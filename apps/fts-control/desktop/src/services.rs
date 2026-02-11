@@ -31,7 +31,7 @@ use roam_session::RoutedDispatcher;
 use roam_stream::LengthPrefixedFramed;
 use session::{SetlistServiceImpl, SongServiceImpl};
 use session_proto::{SetlistServiceClient, SetlistServiceDispatcher, SongServiceDispatcher};
-use tracing::info;
+use tracing::debug;
 
 /// Local session services running in-process.
 ///
@@ -129,7 +129,7 @@ impl LocalServices {
             }
         });
 
-        info!("Created loopback connection to local services");
+        debug!("Created loopback connection to local services");
         Ok(handle)
     }
 

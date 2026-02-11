@@ -15,7 +15,7 @@
 
 use gateway_ws::StandaloneGateway;
 use roam::session::ServiceDispatcher;
-use tracing::info;
+use tracing::debug;
 
 /// Start the WebSocket gateway server.
 ///
@@ -42,7 +42,7 @@ pub async fn start_gateway<D>(
 where
     D: ServiceDispatcher + Clone + Send + Sync + 'static,
 {
-    info!("Starting WebSocket gateway on {}", bind_addr);
+    debug!("Starting WebSocket gateway on {}", bind_addr);
 
     let mut gateway = StandaloneGateway::new(dispatcher);
 

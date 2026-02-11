@@ -79,11 +79,11 @@ use input::{
     config::{default_user_config_path, load_default_config, load_user_config},
     InputCommand, KeymapConfig,
 };
-use input_dioxus::{use_input_processor, ACTION_CONTEXT};
+use input_dioxus::{use_input_processor, ACTION_CONTEXT, TEXT_INPUT_FOCUS_COUNT};
 use session::session_actions;
 
 use tokio;
-use tracing::{debug, info};
+use tracing::debug;
 
 #[global_allocator]
 static GLOBAL_ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
@@ -222,6 +222,8 @@ fn main() {
                 .add_directive("fts_control_desktop=info".parse().unwrap())
                 .add_directive("session=info".parse().unwrap())
                 .add_directive("gateway_ws=info".parse().unwrap())
+                .add_directive("signal_ui=info".parse().unwrap())
+                .add_directive("signal_control=info".parse().unwrap())
                 // Snapshot/morph debugging — targeted debug for FX parameter pipeline
                 .add_directive(
                     "signal_ui::components::snapshot_test_harness=debug"
@@ -448,7 +450,7 @@ fn App() -> Element {
                     let current_info = LATENCY_INFO.read().clone();
                     if new_info != current_info {
                         *LATENCY_INFO.write() = new_info;
-                        info!(
+                        debug!(
                             "Latency updated: input={:.1}ms, output={:.1}ms, rate={}Hz",
                             input_ms, output_ms, state.latency.sample_rate
                         );
@@ -495,7 +497,7 @@ fn App() -> Element {
         // Get initial setlist
         match setlist_client.get_setlist().await {
             Ok(Some(setlist)) => {
-                info!(
+                debug!(
                     "Got setlist '{}' with {} songs",
                     setlist.name,
                     setlist.songs.len()
@@ -798,7 +800,9 @@ fn App() -> Element {
                     tabindex: "0",
                     autofocus: true,
                     onkeydown: move |e: KeyboardEvent| {
-                        if *COMMAND_PALETTE_OPEN.read() {
+                        // Skip action processing when a text input has focus
+                        // or the command palette is open
+                        if *TEXT_INPUT_FOCUS_COUNT.read() > 0 || *COMMAND_PALETTE_OPEN.read() {
                             return;
                         }
 
