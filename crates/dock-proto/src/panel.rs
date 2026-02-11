@@ -7,6 +7,7 @@
 use facet::Facet;
 
 /// All known panel types in the application.
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Facet)]
 #[repr(u8)]
 pub enum PanelId {
@@ -26,6 +27,8 @@ pub enum PanelId {
     SongSelector,
     SceneGrid,
     RigEditor,
+    RigGridEditor,
+    RigDetailEditor,
     FxBrowser,
 
     // DAW panels
@@ -72,6 +75,8 @@ impl PanelId {
             Self::SongSelector => "song-selector",
             Self::SceneGrid => "scene-grid",
             Self::RigEditor => "rig-editor",
+            Self::RigGridEditor => "rig-grid-editor",
+            Self::RigDetailEditor => "rig-detail-editor",
             Self::FxBrowser => "fx-browser",
             Self::Transport => "transport",
             Self::Mixer => "mixer",
@@ -101,6 +106,8 @@ impl PanelId {
             "song-selector" => Some(Self::SongSelector),
             "scene-grid" => Some(Self::SceneGrid),
             "rig-editor" => Some(Self::RigEditor),
+            "rig-grid-editor" => Some(Self::RigGridEditor),
+            "rig-detail-editor" => Some(Self::RigDetailEditor),
             "fx-browser" => Some(Self::FxBrowser),
             "transport" => Some(Self::Transport),
             "mixer" => Some(Self::Mixer),
@@ -136,6 +143,8 @@ impl PanelId {
                 | Self::SongSelector
                 | Self::SceneGrid
                 | Self::RigEditor
+                | Self::RigGridEditor
+                | Self::RigDetailEditor
                 | Self::FxBrowser => "Signal",
                 Self::Transport
                 | Self::Mixer
@@ -153,10 +162,12 @@ impl PanelId {
                 | Self::ProfileBrowser
                 | Self::TrackControlPanel => DockPosition::Left,
                 Self::Inspector | Self::FxBrowser => DockPosition::Right,
-                Self::Transport | Self::Mixer | Self::SceneGrid | Self::SnapshotTest => {
-                    DockPosition::Bottom
-                }
-                Self::RigEditor => DockPosition::Center,
+                Self::Transport
+                | Self::Mixer
+                | Self::SceneGrid
+                | Self::SnapshotTest
+                | Self::RigDetailEditor => DockPosition::Bottom,
+                Self::RigEditor | Self::RigGridEditor => DockPosition::Center,
                 Self::FxChainTree => DockPosition::Left,
                 Self::ArrangementView => DockPosition::Center,
                 _ => DockPosition::Center,
@@ -191,6 +202,8 @@ impl PanelId {
             Self::SongSelector => "Song Selector",
             Self::SceneGrid => "Scene Grid",
             Self::RigEditor => "Rig Editor",
+            Self::RigGridEditor => "Grid Editor",
+            Self::RigDetailEditor => "Detail Editor",
             Self::FxBrowser => "FX Parameters",
             Self::Transport => "Transport",
             Self::Mixer => "Mixer",
@@ -219,6 +232,8 @@ impl PanelId {
             Self::SongSelector => "list-music",
             Self::SceneGrid => "layout-grid",
             Self::RigEditor => "guitar",
+            Self::RigGridEditor => "grid-3x3",
+            Self::RigDetailEditor => "sliders-horizontal",
             Self::FxBrowser => "plug",
             Self::Transport => "disc",
             Self::Mixer => "sliders-horizontal",
@@ -246,6 +261,8 @@ impl PanelId {
             Self::SongSelector,
             Self::SceneGrid,
             Self::RigEditor,
+            Self::RigGridEditor,
+            Self::RigDetailEditor,
             Self::FxBrowser,
             Self::Transport,
             Self::Mixer,
