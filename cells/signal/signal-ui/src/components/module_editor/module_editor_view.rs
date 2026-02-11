@@ -141,6 +141,10 @@ pub(crate) struct CompositionSlot {
     /// Module type for coloring the group container. Only needed on the
     /// first slot in each group (others inherit), but can be set on all.
     pub module_type: Option<ModuleType>,
+    /// True when the block has no plugin loaded yet (template placeholder).
+    pub is_template: bool,
+    /// True when the block is bypassed (signal passes through unprocessed).
+    pub bypassed: bool,
 }
 
 /// Chain view mode: Grid (2D) or List (horizontal strip).
@@ -245,6 +249,8 @@ fn parse_composition_from_model(
                 row,
                 module_group: None,
                 module_type: None,
+                is_template: false,
+                bypassed: false,
             }
         })
         .collect();
@@ -311,10 +317,15 @@ pub fn ModuleEditorView() -> Element {
     let mut module_type_counts = use_signal(std::collections::HashMap::<String, usize>::new);
     let mut module_editor_status = use_signal(|| "Select a module type".to_string());
     let mut composition_chain = use_signal(Vec::<CompositionSlot>::new);
-    let mut selected_slot_id = use_signal(|| None::<Uuid>);
+    let mut selected_slot_id = use_signal(|| None::<super::grid_view::GridSelection>);
     let mut show_add_block_picker = use_signal(|| false);
     let mut chain_view_mode = use_signal(ChainViewMode::default);
     let mut block_detail_tab = use_signal(BlockDetailTab::default);
+
+    // Block preset / snapshot state (for the Block Presets & Block Snapshots tabs)
+    let mut block_presets = use_signal(Vec::<signal_control::block_preset::Model>::new);
+    let mut block_snapshots = use_signal(Vec::<signal_control::block_snapshot::Model>::new);
+    let mut selected_block_preset_id = use_signal(|| None::<Uuid>);
 
     // Dialog state
     let mut show_new_preset_dialog = use_signal(|| false);
@@ -370,6 +381,39 @@ pub fn ModuleEditorView() -> Element {
         refresh_module_type_counts();
     });
 
+    // Auto-fetch block presets when the selected block changes
+    use_effect(move || {
+        // Reading these signals makes the effect re-run when they change
+        let slot_id_val = selected_slot_id.cloned();
+        let chain_val = composition_chain.cloned();
+
+        // Reset block-preset selection and snapshots
+        selected_block_preset_id.set(None);
+        block_snapshots.set(Vec::new());
+
+        let slot = match &slot_id_val {
+            Some(super::grid_view::GridSelection::Block(id)) => {
+                chain_val.iter().find(|s| s.id == *id).cloned()
+            }
+            _ => None,
+        };
+
+        if let Some(slot) = slot {
+            let block_type = slot.block_type.display_name().to_string();
+            spawn(async move {
+                let Some(ctl) = RIG_SERVICE.read().clone() else {
+                    return;
+                };
+                match ctl.list_block_presets(Some(&block_type)).await {
+                    Ok(presets) => block_presets.set(presets),
+                    Err(e) => warn!("Failed to load block presets: {e}"),
+                }
+            });
+        } else {
+            block_presets.set(Vec::new());
+        }
+    });
+
     // Pre-clone values for template use
     let selected_type = *selected_module_type.read();
     let selected_preset_id = *selected_module_preset_id.read();
@@ -378,12 +422,20 @@ pub fn ModuleEditorView() -> Element {
     let type_counts = module_type_counts.cloned();
     let chain = composition_chain.cloned();
     let status = module_editor_status.cloned();
-    let slot_id = *selected_slot_id.read();
+    let slot_id = selected_slot_id.cloned();
     let view_mode = *chain_view_mode.read();
     let detail_tab = *block_detail_tab.read();
+    let bp_list = block_presets.cloned();
+    let bs_list = block_snapshots.cloned();
+    let selected_bp_id = *selected_block_preset_id.read();
 
     // Resolved selected slot for the bottom detail panel
-    let selected_slot = slot_id.and_then(|id| chain.iter().find(|s| s.id == id).cloned());
+    let selected_slot = match &slot_id {
+        Some(super::grid_view::GridSelection::Block(id)) => {
+            chain.iter().find(|s| s.id == *id).cloned()
+        }
+        _ => None,
+    };
 
     let preset_count = presets.len();
     let chain_len = chain.len();
@@ -834,7 +886,7 @@ pub fn ModuleEditorView() -> Element {
                                                 div { class: "flex-1 min-h-0",
                                                     super::grid_view::DynamicGridView {
                                                         chain: chain.clone(),
-                                                        selected_slot_id: slot_id,
+                                                        selection: slot_id.clone(),
                                                         connections: super::grid_view::GRID_CONNECTIONS.cloned(),
                                                         on_chain_change: move |new_chain: Vec<CompositionSlot>| {
                                                             composition_chain.set(new_chain);
@@ -844,8 +896,8 @@ pub fn ModuleEditorView() -> Element {
                                                             *super::grid_view::GRID_CONNECTIONS.write() = new_conns;
                                                             save_composition_chain(selected_preset_id, composition_chain.cloned());
                                                         },
-                                                        on_select: move |id: Option<Uuid>| {
-                                                            selected_slot_id.set(id);
+                                                        on_select: move |s: Option<super::grid_view::GridSelection>| {
+                                                            selected_slot_id.set(s);
                                                         },
                                                     }
                                                 }
@@ -867,7 +919,7 @@ pub fn ModuleEditorView() -> Element {
                                         for (idx, slot) in chain.iter().enumerate() {
                                             {
                                                 let slot_id_val = slot.id;
-                                                let is_slot_selected = slot_id == Some(slot_id_val);
+                                                let is_slot_selected = slot_id == Some(super::grid_view::GridSelection::Block(slot_id_val));
                                                 let bt = slot.block_type;
                                                 let color = block_type_color(bt);
                                                 let slot_name = slot.block_preset_name.as_deref().unwrap_or(bt.display_name());
@@ -889,7 +941,7 @@ pub fn ModuleEditorView() -> Element {
                                                                  hover:bg-zinc-800/30 border-zinc-800/50 min-w-[80px]"
                                                             },
                                                             onclick: move |_| {
-                                                                selected_slot_id.set(Some(slot_id_val));
+                                                                selected_slot_id.set(Some(super::grid_view::GridSelection::Block(slot_id_val)));
                                                                 show_add_block_picker.set(false);
                                                             },
                                                             div { class: "flex items-center gap-1.5",
@@ -1022,11 +1074,71 @@ pub fn ModuleEditorView() -> Element {
                                         // Block Presets tab — show saved presets for the selected block type
                                         if let Some(ref slot) = selected_slot {
                                             div { class: "flex flex-col gap-1.5",
-                                                p { class: "text-[10px] text-zinc-500 mb-1",
-                                                    "Saved presets for {slot.block_type.display_name()} blocks:"
+                                                {
+                                                    let bt_name = slot.block_type.display_name();
+                                                    let count = bp_list.len();
+                                                    rsx! {
+                                                        div { class: "flex items-center justify-between mb-1",
+                                                            p { class: "text-[10px] text-zinc-500",
+                                                                "Saved presets for {bt_name} blocks:"
+                                                            }
+                                                            if count > 0 {
+                                                                span { class: "text-[9px] font-mono text-zinc-600",
+                                                                    "{count}"
+                                                                }
+                                                            }
+                                                        }
+                                                    }
                                                 }
-                                                p { class: "text-[10px] text-zinc-600 italic",
-                                                    "Use the Block Editor tab to capture and manage block presets."
+                                                if bp_list.is_empty() {
+                                                    p { class: "text-[10px] text-zinc-600 italic",
+                                                        "No saved block presets for this type"
+                                                    }
+                                                } else {
+                                                    for preset in bp_list.iter() {
+                                                        {
+                                                            let pid = preset.id;
+                                                            let pname = preset.name.clone();
+                                                            let desc = preset.description.clone().unwrap_or_default();
+                                                            let is_sel = selected_bp_id == Some(pid);
+                                                            rsx! {
+                                                                div {
+                                                                    key: "{pid}",
+                                                                    class: if is_sel {
+                                                                        "flex items-center gap-2 px-2.5 py-1.5 rounded-lg transition-all duration-100 cursor-pointer \
+                                                                         bg-zinc-800/70 border border-purple-500/30"
+                                                                    } else {
+                                                                        "flex items-center gap-2 px-2.5 py-1.5 rounded-lg transition-all duration-100 cursor-pointer \
+                                                                         hover:bg-zinc-800/30 border border-transparent"
+                                                                    },
+                                                                    onclick: move |_| {
+                                                                        selected_block_preset_id.set(Some(pid));
+                                                                        // Fetch snapshots for this block preset
+                                                                        spawn(async move {
+                                                                            let Some(ctl) = RIG_SERVICE.read().clone() else { return; };
+                                                                            match ctl.list_block_snapshots(pid).await {
+                                                                                Ok(snaps) => block_snapshots.set(snaps),
+                                                                                Err(e) => warn!("Failed to load block snapshots: {e}"),
+                                                                            }
+                                                                        });
+                                                                    },
+                                                                    div {
+                                                                        class: if is_sel {
+                                                                            "w-1.5 h-1.5 rounded-full bg-purple-400 flex-shrink-0"
+                                                                        } else {
+                                                                            "w-1.5 h-1.5 rounded-full bg-zinc-700 flex-shrink-0"
+                                                                        },
+                                                                    }
+                                                                    div { class: "flex-1 min-w-0",
+                                                                        span { class: "text-[10px] font-medium text-zinc-200 truncate block", "{pname}" }
+                                                                        if !desc.is_empty() {
+                                                                            span { class: "text-[9px] text-zinc-500 truncate block", "{desc}" }
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
                                                 }
                                             }
                                         } else {
@@ -1038,11 +1150,69 @@ pub fn ModuleEditorView() -> Element {
                                         }
                                     },
                                     BlockDetailTab::Snapshots => rsx! {
-                                        // Block Snapshots tab
-                                        if selected_slot.is_some() {
+                                        // Block Snapshots tab — show snapshots for the selected block preset
+                                        if selected_bp_id.is_some() {
+                                            div { class: "flex flex-col gap-1.5",
+                                                {
+                                                    let preset_name = bp_list.iter()
+                                                        .find(|p| Some(p.id) == selected_bp_id)
+                                                        .map(|p| p.name.as_str())
+                                                        .unwrap_or("Unknown");
+                                                    let count = bs_list.len();
+                                                    rsx! {
+                                                        div { class: "flex items-center justify-between mb-1",
+                                                            p { class: "text-[10px] text-zinc-500",
+                                                                "Snapshots for \"{preset_name}\":"
+                                                            }
+                                                            if count > 0 {
+                                                                span { class: "text-[9px] font-mono text-zinc-600",
+                                                                    "{count}"
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                                if bs_list.is_empty() {
+                                                    p { class: "text-[10px] text-zinc-600 italic",
+                                                        "No snapshots for this preset"
+                                                    }
+                                                } else {
+                                                    div { class: "grid grid-cols-2 gap-1.5",
+                                                        for snap in bs_list.iter() {
+                                                            {
+                                                                let sid = snap.id;
+                                                                let snap_name = snap.name.clone();
+                                                                let is_default = snap.is_default;
+                                                                rsx! {
+                                                                    div {
+                                                                        key: "{sid}",
+                                                                        class: "flex items-center gap-2 px-2.5 py-2 rounded-lg border border-zinc-800/50 \
+                                                                               hover:bg-zinc-800/30 cursor-pointer transition-all duration-100",
+                                                                        div { class: "flex-1 min-w-0",
+                                                                            div { class: "flex items-center gap-1.5",
+                                                                                span { class: "text-[10px] font-medium text-zinc-200 truncate", "{snap_name}" }
+                                                                                if is_default {
+                                                                                    span { class: "text-[8px] text-emerald-400/70 bg-emerald-500/10 px-1 rounded flex-shrink-0", "default" }
+                                                                                }
+                                                                            }
+                                                                        }
+                                                                        button {
+                                                                            class: "flex-shrink-0 px-2 py-0.5 rounded text-[9px] font-semibold \
+                                                                                    bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 \
+                                                                                    hover:bg-cyan-500/20 transition-all",
+                                                                            "Recall"
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        } else if selected_slot.is_some() {
                                             div { class: "flex items-center justify-center h-full",
                                                 p { class: "text-[10px] text-zinc-600 italic",
-                                                    "Assign a block preset first, then manage snapshots here."
+                                                    "Select a block preset to view its snapshots"
                                                 }
                                             }
                                         } else {

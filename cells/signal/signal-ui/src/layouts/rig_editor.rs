@@ -8,6 +8,7 @@
 //! - Advanced
 
 use crate::components::advanced_inspector::AdvancedInspectorView;
+use crate::components::module_editor::module_editor_view::ModuleEditorView;
 use crate::components::performance::PerformanceView;
 use crate::components::song_editor::SongEditorView;
 use crate::hooks::rig_state::use_rig_subscription;
@@ -47,6 +48,9 @@ pub fn RigEditorPanel() -> Element {
                     },
                     RigEditorTab::Edit => rsx! {
                         crate::layouts::rig_layout::RigLayout {}
+                    },
+                    RigEditorTab::Design => rsx! {
+                        ModuleEditorView {}
                     },
                     RigEditorTab::SongEditor => rsx! {
                         SongEditorView {}

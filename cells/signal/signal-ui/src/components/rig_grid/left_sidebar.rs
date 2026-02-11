@@ -257,8 +257,15 @@ fn PresetItem(props: PresetItemProps) -> Element {
 
                 div { class: "flex items-start justify-between",
                     div { class: "flex-1 min-w-0",
-                        div { class: "font-medium text-sm text-zinc-200 truncate",
-                            "{props.preset.name}"
+                        div { class: "flex items-center gap-1.5",
+                            span { class: "font-medium text-sm text-zinc-200 truncate",
+                                "{props.preset.name}"
+                            }
+                            if props.preset.is_template {
+                                span { class: "text-[10px] px-1 py-0.5 rounded border border-dashed border-amber-500/50 text-amber-400/80 whitespace-nowrap leading-none",
+                                    "Template"
+                                }
+                            }
                         }
                         div { class: "text-xs text-zinc-500",
                             "{props.preset.category}"
@@ -401,8 +408,15 @@ fn ProfileItem(props: ProfileItemProps) -> Element {
 
                 div { class: "flex items-start justify-between",
                     div { class: "flex-1 min-w-0",
-                        div { class: "font-medium text-sm text-zinc-200 truncate",
-                            "{props.profile.name}"
+                        div { class: "flex items-center gap-1.5",
+                            span { class: "font-medium text-sm text-zinc-200 truncate",
+                                "{props.profile.name}"
+                            }
+                            if props.profile.is_template {
+                                span { class: "text-[10px] px-1 py-0.5 rounded border border-dashed border-amber-500/50 text-amber-400/80 whitespace-nowrap leading-none",
+                                    "Template"
+                                }
+                            }
                         }
                         div { class: "text-xs text-zinc-500",
                             "{props.profile.scene_count} scenes"

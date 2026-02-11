@@ -16,6 +16,7 @@ pub struct Model {
     pub blocks: Json,
     pub macros: Json,
     pub tags: Json,
+    pub is_template: bool,
     pub is_deleted: bool,
     pub created_at: DateTimeWithTimeZone,
     pub updated_at: DateTimeWithTimeZone,

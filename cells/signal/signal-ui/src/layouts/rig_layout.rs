@@ -12,7 +12,8 @@
 
 use crate::components::module_editor::detail_panel::DetailPanel;
 use crate::components::module_editor::grid_view::{
-    BlockPickerDropdown, DynamicGridView, GridConnection, PICKER_CELL, PICKER_CLICK_POS,
+    BlockPickerDropdown, DynamicGridView, GridConnection, GridSelection, PICKER_CELL,
+    PICKER_CLICK_POS,
 };
 use crate::components::module_editor::module_editor_view::CompositionSlot;
 use crate::components::module_editor::UnifiedGridEditor;
@@ -32,7 +33,9 @@ use crate::context::rig_grid::{use_rig_grid_state, RigGridStateProvider};
 use crate::hooks::rig_actions::use_rig_actions;
 use crate::hooks::rig_state::use_rig_subscription;
 use crate::prelude::*;
-use crate::signals::{init_rig_service, RIG_GRID_SELECTED_SLOT, RIG_MODULES, RIG_NODE_GRAPH};
+use crate::signals::{
+    init_rig_service, RIG_GRID_SELECTED_SLOT, RIG_GRID_SELECTION, RIG_MODULES, RIG_NODE_GRAPH,
+};
 use uuid::Uuid;
 
 /// Main layout for the Rig tab (legacy monolithic view).
@@ -482,28 +485,48 @@ pub fn RigGridEditorPanel() -> Element {
 #[component]
 fn RigGridEditorPanelInner() -> Element {
     use crate::components::module_editor::unified_grid_editor::modules_to_composition_chain;
+    use crate::signals::RIG_GRID_CHAIN_OVERRIDE;
 
     let grid_state = use_rig_grid_state();
 
     let mut connections = use_signal(Vec::<GridConnection>::new);
-    let mut selected_slot_id = use_signal(|| None::<Uuid>);
+    let mut selection = use_signal(|| None::<GridSelection>);
 
     // Build chain from RIG_MODULES — reactive via GlobalSignal read
     let modules = RIG_MODULES.read();
-    let chain_data = modules_to_composition_chain(&modules);
+    let base_chain = modules_to_composition_chain(&modules);
     drop(modules);
 
-    let conn_data = connections.cloned();
-    let sel_id = *selected_slot_id.read();
+    // Track base chain identity so we can clear overrides on preset switch
+    let mut prev_slot_ids = use_signal(Vec::<Uuid>::new);
+    let current_ids: Vec<Uuid> = base_chain.iter().map(|s| s.id).collect();
+    if *prev_slot_ids.read() != current_ids {
+        prev_slot_ids.set(current_ids);
+        if RIG_GRID_CHAIN_OVERRIDE.read().is_some() {
+            *RIG_GRID_CHAIN_OVERRIDE.write() = None;
+        }
+    }
 
-    // Keep the global signal in sync with local selection so that
+    // Use the global chain override if present, otherwise use computed chain
+    let chain_data = RIG_GRID_CHAIN_OVERRIDE.read().clone().unwrap_or(base_chain);
+
+    let conn_data = connections.cloned();
+    let sel = selection.cloned();
+
+    // Keep the global signals in sync with local selection so that
     // RigDetailEditorPanel (in a separate dock tile) can read it.
     {
         let chain_for_effect = chain_data.clone();
         use_effect(move || {
-            let id = *selected_slot_id.read();
-            let slot = id.and_then(|id| chain_for_effect.iter().find(|s| s.id == id).cloned());
+            let sel = selection.cloned();
+            let slot = match &sel {
+                Some(GridSelection::Block(id)) => {
+                    chain_for_effect.iter().find(|s| s.id == *id).cloned()
+                }
+                _ => None,
+            };
             *RIG_GRID_SELECTED_SLOT.write() = slot.clone();
+            *RIG_GRID_SELECTION.write() = sel;
             grid_state.set_selected_slot(slot);
         });
     }
@@ -512,16 +535,17 @@ fn RigGridEditorPanelInner() -> Element {
         div { class: "h-full w-full relative overflow-hidden",
             DynamicGridView {
                 chain: chain_data.clone(),
-                selected_slot_id: sel_id,
+                selection: sel.clone(),
                 connections: conn_data.clone(),
-                on_chain_change: move |_new_chain: Vec<CompositionSlot>| {
-                    // Local edits not persisted yet — just accept
+                on_chain_change: move |new_chain: Vec<CompositionSlot>| {
+                    *RIG_GRID_CHAIN_OVERRIDE.write() = Some(new_chain);
                 },
                 on_connections_change: move |new_conns: Vec<GridConnection>| {
                     connections.set(new_conns);
                 },
-                on_select: move |id: Option<Uuid>| {
-                    selected_slot_id.set(id);
+                on_select: move |s: Option<GridSelection>| {
+                    tracing::info!("RigGridEditorPanelInner on_select: {:?}", s);
+                    selection.set(s);
                 },
                 on_group_reorder: move |(from_name, to_name): (String, String)| {
                     let mut modules = RIG_MODULES.write();
@@ -529,6 +553,26 @@ fn RigGridEditorPanelInner() -> Element {
                     let to_idx = modules.iter().position(|m| m.module_type.display_name() == to_name);
                     if let (Some(a), Some(b)) = (from_idx, to_idx) {
                         modules.swap(a, b);
+                    }
+                },
+                on_bypass_toggle: move |(sel, bypassed): (GridSelection, bool)| {
+                    let mut modules = RIG_MODULES.write();
+                    match sel {
+                        GridSelection::Block(id) => {
+                            for m in modules.iter_mut() {
+                                if let Some(mb) = m.blocks.iter_mut().find(|b| b.id == id) {
+                                    mb.block.bypassed = bypassed;
+                                    break;
+                                }
+                            }
+                        }
+                        GridSelection::Module(ref name) => {
+                            if let Some(m) = modules.iter_mut().find(|m| m.module_type.display_name() == name) {
+                                for mb in m.blocks.iter_mut() {
+                                    mb.block.bypassed = bypassed;
+                                }
+                            }
+                        }
                     }
                 },
             }
@@ -559,23 +603,44 @@ fn RigGridEditorPanelInner() -> Element {
 
 /// Detail editor dock panel — 3-column detail view for the selected block/module.
 ///
-/// Reads the selected slot from the rig grid context (written by
-/// `RigGridEditorPanel`). Displays preset selector, macro/detail/advanced
-/// tabs, and reserved space for future features.
-///
-/// Reads the selected slot from the `RIG_GRID_SELECTED_SLOT` global signal
-/// (written by `RigGridEditorPanel`). Uses the global signal directly because
-/// dock panels are rendered in separate subtrees without a shared context provider.
+/// Reads the selection from `RIG_GRID_SELECTION` and the full composition chain
+/// from `RIG_MODULES` (with `RIG_GRID_CHAIN_OVERRIDE` applied when present).
+/// Uses global signals directly because dock panels are rendered in separate
+/// subtrees without a shared context provider.
 #[component]
 pub fn RigDetailEditorPanel() -> Element {
+    use crate::components::module_editor::unified_grid_editor::modules_to_composition_chain;
+    use crate::signals::RIG_GRID_CHAIN_OVERRIDE;
     init_rig_service();
     use_rig_subscription();
 
-    let selected_slot = RIG_GRID_SELECTED_SLOT.read().clone();
+    let sel = RIG_GRID_SELECTION.read().clone();
+    let modules = RIG_MODULES.read();
+    let base_chain = modules_to_composition_chain(&modules);
+    drop(modules);
+
+    let chain = RIG_GRID_CHAIN_OVERRIDE
+        .read()
+        .clone()
+        .unwrap_or(base_chain.clone());
+
+    let chain_for_cb = chain.clone();
 
     rsx! {
         div { class: "h-full w-full overflow-hidden bg-zinc-950/40",
-            DetailPanel { selected_slot: selected_slot }
+            DetailPanel {
+                selection: sel,
+                chain: chain,
+                on_preset_assigned: move |(slot_id, preset_id, preset_name): (Uuid, Uuid, String)| {
+                    let mut new_chain = chain_for_cb.clone();
+                    if let Some(slot) = new_chain.iter_mut().find(|s| s.id == slot_id) {
+                        slot.block_preset_id = Some(preset_id);
+                        slot.block_preset_name = Some(preset_name);
+                        slot.is_template = false;
+                    }
+                    *RIG_GRID_CHAIN_OVERRIDE.write() = Some(new_chain);
+                },
+            }
         }
     }
 }

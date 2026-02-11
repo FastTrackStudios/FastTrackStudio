@@ -1,7 +1,7 @@
-//! Song & Setlist Editor View — manage songs, their scenes, and setlists.
+//! Song & Setlist Editor View — manage songs, their sections, and setlists.
 //!
 //! Left: Song/Setlist browser with toggle
-//! Center: Song scene table with preset/snapshot assignments, reordering
+//! Center: Song section table with preset/snapshot assignments, reordering
 //! Right: Available presets picker + setlist composition
 
 use crate::components::shared::EntityEditor;
@@ -9,6 +9,9 @@ use crate::prelude::*;
 use crate::signals::RIG_SERVICE;
 use signal_control::{performance_song, preset_entity, setlist, setlist_song, song_scene};
 use uuid::Uuid;
+
+/// Sentinel UUID for the virtual "All Songs" setlist.
+const ALL_SONGS_ID: Uuid = Uuid::from_u128(0);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 enum BrowserTab {
@@ -36,8 +39,6 @@ pub fn SongEditorView() -> Element {
     let mut new_song_name = use_signal(String::new);
     let mut show_new_setlist_dialog = use_signal(|| false);
     let mut new_setlist_name = use_signal(String::new);
-    let mut show_add_scene_dialog = use_signal(|| false);
-    let mut new_scene_name = use_signal(String::new);
 
     // ── Async Refresh Helpers (capture local signals) ────────────────────────
 
@@ -130,7 +131,12 @@ pub fn SongEditorView() -> Element {
     use_effect(move || {
         let sid = *selected_setlist_id.read();
         if let Some(id) = sid {
-            refresh_setlist_songs(id);
+            if id == ALL_SONGS_ID {
+                // Virtual setlist — no DB query needed, uses songs list directly
+                setlist_songs.write().clear();
+            } else {
+                refresh_setlist_songs(id);
+            }
         } else {
             setlist_songs.write().clear();
         }
@@ -186,6 +192,7 @@ pub fn SongEditorView() -> Element {
                                     let is_selected = sel_song_id == Some(sid);
                                     let sname = song.name.clone();
                                     let artist = song.artist.clone().unwrap_or_default();
+                                    let song_is_template = song.is_template;
                                     rsx! {
                                         div {
                                             key: "{sid}",
@@ -199,7 +206,14 @@ pub fn SongEditorView() -> Element {
                                             },
                                             div { class: "flex items-center justify-between",
                                                 div { class: "flex-1 min-w-0",
-                                                    span { class: "text-xs font-medium text-zinc-200 truncate block", "{sname}" }
+                                                    div { class: "flex items-center gap-1.5",
+                                                        span { class: "text-xs font-medium text-zinc-200 truncate", "{sname}" }
+                                                        if song_is_template {
+                                                            span { class: "text-[9px] px-1 py-0.5 rounded border border-dashed border-amber-500/50 text-amber-400/80 whitespace-nowrap leading-none",
+                                                                "Template"
+                                                            }
+                                                        }
+                                                    }
                                                     if !artist.is_empty() {
                                                         span { class: "text-[10px] text-zinc-500 truncate block", "{artist}" }
                                                     }
@@ -231,6 +245,29 @@ pub fn SongEditorView() -> Element {
                             }
                         },
                         BrowserTab::Setlists => rsx! {
+                            // Virtual "All Songs" entry
+                            {
+                                let is_all_selected = sel_setlist_id == Some(ALL_SONGS_ID);
+                                rsx! {
+                                    div {
+                                        class: if is_all_selected {
+                                            "px-3 py-2.5 cursor-pointer border-l-2 border-amber-500 bg-amber-500/10 transition-colors"
+                                        } else {
+                                            "px-3 py-2.5 cursor-pointer border-l-2 border-transparent hover:bg-zinc-800/40 transition-colors"
+                                        },
+                                        onclick: move |_| {
+                                            selected_setlist_id.set(Some(ALL_SONGS_ID));
+                                        },
+                                        div { class: "flex items-center gap-2",
+                                            span { class: "text-[10px] text-amber-400/70", "\u{2605}" }
+                                            span { class: "text-xs font-medium text-zinc-200 truncate", "All Songs" }
+                                        }
+                                    }
+                                }
+                            }
+                            // Separator
+                            div { class: "mx-3 border-b border-zinc-800/40" }
+                            // Real setlists
                             for sl in setlists.iter() {
                                 {
                                     let slid = sl.id;
@@ -295,11 +332,25 @@ pub fn SongEditorView() -> Element {
                                             let val = new_song_name().trim().to_string();
                                             if !val.is_empty() {
                                                 show_new_song_dialog.set(false);
+                                                let current_setlist = *selected_setlist_id.read();
+                                                let setlist_count = setlist_songs.read().len() as i32;
                                                 spawn(async move {
                                                     let Some(ctl) = RIG_SERVICE.read().clone() else { return };
                                                     match ctl.create_song(&val, None, false).await {
                                                         Ok(id) => {
                                                             selected_song_id.set(Some(id));
+                                                            // Auto-create "Intro" section
+                                                            if let Err(e) = ctl.add_song_scene(id, "Intro", Uuid::nil(), None, 0).await {
+                                                                warn!("Auto-create Intro section failed: {e}");
+                                                            }
+                                                            // Auto-add to current setlist (skip the virtual "All Songs")
+                                                            if let Some(sl_id) = current_setlist {
+                                                                if sl_id != ALL_SONGS_ID {
+                                                                    if let Err(e) = ctl.add_song_to_setlist(sl_id, id, setlist_count).await {
+                                                                        warn!("Auto-add to setlist failed: {e}");
+                                                                    }
+                                                                }
+                                                            }
                                                         }
                                                         Err(e) => warn!("Create song failed: {e}"),
                                                     }
@@ -386,7 +437,7 @@ pub fn SongEditorView() -> Element {
                                     let sc = scenes.len();
                                     let sp = if sc != 1 { "s" } else { "" };
                                     rsx! {
-                                        span { class: "text-[10px] text-zinc-600 font-mono", "{sc} scene{sp}" }
+                                        span { class: "text-[10px] text-zinc-600 font-mono", "{sc} section{sp}" }
                                     }
                                 }
                                 div { class: "flex-1" }
@@ -397,7 +448,7 @@ pub fn SongEditorView() -> Element {
                                     } else {
                                         "px-2 py-1 rounded text-[9px] font-semibold bg-zinc-800/50 text-zinc-500 border border-zinc-700/50"
                                     },
-                                    title: "Auto-advance to next scene",
+                                    title: "Auto-advance to next section",
                                     onclick: {
                                         let song_id = song.id;
                                         let current = song.auto_advance;
@@ -413,51 +464,29 @@ pub fn SongEditorView() -> Element {
                                     },
                                     if song.auto_advance { "Auto \u{2713}" } else { "Auto" }
                                 }
-                                // Add scene
-                                button {
-                                    class: "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[10px] font-semibold \
-                                            bg-blue-500/15 text-blue-300 border border-blue-500/25 \
-                                            hover:bg-blue-500/25 hover:border-blue-500/40 transition-all duration-150",
-                                    onclick: move |_| {
-                                        new_scene_name.set(String::new());
-                                        show_add_scene_dialog.set(true);
-                                    },
-                                    span { class: "text-blue-400", "+" }
-                                    "Add Scene"
-                                }
-                            }
-
-                            // Add scene dialog
-                            if *show_add_scene_dialog.read() {
-                                div { class: "px-4 py-2 border-b border-border/30 bg-zinc-800/50 flex items-center gap-2 flex-shrink-0",
-                                    span { class: "text-[10px] text-zinc-400", "Scene name:" }
-                                    input {
-                                        class: "flex-1 px-2 py-1 rounded text-xs bg-zinc-900 border border-zinc-700 \
-                                                text-zinc-200 outline-none focus:border-blue-500/50",
-                                        value: "{new_scene_name}",
-                                        autofocus: true,
-                                        oninput: move |evt| new_scene_name.set(evt.value().clone()),
-                                        onkeydown: {
-                                            let song_id = song.id;
-                                            move |evt| {
-                                                if evt.key() == Key::Enter {
-                                                    let val = new_scene_name().trim().to_string();
-                                                    if !val.is_empty() {
-                                                        show_add_scene_dialog.set(false);
-                                                        let sort_order = song_scenes.read().len() as i32;
-                                                        spawn(async move {
-                                                            let Some(ctl) = RIG_SERVICE.read().clone() else { return };
-                                                            if let Err(e) = ctl.add_song_scene(song_id, &val, Uuid::nil(), None, sort_order).await {
-                                                                warn!("Add scene failed: {e}");
-                                                            }
-                                                        });
-                                                        refresh_song_scenes(song_id);
+                                // Quick-add section (auto-named)
+                                {
+                                    let quick_song_id = song.id;
+                                    let section_count = scenes.len();
+                                    rsx! {
+                                        button {
+                                            class: "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[10px] font-semibold \
+                                                    bg-blue-500/15 text-blue-300 border border-blue-500/25 \
+                                                    hover:bg-blue-500/25 hover:border-blue-500/40 transition-all duration-150",
+                                            onclick: move |_| {
+                                                let name = format!("Section {}", section_count + 1);
+                                                let sort = section_count as i32;
+                                                spawn(async move {
+                                                    let Some(ctl) = RIG_SERVICE.read().clone() else { return };
+                                                    if let Err(e) = ctl.add_song_scene(quick_song_id, &name, Uuid::nil(), None, sort).await {
+                                                        warn!("Quick-add section failed: {e}");
                                                     }
-                                                } else if evt.key() == Key::Escape {
-                                                    show_add_scene_dialog.set(false);
-                                                }
-                                            }
-                                        },
+                                                });
+                                                refresh_song_scenes(quick_song_id);
+                                            },
+                                            span { class: "text-blue-400", "+" }
+                                            "Add Section"
+                                        }
                                     }
                                 }
                             }
@@ -468,8 +497,8 @@ pub fn SongEditorView() -> Element {
                                     div { class: "flex items-center justify-center h-full",
                                         div { class: "text-center py-12",
                                             div { class: "text-lg text-zinc-700 mb-1", "\u{1F3B5}" }
-                                            p { class: "text-xs text-zinc-500", "No scenes yet" }
-                                            p { class: "text-[10px] text-zinc-600 mt-1", "Add scenes to define the song structure" }
+                                            p { class: "text-xs text-zinc-500", "No sections yet" }
+                                            p { class: "text-[10px] text-zinc-600 mt-1", "Add sections to define the song structure" }
                                         }
                                     }
                                 } else {
@@ -477,7 +506,7 @@ pub fn SongEditorView() -> Element {
                                     div { class: "px-4 py-1.5 flex items-center gap-3 text-[9px] font-bold text-zinc-600 uppercase tracking-[0.1em] \
                                                   border-b border-border/20 bg-zinc-900/20 flex-shrink-0 sticky top-0",
                                         div { class: "w-8 text-center", "#" }
-                                        div { class: "flex-1 min-w-0", "Scene" }
+                                        div { class: "flex-1 min-w-0", "Section" }
                                         div { class: "w-40", "Preset" }
                                         div { class: "w-24 text-center", "Actions" }
                                     }
@@ -587,7 +616,7 @@ pub fn SongEditorView() -> Element {
                                     div { class: "text-2xl text-zinc-700 mb-2", "\u{1F3B6}" }
                                     p { class: "text-sm text-zinc-500 font-medium", "Select a song" }
                                     p { class: "text-[10px] text-zinc-600 mt-1",
-                                        "Songs define ordered scene sequences for live performance"
+                                        "Songs define ordered section sequences for live performance"
                                     }
                                 }
                             }
@@ -595,68 +624,166 @@ pub fn SongEditorView() -> Element {
                     },
                     BrowserTab::Setlists => rsx! {
                         if let Some(_setlist_id) = sel_setlist_id {
-                            // Setlist song list
-                            div { class: "px-4 py-2.5 border-b border-border/30 flex items-center gap-3 flex-shrink-0 bg-zinc-900/30",
-                                {
-                                    let sl = setlists.iter().find(|s| s.id == _setlist_id);
-                                    let name = sl.map(|s| s.name.as_str()).unwrap_or("Setlist");
-                                    rsx! {
-                                        span { class: "text-xs font-bold text-zinc-200 tracking-wide", "{name}" }
-                                    }
-                                }
-                                {
-                                    let count = setlist_songs_list.len();
-                                    let sp = if count != 1 { "s" } else { "" };
-                                    rsx! {
-                                        span { class: "text-[10px] text-zinc-600 font-mono", "{count} song{sp}" }
-                                    }
-                                }
-                            }
-
-                            div { class: "flex-1 overflow-y-auto min-h-0",
-                                if setlist_songs_list.is_empty() {
-                                    div { class: "flex items-center justify-center h-full",
-                                        div { class: "text-center py-12",
-                                            div { class: "text-lg text-zinc-700 mb-1", "\u{1F4CB}" }
-                                            p { class: "text-xs text-zinc-500", "Empty setlist" }
-                                            p { class: "text-[10px] text-zinc-600 mt-1", "Drag songs from the left to add them" }
+                            if _setlist_id == ALL_SONGS_ID {
+                                // ── Virtual "All Songs" view ──
+                                div { class: "px-4 py-2.5 border-b border-border/30 flex items-center gap-3 flex-shrink-0 bg-zinc-900/30",
+                                    span { class: "text-[10px] text-amber-400/70", "\u{2605}" }
+                                    span { class: "text-xs font-bold text-zinc-200 tracking-wide", "All Songs" }
+                                    {
+                                        let count = songs.len();
+                                        let sp = if count != 1 { "s" } else { "" };
+                                        rsx! {
+                                            span { class: "text-[10px] text-zinc-600 font-mono", "{count} song{sp}" }
                                         }
                                     }
-                                } else {
-                                    for (idx, sl_song) in setlist_songs_list.iter().enumerate() {
+                                }
+                                div { class: "flex-1 overflow-y-auto min-h-0",
+                                    if songs.is_empty() {
+                                        div { class: "flex items-center justify-center h-full",
+                                            div { class: "text-center py-12",
+                                                div { class: "text-lg text-zinc-700 mb-1", "\u{1F3B6}" }
+                                                p { class: "text-xs text-zinc-500", "No songs yet" }
+                                                p { class: "text-[10px] text-zinc-600 mt-1", "Create a song from the Songs tab" }
+                                            }
+                                        }
+                                    } else {
                                         {
-                                            let ss_id = sl_song.id;
-                                            let song_ref = songs.iter().find(|s| s.id == sl_song.song_id);
-                                            let song_name = song_ref.map(|s| s.name.as_str()).unwrap_or("Unknown");
-                                            let setlist_id = _setlist_id;
-
+                                            let mut sorted_songs: Vec<&performance_song::Model> = songs.iter().collect();
+                                            sorted_songs.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
                                             rsx! {
-                                                div {
-                                                    key: "{ss_id}",
-                                                    class: "px-4 py-2 flex items-center gap-3 border-b border-border/10 \
-                                                            hover:bg-zinc-800/30 transition-colors group",
-                                                    div { class: "w-8 text-center text-[10px] text-zinc-600 font-mono",
-                                                        "{idx + 1}"
-                                                    }
-                                                    div { class: "flex-1 min-w-0",
-                                                        span { class: "text-xs font-medium text-zinc-200 truncate block",
-                                                            "{song_name}"
+                                                for (idx, song) in sorted_songs.iter().enumerate() {
+                                                    {
+                                                        let sid = song.id;
+                                                        let sname = song.name.clone();
+                                                        let artist = song.artist.clone().unwrap_or_default();
+                                                        rsx! {
+                                                            div {
+                                                                key: "{sid}",
+                                                                class: "px-4 py-2 flex items-center gap-3 border-b border-border/10 \
+                                                                        hover:bg-zinc-800/30 transition-colors",
+                                                                div { class: "w-8 text-center text-[10px] text-zinc-600 font-mono",
+                                                                    "{idx + 1}"
+                                                                }
+                                                                div { class: "flex-1 min-w-0",
+                                                                    span { class: "text-xs font-medium text-zinc-200 truncate block",
+                                                                        "{sname}"
+                                                                    }
+                                                                    if !artist.is_empty() {
+                                                                        span { class: "text-[10px] text-zinc-500 truncate block", "{artist}" }
+                                                                    }
+                                                                }
+                                                            }
                                                         }
                                                     }
-                                                    div { class: "flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity",
-                                                        button {
-                                                            class: "p-1 rounded text-zinc-500 hover:text-red-400 hover:bg-zinc-700/50 transition-colors",
-                                                            title: "Remove from setlist",
-                                                            onclick: move |_| {
-                                                                spawn(async move {
-                                                                    let Some(ctl) = RIG_SERVICE.read().clone() else { return };
-                                                                    if let Err(e) = ctl.remove_song_from_setlist(ss_id).await {
-                                                                        warn!("Remove from setlist failed: {e}");
-                                                                    }
-                                                                });
-                                                                refresh_setlist_songs(setlist_id);
-                                                            },
-                                                            span { class: "text-[9px]", "\u{2715}" }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+                                // ── Regular setlist view with reordering ──
+                                div { class: "px-4 py-2.5 border-b border-border/30 flex items-center gap-3 flex-shrink-0 bg-zinc-900/30",
+                                    {
+                                        let sl = setlists.iter().find(|s| s.id == _setlist_id);
+                                        let name = sl.map(|s| s.name.as_str()).unwrap_or("Setlist");
+                                        rsx! {
+                                            span { class: "text-xs font-bold text-zinc-200 tracking-wide", "{name}" }
+                                        }
+                                    }
+                                    {
+                                        let count = setlist_songs_list.len();
+                                        let sp = if count != 1 { "s" } else { "" };
+                                        rsx! {
+                                            span { class: "text-[10px] text-zinc-600 font-mono", "{count} song{sp}" }
+                                        }
+                                    }
+                                }
+
+                                div { class: "flex-1 overflow-y-auto min-h-0",
+                                    if setlist_songs_list.is_empty() {
+                                        div { class: "flex items-center justify-center h-full",
+                                            div { class: "text-center py-12",
+                                                div { class: "text-lg text-zinc-700 mb-1", "\u{1F4CB}" }
+                                                p { class: "text-xs text-zinc-500", "Empty setlist" }
+                                                p { class: "text-[10px] text-zinc-600 mt-1", "Add songs from the right panel" }
+                                            }
+                                        }
+                                    } else {
+                                        for (idx, sl_song) in setlist_songs_list.iter().enumerate() {
+                                            {
+                                                let ss_id = sl_song.id;
+                                                let song_ref = songs.iter().find(|s| s.id == sl_song.song_id);
+                                                let song_name = song_ref.map(|s| s.name.as_str()).unwrap_or("Unknown");
+                                                let setlist_id = _setlist_id;
+                                                let song_count = setlist_songs_list.len();
+
+                                                rsx! {
+                                                    div {
+                                                        key: "{ss_id}",
+                                                        class: "px-4 py-2 flex items-center gap-3 border-b border-border/10 \
+                                                                hover:bg-zinc-800/30 transition-colors group",
+                                                        div { class: "w-8 text-center text-[10px] text-zinc-600 font-mono",
+                                                            "{idx + 1}"
+                                                        }
+                                                        div { class: "flex-1 min-w-0",
+                                                            span { class: "text-xs font-medium text-zinc-200 truncate block",
+                                                                "{song_name}"
+                                                            }
+                                                        }
+                                                        div { class: "flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity",
+                                                            // Move up
+                                                            if idx > 0 {
+                                                                button {
+                                                                    class: "p-1 rounded text-zinc-500 hover:text-zinc-300 hover:bg-zinc-700/50 transition-colors",
+                                                                    title: "Move up",
+                                                                    onclick: move |_| {
+                                                                        let mut ids: Vec<Uuid> = setlist_songs.read().iter().map(|s| s.id).collect();
+                                                                        ids.swap(idx, idx - 1);
+                                                                        spawn(async move {
+                                                                            let Some(ctl) = RIG_SERVICE.read().clone() else { return };
+                                                                            if let Err(e) = ctl.reorder_setlist_songs(setlist_id, &ids).await {
+                                                                                warn!("Reorder failed: {e}");
+                                                                            }
+                                                                        });
+                                                                        refresh_setlist_songs(setlist_id);
+                                                                    },
+                                                                    span { class: "text-[9px]", "\u{2191}" }
+                                                                }
+                                                            }
+                                                            // Move down
+                                                            if idx < song_count - 1 {
+                                                                button {
+                                                                    class: "p-1 rounded text-zinc-500 hover:text-zinc-300 hover:bg-zinc-700/50 transition-colors",
+                                                                    title: "Move down",
+                                                                    onclick: move |_| {
+                                                                        let mut ids: Vec<Uuid> = setlist_songs.read().iter().map(|s| s.id).collect();
+                                                                        ids.swap(idx, idx + 1);
+                                                                        spawn(async move {
+                                                                            let Some(ctl) = RIG_SERVICE.read().clone() else { return };
+                                                                            if let Err(e) = ctl.reorder_setlist_songs(setlist_id, &ids).await {
+                                                                                warn!("Reorder failed: {e}");
+                                                                            }
+                                                                        });
+                                                                        refresh_setlist_songs(setlist_id);
+                                                                    },
+                                                                    span { class: "text-[9px]", "\u{2193}" }
+                                                                }
+                                                            }
+                                                            // Remove
+                                                            button {
+                                                                class: "p-1 rounded text-zinc-500 hover:text-red-400 hover:bg-zinc-700/50 transition-colors",
+                                                                title: "Remove from setlist",
+                                                                onclick: move |_| {
+                                                                    spawn(async move {
+                                                                        let Some(ctl) = RIG_SERVICE.read().clone() else { return };
+                                                                        if let Err(e) = ctl.remove_song_from_setlist(ss_id).await {
+                                                                            warn!("Remove from setlist failed: {e}");
+                                                                        }
+                                                                    });
+                                                                    refresh_setlist_songs(setlist_id);
+                                                                },
+                                                                span { class: "text-[9px]", "\u{2715}" }
+                                                            }
                                                         }
                                                     }
                                                 }
@@ -701,7 +828,7 @@ pub fn SongEditorView() -> Element {
                                         div {
                                             key: "{pid}",
                                             class: "px-3 py-2 cursor-pointer hover:bg-zinc-800/40 border-b border-border/10 transition-colors",
-                                            title: "Click to assign to selected scene",
+                                            title: "Click to assign to selected section",
                                             onclick: move |_| {
                                                 song_status.set(format!("Selected: {pname}"));
                                             },
@@ -753,8 +880,8 @@ pub fn SongEditorView() -> Element {
                     div { class: "space-y-1",
                         p { class: "text-[9px] text-zinc-600 font-semibold uppercase tracking-wider mb-1", "Workflow" }
                         p { class: "text-[9px] text-zinc-500", "1. Create a song" }
-                        p { class: "text-[9px] text-zinc-500", "2. Add scenes (verse, chorus, etc.)" }
-                        p { class: "text-[9px] text-zinc-500", "3. Assign presets to each scene" }
+                        p { class: "text-[9px] text-zinc-500", "2. Add sections (verse, chorus, etc.)" }
+                        p { class: "text-[9px] text-zinc-500", "3. Assign presets to each section" }
                         p { class: "text-[9px] text-zinc-500", "4. Create setlists for shows" }
                     }
                 }

@@ -92,7 +92,7 @@ pub struct DynamicGridViewProps {
 #[component]
 pub fn DynamicGridView(props: DynamicGridViewProps) -> Element {
     let selection = props.selection.clone();
-    tracing::info!("DynamicGridView render: selection={:?}", selection);
+    tracing::debug!("DynamicGridView render: selection={:?}", selection);
     let selection_for_key = selection.clone();
 
     // ── Viewport state (pan/zoom) ────────────────────────────────
@@ -262,7 +262,7 @@ pub fn DynamicGridView(props: DynamicGridViewProps) -> Element {
          width: {nat_w}px; height: {nat_h}px;",
     );
 
-    tracing::info!(
+    tracing::debug!(
         "DynamicGridView: chain={} slots, grid={}x{}, nat={}x{}, viewport={}x{}, zoom={:.2}, pan=({:.0},{:.0})",
         chain_snapshot.len(), cols, rows, nat_w, nat_h,
         viewport_w(), viewport_h(), zoom(), pan_x(), pan_y()

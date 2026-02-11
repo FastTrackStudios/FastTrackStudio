@@ -6,7 +6,10 @@
 use chrono::Utc;
 use sea_orm::{ActiveModelTrait, DatabaseConnection, Set};
 
+use signal_proto::block::Block;
+use signal_proto::defaults::blocks::dummy;
 use signal_proto::defaults::guitar::{build_guitar_rig, GuitarRigDefaults};
+use signal_proto::defaults::modules::dummy as module_dummy;
 use signal_proto::module_preset::{ModulePreset, ModuleSnapshot as DomainModuleSnapshot};
 use signal_proto::performance::{PerformanceSong, Scene};
 use signal_proto::preset::{Preset, Snapshot};
@@ -21,21 +24,58 @@ use crate::facet_bridge;
 
 /// Seed the database with FTS-Guitar defaults if it's empty.
 ///
-/// Checks for existing module presets as a proxy for "has been seeded".
-/// Returns `true` if seeding was performed, `false` if data already exists.
+/// Uses incremental seeding: each category is checked independently so
+/// new seed data (e.g. dummy block/module presets) gets added even if
+/// the DB was created before those features existed.
+///
+/// Returns `true` if any seeding was performed, `false` if fully up-to-date.
 pub async fn seed_if_empty(db: &DatabaseConnection) -> StorageResult<bool> {
-    let existing = crate::module_repo::list_module_presets(db, None).await?;
-    if !existing.is_empty() {
+    let existing_module_presets = crate::module_repo::list_module_presets(db, None).await?;
+    let existing_block_presets = crate::block_repo::list_block_presets(db, None).await?;
+    let mut seeded = false;
+
+    // Full seed: no module presets means fresh DB
+    if existing_module_presets.is_empty() {
+        let defaults = build_guitar_rig();
+        seed_guitar_defaults(db, &defaults).await?;
+        seeded = true;
+    } else {
         tracing::debug!(
-            "Database already seeded ({} module presets), skipping",
-            existing.len()
+            "Core data already seeded ({} module presets)",
+            existing_module_presets.len()
         );
-        return Ok(false);
+
+        // Incremental: seed dummy block presets if missing
+        if existing_block_presets.is_empty() {
+            let dummy_blocks = dummy::all_dummy_blocks();
+            seed_dummy_block_presets(db, &dummy_blocks).await?;
+            tracing::info!(
+                "Incremental seed: added {} dummy block presets",
+                dummy_blocks.len()
+            );
+            seeded = true;
+        }
+
+        // Incremental: seed dummy module presets if missing.
+        // Check for any module preset whose name starts with "Dummy " as marker.
+        let has_dummy_modules = existing_module_presets
+            .iter()
+            .any(|p| p.name.starts_with("Dummy "));
+        if !has_dummy_modules {
+            let dummy_modules = module_dummy::all_dummy_module_presets();
+            seed_dummy_module_presets(db, &dummy_modules).await?;
+            tracing::info!(
+                "Incremental seed: added {} dummy module presets",
+                dummy_modules.len()
+            );
+            seeded = true;
+        }
     }
 
-    let defaults = build_guitar_rig();
-    seed_guitar_defaults(db, &defaults).await?;
-    Ok(true)
+    if !seeded {
+        tracing::debug!("Database fully seeded, nothing to do");
+    }
+    Ok(seeded)
 }
 
 async fn seed_guitar_defaults(
@@ -47,12 +87,22 @@ async fn seed_guitar_defaults(
     seed_profiles(db, &defaults.profiles).await?;
     seed_songs(db, &defaults.songs).await?;
 
+    // Seed dummy block presets for every block type (for testing overrides)
+    let dummy_blocks = dummy::all_dummy_blocks();
+    seed_dummy_block_presets(db, &dummy_blocks).await?;
+
+    // Seed dummy module presets for every module type
+    let dummy_modules = module_dummy::all_dummy_module_presets();
+    seed_dummy_module_presets(db, &dummy_modules).await?;
+
     tracing::info!(
-        "Seeded DB: {} module presets, {} presets, {} profiles, {} songs",
+        "Seeded DB: {} module presets, {} presets, {} profiles, {} songs, {} dummy block presets, {} dummy module presets",
         defaults.rig.module_presets.len(),
         defaults.presets.len(),
         defaults.profiles.len(),
         defaults.songs.len(),
+        dummy_blocks.len(),
+        dummy_modules.len(),
     );
     Ok(())
 }
@@ -77,6 +127,7 @@ async fn seed_module_presets(
             blocks: Set(blocks_json),
             macros: Set(macros_json),
             tags: Set(tags_json),
+            is_template: Set(true),
             is_deleted: Set(false),
             created_at: Set(now),
             updated_at: Set(now),
@@ -137,6 +188,7 @@ async fn seed_presets(db: &DatabaseConnection, presets: &[Preset]) -> StorageRes
             is_public: Set(false),
             is_deleted: Set(false),
             is_favorite: Set(false),
+            is_template: Set(true),
             version: Set(1),
             created_at: Set(now),
             updated_at: Set(now),
@@ -190,6 +242,7 @@ async fn seed_profiles(db: &DatabaseConnection, profiles: &[Profile]) -> Storage
             tags: Set(tags_json),
             metadata: Set(metadata_json),
             default_scene_template_id: Set(default_scene_id),
+            is_template: Set(true),
             is_deleted: Set(false),
             created_at: Set(now),
             updated_at: Set(now),
@@ -267,6 +320,7 @@ async fn seed_songs(db: &DatabaseConnection, songs: &[PerformanceSong]) -> Stora
             linked_song_id: Set(linked_song_id),
             module_overrides: Set(module_overrides_json),
             tags: Set(tags_json),
+            is_template: Set(true),
             is_deleted: Set(false),
             created_at: Set(now),
             updated_at: Set(now),
@@ -310,6 +364,71 @@ async fn seed_song_scenes(
         }
         .insert(db)
         .await?;
+    }
+    Ok(())
+}
+
+// ── Dummy Block Presets + Snapshots ──────────────────────────────────────
+
+async fn seed_dummy_block_presets(db: &DatabaseConnection, blocks: &[Block]) -> StorageResult<()> {
+    for block in blocks {
+        let plugin_id_json = facet_bridge::to_json_value(&block.plugin_id)?;
+        let tags_json = serde_json::json!([]);
+        let block_type_str = block.block_type.display_name();
+
+        let preset_id = crate::block_repo::create_block_preset(
+            db,
+            &block.name,
+            block_type_str,
+            Some(plugin_id_json),
+            None,
+            block.description.as_deref(),
+            tags_json,
+        )
+        .await?;
+
+        // Create 4 snapshots per dummy block preset
+        for (i, name) in dummy::DUMMY_SNAPSHOT_NAMES.iter().enumerate() {
+            let is_default = i == 0;
+            let params = serde_json::json!({});
+            crate::block_repo::create_block_snapshot(db, preset_id, name, params, None, is_default)
+                .await?;
+        }
+    }
+    Ok(())
+}
+
+// ── Dummy Module Presets + Snapshots ────────────────────────────────────
+
+async fn seed_dummy_module_presets(
+    db: &DatabaseConnection,
+    modules: &[module_dummy::DummyModulePreset],
+) -> StorageResult<()> {
+    for module in modules {
+        let module_type_str = module.module_type.display_name();
+        let tags_json = serde_json::json!([]);
+
+        let preset_id = crate::module_repo::create_module_preset(
+            db,
+            &module.name,
+            module_type_str,
+            Some(&module.description),
+            serde_json::json!([]), // empty blocks
+            serde_json::json!([]), // empty macros
+            tags_json,
+        )
+        .await?;
+
+        // Create 4 snapshots per dummy module preset
+        for (i, name) in module_dummy::DUMMY_SNAPSHOT_NAMES.iter().enumerate() {
+            let is_default = i == 0;
+            let overrides = serde_json::json!([]);
+            let snap_tags = serde_json::json!([]);
+            crate::module_repo::create_module_snapshot(
+                db, preset_id, name, overrides, is_default, snap_tags,
+            )
+            .await?;
+        }
     }
     Ok(())
 }
@@ -393,6 +512,62 @@ mod tests {
             .await
             .unwrap();
         assert!(!song_scenes.is_empty(), "first song should have scenes");
+
+        // Verify dummy block presets
+        let block_presets = crate::block_repo::list_block_presets(&db, None)
+            .await
+            .unwrap();
+        assert_eq!(
+            block_presets.len(),
+            33,
+            "expected 33 dummy block presets (one per BlockType)"
+        );
+
+        // Verify each block preset has 4 snapshots
+        for bp in &block_presets {
+            let snaps = crate::block_repo::list_block_snapshots(&db, bp.id)
+                .await
+                .unwrap();
+            assert_eq!(
+                snaps.len(),
+                4,
+                "block preset '{}' should have 4 snapshots, got {}",
+                bp.name,
+                snaps.len()
+            );
+            // First snapshot should be the default
+            assert!(snaps[0].is_default, "first snapshot should be default");
+        }
+
+        // Verify dummy module presets (19 module types × 1 dummy each)
+        let dummy_module_presets: Vec<_> = module_presets
+            .iter()
+            .filter(|p| p.name.starts_with("Dummy "))
+            .collect();
+        assert_eq!(
+            dummy_module_presets.len(),
+            19,
+            "expected 19 dummy module presets (one per ModuleType), got {}",
+            dummy_module_presets.len()
+        );
+
+        // Verify each dummy module preset has 4 snapshots
+        for dmp in &dummy_module_presets {
+            let snaps = crate::module_repo::list_module_snapshots(&db, dmp.id)
+                .await
+                .unwrap();
+            assert_eq!(
+                snaps.len(),
+                4,
+                "dummy module preset '{}' should have 4 snapshots, got {}",
+                dmp.name,
+                snaps.len()
+            );
+            assert!(
+                snaps[0].is_default,
+                "first module snapshot should be default"
+            );
+        }
     }
 
     #[tokio::test]

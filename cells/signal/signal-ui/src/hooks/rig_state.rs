@@ -11,6 +11,7 @@ use crate::signals::{
     RIG_SCENE_INDEX, RIG_SERVICE, RIG_SETLIST_SONGS, RIG_SONG_INDEX,
 };
 use signal_control::{RigControlEvent, SignalControl};
+use uuid::Uuid;
 
 /// Hook that subscribes to rig service events and updates global signals.
 ///
@@ -275,6 +276,7 @@ pub(crate) async fn refresh_presets_from_db(ctl: &SignalControl) {
                     scene_count: scenes.len(),
                     scene_names,
                     scenes,
+                    is_template: p.is_template,
                 });
             }
 
@@ -340,6 +342,7 @@ async fn populate_sidebars_from_db(ctl: &SignalControl) {
                     scene_names,
                     scenes,
                     description: prof.description.clone(),
+                    is_template: prof.is_template,
                 });
             }
 
@@ -374,6 +377,7 @@ async fn populate_sidebars_from_db(ctl: &SignalControl) {
             for (idx, song) in db_songs.iter().enumerate() {
                 let scenes = ctl.list_song_scenes(song.id).await.unwrap_or_default();
                 let scene_names: Vec<String> = scenes.iter().map(|s| s.name.clone()).collect();
+                let scene_ids: Vec<Uuid> = scenes.iter().map(|s| s.id).collect();
 
                 song_infos.push(crate::signals::SongInfo {
                     index: idx,
@@ -381,7 +385,9 @@ async fn populate_sidebars_from_db(ctl: &SignalControl) {
                     artist: song.artist.clone(),
                     scene_count: scenes.len(),
                     scene_names,
+                    scene_ids,
                     current_scene_index: None,
+                    is_template: song.is_template,
                 });
             }
 

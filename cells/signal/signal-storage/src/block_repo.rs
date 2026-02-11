@@ -36,6 +36,7 @@ pub async fn create_block_preset(
         plugin_preset_name: Set(plugin_preset_name.map(String::from)),
         description: Set(description.map(String::from)),
         tags: Set(tags),
+        is_template: Set(false),
         is_deleted: Set(false),
         created_at: Set(now),
         updated_at: Set(now),

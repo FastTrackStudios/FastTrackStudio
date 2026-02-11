@@ -61,6 +61,7 @@ pub async fn create_module_preset_with_id(
         blocks: Set(blocks),
         macros: Set(macros),
         tags: Set(tags),
+        is_template: Set(false),
         is_deleted: Set(false),
         created_at: Set(now),
         updated_at: Set(now),

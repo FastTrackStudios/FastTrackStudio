@@ -15,6 +15,7 @@ pub struct Model {
     pub tags: Json,
     pub metadata: Json,
     pub default_scene_template_id: Option<Uuid>,
+    pub is_template: bool,
     pub is_deleted: bool,
     pub created_at: DateTimeWithTimeZone,
     pub updated_at: DateTimeWithTimeZone,

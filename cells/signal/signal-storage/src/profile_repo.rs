@@ -35,6 +35,7 @@ pub async fn create_profile(
         tags: Set(tags),
         metadata: Set(metadata),
         default_scene_template_id: Set(None),
+        is_template: Set(false),
         is_deleted: Set(false),
         created_at: Set(now),
         updated_at: Set(now),

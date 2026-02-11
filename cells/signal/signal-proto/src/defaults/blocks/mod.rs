@@ -5,6 +5,7 @@
 
 pub mod amp;
 pub mod drive;
+pub mod dummy;
 pub mod dynamics;
 pub mod eq;
 pub mod modulation;

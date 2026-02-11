@@ -26,7 +26,9 @@ pub enum RigEditorTab {
     /// Unified editor — node graph (Flow/Compact) or block grid (Grid).
     #[default]
     Edit,
-    /// Song/setlist editor — manage songs, scenes, and setlists.
+    /// Design — module/block creation and editing workspace.
+    Design,
+    /// Song/setlist editor — manage songs, sections, and setlists.
     SongEditor,
     /// Advanced inspector — raw chunk data, parameter tables, debug info.
     Advanced,
@@ -37,6 +39,7 @@ impl RigEditorTab {
         match self {
             Self::Performance => "Performance",
             Self::Edit => "Edit",
+            Self::Design => "Design",
             Self::SongEditor => "Songs",
             Self::Advanced => "Advanced",
         }
@@ -46,6 +49,7 @@ impl RigEditorTab {
         &[
             RigEditorTab::Performance,
             RigEditorTab::Edit,
+            RigEditorTab::Design,
             RigEditorTab::SongEditor,
             RigEditorTab::Advanced,
         ]
@@ -438,6 +442,23 @@ pub static RIG_SNAPSHOTS: GlobalSignal<Vec<crate::components::rig_grid::node_gra
 /// `CompositionSlot` so the detail panel has all the info it needs.
 pub static RIG_GRID_SELECTED_SLOT: GlobalSignal<
     Option<crate::components::module_editor::module_editor_view::CompositionSlot>,
+> = Signal::global(|| None);
+
+/// Current grid selection (Block or Module) — written by `RigGridEditorPanel`,
+/// read by `RigDetailEditorPanel`. Carries the full `GridSelection` enum so the
+/// detail panel can distinguish between block-level and module-level selection.
+pub static RIG_GRID_SELECTION: GlobalSignal<
+    Option<crate::components::module_editor::grid_view::GridSelection>,
+> = Signal::global(|| None);
+
+/// Chain override for the dock-panel grid editor.
+///
+/// Written by `RigDetailEditorPanel` when the user assigns a block preset.
+/// Read by `RigGridEditorPanelInner` to reflect the update in the grid.
+/// Cleared when `RIG_MODULES` changes (new preset loaded). `None` means
+/// use the computed chain from `RIG_MODULES`.
+pub static RIG_GRID_CHAIN_OVERRIDE: GlobalSignal<
+    Option<Vec<crate::components::module_editor::module_editor_view::CompositionSlot>>,
 > = Signal::global(|| None);
 
 /// Currently selected entity on the node graph canvas.

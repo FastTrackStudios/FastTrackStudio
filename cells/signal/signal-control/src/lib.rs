@@ -659,6 +659,28 @@ impl SignalControl {
         Ok(signal_storage::profile_repo::list_scene_templates(db, profile_id).await?)
     }
 
+    pub async fn update_scene_template(
+        &self,
+        id: Uuid,
+        name: Option<&str>,
+        preset_id: Option<Uuid>,
+        snapshot_id: Option<Option<Uuid>>,
+    ) -> eyre::Result<()> {
+        let db = self.require_db()?;
+        Ok(signal_storage::profile_repo::update_scene_template(
+            db,
+            id,
+            name,
+            preset_id,
+            snapshot_id,
+            None, // module_overrides
+            None, // block_overrides
+            None, // parameter_state
+            None, // tags
+        )
+        .await?)
+    }
+
     pub async fn delete_scene_template(&self, id: Uuid) -> eyre::Result<bool> {
         let db = self.require_db()?;
         Ok(signal_storage::profile_repo::delete_scene_template(db, id).await?)
@@ -762,6 +784,29 @@ impl SignalControl {
     pub async fn list_song_scenes(&self, song_id: Uuid) -> eyre::Result<Vec<song_scene::Model>> {
         let db = self.require_db()?;
         Ok(signal_storage::song_repo::list_song_scenes(db, song_id).await?)
+    }
+
+    pub async fn update_song_scene(
+        &self,
+        id: Uuid,
+        name: Option<&str>,
+        preset_id: Option<Uuid>,
+        snapshot_id: Option<Option<Uuid>>,
+    ) -> eyre::Result<()> {
+        let db = self.require_db()?;
+        Ok(signal_storage::song_repo::update_song_scene(
+            db,
+            id,
+            name,
+            preset_id,
+            snapshot_id,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .await?)
     }
 
     pub async fn delete_song_scene(&self, id: Uuid) -> eyre::Result<bool> {

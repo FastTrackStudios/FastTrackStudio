@@ -11,6 +11,7 @@
 //! - **Center view** (Node/Grid) changes which center panel is shown
 
 use crate::components::advanced_inspector::AdvancedInspectorView;
+use crate::components::module_editor::module_editor_view::ModuleEditorView;
 use crate::components::performance::PerformanceView;
 use crate::components::rig_grid::scene_grid::SceneGridPanel;
 use crate::components::rig_grid::view_mode::{ModuleViewMode, RigViewMode};
@@ -233,6 +234,9 @@ pub fn RigDockView() -> Element {
                     },
                     RigEditorTab::Performance => rsx! {
                         PerformanceView {}
+                    },
+                    RigEditorTab::Design => rsx! {
+                        ModuleEditorView {}
                     },
                     RigEditorTab::SongEditor => rsx! {
                         SongEditorView {}

@@ -61,11 +61,11 @@ impl BlockVisualState {
     pub fn cell_style(&self, color: &BlockColor) -> String {
         match self {
             Self::Dragging => format!(
-                "background-color: {}10; border-color: {}20; color: {}40; opacity: 0.4;",
+                "background-color: {}10; border-color: {}20; color: {}40; opacity: 0.4; border-style: dashed;",
                 color.bg, color.bg, color.fg,
             ),
             Self::Bypassed => format!(
-                "background-color: {}08; border-color: {}15; color: {}30; opacity: 0.25;",
+                "background-color: {}08; border-color: {}15; color: {}30; opacity: 0.25; border-style: solid;",
                 color.bg, color.bg, color.fg,
             ),
             Self::Template => format!(
@@ -73,15 +73,15 @@ impl BlockVisualState {
                 color.bg, color.bg, color.fg,
             ),
             Self::Selected => format!(
-                "background-color: {}25; border-color: {}; color: {}; opacity: 1;",
+                "background-color: {}25; border-color: {}; color: {}; opacity: 1; border-style: solid;",
                 color.bg, color.bg, color.fg,
             ),
             Self::DropTarget => format!(
-                "background-color: {}20; border-color: {}60; color: {}; opacity: 1;",
+                "background-color: {}20; border-color: {}60; color: {}; opacity: 1; border-style: solid;",
                 color.bg, color.bg, color.fg,
             ),
             Self::Normal => format!(
-                "background-color: {}15; border-color: {}40; color: {}; opacity: 1;",
+                "background-color: {}15; border-color: {}40; color: {}; opacity: 1; border-style: solid;",
                 color.bg, color.bg, color.fg,
             ),
         }
@@ -166,11 +166,13 @@ impl ModuleVisualState {
     }
 
     /// Extra inline style fragments (border-style, z-index).
+    /// Always sets border-style explicitly — Wry doesn't reliably reset
+    /// omitted inline properties on VDOM diff.
     pub fn extra_style(&self) -> &'static str {
         match self {
-            Self::Dragging => "z-index: 50;",
+            Self::Dragging => "z-index: 50; border-style: dashed;",
             Self::Template => "border-style: dashed;",
-            _ => "",
+            _ => "border-style: solid;",
         }
     }
 

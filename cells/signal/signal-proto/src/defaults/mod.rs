@@ -5,5 +5,6 @@
 
 pub mod blocks;
 pub mod guitar;
+pub mod modules;
 pub mod templates;
 pub mod vocals;

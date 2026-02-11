@@ -15,6 +15,7 @@ pub struct Model {
     pub linked_song_id: Option<Uuid>,
     pub module_overrides: Json,
     pub tags: Json,
+    pub is_template: bool,
     pub is_deleted: bool,
     pub created_at: DateTimeWithTimeZone,
     pub updated_at: DateTimeWithTimeZone,

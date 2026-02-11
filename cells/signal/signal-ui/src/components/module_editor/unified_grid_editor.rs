@@ -6,7 +6,8 @@
 
 use super::detail_panel::DetailPanel;
 use super::grid_view::{
-    BlockPickerDropdown, DynamicGridView, GridConnection, PICKER_CELL, PICKER_CLICK_POS,
+    BlockPickerDropdown, DynamicGridView, GridConnection, GridSelection, PICKER_CELL,
+    PICKER_CLICK_POS,
 };
 use super::module_editor_view::CompositionSlot;
 use crate::prelude::*;
@@ -68,6 +69,8 @@ pub(crate) fn modules_to_composition_chain(
                 row,
                 module_group: Some(group_key.clone()),
                 module_type: Some(m.module_type),
+                is_template: true,
+                bypassed: false,
             });
             col += 1;
         } else if has_2d {
@@ -95,6 +98,8 @@ pub(crate) fn modules_to_composition_chain(
                     row: base_row + lr,
                     module_group: Some(group_key.clone()),
                     module_type: Some(m.module_type),
+                    is_template: mb.block.plugin_id.uid.is_empty(),
+                    bypassed: mb.block.bypassed,
                 });
             }
 
@@ -113,6 +118,8 @@ pub(crate) fn modules_to_composition_chain(
                     row,
                     module_group: Some(group_key.clone()),
                     module_type: Some(m.module_type),
+                    is_template: mb.block.plugin_id.uid.is_empty(),
+                    bypassed: mb.block.bypassed,
                 });
             }
             col = base_col + module_width;
@@ -129,7 +136,7 @@ pub(crate) fn modules_to_composition_chain(
 #[component]
 pub fn UnifiedGridEditor() -> Element {
     let mut connections = use_signal(Vec::<GridConnection>::new);
-    let mut selected_slot_id = use_signal(|| None::<Uuid>);
+    let mut selection = use_signal(|| None::<GridSelection>);
     // Local chain override: stores user-driven layout changes (drag-drop moves).
     // Cleared whenever the upstream RIG_MODULES data changes (new preset loaded).
     let mut chain_override = use_signal(|| None::<Vec<CompositionSlot>>);
@@ -139,6 +146,19 @@ pub fn UnifiedGridEditor() -> Element {
     let base_chain = modules_to_composition_chain(&modules);
     let module_count = modules.len();
     drop(modules); // release read guard
+
+    // Track the base chain identity (slot IDs) so we can detect preset switches.
+    // When the set of slot IDs changes, the user loaded a different preset —
+    // clear the local override so positions reset to the computed layout.
+    let mut prev_slot_ids = use_signal(Vec::<Uuid>::new);
+    let current_ids: Vec<Uuid> = base_chain.iter().map(|s| s.id).collect();
+    if *prev_slot_ids.read() != current_ids {
+        prev_slot_ids.set(current_ids);
+        // Base chain changed (new preset loaded) — discard stale override
+        if chain_override.read().is_some() {
+            chain_override.set(None);
+        }
+    }
 
     // Use the local override if it exists, otherwise use the computed chain
     let chain_data = chain_override
@@ -154,7 +174,7 @@ pub fn UnifiedGridEditor() -> Element {
     );
 
     let conn_data = connections.cloned();
-    let sel_id = *selected_slot_id.read();
+    let sel = selection.cloned();
 
     rsx! {
         div { class: "h-full w-full flex flex-col overflow-hidden",
@@ -169,7 +189,7 @@ pub fn UnifiedGridEditor() -> Element {
             div { class: "flex-1 min-h-0 relative",
                 DynamicGridView {
                     chain: chain_data.clone(),
-                    selected_slot_id: sel_id,
+                    selection: sel.clone(),
                     connections: conn_data.clone(),
                     on_chain_change: move |new_chain: Vec<CompositionSlot>| {
                         chain_override.set(Some(new_chain));
@@ -177,18 +197,30 @@ pub fn UnifiedGridEditor() -> Element {
                     on_connections_change: move |new_conns: Vec<GridConnection>| {
                         connections.set(new_conns);
                     },
-                    on_select: move |id: Option<Uuid>| {
-                        selected_slot_id.set(id);
+                    on_select: move |s: Option<GridSelection>| {
+                        selection.set(s);
                     },
                 }
             }
 
-            // Detail panel — 3-column layout for editing the selected slot
+            // Detail panel — 3-column layout for editing the selected block/module
             {
-                let selected_slot = sel_id.and_then(|id| chain_data.iter().find(|s| s.id == id).cloned());
+                let chain_for_cb = chain_data.clone();
                 rsx! {
                     div { class: "h-52 flex-shrink-0 border-t border-zinc-800/50 bg-zinc-950/40",
-                        DetailPanel { selected_slot: selected_slot }
+                        DetailPanel {
+                            selection: sel.clone(),
+                            chain: chain_data.clone(),
+                            on_preset_assigned: move |(slot_id, preset_id, preset_name): (Uuid, Uuid, String)| {
+                                let mut new_chain = chain_for_cb.clone();
+                                if let Some(slot) = new_chain.iter_mut().find(|s| s.id == slot_id) {
+                                    slot.block_preset_id = Some(preset_id);
+                                    slot.block_preset_name = Some(preset_name);
+                                    slot.is_template = false;
+                                }
+                                chain_override.set(Some(new_chain));
+                            },
+                        }
                     }
                 }
             }

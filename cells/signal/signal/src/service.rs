@@ -117,6 +117,9 @@ pub struct ProfileInfo {
     /// Optional description
     #[facet(default)]
     pub description: Option<String>,
+    /// Whether this profile is a structural template (seed data) vs concrete user preset
+    #[facet(default)]
+    pub is_template: bool,
 }
 
 /// Simplified profile scene information for RPC communication.
@@ -160,6 +163,9 @@ pub struct PresetInfo {
     /// Scene details (preset-level variations that can load different modules)
     #[facet(default)]
     pub scenes: Vec<PresetSnapshotInfo>,
+    /// Whether this preset is a structural template (seed data) vs concrete user preset
+    #[facet(default)]
+    pub is_template: bool,
     // TEMP: Commented out to test serialization
     // /// Default scene index to load when preset is activated (None means scene 0)
     // #[facet(default)]
@@ -192,9 +198,15 @@ pub struct SongInfo {
     pub scene_count: usize,
     /// Scene names for quick display
     pub scene_names: Vec<String>,
+    /// Scene DB IDs (parallel to scene_names) for updates
+    #[facet(default)]
+    pub scene_ids: Vec<Uuid>,
     /// Current scene index (if this is the active song)
     #[facet(default)]
     pub current_scene_index: Option<usize>,
+    /// Whether this song is a structural template (seed data) vs concrete user song
+    #[facet(default)]
+    pub is_template: bool,
 }
 
 /// Simplified setlist information for RPC communication.
@@ -586,6 +598,7 @@ impl ProfileInfo {
             scene_names,
             scenes,
             description: p.description.clone(),
+            is_template: false,
         }
     }
 }
@@ -622,6 +635,7 @@ impl PresetInfo {
             scene_count: scenes.len(),
             scene_names,
             scenes,
+            is_template: false,
             // TEMP: default_scene_index,
         }
     }
@@ -650,7 +664,9 @@ impl SongInfo {
             artist: song.artist.clone(),
             scene_count,
             scene_names,
+            scene_ids: Vec::new(), // mock data has no DB IDs
             current_scene_index: current_scene,
+            is_template: false,
         }
     }
 }

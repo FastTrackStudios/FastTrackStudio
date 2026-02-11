@@ -33,6 +33,7 @@ pub async fn create_song(
         linked_song_id: Set(None),
         module_overrides: Set(serde_json::json!({})),
         tags: Set(tags),
+        is_template: Set(false),
         is_deleted: Set(false),
         created_at: Set(now),
         updated_at: Set(now),

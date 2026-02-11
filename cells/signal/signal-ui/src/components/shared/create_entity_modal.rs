@@ -4,7 +4,7 @@
 //! - Left: template selection cards + form fields
 //! - Right: live `DynamicGridView` preview with module group containers
 
-use crate::components::module_editor::grid_view::{DynamicGridView, GridConnection};
+use crate::components::module_editor::grid_view::{DynamicGridView, GridConnection, GridSelection};
 use crate::components::module_editor::module_editor_view::CompositionSlot;
 use crate::hooks::rig_actions::CreateEntityData;
 use crate::prelude::*;
@@ -28,7 +28,7 @@ impl EntityKind {
             Self::Preset => "New Preset",
             Self::Profile => "New Profile",
             Self::Song => "New Song",
-            Self::Scene => "New Scene",
+            Self::Scene => "New Section",
             Self::Setlist => "New Setlist",
         }
     }
@@ -159,6 +159,8 @@ fn template_to_slots(template: &RigTemplate) -> Vec<CompositionSlot> {
                     row: base_row + lr,
                     module_group: Some(module.name.clone()),
                     module_type: Some(module.module_type),
+                    is_template: true,
+                    bypassed: false,
                 });
             }
 
@@ -179,6 +181,8 @@ fn template_to_slots(template: &RigTemplate) -> Vec<CompositionSlot> {
                     row,
                     module_group: Some(module.name.clone()),
                     module_type: Some(module.module_type),
+                    is_template: true,
+                    bypassed: false,
                 });
             }
             col = base_col + module_width;
@@ -531,11 +535,11 @@ pub fn CreateEntityModal(props: CreateEntityModalProps) -> Element {
                                 div { class: "flex-1 overflow-hidden min-h-0",
                                     DynamicGridView {
                                         chain: preview_slots,
-                                        selected_slot_id: None,
+                                        selection: None,
                                         connections: Vec::<GridConnection>::new(),
                                         on_chain_change: move |_: Vec<CompositionSlot>| {},
                                         on_connections_change: move |_: Vec<GridConnection>| {},
-                                        on_select: move |_: Option<Uuid>| {},
+                                        on_select: move |_: Option<GridSelection>| {},
                                     }
                                 }
                             }

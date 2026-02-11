@@ -17,6 +17,7 @@ pub struct Model {
     #[sea_orm(column_type = "Text")]
     pub description: Option<String>,
     pub tags: Json,
+    pub is_template: bool,
     pub is_deleted: bool,
     pub created_at: DateTimeWithTimeZone,
     pub updated_at: DateTimeWithTimeZone,

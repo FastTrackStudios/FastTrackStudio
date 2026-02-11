@@ -40,6 +40,7 @@ pub async fn create_preset<T: for<'a> facet::Facet<'a>>(
         is_public: Set(false),
         is_deleted: Set(false),
         is_favorite: Set(false),
+        is_template: Set(false),
         version: Set(1),
         created_at: Set(now),
         updated_at: Set(now),
