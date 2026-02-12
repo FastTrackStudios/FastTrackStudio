@@ -10,6 +10,7 @@ use crate::signals::{
     RIG_LOADING, RIG_MODULES, RIG_PRELOADED_PRESETS, RIG_PROFILE, RIG_SECTION_INDEX, RIG_SERVICE,
     RIG_SETLIST_SONGS, RIG_SONG_INDEX,
 };
+use signal_control::id::{PatchId, ProfileId, RigPresetId, SongId};
 use signal_control::{RigControlEvent, SignalControl};
 
 /// Hook that subscribes to rig service events and updates global signals.
@@ -225,13 +226,15 @@ pub(crate) async fn refresh_presets_from_db(ctl: &SignalControl) {
             let mut preset_infos: Vec<RigPresetInfo> = Vec::with_capacity(db_presets.len());
 
             for p in &db_presets {
-                let category = p.category.as_str().unwrap_or("").to_string();
+                // DB stores category as JSON — use default until Facet serde bridge exists
+                let category = signal_control::category::PresetCategory::default();
+                let rating = signal_control::normalized::Rating::default();
 
                 preset_infos.push(RigPresetInfo {
-                    id: p.id,
+                    id: RigPresetId::from_uuid(p.id),
                     name: p.name.clone(),
                     category,
-                    rating: 0,
+                    rating,
                 });
             }
 
@@ -263,14 +266,14 @@ async fn populate_sidebars_from_db(ctl: &SignalControl) {
                     .iter()
                     .enumerate()
                     .map(|(i, t)| PatchInfo {
-                        id: t.id,
+                        id: PatchId::from_uuid(t.id),
                         name: t.name.clone(),
                         index: i,
                     })
                     .collect();
 
                 profile_infos.push(ProfileInfo {
-                    id: prof.id,
+                    id: ProfileId::from_uuid(prof.id),
                     name: prof.name.clone(),
                     patch_count: patches.len(),
                     patches,
@@ -310,6 +313,7 @@ async fn populate_sidebars_from_db(ctl: &SignalControl) {
                 let section_names: Vec<String> = sections.iter().map(|s| s.name.clone()).collect();
 
                 song_infos.push(crate::signals::SongInfo {
+                    id: SongId::from_uuid(song.id),
                     index: idx,
                     name: song.name.clone(),
                     artist: song.artist.clone(),

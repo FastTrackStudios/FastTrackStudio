@@ -391,7 +391,7 @@ fn SnapshotItem(props: SnapshotItemProps) -> Element {
                 "w-full text-left px-3 py-2 text-sm text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 border-l-2 border-transparent transition-colors"
             },
             onclick: move |_| {
-                *RIG_LAST_APPLIED_SNAPSHOT.write() = Some(snap_id);
+                *RIG_LAST_APPLIED_SNAPSHOT.write() = Some(signal_control::id::RigPresetId::from_uuid(snap_id));
             },
             "{props.name}"
         }

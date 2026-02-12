@@ -560,7 +560,7 @@ fn RigGridEditorPanelInner() -> Element {
                     match sel {
                         GridSelection::Block(id) => {
                             for m in modules.iter_mut() {
-                                if let Some(mb) = m.blocks.iter_mut().find(|b| b.id == id) {
+                                if let Some(mb) = m.blocks.iter_mut().find(|b| b.id.as_uuid() == id) {
                                     mb.block.bypassed = bypassed;
                                     break;
                                 }

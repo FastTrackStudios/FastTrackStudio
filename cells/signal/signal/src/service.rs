@@ -9,13 +9,16 @@
 
 use facet::Facet;
 use roam::{Context, Tx};
-use uuid::Uuid;
 
+use crate::category::PresetCategory;
 use crate::engine::{
     EngineError, InstanceHandle, InstanceState, PreloadPriority, PresetLoadHandle, PresetReadiness,
     SwitchOutcome,
 };
+use crate::id::{ModuleSnapshotId, PatchId, ProfileId, RigId, RigPresetId, SongId};
 use crate::module::ModuleType;
+use crate::normalized::Rating;
+use crate::rig::InstrumentType;
 
 // region:    --- RPC Types
 
@@ -101,7 +104,7 @@ pub struct PreloadStatusInfo {
 #[derive(Debug, Clone, PartialEq, Facet)]
 pub struct ProfileInfo {
     /// Profile ID
-    pub id: Uuid,
+    pub id: ProfileId,
     /// Profile name
     pub name: String,
     /// Number of patches in this profile
@@ -115,7 +118,7 @@ pub struct ProfileInfo {
 #[derive(Debug, Clone, PartialEq, Facet)]
 pub struct PatchInfo {
     /// Patch ID
-    pub id: Uuid,
+    pub id: PatchId,
     /// Patch name
     pub name: String,
     /// Index within the profile
@@ -126,18 +129,20 @@ pub struct PatchInfo {
 #[derive(Debug, Clone, PartialEq, Facet)]
 pub struct RigPresetInfo {
     /// Preset ID
-    pub id: Uuid,
+    pub id: RigPresetId,
     /// Preset name
     pub name: String,
     /// Category
-    pub category: String,
-    /// Star rating (0-5)
-    pub rating: u8,
+    pub category: PresetCategory,
+    /// Star rating
+    pub rating: Rating,
 }
 
 /// Simplified song information for RPC communication.
 #[derive(Debug, Clone, PartialEq, Facet)]
 pub struct SongInfo {
+    /// Song ID
+    pub id: SongId,
     /// Song index in setlist
     pub index: usize,
     /// Song name
@@ -179,11 +184,11 @@ pub struct SetlistInfo {
 #[derive(Debug, Clone, PartialEq, Facet)]
 pub struct RigInfo {
     /// Rig ID
-    pub id: Uuid,
+    pub id: RigId,
     /// Rig name
     pub name: String,
     /// Instrument type
-    pub instrument_type: String,
+    pub instrument_type: InstrumentType,
     /// Number of engines
     pub engine_count: usize,
 }
@@ -198,14 +203,14 @@ pub struct RigInfo {
 pub enum RigControlCommand {
     // ── Lifecycle ────────────────────────────────────────────────────────
     /// Initialize the engine with a rig's module types.
-    Initialize { rig_id: Uuid },
+    Initialize { rig_id: RigId },
     /// Shut down the engine, releasing all resources.
     Shutdown,
 
     // ── Transitions ─────────────────────────────────────────────────────
     /// Load a patch from a profile.
     LoadPatch {
-        profile_id: Uuid,
+        profile_id: ProfileId,
         patch_index: usize,
     },
     /// Load a song section by song and section index.
@@ -216,7 +221,7 @@ pub enum RigControlCommand {
     /// Apply a module snapshot (parameter changes only).
     ApplySnapshot {
         module_type: ModuleType,
-        snapshot_id: Uuid,
+        snapshot_id: ModuleSnapshotId,
     },
 
     // ── Preloading ──────────────────────────────────────────────────────
@@ -235,7 +240,7 @@ pub enum RigControlCommand {
 
     // ── Profile/Song Management ─────────────────────────────────────────
     /// Load a specific profile
-    LoadProfile { profile_id: Uuid },
+    LoadProfile { profile_id: ProfileId },
     /// Go to next song in setlist
     NextSong,
     /// Go to previous song in setlist
@@ -260,7 +265,7 @@ pub enum RigControlCommand {
 pub enum RigControlEvent {
     // ── Lifecycle ────────────────────────────────────────────────────────
     /// Engine was initialized with a rig.
-    EngineInitialized { rig_id: Uuid },
+    EngineInitialized { rig_id: RigId },
     /// Engine was shut down.
     EngineShutdown,
 
@@ -474,14 +479,14 @@ impl ProfileInfo {
             .iter()
             .enumerate()
             .map(|(i, patch)| PatchInfo {
-                id: patch.id.as_uuid(),
+                id: patch.id,
                 name: patch.name.clone(),
                 index: i,
             })
             .collect();
 
         Self {
-            id: p.id.as_uuid(),
+            id: p.id,
             name: p.name.clone(),
             patch_count: patches.len(),
             patches,
@@ -506,6 +511,7 @@ impl SongInfo {
         };
 
         Self {
+            id: song.id,
             index,
             name: song.name.clone(),
             artist: song.artist.clone(),
@@ -530,9 +536,9 @@ impl SetlistInfo {
 impl RigInfo {
     pub fn from_rig(r: &crate::rig::Rig) -> Self {
         Self {
-            id: r.id.as_uuid(),
+            id: r.id,
             name: r.name.clone(),
-            instrument_type: format!("{:?}", r.instrument_type),
+            instrument_type: r.instrument_type.clone(),
             engine_count: r.engine_count(),
         }
     }
@@ -899,11 +905,7 @@ impl RigControlService for MockRigControlService {
                 profile_id,
                 patch_index,
             } => {
-                let profile = self
-                    .data
-                    .profiles
-                    .iter()
-                    .find(|p| p.id.as_uuid() == profile_id);
+                let profile = self.data.profiles.iter().find(|p| p.id == profile_id);
                 let Some(profile) = profile else { return };
                 let Some(patch) = profile.patches.get(patch_index) else {
                     return;
@@ -916,7 +918,7 @@ impl RigControlService for MockRigControlService {
 
                 self.broadcast_event(RigControlEvent::PatchLoaded {
                     patch: PatchInfo {
-                        id: patch.id.as_uuid(),
+                        id: patch.id,
                         name: patch.name.clone(),
                         index: patch_index,
                     },
@@ -953,10 +955,7 @@ impl RigControlService for MockRigControlService {
                 module_type,
                 snapshot_id,
             } => {
-                let snap = self
-                    .data
-                    .store
-                    .module_snapshot(&crate::id::ModuleSnapshotId::from_uuid(snapshot_id));
+                let snap = self.data.store.module_snapshot(&snapshot_id);
                 if let Some(snapshot) = snap {
                     let _ = self.engine.apply_snapshot(module_type, snapshot).await;
                 }
@@ -982,12 +981,7 @@ impl RigControlService for MockRigControlService {
                 self.engine.enable_slot(module_type).await;
             }
             RigControlCommand::LoadProfile { profile_id } => {
-                if let Some(index) = self
-                    .data
-                    .profiles
-                    .iter()
-                    .position(|p| p.id.as_uuid() == profile_id)
-                {
+                if let Some(index) = self.data.profiles.iter().position(|p| p.id == profile_id) {
                     *self.current_profile_index.write().unwrap() = index;
 
                     if let Some(profile) = self.data.profiles.get(index) {

@@ -10,6 +10,7 @@ use crate::signals::{
     RIG_AVAILABLE_PRESETS, RIG_AVAILABLE_PROFILES, RIG_CURRENT_PRESET, RIG_LAST_APPLIED_SNAPSHOT,
     RIG_PROFILE,
 };
+use signal_control::id::{ProfileId, RigPresetId};
 use signal_control::tags::{Tag, TagRegistry};
 use signal_control::{PatchInfo, ProfileInfo, RigPresetInfo};
 use uuid::Uuid;
@@ -24,15 +25,15 @@ pub struct GuitarRigLeftSidebarProps {
     /// Current rig view mode (determines layout).
     pub rig_view_mode: RigViewMode,
     /// Callback when a preset is selected (loads with default scene).
-    pub on_preset_select: Callback<Uuid>,
+    pub on_preset_select: Callback<RigPresetId>,
     /// Callback when a preset + scene is selected (by scene index).
     #[props(default)]
-    pub on_preset_snapshot_select: Option<Callback<(Uuid, usize)>>,
+    pub on_preset_snapshot_select: Option<Callback<(RigPresetId, usize)>>,
     /// Callback when a profile is selected (loads with default scene).
-    pub on_profile_select: Callback<Uuid>,
+    pub on_profile_select: Callback<ProfileId>,
     /// Callback when a profile + scene is selected (by scene index).
     #[props(default)]
-    pub on_profile_scene_select: Option<Callback<(Uuid, usize)>>,
+    pub on_profile_scene_select: Option<Callback<(ProfileId, usize)>>,
     /// Callback to create a new preset.
     #[props(default)]
     pub on_create_preset: Option<Callback<()>>,
@@ -231,8 +232,8 @@ struct PresetItemProps {
     is_active: bool,
     is_expanded: bool,
     registry: TagRegistry,
-    on_click: Callback<Uuid>,
-    on_scene_click: Option<Callback<(Uuid, usize)>>,
+    on_click: Callback<RigPresetId>,
+    on_scene_click: Option<Callback<(RigPresetId, usize)>>,
 }
 
 /// Individual preset item (simplified — no inline snapshot expansion).
@@ -261,9 +262,9 @@ fn PresetItem(props: PresetItemProps) -> Element {
                         }
 
                         // Rating display
-                        if props.preset.rating > 0 {
+                        if props.preset.rating.is_rated() {
                             div { class: "text-xs text-yellow-500 mt-1",
-                                {"★".repeat(props.preset.rating as usize)}
+                                {"★".repeat(props.preset.rating.get() as usize)}
                             }
                         }
                     }
@@ -317,9 +318,9 @@ struct ProfileItemProps {
     profile: ProfileInfo,
     is_active: bool,
     is_expanded: bool,
-    current_preset_id: Option<Uuid>,
-    on_click: Callback<Uuid>,
-    on_scene_click: Option<Callback<(Uuid, usize)>>,
+    current_preset_id: Option<RigPresetId>,
+    on_click: Callback<ProfileId>,
+    on_scene_click: Option<Callback<(ProfileId, usize)>>,
 }
 
 /// Individual profile item with expandable patches.
@@ -373,11 +374,11 @@ fn ProfileItem(props: ProfileItemProps) -> Element {
 /// Props for profile patch item.
 #[derive(Props, Clone, PartialEq)]
 struct ProfilePatchItemProps {
-    profile_id: Uuid,
+    profile_id: ProfileId,
     patch_index: usize,
     patch: PatchInfo,
     is_active: bool,
-    on_click: Option<Callback<(Uuid, usize)>>,
+    on_click: Option<Callback<(ProfileId, usize)>>,
 }
 
 /// Individual patch item within a profile.

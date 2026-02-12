@@ -39,6 +39,7 @@ pub mod snapshot_ops;
 use std::sync::Arc;
 use uuid::Uuid;
 
+use signal::id::ProfileId;
 // Import the trait so its methods are in scope on Arc<MockRigControlService>
 use signal::RigControlService;
 
@@ -172,12 +173,12 @@ impl SignalControl {
         self.service.execute(&Self::cx(), cmd).await;
     }
 
-    pub async fn load_profile(&self, profile_id: Uuid) {
+    pub async fn load_profile(&self, profile_id: ProfileId) {
         self.execute(RigControlCommand::LoadProfile { profile_id })
             .await;
     }
 
-    pub async fn load_patch(&self, profile_id: Uuid, patch_index: usize) {
+    pub async fn load_patch(&self, profile_id: ProfileId, patch_index: usize) {
         self.execute(RigControlCommand::LoadPatch {
             profile_id,
             patch_index,

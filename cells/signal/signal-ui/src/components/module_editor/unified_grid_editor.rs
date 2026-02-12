@@ -89,7 +89,7 @@ pub(crate) fn modules_to_composition_chain(
                 let lc = mb.local_col.unwrap_or(0);
                 let lr = mb.local_row.unwrap_or(0);
                 slots.push(CompositionSlot {
-                    id: mb.id,
+                    id: mb.id.as_uuid(),
                     block_type: mb.block.block_type,
                     block_preset_id: None,
                     block_preset_name: Some(mb.block.name.clone()),
@@ -109,7 +109,7 @@ pub(crate) fn modules_to_composition_chain(
             let base_col = col;
             for (i, mb) in m.blocks.iter().enumerate() {
                 slots.push(CompositionSlot {
-                    id: mb.id,
+                    id: mb.id.as_uuid(),
                     block_type: mb.block.block_type,
                     block_preset_id: None,
                     block_preset_name: Some(mb.block.name.clone()),

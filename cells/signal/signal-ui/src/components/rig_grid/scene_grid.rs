@@ -38,9 +38,9 @@ enum TileAction {
     /// Go to scene by index (song mode).
     GoToScene(usize),
     /// Load profile scene by (profile_id, scene_index).
-    LoadProfileScene(uuid::Uuid, usize),
+    LoadProfileScene(signal_control::id::ProfileId, usize),
     /// Activate preset snapshot by ID.
-    ActivateSnapshot(uuid::Uuid),
+    ActivateSnapshot(signal_control::id::RigPresetId),
     /// No action (empty tile).
     None,
 }

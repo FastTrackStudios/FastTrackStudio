@@ -10,6 +10,7 @@ use crate::signals::{
     RIG_FX_CHAIN, RIG_LAST_APPLIED_SNAPSHOT, RIG_MODULES, RIG_NODE_FX_BINDINGS, RIG_NODE_GRAPH,
     RIG_PROFILE, RIG_SERVICE, RIG_SETLIST_SONGS, RIG_SONG_INDEX,
 };
+use signal_control::id::{PatchId, ProfileId, RigPresetId};
 use signal_control::SignalControl;
 use uuid::Uuid;
 
@@ -28,20 +29,20 @@ pub struct CreateEntityData {
 /// Collection of rig action callbacks for UI components.
 #[derive(Clone)]
 pub struct RigActions {
-    pub load_profile: Callback<Uuid>,
-    pub load_profile_scene: Callback<(Uuid, usize)>,
-    pub load_rig: Callback<Uuid>,
-    pub load_preset: Callback<Uuid>,
-    pub load_preset_snapshot: Callback<(Uuid, usize)>,
-    pub load_preset_with_snapshot: Callback<(Uuid, Uuid)>,
-    pub activate_snapshot: Callback<Uuid>,
+    pub load_profile: Callback<ProfileId>,
+    pub load_profile_scene: Callback<(ProfileId, usize)>,
+    pub load_rig: Callback<ProfileId>,
+    pub load_preset: Callback<RigPresetId>,
+    pub load_preset_snapshot: Callback<(RigPresetId, usize)>,
+    pub load_preset_with_snapshot: Callback<(RigPresetId, RigPresetId)>,
+    pub activate_snapshot: Callback<RigPresetId>,
     pub go_to_scene: Callback<usize>,
     pub next_scene: Callback<()>,
     pub prev_scene: Callback<()>,
     pub go_to_song: Callback<usize>,
     pub next_song: Callback<()>,
     pub prev_song: Callback<()>,
-    pub preload_preset: Callback<Uuid>,
+    pub preload_preset: Callback<RigPresetId>,
     pub preload_song: Callback<usize>,
     pub set_parameter: Callback<(Uuid, u32, f64)>,
     pub set_block_parameter: Callback<(Uuid, u32, f32)>,
@@ -70,7 +71,7 @@ pub fn use_rig_actions() -> RigActions {
     RigActions {
         load_profile: {
             let ctl = ctl.clone();
-            Callback::new(move |profile_id: Uuid| {
+            Callback::new(move |profile_id: ProfileId| {
                 let ctl = ctl.clone();
                 spawn(async move {
                     let profiles = ctl.get_available_profiles().await;
@@ -94,7 +95,7 @@ pub fn use_rig_actions() -> RigActions {
         },
         load_profile_scene: {
             let ctl = ctl.clone();
-            Callback::new(move |(profile_id, patch_index): (Uuid, usize)| {
+            Callback::new(move |(profile_id, patch_index): (ProfileId, usize)| {
                 let ctl = ctl.clone();
                 spawn(async move {
                     let profiles = ctl.get_available_profiles().await;
@@ -122,7 +123,7 @@ pub fn use_rig_actions() -> RigActions {
         },
         load_rig: {
             let ctl = ctl.clone();
-            Callback::new(move |rig_id: Uuid| {
+            Callback::new(move |rig_id: ProfileId| {
                 let ctl = ctl.clone();
                 spawn(async move {
                     // In rig-control, you load profiles, not rigs directly.
@@ -133,7 +134,7 @@ pub fn use_rig_actions() -> RigActions {
         },
         load_preset: {
             let ctl = ctl.clone();
-            Callback::new(move |preset_id: Uuid| {
+            Callback::new(move |preset_id: RigPresetId| {
                 let ctl = ctl.clone();
                 spawn(async move {
                     tracing::info!("load_preset: loading preset {preset_id}");
@@ -152,7 +153,8 @@ pub fn use_rig_actions() -> RigActions {
 
                     // 2. Profile mode: update the active patch's preset reference
                     if let Some(profile) = RIG_PROFILE.read().clone() {
-                        if let Ok(templates) = ctl.list_scene_templates(profile.id).await {
+                        if let Ok(templates) = ctl.list_scene_templates(profile.id.as_uuid()).await
+                        {
                             if let Some(tmpl) = templates.first() {
                                 tracing::info!(
                                     "load_preset: updating profile '{}' patch '{}' preset → {}",
@@ -164,7 +166,7 @@ pub fn use_rig_actions() -> RigActions {
                                     .update_scene_template(
                                         tmpl.id,
                                         None,
-                                        Some(preset_id),
+                                        Some(preset_id.as_uuid()),
                                         Some(None),
                                     )
                                     .await
@@ -180,7 +182,7 @@ pub fn use_rig_actions() -> RigActions {
                     }
 
                     // 3. Try to build modules from DB data
-                    let db_modules = build_modules_from_db(&ctl, preset_id).await;
+                    let db_modules = build_modules_from_db(&ctl, preset_id.as_uuid()).await;
                     if !db_modules.is_empty() {
                         tracing::info!("load_preset: built {} modules from DB", db_modules.len());
                         *RIG_MODULES.write() = db_modules;
@@ -197,7 +199,7 @@ pub fn use_rig_actions() -> RigActions {
         },
         load_preset_snapshot: {
             let ctl = ctl.clone();
-            Callback::new(move |(preset_id, snapshot_index): (Uuid, usize)| {
+            Callback::new(move |(preset_id, snapshot_index): (RigPresetId, usize)| {
                 let ctl = ctl.clone();
                 spawn(async move {
                     tracing::info!(
@@ -214,7 +216,7 @@ pub fn use_rig_actions() -> RigActions {
                     }
 
                     // Build modules from DB
-                    let db_modules = build_modules_from_db(&ctl, preset_id).await;
+                    let db_modules = build_modules_from_db(&ctl, preset_id.as_uuid()).await;
                     if !db_modules.is_empty() {
                         *RIG_MODULES.write() = db_modules;
                     } else {
@@ -226,30 +228,32 @@ pub fn use_rig_actions() -> RigActions {
         },
         load_preset_with_snapshot: {
             let ctl = ctl.clone();
-            Callback::new(move |(preset_id, _snapshot_id): (Uuid, Uuid)| {
-                let ctl = ctl.clone();
-                spawn(async move {
-                    let preset_info = RIG_AVAILABLE_PRESETS
-                        .read()
-                        .iter()
-                        .find(|p| p.id == preset_id)
-                        .cloned();
-                    if let Some(ref info) = preset_info {
-                        *RIG_CURRENT_PRESET.write() = Some(info.clone());
-                    }
+            Callback::new(
+                move |(preset_id, _snapshot_id): (RigPresetId, RigPresetId)| {
+                    let ctl = ctl.clone();
+                    spawn(async move {
+                        let preset_info = RIG_AVAILABLE_PRESETS
+                            .read()
+                            .iter()
+                            .find(|p| p.id == preset_id)
+                            .cloned();
+                        if let Some(ref info) = preset_info {
+                            *RIG_CURRENT_PRESET.write() = Some(info.clone());
+                        }
 
-                    let db_modules = build_modules_from_db(&ctl, preset_id).await;
-                    if !db_modules.is_empty() {
-                        *RIG_MODULES.write() = db_modules;
-                    } else {
-                        *RIG_MODULES.write() = ctl.get_current_modules();
-                    }
-                    rebuild_node_graph();
-                });
-            })
+                        let db_modules = build_modules_from_db(&ctl, preset_id.as_uuid()).await;
+                        if !db_modules.is_empty() {
+                            *RIG_MODULES.write() = db_modules;
+                        } else {
+                            *RIG_MODULES.write() = ctl.get_current_modules();
+                        }
+                        rebuild_node_graph();
+                    });
+                },
+            )
         },
         activate_snapshot: {
-            Callback::new(move |snapshot_id: Uuid| {
+            Callback::new(move |snapshot_id: RigPresetId| {
                 spawn(async move {
                     tracing::info!("activate_snapshot: applying snapshot {snapshot_id}");
                     *RIG_LAST_APPLIED_SNAPSHOT.write() = Some(snapshot_id);
@@ -306,7 +310,7 @@ pub fn use_rig_actions() -> RigActions {
             })
         },
         preload_preset: {
-            Callback::new(move |_preset_id: Uuid| {
+            Callback::new(move |_preset_id: RigPresetId| {
                 // Preloading is now section-based, not preset-based.
                 // Individual preset preloading is handled internally by the engine.
                 tracing::debug!("preload_preset: preloading is now section-based");
@@ -415,10 +419,11 @@ pub fn use_rig_actions() -> RigActions {
                         Ok(id) => {
                             tracing::info!("Created preset '{}' ({id})", data.name);
                             refresh_presets_from_db(&ctl).await;
+                            let preset_id = RigPresetId::from_uuid(id);
                             let info = RIG_AVAILABLE_PRESETS
                                 .read()
                                 .iter()
-                                .find(|p| p.id == id)
+                                .find(|p| p.id == preset_id)
                                 .cloned();
                             if let Some(info) = info {
                                 *RIG_CURRENT_PRESET.write() = Some(info);
@@ -496,10 +501,10 @@ pub fn use_rig_actions() -> RigActions {
 ///
 /// Re-fetches scene templates from the DB and rebuilds the `PatchInfo` list
 /// so the sidebar immediately reflects updated preset assignments.
-async fn refresh_profile_in_signals(ctl: &SignalControl, profile_id: Uuid) {
+async fn refresh_profile_in_signals(ctl: &SignalControl, profile_id: ProfileId) {
     use signal_control::PatchInfo;
 
-    let Ok(templates) = ctl.list_scene_templates(profile_id).await else {
+    let Ok(templates) = ctl.list_scene_templates(profile_id.as_uuid()).await else {
         return;
     };
 
@@ -507,7 +512,7 @@ async fn refresh_profile_in_signals(ctl: &SignalControl, profile_id: Uuid) {
         .iter()
         .enumerate()
         .map(|(i, t)| PatchInfo {
-            id: t.id,
+            id: PatchId::from_uuid(t.id),
             name: t.name.clone(),
             index: i,
         })

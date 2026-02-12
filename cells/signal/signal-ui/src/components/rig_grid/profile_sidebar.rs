@@ -5,17 +5,17 @@
 
 use crate::prelude::*;
 use crate::signals::{RIG_AVAILABLE_PROFILES, RIG_CURRENT_PRESET, RIG_PROFILE};
+use signal_control::id::ProfileId;
 use signal_control::{PatchInfo, ProfileInfo};
-use uuid::Uuid;
 
 /// Props for the profile sidebar.
 #[derive(Props, Clone, PartialEq)]
 pub struct GuitarRigProfileSidebarProps {
     /// Callback when a profile is selected (loads with default scene).
-    pub on_profile_select: Callback<Uuid>,
+    pub on_profile_select: Callback<ProfileId>,
     /// Callback when a profile + scene is selected (by scene index).
     #[props(default)]
-    pub on_profile_scene_select: Option<Callback<(Uuid, usize)>>,
+    pub on_profile_scene_select: Option<Callback<(ProfileId, usize)>>,
     /// Callback to create a new profile.
     #[props(default)]
     pub on_create_profile: Option<Callback<()>>,
@@ -95,8 +95,8 @@ struct ProfileItemProps {
     profile: ProfileInfo,
     is_active: bool,
     is_expanded: bool,
-    on_click: Callback<Uuid>,
-    on_scene_click: Option<Callback<(Uuid, usize)>>,
+    on_click: Callback<ProfileId>,
+    on_scene_click: Option<Callback<(ProfileId, usize)>>,
 }
 
 /// Individual profile item with expandable patches.
@@ -150,11 +150,11 @@ fn ProfileItem(props: ProfileItemProps) -> Element {
 /// Props for profile patch item.
 #[derive(Props, Clone, PartialEq)]
 struct ProfilePatchItemProps {
-    profile_id: Uuid,
+    profile_id: ProfileId,
     patch_index: usize,
     patch: PatchInfo,
     is_active: bool,
-    on_click: Option<Callback<(Uuid, usize)>>,
+    on_click: Option<Callback<(ProfileId, usize)>>,
 }
 
 /// Individual patch item within a profile.

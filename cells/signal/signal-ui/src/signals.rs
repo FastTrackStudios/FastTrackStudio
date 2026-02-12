@@ -76,7 +76,8 @@ pub static RIG_INFO: GlobalSignal<Option<RigInfo>> = Signal::global(|| None);
 pub static RIG_CURRENT_PRESET: GlobalSignal<Option<RigPresetInfo>> = Signal::global(|| None);
 
 /// Last applied snapshot ID (for tracking which snapshot was most recently activated)
-pub static RIG_LAST_APPLIED_SNAPSHOT: GlobalSignal<Option<Uuid>> = Signal::global(|| None);
+pub static RIG_LAST_APPLIED_SNAPSHOT: GlobalSignal<Option<signal_control::id::RigPresetId>> =
+    Signal::global(|| None);
 
 /// All available rig presets (from DB preset browser)
 pub static RIG_AVAILABLE_PRESETS: GlobalSignal<Vec<RigPresetInfo>> = Signal::global(Vec::new);
