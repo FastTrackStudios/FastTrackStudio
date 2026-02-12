@@ -5,11 +5,23 @@
 //! - Multiple tags per preset
 //! - Inclusive/exclusive filtering (+blues -aggressive)
 //! - Weighted fallback resolution
+//! - Auto-tagging from preset names
+//! - Relevance-scored matching
+//! - Co-occurrence based suggestions
 //! - Quick tag panel for fast organization
 //!
 //! Every preset must have at least one "base tone" tag to guarantee fallback.
 
+pub mod auto_tagger;
+pub mod filter;
+pub mod scoring;
+pub mod stats;
+pub mod suggestions;
+
 use std::collections::{HashMap, HashSet};
+
+// Re-export new types for convenience
+pub use filter::{SortDirection, SortField, TagClause};
 
 use uuid::Uuid;
 
@@ -24,7 +36,7 @@ const TAG_NAMESPACE: Uuid = Uuid::from_bytes([
 
 /// Create a deterministic `TagId` for a tag name.
 /// This ensures "Clean" always has the same ID across all instances.
-fn deterministic_tag_id(name: &str) -> TagId {
+pub(crate) fn deterministic_tag_id(name: &str) -> TagId {
     TagId::from_uuid(Uuid::new_v5(&TAG_NAMESPACE, name.as_bytes()))
 }
 
@@ -511,10 +523,16 @@ pub struct TagFilter {
     pub include: HashSet<TagId>,
     /// Tags that MUST NOT be present (exclusive).
     pub exclude: HashSet<TagId>,
+    /// OR-group clauses (ANDed together). Each clause matches if any alternative is present.
+    pub include_clauses: Vec<TagClause>,
     /// Minimum star rating (0 = any).
     pub min_rating: Rating,
     /// Text search query.
     pub search_query: String,
+    /// Sort field for result ordering.
+    pub sort_field: SortField,
+    /// Sort direction.
+    pub sort_direction: SortDirection,
 }
 
 impl TagFilter {
@@ -570,6 +588,7 @@ impl TagFilter {
     pub fn is_empty(&self) -> bool {
         self.include.is_empty()
             && self.exclude.is_empty()
+            && self.include_clauses.is_empty()
             && !self.min_rating.is_rated()
             && self.search_query.is_empty()
     }
