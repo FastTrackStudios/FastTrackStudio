@@ -44,17 +44,17 @@ use signal::RigControlService;
 
 // Re-export domain type modules from signal-proto (via signal)
 pub use signal::{
-    block, category, defaults, director, id, layer, module, module_preset, non_empty, normalized,
-    parameter, patch, performance, preset, profile, rig, routing, section, selection, source, tags,
-    template,
+    active, block, category, container, director, id, layer, module, non_empty, normalized,
+    override_tree, parameter, preset, profile, rack, rig, routing, scene, snapshot, song, source,
+    tags, template, version,
 };
 
 // Re-export service/engine types that consumers need
 pub use signal::engine::PreloadPriority;
 pub use signal::module::ModuleType;
 pub use signal::service::{
-    EngineStateInfo, InstanceInfo, PreloadStatusInfo, PresetInfo, PresetSnapshotInfo, ProfileInfo,
-    ProfileSceneInfo, RigControlCommand, RigControlEvent, RigInfo, SetlistInfo, SlotErrorInfo,
+    EngineStateInfo, InstanceInfo, PatchInfo, PreloadStatusInfo, ProfileInfo, RigControlCommand,
+    RigControlEvent, RigInfo, RigPresetInfo, SectionInfo, SetlistInfo, SlotErrorInfo,
     SlotStateInfo, SongInfo, SwitchOutcomeInfo, TransitionResultInfo,
 };
 
@@ -135,14 +135,6 @@ impl SignalControl {
         self.service.get_current_profile(&Self::cx()).await
     }
 
-    pub async fn get_available_presets(&self) -> Vec<PresetInfo> {
-        self.service.get_available_presets(&Self::cx()).await
-    }
-
-    pub async fn get_current_preset(&self) -> Option<PresetInfo> {
-        self.service.get_current_preset(&Self::cx()).await
-    }
-
     pub async fn get_current_rig(&self) -> Option<RigInfo> {
         self.service.get_current_rig(&Self::cx()).await
     }
@@ -163,8 +155,8 @@ impl SignalControl {
         self.service.get_current_song(&Self::cx()).await
     }
 
-    pub async fn get_current_scene(&self) -> Option<ProfileSceneInfo> {
-        self.service.get_current_scene(&Self::cx()).await
+    pub async fn get_current_section(&self) -> Option<SectionInfo> {
+        self.service.get_current_section(&Self::cx()).await
     }
 
     /// Get the current preset's modules materialized for UI display.
@@ -185,15 +177,18 @@ impl SignalControl {
             .await;
     }
 
-    pub async fn load_preset(&self, preset_id: Uuid) {
-        self.execute(RigControlCommand::LoadPreset { preset_id })
-            .await;
+    pub async fn load_patch(&self, profile_id: Uuid, patch_index: usize) {
+        self.execute(RigControlCommand::LoadPatch {
+            profile_id,
+            patch_index,
+        })
+        .await;
     }
 
-    pub async fn load_preset_with_scene(&self, preset_id: Uuid, scene_index: usize) {
-        self.execute(RigControlCommand::LoadPresetWithScene {
-            preset_id,
-            scene_index,
+    pub async fn load_song_section(&self, song_index: usize, section_index: usize) {
+        self.execute(RigControlCommand::LoadSongSection {
+            song_index,
+            section_index,
         })
         .await;
     }
@@ -206,12 +201,12 @@ impl SignalControl {
         self.execute(RigControlCommand::PreviousSong).await;
     }
 
-    pub async fn next_scene(&self) {
-        self.execute(RigControlCommand::NextScene).await;
+    pub async fn next_section(&self) {
+        self.execute(RigControlCommand::NextSection).await;
     }
 
-    pub async fn previous_scene(&self) {
-        self.execute(RigControlCommand::PreviousScene).await;
+    pub async fn previous_section(&self) {
+        self.execute(RigControlCommand::PreviousSection).await;
     }
 
     // ── Subscriptions ────────────────────────────────────────────────

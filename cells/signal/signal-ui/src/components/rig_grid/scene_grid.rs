@@ -96,11 +96,11 @@ pub fn SceneGridPanel(view_mode: RigViewMode) -> Element {
 /// Build tiles from song scenes.
 fn build_song_tiles() -> (Vec<SceneTile>, Vec<TileAction>) {
     let current_song = RIG_CURRENT_SONG.read();
-    let active_index = *RIG_SCENE_INDEX.read();
+    let active_index = *RIG_SECTION_INDEX.read();
 
     let scene_names: Vec<String> = current_song
         .as_ref()
-        .map(|s| s.scene_names.clone())
+        .map(|s| s.section_names.clone())
         .unwrap_or_default();
 
     let mut tiles = Vec::with_capacity(SLOT_COUNT);
@@ -129,13 +129,12 @@ fn build_song_tiles() -> (Vec<SceneTile>, Vec<TileAction>) {
     (tiles, tile_actions)
 }
 
-/// Build tiles from profile scene templates.
+/// Build tiles from profile patches.
 fn build_profile_tiles() -> (Vec<SceneTile>, Vec<TileAction>) {
     let profile = RIG_PROFILE.read();
-    let active_snapshot_id = *RIG_CURRENT_PRESET_SNAPSHOT_ID.read();
 
-    let (profile_id, scenes) = match profile.as_ref() {
-        Some(p) => (p.id, &p.scenes),
+    let (profile_id, patches) = match profile.as_ref() {
+        Some(p) => (p.id, &p.patches),
         None => {
             return empty_tiles();
         }
@@ -145,15 +144,12 @@ fn build_profile_tiles() -> (Vec<SceneTile>, Vec<TileAction>) {
     let mut tile_actions = Vec::with_capacity(SLOT_COUNT);
 
     for i in 0..SLOT_COUNT {
-        if i < scenes.len() {
-            let scene = &scenes[i];
-            let is_active = active_snapshot_id
-                .map(|sid| scene.preset_snapshot_id == Some(sid))
-                .unwrap_or(false);
+        if i < patches.len() {
+            let patch = &patches[i];
             tiles.push(SceneTile {
                 index: i,
-                name: scene.name.clone(),
-                active: is_active,
+                name: patch.name.clone(),
+                active: false,
                 empty: false,
             });
             tile_actions.push(TileAction::LoadProfileScene(profile_id, i));
@@ -172,45 +168,14 @@ fn build_profile_tiles() -> (Vec<SceneTile>, Vec<TileAction>) {
 }
 
 /// Build tiles from preset snapshots.
+///
+/// Currently returns empty tiles since `RigPresetInfo` no longer carries inline
+/// snapshot data. Snapshot-based tiles will be restored when the preset detail
+/// panel loads snapshots from the DB.
 fn build_preset_tiles() -> (Vec<SceneTile>, Vec<TileAction>) {
-    let preset = RIG_CURRENT_PRESET.read();
-    let active_snapshot_id = *RIG_CURRENT_PRESET_SNAPSHOT_ID.read();
-
-    let snapshots = match preset.as_ref() {
-        Some(p) => &p.scenes,
-        None => {
-            return empty_tiles();
-        }
-    };
-
-    let mut tiles = Vec::with_capacity(SLOT_COUNT);
-    let mut tile_actions = Vec::with_capacity(SLOT_COUNT);
-
-    for i in 0..SLOT_COUNT {
-        if i < snapshots.len() {
-            let snap = &snapshots[i];
-            let is_active = active_snapshot_id
-                .map(|sid| sid == snap.id)
-                .unwrap_or(false);
-            tiles.push(SceneTile {
-                index: i,
-                name: snap.name.clone(),
-                active: is_active,
-                empty: false,
-            });
-            tile_actions.push(TileAction::ActivateSnapshot(snap.id));
-        } else {
-            tiles.push(SceneTile {
-                index: i,
-                name: String::new(),
-                active: false,
-                empty: true,
-            });
-            tile_actions.push(TileAction::None);
-        }
-    }
-
-    (tiles, tile_actions)
+    // RigPresetInfo no longer has snapshot data — the grid shows empty until
+    // we wire up DB-backed snapshot loading.
+    empty_tiles()
 }
 
 /// Produce 8 empty tiles (no data available).

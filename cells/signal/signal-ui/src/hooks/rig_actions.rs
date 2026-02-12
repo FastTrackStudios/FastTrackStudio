@@ -6,14 +6,11 @@
 use crate::hooks::rig_state::refresh_presets_from_db;
 use crate::prelude::*;
 use crate::signals::{
-    RIG_AVAILABLE_PRESETS, RIG_AVAILABLE_PROFILES, RIG_CURRENT_PRESET,
-    RIG_CURRENT_PRESET_SNAPSHOT_ID, RIG_CURRENT_SONG, RIG_FX_CHAIN, RIG_LAST_APPLIED_SNAPSHOT,
-    RIG_MODULES, RIG_NODE_FX_BINDINGS, RIG_NODE_GRAPH, RIG_PROFILE, RIG_SCENE_INDEX, RIG_SERVICE,
-    RIG_SETLIST_SONGS,
+    RIG_AVAILABLE_PRESETS, RIG_AVAILABLE_PROFILES, RIG_CURRENT_PRESET, RIG_CURRENT_SONG,
+    RIG_FX_CHAIN, RIG_LAST_APPLIED_SNAPSHOT, RIG_MODULES, RIG_NODE_FX_BINDINGS, RIG_NODE_GRAPH,
+    RIG_PROFILE, RIG_SERVICE, RIG_SETLIST_SONGS, RIG_SONG_INDEX,
 };
-use signal_control::defaults::templates;
-use signal_control::template::RigTemplate;
-use signal_control::{PreloadPriority, RigControlCommand, SignalControl};
+use signal_control::SignalControl;
 use uuid::Uuid;
 
 /// Data submitted from the create entity modal.
@@ -81,37 +78,15 @@ pub fn use_rig_actions() -> RigActions {
                         // Immediately set profile for instant sidebar expansion
                         *RIG_PROFILE.write() = Some(profile.clone());
 
-                        if let Some(first_scene) = profile.scenes.first() {
+                        if !profile.patches.is_empty() {
                             tracing::info!(
-                                "load_profile: '{}' scene '{}'",
+                                "load_profile: '{}' first patch '{}'",
                                 profile.name,
-                                first_scene.name
+                                profile.patches[0].name
                             );
 
-                            // Immediately set preset from cached list for instant UI expansion
-                            let preset_info = RIG_AVAILABLE_PRESETS
-                                .read()
-                                .iter()
-                                .find(|p| p.id == first_scene.preset_id)
-                                .cloned();
-                            if let Some(info) = preset_info {
-                                *RIG_CURRENT_PRESET.write() = Some(info);
-                            }
-
-                            let snapshot_idx = resolve_preset_snapshot_index(
-                                &ctl,
-                                first_scene.preset_id,
-                                first_scene.preset_snapshot_id,
-                            )
-                            .await;
-
-                            ctl.load_preset_with_scene(first_scene.preset_id, snapshot_idx)
-                                .await;
-
-                            // Update with authoritative data after async load
-                            if let Some(preset) = ctl.get_current_preset().await {
-                                *RIG_CURRENT_PRESET.write() = Some(preset);
-                            }
+                            // Load first patch via the service
+                            ctl.load_patch(profile_id, 0).await;
                         }
                     }
                 });
@@ -119,7 +94,7 @@ pub fn use_rig_actions() -> RigActions {
         },
         load_profile_scene: {
             let ctl = ctl.clone();
-            Callback::new(move |(profile_id, scene_index): (Uuid, usize)| {
+            Callback::new(move |(profile_id, patch_index): (Uuid, usize)| {
                 let ctl = ctl.clone();
                 spawn(async move {
                     let profiles = ctl.get_available_profiles().await;
@@ -127,39 +102,19 @@ pub fn use_rig_actions() -> RigActions {
                         // Immediately set profile for instant sidebar expansion
                         *RIG_PROFILE.write() = Some(profile.clone());
 
-                        if let Some(scene) = profile.scenes.get(scene_index) {
+                        if let Some(patch) = profile.patches.get(patch_index) {
                             tracing::info!(
-                                "load_profile_scene: '{}' scene '{}'",
+                                "load_profile_patch: '{}' patch '{}'",
                                 profile.name,
-                                scene.name
+                                patch.name
                             );
 
-                            // Immediately set preset from cached list for instant UI expansion
-                            let preset_info = RIG_AVAILABLE_PRESETS
-                                .read()
-                                .iter()
-                                .find(|p| p.id == scene.preset_id)
-                                .cloned();
-                            if let Some(info) = preset_info {
-                                *RIG_CURRENT_PRESET.write() = Some(info);
-                            }
-                            // Track which snapshot is active for the scene
-                            *RIG_CURRENT_PRESET_SNAPSHOT_ID.write() = scene.preset_snapshot_id;
+                            // Load the patch via the service
+                            ctl.load_patch(profile_id, patch_index).await;
 
-                            let snapshot_idx = resolve_preset_snapshot_index(
-                                &ctl,
-                                scene.preset_id,
-                                scene.preset_snapshot_id,
-                            )
-                            .await;
-
-                            ctl.load_preset_with_scene(scene.preset_id, snapshot_idx)
-                                .await;
-
-                            // Update with authoritative data after async load
-                            if let Some(preset) = ctl.get_current_preset().await {
-                                *RIG_CURRENT_PRESET.write() = Some(preset);
-                            }
+                            // Build modules from DB for visual display
+                            *RIG_MODULES.write() = ctl.get_current_modules();
+                            rebuild_node_graph();
                         }
                     }
                 });
@@ -183,10 +138,6 @@ pub fn use_rig_actions() -> RigActions {
                 spawn(async move {
                     tracing::info!("load_preset: loading preset {preset_id}");
 
-                    // Capture old state before overwriting (needed for profile scene matching)
-                    let old_preset_id = RIG_CURRENT_PRESET.read().as_ref().map(|p| p.id);
-                    let old_snapshot_id = *RIG_CURRENT_PRESET_SNAPSHOT_ID.read();
-
                     // 1. Set RIG_CURRENT_PRESET from the available presets list
                     //    (fixes selected state immediately — same IDs as sidebar)
                     let preset_info = RIG_AVAILABLE_PRESETS
@@ -195,78 +146,34 @@ pub fn use_rig_actions() -> RigActions {
                         .find(|p| p.id == preset_id)
                         .cloned();
                     if let Some(ref info) = preset_info {
-                        tracing::info!(
-                            "load_preset: selected '{}' ({} scenes)",
-                            info.name,
-                            info.scene_count
-                        );
+                        tracing::info!("load_preset: selected '{}'", info.name);
                         *RIG_CURRENT_PRESET.write() = Some(info.clone());
                     }
-                    // Clear old snapshot since we're switching to a different preset
-                    *RIG_CURRENT_PRESET_SNAPSHOT_ID.write() = None;
 
-                    // 2. Profile mode: update the active scene template's preset reference
+                    // 2. Profile mode: update the active patch's preset reference
                     if let Some(profile) = RIG_PROFILE.read().clone() {
-                        // Find the scene that was active before the user clicked a new preset.
-                        // Match by old preset_id + old snapshot_id to identify the exact scene.
-                        let active_scene = profile
-                            .scenes
-                            .iter()
-                            .find(|s| {
-                                let snapshot_match = old_snapshot_id
-                                    .map(|sid| s.preset_snapshot_id == Some(sid))
-                                    .unwrap_or(false);
-                                snapshot_match || Some(s.preset_id) == old_preset_id
-                            })
-                            .or_else(|| profile.scenes.first());
-
-                        if let Some(scene) = active_scene {
-                            // Look up scene template ID from DB
-                            if let Ok(templates) = ctl.list_scene_templates(profile.id).await {
-                                if let Some(tmpl) = templates.get(scene.index) {
-                                    tracing::info!(
-                                        "load_preset: updating profile '{}' scene '{}' preset → {}",
-                                        profile.name,
-                                        tmpl.name,
-                                        preset_id,
-                                    );
-                                    if let Err(e) = ctl
-                                        .update_scene_template(
-                                            tmpl.id,
-                                            None,
-                                            Some(preset_id),
-                                            Some(None),
-                                        )
-                                        .await
-                                    {
-                                        tracing::warn!(
-                                            "load_preset: failed to update scene template: {e}"
-                                        );
-                                    } else {
-                                        // Refresh the profile's scene data in sidebar
-                                        refresh_profile_in_signals(&ctl, profile.id).await;
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // 2b. Song mode: update the active song section's preset reference
-                    if RIG_PROFILE.read().is_none() {
-                        if let Some(song) = RIG_CURRENT_SONG.read().clone() {
-                            let scene_idx = *RIG_SCENE_INDEX.read();
-                            if let Some(scene_id) = song.scene_ids.get(scene_idx) {
+                        if let Ok(templates) = ctl.list_scene_templates(profile.id).await {
+                            if let Some(tmpl) = templates.first() {
                                 tracing::info!(
-                                    "load_preset: updating song '{}' section {} preset → {}",
-                                    song.name,
-                                    scene_idx,
+                                    "load_preset: updating profile '{}' patch '{}' preset → {}",
+                                    profile.name,
+                                    tmpl.name,
                                     preset_id,
                                 );
                                 if let Err(e) = ctl
-                                    .update_song_scene(*scene_id, None, Some(preset_id), Some(None))
+                                    .update_scene_template(
+                                        tmpl.id,
+                                        None,
+                                        Some(preset_id),
+                                        Some(None),
+                                    )
                                     .await
                                 {
-                                    tracing::warn!("load_preset: failed to update song scene: {e}");
+                                    tracing::warn!(
+                                        "load_preset: failed to update scene template: {e}"
+                                    );
+                                } else {
+                                    refresh_profile_in_signals(&ctl, profile.id).await;
                                 }
                             }
                         }
@@ -280,7 +187,6 @@ pub fn use_rig_actions() -> RigActions {
                     } else {
                         // Fall back to mock service for non-DB presets
                         tracing::info!("load_preset: no DB modules, falling back to mock");
-                        ctl.load_preset_with_scene(preset_id, 0).await;
                         *RIG_MODULES.write() = ctl.get_current_modules();
                     }
 
@@ -291,10 +197,12 @@ pub fn use_rig_actions() -> RigActions {
         },
         load_preset_snapshot: {
             let ctl = ctl.clone();
-            Callback::new(move |(preset_id, scene_index): (Uuid, usize)| {
+            Callback::new(move |(preset_id, snapshot_index): (Uuid, usize)| {
                 let ctl = ctl.clone();
                 spawn(async move {
-                    tracing::info!("load_preset_snapshot: preset={preset_id} scene={scene_index}");
+                    tracing::info!(
+                        "load_preset_snapshot: preset={preset_id} snapshot={snapshot_index}"
+                    );
                     // Set selection from sidebar list
                     let preset_info = RIG_AVAILABLE_PRESETS
                         .read()
@@ -304,43 +212,12 @@ pub fn use_rig_actions() -> RigActions {
                     if let Some(ref info) = preset_info {
                         *RIG_CURRENT_PRESET.write() = Some(info.clone());
                     }
-                    let snapshot_id = preset_info
-                        .as_ref()
-                        .and_then(|info| info.scenes.get(scene_index).map(|s| s.id));
-                    *RIG_CURRENT_PRESET_SNAPSHOT_ID.write() = snapshot_id;
-
-                    // Song mode: update song section with preset + snapshot
-                    if RIG_PROFILE.read().is_none() {
-                        if let Some(song) = RIG_CURRENT_SONG.read().clone() {
-                            let song_scene_idx = *RIG_SCENE_INDEX.read();
-                            if let Some(scene_db_id) = song.scene_ids.get(song_scene_idx) {
-                                tracing::info!(
-                                    "load_preset_snapshot: updating song '{}' section {} → preset={}, snapshot={:?}",
-                                    song.name, song_scene_idx, preset_id, snapshot_id,
-                                );
-                                if let Err(e) = ctl
-                                    .update_song_scene(
-                                        *scene_db_id,
-                                        None,
-                                        Some(preset_id),
-                                        Some(snapshot_id),
-                                    )
-                                    .await
-                                {
-                                    tracing::warn!(
-                                        "load_preset_snapshot: failed to update song scene: {e}"
-                                    );
-                                }
-                            }
-                        }
-                    }
 
                     // Build modules from DB
                     let db_modules = build_modules_from_db(&ctl, preset_id).await;
                     if !db_modules.is_empty() {
                         *RIG_MODULES.write() = db_modules;
                     } else {
-                        ctl.load_preset_with_scene(preset_id, scene_index).await;
                         *RIG_MODULES.write() = ctl.get_current_modules();
                     }
                     rebuild_node_graph();
@@ -365,7 +242,6 @@ pub fn use_rig_actions() -> RigActions {
                     if !db_modules.is_empty() {
                         *RIG_MODULES.write() = db_modules;
                     } else {
-                        ctl.load_preset_with_scene(preset_id, 0).await;
                         *RIG_MODULES.write() = ctl.get_current_modules();
                     }
                     rebuild_node_graph();
@@ -373,51 +249,22 @@ pub fn use_rig_actions() -> RigActions {
             })
         },
         activate_snapshot: {
-            let ctl = ctl.clone();
             Callback::new(move |snapshot_id: Uuid| {
-                let ctl = ctl.clone();
                 spawn(async move {
-                    // Find the current preset and resolve the scene index for this snapshot
-                    let preset = RIG_CURRENT_PRESET.read().clone();
-                    if let Some(preset) = preset {
-                        if let Some(scene_index) =
-                            preset.scenes.iter().position(|s| s.id == snapshot_id)
-                        {
-                            tracing::info!(
-                                "activate_snapshot: applying '{}' (scene {})",
-                                preset.scenes[scene_index].name,
-                                scene_index,
-                            );
-
-                            ctl.load_preset_with_scene(preset.id, scene_index).await;
-
-                            // Update tracking signals
-                            *RIG_LAST_APPLIED_SNAPSHOT.write() = Some(snapshot_id);
-                            *RIG_CURRENT_PRESET_SNAPSHOT_ID.write() = Some(snapshot_id);
-
-                            if let Some(updated_preset) = ctl.get_current_preset().await {
-                                *RIG_CURRENT_PRESET.write() = Some(updated_preset);
-                            }
-                        } else {
-                            tracing::warn!(
-                                "activate_snapshot: snapshot {:?} not found in preset '{}'",
-                                snapshot_id,
-                                preset.name,
-                            );
-                        }
-                    } else {
-                        tracing::warn!("activate_snapshot: no preset loaded");
-                    }
+                    tracing::info!("activate_snapshot: applying snapshot {snapshot_id}");
+                    *RIG_LAST_APPLIED_SNAPSHOT.write() = Some(snapshot_id);
+                    // Snapshot application is handled by the engine via ApplySnapshot command.
+                    // The UI just tracks which snapshot was last activated.
                 });
             })
         },
         go_to_scene: {
             let ctl = ctl.clone();
-            Callback::new(move |scene_index: usize| {
+            Callback::new(move |section_index: usize| {
                 let ctl = ctl.clone();
                 spawn(async move {
-                    ctl.execute(RigControlCommand::SwitchScene { scene_index })
-                        .await;
+                    let song_index = *RIG_SONG_INDEX.read();
+                    ctl.load_song_section(song_index, section_index).await;
                 });
             })
         },
@@ -425,14 +272,14 @@ pub fn use_rig_actions() -> RigActions {
             let ctl = ctl.clone();
             Callback::new(move |_: ()| {
                 let ctl = ctl.clone();
-                spawn(async move { ctl.next_scene().await });
+                spawn(async move { ctl.next_section().await });
             })
         },
         prev_scene: {
             let ctl = ctl.clone();
             Callback::new(move |_: ()| {
                 let ctl = ctl.clone();
-                spawn(async move { ctl.previous_scene().await });
+                spawn(async move { ctl.previous_section().await });
             })
         },
         go_to_song: {
@@ -440,11 +287,7 @@ pub fn use_rig_actions() -> RigActions {
             Callback::new(move |song_index: usize| {
                 let ctl = ctl.clone();
                 spawn(async move {
-                    ctl.execute(RigControlCommand::LoadSongScene {
-                        song_index,
-                        scene_index: 0,
-                    })
-                    .await;
+                    ctl.load_song_section(song_index, 0).await;
                 });
             })
         },
@@ -463,17 +306,10 @@ pub fn use_rig_actions() -> RigActions {
             })
         },
         preload_preset: {
-            let ctl = ctl.clone();
-            Callback::new(move |preset_id: Uuid| {
-                let ctl = ctl.clone();
-                spawn(async move {
-                    ctl.execute(RigControlCommand::Preload {
-                        preset_id,
-                        scene_index: 0,
-                        priority: PreloadPriority::Low,
-                    })
-                    .await;
-                });
+            Callback::new(move |_preset_id: Uuid| {
+                // Preloading is now section-based, not preset-based.
+                // Individual preset preloading is handled internally by the engine.
+                tracing::debug!("preload_preset: preloading is now section-based");
             })
         },
         preload_song: {
@@ -547,10 +383,6 @@ pub fn use_rig_actions() -> RigActions {
                         data.tags
                     );
 
-                    // Resolve selected template
-                    let template: Option<RigTemplate> =
-                        data.template_index.and_then(resolve_template_by_index);
-
                     let category = if data.category.is_empty() {
                         "Uncategorized".to_string()
                     } else {
@@ -564,128 +396,39 @@ pub fn use_rig_actions() -> RigActions {
                         Some(data.description.as_str())
                     };
 
-                    if let Some(tmpl) = &template {
-                        tracing::info!(
-                            "Creating preset '{}' from template '{}'",
-                            data.name,
-                            tmpl.name
-                        );
-
-                        // Instantiate template into domain objects
-                        let (mut preset, module_presets): (
-                            signal_control::preset::Preset,
-                            Vec<signal_control::module_preset::ModulePreset>,
-                        ) = tmpl.instantiate();
-                        preset.name = data.name.clone();
-
-                        // Create each module preset in the DB using the template-generated ID
-                        // so Preset.module_assignments can find them by ModulePresetId.
-                        for mp in &module_presets {
-                            let blocks_json = serde_json::json!(mp
-                                .blocks
-                                .iter()
-                                .map(|mb| {
-                                    serde_json::json!({
-                                        "block": {
-                                            "name": mb.block.name,
-                                            "block_type": format!("{:?}", mb.block.block_type),
-                                            "alias": mb.block.alias,
-                                            "description": mb.block.description,
-                                            "is_placeholder": mb.block.is_placeholder(),
-                                        },
-                                        "local_col": mb.local_col,
-                                        "local_row": mb.local_row,
-                                    })
-                                })
-                                .collect::<Vec<_>>());
-                            // Store grid dimensions as module-level metadata
-                            let macros_json = serde_json::json!({
-                                "grid_width": mp.grid_width,
-                                "grid_height": mp.grid_height,
-                            });
-                            if let Err(e) = ctl
-                                .create_module_preset_with_id(
-                                    mp.id.as_uuid(),
-                                    &mp.name,
-                                    mp.module_type.display_name(),
-                                    mp.description.as_deref(),
-                                    blocks_json,
-                                    macros_json,
-                                )
-                                .await
-                            {
-                                tracing::warn!("Failed to create module preset '{}': {e}", mp.name);
-                            }
-                        }
-
-                        // Create the rig preset with full Preset data (including module_assignments)
-                        match ctl
-                            .create_rig_preset::<signal_control::preset::Preset>(
-                                &data.name,
-                                desc,
-                                serde_json::json!(category),
-                                serde_json::json!(tags_json),
-                                &preset,
-                            )
-                            .await
-                        {
-                            Ok(id) => {
-                                tracing::info!(
-                                    "Created preset '{}' ({id}) from template",
-                                    data.name
-                                );
-                                refresh_presets_from_db(&ctl).await;
-                                // Select the new preset by finding it in the refreshed list
-                                let info = RIG_AVAILABLE_PRESETS
-                                    .read()
-                                    .iter()
-                                    .find(|p| p.id == id)
-                                    .cloned();
-                                if let Some(info) = info {
-                                    *RIG_CURRENT_PRESET.write() = Some(info);
-                                }
-                                // Build modules from DB
-                                let db_modules = build_modules_from_db(&ctl, id).await;
-                                if !db_modules.is_empty() {
-                                    *RIG_MODULES.write() = db_modules;
-                                }
-                                rebuild_node_graph();
-                            }
-                            Err(e) => tracing::error!("Failed to create preset: {e}"),
-                        }
-                    } else {
-                        // Blank preset — store a real Preset object (not null)
-                        let preset = signal_control::preset::Preset::new(
+                    // Create a blank preset — template instantiation will be restored
+                    // once defaults/templates.rs is revived with new domain types.
+                    let preset = signal_control::preset::PresetMetadata::new(
+                        &data.name,
+                        signal_control::category::PresetCategory::default(),
+                    );
+                    match ctl
+                        .create_rig_preset::<signal_control::preset::PresetMetadata>(
                             &data.name,
-                            signal_control::category::PresetCategory::default(),
-                        );
-                        match ctl
-                            .create_rig_preset::<signal_control::preset::Preset>(
-                                &data.name,
-                                desc,
-                                serde_json::json!(category),
-                                serde_json::json!(tags_json),
-                                &preset,
-                            )
-                            .await
-                        {
-                            Ok(id) => {
-                                tracing::info!("Created blank preset '{}' ({id})", data.name);
-                                refresh_presets_from_db(&ctl).await;
-                                let info = RIG_AVAILABLE_PRESETS
-                                    .read()
-                                    .iter()
-                                    .find(|p| p.id == id)
-                                    .cloned();
-                                if let Some(info) = info {
-                                    *RIG_CURRENT_PRESET.write() = Some(info);
-                                }
-                                // Blank preset has no modules — clear
-                                *RIG_MODULES.write() = Vec::new();
-                                rebuild_node_graph();
+                            desc,
+                            serde_json::json!(category),
+                            serde_json::json!(tags_json),
+                            &preset,
+                        )
+                        .await
+                    {
+                        Ok(id) => {
+                            tracing::info!("Created preset '{}' ({id})", data.name);
+                            refresh_presets_from_db(&ctl).await;
+                            let info = RIG_AVAILABLE_PRESETS
+                                .read()
+                                .iter()
+                                .find(|p| p.id == id)
+                                .cloned();
+                            if let Some(info) = info {
+                                *RIG_CURRENT_PRESET.write() = Some(info);
                             }
-                            Err(e) => tracing::error!("Failed to create preset: {e}"),
+                            // Build modules from DB (template presets will have modules)
+                            let db_modules = build_modules_from_db(&ctl, id).await;
+                            *RIG_MODULES.write() = db_modules;
+                            rebuild_node_graph();
                         }
+                        Err(e) => tracing::error!("Failed to create preset: {e}"),
                     }
                 });
             })
@@ -749,54 +492,32 @@ pub fn use_rig_actions() -> RigActions {
     }
 }
 
-/// Refresh a single profile's scene data in RIG_AVAILABLE_PROFILES and RIG_PROFILE.
+/// Refresh a single profile's patch data in RIG_AVAILABLE_PROFILES and RIG_PROFILE.
 ///
-/// Re-fetches scene templates from the DB and rebuilds the `ProfileSceneInfo` list
+/// Re-fetches scene templates from the DB and rebuilds the `PatchInfo` list
 /// so the sidebar immediately reflects updated preset assignments.
 async fn refresh_profile_in_signals(ctl: &SignalControl, profile_id: Uuid) {
-    use signal_control::ProfileSceneInfo;
+    use signal_control::PatchInfo;
 
     let Ok(templates) = ctl.list_scene_templates(profile_id).await else {
         return;
     };
 
-    let db_presets = RIG_AVAILABLE_PRESETS.read();
-    let scenes: Vec<ProfileSceneInfo> = templates
+    let patches: Vec<PatchInfo> = templates
         .iter()
         .enumerate()
-        .map(|(i, t)| {
-            let preset_name = db_presets
-                .iter()
-                .find(|p| p.id == t.preset_id)
-                .map(|p| p.name.clone())
-                .unwrap_or_else(|| "Unknown".to_string());
-            let preset_snapshot_name = t.snapshot_id.and_then(|sid| {
-                db_presets
-                    .iter()
-                    .find(|p| p.id == t.preset_id)
-                    .and_then(|p| p.scenes.iter().find(|s| s.id == sid))
-                    .map(|s| s.name.clone())
-            });
-            ProfileSceneInfo {
-                index: i,
-                name: t.name.clone(),
-                preset_id: t.preset_id,
-                preset_name,
-                preset_snapshot_id: t.snapshot_id,
-                preset_snapshot_name,
-            }
+        .map(|(i, t)| PatchInfo {
+            id: t.id,
+            name: t.name.clone(),
+            index: i,
         })
         .collect();
-    drop(db_presets);
-
-    let scene_names: Vec<String> = scenes.iter().map(|s| s.name.clone()).collect();
 
     // Update in RIG_AVAILABLE_PROFILES
     let mut profiles = RIG_AVAILABLE_PROFILES.write();
     if let Some(p) = profiles.iter_mut().find(|p| p.id == profile_id) {
-        p.scene_count = scenes.len();
-        p.scene_names = scene_names.clone();
-        p.scenes = scenes.clone();
+        p.patch_count = patches.len();
+        p.patches = patches.clone();
     }
     drop(profiles);
 
@@ -804,9 +525,8 @@ async fn refresh_profile_in_signals(ctl: &SignalControl, profile_id: Uuid) {
     let mut current = RIG_PROFILE.write();
     if let Some(ref mut p) = *current {
         if p.id == profile_id {
-            p.scene_count = scenes.len();
-            p.scene_names = scene_names;
-            p.scenes = scenes;
+            p.patch_count = patches.len();
+            p.patches = patches;
         }
     }
 }
@@ -851,31 +571,55 @@ async fn build_modules_from_db(
     use signal_control::module::{Module, ModuleBlock, ModuleType};
     use signal_control::normalized::Order;
 
-    // Load the full Preset object from DB
-    let preset: Option<signal_control::preset::Preset> = match ctl
-        .get_rig_preset::<signal_control::preset::Preset>(preset_id)
-        .await
-    {
-        Ok(p) => p,
+    // Load the raw preset row and parse module_assignments from its JSON data blob.
+    // The old `Preset` type embedded module_assignments directly; in the new domain
+    // model those live in scenes, but the DB still holds the legacy JSON structure.
+    let row = match ctl.get_rig_preset_row(preset_id).await {
+        Ok(Some(r)) => r,
+        Ok(None) => {
+            tracing::info!("build_modules_from_db: preset {preset_id} not in DB");
+            return Vec::new();
+        }
         Err(e) => {
             tracing::warn!("build_modules_from_db: failed to load preset: {e}");
             return Vec::new();
         }
     };
 
-    let Some(preset) = preset else {
-        tracing::info!("build_modules_from_db: preset {preset_id} not in DB");
-        return Vec::new();
+    // Extract module_assignments array from the data JSON blob
+    let assignments = match row
+        .data
+        .get("module_assignments")
+        .and_then(|v| v.as_array())
+    {
+        Some(arr) => arr.clone(),
+        None => {
+            tracing::info!("build_modules_from_db: no module_assignments in preset data");
+            return Vec::new();
+        }
     };
 
     let mut modules = Vec::new();
 
-    for assignment in &preset.module_assignments {
-        if !assignment.enabled {
+    for assignment in &assignments {
+        let enabled = assignment
+            .get("enabled")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+        if !enabled {
             continue;
         }
 
-        let mp_id = assignment.module_preset_id.as_uuid();
+        let Some(mp_id_str) = assignment.get("module_preset_id").and_then(|v| {
+            v.as_str()
+                .or_else(|| v.get("uuid").and_then(|u| u.as_str()))
+        }) else {
+            continue;
+        };
+        let Ok(mp_id) = mp_id_str.parse::<Uuid>() else {
+            tracing::warn!("build_modules_from_db: invalid module_preset_id: {mp_id_str}");
+            continue;
+        };
         let mp_row = match ctl.get_module_preset(mp_id).await {
             Ok(Some(row)) => row,
             Ok(None) => {
@@ -989,35 +733,4 @@ fn parse_block_type(s: &str) -> signal_control::block::BlockType {
         "Boost" => BlockType::Boost,
         _ => BlockType::Custom,
     }
-}
-
-/// Look up a `RigTemplate` by index into the known built-in templates.
-///
-/// 0 = Guitar Rig, 1 = Vocal Rig. Returns None for out-of-bounds.
-fn resolve_template_by_index(index: usize) -> Option<RigTemplate> {
-    match index {
-        0 => Some(templates::guitar_rig_template()),
-        1 => Some(templates::vocal_rig_template()),
-        _ => None,
-    }
-}
-
-/// Resolve the scene index within a preset from a snapshot ID.
-///
-/// If the profile scene specifies a `preset_snapshot_id`, we look it up
-/// in the preset's scene list to find the numeric index. Falls back to 0.
-async fn resolve_preset_snapshot_index(
-    ctl: &SignalControl,
-    preset_id: Uuid,
-    preset_snapshot_id: Option<Uuid>,
-) -> usize {
-    let Some(snapshot_id) = preset_snapshot_id else {
-        return 0;
-    };
-    let presets = ctl.get_available_presets().await;
-    presets
-        .iter()
-        .find(|p| p.id == preset_id)
-        .and_then(|p| p.scenes.iter().position(|s| s.id == snapshot_id))
-        .unwrap_or(0)
 }

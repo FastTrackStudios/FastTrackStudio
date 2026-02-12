@@ -4,7 +4,9 @@
 //! but these provide sensible defaults and reference implementations.
 
 pub mod blocks;
-pub mod guitar;
 pub mod modules;
-pub mod templates;
-pub mod vocals;
+
+// ─── Temporarily disabled — depend on old domain types ───────────
+// pub mod guitar;
+// pub mod templates;
+// pub mod vocals;

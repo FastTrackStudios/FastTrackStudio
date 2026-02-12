@@ -10,8 +10,17 @@
 //! ```
 
 use crate::prelude::*;
-use signal_control::PresetSnapshotInfo;
 use uuid::Uuid;
+
+/// Snapshot reference for morph slider A/B endpoints.
+///
+/// This is a UI-local type since `RigPresetInfo` no longer carries inline
+/// snapshot data. Created from DB snapshot queries.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SnapshotRef {
+    pub id: Uuid,
+    pub name: String,
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MorphSlider
@@ -25,11 +34,11 @@ pub struct MorphSliderProps {
     /// Callback when the user drags the slider.
     pub on_position_change: Callback<f64>,
     /// Currently assigned snapshot A (if any).
-    pub snapshot_a: Option<PresetSnapshotInfo>,
+    pub snapshot_a: Option<SnapshotRef>,
     /// Currently assigned snapshot B (if any).
-    pub snapshot_b: Option<PresetSnapshotInfo>,
+    pub snapshot_b: Option<SnapshotRef>,
     /// Available snapshots to choose from.
-    pub available_snapshots: Vec<PresetSnapshotInfo>,
+    pub available_snapshots: Vec<SnapshotRef>,
     /// Callback when user assigns snapshot A.
     pub on_assign_a: Callback<Uuid>,
     /// Callback when user assigns snapshot B.
@@ -179,7 +188,7 @@ pub fn MorphSlider(props: MorphSliderProps) -> Element {
 
 /// Render a dropdown of available snapshots for assignment.
 fn snapshot_dropdown(
-    available: &[PresetSnapshotInfo],
+    available: &[SnapshotRef],
     current_id: Option<Uuid>,
     on_select: &Callback<Uuid>,
     open_signal: &mut Signal<bool>,

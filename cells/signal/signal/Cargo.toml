@@ -4,6 +4,9 @@ description = "Signal — rig control domain types, gapless module engine, mock 
 version.workspace = true
 edition.workspace = true
 
+[features]
+test-utils = []
+
 [dependencies]
 signal-proto = { path = "../signal-proto" }
 daw-proto = { path = "../../daw/daw-proto" }

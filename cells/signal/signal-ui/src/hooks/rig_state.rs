@@ -6,12 +6,11 @@
 use crate::prelude::*;
 use crate::signals::{
     RIG_AVAILABLE_PRESETS, RIG_AVAILABLE_PROFILES, RIG_AVAILABLE_SETLISTS, RIG_CONNECTED,
-    RIG_CURRENT_PRESET, RIG_CURRENT_PRESET_SNAPSHOT_ID, RIG_CURRENT_SCENE, RIG_CURRENT_SETLIST,
-    RIG_CURRENT_SONG, RIG_INFO, RIG_LOADING, RIG_MODULES, RIG_PRELOADED_PRESETS, RIG_PROFILE,
-    RIG_SCENE_INDEX, RIG_SERVICE, RIG_SETLIST_SONGS, RIG_SONG_INDEX,
+    RIG_CURRENT_PRESET, RIG_CURRENT_SECTION, RIG_CURRENT_SETLIST, RIG_CURRENT_SONG, RIG_INFO,
+    RIG_LOADING, RIG_MODULES, RIG_PRELOADED_PRESETS, RIG_PROFILE, RIG_SECTION_INDEX, RIG_SERVICE,
+    RIG_SETLIST_SONGS, RIG_SONG_INDEX,
 };
 use signal_control::{RigControlEvent, SignalControl};
-use uuid::Uuid;
 
 /// Hook that subscribes to rig service events and updates global signals.
 ///
@@ -51,17 +50,7 @@ pub fn use_rig_subscription() {
                 *RIG_INFO.write() = Some(rig);
             }
 
-            let presets = ctl.get_available_presets().await;
-            tracing::debug!("{} presets available (mock)", presets.len());
-            *RIG_AVAILABLE_PRESETS.write() = presets;
-
-            if let Some(preset) = ctl.get_current_preset().await {
-                tracing::info!("Current preset '{}'", preset.name);
-                if let Some(first_scene) = preset.scenes.first() {
-                    *RIG_CURRENT_PRESET_SNAPSHOT_ID.write() = Some(first_scene.id);
-                }
-                *RIG_CURRENT_PRESET.write() = Some(preset);
-            }
+            // Presets are loaded from DB below in populate_sidebars_from_db
 
             // Materialize modules from the current preset for UI display —
             // but only if RIG_MODULES hasn't already been populated by a
@@ -100,19 +89,18 @@ pub fn use_rig_subscription() {
             *RIG_SETLIST_SONGS.write() = songs;
 
             if let Some(song) = ctl.get_current_song().await {
-                tracing::info!("Current song '{}' ({} scenes)", song.name, song.scene_count);
+                tracing::info!(
+                    "Current song '{}' ({} sections)",
+                    song.name,
+                    song.section_count
+                );
                 *RIG_CURRENT_SONG.write() = Some(song.clone());
                 *RIG_SONG_INDEX.write() = song.index;
             }
 
-            if let Some(scene) = ctl.get_current_scene().await {
-                tracing::info!(
-                    "Current scene '{}' (preset: {})",
-                    scene.name,
-                    scene.preset_name
-                );
-                *RIG_CURRENT_SCENE.write() = Some(scene);
-                // scene.index may exist — set it if available
+            if let Some(section) = ctl.get_current_section().await {
+                tracing::info!("Current section '{}'", section.name);
+                *RIG_CURRENT_SECTION.write() = Some(section);
             }
 
             *RIG_LOADING.write() = false;
@@ -152,27 +140,15 @@ async fn handle_event(ctl: &SignalControl, event: RigControlEvent) {
             tracing::info!("Profile loaded: '{}'", profile.name);
             *RIG_PROFILE.write() = Some(profile);
         }
-        RigControlEvent::PresetLoaded {
-            preset,
-            scene_index,
-        } => {
-            tracing::info!(
-                "Preset loaded event: '{}' (scene {})",
-                preset.name,
-                scene_index
-            );
-            let scene_id = preset.scenes.get(scene_index).map(|s| s.id);
-            if let Some(id) = scene_id {
-                *RIG_CURRENT_PRESET_SNAPSHOT_ID.write() = Some(id);
-            }
-            *RIG_CURRENT_PRESET.write() = Some(preset);
+        RigControlEvent::PatchLoaded { patch } => {
+            tracing::info!("Patch loaded: '{}' (index={})", patch.name, patch.index);
 
             // Only overwrite modules from mock if RIG_MODULES is currently
             // empty. When load_preset already populated DB modules, the
             // mock event arrives AFTER and would clobber them.
             if RIG_MODULES.read().is_empty() {
                 let modules = ctl.get_current_modules();
-                tracing::info!("PresetLoaded: setting {} mock modules", modules.len());
+                tracing::info!("PatchLoaded: setting {} mock modules", modules.len());
                 *RIG_MODULES.write() = modules;
 
                 // Rebuild node graph so grid/node views update
@@ -190,7 +166,7 @@ async fn handle_event(ctl: &SignalControl, event: RigControlEvent) {
                 }
             } else {
                 tracing::info!(
-                    "PresetLoaded: skipping mock overwrite — {} modules already loaded",
+                    "PatchLoaded: skipping mock overwrite — {} modules already loaded",
                     RIG_MODULES.read().len()
                 );
             }
@@ -202,17 +178,14 @@ async fn handle_event(ctl: &SignalControl, event: RigControlEvent) {
                 *RIG_CURRENT_SONG.write() = Some(song);
             }
         }
-        RigControlEvent::SceneIndexChanged { scene_index } => {
-            tracing::info!("Scene changed to index {}", scene_index);
-            *RIG_SCENE_INDEX.write() = scene_index;
-            if let Some(scene) = ctl.get_current_scene().await {
-                *RIG_CURRENT_SCENE.write() = Some(scene);
-            }
-            if let Some(preset) = ctl.get_current_preset().await {
-                *RIG_CURRENT_PRESET.write() = Some(preset);
+        RigControlEvent::SectionChanged { section_index } => {
+            tracing::info!("Section changed to index {}", section_index);
+            *RIG_SECTION_INDEX.write() = section_index;
+            if let Some(section) = ctl.get_current_section().await {
+                *RIG_CURRENT_SECTION.write() = Some(section);
             }
 
-            // Only overwrite modules from mock if empty (same guard as PresetLoaded)
+            // Only overwrite modules from mock if empty (same guard as PatchLoaded)
             if RIG_MODULES.read().is_empty() {
                 *RIG_MODULES.write() = ctl.get_current_modules();
 
@@ -241,42 +214,24 @@ async fn handle_event(ctl: &SignalControl, event: RigControlEvent) {
 
 /// Refresh `RIG_AVAILABLE_PRESETS` from the SQLite database.
 ///
-/// Converts DB entity models into the `PresetInfo` types that sidebar
+/// Converts DB entity models into the `RigPresetInfo` types that sidebar
 /// components consume. Call this after creating/deleting presets to keep
 /// the sidebar in sync with the database.
 pub(crate) async fn refresh_presets_from_db(ctl: &SignalControl) {
-    use signal_control::{PresetInfo, PresetSnapshotInfo};
+    use signal_control::RigPresetInfo;
 
     if let Ok(db_presets) = ctl.list_rig_presets().await {
         if !db_presets.is_empty() {
-            let mut preset_infos: Vec<PresetInfo> = Vec::with_capacity(db_presets.len());
+            let mut preset_infos: Vec<RigPresetInfo> = Vec::with_capacity(db_presets.len());
 
             for p in &db_presets {
-                let snapshots = ctl
-                    .list_rig_preset_snapshots(p.id)
-                    .await
-                    .unwrap_or_default();
-                let scene_names: Vec<String> = snapshots.iter().map(|s| s.name.clone()).collect();
-                let scenes: Vec<PresetSnapshotInfo> = snapshots
-                    .iter()
-                    .map(|s| PresetSnapshotInfo {
-                        id: s.id,
-                        name: s.name.clone(),
-                    })
-                    .collect();
-
                 let category = p.category.as_str().unwrap_or("").to_string();
 
-                preset_infos.push(PresetInfo {
+                preset_infos.push(RigPresetInfo {
                     id: p.id,
                     name: p.name.clone(),
                     category,
                     rating: 0,
-                    description: p.description.clone(),
-                    scene_count: scenes.len(),
-                    scene_names,
-                    scenes,
-                    is_template: p.is_template,
                 });
             }
 
@@ -292,7 +247,7 @@ pub(crate) async fn refresh_presets_from_db(ctl: &SignalControl) {
 /// the existing sidebar components already consume. This replaces mock data
 /// with real persisted content when a DB is available.
 async fn populate_sidebars_from_db(ctl: &SignalControl) {
-    use signal_control::{ProfileInfo, ProfileSceneInfo};
+    use signal_control::{PatchInfo, ProfileInfo};
 
     // ── Presets ──────────────────────────────────────────────────
     refresh_presets_from_db(ctl).await;
@@ -304,45 +259,21 @@ async fn populate_sidebars_from_db(ctl: &SignalControl) {
 
             for prof in &db_profiles {
                 let templates = ctl.list_scene_templates(prof.id).await.unwrap_or_default();
-                let scene_names: Vec<String> = templates.iter().map(|t| t.name.clone()).collect();
-                // Resolve preset names for scene display
-                let db_presets = RIG_AVAILABLE_PRESETS.read();
-                let scenes: Vec<ProfileSceneInfo> = templates
+                let patches: Vec<PatchInfo> = templates
                     .iter()
                     .enumerate()
-                    .map(|(i, t)| {
-                        let preset_name = db_presets
-                            .iter()
-                            .find(|p| p.id == t.preset_id)
-                            .map(|p| p.name.clone())
-                            .unwrap_or_else(|| "Unknown".to_string());
-                        let preset_snapshot_name = t.snapshot_id.and_then(|sid| {
-                            db_presets
-                                .iter()
-                                .find(|p| p.id == t.preset_id)
-                                .and_then(|p| p.scenes.iter().find(|s| s.id == sid))
-                                .map(|s| s.name.clone())
-                        });
-                        ProfileSceneInfo {
-                            index: i,
-                            name: t.name.clone(),
-                            preset_id: t.preset_id,
-                            preset_name,
-                            preset_snapshot_id: t.snapshot_id,
-                            preset_snapshot_name,
-                        }
+                    .map(|(i, t)| PatchInfo {
+                        id: t.id,
+                        name: t.name.clone(),
+                        index: i,
                     })
                     .collect();
 
                 profile_infos.push(ProfileInfo {
                     id: prof.id,
                     name: prof.name.clone(),
-                    rig_id: prof.rig_id,
-                    scene_count: scenes.len(),
-                    scene_names,
-                    scenes,
-                    description: prof.description.clone(),
-                    is_template: prof.is_template,
+                    patch_count: patches.len(),
+                    patches,
                 });
             }
 
@@ -375,19 +306,16 @@ async fn populate_sidebars_from_db(ctl: &SignalControl) {
             let mut song_infos: Vec<crate::signals::SongInfo> = Vec::with_capacity(db_songs.len());
 
             for (idx, song) in db_songs.iter().enumerate() {
-                let scenes = ctl.list_song_scenes(song.id).await.unwrap_or_default();
-                let scene_names: Vec<String> = scenes.iter().map(|s| s.name.clone()).collect();
-                let scene_ids: Vec<Uuid> = scenes.iter().map(|s| s.id).collect();
+                let sections = ctl.list_song_scenes(song.id).await.unwrap_or_default();
+                let section_names: Vec<String> = sections.iter().map(|s| s.name.clone()).collect();
 
                 song_infos.push(crate::signals::SongInfo {
                     index: idx,
                     name: song.name.clone(),
                     artist: song.artist.clone(),
-                    scene_count: scenes.len(),
-                    scene_names,
-                    scene_ids,
-                    current_scene_index: None,
-                    is_template: song.is_template,
+                    section_count: sections.len(),
+                    section_names,
+                    current_section_index: None,
                 });
             }
 

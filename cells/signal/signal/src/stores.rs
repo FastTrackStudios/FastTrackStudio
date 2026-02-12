@@ -87,6 +87,36 @@ impl InMemorySceneStore {
         self.block_snapshots.insert(snapshot.id(), snapshot);
     }
 
+    // ── Read accessors (for repository bulk operations) ─────────
+
+    pub fn layer_scenes(&self) -> &HashMap<LayerSceneId, LayerScene> {
+        &self.layer_scenes
+    }
+
+    pub fn engine_scenes(&self) -> &HashMap<EngineSceneId, EngineScene> {
+        &self.engine_scenes
+    }
+
+    pub fn rig_scenes(&self) -> &HashMap<RigSceneId, RigScene> {
+        &self.rig_scenes
+    }
+
+    pub fn rack_scenes(&self) -> &HashMap<RackSceneId, RackScene> {
+        &self.rack_scenes
+    }
+
+    pub fn module_presets(&self) -> &HashMap<ModulePresetId, ModulePreset> {
+        &self.module_presets
+    }
+
+    pub fn module_snapshots_map(&self) -> &HashMap<ModuleSnapshotId, ModuleSnapshot> {
+        &self.module_snapshots
+    }
+
+    pub fn block_snapshots_map(&self) -> &HashMap<BlockSnapshotId, BlockSnapshot> {
+        &self.block_snapshots
+    }
+
     /// Register a module preset and build the reverse index entry.
     ///
     /// The preset's embedded snapshot is used to create the

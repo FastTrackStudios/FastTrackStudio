@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 // Re-export service types for convenience (signal-control re-exports at crate root)
 pub use signal_control::{
-    PresetInfo, PresetSnapshotInfo, ProfileInfo, ProfileSceneInfo, RigInfo, SetlistInfo, SongInfo,
+    PatchInfo, ProfileInfo, RigInfo, RigPresetInfo, SectionInfo, SetlistInfo, SongInfo,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -72,20 +72,17 @@ pub static RIG_AVAILABLE_PROFILES: GlobalSignal<Vec<ProfileInfo>> = Signal::glob
 /// Current rig information
 pub static RIG_INFO: GlobalSignal<Option<RigInfo>> = Signal::global(|| None);
 
-/// Currently loaded preset
-pub static RIG_CURRENT_PRESET: GlobalSignal<Option<PresetInfo>> = Signal::global(|| None);
+/// Currently loaded rig preset (from preset browser)
+pub static RIG_CURRENT_PRESET: GlobalSignal<Option<RigPresetInfo>> = Signal::global(|| None);
 
-/// Currently active preset snapshot ID (scene within preset)
-pub static RIG_CURRENT_PRESET_SNAPSHOT_ID: GlobalSignal<Option<Uuid>> = Signal::global(|| None);
-
-/// Last applied snapshot ID (for tracking which scene was most recently activated)
+/// Last applied snapshot ID (for tracking which snapshot was most recently activated)
 pub static RIG_LAST_APPLIED_SNAPSHOT: GlobalSignal<Option<Uuid>> = Signal::global(|| None);
 
-/// All available presets
-pub static RIG_AVAILABLE_PRESETS: GlobalSignal<Vec<PresetInfo>> = Signal::global(Vec::new);
+/// All available rig presets (from DB preset browser)
+pub static RIG_AVAILABLE_PRESETS: GlobalSignal<Vec<RigPresetInfo>> = Signal::global(Vec::new);
 
 /// Preloaded presets (presets that have been loaded into memory for fast switching)
-pub static RIG_PRELOADED_PRESETS: GlobalSignal<Vec<PresetInfo>> = Signal::global(Vec::new);
+pub static RIG_PRELOADED_PRESETS: GlobalSignal<Vec<RigPresetInfo>> = Signal::global(Vec::new);
 
 /// Current setlist
 pub static RIG_CURRENT_SETLIST: GlobalSignal<Option<SetlistInfo>> = Signal::global(|| None);
@@ -102,11 +99,11 @@ pub static RIG_CURRENT_SONG: GlobalSignal<Option<SongInfo>> = Signal::global(|| 
 /// Current song index
 pub static RIG_SONG_INDEX: GlobalSignal<usize> = Signal::global(|| 0);
 
-/// Current scene (in performance mode)
-pub static RIG_CURRENT_SCENE: GlobalSignal<Option<ProfileSceneInfo>> = Signal::global(|| None);
+/// Current section (in performance mode)
+pub static RIG_CURRENT_SECTION: GlobalSignal<Option<SectionInfo>> = Signal::global(|| None);
 
-/// Current scene index
-pub static RIG_SCENE_INDEX: GlobalSignal<usize> = Signal::global(|| 0);
+/// Current section index
+pub static RIG_SECTION_INDEX: GlobalSignal<usize> = Signal::global(|| 0);
 
 /// Current modules materialized from preset for UI display
 pub static RIG_MODULES: GlobalSignal<Vec<signal_control::module::Module>> =

@@ -10760,6 +10760,7 @@ dependencies = [
  "sea-orm-migration",
  "serde",
  "serde_json",
+ "signal",
  "signal-proto",
  "sqlx",
  "thiserror 2.0.18",

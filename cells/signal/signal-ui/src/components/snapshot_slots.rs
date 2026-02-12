@@ -16,9 +16,9 @@
 //!
 //! Keyboard shortcuts: 1–8 to apply, Shift+1–8 to save.
 
+use crate::components::morph_slider::SnapshotRef;
 use crate::prelude::*;
-use crate::signals::{RIG_CURRENT_PRESET, RIG_CURRENT_PRESET_SNAPSHOT_ID};
-use signal_control::PresetSnapshotInfo;
+use crate::signals::{RIG_CURRENT_PRESET, RIG_LAST_APPLIED_SNAPSHOT};
 use uuid::Uuid;
 
 // region: --- Constants
@@ -41,7 +41,7 @@ pub struct SnapshotSlot {
     /// Custom name (user-editable). `None` means show "Slot N" placeholder.
     pub name: Option<String>,
     /// The snapshot assigned to this slot (if saved).
-    pub snapshot: Option<PresetSnapshotInfo>,
+    pub snapshot: Option<SnapshotRef>,
 }
 
 impl SnapshotSlot {
@@ -94,11 +94,7 @@ impl SnapshotSlotsState {
     /// Create with N slots per page and M initial pages.
     pub fn new(slots_per_page: usize, page_count: usize) -> Self {
         let pages = (0..page_count)
-            .map(|_| {
-                (0..slots_per_page)
-                    .map(SnapshotSlot::empty)
-                    .collect()
-            })
+            .map(|_| (0..slots_per_page).map(SnapshotSlot::empty).collect())
             .collect();
         Self {
             pages,
@@ -110,7 +106,10 @@ impl SnapshotSlotsState {
 
     /// Get the current page's slots.
     pub fn current_slots(&self) -> &[SnapshotSlot] {
-        self.pages.get(self.current_page).map(|p| p.as_slice()).unwrap_or(&[])
+        self.pages
+            .get(self.current_page)
+            .map(|p| p.as_slice())
+            .unwrap_or(&[])
     }
 
     /// Get a mutable reference to a slot on the current page.
@@ -121,7 +120,7 @@ impl SnapshotSlotsState {
     }
 
     /// Save a snapshot into a slot on the current page.
-    pub fn save_to_slot(&mut self, slot_index: usize, snapshot: PresetSnapshotInfo) {
+    pub fn save_to_slot(&mut self, slot_index: usize, snapshot: SnapshotRef) {
         if let Some(slot) = self.slot_mut(slot_index) {
             // If no custom name set, inherit the snapshot name
             if slot.name.is_none() {
@@ -135,9 +134,7 @@ impl SnapshotSlotsState {
     pub fn next_page(&mut self) {
         if self.current_page + 1 >= self.pages.len() {
             // Create a new page
-            let new_page = (0..self.slots_per_page)
-                .map(SnapshotSlot::empty)
-                .collect();
+            let new_page = (0..self.slots_per_page).map(SnapshotSlot::empty).collect();
             self.pages.push(new_page);
         }
         self.current_page += 1;
@@ -187,7 +184,7 @@ pub struct SnapshotSlotsProps {
 pub fn SnapshotSlots(props: SnapshotSlotsProps) -> Element {
     let slots_state = RIG_SNAPSHOT_SLOTS.read();
     let current_preset = RIG_CURRENT_PRESET.read();
-    let active_snapshot_id = *RIG_CURRENT_PRESET_SNAPSHOT_ID.read();
+    let active_snapshot_id = *RIG_LAST_APPLIED_SNAPSHOT.read();
 
     let current_page = slots_state.current_page;
     let page_count = slots_state.page_count();
@@ -463,14 +460,18 @@ pub fn SnapshotSlotsPanel() -> Element {
     let on_save = Callback::new(move |slot_index: usize| {
         // Capture the current active snapshot into the given slot
         let preset = RIG_CURRENT_PRESET.read();
-        let active_id = *RIG_CURRENT_PRESET_SNAPSHOT_ID.read();
+        let active_id = *RIG_LAST_APPLIED_SNAPSHOT.read();
 
-        if let (Some(ref preset), Some(active_id)) = (&*preset, active_id) {
-            if let Some(snap_info) = preset.scenes.iter().find(|s| s.id == active_id) {
-                RIG_SNAPSHOT_SLOTS
-                    .write()
-                    .save_to_slot(slot_index, snap_info.clone());
-            }
+        if let (Some(ref _preset), Some(active_id)) = (&*preset, active_id) {
+            // Create a snapshot ref from the active snapshot ID.
+            // Snapshot name lookup will be added when DB-backed snapshots are wired up.
+            let snap_ref = SnapshotRef {
+                id: active_id,
+                name: format!("Snapshot"),
+            };
+            RIG_SNAPSHOT_SLOTS
+                .write()
+                .save_to_slot(slot_index, snap_ref);
         }
     });
 

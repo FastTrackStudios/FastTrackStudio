@@ -5,10 +5,7 @@
 //! snapshot with a highlight.
 
 use crate::prelude::*;
-use crate::signals::{
-    RIG_CURRENT_PRESET, RIG_CURRENT_PRESET_SNAPSHOT_ID, RIG_LAST_APPLIED_SNAPSHOT, RIG_LOADING,
-};
-use signal_control::PresetSnapshotInfo;
+use crate::signals::{RIG_CURRENT_PRESET, RIG_LAST_APPLIED_SNAPSHOT, RIG_LOADING};
 use uuid::Uuid;
 
 // region: --- SnapshotBrowser
@@ -27,9 +24,8 @@ pub struct SnapshotBrowserProps {
 #[component]
 pub fn SnapshotBrowser(props: SnapshotBrowserProps) -> Element {
     let preset = RIG_CURRENT_PRESET.read();
-    let active_snapshot_id = *RIG_CURRENT_PRESET_SNAPSHOT_ID.read();
-    let last_applied = *RIG_LAST_APPLIED_SNAPSHOT.read();
-    let is_loading = *RIG_LOADING.read();
+    let _last_applied = *RIG_LAST_APPLIED_SNAPSHOT.read();
+    let _is_loading = *RIG_LOADING.read();
 
     rsx! {
         div { class: "h-full w-full flex flex-col bg-card",
@@ -43,25 +39,12 @@ pub fn SnapshotBrowser(props: SnapshotBrowserProps) -> Element {
                 }
             }
 
-            // Snapshot list
+            // Snapshot list — RigPresetInfo no longer carries inline snapshots.
+            // Will be populated from DB snapshot queries in a future iteration.
             div { class: "flex-1 overflow-y-auto p-2",
-                if let Some(ref preset) = *preset {
-                    if preset.scenes.is_empty() {
-                        div { class: "p-4 text-center text-muted-foreground text-sm",
-                            "No snapshots"
-                        }
-                    } else {
-                        for (index, snapshot) in preset.scenes.iter().enumerate() {
-                            SnapshotItem {
-                                key: "{snapshot.id}",
-                                snapshot: snapshot.clone(),
-                                index,
-                                is_active: active_snapshot_id == Some(snapshot.id),
-                                is_last_applied: last_applied == Some(snapshot.id),
-                                is_loading,
-                                on_activate: props.on_activate_snapshot.clone(),
-                            }
-                        }
+                if preset.is_some() {
+                    div { class: "p-4 text-center text-muted-foreground text-sm",
+                        "Snapshots loaded from DB"
                     }
                 } else {
                     div { class: "p-4 text-center text-muted-foreground text-sm",
@@ -80,7 +63,8 @@ pub fn SnapshotBrowser(props: SnapshotBrowserProps) -> Element {
 /// Props for a single snapshot item.
 #[derive(Props, Clone, PartialEq)]
 struct SnapshotItemProps {
-    snapshot: PresetSnapshotInfo,
+    id: Uuid,
+    name: String,
     index: usize,
     is_active: bool,
     is_last_applied: bool,
@@ -91,7 +75,7 @@ struct SnapshotItemProps {
 /// Single snapshot item — double-click to apply.
 #[component]
 fn SnapshotItem(props: SnapshotItemProps) -> Element {
-    let snapshot_id = props.snapshot.id;
+    let snapshot_id = props.id;
 
     let class = if props.is_active {
         "px-3 py-2.5 rounded cursor-pointer mb-1 bg-green-500/20 border border-green-500/40 \
@@ -116,7 +100,7 @@ fn SnapshotItem(props: SnapshotItemProps) -> Element {
                     } else {
                         span { class: "w-2 h-2 rounded-full bg-transparent flex-shrink-0" }
                     }
-                    span { class: "font-medium text-sm truncate", "{props.snapshot.name}" }
+                    span { class: "font-medium text-sm truncate", "{props.name}" }
                 }
                 span { class: "text-xs opacity-50 ml-2 flex-shrink-0", "{props.index + 1}" }
             }

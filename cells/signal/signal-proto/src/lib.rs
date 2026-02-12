@@ -64,10 +64,12 @@ pub mod container;
 pub mod routing;
 pub mod source;
 
+// ─── Defaults ────────────────────────────────────────────────────
+pub mod defaults;
+
 // ─── Temporarily disabled — depend on old domain types ───────────
 // These modules need rewriting to use the new BlockSnapshot/Scene/Override system.
 // pub mod crossfade;
-// pub mod defaults;
 // pub mod morph;
 // pub mod patch;
 

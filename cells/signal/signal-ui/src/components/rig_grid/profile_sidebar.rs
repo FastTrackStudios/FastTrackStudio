@@ -4,10 +4,8 @@
 //! Similar to the profiles section in the left sidebar but as a dedicated right sidebar.
 
 use crate::prelude::*;
-use crate::signals::{
-    RIG_AVAILABLE_PROFILES, RIG_CURRENT_PRESET, RIG_CURRENT_PRESET_SNAPSHOT_ID, RIG_PROFILE,
-};
-use crate::{ProfileInfo, ProfileSceneInfo};
+use crate::signals::{RIG_AVAILABLE_PROFILES, RIG_CURRENT_PRESET, RIG_PROFILE};
+use signal_control::{PatchInfo, ProfileInfo};
 use uuid::Uuid;
 
 /// Props for the profile sidebar.
@@ -35,7 +33,7 @@ pub fn GuitarRigProfileSidebar(props: GuitarRigProfileSidebarProps) -> Element {
     let all_profiles = RIG_AVAILABLE_PROFILES.read();
     let current_profile = RIG_PROFILE.read();
     let current_preset = RIG_CURRENT_PRESET.read();
-    let current_snapshot_id = *RIG_CURRENT_PRESET_SNAPSHOT_ID.read();
+    let _current_preset_id = current_preset.as_ref().map(|p| p.id);
 
     rsx! {
         div { class: "h-full w-full flex flex-col bg-card border-l border-border",
@@ -81,8 +79,6 @@ pub fn GuitarRigProfileSidebar(props: GuitarRigProfileSidebarProps) -> Element {
                             profile: profile.clone(),
                             is_active: current_profile.as_ref().map(|p| p.id) == Some(profile.id),
                             is_expanded: current_profile.as_ref().map(|p| p.id) == Some(profile.id),
-                            current_preset_id: current_preset.as_ref().map(|p| p.id),
-                            current_snapshot_id,
                             on_click: props.on_profile_select.clone(),
                             on_scene_click: props.on_profile_scene_select.clone(),
                         }
@@ -99,16 +95,14 @@ struct ProfileItemProps {
     profile: ProfileInfo,
     is_active: bool,
     is_expanded: bool,
-    current_preset_id: Option<Uuid>,
-    current_snapshot_id: Option<Uuid>,
     on_click: Callback<Uuid>,
     on_scene_click: Option<Callback<(Uuid, usize)>>,
 }
 
-/// Individual profile item with expandable scenes.
+/// Individual profile item with expandable patches.
 #[component]
 fn ProfileItem(props: ProfileItemProps) -> Element {
-    let has_scenes = !props.profile.scene_names.is_empty();
+    let has_patches = !props.profile.patches.is_empty();
     let profile_id = props.profile.id;
 
     rsx! {
@@ -128,34 +122,23 @@ fn ProfileItem(props: ProfileItemProps) -> Element {
                             "{props.profile.name}"
                         }
                         div { class: "text-xs text-zinc-500",
-                            "{props.profile.scene_count} scenes"
+                            "{props.profile.patch_count} patches"
                         }
                     }
                 }
             }
 
-            // Expanded scenes
-            if props.is_expanded && has_scenes {
+            // Expanded patches
+            if props.is_expanded && has_patches {
                 div { class: "bg-zinc-850 py-1",
-                    for (scene_index, scene) in props.profile.scenes.iter().enumerate() {
-                        {
-                            // Check if this profile scene is active by comparing preset and preset scene
-                            // A profile scene is active only if:
-                            // 1. The current preset matches this scene's preset_id
-                            // 2. The current preset scene ID matches this scene's preset_snapshot_id
-                            let is_scene_active = props.current_preset_id == Some(scene.preset_id)
-                                && scene.preset_snapshot_id == props.current_snapshot_id;
-
-                            rsx! {
-                                ProfileSceneItem {
-                                    key: "{scene_index}",
-                                    profile_id,
-                                    scene_index,
-                                    scene: scene.clone(),
-                                    is_active: is_scene_active,
-                                    on_click: props.on_scene_click.clone(),
-                                }
-                            }
+                    for (patch_index, patch) in props.profile.patches.iter().enumerate() {
+                        ProfilePatchItem {
+                            key: "{patch_index}",
+                            profile_id,
+                            patch_index,
+                            patch: patch.clone(),
+                            is_active: false,
+                            on_click: props.on_scene_click.clone(),
                         }
                     }
                 }
@@ -164,21 +147,21 @@ fn ProfileItem(props: ProfileItemProps) -> Element {
     }
 }
 
-/// Props for profile scene item.
+/// Props for profile patch item.
 #[derive(Props, Clone, PartialEq)]
-struct ProfileSceneItemProps {
+struct ProfilePatchItemProps {
     profile_id: Uuid,
-    scene_index: usize,
-    scene: ProfileSceneInfo,
+    patch_index: usize,
+    patch: PatchInfo,
     is_active: bool,
     on_click: Option<Callback<(Uuid, usize)>>,
 }
 
-/// Individual scene item within a profile.
+/// Individual patch item within a profile.
 #[component]
-fn ProfileSceneItem(props: ProfileSceneItemProps) -> Element {
+fn ProfilePatchItem(props: ProfilePatchItemProps) -> Element {
     let profile_id = props.profile_id;
-    let scene_index = props.scene_index;
+    let patch_index = props.patch_index;
     let on_click = props.on_click.clone();
 
     rsx! {
@@ -190,10 +173,10 @@ fn ProfileSceneItem(props: ProfileSceneItemProps) -> Element {
             },
             onclick: move |_| {
                 if let Some(ref cb) = on_click {
-                    cb.call((profile_id, scene_index));
+                    cb.call((profile_id, patch_index));
                 }
             },
-            "• {props.scene.name}"
+            "• {props.patch.name}"
         }
     }
 }

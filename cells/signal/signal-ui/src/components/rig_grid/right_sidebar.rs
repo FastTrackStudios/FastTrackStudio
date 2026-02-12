@@ -6,7 +6,7 @@
 
 use crate::prelude::*;
 use crate::signals::{
-    RIG_AVAILABLE_SETLISTS, RIG_CURRENT_SETLIST, RIG_CURRENT_SONG, RIG_SCENE_INDEX,
+    RIG_AVAILABLE_SETLISTS, RIG_CURRENT_SETLIST, RIG_CURRENT_SONG, RIG_SECTION_INDEX,
     RIG_SETLIST_SONGS, RIG_SONG_INDEX,
 };
 use signal_control::SongInfo;
@@ -290,7 +290,7 @@ fn SongHeader() -> Element {
             div { class: "p-3 border-b border-zinc-800 bg-zinc-850",
                 h2 { class: "font-semibold text-base text-zinc-200 truncate", "{song.name}" }
                 p { class: "text-xs text-zinc-500",
-                    "{song.scene_count} scenes"
+                    "{song.section_count} scenes"
                 }
             }
         } else {
@@ -311,15 +311,15 @@ struct SceneListProps {
 #[component]
 fn SceneList(props: SceneListProps) -> Element {
     let song = RIG_CURRENT_SONG.read();
-    let scene_index = *RIG_SCENE_INDEX.read();
+    let scene_index = *RIG_SECTION_INDEX.read();
 
     rsx! {
         if let Some(ref song) = *song {
-            for idx in 0..song.scene_count {
+            for idx in 0..song.section_count {
                 SceneItem {
                     key: "{idx}",
                     index: idx,
-                    name: song.scene_names.get(idx)
+                    name: song.section_names.get(idx)
                         .cloned()
                         .unwrap_or_else(|| format!("Scene {}", idx + 1)),
                     is_active: idx == scene_index,
@@ -415,7 +415,7 @@ fn SongItem(props: SongItemProps) -> Element {
                 div { class: "flex-1 min-w-0",
                     span { class: "font-medium text-sm truncate block", "{props.song.name}" }
                     span { class: "text-xs text-zinc-500",
-                        "{props.song.scene_count} scenes"
+                        "{props.song.section_count} scenes"
                     }
                 }
                 span { class: "text-xs opacity-60 ml-2", "{index + 1}" }

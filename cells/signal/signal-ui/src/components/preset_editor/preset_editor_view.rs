@@ -15,9 +15,8 @@ use crate::components::shared::EntityEditor;
 use crate::prelude::*;
 use crate::signals::{RIG_AVAILABLE_PRESETS, RIG_SERVICE};
 use signal_control::block::BlockType;
-use signal_control::defaults::templates;
 use signal_control::module::ModuleType;
-use signal_control::template::RigTemplate;
+// RigTemplate import removed — template instantiation deferred to Step 2.5
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
@@ -474,96 +473,35 @@ pub fn PresetEditorView() -> Element {
                                         spawn(async move {
                                             let Some(ctl) = RIG_SERVICE.read().clone() else { return; };
 
-                                            // Build template if selected
-                                            let template: Option<RigTemplate> = match tmpl_idx {
-                                                Some(0) => Some(templates::guitar_rig_template()),
-                                                Some(1) => Some(templates::vocal_rig_template()),
-                                                _ => None,
-                                            };
-
-                                            if let Some(tmpl) = template {
-                                                // Instantiate template → domain objects
-                                                let (mut preset, module_presets): (signal_control::preset::Preset, Vec<signal_control::module_preset::ModulePreset>) = tmpl.instantiate();
-                                                preset.name = val.clone();
-
-                                                // Create each module preset in the DB
-                                                for mp in &module_presets {
-                                                    let blocks_json = serde_json::json!(
-                                                        mp.blocks.iter().map(|mb| {
-                                                            serde_json::json!({
-                                                                "block": {
-                                                                    "name": mb.block.name,
-                                                                    "block_type": format!("{:?}", mb.block.block_type),
-                                                                    "alias": mb.block.alias,
-                                                                    "description": mb.block.description,
-                                                                    "is_placeholder": mb.block.is_placeholder(),
-                                                                }
-                                                            })
-                                                        }).collect::<Vec<_>>()
-                                                    );
-                                                    if let Err(e) = ctl.create_module_preset(
-                                                        &mp.name,
-                                                        mp.module_type.display_name(),
-                                                        mp.description.as_deref(),
-                                                        blocks_json,
-                                                        serde_json::json!([]),
-                                                    ).await {
-                                                        warn!("Failed to create module preset '{}': {e}", mp.name);
+                                            // Template instantiation deferred (Step 2.5).
+                                            // Always create a blank preset for now.
+                                            let preset_meta = signal_control::preset::PresetMetadata::new(
+                                                &val,
+                                                signal_control::category::PresetCategory::default(),
+                                            );
+                                            match ctl.create_rig_preset::<signal_control::preset::PresetMetadata>(
+                                                &val, None,
+                                                serde_json::json!("Clean"),
+                                                serde_json::json!([]),
+                                                &preset_meta,
+                                            ).await {
+                                                Ok(id) => {
+                                                    info!("Created blank rig preset: {id}");
+                                                    preset_editor_status.set(format!("Created '{}'", val));
+                                                    if let Ok(list) = ctl.list_rig_presets().await {
+                                                        preset_list.set(list);
                                                     }
+                                                    preset_selected_id.set(Some(id));
+                                                    preset_snapshots.set(Vec::new());
+                                                    module_assignments.set(std::collections::HashMap::new());
                                                 }
-
-                                                // Create the rig preset
-                                                match ctl.create_rig_preset::<signal_control::preset::Preset>(
-                                                    &val,
-                                                    preset.description.as_deref(),
-                                                    serde_json::json!("Clean"),
-                                                    serde_json::json!([]),
-                                                    &preset,
-                                                ).await {
-                                                    Ok(id) => {
-                                                        info!("Created rig preset from template: {id}");
-                                                        preset_editor_status.set(format!("Created '{}' from template", val));
-                                                        if let Ok(list) = ctl.list_rig_presets().await {
-                                                            preset_list.set(list);
-                                                        }
-                                                        preset_selected_id.set(Some(id));
-                                                        preset_snapshots.set(Vec::new());
-                                                        module_assignments.set(std::collections::HashMap::new());
-                                                    }
-                                                    Err(e) => {
-                                                        warn!("Create preset from template failed: {e}");
-                                                        preset_editor_status.set(format!("Failed: {e}"));
-                                                    }
-                                                }
-                                            } else {
-                                                // Blank preset (original behavior)
-                                                match ctl.create_rig_preset::<signal_control::preset::Preset>(
-                                                    &val, None,
-                                                    serde_json::json!("Clean"),
-                                                    serde_json::json!([]),
-                                                    &signal_control::preset::Preset::new(
-                                                        &val,
-                                                        signal_control::category::PresetCategory::default(),
-                                                    ),
-                                                ).await {
-                                                    Ok(id) => {
-                                                        info!("Created blank rig preset: {id}");
-                                                        preset_editor_status.set(format!("Created '{}'", val));
-                                                        if let Ok(list) = ctl.list_rig_presets().await {
-                                                            preset_list.set(list);
-                                                        }
-                                                        preset_selected_id.set(Some(id));
-                                                        preset_snapshots.set(Vec::new());
-                                                        module_assignments.set(std::collections::HashMap::new());
-                                                    }
-                                                    Err(e) => {
-                                                        warn!("Create preset failed: {e}");
-                                                        preset_editor_status.set(format!("Failed: {e}"));
-                                                    }
+                                                Err(e) => {
+                                                    warn!("Create preset failed: {e}");
+                                                    preset_editor_status.set(format!("Failed: {e}"));
                                                 }
                                             }
 
-                                            // Refresh module list since templates create module presets
+                                            // Refresh module list
                                             if let Ok(mods) = ctl.list_module_presets(None).await {
                                                 available_module_presets.set(mods);
                                             }
@@ -1162,7 +1100,12 @@ pub fn PresetEditorView() -> Element {
                                             let snap_name = format!("Scene {}", snapshots.len() + 1);
                                             spawn(async move {
                                                 let Some(ctl) = RIG_SERVICE.read().clone() else { return; };
-                                                let snap_data = signal_control::preset::Snapshot::new(&snap_name);
+                                                // Store a lightweight metadata blob — full snapshot data
+                                                // will come from the scene system once templates are revived.
+                                                let snap_data = signal_control::preset::PresetMetadata::new(
+                                                    &snap_name,
+                                                    signal_control::category::PresetCategory::default(),
+                                                );
                                                 match ctl.save_rig_preset_snapshot(pid, &snap_name, &snap_data).await {
                                                     Ok(id) => {
                                                         debug!("Created preset snapshot: {id}");

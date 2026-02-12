@@ -8,7 +8,6 @@ use crate::components::module_editor::grid_view::{DynamicGridView, GridConnectio
 use crate::components::module_editor::module_editor_view::CompositionSlot;
 use crate::hooks::rig_actions::CreateEntityData;
 use crate::prelude::*;
-use signal_control::defaults::templates;
 use signal_control::template::RigTemplate;
 use uuid::Uuid;
 
@@ -79,29 +78,14 @@ struct TemplateOption {
 }
 
 fn available_templates() -> Vec<TemplateOption> {
-    vec![
-        TemplateOption {
-            template: None,
-            template_index: None,
-            name: "Blank",
-            description: "Empty preset -- start from scratch",
-            icon: "\u{2795}",
-        },
-        TemplateOption {
-            template: Some(templates::guitar_rig_template()),
-            template_index: Some(0),
-            name: "Guitar Rig",
-            description: "11 modules, 28 blocks -- full guitar signal chain",
-            icon: "\u{1F3B8}",
-        },
-        TemplateOption {
-            template: Some(templates::vocal_rig_template()),
-            template_index: Some(1),
-            name: "Vocal Rig",
-            description: "5 modules, 13 blocks -- vocal processing chain",
-            icon: "\u{1F3A4}",
-        },
-    ]
+    // Template instantiation is deferred (Step 2.5). Only blank presets for now.
+    vec![TemplateOption {
+        template: None,
+        template_index: None,
+        name: "Blank",
+        description: "Empty preset -- start from scratch",
+        icon: "\u{2795}",
+    }]
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -115,80 +99,12 @@ const PREVIEW_ROW_STRIDE: usize = 3;
 
 /// Convert a `RigTemplate` into `CompositionSlot`s for the grid preview.
 ///
-/// Rules match `modules_to_composition_chain`: modules are never split,
-/// 2D modules are vertically centered, row bands are spaced by stride 3.
-fn template_to_slots(template: &RigTemplate) -> Vec<CompositionSlot> {
-    let mut slots = Vec::new();
-    let mut col: usize = 0;
-    let mut row: usize = 0;
-
-    for module in &template.modules {
-        let has_2d = module.grid_width.is_some();
-
-        // Compute module width
-        let module_width = if has_2d {
-            module.grid_width.unwrap_or(1)
-        } else {
-            module.blocks.len().max(1)
-        };
-
-        // Wrap to next row band if module won't fit (never split)
-        if col > 0 && col + module_width > PREVIEW_MAX_COLS {
-            col = 0;
-            row += PREVIEW_ROW_STRIDE;
-        }
-
-        if has_2d {
-            let gh = module.grid_height.unwrap_or(1);
-            let vert_offset = if gh > 1 { (gh - 1) / 2 } else { 0 };
-            let base_row = row.saturating_sub(vert_offset);
-            let base_col = col;
-
-            for block in &module.blocks {
-                let lc = block.local_col.unwrap_or(0);
-                let lr = block.local_row.unwrap_or(0);
-                slots.push(CompositionSlot {
-                    id: Uuid::new_v4(),
-                    block_type: block.block_type,
-                    block_preset_id: None,
-                    block_preset_name: Some(
-                        block.alias.as_deref().unwrap_or(&block.name).to_string(),
-                    ),
-                    plugin_name: Some(module.name.clone()),
-                    col: base_col + lc,
-                    row: base_row + lr,
-                    module_group: Some(module.name.clone()),
-                    module_type: Some(module.module_type),
-                    is_template: true,
-                    bypassed: false,
-                });
-            }
-
-            col = base_col + module_width;
-        } else {
-            // Linear module: all blocks on the same row
-            let base_col = col;
-            for (i, block) in module.blocks.iter().enumerate() {
-                slots.push(CompositionSlot {
-                    id: Uuid::new_v4(),
-                    block_type: block.block_type,
-                    block_preset_id: None,
-                    block_preset_name: Some(
-                        block.alias.as_deref().unwrap_or(&block.name).to_string(),
-                    ),
-                    plugin_name: Some(module.name.clone()),
-                    col: base_col + i,
-                    row,
-                    module_group: Some(module.name.clone()),
-                    module_type: Some(module.module_type),
-                    is_template: true,
-                    bypassed: false,
-                });
-            }
-            col = base_col + module_width;
-        }
-    }
-    slots
+/// Currently returns empty — template preview will be restored once
+/// `defaults/templates.rs` is revived with the new domain types (Step 2.5).
+fn template_to_slots(_template: &RigTemplate) -> Vec<CompositionSlot> {
+    // Template structure changed: RigTemplate now has `engines` (not `modules`).
+    // Preview generation deferred until template instantiation is wired up.
+    Vec::new()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

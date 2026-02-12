@@ -49,6 +49,7 @@ pub mod diff;
 pub mod discovery;
 pub mod engine;
 pub mod mock;
+pub mod repository;
 pub mod resolver;
 pub mod rig_engine;
 pub mod slot;
@@ -78,3 +79,6 @@ pub use service::{
 
 // Re-export stores.
 pub use stores::{InMemorySceneStore, SceneStore};
+
+// Re-export repository.
+pub use repository::{InMemorySceneRepository, RepositoryError, RepositoryResult, SceneRepository};

@@ -12,12 +12,12 @@
 //! comparison mode expands the full toolbar with morph slider, snapshot
 //! assignment dropdowns, swap, accept, and revert controls.
 
+use crate::components::morph_slider::SnapshotRef;
 use crate::prelude::*;
 use crate::signals::{
     RIG_AB_ACTIVE, RIG_CURRENT_PRESET, RIG_MORPH_POSITION, RIG_MORPH_SNAPSHOT_A,
     RIG_MORPH_SNAPSHOT_B,
 };
-use signal_control::PresetSnapshotInfo;
 use uuid::Uuid;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -36,10 +36,9 @@ pub fn ABComparisonPanel() -> Element {
     let snapshot_a_id = RIG_MORPH_SNAPSHOT_A();
     let snapshot_b_id = RIG_MORPH_SNAPSHOT_B();
 
-    // Gather available snapshots from the current preset
-    let available_snapshots: Vec<PresetSnapshotInfo> = RIG_CURRENT_PRESET()
-        .map(|p| p.snapshots.clone())
-        .unwrap_or_default();
+    // Available snapshots — will be populated from DB queries in a future iteration.
+    // RigPresetInfo no longer carries inline snapshot data.
+    let available_snapshots: Vec<SnapshotRef> = Vec::new();
 
     // Resolve snapshot info from IDs
     let snapshot_a_info =
@@ -189,8 +188,8 @@ pub fn ABComparisonPanel() -> Element {
 /// Renders a snapshot assignment dropdown button (A or B side).
 fn snapshot_assignment_button(
     label: &str,
-    current: Option<PresetSnapshotInfo>,
-    available: &[PresetSnapshotInfo],
+    current: Option<SnapshotRef>,
+    available: &[SnapshotRef],
     accent: &str,
     on_select: impl Fn(Uuid) + Clone + 'static,
 ) -> Element {

@@ -39,6 +39,7 @@ dirs = "6.0"
 
 # Domain types + facet serialization
 signal-proto = { path = "../signal-proto" }
+signal = { path = "../signal" }
 facet = { workspace = true }
 facet-json = { workspace = true }
 

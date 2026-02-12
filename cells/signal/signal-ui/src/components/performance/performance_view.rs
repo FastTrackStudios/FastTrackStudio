@@ -18,8 +18,8 @@
 
 use crate::prelude::*;
 use crate::signals::{
-    RIG_CURRENT_PRESET, RIG_CURRENT_PRESET_SNAPSHOT_ID, RIG_CURRENT_SONG, RIG_MODULES,
-    RIG_SCENE_INDEX, RIG_SETLIST_SONGS, RIG_SONG_INDEX,
+    RIG_CURRENT_PRESET, RIG_CURRENT_SONG, RIG_LAST_APPLIED_SNAPSHOT, RIG_MODULES,
+    RIG_SECTION_INDEX, RIG_SETLIST_SONGS, RIG_SONG_INDEX,
 };
 use signal_control::module::{Module, ModuleType};
 use uuid::Uuid;
@@ -32,10 +32,10 @@ pub fn PerformanceView() -> Element {
     let songs = RIG_SETLIST_SONGS.cloned();
     let current_song = RIG_CURRENT_SONG.cloned();
     let song_index = *RIG_SONG_INDEX.read();
-    let scene_index = *RIG_SCENE_INDEX.read();
+    let scene_index = *RIG_SECTION_INDEX.read();
     let modules = RIG_MODULES.cloned();
     let preset = RIG_CURRENT_PRESET.cloned();
-    let active_snapshot_id = *RIG_CURRENT_PRESET_SNAPSHOT_ID.read();
+    let active_snapshot_id = *RIG_LAST_APPLIED_SNAPSHOT.read();
 
     rsx! {
         div { class: "h-full w-full flex flex-col bg-zinc-950 overflow-hidden",
@@ -55,17 +55,9 @@ pub fn PerformanceView() -> Element {
                     if let Some(ref p) = preset {
                         div { class: "mb-4",
                             h2 { class: "text-2xl font-bold text-zinc-100", "{p.name}" }
-                            if let Some(snap_id) = active_snapshot_id {
-                                {
-                                    let snap_name = p.scenes.iter()
-                                        .find(|s| s.id == snap_id)
-                                        .map(|s| s.name.clone())
-                                        .unwrap_or_else(|| "—".to_string());
-                                    rsx! {
-                                        p { class: "text-sm text-emerald-400 mt-0.5",
-                                            "Scene: {snap_name}"
-                                        }
-                                    }
+                            if active_snapshot_id.is_some() {
+                                p { class: "text-sm text-emerald-400 mt-0.5",
+                                    "Snapshot active"
                                 }
                             }
                         }
@@ -101,20 +93,9 @@ pub fn PerformanceView() -> Element {
                         }
                     }
                     div { class: "flex-1 overflow-y-auto",
-                        if let Some(ref p) = preset {
-                            if p.scenes.is_empty() {
-                                div { class: "px-3 py-4 text-xs text-zinc-600 text-center",
-                                    "No snapshots"
-                                }
-                            } else {
-                                for scene in p.scenes.iter() {
-                                    SnapshotItem {
-                                        key: "{scene.id}",
-                                        id: scene.id,
-                                        name: scene.name.clone(),
-                                        is_active: active_snapshot_id == Some(scene.id),
-                                    }
-                                }
+                        if preset.is_some() {
+                            div { class: "px-3 py-4 text-xs text-zinc-600 text-center",
+                                "Snapshots loaded from DB"
                             }
                         } else {
                             div { class: "px-3 py-4 text-xs text-zinc-600 text-center",
@@ -157,14 +138,14 @@ fn SongSceneNav(props: SongSceneNavProps) -> Element {
     let scene_name = props
         .current_song
         .as_ref()
-        .and_then(|s| s.scene_names.get(props.scene_index))
+        .and_then(|s| s.section_names.get(props.scene_index))
         .map(|n| n.as_str())
         .unwrap_or("—");
 
     let scene_count = props
         .current_song
         .as_ref()
-        .map(|s| s.scene_count)
+        .map(|s| s.section_count)
         .unwrap_or(0);
 
     let song_idx = props.song_index;
@@ -185,7 +166,7 @@ fn SongSceneNav(props: SongSceneNavProps) -> Element {
                     onclick: move |_| {
                         if has_prev_song {
                             *RIG_SONG_INDEX.write() = song_idx.saturating_sub(1);
-                            *RIG_SCENE_INDEX.write() = 0;
+                            *RIG_SECTION_INDEX.write() = 0;
                             update_current_song();
                         }
                     },
@@ -205,7 +186,7 @@ fn SongSceneNav(props: SongSceneNavProps) -> Element {
                     onclick: move |_| {
                         if has_next_song {
                             *RIG_SONG_INDEX.write() = song_idx + 1;
-                            *RIG_SCENE_INDEX.write() = 0;
+                            *RIG_SECTION_INDEX.write() = 0;
                             update_current_song();
                         }
                     },
@@ -223,7 +204,7 @@ fn SongSceneNav(props: SongSceneNavProps) -> Element {
                     disabled: !has_prev_scene,
                     onclick: move |_| {
                         if has_prev_scene {
-                            *RIG_SCENE_INDEX.write() = scene_idx.saturating_sub(1);
+                            *RIG_SECTION_INDEX.write() = scene_idx.saturating_sub(1);
                         }
                     },
                     "◀"
@@ -241,7 +222,7 @@ fn SongSceneNav(props: SongSceneNavProps) -> Element {
                     disabled: !has_next_scene,
                     onclick: move |_| {
                         if has_next_scene {
-                            *RIG_SCENE_INDEX.write() = scene_idx + 1;
+                            *RIG_SECTION_INDEX.write() = scene_idx + 1;
                         }
                     },
                     "▶"
@@ -410,7 +391,7 @@ fn SnapshotItem(props: SnapshotItemProps) -> Element {
                 "w-full text-left px-3 py-2 text-sm text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 border-l-2 border-transparent transition-colors"
             },
             onclick: move |_| {
-                *RIG_CURRENT_PRESET_SNAPSHOT_ID.write() = Some(snap_id);
+                *RIG_LAST_APPLIED_SNAPSHOT.write() = Some(snap_id);
             },
             "{props.name}"
         }
@@ -437,7 +418,7 @@ fn SceneStrip(props: SceneStripProps) -> Element {
         };
     };
 
-    if song.scene_names.is_empty() {
+    if song.section_names.is_empty() {
         return rsx! {
             div { class: "h-12 border-t border-zinc-800 bg-zinc-900/60 flex items-center justify-center flex-shrink-0",
                 span { class: "text-xs text-zinc-600", "No scenes in this song" }
@@ -450,7 +431,7 @@ fn SceneStrip(props: SceneStripProps) -> Element {
     rsx! {
         div { class: "border-t border-zinc-800 bg-zinc-900/60 flex-shrink-0",
             div { class: "flex items-center gap-1 px-3 py-2 overflow-x-auto",
-                for (i, name) in song.scene_names.iter().enumerate() {
+                for (i, name) in song.section_names.iter().enumerate() {
                     {
                         let is_current = i == scene_idx;
                         let is_past = i < scene_idx;
@@ -471,7 +452,7 @@ fn SceneStrip(props: SceneStripProps) -> Element {
                                         "px-3 py-1.5 rounded-md text-xs font-medium bg-zinc-800/40 text-zinc-400 border border-zinc-800 whitespace-nowrap hover:bg-zinc-700/60 hover:text-zinc-200 transition-colors"
                                     },
                                     onclick: move |_| {
-                                        *RIG_SCENE_INDEX.write() = i;
+                                        *RIG_SECTION_INDEX.write() = i;
                                     },
                                     "{name}"
                                 }
