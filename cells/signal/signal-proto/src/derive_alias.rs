@@ -9,5 +9,6 @@ derive_aliases::define! {
 
     // Domain struct — standard derive set for named domain types.
     // Used by: LayerScene, EngineScene, BlockSnapshot, ModuleSnapshot, etc.
-    Domain = ::core::fmt::Debug, ::core::clone::Clone, ::facet::Facet;
+    Domain = ::core::fmt::Debug, ::core::clone::Clone, ::core::cmp::PartialEq,
+             ::facet::Facet;
 }

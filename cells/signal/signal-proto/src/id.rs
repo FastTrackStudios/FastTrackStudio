@@ -177,6 +177,24 @@ typed_id!(
     RackTemplateId
 );
 
+// ─── Module internals ────────────────────────────────────────────
+
+typed_id!(
+    /// Identifies a [`ModuleBlock`](crate::module::ModuleBlock) within a module.
+    ModuleBlockId
+);
+typed_id!(
+    /// Identifies a [`ModuleMacro`](crate::module::ModuleMacro) within a module.
+    ModuleMacroId
+);
+
+// ─── Source ──────────────────────────────────────────────────────
+
+typed_id!(
+    /// Identifies a [`Source`](crate::source::Source) — a sound generator.
+    SourceId
+);
+
 // ─── Tags ────────────────────────────────────────────────────────
 
 typed_id!(

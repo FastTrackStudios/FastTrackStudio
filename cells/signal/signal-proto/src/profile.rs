@@ -10,7 +10,7 @@ use crate::tags::Tags;
 // ─── Profile ─────────────────────────────────────────────────────
 
 /// A named collection of patches.
-#[derive(Debug, Clone, ::facet::Facet)]
+#[derive(Debug, Clone, PartialEq, ::facet::Facet)]
 pub struct Profile {
     pub id: ProfileId,
     pub name: String,
@@ -40,7 +40,7 @@ impl Profile {
 // ─── Patch ───────────────────────────────────────────────────────
 
 /// A named scene reference within a profile.
-#[derive(Debug, Clone, ::facet::Facet)]
+#[derive(Debug, Clone, PartialEq, ::facet::Facet)]
 pub struct Patch {
     pub id: PatchId,
     pub name: String,
@@ -56,6 +56,34 @@ impl Patch {
             scene_ref,
             tags: Tags::new(),
         }
+    }
+}
+
+// ─── Taggable implementations ────────────────────────────────────
+
+use crate::tags::Taggable;
+
+impl Taggable for Profile {
+    fn tags(&self) -> &Tags {
+        &self.tags
+    }
+    fn tags_mut(&mut self) -> &mut Tags {
+        &mut self.tags
+    }
+    fn name(&self) -> &str {
+        &self.name
+    }
+}
+
+impl Taggable for Patch {
+    fn tags(&self) -> &Tags {
+        &self.tags
+    }
+    fn tags_mut(&mut self) -> &mut Tags {
+        &mut self.tags
+    }
+    fn name(&self) -> &str {
+        &self.name
     }
 }
 

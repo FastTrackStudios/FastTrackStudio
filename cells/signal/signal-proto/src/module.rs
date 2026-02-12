@@ -7,10 +7,8 @@
 
 use std::fmt;
 
-use uuid::Uuid;
-
 use crate::block::Block;
-use crate::id::{BlockId, ModuleId};
+use crate::id::{BlockId, ModuleBlockId, ModuleId, ModuleMacroId};
 use crate::normalized::{MidiChannel, NormalizedF64, Order};
 use crate::tags::{Taggable, Tags};
 use daw_proto::FxNodeId;
@@ -174,7 +172,7 @@ pub struct MidiTriggerConfig {
 /// A block positioned within a module, with optional MIDI trigger.
 #[derive(Debug, Clone, PartialEq, ::facet::Facet)]
 pub struct ModuleBlock {
-    pub id: Uuid,
+    pub id: ModuleBlockId,
     pub block: Block,
     pub order: Order,
     pub midi_trigger: Option<MidiTriggerConfig>,
@@ -193,7 +191,7 @@ impl ModuleBlock {
     /// Create a new module block at the given order position.
     pub fn new(block: Block, order: Order) -> Self {
         Self {
-            id: Uuid::new_v4(),
+            id: ModuleBlockId::new(),
             block,
             order,
             midi_trigger: None,
@@ -233,7 +231,7 @@ impl Taggable for ModuleBlock {
 /// A macro knob that exposes a single block parameter for quick access.
 #[derive(Debug, Clone, PartialEq, ::facet::Facet)]
 pub struct ModuleMacro {
-    pub id: Uuid,
+    pub id: ModuleMacroId,
     pub name: String,
     pub block_id: BlockId,
     pub param_index: u32,

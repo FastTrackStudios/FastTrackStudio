@@ -61,17 +61,13 @@ pub mod template;
 
 // ─── Utilities ───────────────────────────────────────────────────
 pub mod container;
+pub mod easing;
+pub mod modulation;
 pub mod routing;
 pub mod source;
 
 // ─── Defaults ────────────────────────────────────────────────────
 pub mod defaults;
-
-// ─── Temporarily disabled — depend on old domain types ───────────
-// These modules need rewriting to use the new BlockSnapshot/Scene/Override system.
-// pub mod crossfade;
-// pub mod morph;
-// pub mod patch;
 
 // Re-export foundation types at crate root for convenience
 pub use id::*;

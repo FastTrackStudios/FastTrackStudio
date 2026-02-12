@@ -373,6 +373,58 @@ impl RackSceneBuilder<RigsSet> {
     }
 }
 
+// ─── Taggable implementations ────────────────────────────────────
+
+use crate::tags::Taggable;
+
+impl Taggable for LayerScene {
+    fn tags(&self) -> &Tags {
+        &self.tags
+    }
+    fn tags_mut(&mut self) -> &mut Tags {
+        &mut self.tags
+    }
+    fn name(&self) -> &str {
+        &self.name
+    }
+}
+
+impl Taggable for EngineScene {
+    fn tags(&self) -> &Tags {
+        &self.tags
+    }
+    fn tags_mut(&mut self) -> &mut Tags {
+        &mut self.tags
+    }
+    fn name(&self) -> &str {
+        &self.name
+    }
+}
+
+impl Taggable for RigScene {
+    fn tags(&self) -> &Tags {
+        &self.tags
+    }
+    fn tags_mut(&mut self) -> &mut Tags {
+        &mut self.tags
+    }
+    fn name(&self) -> &str {
+        &self.name
+    }
+}
+
+impl Taggable for RackScene {
+    fn tags(&self) -> &Tags {
+        &self.tags
+    }
+    fn tags_mut(&mut self) -> &mut Tags {
+        &mut self.tags
+    }
+    fn name(&self) -> &str {
+        &self.name
+    }
+}
+
 // ─── ScopedSceneRef ──────────────────────────────────────────────
 
 /// A reference to a scene at any level of the hierarchy.

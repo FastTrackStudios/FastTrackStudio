@@ -2,15 +2,15 @@
 //!
 //! Defines how audio flows between layers, blocks, and global effects.
 
-
 use crate::id::BlockId;
+use crate::normalized::NormalizedF64;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SectionRouting
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// How audio flows through a section's layers.
-#[derive(Debug, Clone, ::facet::Facet, Default)]
+#[derive(Debug, Clone, PartialEq, ::facet::Facet, Default)]
 #[repr(u8)]
 pub enum SectionRouting {
     /// Layers run in series: Layer 1 → Layer 2 → ... → Output
@@ -41,11 +41,11 @@ impl SectionRouting {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// A single connection in a custom routing graph.
-#[derive(Debug, Clone, ::facet::Facet)]
+#[derive(Debug, Clone, PartialEq, ::facet::Facet)]
 pub struct RoutingNode {
     pub source: BlockRef,
     pub destination: BlockRef,
-    pub level: f64,
+    pub level: NormalizedF64,
 }
 
 impl RoutingNode {
@@ -53,13 +53,17 @@ impl RoutingNode {
         Self {
             source,
             destination,
-            level: level.clamp(0.0, 1.0),
+            level: NormalizedF64::new(level),
         }
     }
 
     /// Unity-gain connection.
     pub fn unity(source: BlockRef, destination: BlockRef) -> Self {
-        Self::new(source, destination, 1.0)
+        Self {
+            source,
+            destination,
+            level: NormalizedF64::ONE,
+        }
     }
 }
 
@@ -68,7 +72,7 @@ impl RoutingNode {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// A reference to a point in the signal chain.
-#[derive(Debug, Clone, ::facet::Facet)]
+#[derive(Debug, Clone, PartialEq, ::facet::Facet)]
 #[repr(u8)]
 pub enum BlockRef {
     /// The section's audio input
@@ -113,15 +117,15 @@ mod tests {
     #[test]
     fn routing_node_clamps_level() {
         let node = RoutingNode::new(BlockRef::SectionInput, BlockRef::SectionOutput, 2.0);
-        assert_eq!(node.level, 1.0);
+        assert_eq!(node.level.get(), 1.0);
 
         let node = RoutingNode::new(BlockRef::SectionInput, BlockRef::SectionOutput, -1.0);
-        assert_eq!(node.level, 0.0);
+        assert_eq!(node.level.get(), 0.0);
     }
 
     #[test]
     fn unity_gain() {
         let node = RoutingNode::unity(BlockRef::SectionInput, BlockRef::SectionOutput);
-        assert_eq!(node.level, 1.0);
+        assert_eq!(node.level.get(), 1.0);
     }
 }

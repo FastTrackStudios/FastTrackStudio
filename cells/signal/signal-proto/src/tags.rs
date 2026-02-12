@@ -505,7 +505,7 @@ pub trait Taggable {
 // ============================================================================
 
 /// Filter for searching presets by tags.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, ::facet::Facet)]
 pub struct TagFilter {
     /// Tags that MUST be present (inclusive).
     pub include: HashSet<TagId>,
@@ -580,7 +580,7 @@ impl TagFilter {
 // ============================================================================
 
 /// Registry for all available tags.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, ::facet::Facet)]
 pub struct TagRegistry {
     /// All tags by ID.
     tags: HashMap<TagId, Tag>,

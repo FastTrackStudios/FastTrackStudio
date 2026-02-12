@@ -105,7 +105,7 @@ impl ParameterOverride {
 ///   be added to a `SongSection`.
 /// - `SceneOverride<Validated>`: has been checked against a hierarchy,
 ///   safe to use in `SongSection`.
-#[derive(Debug, Clone, ::facet::Facet)]
+#[derive(Debug, Clone, PartialEq, ::facet::Facet)]
 pub struct SceneOverride<State = Unvalidated> {
     path: OverridePath,
     action: OverrideAction,

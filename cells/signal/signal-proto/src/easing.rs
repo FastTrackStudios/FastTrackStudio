@@ -1,14 +1,12 @@
 //! Easing curves and time-based snapshot tweening.
 //!
 //! [`EasingCurve`] provides a library of standard easing functions that map
-//! a linear progress `t ∈ [0.0, 1.0]` to a curved output. These extend the
-//! simpler [`CrossfadeCurve`](crate::crossfade::CrossfadeCurve) with the full
+//! a linear progress `t ∈ [0.0, 1.0]` to a curved output, with the full
 //! set of easing functions familiar from CSS/animation.
 //!
 //! [`SnapshotTween`] wraps a duration + curve into a time-based animation.
 //! Call [`advance(delta_ms)`](SnapshotTween::advance) each frame to get the
-//! eased position, then feed it into [`SnapshotMorpher::compute_at()`](crate::morph::SnapshotMorpher::compute_at).
-
+//! eased position for morph interpolation.
 
 // ─────────────────────────────────────────────────────────────────────────────
 // EasingCurve
@@ -147,8 +145,7 @@ pub enum TweenState {
 ///
 /// Wraps a duration and easing curve. Each frame, call [`advance`](Self::advance)
 /// with the elapsed delta to get the current eased morph position. Feed this
-/// into [`SnapshotMorpher::compute_at()`](crate::morph::SnapshotMorpher::compute_at)
-/// for the interpolated parameter values.
+/// into a morph interpolator for the interpolated parameter values.
 ///
 /// # Example (pseudocode)
 ///

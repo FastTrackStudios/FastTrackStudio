@@ -68,6 +68,7 @@ pub struct Resolved;
 // ─── ActiveBlock ─────────────────────────────────────────────────
 
 /// A block with optional resolved snapshot state.
+#[derive(Debug)]
 pub struct ActiveBlock<State = Unresolved> {
     block: Block,
     snapshot: Option<BlockSnapshot>,
@@ -130,6 +131,7 @@ impl ActiveBlock<Resolved> {
 // ─── ActiveModule ────────────────────────────────────────────────
 
 /// A module with optional resolved snapshot and child blocks.
+#[derive(Debug)]
 pub struct ActiveModule<State = Unresolved> {
     module: Module,
     snapshot: Option<ModuleSnapshot>,
@@ -198,6 +200,7 @@ impl ActiveModule<Resolved> {
 // ─── ActiveLayer ─────────────────────────────────────────────────
 
 /// A layer with optional resolved scene, child modules, and standalone blocks.
+#[derive(Debug)]
 pub struct ActiveLayer<State = Unresolved> {
     layer: Layer,
     scene: Option<LayerScene>,
@@ -280,6 +283,7 @@ impl ActiveLayer<Resolved> {
 // ─── ActiveEngine ────────────────────────────────────────────────
 
 /// An engine with optional resolved scene and child layers.
+#[derive(Debug)]
 pub struct ActiveEngine<State = Unresolved> {
     engine: Engine,
     scene: Option<EngineScene>,
@@ -348,6 +352,7 @@ impl ActiveEngine<Resolved> {
 // ─── ActiveRig ───────────────────────────────────────────────────
 
 /// A rig with optional resolved scene and child engines.
+#[derive(Debug)]
 pub struct ActiveRig<State = Unresolved> {
     rig: Rig,
     scene: Option<RigScene>,
@@ -409,6 +414,7 @@ impl ActiveRig<Resolved> {
 // ─── ActiveRack ──────────────────────────────────────────────────
 
 /// A rack with optional resolved scene and child rigs.
+#[derive(Debug)]
 pub struct ActiveRack<State = Unresolved> {
     rack: Rack,
     scene: Option<RackScene>,

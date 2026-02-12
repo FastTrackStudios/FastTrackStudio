@@ -3,7 +3,6 @@
 //! A [`Song`] contains [`SongSection`]s. Each section references a scene
 //! (at any hierarchy level) and can apply validated overrides on top.
 
-
 use crate::id::{SongId, SongSectionId};
 use crate::module::MidiTriggerConfig;
 use crate::override_tree::{SceneOverride, Validated};
@@ -13,7 +12,7 @@ use crate::tags::Tags;
 // ─── Song ────────────────────────────────────────────────────────
 
 /// A performance song with named sections.
-#[derive(Debug, Clone, ::facet::Facet)]
+#[derive(Debug, Clone, PartialEq, ::facet::Facet)]
 pub struct Song {
     pub id: SongId,
     pub name: String,
@@ -60,7 +59,7 @@ impl Song {
 ///
 /// **Key typestate guarantee**: `overrides` can only hold `SceneOverride<Validated>`.
 /// You cannot add an unvalidated override — it's a compile error.
-#[derive(Debug, Clone, ::facet::Facet)]
+#[derive(Debug, Clone, PartialEq, ::facet::Facet)]
 pub struct SongSection {
     pub id: SongSectionId,
     pub name: String,
@@ -102,6 +101,34 @@ impl SongSection {
     pub fn with_transition(mut self, transition: SceneTransition) -> Self {
         self.transition = transition;
         self
+    }
+}
+
+// ─── Taggable implementations ────────────────────────────────────
+
+use crate::tags::Taggable;
+
+impl Taggable for Song {
+    fn tags(&self) -> &Tags {
+        &self.tags
+    }
+    fn tags_mut(&mut self) -> &mut Tags {
+        &mut self.tags
+    }
+    fn name(&self) -> &str {
+        &self.name
+    }
+}
+
+impl Taggable for SongSection {
+    fn tags(&self) -> &Tags {
+        &self.tags
+    }
+    fn tags_mut(&mut self) -> &mut Tags {
+        &mut self.tags
+    }
+    fn name(&self) -> &str {
+        &self.name
     }
 }
 

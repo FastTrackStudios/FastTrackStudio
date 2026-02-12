@@ -55,6 +55,7 @@ pub struct Committed;
 ///
 /// - `Draft`: data can be mutated, message can be set.
 /// - `Committed`: data is frozen. Can produce `VersionedRef`s.
+#[derive(Debug, Clone)]
 pub struct Version<T, State = Draft> {
     id: VersionId,
     version_number: Option<u32>,
@@ -147,7 +148,7 @@ impl<T> Version<T, Committed> {
     }
 
     /// Create a `VersionedRef` pointing to this committed version.
-    pub fn to_ref<Id: From<VersionId> + Clone>(&self) -> VersionedRef<Id> {
+    pub fn to_ref<Id: From<VersionId> + Clone + PartialEq>(&self) -> VersionedRef<Id> {
         VersionedRef::new(Id::from(self.id), self.version_number())
     }
 }
@@ -168,8 +169,8 @@ pub struct Pinned;
 ///
 /// - `AutoUpdate`: resolves to the latest version externally; tracks when it was saved.
 /// - `Pinned`: frozen to a specific version number.
-#[derive(Debug, Clone, ::facet::Facet)]
-pub struct VersionedRef<Id, Mode = AutoUpdate> {
+#[derive(Debug, Clone, PartialEq, ::facet::Facet)]
+pub struct VersionedRef<Id: PartialEq, Mode = AutoUpdate> {
     target_id: Id,
     saved_at_version: u32,
     pinned_version: Option<u32>,
@@ -177,7 +178,7 @@ pub struct VersionedRef<Id, Mode = AutoUpdate> {
     _mode: PhantomData<Mode>,
 }
 
-impl<Id: Clone> VersionedRef<Id, AutoUpdate> {
+impl<Id: Clone + PartialEq> VersionedRef<Id, AutoUpdate> {
     /// Create a new auto-updating reference.
     pub fn new(target_id: Id, saved_at_version: u32) -> Self {
         Self {
@@ -204,7 +205,7 @@ impl<Id: Clone> VersionedRef<Id, AutoUpdate> {
     }
 }
 
-impl<Id: Clone> VersionedRef<Id, Pinned> {
+impl<Id: Clone + PartialEq> VersionedRef<Id, Pinned> {
     /// The pinned version number.
     pub fn pinned_version(&self) -> u32 {
         self.pinned_version
@@ -223,7 +224,7 @@ impl<Id: Clone> VersionedRef<Id, Pinned> {
 }
 
 /// Shared accessors available in any mode.
-impl<Id: Clone, Mode> VersionedRef<Id, Mode> {
+impl<Id: Clone + PartialEq, Mode> VersionedRef<Id, Mode> {
     /// The target entity this reference points to.
     pub fn target_id(&self) -> &Id {
         &self.target_id

@@ -4,9 +4,8 @@
 //! sampler, or internal generator. Sources feed into sections and layers
 //! for processing.
 
-use uuid::Uuid;
-
 use crate::block::PluginId;
+use crate::id::SourceId;
 use crate::normalized::{NormalizedF64, Pan};
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -65,9 +64,9 @@ impl SourceType {
 ///
 /// Each source has a type (audio input, instrument, sampler, or generator),
 /// an enable toggle, and level/pan controls.
-#[derive(Debug, Clone, ::facet::Facet)]
+#[derive(Debug, Clone, PartialEq, ::facet::Facet)]
 pub struct Source {
-    pub id: Uuid,
+    pub id: SourceId,
     pub name: String,
     pub source_type: SourceType,
     pub enabled: bool,
@@ -79,7 +78,7 @@ impl Source {
     /// Create a source backed by an audio input.
     pub fn audio_input(name: impl Into<String>, input_index: u8) -> Self {
         Self {
-            id: Uuid::new_v4(),
+            id: SourceId::new(),
             name: name.into(),
             source_type: SourceType::AudioInput { input_index },
             enabled: true,
@@ -91,7 +90,7 @@ impl Source {
     /// Create a source backed by an instrument plugin.
     pub fn instrument(name: impl Into<String>, plugin_id: PluginId) -> Self {
         Self {
-            id: Uuid::new_v4(),
+            id: SourceId::new(),
             name: name.into(),
             source_type: SourceType::Instrument { plugin_id },
             enabled: true,
@@ -103,7 +102,7 @@ impl Source {
     /// Create a source backed by a sampler plugin.
     pub fn sampler(name: impl Into<String>, plugin_id: PluginId) -> Self {
         Self {
-            id: Uuid::new_v4(),
+            id: SourceId::new(),
             name: name.into(),
             source_type: SourceType::Sampler { plugin_id },
             enabled: true,
@@ -115,7 +114,7 @@ impl Source {
     /// Create an internal generator source.
     pub fn generator(name: impl Into<String>) -> Self {
         Self {
-            id: Uuid::new_v4(),
+            id: SourceId::new(),
             name: name.into(),
             source_type: SourceType::Generator,
             enabled: true,
@@ -219,5 +218,4 @@ mod tests {
         source.set_pan(Pan::new(-0.5));
         assert!((source.pan.get() - (-0.5)).abs() < f64::EPSILON);
     }
-
 }

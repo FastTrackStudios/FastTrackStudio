@@ -4,7 +4,6 @@
 //! "Guitar Rig Pool"). Racks can hold scenes and presets that manage
 //! their constituent rigs.
 
-
 use crate::id::{RackId, RigId};
 use crate::rig::Rig;
 use crate::tags::{Taggable, Tags};
@@ -17,7 +16,7 @@ use crate::tags::{Taggable, Tags};
 ///
 /// Unlike `Rig` and `Engine`, a rack can be empty — it's a grouping
 /// container, not a structural requirement.
-#[derive(Debug, Clone, ::facet::Facet)]
+#[derive(Debug, Clone, PartialEq, ::facet::Facet)]
 pub struct Rack {
     pub id: RackId,
     pub name: String,

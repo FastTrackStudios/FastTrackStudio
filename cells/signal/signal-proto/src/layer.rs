@@ -4,11 +4,10 @@
 //! Each layer has a 1-based [`LayerIndex`] enforced by the type system,
 //! volume/pan/key-range controls, and MIDI channel routing.
 
-
 use crate::block::Block;
 use crate::id::{LayerId, ModuleId};
 use crate::module::{Module, ModuleType};
-use crate::normalized::{MidiNote, NormalizedF64, Pan};
+use crate::normalized::{MidiChannel, MidiNote, NormalizedF64, Pan};
 use crate::tags::{Taggable, Tags};
 use crate::version::LayerIndex;
 
@@ -65,7 +64,7 @@ impl KeyRange {
 ///
 /// Holds modules (named processing stages like Drive, Amp, EQ) and
 /// optional standalone blocks that don't belong to any module.
-#[derive(Debug, Clone, ::facet::Facet)]
+#[derive(Debug, Clone, PartialEq, ::facet::Facet)]
 pub struct Layer {
     pub id: LayerId,
     /// 1-based index within the engine. Layer 1, Layer 2, Layer 3, etc.
@@ -81,7 +80,7 @@ pub struct Layer {
     /// Optional key range for keyboard splits.
     pub key_range: Option<KeyRange>,
     /// Optional MIDI channel filter (None = omni).
-    pub midi_channel: Option<u8>,
+    pub midi_channel: Option<MidiChannel>,
     pub tags: Tags,
 }
 

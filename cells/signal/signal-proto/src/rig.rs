@@ -5,7 +5,6 @@
 
 use std::fmt;
 
-
 use crate::engine::Engine;
 use crate::id::{EngineId, RigId};
 use crate::non_empty::NonEmptyVec;
@@ -49,7 +48,7 @@ impl fmt::Display for InstrumentType {
 /// A complete instrument setup — one or more engines.
 ///
 /// Always has at least one engine (enforced by `NonEmptyVec`).
-#[derive(Debug, Clone, ::facet::Facet)]
+#[derive(Debug, Clone, PartialEq, ::facet::Facet)]
 pub struct Rig {
     pub id: RigId,
     pub name: String,

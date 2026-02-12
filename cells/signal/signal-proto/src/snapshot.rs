@@ -47,7 +47,7 @@ pub struct Forked;
 /// - `BlockSnapshot<Forked>` always has `parent_id()` available.
 ///
 /// Both share common accessors via the blanket `impl<O> BlockSnapshot<O>` block.
-#[derive(Debug, Clone, ::facet::Facet)]
+#[derive(Debug, Clone, PartialEq, ::facet::Facet)]
 pub struct BlockSnapshot<Origin = Original> {
     id: BlockSnapshotId,
     name: String,
@@ -198,7 +198,7 @@ impl<O> BlockSnapshot<O> {
 /// A module snapshot doesn't hold parameter values directly — it references
 /// versioned block snapshots. This allows sharing and reusing block snapshots
 /// across different module configurations.
-#[derive(Debug, Clone, ::facet::Facet)]
+#[derive(Debug, Clone, PartialEq, ::facet::Facet)]
 pub struct ModuleSnapshot {
     pub id: ModuleSnapshotId,
     pub name: String,
@@ -236,6 +236,34 @@ impl ModuleSnapshot {
     /// Whether this is a forked snapshot.
     pub fn is_forked(&self) -> bool {
         self.parent_snapshot_id.is_some()
+    }
+}
+
+// ─── Taggable implementations ────────────────────────────────────
+
+use crate::tags::Taggable;
+
+impl<O> Taggable for BlockSnapshot<O> {
+    fn tags(&self) -> &Tags {
+        &self.tags
+    }
+    fn tags_mut(&mut self) -> &mut Tags {
+        &mut self.tags
+    }
+    fn name(&self) -> &str {
+        &self.name
+    }
+}
+
+impl Taggable for ModuleSnapshot {
+    fn tags(&self) -> &Tags {
+        &self.tags
+    }
+    fn tags_mut(&mut self) -> &mut Tags {
+        &mut self.tags
+    }
+    fn name(&self) -> &str {
+        &self.name
     }
 }
 

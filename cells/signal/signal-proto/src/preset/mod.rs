@@ -8,7 +8,6 @@
 
 pub mod builder;
 
-
 use crate::category::PresetCategory;
 use crate::id::*;
 use crate::module::ModuleType;
@@ -20,7 +19,7 @@ use crate::tags::Tags;
 // ─── PresetMetadata ──────────────────────────────────────────────
 
 /// Shared metadata for all preset types.
-#[derive(Debug, Clone, ::facet::Facet)]
+#[derive(Debug, Clone, PartialEq, ::facet::Facet)]
 pub struct PresetMetadata {
     pub name: String,
     pub category: PresetCategory,
@@ -64,7 +63,7 @@ impl PresetMetadata {
 // ─── Block Preset ────────────────────────────────────────────────
 
 /// A named, versioned block snapshot.
-#[derive(Debug, Clone, ::facet::Facet)]
+#[derive(Debug, Clone, PartialEq, ::facet::Facet)]
 pub struct BlockPreset {
     pub id: BlockPresetId,
     pub metadata: PresetMetadata,
@@ -86,7 +85,7 @@ impl BlockPreset {
 // ─── Module Preset ───────────────────────────────────────────────
 
 /// A named, versioned module snapshot.
-#[derive(Debug, Clone, ::facet::Facet)]
+#[derive(Debug, Clone, PartialEq, ::facet::Facet)]
 pub struct ModulePreset {
     pub id: ModulePresetId,
     pub metadata: PresetMetadata,
@@ -114,7 +113,7 @@ impl ModulePreset {
 // ─── Layer Preset ────────────────────────────────────────────────
 
 /// A named, versioned layer scene.
-#[derive(Debug, Clone, ::facet::Facet)]
+#[derive(Debug, Clone, PartialEq, ::facet::Facet)]
 pub struct LayerPreset {
     pub id: LayerPresetId,
     pub metadata: PresetMetadata,
@@ -136,7 +135,7 @@ impl LayerPreset {
 // ─── Engine Preset ───────────────────────────────────────────────
 
 /// A named, versioned engine scene.
-#[derive(Debug, Clone, ::facet::Facet)]
+#[derive(Debug, Clone, PartialEq, ::facet::Facet)]
 pub struct EnginePreset {
     pub id: EnginePresetId,
     pub metadata: PresetMetadata,
@@ -158,7 +157,7 @@ impl EnginePreset {
 // ─── Rig Preset ──────────────────────────────────────────────────
 
 /// A named, versioned rig scene.
-#[derive(Debug, Clone, ::facet::Facet)]
+#[derive(Debug, Clone, PartialEq, ::facet::Facet)]
 pub struct RigPreset {
     pub id: RigPresetId,
     pub metadata: PresetMetadata,
@@ -180,7 +179,7 @@ impl RigPreset {
 // ─── Rack Preset ─────────────────────────────────────────────────
 
 /// A named, versioned rack scene.
-#[derive(Debug, Clone, ::facet::Facet)]
+#[derive(Debug, Clone, PartialEq, ::facet::Facet)]
 pub struct RackPreset {
     pub id: RackPresetId,
     pub metadata: PresetMetadata,
@@ -196,6 +195,22 @@ impl RackPreset {
             scene,
             version: 1,
         }
+    }
+}
+
+// ─── Taggable implementation ─────────────────────────────────────
+
+use crate::tags::Taggable;
+
+impl Taggable for PresetMetadata {
+    fn tags(&self) -> &Tags {
+        &self.tags
+    }
+    fn tags_mut(&mut self) -> &mut Tags {
+        &mut self.tags
+    }
+    fn name(&self) -> &str {
+        &self.name
     }
 }
 

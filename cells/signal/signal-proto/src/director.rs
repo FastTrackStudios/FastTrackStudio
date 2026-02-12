@@ -3,7 +3,6 @@
 //! The [`Director`] oversees the entire signal routing hierarchy. It holds
 //! racks, which hold rigs, which hold engines, which hold layers.
 
-
 use crate::id::{DirectorId, RackId};
 use crate::rack::Rack;
 use crate::tags::{Taggable, Tags};
@@ -16,7 +15,7 @@ use crate::tags::{Taggable, Tags};
 ///
 /// A director holds racks (which hold rigs, engines, layers, modules, blocks).
 /// There is typically one director per session.
-#[derive(Debug, Clone, ::facet::Facet)]
+#[derive(Debug, Clone, PartialEq, ::facet::Facet)]
 pub struct Director {
     pub id: DirectorId,
     pub name: String,
