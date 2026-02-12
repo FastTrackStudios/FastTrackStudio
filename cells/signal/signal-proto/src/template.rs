@@ -45,6 +45,40 @@ pub struct BlockTemplate {
     pub local_row: Option<usize>,
 }
 
+impl BlockTemplate {
+    /// Create a block template with the given name and type.
+    pub fn new(name: impl Into<String>, block_type: BlockType) -> Self {
+        Self {
+            block_type,
+            name: name.into(),
+            alias: None,
+            description: None,
+            local_col: None,
+            local_row: None,
+        }
+    }
+
+    #[must_use]
+    pub fn with_alias(mut self, alias: impl Into<String>) -> Self {
+        self.alias = Some(alias.into());
+        self
+    }
+
+    #[must_use]
+    pub fn with_description(mut self, desc: impl Into<String>) -> Self {
+        self.description = Some(desc.into());
+        self
+    }
+
+    /// Set 2D grid position (column, row).
+    #[must_use]
+    pub fn at(mut self, col: usize, row: usize) -> Self {
+        self.local_col = Some(col);
+        self.local_row = Some(row);
+        self
+    }
+}
+
 impl Templatable for Block {
     type Template = BlockTemplate;
 
@@ -82,6 +116,39 @@ pub struct ModuleTemplate {
     pub blocks: Vec<BlockTemplate>,
     pub grid_width: Option<usize>,
     pub grid_height: Option<usize>,
+}
+
+impl ModuleTemplate {
+    /// Create a module template with the given name and type.
+    pub fn new(name: impl Into<String>, module_type: ModuleType) -> Self {
+        Self {
+            module_type,
+            name: name.into(),
+            description: None,
+            blocks: Vec::new(),
+            grid_width: None,
+            grid_height: None,
+        }
+    }
+
+    #[must_use]
+    pub fn with_description(mut self, desc: impl Into<String>) -> Self {
+        self.description = Some(desc.into());
+        self
+    }
+
+    #[must_use]
+    pub fn with_block(mut self, block: BlockTemplate) -> Self {
+        self.blocks.push(block);
+        self
+    }
+
+    #[must_use]
+    pub fn with_grid_size(mut self, width: usize, height: usize) -> Self {
+        self.grid_width = Some(width);
+        self.grid_height = Some(height);
+        self
+    }
 }
 
 impl Templatable for Module {
@@ -129,6 +196,31 @@ pub struct LayerTemplate {
     pub description: Option<String>,
 }
 
+impl LayerTemplate {
+    /// Create a layer template with the given name and index.
+    pub fn new(name: impl Into<String>, index: LayerIndex) -> Self {
+        Self {
+            name: name.into(),
+            index,
+            modules: Vec::new(),
+            standalone_blocks: Vec::new(),
+            description: None,
+        }
+    }
+
+    #[must_use]
+    pub fn with_module(mut self, module: ModuleTemplate) -> Self {
+        self.modules.push(module);
+        self
+    }
+
+    #[must_use]
+    pub fn with_description(mut self, desc: impl Into<String>) -> Self {
+        self.description = Some(desc.into());
+        self
+    }
+}
+
 impl Templatable for Layer {
     type Template = LayerTemplate;
 
@@ -170,6 +262,25 @@ pub struct EngineTemplate {
     pub description: Option<String>,
 }
 
+impl EngineTemplate {
+    /// Create an engine template with one initial layer.
+    pub fn new(name: impl Into<String>, engine_type: InstrumentType, layer: LayerTemplate) -> Self {
+        Self {
+            id: EngineTemplateId::new(),
+            name: name.into(),
+            engine_type,
+            layers: NonEmptyVec::new(layer),
+            description: None,
+        }
+    }
+
+    #[must_use]
+    pub fn with_description(mut self, desc: impl Into<String>) -> Self {
+        self.description = Some(desc.into());
+        self
+    }
+}
+
 impl Templatable for Engine {
     type Template = EngineTemplate;
 
@@ -206,6 +317,35 @@ pub struct RigTemplate {
     pub instrument_type: InstrumentType,
     pub engines: NonEmptyVec<EngineTemplate>,
     pub description: Option<String>,
+}
+
+impl RigTemplate {
+    /// Create a rig template with one initial engine.
+    pub fn new(
+        name: impl Into<String>,
+        instrument_type: InstrumentType,
+        engine: EngineTemplate,
+    ) -> Self {
+        Self {
+            id: RigTemplateId::new(),
+            name: name.into(),
+            instrument_type,
+            engines: NonEmptyVec::new(engine),
+            description: None,
+        }
+    }
+
+    #[must_use]
+    pub fn with_description(mut self, desc: impl Into<String>) -> Self {
+        self.description = Some(desc.into());
+        self
+    }
+
+    /// Convenience: access modules from the first engine's first layer.
+    /// Useful for single-engine/single-layer templates (the common case).
+    pub fn modules(&self) -> &[ModuleTemplate] {
+        &self.engines.first().layers.first().modules
+    }
 }
 
 impl Templatable for Rig {

@@ -78,14 +78,31 @@ struct TemplateOption {
 }
 
 fn available_templates() -> Vec<TemplateOption> {
-    // Template instantiation is deferred (Step 2.5). Only blank presets for now.
-    vec![TemplateOption {
-        template: None,
-        template_index: None,
-        name: "Blank",
-        description: "Empty preset -- start from scratch",
-        icon: "\u{2795}",
-    }]
+    use signal_control::defaults::templates;
+
+    vec![
+        TemplateOption {
+            template: None,
+            template_index: None,
+            name: "Blank",
+            description: "Empty preset -- start from scratch",
+            icon: "\u{2795}",
+        },
+        TemplateOption {
+            template: Some(templates::guitar_rig_template()),
+            template_index: Some(0),
+            name: "Guitar Rig",
+            description: "11-module signal chain for electric guitar",
+            icon: "\u{1F3B8}",
+        },
+        TemplateOption {
+            template: Some(templates::vocal_rig_template()),
+            template_index: Some(1),
+            name: "Vocal Rig",
+            description: "5-module vocal processing chain",
+            icon: "\u{1F3A4}",
+        },
+    ]
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -99,12 +116,62 @@ const PREVIEW_ROW_STRIDE: usize = 3;
 
 /// Convert a `RigTemplate` into `CompositionSlot`s for the grid preview.
 ///
-/// Currently returns empty — template preview will be restored once
-/// `defaults/templates.rs` is revived with the new domain types (Step 2.5).
-fn template_to_slots(_template: &RigTemplate) -> Vec<CompositionSlot> {
-    // Template structure changed: RigTemplate now has `engines` (not `modules`).
-    // Preview generation deferred until template instantiation is wired up.
-    Vec::new()
+/// Walks the first engine's first layer (the standard single-engine layout),
+/// placing each module's blocks into a 2D grid with module group labels.
+/// Modules are laid out left-to-right in bands; when they exceed
+/// `PREVIEW_MAX_COLS`, the next module wraps to a new row band.
+fn template_to_slots(template: &RigTemplate) -> Vec<CompositionSlot> {
+    let modules = template.modules();
+    let mut slots = Vec::new();
+    let mut band_col_offset = 0usize;
+    let mut band_row = 0usize;
+
+    for mt in modules {
+        // Determine this module's grid dimensions
+        let mod_cols = mt.grid_width.unwrap_or_else(|| {
+            if mt.blocks.is_empty() {
+                1
+            } else {
+                mt.blocks.len()
+            }
+        });
+
+        // Wrap to next band if we'd exceed max columns
+        if band_col_offset > 0 && band_col_offset + mod_cols > PREVIEW_MAX_COLS {
+            band_col_offset = 0;
+            band_row += PREVIEW_ROW_STRIDE;
+        }
+
+        for bt in &mt.blocks {
+            let col = band_col_offset
+                + bt.local_col.unwrap_or_else(|| {
+                    // Serial layout: blocks at sequential columns
+                    mt.blocks
+                        .iter()
+                        .position(|b| std::ptr::eq(b, bt))
+                        .unwrap_or(0)
+                });
+            let row = band_row + bt.local_row.unwrap_or(0);
+
+            slots.push(CompositionSlot {
+                id: Uuid::new_v4(),
+                block_type: bt.block_type,
+                block_preset_id: None,
+                block_preset_name: bt.alias.clone().or_else(|| Some(bt.name.clone())),
+                plugin_name: bt.description.clone(),
+                col,
+                row,
+                module_group: Some(mt.name.clone()),
+                module_type: Some(mt.module_type),
+                is_template: true,
+                bypassed: false,
+            });
+        }
+
+        band_col_offset += mod_cols;
+    }
+
+    slots
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

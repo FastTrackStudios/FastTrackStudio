@@ -57,6 +57,7 @@ pub struct BlockSnapshot<Origin = Original> {
     bypassed: bool,
     parent_snapshot_id: Option<BlockSnapshotId>,
     tags: Tags,
+    #[facet(skip)]
     _origin: PhantomData<Origin>,
 }
 

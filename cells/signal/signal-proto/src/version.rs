@@ -173,6 +173,7 @@ pub struct VersionedRef<Id, Mode = AutoUpdate> {
     target_id: Id,
     saved_at_version: u32,
     pinned_version: Option<u32>,
+    #[facet(skip)]
     _mode: PhantomData<Mode>,
 }
 

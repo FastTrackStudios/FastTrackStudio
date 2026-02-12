@@ -3,7 +3,6 @@
 //! A [`Profile`] holds [`Patch`]es, each of which references a scene
 //! at any hierarchy level via [`ScopedSceneRef`].
 
-
 use crate::id::{PatchId, ProfileId};
 use crate::scene::ScopedSceneRef;
 use crate::tags::Tags;
@@ -86,5 +85,18 @@ mod tests {
         assert_eq!(profile.patches.len(), 1);
         assert!(profile.patch(patch_id).is_some());
         assert!(profile.patch(PatchId::new()).is_none());
+    }
+
+    #[test]
+    fn profile_json_roundtrip() {
+        let mut profile = Profile::new("Live");
+        let scene_ref = ScopedSceneRef::Rig(VersionedRef::new(RigSceneId::new(), 1));
+        profile.add_patch(Patch::new("Clean Verse", scene_ref));
+
+        let json = facet_json::to_string(&profile).unwrap();
+        let decoded: Profile = facet_json::from_str(&json).unwrap();
+        assert_eq!(decoded.name, "Live");
+        assert_eq!(decoded.patches.len(), 1);
+        assert_eq!(decoded.patches[0].name, "Clean Verse");
     }
 }

@@ -6,7 +6,8 @@
 pub mod blocks;
 pub mod modules;
 
+pub mod templates;
+
 // ─── Temporarily disabled — depend on old domain types ───────────
 // pub mod guitar;
-// pub mod templates;
 // pub mod vocals;

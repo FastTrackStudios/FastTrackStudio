@@ -16,6 +16,7 @@ pub mod module_repo;
 pub mod persist;
 pub mod preset_repo;
 pub mod profile_repo;
+pub mod scene_repo;
 pub mod seed;
 pub mod setlist_repo;
 pub mod snapshot_service;

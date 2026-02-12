@@ -12,5 +12,8 @@ daw-proto = { path = "../../daw/daw-proto" }
 # -- Others
 derive_aliases = "0.4"
 
+[dev-dependencies]
+facet-json = { workspace = true }
+
 [lints]
 workspace = true
