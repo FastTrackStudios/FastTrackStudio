@@ -1,17 +1,14 @@
 //! Rig — a complete instrument setup.
 //!
-//! A [`Rig`] ties together sections (with layers, blocks, and sources) and
-//! global blocks into a full signal chain for one instrument type.
+//! A [`Rig`] holds one or more [`Engine`]s (always at least one, enforced by
+//! [`NonEmptyVec`]). Each engine contains layers with modules and blocks.
 
 use std::fmt;
 
-use facet::Facet;
 
-use crate::block::GlobalBlock;
-use crate::id::{BlockId, ModulePresetId, RigId, SectionId};
-use crate::module::ModuleType;
-use crate::module_preset::{GlobalModuleOverride, ModulePreset};
-use crate::section::Section;
+use crate::engine::Engine;
+use crate::id::{EngineId, RigId};
+use crate::non_empty::NonEmptyVec;
 use crate::tags::{Taggable, Tags};
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -19,7 +16,7 @@ use crate::tags::{Taggable, Tags};
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// The instrument category for a rig.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Facet)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, ::facet::Facet)]
 #[repr(u8)]
 pub enum InstrumentType {
     Guitar = 0,
@@ -49,86 +46,52 @@ impl fmt::Display for InstrumentType {
 // Rig
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// A complete instrument setup with sections and global blocks.
+/// A complete instrument setup — one or more engines.
 ///
-/// Each rig represents a full signal chain for one instrument type.
-/// Sections contain layers with local blocks, while global blocks are
-/// shared across the entire rig.
-#[derive(Debug, Clone, Facet)]
+/// Always has at least one engine (enforced by `NonEmptyVec`).
+#[derive(Debug, Clone, ::facet::Facet)]
 pub struct Rig {
     pub id: RigId,
     pub name: String,
     pub instrument_type: InstrumentType,
-    pub sections: Vec<Section>,
-    pub global_blocks: Vec<GlobalBlock>,
-    /// All available module presets in this rig.
-    pub module_presets: Vec<ModulePreset>,
-    /// Globally locked module overrides (persist across all preset/scene/song changes).
-    pub global_module_overrides: Vec<GlobalModuleOverride>,
-    /// Tags for organizing and filtering.
+    pub engines: NonEmptyVec<Engine>,
     pub tags: Tags,
 }
 
 impl Rig {
-    /// Create a new empty rig for the given instrument type.
-    pub fn new(name: impl Into<String>, instrument_type: InstrumentType) -> Self {
+    /// Create a rig with its first (required) engine.
+    pub fn new(
+        name: impl Into<String>,
+        instrument_type: InstrumentType,
+        first_engine: Engine,
+    ) -> Self {
         Self {
             id: RigId::new(),
             name: name.into(),
             instrument_type,
-            sections: Vec::new(),
-            global_blocks: Vec::new(),
-            module_presets: Vec::new(),
-            global_module_overrides: Vec::new(),
+            engines: NonEmptyVec::new(first_engine),
             tags: Tags::new(),
         }
     }
 
-    /// Add a section to the rig.
-    pub fn add_section(&mut self, section: Section) {
-        self.sections.push(section);
+    /// Add an engine to this rig.
+    pub fn add_engine(&mut self, engine: Engine) {
+        self.engines.push(engine);
     }
 
-    /// Add a global block to the rig.
-    pub fn add_global_block(&mut self, global_block: GlobalBlock) {
-        self.global_blocks.push(global_block);
+    /// Find an engine by ID.
+    pub fn engine(&self, id: EngineId) -> Option<&Engine> {
+        self.engines.iter().find(|e| e.id == id)
     }
 
-    /// Get a section by ID.
-    pub fn get_section(&self, id: SectionId) -> Option<&Section> {
-        self.sections.iter().find(|s| s.id == id)
+    /// Find an engine by ID (mutable).
+    pub fn engine_mut(&mut self, id: EngineId) -> Option<&mut Engine> {
+        self.engines.iter_mut().find(|e| e.id == id)
     }
 
-    /// Get a mutable section by ID.
-    pub fn get_section_mut(&mut self, id: SectionId) -> Option<&mut Section> {
-        self.sections.iter_mut().find(|s| s.id == id)
-    }
-
-    /// Get a global block by its underlying `BlockId`.
-    pub fn get_global_block(&self, block_id: BlockId) -> Option<&GlobalBlock> {
-        self.global_blocks.iter().find(|gb| gb.block.id == block_id)
-    }
-
-    /// Add a module preset to the rig.
-    pub fn add_module_preset(&mut self, preset: ModulePreset) {
-        self.module_presets.push(preset);
-    }
-
-    /// Get a module preset by ID.
-    pub fn get_module_preset(&self, id: ModulePresetId) -> Option<&ModulePreset> {
-        self.module_presets.iter().find(|p| p.id == id)
-    }
-
-    /// Add a global module override.
-    pub fn add_global_override(&mut self, global_override: GlobalModuleOverride) {
-        self.global_module_overrides.push(global_override);
-    }
-
-    /// Check whether a module type is locked by a global override.
-    pub fn is_module_locked(&self, module_type: &ModuleType) -> bool {
-        self.global_module_overrides
-            .iter()
-            .any(|o| o.module_type == *module_type && o.locked)
+    /// Number of engines in this rig.
+    pub fn engine_count(&self) -> usize {
+        self.engines.len()
     }
 }
 
@@ -153,62 +116,39 @@ impl Taggable for Rig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::block::{Block, PluginId};
     use crate::layer::Layer;
-    use crate::normalized::Order;
+    use crate::version::LayerIndex;
 
-    fn test_section() -> Section {
-        Section::new("Amp Section", Layer::new("Main", 0))
-    }
-
-    fn test_global_block() -> GlobalBlock {
-        let block = Block::new("Room Reverb", PluginId::vst3("com.test.reverb", "Reverb"));
-        GlobalBlock {
-            block,
-            order: Order::new(0),
-            tags: Tags::new(),
-        }
+    fn test_engine(name: &str) -> Engine {
+        Engine::new(
+            name,
+            InstrumentType::Guitar,
+            Layer::new("Main", LayerIndex::new(1)),
+        )
     }
 
     #[test]
-    fn rig_creation() {
-        let rig = Rig::new("Main Guitar", InstrumentType::Guitar);
-        assert_eq!(rig.name, "Main Guitar");
-        assert_eq!(rig.instrument_type, InstrumentType::Guitar);
-        assert!(rig.sections.is_empty());
-        assert!(rig.global_blocks.is_empty());
+    fn rig_always_has_at_least_one_engine() {
+        let rig = Rig::new("Guitar Rig", InstrumentType::Guitar, test_engine("Main"));
+        assert_eq!(rig.engines.len(), 1);
+        assert_eq!(rig.engines.first().name, "Main");
     }
 
     #[test]
-    fn section_management() {
-        let mut rig = Rig::new("Keys Rig", InstrumentType::Keys);
-        let section = test_section();
-        let section_id = section.id;
-
-        rig.add_section(section);
-        assert_eq!(rig.sections.len(), 1);
-
-        // Find by ID
-        assert!(rig.get_section(section_id).is_some());
-        assert!(rig.get_section(SectionId::new()).is_none());
-
-        // Mutable access
-        let s = rig.get_section_mut(section_id).unwrap();
-        s.enabled = false;
-        assert!(!rig.get_section(section_id).unwrap().enabled);
+    fn rig_add_engines() {
+        let mut rig = Rig::new("Guitar Rig", InstrumentType::Guitar, test_engine("Clean"));
+        rig.add_engine(test_engine("Dirty"));
+        assert_eq!(rig.engine_count(), 2);
     }
 
     #[test]
-    fn global_blocks() {
-        let mut rig = Rig::new("Bass Rig", InstrumentType::Bass);
-        let gb = test_global_block();
-        let block_id = gb.block.id;
+    fn rig_find_engine_by_id() {
+        let engine = test_engine("Main");
+        let engine_id = engine.id;
+        let rig = Rig::new("Guitar Rig", InstrumentType::Guitar, engine);
 
-        rig.add_global_block(gb);
-        assert_eq!(rig.global_blocks.len(), 1);
-
-        assert!(rig.get_global_block(block_id).is_some());
-        assert!(rig.get_global_block(BlockId::new()).is_none());
+        assert!(rig.engine(engine_id).is_some());
+        assert!(rig.engine(EngineId::new()).is_none());
     }
 
     #[test]
@@ -224,5 +164,4 @@ mod tests {
             "Theremin"
         );
     }
-
 }

@@ -21,7 +21,6 @@
 //! assert!(patch.default_variation().is_some());
 //! ```
 
-use facet::Facet;
 
 use crate::block::Block;
 use crate::id::{PatchId, VariationId};
@@ -41,7 +40,7 @@ use crate::parameter::ParameterValue;
 ///
 /// - "Grand Piano" patch with "Soft", "Normal", "Hard" variations
 /// - "Crunch Amp" patch with "Rhythm", "Lead Boost" variations
-#[derive(Debug, Clone, Facet)]
+#[derive(Debug, Clone, ::facet::Facet)]
 pub struct Patch {
     /// Unique identifier.
     pub id: PatchId,
@@ -145,7 +144,7 @@ impl Patch {
 ///
 /// - `PatchCategory::new("Drive")` displays as `"Drive"`
 /// - `PatchCategory::with_style("Drive", "Metal")` displays as `"Metal Drive"`
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Facet)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, ::facet::Facet)]
 pub struct PatchCategory {
     /// Base category (e.g., "Clean", "Crunch", "Drive", "Lead").
     pub base: String,
@@ -250,7 +249,7 @@ impl PatchCategory {
 /// Variations allow quick parameter tweaks without changing the underlying
 /// plugin chain. They store only the parameter overrides relative to the
 /// patch's base parameters.
-#[derive(Debug, Clone, Facet)]
+#[derive(Debug, Clone, ::facet::Facet)]
 pub struct PatchVariation {
     /// Unique identifier.
     pub id: VariationId,

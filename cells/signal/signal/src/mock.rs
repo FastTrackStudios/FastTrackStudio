@@ -3,7 +3,7 @@
 //!
 //! `MockModuleSlot` simulates plugin loading with configurable delays.
 //! `MockRigEngine` wires up mock slots and implements the full resolution,
-//! diff, and switching pipeline.
+//! diff, and switching pipeline using the new hierarchical scene model.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -16,19 +16,19 @@ use crate::engine::{
     EngineError, InstanceHandle, InstanceState, ModuleTarget, PresetLoadHandle, PresetReadiness,
 };
 use crate::module::ModuleType;
-use crate::module_preset::{ModulePreset, ModuleSnapshot};
-use crate::performance::Scene;
-use crate::preset::Preset;
+use crate::override_tree::{SceneOverride, Validated};
+use crate::preset::ModulePreset;
 use crate::rig::Rig;
+use crate::scene::ScopedSceneRef;
+use crate::snapshot::ModuleSnapshot;
+use crate::stores::SceneStore;
 
 use super::diff::{self, SlotState};
 use super::resolver::{self, ResolvedModules};
 use super::rig_engine::{RigEngine, TransitionResult};
 use super::slot::{ActivateResult, LoadResult, ModuleSlot};
 
-// ─────────────────────────────────────────────────────────────────────────────
-// MockInstance
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── MockInstance ────────────────────────────────────────────────
 
 /// A simulated plugin instance.
 #[derive(Debug, Clone)]
@@ -38,9 +38,7 @@ struct MockInstance {
     state: InstanceState,
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// MockModuleSlot
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── MockModuleSlot ──────────────────────────────────────────────
 
 /// In-memory module slot with configurable simulated load delay.
 pub struct MockModuleSlot {
@@ -229,16 +227,13 @@ impl ModuleSlot for MockModuleSlot {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// MockRigEngine
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── MockRigEngine ───────────────────────────────────────────────
 
 /// Action to execute for a slot diff (avoids holding mutex across await).
 enum DiffAction {
     LoadAndActivate {
         module_type: ModuleType,
         target: ModuleTarget,
-        module_preset: ModulePreset,
     },
     Activate {
         module_type: ModuleType,
@@ -246,7 +241,6 @@ enum DiffAction {
     },
     ApplySnapshot {
         module_type: ModuleType,
-        snapshot: ModuleSnapshot,
     },
     Disable {
         module_type: ModuleType,
@@ -374,12 +368,16 @@ impl RigEngine for MockRigEngine {
         let mut slots = self.slots.lock().unwrap();
         slots.clear();
 
-        // Create a slot for each module type that has presets in the rig
-        let mut module_types: Vec<ModuleType> = rig
-            .module_presets
-            .iter()
-            .map(|p| p.module_type)
-            .collect();
+        // Discover module types from the physical hierarchy:
+        // rig.engines → layers → modules
+        let mut module_types = Vec::new();
+        for engine in rig.engines.iter() {
+            for layer in engine.layers.iter() {
+                for module in &layer.modules {
+                    module_types.push(module.module_type);
+                }
+            }
+        }
         module_types.sort_by_key(|mt| *mt as u8);
         module_types.dedup();
 
@@ -390,70 +388,54 @@ impl RigEngine for MockRigEngine {
         Ok(())
     }
 
-    async fn load_preset_with_scene(
+    async fn load_scene(
         &self,
-        preset: &Preset,
-        scene: &Scene,
+        scene_ref: &ScopedSceneRef,
         rig: &Rig,
+        store: &dyn SceneStore,
+        overrides: &[SceneOverride<Validated>],
     ) -> TransitionResult {
-        // 1. Resolve modules
-        let new_resolved = resolver::resolve_modules(preset, scene, rig, &[]);
+        // 1. Resolve modules via hierarchical resolver
+        let new_resolved = resolver::resolve_modules(scene_ref, rig, store, overrides);
 
         // 2. Diff against current
         let current_states = self.current_slot_states();
         let diffs = diff::compute_diff(&current_states, &new_resolved, &|_mt, _slot| None);
 
-        // 3. Collect actions (holding lock briefly to gather data)
-        let actions: Vec<DiffAction> = {
-            diffs
-                .iter()
-                .filter_map(|d| match d {
-                    crate::engine::SlotDiff::LoadAndActivate { module_type, target } => {
-                        let module_preset = rig.get_module_preset(target.module_preset_id);
-                        module_preset.map(|mp| DiffAction::LoadAndActivate {
-                            module_type: *module_type,
-                            target: target.clone(),
-                            module_preset: mp.clone(),
-                        })
-                    }
-                    crate::engine::SlotDiff::Activate { module_type, handle } => {
-                        Some(DiffAction::Activate {
-                            module_type: *module_type,
-                            handle: *handle,
-                        })
-                    }
-                    crate::engine::SlotDiff::ApplySnapshot {
-                        module_type,
-                        snapshot_id,
-                        ..
-                    } => {
-                        let snap = rig
-                            .module_presets
-                            .iter()
-                            .flat_map(|p| p.snapshots.iter())
-                            .find(|s| s.id == *snapshot_id)
-                            .cloned();
-                        snap.map(|s| DiffAction::ApplySnapshot {
-                            module_type: *module_type,
-                            snapshot: s,
-                        })
-                    }
-                    crate::engine::SlotDiff::Disable { module_type } => {
-                        Some(DiffAction::Disable {
-                            module_type: *module_type,
-                        })
-                    }
-                    crate::engine::SlotDiff::Enable { module_type } => {
-                        Some(DiffAction::Enable {
-                            module_type: *module_type,
-                        })
-                    }
-                    crate::engine::SlotDiff::NoChange { .. } => None,
-                })
-                .collect()
-        };
+        // 3. Collect actions
+        let actions: Vec<DiffAction> = diffs
+            .iter()
+            .filter_map(|d| match d {
+                crate::engine::SlotDiff::LoadAndActivate {
+                    module_type,
+                    target,
+                } => Some(DiffAction::LoadAndActivate {
+                    module_type: *module_type,
+                    target: target.clone(),
+                }),
+                crate::engine::SlotDiff::Activate {
+                    module_type,
+                    handle,
+                } => Some(DiffAction::Activate {
+                    module_type: *module_type,
+                    handle: *handle,
+                }),
+                crate::engine::SlotDiff::ApplySnapshot { module_type, .. } => {
+                    Some(DiffAction::ApplySnapshot {
+                        module_type: *module_type,
+                    })
+                }
+                crate::engine::SlotDiff::Disable { module_type } => Some(DiffAction::Disable {
+                    module_type: *module_type,
+                }),
+                crate::engine::SlotDiff::Enable { module_type } => Some(DiffAction::Enable {
+                    module_type: *module_type,
+                }),
+                crate::engine::SlotDiff::NoChange { .. } => None,
+            })
+            .collect();
 
-        // 4. Execute actions synchronously (all MockModuleSlot state is behind inner Mutex/Atomics)
+        // 4. Execute actions synchronously
         let mut slot_errors = Vec::new();
 
         for action in &actions {
@@ -461,7 +443,6 @@ impl RigEngine for MockRigEngine {
                 DiffAction::LoadAndActivate {
                     module_type,
                     target,
-                    module_preset: _,
                 } => {
                     let slots = self.slots.lock().unwrap();
                     if let Some(slot) = slots.get(module_type) {
@@ -493,7 +474,6 @@ impl RigEngine for MockRigEngine {
                             h
                         };
 
-                        // Activate synchronously (mock activate doesn't actually await)
                         Self::sync_activate(slot, handle, *module_type, &mut slot_errors);
                     }
                 }
@@ -506,11 +486,7 @@ impl RigEngine for MockRigEngine {
                         Self::sync_activate(slot, *handle, *module_type, &mut slot_errors);
                     }
                 }
-                DiffAction::ApplySnapshot {
-                    module_type,
-                    snapshot: _,
-                } => {
-                    // Mock apply_snapshot is a no-op for Active instances
+                DiffAction::ApplySnapshot { module_type } => {
                     let slots = self.slots.lock().unwrap();
                     if let Some(slot) = slots.get(module_type) {
                         let instances = slot.instances.lock().unwrap();
@@ -552,21 +528,11 @@ impl RigEngine for MockRigEngine {
         }
     }
 
-    async fn switch_scene(
-        &self,
-        scene: &Scene,
-        preset: &Preset,
-        rig: &Rig,
-    ) -> TransitionResult {
-        self.load_preset_with_scene(preset, scene, rig).await
-    }
-
     async fn apply_snapshot(
         &self,
         module_type: ModuleType,
         _snapshot: &ModuleSnapshot,
     ) -> Result<(), EngineError> {
-        // All synchronous — no await, so holding std::sync::Mutex is fine.
         let slots = self.slots.lock().unwrap();
         let slot = slots
             .get(&module_type)
@@ -582,9 +548,9 @@ impl RigEngine for MockRigEngine {
 
     async fn preload(
         &self,
-        _preset: &Preset,
-        _scene: &Scene,
+        _scene_ref: &ScopedSceneRef,
         _rig: &Rig,
+        _store: &dyn SceneStore,
     ) -> PresetLoadHandle {
         self.next_load_handle()
     }
@@ -602,7 +568,6 @@ impl RigEngine for MockRigEngine {
     }
 
     async fn tick(&self) {
-        // All synchronous — cleanup tails by removing Tailing instances.
         let slots = self.slots.lock().unwrap();
         for slot in slots.values() {
             let mut instances = slot.instances.lock().unwrap();
@@ -611,7 +576,6 @@ impl RigEngine for MockRigEngine {
     }
 
     async fn shutdown(&self) {
-        // All synchronous — mark all alive instances as Unloaded.
         let slots = self.slots.lock().unwrap();
         for slot in slots.values() {
             let mut instances = slot.instances.lock().unwrap();
@@ -624,56 +588,75 @@ impl RigEngine for MockRigEngine {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Tests
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── Tests ───────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::category::{BaseTone, PresetCategory};
-    use crate::id::{ModulePresetId, PresetId};
-    use crate::module::ModuleType;
-    use crate::module_preset::ModuleAssignment;
-    use crate::normalized::Order;
-    use crate::rig::InstrumentType;
+    use crate::category::PresetCategory;
+    use crate::id::*;
+    use crate::module::{Module, ModuleType};
+    use crate::preset::{ModulePreset, PresetMetadata};
+    use crate::scene::LayerSceneBuilder;
+    use crate::snapshot::ModuleSnapshot;
+    use crate::stores::InMemorySceneStore;
+    use crate::version::{LayerIndex, VersionedRef};
+    use signal_proto::engine::Engine as ProtoEngine;
+    use signal_proto::layer::Layer;
+    use signal_proto::rig::InstrumentType;
 
-    fn test_rig_with_presets() -> (Rig, ModulePresetId, ModulePresetId) {
-        let mut rig = Rig::new("Test Rig", InstrumentType::Guitar);
+    /// Helper: build a rig + store with registered presets, returning IDs.
+    fn setup_rig_and_store(
+        module_types: &[ModuleType],
+    ) -> (
+        Rig,
+        InMemorySceneStore,
+        Vec<(ModulePresetId, ModuleSnapshotId)>,
+    ) {
+        let mut store = InMemorySceneStore::new();
+        let mut ids = Vec::new();
 
-        let drive_preset =
-            crate::module_preset::ModulePreset::new("Blues Stack", ModuleType::Drive);
-        let amp_preset = crate::module_preset::ModulePreset::new("AC30", ModuleType::Amp);
-        let drive_id = drive_preset.id;
-        let amp_id = amp_preset.id;
+        let mut layer = Layer::new("Main", LayerIndex::new(1));
+        for mt in module_types {
+            layer.add_module(Module::new(mt.display_name(), *mt));
 
-        rig.add_module_preset(drive_preset);
-        rig.add_module_preset(amp_preset);
+            let snapshot = ModuleSnapshot::new(format!("{} Snapshot", mt.display_name()), vec![]);
+            let snap_id = snapshot.id;
+            let preset = ModulePreset::new(
+                PresetMetadata::new(
+                    format!("{} Preset", mt.display_name()),
+                    PresetCategory::default(),
+                ),
+                *mt,
+                snapshot,
+            );
+            let preset_id = preset.id;
+            store.register_module_preset(preset);
+            ids.push((preset_id, snap_id));
+        }
 
-        (rig, drive_id, amp_id)
+        let engine = ProtoEngine::new("Guitar", InstrumentType::Guitar, layer);
+        let rig = Rig::new("Test Rig", InstrumentType::Guitar, engine);
+
+        (rig, store, ids)
     }
 
-    fn test_preset_with_assignments(
-        drive_id: ModulePresetId,
-        amp_id: ModulePresetId,
-    ) -> Preset {
-        let mut preset = Preset::new(
-            "Test Preset",
-            PresetCategory::Generic {
-                base_tone: BaseTone::Clean,
-            },
-        );
-        preset.add_module_assignment(ModuleAssignment::new(
-            ModuleType::Drive,
-            drive_id,
-            Order::new(0),
-        ));
-        preset.add_module_assignment(ModuleAssignment::new(
-            ModuleType::Amp,
-            amp_id,
-            Order::new(1),
-        ));
-        preset
+    /// Helper: create a layer scene from snapshot IDs and register it.
+    fn make_layer_scene(
+        store: &mut InMemorySceneStore,
+        snap_ids: &[ModuleSnapshotId],
+    ) -> LayerSceneId {
+        let refs: Vec<_> = snap_ids
+            .iter()
+            .map(|id| VersionedRef::new(*id, 1))
+            .collect();
+        let scene = LayerSceneBuilder::new("Test Scene")
+            .modules(refs)
+            .no_standalone_blocks()
+            .build();
+        let scene_id = scene.id;
+        store.register_layer_scene(scene);
+        scene_id
     }
 
     #[tokio::test]
@@ -681,19 +664,19 @@ mod tests {
         let slot = MockModuleSlot::new(ModuleType::Drive);
         let preset_id = ModulePresetId::new();
         let target = ModuleTarget::new(ModuleType::Drive, preset_id);
-        let module_preset =
-            crate::module_preset::ModulePreset::new("Test", ModuleType::Drive);
+        let module_preset = ModulePreset::new(
+            PresetMetadata::new("Test", PresetCategory::default()),
+            ModuleType::Drive,
+            ModuleSnapshot::new("snap", vec![]),
+        );
 
-        // Load
         let result = slot.load(&target, &module_preset).await;
         assert!(result.is_ok());
         let handle = result.handle().unwrap();
 
-        // Verify state
         assert_eq!(slot.instance_state(handle), Some(InstanceState::Ready));
         assert!(slot.active_instance().is_none());
 
-        // Activate
         let act_result = slot.activate(handle).await;
         assert!(act_result.is_ok());
         assert_eq!(slot.instance_state(handle), Some(InstanceState::Active));
@@ -703,22 +686,22 @@ mod tests {
     #[tokio::test]
     async fn mock_slot_gapless_switch() {
         let slot = MockModuleSlot::new(ModuleType::Drive);
-        let module_preset =
-            crate::module_preset::ModulePreset::new("Test", ModuleType::Drive);
+        let module_preset = ModulePreset::new(
+            PresetMetadata::new("Test", PresetCategory::default()),
+            ModuleType::Drive,
+            ModuleSnapshot::new("snap", vec![]),
+        );
 
-        // Load and activate first instance
         let target1 = ModuleTarget::new(ModuleType::Drive, ModulePresetId::new());
         let result1 = slot.load(&target1, &module_preset).await;
         let handle1 = result1.handle().unwrap();
         slot.activate(handle1).await;
 
-        // Load and activate second instance
         let target2 = ModuleTarget::new(ModuleType::Drive, ModulePresetId::new());
         let result2 = slot.load(&target2, &module_preset).await;
         let handle2 = result2.handle().unwrap();
         let act = slot.activate(handle2).await;
 
-        // First instance should now be tailing
         match act {
             ActivateResult::Activated {
                 new_active,
@@ -730,23 +713,19 @@ mod tests {
             _ => panic!("expected Activated"),
         }
 
-        assert_eq!(
-            slot.instance_state(handle1),
-            Some(InstanceState::Tailing)
-        );
-        assert_eq!(
-            slot.instance_state(handle2),
-            Some(InstanceState::Active)
-        );
+        assert_eq!(slot.instance_state(handle1), Some(InstanceState::Tailing));
+        assert_eq!(slot.instance_state(handle2), Some(InstanceState::Active));
     }
 
     #[tokio::test]
     async fn mock_slot_cleanup_tails() {
         let slot = MockModuleSlot::new(ModuleType::Drive);
-        let module_preset =
-            crate::module_preset::ModulePreset::new("Test", ModuleType::Drive);
+        let module_preset = ModulePreset::new(
+            PresetMetadata::new("Test", PresetCategory::default()),
+            ModuleType::Drive,
+            ModuleSnapshot::new("snap", vec![]),
+        );
 
-        // Create a tailing instance
         let target1 = ModuleTarget::new(ModuleType::Drive, ModulePresetId::new());
         let r1 = slot.load(&target1, &module_preset).await;
         let h1 = r1.handle().unwrap();
@@ -757,10 +736,7 @@ mod tests {
         let h2 = r2.handle().unwrap();
         slot.activate(h2).await;
 
-        // h1 is now tailing
         assert_eq!(slot.loaded_instances().len(), 2);
-
-        // Cleanup
         slot.cleanup_tails().await;
         assert_eq!(slot.loaded_instances().len(), 1);
         assert_eq!(slot.active_instance(), Some(h2));
@@ -771,13 +747,15 @@ mod tests {
         let slot = MockModuleSlot::new(ModuleType::Drive);
         let preset_id = ModulePresetId::new();
         let target = ModuleTarget::new(ModuleType::Drive, preset_id);
-        let module_preset =
-            crate::module_preset::ModulePreset::new("Test", ModuleType::Drive);
+        let module_preset = ModulePreset::new(
+            PresetMetadata::new("Test", PresetCategory::default()),
+            ModuleType::Drive,
+            ModuleSnapshot::new("snap", vec![]),
+        );
 
         let r1 = slot.load(&target, &module_preset).await;
         let h1 = r1.handle().unwrap();
 
-        // Loading same target again returns AlreadyLoaded
         let r2 = slot.load(&target, &module_preset).await;
         match r2 {
             LoadResult::AlreadyLoaded(h) => assert_eq!(h, h1),
@@ -799,17 +777,15 @@ mod tests {
 
     #[tokio::test]
     async fn mock_engine_initialize_and_load() {
-        let (rig, drive_id, amp_id) = test_rig_with_presets();
+        let (rig, mut store, ids) = setup_rig_and_store(&[ModuleType::Drive, ModuleType::Amp]);
         let engine = MockRigEngine::new();
-
         engine.initialize(&rig).await.unwrap();
 
-        let preset = test_preset_with_assignments(drive_id, amp_id);
-        let scene = Scene::new("Test Scene", preset.id);
+        let snap_ids: Vec<_> = ids.iter().map(|(_, s)| *s).collect();
+        let layer_scene_id = make_layer_scene(&mut store, &snap_ids);
+        let scene_ref = ScopedSceneRef::Layer(VersionedRef::new(layer_scene_id, 1));
 
-        let result = engine
-            .load_preset_with_scene(&preset, &scene, &rig)
-            .await;
+        let result = engine.load_scene(&scene_ref, &rig, &store, &[]).await;
 
         assert!(result.outcome.is_completed());
         assert!(result.slot_errors.is_empty());
@@ -817,21 +793,18 @@ mod tests {
 
     #[tokio::test]
     async fn mock_engine_scene_switch_minimal_diff() {
-        let (rig, drive_id, amp_id) = test_rig_with_presets();
+        let (rig, mut store, ids) = setup_rig_and_store(&[ModuleType::Drive, ModuleType::Amp]);
         let engine = MockRigEngine::new();
         engine.initialize(&rig).await.unwrap();
 
-        let preset = test_preset_with_assignments(drive_id, amp_id);
+        let snap_ids: Vec<_> = ids.iter().map(|(_, s)| *s).collect();
+        let scene1_id = make_layer_scene(&mut store, &snap_ids);
+        let scene_ref1 = ScopedSceneRef::Layer(VersionedRef::new(scene1_id, 1));
 
-        // Load initial scene
-        let scene1 = Scene::new("Verse", preset.id);
-        engine
-            .load_preset_with_scene(&preset, &scene1, &rig)
-            .await;
+        engine.load_scene(&scene_ref1, &rig, &store, &[]).await;
 
-        // Switch to a scene with same assignments (should be all NoChange)
-        let scene2 = Scene::new("Chorus", preset.id);
-        let result = engine.switch_scene(&scene2, &preset, &rig).await;
+        // Switch to same scene — should be all NoChange
+        let result = engine.load_scene(&scene_ref1, &rig, &store, &[]).await;
 
         assert!(result.outcome.is_completed());
         assert!(result.slot_errors.is_empty());
@@ -839,50 +812,39 @@ mod tests {
 
     #[tokio::test]
     async fn mock_engine_readiness() {
+        let (rig, store, _) = setup_rig_and_store(&[ModuleType::Drive]);
         let engine = MockRigEngine::new();
-        let handle = engine
-            .preload(
-                &Preset::new(
-                    "Test",
-                    PresetCategory::Generic {
-                        base_tone: BaseTone::Clean,
-                    },
-                ),
-                &Scene::new("Test", PresetId::new()),
-                &Rig::new("Test", InstrumentType::Guitar),
-            )
-            .await;
+        let scene_ref = ScopedSceneRef::Layer(VersionedRef::new(LayerSceneId::new(), 1));
 
+        let handle = engine.preload(&scene_ref, &rig, &store).await;
         assert!(engine.check_readiness(handle).is_ready());
     }
 
     #[tokio::test]
     async fn mock_engine_tick_cleans_tails() {
-        let (rig, drive_id, amp_id) = test_rig_with_presets();
+        let (rig, mut store, ids) = setup_rig_and_store(&[ModuleType::Drive]);
         let engine = MockRigEngine::new();
         engine.initialize(&rig).await.unwrap();
 
-        let preset1 = test_preset_with_assignments(drive_id, amp_id);
-        let scene1 = Scene::new("Scene1", preset1.id);
-        engine
-            .load_preset_with_scene(&preset1, &scene1, &rig)
-            .await;
+        let snap_ids: Vec<_> = ids.iter().map(|(_, s)| *s).collect();
+        let scene_id = make_layer_scene(&mut store, &snap_ids);
+        let scene_ref = ScopedSceneRef::Layer(VersionedRef::new(scene_id, 1));
 
+        engine.load_scene(&scene_ref, &rig, &store, &[]).await;
         engine.tick().await;
     }
 
     #[tokio::test]
     async fn mock_engine_shutdown() {
-        let (rig, drive_id, amp_id) = test_rig_with_presets();
+        let (rig, mut store, ids) = setup_rig_and_store(&[ModuleType::Drive, ModuleType::Amp]);
         let engine = MockRigEngine::new();
         engine.initialize(&rig).await.unwrap();
 
-        let preset = test_preset_with_assignments(drive_id, amp_id);
-        let scene = Scene::new("Test", preset.id);
-        engine
-            .load_preset_with_scene(&preset, &scene, &rig)
-            .await;
+        let snap_ids: Vec<_> = ids.iter().map(|(_, s)| *s).collect();
+        let scene_id = make_layer_scene(&mut store, &snap_ids);
+        let scene_ref = ScopedSceneRef::Layer(VersionedRef::new(scene_id, 1));
 
+        engine.load_scene(&scene_ref, &rig, &store, &[]).await;
         engine.shutdown().await;
     }
 }

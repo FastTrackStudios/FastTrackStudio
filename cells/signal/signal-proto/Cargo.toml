@@ -9,5 +9,8 @@ uuid = { version = "1.0", features = ["v4", "v5"] }
 facet = { workspace = true, features = ["uuid"] }
 daw-proto = { path = "../../daw/daw-proto" }
 
+# -- Others
+derive_aliases = "0.4"
+
 [lints]
 workspace = true

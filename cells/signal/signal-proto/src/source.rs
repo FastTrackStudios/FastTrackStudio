@@ -4,7 +4,6 @@
 //! sampler, or internal generator. Sources feed into sections and layers
 //! for processing.
 
-use facet::Facet;
 use uuid::Uuid;
 
 use crate::block::PluginId;
@@ -15,7 +14,7 @@ use crate::normalized::{NormalizedF64, Pan};
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// The kind of sound generator backing a source.
-#[derive(Debug, Clone, PartialEq, Eq, Facet)]
+#[derive(Debug, Clone, PartialEq, Eq, ::facet::Facet)]
 #[repr(u8)]
 pub enum SourceType {
     /// A hardware audio input (mic, DI, line in).
@@ -66,7 +65,7 @@ impl SourceType {
 ///
 /// Each source has a type (audio input, instrument, sampler, or generator),
 /// an enable toggle, and level/pan controls.
-#[derive(Debug, Clone, Facet)]
+#[derive(Debug, Clone, ::facet::Facet)]
 pub struct Source {
     pub id: Uuid,
     pub name: String,

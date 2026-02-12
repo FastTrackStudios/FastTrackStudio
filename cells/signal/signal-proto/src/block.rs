@@ -5,7 +5,6 @@
 //! values. [`GlobalBlock`] wraps a block with a signal-chain [`Order`] for
 //! positioning in a rig's global block pool.
 
-use facet::Facet;
 
 use crate::id::BlockId;
 use crate::normalized::Order;
@@ -17,7 +16,7 @@ use crate::tags::{Taggable, Tags};
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Audio plugin format.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Facet)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ::facet::Facet)]
 #[repr(C)]
 pub enum PluginFormat {
     Vst3,
@@ -31,7 +30,7 @@ pub enum PluginFormat {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Identifies a specific plugin by format, unique ID, and display name.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Facet)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, ::facet::Facet)]
 pub struct PluginId {
     /// Plugin format (VST3, CLAP, AU, JS).
     pub format: PluginFormat,
@@ -93,7 +92,7 @@ impl PluginId {
 /// Functional category of a DSP block.
 ///
 /// Used for UI grouping, icon selection, and signal-chain validation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Facet, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ::facet::Facet, Default)]
 #[repr(C)]
 pub enum BlockType {
     Input,
@@ -208,7 +207,7 @@ impl BlockType {
 /// Each block is backed by a plugin, has a bypass toggle, and holds a list of
 /// parameter values. Parameters are stored by index into the plugin's parameter
 /// spec list.
-#[derive(Debug, Clone, PartialEq, Facet)]
+#[derive(Debug, Clone, PartialEq, ::facet::Facet)]
 pub struct Block {
     /// Unique identifier for this block instance.
     pub id: BlockId,
@@ -336,7 +335,7 @@ impl Taggable for Block {
 /// A block with a signal-chain ordering for the global block pool.
 ///
 /// Global blocks are shared across presets and positioned in a fixed order.
-#[derive(Debug, Clone, Facet)]
+#[derive(Debug, Clone, ::facet::Facet)]
 pub struct GlobalBlock {
     /// The underlying block.
     pub block: Block,

@@ -1,7 +1,7 @@
 //! RigControlService — ROAM service for the gapless module engine.
 //!
 //! This service provides RPC access to engine state, module slot management,
-//! preset/scene transitions, and preloading. Commands are executed via the
+//! scene transitions, and preloading. Commands are executed via the
 //! `execute` method; events are streamed via `subscribe` / `subscribe_slots`.
 //!
 //! Note: This module uses simplified RPC types that can be easily serialized.
@@ -53,7 +53,7 @@ pub struct InstanceInfo {
     pub state: InstanceState,
 }
 
-/// Result of a preset/scene transition for RPC communication.
+/// Result of a scene transition for RPC communication.
 #[derive(Debug, Clone, PartialEq, Facet)]
 pub struct TransitionResultInfo {
     /// Overall outcome.
@@ -104,47 +104,27 @@ pub struct ProfileInfo {
     pub id: Uuid,
     /// Profile name
     pub name: String,
-    /// Associated rig ID
-    pub rig_id: Uuid,
-    /// Number of scene templates in this profile
-    pub scene_count: usize,
-    /// Scene names for quick display
+    /// Number of patches in this profile
+    pub patch_count: usize,
+    /// Patch details
     #[facet(default)]
-    pub scene_names: Vec<String>,
-    /// Detailed scene info
-    #[facet(default)]
-    pub scenes: Vec<ProfileSceneInfo>,
-    /// Optional description
-    #[facet(default)]
-    pub description: Option<String>,
-    /// Whether this profile is a structural template (seed data) vs concrete user preset
-    #[facet(default)]
-    pub is_template: bool,
+    pub patches: Vec<PatchInfo>,
 }
 
-/// Simplified profile scene information for RPC communication.
-///
-/// A ProfileScene is a template/scene within a Profile that references
-/// a specific Preset and optionally a specific PresetSnapshot (variation).
+/// Simplified patch information for RPC communication.
 #[derive(Debug, Clone, PartialEq, Facet)]
-pub struct ProfileSceneInfo {
-    /// Scene index within profile/song
-    pub index: usize,
-    /// Scene name
+pub struct PatchInfo {
+    /// Patch ID
+    pub id: Uuid,
+    /// Patch name
     pub name: String,
-    /// Preset ID this scene references
-    pub preset_id: Uuid,
-    /// Preset name (resolved)
-    pub preset_name: String,
-    /// Preset scene ID (which variation of the preset to use, if any)
-    pub preset_snapshot_id: Option<Uuid>,
-    /// Preset scene name (if any)
-    pub preset_snapshot_name: Option<String>,
+    /// Index within the profile
+    pub index: usize,
 }
 
-/// Simplified preset information for RPC communication.
+/// Simplified rig preset information for RPC communication.
 #[derive(Debug, Clone, PartialEq, Facet)]
-pub struct PresetInfo {
+pub struct RigPresetInfo {
     /// Preset ID
     pub id: Uuid,
     /// Preset name
@@ -153,36 +133,6 @@ pub struct PresetInfo {
     pub category: String,
     /// Star rating (0-5)
     pub rating: u8,
-    /// Optional description
-    #[facet(default)]
-    pub description: Option<String>,
-    /// Number of scenes (preset-level variations)
-    pub scene_count: usize,
-    /// Scene names for quick display
-    pub scene_names: Vec<String>,
-    /// Scene details (preset-level variations that can load different modules)
-    #[facet(default)]
-    pub scenes: Vec<PresetSnapshotInfo>,
-    /// Whether this preset is a structural template (seed data) vs concrete user preset
-    #[facet(default)]
-    pub is_template: bool,
-    // TEMP: Commented out to test serialization
-    // /// Default scene index to load when preset is activated (None means scene 0)
-    // #[facet(default)]
-    // pub default_scene_index: Option<usize>,
-}
-
-/// Simplified preset scene information for RPC communication.
-///
-/// Preset scenes allow switching between different module configurations
-/// within a preset. The routing/order is locked, but the content of modules
-/// can change between scenes.
-#[derive(Debug, Clone, PartialEq, Facet)]
-pub struct PresetSnapshotInfo {
-    /// Scene ID (internally this is a SnapshotId in the domain model)
-    pub id: Uuid,
-    /// Scene name (e.g., "Verse", "Chorus", "Solo")
-    pub name: String,
 }
 
 /// Simplified song information for RPC communication.
@@ -194,19 +144,24 @@ pub struct SongInfo {
     pub name: String,
     /// Artist name
     pub artist: Option<String>,
-    /// Number of scenes
-    pub scene_count: usize,
-    /// Scene names for quick display
-    pub scene_names: Vec<String>,
-    /// Scene DB IDs (parallel to scene_names) for updates
+    /// Number of sections
+    pub section_count: usize,
+    /// Section names for quick display
+    pub section_names: Vec<String>,
+    /// Current section index (if this is the active song)
     #[facet(default)]
-    pub scene_ids: Vec<Uuid>,
-    /// Current scene index (if this is the active song)
-    #[facet(default)]
-    pub current_scene_index: Option<usize>,
-    /// Whether this song is a structural template (seed data) vs concrete user song
-    #[facet(default)]
-    pub is_template: bool,
+    pub current_section_index: Option<usize>,
+}
+
+/// Simplified section information for RPC communication.
+#[derive(Debug, Clone, PartialEq, Facet)]
+pub struct SectionInfo {
+    /// Section index
+    pub index: usize,
+    /// Section name
+    pub name: String,
+    /// Whether this section has overrides
+    pub has_overrides: bool,
 }
 
 /// Simplified setlist information for RPC communication.
@@ -229,6 +184,8 @@ pub struct RigInfo {
     pub name: String,
     /// Instrument type
     pub instrument_type: String,
+    /// Number of engines
+    pub engine_count: usize,
 }
 
 // endregion: --- RPC Types
@@ -246,18 +203,16 @@ pub enum RigControlCommand {
     Shutdown,
 
     // ── Transitions ─────────────────────────────────────────────────────
-    /// Load a preset with a specific scene (primary entry point).
-    LoadPresetWithScene { preset_id: Uuid, scene_index: usize },
-    /// Load a song scene by song and scene index.
-    ///
-    /// Resolves the song's scene (including song-level module overrides)
-    /// and loads the resulting preset+scene into the engine.
-    LoadSongScene {
-        song_index: usize,
-        scene_index: usize,
+    /// Load a patch from a profile.
+    LoadPatch {
+        profile_id: Uuid,
+        patch_index: usize,
     },
-    /// Switch scene within the current preset.
-    SwitchScene { scene_index: usize },
+    /// Load a song section by song and section index.
+    LoadSongSection {
+        song_index: usize,
+        section_index: usize,
+    },
     /// Apply a module snapshot (parameter changes only).
     ApplySnapshot {
         module_type: ModuleType,
@@ -265,10 +220,10 @@ pub enum RigControlCommand {
     },
 
     // ── Preloading ──────────────────────────────────────────────────────
-    /// Preload a preset+scene in the background.
-    Preload {
-        preset_id: Uuid,
-        scene_index: usize,
+    /// Preload a song section in the background.
+    PreloadSection {
+        song_index: usize,
+        section_index: usize,
         priority: PreloadPriority,
     },
 
@@ -278,19 +233,17 @@ pub enum RigControlCommand {
     /// Re-enable a previously disabled module slot.
     EnableSlot { module_type: ModuleType },
 
-    // ── Profile/Preset Management ───────────────────────────────────────
+    // ── Profile/Song Management ─────────────────────────────────────────
     /// Load a specific profile
     LoadProfile { profile_id: Uuid },
-    /// Load a specific preset (uses scene index 0)
-    LoadPreset { preset_id: Uuid },
     /// Go to next song in setlist
     NextSong,
     /// Go to previous song in setlist
     PreviousSong,
-    /// Go to next scene in current song
-    NextScene,
-    /// Go to previous scene in current song
-    PreviousScene,
+    /// Go to next section in current song
+    NextSection,
+    /// Go to previous section in current song
+    PreviousSection,
 
     // ── Tick ─────────────────────────────────────────────────────────────
     /// Process one engine tick (preload queue, tail cleanup).
@@ -312,15 +265,18 @@ pub enum RigControlEvent {
     EngineShutdown,
 
     // ── Transitions ─────────────────────────────────────────────────────
-    /// A preset/scene transition started.
-    TransitionStarted { preset_id: Uuid, scene_index: usize },
+    /// A scene transition started.
+    TransitionStarted {
+        song_index: Option<usize>,
+        section_index: usize,
+    },
     /// A transition completed (all slots activated).
     TransitionCompleted { result: TransitionResultInfo },
     /// A transition failed.
     TransitionFailed { reason: String },
 
     // ── Slot State ──────────────────────────────────────────────────────
-    /// A module slot's state changed (instance loaded, activated, etc.).
+    /// A module slot's state changed.
     SlotStateChanged {
         module_type: ModuleType,
         slot_state: SlotStateInfo,
@@ -332,34 +288,19 @@ pub enum RigControlEvent {
 
     // ── Preloading ──────────────────────────────────────────────────────
     /// A preload operation started.
-    PreloadStarted {
-        handle: u64,
-        preset_id: Uuid,
-        scene_index: usize,
-    },
-    /// Preload progress changed.
-    PreloadProgress {
-        handle: u64,
-        loaded: u16,
-        total: u16,
-    },
-    /// A preload operation completed (all slots ready).
+    PreloadStarted { handle: u64 },
+    /// A preload operation completed.
     PreloadCompleted { handle: u64 },
-    /// A preload operation failed.
-    PreloadFailed { handle: u64, reason: String },
 
-    // ── Profile/Preset/Song Events ──────────────────────────────────────
+    // ── Profile/Song Events ─────────────────────────────────────────────
     /// A profile was loaded
     ProfileLoaded { profile: ProfileInfo },
-    /// A preset was loaded
-    PresetLoaded {
-        preset: PresetInfo,
-        scene_index: usize,
-    },
     /// A song changed
     SongChanged { song_index: usize },
-    /// Current scene index changed
-    SceneIndexChanged { scene_index: usize },
+    /// Current section index changed
+    SectionChanged { section_index: usize },
+    /// A patch was loaded
+    PatchLoaded { patch: PatchInfo },
 
     // ── Tail Cleanup ────────────────────────────────────────────────────
     /// A tailing instance was cleaned up.
@@ -371,28 +312,11 @@ pub enum RigControlEvent {
 // region:    --- Service Trait
 
 /// RigControlService provides RPC access to the gapless module engine.
-///
-/// This trait defines the contract for engine management.
-/// Implementations can be for REAPER, mock testing, or standalone apps.
-///
-/// # Observability
-///
-/// Use `RigControlDispatcher::with_middleware(TelemetryMiddleware::new(exporter))`
-/// for automatic OpenTelemetry span creation on every call. Client-side tracing
-/// is available via `TracingCaller::new(handle, exporter)`.
-///
-/// # Middleware
-///
-/// ```ignore
-/// let dispatcher = RigControlDispatcher::new(handler)
-///     .with_middleware(AuthMiddleware::new())
-///     .with_middleware(TelemetryMiddleware::new(exporter));
-/// ```
 #[roam::service]
 pub trait RigControlService {
     // ── Engine State Queries ────────────────────────────────────────────
 
-    /// Get the full engine state (initialized?, all slot states).
+    /// Get the full engine state.
     async fn get_engine_state(&self) -> EngineStateInfo;
 
     /// Get a single slot's state.
@@ -404,16 +328,12 @@ pub trait RigControlService {
     /// Check readiness of a preload operation.
     async fn check_preload_status(&self, handle: u64) -> Option<PreloadStatusInfo>;
 
-    // ── Profile/Preset/Song Queries ─────────────────────────────────────
+    // ── Profile/Song Queries ────────────────────────────────────────────
 
     /// Get all available profiles
     async fn get_available_profiles(&self) -> Vec<ProfileInfo>;
     /// Get the currently loaded profile
     async fn get_current_profile(&self) -> Option<ProfileInfo>;
-    /// Get all available presets
-    async fn get_available_presets(&self) -> Vec<PresetInfo>;
-    /// Get the currently loaded preset
-    async fn get_current_preset(&self) -> Option<PresetInfo>;
     /// Get the current rig info
     async fn get_current_rig(&self) -> Option<RigInfo>;
     /// Get all available setlists
@@ -424,8 +344,8 @@ pub trait RigControlService {
     async fn get_setlist_songs(&self) -> Vec<SongInfo>;
     /// Get the current song
     async fn get_current_song(&self) -> Option<SongInfo>;
-    /// Get the current scene (in performance/song mode)
-    async fn get_current_scene(&self) -> Option<ProfileSceneInfo>;
+    /// Get the current section
+    async fn get_current_section(&self) -> Option<SectionInfo>;
 
     // ── Commands ────────────────────────────────────────────────────────
 
@@ -446,7 +366,6 @@ pub trait RigControlService {
 // region:    --- Type Conversions
 
 impl EngineStateInfo {
-    /// Create an uninitialized engine state.
     pub fn uninitialized() -> Self {
         Self {
             initialized: false,
@@ -454,7 +373,6 @@ impl EngineStateInfo {
         }
     }
 
-    /// Create an initialized engine state with slot info.
     pub fn initialized(slots: Vec<SlotStateInfo>) -> Self {
         Self {
             initialized: true,
@@ -464,7 +382,6 @@ impl EngineStateInfo {
 }
 
 impl SlotStateInfo {
-    /// Build slot state info from engine domain types.
     pub fn new(
         module_type: ModuleType,
         disabled: bool,
@@ -487,7 +404,6 @@ impl SlotStateInfo {
 }
 
 impl TransitionResultInfo {
-    /// Convert from a domain `TransitionResult`.
     pub fn from_transition(result: &crate::rig_engine::TransitionResult) -> Self {
         Self {
             outcome: SwitchOutcomeInfo::from_outcome(&result.outcome),
@@ -502,7 +418,6 @@ impl TransitionResultInfo {
         }
     }
 
-    /// Create a successful, clean result.
     pub fn completed() -> Self {
         Self {
             outcome: SwitchOutcomeInfo::Completed,
@@ -512,7 +427,6 @@ impl TransitionResultInfo {
 }
 
 impl SwitchOutcomeInfo {
-    /// Convert from a domain `SwitchOutcome`.
     pub fn from_outcome(outcome: &SwitchOutcome) -> Self {
         match outcome {
             SwitchOutcome::Completed => Self::Completed,
@@ -536,7 +450,6 @@ impl SwitchOutcomeInfo {
 }
 
 impl SlotErrorInfo {
-    /// Create from engine error.
     pub fn from_engine_error(module_type: ModuleType, error: &EngineError) -> Self {
         Self {
             module_type,
@@ -546,7 +459,6 @@ impl SlotErrorInfo {
 }
 
 impl PreloadStatusInfo {
-    /// Create from domain types.
     pub fn new(handle: PresetLoadHandle, readiness: PresetReadiness) -> Self {
         Self {
             handle: handle.raw(),
@@ -556,104 +468,39 @@ impl PreloadStatusInfo {
 }
 
 impl ProfileInfo {
-    /// Convert from domain Profile to RPC ProfileInfo
-    pub fn from_profile(p: &crate::profile::Profile, presets: &[crate::preset::Preset]) -> Self {
-        let scene_count = p.scene_templates.len();
-        let scene_names: Vec<String> = p.scene_templates.iter().map(|st| st.name.clone()).collect();
-
-        let scenes: Vec<ProfileSceneInfo> = p
-            .scene_templates
+    pub fn from_profile(p: &crate::profile::Profile) -> Self {
+        let patches: Vec<PatchInfo> = p
+            .patches
             .iter()
             .enumerate()
-            .map(|(index, st)| {
-                // Extract preset ID from the preset reference
-                let preset_id = match &st.preset_reference {
-                    crate::profile::PresetReference::Direct { preset_id } => preset_id.as_uuid(),
-                    _ => Uuid::nil(), // For other reference types, use placeholder
-                };
-
-                // Resolve preset name from presets list
-                let preset_name = presets
-                    .iter()
-                    .find(|preset| preset.id.as_uuid() == preset_id)
-                    .map(|p| p.name.clone())
-                    .unwrap_or_default();
-
-                ProfileSceneInfo {
-                    index,
-                    name: st.name.clone(),
-                    preset_id,
-                    preset_name,
-                    preset_snapshot_id: st.default_snapshot_id.map(|id| id.as_uuid()),
-                    preset_snapshot_name: None,
-                }
+            .map(|(i, patch)| PatchInfo {
+                id: patch.id.as_uuid(),
+                name: patch.name.clone(),
+                index: i,
             })
             .collect();
 
         Self {
             id: p.id.as_uuid(),
             name: p.name.clone(),
-            rig_id: p.rig_id.as_uuid(),
-            scene_count,
-            scene_names,
-            scenes,
-            description: p.description.clone(),
-            is_template: false,
-        }
-    }
-}
-
-impl PresetInfo {
-    /// Convert from domain Preset to RPC PresetInfo
-    pub fn from_preset(p: &crate::preset::Preset) -> Self {
-        // Note: In the domain model, these are called "snapshots" but at the preset level
-        // they represent "scenes" (different module configurations within the same routing)
-        let scenes: Vec<PresetSnapshotInfo> = p
-            .snapshots
-            .iter()
-            .map(|s| PresetSnapshotInfo {
-                id: s.id.as_uuid(),
-                name: s.name.clone(),
-            })
-            .collect();
-
-        let scene_names: Vec<String> = scenes.iter().map(|s| s.name.clone()).collect();
-
-        // TEMP: Find default scene index by looking up the default_snapshot_id
-        // let default_scene_index = p.default_snapshot_id
-        //     .and_then(|default_id| {
-        //         p.snapshots.iter()
-        //             .position(|s| s.id == default_id)
-        //     });
-
-        Self {
-            id: p.id.as_uuid(),
-            name: p.name.clone(),
-            category: format!("{:?}", p.category),
-            rating: p.rating.get(),
-            description: p.description.clone(),
-            scene_count: scenes.len(),
-            scene_names,
-            scenes,
-            is_template: false,
-            // TEMP: default_scene_index,
+            patch_count: patches.len(),
+            patches,
         }
     }
 }
 
 impl SongInfo {
-    /// Convert from domain PerformanceSong to RPC SongInfo
     pub fn from_song(
         index: usize,
-        song: &crate::performance::PerformanceSong,
+        song: &crate::song::Song,
         current_song_index: Option<usize>,
-        current_scene_index: Option<usize>,
+        current_section_index: Option<usize>,
     ) -> Self {
-        let scene_count = song.scenes.len();
-        let scene_names: Vec<String> = song.scenes.iter().map(|s| s.name.clone()).collect();
+        let section_count = song.sections.len();
+        let section_names: Vec<String> = song.sections.iter().map(|s| s.name.clone()).collect();
 
-        let current_scene = if current_song_index == Some(index) {
-            current_scene_index
+        let current_section = if current_song_index == Some(index) {
+            current_section_index
         } else {
             None
         };
@@ -662,23 +509,16 @@ impl SongInfo {
             index,
             name: song.name.clone(),
             artist: song.artist.clone(),
-            scene_count,
-            scene_names,
-            scene_ids: Vec::new(), // mock data has no DB IDs
-            current_scene_index: current_scene,
-            is_template: false,
+            section_count,
+            section_names,
+            current_section_index: current_section,
         }
     }
 }
 
 impl SetlistInfo {
-    /// Convert from a list of songs to RPC SetlistInfo
-    pub fn from_songs(
-        name: impl Into<String>,
-        songs: &[crate::performance::PerformanceSong],
-    ) -> Self {
+    pub fn from_songs(name: impl Into<String>, songs: &[crate::song::Song]) -> Self {
         let song_names: Vec<String> = songs.iter().map(|s| s.name.clone()).collect();
-
         Self {
             name: name.into(),
             song_count: songs.len(),
@@ -688,12 +528,12 @@ impl SetlistInfo {
 }
 
 impl RigInfo {
-    /// Convert from domain Rig to RPC RigInfo
     pub fn from_rig(r: &crate::rig::Rig) -> Self {
         Self {
             id: r.id.as_uuid(),
             name: r.name.clone(),
             instrument_type: format!("{:?}", r.instrument_type),
+            engine_count: r.engine_count(),
         }
     }
 }
@@ -705,52 +545,41 @@ impl RigInfo {
 use std::sync::{Arc, RwLock};
 
 use crate::mock::MockRigEngine;
-use crate::performance::{PerformanceSong, Scene};
-use crate::preset::Preset;
+use crate::profile::Profile;
 use crate::rig::Rig;
 use crate::rig_engine::RigEngine;
+use crate::song::Song;
+use crate::stores::{InMemorySceneStore, SceneStore};
 
 /// Data context for a `MockRigControlService`.
 ///
-/// Holds the rig, profiles, presets, and songs so the mock service can resolve
-/// commands into the domain types the engine needs.
+/// Holds the rig, scene store, profiles, and songs.
 pub struct RigControlData {
     pub rig: Rig,
-    pub profiles: Vec<crate::profile::Profile>,
-    pub presets: Vec<Preset>,
-    pub songs: Vec<PerformanceSong>,
+    pub store: InMemorySceneStore,
+    pub profiles: Vec<Profile>,
+    pub songs: Vec<Song>,
 }
 
 impl RigControlData {
-    /// Find a preset by its ID.
-    pub fn find_preset(&self, id: Uuid) -> Option<&Preset> {
-        self.presets.iter().find(|p| p.id.as_uuid() == id)
-    }
-
     /// Find a song by index.
-    pub fn song(&self, index: usize) -> Option<&PerformanceSong> {
+    pub fn song(&self, index: usize) -> Option<&Song> {
         self.songs.get(index)
-    }
-
-    /// Find a song by name.
-    pub fn song_by_name(&self, name: &str) -> Option<(usize, &PerformanceSong)> {
-        self.songs.iter().enumerate().find(|(_, s)| s.name == name)
     }
 }
 
 /// Mock implementation of [`RigControlService`] for testing.
 ///
 /// Wraps a [`MockRigEngine`] and [`RigControlData`] to provide a
-/// fully functional service that resolves commands against the guitar
+/// fully functional service that resolves commands against the
 /// rig data model.
 pub struct MockRigControlService {
     engine: MockRigEngine,
     data: RigControlData,
     initialized: RwLock<bool>,
     current_profile_index: RwLock<usize>,
-    current_preset_index: RwLock<usize>,
     current_song_index: RwLock<usize>,
-    current_scene_index: RwLock<usize>,
+    current_section_index: RwLock<usize>,
     event_subscriber: RwLock<Option<Arc<Tx<RigControlEvent>>>>,
 }
 
@@ -762,22 +591,146 @@ impl MockRigControlService {
             data,
             initialized: RwLock::new(false),
             current_profile_index: RwLock::new(0),
-            current_preset_index: RwLock::new(0),
             current_song_index: RwLock::new(0),
-            current_scene_index: RwLock::new(0),
+            current_section_index: RwLock::new(0),
             event_subscriber: RwLock::new(None),
         }
     }
 
-    /// Create a new mock service with default guitar rig data.
+    /// Create a new mock service with minimal inline test data.
+    ///
+    /// Builds a simple guitar rig with Drive + Amp modules, a single
+    /// profile with one patch, and one song with two sections.
+    /// The full defaults module is deferred to Phase 12.
     pub fn with_guitar_defaults() -> Self {
-        let defaults = crate::defaults::guitar::build_guitar_rig();
-        let data = RigControlData {
-            rig: defaults.rig,
-            profiles: defaults.profiles,
-            presets: defaults.presets,
-            songs: defaults.songs,
+        use crate::category::PresetCategory;
+        use crate::module::{Module, ModuleType};
+        use crate::preset::{ModulePreset, PresetMetadata};
+        use crate::scene::{
+            EngineSceneBuilder, EngineSceneEntry, LayerSceneBuilder, LayerSceneEntry,
+            RigSceneBuilder, ScopedSceneRef,
         };
+        use crate::snapshot::ModuleSnapshot;
+        use crate::version::{LayerIndex, VersionedRef};
+        use signal_proto::engine::Engine as ProtoEngine;
+        use signal_proto::layer::Layer;
+        use signal_proto::rig::InstrumentType;
+
+        let mut store = InMemorySceneStore::new();
+
+        // 1. Register module presets
+        let drive_snapshot = ModuleSnapshot::new("Blues Stack", vec![]);
+        let drive_snap_id = drive_snapshot.id;
+        let drive_preset = ModulePreset::new(
+            PresetMetadata::new("Klon", PresetCategory::default()),
+            ModuleType::Drive,
+            drive_snapshot,
+        );
+        store.register_module_preset(drive_preset);
+
+        let amp_snapshot = ModuleSnapshot::new("Clean Deluxe", vec![]);
+        let amp_snap_id = amp_snapshot.id;
+        let amp_preset = ModulePreset::new(
+            PresetMetadata::new("Deluxe Reverb", PresetCategory::default()),
+            ModuleType::Amp,
+            amp_snapshot,
+        );
+        store.register_module_preset(amp_preset);
+
+        // 2. Build physical rig
+        let mut layer = Layer::new("Main", LayerIndex::new(1));
+        layer.add_module(Module::new("Drive", ModuleType::Drive));
+        layer.add_module(Module::new("Amp", ModuleType::Amp));
+        let engine = ProtoEngine::new("Guitar", InstrumentType::Guitar, layer);
+        let engine_id = engine.id;
+        let rig = Rig::new("Guitar Rig", InstrumentType::Guitar, engine);
+
+        // 3. Build scenes (layer → engine → rig)
+        let layer_scene_verse = LayerSceneBuilder::new("Clean Verse")
+            .modules(vec![
+                VersionedRef::new(drive_snap_id, 1),
+                VersionedRef::new(amp_snap_id, 1),
+            ])
+            .no_standalone_blocks()
+            .build();
+        let layer_scene_verse_id = layer_scene_verse.id;
+        store.register_layer_scene(layer_scene_verse);
+
+        let layer_scene_chorus = LayerSceneBuilder::new("Drive Chorus")
+            .modules(vec![
+                VersionedRef::new(drive_snap_id, 1),
+                VersionedRef::new(amp_snap_id, 1),
+            ])
+            .no_standalone_blocks()
+            .build();
+        let layer_scene_chorus_id = layer_scene_chorus.id;
+        store.register_layer_scene(layer_scene_chorus);
+
+        let engine_scene_verse = EngineSceneBuilder::new("Verse Engine")
+            .layers(vec![LayerSceneEntry {
+                layer_index: LayerIndex::new(1),
+                scene_ref: VersionedRef::new(layer_scene_verse_id, 1),
+            }])
+            .build();
+        let engine_scene_verse_id = engine_scene_verse.id;
+        store.register_engine_scene(engine_scene_verse);
+
+        let engine_scene_chorus = EngineSceneBuilder::new("Chorus Engine")
+            .layers(vec![LayerSceneEntry {
+                layer_index: LayerIndex::new(1),
+                scene_ref: VersionedRef::new(layer_scene_chorus_id, 1),
+            }])
+            .build();
+        let engine_scene_chorus_id = engine_scene_chorus.id;
+        store.register_engine_scene(engine_scene_chorus);
+
+        let rig_scene_verse = RigSceneBuilder::new("Verse Rig")
+            .engines(vec![EngineSceneEntry {
+                engine_id,
+                scene_ref: VersionedRef::new(engine_scene_verse_id, 1),
+            }])
+            .build();
+        let rig_scene_verse_id = rig_scene_verse.id;
+        store.register_rig_scene(rig_scene_verse);
+
+        let rig_scene_chorus = RigSceneBuilder::new("Chorus Rig")
+            .engines(vec![EngineSceneEntry {
+                engine_id,
+                scene_ref: VersionedRef::new(engine_scene_chorus_id, 1),
+            }])
+            .build();
+        let rig_scene_chorus_id = rig_scene_chorus.id;
+        store.register_rig_scene(rig_scene_chorus);
+
+        // 4. Build profile with patches
+        let mut profile = Profile::new("Live Show");
+        profile.add_patch(crate::profile::Patch::new(
+            "Clean Verse",
+            ScopedSceneRef::Rig(VersionedRef::new(rig_scene_verse_id, 1)),
+        ));
+        profile.add_patch(crate::profile::Patch::new(
+            "Drive Chorus",
+            ScopedSceneRef::Rig(VersionedRef::new(rig_scene_chorus_id, 1)),
+        ));
+
+        // 5. Build song with sections
+        let mut song = Song::new("Amazing Grace").with_artist("Traditional");
+        song.add_section(crate::song::SongSection::new(
+            "Verse",
+            ScopedSceneRef::Rig(VersionedRef::new(rig_scene_verse_id, 1)),
+        ));
+        song.add_section(crate::song::SongSection::new(
+            "Chorus",
+            ScopedSceneRef::Rig(VersionedRef::new(rig_scene_chorus_id, 1)),
+        ));
+
+        let data = RigControlData {
+            rig,
+            store,
+            profiles: vec![profile],
+            songs: vec![song],
+        };
+
         Self::new(data)
     }
 
@@ -786,58 +739,20 @@ impl MockRigControlService {
         &self.data
     }
 
-    /// Build the current preset's modules for UI display.
+    /// Build the current rig's modules for UI display.
     ///
-    /// Iterates the current preset's `module_assignments`, looks up each
-    /// `ModulePreset` in the rig, and constructs `Module` instances with
-    /// blocks and macros copied from the preset.
+    /// Walks the physical hierarchy: rig → first engine → first layer → modules.
     pub fn build_current_modules(&self) -> Vec<crate::module::Module> {
-        let preset_index = *self.current_preset_index.read().unwrap();
-        let Some(preset) = self.data.presets.get(preset_index) else {
-            return Vec::new();
-        };
         let rig = &self.data.rig;
-
-        let mut modules = Vec::new();
-        for assignment in &preset.module_assignments {
-            if !assignment.enabled {
-                continue;
-            }
-
-            if let Some(mp) = rig.get_module_preset(assignment.module_preset_id) {
-                let mut module = crate::module::Module::new(&mp.name, mp.module_type);
-                module.grid_width = mp.grid_width;
-                module.grid_height = mp.grid_height;
-                for block in &mp.blocks {
-                    module.add_block(block.clone());
-                }
-                for m in &mp.macros {
-                    module.add_macro(m.clone());
-                }
-                modules.push(module);
-            }
-        }
-
-        modules
-    }
-
-    /// Build slot state info from the engine's internal state for a module type.
-    fn build_slot_state(&self, module_type: ModuleType) -> Option<SlotStateInfo> {
-        let slot = self.engine.slot(module_type)?;
-        Some(SlotStateInfo::new(
-            module_type,
-            slot.is_disabled(),
-            slot.active_instance(),
-            slot.loaded_instances(),
-        ))
+        let engine = rig.engines.first();
+        let layer = engine.layers.first();
+        layer.modules.clone()
     }
 
     /// Broadcast an event to the subscriber (non-blocking)
     fn broadcast_event(&self, event: RigControlEvent) {
-        // Clone the Arc<Tx> if present
         let tx_opt = self.event_subscriber.read().unwrap().clone();
         if let Some(tx) = tx_opt {
-            // Send asynchronously in a background task
             #[cfg(not(target_arch = "wasm32"))]
             {
                 tokio::spawn(async move {
@@ -852,32 +767,6 @@ impl MockRigControlService {
             }
         }
     }
-
-    /// Resolve a scene, applying song-level overrides when relevant.
-    fn resolve_scene_for_load(
-        &self,
-        _preset: &Preset,
-        scene: &Scene,
-        song_overrides: &[crate::module_preset::ModuleOverride],
-    ) -> Scene {
-        // Merge song-level module overrides into the scene's overrides
-        if song_overrides.is_empty() {
-            return scene.clone();
-        }
-
-        let mut merged_scene = scene.clone();
-        for song_override in song_overrides {
-            // Only add song override if the scene doesn't already override this module type
-            let already_overridden = merged_scene
-                .module_overrides
-                .iter()
-                .any(|o| o.module_type == song_override.module_type);
-            if !already_overridden {
-                merged_scene.module_overrides.push(song_override.clone());
-            }
-        }
-        merged_scene
-    }
 }
 
 impl RigControlService for MockRigControlService {
@@ -886,7 +775,6 @@ impl RigControlService for MockRigControlService {
         if !initialized {
             return EngineStateInfo::uninitialized();
         }
-
         let slots = self.get_all_slot_states(_cx).await;
         EngineStateInfo::initialized(slots)
     }
@@ -896,8 +784,6 @@ impl RigControlService for MockRigControlService {
         _cx: &Context,
         module_type: ModuleType,
     ) -> Option<SlotStateInfo> {
-        // MockRigEngine::slot() currently returns None — we need to read
-        // the internal state directly. Use engine's slot states helper.
         let states = self.engine.current_slot_states_public();
         states.into_iter().find_map(|ss| {
             if ss.module_type == module_type {
@@ -905,7 +791,7 @@ impl RigControlService for MockRigControlService {
                     module_type: ss.module_type,
                     disabled: ss.is_disabled,
                     active_instance: ss.active_handle.map(|h| h.raw()),
-                    instances: Vec::new(), // Simplified for mock
+                    instances: Vec::new(),
                 })
             } else {
                 None
@@ -921,7 +807,7 @@ impl RigControlService for MockRigControlService {
                 module_type: ss.module_type,
                 disabled: ss.is_disabled,
                 active_instance: ss.active_handle.map(|h| h.raw()),
-                instances: Vec::new(), // Simplified for mock
+                instances: Vec::new(),
             })
             .collect()
     }
@@ -936,29 +822,13 @@ impl RigControlService for MockRigControlService {
         self.data
             .profiles
             .iter()
-            .map(|p| ProfileInfo::from_profile(p, &self.data.presets))
+            .map(ProfileInfo::from_profile)
             .collect()
     }
 
     async fn get_current_profile(&self, _cx: &Context) -> Option<ProfileInfo> {
         let index = *self.current_profile_index.read().unwrap();
-        self.data
-            .profiles
-            .get(index)
-            .map(|p| ProfileInfo::from_profile(p, &self.data.presets))
-    }
-
-    async fn get_available_presets(&self, _cx: &Context) -> Vec<PresetInfo> {
-        self.data
-            .presets
-            .iter()
-            .map(PresetInfo::from_preset)
-            .collect()
-    }
-
-    async fn get_current_preset(&self, _cx: &Context) -> Option<PresetInfo> {
-        let index = *self.current_preset_index.read().unwrap();
-        self.data.presets.get(index).map(PresetInfo::from_preset)
+        self.data.profiles.get(index).map(ProfileInfo::from_profile)
     }
 
     async fn get_current_rig(&self, _cx: &Context) -> Option<RigInfo> {
@@ -966,7 +836,6 @@ impl RigControlService for MockRigControlService {
     }
 
     async fn get_available_setlists(&self, _cx: &Context) -> Vec<SetlistInfo> {
-        // For now, just return one setlist with all songs
         vec![SetlistInfo::from_songs("Main Setlist", &self.data.songs)]
     }
 
@@ -976,41 +845,43 @@ impl RigControlService for MockRigControlService {
 
     async fn get_setlist_songs(&self, _cx: &Context) -> Vec<SongInfo> {
         let current_song = *self.current_song_index.read().unwrap();
-        let current_scene = *self.current_scene_index.read().unwrap();
+        let current_section = *self.current_section_index.read().unwrap();
 
         self.data
             .songs
             .iter()
             .enumerate()
-            .map(|(i, song)| SongInfo::from_song(i, song, Some(current_song), Some(current_scene)))
+            .map(|(i, song)| {
+                SongInfo::from_song(i, song, Some(current_song), Some(current_section))
+            })
             .collect()
     }
 
     async fn get_current_song(&self, _cx: &Context) -> Option<SongInfo> {
         let current_song = *self.current_song_index.read().unwrap();
-        let current_scene = *self.current_scene_index.read().unwrap();
+        let current_section = *self.current_section_index.read().unwrap();
 
         self.data.songs.get(current_song).map(|song| {
-            SongInfo::from_song(current_song, song, Some(current_song), Some(current_scene))
+            SongInfo::from_song(
+                current_song,
+                song,
+                Some(current_song),
+                Some(current_section),
+            )
         })
     }
 
-    async fn get_current_scene(&self, _cx: &Context) -> Option<ProfileSceneInfo> {
+    async fn get_current_section(&self, _cx: &Context) -> Option<SectionInfo> {
         let song_index = *self.current_song_index.read().unwrap();
-        let scene_index = *self.current_scene_index.read().unwrap();
+        let section_index = *self.current_section_index.read().unwrap();
 
         let song = self.data.songs.get(song_index)?;
-        let scene = song.scenes.get(scene_index)?;
+        let section = song.sections.get(section_index)?;
 
-        let preset = self.data.presets.iter().find(|p| p.id == scene.preset_id)?;
-
-        Some(ProfileSceneInfo {
-            index: scene_index,
-            name: scene.name.clone(),
-            preset_id: preset.id.as_uuid(),
-            preset_name: preset.name.clone(),
-            preset_snapshot_id: None,
-            preset_snapshot_name: None,
+        Some(SectionInfo {
+            index: section_index,
+            name: section.name.clone(),
+            has_overrides: !section.overrides.is_empty(),
         })
     }
 
@@ -1024,105 +895,84 @@ impl RigControlService for MockRigControlService {
                 self.engine.shutdown().await;
                 *self.initialized.write().unwrap() = false;
             }
-            RigControlCommand::LoadPresetWithScene {
-                preset_id,
-                scene_index,
+            RigControlCommand::LoadPatch {
+                profile_id,
+                patch_index,
             } => {
-                // Look up preset
-                let Some(preset) = self.data.find_preset(preset_id) else {
+                let profile = self
+                    .data
+                    .profiles
+                    .iter()
+                    .find(|p| p.id.as_uuid() == profile_id);
+                let Some(profile) = profile else { return };
+                let Some(patch) = profile.patches.get(patch_index) else {
                     return;
                 };
 
-                // Find the scene from any song that references this preset at this index
-                // or construct a default scene
-                let (scene, song_overrides) = self.find_scene_for_preset(preset_id, scene_index);
-
-                let merged = self.resolve_scene_for_load(preset, &scene, &song_overrides);
                 let _ = self
                     .engine
-                    .load_preset_with_scene(preset, &merged, &self.data.rig)
+                    .load_scene(&patch.scene_ref, &self.data.rig, &self.data.store, &[])
                     .await;
 
-                // Update current preset index
-                if let Some(index) = self
-                    .data
-                    .presets
-                    .iter()
-                    .position(|p| p.id.as_uuid() == preset_id)
-                {
-                    *self.current_preset_index.write().unwrap() = index;
-                }
-
-                // Broadcast preset loaded event
-                let preset_info = PresetInfo::from_preset(preset);
-                self.broadcast_event(RigControlEvent::PresetLoaded {
-                    preset: preset_info,
-                    scene_index,
+                self.broadcast_event(RigControlEvent::PatchLoaded {
+                    patch: PatchInfo {
+                        id: patch.id.as_uuid(),
+                        name: patch.name.clone(),
+                        index: patch_index,
+                    },
                 });
             }
-            RigControlCommand::LoadSongScene {
+            RigControlCommand::LoadSongSection {
                 song_index,
-                scene_index,
+                section_index,
             } => {
                 let Some(song) = self.data.songs.get(song_index) else {
                     return;
                 };
-                let Some(scene) = song.scenes.get(scene_index) else {
-                    return;
-                };
-                let Some(preset) = self.data.find_preset(scene.preset_id.as_uuid()) else {
+                let Some(section) = song.sections.get(section_index) else {
                     return;
                 };
 
-                let merged = self.resolve_scene_for_load(preset, scene, &song.module_overrides);
                 let _ = self
                     .engine
-                    .load_preset_with_scene(preset, &merged, &self.data.rig)
+                    .load_scene(
+                        &section.scene_ref,
+                        &self.data.rig,
+                        &self.data.store,
+                        &section.overrides,
+                    )
                     .await;
 
-                // Update current indices
                 *self.current_song_index.write().unwrap() = song_index;
-                *self.current_scene_index.write().unwrap() = scene_index;
+                *self.current_section_index.write().unwrap() = section_index;
 
-                // Broadcast events
                 self.broadcast_event(RigControlEvent::SongChanged { song_index });
-                self.broadcast_event(RigControlEvent::SceneIndexChanged { scene_index });
-
-                // Also broadcast preset loaded (scenes in songs use scene 0 as the base)
-                let preset_info = PresetInfo::from_preset(preset);
-                self.broadcast_event(RigControlEvent::PresetLoaded {
-                    preset: preset_info,
-                    scene_index: 0,
-                });
-            }
-            RigControlCommand::SwitchScene { scene_index: _ } => {
-                // Need to know current preset — simplified: search resolved state
-                // In a real impl this would track current state
+                self.broadcast_event(RigControlEvent::SectionChanged { section_index });
             }
             RigControlCommand::ApplySnapshot {
                 module_type,
                 snapshot_id,
             } => {
-                // Find the snapshot across all module presets
                 let snap = self
                     .data
-                    .rig
-                    .module_presets
-                    .iter()
-                    .flat_map(|p| p.snapshots.iter())
-                    .find(|s| s.id.as_uuid() == snapshot_id);
+                    .store
+                    .module_snapshot(&crate::id::ModuleSnapshotId::from_uuid(snapshot_id));
                 if let Some(snapshot) = snap {
                     let _ = self.engine.apply_snapshot(module_type, snapshot).await;
                 }
             }
-            RigControlCommand::Preload {
-                preset_id,
-                scene_index: _,
+            RigControlCommand::PreloadSection {
+                song_index,
+                section_index,
                 priority: _,
             } => {
-                if let Some(preset) = self.data.find_preset(preset_id) {
-                    let scene = Scene::new("Preload", preset.id);
-                    let _ = self.engine.preload(preset, &scene, &self.data.rig).await;
+                if let Some(song) = self.data.songs.get(song_index) {
+                    if let Some(section) = song.sections.get(section_index) {
+                        let _ = self
+                            .engine
+                            .preload(&section.scene_ref, &self.data.rig, &self.data.store)
+                            .await;
+                    }
                 }
             }
             RigControlCommand::DisableSlot { module_type } => {
@@ -1140,69 +990,57 @@ impl RigControlService for MockRigControlService {
                 {
                     *self.current_profile_index.write().unwrap() = index;
 
-                    // Get profile and broadcast event
                     if let Some(profile) = self.data.profiles.get(index) {
-                        let profile_info = ProfileInfo::from_profile(profile, &self.data.presets);
+                        let profile_info = ProfileInfo::from_profile(profile);
                         self.broadcast_event(RigControlEvent::ProfileLoaded {
                             profile: profile_info,
                         });
                     }
                 }
             }
-            RigControlCommand::LoadPreset { preset_id } => {
-                if let Some(index) = self
-                    .data
-                    .presets
-                    .iter()
-                    .position(|p| p.id.as_uuid() == preset_id)
-                {
-                    *self.current_preset_index.write().unwrap() = index;
-                    // Note: In rig-control, presets don't have scenes - they're loaded via songs
-                    // This command just tracks which preset is "current" for UI purposes
-                }
-            }
             RigControlCommand::NextSong => {
                 let mut song_index = self.current_song_index.write().unwrap();
                 *song_index = (*song_index + 1).min(self.data.songs.len().saturating_sub(1));
-                *self.current_scene_index.write().unwrap() = 0;
+                *self.current_section_index.write().unwrap() = 0;
                 let index = *song_index;
                 drop(song_index);
 
-                // Broadcast events
                 self.broadcast_event(RigControlEvent::SongChanged { song_index: index });
-                self.broadcast_event(RigControlEvent::SceneIndexChanged { scene_index: 0 });
+                self.broadcast_event(RigControlEvent::SectionChanged { section_index: 0 });
             }
             RigControlCommand::PreviousSong => {
                 let mut song_index = self.current_song_index.write().unwrap();
                 *song_index = song_index.saturating_sub(1);
-                *self.current_scene_index.write().unwrap() = 0;
+                *self.current_section_index.write().unwrap() = 0;
                 let index = *song_index;
                 drop(song_index);
 
-                // Broadcast events
                 self.broadcast_event(RigControlEvent::SongChanged { song_index: index });
-                self.broadcast_event(RigControlEvent::SceneIndexChanged { scene_index: 0 });
+                self.broadcast_event(RigControlEvent::SectionChanged { section_index: 0 });
             }
-            RigControlCommand::NextScene => {
-                let mut scene_index = self.current_scene_index.write().unwrap();
+            RigControlCommand::NextSection => {
+                let mut section_index = self.current_section_index.write().unwrap();
                 let song_index = *self.current_song_index.read().unwrap();
                 if let Some(song) = self.data.songs.get(song_index) {
-                    *scene_index = (*scene_index + 1).min(song.scenes.len().saturating_sub(1));
+                    *section_index =
+                        (*section_index + 1).min(song.sections.len().saturating_sub(1));
                 }
-                let index = *scene_index;
-                drop(scene_index);
+                let index = *section_index;
+                drop(section_index);
 
-                // Broadcast event
-                self.broadcast_event(RigControlEvent::SceneIndexChanged { scene_index: index });
+                self.broadcast_event(RigControlEvent::SectionChanged {
+                    section_index: index,
+                });
             }
-            RigControlCommand::PreviousScene => {
-                let mut scene_index = self.current_scene_index.write().unwrap();
-                *scene_index = scene_index.saturating_sub(1);
-                let index = *scene_index;
-                drop(scene_index);
+            RigControlCommand::PreviousSection => {
+                let mut section_index = self.current_section_index.write().unwrap();
+                *section_index = section_index.saturating_sub(1);
+                let index = *section_index;
+                drop(section_index);
 
-                // Broadcast event
-                self.broadcast_event(RigControlEvent::SceneIndexChanged { scene_index: index });
+                self.broadcast_event(RigControlEvent::SectionChanged {
+                    section_index: index,
+                });
             }
             RigControlCommand::Tick => {
                 self.engine.tick().await;
@@ -1211,7 +1049,6 @@ impl RigControlService for MockRigControlService {
     }
 
     async fn subscribe(&self, _cx: &Context, events: Tx<RigControlEvent>) {
-        // Store the event subscriber (replace any previous subscriber)
         *self.event_subscriber.write().unwrap() = Some(Arc::new(events));
     }
 
@@ -1226,49 +1063,23 @@ impl RigControlService for MockRigControlService {
 }
 
 impl MockRigControlService {
-    /// Find the scene and song-level overrides for a given preset_id + scene_index.
-    ///
-    /// Searches all songs for scenes that reference this preset. The `scene_index`
-    /// is interpreted as the index among scenes in the first matching song that
-    /// uses this preset, or across all songs if needed.
-    fn find_scene_for_preset(
-        &self,
-        preset_id: Uuid,
-        scene_index: usize,
-    ) -> (Scene, Vec<crate::module_preset::ModuleOverride>) {
-        // Find scenes across all songs that reference this preset
-        for song in &self.data.songs {
-            if let Some(scene) = song.scenes.get(scene_index) {
-                if scene.preset_id.as_uuid() == preset_id {
-                    return (scene.clone(), song.module_overrides.clone());
-                }
-            }
-        }
-
-        // Fallback: construct a default scene for the preset
-        (
-            Scene::new("Default", crate::id::PresetId::from_uuid(preset_id)),
-            Vec::new(),
-        )
-    }
-
-    /// Load a specific song scene by song index and scene index.
-    ///
-    /// This is a convenience for tests that think in terms of songs and
-    /// scene positions rather than raw preset IDs.
-    pub async fn load_song_scene(
+    /// Load a song section directly (convenience for tests).
+    pub async fn load_song_section(
         &self,
         song_index: usize,
-        scene_index: usize,
+        section_index: usize,
     ) -> Option<TransitionResultInfo> {
         let song = self.data.songs.get(song_index)?;
-        let scene = song.scenes.get(scene_index)?;
-        let preset = self.data.find_preset(scene.preset_id.as_uuid())?;
+        let section = song.sections.get(section_index)?;
 
-        let merged = self.resolve_scene_for_load(preset, scene, &song.module_overrides);
         let result = self
             .engine
-            .load_preset_with_scene(preset, &merged, &self.data.rig)
+            .load_scene(
+                &section.scene_ref,
+                &self.data.rig,
+                &self.data.store,
+                &section.overrides,
+            )
             .await;
 
         Some(TransitionResultInfo::from_transition(&result))

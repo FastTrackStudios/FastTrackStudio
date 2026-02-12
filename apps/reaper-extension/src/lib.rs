@@ -24,7 +24,10 @@ use tracing::{debug, info, warn};
 
 use cell_host_proto::ReadyMsg;
 use global::Global;
-use host_runtime::{cell_ready_registry, init_shm_infrastructure, spawn_tracing_consumer, Host};
+use host_runtime::{
+    cell_ready_registry, default_cell_dir, init_shm_infrastructure, spawn_tracing_consumer,
+    CellConfig, Host,
+};
 use roam::session::RoutedDispatcher;
 use roam_telemetry::{ExporterConfig, OtlpExporter, TelemetryMiddleware};
 use std::time::Duration;
@@ -142,6 +145,8 @@ impl App {
             // DAW service calls (play, stop, etc.) that are handled locally using
             // REAPER APIs via TaskSupport
             register_daw_dispatcher();
+            register_action_cells();
+            register_cell_actions().await;
 
             // Start Unix socket server for desktop app connections
             start_unix_server();
@@ -252,6 +257,47 @@ fn register_daw_dispatcher() {
         "DAW dispatcher registered (Transport, Project, Marker, Region, TempoMap, Midi, MidiAnalysis, AudioEngine, Fx, Track) with OTLP telemetry"
     );
     info!("daw-reaper marked as ready for in-process DAW calls");
+}
+
+/// Register cells needed by the REAPER action system.
+fn register_action_cells() {
+    let cell_dir = default_cell_dir();
+
+    // Session cell provides DefinesActions and action execution handlers.
+    // It forwards DAW method calls to the in-process "daw-reaper" dispatcher.
+    CellConfig::new("session", &cell_dir)
+        .forwards_to_with_methods("daw-reaper", || {
+            daw_proto::TransportServiceDispatcher::<()>::method_ids()
+                .into_iter()
+                .chain(daw_proto::ProjectServiceDispatcher::<()>::method_ids())
+                .chain(daw_proto::MarkerServiceDispatcher::<()>::method_ids())
+                .chain(daw_proto::RegionServiceDispatcher::<()>::method_ids())
+                .chain(daw_proto::TempoMapServiceDispatcher::<()>::method_ids())
+                .chain(daw_proto::MidiServiceDispatcher::<()>::method_ids())
+                .chain(daw_proto::MidiAnalysisServiceDispatcher::<()>::method_ids())
+                .chain(daw_proto::AudioEngineServiceDispatcher::<()>::method_ids())
+                .chain(daw_proto::FxServiceDispatcher::<()>::method_ids())
+                .chain(daw_proto::TrackServiceDispatcher::<()>::method_ids())
+                .collect()
+        })
+        .register();
+
+    info!(path = %cell_dir.display(), "Registered action cells for REAPER host");
+}
+
+/// Spawn action-provider cells and register their actions with REAPER.
+async fn register_cell_actions() {
+    info!("Spawning session cell for action registration...");
+
+    let Some(session_handle) = Host::get().spawn_pending_cell("session").await else {
+        warn!("Failed to spawn session cell; no session actions will be registered");
+        return;
+    };
+
+    action_registry::register_cell("session", session_handle).await;
+
+    let action_count = action_registry::get_all_registered_actions().len();
+    info!(action_count, "Registered session actions with REAPER");
 }
 
 /// Start the Unix socket server for desktop app connections.

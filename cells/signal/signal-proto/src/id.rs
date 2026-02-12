@@ -1,15 +1,14 @@
 //! Typed identifiers — prevent mixing up IDs from different domains.
 //!
 //! Each domain entity gets its own newtype wrapper around `Uuid`.
-//! Passing a `PresetId` where a `SnapshotId` is expected is a compile error.
+//! Passing a `BlockId` where a `EngineId` is expected is a compile error.
 
-use facet::Facet;
 use uuid::Uuid;
 
 macro_rules! typed_id {
     ($(#[$meta:meta])* $name:ident) => {
         $(#[$meta])*
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Facet)]
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ::facet::Facet)]
         pub struct $name(Uuid);
 
         impl $name {
@@ -49,81 +48,140 @@ macro_rules! typed_id {
     };
 }
 
+// ─── Physical hierarchy ──────────────────────────────────────────
+
 typed_id!(
-    /// Identifies a [`Preset`](crate::preset::Preset).
-    PresetId
+    /// Identifies a [`Director`](crate::director::Director) — top-level manager of racks.
+    DirectorId
 );
 typed_id!(
-    /// Identifies a [`Snapshot`](crate::preset::Snapshot) within a preset.
-    SnapshotId
-);
-typed_id!(
-    /// Identifies a [`Profile`](crate::profile::Profile).
-    ProfileId
-);
-typed_id!(
-    /// Identifies a [`SceneTemplate`](crate::profile::SceneTemplate) within a profile.
-    SceneTemplateId
-);
-typed_id!(
-    /// Identifies a [`Section`](crate::section::Section) in a rig.
-    SectionId
-);
-typed_id!(
-    /// Identifies a [`Layer`](crate::layer::Layer) within a section.
-    LayerId
-);
-typed_id!(
-    /// Identifies a [`Block`](crate::block::Block) (DSP processing unit).
-    BlockId
-);
-typed_id!(
-    /// Identifies a [`Patch`](crate::patch::Patch).
-    PatchId
-);
-typed_id!(
-    /// Identifies a [`PatchVariation`](crate::patch::PatchVariation).
-    VariationId
-);
-typed_id!(
-    /// Identifies a [`PerformanceSong`](crate::performance::PerformanceSong).
-    SongId
-);
-typed_id!(
-    /// Identifies a [`Scene`](crate::performance::Scene) within a song.
-    SceneId
+    /// Identifies a [`Rack`](crate::rack::Rack) — container for related rigs.
+    RackId
 );
 typed_id!(
     /// Identifies a [`Rig`](crate::rig::Rig).
     RigId
 );
 typed_id!(
-    /// Identifies a [`Module`](crate::module::Module).
+    /// Identifies an [`Engine`](crate::engine::Engine) — pure container for layers.
+    EngineId
+);
+typed_id!(
+    /// Identifies a [`Layer`](crate::layer::Layer) within an engine.
+    LayerId
+);
+typed_id!(
+    /// Identifies a [`Module`](crate::module::Module) within a layer.
     ModuleId
 );
 typed_id!(
-    /// Identifies a role in the [`RigDirector`](crate::director::RigDirector).
-    RoleId
+    /// Identifies a [`Block`](crate::block::Block) — leaf DSP processing unit.
+    BlockId
+);
+
+// ─── State hierarchy: Snapshots ──────────────────────────────────
+
+typed_id!(
+    /// Identifies a [`BlockSnapshot`](crate::snapshot::BlockSnapshot) — parameter state for a block.
+    BlockSnapshotId
 );
 typed_id!(
-    /// Identifies a [`Tag`](crate::tags::Tag) in the tag registry.
-    TagId
+    /// Identifies a [`ModuleSnapshot`](crate::snapshot::ModuleSnapshot) — composed block snapshot refs.
+    ModuleSnapshotId
+);
+
+// ─── State hierarchy: Scenes ─────────────────────────────────────
+
+typed_id!(
+    /// Identifies a [`LayerScene`](crate::scene::LayerScene) — selects module/block snapshots.
+    LayerSceneId
 );
 typed_id!(
-    /// Identifies a global block configuration.
-    GlobalBlockId
+    /// Identifies an [`EngineScene`](crate::scene::EngineScene) — selects layer scenes.
+    EngineSceneId
 );
 typed_id!(
-    /// Identifies a [`ModulePreset`](crate::module_preset::ModulePreset).
+    /// Identifies a [`RigScene`](crate::scene::RigScene) — selects engine scenes.
+    RigSceneId
+);
+typed_id!(
+    /// Identifies a [`RackScene`](crate::scene::RackScene) — selects rig scenes.
+    RackSceneId
+);
+
+// ─── Presets ─────────────────────────────────────────────────────
+
+typed_id!(
+    /// Identifies a block-level preset.
+    BlockPresetId
+);
+typed_id!(
+    /// Identifies a module-level preset.
     ModulePresetId
 );
 typed_id!(
-    /// Identifies a [`ModuleSnapshot`](crate::module_preset::ModuleSnapshot) within a module preset.
-    ModuleSnapshotId
+    /// Identifies a layer-level preset.
+    LayerPresetId
 );
+typed_id!(
+    /// Identifies an engine-level preset.
+    EnginePresetId
+);
+typed_id!(
+    /// Identifies a rig-level preset.
+    RigPresetId
+);
+typed_id!(
+    /// Identifies a rack-level preset.
+    RackPresetId
+);
+
+// ─── Performance ─────────────────────────────────────────────────
+
+typed_id!(
+    /// Identifies a [`Song`](crate::song::Song).
+    SongId
+);
+typed_id!(
+    /// Identifies a [`SongSection`](crate::song::SongSection) within a song.
+    SongSectionId
+);
+typed_id!(
+    /// Identifies a [`Profile`](crate::profile::Profile).
+    ProfileId
+);
+typed_id!(
+    /// Identifies a [`Patch`](crate::profile::Patch) within a profile.
+    PatchId
+);
+
+// ─── Versioning ──────────────────────────────────────────────────
+
+typed_id!(
+    /// Identifies a [`Version`](crate::version::Version) in a version chain.
+    VersionId
+);
+
+// ─── Templates ───────────────────────────────────────────────────
+
 typed_id!(
     /// Identifies a [`RigTemplate`](crate::template::RigTemplate).
     RigTemplateId
+);
+typed_id!(
+    /// Identifies an [`EngineTemplate`](crate::template::EngineTemplate).
+    EngineTemplateId
+);
+typed_id!(
+    /// Identifies a [`RackTemplate`](crate::template::RackTemplate).
+    RackTemplateId
+);
+
+// ─── Tags ────────────────────────────────────────────────────────
+
+typed_id!(
+    /// Identifies a [`Tag`](crate::tags::Tag) in the tag registry.
+    TagId
 );
 
 #[cfg(test)]
@@ -132,33 +190,28 @@ mod tests {
 
     #[test]
     fn typed_ids_are_distinct_types() {
-        // These are different types — passing one where the other is expected
-        // would be a compile error.
-        let preset_id = PresetId::new();
-        let snapshot_id = SnapshotId::new();
+        let block_id = BlockId::new();
+        let engine_id = EngineId::new();
 
-        // They wrap UUIDs but are not interchangeable
         assert_ne!(
-            std::any::TypeId::of::<PresetId>(),
-            std::any::TypeId::of::<SnapshotId>()
+            std::any::TypeId::of::<BlockId>(),
+            std::any::TypeId::of::<EngineId>()
         );
-
-        // Each has its own UUID
-        assert_ne!(preset_id.as_uuid(), snapshot_id.as_uuid());
+        assert_ne!(block_id.as_uuid(), engine_id.as_uuid());
     }
 
     #[test]
     fn from_uuid_roundtrip() {
         let uuid = Uuid::new_v4();
-        let id = PresetId::from_uuid(uuid);
+        let id = BlockSnapshotId::from_uuid(uuid);
         assert_eq!(id.as_uuid(), uuid);
     }
 
     #[test]
     fn equality_by_value() {
         let uuid = Uuid::new_v4();
-        let a = BlockId::from_uuid(uuid);
-        let b = BlockId::from_uuid(uuid);
+        let a = EngineId::from_uuid(uuid);
+        let b = EngineId::from_uuid(uuid);
         assert_eq!(a, b);
     }
 

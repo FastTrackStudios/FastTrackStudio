@@ -5,7 +5,6 @@
 //! and metadata. The actual serialization (via `facet-json`) lives in
 //! [`signal-storage`] — this module only defines the domain types.
 
-use facet::Facet;
 
 use crate::preset::Preset;
 
@@ -14,7 +13,7 @@ use crate::preset::Preset;
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Metadata attached to an exported preset bundle.
-#[derive(Debug, Clone, PartialEq, Facet)]
+#[derive(Debug, Clone, PartialEq, ::facet::Facet)]
 pub struct BundleMetadata {
     /// ISO-8601 timestamp of when the bundle was exported.
     pub exported_at: String,
@@ -60,7 +59,7 @@ pub const BUNDLE_FORMAT_VERSION: u32 = 1;
 ///
 /// The `version` field enables forward compatibility — importers can
 /// reject or migrate bundles from newer/older formats.
-#[derive(Debug, Clone, Facet)]
+#[derive(Debug, Clone, ::facet::Facet)]
 pub struct PresetBundle {
     /// Format version for forward compatibility.
     pub version: u32,

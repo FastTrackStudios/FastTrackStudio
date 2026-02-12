@@ -11,7 +11,6 @@
 
 use std::collections::{HashMap, HashSet};
 
-use facet::Facet;
 use uuid::Uuid;
 
 use crate::id::TagId;
@@ -20,8 +19,7 @@ use crate::normalized::Rating;
 /// Namespace UUID for deterministic tag IDs (UUID v5).
 /// This ensures the same tag name always produces the same UUID.
 const TAG_NAMESPACE: Uuid = Uuid::from_bytes([
-    0x6b, 0xa7, 0xb8, 0x10, 0x9d, 0xad, 0x11, 0xd1, 0x80, 0xb4, 0x00, 0xc0, 0x4f, 0xd4, 0x30,
-    0xc8,
+    0x6b, 0xa7, 0xb8, 0x10, 0x9d, 0xad, 0x11, 0xd1, 0x80, 0xb4, 0x00, 0xc0, 0x4f, 0xd4, 0x30, 0xc8,
 ]);
 
 /// Create a deterministic `TagId` for a tag name.
@@ -38,7 +36,7 @@ fn deterministic_tag_id(name: &str) -> TagId {
 ///
 /// Tags can be hierarchical (parent-child relationships) and have
 /// priority weights for fallback resolution.
-#[derive(Debug, Clone, Facet)]
+#[derive(Debug, Clone, ::facet::Facet)]
 pub struct Tag {
     /// Unique identifier.
     pub id: TagId,
@@ -262,7 +260,7 @@ impl std::hash::Hash for Tag {
 // ============================================================================
 
 /// Tag categories for organization and display.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Facet, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ::facet::Facet, Default)]
 #[repr(u8)]
 pub enum TagCategory {
     /// Base tone type - REQUIRED for fallback (Clean, Lead, Drive, etc.)
@@ -351,18 +349,7 @@ impl TagCategory {
 /// Priority levels for tag-based fallback resolution.
 ///
 /// Higher priority tags are matched first during fallback.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Facet,
-    Default,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, ::facet::Facet, Default)]
 #[repr(u8)]
 pub enum TagPriority {
     /// Required - must match (base tone tags).
@@ -393,7 +380,7 @@ impl TagPriority {
 ///
 /// Tracks both manually-applied tags and auto-derived tags (from name analysis).
 /// Auto-derived tags can be hidden in UI since they're redundant with the name.
-#[derive(Debug, Clone, Default, Facet, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, ::facet::Facet, PartialEq, Eq)]
 pub struct Tags {
     /// Manually applied tag IDs.
     pub manual: HashSet<TagId>,
@@ -823,9 +810,7 @@ impl TagRegistry {
         let mut priority_map: HashMap<TagPriority, Vec<TagId>> = HashMap::new();
 
         for &tag_id in requested {
-            let priority = self
-                .get(tag_id)
-                .map_or(TagPriority::Medium, |t| t.priority);
+            let priority = self.get(tag_id).map_or(TagPriority::Medium, |t| t.priority);
             priority_map.entry(priority).or_default().push(tag_id);
         }
 
@@ -953,10 +938,7 @@ mod tests {
         assert_eq!(TagCategory::Song.default_priority(), TagPriority::Low);
         assert_eq!(TagCategory::Character.default_priority(), TagPriority::Low);
         assert_eq!(TagCategory::Context.default_priority(), TagPriority::Low);
-        assert_eq!(
-            TagCategory::Gear.default_priority(),
-            TagPriority::Optional
-        );
+        assert_eq!(TagCategory::Gear.default_priority(), TagPriority::Optional);
         assert_eq!(
             TagCategory::Custom.default_priority(),
             TagPriority::Optional
@@ -1463,9 +1445,8 @@ mod tests {
         registry.add(gravity);
 
         // Request: Gravity + John Mayer + Blues + Lead
-        let requested: HashSet<TagId> = [gravity_id, jm_id, blues_id, lead_id]
-            .into_iter()
-            .collect();
+        let requested: HashSet<TagId> =
+            [gravity_id, jm_id, blues_id, lead_id].into_iter().collect();
 
         let chain = registry.fallback_chain(&requested);
 
@@ -1543,5 +1524,4 @@ mod tests {
             assert_eq!(tag.priority, TagPriority::Low);
         }
     }
-
 }

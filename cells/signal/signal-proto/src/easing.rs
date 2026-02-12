@@ -9,7 +9,6 @@
 //! Call [`advance(delta_ms)`](SnapshotTween::advance) each frame to get the
 //! eased position, then feed it into [`SnapshotMorpher::compute_at()`](crate::morph::SnapshotMorpher::compute_at).
 
-use facet::Facet;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // EasingCurve
@@ -20,7 +19,7 @@ use facet::Facet;
 /// Each variant maps a linear `t ∈ [0.0, 1.0]` to a curved output in the
 /// same range. "In" variants start slow, "Out" variants end slow, and
 /// "InOut" variants do both.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Facet)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, ::facet::Facet)]
 #[repr(u8)]
 pub enum EasingCurve {
     /// No easing: `f(t) = t`.
@@ -129,7 +128,7 @@ impl EasingCurve {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Lifecycle state of a [`SnapshotTween`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Facet)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ::facet::Facet)]
 #[repr(u8)]
 pub enum TweenState {
     /// Not yet started.
@@ -162,7 +161,7 @@ pub enum TweenState {
 /// let result = morpher.compute_at(eased);
 /// apply_to_dsp(result);
 /// ```
-#[derive(Debug, Clone, Facet)]
+#[derive(Debug, Clone, ::facet::Facet)]
 pub struct SnapshotTween {
     /// Total duration in milliseconds.
     pub duration_ms: f64,

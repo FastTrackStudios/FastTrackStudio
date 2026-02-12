@@ -1,28 +1,30 @@
 //! Rig engine trait — orchestrator over all module slots.
 //!
-//! The [`RigEngine`] resolves presets into per-slot targets, manages
+//! The [`RigEngine`] resolves scene references into per-slot targets, manages
 //! preloading, handles deferred switching, and calls into individual
-//! [`ModuleSlot`]s. It enforces the rule that a preset is **always**
-//! loaded with a scene — there is no bare `load_preset()` method.
+//! [`ModuleSlot`]s.
+//!
+//! # Scene-Centric API
+//!
+//! All operations take a `ScopedSceneRef` (pointing at any hierarchy level)
+//! plus a `SceneStore` for lookups. There is no separate "load preset" vs
+//! "switch scene" — both are just `load_scene()` with a different ref.
 
 use async_trait::async_trait;
 
-use crate::engine::{
-    EngineError, PresetLoadHandle, PresetReadiness, SwitchOutcome,
-};
+use crate::engine::{EngineError, PresetLoadHandle, PresetReadiness, SwitchOutcome};
 use crate::module::ModuleType;
-use crate::module_preset::ModuleSnapshot;
-use crate::performance::Scene;
-use crate::preset::Preset;
+use crate::override_tree::{SceneOverride, Validated};
 use crate::rig::Rig;
+use crate::scene::ScopedSceneRef;
+use crate::snapshot::ModuleSnapshot;
+use crate::stores::SceneStore;
 
 use super::slot::ModuleSlot;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// TransitionResult
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── TransitionResult ────────────────────────────────────────────
 
-/// Full result of a preset/scene transition, including any partial failures.
+/// Full result of a scene transition, including any partial failures.
 #[derive(Debug)]
 pub struct TransitionResult {
     /// Overall outcome — completed, pending, or failed.
@@ -70,28 +72,24 @@ impl TransitionResult {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// RigEngine trait
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── RigEngine trait ─────────────────────────────────────────────
 
 /// Orchestrator that manages all module slots for gapless switching.
 ///
-/// # Design Constraint: Preset Always Has Scene
+/// # Scene-Centric Design
 ///
-/// There is **no** `load_preset(preset)` method. Only
-/// `load_preset_with_scene(preset, scene, rig)`. The existing
-/// `RigCommand::LoadPreset` internally constructs a default scene from the
-/// preset's first snapshot. This makes it structurally impossible to have
-/// an active preset without a scene.
+/// Every operation takes a `ScopedSceneRef` which points at any level
+/// of the hierarchy (Layer, Engine, Rig, Rack). The engine + resolver
+/// walk the ref down to LayerScene level, correlate with the physical
+/// hierarchy, and produce per-slot `ModuleTarget`s.
 ///
 /// # Lifecycle
 ///
 /// 1. `initialize(rig)` — creates module slots for each type in the rig
-/// 2. `load_preset_with_scene(...)` — first load
-/// 3. `switch_scene(...)` — scene changes within the same preset
-/// 4. `preload(...)` — background loading for predictive preloading
-/// 5. `tick()` — called from 60Hz timer to process preload queue and cleanup
-/// 6. `shutdown()` — release all resources
+/// 2. `load_scene(...)` — load a scene (initial or switch)
+/// 3. `preload(...)` — background loading for predictive preloading
+/// 4. `tick()` — called from 60Hz timer to process preload queue and cleanup
+/// 5. `shutdown()` — release all resources
 #[async_trait]
 pub trait RigEngine: Send + Sync {
     /// Initialize module slots for each module type in the rig.
@@ -100,28 +98,18 @@ pub trait RigEngine: Send + Sync {
     /// resources (tracks, channels, etc.) for each module type.
     async fn initialize(&self, rig: &Rig) -> Result<(), EngineError>;
 
-    /// Load a preset with a specific scene.
+    /// Load a scene — resolve, diff, and execute the transition.
     ///
-    /// This is the primary entry point. Resolves the preset+scene into
-    /// per-slot module targets, diffs against current state, and executes
-    /// the transition. If target slots aren't preloaded, the switch is
-    /// deferred until ready.
-    async fn load_preset_with_scene(
+    /// This is the primary entry point for both initial loads and scene
+    /// switches. The resolver walks `scene_ref` down to LayerScene level,
+    /// correlates with the physical `rig`, looks up data via `store`,
+    /// applies `overrides`, then diffs against current state and executes.
+    async fn load_scene(
         &self,
-        preset: &Preset,
-        scene: &Scene,
+        scene_ref: &ScopedSceneRef,
         rig: &Rig,
-    ) -> TransitionResult;
-
-    /// Switch scene within the current preset.
-    ///
-    /// Only changed slots are touched. Slots that don't change between
-    /// scenes produce `SlotDiff::NoChange`.
-    async fn switch_scene(
-        &self,
-        scene: &Scene,
-        preset: &Preset,
-        rig: &Rig,
+        store: &dyn SceneStore,
+        overrides: &[SceneOverride<Validated>],
     ) -> TransitionResult;
 
     /// Apply a module snapshot (parameter changes only, no instance switching).
@@ -131,16 +119,16 @@ pub trait RigEngine: Send + Sync {
         snapshot: &ModuleSnapshot,
     ) -> Result<(), EngineError>;
 
-    /// Preload a preset+scene in the background.
+    /// Preload a scene in the background.
     ///
     /// Returns a handle that can be polled for readiness. When ready,
-    /// a subsequent `load_preset_with_scene` for the same target will
-    /// complete instantly (gapless).
+    /// a subsequent `load_scene` for the same target will complete
+    /// instantly (gapless).
     async fn preload(
         &self,
-        preset: &Preset,
-        scene: &Scene,
+        scene_ref: &ScopedSceneRef,
         rig: &Rig,
+        store: &dyn SceneStore,
     ) -> PresetLoadHandle;
 
     /// Check the readiness of a preload operation.

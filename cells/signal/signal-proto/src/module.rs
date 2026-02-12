@@ -7,7 +7,6 @@
 
 use std::fmt;
 
-use facet::Facet;
 use uuid::Uuid;
 
 use crate::block::Block;
@@ -24,7 +23,7 @@ use daw_proto::FxNodeId;
 ///
 /// Determines where the module fits in the signal chain and how the UI
 /// groups and labels it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Facet)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ::facet::Facet)]
 #[repr(u8)]
 pub enum ModuleType {
     // ── Vocal chain ──────────────────────────────────────────────────────
@@ -120,7 +119,7 @@ impl fmt::Display for ModuleType {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// How a module routes its output to the send bus.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Facet, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ::facet::Facet, Default)]
 #[repr(u8)]
 pub enum SendMode {
     /// Module is an insert (no send routing).
@@ -139,7 +138,7 @@ pub enum SendMode {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// A MIDI control source for triggering a block.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Facet)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ::facet::Facet)]
 #[repr(u8)]
 pub enum MidiControl {
     /// Continuous Controller number (0–127).
@@ -149,7 +148,7 @@ pub enum MidiControl {
 }
 
 /// How a MIDI trigger behaves.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Facet)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ::facet::Facet)]
 #[repr(u8)]
 pub enum TriggerMode {
     /// Active only while held.
@@ -161,7 +160,7 @@ pub enum TriggerMode {
 }
 
 /// Configuration for MIDI-triggered block activation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Facet)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ::facet::Facet)]
 pub struct MidiTriggerConfig {
     pub channel: MidiChannel,
     pub control: MidiControl,
@@ -173,7 +172,7 @@ pub struct MidiTriggerConfig {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// A block positioned within a module, with optional MIDI trigger.
-#[derive(Debug, Clone, PartialEq, Facet)]
+#[derive(Debug, Clone, PartialEq, ::facet::Facet)]
 pub struct ModuleBlock {
     pub id: Uuid,
     pub block: Block,
@@ -232,7 +231,7 @@ impl Taggable for ModuleBlock {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// A macro knob that exposes a single block parameter for quick access.
-#[derive(Debug, Clone, PartialEq, Facet)]
+#[derive(Debug, Clone, PartialEq, ::facet::Facet)]
 pub struct ModuleMacro {
     pub id: Uuid,
     pub name: String,
@@ -251,7 +250,7 @@ pub struct ModuleMacro {
 /// Modules represent logical groups in the signal chain (e.g. "Drive",
 /// "Amp", "EQ"). Each module holds one or more [`ModuleBlock`]s
 /// and optional [`ModuleMacro`] knobs for quick parameter access.
-#[derive(Debug, Clone, PartialEq, Facet)]
+#[derive(Debug, Clone, PartialEq, ::facet::Facet)]
 pub struct Module {
     pub id: ModuleId,
     pub name: String,

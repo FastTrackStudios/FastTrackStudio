@@ -9,7 +9,8 @@ use async_trait::async_trait;
 
 use crate::engine::{EngineError, InstanceHandle, InstanceState, ModuleTarget};
 use crate::module::ModuleType;
-use crate::module_preset::{ModulePreset, ModuleSnapshot};
+use crate::preset::ModulePreset;
+use crate::snapshot::ModuleSnapshot;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // LoadResult
@@ -100,11 +101,7 @@ pub trait ModuleSlot: Send + Sync {
     /// If the exact same preset+snapshot is already loaded, returns
     /// `AlreadyLoaded`. Otherwise creates a new instance that transitions
     /// through `Loading` → `Ready`.
-    async fn load(
-        &self,
-        target: &ModuleTarget,
-        preset: &ModulePreset,
-    ) -> LoadResult;
+    async fn load(&self, target: &ModuleTarget, preset: &ModulePreset) -> LoadResult;
 
     /// Gapless switch: unmute the new instance, set the old one to Tailing.
     ///

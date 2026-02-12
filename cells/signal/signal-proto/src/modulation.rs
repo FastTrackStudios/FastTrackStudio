@@ -26,7 +26,6 @@
 use std::collections::HashMap;
 use std::f64::consts::TAU;
 
-use facet::Facet;
 use uuid::Uuid;
 
 use crate::id::BlockId;
@@ -37,7 +36,7 @@ use crate::normalized::NormalizedF64;
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Waveform shape for an LFO modulation source.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Facet)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, ::facet::Facet)]
 #[repr(u8)]
 pub enum LfoWaveform {
     #[default]
@@ -112,7 +111,7 @@ impl LfoWaveform {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Configuration for an LFO modulation source.
-#[derive(Debug, Clone, PartialEq, Facet)]
+#[derive(Debug, Clone, PartialEq, ::facet::Facet)]
 pub struct LfoConfig {
     /// Waveform shape.
     pub waveform: LfoWaveform,
@@ -140,7 +139,7 @@ impl Default for LfoConfig {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// ADSR envelope configuration for modulation.
-#[derive(Debug, Clone, PartialEq, Facet)]
+#[derive(Debug, Clone, PartialEq, ::facet::Facet)]
 pub struct EnvelopeConfig {
     /// Attack time in milliseconds.
     pub attack_ms: f64,
@@ -168,7 +167,7 @@ impl Default for EnvelopeConfig {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Runtime state of an ADSR envelope.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Facet)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ::facet::Facet)]
 #[repr(u8)]
 pub enum EnvelopePhase {
     Idle,
@@ -281,7 +280,7 @@ impl Default for EnvelopeState {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// What drives a modulation route.
-#[derive(Debug, Clone, PartialEq, Facet)]
+#[derive(Debug, Clone, PartialEq, ::facet::Facet)]
 #[repr(C)]
 pub enum ModulationSource {
     /// Low-frequency oscillator.
@@ -301,7 +300,7 @@ pub enum ModulationSource {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Routes a modulation source to a specific parameter on a block.
-#[derive(Debug, Clone, PartialEq, Facet)]
+#[derive(Debug, Clone, PartialEq, ::facet::Facet)]
 pub struct ModulationRoute {
     /// Unique identifier for this route.
     pub id: Uuid,

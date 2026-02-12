@@ -2,7 +2,6 @@
 //!
 //! Defines how audio flows between layers, blocks, and global effects.
 
-use facet::Facet;
 
 use crate::id::BlockId;
 
@@ -11,7 +10,7 @@ use crate::id::BlockId;
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// How audio flows through a section's layers.
-#[derive(Debug, Clone, Facet, Default)]
+#[derive(Debug, Clone, ::facet::Facet, Default)]
 #[repr(u8)]
 pub enum SectionRouting {
     /// Layers run in series: Layer 1 → Layer 2 → ... → Output
@@ -42,7 +41,7 @@ impl SectionRouting {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// A single connection in a custom routing graph.
-#[derive(Debug, Clone, Facet)]
+#[derive(Debug, Clone, ::facet::Facet)]
 pub struct RoutingNode {
     pub source: BlockRef,
     pub destination: BlockRef,
@@ -69,7 +68,7 @@ impl RoutingNode {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// A reference to a point in the signal chain.
-#[derive(Debug, Clone, Facet)]
+#[derive(Debug, Clone, ::facet::Facet)]
 #[repr(u8)]
 pub enum BlockRef {
     /// The section's audio input

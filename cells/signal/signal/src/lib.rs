@@ -30,10 +30,13 @@
 //! - [`mock`] — in-memory implementations for testing
 
 // ── Domain types (re-exported from signal-proto) ────────────────────────────
+// NOTE: signal_proto::engine is NOT re-exported — it would collide with
+// signal::engine (runtime types like ModuleTarget, InstanceState).
+// Access proto Engine via signal::preset::EnginePreset or signal_proto::engine directly.
 pub use signal_proto::{
-    block, category, defaults, director, id, layer, module, module_preset, non_empty, normalized,
-    parameter, patch, performance, preset, profile, rig, routing, section, selection, source, tags,
-    template,
+    active, block, category, container, director, id, layer, module, non_empty, normalized,
+    override_tree, parameter, preset, profile, rack, rig, routing, scene, snapshot, song, source,
+    tags, template, version,
 };
 
 // Re-export foundation types at crate root for convenience
@@ -49,6 +52,7 @@ pub mod mock;
 pub mod resolver;
 pub mod rig_engine;
 pub mod slot;
+pub mod stores;
 
 // ── Service (ROAM) ─────────────────────────────────────────────────────────
 pub mod roam_test;
@@ -66,8 +70,11 @@ pub use slot::{ActivateResult, LoadResult, ModuleSlot};
 
 // Re-export service types.
 pub use service::{
-    EngineStateInfo, InstanceInfo, MockRigControlService, PreloadStatusInfo, PresetInfo,
-    PresetSnapshotInfo, ProfileInfo, ProfileSceneInfo, RigControlCommand, RigControlData,
-    RigControlEvent, RigControlService, RigInfo, SetlistInfo, SlotErrorInfo, SlotStateInfo,
-    SongInfo, SwitchOutcomeInfo, TransitionResultInfo,
+    EngineStateInfo, InstanceInfo, MockRigControlService, PatchInfo, PreloadStatusInfo,
+    ProfileInfo, RigControlCommand, RigControlData, RigControlEvent, RigControlService, RigInfo,
+    RigPresetInfo, SectionInfo, SetlistInfo, SlotErrorInfo, SlotStateInfo, SongInfo,
+    SwitchOutcomeInfo, TransitionResultInfo,
 };
+
+// Re-export stores.
+pub use stores::{InMemorySceneStore, SceneStore};

@@ -4,7 +4,6 @@
 //! range and its real-world value (dB, Hz, ms, etc.). The [`ParamFormat`] enum
 //! encodes the mapping math, while [`ParamSpec`] bundles format with metadata.
 
-use facet::Facet;
 
 use crate::normalized::NormalizedF64;
 
@@ -21,7 +20,7 @@ use crate::normalized::NormalizedF64;
 /// - `1.0` = linear
 /// - `< 1.0` = more resolution at the low end (e.g. frequency)
 /// - `> 1.0` = more resolution at the high end
-#[derive(Debug, Clone, PartialEq, Facet)]
+#[derive(Debug, Clone, PartialEq, ::facet::Facet)]
 #[repr(u8)]
 pub enum ParamFormat {
     /// 0–100% linear mapping.
@@ -270,7 +269,7 @@ impl ParamFormat {
 ///
 /// This is the "blueprint" for a parameter — it does not hold a current value,
 /// only describes what values are valid and how to display them.
-#[derive(Debug, Clone, PartialEq, Facet)]
+#[derive(Debug, Clone, PartialEq, ::facet::Facet)]
 pub struct ParamSpec {
     /// Unique identifier (e.g. `"drive"`, `"eq_low_freq"`).
     pub id: String,
@@ -298,7 +297,7 @@ pub struct ParamSpec {
 ///
 /// Lightweight value type used in [`Block`](crate::block::Block) parameter lists
 /// and real-time parameter change messages.
-#[derive(Debug, Clone, PartialEq, Facet)]
+#[derive(Debug, Clone, PartialEq, ::facet::Facet)]
 pub struct ParameterValue {
     /// Index into the parent's parameter spec list.
     pub index: u32,
@@ -327,7 +326,7 @@ impl ParameterValue {
 /// perspective. A `Continuous` parameter is a smooth slider; a `Stepped` one
 /// snaps to labelled positions; a `Toggle` is on/off; a `Choice` presents
 /// a list of exclusive options.
-#[derive(Debug, Clone, PartialEq, Facet)]
+#[derive(Debug, Clone, PartialEq, ::facet::Facet)]
 #[repr(u8)]
 pub enum ParameterType {
     /// Smooth, continuous range (typical for knobs/sliders).
@@ -348,7 +347,7 @@ pub enum ParameterType {
 ///
 /// Complements [`ParamFormat`] by providing a unit label without coupling to
 /// the normalization math. Useful for display, serialization, and VST bridges.
-#[derive(Debug, Clone, PartialEq, Facet)]
+#[derive(Debug, Clone, PartialEq, ::facet::Facet)]
 #[repr(u8)]
 pub enum ParameterUnit {
     Decibels,
@@ -385,7 +384,7 @@ impl ParameterUnit {
 /// runtime value, `Parameter` is the full picture: identity, constraints,
 /// current value, and precomputed display string. This is the type handed
 /// to UI components and the VST parameter bridge.
-#[derive(Debug, Clone, PartialEq, Facet)]
+#[derive(Debug, Clone, PartialEq, ::facet::Facet)]
 pub struct Parameter {
     /// Unique identifier (e.g. `"drive"`, `"eq_low_freq"`).
     pub id: String,

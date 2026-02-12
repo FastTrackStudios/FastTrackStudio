@@ -1,404 +1,414 @@
-//! Rig Templates — structural blueprints for presets.
+//! Template system — structural blueprints at every level.
 //!
-//! A [`RigTemplate`] defines a rig's structure (which modules, which block
-//! slots) without binding to actual plugins. When instantiated it produces a
-//! real [`Preset`](crate::preset::Preset) where every block starts as a
-//! placeholder awaiting plugin assignment.
+//! Templates capture the shape of a thing (modules, block slots, layers) without
+//! binding to specific plugins or parameter state. Bidirectional:
 //!
-//! Hierarchy: `RigTemplate` → `ModuleTemplate` → `BlockPlaceholder`
-
-use facet::Facet;
+//! - **Instance → Template**: `thing.to_template()` strips plugins, keeps structure.
+//! - **Template → Instance**: `T::from_template(&template)` creates placeholders.
+//!
+//! The [`Templatable`] trait is implemented for Block, Module, Layer, Engine, Rig, Rack.
 
 use crate::block::{Block, BlockType, PluginId};
-use crate::category::{BaseTone, PresetCategory};
-use crate::id::RigTemplateId;
-use crate::module::{ModuleBlock, ModuleType};
-use crate::module_preset::{ModuleAssignment, ModulePreset};
+use crate::engine::Engine;
+use crate::id::{EngineTemplateId, RackTemplateId, RigTemplateId};
+use crate::layer::Layer;
+use crate::module::{Module, ModuleBlock, ModuleType};
+use crate::non_empty::NonEmptyVec;
 use crate::normalized::Order;
-use crate::preset::Preset;
+use crate::rack::Rack;
+use crate::rig::{InstrumentType, Rig};
+use crate::version::LayerIndex;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// BlockPlaceholder
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── Templatable trait ───────────────────────────────────────────
 
-/// A placeholder for a block slot in a template.
-///
-/// Contains the structural information (type, alias, description) but no
-/// plugin binding. When instantiated, becomes a real [`Block`](crate::block::Block)
-/// with [`PluginId::unassigned()`](crate::block::PluginId::unassigned).
-#[derive(Debug, Clone, PartialEq, Facet)]
-pub struct BlockPlaceholder {
-    /// The DSP category this slot expects (EQ, Compressor, Drive, etc.).
+/// Types that can produce and consume structural templates.
+pub trait Templatable: Sized {
+    type Template;
+
+    /// Extract a structural template — strips plugin bindings and parameter state.
+    fn to_template(&self) -> Self::Template;
+
+    /// Instantiate from a template — creates real instances with placeholder plugins.
+    fn from_template(template: &Self::Template) -> Self;
+}
+
+// ─── BlockTemplate ───────────────────────────────────────────────
+
+/// A block slot — knows what type of DSP it needs but not which plugin.
+#[derive(Debug, Clone, PartialEq, ::facet::Facet)]
+pub struct BlockTemplate {
     pub block_type: BlockType,
-    /// Display name for the block (e.g. "Main Drive", "Room Reverb").
     pub name: String,
-    /// Optional short alias shown in the node graph (e.g. "Rescue-EQ").
     pub alias: Option<String>,
-    /// Optional description of this block's purpose in the template.
     pub description: Option<String>,
-    /// Position within the module's internal grid (column). `None` means
-    /// auto-layout (linear chain). Used for 2D module layouts like parallel
-    /// amp pairs or multi-lane time sections.
     pub local_col: Option<usize>,
-    /// Position within the module's internal grid (row).
     pub local_row: Option<usize>,
 }
 
-impl BlockPlaceholder {
-    /// Create a new block placeholder.
-    pub fn new(name: impl Into<String>, block_type: BlockType) -> Self {
-        Self {
-            block_type,
-            name: name.into(),
-            alias: None,
-            description: None,
+impl Templatable for Block {
+    type Template = BlockTemplate;
+
+    fn to_template(&self) -> BlockTemplate {
+        BlockTemplate {
+            block_type: self.block_type,
+            name: self.name.clone(),
+            alias: self.alias.clone(),
+            description: self.description.clone(),
             local_col: None,
             local_row: None,
         }
     }
 
-    /// Set a short alias (builder pattern).
-    #[must_use]
-    pub fn with_alias(mut self, alias: impl Into<String>) -> Self {
-        self.alias = Some(alias.into());
-        self
-    }
-
-    /// Set a description (builder pattern).
-    #[must_use]
-    pub fn with_description(mut self, description: impl Into<String>) -> Self {
-        self.description = Some(description.into());
-        self
-    }
-
-    /// Set the block's position within the module's internal 2D grid.
-    ///
-    /// Used for modules with non-linear layouts (e.g. parallel amps,
-    /// multi-lane time sections). Blocks without `at()` are laid out
-    /// linearly in chain order.
-    #[must_use]
-    pub fn at(mut self, col: usize, row: usize) -> Self {
-        self.local_col = Some(col);
-        self.local_row = Some(row);
-        self
-    }
-
-    /// Convert this placeholder into a real [`Block`] with [`PluginId::unassigned()`].
-    pub fn to_block(&self) -> Block {
-        let mut block =
-            Block::new(&self.name, PluginId::unassigned()).with_block_type(self.block_type);
-        if let Some(alias) = &self.alias {
-            block.alias = Some(alias.clone());
+    fn from_template(t: &BlockTemplate) -> Block {
+        let mut block = Block::new(&t.name, PluginId::unassigned()).with_block_type(t.block_type);
+        if let Some(alias) = &t.alias {
+            block = block.with_alias(alias);
         }
-        if let Some(desc) = &self.description {
-            block.description = Some(desc.clone());
+        if let Some(desc) = &t.description {
+            block = block.with_description(desc);
         }
         block
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ModuleTemplate
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── ModuleTemplate ──────────────────────────────────────────────
 
-/// Template for a processing module — defines which block slots exist.
-#[derive(Debug, Clone, PartialEq, Facet)]
+/// Structural blueprint for a processing module.
+#[derive(Debug, Clone, PartialEq, ::facet::Facet)]
 pub struct ModuleTemplate {
-    /// The module type this template defines (Drive, Amp, Time, etc.).
     pub module_type: ModuleType,
-    /// Display name for the module (e.g. "Drive", "Amp/Cab").
     pub name: String,
-    /// Optional description of this module's role in the rig.
     pub description: Option<String>,
-    /// Block slots in signal-chain order.
-    pub blocks: Vec<BlockPlaceholder>,
-    /// Internal grid width (columns) for 2D layouts. `None` = auto (block count).
+    pub blocks: Vec<BlockTemplate>,
     pub grid_width: Option<usize>,
-    /// Internal grid height (rows) for 2D layouts. `None` = auto (1 row).
     pub grid_height: Option<usize>,
 }
 
-impl ModuleTemplate {
-    /// Create a new module template with no blocks.
-    pub fn new(name: impl Into<String>, module_type: ModuleType) -> Self {
-        Self {
-            module_type,
-            name: name.into(),
+impl Templatable for Module {
+    type Template = ModuleTemplate;
+
+    fn to_template(&self) -> ModuleTemplate {
+        ModuleTemplate {
+            module_type: self.module_type,
+            name: self.name.clone(),
             description: None,
-            blocks: Vec::new(),
-            grid_width: None,
-            grid_height: None,
+            blocks: self
+                .blocks
+                .iter()
+                .map(|mb| mb.block.to_template())
+                .collect(),
+            grid_width: self.grid_width,
+            grid_height: self.grid_height,
         }
     }
 
-    /// Set a description (builder pattern).
-    #[must_use]
-    pub fn with_description(mut self, description: impl Into<String>) -> Self {
-        self.description = Some(description.into());
-        self
-    }
-
-    /// Set the module's internal grid dimensions for 2D layouts.
-    ///
-    /// Modules with a grid size will lay out their blocks using
-    /// `BlockPlaceholder::local_col` / `local_row` positions within
-    /// this grid. Unpositioned blocks fall back to linear auto-layout.
-    #[must_use]
-    pub fn with_grid_size(mut self, width: usize, height: usize) -> Self {
-        self.grid_width = Some(width);
-        self.grid_height = Some(height);
-        self
-    }
-
-    /// Add a block placeholder (builder pattern).
-    #[must_use]
-    pub fn with_block(mut self, block: BlockPlaceholder) -> Self {
-        self.blocks.push(block);
-        self
-    }
-
-    /// Convert this module template into a [`ModulePreset`] with placeholder blocks.
-    pub fn to_module_preset(&self) -> ModulePreset {
-        let mut mp = ModulePreset::new(&self.name, self.module_type);
-        if let Some(desc) = &self.description {
-            mp.description = Some(desc.clone());
+    fn from_template(t: &ModuleTemplate) -> Module {
+        let mut module = Module::new(&t.name, t.module_type);
+        module.grid_width = t.grid_width;
+        module.grid_height = t.grid_height;
+        for (i, bt) in t.blocks.iter().enumerate() {
+            let block = Block::from_template(bt);
+            let mut mb = ModuleBlock::new(block, Order::new(i as u8));
+            mb.local_col = bt.local_col;
+            mb.local_row = bt.local_row;
+            module.add_block(mb);
         }
-        mp.grid_width = self.grid_width;
-        mp.grid_height = self.grid_height;
-        for (i, bp) in self.blocks.iter().enumerate() {
-            let mut mb = ModuleBlock::new(bp.to_block(), Order::new(i as u8));
-            mb.local_col = bp.local_col;
-            mb.local_row = bp.local_row;
-            mp.add_block(mb);
-        }
-        mp
+        module
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// RigTemplate
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── LayerTemplate ───────────────────────────────────────────────
 
-/// A structural blueprint for a complete rig preset.
-///
-/// Contains module templates in signal-chain order. When instantiated,
-/// produces a real [`Preset`](crate::preset::Preset) with placeholder blocks.
-#[derive(Debug, Clone, PartialEq, Facet)]
+/// Blueprint for a layer — which modules and standalone blocks it has.
+#[derive(Debug, Clone, ::facet::Facet)]
+pub struct LayerTemplate {
+    pub name: String,
+    pub index: LayerIndex,
+    pub modules: Vec<ModuleTemplate>,
+    pub standalone_blocks: Vec<BlockTemplate>,
+    pub description: Option<String>,
+}
+
+impl Templatable for Layer {
+    type Template = LayerTemplate;
+
+    fn to_template(&self) -> LayerTemplate {
+        LayerTemplate {
+            name: self.name.clone(),
+            index: self.index,
+            modules: self.modules.iter().map(|m| m.to_template()).collect(),
+            standalone_blocks: self
+                .standalone_blocks
+                .iter()
+                .map(|b| b.to_template())
+                .collect(),
+            description: None,
+        }
+    }
+
+    fn from_template(t: &LayerTemplate) -> Layer {
+        let mut layer = Layer::new(&t.name, t.index);
+        for mt in &t.modules {
+            layer.add_module(Module::from_template(mt));
+        }
+        for bt in &t.standalone_blocks {
+            layer.add_standalone_block(Block::from_template(bt));
+        }
+        layer
+    }
+}
+
+// ─── EngineTemplate ──────────────────────────────────────────────
+
+/// Blueprint for an engine — which layers and their structure.
+#[derive(Debug, Clone, ::facet::Facet)]
+pub struct EngineTemplate {
+    pub id: EngineTemplateId,
+    pub name: String,
+    pub engine_type: InstrumentType,
+    pub layers: NonEmptyVec<LayerTemplate>,
+    pub description: Option<String>,
+}
+
+impl Templatable for Engine {
+    type Template = EngineTemplate;
+
+    fn to_template(&self) -> EngineTemplate {
+        let layer_templates: Vec<LayerTemplate> =
+            self.layers.iter().map(|l| l.to_template()).collect();
+        EngineTemplate {
+            id: EngineTemplateId::new(),
+            name: self.name.clone(),
+            engine_type: self.engine_type.clone(),
+            layers: NonEmptyVec::from_vec(layer_templates)
+                .expect("engine always has at least one layer"),
+            description: None,
+        }
+    }
+
+    fn from_template(t: &EngineTemplate) -> Engine {
+        let first_layer = Layer::from_template(t.layers.first());
+        let mut engine = Engine::new(&t.name, t.engine_type.clone(), first_layer);
+        for layer_template in t.layers.iter().skip(1) {
+            engine.add_layer(Layer::from_template(layer_template));
+        }
+        engine
+    }
+}
+
+// ─── RigTemplate ─────────────────────────────────────────────────
+
+/// Blueprint for a rig — which engines it contains.
+#[derive(Debug, Clone, ::facet::Facet)]
 pub struct RigTemplate {
     pub id: RigTemplateId,
-    /// Display name (e.g. "Guitar Rig Template", "Vocal Rig Template").
     pub name: String,
-    /// Optional description of this template's intended use.
+    pub instrument_type: InstrumentType,
+    pub engines: NonEmptyVec<EngineTemplate>,
     pub description: Option<String>,
-    /// Module templates in signal-chain order.
-    pub modules: Vec<ModuleTemplate>,
 }
 
-impl RigTemplate {
-    /// Create a new empty rig template.
-    pub fn new(name: impl Into<String>) -> Self {
-        Self {
+impl Templatable for Rig {
+    type Template = RigTemplate;
+
+    fn to_template(&self) -> RigTemplate {
+        let engine_templates: Vec<EngineTemplate> =
+            self.engines.iter().map(|e| e.to_template()).collect();
+        RigTemplate {
             id: RigTemplateId::new(),
-            name: name.into(),
+            name: self.name.clone(),
+            instrument_type: self.instrument_type.clone(),
+            engines: NonEmptyVec::from_vec(engine_templates)
+                .expect("rig always has at least one engine"),
             description: None,
-            modules: Vec::new(),
         }
     }
 
-    /// Set a description (builder pattern).
-    #[must_use]
-    pub fn with_description(mut self, description: impl Into<String>) -> Self {
-        self.description = Some(description.into());
-        self
-    }
-
-    /// Add a module template (builder pattern).
-    #[must_use]
-    pub fn with_module(mut self, module: ModuleTemplate) -> Self {
-        self.modules.push(module);
-        self
-    }
-
-    /// Find a module template by type.
-    pub fn module(&self, module_type: ModuleType) -> Option<&ModuleTemplate> {
-        self.modules.iter().find(|m| m.module_type == module_type)
-    }
-
-    /// Instantiate this template into a real [`Preset`] with placeholder blocks.
-    ///
-    /// Returns `(preset, module_presets)` — the preset with module assignments
-    /// pointing to the newly-created module presets.
-    pub fn instantiate(&self) -> (Preset, Vec<ModulePreset>) {
-        let mut preset = Preset::new(
-            &self.name,
-            PresetCategory::Generic {
-                base_tone: BaseTone::Clean,
-            },
-        );
-        preset.description = self.description.clone();
-
-        let mut module_presets = Vec::with_capacity(self.modules.len());
-
-        for (module_idx, module_template) in self.modules.iter().enumerate() {
-            let module_preset = module_template.to_module_preset();
-            let assignment = ModuleAssignment::new(
-                module_template.module_type,
-                module_preset.id,
-                Order::new(module_idx as u8),
-            );
-            preset.module_assignments.push(assignment);
-            module_presets.push(module_preset);
+    fn from_template(t: &RigTemplate) -> Rig {
+        let first_engine = Engine::from_template(t.engines.first());
+        let mut rig = Rig::new(&t.name, t.instrument_type.clone(), first_engine);
+        for engine_template in t.engines.iter().skip(1) {
+            rig.add_engine(Engine::from_template(engine_template));
         }
-
-        (preset, module_presets)
+        rig
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Tests
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── RackTemplate ────────────────────────────────────────────────
+
+/// Blueprint for a rack — which rigs it contains.
+#[derive(Debug, Clone, ::facet::Facet)]
+pub struct RackTemplate {
+    pub id: RackTemplateId,
+    pub name: String,
+    pub rigs: Vec<RigTemplate>,
+    pub description: Option<String>,
+}
+
+impl Templatable for Rack {
+    type Template = RackTemplate;
+
+    fn to_template(&self) -> RackTemplate {
+        RackTemplate {
+            id: RackTemplateId::new(),
+            name: self.name.clone(),
+            rigs: self.rigs.iter().map(|r| r.to_template()).collect(),
+            description: None,
+        }
+    }
+
+    fn from_template(t: &RackTemplate) -> Rack {
+        let mut rack = Rack::new(&t.name);
+        for rt in &t.rigs {
+            rack.add_rig(Rig::from_template(rt));
+        }
+        rack
+    }
+}
+
+// ─── Scene Templates ─────────────────────────────────────────────
+
+/// Captures the structure of a layer scene without snapshot IDs.
+#[derive(Debug, Clone, ::facet::Facet)]
+pub struct LayerSceneTemplate {
+    pub name: String,
+    pub module_types: Vec<ModuleType>,
+    pub has_standalone_blocks: bool,
+    pub enabled: bool,
+}
+
+/// Captures the structure of an engine scene.
+#[derive(Debug, Clone, ::facet::Facet)]
+pub struct EngineSceneTemplate {
+    pub name: String,
+    pub layer_count: u8,
+}
+
+// ─── Tests ───────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn block_placeholder_creation() {
-        let bp = BlockPlaceholder::new("Main Drive", BlockType::Drive)
-            .with_alias("OD1")
-            .with_description("Primary overdrive pedal");
+    fn block_round_trip() {
+        let block = Block::new("Klon", PluginId::vst3("klon", "Klon Centaur"))
+            .with_block_type(BlockType::Drive)
+            .with_alias("KTR");
 
-        assert_eq!(bp.name, "Main Drive");
-        assert_eq!(bp.block_type, BlockType::Drive);
-        assert_eq!(bp.alias.as_deref(), Some("OD1"));
-        assert_eq!(bp.description.as_deref(), Some("Primary overdrive pedal"));
+        let template = block.to_template();
+        assert_eq!(template.name, "Klon");
+        assert_eq!(template.block_type, BlockType::Drive);
+        assert_eq!(template.alias.as_deref(), Some("KTR"));
+
+        let instantiated = Block::from_template(&template);
+        assert_eq!(instantiated.name, "Klon");
+        assert_eq!(instantiated.block_type, BlockType::Drive);
+        assert!(instantiated.is_placeholder());
     }
 
     #[test]
-    fn module_template_creation() {
-        let mt = ModuleTemplate::new("Drive", ModuleType::Drive)
-            .with_description("Overdrive and distortion stage")
-            .with_block(BlockPlaceholder::new("Boost", BlockType::Boost))
-            .with_block(BlockPlaceholder::new("Drive 1", BlockType::Drive))
-            .with_block(BlockPlaceholder::new("Drive 2", BlockType::Drive));
+    fn module_round_trip() {
+        let mut module = Module::new("Drive", ModuleType::Drive);
+        module.grid_width = Some(2);
+        let block =
+            Block::new("OD", PluginId::vst3("od", "Overdrive")).with_block_type(BlockType::Drive);
+        module.add_block(ModuleBlock::new(block, Order::new(0)));
 
-        assert_eq!(mt.name, "Drive");
-        assert_eq!(mt.module_type, ModuleType::Drive);
-        assert_eq!(mt.blocks.len(), 3);
-        assert_eq!(mt.blocks[0].name, "Boost");
-        assert_eq!(mt.blocks[1].block_type, BlockType::Drive);
+        let template = module.to_template();
+        assert_eq!(template.module_type, ModuleType::Drive);
+        assert_eq!(template.blocks.len(), 1);
+        assert_eq!(template.grid_width, Some(2));
+
+        let instantiated = Module::from_template(&template);
+        assert_eq!(instantiated.module_type, ModuleType::Drive);
+        assert_eq!(instantiated.blocks.len(), 1);
+        assert!(instantiated.blocks[0].block.is_placeholder());
     }
 
     #[test]
-    fn rig_template_creation() {
-        let rt = RigTemplate::new("Guitar Rig Template")
-            .with_description("Standard guitar signal chain")
-            .with_module(
-                ModuleTemplate::new("Source", ModuleType::Source)
-                    .with_block(BlockPlaceholder::new("Input Gate", BlockType::Gate)),
-            )
-            .with_module(
-                ModuleTemplate::new("Drive", ModuleType::Drive)
-                    .with_block(BlockPlaceholder::new("Drive 1", BlockType::Drive)),
-            );
-
-        assert_eq!(rt.name, "Guitar Rig Template");
-        assert_eq!(rt.modules.len(), 2);
-        assert!(rt.module(ModuleType::Source).is_some());
-        assert!(rt.module(ModuleType::Drive).is_some());
-        assert!(rt.module(ModuleType::Amp).is_none());
-    }
-
-    #[test]
-    fn rig_template_find_module() {
-        let rt = RigTemplate::new("Test").with_module(ModuleTemplate::new("Amp", ModuleType::Amp));
-
-        let amp = rt.module(ModuleType::Amp).unwrap();
-        assert_eq!(amp.name, "Amp");
-    }
-
-    #[test]
-    fn block_placeholder_to_block() {
-        let bp = BlockPlaceholder::new("Rescue-EQ", BlockType::Eq)
-            .with_alias("R-EQ")
-            .with_description("First EQ for fixing problem frequencies");
-
-        let block = bp.to_block();
-        assert_eq!(block.name, "Rescue-EQ");
-        assert_eq!(block.display_name(), "R-EQ");
-        assert_eq!(block.block_type, BlockType::Eq);
-        assert!(block.is_placeholder());
-        assert_eq!(
-            block.description.as_deref(),
-            Some("First EQ for fixing problem frequencies")
+    fn engine_round_trip() {
+        let mut engine = Engine::new(
+            "Guitar",
+            InstrumentType::Guitar,
+            Layer::new("Main", LayerIndex::new(1)),
         );
+        engine.add_layer(Layer::new("Harmony", LayerIndex::new(2)));
+
+        let template = engine.to_template();
+        assert_eq!(template.layers.len(), 2);
+        assert_eq!(template.layers.first().name, "Main");
+
+        let instantiated = Engine::from_template(&template);
+        assert_eq!(instantiated.layers.len(), 2);
+        assert_eq!(instantiated.layers.first().name, "Main");
     }
 
     #[test]
-    fn module_template_to_module_preset() {
-        let mt = ModuleTemplate::new("Drive", ModuleType::Drive)
-            .with_description("Overdrive stage")
-            .with_block(BlockPlaceholder::new("Boost", BlockType::Boost))
-            .with_block(BlockPlaceholder::new("Drive 1", BlockType::Drive));
+    fn rig_round_trip() {
+        let engine = Engine::new(
+            "Main",
+            InstrumentType::Guitar,
+            Layer::new("Layer 1", LayerIndex::new(1)),
+        );
+        let rig = Rig::new("Guitar Rig", InstrumentType::Guitar, engine);
 
-        let mp = mt.to_module_preset();
-        assert_eq!(mp.name, "Drive");
-        assert_eq!(mp.module_type, ModuleType::Drive);
-        assert_eq!(mp.description.as_deref(), Some("Overdrive stage"));
-        assert_eq!(mp.blocks.len(), 2);
-        assert!(mp.blocks[0].block.is_placeholder());
-        assert_eq!(mp.blocks[0].block.name, "Boost");
-        assert_eq!(mp.blocks[1].block.name, "Drive 1");
+        let template = rig.to_template();
+        assert_eq!(template.name, "Guitar Rig");
+        assert_eq!(template.engines.len(), 1);
+
+        let instantiated = Rig::from_template(&template);
+        assert_eq!(instantiated.name, "Guitar Rig");
+        assert_eq!(instantiated.engines.len(), 1);
     }
 
     #[test]
-    fn rig_template_instantiate() {
-        let rt = RigTemplate::new("Guitar Template")
-            .with_description("Standard guitar chain")
-            .with_module(
-                ModuleTemplate::new("Source", ModuleType::Source)
-                    .with_block(BlockPlaceholder::new("Input Gate", BlockType::Gate))
-                    .with_block(BlockPlaceholder::new("Input Volume", BlockType::Volume)),
-            )
-            .with_module(
-                ModuleTemplate::new("Drive", ModuleType::Drive)
-                    .with_block(BlockPlaceholder::new("Boost", BlockType::Boost))
-                    .with_block(BlockPlaceholder::new("Drive 1", BlockType::Drive))
-                    .with_block(BlockPlaceholder::new("Drive 2", BlockType::Drive)),
-            );
-
-        let (preset, module_presets) = rt.instantiate();
-
-        // Preset
-        assert_eq!(preset.name, "Guitar Template");
-        assert_eq!(preset.description.as_deref(), Some("Standard guitar chain"));
-        assert_eq!(preset.module_assignments.len(), 2);
-
-        // Module presets
-        assert_eq!(module_presets.len(), 2);
-        assert_eq!(module_presets[0].module_type, ModuleType::Source);
-        assert_eq!(module_presets[0].blocks.len(), 2);
-        assert_eq!(module_presets[1].module_type, ModuleType::Drive);
-        assert_eq!(module_presets[1].blocks.len(), 3);
-
-        // Assignments link correctly
-        assert_eq!(
-            preset.module_assignments[0].module_preset_id,
-            module_presets[0].id
+    fn rack_round_trip() {
+        let engine = Engine::new(
+            "Main",
+            InstrumentType::Guitar,
+            Layer::new("Layer 1", LayerIndex::new(1)),
         );
-        assert_eq!(
-            preset.module_assignments[1].module_preset_id,
-            module_presets[1].id
-        );
+        let rig = Rig::new("Rig", InstrumentType::Guitar, engine);
+        let mut rack = Rack::new("Guitar Pool");
+        rack.add_rig(rig);
 
-        // All blocks are placeholders
-        for mp in &module_presets {
-            for mb in &mp.blocks {
-                assert!(
-                    mb.block.is_placeholder(),
-                    "block '{}' should be a placeholder",
-                    mb.block.name
-                );
+        let template = rack.to_template();
+        assert_eq!(template.rigs.len(), 1);
+
+        let instantiated = Rack::from_template(&template);
+        assert_eq!(instantiated.rigs.len(), 1);
+    }
+
+    #[test]
+    fn template_strips_plugins() {
+        let mut module = Module::new("Drive", ModuleType::Drive);
+        let block = Block::new("Real Plugin", PluginId::vst3("com.real", "Real"))
+            .with_block_type(BlockType::Drive);
+        module.add_block(ModuleBlock::new(block, Order::new(0)));
+
+        let layer = Layer::new("Main", LayerIndex::new(1));
+        let mut layer_with_module = layer;
+        layer_with_module.add_module(module);
+
+        let engine = Engine::new("Guitar", InstrumentType::Guitar, layer_with_module);
+        let rig = Rig::new("Test Rig", InstrumentType::Guitar, engine);
+
+        let template = rig.to_template();
+        let new_rig = Rig::from_template(&template);
+
+        // Verify all blocks are placeholders
+        for engine in new_rig.engines.iter() {
+            for layer in engine.layers.iter() {
+                for module in &layer.modules {
+                    for mb in &module.blocks {
+                        assert!(
+                            mb.block.is_placeholder(),
+                            "Expected placeholder, got: {:?}",
+                            mb.block.plugin_id
+                        );
+                    }
+                }
             }
         }
     }

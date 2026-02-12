@@ -3,14 +3,12 @@
 //! `NonEmptyVec<T>` stores the first element separately from the rest,
 //! so `len() >= 1` is enforced by construction.
 
-use facet::Facet;
 /// A `Vec` that always contains at least one element.
 ///
 /// Used for domain invariants like:
-/// - A section must have at least one layer
-/// - A song must have at least one scene
-/// - A patch must have at least one variation
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Facet)]
+/// - An engine must have at least one layer
+/// - A rig must have at least one engine
+#[derive(Debug, Clone, PartialEq, Eq, Hash, ::facet::Facet)]
 pub struct NonEmptyVec<T: 'static> {
     first: T,
     rest: Vec<T>,

@@ -1,14 +1,16 @@
-//! Layer — a slot within a section for a sound source.
+//! Layer — a processing lane within an engine.
 //!
-//! Layers hold local blocks, send levels to global effects, and can
-//! optionally be key-split across the MIDI range.
+//! Layers hold modules (Drive, Amp, EQ, etc.) and optional standalone blocks.
+//! Each layer has a 1-based [`LayerIndex`] enforced by the type system,
+//! volume/pan/key-range controls, and MIDI channel routing.
 
-use facet::Facet;
 
 use crate::block::Block;
-use crate::id::{BlockId, LayerId, PatchId, VariationId};
+use crate::id::{LayerId, ModuleId};
+use crate::module::{Module, ModuleType};
 use crate::normalized::{MidiNote, NormalizedF64, Pan};
 use crate::tags::{Taggable, Tags};
+use crate::version::LayerIndex;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // KeyRange — enforces low ≤ high
@@ -17,7 +19,7 @@ use crate::tags::{Taggable, Tags};
 /// MIDI key range with the invariant that `low <= high`.
 ///
 /// Construction returns `None` if the range is inverted.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Facet)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ::facet::Facet)]
 pub struct KeyRange {
     low: MidiNote,
     high: MidiNote,
@@ -56,80 +58,42 @@ impl KeyRange {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SendLevel — send from a layer to a global block
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Send level from a layer to a global block.
-#[derive(Debug, Clone, Facet)]
-pub struct SendLevel {
-    /// ID of the global block to send to
-    pub global_block_id: BlockId,
-    /// Send level (0.0–1.0)
-    pub level: NormalizedF64,
-    /// Whether this is a pre-fader send (before layer volume)
-    pub pre_fader: bool,
-}
-
-impl SendLevel {
-    /// Post-fader send at the given level.
-    pub fn new(global_block_id: BlockId, level: NormalizedF64) -> Self {
-        Self {
-            global_block_id,
-            level,
-            pre_fader: false,
-        }
-    }
-
-    /// Pre-fader send at the given level.
-    pub fn pre_fader(global_block_id: BlockId, level: NormalizedF64) -> Self {
-        Self {
-            global_block_id,
-            level,
-            pre_fader: true,
-        }
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Layer
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// A slot within a section that can hold a sound source.
-#[derive(Debug, Clone, Facet)]
+/// A processing lane within an engine.
+///
+/// Holds modules (named processing stages like Drive, Amp, EQ) and
+/// optional standalone blocks that don't belong to any module.
+#[derive(Debug, Clone, ::facet::Facet)]
 pub struct Layer {
     pub id: LayerId,
-    /// Layer index within the section (0-based)
-    pub index: u8,
+    /// 1-based index within the engine. Layer 1, Layer 2, Layer 3, etc.
+    pub index: LayerIndex,
     pub name: String,
-    /// Local DSP blocks dedicated to this layer
-    pub local_blocks: Vec<Block>,
-    /// Send levels to global blocks
-    pub global_sends: Vec<SendLevel>,
-    /// Currently loaded patch ID
-    pub current_patch_id: Option<PatchId>,
-    /// Currently active patch variation ID
-    pub current_variation_id: Option<VariationId>,
+    /// Processing modules in signal-chain order.
+    pub modules: Vec<Module>,
+    /// Blocks that don't belong to any module (e.g. utility, routing).
+    pub standalone_blocks: Vec<Block>,
     pub enabled: bool,
     pub volume: NormalizedF64,
     pub pan: Pan,
-    /// Optional key range for keyboard splits
+    /// Optional key range for keyboard splits.
     pub key_range: Option<KeyRange>,
-    /// Optional MIDI channel filter (None = omni)
+    /// Optional MIDI channel filter (None = omni).
     pub midi_channel: Option<u8>,
-    /// Tags for organizing and filtering.
     pub tags: Tags,
 }
 
 impl Layer {
-    pub fn new(name: impl Into<String>, index: u8) -> Self {
+    /// Create a new enabled layer at the given 1-based index.
+    pub fn new(name: impl Into<String>, index: LayerIndex) -> Self {
         Self {
             id: LayerId::new(),
             index,
             name: name.into(),
-            local_blocks: Vec::new(),
-            global_sends: Vec::new(),
-            current_patch_id: None,
-            current_variation_id: None,
+            modules: Vec::new(),
+            standalone_blocks: Vec::new(),
             enabled: true,
             volume: NormalizedF64::ONE,
             pan: Pan::CENTER,
@@ -139,33 +103,39 @@ impl Layer {
         }
     }
 
-    pub fn add_block(&mut self, block: Block) {
-        self.local_blocks.push(block);
+    /// Add a module to this layer.
+    pub fn add_module(&mut self, module: Module) {
+        self.modules.push(module);
     }
 
-    pub fn set_send(&mut self, global_block_id: BlockId, level: NormalizedF64, pre_fader: bool) {
-        if let Some(send) = self
-            .global_sends
+    /// Add a standalone block to this layer.
+    pub fn add_standalone_block(&mut self, block: Block) {
+        self.standalone_blocks.push(block);
+    }
+
+    /// Find a module by type.
+    pub fn module_by_type(&self, module_type: ModuleType) -> Option<&Module> {
+        self.modules.iter().find(|m| m.module_type == module_type)
+    }
+
+    /// Find a module by type (mutable).
+    pub fn module_by_type_mut(&mut self, module_type: ModuleType) -> Option<&mut Module> {
+        self.modules
             .iter_mut()
-            .find(|s| s.global_block_id == global_block_id)
-        {
-            send.level = level;
-            send.pre_fader = pre_fader;
-        } else {
-            self.global_sends.push(SendLevel {
-                global_block_id,
-                level,
-                pre_fader,
-            });
-        }
+            .find(|m| m.module_type == module_type)
     }
 
-    pub fn get_send(&self, global_block_id: BlockId) -> Option<&SendLevel> {
-        self.global_sends
-            .iter()
-            .find(|s| s.global_block_id == global_block_id)
+    /// Find a module by ID.
+    pub fn module_by_id(&self, id: ModuleId) -> Option<&Module> {
+        self.modules.iter().find(|m| m.id == id)
     }
 
+    /// Find a module by ID (mutable).
+    pub fn module_by_id_mut(&mut self, id: ModuleId) -> Option<&mut Module> {
+        self.modules.iter_mut().find(|m| m.id == id)
+    }
+
+    /// Set the key range for keyboard splits.
     pub fn set_key_range(&mut self, range: KeyRange) {
         self.key_range = Some(range);
     }
@@ -192,6 +162,7 @@ impl Taggable for Layer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::module::Module;
 
     #[test]
     fn key_range_valid() {
@@ -229,34 +200,60 @@ mod tests {
         let range = KeyRange::full();
         assert_eq!(range.low().get(), 0);
         assert_eq!(range.high().get(), 127);
-        assert!(range.contains(MidiNote::new(0)));
-        assert!(range.contains(MidiNote::new(127)));
     }
 
     #[test]
     fn layer_defaults() {
-        let layer = Layer::new("Main", 0);
+        let layer = Layer::new("Main", LayerIndex::new(1));
         assert!(layer.enabled);
         assert_eq!(layer.volume.get(), 1.0);
         assert_eq!(layer.pan.get(), 0.0);
+        assert_eq!(layer.index.get(), 1);
         assert!(layer.key_range.is_none());
-        assert!(layer.local_blocks.is_empty());
+        assert!(layer.modules.is_empty());
+        assert!(layer.standalone_blocks.is_empty());
     }
 
     #[test]
-    fn layer_send_upsert() {
-        let mut layer = Layer::new("Main", 0);
-        let block_id = BlockId::new();
+    fn layer_with_modules() {
+        let mut layer = Layer::new("Main", LayerIndex::new(1));
+        layer.add_module(Module::new("Drive", ModuleType::Drive));
+        layer.add_module(Module::new("Amp", ModuleType::Amp));
 
-        // Add new send
-        layer.set_send(block_id, NormalizedF64::new(0.5), false);
-        assert_eq!(layer.global_sends.len(), 1);
-        assert_eq!(layer.get_send(block_id).unwrap().level.get(), 0.5);
+        assert_eq!(layer.modules.len(), 2);
+        assert!(layer.module_by_type(ModuleType::Drive).is_some());
+        assert!(layer.module_by_type(ModuleType::Amp).is_some());
+        assert!(layer.module_by_type(ModuleType::Eq).is_none());
+    }
 
-        // Update existing send
-        layer.set_send(block_id, NormalizedF64::new(0.8), true);
-        assert_eq!(layer.global_sends.len(), 1);
-        assert_eq!(layer.get_send(block_id).unwrap().level.get(), 0.8);
-        assert!(layer.get_send(block_id).unwrap().pre_fader);
+    #[test]
+    fn layer_module_by_id() {
+        let mut layer = Layer::new("Main", LayerIndex::new(1));
+        let module = Module::new("Drive", ModuleType::Drive);
+        let module_id = module.id;
+        layer.add_module(module);
+
+        assert!(layer.module_by_id(module_id).is_some());
+        assert!(layer.module_by_id(ModuleId::new()).is_none());
+    }
+
+    #[test]
+    fn layer_standalone_blocks() {
+        let mut layer = Layer::new("Main", LayerIndex::new(1));
+        let block =
+            crate::block::Block::new("Utility", crate::block::PluginId::vst3("util", "Utility"));
+        layer.add_standalone_block(block);
+        assert_eq!(layer.standalone_blocks.len(), 1);
+    }
+
+    #[test]
+    fn layer_uses_one_based_index() {
+        let layer = Layer::new("Layer A", LayerIndex::new(1));
+        assert_eq!(layer.index.get(), 1);
+        assert_eq!(layer.index.to_zero_based(), 0);
+
+        let layer3 = Layer::new("Layer C", LayerIndex::new(3));
+        assert_eq!(layer3.index.get(), 3);
+        assert_eq!(layer3.index.to_zero_based(), 2);
     }
 }

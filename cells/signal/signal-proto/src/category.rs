@@ -15,14 +15,13 @@
 
 use std::fmt;
 
-use facet::Facet;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // BaseTone (Level 1 — always required)
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Level 1: Generic base tone. Every preset has exactly one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Facet, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ::facet::Facet, Default)]
 #[repr(u8)]
 pub enum BaseTone {
     // Guitar
@@ -136,7 +135,7 @@ impl fmt::Display for BaseTone {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Level 2: Musical genre.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Facet)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, ::facet::Facet)]
 #[repr(u8)]
 pub enum Genre {
     Blues,
@@ -212,7 +211,7 @@ impl fmt::Display for Genre {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Level 4: Artist or reference archetype.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Facet)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, ::facet::Facet)]
 pub struct Archetype {
     pub name: String,
     pub era: Option<String>,
@@ -246,7 +245,7 @@ impl fmt::Display for Archetype {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Level 5: Song-specific reference.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Facet)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, ::facet::Facet)]
 pub struct SongReference {
     pub name: String,
     pub album: Option<String>,
@@ -296,7 +295,7 @@ impl fmt::Display for SongReference {
 /// Song → Archetype → Genre → Generic
 /// SubGenre → Genre → Generic
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Facet)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, ::facet::Facet)]
 #[repr(C)]
 pub enum PresetCategory {
     /// Level 1: Base tone only

@@ -9,7 +9,7 @@ use std::fmt;
 
 use facet::Facet;
 
-use crate::id::{ModulePresetId, ModuleSnapshotId, SnapshotId};
+use crate::id::{ModulePresetId, ModuleSnapshotId};
 use crate::module::ModuleType;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -63,10 +63,7 @@ pub struct ModuleTarget {
 
 impl ModuleTarget {
     /// Create a new module target.
-    pub fn new(
-        module_type: ModuleType,
-        module_preset_id: ModulePresetId,
-    ) -> Self {
+    pub fn new(module_type: ModuleType, module_preset_id: ModulePresetId) -> Self {
         Self {
             module_type,
             module_preset_id,
@@ -83,8 +80,7 @@ impl ModuleTarget {
 
     /// Whether this target has the same preset (ignoring snapshot).
     pub fn same_preset(&self, other: &Self) -> bool {
-        self.module_type == other.module_type
-            && self.module_preset_id == other.module_preset_id
+        self.module_type == other.module_type && self.module_preset_id == other.module_preset_id
     }
 }
 
@@ -128,7 +124,10 @@ pub enum InstanceState {
 impl InstanceState {
     /// Whether this instance is occupying audio resources.
     pub fn is_alive(self) -> bool {
-        matches!(self, Self::Loading | Self::Ready | Self::Active | Self::Tailing)
+        matches!(
+            self,
+            Self::Loading | Self::Ready | Self::Active | Self::Tailing
+        )
     }
 
     /// Whether this instance is producing audible output.
@@ -269,17 +268,11 @@ pub enum SlotDiff {
         snapshot_id: ModuleSnapshotId,
     },
     /// Disable this module slot (override says Disable).
-    Disable {
-        module_type: ModuleType,
-    },
+    Disable { module_type: ModuleType },
     /// Re-enable a previously disabled module slot.
-    Enable {
-        module_type: ModuleType,
-    },
+    Enable { module_type: ModuleType },
     /// No change needed for this slot.
-    NoChange {
-        module_type: ModuleType,
-    },
+    NoChange { module_type: ModuleType },
 }
 
 impl SlotDiff {
@@ -322,9 +315,7 @@ pub enum SwitchOutcome {
         readiness: PresetReadiness,
     },
     /// Switch failed — engine error prevented the transition.
-    Failed {
-        reason: String,
-    },
+    Failed { reason: String },
 }
 
 impl SwitchOutcome {
@@ -368,7 +359,7 @@ pub enum EngineError {
     /// The module preset ID was not found in the rig.
     ModulePresetNotFound { module_preset_id: ModulePresetId },
     /// The snapshot ID was not found in the module preset.
-    SnapshotNotFound { snapshot_id: SnapshotId },
+    SnapshotNotFound { snapshot_id: ModuleSnapshotId },
     /// Backend-specific error.
     Backend(String),
 }
@@ -389,7 +380,10 @@ impl fmt::Display for EngineError {
                 module_preset_id,
                 timeout_ms,
             } => {
-                write!(f, "load timeout for {module_preset_id} after {timeout_ms}ms")
+                write!(
+                    f,
+                    "load timeout for {module_preset_id} after {timeout_ms}ms"
+                )
             }
             Self::ModulePresetNotFound { module_preset_id } => {
                 write!(f, "module preset not found: {module_preset_id}")
@@ -486,8 +480,7 @@ mod tests {
     fn module_target_with_snapshot() {
         let preset_id = ModulePresetId::new();
         let snap_id = ModuleSnapshotId::new();
-        let target = ModuleTarget::new(ModuleType::Amp, preset_id)
-            .with_snapshot(snap_id);
+        let target = ModuleTarget::new(ModuleType::Amp, preset_id).with_snapshot(snap_id);
 
         assert_eq!(target.module_snapshot_id, Some(snap_id));
     }
@@ -628,7 +621,10 @@ mod tests {
             expected: InstanceState::Ready,
             actual: InstanceState::Loading,
         };
-        assert_eq!(format!("{err}"), "invalid state: expected Ready, got Loading");
+        assert_eq!(
+            format!("{err}"),
+            "invalid state: expected Ready, got Loading"
+        );
 
         let err = EngineError::Backend("connection lost".into());
         assert_eq!(format!("{err}"), "backend error: connection lost");

@@ -3,7 +3,6 @@
 //! Each type clamps on construction so the inner value is always valid.
 //! Private inner fields prevent direct mutation.
 
-use facet::Facet;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // NormalizedF64: [0.0, 1.0]
@@ -12,7 +11,7 @@ use facet::Facet;
 /// A floating-point value clamped to the range [0.0, 1.0].
 ///
 /// Used for volume, send levels, parameter values, and any 0–1 normalized quantity.
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Facet)]
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, ::facet::Facet)]
 pub struct NormalizedF64(f64);
 
 impl NormalizedF64 {
@@ -50,7 +49,7 @@ impl std::fmt::Display for NormalizedF64 {
 /// A pan value clamped to [-1.0, 1.0].
 ///
 /// -1.0 = hard left, 0.0 = center, 1.0 = hard right.
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Facet)]
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, ::facet::Facet)]
 pub struct Pan(f64);
 
 impl Pan {
@@ -82,7 +81,7 @@ impl Default for Pan {
 /// A star rating clamped to [0, 5].
 ///
 /// 0 = unrated, 1–5 = star rating.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Facet)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, ::facet::Facet)]
 pub struct Rating(u8);
 
 impl Rating {
@@ -115,7 +114,7 @@ impl Default for Rating {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// A MIDI note number clamped to [0, 127].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Facet)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, ::facet::Facet)]
 pub struct MidiNote(u8);
 
 impl MidiNote {
@@ -139,7 +138,7 @@ impl MidiNote {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// A MIDI channel clamped to [1, 16].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Facet)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, ::facet::Facet)]
 pub struct MidiChannel(u8);
 
 impl MidiChannel {
@@ -159,7 +158,7 @@ impl MidiChannel {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Signal chain position. Lower values are earlier in the chain.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Facet, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, ::facet::Facet, Default)]
 pub struct Order(u8);
 
 impl Order {
