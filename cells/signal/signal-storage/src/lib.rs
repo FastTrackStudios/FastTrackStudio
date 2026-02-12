@@ -21,6 +21,8 @@ pub mod seed;
 pub mod setlist_repo;
 pub mod snapshot_service;
 pub mod song_repo;
+pub mod tag_bridge;
+pub mod tagging;
 
 pub use error::{StorageError, StorageResult};
 pub use local_config::LocalConfig;

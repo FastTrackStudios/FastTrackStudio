@@ -6,14 +6,22 @@
 //! Tags are stored as a JSON array of strings in the `tags` column.
 //! Categories are stored as a JSON object in the `category` column.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use sea_orm::prelude::*;
 use sea_orm::{ActiveValue, Condition, IntoActiveModel, QueryOrder, QuerySelect};
 use serde_json::Value as JsonValue;
 
+use signal_proto::id::TagId;
+use signal_proto::normalized::Rating;
+use signal_proto::tags::auto_tagger::AutoTagger;
+use signal_proto::tags::stats::TagStats;
+use signal_proto::tags::suggestions::TagCooccurrence;
+use signal_proto::tags::{TagFilter, TagRegistry};
+
 use crate::entities::preset;
 use crate::error::{StorageError, StorageResult};
+use crate::tag_bridge;
 
 // region: --- PresetCategory enum
 
@@ -137,10 +145,7 @@ impl TaggingService {
     }
 
     /// Get all tags for a preset.
-    pub async fn get_tags(
-        db: &DatabaseConnection,
-        preset_id: Uuid,
-    ) -> StorageResult<Vec<String>> {
+    pub async fn get_tags(db: &DatabaseConnection, preset_id: Uuid) -> StorageResult<Vec<String>> {
         let model = Self::find_preset(db, preset_id).await?;
         Ok(extract_tags(&model))
     }
@@ -276,10 +281,7 @@ impl TaggingService {
     // ── Favorites ───────────────────────────────────────────────────────
 
     /// Toggle the favorite/starred flag for a preset. Returns the new state.
-    pub async fn toggle_favorite(
-        db: &DatabaseConnection,
-        preset_id: Uuid,
-    ) -> StorageResult<bool> {
+    pub async fn toggle_favorite(db: &DatabaseConnection, preset_id: Uuid) -> StorageResult<bool> {
         let model = Self::find_preset(db, preset_id).await?;
         let new_value = !model.is_favorite;
         let mut active: preset::ActiveModel = model.into_active_model();
@@ -301,9 +303,7 @@ impl TaggingService {
     }
 
     /// List all favorited presets.
-    pub async fn list_favorites(
-        db: &DatabaseConnection,
-    ) -> StorageResult<Vec<preset::Model>> {
+    pub async fn list_favorites(db: &DatabaseConnection) -> StorageResult<Vec<preset::Model>> {
         Ok(preset::Entity::find()
             .filter(
                 Condition::all()
@@ -324,8 +324,7 @@ impl TaggingService {
         category: Option<PresetCategory>,
         favorites_only: bool,
     ) -> StorageResult<Vec<preset::Model>> {
-        let mut query = preset::Entity::find()
-            .filter(preset::Column::IsDeleted.eq(false));
+        let mut query = preset::Entity::find().filter(preset::Column::IsDeleted.eq(false));
 
         if favorites_only {
             query = query.filter(preset::Column::IsFavorite.eq(true));
@@ -358,12 +357,259 @@ impl TaggingService {
             .collect())
     }
 
+    // ── Auto-tagging ─────────────────────────────────────────────────────
+
+    /// Auto-tag a preset from its name using the domain [`AutoTagger`].
+    ///
+    /// Inferred tags are merged with existing tags (case-insensitive dedup).
+    /// Does not remove any existing manually-applied tags.
+    pub async fn auto_tag(
+        db: &DatabaseConnection,
+        preset_id: Uuid,
+        registry: &TagRegistry,
+    ) -> StorageResult<preset::Model> {
+        let model = Self::find_preset(db, preset_id).await?;
+        let tagger = AutoTagger::with_defaults(registry);
+        let inferred_ids = tagger.tag_name(&model.name);
+
+        if inferred_ids.is_empty() {
+            return Ok(model);
+        }
+
+        let existing = extract_tags(&model);
+        let existing_lower: HashSet<String> = existing.iter().map(|t| t.to_lowercase()).collect();
+
+        let mut merged = existing;
+        for id in inferred_ids {
+            let name = tag_bridge::resolve_tag_name_or(id, registry, "");
+            if !name.is_empty() && !existing_lower.contains(&name.to_lowercase()) {
+                merged.push(name);
+            }
+        }
+
+        Self::update_tags(db, model, &merged).await
+    }
+
+    /// Auto-tag all non-deleted presets in the database.
+    ///
+    /// Returns the number of presets that were modified (gained new tags).
+    pub async fn auto_tag_all(
+        db: &DatabaseConnection,
+        registry: &TagRegistry,
+    ) -> StorageResult<u32> {
+        let tagger = AutoTagger::with_defaults(registry);
+        let all = preset::Entity::find()
+            .filter(preset::Column::IsDeleted.eq(false))
+            .all(db)
+            .await?;
+
+        let mut modified = 0u32;
+        for model in all {
+            let inferred_ids = tagger.tag_name(&model.name);
+            if inferred_ids.is_empty() {
+                continue;
+            }
+
+            let existing = extract_tags(&model);
+            let existing_lower: HashSet<String> =
+                existing.iter().map(|t| t.to_lowercase()).collect();
+
+            let mut merged = existing;
+            let mut changed = false;
+            for id in inferred_ids {
+                let name = tag_bridge::resolve_tag_name_or(id, registry, "");
+                if !name.is_empty() && !existing_lower.contains(&name.to_lowercase()) {
+                    merged.push(name);
+                    changed = true;
+                }
+            }
+
+            if changed {
+                Self::update_tags(db, model, &merged).await?;
+                modified += 1;
+            }
+        }
+
+        Ok(modified)
+    }
+
+    // ── Domain-aware queries ────────────────────────────────────────────
+
+    /// Query presets using the domain [`TagFilter`].
+    ///
+    /// Supports include/exclude tags, OR-group clauses, rating threshold,
+    /// text search, and sort specifications. Falls back to in-memory
+    /// filtering after loading candidates from the database.
+    pub async fn query_presets(
+        db: &DatabaseConnection,
+        filter: &TagFilter,
+        category: Option<PresetCategory>,
+        favorites_only: bool,
+        registry: &TagRegistry,
+    ) -> StorageResult<Vec<preset::Model>> {
+        let candidates = Self::load_candidates(db, category, favorites_only).await?;
+
+        let mut results: Vec<preset::Model> = Vec::new();
+        for model in candidates {
+            let tags = tag_bridge::strings_to_tags(&extract_tags(&model), registry);
+            let rating = Rating::default(); // TODO: join ratings when needed
+            if filter.matches_full(&tags, &model.name, rating) {
+                results.push(model);
+            }
+        }
+
+        Ok(results)
+    }
+
+    /// Query presets with relevance scoring, returned in ranked order.
+    ///
+    /// Each result is paired with its relevance score (0.0–1.0).
+    /// Results are sorted by score descending (most relevant first).
+    pub async fn query_presets_scored(
+        db: &DatabaseConnection,
+        filter: &TagFilter,
+        category: Option<PresetCategory>,
+        favorites_only: bool,
+        registry: &TagRegistry,
+    ) -> StorageResult<Vec<(preset::Model, f64)>> {
+        let candidates = Self::load_candidates(db, category, favorites_only).await?;
+
+        let mut scored: Vec<(preset::Model, f64)> = Vec::new();
+        for model in candidates {
+            let tags = tag_bridge::strings_to_tags(&extract_tags(&model), registry);
+            let rating = Rating::default();
+            let score = filter.score_full(&tags, &model.name, rating, registry);
+            if score.is_match() {
+                scored.push((model, score.get()));
+            }
+        }
+
+        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+        Ok(scored)
+    }
+
+    // ── Tag suggestions ─────────────────────────────────────────────────
+
+    /// Suggest tags based on co-occurrence patterns across all presets.
+    ///
+    /// Given the current tags on an item, returns up to `limit` suggestions
+    /// ranked by how often they appear alongside the current tags.
+    pub async fn suggest_tags(
+        db: &DatabaseConnection,
+        current_tags: &[String],
+        registry: &TagRegistry,
+        limit: usize,
+    ) -> StorageResult<Vec<(String, f64)>> {
+        let all = preset::Entity::find()
+            .filter(preset::Column::IsDeleted.eq(false))
+            .column(preset::Column::Tags)
+            .all(db)
+            .await?;
+
+        let tag_sets: Vec<_> = all
+            .iter()
+            .map(|m| tag_bridge::strings_to_tags(&extract_tags(m), registry))
+            .collect();
+
+        let co = TagCooccurrence::build_from(tag_sets.iter());
+
+        let current_ids: HashSet<TagId> = current_tags
+            .iter()
+            .map(|s| tag_bridge::resolve_tag_id(s, registry))
+            .collect();
+
+        let suggestions = co.suggest(&current_ids, limit);
+
+        Ok(suggestions
+            .into_iter()
+            .filter_map(|(id, score)| {
+                tag_bridge::resolve_tag_name(id, registry).map(|name| (name, score))
+            })
+            .collect())
+    }
+
+    // ── Tag statistics ──────────────────────────────────────────────────
+
+    /// Compute tag statistics across all non-deleted presets.
+    pub async fn tag_stats(
+        db: &DatabaseConnection,
+        registry: &TagRegistry,
+    ) -> StorageResult<TagStatsReport> {
+        let all = preset::Entity::find()
+            .filter(preset::Column::IsDeleted.eq(false))
+            .column(preset::Column::Tags)
+            .all(db)
+            .await?;
+
+        let tag_sets: Vec<_> = all
+            .iter()
+            .map(|m| tag_bridge::strings_to_tags(&extract_tags(m), registry))
+            .collect();
+
+        let stats = TagStats::build_from(tag_sets.iter());
+
+        let most_used: Vec<(String, u32)> = stats
+            .most_used(20)
+            .into_iter()
+            .filter_map(|(id, count)| {
+                tag_bridge::resolve_tag_name(id, registry).map(|n| (n, count))
+            })
+            .collect();
+
+        let least_used: Vec<(String, u32)> = stats
+            .least_used(20)
+            .into_iter()
+            .filter_map(|(id, count)| {
+                tag_bridge::resolve_tag_name(id, registry).map(|n| (n, count))
+            })
+            .collect();
+
+        let by_category: Vec<(String, u32)> = stats
+            .by_category(registry)
+            .into_iter()
+            .map(|(cat, count)| (cat.display_name().to_string(), count))
+            .collect();
+
+        Ok(TagStatsReport {
+            total_presets: stats.total_items(),
+            tagged_presets: stats.total_items() - stats.untagged_items(),
+            coverage_pct: stats.coverage() * 100.0,
+            avg_tags_per_preset: stats.average_tags_per_item(),
+            most_used,
+            least_used,
+            by_category,
+        })
+    }
+
     // ── Private helpers ─────────────────────────────────────────────────
 
-    async fn find_preset(
+    /// Load candidate presets with SQL-level filters applied.
+    async fn load_candidates(
         db: &DatabaseConnection,
-        id: Uuid,
-    ) -> StorageResult<preset::Model> {
+        category: Option<PresetCategory>,
+        favorites_only: bool,
+    ) -> StorageResult<Vec<preset::Model>> {
+        let mut query = preset::Entity::find().filter(preset::Column::IsDeleted.eq(false));
+
+        if favorites_only {
+            query = query.filter(preset::Column::IsFavorite.eq(true));
+        }
+
+        let all = query.order_by_asc(preset::Column::Name).all(db).await?;
+
+        // Category filter is in-memory (JSON column)
+        if let Some(cat) = category {
+            Ok(all
+                .into_iter()
+                .filter(|m| PresetCategory::from_json(&m.category) == Some(cat))
+                .collect())
+        } else {
+            Ok(all)
+        }
+    }
+
+    async fn find_preset(db: &DatabaseConnection, id: Uuid) -> StorageResult<preset::Model> {
         preset::Entity::find_by_id(id)
             .one(db)
             .await?
@@ -385,3 +631,29 @@ impl TaggingService {
 }
 
 // endregion: --- TaggingService
+
+// region: --- TagStatsReport
+
+/// Storage-friendly tag statistics report.
+///
+/// Aggregated from all non-deleted presets. Field values are pre-computed
+/// for direct display — no domain types leak to callers.
+#[derive(Debug, Clone)]
+pub struct TagStatsReport {
+    /// Total non-deleted presets in the database.
+    pub total_presets: u32,
+    /// Number of presets that have at least one tag.
+    pub tagged_presets: u32,
+    /// Percentage of presets that have tags (0.0–100.0).
+    pub coverage_pct: f64,
+    /// Average number of tags per preset.
+    pub avg_tags_per_preset: f64,
+    /// Top tags by usage count (up to 20).
+    pub most_used: Vec<(String, u32)>,
+    /// Least used tags by count (up to 20).
+    pub least_used: Vec<(String, u32)>,
+    /// Tag counts grouped by category display name.
+    pub by_category: Vec<(String, u32)>,
+}
+
+// endregion: --- TagStatsReport
