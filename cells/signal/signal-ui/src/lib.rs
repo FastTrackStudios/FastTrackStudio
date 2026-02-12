@@ -6,6 +6,7 @@
 //! - Context providers for dependency injection
 //! - Components for the guitar rig grid interface
 
+pub mod callback_types;
 pub mod components;
 pub mod context;
 pub mod hooks;

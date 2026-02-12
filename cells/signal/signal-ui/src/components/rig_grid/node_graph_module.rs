@@ -6,6 +6,7 @@
 //! - Port circles on left/right edges (module-level I/O, wire-draggable)
 //! - Child NodeBlock components positioned inside
 
+use crate::callback_types::{PortDragStart, PortHoverEvent};
 use crate::prelude::*;
 use uuid::Uuid;
 
@@ -38,12 +39,12 @@ pub(crate) struct ModuleContainerProps {
     /// Callback when the module is clicked (for selection).
     #[props(default)]
     pub on_select: Option<Callback<Uuid>>,
-    /// Callback when a port circle is mousedown'd: (port_id, is_output).
+    /// Callback when a port circle is mousedown'd.
     #[props(default)]
-    pub on_port_drag_start: Option<Callback<(String, bool)>>,
-    /// Callback when a port is hovered: (entity_id, port_id, is_input).
+    pub on_port_drag_start: Option<Callback<PortDragStart>>,
+    /// Callback when a port is hovered.
     #[props(default)]
-    pub on_port_hover: Option<Callback<(Uuid, String, bool)>>,
+    pub on_port_hover: Option<Callback<PortHoverEvent>>,
     /// Callback when port hover ends.
     #[props(default)]
     pub on_port_hover_end: Option<Callback<()>>,
@@ -88,7 +89,11 @@ pub(crate) fn ModuleContainer(props: ModuleContainerProps) -> Element {
         ""
     };
 
-    let title_cursor = if props.wire_draft_active { "crosshair" } else { "grab" };
+    let title_cursor = if props.wire_draft_active {
+        "crosshair"
+    } else {
+        "grab"
+    };
     let title_height = if props.compact || props.performance_mode {
         TITLE_BAR_HEIGHT_COMPACT
     } else {
@@ -221,7 +226,7 @@ pub(crate) fn ModuleContainer(props: ModuleContainerProps) -> Element {
                                 move |evt: MouseEvent| {
                                     evt.stop_propagation();
                                     if let Some(ref cb) = on_port_start {
-                                        cb.call((port_id.clone(), false)); // input port
+                                        cb.call(PortDragStart { port_name: port_id.clone(), is_output: false }); // input port
                                     }
                                 }
                             },
@@ -230,7 +235,7 @@ pub(crate) fn ModuleContainer(props: ModuleContainerProps) -> Element {
                                 move |_| {
                                     if wire_active {
                                         if let Some(ref cb) = on_hover {
-                                            cb.call((module_id, port_id.clone(), true));
+                                            cb.call(PortHoverEvent { node_id: module_id, port_name: port_id.clone(), is_hovering: true });
                                         }
                                     }
                                 }
@@ -290,7 +295,7 @@ pub(crate) fn ModuleContainer(props: ModuleContainerProps) -> Element {
                                 move |evt: MouseEvent| {
                                     evt.stop_propagation();
                                     if let Some(ref cb) = on_port_start {
-                                        cb.call((port_id.clone(), true)); // output port
+                                        cb.call(PortDragStart { port_name: port_id.clone(), is_output: true }); // output port
                                     }
                                 }
                             },
@@ -299,7 +304,7 @@ pub(crate) fn ModuleContainer(props: ModuleContainerProps) -> Element {
                                 move |_| {
                                     if wire_active {
                                         if let Some(ref cb) = on_hover {
-                                            cb.call((module_id, port_id.clone(), false));
+                                            cb.call(PortHoverEvent { node_id: module_id, port_name: port_id.clone(), is_hovering: false });
                                         }
                                     }
                                 }

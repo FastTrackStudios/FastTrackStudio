@@ -3,6 +3,7 @@
 //! A module group wraps a module's header and view content in a styled
 //! container that adapts its width based on the current view mode.
 
+use crate::callback_types::{MacroChange, SetParameter};
 use crate::prelude::*;
 use signal_control::id::BlockId;
 use signal_control::module::Module;
@@ -22,10 +23,10 @@ pub struct ModuleGroupProps {
     pub on_toggle_module_bypass: Callback<Uuid>,
     /// Callback when a block's bypass is toggled.
     pub on_toggle_block_bypass: Callback<Uuid>,
-    /// Callback when a macro value changes: (block_id, param_index, value).
-    pub on_macro_change: Callback<(BlockId, u32, f64)>,
-    /// Callback when a block parameter changes: (block_id, param_index, value).
-    pub on_param_change: Callback<(Uuid, u32, f64)>,
+    /// Callback when a macro value changes.
+    pub on_macro_change: Callback<MacroChange>,
+    /// Callback when a block parameter changes.
+    pub on_param_change: Callback<SetParameter>,
     /// Callback when the view mode changes.
     pub on_view_mode_change: Callback<ModuleViewMode>,
     /// Available presets for this module (optional).

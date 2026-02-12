@@ -3,6 +3,10 @@
 //! Wraps `SignalControl` methods into Dioxus `Callback`s that UI
 //! components can invoke directly (e.g. `actions.next_scene.call(())`).
 
+use crate::callback_types::{
+    MacroChange, PresetSnapshotSelect, PresetWithSnapshot, ProfileSceneSelect, SetBlockParameter,
+    SetParameter,
+};
 use crate::hooks::rig_state::refresh_presets_from_db;
 use crate::prelude::*;
 use crate::signals::{
@@ -30,11 +34,11 @@ pub struct CreateEntityData {
 #[derive(Clone)]
 pub struct RigActions {
     pub load_profile: Callback<ProfileId>,
-    pub load_profile_scene: Callback<(ProfileId, usize)>,
+    pub load_profile_scene: Callback<ProfileSceneSelect>,
     pub load_rig: Callback<ProfileId>,
     pub load_preset: Callback<RigPresetId>,
-    pub load_preset_snapshot: Callback<(RigPresetId, usize)>,
-    pub load_preset_with_snapshot: Callback<(RigPresetId, RigPresetId)>,
+    pub load_preset_snapshot: Callback<PresetSnapshotSelect>,
+    pub load_preset_with_snapshot: Callback<PresetWithSnapshot>,
     pub activate_snapshot: Callback<RigPresetId>,
     pub go_to_scene: Callback<usize>,
     pub next_scene: Callback<()>,
@@ -44,8 +48,8 @@ pub struct RigActions {
     pub prev_song: Callback<()>,
     pub preload_preset: Callback<RigPresetId>,
     pub preload_song: Callback<usize>,
-    pub set_parameter: Callback<(Uuid, u32, f64)>,
-    pub set_block_parameter: Callback<(Uuid, u32, f32)>,
+    pub set_parameter: Callback<SetParameter>,
+    pub set_block_parameter: Callback<SetBlockParameter>,
     pub toggle_block_bypass: Callback<Uuid>,
     pub toggle_section: Callback<Uuid>,
     pub load_setlist: Callback<Uuid>,
@@ -95,7 +99,11 @@ pub fn use_rig_actions() -> RigActions {
         },
         load_profile_scene: {
             let ctl = ctl.clone();
-            Callback::new(move |(profile_id, patch_index): (ProfileId, usize)| {
+            Callback::new(move |sel: ProfileSceneSelect| {
+                let ProfileSceneSelect {
+                    profile_id,
+                    scene_index: patch_index,
+                } = sel;
                 let ctl = ctl.clone();
                 spawn(async move {
                     let profiles = ctl.get_available_profiles().await;
@@ -199,7 +207,11 @@ pub fn use_rig_actions() -> RigActions {
         },
         load_preset_snapshot: {
             let ctl = ctl.clone();
-            Callback::new(move |(preset_id, snapshot_index): (RigPresetId, usize)| {
+            Callback::new(move |sel: PresetSnapshotSelect| {
+                let PresetSnapshotSelect {
+                    preset_id,
+                    snapshot_index,
+                } = sel;
                 let ctl = ctl.clone();
                 spawn(async move {
                     tracing::info!(
@@ -228,29 +240,31 @@ pub fn use_rig_actions() -> RigActions {
         },
         load_preset_with_snapshot: {
             let ctl = ctl.clone();
-            Callback::new(
-                move |(preset_id, _snapshot_id): (RigPresetId, RigPresetId)| {
-                    let ctl = ctl.clone();
-                    spawn(async move {
-                        let preset_info = RIG_AVAILABLE_PRESETS
-                            .read()
-                            .iter()
-                            .find(|p| p.id == preset_id)
-                            .cloned();
-                        if let Some(ref info) = preset_info {
-                            *RIG_CURRENT_PRESET.write() = Some(info.clone());
-                        }
+            Callback::new(move |sel: PresetWithSnapshot| {
+                let PresetWithSnapshot {
+                    preset_id,
+                    snapshot_id: _snapshot_id,
+                } = sel;
+                let ctl = ctl.clone();
+                spawn(async move {
+                    let preset_info = RIG_AVAILABLE_PRESETS
+                        .read()
+                        .iter()
+                        .find(|p| p.id == preset_id)
+                        .cloned();
+                    if let Some(ref info) = preset_info {
+                        *RIG_CURRENT_PRESET.write() = Some(info.clone());
+                    }
 
-                        let db_modules = build_modules_from_db(&ctl, preset_id.as_uuid()).await;
-                        if !db_modules.is_empty() {
-                            *RIG_MODULES.write() = db_modules;
-                        } else {
-                            *RIG_MODULES.write() = ctl.get_current_modules();
-                        }
-                        rebuild_node_graph();
-                    });
-                },
-            )
+                    let db_modules = build_modules_from_db(&ctl, preset_id.as_uuid()).await;
+                    if !db_modules.is_empty() {
+                        *RIG_MODULES.write() = db_modules;
+                    } else {
+                        *RIG_MODULES.write() = ctl.get_current_modules();
+                    }
+                    rebuild_node_graph();
+                });
+            })
         },
         activate_snapshot: {
             Callback::new(move |snapshot_id: RigPresetId| {
@@ -328,7 +342,12 @@ pub fn use_rig_actions() -> RigActions {
                 });
             })
         },
-        set_parameter: Callback::new(move |(node_id, param_index, value): (Uuid, u32, f64)| {
+        set_parameter: Callback::new(move |sp: SetParameter| {
+            let SetParameter {
+                node_id,
+                param_index,
+                value,
+            } = sp;
             spawn(async move {
                 let binding = match RIG_NODE_FX_BINDINGS.read().get(&node_id).cloned() {
                     Some(b) => b,
@@ -360,11 +379,9 @@ pub fn use_rig_actions() -> RigActions {
                 }
             });
         }),
-        set_block_parameter: Callback::new(
-            move |(_module_id, _param_index, _value): (Uuid, u32, f32)| {
-                tracing::warn!("set_block_parameter: not yet implemented in signal-control");
-            },
-        ),
+        set_block_parameter: Callback::new(move |_sp: SetBlockParameter| {
+            tracing::warn!("set_block_parameter: not yet implemented in signal-control");
+        }),
         toggle_block_bypass: Callback::new(move |_module_id: Uuid| {
             tracing::warn!("toggle_block_bypass: not yet implemented");
         }),
@@ -637,8 +654,14 @@ async fn build_modules_from_db(
             }
         };
 
-        let module_type =
-            ModuleType::from_container_name(&mp_row.module_type).unwrap_or(ModuleType::Custom);
+        let module_type = mp_row.module_type_parsed().unwrap_or_else(|| {
+            tracing::warn!(
+                "build_modules_from_db: unknown module_type '{}' for preset {}, falling back to Custom",
+                mp_row.module_type,
+                mp_row.id,
+            );
+            ModuleType::Custom
+        });
         let mut module = Module::new(&mp_row.name, module_type);
 
         // Restore grid dimensions from macros metadata
@@ -662,7 +685,15 @@ async fn build_modules_from_db(
                     .get("block_type")
                     .and_then(|v| v.as_str())
                     .unwrap_or("Custom");
-                let block_type = parse_block_type(block_type_str);
+                let block_type =
+                    signal_control::block::BlockType::from_variant_name(block_type_str)
+                        .unwrap_or_else(|| {
+                            tracing::warn!(
+                                "build_modules_from_db: unknown block_type '{block_type_str}' in module '{}', falling back to Custom",
+                                mp_row.name,
+                            );
+                            signal_control::block::BlockType::Custom
+                        });
                 let alias = block_obj
                     .get("alias")
                     .and_then(|v| v.as_str())
@@ -698,44 +729,4 @@ async fn build_modules_from_db(
 
     log_modules(&modules);
     modules
-}
-
-/// Parse a BlockType from its Debug/variant name string.
-fn parse_block_type(s: &str) -> signal_control::block::BlockType {
-    use signal_control::block::BlockType;
-    match s {
-        "Input" => BlockType::Input,
-        "Compressor" => BlockType::Compressor,
-        "Drive" => BlockType::Drive,
-        "Amp" => BlockType::Amp,
-        "Cabinet" => BlockType::Cabinet,
-        "Eq" => BlockType::Eq,
-        "Modulation" => BlockType::Modulation,
-        "Delay" => BlockType::Delay,
-        "Reverb" => BlockType::Reverb,
-        "Gate" => BlockType::Gate,
-        "Volume" => BlockType::Volume,
-        "Pitch" => BlockType::Pitch,
-        "Tremolo" => BlockType::Tremolo,
-        "Limiter" => BlockType::Limiter,
-        "Send" => BlockType::Send,
-        "Special" => BlockType::Special,
-        "Freeze" => BlockType::Freeze,
-        "DeEsser" => BlockType::DeEsser,
-        "Saturator" => BlockType::Saturator,
-        "Tuner" => BlockType::Tuner,
-        "Chorus" => BlockType::Chorus,
-        "Flanger" => BlockType::Flanger,
-        "Phaser" => BlockType::Phaser,
-        "RingModulator" => BlockType::RingModulator,
-        "Wah" => BlockType::Wah,
-        "Filter" => BlockType::Filter,
-        "Doubler" => BlockType::Doubler,
-        "Panner" => BlockType::Panner,
-        "Vibrato" => BlockType::Vibrato,
-        "Rotary" => BlockType::Rotary,
-        "Crossover" => BlockType::Crossover,
-        "Boost" => BlockType::Boost,
-        _ => BlockType::Custom,
-    }
 }

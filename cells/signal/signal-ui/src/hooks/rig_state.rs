@@ -226,8 +226,7 @@ pub(crate) async fn refresh_presets_from_db(ctl: &SignalControl) {
             let mut preset_infos: Vec<RigPresetInfo> = Vec::with_capacity(db_presets.len());
 
             for p in &db_presets {
-                // DB stores category as JSON — use default until Facet serde bridge exists
-                let category = signal_control::category::PresetCategory::default();
+                let category = p.category_parsed();
                 let rating = signal_control::normalized::Rating::default();
 
                 preset_infos.push(RigPresetInfo {

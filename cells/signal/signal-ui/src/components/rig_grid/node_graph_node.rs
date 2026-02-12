@@ -6,6 +6,7 @@
 //! - Content area with widget visualization
 //! - Port circles on left (inputs) and right (outputs) edges (wire-draggable)
 
+use crate::callback_types::{PortDragStart, PortHoverEvent};
 use crate::prelude::*;
 use uuid::Uuid;
 
@@ -39,12 +40,12 @@ pub(crate) struct NodeBlockProps {
     /// Callback when the header is mousedown'd (for dragging standalone nodes).
     #[props(default)]
     pub on_header_drag_start: Option<EventHandler<MouseEvent>>,
-    /// Callback when a port circle is mousedown'd: (port_id, is_output).
+    /// Callback when a port circle is mousedown'd.
     #[props(default)]
-    pub on_port_drag_start: Option<Callback<(String, bool)>>,
-    /// Callback when a port is hovered: (entity_id, port_id, is_input).
+    pub on_port_drag_start: Option<Callback<PortDragStart>>,
+    /// Callback when a port is hovered.
     #[props(default)]
-    pub on_port_hover: Option<Callback<(Uuid, String, bool)>>,
+    pub on_port_hover: Option<Callback<PortHoverEvent>>,
     /// Callback when port hover ends.
     #[props(default)]
     pub on_port_hover_end: Option<Callback<()>>,
@@ -222,9 +223,9 @@ struct PortCircleProps {
     is_input: bool,
     entity_id: Uuid,
     #[props(default)]
-    on_port_drag_start: Option<Callback<(String, bool)>>,
+    on_port_drag_start: Option<Callback<PortDragStart>>,
     #[props(default)]
-    on_port_hover: Option<Callback<(Uuid, String, bool)>>,
+    on_port_hover: Option<Callback<PortHoverEvent>>,
     #[props(default)]
     on_port_hover_end: Option<Callback<()>>,
     #[props(default)]
@@ -286,7 +287,7 @@ fn PortCircle(props: PortCircleProps) -> Element {
                 move |evt: MouseEvent| {
                     evt.stop_propagation();
                     if let Some(ref cb) = on_port_start {
-                        cb.call((port_id.clone(), !is_input));
+                        cb.call(PortDragStart { port_name: port_id.clone(), is_output: !is_input });
                     }
                 }
             },
@@ -295,7 +296,7 @@ fn PortCircle(props: PortCircleProps) -> Element {
                 move |_| {
                     if wire_active {
                         if let Some(ref cb) = on_hover {
-                            cb.call((entity_id, port_id.clone(), is_input));
+                            cb.call(PortHoverEvent { node_id: entity_id, port_name: port_id.clone(), is_hovering: is_input });
                         }
                     }
                 }

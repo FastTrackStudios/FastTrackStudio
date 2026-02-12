@@ -7,6 +7,7 @@
 //! - Dropdown select for choice parameters
 //! - Close via Escape key or clicking the backdrop
 
+use crate::callback_types::SetParameter;
 use crate::hooks::rig_actions::use_rig_actions;
 use crate::prelude::*;
 use crate::signals::RIG_NODE_GRAPH;
@@ -159,7 +160,7 @@ struct ParameterControlProps {
     node_id: Uuid,
     param_index: u32,
     param: NodeParameter,
-    set_parameter: Callback<(Uuid, u32, f64)>,
+    set_parameter: Callback<SetParameter>,
 }
 
 /// Routes to the appropriate control widget based on `ParameterType`.
@@ -211,7 +212,7 @@ struct ContinuousControlProps {
     node_id: Uuid,
     param_index: u32,
     param: NodeParameter,
-    set_parameter: Callback<(Uuid, u32, f64)>,
+    set_parameter: Callback<SetParameter>,
 }
 
 #[component]
@@ -240,7 +241,7 @@ fn ContinuousControl(props: ContinuousControlProps) -> Element {
                             p.value = NormalizedF64::new(clamped);
                         }
                     });
-                    set_parameter.call((node_id, param_index, clamped));
+                    set_parameter.call(SetParameter { node_id, param_index, value: clamped });
                 },
             }
         }
@@ -256,7 +257,7 @@ struct SteppedControlProps {
     node_id: Uuid,
     param_index: u32,
     param: NodeParameter,
-    set_parameter: Callback<(Uuid, u32, f64)>,
+    set_parameter: Callback<SetParameter>,
 }
 
 #[component]
@@ -288,7 +289,7 @@ fn SteppedControl(props: SteppedControlProps) -> Element {
                             p.value = NormalizedF64::new(clamped);
                         }
                     });
-                    set_parameter.call((node_id, param_index, clamped));
+                    set_parameter.call(SetParameter { node_id, param_index, value: clamped });
                 },
             }
         }
@@ -304,7 +305,7 @@ struct ToggleControlProps {
     node_id: Uuid,
     param_index: u32,
     param: NodeParameter,
-    set_parameter: Callback<(Uuid, u32, f64)>,
+    set_parameter: Callback<SetParameter>,
 }
 
 #[component]
@@ -342,7 +343,7 @@ fn ToggleControl(props: ToggleControlProps) -> Element {
                             p.value = NormalizedF64::new(new_val);
                         }
                     });
-                    set_parameter.call((node_id, param_index, new_val));
+                    set_parameter.call(SetParameter { node_id, param_index, value: new_val });
                 },
                 div { style: knob_style }
             }
@@ -363,7 +364,7 @@ struct ChoiceControlProps {
     param_index: u32,
     param: NodeParameter,
     choices: Vec<String>,
-    set_parameter: Callback<(Uuid, u32, f64)>,
+    set_parameter: Callback<SetParameter>,
 }
 
 #[component]
@@ -401,7 +402,7 @@ fn ChoiceControl(props: ChoiceControlProps) -> Element {
                                 p.value = NormalizedF64::new(norm);
                             }
                         });
-                        set_parameter.call((node_id, param_index, norm));
+                        set_parameter.call(SetParameter { node_id, param_index, value: norm });
                     }
                 },
                 for (idx, choice) in choices.iter().enumerate() {
@@ -540,10 +541,9 @@ mod tests {
     #[test]
     fn test_display_value_choice() -> Result<()> {
         // -- Setup & Fixtures
-        let param = NodeParameter::new("type", "Type", NormalizedF64::new(0.5))
-            .with_param_type(ParameterType::Choice(vec![
-                "Clean".into(), "Crunch".into(), "Lead".into(),
-            ]));
+        let param = NodeParameter::new("type", "Type", NormalizedF64::new(0.5)).with_param_type(
+            ParameterType::Choice(vec!["Clean".into(), "Crunch".into(), "Lead".into()]),
+        );
 
         // -- Exec
         let display = param.display_value();

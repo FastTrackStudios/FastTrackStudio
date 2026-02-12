@@ -5,7 +5,6 @@
 //! values. [`GlobalBlock`] wraps a block with a signal-chain [`Order`] for
 //! positioning in a rig's global block pool.
 
-
 use crate::id::BlockId;
 use crate::normalized::Order;
 use crate::parameter::ParameterValue;
@@ -155,6 +154,91 @@ impl BlockType {
             Self::Compressor | Self::Gate | Self::Limiter | Self::DeEsser => "Dynamics",
             Self::Volume | Self::Send | Self::Input | Self::Tuner => "Utility",
             Self::Custom => "Other",
+        }
+    }
+
+    /// Parse a `BlockType` from its variant name string (e.g. `"Eq"`, `"DeEsser"`).
+    ///
+    /// This is the inverse of [`BlockType::variant_name`]. Returns `None` for
+    /// unrecognised strings.
+    pub fn from_variant_name(s: &str) -> Option<Self> {
+        Some(match s {
+            "Input" => Self::Input,
+            "Compressor" => Self::Compressor,
+            "Drive" => Self::Drive,
+            "Amp" => Self::Amp,
+            "Cabinet" => Self::Cabinet,
+            "Eq" => Self::Eq,
+            "Modulation" => Self::Modulation,
+            "Delay" => Self::Delay,
+            "Reverb" => Self::Reverb,
+            "Gate" => Self::Gate,
+            "Volume" => Self::Volume,
+            "Pitch" => Self::Pitch,
+            "Tremolo" => Self::Tremolo,
+            "Limiter" => Self::Limiter,
+            "Send" => Self::Send,
+            "Special" => Self::Special,
+            "Freeze" => Self::Freeze,
+            "Custom" => Self::Custom,
+            "DeEsser" => Self::DeEsser,
+            "Saturator" => Self::Saturator,
+            "Tuner" => Self::Tuner,
+            "Chorus" => Self::Chorus,
+            "Flanger" => Self::Flanger,
+            "Phaser" => Self::Phaser,
+            "RingModulator" => Self::RingModulator,
+            "Wah" => Self::Wah,
+            "Filter" => Self::Filter,
+            "Doubler" => Self::Doubler,
+            "Panner" => Self::Panner,
+            "Vibrato" => Self::Vibrato,
+            "Rotary" => Self::Rotary,
+            "Crossover" => Self::Crossover,
+            "Boost" => Self::Boost,
+            _ => return None,
+        })
+    }
+
+    /// The variant name as a string (e.g. `"Eq"`, `"DeEsser"`).
+    ///
+    /// This is the canonical serialisation form for storage — it matches the
+    /// Rust variant name exactly and round-trips through [`BlockType::from_variant_name`].
+    pub fn variant_name(&self) -> &'static str {
+        match self {
+            Self::Input => "Input",
+            Self::Compressor => "Compressor",
+            Self::Drive => "Drive",
+            Self::Amp => "Amp",
+            Self::Cabinet => "Cabinet",
+            Self::Eq => "Eq",
+            Self::Modulation => "Modulation",
+            Self::Delay => "Delay",
+            Self::Reverb => "Reverb",
+            Self::Gate => "Gate",
+            Self::Volume => "Volume",
+            Self::Pitch => "Pitch",
+            Self::Tremolo => "Tremolo",
+            Self::Limiter => "Limiter",
+            Self::Send => "Send",
+            Self::Special => "Special",
+            Self::Freeze => "Freeze",
+            Self::Custom => "Custom",
+            Self::DeEsser => "DeEsser",
+            Self::Saturator => "Saturator",
+            Self::Tuner => "Tuner",
+            Self::Chorus => "Chorus",
+            Self::Flanger => "Flanger",
+            Self::Phaser => "Phaser",
+            Self::RingModulator => "RingModulator",
+            Self::Wah => "Wah",
+            Self::Filter => "Filter",
+            Self::Doubler => "Doubler",
+            Self::Panner => "Panner",
+            Self::Vibrato => "Vibrato",
+            Self::Rotary => "Rotary",
+            Self::Crossover => "Crossover",
+            Self::Boost => "Boost",
         }
     }
 
@@ -483,5 +567,58 @@ mod tests {
         };
         assert_eq!(global.order.get(), 3);
         assert_eq!(global.block.name, "Global EQ");
+    }
+
+    // BlockType::from_variant_name / variant_name round-trip
+
+    #[test]
+    fn variant_name_round_trips_all_variants() {
+        let all = [
+            BlockType::Input,
+            BlockType::Compressor,
+            BlockType::Drive,
+            BlockType::Amp,
+            BlockType::Cabinet,
+            BlockType::Eq,
+            BlockType::Modulation,
+            BlockType::Delay,
+            BlockType::Reverb,
+            BlockType::Gate,
+            BlockType::Volume,
+            BlockType::Pitch,
+            BlockType::Tremolo,
+            BlockType::Limiter,
+            BlockType::Send,
+            BlockType::Special,
+            BlockType::Freeze,
+            BlockType::Custom,
+            BlockType::DeEsser,
+            BlockType::Saturator,
+            BlockType::Tuner,
+            BlockType::Chorus,
+            BlockType::Flanger,
+            BlockType::Phaser,
+            BlockType::RingModulator,
+            BlockType::Wah,
+            BlockType::Filter,
+            BlockType::Doubler,
+            BlockType::Panner,
+            BlockType::Vibrato,
+            BlockType::Rotary,
+            BlockType::Crossover,
+            BlockType::Boost,
+        ];
+        for bt in &all {
+            let name = bt.variant_name();
+            let parsed = BlockType::from_variant_name(name)
+                .unwrap_or_else(|| panic!("from_variant_name({name:?}) returned None"));
+            assert_eq!(*bt, parsed, "round-trip failed for {name}");
+        }
+    }
+
+    #[test]
+    fn from_variant_name_returns_none_for_unknown() {
+        assert_eq!(BlockType::from_variant_name("Nonexistent"), None);
+        assert_eq!(BlockType::from_variant_name(""), None);
     }
 }

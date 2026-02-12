@@ -4,6 +4,7 @@
 //! in a centered flex grid. This provides rapid parameter access without
 //! the clutter of full block detail views.
 
+use crate::callback_types::MacroChange;
 use crate::prelude::*;
 use signal_control::id::BlockId;
 use signal_control::module::ModuleMacro;
@@ -14,8 +15,8 @@ use uuid::Uuid;
 pub struct ModuleMacroViewProps {
     /// Macros to display as knobs.
     pub macros: Vec<ModuleMacro>,
-    /// Callback when a macro value changes: (block_id, param_index, normalized_value).
-    pub on_macro_change: Callback<(BlockId, u32, f64)>,
+    /// Callback when a macro value changes.
+    pub on_macro_change: Callback<MacroChange>,
 }
 
 /// Macro view showing quick-access knobs in a grid.
@@ -50,7 +51,7 @@ pub fn ModuleMacroView(props: ModuleMacroViewProps) -> Element {
 #[derive(Props, Clone, PartialEq)]
 struct MacroKnobProps {
     macro_def: ModuleMacro,
-    on_change: Callback<(BlockId, u32, f64)>,
+    on_change: Callback<MacroChange>,
 }
 
 /// A single macro knob with label and value display.
@@ -79,7 +80,7 @@ fn MacroKnob(props: MacroKnobProps) -> Element {
                     value: value(),
                     on_change: move |new_val: f32| {
                         value.set(new_val);
-                        on_change.call((block_id, param_index, new_val as f64));
+                        on_change.call(MacroChange { block_id, param_index, value: new_val as f64 });
                     },
                 }
             }

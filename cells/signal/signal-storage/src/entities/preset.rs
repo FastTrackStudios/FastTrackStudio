@@ -73,3 +73,15 @@ impl Related<super::preset_version::Entity> for Entity {
 }
 
 impl ActiveModelBehavior for ActiveModel {}
+
+// ── Typed accessors ──────────────────────────────────────────────────────────
+
+impl Model {
+    /// Parse the `category` JSON column into a typed [`PresetCategory`].
+    ///
+    /// Uses the Facet bridge for deserialization. Returns `PresetCategory::default()`
+    /// if the JSON is malformed or missing.
+    pub fn category_parsed(&self) -> signal_proto::category::PresetCategory {
+        crate::facet_bridge::from_json_value(&self.category).unwrap_or_default()
+    }
+}

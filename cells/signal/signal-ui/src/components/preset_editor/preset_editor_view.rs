@@ -116,39 +116,6 @@ fn module_type_color(mt: ModuleType) -> BlockColor {
     block_type_color(bt)
 }
 
-/// Parse a block_type string from JSON into a BlockType enum.
-fn parse_block_type(s: &str) -> BlockType {
-    match s {
-        "Eq" => BlockType::Eq,
-        "Compressor" => BlockType::Compressor,
-        "Drive" => BlockType::Drive,
-        "Amp" => BlockType::Amp,
-        "Cabinet" => BlockType::Cabinet,
-        "Delay" => BlockType::Delay,
-        "Reverb" => BlockType::Reverb,
-        "Modulation" => BlockType::Modulation,
-        "Chorus" => BlockType::Chorus,
-        "Flanger" => BlockType::Flanger,
-        "Phaser" => BlockType::Phaser,
-        "Tremolo" => BlockType::Tremolo,
-        "Vibrato" => BlockType::Vibrato,
-        "Rotary" => BlockType::Rotary,
-        "Pitch" => BlockType::Pitch,
-        "Gate" => BlockType::Gate,
-        "Limiter" => BlockType::Limiter,
-        "Volume" => BlockType::Volume,
-        "Boost" => BlockType::Boost,
-        "Wah" => BlockType::Wah,
-        "Filter" => BlockType::Filter,
-        "Freeze" => BlockType::Freeze,
-        "Special" => BlockType::Special,
-        "Doubler" => BlockType::Doubler,
-        "Crossover" => BlockType::Crossover,
-        "Send" => BlockType::Send,
-        _ => BlockType::Custom,
-    }
-}
-
 /// A parsed block from a module preset's JSON, for display purposes only.
 #[derive(Clone)]
 struct PreviewBlock {
@@ -192,7 +159,8 @@ fn parse_preview_blocks(model: &signal_control::module_preset_entity::Model) -> 
                 .unwrap_or(false);
             PreviewBlock {
                 name,
-                block_type: parse_block_type(block_type_str),
+                block_type: BlockType::from_variant_name(block_type_str)
+                    .unwrap_or(BlockType::Custom),
                 is_placeholder,
             }
         })

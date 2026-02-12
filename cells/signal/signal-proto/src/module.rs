@@ -74,6 +74,64 @@ impl ModuleType {
         }
     }
 
+    /// The variant name as a string (e.g. `"Eq"`, `"VocalModulation"`).
+    ///
+    /// This is the canonical serialisation form for storage — it matches the
+    /// Rust variant name exactly and round-trips through [`ModuleType::from_variant_name`].
+    pub fn variant_name(self) -> &'static str {
+        match self {
+            Self::Rescue => "Rescue",
+            Self::Correction => "Correction",
+            Self::Tonal => "Tonal",
+            Self::VocalModulation => "VocalModulation",
+            Self::Sends => "Sends",
+            Self::Source => "Source",
+            Self::Eq => "Eq",
+            Self::Dynamics => "Dynamics",
+            Self::Special => "Special",
+            Self::Drive => "Drive",
+            Self::PreFx => "PreFx",
+            Self::Volume => "Volume",
+            Self::Amp => "Amp",
+            Self::PostEq => "PostEq",
+            Self::Modulation => "Modulation",
+            Self::Time => "Time",
+            Self::Motion => "Motion",
+            Self::Master => "Master",
+            Self::Custom => "Custom",
+        }
+    }
+
+    /// Parse a `ModuleType` from its variant name string (e.g. `"Eq"`, `"VocalModulation"`).
+    ///
+    /// This is the inverse of [`ModuleType::variant_name`]. Returns `None` for
+    /// unrecognised strings. For fuzzy matching from DAW container names, use
+    /// [`ModuleType::from_container_name`] instead.
+    pub fn from_variant_name(s: &str) -> Option<Self> {
+        Some(match s {
+            "Rescue" => Self::Rescue,
+            "Correction" => Self::Correction,
+            "Tonal" => Self::Tonal,
+            "VocalModulation" => Self::VocalModulation,
+            "Sends" => Self::Sends,
+            "Source" => Self::Source,
+            "Eq" => Self::Eq,
+            "Dynamics" => Self::Dynamics,
+            "Special" => Self::Special,
+            "Drive" => Self::Drive,
+            "PreFx" => Self::PreFx,
+            "Volume" => Self::Volume,
+            "Amp" => Self::Amp,
+            "PostEq" => Self::PostEq,
+            "Modulation" => Self::Modulation,
+            "Time" => Self::Time,
+            "Motion" => Self::Motion,
+            "Master" => Self::Master,
+            "Custom" => Self::Custom,
+            _ => return None,
+        })
+    }
+
     /// Map a REAPER container name to a `ModuleType`.
     ///
     /// Case-insensitive matching with common aliases for each module type.
@@ -567,5 +625,47 @@ mod tests {
         assert_eq!(ModuleType::from_container_name("FOOBAR"), None);
         assert_eq!(ModuleType::from_container_name(""), None);
         assert_eq!(ModuleType::from_container_name("My Custom Container"), None);
+    }
+
+    // ModuleType::from_variant_name / variant_name round-trip
+
+    #[test]
+    fn variant_name_round_trips_all_module_types() {
+        let all = [
+            ModuleType::Rescue,
+            ModuleType::Correction,
+            ModuleType::Tonal,
+            ModuleType::VocalModulation,
+            ModuleType::Sends,
+            ModuleType::Source,
+            ModuleType::Eq,
+            ModuleType::Dynamics,
+            ModuleType::Special,
+            ModuleType::Drive,
+            ModuleType::PreFx,
+            ModuleType::Volume,
+            ModuleType::Amp,
+            ModuleType::PostEq,
+            ModuleType::Modulation,
+            ModuleType::Time,
+            ModuleType::Motion,
+            ModuleType::Master,
+            ModuleType::Custom,
+        ];
+        for mt in &all {
+            let name = mt.variant_name();
+            let parsed = ModuleType::from_variant_name(name)
+                .unwrap_or_else(|| panic!("from_variant_name({name:?}) returned None"));
+            assert_eq!(*mt, parsed, "round-trip failed for {name}");
+        }
+    }
+
+    #[test]
+    fn from_variant_name_returns_none_for_unknown() {
+        assert_eq!(ModuleType::from_variant_name("Nonexistent"), None);
+        assert_eq!(ModuleType::from_variant_name(""), None);
+        // Display names are NOT variant names
+        assert_eq!(ModuleType::from_variant_name("Vocal Modulation"), None);
+        assert_eq!(ModuleType::from_variant_name("Pre FX"), None);
     }
 }

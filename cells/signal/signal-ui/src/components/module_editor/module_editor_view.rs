@@ -210,7 +210,8 @@ fn parse_composition_from_model(
                 .and_then(|bl| bl.get("block_type"))
                 .and_then(|v| v.as_str())
                 .unwrap_or("Custom");
-            let block_type = parse_block_type(block_type_str);
+            let block_type =
+                BlockType::from_variant_name(block_type_str).unwrap_or(BlockType::Custom);
             let name = b
                 .get("block")
                 .and_then(|bl| bl.get("name"))
@@ -268,38 +269,6 @@ fn parse_composition_from_model(
         .collect();
 
     ParsedComposition { chain, connections }
-}
-
-fn parse_block_type(s: &str) -> BlockType {
-    match s {
-        "Eq" => BlockType::Eq,
-        "Compressor" => BlockType::Compressor,
-        "Drive" => BlockType::Drive,
-        "Amp" => BlockType::Amp,
-        "Cabinet" => BlockType::Cabinet,
-        "Delay" => BlockType::Delay,
-        "Reverb" => BlockType::Reverb,
-        "Modulation" => BlockType::Modulation,
-        "Chorus" => BlockType::Chorus,
-        "Flanger" => BlockType::Flanger,
-        "Phaser" => BlockType::Phaser,
-        "Tremolo" => BlockType::Tremolo,
-        "Vibrato" => BlockType::Vibrato,
-        "Rotary" => BlockType::Rotary,
-        "Pitch" => BlockType::Pitch,
-        "Gate" => BlockType::Gate,
-        "Limiter" => BlockType::Limiter,
-        "Volume" => BlockType::Volume,
-        "Boost" => BlockType::Boost,
-        "Wah" => BlockType::Wah,
-        "Filter" => BlockType::Filter,
-        "Freeze" => BlockType::Freeze,
-        "Special" => BlockType::Special,
-        "Doubler" => BlockType::Doubler,
-        "Crossover" => BlockType::Crossover,
-        "Send" => BlockType::Send,
-        _ => BlockType::Custom,
-    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

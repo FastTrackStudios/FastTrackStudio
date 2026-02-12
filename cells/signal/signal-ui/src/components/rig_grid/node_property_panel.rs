@@ -11,6 +11,7 @@
 //! - Input/output port list with connection status
 //! - Placeholder when nothing is selected
 
+use crate::callback_types::SetParameter;
 use crate::hooks::rig_actions::use_rig_actions;
 use crate::prelude::*;
 use crate::signals::{SelectedEntity, RIG_NODE_GRAPH, RIG_SELECTED_ENTITY, RIG_SERVICE};
@@ -500,7 +501,7 @@ struct ParameterSliderProps {
     name: String,
     value: f64,
     display_value: String,
-    set_parameter: Callback<(Uuid, u32, f64)>,
+    set_parameter: Callback<SetParameter>,
 }
 
 #[component]
@@ -529,7 +530,7 @@ fn ParameterSlider(props: ParameterSliderProps) -> Element {
                                 p.formatted_display = None;
                             }
                         });
-                        set_parameter.call((node_id, param_index, clamped));
+                        set_parameter.call(SetParameter { node_id, param_index, value: clamped });
                     }
                 },
                 // Fill

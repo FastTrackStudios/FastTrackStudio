@@ -41,7 +41,7 @@ pub struct SlotStateInfo {
     pub disabled: bool,
     /// The currently active instance handle (if any).
     #[facet(default)]
-    pub active_instance: Option<u64>,
+    pub active_instance: Option<InstanceHandle>,
     /// All loaded instances and their states.
     #[facet(default)]
     pub instances: Vec<InstanceInfo>,
@@ -50,8 +50,8 @@ pub struct SlotStateInfo {
 /// Per-instance state information for RPC communication.
 #[derive(Debug, Clone, PartialEq, Facet)]
 pub struct InstanceInfo {
-    /// Instance handle (raw u64).
-    pub handle: u64,
+    /// Instance handle.
+    pub handle: InstanceHandle,
     /// Current lifecycle state.
     pub state: InstanceState,
 }
@@ -74,7 +74,7 @@ pub enum SwitchOutcomeInfo {
     Completed = 0,
     /// Switch is deferred — some slots need to load first.
     Pending {
-        handle: u64,
+        handle: PresetLoadHandle,
         loaded: u16,
         total: u16,
     } = 1,
@@ -94,8 +94,8 @@ pub struct SlotErrorInfo {
 /// Readiness status for a preload operation.
 #[derive(Debug, Clone, PartialEq, Facet)]
 pub struct PreloadStatusInfo {
-    /// The preload handle (raw u64).
-    pub handle: u64,
+    /// The preload handle.
+    pub handle: PresetLoadHandle,
     /// Current readiness.
     pub readiness: PresetReadiness,
 }
@@ -396,13 +396,10 @@ impl SlotStateInfo {
         Self {
             module_type,
             disabled,
-            active_instance: active_instance.map(|h| h.raw()),
+            active_instance,
             instances: instances
                 .into_iter()
-                .map(|(handle, state)| InstanceInfo {
-                    handle: handle.raw(),
-                    state,
-                })
+                .map(|(handle, state)| InstanceInfo { handle, state })
                 .collect(),
         }
     }
@@ -442,7 +439,7 @@ impl SwitchOutcomeInfo {
                     PresetReadiness::Failed => (0, 0),
                 };
                 Self::Pending {
-                    handle: handle.raw(),
+                    handle: *handle,
                     loaded,
                     total,
                 }
@@ -465,10 +462,7 @@ impl SlotErrorInfo {
 
 impl PreloadStatusInfo {
     pub fn new(handle: PresetLoadHandle, readiness: PresetReadiness) -> Self {
-        Self {
-            handle: handle.raw(),
-            readiness,
-        }
+        Self { handle, readiness }
     }
 }
 
@@ -796,7 +790,7 @@ impl RigControlService for MockRigControlService {
                 Some(SlotStateInfo {
                     module_type: ss.module_type,
                     disabled: ss.is_disabled,
-                    active_instance: ss.active_handle.map(|h| h.raw()),
+                    active_instance: ss.active_handle,
                     instances: Vec::new(),
                 })
             } else {
@@ -812,7 +806,7 @@ impl RigControlService for MockRigControlService {
             .map(|ss| SlotStateInfo {
                 module_type: ss.module_type,
                 disabled: ss.is_disabled,
-                active_instance: ss.active_handle.map(|h| h.raw()),
+                active_instance: ss.active_handle,
                 instances: Vec::new(),
             })
             .collect()

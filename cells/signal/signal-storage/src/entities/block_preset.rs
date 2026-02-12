@@ -36,3 +36,14 @@ impl Related<super::block_snapshot::Entity> for Entity {
 }
 
 impl ActiveModelBehavior for ActiveModel {}
+
+// ── Typed accessors ──────────────────────────────────────────────────────────
+
+impl Model {
+    /// Parse the `block_type` column into a typed [`BlockType`].
+    ///
+    /// Returns `None` if the stored string doesn't match any known variant.
+    pub fn block_type_parsed(&self) -> Option<signal_proto::block::BlockType> {
+        signal_proto::block::BlockType::from_variant_name(&self.block_type)
+    }
+}

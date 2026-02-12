@@ -512,25 +512,25 @@ pub fn NodeGraphView(props: NodeGraphViewProps) -> Element {
                             },
                             on_port_drag_start: {
                                 let module_clone = module.clone();
-                                move |(port_id, is_output): (String, bool)| {
+                                move |evt: crate::callback_types::PortDragStart| {
                                     if compact || performance_mode { return; }
-                                    let is_input = !is_output;
-                                    if let Some(pos) = module_clone.port_position(&port_id, is_input) {
+                                    let is_input = !evt.is_output;
+                                    if let Some(pos) = module_clone.port_position(&evt.port_name, is_input) {
                                         wire_draft.set(Some(WireDraft {
                                             from_entity: module_clone.id,
-                                            from_port: port_id,
+                                            from_port: evt.port_name,
                                             from_pos: pos,
-                                            is_from_output: is_output,
+                                            is_from_output: evt.is_output,
                                             mouse_pos: pos,
                                         }));
                                     }
                                 }
                             },
                             on_port_hover: {
-                                move |(entity_id, port_id, is_input): (Uuid, String, bool)| {
+                                move |evt: crate::callback_types::PortHoverEvent| {
                                     if compact || performance_mode { return; }
                                     if wire_draft().is_some() {
-                                        hovered_port.set(Some((entity_id, port_id, is_input)));
+                                        hovered_port.set(Some((evt.node_id, evt.port_name, evt.is_hovering)));
                                     }
                                 }
                             },
@@ -576,24 +576,24 @@ pub fn NodeGraphView(props: NodeGraphViewProps) -> Element {
                             },
                             on_port_drag_start: {
                                 let node_clone = node.clone();
-                                move |(port_id, is_output): (String, bool)| {
+                                move |evt: crate::callback_types::PortDragStart| {
                                     if performance_mode { return; }
-                                    let is_input = !is_output;
-                                    if let Some(pos) = node_clone.port_position(&port_id, is_input) {
+                                    let is_input = !evt.is_output;
+                                    if let Some(pos) = node_clone.port_position(&evt.port_name, is_input) {
                                         wire_draft.set(Some(WireDraft {
                                             from_entity: node_clone.id,
-                                            from_port: port_id,
+                                            from_port: evt.port_name,
                                             from_pos: pos,
-                                            is_from_output: is_output,
+                                            is_from_output: evt.is_output,
                                             mouse_pos: pos,
                                         }));
                                     }
                                 }
                             },
                             on_port_hover: {
-                                move |(entity_id, port_id, is_input): (Uuid, String, bool)| {
+                                move |evt: crate::callback_types::PortHoverEvent| {
                                     if wire_draft().is_some() {
-                                        hovered_port.set(Some((entity_id, port_id, is_input)));
+                                        hovered_port.set(Some((evt.node_id, evt.port_name, evt.is_hovering)));
                                     }
                                 }
                             },
@@ -695,9 +695,9 @@ pub fn NodeGraphView(props: NodeGraphViewProps) -> Element {
                     pan_x: pan_x(),
                     pan_y: pan_y(),
                     zoom: zoom(),
-                    on_pan: move |(new_px, new_py): (f64, f64)| {
-                        pan_x.set(new_px);
-                        pan_y.set(new_py);
+                    on_pan: move |offset: crate::callback_types::PanOffset| {
+                        pan_x.set(offset.x);
+                        pan_y.set(offset.y);
                     },
                 }
             }

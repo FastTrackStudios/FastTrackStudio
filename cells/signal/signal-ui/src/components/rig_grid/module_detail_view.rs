@@ -4,6 +4,7 @@
 //! using audio-controls widgets. This provides complete editing capability
 //! at the cost of more screen space.
 
+use crate::callback_types::SetParameter;
 use crate::prelude::*;
 use signal_control::block::BlockType;
 use signal_control::module::ModuleBlock;
@@ -20,8 +21,8 @@ pub struct ModuleDetailViewProps {
     pub blocks: Vec<ModuleBlock>,
     /// Callback when a block's bypass is toggled.
     pub on_toggle_bypass: Callback<Uuid>,
-    /// Callback when a parameter changes: (block_id, param_index, value).
-    pub on_param_change: Callback<(Uuid, u32, f64)>,
+    /// Callback when a parameter changes.
+    pub on_param_change: Callback<SetParameter>,
 }
 
 /// Detail view showing full block parameters.
@@ -61,7 +62,7 @@ pub fn ModuleDetailView(props: ModuleDetailViewProps) -> Element {
 struct BlockDetailCardProps {
     block: ModuleBlock,
     on_toggle_bypass: Callback<Uuid>,
-    on_param_change: Callback<(Uuid, u32, f64)>,
+    on_param_change: Callback<SetParameter>,
 }
 
 /// A card showing a block with its full parameter set.
@@ -156,7 +157,7 @@ struct ParameterKnobProps {
     param_index: u32,
     value: f64,
     name: String,
-    on_change: Callback<(Uuid, u32, f64)>,
+    on_change: Callback<SetParameter>,
 }
 
 /// A single parameter knob control.
@@ -181,7 +182,7 @@ fn ParameterKnob(props: ParameterKnobProps) -> Element {
                 value: value(),
                 on_change: move |new_val: f32| {
                     value.set(new_val);
-                    on_change.call((block_id, param_index, new_val as f64));
+                    on_change.call(SetParameter { node_id: block_id, param_index, value: new_val as f64 });
                 },
             }
 

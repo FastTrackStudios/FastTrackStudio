@@ -3,6 +3,7 @@
 //! Displays the list of available profiles with expandable scenes.
 //! Similar to the profiles section in the left sidebar but as a dedicated right sidebar.
 
+use crate::callback_types::ProfileSceneSelect;
 use crate::prelude::*;
 use crate::signals::{RIG_AVAILABLE_PROFILES, RIG_CURRENT_PRESET, RIG_PROFILE};
 use signal_control::id::ProfileId;
@@ -15,7 +16,7 @@ pub struct GuitarRigProfileSidebarProps {
     pub on_profile_select: Callback<ProfileId>,
     /// Callback when a profile + scene is selected (by scene index).
     #[props(default)]
-    pub on_profile_scene_select: Option<Callback<(ProfileId, usize)>>,
+    pub on_profile_scene_select: Option<Callback<ProfileSceneSelect>>,
     /// Callback to create a new profile.
     #[props(default)]
     pub on_create_profile: Option<Callback<()>>,
@@ -96,7 +97,7 @@ struct ProfileItemProps {
     is_active: bool,
     is_expanded: bool,
     on_click: Callback<ProfileId>,
-    on_scene_click: Option<Callback<(ProfileId, usize)>>,
+    on_scene_click: Option<Callback<ProfileSceneSelect>>,
 }
 
 /// Individual profile item with expandable patches.
@@ -154,7 +155,7 @@ struct ProfilePatchItemProps {
     patch_index: usize,
     patch: PatchInfo,
     is_active: bool,
-    on_click: Option<Callback<(ProfileId, usize)>>,
+    on_click: Option<Callback<ProfileSceneSelect>>,
 }
 
 /// Individual patch item within a profile.
@@ -173,7 +174,7 @@ fn ProfilePatchItem(props: ProfilePatchItemProps) -> Element {
             },
             onclick: move |_| {
                 if let Some(ref cb) = on_click {
-                    cb.call((profile_id, patch_index));
+                    cb.call(ProfileSceneSelect { profile_id, scene_index: patch_index });
                 }
             },
             "• {props.patch.name}"

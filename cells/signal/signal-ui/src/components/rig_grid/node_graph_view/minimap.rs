@@ -3,9 +3,10 @@
 //! Renders a small overview of all modules in the bottom-left corner and
 //! shows the current viewport rectangle. Clicking jumps to that position.
 
-use crate::prelude::*;
 use super::super::block_colors::block_type_color;
 use super::super::node_graph::NodeGraph;
+use crate::callback_types::PanOffset;
+use crate::prelude::*;
 
 // ── Minimap Component ────────────────────────────────────────────────
 
@@ -19,7 +20,7 @@ pub(crate) struct MinimapProps {
     pub pan_x: f64,
     pub pan_y: f64,
     pub zoom: f64,
-    pub on_pan: Callback<(f64, f64)>,
+    pub on_pan: Callback<PanOffset>,
 }
 
 #[component]
@@ -61,7 +62,7 @@ pub(crate) fn Minimap(props: MinimapProps) -> Element {
                 let canvas_y = (rect_y - offset_y) / scale;
                 let new_pan_x = -(canvas_x - props.viewport_w * 0.5 / current_zoom) * current_zoom;
                 let new_pan_y = -(canvas_y - props.viewport_h * 0.5 / current_zoom) * current_zoom;
-                on_pan.call((new_pan_x, new_pan_y));
+                on_pan.call(PanOffset { x: new_pan_x, y: new_pan_y });
             },
 
             for module in &props.graph.modules {

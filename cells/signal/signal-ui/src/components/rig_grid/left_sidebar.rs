@@ -4,6 +4,7 @@
 //! - Top section: Preset browser with fuzzy search
 //! - Bottom section: Profile selector
 
+use crate::callback_types::{PresetSnapshotSelect, ProfileSceneSelect};
 use crate::hooks::use_fuzzy_search;
 use crate::prelude::*;
 use crate::signals::{
@@ -28,12 +29,12 @@ pub struct GuitarRigLeftSidebarProps {
     pub on_preset_select: Callback<RigPresetId>,
     /// Callback when a preset + scene is selected (by scene index).
     #[props(default)]
-    pub on_preset_snapshot_select: Option<Callback<(RigPresetId, usize)>>,
+    pub on_preset_snapshot_select: Option<Callback<PresetSnapshotSelect>>,
     /// Callback when a profile is selected (loads with default scene).
     pub on_profile_select: Callback<ProfileId>,
     /// Callback when a profile + scene is selected (by scene index).
     #[props(default)]
-    pub on_profile_scene_select: Option<Callback<(ProfileId, usize)>>,
+    pub on_profile_scene_select: Option<Callback<ProfileSceneSelect>>,
     /// Callback to create a new preset.
     #[props(default)]
     pub on_create_preset: Option<Callback<()>>,
@@ -233,7 +234,7 @@ struct PresetItemProps {
     is_expanded: bool,
     registry: TagRegistry,
     on_click: Callback<RigPresetId>,
-    on_scene_click: Option<Callback<(RigPresetId, usize)>>,
+    on_scene_click: Option<Callback<PresetSnapshotSelect>>,
 }
 
 /// Individual preset item (simplified — no inline snapshot expansion).
@@ -320,7 +321,7 @@ struct ProfileItemProps {
     is_expanded: bool,
     current_preset_id: Option<RigPresetId>,
     on_click: Callback<ProfileId>,
-    on_scene_click: Option<Callback<(ProfileId, usize)>>,
+    on_scene_click: Option<Callback<ProfileSceneSelect>>,
 }
 
 /// Individual profile item with expandable patches.
@@ -378,7 +379,7 @@ struct ProfilePatchItemProps {
     patch_index: usize,
     patch: PatchInfo,
     is_active: bool,
-    on_click: Option<Callback<(ProfileId, usize)>>,
+    on_click: Option<Callback<ProfileSceneSelect>>,
 }
 
 /// Individual patch item within a profile.
@@ -397,7 +398,7 @@ fn ProfilePatchItem(props: ProfilePatchItemProps) -> Element {
             },
             onclick: move |_| {
                 if let Some(ref cb) = on_click {
-                    cb.call((profile_id, patch_index));
+                    cb.call(ProfileSceneSelect { profile_id, scene_index: patch_index });
                 }
             },
             "• {props.patch.name}"

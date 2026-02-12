@@ -6,6 +6,7 @@
 //! - **Preset**: Snapshots from the current preset
 
 use super::view_mode::RigViewMode;
+use crate::callback_types::ProfileSceneSelect;
 use crate::prelude::*;
 use crate::signals::*;
 
@@ -76,7 +77,7 @@ pub fn SceneGridPanel(view_mode: RigViewMode) -> Element {
                                     match &action {
                                         TileAction::GoToScene(i) => actions.go_to_scene.call(*i),
                                         TileAction::LoadProfileScene(pid, i) => {
-                                            actions.load_profile_scene.call((*pid, *i));
+                                            actions.load_profile_scene.call(ProfileSceneSelect { profile_id: *pid, scene_index: *i });
                                         }
                                         TileAction::ActivateSnapshot(sid) => {
                                             actions.activate_snapshot.call(*sid);
