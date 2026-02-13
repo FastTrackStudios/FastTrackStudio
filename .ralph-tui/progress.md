@@ -16,6 +16,8 @@
 - **SeaORM migration ordering**: FK-referenced tables must be created before dependent tables. Order: users → presets → snapshots/module_chunks/ratings/preset_versions → sync_metadata.
 - **oauth2 v5 typestate**: `BasicClient` defaults all endpoint generics to `EndpointNotSet`. After calling `set_auth_uri()`/`set_token_uri()`, the client type changes to `EndpointSet` for those positions. Methods like `authorize_url()`, `exchange_code()`, `exchange_refresh_token()` only exist on clients with `EndpointSet` for the relevant endpoints. Use a type alias like `type ConfiguredClient = BasicClient<EndpointSet, ..., EndpointSet>` for the return type.
 - **oauth2 v5 TokenResponse trait**: The `access_token()`, `refresh_token()`, and `expires_in()` methods come from the `TokenResponse` trait which must be explicitly imported: `use oauth2::TokenResponse;`.
+- **Branded ID `From<&String>` gap**: `typed_string_id!` macro implements `From<&str>` and `From<String>` but NOT `From<&String>`. Controller methods taking `impl Into<PresetId>` will reject `&String` — use `.as_str()` instead.
+- **Pre-existing signal2-proto clippy**: `BlockType::from_str` triggers `clippy::should_implement_trait`. Use `--no-deps` when running clippy against downstream crates.
 
 ---
 
@@ -163,4 +165,47 @@
   - `TokenResponse` trait must be explicitly imported for `access_token()`/`refresh_token()`/`expires_in()` — they're trait methods, not inherent methods
   - Type annotations needed on closures like `.map(|d: std::time::Duration| ...)` when the compiler can't infer through long method chains
   - `#[derive(Default)]` with `#[default]` on enum variants is cleaner than manual impl and satisfies clippy `derivable_impls` lint
+---
+
+## 2026-02-13 - roam-test-5e9.18
+- What was implemented:
+  - US-018: Updated signal2-ui and playground to Collection/Variant concepts
+  - Refactored `SignalSlider` to use "Collections" / "Variants" terminology in UI labels
+  - Added `CollectionCard` component (extracted from inline preset rendering) for block collections
+  - Added `ModuleCollectionCard` component for module preset collections with variant browsing
+  - Added `MetadataPlaceholder` component with hooks for tags, description, notes (ready for US-002 wiring)
+  - Added `normalize_default_variant_id()` helper implementing the epic's normalization contract
+  - Active variant highlighting with border-2 visual indicator
+  - "Load default variant" buttons use normalized default (explicit default → first variant fallback)
+  - Updated playground doc comment to reference collection/variant concepts
+- Files changed:
+  - `modules/signal/signal-ui/src/lib.rs` (rewrote — 5 components + normalization helper)
+  - `apps/tests/playground/src/main.rs` (updated doc comment)
+- **Learnings:**
+  - `typed_string_id!` macro doesn't implement `From<&String>` — use `.as_str()` for `&str` conversion when passing to `impl Into<BrandedId>` params
+  - Dioxus signal borrowing: can't hold a `&Snapshot` reference across `rsx!` render because `rsx!` moves captured signals. Compute owned `String` IDs eagerly instead
+  - `BlockType::from_str` in signal2-proto is a pre-existing clippy `should_implement_trait` warning — not introduced by this bead
+  - Disk space on worktree can run low (12G free on 1.9T volume) — `cargo clean` frees ~5.5G of build artifacts
+---
+
+## 2026-02-13 - roam-test-5e9.14
+- What was implemented:
+  - US-014: Renamed `BlockRepo` → `CollectionRepo` with collection/variant semantics
+  - New `CollectionRepo` trait with 8 methods: `load_block_state`, `save_block_state`, `list_block_collections`, `load_block_default_variant`, `load_block_variant`, `list_module_collections`, `load_module_default_variant`, `load_module_variant`
+  - `CollectionRepoLive` implementation with extracted `assemble_block_collection` / `assemble_module_collection` helpers to reduce duplication
+  - Seed functions renamed: `default_seed_presets` → `default_seed_block_collections`, `default_seed_module_presets` → `default_seed_module_collections`
+  - Updated all consumers: signal-live, signal (facade), signal-controller (no changes needed), signal-ui (no changes needed)
+  - 21 tests covering: block state round-trip, collection listing/filtering, default variant loading, specific variant loading, missing collection/variant edge cases, metadata round-trip, override round-trip, default normalization, reseed idempotency, module block source types
+- Files changed:
+  - `modules/signal/signal-storage/src/collection_repo.rs` (new — replaces block_repo.rs, ~1070 lines with 21 tests)
+  - `modules/signal/signal-storage/src/lib.rs` (updated exports)
+  - `modules/signal/signal-storage/Cargo.toml` (added tokio dev-dependency for tests)
+  - `modules/signal/signal-live/src/lib.rs` (updated to CollectionRepo trait methods)
+  - `modules/signal/signal/src/lib.rs` (updated re-exports and bootstrap functions)
+  - Removed: `modules/signal/signal-storage/src/block_repo.rs`
+- **Learnings:**
+  - `Snapshot::block()` returns owned `Block`, so `variant.block().parameters()` creates a temporary that can't be borrowed — need `let block = variant.block();` first
+  - Named methods with domain vocabulary (collection/variant) are cleaner than making the trait generic over type parameters, keeping the trait object-safe and call sites readable
+  - Entity model layer didn't need changes — the entity files (preset, snapshot, etc.) are internal storage details that the renamed repo methods abstract over
+  - `--no-deps` is essential for clippy on signal2-storage/live/controller because signal2-proto has a pre-existing `should_implement_trait` warning
 ---

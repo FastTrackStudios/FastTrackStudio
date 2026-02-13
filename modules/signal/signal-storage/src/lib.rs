@@ -1,9 +1,12 @@
 //! Signal storage layer built on SeaORM.
 
-pub mod block_repo;
+pub mod collection_repo;
 pub mod entity;
 
-pub use block_repo::{default_seed_module_presets, default_seed_presets, BlockRepo, BlockRepoLive};
+pub use collection_repo::{
+    default_seed_block_collections, default_seed_module_collections, CollectionRepo,
+    CollectionRepoLive,
+};
 pub use sea_orm::{Database, DatabaseConnection, DbErr};
 
 #[derive(Debug, thiserror::Error)]

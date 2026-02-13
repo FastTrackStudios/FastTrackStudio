@@ -1,4 +1,4 @@
-//! Minimal playground for signal2 slider.
+//! Playground for signal2 collection/variant UI.
 
 use dioxus::prelude::*;
 use signal2::{bootstrap_in_memory_controller_async, SignalController};

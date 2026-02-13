@@ -1,13 +1,24 @@
-//! Minimal UI for signal2.
+//! Signal2 UI — renders via Collection / Variant concepts.
+//!
+//! Collections map to the underlying `Preset` / `ModulePreset` types and
+//! Variants map to `Snapshot` / `ModuleSnapshot`.  Metadata hooks (tags,
+//! description, notes) are rendered as placeholder sections ready for
+//! back-end wiring once `signal2-proto` grows `Metadata` support.
 
 use dioxus::prelude::*;
-use signal::{Block, BlockType, Preset, SignalController};
+use signal::{Block, BlockType, ModulePreset, Preset, SignalController, Snapshot};
+
+// region: --- Main Component
 
 #[component]
 pub fn SignalSlider(controller: SignalController) -> Element {
     let mut block_type = use_signal(|| BlockType::Amp);
     let mut block = use_signal(Block::default);
-    let mut presets = use_signal(Vec::<Preset>::new);
+    let mut collections = use_signal(Vec::<Preset>::new);
+    let mut module_collections = use_signal(Vec::<ModulePreset>::new);
+    let mut active_variant_id = use_signal(|| None::<String>);
+
+    // Fetch block state, block collections, and module collections on type change.
     {
         let controller = controller.clone();
         use_effect(move || {
@@ -15,10 +26,13 @@ pub fn SignalSlider(controller: SignalController) -> Element {
             let selected = block_type();
             spawn(async move {
                 block.set(controller.get_block(selected).await);
-                presets.set(controller.list_presets(selected).await);
+                collections.set(controller.list_presets(selected).await);
+                module_collections.set(controller.list_module_presets().await);
+                active_variant_id.set(None);
             });
         });
     }
+
     let active_block_type = block_type();
     let b: Block = block();
     let params = b.parameters().to_vec();
@@ -26,6 +40,8 @@ pub fn SignalSlider(controller: SignalController) -> Element {
     rsx! {
         div { class: "max-w-2xl mx-auto p-6 space-y-8",
             h1 { class: "text-xl font-semibold mb-4", "signal2 block" }
+
+            // -- Block type selector
             div { class: "flex gap-2",
                 button {
                     class: if active_block_type == BlockType::Amp { "px-3 py-1 rounded border bg-zinc-200" } else { "px-3 py-1 rounded border border-zinc-300" },
@@ -39,6 +55,7 @@ pub fn SignalSlider(controller: SignalController) -> Element {
                 }
             }
 
+            // -- Parameter sliders
             div { class: "space-y-4",
                 for (index, parameter) in params.into_iter().enumerate() {
                     {
@@ -68,71 +85,130 @@ pub fn SignalSlider(controller: SignalController) -> Element {
                 }
             }
 
+            // -- Block collections (presets rendered as collection/variant)
             div { class: "space-y-3",
-                h2 { class: "text-lg font-semibold", "Presets" }
-                for preset in presets().into_iter() {
+                h2 { class: "text-lg font-semibold", "Collections" }
+                for collection in collections().into_iter() {
                     {
-                        let preset_id = preset.id().to_string();
-                        let preset_name = preset.name().to_string();
-                        let snapshots = preset.snapshots().to_vec();
+                        let collection_id = collection.id().to_string();
                         rsx! {
-                            div { key: "{preset_id}", class: "rounded-md border border-zinc-300 p-3 space-y-2",
-                                div { class: "flex items-center justify-between gap-3",
-                                    p { class: "font-medium", "{preset_name}" }
-                                    button {
-                                        class: "px-2 py-1 text-xs rounded border border-zinc-400 hover:bg-zinc-100",
-                                        onclick: {
-                                            let controller = controller.clone();
-                                            let preset_id = preset_id.clone();
-                                            move |_| {
-                                                let controller = controller.clone();
-                                                let preset_id = preset_id.clone();
-                                                let selected = active_block_type;
-                                                spawn(async move {
-                                                    if let Some(next_block) = controller.load_preset(selected, preset_id).await {
-                                                        block.set(next_block);
-                                                    }
-                                                });
-                                            }
-                                        },
-                                        "Load default"
-                                    }
+                            CollectionCard {
+                                key: "{collection_id}",
+                                collection,
+                                controller: controller.clone(),
+                                block_type: active_block_type,
+                                block,
+                                active_variant_id,
+                            }
+                        }
+                    }
+                }
+            }
+
+            // -- Module collections (module presets rendered as collection/variant)
+            if !module_collections().is_empty() {
+                div { class: "space-y-3",
+                    h2 { class: "text-lg font-semibold", "Module Collections" }
+                    for module_collection in module_collections().into_iter() {
+                        {
+                            let mc_id = module_collection.id().to_string();
+                            rsx! {
+                                ModuleCollectionCard {
+                                    key: "{mc_id}",
+                                    collection: module_collection,
+                                    controller: controller.clone(),
                                 }
-                                div { class: "space-y-2",
-                                    for snapshot in snapshots.into_iter() {
-                                        {
-                                            let snapshot_id = snapshot.id().to_string();
-                                            let snapshot_name = snapshot.name().to_string();
-                                            let sb = snapshot.block();
-                                            rsx! {
-                                                button {
-                                                    key: "{snapshot_id}",
-                                                    class: "w-full text-left p-2 rounded border border-zinc-200 hover:bg-zinc-50",
-                                                    onclick: {
-                                                        let controller = controller.clone();
-                                                        let preset_id = preset_id.clone();
-                                                        let snapshot_id = snapshot_id.clone();
-                                                        move |_| {
-                                                            let controller = controller.clone();
-                                                            let preset_id = preset_id.clone();
-                                                            let snapshot_id = snapshot_id.clone();
-                                                            let selected = active_block_type;
-                                                            spawn(async move {
-                                                                if let Some(next_block) = controller.load_preset_snapshot(selected, preset_id, snapshot_id).await {
-                                                                    block.set(next_block);
-                                                                }
-                                                            });
-                                                        }
-                                                    },
-                                                    div { class: "text-sm font-medium", "{snapshot_name}" }
-                                                    p { class: "text-xs text-zinc-600",
-                                                        for parameter in sb.parameters().iter() {
-                                                            span { "{parameter.name()} {parameter.value().get():.2} " }
-                                                        }
-                                                    }
-                                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// endregion: --- Main Component
+
+// region: --- Block Collection Card
+
+#[component]
+fn CollectionCard(
+    collection: Preset,
+    controller: SignalController,
+    block_type: BlockType,
+    mut block: Signal<Block>,
+    mut active_variant_id: Signal<Option<String>>,
+) -> Element {
+    let collection_id = collection.id().to_string();
+    let collection_name = collection.name().to_string();
+    let variants = collection.snapshots().to_vec();
+
+    // Normalization: determine default variant ID eagerly.
+    // Rule: use the explicit default; if missing, promote first variant.
+    let default_variant_id = normalize_default_variant_id(&variants, &collection.default_snapshot());
+
+    rsx! {
+        div { class: "rounded-md border border-zinc-300 p-3 space-y-2",
+            // -- Header: collection name + load-default button
+            div { class: "flex items-center justify-between gap-3",
+                p { class: "font-medium", "{collection_name}" }
+                button {
+                    class: "px-2 py-1 text-xs rounded border border-zinc-400 hover:bg-zinc-100",
+                    onclick: {
+                        let controller = controller.clone();
+                        let collection_id = collection_id.clone();
+                        let default_id = default_variant_id.clone();
+                        move |_| {
+                            let controller = controller.clone();
+                            let collection_id = collection_id.clone();
+                            let default_id = default_id.clone();
+                            spawn(async move {
+                                if let Some(next_block) = controller.load_preset_snapshot(block_type, collection_id.as_str(), default_id.as_str()).await {
+                                    block.set(next_block);
+                                    active_variant_id.set(Some(default_id));
+                                }
+                            });
+                        }
+                    },
+                    "Load default variant"
+                }
+            }
+
+            // -- Metadata hooks (placeholder sections for tags / description / notes)
+            MetadataPlaceholder {}
+
+            // -- Variant list
+            div { class: "space-y-2",
+                for variant in variants.into_iter() {
+                    {
+                        let variant_id = variant.id().to_string();
+                        let variant_name = variant.name().to_string();
+                        let vb = variant.block();
+                        let is_active = active_variant_id().as_deref() == Some(variant_id.as_str());
+                        rsx! {
+                            button {
+                                key: "{variant_id}",
+                                class: if is_active { "w-full text-left p-2 rounded border-2 border-zinc-400 bg-zinc-50" } else { "w-full text-left p-2 rounded border border-zinc-200 hover:bg-zinc-50" },
+                                onclick: {
+                                    let controller = controller.clone();
+                                    let collection_id = collection_id.clone();
+                                    let variant_id = variant_id.clone();
+                                    move |_| {
+                                        let controller = controller.clone();
+                                        let collection_id = collection_id.clone();
+                                        let variant_id = variant_id.clone();
+                                        spawn(async move {
+                                            if let Some(next_block) = controller.load_preset_snapshot(block_type, collection_id.as_str(), variant_id.as_str()).await {
+                                                block.set(next_block);
+                                                active_variant_id.set(Some(variant_id));
                                             }
-                                        }
+                                        });
+                                    }
+                                },
+                                div { class: "text-sm font-medium", "{variant_name}" }
+                                p { class: "text-xs text-zinc-600",
+                                    for parameter in vb.parameters().iter() {
+                                        span { "{parameter.name()} {parameter.value().get():.2} " }
                                     }
                                 }
                             }
@@ -143,6 +219,109 @@ pub fn SignalSlider(controller: SignalController) -> Element {
         }
     }
 }
+
+// endregion: --- Block Collection Card
+
+// region: --- Module Collection Card
+
+#[component]
+fn ModuleCollectionCard(
+    collection: ModulePreset,
+    controller: SignalController,
+) -> Element {
+    let collection_id = collection.id().to_string();
+    let collection_name = collection.name().to_string();
+    let variants = collection.snapshots().to_vec();
+    let default_variant_id = collection.default_snapshot().id().to_string();
+    let mut loaded_variant = use_signal(|| None::<String>);
+
+    rsx! {
+        div { class: "rounded-md border border-zinc-300 p-3 space-y-2",
+            div { class: "flex items-center justify-between gap-3",
+                p { class: "font-medium", "{collection_name}" }
+                button {
+                    class: "px-2 py-1 text-xs rounded border border-zinc-400 hover:bg-zinc-100",
+                    onclick: {
+                        let controller = controller.clone();
+                        let collection_id = collection_id.clone();
+                        let default_variant_id = default_variant_id.clone();
+                        move |_| {
+                            let controller = controller.clone();
+                            let collection_id = collection_id.clone();
+                            let default_variant_id = default_variant_id.clone();
+                            spawn(async move {
+                                let _ = controller.load_module_preset_snapshot(collection_id.as_str(), default_variant_id.as_str()).await;
+                                loaded_variant.set(Some(default_variant_id));
+                            });
+                        }
+                    },
+                    "Load default variant"
+                }
+            }
+
+            MetadataPlaceholder {}
+
+            div { class: "space-y-2",
+                for variant in variants.into_iter() {
+                    {
+                        let variant_id = variant.id().to_string();
+                        let variant_name = variant.name().to_string();
+                        let block_count = variant.module().blocks().len();
+                        let is_active = loaded_variant().as_deref() == Some(variant_id.as_str());
+                        rsx! {
+                            button {
+                                key: "{variant_id}",
+                                class: if is_active { "w-full text-left p-2 rounded border-2 border-zinc-400 bg-zinc-50" } else { "w-full text-left p-2 rounded border border-zinc-200 hover:bg-zinc-50" },
+                                onclick: {
+                                    let controller = controller.clone();
+                                    let collection_id = collection_id.clone();
+                                    let variant_id = variant_id.clone();
+                                    move |_| {
+                                        let controller = controller.clone();
+                                        let collection_id = collection_id.clone();
+                                        let variant_id = variant_id.clone();
+                                        spawn(async move {
+                                            let _ = controller.load_module_preset_snapshot(collection_id.as_str(), variant_id.as_str()).await;
+                                            loaded_variant.set(Some(variant_id));
+                                        });
+                                    }
+                                },
+                                div { class: "text-sm font-medium", "{variant_name}" }
+                                p { class: "text-xs text-zinc-600",
+                                    "{block_count} block(s)"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// endregion: --- Module Collection Card
+
+// region: --- Metadata Placeholder
+
+/// Metadata display hooks for tags, description, and notes.
+///
+/// These render as placeholder UI sections.  Once `signal2-proto` gains the
+/// `Metadata` trait (US-001 / US-002), these placeholders will be wired to
+/// real data from `Collection::metadata()`.
+#[component]
+fn MetadataPlaceholder() -> Element {
+    rsx! {
+        div { class: "text-xs text-zinc-400 space-y-0.5 border-t border-zinc-200 pt-1 mt-1",
+            p { "Tags: —" }
+            p { "Description: —" }
+            p { "Notes: —" }
+        }
+    }
+}
+
+// endregion: --- Metadata Placeholder
+
+// region: --- Parameter Slider
 
 #[component]
 fn ParameterSlider(label: String, value: f32, oninput: EventHandler<FormEvent>) -> Element {
@@ -161,3 +340,28 @@ fn ParameterSlider(label: String, value: f32, oninput: EventHandler<FormEvent>) 
         }
     }
 }
+
+// endregion: --- Parameter Slider
+
+// region: --- Normalization Helpers
+
+/// Determine the default variant ID from a collection's variant list.
+///
+/// Normalization rules (matching the epic's `Collection::normalize_default` contract):
+/// 1. If the explicit default exists in the variants list, use its ID.
+/// 2. If the explicit default is missing from the list, promote the first variant.
+/// 3. As a final fallback, return the explicit default's ID.
+fn normalize_default_variant_id(variants: &[Snapshot], explicit_default: &Snapshot) -> String {
+    // Prefer the explicit default when it exists in the variants list.
+    if variants.iter().any(|v| v.id() == explicit_default.id()) {
+        return explicit_default.id().to_string();
+    }
+    // Fallback: promote the first variant if the list is non-empty.
+    if let Some(first) = variants.first() {
+        return first.id().to_string();
+    }
+    // Final fallback: the explicit default's ID.
+    explicit_default.id().to_string()
+}
+
+// endregion: --- Normalization Helpers
