@@ -39,6 +39,7 @@
 #![deny(unsafe_code)]
 
 use facet::Facet;
+use convert_case::{Case, Casing};
 use roam::service;
 
 pub mod ids;
@@ -86,6 +87,38 @@ impl ActionId {
     pub fn to_command_id(&self) -> String {
         self.0.replace('.', "_").to_uppercase()
     }
+}
+
+fn sanitize_symbol_segment(raw: &str) -> String {
+    let normalized: String = raw
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { ' ' })
+        .collect();
+    normalized.to_case(Case::UpperSnake)
+}
+
+pub fn generated_action_id(menu_path: Option<&str>, action_name: &str) -> String {
+    let mut segments = Vec::new();
+
+    if let Some(path) = menu_path {
+        for part in path.split('/').filter(|p| !p.trim().is_empty()) {
+            let norm = sanitize_symbol_segment(part);
+            if !norm.is_empty() {
+                segments.push(norm);
+            }
+        }
+    }
+
+    if segments.is_empty() || segments.first().map(String::as_str) != Some("FTS") {
+        segments.insert(0, "FTS".to_string());
+    }
+
+    let action = sanitize_symbol_segment(action_name);
+    if !action.is_empty() {
+        segments.push(action);
+    }
+
+    segments.join("_")
 }
 
 impl std::fmt::Display for ActionId {
@@ -208,11 +241,6 @@ impl ActionDefinition {
                 Err(_) => true, // Malformed when-clause: fail-open
             },
         }
-    }
-
-    /// Get the REAPER command ID for this action
-    pub fn command_id(&self) -> String {
-        self.id.to_command_id()
     }
 
     /// Get the display name with FTS prefix

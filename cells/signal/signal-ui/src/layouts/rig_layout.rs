@@ -38,6 +38,7 @@ use crate::hooks::rig_state::use_rig_subscription;
 use crate::prelude::*;
 use crate::signals::{
     init_rig_service, RIG_GRID_SELECTED_SLOT, RIG_GRID_SELECTION, RIG_MODULES, RIG_NODE_GRAPH,
+    RIG_PRESET_BROWSER_OPEN,
 };
 use uuid::Uuid;
 
@@ -243,6 +244,11 @@ fn RigLayoutInner() -> Element {
             // Module preset save/load dialogs (driven by global signals)
             ModulePresetSaveDialog {}
             ModulePresetBrowser {}
+
+            // Full-screen preset browser (driven by RIG_PRESET_BROWSER_OPEN signal)
+            if *RIG_PRESET_BROWSER_OPEN.read() {
+                crate::components::preset_browser::PresetBrowserDialog {}
+            }
         }
     }
 }

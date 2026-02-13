@@ -35,28 +35,31 @@ pub mod daw_bridge;
 pub mod fx_binding;
 pub mod morph_engine;
 pub mod snapshot_ops;
+pub mod standalone;
 
 use std::sync::Arc;
 use uuid::Uuid;
 
-use signal::id::ProfileId;
-// Import the trait so its methods are in scope on Arc<MockRigControlService>
+use signal::id::{ProfileId, RigPresetId};
+// Import the trait so its methods are in scope
 use signal::RigControlService;
+
+pub use standalone::StandaloneRigControlService;
 
 // Re-export domain type modules from signal-proto (via signal)
 pub use signal::{
     active, automation, block, category, container, defaults, director, id, layer, midi, module,
-    non_empty, normalized, override_tree, parameter, preset, profile, rack, rig, routing, scene,
-    snapshot, song, source, tags, template, version,
+    non_empty, normalized, override_tree, parameter, preset, profile, rack, rating, rig, routing,
+    scene, snapshot, song, source, tags, template, version,
 };
 
 // Re-export service/engine types that consumers need
 pub use signal::engine::PreloadPriority;
 pub use signal::module::ModuleType;
 pub use signal::service::{
-    EngineStateInfo, InstanceInfo, PatchInfo, PreloadStatusInfo, ProfileInfo, RigControlCommand,
-    RigControlEvent, RigInfo, RigPresetInfo, SectionInfo, SetlistInfo, SlotErrorInfo,
-    SlotStateInfo, SongInfo, SwitchOutcomeInfo, TransitionResultInfo,
+    EngineStateInfo, InstanceInfo, PatchInfo, PreloadStatusInfo, PresetSceneInfo, ProfileInfo,
+    RigControlCommand, RigControlEvent, RigInfo, RigPresetInfo, SectionInfo, SetlistInfo,
+    SlotErrorInfo, SlotStateInfo, SongInfo, SwitchOutcomeInfo, TransitionResultInfo,
 };
 
 // Re-export storage entity models for UI consumers
@@ -67,15 +70,49 @@ pub use signal_storage::entities::{
 };
 pub use signal_storage::DatabaseConnection;
 
+// ── Service Backend Dispatch ─────────────────────────────────────────
+
+/// The concrete service backend: either mock (in-memory) or standalone (DB-backed).
+enum ServiceImpl {
+    Mock(signal::MockRigControlService),
+    Standalone(standalone::StandaloneRigControlService),
+}
+
+impl ServiceImpl {
+    /// Get the database connection, if this backend has one.
+    fn db(&self) -> Option<&DatabaseConnection> {
+        match self {
+            ServiceImpl::Mock(_) => None,
+            ServiceImpl::Standalone(s) => Some(s.db()),
+        }
+    }
+
+    /// Broadcast an event through the active backend's event subscriber.
+    fn broadcast_event(&self, event: RigControlEvent) {
+        match self {
+            ServiceImpl::Mock(s) => s.broadcast_event(event),
+            ServiceImpl::Standalone(s) => s.broadcast_event(event),
+        }
+    }
+}
+
+/// Dispatch a trait method call to whichever backend is active.
+macro_rules! dispatch {
+    ($self:expr, $method:ident $(, $arg:expr)*) => {
+        match &*$self.service {
+            ServiceImpl::Mock(s) => s.$method(&SignalControl::cx(), $($arg),*).await,
+            ServiceImpl::Standalone(s) => s.$method(&SignalControl::cx(), $($arg),*).await,
+        }
+    };
+}
+
 /// Ergonomic rig control API.
 ///
-/// Wraps any `RigControlService` implementation and provides simple
-/// async methods without exposing ROAM internals. Optionally backed by
-/// a SQLite database for persistent CRUD operations.
+/// Wraps any `RigControlService` implementation (mock or DB-backed) and
+/// provides simple async methods without exposing ROAM internals.
 #[derive(Clone)]
 pub struct SignalControl {
-    service: Arc<signal::MockRigControlService>,
-    db: Option<DatabaseConnection>,
+    service: Arc<ServiceImpl>,
 }
 
 impl PartialEq for SignalControl {
@@ -88,8 +125,14 @@ impl SignalControl {
     /// Create from a mock service instance (no database).
     pub fn new(service: signal::MockRigControlService) -> Self {
         Self {
-            service: Arc::new(service),
-            db: None,
+            service: Arc::new(ServiceImpl::Mock(service)),
+        }
+    }
+
+    /// Create from a standalone (DB-backed) service.
+    pub fn standalone(service: standalone::StandaloneRigControlService) -> Self {
+        Self {
+            service: Arc::new(ServiceImpl::Standalone(service)),
         }
     }
 
@@ -98,84 +141,140 @@ impl SignalControl {
         Self::new(signal::MockRigControlService::with_guitar_defaults())
     }
 
-    /// Connect to a SQLite database, run migrations, seed defaults if empty,
-    /// and create a `SignalControl` with both mock rig service and persistent storage.
+    /// Create with bass rig mock data (no database).
+    pub fn mock_bass() -> Self {
+        Self::new(signal::MockRigControlService::with_bass_defaults())
+    }
+
+    /// Create with vocal rig mock data (no database).
+    pub fn mock_vocals() -> Self {
+        Self::new(signal::MockRigControlService::with_vocal_defaults())
+    }
+
+    /// Create with keys rig mock data (no database).
+    pub fn mock_keys() -> Self {
+        Self::new(signal::MockRigControlService::with_keys_defaults())
+    }
+
+    /// Create with synth rig mock data (no database).
+    pub fn mock_synth() -> Self {
+        Self::new(signal::MockRigControlService::with_synth_defaults())
+    }
+
+    /// Create with drums rig mock data (no database).
+    pub fn mock_drums() -> Self {
+        Self::new(signal::MockRigControlService::with_drums_defaults())
+    }
+
+    /// Create with drum replacement rig mock data (no database).
+    pub fn mock_drum_replacement() -> Self {
+        Self::new(signal::MockRigControlService::with_drum_replacement_defaults())
+    }
+
+    /// Create with synth bass rig mock data (no database).
+    pub fn mock_synth_bass() -> Self {
+        Self::new(signal::MockRigControlService::with_synth_bass_defaults())
+    }
+
+    /// Connect to a SQLite database, run migrations, seed defaults,
+    /// and create a `SignalControl` with DB-backed standalone service.
     pub async fn connect_db(db_path: &str) -> eyre::Result<Self> {
+        Self::connect_db_for_type(db_path, "guitar").await
+    }
+
+    /// Connect to a SQLite database for a specific instrument type.
+    pub async fn connect_db_for_type(db_path: &str, instrument_type: &str) -> eyre::Result<Self> {
         let db = signal_storage::connect_migrate_and_seed(db_path).await?;
-        tracing::info!("signal-control: connected to {db_path}");
-        Ok(Self {
-            service: Arc::new(signal::MockRigControlService::with_guitar_defaults()),
-            db: Some(db),
-        })
+        tracing::info!("signal-control: connected to {db_path} (instrument: {instrument_type})");
+        let svc = standalone::StandaloneRigControlService::new(db, instrument_type).await?;
+        Ok(Self::standalone(svc))
     }
 
-    /// Get a reference to the underlying service (for advanced usage).
-    pub fn inner(&self) -> &Arc<signal::MockRigControlService> {
-        &self.service
-    }
-
-    /// Get a reference to the database connection, if connected.
+    /// Get a reference to the database connection, if the backend has one.
     pub fn db(&self) -> Option<&DatabaseConnection> {
-        self.db.as_ref()
+        self.service.db()
     }
 
     /// Get the database connection or return an error.
     fn require_db(&self) -> eyre::Result<&DatabaseConnection> {
-        self.db
-            .as_ref()
-            .ok_or_else(|| eyre::eyre!("no database connection — call connect_db() first"))
+        self.service
+            .db()
+            .ok_or_else(|| eyre::eyre!("no database connection — using mock service"))
     }
 
-    // ── Mock Rig Queries ─────────────────────────────────────────────
+    // ── Service Queries (dispatched to active backend) ──────────────
 
     pub async fn get_available_profiles(&self) -> Vec<ProfileInfo> {
-        self.service.get_available_profiles(&Self::cx()).await
+        dispatch!(self, get_available_profiles)
     }
 
     pub async fn get_current_profile(&self) -> Option<ProfileInfo> {
-        self.service.get_current_profile(&Self::cx()).await
+        dispatch!(self, get_current_profile)
+    }
+
+    pub async fn get_current_patch(&self) -> Option<PatchInfo> {
+        dispatch!(self, get_current_patch)
     }
 
     pub async fn get_current_rig(&self) -> Option<RigInfo> {
-        self.service.get_current_rig(&Self::cx()).await
+        dispatch!(self, get_current_rig)
     }
 
     pub async fn get_available_setlists(&self) -> Vec<SetlistInfo> {
-        self.service.get_available_setlists(&Self::cx()).await
+        dispatch!(self, get_available_setlists)
     }
 
     pub async fn get_current_setlist(&self) -> Option<SetlistInfo> {
-        self.service.get_current_setlist(&Self::cx()).await
+        dispatch!(self, get_current_setlist)
     }
 
     pub async fn get_setlist_songs(&self) -> Vec<SongInfo> {
-        self.service.get_setlist_songs(&Self::cx()).await
+        dispatch!(self, get_setlist_songs)
     }
 
     pub async fn get_current_song(&self) -> Option<SongInfo> {
-        self.service.get_current_song(&Self::cx()).await
+        dispatch!(self, get_current_song)
     }
 
     pub async fn get_current_section(&self) -> Option<SectionInfo> {
-        self.service.get_current_section(&Self::cx()).await
+        dispatch!(self, get_current_section)
+    }
+
+    pub async fn get_available_presets(&self) -> Vec<RigPresetInfo> {
+        dispatch!(self, get_available_presets)
     }
 
     /// Get the current preset's modules materialized for UI display.
     ///
-    /// Synchronous — reads directly from the mock service's data store.
+    /// Only meaningful for mock backends (which have an in-memory rig).
+    /// Standalone returns empty — modules come from FX binding.
     pub fn get_current_modules(&self) -> Vec<signal::module::Module> {
-        self.service.build_current_modules()
+        match &*self.service {
+            ServiceImpl::Mock(s) => s.build_current_modules(),
+            ServiceImpl::Standalone(_) => Vec::new(),
+        }
     }
 
-    // ── Mock Rig Commands ────────────────────────────────────────────
+    // ── Service Commands (dispatched to active backend) ──────────────
 
     pub async fn execute(&self, cmd: RigControlCommand) {
-        self.service.execute(&Self::cx(), cmd).await;
+        dispatch!(self, execute, cmd);
     }
 
     pub async fn load_profile(&self, profile_id: ProfileId) {
         self.execute(RigControlCommand::LoadProfile { profile_id })
             .await;
+    }
+
+    pub async fn select_preset(&self, preset_id: RigPresetId) {
+        self.execute(RigControlCommand::SelectPreset { preset_id })
+            .await;
+
+        // Build modules from DB (standalone backend) or mock rig (mock backend).
+        // Broadcast ModulesChanged so the event handler can update UI signals.
+        let modules = self.build_preset_modules(preset_id).await;
+        self.service
+            .broadcast_event(RigControlEvent::ModulesChanged { modules });
     }
 
     pub async fn load_patch(&self, profile_id: ProfileId, patch_index: usize) {
@@ -210,12 +309,159 @@ impl SignalControl {
         self.execute(RigControlCommand::PreviousSection).await;
     }
 
+    // ── Module Building ─────────────────────────────────────────────
+
+    /// Build modules for a preset from the DB, or from the mock rig.
+    ///
+    /// For DB-backed presets: loads the preset row, parses `module_assignments`
+    /// from the JSON data blob, loads each `ModulePreset`, and reconstructs
+    /// `Module` objects with blocks parsed from JSON.
+    ///
+    /// For mock backends (no DB): returns the rig's physical modules.
+    pub async fn build_preset_modules(
+        &self,
+        preset_id: RigPresetId,
+    ) -> Vec<signal::module::Module> {
+        use signal::block::{Block, BlockType, PluginId};
+        use signal::module::{Module, ModuleBlock, ModuleType};
+        use signal::normalized::Order;
+
+        // Try DB path first
+        let row = match self.get_rig_preset_row(preset_id.as_uuid()).await {
+            Ok(Some(r)) => Some(r),
+            Ok(None) => None,
+            Err(_) => None,
+        };
+
+        if let Some(row) = row {
+            let assignments = match row
+                .data
+                .get("module_assignments")
+                .and_then(|v| v.as_array())
+            {
+                Some(arr) => arr.clone(),
+                None => return Vec::new(),
+            };
+
+            let mut modules = Vec::new();
+
+            for assignment in &assignments {
+                let enabled = assignment
+                    .get("enabled")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(true);
+                if !enabled {
+                    continue;
+                }
+
+                let Some(mp_id_str) = assignment.get("module_preset_id").and_then(|v| {
+                    v.as_str()
+                        .or_else(|| v.get("uuid").and_then(|u| u.as_str()))
+                }) else {
+                    continue;
+                };
+                let Ok(mp_id) = mp_id_str.parse::<Uuid>() else {
+                    tracing::warn!("build_preset_modules: invalid module_preset_id: {mp_id_str}");
+                    continue;
+                };
+                let mp_row = match self.get_module_preset(mp_id).await {
+                    Ok(Some(row)) => row,
+                    Ok(None) => {
+                        tracing::warn!(
+                            "build_preset_modules: module preset {mp_id} not found in DB"
+                        );
+                        continue;
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "build_preset_modules: failed to load module preset {mp_id}: {e}"
+                        );
+                        continue;
+                    }
+                };
+
+                let module_type = mp_row.module_type_parsed().unwrap_or_else(|| {
+                    tracing::warn!(
+                        "build_preset_modules: unknown module_type '{}' for preset {}, using Custom",
+                        mp_row.module_type,
+                        mp_row.id,
+                    );
+                    ModuleType::Custom
+                });
+                let mut module = Module::new(&mp_row.name, module_type);
+
+                if let Some(gw) = mp_row.macros.get("grid_width").and_then(|v| v.as_u64()) {
+                    module.grid_width = Some(gw as usize);
+                }
+                if let Some(gh) = mp_row.macros.get("grid_height").and_then(|v| v.as_u64()) {
+                    module.grid_height = Some(gh as usize);
+                }
+
+                if let Some(blocks_arr) = mp_row.blocks.as_array() {
+                    for block_json in blocks_arr {
+                        let block_obj = block_json.get("block").unwrap_or(block_json);
+                        let name = block_obj
+                            .get("name")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("Unknown")
+                            .to_string();
+                        let block_type_str = block_obj
+                            .get("block_type")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("Custom");
+                        let block_type =
+                            BlockType::from_variant_name(block_type_str).unwrap_or_else(|| {
+                                tracing::warn!(
+                                    "build_preset_modules: unknown block_type '{block_type_str}' in module '{}', using Custom",
+                                    mp_row.name,
+                                );
+                                BlockType::Custom
+                            });
+                        let alias = block_obj
+                            .get("alias")
+                            .and_then(|v| v.as_str())
+                            .map(String::from);
+                        let description = block_obj
+                            .get("description")
+                            .and_then(|v| v.as_str())
+                            .map(String::from);
+
+                        let mut block =
+                            Block::new(name, PluginId::unassigned()).with_block_type(block_type);
+                        block.alias = alias;
+                        block.description = description;
+                        let order = Order::new(module.blocks.len() as u8);
+                        let mut mb = ModuleBlock::new(block, order);
+
+                        mb.local_col = block_json
+                            .get("local_col")
+                            .and_then(|v| v.as_u64())
+                            .map(|v| v as usize);
+                        mb.local_row = block_json
+                            .get("local_row")
+                            .and_then(|v| v.as_u64())
+                            .map(|v| v as usize);
+
+                        module.add_block(mb);
+                    }
+                }
+
+                modules.push(module);
+            }
+
+            modules
+        } else {
+            // No DB row — fall back to mock rig's physical modules
+            self.get_current_modules()
+        }
+    }
+
     // ── Subscriptions ────────────────────────────────────────────────
 
     /// Subscribe to rig events. Returns a receiver channel.
     pub async fn subscribe(&self) -> roam::Rx<RigControlEvent> {
         let (tx, rx) = roam::channel::<RigControlEvent>();
-        self.service.subscribe(&Self::cx(), tx).await;
+        dispatch!(self, subscribe, tx);
         rx
     }
 
@@ -492,6 +738,15 @@ impl SignalControl {
         Ok(signal_storage::preset_repo::list_presets(db, true).await?)
     }
 
+    /// List rig presets filtered by instrument type (e.g. "guitar", "bass").
+    pub async fn list_rig_presets_by_type(
+        &self,
+        instrument_type: &str,
+    ) -> eyre::Result<Vec<preset_entity::Model>> {
+        let db = self.require_db()?;
+        Ok(signal_storage::preset_repo::list_presets_by_type(db, instrument_type).await?)
+    }
+
     pub async fn update_rig_preset_data<T: for<'a> facet::Facet<'a>>(
         &self,
         id: Uuid,
@@ -535,12 +790,17 @@ impl SignalControl {
         preset_id: Uuid,
         name: &str,
         snapshot_data: &T,
+        is_default: bool,
     ) -> eyre::Result<Uuid> {
         let db = self.require_db()?;
-        Ok(
-            signal_storage::preset_repo::save_preset_snapshot(db, preset_id, name, snapshot_data)
-                .await?,
+        Ok(signal_storage::preset_repo::save_preset_snapshot(
+            db,
+            preset_id,
+            name,
+            snapshot_data,
+            is_default,
         )
+        .await?)
     }
 
     pub async fn get_rig_preset_snapshot<T: for<'a> facet::Facet<'a>>(
@@ -592,6 +852,15 @@ impl SignalControl {
     pub async fn list_profiles(&self) -> eyre::Result<Vec<profile_entity::Model>> {
         let db = self.require_db()?;
         Ok(signal_storage::profile_repo::list_profiles(db).await?)
+    }
+
+    /// List profiles filtered by instrument type (e.g. "guitar", "bass").
+    pub async fn list_profiles_by_type(
+        &self,
+        instrument_type: &str,
+    ) -> eyre::Result<Vec<profile_entity::Model>> {
+        let db = self.require_db()?;
+        Ok(signal_storage::profile_repo::list_profiles_by_type(db, instrument_type).await?)
     }
 
     pub async fn update_profile(
@@ -723,6 +992,15 @@ impl SignalControl {
         Ok(signal_storage::song_repo::list_songs(db).await?)
     }
 
+    /// List songs filtered by instrument type (e.g. "guitar", "bass").
+    pub async fn list_songs_by_type(
+        &self,
+        instrument_type: &str,
+    ) -> eyre::Result<Vec<performance_song::Model>> {
+        let db = self.require_db()?;
+        Ok(signal_storage::song_repo::list_songs_by_type(db, instrument_type).await?)
+    }
+
     pub async fn update_song(
         &self,
         id: Uuid,
@@ -759,6 +1037,7 @@ impl SignalControl {
         preset_id: Uuid,
         snapshot_id: Option<Uuid>,
         sort_order: i32,
+        is_default: bool,
     ) -> eyre::Result<Uuid> {
         let db = self.require_db()?;
         Ok(signal_storage::song_repo::add_song_scene(
@@ -772,6 +1051,7 @@ impl SignalControl {
             serde_json::json!({}),
             serde_json::json!({}),
             sort_order,
+            is_default,
             serde_json::json!([]),
         )
         .await?)

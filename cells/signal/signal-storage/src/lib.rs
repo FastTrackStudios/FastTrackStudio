@@ -66,6 +66,15 @@ pub async fn connect_and_migrate(db_path: &str) -> Result<DatabaseConnection, St
 /// This is the recommended entry point for production startup. Use
 /// [`connect_and_migrate`] directly if you want to skip seeding (e.g., in tests).
 pub async fn connect_migrate_and_seed(db_path: &str) -> Result<DatabaseConnection, StorageError> {
+    // TEMPORARY: wipe DB on every startup so seed data changes take effect
+    // immediately while the schema is still in flux. Remove this once the
+    // data model stabilizes.
+    if std::path::Path::new(db_path).exists() {
+        tracing::info!("Wiping existing DB at {db_path} (dev-mode fresh seed)");
+        std::fs::remove_file(db_path)
+            .map_err(|e| StorageError::Config(format!("failed to remove DB file: {e}")))?;
+    }
+
     let db = connect_and_migrate(db_path).await?;
     seed::seed_if_empty(&db).await?;
     Ok(db)

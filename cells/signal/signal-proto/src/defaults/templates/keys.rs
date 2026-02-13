@@ -374,13 +374,13 @@ mod tests {
     fn engines_have_global_fx() {
         let t = keys_rig_template();
         // Keys Engine: Master EQ + Master Limiter
-        assert_eq!(t.engines.first().modules.len(), 2);
+        assert_eq!(t.engines.first().engine_modules.len(), 2);
         // Synth Engine: Master Dynamics + Master Limiter
-        assert_eq!(t.engines.iter().nth(1).unwrap().modules.len(), 2);
+        assert_eq!(t.engines.iter().nth(1).unwrap().engine_modules.len(), 2);
         // Organ Engine: Master EQ + Master Volume
-        assert_eq!(t.engines.iter().nth(2).unwrap().modules.len(), 2);
+        assert_eq!(t.engines.iter().nth(2).unwrap().engine_modules.len(), 2);
         // Pad Engine: Master Reverb + Master Volume
-        assert_eq!(t.engines.iter().nth(3).unwrap().modules.len(), 2);
+        assert_eq!(t.engines.iter().nth(3).unwrap().engine_modules.len(), 2);
     }
 
     #[test]
@@ -407,17 +407,8 @@ mod tests {
                     }
                 }
             }
-            // Engine-level modules should also be placeholders
-            for module in &engine.modules {
-                for mb in &module.blocks {
-                    assert!(
-                        mb.block.is_placeholder(),
-                        "Engine-level block '{}' in engine '{}' should be placeholder",
-                        mb.block.name,
-                        engine.name,
-                    );
-                }
-            }
+            // Note: engine-level modules exist in EngineTemplate but are not
+            // yet instantiated on the runtime Engine struct (forward-looking design).
         }
     }
 
@@ -434,7 +425,7 @@ mod tests {
         let engine_blocks: usize = t
             .engines
             .iter()
-            .flat_map(|e| e.modules.iter())
+            .flat_map(|e| e.engine_modules.iter())
             .map(|m| m.blocks.len())
             .sum();
         // Keys: Piano(4) + EP(5) = 9 layer blocks + 2 engine blocks

@@ -10,9 +10,9 @@ use crate::callback_types::{
 use crate::hooks::rig_state::refresh_presets_from_db;
 use crate::prelude::*;
 use crate::signals::{
-    RIG_AVAILABLE_PRESETS, RIG_AVAILABLE_PROFILES, RIG_CURRENT_PRESET, RIG_CURRENT_SONG,
-    RIG_FX_CHAIN, RIG_LAST_APPLIED_SNAPSHOT, RIG_MODULES, RIG_NODE_FX_BINDINGS, RIG_NODE_GRAPH,
-    RIG_PROFILE, RIG_SERVICE, RIG_SETLIST_SONGS, RIG_SONG_INDEX,
+    RIG_AVAILABLE_PROFILES, RIG_CURRENT_PRESET, RIG_CURRENT_SONG, RIG_FX_CHAIN,
+    RIG_LAST_APPLIED_SNAPSHOT, RIG_MODULES, RIG_NODE_FX_BINDINGS, RIG_NODE_GRAPH, RIG_PROFILE,
+    RIG_SERVICE, RIG_SETLIST_SONGS, RIG_SONG_INDEX,
 };
 use signal_control::id::{PatchId, ProfileId, RigPresetId};
 use signal_control::SignalControl;
@@ -78,54 +78,19 @@ pub fn use_rig_actions() -> RigActions {
             Callback::new(move |profile_id: ProfileId| {
                 let ctl = ctl.clone();
                 spawn(async move {
-                    let profiles = ctl.get_available_profiles().await;
-                    if let Some(profile) = profiles.iter().find(|p| p.id == profile_id) {
-                        // Immediately set profile for instant sidebar expansion
-                        *RIG_PROFILE.write() = Some(profile.clone());
-
-                        if !profile.patches.is_empty() {
-                            tracing::info!(
-                                "load_profile: '{}' first patch '{}'",
-                                profile.name,
-                                profile.patches[0].name
-                            );
-
-                            // Load first patch via the service
-                            ctl.load_patch(profile_id, 0).await;
-                        }
-                    }
+                    // Service handles: set current profile, auto-select first patch,
+                    // broadcast ProfileLoaded + PatchLoaded events.
+                    ctl.load_profile(profile_id).await;
                 });
             })
         },
         load_profile_scene: {
             let ctl = ctl.clone();
             Callback::new(move |sel: ProfileSceneSelect| {
-                let ProfileSceneSelect {
-                    profile_id,
-                    scene_index: patch_index,
-                } = sel;
                 let ctl = ctl.clone();
                 spawn(async move {
-                    let profiles = ctl.get_available_profiles().await;
-                    if let Some(profile) = profiles.iter().find(|p| p.id == profile_id) {
-                        // Immediately set profile for instant sidebar expansion
-                        *RIG_PROFILE.write() = Some(profile.clone());
-
-                        if let Some(patch) = profile.patches.get(patch_index) {
-                            tracing::info!(
-                                "load_profile_patch: '{}' patch '{}'",
-                                profile.name,
-                                patch.name
-                            );
-
-                            // Load the patch via the service
-                            ctl.load_patch(profile_id, patch_index).await;
-
-                            // Build modules from DB for visual display
-                            *RIG_MODULES.write() = ctl.get_current_modules();
-                            rebuild_node_graph();
-                        }
-                    }
+                    // Service handles: set current patch, broadcast PatchLoaded event.
+                    ctl.load_patch(sel.profile_id, sel.scene_index).await;
                 });
             })
         },
@@ -147,29 +112,31 @@ pub fn use_rig_actions() -> RigActions {
                 spawn(async move {
                     tracing::info!("load_preset: loading preset {preset_id}");
 
-                    // 1. Set RIG_CURRENT_PRESET from the available presets list
-                    //    (fixes selected state immediately — same IDs as sidebar)
-                    let preset_info = RIG_AVAILABLE_PRESETS
-                        .read()
-                        .iter()
-                        .find(|p| p.id == preset_id)
-                        .cloned();
+                    // 1. Service handles: set current_preset, build modules,
+                    //    broadcast PresetSelected + ModulesChanged events.
+                    ctl.select_preset(preset_id).await;
+
+                    // 2. Auto-select default snapshot from the preset's scenes
+                    let preset_info = RIG_CURRENT_PRESET.read().clone();
                     if let Some(ref info) = preset_info {
-                        tracing::info!("load_preset: selected '{}'", info.name);
-                        *RIG_CURRENT_PRESET.write() = Some(info.clone());
+                        let default_scene = info
+                            .scenes
+                            .iter()
+                            .find(|s| s.is_default)
+                            .or_else(|| info.scenes.first());
+                        if let Some(scene) = default_scene {
+                            *RIG_LAST_APPLIED_SNAPSHOT.write() =
+                                Some(RigPresetId::from_uuid(scene.id));
+                        }
                     }
 
-                    // 2. Profile mode: update the active patch's preset reference
-                    if let Some(profile) = RIG_PROFILE.read().clone() {
+                    // 3. Profile mode: update the active patch's preset reference
+                    //    (TODO Phase 4: move to AssignPresetToPatch command)
+                    let current_profile = { RIG_PROFILE.read().clone() };
+                    if let Some(profile) = current_profile {
                         if let Ok(templates) = ctl.list_scene_templates(profile.id.as_uuid()).await
                         {
                             if let Some(tmpl) = templates.first() {
-                                tracing::info!(
-                                    "load_preset: updating profile '{}' patch '{}' preset → {}",
-                                    profile.name,
-                                    tmpl.name,
-                                    preset_id,
-                                );
                                 if let Err(e) = ctl
                                     .update_scene_template(
                                         tmpl.id,
@@ -188,20 +155,6 @@ pub fn use_rig_actions() -> RigActions {
                             }
                         }
                     }
-
-                    // 3. Try to build modules from DB data
-                    let db_modules = build_modules_from_db(&ctl, preset_id.as_uuid()).await;
-                    if !db_modules.is_empty() {
-                        tracing::info!("load_preset: built {} modules from DB", db_modules.len());
-                        *RIG_MODULES.write() = db_modules;
-                    } else {
-                        // Fall back to mock service for non-DB presets
-                        tracing::info!("load_preset: no DB modules, falling back to mock");
-                        *RIG_MODULES.write() = ctl.get_current_modules();
-                    }
-
-                    // 4. Rebuild node graph
-                    rebuild_node_graph();
                 });
             })
         },
@@ -210,31 +163,13 @@ pub fn use_rig_actions() -> RigActions {
             Callback::new(move |sel: PresetSnapshotSelect| {
                 let PresetSnapshotSelect {
                     preset_id,
-                    snapshot_index,
+                    snapshot_index: _,
                 } = sel;
                 let ctl = ctl.clone();
                 spawn(async move {
-                    tracing::info!(
-                        "load_preset_snapshot: preset={preset_id} snapshot={snapshot_index}"
-                    );
-                    // Set selection from sidebar list
-                    let preset_info = RIG_AVAILABLE_PRESETS
-                        .read()
-                        .iter()
-                        .find(|p| p.id == preset_id)
-                        .cloned();
-                    if let Some(ref info) = preset_info {
-                        *RIG_CURRENT_PRESET.write() = Some(info.clone());
-                    }
-
-                    // Build modules from DB
-                    let db_modules = build_modules_from_db(&ctl, preset_id.as_uuid()).await;
-                    if !db_modules.is_empty() {
-                        *RIG_MODULES.write() = db_modules;
-                    } else {
-                        *RIG_MODULES.write() = ctl.get_current_modules();
-                    }
-                    rebuild_node_graph();
+                    // Service handles: preset selection, module building,
+                    // broadcasts PresetSelected + ModulesChanged.
+                    ctl.select_preset(preset_id).await;
                 });
             })
         },
@@ -243,26 +178,13 @@ pub fn use_rig_actions() -> RigActions {
             Callback::new(move |sel: PresetWithSnapshot| {
                 let PresetWithSnapshot {
                     preset_id,
-                    snapshot_id: _snapshot_id,
+                    snapshot_id: _,
                 } = sel;
                 let ctl = ctl.clone();
                 spawn(async move {
-                    let preset_info = RIG_AVAILABLE_PRESETS
-                        .read()
-                        .iter()
-                        .find(|p| p.id == preset_id)
-                        .cloned();
-                    if let Some(ref info) = preset_info {
-                        *RIG_CURRENT_PRESET.write() = Some(info.clone());
-                    }
-
-                    let db_modules = build_modules_from_db(&ctl, preset_id.as_uuid()).await;
-                    if !db_modules.is_empty() {
-                        *RIG_MODULES.write() = db_modules;
-                    } else {
-                        *RIG_MODULES.write() = ctl.get_current_modules();
-                    }
-                    rebuild_node_graph();
+                    // Service handles: preset selection, module building,
+                    // broadcasts PresetSelected + ModulesChanged.
+                    ctl.select_preset(preset_id).await;
                 });
             })
         },
@@ -435,17 +357,12 @@ pub fn use_rig_actions() -> RigActions {
                     {
                         Ok(id) => {
                             tracing::info!("Created preset '{}' ({id})", data.name);
+                            // Refresh the presets cache so the new preset appears in the sidebar
                             refresh_presets_from_db(&ctl).await;
+                            // Select the newly created preset via service
                             let preset_id = RigPresetId::from_uuid(id);
-                            let info = RIG_AVAILABLE_PRESETS
-                                .read()
-                                .iter()
-                                .find(|p| p.id == preset_id)
-                                .cloned();
-                            if let Some(info) = info {
-                                *RIG_CURRENT_PRESET.write() = Some(info);
-                            }
-                            // Build modules from DB (template presets will have modules)
+                            ctl.select_preset(preset_id).await;
+                            // Build modules (TODO Phase 3: move to service)
                             let db_modules = build_modules_from_db(&ctl, id).await;
                             *RIG_MODULES.write() = db_modules;
                             rebuild_node_graph();

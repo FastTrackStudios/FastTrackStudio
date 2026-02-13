@@ -95,18 +95,95 @@ macro_rules! __define_actions_local_impl_expr {
 /// Unified actions macro.
 #[macro_export]
 macro_rules! define_actions {
-    // Grouped definitions + local implementations
+    // Grouped definitions + local implementations (title omitted)
     (
         $(#[$mod_meta:meta])*
         $vis:vis $mod_name:ident {
             prefix: $prefix:literal,
-            title: $title:literal,
             $(
                 $const_name:ident = $id_suffix:literal {
                     name: $name:literal,
                     description: $desc:literal,
                     category: $category:ident
-                    $(, group: $group:literal)?
+                    $(, group: $group:expr)?
+                    $(, shortcut: $shortcut:literal)?
+                    $(, when: $when:literal)?
+                    , implementation: $impl_kind:ident ( $impl_value:expr )
+                    $(,)?
+                }
+            )*
+        }
+    ) => {
+        $crate::define_actions! {
+            $(#[$mod_meta])*
+            $vis $mod_name {
+                prefix: $prefix,
+                title: "",
+                $(
+                    $const_name = $id_suffix {
+                        name: $name,
+                        description: $desc,
+                        category: $category
+                        $(, group: $group)?
+                        $(, shortcut: $shortcut)?
+                        $(, when: $when)?
+                        , implementation: $impl_kind($impl_value)
+                    }
+                )*
+            }
+        }
+    };
+
+    // Grouped definitions only + strict binder support (title omitted)
+    (
+        $(#[$mod_meta:meta])*
+        $vis:vis $mod_name:ident {
+            prefix: $prefix:literal,
+            $(
+                $const_name:ident = $id_suffix:literal {
+                    name: $name:literal,
+                    description: $desc:literal,
+                    category: $category:ident
+                    $(, group: $group:expr)?
+                    $(, shortcut: $shortcut:literal)?
+                    $(, when: $when:literal)?
+                    $(,)?
+                }
+            )*
+        }
+    ) => {
+        $crate::define_actions! {
+            $(#[$mod_meta])*
+            $vis $mod_name {
+                prefix: $prefix,
+                title: "",
+                $(
+                    $const_name = $id_suffix {
+                        name: $name,
+                        description: $desc,
+                        category: $category
+                        $(, group: $group)?
+                        $(, shortcut: $shortcut)?
+                        $(, when: $when)?
+                    }
+                )*
+            }
+        }
+    };
+
+    // Grouped definitions + local implementations
+    (
+        $(#[$mod_meta:meta])*
+        $vis:vis $mod_name:ident {
+            prefix: $prefix:literal,
+            title: $title:expr,
+            $(parent: $parent:expr,)?
+            $(
+                $const_name:ident = $id_suffix:literal {
+                    name: $name:literal,
+                    description: $desc:literal,
+                    category: $category:ident
+                    $(, group: $group:expr)?
                     $(, shortcut: $shortcut:literal)?
                     $(, when: $when:literal)?
                     , implementation: $impl_kind:ident ( $impl_value:expr )
@@ -118,6 +195,26 @@ macro_rules! define_actions {
         $(#[$mod_meta])*
         $vis mod $mod_name {
             use $crate::ids::StaticActionId;
+            pub const TITLE: &str = $title;
+
+            fn __menu_root() -> String {
+                let mut root = String::from("FTS");
+                $(
+                    {
+                        let parent = $parent;
+                        let parent = parent.trim_matches('/');
+                        if !parent.is_empty() {
+                            root.push('/');
+                            root.push_str(parent);
+                        }
+                    }
+                )?
+                if !TITLE.is_empty() {
+                    root.push('/');
+                    root.push_str(TITLE);
+                }
+                root
+            }
 
             $(
                 pub const $const_name: StaticActionId =
@@ -134,7 +231,20 @@ macro_rules! define_actions {
                     $(
                         $crate::ActionDefinition::new(concat!($prefix, ".", $id_suffix), $name, $desc)
                             .with_category($crate::ActionCategory::$category)
-                            .with_menu_path(concat!("FTS/", $title $(, "/", $group)?))
+                            .with_menu_path({
+                                let mut path = __menu_root();
+                                $(
+                                    {
+                                        let group = $group;
+                                        let group = group.trim_matches('/');
+                                        if !group.is_empty() {
+                                            path.push('/');
+                                            path.push_str(group);
+                                        }
+                                    }
+                                )?
+                                path
+                            })
                             $(.with_shortcut($shortcut))?
                             $(.with_when($when))?
                             ,
@@ -152,7 +262,20 @@ macro_rules! define_actions {
                                 concat!($prefix, ".", $id_suffix), $name, $desc
                             )
                             .with_category($crate::ActionCategory::$category)
-                            .with_menu_path(concat!("FTS/", $title $(, "/", $group)?))
+                            .with_menu_path({
+                                let mut path = __menu_root();
+                                $(
+                                    {
+                                        let group = $group;
+                                        let group = group.trim_matches('/');
+                                        if !group.is_empty() {
+                                            path.push('/');
+                                            path.push_str(group);
+                                        }
+                                    }
+                                )?
+                                path
+                            })
                             $(.with_shortcut($shortcut))?
                             $(.with_when($when))?
                             ,
@@ -170,7 +293,20 @@ macro_rules! define_actions {
                                 concat!($prefix, ".", $id_suffix), $name, $desc
                             )
                             .with_category($crate::ActionCategory::$category)
-                            .with_menu_path(concat!("FTS/", $title $(, "/", $group)?))
+                            .with_menu_path({
+                                let mut path = __menu_root();
+                                $(
+                                    {
+                                        let group = $group;
+                                        let group = group.trim_matches('/');
+                                        if !group.is_empty() {
+                                            path.push('/');
+                                            path.push_str(group);
+                                        }
+                                    }
+                                )?
+                                path
+                            })
                             $(.with_shortcut($shortcut))?
                             $(.with_when($when))?
                             ,
@@ -189,13 +325,14 @@ macro_rules! define_actions {
         $(#[$mod_meta:meta])*
         $vis:vis $mod_name:ident {
             prefix: $prefix:literal,
-            title: $title:literal,
+            title: $title:expr,
+            $(parent: $parent:expr,)?
             $(
                 $const_name:ident = $id_suffix:literal {
                     name: $name:literal,
                     description: $desc:literal,
                     category: $category:ident
-                    $(, group: $group:literal)?
+                    $(, group: $group:expr)?
                     $(, shortcut: $shortcut:literal)?
                     $(, when: $when:literal)?
                     $(,)?
@@ -206,6 +343,26 @@ macro_rules! define_actions {
         $(#[$mod_meta])*
         $vis mod $mod_name {
             use $crate::ids::StaticActionId;
+            pub const TITLE: &str = $title;
+
+            fn __menu_root() -> String {
+                let mut root = String::from("FTS");
+                $(
+                    {
+                        let parent = $parent;
+                        let parent = parent.trim_matches('/');
+                        if !parent.is_empty() {
+                            root.push('/');
+                            root.push_str(parent);
+                        }
+                    }
+                )?
+                if !TITLE.is_empty() {
+                    root.push('/');
+                    root.push_str(TITLE);
+                }
+                root
+            }
 
             $(
                 pub const $const_name: StaticActionId =
@@ -222,7 +379,20 @@ macro_rules! define_actions {
                     $(
                         $crate::ActionDefinition::new(concat!($prefix, ".", $id_suffix), $name, $desc)
                             .with_category($crate::ActionCategory::$category)
-                            .with_menu_path(concat!("FTS/", $title $(, "/", $group)?))
+                            .with_menu_path({
+                                let mut path = __menu_root();
+                                $(
+                                    {
+                                        let group = $group;
+                                        let group = group.trim_matches('/');
+                                        if !group.is_empty() {
+                                            path.push('/');
+                                            path.push_str(group);
+                                        }
+                                    }
+                                )?
+                                path
+                            })
                             $(.with_shortcut($shortcut))?
                             $(.with_when($when))?
                             ,
@@ -240,7 +410,20 @@ macro_rules! define_actions {
                                 concat!($prefix, ".", $id_suffix), $name, $desc
                             )
                             .with_category($crate::ActionCategory::$category)
-                            .with_menu_path(concat!("FTS/", $title $(, "/", $group)?))
+                            .with_menu_path({
+                                let mut path = __menu_root();
+                                $(
+                                    {
+                                        let group = $group;
+                                        let group = group.trim_matches('/');
+                                        if !group.is_empty() {
+                                            path.push('/');
+                                            path.push_str(group);
+                                        }
+                                    }
+                                )?
+                                path
+                            })
                             $(.with_shortcut($shortcut))?
                             $(.with_when($when))?
                             ,

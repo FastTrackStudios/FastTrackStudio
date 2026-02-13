@@ -34,6 +34,7 @@ pub async fn create_profile(
         description: Set(description.map(String::from)),
         tags: Set(tags),
         metadata: Set(metadata),
+        instrument_type: Set("guitar".to_string()),
         default_scene_template_id: Set(None),
         is_template: Set(false),
         is_deleted: Set(false),
@@ -58,6 +59,19 @@ pub async fn get_profile(
 pub async fn list_profiles(db: &DatabaseConnection) -> StorageResult<Vec<profile::Model>> {
     Ok(profile::Entity::find()
         .filter(profile::Column::IsDeleted.eq(false))
+        .order_by_asc(profile::Column::Name)
+        .all(db)
+        .await?)
+}
+
+/// List profiles filtered by instrument type (e.g. "guitar", "bass").
+pub async fn list_profiles_by_type(
+    db: &DatabaseConnection,
+    instrument_type: &str,
+) -> StorageResult<Vec<profile::Model>> {
+    Ok(profile::Entity::find()
+        .filter(profile::Column::IsDeleted.eq(false))
+        .filter(profile::Column::InstrumentType.eq(instrument_type))
         .order_by_asc(profile::Column::Name)
         .all(db)
         .await?)

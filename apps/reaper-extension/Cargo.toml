@@ -25,6 +25,7 @@ actions-proto.workspace = true
 actions-registry.workspace = true
 cell-host-proto.workspace = true
 daw-proto.workspace = true
+input-reaper.workspace = true
 
 # DAW REAPER implementation (in-process, not a cell)
 daw-reaper.workspace = true
@@ -39,3 +40,4 @@ fragile.workspace = true
 anyhow = "1.0"
 tempfile = "3.24.0"
 crossbeam-channel.workspace = true
+camino = "1.1"

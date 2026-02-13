@@ -1,0 +1,5 @@
+[application]
+name = "playground"
+
+[desktop]
+title = "Architecture Playground"

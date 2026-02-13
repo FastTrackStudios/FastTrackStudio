@@ -340,7 +340,7 @@ pub fn SongEditorView() -> Element {
                                                         Ok(id) => {
                                                             selected_song_id.set(Some(id));
                                                             // Auto-create "Intro" section
-                                                            if let Err(e) = ctl.add_song_scene(id, "Intro", Uuid::nil(), None, 0).await {
+                                                            if let Err(e) = ctl.add_song_scene(id, "Intro", Uuid::nil(), None, 0, true).await {
                                                                 warn!("Auto-create Intro section failed: {e}");
                                                             }
                                                             // Auto-add to current setlist (skip the virtual "All Songs")
@@ -478,7 +478,7 @@ pub fn SongEditorView() -> Element {
                                                 let sort = section_count as i32;
                                                 spawn(async move {
                                                     let Some(ctl) = RIG_SERVICE.read().clone() else { return };
-                                                    if let Err(e) = ctl.add_song_scene(quick_song_id, &name, Uuid::nil(), None, sort).await {
+                                                    if let Err(e) = ctl.add_song_scene(quick_song_id, &name, Uuid::nil(), None, sort, false).await {
                                                         warn!("Quick-add section failed: {e}");
                                                     }
                                                 });

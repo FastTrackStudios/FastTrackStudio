@@ -38,6 +38,7 @@ pub async fn create_preset<T: for<'a> facet::Facet<'a>>(
         tags: Set(tags),
         data: Set(data_json),
         is_public: Set(false),
+        instrument_type: Set("guitar".to_string()),
         is_deleted: Set(false),
         is_favorite: Set(false),
         is_template: Set(false),
@@ -89,6 +90,19 @@ pub async fn list_presets(
     query = query.order_by_desc(preset::Column::UpdatedAt);
 
     Ok(query.all(db).await?)
+}
+
+/// List presets filtered by instrument type (e.g. "guitar", "bass").
+pub async fn list_presets_by_type(
+    db: &DatabaseConnection,
+    instrument_type: &str,
+) -> StorageResult<Vec<preset::Model>> {
+    Ok(preset::Entity::find()
+        .filter(preset::Column::IsDeleted.eq(false))
+        .filter(preset::Column::InstrumentType.eq(instrument_type))
+        .order_by_desc(preset::Column::UpdatedAt)
+        .all(db)
+        .await?)
 }
 
 /// Update the full preset data (the JSON blob in the data column).
@@ -183,6 +197,7 @@ pub async fn save_preset_snapshot<T: for<'a> facet::Facet<'a>>(
     preset_id: Uuid,
     name: &str,
     snapshot_data: &T,
+    is_default: bool,
 ) -> StorageResult<Uuid> {
     let id = Uuid::new_v4();
     let now = Utc::now().fixed_offset();
@@ -193,6 +208,7 @@ pub async fn save_preset_snapshot<T: for<'a> facet::Facet<'a>>(
         preset_id: Set(preset_id),
         name: Set(name.to_string()),
         data: Set(data_json),
+        is_default: Set(is_default),
         created_at: Set(now),
         updated_at: Set(now),
     }
@@ -413,7 +429,7 @@ mod tests {
             scene: "Verse".into(),
             volume: 0.8,
         };
-        let snap_id = save_preset_snapshot(&db, preset_id, "Verse", &snap_data).await?;
+        let snap_id = save_preset_snapshot(&db, preset_id, "Verse", &snap_data, false).await?;
 
         let loaded: TestSnapshotData = get_preset_snapshot(&db, snap_id)
             .await?
@@ -438,8 +454,8 @@ mod tests {
             scene: "S".into(),
             volume: 0.5,
         };
-        save_preset_snapshot(&db, preset_id, "Snap A", &snap).await?;
-        save_preset_snapshot(&db, preset_id, "Snap B", &snap).await?;
+        save_preset_snapshot(&db, preset_id, "Snap A", &snap, true).await?;
+        save_preset_snapshot(&db, preset_id, "Snap B", &snap, false).await?;
 
         let list = list_preset_snapshots(&db, preset_id).await?;
         assert_eq!(list.len(), 2);
@@ -463,7 +479,7 @@ mod tests {
             scene: "Verse".into(),
             volume: 0.8,
         };
-        let snap_id = save_preset_snapshot(&db, preset_id, "Verse", &snap).await?;
+        let snap_id = save_preset_snapshot(&db, preset_id, "Verse", &snap, false).await?;
 
         let updated = TestSnapshotData {
             scene: "Chorus".into(),
@@ -494,7 +510,7 @@ mod tests {
             scene: "Temp".into(),
             volume: 0.5,
         };
-        let snap_id = save_preset_snapshot(&db, preset_id, "Temp", &snap).await?;
+        let snap_id = save_preset_snapshot(&db, preset_id, "Temp", &snap, false).await?;
 
         let deleted = delete_preset_snapshot(&db, snap_id).await?;
         assert!(deleted);

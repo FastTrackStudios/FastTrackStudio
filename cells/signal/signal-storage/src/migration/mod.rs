@@ -18,6 +18,8 @@ mod m20250101_000011_create_module_presets;
 mod m20250101_000012_create_profiles;
 mod m20250101_000013_create_songs;
 mod m20250101_000014_add_is_template;
+mod m20250101_000015_add_rig_type_and_roles;
+mod m20250101_000016_add_is_default;
 
 pub struct Migrator;
 
@@ -39,6 +41,8 @@ impl MigratorTrait for Migrator {
             Box::new(m20250101_000012_create_profiles::Migration),
             Box::new(m20250101_000013_create_songs::Migration),
             Box::new(m20250101_000014_add_is_template::Migration),
+            Box::new(m20250101_000015_add_rig_type_and_roles::Migration),
+            Box::new(m20250101_000016_add_is_default::Migration),
         ]
     }
 }

@@ -15,6 +15,161 @@ pub use signal_control::{
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Rig Type Selection
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Which instrument rig type is currently loaded.
+///
+/// Maps UI choices to `SignalControl` mock constructors. Separate from
+/// `InstrumentType` because "Synth Bass" and "Drum Replacement" are
+/// `Custom(String)` in the domain but first-class choices here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RigTypeChoice {
+    #[default]
+    Guitar,
+    Bass,
+    Keys,
+    SynthBass,
+    Drums,
+    DrumReplacement,
+    Vocals,
+}
+
+impl RigTypeChoice {
+    pub const fn display_name(self) -> &'static str {
+        match self {
+            Self::Guitar => "Guitar",
+            Self::Bass => "Bass",
+            Self::Keys => "Keys",
+            Self::SynthBass => "Synth Bass",
+            Self::Drums => "Drums",
+            Self::DrumReplacement => "Drum Repl",
+            Self::Vocals => "Vocals",
+        }
+    }
+
+    /// Lowercase key used for the `instrument_type` DB column.
+    pub const fn db_key(self) -> &'static str {
+        match self {
+            Self::Guitar => "guitar",
+            Self::Bass => "bass",
+            Self::Keys => "keys",
+            Self::SynthBass => "synth_bass",
+            Self::Drums => "drums",
+            Self::DrumReplacement => "drum_replacement",
+            Self::Vocals => "vocals",
+        }
+    }
+
+    pub const fn all() -> &'static [RigTypeChoice] {
+        &[
+            RigTypeChoice::Guitar,
+            RigTypeChoice::Bass,
+            RigTypeChoice::Keys,
+            RigTypeChoice::SynthBass,
+            RigTypeChoice::Drums,
+            RigTypeChoice::DrumReplacement,
+            RigTypeChoice::Vocals,
+        ]
+    }
+
+    /// Create the corresponding mock service for this rig type.
+    pub fn create_mock_service(self) -> signal_control::SignalControl {
+        match self {
+            Self::Guitar => signal_control::SignalControl::mock_guitar(),
+            Self::Bass => signal_control::SignalControl::mock_bass(),
+            Self::Keys => signal_control::SignalControl::mock_keys(),
+            Self::SynthBass => signal_control::SignalControl::mock_synth_bass(),
+            Self::Drums => signal_control::SignalControl::mock_drums(),
+            Self::DrumReplacement => signal_control::SignalControl::mock_drum_replacement(),
+            Self::Vocals => signal_control::SignalControl::mock_vocals(),
+        }
+    }
+}
+
+impl std::fmt::Display for RigTypeChoice {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.display_name())
+    }
+}
+
+/// Currently selected rig type.
+pub static RIG_TYPE: GlobalSignal<RigTypeChoice> = Signal::global(RigTypeChoice::default);
+
+/// Switch to a different instrument rig type.
+///
+/// If a DB connection is available, creates a new `StandaloneRigControlService`
+/// for the new instrument type. Otherwise falls back to mock data.
+/// Clears all rig-related signals and re-populates from the service.
+pub fn switch_rig_type(choice: RigTypeChoice) {
+    // Skip if already on this type
+    if *RIG_TYPE.read() == choice {
+        return;
+    }
+
+    // 1. Update the rig type signal
+    *RIG_TYPE.write() = choice;
+
+    // 2. Get the DB connection if the current service has one
+    let had_db = RIG_SERVICE.read().as_ref().and_then(|s| s.db().cloned());
+
+    // 3. Clear all dependent signals
+    *RIG_MODULES.write() = Vec::new();
+    *RIG_PROFILE.write() = None;
+    *RIG_CURRENT_PATCH.write() = None;
+    *RIG_AVAILABLE_PROFILES.write() = Vec::new();
+    *RIG_INFO.write() = None;
+    *RIG_CURRENT_PRESET.write() = None;
+    *RIG_AVAILABLE_PRESETS.write() = Vec::new();
+    *RIG_PRELOADED_PRESETS.write() = Vec::new();
+    *RIG_CURRENT_SETLIST.write() = None;
+    *RIG_AVAILABLE_SETLISTS.write() = Vec::new();
+    *RIG_SETLIST_SONGS.write() = Vec::new();
+    *RIG_CURRENT_SONG.write() = None;
+    *RIG_CURRENT_SECTION.write() = None;
+    *RIG_SONG_INDEX.write() = 0;
+    *RIG_SECTION_INDEX.write() = 0;
+    *RIG_SNAPSHOTS.write() = Vec::new();
+    *RIG_SELECTED_ENTITY.write() = None;
+    *RIG_GRID_SELECTED_SLOT.write() = None;
+    *RIG_GRID_SELECTION.write() = None;
+    *RIG_GRID_CHAIN_OVERRIDE.write() = None;
+    RIG_NODE_FX_BINDINGS.write().clear();
+
+    // 4. Create new service for the selected instrument type
+    match had_db {
+        Some(db) => {
+            // DB available — create standalone service with new instrument type
+            spawn(async move {
+                match signal_control::StandaloneRigControlService::new(db, choice.db_key()).await {
+                    Ok(svc) => {
+                        let ctl = signal_control::SignalControl::standalone(svc);
+                        *RIG_SERVICE.write() = Some(ctl.clone());
+                        crate::hooks::rig_state::populate_sidebars_from_db(&ctl).await;
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "Failed to create standalone service: {e}, falling back to mock"
+                        );
+                        let ctl = choice.create_mock_service();
+                        *RIG_SERVICE.write() = Some(ctl.clone());
+                        crate::hooks::rig_state::populate_sidebars_from_db(&ctl).await;
+                    }
+                }
+            });
+        }
+        None => {
+            // No DB — fall back to mock service
+            let service = choice.create_mock_service();
+            *RIG_SERVICE.write() = Some(service.clone());
+            spawn(async move {
+                crate::hooks::rig_state::populate_sidebars_from_db(&service).await;
+            });
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Rig Editor Sub-Tab
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -65,6 +220,13 @@ pub static RIG_EDITOR_TAB: GlobalSignal<RigEditorTab> = Signal::global(RigEditor
 
 /// Current profile loaded in the rig
 pub static RIG_PROFILE: GlobalSignal<Option<ProfileInfo>> = Signal::global(|| None);
+
+/// Currently active patch within the loaded profile.
+///
+/// Updated by the `PatchLoaded` event handler. When a profile is loaded,
+/// the first patch is auto-selected. UI components compare against this
+/// to highlight the active patch row.
+pub static RIG_CURRENT_PATCH: GlobalSignal<Option<PatchInfo>> = Signal::global(|| None);
 
 /// All available profiles
 pub static RIG_AVAILABLE_PROFILES: GlobalSignal<Vec<ProfileInfo>> = Signal::global(Vec::new);
@@ -135,10 +297,9 @@ static DB_INIT_STARTED: std::sync::atomic::AtomicBool = std::sync::atomic::Atomi
 
 /// Initialize the rig service.
 ///
-/// Immediately sets `RIG_SERVICE` to a mock guitar rig so UI can render
-/// right away. Then spawns an async task to connect to SQLite at
-/// `~/Music/FastTrackStudio/signal.db`, run migrations, and upgrade
-/// `RIG_SERVICE` to a DB-backed `SignalControl`.
+/// Immediately sets `RIG_SERVICE` to a mock rig so UI can render right away.
+/// Then spawns an async task to connect to SQLite, run migrations, and upgrade
+/// `RIG_SERVICE` to a DB-backed `StandaloneRigControlService`.
 ///
 /// If the DB connection fails, the mock service stays in place and a
 /// warning is logged. Call this from any component that needs rig data —
@@ -147,10 +308,9 @@ pub fn init_rig_service() {
     if RIG_SERVICE.read().is_some() {
         return; // already initialized
     }
-    // Start with mock data immediately so UI can render
-    // (commented-out original: was the only line before DB support)
-    // *RIG_SERVICE.write() = Some(signal_control::SignalControl::mock_guitar());
-    *RIG_SERVICE.write() = Some(signal_control::SignalControl::mock_guitar());
+    // Start with mock data immediately so UI can render.
+    let rig_type = *RIG_TYPE.read();
+    *RIG_SERVICE.write() = Some(rig_type.create_mock_service());
 
     // Spawn DB connection upgrade (once)
     if !DB_INIT_STARTED.swap(true, std::sync::atomic::Ordering::SeqCst) {
@@ -163,9 +323,15 @@ pub fn init_rig_service() {
                 }
             };
 
-            match signal_control::SignalControl::connect_db(&db_path).await {
+            let rig_type = *RIG_TYPE.read();
+            match signal_control::SignalControl::connect_db_for_type(&db_path, rig_type.db_key())
+                .await
+            {
                 Ok(ctl) => {
-                    tracing::info!("Upgraded RIG_SERVICE to DB-backed SignalControl");
+                    tracing::info!(
+                        "Upgraded RIG_SERVICE to standalone DB-backed service ({})",
+                        rig_type.db_key()
+                    );
                     *RIG_SERVICE.write() = Some(ctl);
                 }
                 Err(e) => {
@@ -429,6 +595,9 @@ pub static RIG_CONNECTED: GlobalSignal<bool> = Signal::global(|| false);
 
 /// Loading status
 pub static RIG_LOADING: GlobalSignal<bool> = Signal::global(|| false);
+
+/// Whether the full-screen preset browser dialog is open.
+pub static RIG_PRESET_BROWSER_OPEN: GlobalSignal<bool> = Signal::global(|| false);
 
 /// The node graph for the Flow/FlowCompact view.
 ///

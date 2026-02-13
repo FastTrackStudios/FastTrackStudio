@@ -17,6 +17,7 @@ pub struct Model {
     pub module_overrides: Json,
     pub block_overrides: Json,
     pub sort_order: i32,
+    pub is_default: bool,
     pub tags: Json,
     pub created_at: DateTimeWithTimeZone,
     pub updated_at: DateTimeWithTimeZone,

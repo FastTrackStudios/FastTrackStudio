@@ -259,6 +259,9 @@ pub struct EngineTemplate {
     pub name: String,
     pub engine_type: InstrumentType,
     pub layers: NonEmptyVec<LayerTemplate>,
+    /// Engine-level modules that process the combined output of all layers
+    /// (e.g. master EQ, limiter). Empty for single-layer engines.
+    pub engine_modules: Vec<ModuleTemplate>,
     pub description: Option<String>,
 }
 
@@ -270,6 +273,7 @@ impl EngineTemplate {
             name: name.into(),
             engine_type,
             layers: NonEmptyVec::new(layer),
+            engine_modules: Vec::new(),
             description: None,
         }
     }
@@ -277,6 +281,13 @@ impl EngineTemplate {
     #[must_use]
     pub fn with_description(mut self, desc: impl Into<String>) -> Self {
         self.description = Some(desc.into());
+        self
+    }
+
+    /// Add an engine-level module (global FX across all layers).
+    #[must_use]
+    pub fn with_engine_module(mut self, module: ModuleTemplate) -> Self {
+        self.engine_modules.push(module);
         self
     }
 }
@@ -293,6 +304,7 @@ impl Templatable for Engine {
             engine_type: self.engine_type.clone(),
             layers: NonEmptyVec::from_vec(layer_templates)
                 .expect("engine always has at least one layer"),
+            engine_modules: Vec::new(),
             description: None,
         }
     }

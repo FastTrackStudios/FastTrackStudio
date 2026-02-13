@@ -14,6 +14,7 @@ pub struct Model {
     pub description: Option<String>,
     pub tags: Json,
     pub metadata: Json,
+    pub instrument_type: String,
     pub default_scene_template_id: Option<Uuid>,
     pub is_template: bool,
     pub is_deleted: bool,

@@ -13,7 +13,9 @@
 //! Every preset must have at least one "base tone" tag to guarantee fallback.
 
 pub mod auto_tagger;
+pub mod browse;
 pub mod filter;
+pub mod instrument_tags;
 pub mod scoring;
 pub mod stats;
 pub mod suggestions;
@@ -292,6 +294,10 @@ pub enum TagCategory {
     Context,
     /// Gear emulation (Fender, Marshall, Klon, 1176).
     Gear,
+    /// Instrument type (Piano, Rhodes, Electric Bass, etc.).
+    Instrument,
+    /// Plugin manufacturer/product (Neural DSP, Helix Native, etc.).
+    Plugin,
     /// Custom user-defined category.
     Custom,
 }
@@ -302,9 +308,9 @@ impl TagCategory {
         match self {
             Self::BaseTone => TagPriority::Required,
             Self::Genre => TagPriority::High,
-            Self::SubGenre | Self::Archetype => TagPriority::Medium,
+            Self::SubGenre | Self::Archetype | Self::Instrument => TagPriority::Medium,
             Self::Song | Self::Character | Self::Context => TagPriority::Low,
-            Self::Gear | Self::Custom => TagPriority::Optional,
+            Self::Gear | Self::Plugin | Self::Custom => TagPriority::Optional,
         }
     }
 
@@ -319,6 +325,8 @@ impl TagCategory {
             Self::Character => Some("#F97316".to_string()), // Orange
             Self::Context => Some("#06B6D4".to_string()),   // Cyan
             Self::Gear => Some("#6B7280".to_string()),      // Gray
+            Self::Instrument => Some("#14B8A6".to_string()), // Teal
+            Self::Plugin => Some("#8B5CF6".to_string()),    // Violet
             Self::Custom => Some("#78716C".to_string()),    // Stone
         }
     }
@@ -334,6 +342,8 @@ impl TagCategory {
             Self::Character => "Character",
             Self::Context => "Context",
             Self::Gear => "Gear",
+            Self::Instrument => "Instrument",
+            Self::Plugin => "Plugin",
             Self::Custom => "Custom",
         }
     }
@@ -349,6 +359,8 @@ impl TagCategory {
             Self::Character,
             Self::Context,
             Self::Gear,
+            Self::Instrument,
+            Self::Plugin,
             Self::Custom,
         ]
     }
@@ -986,7 +998,7 @@ mod tests {
 
     #[test]
     fn tag_category_all_returns_all_variants() {
-        assert_eq!(TagCategory::all().len(), 9);
+        assert_eq!(TagCategory::all().len(), 11);
     }
 
     // ── TagPriority ─────────────────────────────────────────────────────

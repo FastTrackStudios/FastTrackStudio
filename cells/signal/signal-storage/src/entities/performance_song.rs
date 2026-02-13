@@ -13,6 +13,7 @@ pub struct Model {
     pub artist: Option<String>,
     pub auto_advance: bool,
     pub linked_song_id: Option<Uuid>,
+    pub instrument_type: String,
     pub module_overrides: Json,
     pub tags: Json,
     pub is_template: bool,

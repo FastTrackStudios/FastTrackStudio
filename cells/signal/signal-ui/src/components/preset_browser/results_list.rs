@@ -33,11 +33,11 @@ pub fn ResultsList(props: ResultsListProps) -> Element {
                 for (i, preset) in props.results.iter().enumerate() {
                     super::result_item::ResultItem {
                         name: preset.name.clone(),
-                        level: preset.level,
+                        level: signal_control::tags::browse::BrowseLevel::default(),
                         quality: 0,
                         versatility: 0,
-                        scene_count: 0,
-                        status: preset.status,
+                        scene_count: preset.scenes.len(),
+                        status: signal_control::rating::PresetStatus::default(),
                         is_selected: props.selected_index == Some(i),
                         index: i,
                         on_click: props.on_select.clone(),

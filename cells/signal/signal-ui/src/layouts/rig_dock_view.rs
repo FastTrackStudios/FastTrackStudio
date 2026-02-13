@@ -19,7 +19,8 @@ use crate::components::song_editor::SongEditorView;
 use crate::hooks::rig_state::use_rig_subscription;
 use crate::prelude::*;
 use crate::signals::{
-    init_rig_service, RigEditorTab, RIG_CONNECTED, RIG_CURRENT_PRESET, RIG_EDITOR_TAB, RIG_LOADING,
+    init_rig_service, RigEditorTab, RigTypeChoice, RIG_CONNECTED, RIG_CURRENT_PRESET,
+    RIG_EDITOR_TAB, RIG_LOADING, RIG_TYPE,
 };
 use dock_dioxus::{DockRoot, DOCK_WORKSPACE, RIG_DOCK_WINDOW_ID};
 use dock_proto::builder::DockLayoutBuilder as B;
@@ -278,8 +279,13 @@ fn RigTopBar(props: RigTopBarProps) -> Element {
 
     rsx! {
         div { class: "h-11 flex items-center justify-between px-4 bg-zinc-900 border-b border-zinc-800 flex-shrink-0",
-            // Left: Mode + View selectors
+            // Left: Instrument type + Mode + View selectors
             div { class: "flex items-center gap-3",
+                // Instrument type dropdown
+                RigTypeDropdown {}
+
+                div { class: "w-px h-6 bg-zinc-700" }
+
                 // Rig view mode (Preset / Profile / Song)
                 div { class: "flex items-center gap-0.5 bg-zinc-800 rounded-lg p-0.5",
                     for mode in RigViewMode::all() {
@@ -379,6 +385,76 @@ fn RigTopBar(props: RigTopBarProps) -> Element {
                         "Connected"
                     } else {
                         "Disconnected"
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ── Rig Type Dropdown ────────────────────────────────────────────────
+
+/// Dropdown selector for switching between instrument rig types.
+///
+/// Shows the current rig type as a green-accented button. Clicking opens
+/// a dropdown menu with all available types. Selecting a type calls
+/// `switch_rig_type()` which swaps the mock service and rebuilds all signals.
+#[component]
+fn RigTypeDropdown() -> Element {
+    let mut open = use_signal(|| false);
+    let current = *RIG_TYPE.read();
+
+    rsx! {
+        div { class: "relative",
+            // Trigger button
+            button {
+                class: "flex items-center gap-1.5 px-3 py-1 rounded-lg bg-green-600 hover:bg-green-500 \
+                        text-xs font-medium text-white transition-colors",
+                onclick: move |_| open.set(!open()),
+                span { "{current.display_name()}" }
+                // Chevron
+                svg {
+                    class: "w-3 h-3 opacity-70",
+                    fill: "none",
+                    stroke: "currentColor",
+                    stroke_width: "2",
+                    view_box: "0 0 24 24",
+                    path {
+                        stroke_linecap: "round",
+                        stroke_linejoin: "round",
+                        d: if open() { "M18 15l-6-6-6 6" } else { "M6 9l6 6 6-6" },
+                    }
+                }
+            }
+
+            // Dropdown menu
+            if open() {
+                // Invisible backdrop to close on outside click
+                div {
+                    class: "fixed inset-0 z-40",
+                    onclick: move |_| open.set(false),
+                }
+                div { class: "absolute top-full left-0 mt-1 z-50 min-w-[160px] \
+                              bg-zinc-800 border border-zinc-700 rounded-lg shadow-xl py-1",
+                    for rig_type in RigTypeChoice::all() {
+                        {
+                            let rt = *rig_type;
+                            let is_current = rt == current;
+                            rsx! {
+                                button {
+                                    class: if is_current {
+                                        "w-full text-left px-3 py-1.5 text-xs font-medium text-green-400 bg-green-600/20 transition-colors"
+                                    } else {
+                                        "w-full text-left px-3 py-1.5 text-xs font-medium text-zinc-300 hover:bg-zinc-700 hover:text-white transition-colors"
+                                    },
+                                    onclick: move |_| {
+                                        crate::signals::switch_rig_type(rt);
+                                        open.set(false);
+                                    },
+                                    "{rig_type.display_name()}"
+                                }
+                            }
+                        }
                     }
                 }
             }

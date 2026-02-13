@@ -8,6 +8,7 @@ pub mod midi_learn;
 pub mod module_editor;
 pub mod morph_slider;
 pub mod performance;
+pub mod preset_browser;
 pub mod preset_editor;
 pub mod profile_editor;
 pub mod rig_grid;

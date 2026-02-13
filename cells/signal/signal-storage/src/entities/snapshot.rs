@@ -11,6 +11,7 @@ pub struct Model {
     #[sea_orm(column_type = "String(StringLen::N(255))")]
     pub name: String,
     pub data: Json,
+    pub is_default: bool,
     pub created_at: DateTimeWithTimeZone,
     pub updated_at: DateTimeWithTimeZone,
 }

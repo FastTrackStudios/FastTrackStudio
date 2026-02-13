@@ -4,7 +4,7 @@
 
 use reaper_high::Reaper;
 use reaper_medium::{Hmenu, HookCustomMenu, MenuHookFlag, ReaperStr};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use swell_ui::{
     menu_tree::{anonymous_menu, item, menu, separator, Entry},
     Menu,
@@ -82,44 +82,71 @@ fn extension_menu() -> swell_ui::menu_tree::Menu<String> {
         )]);
     }
 
-    // Group actions by menu path
-    let mut grouped: HashMap<String, Vec<&MenuActionDef>> = HashMap::new();
+    #[derive(Default)]
+    struct MenuNode<'a> {
+        children: BTreeMap<String, MenuNode<'a>>,
+        actions: Vec<&'a MenuActionDef>,
+    }
+
+    fn insert_path<'a>(root: &mut MenuNode<'a>, path: &[String], action: &'a MenuActionDef) {
+        let mut node = root;
+        for segment in path {
+            node = node.children.entry(segment.clone()).or_default();
+        }
+        node.actions.push(action);
+    }
+
+    fn node_to_entries(node: &MenuNode<'_>) -> Vec<Entry<String>> {
+        let mut entries = Vec::new();
+
+        for (name, child) in &node.children {
+            let child_entries = node_to_entries(child);
+            entries.push(menu(name.clone(), child_entries));
+        }
+
+        let mut action_entries: Vec<Entry<String>> = node
+            .actions
+            .iter()
+            .map(|action| item(action.display_name.clone(), action.action_id.clone()))
+            .collect();
+
+        action_entries.sort_by(|a, b| match (a, b) {
+            (Entry::Item(ia), Entry::Item(ib)) => ia.text.cmp(&ib.text),
+            _ => std::cmp::Ordering::Equal,
+        });
+
+        entries.extend(action_entries);
+        entries
+    }
+
+    // Group actions by full menu path hierarchy
+    let mut root = MenuNode::default();
     let mut ungrouped: Vec<&MenuActionDef> = Vec::new();
 
     for action in &actions {
         if let Some(ref path) = action.menu_path {
-            grouped.entry(path.clone()).or_default().push(action);
+            let mut segments: Vec<String> = path
+                .split('/')
+                .filter(|s| !s.trim().is_empty())
+                .map(|s| s.trim().to_string())
+                .collect();
+
+            if matches!(segments.first().map(String::as_str), Some("FTS")) {
+                segments.remove(0);
+            }
+
+            if segments.is_empty() {
+                ungrouped.push(action);
+            } else {
+                insert_path(&mut root, &segments, action);
+            }
         } else {
             ungrouped.push(action);
         }
     }
 
     // Build menu entries
-    let mut menu_entries = Vec::new();
-
-    // Add grouped actions as submenus
-    let mut paths: Vec<_> = grouped.keys().cloned().collect();
-    paths.sort();
-
-    for path in paths {
-        if let Some(actions_in_path) = grouped.get(&path) {
-            // Extract submenu name from path (e.g., "FTS/Session" -> "Session")
-            let submenu_name = path.split('/').last().unwrap_or(&path).to_string();
-
-            let mut submenu_items: Vec<Entry<String>> = actions_in_path
-                .iter()
-                .map(|action| item(action.display_name.clone(), action.command_id.clone()))
-                .collect();
-
-            // Sort items alphabetically
-            submenu_items.sort_by(|a, b| match (a, b) {
-                (Entry::Item(ia), Entry::Item(ib)) => ia.text.cmp(&ib.text),
-                _ => std::cmp::Ordering::Equal,
-            });
-
-            menu_entries.push(menu(submenu_name, submenu_items));
-        }
-    }
+    let mut menu_entries = node_to_entries(&root);
 
     // Add ungrouped actions directly
     if !ungrouped.is_empty() {
@@ -127,7 +154,7 @@ fn extension_menu() -> swell_ui::menu_tree::Menu<String> {
             menu_entries.push(separator());
         }
         for action in ungrouped {
-            menu_entries.push(item(action.display_name.clone(), action.command_id.clone()));
+            menu_entries.push(item(action.display_name.clone(), action.action_id.clone()));
         }
     }
 

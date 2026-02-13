@@ -7,3 +7,4 @@ description = "Protocol definitions for the actions system"
 [dependencies]
 roam.workspace = true
 facet.workspace = true
+convert_case = "0.6"

@@ -11,7 +11,10 @@ use crate::context::rig::RigServiceMode;
 use crate::hooks::parameter_capture::use_parameter_capture;
 use crate::hooks::storage::{CloudSyncStatus, CLOUD_STORAGE_ENABLED, CLOUD_SYNC_STATUS};
 use crate::prelude::*;
-use crate::signals::{RIG_CURRENT_PRESET, RIG_LOADING, RIG_SERVICE_MODE};
+use crate::signals::{
+    RigTypeChoice, RIG_CURRENT_PRESET, RIG_LOADING, RIG_PRESET_BROWSER_OPEN, RIG_SERVICE_MODE,
+    RIG_TYPE,
+};
 
 use super::view_mode::{ModuleViewMode, RigViewMode};
 
@@ -110,6 +113,12 @@ pub fn GuitarRigTopBar(props: GuitarRigTopBarProps) -> Element {
                 // Separator
                 div { class: "w-px h-6 bg-zinc-700" }
 
+                // Instrument type dropdown
+                RigTypeDropdown {}
+
+                // Separator
+                div { class: "w-px h-6 bg-zinc-700" }
+
                 // Rig view mode selector (Preset/Profile/Song)
                 div { class: "flex items-center gap-1 bg-zinc-800 rounded-lg p-1",
                     for mode in RigViewMode::all() {
@@ -169,6 +178,39 @@ pub fn GuitarRigTopBar(props: GuitarRigTopBarProps) -> Element {
                         rect { x: "20", y: "14", width: "2", height: "6", rx: "0.5" }
                     }
                     span { "Scenes" }
+                }
+
+                // Separator
+                div { class: "w-px h-6 bg-zinc-700" }
+
+                // Full-screen preset browser button
+                button {
+                    class: if *RIG_PRESET_BROWSER_OPEN.read() {
+                        "flex items-center gap-2 px-3 py-1.5 rounded-lg bg-purple-700 hover:bg-purple-600 \
+                         text-sm font-medium text-white transition-colors"
+                    } else {
+                        "flex items-center gap-2 px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 \
+                         text-sm font-medium text-zinc-300 transition-colors"
+                    },
+                    onclick: move |_| {
+                        let current = *RIG_PRESET_BROWSER_OPEN.read();
+                        *RIG_PRESET_BROWSER_OPEN.write() = !current;
+                    },
+                    title: "Open preset browser",
+                    // Search/browse icon
+                    svg {
+                        class: "w-4 h-4",
+                        fill: "none",
+                        stroke: "currentColor",
+                        stroke_width: "2",
+                        view_box: "0 0 24 24",
+                        path {
+                            stroke_linecap: "round",
+                            stroke_linejoin: "round",
+                            d: "M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z",
+                        }
+                    }
+                    span { "Browser" }
                 }
             }
 
@@ -280,6 +322,66 @@ fn RigModeButton(props: RigModeButtonProps) -> Element {
             title: "{props.mode.display_name()} mode",
             onclick: move |_| props.on_click.call(mode),
             span { "{props.mode.display_name()}" }
+        }
+    }
+}
+
+/// Dropdown selector for switching between instrument rig types.
+#[component]
+fn RigTypeDropdown() -> Element {
+    let mut open = use_signal(|| false);
+    let current = *RIG_TYPE.read();
+
+    rsx! {
+        div { class: "relative",
+            button {
+                class: "flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-600 hover:bg-green-500 \
+                        text-sm font-medium text-white transition-colors",
+                onclick: move |_| open.set(!open()),
+                span { "{current.display_name()}" }
+                svg {
+                    class: "w-3 h-3 opacity-70",
+                    fill: "none",
+                    stroke: "currentColor",
+                    stroke_width: "2",
+                    view_box: "0 0 24 24",
+                    path {
+                        stroke_linecap: "round",
+                        stroke_linejoin: "round",
+                        d: if open() { "M18 15l-6-6-6 6" } else { "M6 9l6 6 6-6" },
+                    }
+                }
+            }
+
+            if open() {
+                div {
+                    class: "fixed inset-0 z-40",
+                    onclick: move |_| open.set(false),
+                }
+                div { class: "absolute top-full left-0 mt-1 z-50 min-w-[160px] \
+                              bg-zinc-800 border border-zinc-700 rounded-lg shadow-xl py-1",
+                    for rig_type in RigTypeChoice::all() {
+                        {
+                            let rt = *rig_type;
+                            let is_current = rt == current;
+                            rsx! {
+                                button {
+                                    class: if is_current {
+                                        "w-full text-left px-3 py-1.5 text-xs font-medium text-green-400 bg-green-600/20 transition-colors"
+                                    } else {
+                                        "w-full text-left px-3 py-1.5 text-xs font-medium text-zinc-300 hover:bg-zinc-700 hover:text-white transition-colors"
+                                    },
+                                    onclick: move |_| {
+                                        crate::signals::switch_rig_type(rt);
+                                        open.set(false);
+                                    },
+                                    "{rig_type.display_name()}"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }

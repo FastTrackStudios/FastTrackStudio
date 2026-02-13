@@ -51,6 +51,7 @@ pub mod override_tree;
 
 // ─── Presets ─────────────────────────────────────────────────────
 pub mod preset;
+pub mod rating;
 
 // ─── Performance ─────────────────────────────────────────────────
 pub mod profile;

@@ -4,16 +4,18 @@
 //! - Top section: Preset browser with fuzzy search
 //! - Bottom section: Profile selector
 
+use std::collections::HashSet;
+
 use crate::callback_types::{PresetSnapshotSelect, ProfileSceneSelect};
 use crate::hooks::use_fuzzy_search;
 use crate::prelude::*;
 use crate::signals::{
-    RIG_AVAILABLE_PRESETS, RIG_AVAILABLE_PROFILES, RIG_CURRENT_PRESET, RIG_LAST_APPLIED_SNAPSHOT,
-    RIG_PROFILE,
+    RIG_AVAILABLE_PRESETS, RIG_AVAILABLE_PROFILES, RIG_CURRENT_PATCH, RIG_CURRENT_PRESET,
+    RIG_LAST_APPLIED_SNAPSHOT, RIG_PROFILE,
 };
 use signal_control::id::{ProfileId, RigPresetId};
 use signal_control::tags::{Tag, TagRegistry};
-use signal_control::{PatchInfo, ProfileInfo, RigPresetInfo};
+use signal_control::{ProfileInfo, RigPresetInfo};
 use uuid::Uuid;
 
 use super::view_mode::RigViewMode;
@@ -60,6 +62,8 @@ pub fn GuitarRigLeftSidebar(props: GuitarRigLeftSidebarProps) -> Element {
 
     // Local state
     let mut search_query = use_signal(String::new);
+    let expanded_presets = use_signal(HashSet::<RigPresetId>::new);
+    let expanded_profiles = use_signal(HashSet::<ProfileId>::new);
 
     // Read global signals
     let all_presets = RIG_AVAILABLE_PRESETS.read();
@@ -160,14 +164,31 @@ pub fn GuitarRigLeftSidebar(props: GuitarRigLeftSidebarProps) -> Element {
                         }
                     } else {
                         for preset in filtered_presets.read().iter() {
-                            // Only expand the currently selected preset
-                            PresetItem {
-                                preset: preset.clone(),
-                                is_active: current_preset.as_ref().map(|p| p.id) == Some(preset.id),
-                                is_expanded: current_preset.as_ref().map(|p| p.id) == Some(preset.id),
-                                registry: tag_registry.read().clone(),
-                                on_click: props.on_preset_select.clone(),
-                                on_scene_click: props.on_preset_snapshot_select.clone(),
+                            {
+                                let pid = preset.id;
+                                let is_active = current_preset.as_ref().map(|p| p.id) == Some(pid);
+                                let is_expanded = is_active || expanded_presets.read().contains(&pid);
+                                rsx! {
+                                    PresetItem {
+                                        preset: preset.clone(),
+                                        is_active,
+                                        is_expanded,
+                                        registry: tag_registry.read().clone(),
+                                        on_click: props.on_preset_select.clone(),
+                                        on_scene_click: props.on_preset_snapshot_select.clone(),
+                                        on_toggle_expand: {
+                                            let mut expanded_presets = expanded_presets.clone();
+                                            Callback::new(move |id: RigPresetId| {
+                                                let mut set = expanded_presets.write();
+                                                if set.contains(&id) {
+                                                    set.remove(&id);
+                                                } else {
+                                                    set.insert(id);
+                                                }
+                                            })
+                                        },
+                                    }
+                                }
                             }
                         }
                     }
@@ -183,17 +204,22 @@ pub fn GuitarRigLeftSidebar(props: GuitarRigLeftSidebarProps) -> Element {
                             h3 { class: "text-xs font-semibold text-zinc-500 uppercase tracking-wider",
                                 "Profiles"
                             }
-                            if let Some(ref on_create) = props.on_create_profile {
-                                {
-                                    let on_create = on_create.clone();
-                                    rsx! {
-                                        button {
-                                            class: "w-5 h-5 flex items-center justify-center rounded \
-                                                    text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700 \
-                                                    transition-colors text-sm leading-none",
-                                            title: "New Profile",
-                                            onclick: move |_| on_create.call(()),
-                                            "+"
+                            div { class: "flex items-center gap-1.5",
+                                span { class: "text-xs text-zinc-600 bg-zinc-800 px-1.5 py-0.5 rounded",
+                                    "{all_profiles.len()}"
+                                }
+                                if let Some(ref on_create) = props.on_create_profile {
+                                    {
+                                        let on_create = on_create.clone();
+                                        rsx! {
+                                            button {
+                                                class: "w-5 h-5 flex items-center justify-center rounded \
+                                                        text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700 \
+                                                        transition-colors text-sm leading-none",
+                                                title: "New Profile",
+                                                onclick: move |_| on_create.call(()),
+                                                "+"
+                                            }
                                         }
                                     }
                                 }
@@ -208,14 +234,31 @@ pub fn GuitarRigLeftSidebar(props: GuitarRigLeftSidebarProps) -> Element {
                             }
                         } else {
                             for profile in all_profiles.iter() {
-                                // Only expand the currently selected profile
-                                ProfileItem {
-                                    profile: profile.clone(),
-                                    is_active: current_profile.as_ref().map(|p| p.id) == Some(profile.id),
-                                    is_expanded: current_profile.as_ref().map(|p| p.id) == Some(profile.id),
-                                    current_preset_id: current_preset.as_ref().map(|p| p.id),
-                                    on_click: props.on_profile_select.clone(),
-                                    on_scene_click: props.on_profile_scene_select.clone(),
+                                {
+                                    let pid = profile.id;
+                                    let is_active = current_profile.as_ref().map(|p| p.id) == Some(pid);
+                                    let is_expanded = is_active || expanded_profiles.read().contains(&pid);
+                                    rsx! {
+                                        ProfileItem {
+                                            profile: profile.clone(),
+                                            is_active,
+                                            is_expanded,
+                                            current_preset_id: current_preset.as_ref().map(|p| p.id),
+                                            on_click: props.on_profile_select.clone(),
+                                            on_scene_click: props.on_profile_scene_select.clone(),
+                                            on_toggle_expand: {
+                                                let mut expanded_profiles = expanded_profiles.clone();
+                                                Callback::new(move |id: ProfileId| {
+                                                    let mut set = expanded_profiles.write();
+                                                    if set.contains(&id) {
+                                                        set.remove(&id);
+                                                    } else {
+                                                        set.insert(id);
+                                                    }
+                                                })
+                                            },
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -235,12 +278,15 @@ struct PresetItemProps {
     registry: TagRegistry,
     on_click: Callback<RigPresetId>,
     on_scene_click: Option<Callback<PresetSnapshotSelect>>,
+    on_toggle_expand: Callback<RigPresetId>,
 }
 
-/// Individual preset item (simplified — no inline snapshot expansion).
+/// Individual preset item with expandable scenes.
 #[component]
 fn PresetItem(props: PresetItemProps) -> Element {
     let preset_id = props.preset.id;
+    let has_scenes = !props.preset.scenes.is_empty();
+    let chevron = if props.is_expanded { "▼" } else { "▶" };
 
     rsx! {
         div { class: "border-b border-zinc-800/50",
@@ -253,7 +299,7 @@ fn PresetItem(props: PresetItemProps) -> Element {
                 },
                 onclick: move |_| props.on_click.call(preset_id),
 
-                div { class: "flex items-start justify-between",
+                div { class: "flex items-center justify-between",
                     div { class: "flex-1 min-w-0",
                         span { class: "font-medium text-sm text-zinc-200 truncate",
                             "{props.preset.name}"
@@ -269,8 +315,81 @@ fn PresetItem(props: PresetItemProps) -> Element {
                             }
                         }
                     }
+
+                    // Expand/collapse chevron
+                    if has_scenes {
+                        button {
+                            class: "ml-2 w-5 h-5 flex items-center justify-center rounded \
+                                    text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700 \
+                                    transition-colors text-xs leading-none flex-shrink-0",
+                            title: if props.is_expanded { "Collapse scenes" } else { "Expand scenes" },
+                            onclick: move |e: Event<MouseData>| {
+                                e.stop_propagation();
+                                props.on_toggle_expand.call(preset_id);
+                            },
+                            "{chevron}"
+                        }
+                    }
                 }
             }
+
+            // Expanded scenes
+            if props.is_expanded && has_scenes {
+                div { class: "bg-zinc-900/50 py-1",
+                    for (scene_index, scene) in props.preset.scenes.iter().enumerate() {
+                        {
+                            let scene_id = scene.id;
+                            let on_scene = props.on_scene_click.clone();
+                            rsx! {
+                                ChildRow {
+                                    key: "{scene_id}",
+                                    name: scene.name.clone(),
+                                    is_active: (*RIG_LAST_APPLIED_SNAPSHOT.read()).map(|s| s.as_uuid()) == Some(scene_id),
+                                    is_default: scene.is_default,
+                                    on_click: Callback::new(move |_| {
+                                        if let Some(ref cb) = on_scene {
+                                            cb.call(PresetSnapshotSelect { preset_id, snapshot_index: scene_index });
+                                        }
+                                    }),
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Props for a generic expandable child row.
+///
+/// Used for preset scenes, profile patches, and song sections — any indented
+/// child item under a parent row.
+#[derive(Props, Clone, PartialEq)]
+struct ChildRowProps {
+    name: String,
+    is_active: bool,
+    #[props(default)]
+    is_default: bool,
+    on_click: Callback<()>,
+}
+
+/// Shared child row component for preset scenes, profile patches, and song sections.
+#[component]
+fn ChildRow(props: ChildRowProps) -> Element {
+    let prefix = if props.is_default { "★" } else { "•" };
+
+    rsx! {
+        div {
+            class: if props.is_active {
+                "pl-6 pr-3 py-1.5 text-xs cursor-pointer bg-green-500/10 text-green-400 transition-colors"
+            } else if props.is_default {
+                "pl-6 pr-3 py-1.5 text-xs cursor-pointer text-yellow-500 hover:text-yellow-400 hover:bg-zinc-800/50 transition-colors"
+            } else {
+                "pl-6 pr-3 py-1.5 text-xs cursor-pointer text-zinc-400 hover:text-zinc-300 hover:bg-zinc-800/50 transition-colors"
+            },
+            onclick: move |_| props.on_click.call(()),
+            "{prefix} {props.name}"
         }
     }
 }
@@ -322,6 +441,7 @@ struct ProfileItemProps {
     current_preset_id: Option<RigPresetId>,
     on_click: Callback<ProfileId>,
     on_scene_click: Option<Callback<ProfileSceneSelect>>,
+    on_toggle_expand: Callback<ProfileId>,
 }
 
 /// Individual profile item with expandable patches.
@@ -329,6 +449,7 @@ struct ProfileItemProps {
 fn ProfileItem(props: ProfileItemProps) -> Element {
     let has_patches = !props.profile.patches.is_empty();
     let profile_id = props.profile.id;
+    let chevron = if props.is_expanded { "▼" } else { "▶" };
 
     rsx! {
         div { class: "border-b border-zinc-800/50",
@@ -341,7 +462,7 @@ fn ProfileItem(props: ProfileItemProps) -> Element {
                 },
                 onclick: move |_| props.on_click.call(profile_id),
 
-                div { class: "flex items-start justify-between",
+                div { class: "flex items-center justify-between",
                     div { class: "flex-1 min-w-0",
                         span { class: "font-medium text-sm text-zinc-200 truncate",
                             "{props.profile.name}"
@@ -350,58 +471,53 @@ fn ProfileItem(props: ProfileItemProps) -> Element {
                             "{props.profile.patch_count} patches"
                         }
                     }
+
+                    // Expand/collapse chevron
+                    if has_patches {
+                        button {
+                            class: "ml-2 w-5 h-5 flex items-center justify-center rounded \
+                                    text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700 \
+                                    transition-colors text-xs leading-none flex-shrink-0",
+                            title: if props.is_expanded { "Collapse patches" } else { "Expand patches" },
+                            onclick: move |e: Event<MouseData>| {
+                                e.stop_propagation();
+                                props.on_toggle_expand.call(profile_id);
+                            },
+                            "{chevron}"
+                        }
+                    }
                 }
             }
 
             // Expanded patches
             if props.is_expanded && has_patches {
-                div { class: "bg-zinc-850 py-1",
-                    for (patch_index, patch) in props.profile.patches.iter().enumerate() {
-                        ProfilePatchItem {
-                            key: "{patch_index}",
-                            profile_id,
-                            patch_index,
-                            patch: patch.clone(),
-                            is_active: false,
-                            on_click: props.on_scene_click.clone(),
+                {
+                    let current_patch_id = RIG_CURRENT_PATCH.read().as_ref().map(|p| p.id);
+                    rsx! {
+                        div { class: "bg-zinc-900/50 py-1",
+                            for (patch_index, patch) in props.profile.patches.iter().enumerate() {
+                                {
+                                    let on_scene = props.on_scene_click.clone();
+                                    let patch_name = patch.name.clone();
+                                    let is_patch_active = props.is_active && current_patch_id == Some(patch.id);
+                                    rsx! {
+                                        ChildRow {
+                                            key: "{patch_index}",
+                                            name: patch_name,
+                                            is_active: is_patch_active,
+                                            on_click: Callback::new(move |_| {
+                                                if let Some(ref cb) = on_scene {
+                                                    cb.call(ProfileSceneSelect { profile_id, scene_index: patch_index });
+                                                }
+                                            }),
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
             }
-        }
-    }
-}
-
-/// Props for profile patch item.
-#[derive(Props, Clone, PartialEq)]
-struct ProfilePatchItemProps {
-    profile_id: ProfileId,
-    patch_index: usize,
-    patch: PatchInfo,
-    is_active: bool,
-    on_click: Option<Callback<ProfileSceneSelect>>,
-}
-
-/// Individual patch item within a profile.
-#[component]
-fn ProfilePatchItem(props: ProfilePatchItemProps) -> Element {
-    let profile_id = props.profile_id;
-    let patch_index = props.patch_index;
-    let on_click = props.on_click.clone();
-
-    rsx! {
-        div {
-            class: if props.is_active {
-                "pl-6 pr-3 py-1.5 text-xs cursor-pointer bg-green-500/10 text-green-400 transition-colors"
-            } else {
-                "pl-6 pr-3 py-1.5 text-xs cursor-pointer text-zinc-400 hover:text-zinc-300 hover:bg-zinc-800/50 transition-colors"
-            },
-            onclick: move |_| {
-                if let Some(ref cb) = on_click {
-                    cb.call(ProfileSceneSelect { profile_id, scene_index: patch_index });
-                }
-            },
-            "• {props.patch.name}"
         }
     }
 }

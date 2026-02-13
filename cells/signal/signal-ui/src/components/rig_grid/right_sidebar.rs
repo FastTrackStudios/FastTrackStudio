@@ -323,6 +323,7 @@ fn SceneList(props: SceneListProps) -> Element {
                         .cloned()
                         .unwrap_or_else(|| format!("Scene {}", idx + 1)),
                     is_active: idx == scene_index,
+                    is_default: song.default_section_index == Some(idx),
                     on_click: props.on_scene_click.clone(),
                 }
             }
@@ -340,6 +341,8 @@ struct SceneItemProps {
     index: usize,
     name: String,
     is_active: bool,
+    #[props(default)]
+    is_default: bool,
     on_click: Callback<usize>,
 }
 
@@ -347,18 +350,21 @@ struct SceneItemProps {
 #[component]
 fn SceneItem(props: SceneItemProps) -> Element {
     let index = props.index;
+    let prefix = if props.is_default { "★ " } else { "" };
 
     rsx! {
         div {
             class: if props.is_active {
                 "px-3 py-2 rounded cursor-pointer mb-1 bg-green-500 text-white transition-colors"
+            } else if props.is_default {
+                "px-3 py-2 rounded cursor-pointer mb-1 hover:bg-zinc-800 text-yellow-500 transition-colors"
             } else {
                 "px-3 py-2 rounded cursor-pointer mb-1 hover:bg-zinc-800 text-zinc-300 transition-colors"
             },
             onclick: move |_| props.on_click.call(index),
 
             div { class: "flex items-center justify-between",
-                span { class: "font-medium text-sm truncate", "{props.name}" }
+                span { class: "font-medium text-sm truncate", "{prefix}{props.name}" }
                 span { class: "text-xs opacity-60 ml-2", "{index + 1}" }
             }
         }

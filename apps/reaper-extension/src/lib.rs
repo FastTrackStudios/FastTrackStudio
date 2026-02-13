@@ -10,7 +10,9 @@
 
 mod action_registry;
 mod global;
+mod local_actions;
 mod menu;
+mod toolbar_manager;
 
 use fragile::Fragile;
 use reaper_high::{MainTaskMiddleware, Reaper as HighReaper};
@@ -25,8 +27,7 @@ use tracing::{debug, info, warn};
 use cell_host_proto::ReadyMsg;
 use global::Global;
 use host_runtime::{
-    cell_ready_registry, default_cell_dir, init_shm_infrastructure, spawn_tracing_consumer,
-    CellConfig, Host,
+    cell_ready_registry, init_shm_infrastructure, spawn_tracing_consumer, Host,
 };
 use roam::session::RoutedDispatcher;
 use roam_telemetry::{ExporterConfig, OtlpExporter, TelemetryMiddleware};
@@ -122,9 +123,10 @@ impl App {
 
         // Initialize the in-process actions registry
         action_registry::init_registry();
-
         // Initialize SHM infrastructure for host runtime
         let shm_temp_dir = self.tokio_runtime.block_on(async {
+            register_actions().await;
+
             // Initialize SHM infrastructure
             let temp_dir = match init_shm_infrastructure().await {
                 Ok(temp_dir) => {
@@ -145,9 +147,6 @@ impl App {
             // DAW service calls (play, stop, etc.) that are handled locally using
             // REAPER APIs via TaskSupport
             register_daw_dispatcher();
-            register_action_cells();
-            register_cell_actions().await;
-
             // Start Unix socket server for desktop app connections
             start_unix_server();
 
@@ -259,47 +258,6 @@ fn register_daw_dispatcher() {
     info!("daw-reaper marked as ready for in-process DAW calls");
 }
 
-/// Register cells needed by the REAPER action system.
-fn register_action_cells() {
-    let cell_dir = default_cell_dir();
-
-    // Session cell provides DefinesActions and action execution handlers.
-    // It forwards DAW method calls to the in-process "daw-reaper" dispatcher.
-    CellConfig::new("session", &cell_dir)
-        .forwards_to_with_methods("daw-reaper", || {
-            daw_proto::TransportServiceDispatcher::<()>::method_ids()
-                .into_iter()
-                .chain(daw_proto::ProjectServiceDispatcher::<()>::method_ids())
-                .chain(daw_proto::MarkerServiceDispatcher::<()>::method_ids())
-                .chain(daw_proto::RegionServiceDispatcher::<()>::method_ids())
-                .chain(daw_proto::TempoMapServiceDispatcher::<()>::method_ids())
-                .chain(daw_proto::MidiServiceDispatcher::<()>::method_ids())
-                .chain(daw_proto::MidiAnalysisServiceDispatcher::<()>::method_ids())
-                .chain(daw_proto::AudioEngineServiceDispatcher::<()>::method_ids())
-                .chain(daw_proto::FxServiceDispatcher::<()>::method_ids())
-                .chain(daw_proto::TrackServiceDispatcher::<()>::method_ids())
-                .collect()
-        })
-        .register();
-
-    info!(path = %cell_dir.display(), "Registered action cells for REAPER host");
-}
-
-/// Spawn action-provider cells and register their actions with REAPER.
-async fn register_cell_actions() {
-    info!("Spawning session cell for action registration...");
-
-    let Some(session_handle) = Host::get().spawn_pending_cell("session").await else {
-        warn!("Failed to spawn session cell; no session actions will be registered");
-        return;
-    };
-
-    action_registry::register_cell("session", session_handle).await;
-
-    let action_count = action_registry::get_all_registered_actions().len();
-    info!(action_count, "Registered session actions with REAPER");
-}
-
 /// Start the Unix socket server for desktop app connections.
 fn start_unix_server() {
     let socket_path = std::env::var("FTS_SOCKET")
@@ -313,6 +271,75 @@ fn start_unix_server() {
             warn!("Unix socket server error: {}", e);
         }
     });
+}
+
+async fn register_actions() {
+    local_actions::register_toggle_states();
+
+    if let Err(error) = action_registry::register_actions(vec![
+        action_registry::ActionRegistrationSource::Local(local_actions::builtin_local_actions()),
+    ])
+    .await
+    {
+        warn!(%error, "Failed to register actions");
+        return;
+    }
+
+    // Add quick input validation buttons to the default FTS floating toolbar.
+    let add_toggle = toolbar_manager::add_button(
+        &toolbar_manager::ToolbarButton::new(
+            "FTS_INPUT_TOGGLE_INPUT_RUNTIME",
+            "Toggle Input",
+        )
+        .on_toolbar(toolbar_manager::ToolbarTarget::Floating(32)),
+        "__input_runtime__",
+    );
+    if let Err(error) = add_toggle {
+        warn!(%error, "Failed to queue Toggle Input toolbar button");
+    }
+
+    let add_log = toolbar_manager::add_button(
+        &toolbar_manager::ToolbarButton::new("FTS_INPUT_LOG_INPUT_RUNTIME_STATE", "Log Input")
+            .on_toolbar(toolbar_manager::ToolbarTarget::Floating(32)),
+        "__input_runtime__",
+    );
+    if let Err(error) = add_log {
+        warn!(%error, "Failed to queue Log Input toolbar button");
+    }
+
+    let add_intercept = toolbar_manager::add_button(
+        &toolbar_manager::ToolbarButton::new(
+            "FTS_INPUT_TOGGLE_INPUT_INTERCEPT",
+            "Intercept",
+        )
+        .on_toolbar(toolbar_manager::ToolbarTarget::Floating(32)),
+        "__input_runtime__",
+    );
+    if let Err(error) = add_intercept {
+        warn!(%error, "Failed to queue Intercept toolbar button");
+    }
+
+    let add_menu = toolbar_manager::add_button(
+        &toolbar_manager::ToolbarButton::new("FTS_INPUT_INPUT_MENU", "Input Menu")
+            .on_toolbar(toolbar_manager::ToolbarTarget::Floating(32))
+            .double_wide(),
+        "__input_runtime__",
+    );
+    if let Err(error) = add_menu {
+        warn!(%error, "Failed to queue Input Menu toolbar button");
+    }
+
+    let add_reset_mouse = toolbar_manager::add_button(
+        &toolbar_manager::ToolbarButton::new(
+            "FTS_INPUT_RESET_MOUSE_MODIFIERS",
+            "Reset Mouse Modifiers",
+        )
+        .on_toolbar(toolbar_manager::ToolbarTarget::Floating(32)),
+        "__input_runtime__",
+    );
+    if let Err(error) = add_reset_mouse {
+        warn!(%error, "Failed to queue Reset Mouse Modifiers toolbar button");
+    }
 }
 
 /// Global App instance (wrapped in Fragile to ensure main-thread-only access)
@@ -332,12 +359,18 @@ extern "C" fn timer_callback() {
         // Process pending main thread tasks via TaskSupport middleware
         app.process_tasks();
 
+        // Keep input mouse hooks attached to newly opened windows (MIDI editors).
+        input_reaper::check_and_hook_windows();
+
         // Poll transport state and broadcast to subscribers
         // This runs directly on main thread, avoiding async round-trip latency
         daw_reaper::poll_and_broadcast();
 
         // Poll FX chain state and broadcast events for monitored chains
         daw_reaper::poll_and_broadcast_fx();
+
+        // Apply deferred toolbar operations from workflow/input systems.
+        toolbar_manager::process_deferred_ops();
     }
 }
 
@@ -376,6 +409,13 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
 
     // Initialize the extension (mut needed to store SHM temp dir)
     app.initialize()?;
+
+    // Register REAPER input bridge on top of the shared input core.
+    if let Err(error) =
+        input_reaper::register_with_default_keymap(input_reaper::InputRuntimeConfig::default())
+    {
+        warn!(%error, "Failed to register input-reaper runtime");
+    }
 
     // Store app globally
     APP_INSTANCE

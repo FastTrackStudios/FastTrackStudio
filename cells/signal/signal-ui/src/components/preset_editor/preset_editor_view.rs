@@ -1022,7 +1022,7 @@ pub fn PresetEditorView() -> Element {
                                                             &snap_name,
                                                             signal_control::category::PresetCategory::default(),
                                                         );
-                                                        match ctl.save_rig_preset_snapshot(pid, &snap_name, &snap_data).await {
+                                                        match ctl.save_rig_preset_snapshot(pid, &snap_name, &snap_data, false).await {
                                                             Ok(id) => {
                                                                 debug!("Created preset snapshot: {id}");
                                                                 if let Ok(snaps) = ctl.list_rig_preset_snapshots(pid).await {
@@ -1051,7 +1051,7 @@ pub fn PresetEditorView() -> Element {
                                                         &snap_name,
                                                         signal_control::category::PresetCategory::default(),
                                                     );
-                                                    match ctl.save_rig_preset_snapshot(pid, &snap_name, &snap_data).await {
+                                                    match ctl.save_rig_preset_snapshot(pid, &snap_name, &snap_data, false).await {
                                                         Ok(id) => {
                                                             debug!("Created preset snapshot: {id}");
                                                             if let Ok(snaps) = ctl.list_rig_preset_snapshots(pid).await {

@@ -31,6 +31,7 @@ pub async fn create_song(
         artist: Set(artist.map(String::from)),
         auto_advance: Set(auto_advance),
         linked_song_id: Set(None),
+        instrument_type: Set("guitar".to_string()),
         module_overrides: Set(serde_json::json!({})),
         tags: Set(tags),
         is_template: Set(false),
@@ -56,6 +57,19 @@ pub async fn get_song(
 pub async fn list_songs(db: &DatabaseConnection) -> StorageResult<Vec<performance_song::Model>> {
     Ok(performance_song::Entity::find()
         .filter(performance_song::Column::IsDeleted.eq(false))
+        .order_by_asc(performance_song::Column::Name)
+        .all(db)
+        .await?)
+}
+
+/// List songs filtered by instrument type (e.g. "guitar", "bass").
+pub async fn list_songs_by_type(
+    db: &DatabaseConnection,
+    instrument_type: &str,
+) -> StorageResult<Vec<performance_song::Model>> {
+    Ok(performance_song::Entity::find()
+        .filter(performance_song::Column::IsDeleted.eq(false))
+        .filter(performance_song::Column::InstrumentType.eq(instrument_type))
         .order_by_asc(performance_song::Column::Name)
         .all(db)
         .await?)
@@ -136,6 +150,7 @@ pub async fn add_song_scene(
     module_overrides: serde_json::Value,
     block_overrides: serde_json::Value,
     sort_order: i32,
+    is_default: bool,
     tags: serde_json::Value,
 ) -> StorageResult<Uuid> {
     let id = Uuid::new_v4();
@@ -152,6 +167,7 @@ pub async fn add_song_scene(
         module_overrides: Set(module_overrides),
         block_overrides: Set(block_overrides),
         sort_order: Set(sort_order),
+        is_default: Set(is_default),
         tags: Set(tags),
         created_at: Set(now),
         updated_at: Set(now),
@@ -357,6 +373,7 @@ mod tests {
             empty.clone(),
             empty.clone(),
             0,
+            true,
             serde_json::json!([]),
         )
         .await?;
@@ -371,6 +388,7 @@ mod tests {
             empty.clone(),
             empty.clone(),
             1,
+            false,
             serde_json::json!([]),
         )
         .await?;
@@ -400,6 +418,7 @@ mod tests {
             empty.clone(),
             empty.clone(),
             0,
+            true,
             serde_json::json!([]),
         )
         .await?;
@@ -414,6 +433,7 @@ mod tests {
             empty.clone(),
             empty.clone(),
             1,
+            false,
             serde_json::json!([]),
         )
         .await?;
@@ -428,6 +448,7 @@ mod tests {
             empty.clone(),
             empty.clone(),
             2,
+            false,
             serde_json::json!([]),
         )
         .await?;
@@ -459,6 +480,7 @@ mod tests {
             empty.clone(),
             empty.clone(),
             0,
+            false,
             serde_json::json!([]),
         )
         .await?;

@@ -16,6 +16,7 @@ pub struct Model {
     pub tags: Json,
     pub data: Json,
     pub is_public: bool,
+    pub instrument_type: String,
     pub is_deleted: bool,
     pub is_favorite: bool,
     pub is_template: bool,

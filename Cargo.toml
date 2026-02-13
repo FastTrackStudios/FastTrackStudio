@@ -12,6 +12,7 @@ members = [
     "modules/actions/actions-standalone",
     "modules/actions/actions-keybindings",
     "modules/actions/input-dioxus",
+    "modules/actions/input-reaper",
     "modules/actions/input",
     "libs/*",
     "xtask",
@@ -138,6 +139,7 @@ actions-registry = { path = "modules/actions/actions-registry" }
 actions-standalone = { path = "modules/actions/actions-standalone" }
 actions-keybindings = { path = "modules/actions/actions-keybindings" }
 input-dioxus = { path = "modules/actions/input-dioxus" }
+input-reaper = { path = "modules/actions/input-reaper" }
 input = { path = "modules/actions/input" }
 
 # REAPER extension dependencies
