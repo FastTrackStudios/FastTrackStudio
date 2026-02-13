@@ -13,14 +13,15 @@ use facet::Facet;
 use serde::{Deserialize, Serialize};
 
 // ─── Domain modules ─────────────────────────────────────────────
+pub mod engine;
+pub mod layer;
 pub mod metadata;
 pub mod overrides;
-pub mod layer;
-pub mod engine;
-pub mod rig;
 pub mod profile;
+pub mod rig;
 pub mod song;
 pub mod template;
+pub mod traits;
 
 /// Creates a branded string ID type with Display, From, and AsRef impls.
 #[macro_export]

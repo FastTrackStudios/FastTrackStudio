@@ -3,7 +3,7 @@
 //! A [`Layer`] groups module references and standalone block references
 //! into a processing lane. Layers live inside Engines.
 //!
-//! [`LayerVariant`] captures a specific configuration of a Layer,
+//! [`LayerSnapshot`] captures a specific configuration of a Layer,
 //! selecting which module/block variants to use plus optional overrides.
 
 use facet::Facet;
@@ -21,7 +21,7 @@ crate::typed_string_id!(
 );
 crate::typed_string_id!(
     /// Identifies a specific Layer variant.
-    LayerVariantId
+    LayerSnapshotId
 );
 
 // ─── Module reference ───────────────────────────────────────────
@@ -76,12 +76,12 @@ impl BlockRef {
     }
 }
 
-// ─── LayerVariant ───────────────────────────────────────────────
+// ─── LayerSnapshot ───────────────────────────────────────────────
 
 /// A specific configuration of a Layer — which modules and blocks to use.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
-pub struct LayerVariant {
-    pub id: LayerVariantId,
+pub struct LayerSnapshot {
+    pub id: LayerSnapshotId,
     pub name: String,
     pub module_refs: Vec<ModuleRef>,
     pub block_refs: Vec<BlockRef>,
@@ -90,8 +90,8 @@ pub struct LayerVariant {
     pub metadata: Metadata,
 }
 
-impl LayerVariant {
-    pub fn new(id: impl Into<LayerVariantId>, name: impl Into<String>) -> Self {
+impl LayerSnapshot {
+    pub fn new(id: impl Into<LayerSnapshotId>, name: impl Into<String>) -> Self {
         Self {
             id: id.into(),
             name: name.into(),
@@ -135,8 +135,8 @@ impl LayerVariant {
 pub struct Layer {
     pub id: LayerId,
     pub name: String,
-    pub default_variant_id: LayerVariantId,
-    pub variants: Vec<LayerVariant>,
+    pub default_variant_id: LayerSnapshotId,
+    pub variants: Vec<LayerSnapshot>,
     pub metadata: Metadata,
 }
 
@@ -144,7 +144,7 @@ impl Layer {
     pub fn new(
         id: impl Into<LayerId>,
         name: impl Into<String>,
-        default_variant: LayerVariant,
+        default_variant: LayerSnapshot,
     ) -> Self {
         let default_variant_id = default_variant.id.clone();
         Self {
@@ -156,17 +156,17 @@ impl Layer {
         }
     }
 
-    pub fn add_variant(&mut self, variant: LayerVariant) {
+    pub fn add_variant(&mut self, variant: LayerSnapshot) {
         self.variants.push(variant);
     }
 
-    pub fn default_variant(&self) -> Option<&LayerVariant> {
+    pub fn default_variant(&self) -> Option<&LayerSnapshot> {
         self.variants
             .iter()
             .find(|v| v.id == self.default_variant_id)
     }
 
-    pub fn variant(&self, id: &LayerVariantId) -> Option<&LayerVariant> {
+    pub fn variant(&self, id: &LayerSnapshotId) -> Option<&LayerSnapshot> {
         self.variants.iter().find(|v| &v.id == id)
     }
 
@@ -183,8 +183,7 @@ mod tests {
 
     #[test]
     fn test_layer_creation() {
-        let variant = LayerVariant::new("v1", "Default")
-            .with_module(ModuleRef::new("mod-drive"));
+        let variant = LayerSnapshot::new("v1", "Default").with_module(ModuleRef::new("mod-drive"));
 
         let layer = Layer::new("layer-1", "Main Layer", variant);
         assert_eq!(layer.name, "Main Layer");
@@ -194,13 +193,13 @@ mod tests {
 
     #[test]
     fn test_layer_multiple_variants() {
-        let v1 = LayerVariant::new("v1", "Clean");
-        let v2 = LayerVariant::new("v2", "Heavy");
+        let v1 = LayerSnapshot::new("v1", "Clean");
+        let v2 = LayerSnapshot::new("v2", "Heavy");
 
         let mut layer = Layer::new("layer-1", "Guitar", v1);
         layer.add_variant(v2);
 
         assert_eq!(layer.variants.len(), 2);
-        assert!(layer.variant(&LayerVariantId::new("v2")).is_some());
+        assert!(layer.variant(&LayerSnapshotId::new("v2")).is_some());
     }
 }

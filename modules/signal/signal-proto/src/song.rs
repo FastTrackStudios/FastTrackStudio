@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::metadata::Metadata;
 use crate::overrides::Override;
 use crate::profile::PatchId;
-use crate::rig::{RigId, RigVariantId};
+use crate::rig::{RigId, RigSceneId};
 
 // ─── IDs ────────────────────────────────────────────────────────
 
@@ -30,11 +30,8 @@ crate::typed_string_id!(
 pub enum SectionSource {
     /// Reference a Patch from a Profile.
     Patch { patch_id: PatchId },
-    /// Reference a Rig variant directly.
-    RigVariant {
-        rig_id: RigId,
-        variant_id: RigVariantId,
-    },
+    /// Reference a Rig scene directly.
+    RigScene { rig_id: RigId, scene_id: RigSceneId },
 }
 
 // ─── Section ────────────────────────────────────────────────────
@@ -66,18 +63,18 @@ impl Section {
         }
     }
 
-    pub fn from_rig_variant(
+    pub fn from_rig_scene(
         id: impl Into<SectionId>,
         name: impl Into<String>,
         rig_id: impl Into<RigId>,
-        variant_id: impl Into<RigVariantId>,
+        scene_id: impl Into<RigSceneId>,
     ) -> Self {
         Self {
             id: id.into(),
             name: name.into(),
-            source: SectionSource::RigVariant {
+            source: SectionSource::RigScene {
                 rig_id: rig_id.into(),
-                variant_id: variant_id.into(),
+                scene_id: scene_id.into(),
             },
             overrides: Vec::new(),
             metadata: Metadata::new(),
@@ -111,11 +108,7 @@ pub struct Song {
 }
 
 impl Song {
-    pub fn new(
-        id: impl Into<SongId>,
-        name: impl Into<String>,
-        default_section: Section,
-    ) -> Self {
+    pub fn new(id: impl Into<SongId>, name: impl Into<String>, default_section: Section) -> Self {
         let default_section_id = default_section.id.clone();
         Self {
             id: id.into(),
@@ -163,8 +156,7 @@ mod tests {
         let verse = Section::from_patch("sec-verse", "Verse", "patch-clean");
         let chorus = Section::from_patch("sec-chorus", "Chorus", "patch-lead");
 
-        let mut song = Song::new("song-1", "Amazing Grace", verse)
-            .with_artist("Traditional");
+        let mut song = Song::new("song-1", "Amazing Grace", verse).with_artist("Traditional");
         song.add_section(chorus);
 
         assert_eq!(song.name, "Amazing Grace");
@@ -174,14 +166,14 @@ mod tests {
     }
 
     #[test]
-    fn test_section_from_rig_variant() {
-        let section = Section::from_rig_variant("sec-1", "Intro", "rig-1", "rv-ambient");
+    fn test_section_from_rig_scene() {
+        let section = Section::from_rig_scene("sec-1", "Intro", "rig-1", "rv-ambient");
         match &section.source {
-            SectionSource::RigVariant { rig_id, variant_id } => {
+            SectionSource::RigScene { rig_id, scene_id } => {
                 assert_eq!(rig_id.as_str(), "rig-1");
-                assert_eq!(variant_id.as_str(), "rv-ambient");
+                assert_eq!(scene_id.as_str(), "rv-ambient");
             }
-            _ => panic!("expected RigVariant source"),
+            _ => panic!("expected RigScene source"),
         }
     }
 }

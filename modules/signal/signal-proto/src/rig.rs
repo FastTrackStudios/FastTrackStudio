@@ -1,12 +1,12 @@
 //! Rig domain — complete instrument setups with scene-style variants.
 //!
-//! A [`Rig`] groups one or more Engines. [`RigVariant`] selects which
+//! A [`Rig`] groups one or more Engines. [`RigScene`] selects which
 //! engine variant to use for each engine, forming a top-level "scene".
 
 use facet::Facet;
 use serde::{Deserialize, Serialize};
 
-use crate::engine::{EngineId, EngineVariantId};
+use crate::engine::{EngineId, EngineSceneId};
 use crate::metadata::Metadata;
 use crate::overrides::Override;
 
@@ -18,7 +18,7 @@ crate::typed_string_id!(
 );
 crate::typed_string_id!(
     /// Identifies a specific Rig variant (scene).
-    RigVariantId
+    RigSceneId
 );
 crate::typed_string_id!(
     /// Categorizes a Rig by instrument type (e.g. "guitar", "bass", "keys").
@@ -31,14 +31,11 @@ crate::typed_string_id!(
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct EngineSelection {
     pub engine_id: EngineId,
-    pub variant_id: EngineVariantId,
+    pub variant_id: EngineSceneId,
 }
 
 impl EngineSelection {
-    pub fn new(
-        engine_id: impl Into<EngineId>,
-        variant_id: impl Into<EngineVariantId>,
-    ) -> Self {
+    pub fn new(engine_id: impl Into<EngineId>, variant_id: impl Into<EngineSceneId>) -> Self {
         Self {
             engine_id: engine_id.into(),
             variant_id: variant_id.into(),
@@ -46,20 +43,20 @@ impl EngineSelection {
     }
 }
 
-// ─── RigVariant ─────────────────────────────────────────────────
+// ─── RigScene ─────────────────────────────────────────────────
 
 /// A scene-style variant for a Rig — selects engine variants and overrides.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
-pub struct RigVariant {
-    pub id: RigVariantId,
+pub struct RigScene {
+    pub id: RigSceneId,
     pub name: String,
     pub engine_selections: Vec<EngineSelection>,
     pub overrides: Vec<Override>,
     pub metadata: Metadata,
 }
 
-impl RigVariant {
-    pub fn new(id: impl Into<RigVariantId>, name: impl Into<String>) -> Self {
+impl RigScene {
+    pub fn new(id: impl Into<RigSceneId>, name: impl Into<String>) -> Self {
         Self {
             id: id.into(),
             name: name.into(),
@@ -97,8 +94,8 @@ pub struct Rig {
     pub name: String,
     pub rig_type_id: Option<RigTypeId>,
     pub engine_ids: Vec<EngineId>,
-    pub default_variant_id: RigVariantId,
-    pub variants: Vec<RigVariant>,
+    pub default_variant_id: RigSceneId,
+    pub variants: Vec<RigScene>,
     pub metadata: Metadata,
 }
 
@@ -107,7 +104,7 @@ impl Rig {
         id: impl Into<RigId>,
         name: impl Into<String>,
         engine_ids: Vec<EngineId>,
-        default_variant: RigVariant,
+        default_variant: RigScene,
     ) -> Self {
         let default_variant_id = default_variant.id.clone();
         Self {
@@ -121,17 +118,17 @@ impl Rig {
         }
     }
 
-    pub fn add_variant(&mut self, variant: RigVariant) {
+    pub fn add_variant(&mut self, variant: RigScene) {
         self.variants.push(variant);
     }
 
-    pub fn default_variant(&self) -> Option<&RigVariant> {
+    pub fn default_variant(&self) -> Option<&RigScene> {
         self.variants
             .iter()
             .find(|v| v.id == self.default_variant_id)
     }
 
-    pub fn variant(&self, id: &RigVariantId) -> Option<&RigVariant> {
+    pub fn variant(&self, id: &RigSceneId) -> Option<&RigScene> {
         self.variants.iter().find(|v| &v.id == id)
     }
 
@@ -154,7 +151,7 @@ mod tests {
 
     #[test]
     fn test_rig_creation() {
-        let variant = RigVariant::new("rv1", "Default Scene")
+        let variant = RigScene::new("rv1", "Default Scene")
             .with_engine(EngineSelection::new("engine-1", "ev1"));
 
         let rig = Rig::new(

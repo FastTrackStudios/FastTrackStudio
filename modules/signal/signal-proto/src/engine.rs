@@ -1,12 +1,12 @@
 //! Engine domain — containers for layers with scene-style variants.
 //!
-//! An [`Engine`] groups one or more Layers. [`EngineVariant`] selects which
+//! An [`Engine`] groups one or more Layers. [`EngineScene`] selects which
 //! layer variant to use for each layer, forming a "scene" of the engine.
 
 use facet::Facet;
 use serde::{Deserialize, Serialize};
 
-use crate::layer::{LayerId, LayerVariantId};
+use crate::layer::{LayerId, LayerSnapshotId};
 use crate::metadata::Metadata;
 use crate::overrides::Override;
 
@@ -18,7 +18,7 @@ crate::typed_string_id!(
 );
 crate::typed_string_id!(
     /// Identifies a specific Engine variant (scene).
-    EngineVariantId
+    EngineSceneId
 );
 
 // ─── Layer selection ────────────────────────────────────────────
@@ -27,14 +27,11 @@ crate::typed_string_id!(
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct LayerSelection {
     pub layer_id: LayerId,
-    pub variant_id: LayerVariantId,
+    pub variant_id: LayerSnapshotId,
 }
 
 impl LayerSelection {
-    pub fn new(
-        layer_id: impl Into<LayerId>,
-        variant_id: impl Into<LayerVariantId>,
-    ) -> Self {
+    pub fn new(layer_id: impl Into<LayerId>, variant_id: impl Into<LayerSnapshotId>) -> Self {
         Self {
             layer_id: layer_id.into(),
             variant_id: variant_id.into(),
@@ -42,20 +39,20 @@ impl LayerSelection {
     }
 }
 
-// ─── EngineVariant ──────────────────────────────────────────────
+// ─── EngineScene ──────────────────────────────────────────────
 
 /// A scene-style variant for an Engine — selects layer variants and overrides.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
-pub struct EngineVariant {
-    pub id: EngineVariantId,
+pub struct EngineScene {
+    pub id: EngineSceneId,
     pub name: String,
     pub layer_selections: Vec<LayerSelection>,
     pub overrides: Vec<Override>,
     pub metadata: Metadata,
 }
 
-impl EngineVariant {
-    pub fn new(id: impl Into<EngineVariantId>, name: impl Into<String>) -> Self {
+impl EngineScene {
+    pub fn new(id: impl Into<EngineSceneId>, name: impl Into<String>) -> Self {
         Self {
             id: id.into(),
             name: name.into(),
@@ -92,8 +89,8 @@ pub struct Engine {
     pub id: EngineId,
     pub name: String,
     pub layer_ids: Vec<LayerId>,
-    pub default_variant_id: EngineVariantId,
-    pub variants: Vec<EngineVariant>,
+    pub default_variant_id: EngineSceneId,
+    pub variants: Vec<EngineScene>,
     pub metadata: Metadata,
 }
 
@@ -102,7 +99,7 @@ impl Engine {
         id: impl Into<EngineId>,
         name: impl Into<String>,
         layer_ids: Vec<LayerId>,
-        default_variant: EngineVariant,
+        default_variant: EngineScene,
     ) -> Self {
         let default_variant_id = default_variant.id.clone();
         Self {
@@ -115,17 +112,17 @@ impl Engine {
         }
     }
 
-    pub fn add_variant(&mut self, variant: EngineVariant) {
+    pub fn add_variant(&mut self, variant: EngineScene) {
         self.variants.push(variant);
     }
 
-    pub fn default_variant(&self) -> Option<&EngineVariant> {
+    pub fn default_variant(&self) -> Option<&EngineScene> {
         self.variants
             .iter()
             .find(|v| v.id == self.default_variant_id)
     }
 
-    pub fn variant(&self, id: &EngineVariantId) -> Option<&EngineVariant> {
+    pub fn variant(&self, id: &EngineSceneId) -> Option<&EngineScene> {
         self.variants.iter().find(|v| &v.id == id)
     }
 
@@ -142,7 +139,7 @@ mod tests {
 
     #[test]
     fn test_engine_creation() {
-        let variant = EngineVariant::new("ev1", "Default Scene")
+        let variant = EngineScene::new("ev1", "Default Scene")
             .with_layer(LayerSelection::new("layer-1", "v1"));
 
         let engine = Engine::new(

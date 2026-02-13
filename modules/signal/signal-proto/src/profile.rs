@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::metadata::Metadata;
 use crate::overrides::Override;
-use crate::rig::{RigId, RigVariantId};
+use crate::rig::{RigId, RigSceneId};
 
 // ─── IDs ────────────────────────────────────────────────────────
 
@@ -30,7 +30,7 @@ pub struct Patch {
     pub id: PatchId,
     pub name: String,
     pub rig_id: RigId,
-    pub rig_variant_id: RigVariantId,
+    pub rig_variant_id: RigSceneId,
     pub overrides: Vec<Override>,
     pub metadata: Metadata,
 }
@@ -40,7 +40,7 @@ impl Patch {
         id: impl Into<PatchId>,
         name: impl Into<String>,
         rig_id: impl Into<RigId>,
-        rig_variant_id: impl Into<RigVariantId>,
+        rig_variant_id: impl Into<RigSceneId>,
     ) -> Self {
         Self {
             id: id.into(),
@@ -78,11 +78,7 @@ pub struct Profile {
 }
 
 impl Profile {
-    pub fn new(
-        id: impl Into<ProfileId>,
-        name: impl Into<String>,
-        default_patch: Patch,
-    ) -> Self {
+    pub fn new(id: impl Into<ProfileId>, name: impl Into<String>, default_patch: Patch) -> Self {
         let default_patch_id = default_patch.id.clone();
         Self {
             id: id.into(),
@@ -98,9 +94,7 @@ impl Profile {
     }
 
     pub fn default_patch(&self) -> Option<&Patch> {
-        self.patches
-            .iter()
-            .find(|p| p.id == self.default_patch_id)
+        self.patches.iter().find(|p| p.id == self.default_patch_id)
     }
 
     pub fn patch(&self, id: &PatchId) -> Option<&Patch> {
