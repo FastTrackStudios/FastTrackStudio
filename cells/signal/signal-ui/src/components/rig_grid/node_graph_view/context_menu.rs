@@ -32,6 +32,15 @@ pub(crate) struct ContextMenuPopupProps {
     pub on_bypass: Callback<Uuid>,
     pub on_delete: Callback<Uuid>,
     pub on_duplicate: Callback<Uuid>,
+    /// Callback when collapse/expand is toggled (module ID).
+    #[props(default)]
+    pub on_toggle_collapse: Option<Callback<Uuid>>,
+    /// Callback when "Save as Preset" is selected (module ID).
+    #[props(default)]
+    pub on_save_preset: Option<Callback<Uuid>>,
+    /// Callback when "Load Preset" is selected (module ID).
+    #[props(default)]
+    pub on_load_preset: Option<Callback<Uuid>>,
 }
 
 #[component]
@@ -58,10 +67,22 @@ pub(crate) fn ContextMenuPopup(props: ContextMenuPopupProps) -> Element {
 
     let bypass_label = if is_bypassed { "Enable" } else { "Bypass" };
 
+    // Check current collapsed state (modules only)
+    let is_collapsed = if is_module {
+        let graph = RIG_NODE_GRAPH.read();
+        graph.find_module(entity_id).map_or(false, |m| m.collapsed)
+    } else {
+        false
+    };
+    let collapse_label = if is_collapsed { "Expand" } else { "Collapse" };
+
     let on_close = props.on_close.clone();
     let on_bypass = props.on_bypass.clone();
     let on_delete = props.on_delete.clone();
     let on_duplicate = props.on_duplicate.clone();
+    let on_toggle_collapse = props.on_toggle_collapse.clone();
+    let on_save_preset = props.on_save_preset.clone();
+    let on_load_preset = props.on_load_preset.clone();
 
     rsx! {
         // Backdrop to close menu
@@ -94,6 +115,43 @@ pub(crate) fn ContextMenuPopup(props: ContextMenuPopupProps) -> Element {
                     label: "Duplicate",
                     shortcut: "",
                     on_click: move |_| on_duplicate.call(entity_id),
+                }
+            }
+
+            // Collapse/Expand (modules only)
+            if is_module {
+                ContextMenuItem {
+                    label: collapse_label,
+                    shortcut: "C",
+                    on_click: move |_| {
+                        if let Some(ref cb) = on_toggle_collapse {
+                            cb.call(entity_id);
+                        }
+                    },
+                }
+            }
+
+            // Preset actions (modules only)
+            if is_module {
+                div { class: "my-1 border-t border-zinc-700" }
+
+                ContextMenuItem {
+                    label: "Save as Preset",
+                    shortcut: "",
+                    on_click: move |_| {
+                        if let Some(ref cb) = on_save_preset {
+                            cb.call(entity_id);
+                        }
+                    },
+                }
+                ContextMenuItem {
+                    label: "Load Preset",
+                    shortcut: "",
+                    on_click: move |_| {
+                        if let Some(ref cb) = on_load_preset {
+                            cb.call(entity_id);
+                        }
+                    },
                 }
             }
 

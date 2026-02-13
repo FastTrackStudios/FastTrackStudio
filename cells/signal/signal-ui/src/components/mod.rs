@@ -1,8 +1,10 @@
 pub mod advanced_inspector;
+pub mod automation_lane;
 pub mod block_editor;
 pub mod daw_preset_panel;
 pub mod daw_snapshot_panel;
 pub mod fx_binding_status;
+pub mod midi_learn;
 pub mod module_editor;
 pub mod morph_slider;
 pub mod performance;
@@ -15,6 +17,11 @@ pub mod song_editor;
 
 // Re-export morph slider
 pub use morph_slider::MorphSlider;
+
+// Re-export MIDI learn components
+pub use midi_learn::{
+    handle_midi_cc, MidiActivityIndicator, MidiCcMappingList, MidiCcSettings, MidiLearnButton,
+};
 
 // Re-export shared components
 pub use shared::{CreateEntityModal, EntityKind};

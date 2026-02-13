@@ -41,6 +41,7 @@
 mod error;
 mod services;
 mod types;
+pub mod actions;
 
 pub use error::*;
 pub use services::*;

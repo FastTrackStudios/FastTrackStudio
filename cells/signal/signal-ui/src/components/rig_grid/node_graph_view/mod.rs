@@ -274,6 +274,13 @@ pub fn NodeGraphView(props: NodeGraphViewProps) -> Element {
                             _ => {}
                         }
                     }
+                    Key::Character(ref c) if c == "c" || c == "C" => {
+                        if let Selection::Module(module_id) = selection() {
+                            RIG_NODE_GRAPH.write().find_module_mut(module_id).map(|m| {
+                                m.collapsed = !m.collapsed;
+                            });
+                        }
+                    }
                     _ => {}
                 }
             },
@@ -412,11 +419,46 @@ pub fn NodeGraphView(props: NodeGraphViewProps) -> Element {
                 zoom.set(new_zoom);
             },
 
-            // ── Canvas Mode Toggles ─────────────────────────
+            // ── Canvas Mode Toggles + Collapse All/Expand All ─
             if !compact {
                 div {
                     class: "absolute top-3 right-3 z-30 flex gap-2 select-none",
                     onmousedown: move |evt| evt.stop_propagation(),
+
+                    // Collapse All / Expand All (only in Node view)
+                    if canvas_mode() == CanvasViewMode::Node {
+                        button {
+                            class: "px-3 py-1.5 rounded-lg text-xs font-medium text-zinc-300 hover:text-white transition-colors",
+                            style: "background-color: rgba(0,0,0,0.6); backdrop-filter: blur(8px);",
+                            title: "Collapse all modules",
+                            onclick: move |_| {
+                                let mut graph = RIG_NODE_GRAPH.write();
+                                for m in graph.modules.iter_mut() {
+                                    m.collapsed = true;
+                                }
+                            },
+                            "Collapse All"
+                        }
+
+                        button {
+                            class: "px-3 py-1.5 rounded-lg text-xs font-medium text-zinc-300 hover:text-white transition-colors",
+                            style: "background-color: rgba(0,0,0,0.6); backdrop-filter: blur(8px);",
+                            title: "Expand all modules",
+                            onclick: move |_| {
+                                let mut graph = RIG_NODE_GRAPH.write();
+                                for m in graph.modules.iter_mut() {
+                                    m.collapsed = false;
+                                }
+                            },
+                            "Expand All"
+                        }
+
+                        // Separator
+                        div {
+                            class: "w-px h-6 self-center",
+                            style: "background-color: rgba(255,255,255,0.15);",
+                        }
+                    }
 
                     button {
                         class: if canvas_mode() == CanvasViewMode::Node {
@@ -681,6 +723,20 @@ pub fn NodeGraphView(props: NodeGraphViewProps) -> Element {
                             _ => {}
                         }
                     },
+                    on_toggle_collapse: move |id: Uuid| {
+                        context_menu.set(None);
+                        RIG_NODE_GRAPH.write().find_module_mut(id).map(|m| {
+                            m.collapsed = !m.collapsed;
+                        });
+                    },
+                    on_save_preset: move |id: Uuid| {
+                        context_menu.set(None);
+                        *crate::components::rig_grid::module_preset_manager::MODULE_PRESET_SAVE_OPEN.write() = Some(id);
+                    },
+                    on_load_preset: move |id: Uuid| {
+                        context_menu.set(None);
+                        *crate::components::rig_grid::module_preset_manager::MODULE_PRESET_LOAD_OPEN.write() = Some(id);
+                    },
                 }
             }
 
@@ -771,7 +827,8 @@ pub fn NodeGraphView(props: NodeGraphViewProps) -> Element {
                         render_graph.find_module(id)
                             .map(|m| {
                                 let bypass_status = if m.bypassed { " [BYPASSED]" } else { "" };
-                                format!("{}{} -- Del: remove, B: bypass, Esc: deselect", m.name, bypass_status)
+                                let collapse_status = if m.collapsed { " [COLLAPSED]" } else { "" };
+                                format!("{}{}{} -- Del: remove, B: bypass, C: collapse, Esc: deselect", m.name, bypass_status, collapse_status)
                             })
                             .unwrap_or_default()
                     }

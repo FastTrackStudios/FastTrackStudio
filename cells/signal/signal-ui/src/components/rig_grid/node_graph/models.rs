@@ -359,6 +359,9 @@ pub struct GraphModule {
     pub position: NodePosition,
     pub size: NodeSize,
     pub bypassed: bool,
+    /// Whether this module is collapsed (hiding internal nodes/wires).
+    #[facet(default)]
+    pub collapsed: bool,
     pub nodes: Vec<Node>,
     pub internal_wires: Vec<Wire>,
     pub inputs: Vec<NodePort>,
@@ -374,6 +377,7 @@ impl GraphModule {
             position,
             size: NodeSize::new(500.0, 300.0),
             bypassed: false,
+            collapsed: false,
             nodes: Vec::new(),
             internal_wires: Vec::new(),
             inputs: vec![

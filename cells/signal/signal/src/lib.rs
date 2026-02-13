@@ -34,9 +34,9 @@
 // signal::engine (runtime types like ModuleTarget, InstanceState).
 // Access proto Engine via signal::preset::EnginePreset or signal_proto::engine directly.
 pub use signal_proto::{
-    active, block, category, container, defaults, director, id, layer, module, non_empty,
-    normalized, override_tree, parameter, preset, profile, rack, rig, routing, scene, snapshot,
-    song, source, tags, template, version,
+    active, automation, block, category, container, defaults, director, id, layer, midi, module,
+    non_empty, normalized, override_tree, parameter, preset, profile, rack, rig, routing, scene,
+    snapshot, song, source, tags, template, version,
 };
 
 // Re-export foundation types at crate root for convenience

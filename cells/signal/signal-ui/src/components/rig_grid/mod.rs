@@ -39,6 +39,7 @@ pub mod module_detail_view;
 pub mod module_group;
 pub mod module_header;
 pub mod module_macro_view;
+pub mod module_preset_manager;
 pub mod profile_sidebar;
 pub mod right_sidebar;
 pub mod top_bar;
@@ -71,6 +72,7 @@ pub use view_mode::{ModuleViewMode, RigViewMode};
 // Page layout components
 pub use left_sidebar::GuitarRigLeftSidebar;
 pub use module_browser_modal::ModuleBrowserModal;
+pub use module_preset_manager::{ModulePresetBrowser, ModulePresetSaveDialog};
 pub use profile_sidebar::GuitarRigProfileSidebar;
 pub use right_sidebar::{GuitarRigRightSidebar, SceneListPanel, SongListPanel};
 pub use top_bar::GuitarRigTopBar;

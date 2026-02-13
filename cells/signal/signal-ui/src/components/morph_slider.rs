@@ -9,14 +9,17 @@
 //! └──────────────────────────────────────────────────────┘
 //! ```
 
+use crate::components::midi_learn::{MidiActivityIndicator, MidiLearnButton};
 use crate::prelude::*;
+use facet::Facet;
+use signal_control::midi::MidiTarget;
 use uuid::Uuid;
 
 /// Snapshot reference for morph slider A/B endpoints.
 ///
 /// This is a UI-local type since `RigPresetInfo` no longer carries inline
 /// snapshot data. Created from DB snapshot queries.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Facet)]
 pub struct SnapshotRef {
     pub id: Uuid,
     pub name: String,
@@ -156,6 +159,30 @@ pub fn MorphSlider(props: MorphSliderProps) -> Element {
                             &props.on_assign_b,
                             &mut dropdown_b_open,
                         )}
+                    }
+                }
+            }
+
+            // MIDI CC control row
+            div { class: "flex items-center gap-2 px-1",
+                MidiLearnButton {
+                    target: MidiTarget::MorphSlider,
+                    compact: true,
+                }
+                MidiActivityIndicator {
+                    mode: "bar".to_string(),
+                }
+                // Show current mapping info if one exists for morph slider
+                {
+                    let mappings = crate::signals::MIDI_CC_MAPPINGS.read();
+                    let morph_mapping = mappings.iter().find(|m| m.target == MidiTarget::MorphSlider);
+                    if let Some(m) = morph_mapping {
+                        let info = format!("Ch{} CC#{}", m.channel + 1, m.cc_number);
+                        rsx! {
+                            span { class: "text-[10px] text-zinc-500 font-mono", "{info}" }
+                        }
+                    } else {
+                        rsx! {}
                     }
                 }
             }

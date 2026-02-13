@@ -20,6 +20,9 @@ use crate::components::module_editor::UnifiedGridEditor;
 use crate::components::rig_grid::guitar_rig_grid::GuitarRigGrid;
 use crate::components::rig_grid::left_sidebar::GuitarRigLeftSidebar;
 use crate::components::rig_grid::module_browser_modal::ModuleBrowserModal;
+use crate::components::rig_grid::module_preset_manager::{
+    ModulePresetBrowser, ModulePresetSaveDialog,
+};
 use crate::components::rig_grid::node_property_panel::NodePropertyPanel;
 use crate::components::rig_grid::profile_sidebar::GuitarRigProfileSidebar;
 use crate::components::rig_grid::right_sidebar::{
@@ -236,6 +239,10 @@ fn RigLayoutInner() -> Element {
                     on_close: Callback::new(move |_| create_modal_kind.set(None)),
                 }
             }
+
+            // Module preset save/load dialogs (driven by global signals)
+            ModulePresetSaveDialog {}
+            ModulePresetBrowser {}
         }
     }
 }

@@ -45,9 +45,9 @@ use signal::RigControlService;
 
 // Re-export domain type modules from signal-proto (via signal)
 pub use signal::{
-    active, block, category, container, defaults, director, id, layer, module, non_empty,
-    normalized, override_tree, parameter, preset, profile, rack, rig, routing, scene, snapshot,
-    song, source, tags, template, version,
+    active, automation, block, category, container, defaults, director, id, layer, midi, module,
+    non_empty, normalized, override_tree, parameter, preset, profile, rack, rig, routing, scene,
+    snapshot, song, source, tags, template, version,
 };
 
 // Re-export service/engine types that consumers need

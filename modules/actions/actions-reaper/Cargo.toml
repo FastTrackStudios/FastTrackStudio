@@ -1,0 +1,18 @@
+[package]
+name = "actions-reaper"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+actions-proto.workspace = true
+actions-registry.workspace = true
+roam.workspace = true
+reaper-high.workspace = true
+reaper-medium.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

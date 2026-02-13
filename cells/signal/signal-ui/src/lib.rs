@@ -16,6 +16,7 @@ pub mod prelude;
 pub mod signals;
 
 // Re-exports for desktop app
+pub use components::automation_lane::{AutomationLane, AutomationLanePanel, AutomationToolbar};
 pub use components::daw_preset_panel::{
     DawPresetEntry, DawPresetPanel, DAW_ACTIVE_PRESET, DAW_PRESETS,
 };
@@ -26,7 +27,12 @@ pub use components::daw_snapshot_panel::{
 pub use components::fx_binding_status::FxBindingStatus;
 pub use components::snapshot_test_harness::SnapshotTestHarness;
 pub use components::MorphSlider;
-pub use context::rig::{use_rig_service, RigService, RigServiceProvider};
+pub use components::{
+    handle_midi_cc, MidiActivityIndicator, MidiCcMappingList, MidiCcSettings, MidiLearnButton,
+};
+pub use context::rig::{
+    detect_service_mode, use_rig_service, RigService, RigServiceMode, RigServiceProvider,
+};
 pub use context::rig_grid::{use_rig_grid_state, RigGridState, RigGridStateProvider};
 pub use hooks::rig_actions::{use_rig_actions, CreateEntityData, RigActions};
 pub use hooks::rig_state::use_rig_subscription;

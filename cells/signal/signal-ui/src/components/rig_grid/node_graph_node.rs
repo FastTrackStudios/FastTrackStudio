@@ -87,6 +87,24 @@ pub(crate) fn NodeBlock(props: NodeBlockProps) -> Element {
         "grab"
     };
 
+    // Display label: prefer short_label (alias) over name
+    let display_label = node.short_label.as_deref().unwrap_or(&node.name);
+
+    // Tooltip: show description if available, otherwise show the full name
+    // (useful when short_label is displayed instead of the full name)
+    let tooltip = node
+        .description
+        .as_deref()
+        .or_else(|| {
+            // If we're showing a short_label, show the full name as tooltip
+            if node.short_label.is_some() {
+                Some(node.name.as_str())
+            } else {
+                None
+            }
+        })
+        .unwrap_or("");
+
     // Selection glow
     let selection_style = if props.is_selected {
         "box-shadow: 0 0 12px 2px rgba(34,211,238,0.5); border-color: #22d3ee !important;"
@@ -96,9 +114,9 @@ pub(crate) fn NodeBlock(props: NodeBlockProps) -> Element {
 
     let node_class = if node.is_placeholder {
         if props.compact {
-            "absolute rounded overflow-hidden border border-dashed transition-shadow duration-150 opacity-50"
+            "absolute rounded overflow-hidden border border-dashed transition-shadow duration-150 opacity-40"
         } else {
-            "absolute rounded-lg overflow-hidden shadow-md border-2 border-dashed transition-shadow duration-150 opacity-50"
+            "absolute rounded-lg overflow-hidden shadow-md border-2 border-dashed transition-shadow duration-150 opacity-40"
         }
     } else if props.compact {
         "absolute rounded overflow-hidden border transition-shadow duration-150"
@@ -117,6 +135,7 @@ pub(crate) fn NodeBlock(props: NodeBlockProps) -> Element {
             class: "{node_class}",
             style: "left: {x}px; top: {y}px; width: {w}px; height: {h}px; \
                     {style_str} opacity: {opacity}; {selection_style}",
+            title: "{tooltip}",
             // Click on node to select (but don't start pan)
             onmousedown: move |evt| {
                 evt.stop_propagation();
@@ -144,7 +163,14 @@ pub(crate) fn NodeBlock(props: NodeBlockProps) -> Element {
                         }
                     }
                 },
-                span { class: "truncate", "{node.name}" }
+                // Placeholder "+" affordance before the label
+                if node.is_placeholder {
+                    span {
+                        class: "flex-shrink-0 mr-1 text-[10px] opacity-70",
+                        "+"
+                    }
+                }
+                span { class: "truncate", "{display_label}" }
                 if node.bypassed {
                     span { class: "text-[8px] opacity-50 flex-shrink-0 ml-1", "BYP" }
                 }
@@ -152,14 +178,33 @@ pub(crate) fn NodeBlock(props: NodeBlockProps) -> Element {
 
             // Content area — in compact mode, show nothing (just the header)
             if !props.compact {
-                div {
-                    class: "flex-1 overflow-hidden",
-                    style: "height: {content_h}px;",
-                    NodeWidgetContent {
-                        widget: node.widget,
-                        width: content_w,
-                        height: content_h,
-                        bypassed: node.bypassed,
+                if node.is_placeholder {
+                    // Placeholder content: centered "+" assign affordance
+                    div {
+                        class: "flex-1 flex items-center justify-center overflow-hidden",
+                        style: "height: {content_h}px;",
+                        div {
+                            class: "flex flex-col items-center gap-1 opacity-60",
+                            span {
+                                class: "text-xl font-light leading-none",
+                                "+"
+                            }
+                            span {
+                                class: "text-[9px] uppercase tracking-wider",
+                                "Assign"
+                            }
+                        }
+                    }
+                } else {
+                    div {
+                        class: "flex-1 overflow-hidden",
+                        style: "height: {content_h}px;",
+                        NodeWidgetContent {
+                            widget: node.widget,
+                            width: content_w,
+                            height: content_h,
+                            bypassed: node.bypassed,
+                        }
                     }
                 }
             }

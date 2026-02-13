@@ -256,6 +256,22 @@ impl ActionResult {
     }
 }
 
+/// Local host-side implementation for an action definition.
+#[derive(Clone)]
+pub enum LocalActionImplementation {
+    /// Action is supported and can be executed in-process.
+    Supported(std::sync::Arc<dyn Fn() -> ActionResult + Send + Sync>),
+    /// Action is intentionally unsupported in this host/runtime.
+    Unsupported(&'static str),
+}
+
+/// Typed local action registration entry.
+#[derive(Clone)]
+pub struct LocalActionRegistration {
+    pub definition: ActionDefinition,
+    pub implementation: LocalActionImplementation,
+}
+
 /// Event emitted when actions change
 #[derive(Debug, Clone)]
 pub enum ActionEvent {

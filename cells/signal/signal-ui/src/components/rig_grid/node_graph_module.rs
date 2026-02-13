@@ -2,9 +2,10 @@
 //!
 //! Renders a module as an absolutely positioned container with:
 //! - Semi-transparent tinted background (cyan glow when selected)
-//! - Title bar with module name and bypass toggle (draggable)
+//! - Title bar with module name, collapse toggle, and bypass badge (draggable)
 //! - Port circles on left/right edges (module-level I/O, wire-draggable)
 //! - Child NodeBlock components positioned inside
+//! - Collapse/expand support: collapsed modules show only title bar + node count badge
 
 use crate::callback_types::{PortDragStart, PortHoverEvent};
 use crate::prelude::*;
@@ -18,6 +19,10 @@ use super::node_graph_node::NodeBlock;
 const TITLE_BAR_HEIGHT: f64 = 40.0;
 /// Title bar height in pixels (compact mode).
 const TITLE_BAR_HEIGHT_COMPACT: f64 = 28.0;
+/// Height of a collapsed module (title bar + summary badge area).
+const COLLAPSED_HEIGHT: f64 = 56.0;
+/// Height of a collapsed module in compact mode.
+const COLLAPSED_HEIGHT_COMPACT: f64 = 40.0;
 
 /// Props for a module container.
 #[derive(Props, Clone, PartialEq)]
@@ -54,6 +59,9 @@ pub(crate) struct ModuleContainerProps {
     /// Callback when an internal node is double-clicked (opens parameter editor).
     #[props(default)]
     pub on_node_double_click: Option<Callback<Uuid>>,
+    /// Callback when the module collapse/expand toggle is clicked.
+    #[props(default)]
+    pub on_toggle_collapse: Option<Callback<Uuid>>,
     /// Whether a wire draft is currently active (enables port hover highlighting).
     #[props(default)]
     pub wire_draft_active: bool,
@@ -69,7 +77,7 @@ pub(crate) fn ModuleContainer(props: ModuleContainerProps) -> Element {
     let x = module.position.x;
     let y = module.position.y;
     let w = module.size.width;
-    let h = module.size.height;
+    let is_collapsed = module.collapsed;
 
     let color = block_type_color(module.block_type);
     let opacity = if module.bypassed { "0.4" } else { "1.0" };
@@ -80,7 +88,9 @@ pub(crate) fn ModuleContainer(props: ModuleContainerProps) -> Element {
     let on_title_drag = props.on_title_drag_start.clone();
     let on_select = props.on_select.clone();
     let on_context_menu = props.on_context_menu.clone();
+    let on_toggle_collapse = props.on_toggle_collapse.clone();
     let module_id = module.id;
+    let node_count = module.nodes.len();
 
     // Selection glow
     let selection_border = if props.is_selected {
@@ -101,10 +111,26 @@ pub(crate) fn ModuleContainer(props: ModuleContainerProps) -> Element {
     };
     let port_size = if props.compact { 8.0 } else { port_size };
 
+    // Compute rendered height: collapsed modules shrink to title bar + badge
+    let collapsed_h = if props.compact || props.performance_mode {
+        COLLAPSED_HEIGHT_COMPACT
+    } else {
+        COLLAPSED_HEIGHT
+    };
+    let h = if is_collapsed {
+        collapsed_h
+    } else {
+        module.size.height
+    };
+
+    // Chevron indicator: right-pointing when collapsed, down-pointing when expanded
+    let chevron = if is_collapsed { "\u{25B6}" } else { "\u{25BC}" };
+
     rsx! {
         div {
             class: if props.compact { "absolute rounded-lg overflow-visible" } else { "absolute rounded-xl overflow-visible" },
-            style: "left: {x}px; top: {y}px; width: {w}px; height: {h}px; opacity: {opacity};",
+            style: "left: {x}px; top: {y}px; width: {w}px; height: {h}px; opacity: {opacity}; \
+                    transition: height 0.3s ease;",
 
             // Click on module body to select (but don't start pan)
             onmousedown: move |evt| {
@@ -132,9 +158,9 @@ pub(crate) fn ModuleContainer(props: ModuleContainerProps) -> Element {
                         {selection_border}",
             }
 
-            // Title bar — draggable
+            // Title bar -- draggable, with collapse toggle
             div {
-                class: "relative flex items-center justify-between select-none",
+                class: "relative flex items-center select-none",
                 class: if props.compact { "px-2 rounded-t-lg" } else { "px-3 rounded-t-xl" },
                 style: "height: {title_height}px; \
                         background-color: {color.bg}30; \
@@ -149,39 +175,97 @@ pub(crate) fn ModuleContainer(props: ModuleContainerProps) -> Element {
                         }
                     }
                 },
+
+                // Collapse/expand chevron toggle (not in performance mode)
+                if !props.performance_mode {
+                    button {
+                        class: "flex items-center justify-center flex-shrink-0 mr-1.5",
+                        style: "width: 18px; height: 18px; \
+                                color: {color.fg}90; \
+                                cursor: pointer; \
+                                font-size: 8px; \
+                                border: none; \
+                                background: transparent; \
+                                transition: transform 0.3s ease;",
+                        title: if is_collapsed { "Expand module" } else { "Collapse module" },
+                        onmousedown: move |evt: MouseEvent| {
+                            // Prevent the title bar drag from starting
+                            evt.stop_propagation();
+                        },
+                        onclick: move |evt| {
+                            evt.stop_propagation();
+                            if let Some(ref cb) = on_toggle_collapse {
+                                cb.call(module_id);
+                            }
+                        },
+                        "{chevron}"
+                    }
+                }
+
+                // Module name
                 span {
-                    class: if props.compact { "text-[10px] font-semibold" } else { "text-sm font-semibold tracking-wide" },
+                    class: if props.compact { "text-[10px] font-semibold flex-1" } else { "text-sm font-semibold tracking-wide flex-1" },
                     style: "color: {color.fg};",
                     "{module.name}"
                 }
-                if module.bypassed {
-                    span {
-                        class: "text-[9px] px-1 py-0.5 rounded",
-                        style: "background-color: {color.bg}30; color: {color.fg}80;",
-                        "BYP"
+
+                // Right side: bypass badge and collapsed node count badge
+                div { class: "flex items-center gap-1",
+                    if is_collapsed && node_count > 0 {
+                        span {
+                            class: "text-[9px] px-1.5 py-0.5 rounded-full font-medium",
+                            style: "background-color: {color.bg}40; color: {color.fg};",
+                            {
+                                let label = if node_count == 1 {
+                                    "1 block".to_string()
+                                } else {
+                                    format!("{node_count} blocks")
+                                };
+                                label
+                            }
+                        }
+                    }
+                    if module.bypassed {
+                        span {
+                            class: "text-[9px] px-1 py-0.5 rounded",
+                            style: "background-color: {color.bg}30; color: {color.fg}80;",
+                            "BYP"
+                        }
                     }
                 }
             }
 
-            // Child nodes (positioned relative to module content area).
-            for node in &module.nodes {
-                NodeBlock {
-                    key: "{node.id}",
-                    node: node.clone(),
-                    offset_x: 0.0,
-                    offset_y: title_height,
-                    compact: props.compact,
-                    on_double_click: props.on_node_double_click.clone(),
-                    on_port_drag_start: props.on_port_drag_start.clone(),
-                    on_port_hover: props.on_port_hover.clone(),
-                    on_port_hover_end: props.on_port_hover_end.clone(),
-                    wire_draft_active: props.wire_draft_active,
-                    hovered_port: props.hovered_port.clone(),
+            // Collapsed summary area (below title bar)
+            if is_collapsed && !props.performance_mode {
+                div {
+                    class: "relative flex items-center justify-center select-none",
+                    style: "height: {collapsed_h - title_height}px; \
+                            overflow: hidden; \
+                            opacity: 0.7;",
                 }
             }
 
-            // Module-level input ports (left edge) — hidden in compact mode
-            if !props.compact && !props.performance_mode {
+            // Child nodes -- hidden when collapsed (positioned relative to module content area)
+            if !is_collapsed {
+                for node in &module.nodes {
+                    NodeBlock {
+                        key: "{node.id}",
+                        node: node.clone(),
+                        offset_x: 0.0,
+                        offset_y: title_height,
+                        compact: props.compact,
+                        on_double_click: props.on_node_double_click.clone(),
+                        on_port_drag_start: props.on_port_drag_start.clone(),
+                        on_port_hover: props.on_port_hover.clone(),
+                        on_port_hover_end: props.on_port_hover_end.clone(),
+                        wire_draft_active: props.wire_draft_active,
+                        hovered_port: props.hovered_port.clone(),
+                    }
+                }
+            }
+
+            // Module-level input ports (left edge) -- hidden in compact/collapsed mode
+            if !props.compact && !props.performance_mode && !is_collapsed {
             for (idx, port) in module.inputs.iter().enumerate() {
                 {
                     let spacing = h / (module.inputs.len() + 1) as f64;
@@ -318,7 +402,7 @@ pub(crate) fn ModuleContainer(props: ModuleContainerProps) -> Element {
                     }
                 }
             }
-            } // end if !props.compact && !props.performance_mode (ports)
+            } // end if !props.compact && !props.performance_mode && !is_collapsed (ports)
         }
     }
 }

@@ -17,9 +17,15 @@
 //! Keyboard shortcuts: 1–8 to apply, Shift+1–8 to save.
 
 use crate::components::morph_slider::SnapshotRef;
+use crate::hooks::storage::STORAGE_BACKEND;
 use crate::prelude::*;
 use crate::signals::{RIG_CURRENT_PRESET, RIG_LAST_APPLIED_SNAPSHOT};
+use facet::Facet;
+use signal_storage::{load_value, save_value};
 use uuid::Uuid;
+
+/// Key under which snapshot slots state is persisted in the KV store.
+const SNAPSHOT_SLOTS_KEY: &str = "rig:snapshot_slots";
 
 // region: --- Constants
 
@@ -34,7 +40,7 @@ pub const MAX_SLOTS_PER_PAGE: usize = 12;
 // region: --- Slot Data
 
 /// A single snapshot slot.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Facet)]
 pub struct SnapshotSlot {
     /// Slot index (0-based within page).
     pub index: usize,
@@ -72,7 +78,7 @@ impl SnapshotSlot {
 }
 
 /// State for all snapshot slot pages.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Facet)]
 pub struct SnapshotSlotsState {
     /// All pages of slots. Each page is a Vec of slots.
     pub pages: Vec<Vec<SnapshotSlot>>,
@@ -438,16 +444,78 @@ pub fn SnapshotSlots(props: SnapshotSlotsProps) -> Element {
 
 // endregion: --- SnapshotSlots Component
 
+// region: --- Persistence
+
+/// Hook that persists snapshot slots state to SQLite.
+///
+/// - **On mount**: loads saved snapshot slots from the KV store via `STORAGE_BACKEND`.
+/// - **On change**: saves the current `RIG_SNAPSHOT_SLOTS` state to the KV store.
+///
+/// Call once from the top-level `SnapshotSlotsPanel` component.
+fn use_snapshot_slots_persistence() {
+    // Initialize the storage backend (idempotent)
+    crate::hooks::storage::use_storage();
+
+    // On mount: load saved state
+    use_effect(move || {
+        spawn(async move {
+            let Some(backend) = STORAGE_BACKEND.read().clone() else {
+                return;
+            };
+            match load_value::<SnapshotSlotsState>(backend.as_ref(), SNAPSHOT_SLOTS_KEY).await {
+                Ok(Some(state)) => {
+                    let page_count = state.pages.len();
+                    let filled = state
+                        .pages
+                        .iter()
+                        .flatten()
+                        .filter(|s| s.is_filled())
+                        .count();
+                    tracing::info!(
+                        "Loaded persisted snapshot slots ({} pages, {} filled slots)",
+                        page_count,
+                        filled
+                    );
+                    *RIG_SNAPSHOT_SLOTS.write() = state;
+                }
+                Ok(None) => {
+                    tracing::debug!("No persisted snapshot slots found, using default");
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to load persisted snapshot slots: {e}");
+                }
+            }
+        });
+    });
+
+    // On change: save to SQLite
+    use_effect(move || {
+        let state = RIG_SNAPSHOT_SLOTS.read().clone();
+        spawn(async move {
+            let Some(backend) = STORAGE_BACKEND.read().clone() else {
+                return;
+            };
+            if let Err(e) = save_value(backend.as_ref(), SNAPSHOT_SLOTS_KEY, &state).await {
+                tracing::warn!("Failed to persist snapshot slots: {e}");
+            }
+        });
+    });
+}
+
+// endregion: --- Persistence
+
 // region: --- Standalone Panel
 
 /// Snapshot slots panel — standalone dock panel wrapper.
 ///
 /// Initializes the rig service and provides save/apply wiring that
 /// captures the current preset snapshot into a slot or recalls it.
+/// Automatically persists slot assignments to SQLite.
 #[component]
 pub fn SnapshotSlotsPanel() -> Element {
     crate::signals::init_rig_service();
     crate::hooks::rig_state::use_rig_subscription();
+    use_snapshot_slots_persistence();
     let actions = crate::hooks::rig_actions::use_rig_actions();
 
     let on_apply = {

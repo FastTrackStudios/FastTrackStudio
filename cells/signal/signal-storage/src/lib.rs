@@ -21,6 +21,7 @@ pub mod seed;
 pub mod setlist_repo;
 pub mod snapshot_service;
 pub mod song_repo;
+pub mod sync;
 pub mod tag_bridge;
 pub mod tagging;
 

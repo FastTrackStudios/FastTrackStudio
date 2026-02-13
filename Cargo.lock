@@ -3574,6 +3574,7 @@ dependencies = [
 name = "dynamic-template-proto"
 version = "0.1.0"
 dependencies = [
+ "actions-proto",
  "daw-proto",
  "facet",
  "roam",

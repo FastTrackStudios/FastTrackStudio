@@ -7,9 +7,11 @@
 //! - Current preset name display
 //! - Connection status indicator
 
+use crate::context::rig::RigServiceMode;
 use crate::hooks::parameter_capture::use_parameter_capture;
+use crate::hooks::storage::{CloudSyncStatus, CLOUD_STORAGE_ENABLED, CLOUD_SYNC_STATUS};
 use crate::prelude::*;
-use crate::signals::{RIG_CONNECTED, RIG_CURRENT_PRESET, RIG_LOADING};
+use crate::signals::{RIG_CURRENT_PRESET, RIG_LOADING, RIG_SERVICE_MODE};
 
 use super::view_mode::{ModuleViewMode, RigViewMode};
 
@@ -50,8 +52,6 @@ pub struct GuitarRigTopBarProps {
 pub fn GuitarRigTopBar(props: GuitarRigTopBarProps) -> Element {
     // Read global signals for display
     let preset = RIG_CURRENT_PRESET.read();
-    let connected = *RIG_CONNECTED.read();
-    let loading = *RIG_LOADING.read();
 
     // Snapshot naming dialog state
     let mut snapshot_dialog_open = use_signal(|| false);
@@ -229,25 +229,14 @@ pub fn GuitarRigTopBar(props: GuitarRigTopBarProps) -> Element {
                 // Separator
                 div { class: "w-px h-6 bg-zinc-700" }
 
-                // Connection status
-                div { class: "flex items-center gap-2",
-                    div {
-                        class: if connected {
-                            "w-2 h-2 rounded-full bg-green-500"
-                        } else {
-                            "w-2 h-2 rounded-full bg-red-500"
-                        },
-                    }
-                    span { class: "text-xs text-zinc-500",
-                        if loading {
-                            "Loading..."
-                        } else if connected {
-                            "Connected"
-                        } else {
-                            "Disconnected"
-                        }
-                    }
-                }
+                // Cloud sync status indicator
+                CloudSyncIndicator {}
+
+                // Separator
+                div { class: "w-px h-6 bg-zinc-700" }
+
+                // Connection / service mode status
+                ServiceModeIndicator {}
             }
         }
 
@@ -339,9 +328,15 @@ struct SnapshotNamingDialogProps {
 }
 
 /// Modal dialog for naming a snapshot before saving.
+///
+/// Includes a "Save to Cloud" toggle that mirrors the global
+/// `CLOUD_STORAGE_ENABLED` setting. When enabled (mocked), the
+/// snapshot will be queued for cloud sync.
 #[component]
 fn SnapshotNamingDialog(props: SnapshotNamingDialogProps) -> Element {
     let name_for_save = props.name.clone();
+    let cloud_enabled = *CLOUD_STORAGE_ENABLED.read();
+    let sync_status = *CLOUD_SYNC_STATUS.read();
 
     rsx! {
         // Backdrop
@@ -378,6 +373,43 @@ fn SnapshotNamingDialog(props: SnapshotNamingDialogProps) -> Element {
                     }
                 }
 
+                // Save to Cloud toggle
+                div { class: "mb-4 flex items-center justify-between px-1",
+                    div { class: "flex flex-col",
+                        span { class: "text-sm text-zinc-300", "Save to Cloud" }
+                        span { class: "text-xs text-zinc-500",
+                            if cloud_enabled && sync_status.is_offline() {
+                                "Cloud unavailable -- will sync when online"
+                            } else if cloud_enabled {
+                                "Snapshot will be synced to cloud storage"
+                            } else {
+                                "Local only -- enable for cross-device access"
+                            }
+                        }
+                    }
+                    button {
+                        class: if cloud_enabled {
+                            "relative w-10 h-5 rounded-full bg-blue-600 transition-colors"
+                        } else {
+                            "relative w-10 h-5 rounded-full bg-zinc-700 transition-colors"
+                        },
+                        onclick: move |_| {
+                            crate::hooks::storage::toggle_cloud_storage();
+                        },
+                        title: if cloud_enabled { "Disable cloud sync" } else { "Enable cloud sync" },
+                        // Toggle knob
+                        div {
+                            class: if cloud_enabled {
+                                "absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-white \
+                                 shadow transition-all"
+                            } else {
+                                "absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-zinc-400 \
+                                 shadow transition-all"
+                            },
+                        }
+                    }
+                }
+
                 // Actions
                 div { class: "flex justify-end gap-2",
                     button {
@@ -396,6 +428,99 @@ fn SnapshotNamingDialog(props: SnapshotNamingDialogProps) -> Element {
                         },
                         "Save"
                     }
+                }
+            }
+        }
+    }
+}
+
+// ─── Cloud Sync Status Indicator ─────────────────────────────────────────
+
+/// Compact cloud sync status badge for the toolbar.
+///
+/// Displays one of: "Local", "Cloud", "Syncing", or "Offline" with a
+/// corresponding status dot. Clicking toggles cloud storage on/off.
+#[component]
+fn CloudSyncIndicator() -> Element {
+    let status = *CLOUD_SYNC_STATUS.read();
+
+    // Status dot color
+    let dot_class = match status {
+        CloudSyncStatus::LocalOnly => "w-2 h-2 rounded-full bg-zinc-500",
+        CloudSyncStatus::CloudSynced => "w-2 h-2 rounded-full bg-blue-500",
+        CloudSyncStatus::CloudSyncing => "w-2 h-2 rounded-full bg-blue-400 animate-pulse",
+        CloudSyncStatus::CloudOffline => "w-2 h-2 rounded-full bg-amber-500",
+    };
+
+    let label = status.label();
+
+    rsx! {
+        button {
+            class: "flex items-center gap-2 px-2 py-1 rounded-md hover:bg-zinc-800 transition-colors",
+            onclick: move |_| {
+                crate::hooks::storage::toggle_cloud_storage();
+            },
+            title: if status.is_cloud_enabled() {
+                "Cloud storage enabled -- click to disable"
+            } else {
+                "Local storage -- click to enable cloud sync"
+            },
+            // Cloud icon
+            svg {
+                class: "w-3.5 h-3.5 text-zinc-400",
+                fill: "none",
+                stroke: "currentColor",
+                stroke_width: "2",
+                view_box: "0 0 24 24",
+                path {
+                    stroke_linecap: "round",
+                    stroke_linejoin: "round",
+                    d: "M18 10h-1.26A8 8 0 109 20h9a5 5 0 000-10z",
+                }
+            }
+            div { class: dot_class }
+            span { class: "text-xs text-zinc-500", "{label}" }
+        }
+    }
+}
+
+// ─── Service Mode Indicator ──────────────────────────────────────────────
+
+/// Shows a colored dot, label, and optional "Mock Mode" badge reflecting
+/// the current [`RigServiceMode`].
+///
+/// - Green dot + "Connected" when `Real`
+/// - Yellow dot + "Mock" badge when `Mock`
+/// - Red dot + "Disconnected" when `Disconnected`
+///
+/// Also respects `RIG_LOADING` to show a "Loading..." transient state.
+#[component]
+fn ServiceModeIndicator() -> Element {
+    let mode = *RIG_SERVICE_MODE.read();
+    let loading = *RIG_LOADING.read();
+
+    let dot_class = format!("w-2 h-2 rounded-full {}", mode.dot_color());
+
+    rsx! {
+        div { class: "flex items-center gap-2",
+            // Colored status dot
+            div { class: "{dot_class}" }
+
+            // Label
+            span { class: "text-xs text-zinc-500",
+                if loading {
+                    "Loading..."
+                } else {
+                    "{mode.label()}"
+                }
+            }
+
+            // "Mock Mode" badge (only shown in Mock mode)
+            if mode == RigServiceMode::Mock {
+                span {
+                    class: "ml-1 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide \
+                            rounded bg-yellow-500/20 text-yellow-400 border border-yellow-500/30",
+                    "Mock Mode"
                 }
             }
         }

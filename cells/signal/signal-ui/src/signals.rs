@@ -416,6 +416,14 @@ pub static RIG_FX_BINDING: GlobalSignal<Option<signal_control::fx_binding::FxRig
 /// Human-readable binding status: "Not bound", "Bound: TrackName (N modules)", etc.
 pub static RIG_FX_BINDING_STATUS: GlobalSignal<String> = Signal::global(|| "Not bound".to_string());
 
+/// Current rig service mode (Mock / Real / Disconnected).
+///
+/// Written by [`RigServiceProvider`](crate::context::rig::RigServiceProvider) on mount
+/// and updated by the background service-discovery task. UI components read
+/// this to show connection status badges.
+pub static RIG_SERVICE_MODE: GlobalSignal<crate::context::rig::RigServiceMode> =
+    Signal::global(|| crate::context::rig::RigServiceMode::Mock);
+
 /// Connection status
 pub static RIG_CONNECTED: GlobalSignal<bool> = Signal::global(|| false);
 
@@ -474,3 +482,38 @@ pub enum SelectedEntity {
     /// A module container.
     Module(Uuid),
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MIDI CC / Expression Pedal State
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Whether MIDI learn mode is currently active (listening for incoming CC).
+pub static MIDI_LEARN_ACTIVE: GlobalSignal<bool> = Signal::global(|| false);
+
+/// Current MIDI learn state machine (Idle / Listening / Captured).
+pub static MIDI_LEARN_STATE: GlobalSignal<signal_control::midi::MidiLearnState> =
+    Signal::global(signal_control::midi::MidiLearnState::default);
+
+/// All active MIDI CC mappings (expression pedals, knobs, etc.).
+pub static MIDI_CC_MAPPINGS: GlobalSignal<Vec<signal_control::midi::MidiCcMapping>> =
+    Signal::global(Vec::new);
+
+/// Last received MIDI CC message: `(channel, cc_number, value)`.
+///
+/// Updated on every incoming CC event. Used by `MidiActivityIndicator`
+/// to show a visual pulse and by MIDI learn to capture assignments.
+pub static MIDI_LAST_CC: GlobalSignal<Option<(u8, u8, u8)>> = Signal::global(|| None);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Snapshot Automation
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// The current automation lane (None = no lane loaded).
+pub static AUTOMATION_LANE: GlobalSignal<Option<signal_control::automation::SnapshotAutomation>> =
+    Signal::global(|| None);
+
+/// Whether the automation timeline is currently playing back events.
+pub static AUTOMATION_PLAYING: GlobalSignal<bool> = Signal::global(|| false);
+
+/// Whether the automation lane is recording new events from user actions.
+pub static AUTOMATION_RECORDING: GlobalSignal<bool> = Signal::global(|| false);
