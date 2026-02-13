@@ -17,7 +17,10 @@
 - **oauth2 v5 typestate**: `BasicClient` defaults all endpoint generics to `EndpointNotSet`. After calling `set_auth_uri()`/`set_token_uri()`, the client type changes to `EndpointSet` for those positions. Methods like `authorize_url()`, `exchange_code()`, `exchange_refresh_token()` only exist on clients with `EndpointSet` for the relevant endpoints. Use a type alias like `type ConfiguredClient = BasicClient<EndpointSet, ..., EndpointSet>` for the return type.
 - **oauth2 v5 TokenResponse trait**: The `access_token()`, `refresh_token()`, and `expires_in()` methods come from the `TokenResponse` trait which must be explicitly imported: `use oauth2::TokenResponse;`.
 - **Branded ID `From<&String>` gap**: `typed_string_id!` macro implements `From<&str>` and `From<String>` but NOT `From<&String>`. Controller methods taking `impl Into<PresetId>` will reject `&String` — use `.as_str()` instead.
-- **Pre-existing signal2-proto clippy**: `BlockType::from_str` triggers `clippy::should_implement_trait`. Use `--no-deps` when running clippy against downstream crates.
+- **Pre-existing signal2-proto clippy**: `BlockType::from_str` triggers `clippy::should_implement_trait`. Fixed with `#[allow(clippy::should_implement_trait)]` inline.
+- **Macro hygiene for `#[macro_export]`**: When a macro uses `fmt::Display`, use `::std::fmt` (fully qualified) and `serde::Serialize`/`facet::Facet` (by crate name) — `#[macro_export]` expands at the call site, not definition site.
+- **signal2-proto module layout**: Domain hierarchy in `modules/signal/signal-proto/src/`: `metadata.rs`, `overrides.rs`, `layer.rs`, `engine.rs`, `rig.rs`, `profile.rs`, `song.rs`, `template.rs`. Core Block/Module/Preset types remain in `lib.rs`.
+- **Template Assignment pattern**: Use `Assignment<T>` enum with `Unassigned`/`Assigned(T)` for template slots. `missing_assignments()` cascades through the hierarchy. `InstantiateError` collects all missing slots with typed `AssignmentLevel`.
 
 ---
 
@@ -188,24 +191,50 @@
   - Disk space on worktree can run low (12G free on 1.9T volume) — `cargo clean` frees ~5.5G of build artifacts
 ---
 
-## 2026-02-13 - roam-test-5e9.15
+## 2026-02-13 - roam-test-5e9.16
 - What was implemented:
-  - US-015: Updated signal2-live service to collection/variant contracts
-  - Updated module-level doc comment to document collection/variant mapping (Preset=Collection, Snapshot=Variant)
-  - Documented the "load = apply" side-effect contract: loading a variant persists block state as active
-  - Added doc comments on all BlockService impl methods with collection/variant terminology
-  - Added region markers (SignalLive, BlockService impl)
-  - Added 15 comprehensive tests covering all service methods:
-    - get_block/set_block: seeded state, empty repo default, persist-and-return
-    - Block collections: list seeded, list empty, load default variant (with side-effect verification), load specific variant, nonexistent collection, nonexistent variant
-    - Module collections: list, load default variant, load specific variant, nonexistent collection
-    - Resolver determinism: sequential variant loads overwrite correctly, cross-type isolation
-  - Added tokio dev-dependency for async test runtime
+  - US-016: Updated signal2-controller API to collection/variant terminology
+  - Renamed `list_presets` → `list_collections`, `load_preset` → `load_collection_default`, `load_preset_snapshot` → `load_variant`
+  - Renamed `list_module_presets` → `list_module_collections`, `load_module_preset` → `load_module_collection_default`, `load_module_preset_snapshot` → `load_module_variant`
+  - Added `#[deprecated]` shim methods for all old names delegating to new methods (playground/UI backward compat)
+  - Block operations (`get_block`, `set_block`, `get_value`, `set_value`) unchanged
+  - Constructor/context factory behavior fully preserved
+  - Region markers added for code organization
+  - Removed unused `Snapshot` import (was only needed by old `load_preset` return type mapping)
 - Files changed:
-  - `modules/signal/signal-live/src/lib.rs` (rewritten — doc comments, region markers, 15 tests)
-  - `modules/signal/signal-live/Cargo.toml` (added tokio dev-dependency)
+  - `modules/signal/signal-controller/src/lib.rs` (rewritten — collection/variant API + deprecated shims)
 - **Learnings:**
-  - `Context::new()` is accessible directly from `roam::Context` without needing a `roam-wire` dev-dep — the controller crate pattern confirms this
-  - The collection/variant migration is a conceptual overlay at this stage — proto types remain `Preset`/`Snapshot` until US-004 renames them
-  - `--no-deps` is essential for clippy on signal2-live/storage/controller since signal2-proto has a pre-existing `should_implement_trait` warning
+  - `#[deprecated(note = "use new_method")]` on async methods works correctly — Rust deprecation warnings propagate through await chains
+  - The `signal2-ui` crate (US-018) was already written against the old names — deprecated shims let it compile with warnings rather than breaking
+  - Clippy `--no-deps` remains essential since signal2-proto's `BlockType::from_str` triggers `should_implement_trait` with `-D warnings`
+  - The controller is a pure delegation layer — renaming methods requires zero logic changes, just re-mapping the method names to the underlying `BlockService` trait calls
+---
+
+## 2026-02-13 - roam-test-5e9.12
+- What was implemented:
+  - US-012: Template system for Block→Song levels in signal2-proto
+  - Added domain hierarchy types: Layer, Engine, Rig, Profile, Song (with variants and overrides at each level)
+  - Added foundation types: Metadata (tags/description/notes), Override (path + op model)
+  - Added template system: Assignment<T>::Unassigned/Assigned, Templateable trait with instantiate(), TemplateMetadata
+  - Templates at every level: BlockTemplate, ModuleTemplate, LayerTemplate, EngineTemplate, RigTemplate, ProfileTemplate, SongTemplate
+  - Each template has missing_assignments() that cascades through the hierarchy
+  - InstantiateError with typed MissingAssignment (level + slot description)
+  - Templateable impls for Block and Module with proper instantiate() validation
+  - Fixed pre-existing clippy issue: added #[allow(clippy::should_implement_trait)] on BlockType::from_str
+  - 31 tests pass (metadata: 2, overrides: 2, layer: 2, engine: 1, rig: 1, profile: 1, song: 2, template: 19, existing: 1)
+- Files changed:
+  - `modules/signal/signal-proto/src/lib.rs` (updated: module declarations, macro_export, doc header, clippy fix)
+  - `modules/signal/signal-proto/src/metadata.rs` (new: Tags, Metadata with builder)
+  - `modules/signal/signal-proto/src/overrides.rs` (new: OverridePath, OverrideOp, Override)
+  - `modules/signal/signal-proto/src/layer.rs` (new: LayerId, LayerVariantId, ModuleRef, BlockRef, LayerVariant, Layer)
+  - `modules/signal/signal-proto/src/engine.rs` (new: EngineId, EngineVariantId, LayerSelection, EngineVariant, Engine)
+  - `modules/signal/signal-proto/src/rig.rs` (new: RigId, RigVariantId, RigTypeId, EngineSelection, RigVariant, Rig)
+  - `modules/signal/signal-proto/src/profile.rs` (new: ProfileId, PatchId, Patch, Profile)
+  - `modules/signal/signal-proto/src/song.rs` (new: SongId, SectionId, SectionSource, Section, Song)
+  - `modules/signal/signal-proto/src/template.rs` (new: Assignment, Templateable, TemplateMetadata, InstantiateError, all level templates)
+- **Learnings:**
+  - Previous beads (US-006 through US-012) were batch-closed without implementation — code lost across worktrees
+  - `#[macro_export]` changes name resolution: macros expand at call site, need fully-qualified paths (::std::fmt, serde::Serialize)
+  - Template Assignment<T> is more robust than sentinel values (like PluginId::unassigned()) — enables typed error reporting
+  - Cascading missing_assignments() through the hierarchy gives users actionable error messages
 ---

@@ -1,9 +1,17 @@
 //! Service-driven controller for a single block with three normalized parameters.
+//!
+//! The controller exposes **collection / variant** terminology:
+//!
+//! - A **collection** is a named group of block-state variants (backed by `Preset`).
+//! - A **variant** is a specific block-state snapshot within a collection (backed by `Snapshot`).
+//!
+//! Module-level equivalents (`ModulePreset` / `ModuleSnapshot`) follow the same
+//! naming convention via `list_module_collections` / `load_module_variant`.
 
 use signal_live::SignalLive;
 use signal_proto::{
     Block, BlockService, BlockType, ModulePreset, ModulePresetId, ModuleSnapshot, ModuleSnapshotId,
-    PresetId, SnapshotId,
+    Preset, PresetId, SnapshotId,
 };
 use std::sync::Arc;
 
@@ -74,6 +82,8 @@ where
         }
     }
 
+    // region: --- Block operations
+
     pub async fn get_block(&self, block_type: BlockType) -> Block {
         let cx = self.context_factory.make_context();
         self.service.get_block(&cx, block_type).await
@@ -94,57 +104,131 @@ where
         self.set_block(block_type, block).await
     }
 
+    // endregion: --- Block operations
+
+    // region: --- Collection + variant operations (block-level)
+
+    /// List all collections for a given block type.
+    pub async fn list_collections(&self, block_type: BlockType) -> Vec<Preset> {
+        let cx = self.context_factory.make_context();
+        self.service.list_presets(&cx, block_type).await
+    }
+
+    /// Load the default variant from a collection, returning its block state.
+    pub async fn load_collection_default(
+        &self,
+        block_type: BlockType,
+        collection_id: impl Into<PresetId>,
+    ) -> Option<Block> {
+        let cx = self.context_factory.make_context();
+        self.service
+            .load_preset(&cx, block_type, collection_id.into())
+            .await
+            .map(|snapshot| snapshot.block())
+    }
+
+    /// Load a specific variant from a collection, returning its block state.
+    pub async fn load_variant(
+        &self,
+        block_type: BlockType,
+        collection_id: impl Into<PresetId>,
+        variant_id: impl Into<SnapshotId>,
+    ) -> Option<Block> {
+        let cx = self.context_factory.make_context();
+        self.service
+            .load_preset_snapshot(&cx, block_type, collection_id.into(), variant_id.into())
+            .await
+            .map(|snapshot| snapshot.block())
+    }
+
+    // endregion: --- Collection + variant operations (block-level)
+
+    // region: --- Collection + variant operations (module-level)
+
+    /// List all module-level collections.
+    pub async fn list_module_collections(&self) -> Vec<ModulePreset> {
+        let cx = self.context_factory.make_context();
+        self.service.list_module_presets(&cx).await
+    }
+
+    /// Load the default variant from a module collection.
+    pub async fn load_module_collection_default(
+        &self,
+        collection_id: impl Into<ModulePresetId>,
+    ) -> Option<ModuleSnapshot> {
+        let cx = self.context_factory.make_context();
+        self.service
+            .load_module_preset(&cx, collection_id.into())
+            .await
+    }
+
+    /// Load a specific variant from a module collection.
+    pub async fn load_module_variant(
+        &self,
+        collection_id: impl Into<ModulePresetId>,
+        variant_id: impl Into<ModuleSnapshotId>,
+    ) -> Option<ModuleSnapshot> {
+        let cx = self.context_factory.make_context();
+        self.service
+            .load_module_preset_snapshot(&cx, collection_id.into(), variant_id.into())
+            .await
+    }
+
+    // endregion: --- Collection + variant operations (module-level)
+
+    // region: --- Deprecated shims
+
+    /// Deprecated: use [`list_collections`] instead.
+    #[deprecated(note = "use list_collections")]
+    pub async fn list_presets(&self, block_type: BlockType) -> Vec<Preset> {
+        self.list_collections(block_type).await
+    }
+
+    /// Deprecated: use [`load_collection_default`] instead.
+    #[deprecated(note = "use load_collection_default")]
     pub async fn load_preset(
         &self,
         block_type: BlockType,
         preset_id: impl Into<PresetId>,
     ) -> Option<Block> {
-        let cx = self.context_factory.make_context();
-        self.service
-            .load_preset(&cx, block_type, preset_id.into())
-            .await
-            .map(|snapshot| snapshot.block())
+        self.load_collection_default(block_type, preset_id).await
     }
 
+    /// Deprecated: use [`load_variant`] instead.
+    #[deprecated(note = "use load_variant")]
     pub async fn load_preset_snapshot(
         &self,
         block_type: BlockType,
         preset_id: impl Into<PresetId>,
         snapshot_id: impl Into<SnapshotId>,
     ) -> Option<Block> {
-        let cx = self.context_factory.make_context();
-        self.service
-            .load_preset_snapshot(&cx, block_type, preset_id.into(), snapshot_id.into())
-            .await
-            .map(|snapshot| snapshot.block())
+        self.load_variant(block_type, preset_id, snapshot_id).await
     }
 
-    pub async fn list_presets(&self, block_type: BlockType) -> Vec<signal_proto::Preset> {
-        let cx = self.context_factory.make_context();
-        self.service.list_presets(&cx, block_type).await
-    }
-
+    /// Deprecated: use [`list_module_collections`] instead.
+    #[deprecated(note = "use list_module_collections")]
     pub async fn list_module_presets(&self) -> Vec<ModulePreset> {
-        let cx = self.context_factory.make_context();
-        self.service.list_module_presets(&cx).await
+        self.list_module_collections().await
     }
 
+    /// Deprecated: use [`load_module_collection_default`] instead.
+    #[deprecated(note = "use load_module_collection_default")]
     pub async fn load_module_preset(
         &self,
         preset_id: impl Into<ModulePresetId>,
     ) -> Option<ModuleSnapshot> {
-        let cx = self.context_factory.make_context();
-        self.service.load_module_preset(&cx, preset_id.into()).await
+        self.load_module_collection_default(preset_id).await
     }
 
+    /// Deprecated: use [`load_module_variant`] instead.
+    #[deprecated(note = "use load_module_variant")]
     pub async fn load_module_preset_snapshot(
         &self,
         preset_id: impl Into<ModulePresetId>,
         snapshot_id: impl Into<ModuleSnapshotId>,
     ) -> Option<ModuleSnapshot> {
-        let cx = self.context_factory.make_context();
-        self.service
-            .load_module_preset_snapshot(&cx, preset_id.into(), snapshot_id.into())
-            .await
+        self.load_module_variant(preset_id, snapshot_id).await
     }
+
+    // endregion: --- Deprecated shims
 }

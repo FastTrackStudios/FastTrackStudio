@@ -1,13 +1,33 @@
-//! Minimal protocol types for signal2.
+//! Signal2 protocol types — domain model for rig control.
+//!
+//! ## Hierarchy
+//!
+//! **Physical**: Block → Module → Layer → Engine → Rig
+//!
+//! **Performance**: Profile (Patches) → Song (Sections)
+//!
+//! **Templates**: Structural blueprints with [`Assignment::Unassigned`](template::Assignment)
+//! placeholders at every level.
 
 use facet::Facet;
 use serde::{Deserialize, Serialize};
-use std::fmt;
 
+// ─── Domain modules ─────────────────────────────────────────────
+pub mod metadata;
+pub mod overrides;
+pub mod layer;
+pub mod engine;
+pub mod rig;
+pub mod profile;
+pub mod song;
+pub mod template;
+
+/// Creates a branded string ID type with Display, From, and AsRef impls.
+#[macro_export]
 macro_rules! typed_string_id {
     ($(#[$meta:meta])* $name:ident) => {
         $(#[$meta])*
-        #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Facet)]
+        #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, facet::Facet)]
         pub struct $name(String);
 
         impl $name {
@@ -24,8 +44,8 @@ macro_rules! typed_string_id {
             }
         }
 
-        impl fmt::Display for $name {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        impl ::std::fmt::Display for $name {
+            fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
                 write!(f, "{}", self.0)
             }
         }
