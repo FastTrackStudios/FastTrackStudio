@@ -145,6 +145,53 @@ impl Rig {
     }
 }
 
+// ─── Trait impls ────────────────────────────────────────────────
+
+impl crate::traits::Variant for RigScene {
+    type Id = RigSceneId;
+    fn variant_id(&self) -> &RigSceneId {
+        &self.id
+    }
+    fn variant_name(&self) -> &str {
+        &self.name
+    }
+}
+
+impl crate::traits::Collection for Rig {
+    type Variant = RigScene;
+
+    fn variants(&self) -> &[RigScene] {
+        &self.variants
+    }
+    fn variants_mut(&mut self) -> &mut Vec<RigScene> {
+        &mut self.variants
+    }
+    fn default_variant_id(&self) -> &RigSceneId {
+        &self.default_variant_id
+    }
+    fn set_default_variant_id(&mut self, id: RigSceneId) {
+        self.default_variant_id = id;
+    }
+}
+
+impl crate::traits::HasMetadata for RigScene {
+    fn metadata(&self) -> &Metadata {
+        &self.metadata
+    }
+    fn metadata_mut(&mut self) -> &mut Metadata {
+        &mut self.metadata
+    }
+}
+
+impl crate::traits::HasMetadata for Rig {
+    fn metadata(&self) -> &Metadata {
+        &self.metadata
+    }
+    fn metadata_mut(&mut self) -> &mut Metadata {
+        &mut self.metadata
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

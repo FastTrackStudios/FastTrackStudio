@@ -147,6 +147,53 @@ impl Song {
     }
 }
 
+// ─── Trait impls ────────────────────────────────────────────────
+
+impl crate::traits::Variant for Section {
+    type Id = SectionId;
+    fn variant_id(&self) -> &SectionId {
+        &self.id
+    }
+    fn variant_name(&self) -> &str {
+        &self.name
+    }
+}
+
+impl crate::traits::Collection for Song {
+    type Variant = Section;
+
+    fn variants(&self) -> &[Section] {
+        &self.sections
+    }
+    fn variants_mut(&mut self) -> &mut Vec<Section> {
+        &mut self.sections
+    }
+    fn default_variant_id(&self) -> &SectionId {
+        &self.default_section_id
+    }
+    fn set_default_variant_id(&mut self, id: SectionId) {
+        self.default_section_id = id;
+    }
+}
+
+impl crate::traits::HasMetadata for Section {
+    fn metadata(&self) -> &Metadata {
+        &self.metadata
+    }
+    fn metadata_mut(&mut self) -> &mut Metadata {
+        &mut self.metadata
+    }
+}
+
+impl crate::traits::HasMetadata for Song {
+    fn metadata(&self) -> &Metadata {
+        &self.metadata
+    }
+    fn metadata_mut(&mut self) -> &mut Metadata {
+        &mut self.metadata
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

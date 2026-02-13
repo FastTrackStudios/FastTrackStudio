@@ -269,6 +269,16 @@ impl SnapshotLike for Snapshot {
     }
 }
 
+impl traits::Variant for Snapshot {
+    type Id = SnapshotId;
+    fn variant_id(&self) -> &SnapshotId {
+        &self.id
+    }
+    fn variant_name(&self) -> &str {
+        &self.name
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct Preset {
     id: PresetId,
@@ -379,6 +389,25 @@ impl PresetLike for Preset {
 
     fn default_snapshot_id(&self) -> &Self::SnapshotId {
         self.default_snapshot.id()
+    }
+}
+
+impl traits::Collection for Preset {
+    type Variant = Snapshot;
+
+    fn variants(&self) -> &[Snapshot] {
+        &self.snapshots
+    }
+    fn variants_mut(&mut self) -> &mut Vec<Snapshot> {
+        &mut self.snapshots
+    }
+    fn default_variant_id(&self) -> &SnapshotId {
+        self.default_snapshot.id()
+    }
+    fn set_default_variant_id(&mut self, id: SnapshotId) {
+        if let Some(snap) = self.snapshots.iter().find(|s| s.id == id) {
+            self.default_snapshot = snap.clone();
+        }
     }
 }
 
@@ -532,6 +561,16 @@ impl SnapshotLike for ModuleSnapshot {
     }
 }
 
+impl traits::Variant for ModuleSnapshot {
+    type Id = ModuleSnapshotId;
+    fn variant_id(&self) -> &ModuleSnapshotId {
+        &self.id
+    }
+    fn variant_name(&self) -> &str {
+        &self.name
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct ModulePreset {
     id: ModulePresetId,
@@ -606,6 +645,25 @@ impl PresetLike for ModulePreset {
 
     fn default_snapshot_id(&self) -> &Self::SnapshotId {
         self.default_snapshot.id()
+    }
+}
+
+impl traits::Collection for ModulePreset {
+    type Variant = ModuleSnapshot;
+
+    fn variants(&self) -> &[ModuleSnapshot] {
+        &self.snapshots
+    }
+    fn variants_mut(&mut self) -> &mut Vec<ModuleSnapshot> {
+        &mut self.snapshots
+    }
+    fn default_variant_id(&self) -> &ModuleSnapshotId {
+        self.default_snapshot.id()
+    }
+    fn set_default_variant_id(&mut self, id: ModuleSnapshotId) {
+        if let Some(snap) = self.snapshots.iter().find(|s| s.id == id) {
+            self.default_snapshot = snap.clone();
+        }
     }
 }
 

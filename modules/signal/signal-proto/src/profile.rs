@@ -108,6 +108,53 @@ impl Profile {
     }
 }
 
+// ─── Trait impls ────────────────────────────────────────────────
+
+impl crate::traits::Variant for Patch {
+    type Id = PatchId;
+    fn variant_id(&self) -> &PatchId {
+        &self.id
+    }
+    fn variant_name(&self) -> &str {
+        &self.name
+    }
+}
+
+impl crate::traits::Collection for Profile {
+    type Variant = Patch;
+
+    fn variants(&self) -> &[Patch] {
+        &self.patches
+    }
+    fn variants_mut(&mut self) -> &mut Vec<Patch> {
+        &mut self.patches
+    }
+    fn default_variant_id(&self) -> &PatchId {
+        &self.default_patch_id
+    }
+    fn set_default_variant_id(&mut self, id: PatchId) {
+        self.default_patch_id = id;
+    }
+}
+
+impl crate::traits::HasMetadata for Patch {
+    fn metadata(&self) -> &Metadata {
+        &self.metadata
+    }
+    fn metadata_mut(&mut self) -> &mut Metadata {
+        &mut self.metadata
+    }
+}
+
+impl crate::traits::HasMetadata for Profile {
+    fn metadata(&self) -> &Metadata {
+        &self.metadata
+    }
+    fn metadata_mut(&mut self) -> &mut Metadata {
+        &mut self.metadata
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

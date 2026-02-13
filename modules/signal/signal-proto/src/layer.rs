@@ -177,6 +177,53 @@ impl Layer {
     }
 }
 
+// ─── Trait impls ────────────────────────────────────────────────
+
+impl crate::traits::Variant for LayerSnapshot {
+    type Id = LayerSnapshotId;
+    fn variant_id(&self) -> &LayerSnapshotId {
+        &self.id
+    }
+    fn variant_name(&self) -> &str {
+        &self.name
+    }
+}
+
+impl crate::traits::Collection for Layer {
+    type Variant = LayerSnapshot;
+
+    fn variants(&self) -> &[LayerSnapshot] {
+        &self.variants
+    }
+    fn variants_mut(&mut self) -> &mut Vec<LayerSnapshot> {
+        &mut self.variants
+    }
+    fn default_variant_id(&self) -> &LayerSnapshotId {
+        &self.default_variant_id
+    }
+    fn set_default_variant_id(&mut self, id: LayerSnapshotId) {
+        self.default_variant_id = id;
+    }
+}
+
+impl crate::traits::HasMetadata for LayerSnapshot {
+    fn metadata(&self) -> &Metadata {
+        &self.metadata
+    }
+    fn metadata_mut(&mut self) -> &mut Metadata {
+        &mut self.metadata
+    }
+}
+
+impl crate::traits::HasMetadata for Layer {
+    fn metadata(&self) -> &Metadata {
+        &self.metadata
+    }
+    fn metadata_mut(&mut self) -> &mut Metadata {
+        &mut self.metadata
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

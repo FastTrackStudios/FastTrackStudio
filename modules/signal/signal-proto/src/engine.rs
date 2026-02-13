@@ -133,6 +133,53 @@ impl Engine {
     }
 }
 
+// ─── Trait impls ────────────────────────────────────────────────
+
+impl crate::traits::Variant for EngineScene {
+    type Id = EngineSceneId;
+    fn variant_id(&self) -> &EngineSceneId {
+        &self.id
+    }
+    fn variant_name(&self) -> &str {
+        &self.name
+    }
+}
+
+impl crate::traits::Collection for Engine {
+    type Variant = EngineScene;
+
+    fn variants(&self) -> &[EngineScene] {
+        &self.variants
+    }
+    fn variants_mut(&mut self) -> &mut Vec<EngineScene> {
+        &mut self.variants
+    }
+    fn default_variant_id(&self) -> &EngineSceneId {
+        &self.default_variant_id
+    }
+    fn set_default_variant_id(&mut self, id: EngineSceneId) {
+        self.default_variant_id = id;
+    }
+}
+
+impl crate::traits::HasMetadata for EngineScene {
+    fn metadata(&self) -> &Metadata {
+        &self.metadata
+    }
+    fn metadata_mut(&mut self) -> &mut Metadata {
+        &mut self.metadata
+    }
+}
+
+impl crate::traits::HasMetadata for Engine {
+    fn metadata(&self) -> &Metadata {
+        &self.metadata
+    }
+    fn metadata_mut(&mut self) -> &mut Metadata {
+        &mut self.metadata
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
