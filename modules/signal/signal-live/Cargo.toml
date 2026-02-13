@@ -1,0 +1,11 @@
+[package]
+name = "signal2-live"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+signal-proto = { package = "signal2-proto", path = "../signal-proto" }
+signal-storage = { package = "signal2-storage", path = "../signal-storage" }
+roam.workspace = true

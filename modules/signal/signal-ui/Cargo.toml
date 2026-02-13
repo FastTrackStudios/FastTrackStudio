@@ -1,0 +1,10 @@
+[package]
+name = "signal2-ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+dioxus.workspace = true
+signal = { package = "signal2", path = "../signal" }

@@ -14,6 +14,7 @@ members = [
     "modules/actions/input-dioxus",
     "modules/actions/input-reaper",
     "modules/actions/input",
+    "modules/signal/*",
     "libs/*",
     "xtask",
     "apps/tests/*",
@@ -124,6 +125,12 @@ audio-controls = { path = "cells/signal/audio-controls" }
 signal-control = { path = "cells/signal/signal-control" }
 signal-storage = { path = "cells/signal/signal-storage" }
 signal-ui = { path = "cells/signal/signal-ui" }
+signal2 = { package = "signal2", path = "modules/signal/signal" }
+signal2-proto = { package = "signal2-proto", path = "modules/signal/signal-proto" }
+signal2-storage = { package = "signal2-storage", path = "modules/signal/signal-storage" }
+signal2-live = { package = "signal2-live", path = "modules/signal/signal-live" }
+signal2-controller = { package = "signal2-controller", path = "modules/signal/signal-controller" }
+signal2-ui = { package = "signal2-ui", path = "modules/signal/signal-ui" }
 sync-proto = { path = "cells/sync/sync-proto" }
 sync = { path = "cells/sync/sync" }
 sync-ui = { path = "cells/sync/sync-ui" }

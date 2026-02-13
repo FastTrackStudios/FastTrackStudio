@@ -13,12 +13,11 @@
 //! When an override is disabled, the original values are restored.
 
 use super::behaviors::media_item::{
-    MediaItemClickBehavior, MediaItemCrossfadeLeftDragBehavior, MediaItemEdgeLeftDragBehavior,
-    MediaItemLeftDragBehavior, MediaItemLowerLeftDragBehavior,
+    MediaItemCrossfadeLeftDragBehavior, MediaItemLowerLeftDragBehavior,
 };
-use super::behaviors::track::TrackLeftDragBehavior;
 use super::behaviors::shared::traits::BehaviorDisplay;
 use super::core::{MouseModifierFlag, get_mouse_modifier, set_mouse_modifier};
+use super::profile_sections;
 use reaper_high::Reaper;
 use std::collections::HashMap;
 use std::sync::{OnceLock, RwLock};
@@ -679,248 +678,19 @@ fn fts_profile() -> MouseModifierProfile {
         "fastrackstudio",
         "FastTrackStudio optimized mouse modifiers",
     )
-    .with_settings([
-        // === Media Item Edge - Stretch Focus ===
-        // Default: Stretch item (instead of Move edge)
-        // This makes time-stretching items easier without holding a modifier
-        MouseModifierSetting::default_behavior(
-            "MM_CTX_ITEMEDGE",
-            MediaItemEdgeLeftDragBehavior::StretchItem,
-        ),
-        // Shift: Move edge (swap with default)
-        MouseModifierSetting::shift_behavior(
-            "MM_CTX_ITEMEDGE",
-            MediaItemEdgeLeftDragBehavior::MoveEdge,
-        ),
-        // === Media Item (Main Body) - Move/Copy Focus ===
-        // Default: Move item ignoring time selection
-        MouseModifierSetting::default_behavior(
-            "MM_CTX_ITEM",
-            MediaItemLeftDragBehavior::MoveItemIgnoringTimeSelection,
-        ),
-        // Shift: Move item ignoring snap and time selection
-        MouseModifierSetting::shift_behavior(
-            "MM_CTX_ITEM",
-            MediaItemLeftDragBehavior::MoveItemIgnoringSnapAndTimeSelection,
-        ),
-        // Alt/Opt: Copy item
-        MouseModifierSetting::alt_behavior("MM_CTX_ITEM", MediaItemLeftDragBehavior::CopyItem),
-        // Alt/Opt+Shift: Copy item ignoring snap
-        MouseModifierSetting::alt_shift_behavior(
-            "MM_CTX_ITEM",
-            MediaItemLeftDragBehavior::CopyItemIgnoringSnap,
-        ),
-        // === Media Item Lower Half (Bottom Half) - Razor Edit Focus ===
-        // Default: Select razor edit area
-        MouseModifierSetting::default_behavior(
-            "MM_CTX_ITEMLOWER",
-            MediaItemLowerLeftDragBehavior::SelectRazorEditArea,
-        ),
-        // Cmd/Ctrl: Add to razor edit area (add to selection)
-        MouseModifierSetting::cmd_behavior(
-            "MM_CTX_ITEMLOWER",
-            MediaItemLowerLeftDragBehavior::AddToRazorEditArea,
-        ),
-        // Shift: Select razor edit area ignoring snap
-        MouseModifierSetting::shift_behavior(
-            "MM_CTX_ITEMLOWER",
-            MediaItemLowerLeftDragBehavior::SelectRazorEditAreaIgnoringSnap,
-        ),
-        // Shift+Cmd/Ctrl: Add to razor edit area ignoring snap
-        MouseModifierSetting::shift_cmd_behavior(
-            "MM_CTX_ITEMLOWER",
-            MediaItemLowerLeftDragBehavior::AddToRazorEditAreaIgnoringSnap,
-        ),
-        // === Media Item Click (Left Click) ===
-        // Default: Select item and move edit cursor
-        MouseModifierSetting::default_behavior(
-            "MM_CTX_ITEM_CLK",
-            MediaItemClickBehavior::SelectItemAndMoveEditCursor,
-        ),
-        // Shift: Add items to selection, if already selected extend time selection
-        MouseModifierSetting::shift_behavior(
-            "MM_CTX_ITEM_CLK",
-            MediaItemClickBehavior::AddARangeOfItemsToSelectionIfAlreadySelectedExtendTimeSelection,
-        ),
-        // Cmd/Ctrl: Toggle item selection
-        MouseModifierSetting::cmd_behavior(
-            "MM_CTX_ITEM_CLK",
-            MediaItemClickBehavior::ToggleItemSelection,
-        ),
-        // Shift+Cmd/Ctrl: Select item and move edit cursor ignoring snap
-        MouseModifierSetting::shift_cmd_behavior(
-            "MM_CTX_ITEM_CLK",
-            MediaItemClickBehavior::SelectItemAndMoveEditCursorIgnoringSnap,
-        ),
-        // Opt: Select item ignoring grouping
-        MouseModifierSetting::alt_behavior(
-            "MM_CTX_ITEM_CLK",
-            MediaItemClickBehavior::SelectItemIgnoringGrouping,
-        ),
-        // Shift+Opt: Extend razor edit area
-        MouseModifierSetting::alt_shift_behavior(
-            "MM_CTX_ITEM_CLK",
-            MediaItemClickBehavior::ExtendRazorEditArea,
-        ),
-        // Cmd/Ctrl+Opt: Add stretch marker
-        MouseModifierSetting::cmd_opt_behavior(
-            "MM_CTX_ITEM_CLK",
-            MediaItemClickBehavior::AddStretchMarker,
-        ),
-        // Track left drag: marquee-select items
-        MouseModifierSetting::default_behavior(
-            "MM_CTX_TRACK",
-            TrackLeftDragBehavior::MarqueeSelectItems,
-        ),
-        MouseModifierSetting::shift_behavior(
-            "MM_CTX_TRACK",
-            TrackLeftDragBehavior::MarqueeAddToItemSelection,
-        ),
-        // Cmd: Select razor edit area
-        MouseModifierSetting::with_cmd("MM_CTX_TRACK", "25 m"),
-        // Shift+Cmd: Add to razor edit area
-        MouseModifierSetting::new(
-            "MM_CTX_TRACK",
-            MouseModifierFlag::new(true, true, false, false),
-            "27 m",
-        ),
-        MouseModifierSetting::alt_behavior("MM_CTX_TRACK", TrackLeftDragBehavior::MarqueeZoom),
-        // Track left click behavior model:
-        // default = deselect all items
-        MouseModifierSetting::default_behavior(
-            "MM_CTX_TRACK_CLK",
-            super::behaviors::track::TrackClickBehavior::DeselectAllItems,
-        ),
-        // Shift = deselect all items and move edit cursor
-        MouseModifierSetting::shift_behavior(
-            "MM_CTX_TRACK_CLK",
-            super::behaviors::track::TrackClickBehavior::DeselectAllItemsAndMoveEditCursor,
-        ),
-        // Shift+Opt = deselect all items and move edit cursor ignoring snap
-        MouseModifierSetting::alt_shift_behavior(
-            "MM_CTX_TRACK_CLK",
-            super::behaviors::track::TrackClickBehavior::DeselectAllItemsAndMoveEditCursorIgnoringSnap,
-        ),
-    ])
+    .with_settings(profile_sections::fts::all())
 }
 
 /// Default REAPER profile - matches REAPER's default mouse modifier settings
 fn reaper_profile() -> MouseModifierProfile {
-    MouseModifierProfile::new("reaper", "Default REAPER mouse modifiers").with_settings([
-        // === Media Item Edge (Left Drag) ===
-        // Default: Move edge (REAPER default)
-        MouseModifierSetting::default_behavior(
-            "MM_CTX_ITEMEDGE",
-            MediaItemEdgeLeftDragBehavior::MoveEdge,
-        ),
-        // === Media Item Click (Left Click) ===
-        // Default: Select item and move edit cursor
-        MouseModifierSetting::default_behavior(
-            "MM_CTX_ITEM_CLK",
-            MediaItemClickBehavior::SelectItemAndMoveEditCursor,
-        ),
-        // Shift: Add items to selection, if already selected extend time selection
-        MouseModifierSetting::shift_behavior(
-            "MM_CTX_ITEM_CLK",
-            MediaItemClickBehavior::AddARangeOfItemsToSelectionIfAlreadySelectedExtendTimeSelection,
-        ),
-        // Cmd/Ctrl: Toggle item selection
-        MouseModifierSetting::cmd_behavior(
-            "MM_CTX_ITEM_CLK",
-            MediaItemClickBehavior::ToggleItemSelection,
-        ),
-        // Shift+Cmd/Ctrl: Select item and move edit cursor ignoring snap
-        MouseModifierSetting::shift_cmd_behavior(
-            "MM_CTX_ITEM_CLK",
-            MediaItemClickBehavior::SelectItemAndMoveEditCursorIgnoringSnap,
-        ),
-        // Opt: Select item ignoring grouping
-        MouseModifierSetting::alt_behavior(
-            "MM_CTX_ITEM_CLK",
-            MediaItemClickBehavior::SelectItemIgnoringGrouping,
-        ),
-        // Shift+Opt: Extend razor edit area
-        MouseModifierSetting::alt_shift_behavior(
-            "MM_CTX_ITEM_CLK",
-            MediaItemClickBehavior::ExtendRazorEditArea,
-        ),
-        // Cmd/Ctrl+Opt: Add stretch marker
-        MouseModifierSetting::cmd_opt_behavior(
-            "MM_CTX_ITEM_CLK",
-            MediaItemClickBehavior::AddStretchMarker,
-        ),
-        // Track left drag: marquee-select items
-        MouseModifierSetting::default_behavior(
-            "MM_CTX_TRACK",
-            TrackLeftDragBehavior::MarqueeSelectItems,
-        ),
-        MouseModifierSetting::shift_behavior(
-            "MM_CTX_TRACK",
-            TrackLeftDragBehavior::MarqueeAddToItemSelection,
-        ),
-        // Cmd: Select razor edit area
-        MouseModifierSetting::with_cmd("MM_CTX_TRACK", "25 m"),
-        // Shift+Cmd: Add to razor edit area
-        MouseModifierSetting::new(
-            "MM_CTX_TRACK",
-            MouseModifierFlag::new(true, true, false, false),
-            "27 m",
-        ),
-        MouseModifierSetting::alt_behavior("MM_CTX_TRACK", TrackLeftDragBehavior::MarqueeZoom),
-        MouseModifierSetting::default_behavior(
-            "MM_CTX_TRACK_CLK",
-            super::behaviors::track::TrackClickBehavior::DeselectAllItems,
-        ),
-        MouseModifierSetting::shift_behavior(
-            "MM_CTX_TRACK_CLK",
-            super::behaviors::track::TrackClickBehavior::DeselectAllItemsAndMoveEditCursor,
-        ),
-        MouseModifierSetting::alt_shift_behavior(
-            "MM_CTX_TRACK_CLK",
-            super::behaviors::track::TrackClickBehavior::DeselectAllItemsAndMoveEditCursorIgnoringSnap,
-        ),
-    ])
+    MouseModifierProfile::new("reaper", "Default REAPER mouse modifiers")
+        .with_settings(profile_sections::reaper::all())
 }
 
 /// Logic Pro style profile
 fn logic_profile() -> MouseModifierProfile {
-    MouseModifierProfile::new("logic", "Logic Pro style mouse modifiers").with_settings([
-        // Item edge: Move edge by default (similar to Logic)
-        MouseModifierSetting::default_behavior(
-            "MM_CTX_ITEMEDGE",
-            MediaItemEdgeLeftDragBehavior::MoveEdge,
-        ),
-        // Track left drag: marquee-select items
-        MouseModifierSetting::default_behavior(
-            "MM_CTX_TRACK",
-            TrackLeftDragBehavior::MarqueeSelectItems,
-        ),
-        MouseModifierSetting::shift_behavior(
-            "MM_CTX_TRACK",
-            TrackLeftDragBehavior::MarqueeAddToItemSelection,
-        ),
-        // Cmd: Select razor edit area
-        MouseModifierSetting::with_cmd("MM_CTX_TRACK", "25 m"),
-        // Shift+Cmd: Add to razor edit area
-        MouseModifierSetting::new(
-            "MM_CTX_TRACK",
-            MouseModifierFlag::new(true, true, false, false),
-            "27 m",
-        ),
-        MouseModifierSetting::alt_behavior("MM_CTX_TRACK", TrackLeftDragBehavior::MarqueeZoom),
-        MouseModifierSetting::default_behavior(
-            "MM_CTX_TRACK_CLK",
-            super::behaviors::track::TrackClickBehavior::DeselectAllItems,
-        ),
-        MouseModifierSetting::shift_behavior(
-            "MM_CTX_TRACK_CLK",
-            super::behaviors::track::TrackClickBehavior::DeselectAllItemsAndMoveEditCursor,
-        ),
-        MouseModifierSetting::alt_shift_behavior(
-            "MM_CTX_TRACK_CLK",
-            super::behaviors::track::TrackClickBehavior::DeselectAllItemsAndMoveEditCursorIgnoringSnap,
-        ),
-    ])
+    MouseModifierProfile::new("logic", "Logic Pro style mouse modifiers")
+        .with_settings(profile_sections::logic::all())
 }
 
 // === Built-in Overrides ===

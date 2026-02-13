@@ -1,35 +1,16 @@
 [package]
 name = "playground"
-version.workspace = true
-edition.workspace = true
+version = "0.1.0"
+authors = ["Cody Wright <acodywright@gmail.com>"]
+edition = "2021"
 
 [dependencies]
-# Dioxus desktop (WebView)
-dioxus = { version = "0.7.2", features = ["desktop"] }
+dioxus = { workspace = true, features = ["router"] }
+signal2.workspace = true
+signal2-ui.workspace = true
 
-# Roam RPC
-roam.workspace = true
-roam-session.workspace = true
-roam-stream.workspace = true
-facet = { workspace = true }
-
-# Async
-tokio = { workspace = true, features = ["full"] }
-futures.workspace = true
-
-# Utils
-tracing.workspace = true
-tracing-subscriber = { workspace = true }
-eyre.workspace = true
-uuid = { version = "1.0", features = ["v4"] }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-chrono = { version = "0.4", features = ["serde"] }
-
-# Database (lightweight — rusqlite for item storage)
-rusqlite = { version = "0.32", features = ["bundled"] }
-
-# Authentication
-better-auth = { git = "https://github.com/better-auth-rs/better-auth-rs.git" }
-better-auth-core = { git = "https://github.com/better-auth-rs/better-auth-rs.git" }
-async-trait = "0.1"
+[features]
+default = ["desktop"]
+web = ["dioxus/web"]
+desktop = ["dioxus/desktop"]
+mobile = ["dioxus/mobile"]

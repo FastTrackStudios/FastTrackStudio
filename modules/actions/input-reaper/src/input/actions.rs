@@ -10,6 +10,7 @@ use crate::input::item_actions;
 use crate::input::keybinds;
 use crate::input::mouse_modifiers::core::{MouseModifierFlag, set_mouse_modifier};
 use crate::input::mouse_modifiers::manager as mouse_manager;
+use crate::input::mouse_modifiers::preset as mouse_preset;
 use crate::input::tempo::{
     MoveGridVariant, register_move_grid_actions, set_move_grid_variant,
     snap_grid_to_transient_constrained_handler, snap_grid_to_transient_fully_constrained_handler,
@@ -23,6 +24,27 @@ use tracing::{debug, info};
 fn toggle_input_interception_handler() {
     let is_enabled = InputHandler::toggle();
     let reaper = Reaper::get();
+    let medium_reaper = reaper.medium_reaper();
+
+    if is_enabled {
+        match mouse_preset::backup_current_modifiers_if_missing(&medium_reaper) {
+            Ok(true) => info!("Created user mouse modifier backup"),
+            Ok(false) => debug!("User mouse modifier backup already exists"),
+            Err(e) => tracing::warn!("Failed to create user mouse modifier backup: {}", e),
+        }
+    } else {
+        mouse_manager::disable_all_overrides();
+        if let Err(e) = mouse_preset::restore_user_backup(&medium_reaper) {
+            tracing::warn!("Failed to restore user mouse modifiers from backup: {}", e);
+            reaper.show_console_msg(format!(
+                "FTS-Input: failed to restore mouse modifier backup ({})\n",
+                e
+            ));
+        } else {
+            reaper.show_console_msg("FTS-Input: restored mouse modifiers from backup\n");
+            info!("Restored user mouse modifiers from backup");
+        }
+    }
 
     let status = if is_enabled { "enabled" } else { "disabled" };
     reaper.show_console_msg(format!("FTS-Input interception: {}\n", status));
@@ -159,6 +181,14 @@ fn apply_preset_mouse_modifiers(preset_name: &str) {
         "logic" => "logic",
         "reaper" | "reavim" | _ => "reaper",
     };
+
+    let reaper = Reaper::get();
+    let medium_reaper = reaper.medium_reaper();
+    match mouse_preset::backup_current_modifiers_if_missing(&medium_reaper) {
+        Ok(true) => info!("Created user mouse modifier backup"),
+        Ok(false) => debug!("User mouse modifier backup already exists"),
+        Err(e) => tracing::warn!("Failed to create user mouse modifier backup: {}", e),
+    }
 
     // Apply the mouse modifier profile
     mouse_manager::set_profile(profile_name);
@@ -341,12 +371,21 @@ fn reset_all_overrides_handler() {
 
 fn reset_mouse_to_profile_handler() {
     let reaper = Reaper::get();
+    let medium_reaper = reaper.medium_reaper();
 
     // Disable all mouse modifier overlays (returns to base profile)
     mouse_manager::disable_all_overrides();
 
-    reaper.show_console_msg("Mouse modifiers reset to base profile\n");
-    info!("Reset mouse modifiers to base profile");
+    if let Err(e) = mouse_preset::restore_user_backup(&medium_reaper) {
+        tracing::warn!("Failed to restore user mouse modifiers from backup: {}", e);
+        reaper.show_console_msg(format!(
+            "FTS: failed to restore mouse modifier backup ({})\n",
+            e
+        ));
+    } else {
+        reaper.show_console_msg("Mouse modifiers restored from backup\n");
+        info!("Restored mouse modifiers from backup");
+    }
 
     // Log current state
     mouse_manager::log_state();

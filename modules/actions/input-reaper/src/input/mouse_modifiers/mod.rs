@@ -15,12 +15,16 @@ pub mod behaviors;
 pub mod contexts;
 pub mod core;
 pub mod manager;
+pub mod profile_sections;
 pub mod preset;
 pub mod types;
 
 pub use contexts::ALL_CONTEXTS;
 pub use core::{MouseModifierFlag, get_mouse_modifier, set_mouse_modifier};
-pub use preset::{delete_preset, list_presets, load_preset, save_all_modifiers};
+pub use preset::{
+    USER_BACKUP_PRESET_NAME, backup_current_modifiers, backup_current_modifiers_if_missing,
+    delete_preset, list_presets, load_preset, restore_user_backup, save_all_modifiers,
+};
 pub use types::{
     // Context interaction enums
     ArrangeViewInteraction,

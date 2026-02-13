@@ -1,0 +1,13 @@
+[package]
+name = "signal2-storage"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+signal-proto = { package = "signal2-proto", path = "../signal-proto" }
+thiserror.workspace = true
+sea-orm = { version = "1.1", features = ["sqlx-sqlite", "runtime-tokio-rustls", "macros"] }
+async-trait = "0.1"
+serde_json.workspace = true

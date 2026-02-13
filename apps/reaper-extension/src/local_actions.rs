@@ -1,6 +1,7 @@
 //! Local actions owned by reaper-extension itself (not provided by cells).
 
 use actions_proto::{ActionId, ActionResult};
+use daw_proto::markers_regions::fts_markers_regions_actions;
 use daw_proto::transport::fts_transport_actions;
 use input_reaper::InputProfile;
 use reaper_high::Reaper;
@@ -275,6 +276,34 @@ impl fts_transport_actions::LocalActionBinder for ReaperExtensionTransportAction
     }
 }
 
+fn handle_fts_insert_region_and_edit() -> ActionResult {
+    Reaper::get()
+        .medium_reaper()
+        .main_on_command_ex(CommandId::new(40306), 0, CurrentProject);
+    ActionResult::success_with_message("Executed FTS insert region and edit")
+}
+
+fn handle_fts_insert_marker_and_edit() -> ActionResult {
+    let medium = Reaper::get().medium_reaper();
+    // Force marker creation first so repeated invocations at same position create new markers.
+    medium.main_on_command_ex(CommandId::new(40157), 0, CurrentProject);
+    // Then open the marker editor for the current position marker.
+    medium.main_on_command_ex(CommandId::new(40171), 0, CurrentProject);
+    ActionResult::success_with_message("Executed FTS insert marker and edit")
+}
+
+struct ReaperExtensionMarkersRegionsActionBinder;
+
+impl fts_markers_regions_actions::LocalActionBinder for ReaperExtensionMarkersRegionsActionBinder {
+    fn INSERT_REGION_AND_EDIT(&self) -> actions_proto::LocalActionImplementation {
+        actions_proto::LocalActionImplementation::Supported(Arc::new(handle_fts_insert_region_and_edit))
+    }
+
+    fn INSERT_MARKER_AND_EDIT(&self) -> actions_proto::LocalActionImplementation {
+        actions_proto::LocalActionImplementation::Supported(Arc::new(handle_fts_insert_marker_and_edit))
+    }
+}
+
 fn handle_log_input() -> ActionResult {
     input_reaper::log_state_to_console();
     ActionResult::success_with_message("Logged input runtime state")
@@ -499,6 +528,9 @@ pub fn builtin_local_actions() -> Vec<actions_proto::LocalActionRegistration> {
     let mut actions = reaper_extension_actions::definitions_with_handlers();
     actions.extend(fts_transport_actions::definitions_with_binder(
         &ReaperExtensionTransportActionBinder,
+    ));
+    actions.extend(fts_markers_regions_actions::definitions_with_binder(
+        &ReaperExtensionMarkersRegionsActionBinder,
     ));
     actions
         .into_iter()

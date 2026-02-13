@@ -16,6 +16,9 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+/// System-managed backup name for restoring user state after FTS modifications.
+pub const USER_BACKUP_PRESET_NAME: &str = "__fts_user_mouse_modifiers_backup";
+
 /// Mouse modifier preset data structure
 #[derive(Debug, Clone, Facet)]
 pub struct MouseModifierPreset {
@@ -93,6 +96,12 @@ fn key_to_flag(key: &str) -> MouseModifierFlag {
     }
 }
 
+/// Get the full file path for a preset name.
+fn preset_file_path(preset_name: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let presets_dir = get_presets_dir()?;
+    Ok(presets_dir.join(format!("{}.json", preset_name)))
+}
+
 /// Save all current mouse modifiers to a preset
 pub fn save_all_modifiers(
     preset_name: &str,
@@ -129,8 +138,7 @@ pub fn save_all_modifiers(
     }
 
     // Save to file
-    let presets_dir = get_presets_dir()?;
-    let preset_file = presets_dir.join(format!("{}.json", preset_name));
+    let preset_file = preset_file_path(preset_name)?;
     let json = facet_json::to_string_pretty(&preset)?;
     fs::write(&preset_file, json)?;
 
@@ -142,8 +150,7 @@ pub fn load_preset(
     preset_name: &str,
     medium_reaper: &MediumReaper,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let presets_dir = get_presets_dir()?;
-    let preset_file = presets_dir.join(format!("{}.json", preset_name));
+    let preset_file = preset_file_path(preset_name)?;
 
     if !preset_file.exists() {
         return Err(format!("Preset '{}' not found", preset_name).into());
@@ -173,10 +180,6 @@ pub fn load_preset(
 pub fn list_presets() -> Result<Vec<String>, Box<dyn std::error::Error>> {
     let presets_dir = get_presets_dir()?;
 
-    if !presets_dir.exists() {
-        return Ok(Vec::new());
-    }
-
     let mut presets = Vec::new();
 
     for entry in fs::read_dir(&presets_dir)? {
@@ -196,8 +199,7 @@ pub fn list_presets() -> Result<Vec<String>, Box<dyn std::error::Error>> {
 
 /// Delete a preset
 pub fn delete_preset(preset_name: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let presets_dir = get_presets_dir()?;
-    let preset_file = presets_dir.join(format!("{}.json", preset_name));
+    let preset_file = preset_file_path(preset_name)?;
 
     if !preset_file.exists() {
         return Err(format!("Preset '{}' not found", preset_name).into());
@@ -205,6 +207,39 @@ pub fn delete_preset(preset_name: &str) -> Result<(), Box<dyn std::error::Error>
 
     fs::remove_file(&preset_file)?;
     Ok(())
+}
+
+/// Return the on-disk path for the system-managed backup preset.
+pub fn user_backup_file_path() -> Result<PathBuf, Box<dyn std::error::Error>> {
+    preset_file_path(USER_BACKUP_PRESET_NAME)
+}
+
+/// Save a full backup snapshot of the user's current mouse modifiers.
+pub fn backup_current_modifiers(
+    medium_reaper: &MediumReaper,
+) -> Result<MouseModifierPreset, Box<dyn std::error::Error>> {
+    save_all_modifiers(
+        USER_BACKUP_PRESET_NAME,
+        Some("Auto backup before FTS mouse modifier changes"),
+        medium_reaper,
+    )
+}
+
+/// Save the user backup only if one does not already exist.
+pub fn backup_current_modifiers_if_missing(
+    medium_reaper: &MediumReaper,
+) -> Result<bool, Box<dyn std::error::Error>> {
+    let backup_file = user_backup_file_path()?;
+    if backup_file.exists() {
+        return Ok(false);
+    }
+    let _ = backup_current_modifiers(medium_reaper)?;
+    Ok(true)
+}
+
+/// Restore the user's full mouse modifier state from backup.
+pub fn restore_user_backup(medium_reaper: &MediumReaper) -> Result<(), Box<dyn std::error::Error>> {
+    load_preset(USER_BACKUP_PRESET_NAME, medium_reaper)
 }
 
 /// Test a specific context to see if GetMouseModifier works
