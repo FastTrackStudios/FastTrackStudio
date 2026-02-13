@@ -10,6 +10,7 @@ signal-proto = { package = "signal2-proto", path = "../signal-proto" }
 thiserror.workspace = true
 sea-orm = { version = "1.1", features = ["sqlx-sqlite", "runtime-tokio-rustls", "macros"] }
 async-trait = "0.1"
+serde.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]

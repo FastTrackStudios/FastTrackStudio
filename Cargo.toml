@@ -119,12 +119,12 @@ daw-proto = { path = "cells/daw/daw-proto" }
 daw-control = { path = "cells/daw/daw-control" }
 session = { path = "cells/session/session" }
 session-ui = { path = "cells/session/session-ui" }
-signal = { path = "cells/signal/signal" }
-signal-proto = { path = "cells/signal/signal-proto" }
-audio-controls = { path = "cells/signal/audio-controls" }
-signal-control = { path = "cells/signal/signal-control" }
-signal-storage = { path = "cells/signal/signal-storage" }
-signal-ui = { path = "cells/signal/signal-ui" }
+signal = { path = "cells/legacy-signal/signal" }
+signal-proto = { path = "cells/legacy-signal/signal-proto" }
+audio-controls = { path = "cells/legacy-signal/audio-controls" }
+signal-control = { path = "cells/legacy-signal/signal-control" }
+signal-storage = { path = "cells/legacy-signal/signal-storage" }
+signal-ui = { path = "cells/legacy-signal/signal-ui" }
 signal2 = { package = "signal2", path = "modules/signal/signal" }
 signal2-proto = { package = "signal2-proto", path = "modules/signal/signal-proto" }
 signal2-storage = { package = "signal2-storage", path = "modules/signal/signal-storage" }

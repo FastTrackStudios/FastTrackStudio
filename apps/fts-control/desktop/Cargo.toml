@@ -55,8 +55,8 @@ keyflow-ui = { path = "../../../cells/keyflow/keyflow-ui", default-features = fa
 keyflow = { path = "../../../cells/keyflow/keyflow", features = ["text"] }
 
 # Signal rig control UI
-signal-ui = { path = "../../../cells/signal/signal-ui", default-features = false }
-signal-control = { path = "../../../cells/signal/signal-control" }
+signal-ui = { path = "../../../cells/legacy-signal/signal-ui", default-features = false }
+signal-control = { path = "../../../cells/legacy-signal/signal-control" }
 
 # DAW UI components (mixer, TCP, arrangement, FX browser)
 daw-ui = { path = "../../../cells/daw/daw-ui", default-features = false }
