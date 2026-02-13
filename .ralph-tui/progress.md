@@ -188,24 +188,24 @@
   - Disk space on worktree can run low (12G free on 1.9T volume) — `cargo clean` frees ~5.5G of build artifacts
 ---
 
-## 2026-02-13 - roam-test-5e9.14
+## 2026-02-13 - roam-test-5e9.15
 - What was implemented:
-  - US-014: Renamed `BlockRepo` → `CollectionRepo` with collection/variant semantics
-  - New `CollectionRepo` trait with 8 methods: `load_block_state`, `save_block_state`, `list_block_collections`, `load_block_default_variant`, `load_block_variant`, `list_module_collections`, `load_module_default_variant`, `load_module_variant`
-  - `CollectionRepoLive` implementation with extracted `assemble_block_collection` / `assemble_module_collection` helpers to reduce duplication
-  - Seed functions renamed: `default_seed_presets` → `default_seed_block_collections`, `default_seed_module_presets` → `default_seed_module_collections`
-  - Updated all consumers: signal-live, signal (facade), signal-controller (no changes needed), signal-ui (no changes needed)
-  - 21 tests covering: block state round-trip, collection listing/filtering, default variant loading, specific variant loading, missing collection/variant edge cases, metadata round-trip, override round-trip, default normalization, reseed idempotency, module block source types
+  - US-015: Updated signal2-live service to collection/variant contracts
+  - Updated module-level doc comment to document collection/variant mapping (Preset=Collection, Snapshot=Variant)
+  - Documented the "load = apply" side-effect contract: loading a variant persists block state as active
+  - Added doc comments on all BlockService impl methods with collection/variant terminology
+  - Added region markers (SignalLive, BlockService impl)
+  - Added 15 comprehensive tests covering all service methods:
+    - get_block/set_block: seeded state, empty repo default, persist-and-return
+    - Block collections: list seeded, list empty, load default variant (with side-effect verification), load specific variant, nonexistent collection, nonexistent variant
+    - Module collections: list, load default variant, load specific variant, nonexistent collection
+    - Resolver determinism: sequential variant loads overwrite correctly, cross-type isolation
+  - Added tokio dev-dependency for async test runtime
 - Files changed:
-  - `modules/signal/signal-storage/src/collection_repo.rs` (new — replaces block_repo.rs, ~1070 lines with 21 tests)
-  - `modules/signal/signal-storage/src/lib.rs` (updated exports)
-  - `modules/signal/signal-storage/Cargo.toml` (added tokio dev-dependency for tests)
-  - `modules/signal/signal-live/src/lib.rs` (updated to CollectionRepo trait methods)
-  - `modules/signal/signal/src/lib.rs` (updated re-exports and bootstrap functions)
-  - Removed: `modules/signal/signal-storage/src/block_repo.rs`
+  - `modules/signal/signal-live/src/lib.rs` (rewritten — doc comments, region markers, 15 tests)
+  - `modules/signal/signal-live/Cargo.toml` (added tokio dev-dependency)
 - **Learnings:**
-  - `Snapshot::block()` returns owned `Block`, so `variant.block().parameters()` creates a temporary that can't be borrowed — need `let block = variant.block();` first
-  - Named methods with domain vocabulary (collection/variant) are cleaner than making the trait generic over type parameters, keeping the trait object-safe and call sites readable
-  - Entity model layer didn't need changes — the entity files (preset, snapshot, etc.) are internal storage details that the renamed repo methods abstract over
-  - `--no-deps` is essential for clippy on signal2-storage/live/controller because signal2-proto has a pre-existing `should_implement_trait` warning
+  - `Context::new()` is accessible directly from `roam::Context` without needing a `roam-wire` dev-dep — the controller crate pattern confirms this
+  - The collection/variant migration is a conceptual overlay at this stage — proto types remain `Preset`/`Snapshot` until US-004 renames them
+  - `--no-deps` is essential for clippy on signal2-live/storage/controller since signal2-proto has a pre-existing `should_implement_trait` warning
 ---

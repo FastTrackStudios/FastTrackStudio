@@ -10855,6 +10855,7 @@ dependencies = [
  "roam",
  "signal2-proto",
  "signal2-storage",
+ "tokio",
 ]
 
 [[package]]
