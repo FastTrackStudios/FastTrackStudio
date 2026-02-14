@@ -10,16 +10,17 @@ use facet::Facet;
 use serde::{Deserialize, Serialize};
 
 use crate::metadata::Metadata;
+use crate::override_policy::{validate_overrides, OverridePolicyError, SnapshotPolicy};
 use crate::overrides::Override;
-use crate::{ModulePresetId, ModuleSnapshotId, PresetId, SnapshotId};
+use crate::{EngineType, ModulePresetId, ModuleSnapshotId, PresetId, SnapshotId};
 
 // ─── IDs ────────────────────────────────────────────────────────
 
-crate::typed_string_id!(
+crate::typed_uuid_id!(
     /// Identifies a Layer collection.
     LayerId
 );
-crate::typed_string_id!(
+crate::typed_uuid_id!(
     /// Identifies a specific Layer variant.
     LayerSnapshotId
 );
@@ -76,6 +77,33 @@ impl BlockRef {
     }
 }
 
+// ─── Layer reference ────────────────────────────────────────────
+
+/// A reference to another layer preset/variant, enabling
+/// "preset-as-layer" composition for simple and complex sounds.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+pub struct LayerRef {
+    /// Which layer collection to pull from.
+    pub collection_id: LayerId,
+    /// Which variant within that layer. `None` = default variant.
+    pub variant_id: Option<LayerSnapshotId>,
+}
+
+impl LayerRef {
+    pub fn new(collection_id: impl Into<LayerId>) -> Self {
+        Self {
+            collection_id: collection_id.into(),
+            variant_id: None,
+        }
+    }
+
+    #[must_use]
+    pub fn with_variant(mut self, variant_id: impl Into<LayerSnapshotId>) -> Self {
+        self.variant_id = Some(variant_id.into());
+        self
+    }
+}
+
 // ─── LayerSnapshot ───────────────────────────────────────────────
 
 /// A specific configuration of a Layer — which modules and blocks to use.
@@ -83,6 +111,7 @@ impl BlockRef {
 pub struct LayerSnapshot {
     pub id: LayerSnapshotId,
     pub name: String,
+    pub layer_refs: Vec<LayerRef>,
     pub module_refs: Vec<ModuleRef>,
     pub block_refs: Vec<BlockRef>,
     pub overrides: Vec<Override>,
@@ -95,12 +124,19 @@ impl LayerSnapshot {
         Self {
             id: id.into(),
             name: name.into(),
+            layer_refs: Vec::new(),
             module_refs: Vec::new(),
             block_refs: Vec::new(),
             overrides: Vec::new(),
             enabled: true,
             metadata: Metadata::new(),
         }
+    }
+
+    #[must_use]
+    pub fn with_layer(mut self, layer_ref: LayerRef) -> Self {
+        self.layer_refs.push(layer_ref);
+        self
     }
 
     #[must_use]
@@ -126,6 +162,10 @@ impl LayerSnapshot {
         self.metadata = metadata;
         self
     }
+
+    pub fn validate_overrides(&self) -> Result<(), OverridePolicyError> {
+        validate_overrides::<SnapshotPolicy>(&self.overrides)
+    }
 }
 
 // ─── Layer ──────────────────────────────────────────────────────
@@ -135,6 +175,7 @@ impl LayerSnapshot {
 pub struct Layer {
     pub id: LayerId,
     pub name: String,
+    pub engine_type: EngineType,
     pub default_variant_id: LayerSnapshotId,
     pub variants: Vec<LayerSnapshot>,
     pub metadata: Metadata,
@@ -144,12 +185,14 @@ impl Layer {
     pub fn new(
         id: impl Into<LayerId>,
         name: impl Into<String>,
+        engine_type: EngineType,
         default_variant: LayerSnapshot,
     ) -> Self {
         let default_variant_id = default_variant.id.clone();
         Self {
             id: id.into(),
             name: name.into(),
+            engine_type,
             default_variant_id,
             variants: vec![default_variant],
             metadata: Metadata::new(),
@@ -181,11 +224,28 @@ impl Layer {
 
 impl crate::traits::Variant for LayerSnapshot {
     type Id = LayerSnapshotId;
-    fn variant_id(&self) -> &LayerSnapshotId {
+    type BaseRef = ();
+    type Override = Override;
+    fn id(&self) -> &LayerSnapshotId {
         &self.id
     }
-    fn variant_name(&self) -> &str {
+    fn name(&self) -> &str {
         &self.name
+    }
+    fn set_name(&mut self, name: impl Into<String>) {
+        self.name = name.into();
+    }
+    fn overrides(&self) -> Option<&[Self::Override]> {
+        Some(&self.overrides)
+    }
+    fn overrides_mut(&mut self) -> Option<&mut Vec<Self::Override>> {
+        Some(&mut self.overrides)
+    }
+}
+
+impl crate::traits::DefaultVariant for LayerSnapshot {
+    fn default_named(name: impl Into<String>) -> Self {
+        Self::new(LayerSnapshotId::new(), name)
     }
 }
 
@@ -230,9 +290,10 @@ mod tests {
 
     #[test]
     fn test_layer_creation() {
-        let variant = LayerSnapshot::new("v1", "Default").with_module(ModuleRef::new("mod-drive"));
+        let variant = LayerSnapshot::new(LayerSnapshotId::new(), "Default")
+            .with_module(ModuleRef::new(ModulePresetId::new()));
 
-        let layer = Layer::new("layer-1", "Main Layer", variant);
+        let layer = Layer::new(LayerId::new(), "Main Layer", EngineType::Guitar, variant);
         assert_eq!(layer.name, "Main Layer");
         assert_eq!(layer.variants.len(), 1);
         assert!(layer.default_variant().is_some());
@@ -240,13 +301,14 @@ mod tests {
 
     #[test]
     fn test_layer_multiple_variants() {
-        let v1 = LayerSnapshot::new("v1", "Clean");
-        let v2 = LayerSnapshot::new("v2", "Heavy");
+        let v1 = LayerSnapshot::new(LayerSnapshotId::new(), "Clean");
+        let v2_id = LayerSnapshotId::new();
+        let v2 = LayerSnapshot::new(v2_id.clone(), "Heavy");
 
-        let mut layer = Layer::new("layer-1", "Guitar", v1);
+        let mut layer = Layer::new(LayerId::new(), "Guitar", EngineType::Guitar, v1);
         layer.add_variant(v2);
 
         assert_eq!(layer.variants.len(), 2);
-        assert!(layer.variant(&LayerSnapshotId::new("v2")).is_some());
+        assert!(layer.variant(&v2_id).is_some());
     }
 }

@@ -11,19 +11,46 @@
 
 use facet::Facet;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 // ─── Domain modules ─────────────────────────────────────────────
+pub mod block;
+pub mod defaults;
 pub mod engine;
 pub mod layer;
 pub mod metadata;
+pub mod module_type;
 pub mod overrides;
+pub mod override_policy;
 pub mod profile;
 pub mod rig;
+pub mod signal_chain;
 pub mod song;
+pub mod tagging;
 pub mod template;
 pub mod traits;
 
+pub use block::*;
+pub use module_type::*;
+pub use signal_chain::*;
+
+/// Shared contract for generating globally unique IDs at runtime.
+pub trait IdFactory: Send + Sync {
+    fn new_uuid(&self) -> Uuid;
+}
+
+/// Default runtime ID factory. Uses UUIDv7 for sortable, globally unique IDs.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct RuntimeIdFactory;
+
+impl IdFactory for RuntimeIdFactory {
+    fn new_uuid(&self) -> Uuid {
+        Uuid::now_v7()
+    }
+}
+
 /// Creates a branded string ID type with Display, From, and AsRef impls.
+/// Used for categorical IDs like `RigTypeId` that remain human-readable strings.
 #[macro_export]
 macro_rules! typed_string_id {
     ($(#[$meta:meta])* $name:ident) => {
@@ -71,47 +98,163 @@ macro_rules! typed_string_id {
     };
 }
 
-typed_string_id!(
+/// Creates a branded UUID ID type backed by String for Facet compatibility.
+/// Generates v7 UUIDs on `new()`, validates UUID format on `From<&str>`.
+/// Used for all entity IDs that need global uniqueness for online sharing.
+#[macro_export]
+macro_rules! typed_uuid_id {
+    ($(#[$meta:meta])* $name:ident) => {
+        $(#[$meta])*
+        #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, facet::Facet)]
+        pub struct $name(String);
+
+        impl $name {
+            /// Generate a new random v7 UUID.
+            pub fn new() -> Self {
+                Self(uuid::Uuid::now_v7().to_string())
+            }
+
+            /// Wrap an existing UUID.
+            pub fn from_uuid(uuid: uuid::Uuid) -> Self {
+                Self(uuid.to_string())
+            }
+
+            /// Get the string representation.
+            pub fn as_str(&self) -> &str {
+                &self.0
+            }
+
+            /// Parse back to a UUID value.
+            pub fn to_uuid(&self) -> uuid::Uuid {
+                self.0.parse().expect(concat!(
+                    "corrupted UUID in ",
+                    stringify!($name)
+                ))
+            }
+
+            /// Consume and return the inner string.
+            pub fn into_inner(self) -> String {
+                self.0
+            }
+        }
+
+        impl Default for $name {
+            fn default() -> Self {
+                Self::new()
+            }
+        }
+
+        impl ::std::fmt::Display for $name {
+            fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+                write!(f, "{}", self.0)
+            }
+        }
+
+        impl From<uuid::Uuid> for $name {
+            fn from(value: uuid::Uuid) -> Self {
+                Self(value.to_string())
+            }
+        }
+
+        impl From<String> for $name {
+            fn from(value: String) -> Self {
+                // Validate UUID format
+                let _: uuid::Uuid = value.parse().expect(concat!(
+                    "invalid UUID string for ",
+                    stringify!($name)
+                ));
+                Self(value)
+            }
+        }
+
+        impl From<&str> for $name {
+            fn from(value: &str) -> Self {
+                // Validate UUID format
+                let _: uuid::Uuid = value.parse().expect(concat!(
+                    "invalid UUID string for ",
+                    stringify!($name)
+                ));
+                Self(value.to_string())
+            }
+        }
+
+        impl AsRef<str> for $name {
+            fn as_ref(&self) -> &str {
+                &self.0
+            }
+        }
+    };
+}
+
+/// Namespace UUID for deterministic seed data IDs (v5).
+pub const SEED_UUID_NS: Uuid = Uuid::from_bytes([
+    0x6b, 0xa7, 0xb8, 0x10, 0x9d, 0xad, 0x51, 0xd1, 0x80, 0xb4, 0x00, 0xc0, 0x4f, 0xd4, 0x30, 0xc8,
+]);
+
+/// Generate a deterministic UUID from a human-readable name.
+/// Same name always produces same UUID — used for seed data and tests.
+pub fn seed_id(name: &str) -> Uuid {
+    Uuid::new_v5(&SEED_UUID_NS, name.as_bytes())
+}
+
+typed_uuid_id!(
     /// Branded type for preset identifiers.
     PresetId
 );
-typed_string_id!(
+typed_uuid_id!(
     /// Branded type for snapshot identifiers.
     SnapshotId
 );
-typed_string_id!(
+typed_uuid_id!(
     /// Branded type for module preset identifiers.
     ModulePresetId
 );
-typed_string_id!(
+typed_uuid_id!(
     /// Branded type for module snapshot identifiers.
     ModuleSnapshotId
 );
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Facet)]
-#[repr(u8)]
-pub enum BlockType {
-    Amp,
-    Drive,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Facet, Default)]
+#[repr(C)]
+pub enum EngineType {
+    #[default]
+    Guitar,
+    Bass,
+    Vocal,
+    Keys,
+    Synth,
+    Organ,
+    Pad,
 }
 
-impl BlockType {
-    pub fn as_str(self) -> &'static str {
+impl EngineType {
+    pub const fn as_str(self) -> &'static str {
         match self {
-            Self::Amp => "amp",
-            Self::Drive => "drive",
+            Self::Guitar => "guitar",
+            Self::Bass => "bass",
+            Self::Vocal => "vocal",
+            Self::Keys => "keys",
+            Self::Synth => "synth",
+            Self::Organ => "organ",
+            Self::Pad => "pad",
         }
     }
 
     #[allow(clippy::should_implement_trait)]
     pub fn from_str(value: &str) -> Option<Self> {
         match value {
-            "amp" => Some(Self::Amp),
-            "drive" => Some(Self::Drive),
+            "guitar" => Some(Self::Guitar),
+            "bass" => Some(Self::Bass),
+            "vocal" => Some(Self::Vocal),
+            "keys" => Some(Self::Keys),
+            "synth" => Some(Self::Synth),
+            "organ" => Some(Self::Organ),
+            "pad" => Some(Self::Pad),
             _ => None,
         }
     }
 }
+
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Facet)]
 pub struct ParameterValue(f32);
@@ -219,6 +362,12 @@ pub struct Snapshot {
     id: SnapshotId,
     name: String,
     block: Block,
+    #[serde(default = "default_version")]
+    version: u32,
+}
+
+fn default_version() -> u32 {
+    1
 }
 
 impl Snapshot {
@@ -227,6 +376,22 @@ impl Snapshot {
             id: id.into(),
             name: name.into(),
             block,
+            version: 1,
+        }
+    }
+
+    /// Create a snapshot with an explicit version (used by storage layer on load).
+    pub fn with_version(
+        id: impl Into<SnapshotId>,
+        name: impl Into<String>,
+        block: Block,
+        version: u32,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            name: name.into(),
+            block,
+            version,
         }
     }
 
@@ -240,6 +405,15 @@ impl Snapshot {
 
     pub fn block(&self) -> Block {
         self.block.clone()
+    }
+
+    pub fn version(&self) -> u32 {
+        self.version
+    }
+
+    /// Bump the version counter. Called by the storage layer when parameter values change.
+    pub fn increment_version(&mut self) {
+        self.version += 1;
     }
 }
 
@@ -271,11 +445,22 @@ impl SnapshotLike for Snapshot {
 
 impl traits::Variant for Snapshot {
     type Id = SnapshotId;
-    fn variant_id(&self) -> &SnapshotId {
+    type BaseRef = ();
+    type Override = ();
+    fn id(&self) -> &SnapshotId {
         &self.id
     }
-    fn variant_name(&self) -> &str {
+    fn name(&self) -> &str {
         &self.name
+    }
+    fn set_name(&mut self, name: impl Into<String>) {
+        self.name = name.into();
+    }
+}
+
+impl traits::DefaultVariant for Snapshot {
+    fn default_named(name: impl Into<String>) -> Self {
+        Self::new(SnapshotId::new(), name, Block::default())
     }
 }
 
@@ -439,14 +624,55 @@ impl BlockParameterOverride {
 pub enum ModuleBlockSource {
     PresetDefault {
         preset_id: PresetId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        saved_at_version: Option<u32>,
     },
     PresetSnapshot {
         preset_id: PresetId,
         snapshot_id: SnapshotId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        saved_at_version: Option<u32>,
     },
     Inline {
         block: Block,
     },
+}
+
+impl ModuleBlockSource {
+    /// The snapshot version this source was saved against, if known.
+    ///
+    /// Returns `None` for legacy data or inline blocks.
+    pub fn saved_at_version(&self) -> Option<u32> {
+        match self {
+            Self::PresetDefault {
+                saved_at_version, ..
+            } => *saved_at_version,
+            Self::PresetSnapshot {
+                saved_at_version, ..
+            } => *saved_at_version,
+            Self::Inline { .. } => None,
+        }
+    }
+
+    /// Return a new source with the saved version stamped.
+    pub fn with_saved_version(self, version: u32) -> Self {
+        match self {
+            Self::PresetDefault { preset_id, .. } => Self::PresetDefault {
+                preset_id,
+                saved_at_version: Some(version),
+            },
+            Self::PresetSnapshot {
+                preset_id,
+                snapshot_id,
+                ..
+            } => Self::PresetSnapshot {
+                preset_id,
+                snapshot_id,
+                saved_at_version: Some(version),
+            },
+            inline @ Self::Inline { .. } => inline,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
@@ -502,16 +728,35 @@ impl ModuleBlock {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct Module {
-    blocks: Vec<ModuleBlock>,
+    chain: SignalChain,
 }
 
 impl Module {
-    pub fn from_blocks(blocks: Vec<ModuleBlock>) -> Self {
-        Self { blocks }
+    /// Create a module from a signal chain (supports parallel routing).
+    pub fn from_chain(chain: SignalChain) -> Self {
+        Self { chain }
     }
 
-    pub fn blocks(&self) -> &[ModuleBlock] {
-        &self.blocks
+    /// Create a module from a flat list of blocks (pure series chain).
+    ///
+    /// Backward-compatible constructor — wraps blocks in [`SignalChain::serial`].
+    pub fn from_blocks(blocks: Vec<ModuleBlock>) -> Self {
+        Self {
+            chain: SignalChain::serial(blocks),
+        }
+    }
+
+    /// The full signal chain topology.
+    pub fn chain(&self) -> &SignalChain {
+        &self.chain
+    }
+
+    /// All blocks in depth-first order (flattening any parallel splits).
+    ///
+    /// Use this when you need a flat view regardless of topology — e.g.,
+    /// counting blocks, iterating parameters, or building a template.
+    pub fn blocks(&self) -> Vec<&ModuleBlock> {
+        self.chain.blocks()
     }
 }
 
@@ -520,6 +765,8 @@ pub struct ModuleSnapshot {
     id: ModuleSnapshotId,
     name: String,
     module: Module,
+    #[serde(default = "default_version")]
+    version: u32,
 }
 
 impl ModuleSnapshot {
@@ -528,6 +775,22 @@ impl ModuleSnapshot {
             id: id.into(),
             name: name.into(),
             module,
+            version: 1,
+        }
+    }
+
+    /// Create a module snapshot with an explicit version (used by storage layer on load).
+    pub fn with_version(
+        id: impl Into<ModuleSnapshotId>,
+        name: impl Into<String>,
+        module: Module,
+        version: u32,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            name: name.into(),
+            module,
+            version,
         }
     }
 
@@ -541,6 +804,15 @@ impl ModuleSnapshot {
 
     pub fn module(&self) -> &Module {
         &self.module
+    }
+
+    pub fn version(&self) -> u32 {
+        self.version
+    }
+
+    /// Bump the version counter. Called by the storage layer when parameter values change.
+    pub fn increment_version(&mut self) {
+        self.version += 1;
     }
 }
 
@@ -563,11 +835,22 @@ impl SnapshotLike for ModuleSnapshot {
 
 impl traits::Variant for ModuleSnapshot {
     type Id = ModuleSnapshotId;
-    fn variant_id(&self) -> &ModuleSnapshotId {
+    type BaseRef = ();
+    type Override = ();
+    fn id(&self) -> &ModuleSnapshotId {
         &self.id
     }
-    fn variant_name(&self) -> &str {
+    fn name(&self) -> &str {
         &self.name
+    }
+    fn set_name(&mut self, name: impl Into<String>) {
+        self.name = name.into();
+    }
+}
+
+impl traits::DefaultVariant for ModuleSnapshot {
+    fn default_named(name: impl Into<String>) -> Self {
+        Self::new(ModuleSnapshotId::new(), name, Module::from_blocks(Vec::new()))
     }
 }
 
@@ -575,6 +858,7 @@ impl traits::Variant for ModuleSnapshot {
 pub struct ModulePreset {
     id: ModulePresetId,
     name: String,
+    module_type: ModuleType,
     default_snapshot: ModuleSnapshot,
     snapshots: Vec<ModuleSnapshot>,
 }
@@ -583,6 +867,7 @@ impl ModulePreset {
     pub fn new(
         id: impl Into<ModulePresetId>,
         name: impl Into<String>,
+        module_type: ModuleType,
         default_snapshot: ModuleSnapshot,
         additional_snapshots: Vec<ModuleSnapshot>,
     ) -> Self {
@@ -597,6 +882,7 @@ impl ModulePreset {
         Self {
             id: id.into(),
             name: name.into(),
+            module_type,
             default_snapshot,
             snapshots,
         }
@@ -608,6 +894,10 @@ impl ModulePreset {
 
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    pub fn module_type(&self) -> ModuleType {
+        self.module_type
     }
 
     pub fn snapshots(&self) -> &[ModuleSnapshot] {
@@ -688,18 +978,95 @@ pub trait BlockService {
     ) -> Option<ModuleSnapshot>;
 }
 
+#[roam::service]
+pub trait LayerService {
+    async fn list_layers(&self) -> Vec<layer::Layer>;
+    async fn load_layer(&self, id: layer::LayerId) -> Option<layer::Layer>;
+    async fn save_layer(&self, layer: layer::Layer) -> ();
+    async fn delete_layer(&self, id: layer::LayerId) -> ();
+    async fn load_layer_variant(
+        &self,
+        layer_id: layer::LayerId,
+        variant_id: layer::LayerSnapshotId,
+    ) -> Option<layer::LayerSnapshot>;
+}
+
+#[roam::service]
+pub trait EngineService {
+    async fn list_engines(&self) -> Vec<engine::Engine>;
+    async fn load_engine(&self, id: engine::EngineId) -> Option<engine::Engine>;
+    async fn save_engine(&self, engine: engine::Engine) -> ();
+    async fn delete_engine(&self, id: engine::EngineId) -> ();
+    async fn load_engine_variant(
+        &self,
+        engine_id: engine::EngineId,
+        variant_id: engine::EngineSceneId,
+    ) -> Option<engine::EngineScene>;
+}
+
+#[roam::service]
+pub trait PresetService {
+    async fn list_presets_all(&self) -> Vec<rig::Rig>;
+    async fn load_preset_rig(&self, id: rig::RigId) -> Option<rig::Rig>;
+    async fn save_preset(&self, rig: rig::Rig) -> ();
+    async fn delete_preset(&self, id: rig::RigId) -> ();
+    async fn load_preset_variant(
+        &self,
+        rig_id: rig::RigId,
+        variant_id: rig::RigSceneId,
+    ) -> Option<rig::RigScene>;
+}
+
+#[roam::service]
+pub trait ProfileService {
+    async fn list_profiles(&self) -> Vec<profile::Profile>;
+    async fn load_profile(&self, id: profile::ProfileId) -> Option<profile::Profile>;
+    async fn save_profile(&self, profile: profile::Profile) -> ();
+    async fn delete_profile(&self, id: profile::ProfileId) -> ();
+    async fn load_profile_variant(
+        &self,
+        profile_id: profile::ProfileId,
+        variant_id: profile::PatchId,
+    ) -> Option<profile::Patch>;
+}
+
+#[roam::service]
+pub trait SongService {
+    async fn list_songs(&self) -> Vec<song::Song>;
+    async fn load_song(&self, id: song::SongId) -> Option<song::Song>;
+    async fn save_song(&self, song: song::Song) -> ();
+    async fn delete_song(&self, id: song::SongId) -> ();
+    async fn load_song_variant(
+        &self,
+        song_id: song::SongId,
+        variant_id: song::SectionId,
+    ) -> Option<song::Section>;
+}
+
+#[roam::service]
+pub trait BrowserService {
+    async fn browser_index(&self) -> tagging::BrowserIndex;
+    async fn browse(&self, query: tagging::BrowserQuery) -> Vec<tagging::BrowserHit>;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn preset_always_contains_default_snapshot() {
-        let default = Snapshot::new("snap-default", "Default", Block::default());
-        let duplicate = Snapshot::new("snap-default", "Duplicate", Block::new(0.1, 0.2, 0.3));
-        let extra = Snapshot::new("snap-extra", "Extra", Block::new(0.8, 0.1, 0.6));
+        let snap_default_id = SnapshotId::from_uuid(seed_id("snap-default"));
+        let snap_extra_id = SnapshotId::from_uuid(seed_id("snap-extra"));
+        let default = Snapshot::new(snap_default_id.clone(), "Default", Block::default());
+        let duplicate = Snapshot::new(
+            snap_default_id.clone(),
+            "Duplicate",
+            Block::new(0.1, 0.2, 0.3),
+        );
+        let extra = Snapshot::new(snap_extra_id.clone(), "Extra", Block::new(0.8, 0.1, 0.6));
 
         let preset = Preset::new(
-            "preset-a",
+            PresetId::from_uuid(seed_id("preset-a")),
             "Preset A",
             BlockType::Amp,
             default.clone(),
@@ -709,10 +1076,114 @@ mod tests {
         assert_eq!(preset.default_snapshot(), default);
         assert_eq!(preset.block_type(), BlockType::Amp);
         assert_eq!(preset.snapshots().len(), 2);
-        assert_eq!(
-            preset.snapshots()[0].id(),
-            &SnapshotId::from("snap-default")
-        );
-        assert_eq!(preset.snapshots()[1].id(), &SnapshotId::from("snap-extra"));
+        assert_eq!(preset.snapshots()[0].id(), &snap_default_id);
+        assert_eq!(preset.snapshots()[1].id(), &snap_extra_id);
+    }
+
+    // -- Version tracking tests
+
+    #[test]
+    fn snapshot_starts_at_version_1() {
+        let snap = Snapshot::new(SnapshotId::new(), "Test", Block::default());
+        assert_eq!(snap.version(), 1);
+    }
+
+    #[test]
+    fn snapshot_version_increments() {
+        let mut snap = Snapshot::new(SnapshotId::new(), "Test", Block::default());
+        assert_eq!(snap.version(), 1);
+        snap.increment_version();
+        assert_eq!(snap.version(), 2);
+        snap.increment_version();
+        assert_eq!(snap.version(), 3);
+    }
+
+    #[test]
+    fn snapshot_with_version_sets_explicit_version() {
+        let snap = Snapshot::with_version(SnapshotId::new(), "Test", Block::default(), 42);
+        assert_eq!(snap.version(), 42);
+    }
+
+    #[test]
+    fn module_snapshot_starts_at_version_1() {
+        let ms = ModuleSnapshot::new(ModuleSnapshotId::new(), "Test", Module::from_blocks(vec![]));
+        assert_eq!(ms.version(), 1);
+    }
+
+    #[test]
+    fn module_snapshot_version_increments() {
+        let mut ms =
+            ModuleSnapshot::new(ModuleSnapshotId::new(), "Test", Module::from_blocks(vec![]));
+        ms.increment_version();
+        assert_eq!(ms.version(), 2);
+    }
+
+    #[test]
+    fn module_block_source_saved_version() {
+        let source = ModuleBlockSource::PresetDefault {
+            preset_id: PresetId::new(),
+            saved_at_version: None,
+        };
+        assert_eq!(source.saved_at_version(), None);
+
+        let stamped = source.with_saved_version(3);
+        assert_eq!(stamped.saved_at_version(), Some(3));
+    }
+
+    #[test]
+    fn module_block_source_snapshot_saved_version() {
+        let source = ModuleBlockSource::PresetSnapshot {
+            preset_id: PresetId::new(),
+            snapshot_id: SnapshotId::new(),
+            saved_at_version: None,
+        };
+        let stamped = source.with_saved_version(5);
+        assert_eq!(stamped.saved_at_version(), Some(5));
+
+        // Inline always returns None
+        let inline = ModuleBlockSource::Inline {
+            block: Block::default(),
+        };
+        assert_eq!(inline.saved_at_version(), None);
+        let still_inline = inline.with_saved_version(10);
+        assert_eq!(still_inline.saved_at_version(), None);
+    }
+
+    #[test]
+    fn snapshot_serde_round_trip() {
+        let snap = Snapshot::new(SnapshotId::new(), "Test", Block::default());
+        let json = serde_json::to_string(&snap).unwrap();
+        let roundtrip: Snapshot = serde_json::from_str(&json).unwrap();
+        assert_eq!(snap, roundtrip);
+    }
+
+    #[test]
+    fn module_block_source_serde_with_version() {
+        let source = ModuleBlockSource::PresetSnapshot {
+            preset_id: PresetId::new(),
+            snapshot_id: SnapshotId::new(),
+            saved_at_version: Some(7),
+        };
+        let json = serde_json::to_string(&source).unwrap();
+        let roundtrip: ModuleBlockSource = serde_json::from_str(&json).unwrap();
+        assert_eq!(roundtrip.saved_at_version(), Some(7));
+    }
+
+    #[test]
+    fn seed_id_is_deterministic() {
+        let a = seed_id("test-name");
+        let b = seed_id("test-name");
+        assert_eq!(a, b);
+
+        let c = seed_id("different-name");
+        assert_ne!(a, c);
+    }
+
+    #[test]
+    fn uuid_id_from_string_round_trip() {
+        let id = PresetId::new();
+        let s = id.to_string();
+        let parsed = PresetId::from(s);
+        assert_eq!(id, parsed);
     }
 }

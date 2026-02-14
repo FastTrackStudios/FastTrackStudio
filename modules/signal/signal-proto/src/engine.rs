@@ -8,15 +8,17 @@ use serde::{Deserialize, Serialize};
 
 use crate::layer::{LayerId, LayerSnapshotId};
 use crate::metadata::Metadata;
+use crate::override_policy::{validate_overrides, OverridePolicyError, ScenePolicy};
 use crate::overrides::Override;
+use crate::EngineType;
 
 // ─── IDs ────────────────────────────────────────────────────────
 
-crate::typed_string_id!(
+crate::typed_uuid_id!(
     /// Identifies an Engine collection.
     EngineId
 );
-crate::typed_string_id!(
+crate::typed_uuid_id!(
     /// Identifies a specific Engine variant (scene).
     EngineSceneId
 );
@@ -79,6 +81,10 @@ impl EngineScene {
         self.metadata = metadata;
         self
     }
+
+    pub fn validate_overrides(&self) -> Result<(), OverridePolicyError> {
+        validate_overrides::<ScenePolicy>(&self.overrides)
+    }
 }
 
 // ─── Engine ─────────────────────────────────────────────────────
@@ -88,6 +94,7 @@ impl EngineScene {
 pub struct Engine {
     pub id: EngineId,
     pub name: String,
+    pub engine_type: EngineType,
     pub layer_ids: Vec<LayerId>,
     pub default_variant_id: EngineSceneId,
     pub variants: Vec<EngineScene>,
@@ -98,6 +105,7 @@ impl Engine {
     pub fn new(
         id: impl Into<EngineId>,
         name: impl Into<String>,
+        engine_type: EngineType,
         layer_ids: Vec<LayerId>,
         default_variant: EngineScene,
     ) -> Self {
@@ -105,6 +113,7 @@ impl Engine {
         Self {
             id: id.into(),
             name: name.into(),
+            engine_type,
             layer_ids,
             default_variant_id,
             variants: vec![default_variant],
@@ -126,6 +135,10 @@ impl Engine {
         self.variants.iter().find(|v| &v.id == id)
     }
 
+    pub fn is_layer_type_compatible(&self, layer_type: EngineType) -> bool {
+        self.engine_type == layer_type
+    }
+
     #[must_use]
     pub fn with_metadata(mut self, metadata: Metadata) -> Self {
         self.metadata = metadata;
@@ -137,11 +150,28 @@ impl Engine {
 
 impl crate::traits::Variant for EngineScene {
     type Id = EngineSceneId;
-    fn variant_id(&self) -> &EngineSceneId {
+    type BaseRef = ();
+    type Override = Override;
+    fn id(&self) -> &EngineSceneId {
         &self.id
     }
-    fn variant_name(&self) -> &str {
+    fn name(&self) -> &str {
         &self.name
+    }
+    fn set_name(&mut self, name: impl Into<String>) {
+        self.name = name.into();
+    }
+    fn overrides(&self) -> Option<&[Self::Override]> {
+        Some(&self.overrides)
+    }
+    fn overrides_mut(&mut self) -> Option<&mut Vec<Self::Override>> {
+        Some(&mut self.overrides)
+    }
+}
+
+impl crate::traits::DefaultVariant for EngineScene {
+    fn default_named(name: impl Into<String>) -> Self {
+        Self::new(EngineSceneId::new(), name)
     }
 }
 
@@ -186,17 +216,21 @@ mod tests {
 
     #[test]
     fn test_engine_creation() {
-        let variant = EngineScene::new("ev1", "Default Scene")
-            .with_layer(LayerSelection::new("layer-1", "v1"));
+        let layer_id = LayerId::new();
+        let variant = EngineScene::new(EngineSceneId::new(), "Default Scene").with_layer(
+            LayerSelection::new(layer_id.clone(), LayerSnapshotId::new()),
+        );
 
         let engine = Engine::new(
-            "engine-1",
+            EngineId::new(),
             "Guitar Engine",
-            vec![LayerId::new("layer-1")],
+            EngineType::Guitar,
+            vec![layer_id],
             variant,
         );
 
         assert_eq!(engine.name, "Guitar Engine");
+        assert_eq!(engine.engine_type, EngineType::Guitar);
         assert_eq!(engine.layer_ids.len(), 1);
         assert!(engine.default_variant().is_some());
     }

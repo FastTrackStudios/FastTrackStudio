@@ -8,16 +8,17 @@ use facet::Facet;
 use serde::{Deserialize, Serialize};
 
 use crate::metadata::Metadata;
+use crate::override_policy::{validate_overrides, FreePolicy, OverridePolicyError};
 use crate::overrides::Override;
 use crate::rig::{RigId, RigSceneId};
 
 // ─── IDs ────────────────────────────────────────────────────────
 
-crate::typed_string_id!(
+crate::typed_uuid_id!(
     /// Identifies a Profile collection.
     ProfileId
 );
-crate::typed_string_id!(
+crate::typed_uuid_id!(
     /// Identifies a specific Patch variant within a Profile.
     PatchId
 );
@@ -62,6 +63,10 @@ impl Patch {
     pub fn with_metadata(mut self, metadata: Metadata) -> Self {
         self.metadata = metadata;
         self
+    }
+
+    pub fn validate_overrides(&self) -> Result<(), OverridePolicyError> {
+        validate_overrides::<FreePolicy>(&self.overrides)
     }
 }
 
@@ -112,11 +117,31 @@ impl Profile {
 
 impl crate::traits::Variant for Patch {
     type Id = PatchId;
-    fn variant_id(&self) -> &PatchId {
+    type BaseRef = RigSceneId;
+    type Override = Override;
+    fn id(&self) -> &PatchId {
         &self.id
     }
-    fn variant_name(&self) -> &str {
+    fn name(&self) -> &str {
         &self.name
+    }
+    fn set_name(&mut self, name: impl Into<String>) {
+        self.name = name.into();
+    }
+    fn base_ref(&self) -> Option<&Self::BaseRef> {
+        Some(&self.rig_variant_id)
+    }
+    fn overrides(&self) -> Option<&[Self::Override]> {
+        Some(&self.overrides)
+    }
+    fn overrides_mut(&mut self) -> Option<&mut Vec<Self::Override>> {
+        Some(&mut self.overrides)
+    }
+}
+
+impl crate::traits::DefaultVariant for Patch {
+    fn default_named(name: impl Into<String>) -> Self {
+        Self::new(PatchId::new(), name, RigId::new(), RigSceneId::new())
     }
 }
 
@@ -161,13 +186,17 @@ mod tests {
 
     #[test]
     fn test_profile_creation() {
-        let patch = Patch::new("patch-clean", "Clean", "rig-1", "rv-clean");
-        let mut profile = Profile::new("profile-1", "Worship", patch);
-        profile.add_patch(Patch::new("patch-lead", "Lead", "rig-1", "rv-lead"));
+        let rig_id = RigId::new();
+        let rv_clean = RigSceneId::new();
+        let rv_lead = RigSceneId::new();
+        let lead_id = PatchId::new();
+        let patch = Patch::new(PatchId::new(), "Clean", rig_id.clone(), rv_clean);
+        let mut profile = Profile::new(ProfileId::new(), "Worship", patch);
+        profile.add_patch(Patch::new(lead_id.clone(), "Lead", rig_id, rv_lead));
 
         assert_eq!(profile.name, "Worship");
         assert_eq!(profile.patches.len(), 2);
         assert_eq!(profile.default_patch().unwrap().name, "Clean");
-        assert!(profile.patch(&PatchId::new("patch-lead")).is_some());
+        assert!(profile.patch(&lead_id).is_some());
     }
 }

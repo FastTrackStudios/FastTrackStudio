@@ -14,7 +14,7 @@ pub struct Model {
 
 impl Model {
     pub fn variant_id_branded(&self) -> SectionId {
-        SectionId::new(self.id.clone())
+        SectionId::from(self.id.clone())
     }
 }
 

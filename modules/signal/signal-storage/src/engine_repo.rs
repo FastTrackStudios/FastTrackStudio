@@ -5,6 +5,7 @@ use signal_proto::engine::{Engine, EngineId, EngineScene, EngineSceneId, LayerSe
 use signal_proto::layer::LayerId;
 use signal_proto::metadata::Metadata;
 use signal_proto::overrides::Override;
+use signal_proto::EngineType;
 
 use crate::entity;
 use crate::{DatabaseConnection, StorageError, StorageResult};
@@ -76,7 +77,7 @@ impl EngineRepoLive {
     fn layer_ids_from_json(json: &str) -> StorageResult<Vec<LayerId>> {
         let strs: Vec<String> = serde_json::from_str(json)
             .map_err(|e| StorageError::Data(format!("failed to parse layer_ids json: {e}")))?;
-        Ok(strs.into_iter().map(LayerId::new).collect())
+        Ok(strs.into_iter().map(LayerId::from).collect())
     }
 
     fn metadata_to_json(metadata: &Metadata) -> StorageResult<String> {
@@ -119,6 +120,7 @@ impl EngineRepoLive {
         Ok(Engine {
             id: model.engine_id_branded(),
             name: model.name.clone(),
+            engine_type: EngineType::from_str(&model.engine_type).unwrap_or_default(),
             layer_ids,
             default_variant_id: model.default_variant_id_branded(),
             variants,
@@ -181,6 +183,7 @@ impl EngineRepo for EngineRepoLive {
         entity::engine::Entity::insert(entity::engine::ActiveModel {
             id: Set(engine.id.as_str().to_string()),
             name: Set(engine.name.clone()),
+            engine_type: Set(engine.engine_type.as_str().to_string()),
             layer_ids_json: Set(Self::layer_ids_to_json(&engine.layer_ids)?),
             default_variant_id: Set(engine.default_variant_id.as_str().to_string()),
             metadata_json: Set(Self::metadata_to_json(&engine.metadata)?),
@@ -235,8 +238,16 @@ impl EngineRepo for EngineRepoLive {
 mod tests {
     use super::*;
     use crate::Database;
+    use signal_proto::seed_id;
 
     type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
+
+    fn eid(name: &str) -> EngineId {
+        EngineId::from_uuid(seed_id(name))
+    }
+    fn esid(name: &str) -> EngineSceneId {
+        EngineSceneId::from_uuid(seed_id(name))
+    }
 
     async fn test_repo() -> Result<EngineRepoLive> {
         let db = Database::connect("sqlite::memory:").await?;
@@ -246,15 +257,16 @@ mod tests {
     }
 
     fn sample_engine() -> Engine {
-        let scene1 = EngineScene::new("s1", "Default Scene")
-            .with_layer(LayerSelection::new("layer-1", "v1"));
-        let scene2 =
-            EngineScene::new("s2", "Alt Scene").with_layer(LayerSelection::new("layer-1", "v2"));
+        let scene1 = EngineScene::new(seed_id("s1"), "Default Scene")
+            .with_layer(LayerSelection::new(seed_id("layer-1"), seed_id("v1")));
+        let scene2 = EngineScene::new(seed_id("s2"), "Alt Scene")
+            .with_layer(LayerSelection::new(seed_id("layer-1"), seed_id("v2")));
 
         let mut engine = Engine::new(
-            "engine-1",
+            seed_id("engine-1"),
             "Guitar Engine",
-            vec![LayerId::new("layer-1")],
+            EngineType::Guitar,
+            vec![LayerId::from_uuid(seed_id("layer-1"))],
             scene1,
         );
         engine.add_variant(scene2);
@@ -267,12 +279,12 @@ mod tests {
         let engine = sample_engine();
         repo.save_engine(&engine).await?;
 
-        let loaded = repo.load_engine(&EngineId::new("engine-1")).await?;
+        let loaded = repo.load_engine(&eid("engine-1")).await?;
         let loaded = loaded.expect("should find engine");
         assert_eq!(loaded.name, "Guitar Engine");
         assert_eq!(loaded.variants.len(), 2);
         assert_eq!(loaded.layer_ids.len(), 1);
-        assert_eq!(loaded.layer_ids[0].as_str(), "layer-1");
+        assert_eq!(loaded.layer_ids[0], LayerId::from_uuid(seed_id("layer-1")));
         Ok(())
     }
 
@@ -280,16 +292,18 @@ mod tests {
     async fn list_engines_returns_all() -> Result<()> {
         let repo = test_repo().await?;
         let e1 = Engine::new(
-            "e1",
+            seed_id("e1"),
             "Engine 1",
-            vec![LayerId::new("l1")],
-            EngineScene::new("s1", "Default"),
+            EngineType::Guitar,
+            vec![LayerId::from_uuid(seed_id("l1"))],
+            EngineScene::new(seed_id("s1"), "Default"),
         );
         let e2 = Engine::new(
-            "e2",
+            seed_id("e2"),
             "Engine 2",
-            vec![LayerId::new("l2")],
-            EngineScene::new("s2", "Default"),
+            EngineType::Guitar,
+            vec![LayerId::from_uuid(seed_id("l2"))],
+            EngineScene::new(seed_id("s2"), "Default"),
         );
         repo.save_engine(&e1).await?;
         repo.save_engine(&e2).await?;
@@ -302,7 +316,7 @@ mod tests {
     #[tokio::test]
     async fn load_missing_returns_none() -> Result<()> {
         let repo = test_repo().await?;
-        let loaded = repo.load_engine(&EngineId::new("nonexistent")).await?;
+        let loaded = repo.load_engine(&eid("nonexistent")).await?;
         assert!(loaded.is_none());
         Ok(())
     }
@@ -311,8 +325,8 @@ mod tests {
     async fn delete_engine_removes_it() -> Result<()> {
         let repo = test_repo().await?;
         repo.save_engine(&sample_engine()).await?;
-        repo.delete_engine(&EngineId::new("engine-1")).await?;
-        let loaded = repo.load_engine(&EngineId::new("engine-1")).await?;
+        repo.delete_engine(&eid("engine-1")).await?;
+        let loaded = repo.load_engine(&eid("engine-1")).await?;
         assert!(loaded.is_none());
         Ok(())
     }
@@ -322,9 +336,7 @@ mod tests {
         let repo = test_repo().await?;
         repo.save_engine(&sample_engine()).await?;
 
-        let variant = repo
-            .load_variant(&EngineId::new("engine-1"), &EngineSceneId::new("s2"))
-            .await?;
+        let variant = repo.load_variant(&eid("engine-1"), &esid("s2")).await?;
         let variant = variant.expect("should find variant");
         assert_eq!(variant.name, "Alt Scene");
         assert_eq!(variant.layer_selections.len(), 1);
@@ -337,14 +349,18 @@ mod tests {
         repo.save_engine(&sample_engine()).await?;
 
         let updated = Engine::new(
-            "engine-1",
+            seed_id("engine-1"),
             "Renamed",
-            vec![LayerId::new("layer-1"), LayerId::new("layer-2")],
-            EngineScene::new("s1", "Only Scene"),
+            EngineType::Guitar,
+            vec![
+                LayerId::from_uuid(seed_id("layer-1")),
+                LayerId::from_uuid(seed_id("layer-2")),
+            ],
+            EngineScene::new(seed_id("s1"), "Only Scene"),
         );
         repo.save_engine(&updated).await?;
 
-        let loaded = repo.load_engine(&EngineId::new("engine-1")).await?.unwrap();
+        let loaded = repo.load_engine(&eid("engine-1")).await?.unwrap();
         assert_eq!(loaded.name, "Renamed");
         assert_eq!(loaded.variants.len(), 1);
         assert_eq!(loaded.layer_ids.len(), 2);

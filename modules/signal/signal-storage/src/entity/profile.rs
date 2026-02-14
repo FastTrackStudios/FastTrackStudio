@@ -13,11 +13,11 @@ pub struct Model {
 
 impl Model {
     pub fn profile_id_branded(&self) -> ProfileId {
-        ProfileId::new(self.id.clone())
+        ProfileId::from(self.id.clone())
     }
 
     pub fn default_variant_id_branded(&self) -> PatchId {
-        PatchId::new(self.default_variant_id.clone())
+        PatchId::from(self.default_variant_id.clone())
     }
 }
 

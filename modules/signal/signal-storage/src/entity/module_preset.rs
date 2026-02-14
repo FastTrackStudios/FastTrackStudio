@@ -1,5 +1,5 @@
 use sea_orm::entity::prelude::*;
-use signal_proto::{ModulePresetId, ModuleSnapshotId};
+use signal_proto::{ModulePresetId, ModuleSnapshotId, ModuleType};
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
 #[sea_orm(table_name = "module_presets")]
@@ -7,6 +7,7 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: String,
     pub name: String,
+    pub module_type: String,
     pub default_snapshot_id: String,
 }
 
@@ -17,6 +18,10 @@ impl Model {
 
     pub fn default_snapshot_id_branded(&self) -> ModuleSnapshotId {
         ModuleSnapshotId::from(self.default_snapshot_id.clone())
+    }
+
+    pub fn module_type_branded(&self) -> ModuleType {
+        ModuleType::from_str(&self.module_type).unwrap_or_default()
     }
 }
 

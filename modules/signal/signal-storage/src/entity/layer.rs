@@ -7,17 +7,18 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: String,
     pub name: String,
+    pub engine_type: String,
     pub default_variant_id: String,
     pub metadata_json: String,
 }
 
 impl Model {
     pub fn layer_id_branded(&self) -> LayerId {
-        LayerId::new(self.id.clone())
+        LayerId::from(self.id.clone())
     }
 
     pub fn default_variant_id_branded(&self) -> LayerSnapshotId {
-        LayerSnapshotId::new(self.default_variant_id.clone())
+        LayerSnapshotId::from(self.default_variant_id.clone())
     }
 }
 

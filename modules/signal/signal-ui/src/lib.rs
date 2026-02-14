@@ -4,8 +4,17 @@
 //! Variants map to `Snapshot` / `ModuleSnapshot`.  Metadata hooks (tags,
 //! description, notes) are rendered as placeholder sections ready for
 //! back-end wiring once `signal2-proto` grows `Metadata` support.
+//!
+//! ## Components
+//!
+//! The [`components`] module contains domain-agnostic presentation components
+//! (entity editor, star ratings, scene tiles, morph slider, etc.) that can
+//! be composed by domain-aware wrappers.
+
+pub mod components;
 
 use dioxus::prelude::*;
+use signal::tagging::{BrowserHit, BrowserMode, BrowserQuery};
 use signal::{Block, BlockType, ModulePreset, Preset, SignalController, Snapshot};
 
 // region: --- Main Component
@@ -17,6 +26,9 @@ pub fn SignalSlider(controller: SignalController) -> Element {
     let mut collections = use_signal(Vec::<Preset>::new);
     let mut module_collections = use_signal(Vec::<ModulePreset>::new);
     let mut active_variant_id = use_signal(|| None::<String>);
+    let mut browser_query_input = use_signal(String::new);
+    let mut browser_hits = use_signal(Vec::<BrowserHit>::new);
+    let mut browser_entry_count = use_signal(|| 0usize);
 
     // Fetch block state, block collections, and module collections on type change.
     {
@@ -29,6 +41,27 @@ pub fn SignalSlider(controller: SignalController) -> Element {
                 collections.set(controller.list_presets(selected).await);
                 module_collections.set(controller.list_module_presets().await);
                 active_variant_id.set(None);
+            });
+        });
+    }
+
+    // Prime browser index and initial semantic query once at mount.
+    {
+        let controller = controller.clone();
+        use_effect(move || {
+            let controller = controller.clone();
+            spawn(async move {
+                let index = controller.browser_index().await;
+                browser_entry_count.set(index.entries().len());
+                browser_hits.set(
+                    controller
+                        .browse(BrowserQuery {
+                            mode: BrowserMode::Semantic,
+                            include: vec!["tone:clean".to_string()],
+                            ..BrowserQuery::default()
+                        })
+                        .await,
+                );
             });
         });
     }
@@ -123,6 +156,57 @@ pub fn SignalSlider(controller: SignalController) -> Element {
                     }
                 }
             }
+
+            // -- Semantic browser (new typed tagging system)
+            div { class: "space-y-3",
+                h2 { class: "text-lg font-semibold", "Browser" }
+                p { class: "text-xs text-zinc-600", "Indexed entries: {browser_entry_count}" }
+                div { class: "flex gap-2",
+                    input {
+                        class: "flex-1 border border-zinc-300 rounded px-2 py-1 text-sm",
+                        placeholder: "tags e.g. tone:clean rig_type:keys",
+                        value: "{browser_query_input}",
+                        oninput: move |e| browser_query_input.set(e.value()),
+                    }
+                    button {
+                        class: "px-3 py-1 rounded border border-zinc-400 hover:bg-zinc-100 text-sm",
+                        onclick: {
+                            let controller = controller.clone();
+                            move |_| {
+                                let controller = controller.clone();
+                                let raw = browser_query_input();
+                                let include = raw
+                                    .split_whitespace()
+                                    .map(str::trim)
+                                    .filter(|s| !s.is_empty())
+                                    .map(ToString::to_string)
+                                    .collect::<Vec<_>>();
+                                spawn(async move {
+                                    let hits = controller
+                                        .browse(BrowserQuery {
+                                            mode: BrowserMode::Semantic,
+                                            include,
+                                            ..BrowserQuery::default()
+                                        })
+                                        .await;
+                                    browser_hits.set(hits);
+                                });
+                            }
+                        },
+                        "Search"
+                    }
+                }
+                div { class: "space-y-2",
+                    for hit in browser_hits().into_iter().take(16) {
+                        div {
+                            key: "{hit.node.id}",
+                            class: "border border-zinc-200 rounded p-2",
+                            p { class: "text-sm font-medium", "{hit.node.id}" }
+                            p { class: "text-xs text-zinc-600", "{hit.node.kind:?}  score={hit.score:.2}" }
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -145,7 +229,8 @@ fn CollectionCard(
 
     // Normalization: determine default variant ID eagerly.
     // Rule: use the explicit default; if missing, promote first variant.
-    let default_variant_id = normalize_default_variant_id(&variants, &collection.default_snapshot());
+    let default_variant_id =
+        normalize_default_variant_id(&variants, &collection.default_snapshot());
 
     rsx! {
         div { class: "rounded-md border border-zinc-300 p-3 space-y-2",
@@ -225,10 +310,7 @@ fn CollectionCard(
 // region: --- Module Collection Card
 
 #[component]
-fn ModuleCollectionCard(
-    collection: ModulePreset,
-    controller: SignalController,
-) -> Element {
+fn ModuleCollectionCard(collection: ModulePreset, controller: SignalController) -> Element {
     let collection_id = collection.id().to_string();
     let collection_name = collection.name().to_string();
     let variants = collection.snapshots().to_vec();

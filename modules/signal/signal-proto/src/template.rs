@@ -26,13 +26,13 @@ use std::fmt;
 use facet::Facet;
 use serde::{Deserialize, Serialize};
 
-use crate::metadata::{Metadata, Tags};
-use crate::{BlockType, PresetId};
 use crate::engine::EngineId;
 use crate::layer::LayerId;
+use crate::metadata::{Metadata, Tags};
 use crate::profile::ProfileId;
 use crate::rig::{RigId, RigTypeId};
 use crate::song::SongId;
+use crate::{BlockType, PresetId};
 
 // ─── Assignment ─────────────────────────────────────────────────
 
@@ -263,28 +263,117 @@ impl BlockTemplate {
     }
 }
 
-// ─── ModuleTemplate ─────────────────────────────────────────────
+// ─── Signal chain templates ─────────────────────────────────────
 
-/// A module slot — knows its block structure but not specific presets.
+/// Template for a signal processing node — either a block or a parallel split.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
-pub struct ModuleTemplate {
-    pub name: String,
-    pub blocks: Vec<BlockTemplate>,
-    pub metadata: TemplateMetadata,
+#[repr(C)]
+pub enum SignalNodeTemplate {
+    /// A single block slot.
+    Block(BlockTemplate),
+    /// Parallel split into independent lanes.
+    Split { lanes: Vec<SignalChainTemplate> },
 }
 
-impl ModuleTemplate {
-    pub fn new(name: impl Into<String>) -> Self {
+/// Template for an ordered signal chain — mirrors [`SignalChain`](crate::SignalChain).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+pub struct SignalChainTemplate {
+    pub nodes: Vec<SignalNodeTemplate>,
+}
+
+impl SignalChainTemplate {
+    pub fn new() -> Self {
+        Self { nodes: Vec::new() }
+    }
+
+    /// Create a serial chain template from block templates.
+    pub fn serial(blocks: Vec<BlockTemplate>) -> Self {
         Self {
-            name: name.into(),
-            blocks: Vec::new(),
-            metadata: TemplateMetadata::new(),
+            nodes: blocks.into_iter().map(SignalNodeTemplate::Block).collect(),
         }
     }
 
     #[must_use]
+    pub fn with_node(mut self, node: SignalNodeTemplate) -> Self {
+        self.nodes.push(node);
+        self
+    }
+
+    #[must_use]
     pub fn with_block(mut self, block: BlockTemplate) -> Self {
-        self.blocks.push(block);
+        self.nodes.push(SignalNodeTemplate::Block(block));
+        self
+    }
+
+    /// Collect missing assignments recursively.
+    pub fn missing_assignments(&self) -> Vec<MissingAssignment> {
+        let mut missing = Vec::new();
+        for node in &self.nodes {
+            match node {
+                SignalNodeTemplate::Block(b) => {
+                    if b.preset_id.is_unassigned() {
+                        missing.push(MissingAssignment {
+                            level: AssignmentLevel::Block,
+                            slot: format!("{} ({})", b.name, b.block_type.as_str()),
+                        });
+                    }
+                }
+                SignalNodeTemplate::Split { lanes } => {
+                    for lane in lanes {
+                        missing.extend(lane.missing_assignments());
+                    }
+                }
+            }
+        }
+        missing
+    }
+}
+
+impl Default for SignalChainTemplate {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ─── ModuleTemplate ─────────────────────────────────────────────
+
+/// A module slot — knows its signal chain structure but not specific presets.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+pub struct ModuleTemplate {
+    pub name: String,
+    pub module_type: crate::ModuleType,
+    pub chain: SignalChainTemplate,
+    pub metadata: TemplateMetadata,
+}
+
+impl ModuleTemplate {
+    pub fn new(name: impl Into<String>, module_type: crate::ModuleType) -> Self {
+        Self {
+            name: name.into(),
+            module_type,
+            chain: SignalChainTemplate::new(),
+            metadata: TemplateMetadata::new(),
+        }
+    }
+
+    /// Append a block to the chain (convenience for serial templates).
+    #[must_use]
+    pub fn with_block(mut self, block: BlockTemplate) -> Self {
+        self.chain.nodes.push(SignalNodeTemplate::Block(block));
+        self
+    }
+
+    /// Append an arbitrary signal node to the chain.
+    #[must_use]
+    pub fn with_node(mut self, node: SignalNodeTemplate) -> Self {
+        self.chain.nodes.push(node);
+        self
+    }
+
+    /// Set the full signal chain template.
+    #[must_use]
+    pub fn with_chain(mut self, chain: SignalChainTemplate) -> Self {
+        self.chain = chain;
         self
     }
 
@@ -294,16 +383,9 @@ impl ModuleTemplate {
         self
     }
 
-    /// Collect missing assignments from all blocks.
+    /// Collect missing assignments from all blocks in the chain.
     pub fn missing_assignments(&self) -> Vec<MissingAssignment> {
-        self.blocks
-            .iter()
-            .filter(|b| b.preset_id.is_unassigned())
-            .map(|b| MissingAssignment {
-                level: AssignmentLevel::Block,
-                slot: format!("{} ({})", b.name, b.block_type.as_str()),
-            })
-            .collect()
+        self.chain.missing_assignments()
     }
 }
 
@@ -625,31 +707,43 @@ impl Templateable for crate::Block {
     }
 }
 
-// Module → ModuleTemplate (strips block preset bindings, keeps structure)
+// Module → ModuleTemplate (strips block preset bindings, keeps chain structure)
 impl Templateable for crate::Module {
     type Template = ModuleTemplate;
 
     fn to_template(&self) -> ModuleTemplate {
+        fn chain_to_template(chain: &crate::SignalChain) -> SignalChainTemplate {
+            SignalChainTemplate {
+                nodes: chain
+                    .nodes()
+                    .iter()
+                    .map(|node| match node {
+                        crate::SignalNode::Block(mb) => SignalNodeTemplate::Block(BlockTemplate {
+                            block_type: mb.block_type(),
+                            name: mb.label().to_string(),
+                            preset_id: match mb.source() {
+                                crate::ModuleBlockSource::PresetDefault { preset_id, .. } => {
+                                    Assignment::Assigned(preset_id.clone())
+                                }
+                                crate::ModuleBlockSource::PresetSnapshot { preset_id, .. } => {
+                                    Assignment::Assigned(preset_id.clone())
+                                }
+                                crate::ModuleBlockSource::Inline { .. } => Assignment::Unassigned,
+                            },
+                            metadata: TemplateMetadata::new(),
+                        }),
+                        crate::SignalNode::Split { lanes } => SignalNodeTemplate::Split {
+                            lanes: lanes.iter().map(chain_to_template).collect(),
+                        },
+                    })
+                    .collect(),
+            }
+        }
+
         ModuleTemplate {
             name: "Module".to_string(),
-            blocks: self
-                .blocks()
-                .iter()
-                .map(|mb| BlockTemplate {
-                    block_type: mb.block_type(),
-                    name: mb.label().to_string(),
-                    preset_id: match mb.source() {
-                        crate::ModuleBlockSource::PresetDefault { preset_id } => {
-                            Assignment::Assigned(preset_id.clone())
-                        }
-                        crate::ModuleBlockSource::PresetSnapshot { preset_id, .. } => {
-                            Assignment::Assigned(preset_id.clone())
-                        }
-                        crate::ModuleBlockSource::Inline { .. } => Assignment::Unassigned,
-                    },
-                    metadata: TemplateMetadata::new(),
-                })
-                .collect(),
+            module_type: crate::ModuleType::default(),
+            chain: chain_to_template(self.chain()),
             metadata: TemplateMetadata::new(),
         }
     }
@@ -659,24 +753,43 @@ impl Templateable for crate::Module {
         if !missing.is_empty() {
             return Err(InstantiateError::new(missing));
         }
-        // All assignments filled — create module from assigned presets
-        let blocks: Vec<crate::ModuleBlock> = template
-            .blocks
-            .iter()
-            .enumerate()
-            .map(|(i, bt)| {
-                let preset_id = bt.preset_id.assigned().unwrap();
-                crate::ModuleBlock::new(
-                    format!("block-{i}"),
-                    &bt.name,
-                    bt.block_type,
-                    crate::ModuleBlockSource::PresetDefault {
-                        preset_id: preset_id.clone(),
+
+        fn instantiate_chain(
+            chain: &SignalChainTemplate,
+            counter: &mut usize,
+        ) -> crate::SignalChain {
+            let nodes = chain
+                .nodes
+                .iter()
+                .map(|node| match node {
+                    SignalNodeTemplate::Block(bt) => {
+                        let preset_id = bt.preset_id.assigned().unwrap();
+                        let idx = *counter;
+                        *counter += 1;
+                        crate::SignalNode::Block(crate::ModuleBlock::new(
+                            format!("block-{idx}"),
+                            &bt.name,
+                            bt.block_type,
+                            crate::ModuleBlockSource::PresetDefault {
+                                preset_id: preset_id.clone(),
+                                saved_at_version: None,
+                            },
+                        ))
+                    }
+                    SignalNodeTemplate::Split { lanes } => crate::SignalNode::Split {
+                        lanes: lanes
+                            .iter()
+                            .map(|lane| instantiate_chain(lane, counter))
+                            .collect(),
                     },
-                )
-            })
-            .collect();
-        Ok(crate::Module::from_blocks(blocks))
+                })
+                .collect();
+            crate::SignalChain::new(nodes)
+        }
+
+        let mut counter = 0;
+        let chain = instantiate_chain(&template.chain, &mut counter);
+        Ok(crate::Module::from_chain(chain))
     }
 }
 
@@ -685,6 +798,7 @@ impl Templateable for crate::Module {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{seed_id, ModuleType};
 
     type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
 
@@ -726,7 +840,10 @@ mod tests {
             .with_tag("rock");
 
         assert_eq!(meta.description.as_deref(), Some("A guitar template"));
-        assert_eq!(meta.notes.as_deref(), Some("Start with this for rock tones"));
+        assert_eq!(
+            meta.notes.as_deref(),
+            Some("Start with this for rock tones")
+        );
         assert_eq!(meta.tags.len(), 2);
         assert!(meta.tags.contains("guitar"));
     }
@@ -741,12 +858,10 @@ mod tests {
 
     #[test]
     fn test_block_template_assigned() {
-        let template = BlockTemplate::assigned("Drive", BlockType::Drive, "preset-od1");
+        let pid = PresetId::from_uuid(seed_id("preset-od1"));
+        let template = BlockTemplate::assigned("Drive", BlockType::Drive, pid.clone());
         assert!(template.preset_id.is_assigned());
-        assert_eq!(
-            template.preset_id.assigned().unwrap().as_str(),
-            "preset-od1"
-        );
+        assert_eq!(template.preset_id.assigned().unwrap(), &pid);
     }
 
     #[test]
@@ -764,7 +879,7 @@ mod tests {
     #[test]
     fn test_block_instantiate_succeeds_when_assigned() -> Result<()> {
         let template = BlockTemplate::new("Drive", BlockType::Drive)
-            .with_preset("preset-od1");
+            .with_preset(PresetId::from_uuid(seed_id("preset-od1")));
         let block = crate::Block::instantiate(&template)?;
         assert!(block.first_value().is_some());
         Ok(())
@@ -774,9 +889,13 @@ mod tests {
 
     #[test]
     fn test_module_template_missing_assignments() {
-        let template = ModuleTemplate::new("Drive Section")
+        let template = ModuleTemplate::new("Drive Section", ModuleType::Drive)
             .with_block(BlockTemplate::new("OD", BlockType::Drive))
-            .with_block(BlockTemplate::assigned("Amp", BlockType::Amp, "preset-amp1"));
+            .with_block(BlockTemplate::assigned(
+                "Amp",
+                BlockType::Amp,
+                PresetId::from_uuid(seed_id("preset-amp1")),
+            ));
 
         let missing = template.missing_assignments();
         assert_eq!(missing.len(), 1);
@@ -786,7 +905,7 @@ mod tests {
 
     #[test]
     fn test_module_instantiate_fails_with_unassigned_blocks() {
-        let template = ModuleTemplate::new("Drive Section")
+        let template = ModuleTemplate::new("Drive Section", ModuleType::Drive)
             .with_block(BlockTemplate::new("OD", BlockType::Drive));
 
         let result = crate::Module::instantiate(&template);
@@ -795,9 +914,17 @@ mod tests {
 
     #[test]
     fn test_module_instantiate_succeeds() -> Result<()> {
-        let template = ModuleTemplate::new("Drive Section")
-            .with_block(BlockTemplate::assigned("OD", BlockType::Drive, "preset-od1"))
-            .with_block(BlockTemplate::assigned("Amp", BlockType::Amp, "preset-amp1"));
+        let template = ModuleTemplate::new("Drive Section", ModuleType::Drive)
+            .with_block(BlockTemplate::assigned(
+                "OD",
+                BlockType::Drive,
+                PresetId::from_uuid(seed_id("preset-od1")),
+            ))
+            .with_block(BlockTemplate::assigned(
+                "Amp",
+                BlockType::Amp,
+                PresetId::from_uuid(seed_id("preset-amp1")),
+            ));
 
         let module = crate::Module::instantiate(&template)?;
         assert_eq!(module.blocks().len(), 2);
@@ -808,11 +935,10 @@ mod tests {
 
     #[test]
     fn test_layer_template_missing_assignments() {
-        let template = LayerTemplate::new("Main Layer")
-            .with_module(
-                ModuleTemplate::new("Drive")
-                    .with_block(BlockTemplate::new("OD", BlockType::Drive)),
-            );
+        let template = LayerTemplate::new("Main Layer").with_module(
+            ModuleTemplate::new("Drive", ModuleType::Drive)
+                .with_block(BlockTemplate::new("OD", BlockType::Drive)),
+        );
 
         let missing = template.missing_assignments();
         // layer_id unassigned + block unassigned
@@ -824,11 +950,10 @@ mod tests {
     #[test]
     fn test_layer_template_fully_assigned() {
         let template = LayerTemplate::new("Main Layer")
-            .with_layer_id("layer-1")
-            .with_module(
-                ModuleTemplate::new("Drive")
-                    .with_block(BlockTemplate::assigned("OD", BlockType::Drive, "p1")),
-            );
+            .with_layer_id(LayerId::from_uuid(seed_id("layer-1")))
+            .with_module(ModuleTemplate::new("Drive", ModuleType::Drive).with_block(
+                BlockTemplate::assigned("OD", BlockType::Drive, PresetId::from_uuid(seed_id("p1"))),
+            ));
 
         assert!(template.missing_assignments().is_empty());
     }
@@ -837,14 +962,12 @@ mod tests {
 
     #[test]
     fn test_engine_template_cascading_missing() {
-        let template = EngineTemplate::new("Guitar Engine")
-            .with_layer(
-                LayerTemplate::new("Layer 1")
-                    .with_module(
-                        ModuleTemplate::new("Drive")
-                            .with_block(BlockTemplate::new("OD", BlockType::Drive)),
-                    ),
-            );
+        let template = EngineTemplate::new("Guitar Engine").with_layer(
+            LayerTemplate::new("Layer 1").with_module(
+                ModuleTemplate::new("Drive", ModuleType::Drive)
+                    .with_block(BlockTemplate::new("OD", BlockType::Drive)),
+            ),
+        );
 
         let missing = template.missing_assignments();
         // engine_id + layer_id + block preset
@@ -864,17 +987,18 @@ mod tests {
             )
             .with_engine(
                 EngineTemplate::new("Main Engine")
-                    .with_engine_id("eng-1")
+                    .with_engine_id(EngineId::from_uuid(seed_id("eng-1")))
                     .with_layer(
                         LayerTemplate::new("Layer 1")
-                            .with_layer_id("lay-1")
+                            .with_layer_id(LayerId::from_uuid(seed_id("lay-1")))
                             .with_module(
-                                ModuleTemplate::new("Drive")
-                                    .with_block(BlockTemplate::assigned(
+                                ModuleTemplate::new("Drive", ModuleType::Drive).with_block(
+                                    BlockTemplate::assigned(
                                         "OD",
                                         BlockType::Drive,
-                                        "p1",
-                                    )),
+                                        PresetId::from_uuid(seed_id("p1")),
+                                    ),
+                                ),
                             ),
                     ),
             );
@@ -892,7 +1016,7 @@ mod tests {
     #[test]
     fn test_profile_template() {
         let template = ProfileTemplate::new("Worship")
-            .with_profile_id("prof-1")
+            .with_profile_id(ProfileId::from_uuid(seed_id("prof-1")))
             .with_patch_name("Clean")
             .with_patch_name("Lead")
             .with_patch_name("Ambient");
@@ -926,7 +1050,7 @@ mod tests {
     #[test]
     fn test_song_template_fully_assigned() {
         let template = SongTemplate::new("Test Song")
-            .with_song_id("song-1")
+            .with_song_id(SongId::from_uuid(seed_id("song-1")))
             .with_section("Verse");
 
         assert!(template.missing_assignments().is_empty());

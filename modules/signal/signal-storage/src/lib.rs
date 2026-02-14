@@ -1,22 +1,26 @@
 //! Signal storage layer built on SeaORM.
 
-pub mod collection_repo;
+pub mod block_repo;
 pub mod engine_repo;
 pub mod entity;
 pub mod layer_repo;
+pub mod module_repo;
 pub mod profile_repo;
 pub mod rig_repo;
+pub mod seed_data;
 pub mod song_repo;
 
-pub use collection_repo::{
-    default_seed_block_collections, default_seed_module_collections, CollectionRepo,
-    CollectionRepoLive,
-};
+pub use block_repo::{BlockRepo, BlockRepoLive};
 pub use engine_repo::{EngineRepo, EngineRepoLive};
 pub use layer_repo::{LayerRepo, LayerRepoLive};
+pub use module_repo::{ModuleRepo, ModuleRepoLive};
 pub use profile_repo::{ProfileRepo, ProfileRepoLive};
 pub use rig_repo::{RigRepo, RigRepoLive};
 pub use sea_orm::{Database, DatabaseConnection, DbErr};
+pub use seed_data::{
+    default_block_collections, default_module_collections, default_seed_engines, default_seed_layers,
+    default_seed_profiles, default_seed_rigs, default_seed_songs, runtime_seed_bundle, SeedBundle,
+};
 pub use song_repo::{SongRepo, SongRepoLive};
 
 #[derive(Debug, thiserror::Error)]

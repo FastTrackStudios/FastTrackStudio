@@ -14,7 +14,7 @@ pub struct Model {
 
 impl Model {
     pub fn variant_id_branded(&self) -> RigSceneId {
-        RigSceneId::new(self.id.clone())
+        RigSceneId::from(self.id.clone())
     }
 }
 

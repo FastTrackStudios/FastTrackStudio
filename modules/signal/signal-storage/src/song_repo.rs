@@ -221,8 +221,16 @@ impl SongRepo for SongRepoLive {
 mod tests {
     use super::*;
     use crate::Database;
+    use signal_proto::seed_id;
 
     type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
+
+    fn soid(name: &str) -> SongId {
+        SongId::from_uuid(seed_id(name))
+    }
+    fn secid(name: &str) -> SectionId {
+        SectionId::from_uuid(seed_id(name))
+    }
 
     async fn test_repo() -> Result<SongRepoLive> {
         let db = Database::connect("sqlite::memory:").await?;
@@ -232,10 +240,11 @@ mod tests {
     }
 
     fn sample_song() -> Song {
-        let verse = Section::from_patch("sec-verse", "Verse", "patch-clean");
-        let chorus = Section::from_patch("sec-chorus", "Chorus", "patch-lead");
+        let verse = Section::from_patch(seed_id("sec-verse"), "Verse", seed_id("patch-clean"));
+        let chorus = Section::from_patch(seed_id("sec-chorus"), "Chorus", seed_id("patch-lead"));
 
-        let mut song = Song::new("song-1", "Amazing Grace", verse).with_artist("Traditional");
+        let mut song =
+            Song::new(seed_id("song-1"), "Amazing Grace", verse).with_artist("Traditional");
         song.add_section(chorus);
         song
     }
@@ -245,20 +254,28 @@ mod tests {
         let repo = test_repo().await?;
         repo.save_song(&sample_song()).await?;
 
-        let loaded = repo.load_song(&SongId::new("song-1")).await?;
+        let loaded = repo.load_song(&soid("song-1")).await?;
         let loaded = loaded.expect("should find song");
         assert_eq!(loaded.name, "Amazing Grace");
         assert_eq!(loaded.artist.as_deref(), Some("Traditional"));
         assert_eq!(loaded.sections.len(), 2);
-        assert_eq!(loaded.default_section_id.as_str(), "sec-verse");
+        assert_eq!(loaded.default_section_id, secid("sec-verse"));
         Ok(())
     }
 
     #[tokio::test]
     async fn list_songs_returns_all() -> Result<()> {
         let repo = test_repo().await?;
-        let s1 = Song::new("s1", "Song 1", Section::from_patch("sec1", "Verse", "p1"));
-        let s2 = Song::new("s2", "Song 2", Section::from_patch("sec2", "Verse", "p2"));
+        let s1 = Song::new(
+            seed_id("s1"),
+            "Song 1",
+            Section::from_patch(seed_id("sec1"), "Verse", seed_id("p1")),
+        );
+        let s2 = Song::new(
+            seed_id("s2"),
+            "Song 2",
+            Section::from_patch(seed_id("sec2"), "Verse", seed_id("p2")),
+        );
         repo.save_song(&s1).await?;
         repo.save_song(&s2).await?;
 
@@ -270,7 +287,7 @@ mod tests {
     #[tokio::test]
     async fn load_missing_returns_none() -> Result<()> {
         let repo = test_repo().await?;
-        let loaded = repo.load_song(&SongId::new("nonexistent")).await?;
+        let loaded = repo.load_song(&soid("nonexistent")).await?;
         assert!(loaded.is_none());
         Ok(())
     }
@@ -279,8 +296,8 @@ mod tests {
     async fn delete_song_removes_it() -> Result<()> {
         let repo = test_repo().await?;
         repo.save_song(&sample_song()).await?;
-        repo.delete_song(&SongId::new("song-1")).await?;
-        let loaded = repo.load_song(&SongId::new("song-1")).await?;
+        repo.delete_song(&soid("song-1")).await?;
+        let loaded = repo.load_song(&soid("song-1")).await?;
         assert!(loaded.is_none());
         Ok(())
     }
@@ -291,13 +308,16 @@ mod tests {
         repo.save_song(&sample_song()).await?;
 
         let variant = repo
-            .load_variant(&SongId::new("song-1"), &SectionId::new("sec-chorus"))
+            .load_variant(&soid("song-1"), &secid("sec-chorus"))
             .await?;
         let variant = variant.expect("should find section");
         assert_eq!(variant.name, "Chorus");
         match &variant.source {
             SectionSource::Patch { patch_id } => {
-                assert_eq!(patch_id.as_str(), "patch-lead");
+                assert_eq!(
+                    *patch_id,
+                    signal_proto::profile::PatchId::from_uuid(seed_id("patch-lead"))
+                );
             }
             _ => panic!("expected Patch source"),
         }
@@ -307,16 +327,27 @@ mod tests {
     #[tokio::test]
     async fn rig_scene_source_round_trip() -> Result<()> {
         let repo = test_repo().await?;
-        let section = Section::from_rig_scene("sec-1", "Intro", "rig-1", "rs-ambient");
-        let song = Song::new("song-2", "Instrumental", section);
+        let section = Section::from_rig_scene(
+            seed_id("sec-1"),
+            "Intro",
+            seed_id("rig-1"),
+            seed_id("rs-ambient"),
+        );
+        let song = Song::new(seed_id("song-2"), "Instrumental", section);
         repo.save_song(&song).await?;
 
-        let loaded = repo.load_song(&SongId::new("song-2")).await?.unwrap();
+        let loaded = repo.load_song(&soid("song-2")).await?.unwrap();
         let sec = &loaded.sections[0];
         match &sec.source {
             SectionSource::RigScene { rig_id, scene_id } => {
-                assert_eq!(rig_id.as_str(), "rig-1");
-                assert_eq!(scene_id.as_str(), "rs-ambient");
+                assert_eq!(
+                    *rig_id,
+                    signal_proto::rig::RigId::from_uuid(seed_id("rig-1"))
+                );
+                assert_eq!(
+                    *scene_id,
+                    signal_proto::rig::RigSceneId::from_uuid(seed_id("rs-ambient"))
+                );
             }
             _ => panic!("expected RigScene source"),
         }
@@ -327,13 +358,13 @@ mod tests {
     async fn artist_none_round_trip() -> Result<()> {
         let repo = test_repo().await?;
         let song = Song::new(
-            "song-3",
+            seed_id("song-3"),
             "Untitled",
-            Section::from_patch("s1", "Main", "p1"),
+            Section::from_patch(seed_id("s1"), "Main", seed_id("p1")),
         );
         repo.save_song(&song).await?;
 
-        let loaded = repo.load_song(&SongId::new("song-3")).await?.unwrap();
+        let loaded = repo.load_song(&soid("song-3")).await?.unwrap();
         assert!(loaded.artist.is_none());
         Ok(())
     }
@@ -344,13 +375,13 @@ mod tests {
         repo.save_song(&sample_song()).await?;
 
         let updated = Song::new(
-            "song-1",
+            seed_id("song-1"),
             "Renamed Song",
-            Section::from_patch("sec-only", "Only Section", "p1"),
+            Section::from_patch(seed_id("sec-only"), "Only Section", seed_id("p1")),
         );
         repo.save_song(&updated).await?;
 
-        let loaded = repo.load_song(&SongId::new("song-1")).await?.unwrap();
+        let loaded = repo.load_song(&soid("song-1")).await?.unwrap();
         assert_eq!(loaded.name, "Renamed Song");
         assert_eq!(loaded.sections.len(), 1);
         assert!(loaded.artist.is_none());

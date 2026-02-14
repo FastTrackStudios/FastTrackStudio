@@ -84,8 +84,8 @@ impl ProfileRepoLive {
         Ok(Patch {
             id: model.variant_id_branded(),
             name: model.name.clone(),
-            rig_id: RigId::new(state.rig_id),
-            rig_variant_id: RigSceneId::new(state.rig_variant_id),
+            rig_id: RigId::from(state.rig_id),
+            rig_variant_id: RigSceneId::from(state.rig_variant_id),
             overrides: state.overrides,
             metadata,
         })
@@ -224,8 +224,16 @@ impl ProfileRepo for ProfileRepoLive {
 mod tests {
     use super::*;
     use crate::Database;
+    use signal_proto::seed_id;
 
     type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
+
+    fn pid(name: &str) -> ProfileId {
+        ProfileId::from_uuid(seed_id(name))
+    }
+    fn paid(name: &str) -> PatchId {
+        PatchId::from_uuid(seed_id(name))
+    }
 
     async fn test_repo() -> Result<ProfileRepoLive> {
         let db = Database::connect("sqlite::memory:").await?;
@@ -235,9 +243,19 @@ mod tests {
     }
 
     fn sample_profile() -> Profile {
-        let patch1 = Patch::new("p-clean", "Clean", "rig-1", "rs-clean");
-        let patch2 = Patch::new("p-lead", "Lead", "rig-1", "rs-lead");
-        let mut profile = Profile::new("profile-1", "Worship", patch1);
+        let patch1 = Patch::new(
+            seed_id("p-clean"),
+            "Clean",
+            seed_id("rig-1"),
+            seed_id("rs-clean"),
+        );
+        let patch2 = Patch::new(
+            seed_id("p-lead"),
+            "Lead",
+            seed_id("rig-1"),
+            seed_id("rs-lead"),
+        );
+        let mut profile = Profile::new(seed_id("profile-1"), "Worship", patch1);
         profile.add_patch(patch2);
         profile
     }
@@ -247,19 +265,27 @@ mod tests {
         let repo = test_repo().await?;
         repo.save_profile(&sample_profile()).await?;
 
-        let loaded = repo.load_profile(&ProfileId::new("profile-1")).await?;
+        let loaded = repo.load_profile(&pid("profile-1")).await?;
         let loaded = loaded.expect("should find profile");
         assert_eq!(loaded.name, "Worship");
         assert_eq!(loaded.patches.len(), 2);
-        assert_eq!(loaded.default_patch_id.as_str(), "p-clean");
+        assert_eq!(loaded.default_patch_id, paid("p-clean"));
         Ok(())
     }
 
     #[tokio::test]
     async fn list_profiles_returns_all() -> Result<()> {
         let repo = test_repo().await?;
-        let p1 = Profile::new("p1", "Profile 1", Patch::new("pa1", "Default", "r1", "rs1"));
-        let p2 = Profile::new("p2", "Profile 2", Patch::new("pa2", "Default", "r2", "rs2"));
+        let p1 = Profile::new(
+            seed_id("p1"),
+            "Profile 1",
+            Patch::new(seed_id("pa1"), "Default", seed_id("r1"), seed_id("rs1")),
+        );
+        let p2 = Profile::new(
+            seed_id("p2"),
+            "Profile 2",
+            Patch::new(seed_id("pa2"), "Default", seed_id("r2"), seed_id("rs2")),
+        );
         repo.save_profile(&p1).await?;
         repo.save_profile(&p2).await?;
 
@@ -271,7 +297,7 @@ mod tests {
     #[tokio::test]
     async fn load_missing_returns_none() -> Result<()> {
         let repo = test_repo().await?;
-        let loaded = repo.load_profile(&ProfileId::new("nonexistent")).await?;
+        let loaded = repo.load_profile(&pid("nonexistent")).await?;
         assert!(loaded.is_none());
         Ok(())
     }
@@ -280,8 +306,8 @@ mod tests {
     async fn delete_profile_removes_it() -> Result<()> {
         let repo = test_repo().await?;
         repo.save_profile(&sample_profile()).await?;
-        repo.delete_profile(&ProfileId::new("profile-1")).await?;
-        let loaded = repo.load_profile(&ProfileId::new("profile-1")).await?;
+        repo.delete_profile(&pid("profile-1")).await?;
+        let loaded = repo.load_profile(&pid("profile-1")).await?;
         assert!(loaded.is_none());
         Ok(())
     }
@@ -292,28 +318,41 @@ mod tests {
         repo.save_profile(&sample_profile()).await?;
 
         let variant = repo
-            .load_variant(&ProfileId::new("profile-1"), &PatchId::new("p-lead"))
+            .load_variant(&pid("profile-1"), &paid("p-lead"))
             .await?;
         let variant = variant.expect("should find patch");
         assert_eq!(variant.name, "Lead");
-        assert_eq!(variant.rig_id.as_str(), "rig-1");
-        assert_eq!(variant.rig_variant_id.as_str(), "rs-lead");
+        assert_eq!(variant.rig_id, RigId::from_uuid(seed_id("rig-1")));
+        assert_eq!(
+            variant.rig_variant_id,
+            RigSceneId::from_uuid(seed_id("rs-lead"))
+        );
         Ok(())
     }
 
     #[tokio::test]
     async fn patch_rig_references_round_trip() -> Result<()> {
         let repo = test_repo().await?;
-        let patch = Patch::new("p1", "Test", "rig-guitar", "scene-heavy").with_override(
-            signal_proto::overrides::Override::set("module.drive.param.gain", 0.9),
-        );
-        let profile = Profile::new("prof-1", "Test Profile", patch);
+        let patch = Patch::new(
+            seed_id("p1"),
+            "Test",
+            seed_id("rig-guitar"),
+            seed_id("scene-heavy"),
+        )
+        .with_override(signal_proto::overrides::Override::set(
+            "module.drive.param.gain",
+            0.9,
+        ));
+        let profile = Profile::new(seed_id("prof-1"), "Test Profile", patch);
         repo.save_profile(&profile).await?;
 
-        let loaded = repo.load_profile(&ProfileId::new("prof-1")).await?.unwrap();
+        let loaded = repo.load_profile(&pid("prof-1")).await?.unwrap();
         let p = &loaded.patches[0];
-        assert_eq!(p.rig_id.as_str(), "rig-guitar");
-        assert_eq!(p.rig_variant_id.as_str(), "scene-heavy");
+        assert_eq!(p.rig_id, RigId::from_uuid(seed_id("rig-guitar")));
+        assert_eq!(
+            p.rig_variant_id,
+            RigSceneId::from_uuid(seed_id("scene-heavy"))
+        );
         assert_eq!(p.overrides.len(), 1);
         Ok(())
     }

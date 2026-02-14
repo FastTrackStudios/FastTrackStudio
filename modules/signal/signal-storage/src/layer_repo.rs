@@ -1,9 +1,12 @@
 //! Layer repository — data access for Layer collections and LayerSnapshot variants.
 
 use sea_orm::*;
-use signal_proto::layer::{BlockRef, Layer, LayerId, LayerSnapshot, LayerSnapshotId, ModuleRef};
+use signal_proto::layer::{
+    BlockRef, Layer, LayerId, LayerRef, LayerSnapshot, LayerSnapshotId, ModuleRef,
+};
 use signal_proto::metadata::Metadata;
 use signal_proto::overrides::Override;
+use signal_proto::EngineType;
 
 use crate::entity;
 use crate::{DatabaseConnection, StorageError, StorageResult};
@@ -57,6 +60,7 @@ impl LayerRepoLive {
 
     fn variant_state_to_json(variant: &LayerSnapshot) -> StorageResult<String> {
         let state = VariantState {
+            layer_refs: &variant.layer_refs,
             module_refs: &variant.module_refs,
             block_refs: &variant.block_refs,
             overrides: &variant.overrides,
@@ -91,6 +95,7 @@ impl LayerRepoLive {
         Ok(LayerSnapshot {
             id: model.variant_id_branded(),
             name: model.name.clone(),
+            layer_refs: state.layer_refs,
             module_refs: state.module_refs,
             block_refs: state.block_refs,
             overrides: state.overrides,
@@ -116,6 +121,7 @@ impl LayerRepoLive {
         Ok(Layer {
             id: model.layer_id_branded(),
             name: model.name.clone(),
+            engine_type: EngineType::from_str(&model.engine_type).unwrap_or_default(),
             default_variant_id: model.default_variant_id_branded(),
             variants,
             metadata,
@@ -131,6 +137,7 @@ impl LayerRepoLive {
 
 #[derive(serde::Serialize)]
 struct VariantState<'a> {
+    layer_refs: &'a [LayerRef],
     module_refs: &'a [ModuleRef],
     block_refs: &'a [BlockRef],
     overrides: &'a [Override],
@@ -139,6 +146,7 @@ struct VariantState<'a> {
 
 #[derive(serde::Deserialize)]
 struct VariantStateOwned {
+    layer_refs: Vec<LayerRef>,
     module_refs: Vec<ModuleRef>,
     block_refs: Vec<BlockRef>,
     overrides: Vec<Override>,
@@ -184,6 +192,7 @@ impl LayerRepo for LayerRepoLive {
         entity::layer::Entity::insert(entity::layer::ActiveModel {
             id: Set(layer.id.as_str().to_string()),
             name: Set(layer.name.clone()),
+            engine_type: Set(layer.engine_type.as_str().to_string()),
             default_variant_id: Set(layer.default_variant_id.as_str().to_string()),
             metadata_json: Set(Self::metadata_to_json(&layer.metadata)?),
         })
@@ -238,6 +247,7 @@ mod tests {
     use super::*;
     use crate::Database;
     use signal_proto::layer::ModuleRef;
+    use signal_proto::seed_id;
 
     type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
 
@@ -249,12 +259,25 @@ mod tests {
     }
 
     fn sample_layer() -> Layer {
-        let v1 = LayerSnapshot::new("v1", "Clean").with_module(ModuleRef::new("mod-drive"));
-        let v2 = LayerSnapshot::new("v2", "Heavy")
-            .with_module(ModuleRef::new("mod-drive").with_variant("push"));
-        let mut layer = Layer::new("layer-1", "Guitar Layer", v1);
+        let v1 = LayerSnapshot::new(seed_id("v1"), "Clean")
+            .with_module(ModuleRef::new(seed_id("mod-drive")));
+        let v2 = LayerSnapshot::new(seed_id("v2"), "Heavy")
+            .with_module(ModuleRef::new(seed_id("mod-drive")).with_variant(seed_id("push")));
+        let mut layer = Layer::new(
+            seed_id("layer-1"),
+            "Guitar Layer",
+            EngineType::Guitar,
+            v1,
+        );
         layer.add_variant(v2);
         layer
+    }
+
+    fn lid(name: &str) -> LayerId {
+        LayerId::from_uuid(seed_id(name))
+    }
+    fn lsid(name: &str) -> LayerSnapshotId {
+        LayerSnapshotId::from_uuid(seed_id(name))
     }
 
     #[tokio::test]
@@ -263,12 +286,12 @@ mod tests {
         let layer = sample_layer();
 
         repo.save_layer(&layer).await?;
-        let loaded = repo.load_layer(&LayerId::new("layer-1")).await?;
+        let loaded = repo.load_layer(&lid("layer-1")).await?;
 
         let loaded = loaded.expect("should find layer");
         assert_eq!(loaded.name, "Guitar Layer");
         assert_eq!(loaded.variants.len(), 2);
-        assert_eq!(loaded.default_variant_id.as_str(), "v1");
+        assert_eq!(loaded.default_variant_id, lsid("v1"));
         Ok(())
     }
 
@@ -276,8 +299,18 @@ mod tests {
     async fn list_layers_returns_all() -> Result<()> {
         let repo = test_repo().await?;
 
-        let l1 = Layer::new("l1", "Layer 1", LayerSnapshot::new("v1", "Default"));
-        let l2 = Layer::new("l2", "Layer 2", LayerSnapshot::new("v2", "Default"));
+        let l1 = Layer::new(
+            seed_id("l1"),
+            "Layer 1",
+            EngineType::Guitar,
+            LayerSnapshot::new(seed_id("v1"), "Default"),
+        );
+        let l2 = Layer::new(
+            seed_id("l2"),
+            "Layer 2",
+            EngineType::Guitar,
+            LayerSnapshot::new(seed_id("v2"), "Default"),
+        );
         repo.save_layer(&l1).await?;
         repo.save_layer(&l2).await?;
 
@@ -289,7 +322,7 @@ mod tests {
     #[tokio::test]
     async fn load_missing_returns_none() -> Result<()> {
         let repo = test_repo().await?;
-        let loaded = repo.load_layer(&LayerId::new("nonexistent")).await?;
+        let loaded = repo.load_layer(&lid("nonexistent")).await?;
         assert!(loaded.is_none());
         Ok(())
     }
@@ -300,8 +333,8 @@ mod tests {
         let layer = sample_layer();
         repo.save_layer(&layer).await?;
 
-        repo.delete_layer(&LayerId::new("layer-1")).await?;
-        let loaded = repo.load_layer(&LayerId::new("layer-1")).await?;
+        repo.delete_layer(&lid("layer-1")).await?;
+        let loaded = repo.load_layer(&lid("layer-1")).await?;
         assert!(loaded.is_none());
         Ok(())
     }
@@ -312,9 +345,7 @@ mod tests {
         let layer = sample_layer();
         repo.save_layer(&layer).await?;
 
-        let variant = repo
-            .load_variant(&LayerId::new("layer-1"), &LayerSnapshotId::new("v2"))
-            .await?;
+        let variant = repo.load_variant(&lid("layer-1"), &lsid("v2")).await?;
         let variant = variant.expect("should find variant");
         assert_eq!(variant.name, "Heavy");
         assert_eq!(variant.module_refs.len(), 1);
@@ -328,10 +359,7 @@ mod tests {
         repo.save_layer(&layer).await?;
 
         let variant = repo
-            .load_variant(
-                &LayerId::new("layer-1"),
-                &LayerSnapshotId::new("nonexistent"),
-            )
+            .load_variant(&lid("layer-1"), &lsid("nonexistent"))
             .await?;
         assert!(variant.is_none());
         Ok(())
@@ -341,15 +369,15 @@ mod tests {
     async fn save_overwrites_existing() -> Result<()> {
         let repo = test_repo().await?;
 
-        let v1 = LayerSnapshot::new("v1", "Original");
-        let layer = Layer::new("layer-1", "Layer", v1);
+        let v1 = LayerSnapshot::new(seed_id("v1"), "Original");
+        let layer = Layer::new(seed_id("layer-1"), "Layer", EngineType::Guitar, v1);
         repo.save_layer(&layer).await?;
 
-        let v1 = LayerSnapshot::new("v1", "Updated");
-        let layer = Layer::new("layer-1", "Layer Renamed", v1);
+        let v1 = LayerSnapshot::new(seed_id("v1"), "Updated");
+        let layer = Layer::new(seed_id("layer-1"), "Layer Renamed", EngineType::Guitar, v1);
         repo.save_layer(&layer).await?;
 
-        let loaded = repo.load_layer(&LayerId::new("layer-1")).await?.unwrap();
+        let loaded = repo.load_layer(&lid("layer-1")).await?.unwrap();
         assert_eq!(loaded.name, "Layer Renamed");
         assert_eq!(loaded.variants.len(), 1);
         assert_eq!(loaded.variants[0].name, "Updated");
@@ -360,22 +388,97 @@ mod tests {
     async fn metadata_round_trip() -> Result<()> {
         let repo = test_repo().await?;
 
-        let v1 = LayerSnapshot::new("v1", "Default").with_metadata(
+        let v1 = LayerSnapshot::new(seed_id("v1"), "Default").with_metadata(
             Metadata::new()
                 .with_tag("guitar")
                 .with_description("Clean tone"),
         );
-        let layer = Layer::new("layer-1", "Guitar", v1)
+        let layer = Layer::new(seed_id("layer-1"), "Guitar", EngineType::Guitar, v1)
             .with_metadata(Metadata::new().with_tag("main").with_notes("Primary layer"));
         repo.save_layer(&layer).await?;
 
-        let loaded = repo.load_layer(&LayerId::new("layer-1")).await?.unwrap();
+        let loaded = repo.load_layer(&lid("layer-1")).await?.unwrap();
         assert!(loaded.metadata.tags.contains("main"));
         assert_eq!(loaded.metadata.notes.as_deref(), Some("Primary layer"));
 
         let v = &loaded.variants[0];
         assert!(v.metadata.tags.contains("guitar"));
         assert_eq!(v.metadata.description.as_deref(), Some("Clean tone"));
+        Ok(())
+    }
+
+    // -- Replace module in layer: two variants reference different modules
+
+    #[tokio::test]
+    async fn replace_module_in_layer_via_variant_switch() -> Result<()> {
+        // -- Setup & Fixtures
+        let repo = test_repo().await?;
+
+        let mod_serial = signal_proto::ModulePresetId::from_uuid(seed_id("mod-serial-drive"));
+        let mod_parallel = signal_proto::ModulePresetId::from_uuid(seed_id("mod-parallel-time"));
+
+        // Variant "Clean": uses module "mod-serial-drive" (serial chain)
+        let v_clean = LayerSnapshot::new(seed_id("v-clean"), "Clean Tone")
+            .with_module(ModuleRef::new(mod_serial.clone()))
+            .with_override(signal_proto::overrides::Override::set(
+                "module.mod-serial-drive.block.drive.param.gain",
+                0.30,
+            ));
+
+        // Variant "Ambient": uses module "mod-parallel-time" (parallel chain)
+        let v_ambient = LayerSnapshot::new(seed_id("v-ambient"), "Ambient")
+            .with_module(ModuleRef::new(mod_parallel.clone()).with_variant(seed_id("lush")))
+            .with_override(signal_proto::overrides::Override::set(
+                "module.mod-parallel-time.block.delay.param.time",
+                0.75,
+            ))
+            .with_override(signal_proto::overrides::Override::bypass(
+                "module.mod-parallel-time.block.pre-eq",
+                true,
+            ));
+
+        let mut layer = Layer::new(seed_id("layer-fx"), "FX Layer", EngineType::Guitar, v_clean);
+        layer.add_variant(v_ambient);
+        repo.save_layer(&layer).await?;
+
+        // -- Exec: load both variants back
+        let loaded = repo.load_layer(&lid("layer-fx")).await?.unwrap();
+
+        // -- Check: Clean variant
+        let clean = loaded.variant(&lsid("v-clean")).unwrap();
+        assert_eq!(clean.module_refs.len(), 1);
+        assert_eq!(clean.module_refs[0].collection_id, mod_serial);
+        assert!(clean.module_refs[0].variant_id.is_none()); // default variant
+        assert_eq!(clean.overrides.len(), 1);
+        assert_eq!(
+            clean.overrides[0].path.as_str(),
+            "module.mod-serial-drive.block.drive.param.gain"
+        );
+
+        // -- Check: Ambient variant — different module, different overrides
+        let ambient = loaded.variant(&lsid("v-ambient")).unwrap();
+        assert_eq!(ambient.module_refs.len(), 1);
+        assert_eq!(ambient.module_refs[0].collection_id, mod_parallel);
+        assert_eq!(
+            ambient.module_refs[0].variant_id,
+            Some(signal_proto::ModuleSnapshotId::from_uuid(seed_id("lush")))
+        );
+        assert_eq!(ambient.overrides.len(), 2);
+        assert_eq!(
+            ambient.overrides[0].path.as_str(),
+            "module.mod-parallel-time.block.delay.param.time"
+        );
+        // Second override is a bypass
+        match &ambient.overrides[1].op {
+            signal_proto::overrides::OverrideOp::Bypass(b) => assert!(b),
+            other => panic!("expected Bypass, got {:?}", other),
+        }
+
+        // -- Check: switching between variants changes which module is active
+        assert_ne!(
+            clean.module_refs[0].collection_id,
+            ambient.module_refs[0].collection_id,
+        );
         Ok(())
     }
 }

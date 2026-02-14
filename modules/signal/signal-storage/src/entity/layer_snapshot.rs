@@ -14,7 +14,7 @@ pub struct Model {
 
 impl Model {
     pub fn variant_id_branded(&self) -> LayerSnapshotId {
-        LayerSnapshotId::new(self.id.clone())
+        LayerSnapshotId::from(self.id.clone())
     }
 }
 

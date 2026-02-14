@@ -4,7 +4,7 @@ use sea_orm::*;
 use signal_proto::engine::EngineId;
 use signal_proto::metadata::Metadata;
 use signal_proto::overrides::Override;
-use signal_proto::rig::{EngineSelection, Rig, RigId, RigScene, RigSceneId, RigTypeId};
+use signal_proto::rig::{EngineSelection, Rig, RigId, RigScene, RigSceneId, RigType};
 
 use crate::entity;
 use crate::{DatabaseConnection, StorageError, StorageResult};
@@ -76,7 +76,7 @@ impl RigRepoLive {
     fn engine_ids_from_json(json: &str) -> StorageResult<Vec<EngineId>> {
         let strs: Vec<String> = serde_json::from_str(json)
             .map_err(|e| StorageError::Data(format!("failed to parse engine_ids json: {e}")))?;
-        Ok(strs.into_iter().map(EngineId::new).collect())
+        Ok(strs.into_iter().map(EngineId::from).collect())
     }
 
     fn metadata_to_json(metadata: &Metadata) -> StorageResult<String> {
@@ -115,15 +115,15 @@ impl RigRepoLive {
 
         let metadata = Self::metadata_from_json(&model.metadata_json)?;
         let engine_ids = Self::engine_ids_from_json(&model.engine_ids_json)?;
-        let rig_type_id = model
+        let rig_type = model
             .rig_type_id
             .as_ref()
-            .map(|s| RigTypeId::new(s.clone()));
+            .map(|s| RigType::from_str(s).unwrap_or_default());
 
         Ok(Rig {
             id: model.rig_id_branded(),
             name: model.name.clone(),
-            rig_type_id,
+            rig_type,
             engine_ids,
             default_variant_id: model.default_variant_id_branded(),
             variants,
@@ -186,7 +186,7 @@ impl RigRepo for RigRepoLive {
         entity::rig::Entity::insert(entity::rig::ActiveModel {
             id: Set(rig.id.as_str().to_string()),
             name: Set(rig.name.clone()),
-            rig_type_id: Set(rig.rig_type_id.as_ref().map(|t| t.as_str().to_string())),
+            rig_type_id: Set(rig.rig_type.as_ref().map(|t| t.as_str().to_string())),
             engine_ids_json: Set(Self::engine_ids_to_json(&rig.engine_ids)?),
             default_variant_id: Set(rig.default_variant_id.as_str().to_string()),
             metadata_json: Set(Self::metadata_to_json(&rig.metadata)?),
@@ -241,8 +241,16 @@ impl RigRepo for RigRepoLive {
 mod tests {
     use super::*;
     use crate::Database;
+    use signal_proto::seed_id;
 
     type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
+
+    fn rid(name: &str) -> RigId {
+        RigId::from_uuid(seed_id(name))
+    }
+    fn rsid(name: &str) -> RigSceneId {
+        RigSceneId::from_uuid(seed_id(name))
+    }
 
     async fn test_repo() -> Result<RigRepoLive> {
         let db = Database::connect("sqlite::memory:").await?;
@@ -252,15 +260,15 @@ mod tests {
     }
 
     fn sample_rig() -> Rig {
-        let scene1 = RigScene::new("rs1", "Default Scene")
-            .with_engine(EngineSelection::new("engine-1", "s1"));
-        let scene2 =
-            RigScene::new("rs2", "Alt Scene").with_engine(EngineSelection::new("engine-1", "s2"));
+        let scene1 = RigScene::new(seed_id("rs1"), "Default Scene")
+            .with_engine(EngineSelection::new(seed_id("engine-1"), seed_id("s1")));
+        let scene2 = RigScene::new(seed_id("rs2"), "Alt Scene")
+            .with_engine(EngineSelection::new(seed_id("engine-1"), seed_id("s2")));
 
         let mut rig = Rig::new(
-            "rig-1",
+            seed_id("rig-1"),
             "Guitar Rig",
-            vec![EngineId::new("engine-1")],
+            vec![EngineId::from_uuid(seed_id("engine-1"))],
             scene1,
         )
         .with_rig_type("guitar");
@@ -273,11 +281,11 @@ mod tests {
         let repo = test_repo().await?;
         repo.save_rig(&sample_rig()).await?;
 
-        let loaded = repo.load_rig(&RigId::new("rig-1")).await?;
+        let loaded = repo.load_rig(&rid("rig-1")).await?;
         let loaded = loaded.expect("should find rig");
         assert_eq!(loaded.name, "Guitar Rig");
         assert_eq!(loaded.variants.len(), 2);
-        assert_eq!(loaded.rig_type_id.as_ref().unwrap().as_str(), "guitar");
+        assert_eq!(loaded.rig_type.unwrap().as_str(), "guitar");
         assert_eq!(loaded.engine_ids.len(), 1);
         Ok(())
     }
@@ -286,16 +294,16 @@ mod tests {
     async fn list_rigs_returns_all() -> Result<()> {
         let repo = test_repo().await?;
         let r1 = Rig::new(
-            "r1",
+            seed_id("r1"),
             "Rig 1",
-            vec![EngineId::new("e1")],
-            RigScene::new("rs1", "Default"),
+            vec![EngineId::from_uuid(seed_id("e1"))],
+            RigScene::new(seed_id("rs1"), "Default"),
         );
         let r2 = Rig::new(
-            "r2",
+            seed_id("r2"),
             "Rig 2",
-            vec![EngineId::new("e2")],
-            RigScene::new("rs2", "Default"),
+            vec![EngineId::from_uuid(seed_id("e2"))],
+            RigScene::new(seed_id("rs2"), "Default"),
         );
         repo.save_rig(&r1).await?;
         repo.save_rig(&r2).await?;
@@ -308,7 +316,7 @@ mod tests {
     #[tokio::test]
     async fn load_missing_returns_none() -> Result<()> {
         let repo = test_repo().await?;
-        let loaded = repo.load_rig(&RigId::new("nonexistent")).await?;
+        let loaded = repo.load_rig(&rid("nonexistent")).await?;
         assert!(loaded.is_none());
         Ok(())
     }
@@ -317,8 +325,8 @@ mod tests {
     async fn delete_rig_removes_it() -> Result<()> {
         let repo = test_repo().await?;
         repo.save_rig(&sample_rig()).await?;
-        repo.delete_rig(&RigId::new("rig-1")).await?;
-        let loaded = repo.load_rig(&RigId::new("rig-1")).await?;
+        repo.delete_rig(&rid("rig-1")).await?;
+        let loaded = repo.load_rig(&rid("rig-1")).await?;
         assert!(loaded.is_none());
         Ok(())
     }
@@ -328,9 +336,7 @@ mod tests {
         let repo = test_repo().await?;
         repo.save_rig(&sample_rig()).await?;
 
-        let variant = repo
-            .load_variant(&RigId::new("rig-1"), &RigSceneId::new("rs2"))
-            .await?;
+        let variant = repo.load_variant(&rid("rig-1"), &rsid("rs2")).await?;
         let variant = variant.expect("should find variant");
         assert_eq!(variant.name, "Alt Scene");
         assert_eq!(variant.engine_selections.len(), 1);
@@ -341,15 +347,15 @@ mod tests {
     async fn rig_type_none_round_trip() -> Result<()> {
         let repo = test_repo().await?;
         let rig = Rig::new(
-            "rig-no-type",
+            seed_id("rig-no-type"),
             "Untyped",
             vec![],
-            RigScene::new("rs1", "Default"),
+            RigScene::new(seed_id("rs1"), "Default"),
         );
         repo.save_rig(&rig).await?;
 
-        let loaded = repo.load_rig(&RigId::new("rig-no-type")).await?.unwrap();
-        assert!(loaded.rig_type_id.is_none());
+        let loaded = repo.load_rig(&rid("rig-no-type")).await?.unwrap();
+        assert!(loaded.rig_type.is_none());
         Ok(())
     }
 }

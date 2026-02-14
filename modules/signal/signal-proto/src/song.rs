@@ -7,17 +7,18 @@ use facet::Facet;
 use serde::{Deserialize, Serialize};
 
 use crate::metadata::Metadata;
+use crate::override_policy::{validate_overrides, FreePolicy, OverridePolicyError};
 use crate::overrides::Override;
 use crate::profile::PatchId;
 use crate::rig::{RigId, RigSceneId};
 
 // ─── IDs ────────────────────────────────────────────────────────
 
-crate::typed_string_id!(
+crate::typed_uuid_id!(
     /// Identifies a Song collection.
     SongId
 );
-crate::typed_string_id!(
+crate::typed_uuid_id!(
     /// Identifies a specific Section variant within a Song.
     SectionId
 );
@@ -92,6 +93,10 @@ impl Section {
         self.metadata = metadata;
         self
     }
+
+    pub fn validate_overrides(&self) -> Result<(), OverridePolicyError> {
+        validate_overrides::<FreePolicy>(&self.overrides)
+    }
 }
 
 // ─── Song ───────────────────────────────────────────────────────
@@ -151,11 +156,31 @@ impl Song {
 
 impl crate::traits::Variant for Section {
     type Id = SectionId;
-    fn variant_id(&self) -> &SectionId {
+    type BaseRef = SectionSource;
+    type Override = Override;
+    fn id(&self) -> &SectionId {
         &self.id
     }
-    fn variant_name(&self) -> &str {
+    fn name(&self) -> &str {
         &self.name
+    }
+    fn set_name(&mut self, name: impl Into<String>) {
+        self.name = name.into();
+    }
+    fn base_ref(&self) -> Option<&Self::BaseRef> {
+        Some(&self.source)
+    }
+    fn overrides(&self) -> Option<&[Self::Override]> {
+        Some(&self.overrides)
+    }
+    fn overrides_mut(&mut self) -> Option<&mut Vec<Self::Override>> {
+        Some(&mut self.overrides)
+    }
+}
+
+impl crate::traits::DefaultVariant for Section {
+    fn default_named(name: impl Into<String>) -> Self {
+        Self::from_patch(SectionId::new(), name, PatchId::new())
     }
 }
 
@@ -200,10 +225,10 @@ mod tests {
 
     #[test]
     fn test_song_with_patch_sections() {
-        let verse = Section::from_patch("sec-verse", "Verse", "patch-clean");
-        let chorus = Section::from_patch("sec-chorus", "Chorus", "patch-lead");
+        let verse = Section::from_patch(SectionId::new(), "Verse", PatchId::new());
+        let chorus = Section::from_patch(SectionId::new(), "Chorus", PatchId::new());
 
-        let mut song = Song::new("song-1", "Amazing Grace", verse).with_artist("Traditional");
+        let mut song = Song::new(SongId::new(), "Amazing Grace", verse).with_artist("Traditional");
         song.add_section(chorus);
 
         assert_eq!(song.name, "Amazing Grace");
@@ -214,11 +239,17 @@ mod tests {
 
     #[test]
     fn test_section_from_rig_scene() {
-        let section = Section::from_rig_scene("sec-1", "Intro", "rig-1", "rv-ambient");
+        let rig_id = RigId::new();
+        let scene_id = RigSceneId::new();
+        let section =
+            Section::from_rig_scene(SectionId::new(), "Intro", rig_id.clone(), scene_id.clone());
         match &section.source {
-            SectionSource::RigScene { rig_id, scene_id } => {
-                assert_eq!(rig_id.as_str(), "rig-1");
-                assert_eq!(scene_id.as_str(), "rv-ambient");
+            SectionSource::RigScene {
+                rig_id: r,
+                scene_id: s,
+            } => {
+                assert_eq!(r, &rig_id);
+                assert_eq!(s, &scene_id);
             }
             _ => panic!("expected RigScene source"),
         }

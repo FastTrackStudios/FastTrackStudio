@@ -5,7 +5,7 @@
 //! - [`Collection`]: An ordered group of [`Variant`]s with a designated default.
 //! - [`HasMetadata`]: Provides access to [`Metadata`](crate::metadata::Metadata) for tagging/description.
 
-use crate::metadata::{Metadata, Tags};
+use crate::metadata::{Metadata as MetadataModel, Tags};
 
 // ─── Variant ────────────────────────────────────────────────────
 
@@ -14,17 +14,41 @@ use crate::metadata::{Metadata, Tags};
 /// Variants are the leaves of the signal hierarchy — each one captures
 /// a concrete configuration (parameters, block choices, overrides, etc.).
 pub trait Variant {
-    type Id: PartialEq;
+    type Id: Clone + PartialEq;
+    type BaseRef;
+    type Override;
 
-    fn variant_id(&self) -> &Self::Id;
-    fn variant_name(&self) -> &str;
+    fn id(&self) -> &Self::Id;
+    fn name(&self) -> &str;
+    fn set_name(&mut self, name: impl Into<String>);
+
+    fn base_ref(&self) -> Option<&Self::BaseRef> {
+        None
+    }
+
+    fn overrides(&self) -> Option<&[Self::Override]> {
+        None
+    }
+
+    fn overrides_mut(&mut self) -> Option<&mut Vec<Self::Override>> {
+        None
+    }
+
+    // Backward-compatible aliases during migration.
+    fn variant_id(&self) -> &Self::Id {
+        self.id()
+    }
+
+    fn variant_name(&self) -> &str {
+        self.name()
+    }
 }
 
 // ─── DefaultVariant ─────────────────────────────────────────────
 
 /// Factory for producing a sensible default variant.
 pub trait DefaultVariant: Variant {
-    fn default_named(name: &str) -> Self;
+    fn default_named(name: impl Into<String>) -> Self;
 }
 
 // ─── Collection ─────────────────────────────────────────────────
@@ -47,6 +71,15 @@ pub trait Collection {
 
     fn default_variant_id(&self) -> &<Self::Variant as Variant>::Id;
     fn set_default_variant_id(&mut self, id: <Self::Variant as Variant>::Id);
+
+    // Backward-compatible aliases aligned with "collection/entry" naming.
+    fn entries(&self) -> &[Self::Variant] {
+        self.variants()
+    }
+
+    fn entries_mut(&mut self) -> &mut Vec<Self::Variant> {
+        self.variants_mut()
+    }
 
     /// Look up the designated default variant.
     fn default_variant(&self) -> Option<&Self::Variant> {
@@ -85,8 +118,24 @@ pub trait Collection {
 
 /// Provides access to metadata (tags, description, notes).
 pub trait HasMetadata {
-    fn metadata(&self) -> &Metadata;
-    fn metadata_mut(&mut self) -> &mut Metadata;
+    fn metadata(&self) -> &MetadataModel;
+    fn metadata_mut(&mut self) -> &mut MetadataModel;
+}
+
+/// Domain metadata trait alias for cleaner generic bounds.
+pub trait Metadata: HasMetadata {}
+
+impl<T: HasMetadata> Metadata for T {}
+
+/// Explicit accessors for long-form text fields.
+pub trait Notes: HasMetadata {
+    fn notes(&self) -> Option<&str> {
+        self.metadata().notes.as_deref()
+    }
+
+    fn set_notes(&mut self, value: Option<String>) {
+        self.metadata_mut().notes = value;
+    }
 }
 
 /// Convenience trait for items that are tagged.
@@ -101,11 +150,16 @@ pub trait Described: HasMetadata {
     fn description(&self) -> Option<&str> {
         self.metadata().description.as_deref()
     }
+
+    fn set_description(&mut self, value: Option<String>) {
+        self.metadata_mut().description = value;
+    }
 }
 
 // Blanket impls
 impl<T: HasMetadata> Tagged for T {}
 impl<T: HasMetadata> Described for T {}
+impl<T: HasMetadata> Notes for T {}
 
 #[cfg(test)]
 mod tests {
@@ -124,19 +178,25 @@ mod tests {
 
     impl Variant for TestVariant {
         type Id = TestId;
-        fn variant_id(&self) -> &TestId {
+        type BaseRef = ();
+        type Override = ();
+        fn id(&self) -> &TestId {
             &self.id
         }
-        fn variant_name(&self) -> &str {
+        fn name(&self) -> &str {
             &self.name
+        }
+        fn set_name(&mut self, name: impl Into<String>) {
+            self.name = name.into();
         }
     }
 
     impl DefaultVariant for TestVariant {
-        fn default_named(name: &str) -> Self {
+        fn default_named(name: impl Into<String>) -> Self {
+            let name = name.into();
             Self {
                 id: TestId(format!("{}-default", name.to_lowercase())),
-                name: name.to_string(),
+                name,
             }
         }
     }

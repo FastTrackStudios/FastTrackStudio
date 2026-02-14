@@ -8,22 +8,74 @@ use serde::{Deserialize, Serialize};
 
 use crate::engine::{EngineId, EngineSceneId};
 use crate::metadata::Metadata;
+use crate::override_policy::{validate_overrides, OverridePolicyError, ScenePolicy};
 use crate::overrides::Override;
 
 // ─── IDs ────────────────────────────────────────────────────────
 
-crate::typed_string_id!(
+crate::typed_uuid_id!(
     /// Identifies a Rig collection.
     RigId
 );
-crate::typed_string_id!(
+crate::typed_uuid_id!(
     /// Identifies a specific Rig variant (scene).
     RigSceneId
 );
+// Legacy branded string id used by template internals.
 crate::typed_string_id!(
-    /// Categorizes a Rig by instrument type (e.g. "guitar", "bass", "keys").
+    /// Deprecated in favor of [`RigType`].
     RigTypeId
 );
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Facet, Default)]
+#[repr(C)]
+pub enum RigType {
+    #[default]
+    Guitar,
+    Bass,
+    Keys,
+    Drums,
+    DrumReplacement,
+    Vocals,
+}
+
+impl RigType {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Guitar => "guitar",
+            Self::Bass => "bass",
+            Self::Keys => "keys",
+            Self::Drums => "drums",
+            Self::DrumReplacement => "drum-replacement",
+            Self::Vocals => "vocals",
+        }
+    }
+
+    #[allow(clippy::should_implement_trait)]
+    pub fn from_str(value: &str) -> Option<Self> {
+        match value {
+            "guitar" => Some(Self::Guitar),
+            "bass" => Some(Self::Bass),
+            "keys" => Some(Self::Keys),
+            "drums" => Some(Self::Drums),
+            "drum-replacement" => Some(Self::DrumReplacement),
+            "vocals" => Some(Self::Vocals),
+            _ => None,
+        }
+    }
+}
+
+impl From<&str> for RigType {
+    fn from(value: &str) -> Self {
+        Self::from_str(value).unwrap_or_default()
+    }
+}
+
+impl From<String> for RigType {
+    fn from(value: String) -> Self {
+        Self::from(value.as_str())
+    }
+}
 
 // ─── Engine selection ───────────────────────────────────────────
 
@@ -83,6 +135,10 @@ impl RigScene {
         self.metadata = metadata;
         self
     }
+
+    pub fn validate_overrides(&self) -> Result<(), OverridePolicyError> {
+        validate_overrides::<ScenePolicy>(&self.overrides)
+    }
 }
 
 // ─── Rig ────────────────────────────────────────────────────────
@@ -92,7 +148,7 @@ impl RigScene {
 pub struct Rig {
     pub id: RigId,
     pub name: String,
-    pub rig_type_id: Option<RigTypeId>,
+    pub rig_type: Option<RigType>,
     pub engine_ids: Vec<EngineId>,
     pub default_variant_id: RigSceneId,
     pub variants: Vec<RigScene>,
@@ -110,7 +166,7 @@ impl Rig {
         Self {
             id: id.into(),
             name: name.into(),
-            rig_type_id: None,
+            rig_type: None,
             engine_ids,
             default_variant_id,
             variants: vec![default_variant],
@@ -133,8 +189,8 @@ impl Rig {
     }
 
     #[must_use]
-    pub fn with_rig_type(mut self, rig_type_id: impl Into<RigTypeId>) -> Self {
-        self.rig_type_id = Some(rig_type_id.into());
+    pub fn with_rig_type(mut self, rig_type: impl Into<RigType>) -> Self {
+        self.rig_type = Some(rig_type.into());
         self
     }
 
@@ -149,11 +205,28 @@ impl Rig {
 
 impl crate::traits::Variant for RigScene {
     type Id = RigSceneId;
-    fn variant_id(&self) -> &RigSceneId {
+    type BaseRef = ();
+    type Override = Override;
+    fn id(&self) -> &RigSceneId {
         &self.id
     }
-    fn variant_name(&self) -> &str {
+    fn name(&self) -> &str {
         &self.name
+    }
+    fn set_name(&mut self, name: impl Into<String>) {
+        self.name = name.into();
+    }
+    fn overrides(&self) -> Option<&[Self::Override]> {
+        Some(&self.overrides)
+    }
+    fn overrides_mut(&mut self) -> Option<&mut Vec<Self::Override>> {
+        Some(&mut self.overrides)
+    }
+}
+
+impl crate::traits::DefaultVariant for RigScene {
+    fn default_named(name: impl Into<String>) -> Self {
+        Self::new(RigSceneId::new(), name)
     }
 }
 
@@ -198,19 +271,16 @@ mod tests {
 
     #[test]
     fn test_rig_creation() {
-        let variant = RigScene::new("rv1", "Default Scene")
-            .with_engine(EngineSelection::new("engine-1", "ev1"));
+        let engine_id = EngineId::new();
+        let variant = RigScene::new(RigSceneId::new(), "Default Scene").with_engine(
+            EngineSelection::new(engine_id.clone(), EngineSceneId::new()),
+        );
 
-        let rig = Rig::new(
-            "rig-1",
-            "Guitar Rig",
-            vec![EngineId::new("engine-1")],
-            variant,
-        )
-        .with_rig_type("guitar");
+        let rig =
+            Rig::new(RigId::new(), "Guitar Rig", vec![engine_id], variant).with_rig_type("guitar");
 
         assert_eq!(rig.name, "Guitar Rig");
-        assert_eq!(rig.rig_type_id.as_ref().unwrap().as_str(), "guitar");
+        assert_eq!(rig.rig_type.unwrap().as_str(), "guitar");
         assert!(rig.default_variant().is_some());
     }
 }

@@ -7,6 +7,7 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: String,
     pub name: String,
+    pub engine_type: String,
     pub layer_ids_json: String,
     pub default_variant_id: String,
     pub metadata_json: String,
@@ -14,11 +15,11 @@ pub struct Model {
 
 impl Model {
     pub fn engine_id_branded(&self) -> EngineId {
-        EngineId::new(self.id.clone())
+        EngineId::from(self.id.clone())
     }
 
     pub fn default_variant_id_branded(&self) -> EngineSceneId {
-        EngineSceneId::new(self.default_variant_id.clone())
+        EngineSceneId::from(self.default_variant_id.clone())
     }
 }
 

@@ -10865,6 +10865,8 @@ dependencies = [
  "facet",
  "roam",
  "serde",
+ "serde_json",
+ "uuid",
 ]
 
 [[package]]
@@ -10878,6 +10880,7 @@ dependencies = [
  "signal2-proto",
  "thiserror 2.0.18",
  "tokio",
+ "uuid",
 ]
 
 [[package]]
