@@ -219,6 +219,7 @@ pub fn BlockPickerDropdown(props: BlockPickerDropdownProps) -> Element {
                                                     engine_group: None,
                                                     is_template: true,
                                                     bypassed: false,
+                                                    is_phantom: false,
                                                 };
                                                 props.on_add_slot.call(new_slot);
                                             },
@@ -280,6 +281,7 @@ pub fn BlockPickerDropdown(props: BlockPickerDropdownProps) -> Element {
                                                                 engine_group: None,
                                                                 is_template: true,
                                                                 bypassed: false,
+                                                                is_phantom: false,
                                                             };
                                                             props.on_add_slot.call(new_slot);
                                                         },

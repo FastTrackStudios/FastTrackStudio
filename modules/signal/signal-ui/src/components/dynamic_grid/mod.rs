@@ -703,7 +703,7 @@ pub fn DynamicGridView(props: DynamicGridViewProps) -> Element {
                     for row in 0..rows {
                         for col in 0..cols {
                             {
-                                let slot = drag_chain.iter().find(|s| s.col == col && s.row == row);
+                                let slot = drag_chain.iter().find(|s| s.col == col && s.row == row && !s.is_phantom);
                                 let is_drag_target = hover_cell == Some((col, row)) && dragged_slot_id.is_some();
                                 let is_being_dragged = slot.as_ref().map_or(false, |s| dragged_slot_id == Some(s.id));
 

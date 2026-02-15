@@ -29,6 +29,9 @@ pub struct GridSlot {
     pub is_template: bool,
     /// True when the block is bypassed (signal passes through unprocessed).
     pub bypassed: bool,
+    /// Phantom slot — participates in layout (group bounds, grid sizing)
+    /// but does not render a visible cell. Used for dry pass-through lanes.
+    pub is_phantom: bool,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

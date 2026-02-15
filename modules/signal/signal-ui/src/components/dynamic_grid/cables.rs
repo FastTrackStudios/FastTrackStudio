@@ -94,7 +94,7 @@ pub(crate) fn compute_module_ports(chain: &[GridSlot]) -> Vec<ModulePort> {
         let all_bypassed = {
             let slots: Vec<&GridSlot> = chain
                 .iter()
-                .filter(|s| s.module_group.as_deref() == Some(name))
+                .filter(|s| s.module_group.as_deref() == Some(name) && !s.is_phantom)
                 .collect();
             !slots.is_empty() && slots.iter().all(|s| s.bypassed)
         };
@@ -195,14 +195,18 @@ pub(crate) fn resolve_cables(chain: &[GridSlot]) -> Vec<Cable> {
         .map(|(name, min_c, max_c, min_r, max_r, color)| {
             let mut left_edge: Vec<(usize, usize)> = chain
                 .iter()
-                .filter(|s| s.module_group.as_deref() == Some(name) && s.col == *min_c)
+                .filter(|s| {
+                    s.module_group.as_deref() == Some(name) && s.col == *min_c && !s.is_phantom
+                })
                 .map(|s| (s.col, s.row))
                 .collect();
             left_edge.sort_by_key(|&(_, r)| r);
 
             let mut right_edge: Vec<(usize, usize)> = chain
                 .iter()
-                .filter(|s| s.module_group.as_deref() == Some(name) && s.col == *max_c)
+                .filter(|s| {
+                    s.module_group.as_deref() == Some(name) && s.col == *max_c && !s.is_phantom
+                })
                 .map(|s| (s.col, s.row))
                 .collect();
             right_edge.sort_by_key(|&(_, r)| r);
@@ -222,7 +226,13 @@ pub(crate) fn resolve_cables(chain: &[GridSlot]) -> Vec<Cable> {
 
     // 1. Intra-module horizontal adjacency
     for a in chain.iter() {
+        if a.is_phantom {
+            continue;
+        }
         for b in chain.iter() {
+            if b.is_phantom {
+                continue;
+            }
             let same_group = match (&a.module_group, &b.module_group) {
                 (Some(ga), Some(gb)) => ga == gb,
                 _ => false,
@@ -281,9 +291,9 @@ pub(crate) fn resolve_cables(chain: &[GridSlot]) -> Vec<Cable> {
             }
 
             let center_row = (m.min_row + m.max_row) / 2;
-            let has_center_block = chain
-                .iter()
-                .any(|s| s.module_group.as_deref() == Some(&m.name) && s.row == center_row);
+            let has_center_block = chain.iter().any(|s| {
+                s.module_group.as_deref() == Some(&m.name) && s.row == center_row && !s.is_phantom
+            });
             if !has_center_block && m.max_row - m.min_row >= 2 {
                 cables.push(Cable::new(mod_in, mod_out, m.color.clone(), mod_bypassed));
             }
@@ -306,9 +316,28 @@ pub(crate) fn resolve_cables(chain: &[GridSlot]) -> Vec<Cable> {
             let rows_overlap =
                 from_mod.min_row <= to_mod.max_row && to_mod.min_row <= from_mod.max_row;
 
-            if rows_overlap {
-                // Same row band — direct Bézier
+            // Even if rows overlap, a multi-row module extends above/below
+            // the base row.  A direct Bézier would cut through its container,
+            // so route through the cable channel above the row band instead.
+            let either_tall = from_mod.is_multi_row() || to_mod.is_multi_row();
+
+            if rows_overlap && !either_tall {
+                // Same row band, single-row modules — direct Bézier
                 cables.push(Cable::new(from_pt, to_pt, color, both_bypassed));
+            } else if rows_overlap && either_tall {
+                // Same band but one module is multi-row — route above
+                let band_top = from_mod.min_row.min(to_mod.min_row);
+                let channel_row = band_top.saturating_sub(1);
+                let channel_y =
+                    channel_row as f64 * step + CELL_SIZE as f64 + CELL_GAP as f64 * 0.5;
+
+                cables.push(Cable::routed(
+                    from_pt,
+                    to_pt,
+                    color,
+                    channel_y,
+                    both_bypassed,
+                ));
             } else {
                 // Cross-row: check if this is a row wrap (output right → input left below)
                 let is_wrap = to_pt.0 < from_pt.0 && to_pt.1 > from_pt.1;
