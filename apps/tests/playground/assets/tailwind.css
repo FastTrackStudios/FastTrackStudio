@@ -912,13 +912,6 @@
       margin-block-end: calc(calc(var(--spacing) * 4) * calc(1 - var(--tw-space-y-reverse)));
     }
   }
-  .space-y-5 {
-    :where(& > :not(:last-child)) {
-      --tw-space-y-reverse: 0;
-      margin-block-start: calc(calc(var(--spacing) * 5) * var(--tw-space-y-reverse));
-      margin-block-end: calc(calc(var(--spacing) * 5) * calc(1 - var(--tw-space-y-reverse)));
-    }
-  }
   .space-y-6 {
     :where(& > :not(:last-child)) {
       --tw-space-y-reverse: 0;
@@ -1051,12 +1044,6 @@
       border-color: color-mix(in oklab, var(--color-blue-400) 80%, transparent);
     }
   }
-  .border-blue-400\/90 {
-    border-color: color-mix(in srgb, oklch(70.7% 0.165 254.624) 90%, transparent);
-    @supports (color: color-mix(in lab, red, red)) {
-      border-color: color-mix(in oklab, var(--color-blue-400) 90%, transparent);
-    }
-  }
   .border-blue-500 {
     border-color: var(--color-blue-500);
   }
@@ -1161,12 +1148,6 @@
   }
   .border-zinc-300 {
     border-color: var(--color-zinc-300);
-  }
-  .border-zinc-300\/60 {
-    border-color: color-mix(in srgb, oklch(87.1% 0.006 286.286) 60%, transparent);
-    @supports (color: color-mix(in lab, red, red)) {
-      border-color: color-mix(in oklab, var(--color-zinc-300) 60%, transparent);
-    }
   }
   .border-zinc-400 {
     border-color: var(--color-zinc-400);
@@ -1781,9 +1762,6 @@
   }
   .pb-4 {
     padding-bottom: calc(var(--spacing) * 4);
-  }
-  .pl-2 {
-    padding-left: calc(var(--spacing) * 2);
   }
   .pl-4 {
     padding-left: calc(var(--spacing) * 4);
