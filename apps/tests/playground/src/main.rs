@@ -781,6 +781,25 @@ fn FramePreviewTab() -> Element {
                                 None,
                                 &rect,
                             );
+
+                            let handle_size = 8.0 * bounds.dpr.max(1.0);
+                            let half = handle_size * 0.5;
+                            for (hx, hy) in [
+                                (rect.x0, rect.y0),
+                                (rect.x1, rect.y0),
+                                (rect.x0, rect.y1),
+                                (rect.x1, rect.y1),
+                            ] {
+                                let handle_rect =
+                                    Rect::new(hx - half, hy - half, hx + half, hy + half);
+                                scene.fill(
+                                    Fill::NonZero,
+                                    Affine::IDENTITY,
+                                    Color::from_rgba8(59, 130, 246, 240),
+                                    None,
+                                    &handle_rect,
+                                );
+                            }
                         }
                     });
                 }
@@ -1061,40 +1080,20 @@ fn FramePreviewTab() -> Element {
                                     evt.stop_propagation();
                                     evt.prevent_default();
                                     if let Some(world) = selected_world_bounds {
+                                        let handle = detect_resize_handle_css(
+                                            overlay,
+                                            evt.client_coordinates().x,
+                                            evt.client_coordinates().y,
+                                        );
                                         let drag = EditDragState {
                                             node_id: active_node,
                                             start_mouse: (evt.client_coordinates().x, evt.client_coordinates().y),
                                             start_rect: world.into(),
-                                            mode: EditDragMode::Move,
+                                            mode: handle.map(EditDragMode::Resize).unwrap_or(EditDragMode::Move),
                                         };
                                         edit_drag.set(Some(drag));
                                     }
                                 },
-                            }
-                            for handle in ResizeHandle::ALL {
-                                {
-                                    let hs = overlay_handle_style(overlay, handle);
-                                    rsx! {
-                                        div {
-                                            key: "{handle:?}",
-                                            class: "absolute bg-blue-400 border border-blue-200 rounded-[2px] pointer-events-auto",
-                                            style: "{hs}",
-                                            onmousedown: move |evt| {
-                                                evt.stop_propagation();
-                                                evt.prevent_default();
-                                                if let Some(world) = selected_world_bounds {
-                                                    let drag = EditDragState {
-                                                        node_id: active_node,
-                                                        start_mouse: (evt.client_coordinates().x, evt.client_coordinates().y),
-                                                        start_rect: world.into(),
-                                                        mode: EditDragMode::Resize(handle),
-                                                    };
-                                                    edit_drag.set(Some(drag));
-                                                }
-                                            },
-                                        }
-                                    }
-                                }
                             }
                         }
                     }
