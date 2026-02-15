@@ -316,35 +316,22 @@ pub(crate) fn resolve_cables(chain: &[GridSlot]) -> Vec<Cable> {
             let rows_overlap =
                 from_mod.min_row <= to_mod.max_row && to_mod.min_row <= from_mod.max_row;
 
-            // Even if rows overlap, a multi-row module extends above/below
-            // the base row.  A direct Bézier would cut through its container,
-            // so route through the cable channel above the row band instead.
-            let either_tall = from_mod.is_multi_row() || to_mod.is_multi_row();
-
-            if rows_overlap && !either_tall {
-                // Same row band, single-row modules — direct Bézier
+            if rows_overlap {
+                // Same row band — direct Bézier between module I/O ports
                 cables.push(Cable::new(from_pt, to_pt, color, both_bypassed));
-            } else if rows_overlap && either_tall {
-                // Same band but one module is multi-row — route above
-                let band_top = from_mod.min_row.min(to_mod.min_row);
-                let channel_row = band_top.saturating_sub(1);
-                let channel_y =
-                    channel_row as f64 * step + CELL_SIZE as f64 + CELL_GAP as f64 * 0.5;
-
-                cables.push(Cable::routed(
-                    from_pt,
-                    to_pt,
-                    color,
-                    channel_y,
-                    both_bypassed,
-                ));
             } else {
                 // Cross-row: check if this is a row wrap (output right → input left below)
                 let is_wrap = to_pt.0 < from_pt.0 && to_pt.1 > from_pt.1;
 
                 if is_wrap {
-                    // Row wrap — use cable_path_d's U-turn detection (right → down → left → down)
-                    cables.push(Cable::new(from_pt, to_pt, color, both_bypassed));
+                    // Row wrap — route horizontal segment through the gap
+                    // channel just below the source module's row band.
+                    // Hug the bottom of the source row's cells
+                    let channel_y =
+                        from_mod.max_row as f64 * step + CELL_SIZE as f64 + CELL_GAP as f64 * 0.12;
+                    let mut c = Cable::new(from_pt, to_pt, color, both_bypassed);
+                    c.route_y = Some(channel_y);
+                    cables.push(c);
                 } else {
                     // Forward cross-row — route through gap channel
                     let upper_bottom_row = from_mod.max_row.min(to_mod.max_row);
