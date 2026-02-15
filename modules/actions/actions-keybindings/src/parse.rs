@@ -71,10 +71,7 @@ pub fn parse_shortcut(input: &str) -> Result<KeyBinding, ParseError> {
     }
 
     match key {
-        Some(k) => Ok(KeyBinding {
-            key: k,
-            modifiers,
-        }),
+        Some(k) => Ok(KeyBinding { key: k, modifiers }),
         None => Err(ParseError::NoKeySpecified),
     }
 }

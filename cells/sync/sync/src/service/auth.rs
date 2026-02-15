@@ -101,7 +101,8 @@ impl<T: TokenStore> AuthServiceImpl<T> {
         let client = oauth::build_client(pending.provider, config)?;
 
         // Exchange code for tokens
-        let token = oauth::exchange_code(&client, &params.code, pending.request.pkce_verifier).await?;
+        let token =
+            oauth::exchange_code(&client, &params.code, pending.request.pkce_verifier).await?;
 
         // Fetch user profile from provider
         let user = oauth::fetch_user_profile(pending.provider, &token.access_token).await?;

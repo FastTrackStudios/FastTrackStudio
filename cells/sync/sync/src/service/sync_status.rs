@@ -112,7 +112,8 @@ mod tests {
         let svc = SyncStatusServiceImpl::new();
 
         // -- Exec
-        svc.set_state(SyncState::Error("connection refused".into())).await;
+        svc.set_state(SyncState::Error("connection refused".into()))
+            .await;
 
         // -- Check
         assert_eq!(

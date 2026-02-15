@@ -177,7 +177,12 @@ mod tests {
         // -- Exec: split the layout, recording history
         let before = layout.clone();
         let root_id = layout.root().unwrap();
-        layout.split_tile(root_id, SplitDirection::Horizontal, PanelId::ChartEditor, 50.0);
+        layout.split_tile(
+            root_id,
+            SplitDirection::Horizontal,
+            PanelId::ChartEditor,
+            50.0,
+        );
         history.push(&before, &layout);
 
         assert_panels(&layout, &[PanelId::Performance, PanelId::ChartEditor]);
@@ -199,7 +204,12 @@ mod tests {
 
         let before = layout.clone();
         let root_id = layout.root().unwrap();
-        layout.split_tile(root_id, SplitDirection::Horizontal, PanelId::ChartEditor, 50.0);
+        layout.split_tile(
+            root_id,
+            SplitDirection::Horizontal,
+            PanelId::ChartEditor,
+            50.0,
+        );
         history.push(&before, &layout);
 
         // -- Exec: undo then redo
@@ -223,7 +233,12 @@ mod tests {
         // First mutation: split
         let before1 = layout.clone();
         let root_id = layout.root().unwrap();
-        layout.split_tile(root_id, SplitDirection::Horizontal, PanelId::ChartEditor, 50.0);
+        layout.split_tile(
+            root_id,
+            SplitDirection::Horizontal,
+            PanelId::ChartEditor,
+            50.0,
+        );
         history.push(&before1, &layout);
 
         // Undo the split
@@ -285,7 +300,12 @@ mod tests {
         // -- Exec: push a change
         let before = layout.clone();
         let root_id = layout.root().unwrap();
-        layout.split_tile(root_id, SplitDirection::Horizontal, PanelId::ChartEditor, 50.0);
+        layout.split_tile(
+            root_id,
+            SplitDirection::Horizontal,
+            PanelId::ChartEditor,
+            50.0,
+        );
         history.push(&before, &layout);
 
         // -- Check: can undo, cannot redo
@@ -329,13 +349,23 @@ mod tests {
         // Mutation 1: split with ChartEditor
         let before1 = layout.clone();
         let root_id = layout.root().unwrap();
-        layout.split_tile(root_id, SplitDirection::Horizontal, PanelId::ChartEditor, 50.0);
+        layout.split_tile(
+            root_id,
+            SplitDirection::Horizontal,
+            PanelId::ChartEditor,
+            50.0,
+        );
         history.push(&before1, &layout);
 
         // Mutation 2: split with Navigator
         let before2 = layout.clone();
         let editor_node = layout.find_node_for_panel(PanelId::ChartEditor).unwrap();
-        layout.split_tile(editor_node, SplitDirection::Vertical, PanelId::Navigator, 40.0);
+        layout.split_tile(
+            editor_node,
+            SplitDirection::Vertical,
+            PanelId::Navigator,
+            40.0,
+        );
         history.push(&before2, &layout);
 
         // -- Exec: undo twice
@@ -352,7 +382,11 @@ mod tests {
         assert!(history.redo(&mut layout));
         assert_panels(
             &layout,
-            &[PanelId::Performance, PanelId::ChartEditor, PanelId::Navigator],
+            &[
+                PanelId::Performance,
+                PanelId::ChartEditor,
+                PanelId::Navigator,
+            ],
         );
     }
 
@@ -364,7 +398,12 @@ mod tests {
 
         let before = layout.clone();
         let root_id = layout.root().unwrap();
-        layout.split_tile(root_id, SplitDirection::Horizontal, PanelId::ChartEditor, 50.0);
+        layout.split_tile(
+            root_id,
+            SplitDirection::Horizontal,
+            PanelId::ChartEditor,
+            50.0,
+        );
         history.push(&before, &layout);
         history.undo(&mut layout);
 
@@ -390,7 +429,12 @@ mod tests {
         let mut h = history;
         let before = layout.clone();
         let root_id = layout.root().unwrap();
-        layout.split_tile(root_id, SplitDirection::Horizontal, PanelId::ChartEditor, 50.0);
+        layout.split_tile(
+            root_id,
+            SplitDirection::Horizontal,
+            PanelId::ChartEditor,
+            50.0,
+        );
         h.push(&before, &layout);
 
         assert_eq!(h.undo_depth(), 1);

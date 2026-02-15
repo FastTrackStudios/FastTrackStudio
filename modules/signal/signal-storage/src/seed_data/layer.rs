@@ -77,8 +77,7 @@ fn keys_layer_space() -> Layer {
         "__phantom__ MegaRig Private",
     )
     .with_layer(
-        LayerRef::new(seed_id("guitar-layer-main"))
-            .with_variant(seed_id("guitar-layer-main-lead")),
+        LayerRef::new(seed_id("guitar-layer-main")).with_variant(seed_id("guitar-layer-main-lead")),
     )
     .with_module(
         ModuleRef::new(seed_id("__phantom__keys-megarig-time"))
@@ -129,12 +128,17 @@ fn guitar_layer_main() -> Layer {
         .with_module(ModuleRef::new(seed_id("gtr-source")))
         .with_module(ModuleRef::new(seed_id("gtr-dynamics")))
         .with_module(ModuleRef::new(seed_id("gtr-special")))
-        .with_module(ModuleRef::new(seed_id("drive-full-stack")).with_variant(seed_id("drive-full-stack-push")))
+        .with_module(
+            ModuleRef::new(seed_id("drive-full-stack"))
+                .with_variant(seed_id("drive-full-stack-push")),
+        )
         .with_module(ModuleRef::new(seed_id("gtr-volume")))
         .with_module(ModuleRef::new(seed_id("gtr-pre-fx")))
         .with_module(ModuleRef::new(seed_id("gtr-amp")))
         .with_module(ModuleRef::new(seed_id("gtr-modulation")))
-        .with_module(ModuleRef::new(seed_id("time-parallel")).with_variant(seed_id("time-parallel-ambient")))
+        .with_module(
+            ModuleRef::new(seed_id("time-parallel")).with_variant(seed_id("time-parallel-ambient")),
+        )
         .with_module(ModuleRef::new(seed_id("gtr-motion")))
         .with_module(ModuleRef::new(seed_id("gtr-master")))
         .with_override(Override::set(
@@ -276,7 +280,9 @@ fn pad_layer_foundation() -> Layer {
 
 fn pad_layer_shimmer() -> Layer {
     let default_variant = LayerSnapshot::new(seed_id("pad-layer-shimmer-default"), "Default")
-        .with_block(BlockRef::new(seed_id("reverb-bigsky")).with_variant(seed_id("reverb-bigsky-shimmer")))
+        .with_block(
+            BlockRef::new(seed_id("reverb-bigsky")).with_variant(seed_id("reverb-bigsky-shimmer")),
+        )
         .with_block(BlockRef::new(seed_id("delay-timeless")))
         .with_override(Override::set(
             NodePath::block("pad-shimmer-delay").with_parameter("mix"),
@@ -325,11 +331,47 @@ mod tests {
     #[test]
     fn includes_required_engine_types() {
         let layers = layers();
-        assert_eq!(layers.iter().filter(|l| l.engine_type == EngineType::Keys).count(), 2);
-        assert_eq!(layers.iter().filter(|l| l.engine_type == EngineType::Synth).count(), 3);
-        assert_eq!(layers.iter().filter(|l| l.engine_type == EngineType::Organ).count(), 2);
-        assert_eq!(layers.iter().filter(|l| l.engine_type == EngineType::Pad).count(), 2);
-        assert_eq!(layers.iter().filter(|l| l.engine_type == EngineType::Guitar).count(), 1);
-        assert_eq!(layers.iter().filter(|l| l.engine_type == EngineType::Vocal).count(), 1);
+        assert_eq!(
+            layers
+                .iter()
+                .filter(|l| l.engine_type == EngineType::Keys)
+                .count(),
+            2
+        );
+        assert_eq!(
+            layers
+                .iter()
+                .filter(|l| l.engine_type == EngineType::Synth)
+                .count(),
+            3
+        );
+        assert_eq!(
+            layers
+                .iter()
+                .filter(|l| l.engine_type == EngineType::Organ)
+                .count(),
+            2
+        );
+        assert_eq!(
+            layers
+                .iter()
+                .filter(|l| l.engine_type == EngineType::Pad)
+                .count(),
+            2
+        );
+        assert_eq!(
+            layers
+                .iter()
+                .filter(|l| l.engine_type == EngineType::Guitar)
+                .count(),
+            1
+        );
+        assert_eq!(
+            layers
+                .iter()
+                .filter(|l| l.engine_type == EngineType::Vocal)
+                .count(),
+            1
+        );
     }
 }

@@ -90,4 +90,3 @@ pub fn all() -> Vec<MouseModifierSetting> {
         track_left_click(),
     ])
 }
-

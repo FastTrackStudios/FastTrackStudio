@@ -143,4 +143,3 @@ impl crate::traits::HasMetadata for Setlist {
         &mut self.metadata
     }
 }
-

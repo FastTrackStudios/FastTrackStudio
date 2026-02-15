@@ -7,7 +7,7 @@
 
 #![deny(unsafe_code)]
 
-use hello_world_proto::{GreetingRequest, GreetingResponse, Greeter};
+use hello_world_proto::{Greeter, GreetingRequest, GreetingResponse};
 use tracing::info;
 
 /// r[impl greeter.service]
@@ -29,9 +29,9 @@ impl Greeter for SimpleGreeter {
     async fn say_hello(&self, _cx: &roam::Context, request: GreetingRequest) -> GreetingResponse {
         let name = request.name.as_deref().unwrap_or("World");
         let message = format!("Hello, {}!", name);
-        
+
         info!("Sending greeting: {}", message);
-        
+
         GreetingResponse { message }
     }
 }
@@ -48,14 +48,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Hello World Cell starting...");
 
     let _greeter = SimpleGreeter::new();
-    
+
     info!("Greeter service initialized");
-    
+
     info!("Hello World Cell initialized");
     info!("Waiting for connections...");
-    
+
     tokio::signal::ctrl_c().await?;
     info!("Shutting down...");
-    
+
     Ok(())
 }

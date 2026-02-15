@@ -26,9 +26,7 @@ use tracing::{debug, info, warn};
 
 use cell_host_proto::ReadyMsg;
 use global::Global;
-use host_runtime::{
-    cell_ready_registry, init_shm_infrastructure, spawn_tracing_consumer, Host,
-};
+use host_runtime::{cell_ready_registry, init_shm_infrastructure, spawn_tracing_consumer, Host};
 use roam::session::RoutedDispatcher;
 use roam_telemetry::{ExporterConfig, OtlpExporter, TelemetryMiddleware};
 use std::time::Duration;
@@ -276,10 +274,11 @@ fn start_unix_server() {
 async fn register_actions() {
     local_actions::register_toggle_states();
 
-    if let Err(error) = action_registry::register_actions(vec![
-        action_registry::ActionRegistrationSource::Local(local_actions::builtin_local_actions()),
-    ])
-    .await
+    if let Err(error) =
+        action_registry::register_actions(vec![action_registry::ActionRegistrationSource::Local(
+            local_actions::builtin_local_actions(),
+        )])
+        .await
     {
         warn!(%error, "Failed to register actions");
         return;
@@ -287,11 +286,8 @@ async fn register_actions() {
 
     // Add quick input validation buttons to the default FTS floating toolbar.
     let add_toggle = toolbar_manager::add_button(
-        &toolbar_manager::ToolbarButton::new(
-            "FTS_INPUT_TOGGLE_INPUT_RUNTIME",
-            "Toggle Input",
-        )
-        .on_toolbar(toolbar_manager::ToolbarTarget::Floating(32)),
+        &toolbar_manager::ToolbarButton::new("FTS_INPUT_TOGGLE_INPUT_RUNTIME", "Toggle Input")
+            .on_toolbar(toolbar_manager::ToolbarTarget::Floating(32)),
         "__input_runtime__",
     );
     if let Err(error) = add_toggle {
@@ -308,11 +304,8 @@ async fn register_actions() {
     }
 
     let add_intercept = toolbar_manager::add_button(
-        &toolbar_manager::ToolbarButton::new(
-            "FTS_INPUT_TOGGLE_INPUT_INTERCEPT",
-            "Intercept",
-        )
-        .on_toolbar(toolbar_manager::ToolbarTarget::Floating(32)),
+        &toolbar_manager::ToolbarButton::new("FTS_INPUT_TOGGLE_INPUT_INTERCEPT", "Intercept")
+            .on_toolbar(toolbar_manager::ToolbarTarget::Floating(32)),
         "__input_runtime__",
     );
     if let Err(error) = add_intercept {

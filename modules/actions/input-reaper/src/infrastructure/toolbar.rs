@@ -110,7 +110,9 @@ pub fn remove_workflow_buttons(workflow_id: &str) -> Result<(), String> {
             s.added_buttons
                 .iter()
                 .filter(|(_, owner)| owner.as_str() == workflow_id)
-                .map(|((toolbar_name, command_name), _)| (toolbar_name.clone(), command_name.clone()))
+                .map(|((toolbar_name, command_name), _)| {
+                    (toolbar_name.clone(), command_name.clone())
+                })
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
@@ -159,10 +161,11 @@ fn scan_toolbar_for_command(toolbar_name: &str, command_id: CommandId) -> Option
     let mut pos = 0;
 
     loop {
-        let result = medium.get_custom_menu_or_toolbar_item(toolbar_name, pos, |item| match item? {
-            MenuOrToolbarItem::Command(cmd) if cmd.command_id == command_id => Some(Some(pos)),
-            _ => Some(None),
-        });
+        let result =
+            medium.get_custom_menu_or_toolbar_item(toolbar_name, pos, |item| match item? {
+                MenuOrToolbarItem::Command(cmd) if cmd.command_id == command_id => Some(Some(pos)),
+                _ => Some(None),
+            });
 
         match result {
             Some(Some(found)) => return Some(found),

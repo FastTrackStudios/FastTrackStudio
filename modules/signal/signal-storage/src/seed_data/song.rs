@@ -26,7 +26,11 @@ fn feature_demo_song() -> Song {
         path: NodePath::engine("synth-engine"),
         op: NodeOverrideOp::ReplaceRef(seed_id("synth-engine-scene-b").to_string()),
     })
-    .with_metadata(Metadata::new().with_tag("patch").with_tag("engine-override"));
+    .with_metadata(
+        Metadata::new()
+            .with_tag("patch")
+            .with_tag("engine-override"),
+    );
 
     let verse = Section::from_patch(
         seed_id("feature-demo-verse"),
@@ -60,7 +64,11 @@ fn feature_demo_song() -> Song {
             .with_parameter("mix"),
         0.67,
     ))
-    .with_metadata(Metadata::new().with_tag("patch").with_tag("module-param-override"));
+    .with_metadata(
+        Metadata::new()
+            .with_tag("patch")
+            .with_tag("module-param-override"),
+    );
 
     let bridge = Section::from_rig_scene(
         seed_id("feature-demo-bridge"),
@@ -75,7 +83,11 @@ fn feature_demo_song() -> Song {
             .with_block("texture-verb"),
         op: NodeOverrideOp::ReplaceRef(seed_id("reverb-space-blackhole").to_string()),
     })
-    .with_metadata(Metadata::new().with_tag("preset").with_tag("block-override"));
+    .with_metadata(
+        Metadata::new()
+            .with_tag("preset")
+            .with_tag("block-override"),
+    );
 
     let mut song = Song::new(seed_id("feature-demo-song"), "Feature-Demo Song", intro)
         .with_artist("Signal2")
@@ -83,7 +95,9 @@ fn feature_demo_song() -> Song {
             Metadata::new()
                 .with_tag("setlist")
                 .with_tag("keys")
-                .with_description("Demonstrates patch-sourced and preset-sourced sections with deep overrides"),
+                .with_description(
+                    "Demonstrates patch-sourced and preset-sourced sections with deep overrides",
+                ),
         );
     song.add_section(verse);
     song.add_section(chorus);
@@ -162,7 +176,10 @@ mod tests {
                 if path == "engine.synth-engine" {
                     saw_engine = true;
                 }
-                if path.contains(".layer.") && !path.contains(".module.") && !path.contains(".block.") {
+                if path.contains(".layer.")
+                    && !path.contains(".module.")
+                    && !path.contains(".block.")
+                {
                     saw_layer = true;
                 }
                 if path.contains(".module.") {

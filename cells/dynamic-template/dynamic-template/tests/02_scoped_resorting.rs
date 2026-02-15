@@ -7,7 +7,7 @@
 
 use dynamic_template::*;
 use monarchy::{
-    StructureAssertions, Visitable, monarchy_sort, move_unsorted_to_group, reapply_collapse,
+    monarchy_sort, move_unsorted_to_group, reapply_collapse, StructureAssertions, Visitable,
 };
 
 type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;

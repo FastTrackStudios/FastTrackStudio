@@ -203,8 +203,7 @@ pub static SONG_TRANSPORT: GlobalSignal<HashMap<usize, TransportState>> =
 ///
 /// This is a lightweight signal for chart cursor rendering so the renderer
 /// doesn't need to subscribe to the full `SONG_TRANSPORT` map.
-pub static ACTIVE_PLAYBACK_MUSICAL: GlobalSignal<Option<MusicalPosition>> =
-    Signal::global(|| None);
+pub static ACTIVE_PLAYBACK_MUSICAL: GlobalSignal<Option<MusicalPosition>> = Signal::global(|| None);
 
 /// Whether active song transport is currently playing.
 ///

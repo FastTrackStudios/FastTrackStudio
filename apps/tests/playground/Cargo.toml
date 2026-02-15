@@ -17,6 +17,7 @@ kurbo = { workspace = true }
 peniko = { workspace = true }
 tokio = { workspace = true, features = ["time"] }
 serde_json = { workspace = true }
+lumen-blocks = { git = "https://github.com/Leaf-Computer/lumen-blocks.git", tag = "v0.2.0" }
 
 [features]
 default = ["desktop"]

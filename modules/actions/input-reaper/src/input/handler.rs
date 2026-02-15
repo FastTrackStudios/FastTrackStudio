@@ -100,12 +100,14 @@ impl InputHandler {
                 match key_code {
                     // Modifier keys (return early, don't apply modifier prefixes)
                     16 | 160 | 161 => return "shift".to_string(), // VK_SHIFT, VK_LSHIFT, VK_RSHIFT
-                    17 | 162 | 163 => return "cmd".to_string(), // On macOS, VK_CONTROL = Command
+                    17 | 162 | 163 => return "cmd".to_string(),   // On macOS, VK_CONTROL = Command
                     18 | 164 | 165 => return "alt".to_string(), // VK_MENU (Alt/Option), VK_LMENU, VK_RMENU
-                    91 => return "ctrl".to_string(),             // On macOS, VK_LWIN = Control
-                    92 => return "ctrl".to_string(),             // On macOS, VK_RWIN = Control
+                    91 => return "ctrl".to_string(),            // On macOS, VK_LWIN = Control
+                    92 => return "ctrl".to_string(),            // On macOS, VK_RWIN = Control
                     // Letters (A-Z)
-                    65..=90 => char::from_u32((key_code + 32) as u32).unwrap_or('?').to_string(),
+                    65..=90 => char::from_u32((key_code + 32) as u32)
+                        .unwrap_or('?')
+                        .to_string(),
                     // Numbers (0-9)
                     48..=57 => char::from_u32(key_code as u32).unwrap_or('?').to_string(),
                     // Special keys
@@ -149,10 +151,10 @@ impl InputHandler {
         let key_str = match key_code {
             // Modifier keys (return early, don't apply modifier prefixes)
             16 | 160 | 161 => return "shift".to_string(), // VK_SHIFT, VK_LSHIFT, VK_RSHIFT
-            17 | 162 | 163 => return "ctrl".to_string(), // VK_CONTROL, VK_LCONTROL, VK_RCONTROL
+            17 | 162 | 163 => return "ctrl".to_string(),  // VK_CONTROL, VK_LCONTROL, VK_RCONTROL
             18 | 164 | 165 => return "alt".to_string(), // VK_MENU (Alt/Option), VK_LMENU, VK_RMENU
-            91 => return "lmeta".to_string(), // VK_LWIN (Left Win)
-            92 => return "rmeta".to_string(), // VK_RWIN (Right Win)
+            91 => return "lmeta".to_string(),           // VK_LWIN (Left Win)
+            92 => return "rmeta".to_string(),           // VK_RWIN (Right Win)
             // Letters (A-Z)
             65..=90 => {
                 // Always use lowercase for the key name

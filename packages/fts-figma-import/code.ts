@@ -105,13 +105,20 @@ type ExportPayload = {
   nodes: ExportNode[];
 };
 
+type ExportRoot = SceneNode;
+
 let liveSyncEnabled = false;
 let exportQueued = false;
 let bridgeLiveEnabled = true;
 let bridgeLiveUrl = 'http://localhost:43123/figma-export';
+let pinnedExportRootIds: string[] = [];
+let hasManualRootSelection = false;
 
 figma.showUI(__html__, { width: UI_WIDTH, height: UI_HEIGHT, themeColors: true });
 postSelectionSummary();
+maybeAutoPinMainFrame();
+postPinnedRootsSummary();
+postFrameCatalog();
 
 figma.on('selectionchange', () => {
   postSelectionSummary();
@@ -121,6 +128,10 @@ figma.on('selectionchange', () => {
 });
 
 figma.on('documentchange', () => {
+  prunePinnedRoots();
+  maybeAutoPinMainFrame();
+  postFrameCatalog();
+  postPinnedRootsSummary();
   if (liveSyncEnabled) {
     queueExport();
   }
@@ -137,6 +148,7 @@ figma.ui.onmessage = async (msg: unknown) => {
     enabled?: boolean;
     bridgeUrl?: string;
     bridgeEnabled?: boolean;
+    nodeId?: string;
   };
 
   if (message.type === 'close') {
@@ -174,6 +186,66 @@ figma.ui.onmessage = async (msg: unknown) => {
     if (liveSyncEnabled && bridgeLiveEnabled) {
       queueExport();
     }
+    return;
+  }
+
+  if (message.type === 'set-export-roots-from-selection') {
+    hasManualRootSelection = true;
+    const roots = rootsFromSelection();
+    if (roots.length === 0) {
+      figma.notify('Select at least one frame before pinning export roots.');
+      figma.ui.postMessage({
+        type: 'export-error',
+        message: 'Select at least one frame before pinning export roots.',
+      });
+      return;
+    }
+    pinnedExportRootIds = roots.map((node) => node.id);
+    postPinnedRootsSummary();
+    postFrameCatalog();
+    figma.notify(`Pinned ${roots.length} export root(s).`);
+    if (liveSyncEnabled) {
+      queueExport();
+    }
+    return;
+  }
+
+  if (message.type === 'set-export-root-by-id') {
+    hasManualRootSelection = true;
+    const nodeId = message.nodeId?.trim();
+    if (!nodeId) {
+      return;
+    }
+    const node = figma.getNodeById(nodeId);
+    if (!node || node.type !== 'FRAME') {
+      figma.notify('Selected node is no longer a frame.');
+      postFrameCatalog();
+      return;
+    }
+    pinnedExportRootIds = [node.id];
+    postPinnedRootsSummary();
+    postFrameCatalog();
+    figma.notify(`Pinned frame: ${node.name}`);
+    if (liveSyncEnabled) {
+      queueExport();
+    }
+    return;
+  }
+
+  if (message.type === 'clear-export-roots') {
+    hasManualRootSelection = true;
+    pinnedExportRootIds = [];
+    postPinnedRootsSummary();
+    postFrameCatalog();
+    figma.notify('Cleared pinned export roots.');
+    return;
+  }
+
+  if (message.type === 'refresh-frames') {
+    prunePinnedRoots();
+    maybeAutoPinMainFrame();
+    postFrameCatalog();
+    postPinnedRootsSummary();
   }
 };
 
@@ -185,6 +257,67 @@ function postSelectionSummary(): void {
     selectedNames: selection.map((n) => `${n.name} (${n.type})`),
     hasSelection: selection.length > 0,
   });
+}
+
+function postPinnedRootsSummary(): void {
+  const roots = resolvePinnedRoots();
+  figma.ui.postMessage({
+    type: 'pinned-roots-summary',
+    count: roots.length,
+    names: roots.map((n) => `${n.name} (${n.type})`),
+    hasPinned: roots.length > 0,
+  });
+}
+
+function postFrameCatalog(): void {
+  const frames = figma.currentPage.findAll((n) => n.type === 'FRAME') as FrameNode[];
+  figma.ui.postMessage({
+    type: 'frame-catalog',
+    frames: frames.map((f) => ({ id: f.id, name: f.name, type: f.type })),
+    pinnedIds: [...pinnedExportRootIds],
+  });
+}
+
+function prunePinnedRoots(): void {
+  pinnedExportRootIds = pinnedExportRootIds.filter((id) => {
+    const node = figma.getNodeById(id);
+    return Boolean(node && node.type === 'FRAME');
+  });
+}
+
+function maybeAutoPinMainFrame(): void {
+  if (hasManualRootSelection || pinnedExportRootIds.length > 0) {
+    return;
+  }
+  const frames = figma.currentPage.findAll((n) => n.type === 'FRAME') as FrameNode[];
+  const main = frames.find((f) => f.name.trim().toLowerCase() === 'main');
+  if (main) {
+    pinnedExportRootIds = [main.id];
+  }
+}
+
+function rootsFromSelection(): ExportRoot[] {
+  const selection = figma.currentPage.selection;
+  return selection.filter((n): n is ExportRoot => n.type === 'FRAME');
+}
+
+function resolvePinnedRoots(): ExportRoot[] {
+  const roots: ExportRoot[] = [];
+  for (const id of pinnedExportRootIds) {
+    const node = figma.getNodeById(id);
+    if (node && node.type === 'FRAME') {
+      roots.push(node as ExportRoot);
+    }
+  }
+  return roots;
+}
+
+function resolveExportRoots(): ExportRoot[] {
+  const pinned = resolvePinnedRoots();
+  if (pinned.length > 0) {
+    return pinned;
+  }
+  return rootsFromSelection();
 }
 
 function queueExport(): void {
@@ -212,17 +345,18 @@ function normalizeOptions(input?: Partial<ExportOptions>): ExportOptions {
 }
 
 async function exportSelection(options: ExportOptions, reason: 'manual' | 'live'): Promise<void> {
-  const selection = figma.currentPage.selection;
-  if (selection.length === 0) {
+  const roots = resolveExportRoots();
+  if (roots.length === 0) {
     figma.ui.postMessage({
       type: 'export-error',
-      message: 'Select at least one frame or layer before exporting.',
+      message:
+        'No export roots. Pin a frame with "Select Frame" or select a frame on canvas.',
     });
     return;
   }
 
   try {
-    const nodes = await Promise.all(selection.map((node) => serializeNode(node, 0, options)));
+    const nodes = await Promise.all(roots.map((node) => serializeNode(node, 0, options)));
     const totalNodes = nodes.reduce((count, node) => count + countNodes(node), 0);
 
     const payload: ExportPayload = {
@@ -239,9 +373,9 @@ async function exportSelection(options: ExportOptions, reason: 'manual' | 'live'
         },
       },
       selection: {
-        ids: selection.map((node) => node.id),
-        names: selection.map((node) => node.name),
-        totalRoots: selection.length,
+        ids: roots.map((node) => node.id),
+        names: roots.map((node) => node.name),
+        totalRoots: roots.length,
         totalNodes,
       },
       options,
@@ -254,14 +388,14 @@ async function exportSelection(options: ExportOptions, reason: 'manual' | 'live'
       reason,
       json,
       stats: {
-        totalRoots: selection.length,
+        totalRoots: roots.length,
         totalNodes,
         bytes: json.length,
       },
     });
 
     if (reason === 'manual') {
-      figma.notify(`Exported ${totalNodes} nodes from ${selection.length} root selection(s).`);
+      figma.notify(`Exported ${totalNodes} nodes from ${roots.length} root(s).`);
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -277,17 +411,18 @@ async function exportToBridge(
   bridgeUrl?: string,
   silent = false,
 ): Promise<void> {
-  const selection = figma.currentPage.selection;
-  if (selection.length === 0) {
+  const roots = resolveExportRoots();
+  if (roots.length === 0) {
     figma.ui.postMessage({
       type: 'bridge-error',
-      message: 'Select at least one frame or layer before sending to bridge.',
+      message:
+        'No export roots. Pin a frame with "Select Frame" or select a frame on canvas.',
     });
     return;
   }
 
   try {
-    const nodes = await Promise.all(selection.map((node) => serializeNode(node, 0, options)));
+    const nodes = await Promise.all(roots.map((node) => serializeNode(node, 0, options)));
     const totalNodes = nodes.reduce((count, node) => count + countNodes(node), 0);
     const payload: ExportPayload = {
       schema: 'fts.figma.export/v1',
@@ -303,9 +438,9 @@ async function exportToBridge(
         },
       },
       selection: {
-        ids: selection.map((node) => node.id),
-        names: selection.map((node) => node.name),
-        totalRoots: selection.length,
+        ids: roots.map((node) => node.id),
+        names: roots.map((node) => node.name),
+        totalRoots: roots.length,
         totalNodes,
       },
       options,
@@ -354,7 +489,19 @@ async function exportToBridge(
   }
 }
 
-async function serializeNode(node: SceneNode, depth: number, options: ExportOptions): Promise<ExportNode> {
+async function serializeNode(
+  node: SceneNode,
+  depth: number,
+  options: ExportOptions,
+  parentBounds?: RectLike,
+): Promise<ExportNode> {
+  const absoluteBoundingBox = readAbsoluteBoundingBox(node);
+  const relativeTransform = normalizeRelativeTransform(
+    sanitize(readProp(node, 'relativeTransform')),
+    absoluteBoundingBox,
+    parentBounds,
+  );
+
   const base: ExportNode = {
     id: node.id,
     name: node.name,
@@ -363,8 +510,8 @@ async function serializeNode(node: SceneNode, depth: number, options: ExportOpti
     locked: readProp(node, 'locked'),
     opacity: readProp(node, 'opacity'),
     blendMode: readProp(node, 'blendMode'),
-    absoluteBoundingBox: readAbsoluteBoundingBox(node),
-    relativeTransform: sanitize(readProp(node, 'relativeTransform')),
+    absoluteBoundingBox,
+    relativeTransform,
     size: readSize(node),
     rotation: readProp(node, 'rotation'),
     constraints: sanitize(readProp(node, 'constraints')),
@@ -426,11 +573,40 @@ async function serializeNode(node: SceneNode, depth: number, options: ExportOpti
   if ('children' in node && depth < options.maxDepth) {
     const sceneChildren = node.children.filter(isSceneNode);
     base.children = await Promise.all(
-      sceneChildren.map((child) => serializeNode(child, depth + 1, options)),
+      sceneChildren.map((child) => serializeNode(child, depth + 1, options, absoluteBoundingBox)),
     );
   }
 
   return pruneUndefined(base);
+}
+
+function normalizeRelativeTransform(
+  transform: unknown,
+  nodeBounds?: RectLike,
+  parentBounds?: RectLike,
+): number[][] | undefined {
+  if (!transform || !Array.isArray(transform)) {
+    return undefined;
+  }
+  if (!nodeBounds || !parentBounds) {
+    return sanitize(transform) as number[][] | undefined;
+  }
+  if (transform.length < 2) {
+    return sanitize(transform) as number[][] | undefined;
+  }
+  const row0 = transform[0];
+  const row1 = transform[1];
+  if (!Array.isArray(row0) || !Array.isArray(row1) || row0.length < 3 || row1.length < 3) {
+    return sanitize(transform) as number[][] | undefined;
+  }
+
+  const localX = nodeBounds.x - parentBounds.x;
+  const localY = nodeBounds.y - parentBounds.y;
+  const next0 = [...row0];
+  const next1 = [...row1];
+  next0[2] = localX;
+  next1[2] = localY;
+  return [next0 as number[], next1 as number[]];
 }
 
 async function exportNodeAssets(

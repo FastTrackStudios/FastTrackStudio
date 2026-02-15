@@ -115,6 +115,16 @@
       <div class="card">
         <p class="title">Selection</p>
         <div id="selectionText" class="muted">No layers selected.</div>
+        <div id="pinnedText" class="muted" style="margin-top: 6px">Pinned export frame: none</div>
+        <div class="row wrap" style="margin-top: 8px">
+          <select id="framePicker" style="flex: 1; min-width: 180px; background: #1b1c1f; color: #fff; border: 1px solid #4f5565; border-radius: 4px; padding: 6px 8px;">
+            <option value="">No frames on this page</option>
+          </select>
+          <button id="selectFrame" class="secondary">Select Frame</button>
+          <button id="pinFromSelection" class="secondary">Use Canvas Selection</button>
+          <button id="clearPinned" class="ghost">Clear</button>
+          <button id="refreshFrames" class="ghost">Refresh</button>
+        </div>
       </div>
 
       <div class="card">
@@ -150,6 +160,8 @@
 
     <script>
       const selectionText = document.getElementById('selectionText');
+      const pinnedText = document.getElementById('pinnedText');
+      const framePicker = document.getElementById('framePicker');
       const includeSvg = document.getElementById('includeSvg');
       const includePng = document.getElementById('includePng');
       const maxDepth = document.getElementById('maxDepth');
@@ -161,6 +173,8 @@
 
       let latestJson = '';
       let liveEnabled = false;
+      let frameCatalog = [];
+      let pinnedIds = [];
 
       function readOptions() {
         return {
@@ -245,6 +259,50 @@
         );
       };
 
+      document.getElementById('selectFrame').onclick = () => {
+        const nodeId = framePicker.value;
+        if (!nodeId) {
+          setStatus('Choose a frame first.', 'error');
+          return;
+        }
+        parent.postMessage({ pluginMessage: { type: 'set-export-root-by-id', nodeId } }, '*');
+      };
+
+      document.getElementById('pinFromSelection').onclick = () => {
+        parent.postMessage({ pluginMessage: { type: 'set-export-roots-from-selection' } }, '*');
+      };
+
+      document.getElementById('clearPinned').onclick = () => {
+        parent.postMessage({ pluginMessage: { type: 'clear-export-roots' } }, '*');
+      };
+
+      document.getElementById('refreshFrames').onclick = () => {
+        parent.postMessage({ pluginMessage: { type: 'refresh-frames' } }, '*');
+      };
+
+      function renderFramePicker() {
+        const current = framePicker.value;
+        framePicker.innerHTML = '';
+        if (frameCatalog.length === 0) {
+          const option = document.createElement('option');
+          option.value = '';
+          option.textContent = 'No frames on this page';
+          framePicker.appendChild(option);
+          return;
+        }
+        for (const frame of frameCatalog) {
+          const option = document.createElement('option');
+          option.value = frame.id;
+          option.textContent = `${frame.name} (${frame.id})`;
+          framePicker.appendChild(option);
+        }
+        if (pinnedIds.length > 0) {
+          framePicker.value = pinnedIds[0];
+        } else if (current && frameCatalog.some((f) => f.id === current)) {
+          framePicker.value = current;
+        }
+      }
+
       window.onmessage = (event) => {
         const msg = event.data.pluginMessage;
         if (!msg) return;
@@ -255,6 +313,22 @@
             return;
           }
           selectionText.innerHTML = `<span class="strong">${msg.selectionCount}</span> selected: ${msg.selectedNames.join(', ')}`;
+          return;
+        }
+
+        if (msg.type === 'pinned-roots-summary') {
+          if (!msg.hasPinned) {
+            pinnedText.textContent = 'Pinned export frame: none';
+          } else {
+            pinnedText.innerHTML = `<span class="strong">Pinned</span>: ${msg.names.join(', ')}`;
+          }
+          return;
+        }
+
+        if (msg.type === 'frame-catalog') {
+          frameCatalog = Array.isArray(msg.frames) ? msg.frames : [];
+          pinnedIds = Array.isArray(msg.pinnedIds) ? msg.pinnedIds : [];
+          renderFramePicker();
           return;
         }
 

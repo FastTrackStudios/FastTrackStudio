@@ -5,8 +5,8 @@ use std::time::Duration;
 
 use crate::command::{ActionId, InputArgs, InputCommand};
 use crate::config::{
-    mode_definition_from_config, parse_key_sequence, parse_leaf_action, parse_mouse_pattern,
-    parse_scroll_pattern, parse_when_expr, ConfigError, KeymapConfig,
+    ConfigError, KeymapConfig, mode_definition_from_config, parse_key_sequence, parse_leaf_action,
+    parse_mouse_pattern, parse_scroll_pattern, parse_when_expr,
 };
 use crate::context::{ActionContext, WhenExpr};
 use crate::event::{InputEvent, KeyEvent, MouseEvent};
@@ -141,7 +141,13 @@ impl InputProcessor {
         if self.sequence.is_empty() {
             None
         } else {
-            Some(self.sequence.iter().map(chord_display).collect::<Vec<_>>().join(""))
+            Some(
+                self.sequence
+                    .iter()
+                    .map(chord_display)
+                    .collect::<Vec<_>>()
+                    .join(""),
+            )
         }
     }
 
@@ -335,7 +341,12 @@ impl InputProcessor {
         }
 
         let digit = (c as u8 - b'0') as u32;
-        self.count_prefix = Some(self.count_prefix.unwrap_or(0).saturating_mul(10).saturating_add(digit));
+        self.count_prefix = Some(
+            self.count_prefix
+                .unwrap_or(0)
+                .saturating_mul(10)
+                .saturating_add(digit),
+        );
         true
     }
 
@@ -467,7 +478,9 @@ impl InputProcessor {
     fn execute_leaf_action(&mut self, action: LeafAction) -> Vec<InputCommand> {
         match action {
             LeafAction::Action(id) => vec![self.action_command(id)],
-            LeafAction::SwitchMode(mode_id) => self.execute_command(InputCommand::SwitchMode(mode_id)),
+            LeafAction::SwitchMode(mode_id) => {
+                self.execute_command(InputCommand::SwitchMode(mode_id))
+            }
             LeafAction::PushMode(mode_id) => self.execute_command(InputCommand::PushMode(mode_id)),
             LeafAction::Operator(op) => {
                 self.pending_operator = Some(op);

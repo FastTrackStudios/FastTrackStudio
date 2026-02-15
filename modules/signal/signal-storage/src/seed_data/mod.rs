@@ -35,30 +35,10 @@ pub mod volume;
 pub mod wah;
 
 use signal_proto::{
-    engine::Engine,
-    layer::Layer,
-    profile::Profile,
-    rig::Rig,
-    setlist::Setlist,
-    song::Song,
-    seed_id,
-    Block,
-    BlockParameter,
-    BlockType,
-    Module,
-    ModuleBlock,
-    ModuleBlockSource,
-    ModulePreset,
-    ModulePresetId,
-    ModuleSnapshot,
-    ModuleSnapshotId,
-    ModuleType,
-    Preset,
-    PresetId,
-    SignalChain,
-    SignalNode,
-    Snapshot,
-    SnapshotId,
+    engine::Engine, layer::Layer, profile::Profile, rig::Rig, seed_id, setlist::Setlist,
+    song::Song, Block, BlockParameter, BlockType, Module, ModuleBlock, ModuleBlockSource,
+    ModulePreset, ModulePresetId, ModuleSnapshot, ModuleSnapshotId, ModuleType, Preset, PresetId,
+    SignalChain, SignalNode, Snapshot, SnapshotId,
 };
 use std::collections::HashMap;
 

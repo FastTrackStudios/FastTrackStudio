@@ -493,7 +493,10 @@ where
     // region: --- Resolve operations
 
     /// Resolve any target (rig scene, profile patch, song section) into an executable graph.
-    pub async fn resolve_target(&self, target: ResolveTarget) -> Result<ResolvedGraph, ResolveError> {
+    pub async fn resolve_target(
+        &self,
+        target: ResolveTarget,
+    ) -> Result<ResolvedGraph, ResolveError> {
         let cx = self.context_factory.make_context();
         self.service.resolve_target(&cx, target).await
     }

@@ -116,7 +116,11 @@ mod tests {
         let mut unique = names.clone();
         unique.sort();
         unique.dedup();
-        assert_eq!(names.len(), unique.len(), "duplicate dummy block names found");
+        assert_eq!(
+            names.len(),
+            unique.len(),
+            "duplicate dummy block names found"
+        );
     }
 
     #[test]

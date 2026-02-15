@@ -114,7 +114,10 @@ pub fn track_left_drag() -> Vec<MouseModifierSetting> {
 
 pub fn ruler_left_drag() -> Vec<MouseModifierSetting> {
     vec![
-        MouseModifierSetting::default_behavior("MM_CTX_RULER", RulerLeftDragBehavior::EditLoopPoint),
+        MouseModifierSetting::default_behavior(
+            "MM_CTX_RULER",
+            RulerLeftDragBehavior::EditLoopPoint,
+        ),
         MouseModifierSetting::shift_behavior("MM_CTX_RULER", RulerLeftDragBehavior::MoveLoopPoints),
         MouseModifierSetting::alt_behavior(
             "MM_CTX_RULER",
@@ -159,4 +162,3 @@ pub fn all() -> Vec<MouseModifierSetting> {
         track_left_click(),
     ])
 }
-

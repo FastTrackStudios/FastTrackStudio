@@ -34,9 +34,9 @@ pub struct BlockViewProps {
 /// Main block view component that adapts to different form factors and LODs.
 #[component]
 pub fn BlockView(props: BlockViewProps) -> Element {
-    let constraints = props.constraints.unwrap_or_else(|| {
-        LayoutConstraints::from_form_factor(props.instance.form_factor)
-    });
+    let constraints = props
+        .constraints
+        .unwrap_or_else(|| LayoutConstraints::from_form_factor(props.instance.form_factor));
 
     let lod = constraints.lod;
     let form_factor = constraints.form_factor;

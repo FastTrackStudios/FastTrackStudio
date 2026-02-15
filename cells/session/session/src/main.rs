@@ -6,8 +6,7 @@
 //! This is the cell binary entry point. For library usage, import `session` crate directly.
 
 use actions_proto::{
-    ActionDefinition, ActionId, ActionResult, DefinesActions,
-    DefinesActionsDispatcher,
+    ActionDefinition, ActionId, ActionResult, DefinesActions, DefinesActionsDispatcher,
 };
 use cell_runtime::{HostServiceClient, WaitPolicy, run_cell};
 use daw_control::Daw;

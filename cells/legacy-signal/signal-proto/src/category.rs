@@ -15,7 +15,6 @@
 
 use std::fmt;
 
-
 // ─────────────────────────────────────────────────────────────────────────────
 // BaseTone (Level 1 — always required)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -108,11 +107,27 @@ impl BaseTone {
     }
 
     pub fn guitar_tones() -> &'static [Self] {
-        &[Self::Clean, Self::Dry, Self::Crunch, Self::Drive, Self::Lead, Self::Solo, Self::Ambient, Self::DI]
+        &[
+            Self::Clean,
+            Self::Dry,
+            Self::Crunch,
+            Self::Drive,
+            Self::Lead,
+            Self::Solo,
+            Self::Ambient,
+            Self::DI,
+        ]
     }
 
     pub fn keyboard_tones() -> &'static [Self] {
-        &[Self::Piano, Self::Organ, Self::Synth, Self::Pad, Self::Strings, Self::Brass]
+        &[
+            Self::Piano,
+            Self::Organ,
+            Self::Synth,
+            Self::Pad,
+            Self::Strings,
+            Self::Brass,
+        ]
     }
 
     pub fn bass_tones() -> &'static [Self] {
@@ -120,7 +135,13 @@ impl BaseTone {
     }
 
     pub fn vocal_tones() -> &'static [Self] {
-        &[Self::Natural, Self::Warm, Self::Bright, Self::Breathy, Self::Powerful]
+        &[
+            Self::Natural,
+            Self::Warm,
+            Self::Bright,
+            Self::Breathy,
+            Self::Powerful,
+        ]
     }
 }
 
@@ -219,11 +240,17 @@ pub struct Archetype {
 
 impl Archetype {
     pub fn new(name: impl Into<String>) -> Self {
-        Self { name: name.into(), era: None }
+        Self {
+            name: name.into(),
+            era: None,
+        }
     }
 
     pub fn with_era(name: impl Into<String>, era: impl Into<String>) -> Self {
-        Self { name: name.into(), era: Some(era.into()) }
+        Self {
+            name: name.into(),
+            era: Some(era.into()),
+        }
     }
 
     pub fn display_name(&self) -> String {
@@ -254,15 +281,27 @@ pub struct SongReference {
 
 impl SongReference {
     pub fn new(name: impl Into<String>) -> Self {
-        Self { name: name.into(), album: None, part: None }
+        Self {
+            name: name.into(),
+            album: None,
+            part: None,
+        }
     }
 
     pub fn with_album(name: impl Into<String>, album: impl Into<String>) -> Self {
-        Self { name: name.into(), album: Some(album.into()), part: None }
+        Self {
+            name: name.into(),
+            album: Some(album.into()),
+            part: None,
+        }
     }
 
     pub fn with_part(name: impl Into<String>, part: impl Into<String>) -> Self {
-        Self { name: name.into(), album: None, part: Some(part.into()) }
+        Self {
+            name: name.into(),
+            album: None,
+            part: Some(part.into()),
+        }
     }
 
     pub fn display_name(&self) -> String {
@@ -299,14 +338,9 @@ impl fmt::Display for SongReference {
 #[repr(C)]
 pub enum PresetCategory {
     /// Level 1: Base tone only
-    Generic {
-        base_tone: BaseTone,
-    },
+    Generic { base_tone: BaseTone },
     /// Level 2: Base tone + genre
-    Genre {
-        base_tone: BaseTone,
-        genre: Genre,
-    },
+    Genre { base_tone: BaseTone, genre: Genre },
     /// Level 3: Base tone + genre + sub-genre
     SubGenre {
         base_tone: BaseTone,
@@ -362,8 +396,7 @@ impl PresetCategory {
     /// Get the archetype (if present — Level 4+).
     pub fn archetype(&self) -> Option<&Archetype> {
         match self {
-            Self::Archetype { archetype, .. }
-            | Self::Song { archetype, .. } => Some(archetype),
+            Self::Archetype { archetype, .. } | Self::Song { archetype, .. } => Some(archetype),
             _ => None,
         }
     }
@@ -393,13 +426,24 @@ impl PresetCategory {
     pub fn fallback(&self) -> Option<Self> {
         match self {
             Self::Generic { .. } => None,
-            Self::Genre { base_tone, .. } => Some(Self::Generic { base_tone: *base_tone }),
-            Self::SubGenre { base_tone, genre, .. }
-            | Self::Archetype { base_tone, genre, .. } => Some(Self::Genre {
+            Self::Genre { base_tone, .. } => Some(Self::Generic {
+                base_tone: *base_tone,
+            }),
+            Self::SubGenre {
+                base_tone, genre, ..
+            }
+            | Self::Archetype {
+                base_tone, genre, ..
+            } => Some(Self::Genre {
                 base_tone: *base_tone,
                 genre: genre.clone(),
             }),
-            Self::Song { base_tone, genre, archetype, .. } => Some(Self::Archetype {
+            Self::Song {
+                base_tone,
+                genre,
+                archetype,
+                ..
+            } => Some(Self::Archetype {
                 base_tone: *base_tone,
                 genre: genre.clone(),
                 archetype: archetype.clone(),
@@ -477,13 +521,18 @@ impl PresetCategory {
         match self {
             Self::Generic { .. } => true,
             Self::Genre { genre, .. } => other.genre() == Some(genre),
-            Self::SubGenre { genre, sub_genre, .. } => {
-                other.genre() == Some(genre) && other.sub_genre() == Some(sub_genre.as_str())
-            }
-            Self::Archetype { genre, archetype, .. } => {
-                other.genre() == Some(genre) && other.archetype() == Some(archetype)
-            }
-            Self::Song { genre, archetype, song, .. } => {
+            Self::SubGenre {
+                genre, sub_genre, ..
+            } => other.genre() == Some(genre) && other.sub_genre() == Some(sub_genre.as_str()),
+            Self::Archetype {
+                genre, archetype, ..
+            } => other.genre() == Some(genre) && other.archetype() == Some(archetype),
+            Self::Song {
+                genre,
+                archetype,
+                song,
+                ..
+            } => {
                 other.genre() == Some(genre)
                     && other.archetype() == Some(archetype)
                     && other.song() == Some(song)
@@ -494,7 +543,9 @@ impl PresetCategory {
 
 impl Default for PresetCategory {
     fn default() -> Self {
-        Self::Generic { base_tone: BaseTone::Clean }
+        Self::Generic {
+            base_tone: BaseTone::Clean,
+        }
     }
 }
 
@@ -514,8 +565,13 @@ mod tests {
 
     #[test]
     fn levels() {
-        let l1 = PresetCategory::Generic { base_tone: BaseTone::Lead };
-        let l2 = PresetCategory::Genre { base_tone: BaseTone::Lead, genre: Genre::Blues };
+        let l1 = PresetCategory::Generic {
+            base_tone: BaseTone::Lead,
+        };
+        let l2 = PresetCategory::Genre {
+            base_tone: BaseTone::Lead,
+            genre: Genre::Blues,
+        };
         let l3 = PresetCategory::SubGenre {
             base_tone: BaseTone::Lead,
             genre: Genre::Metal,
@@ -574,7 +630,9 @@ mod tests {
 
     #[test]
     fn generic_has_no_fallback() {
-        let cat = PresetCategory::Generic { base_tone: BaseTone::Clean };
+        let cat = PresetCategory::Generic {
+            base_tone: BaseTone::Clean,
+        };
         assert!(cat.fallback().is_none());
         assert_eq!(cat.fallback_chain().len(), 1);
     }
@@ -605,8 +663,13 @@ mod tests {
 
     #[test]
     fn matches_parent_child() {
-        let generic = PresetCategory::Generic { base_tone: BaseTone::Lead };
-        let blues_lead = PresetCategory::Genre { base_tone: BaseTone::Lead, genre: Genre::Blues };
+        let generic = PresetCategory::Generic {
+            base_tone: BaseTone::Lead,
+        };
+        let blues_lead = PresetCategory::Genre {
+            base_tone: BaseTone::Lead,
+            genre: Genre::Blues,
+        };
         let jm_lead = PresetCategory::Archetype {
             base_tone: BaseTone::Lead,
             genre: Genre::Blues,
@@ -627,8 +690,12 @@ mod tests {
 
     #[test]
     fn different_base_tone_never_matches() {
-        let clean = PresetCategory::Generic { base_tone: BaseTone::Clean };
-        let lead = PresetCategory::Generic { base_tone: BaseTone::Lead };
+        let clean = PresetCategory::Generic {
+            base_tone: BaseTone::Clean,
+        };
+        let lead = PresetCategory::Generic {
+            base_tone: BaseTone::Lead,
+        };
         assert!(!clean.matches(&lead));
     }
 
@@ -642,5 +709,4 @@ mod tests {
         };
         assert_eq!(cat.base_tone(), BaseTone::Drive);
     }
-
 }

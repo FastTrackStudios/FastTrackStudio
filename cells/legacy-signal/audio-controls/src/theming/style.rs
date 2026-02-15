@@ -68,10 +68,10 @@ impl KnobStyle {
     #[must_use]
     pub fn default_colors(state: ControlState, bipolar: bool) -> Self {
         let (fill_color, track_color, pointer_color) = match state {
-            ControlState::Idle => ("#3b82f6", "#374151", "#e5e7eb"),      // blue-500, gray-700, gray-200
-            ControlState::Hovered => ("#60a5fa", "#4b5563", "#f3f4f6"),   // blue-400, gray-600, gray-100
-            ControlState::Dragging => ("#2563eb", "#4b5563", "#ffffff"),  // blue-600, gray-600, white
-            ControlState::Disabled => ("#6b7280", "#1f2937", "#9ca3af"),  // gray-500, gray-800, gray-400
+            ControlState::Idle => ("#3b82f6", "#374151", "#e5e7eb"), // blue-500, gray-700, gray-200
+            ControlState::Hovered => ("#60a5fa", "#4b5563", "#f3f4f6"), // blue-400, gray-600, gray-100
+            ControlState::Dragging => ("#2563eb", "#4b5563", "#ffffff"), // blue-600, gray-600, white
+            ControlState::Disabled => ("#6b7280", "#1f2937", "#9ca3af"), // gray-500, gray-800, gray-400
         };
 
         Self {

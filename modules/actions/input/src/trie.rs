@@ -98,8 +98,7 @@ impl TrieNode {
         match path {
             [] => {}
             [chord] => {
-                self.children
-                    .insert(chord.clone(), KeyTrie::Leaf(action));
+                self.children.insert(chord.clone(), KeyTrie::Leaf(action));
             }
             [chord, rest @ ..] => {
                 let child = self
@@ -266,13 +265,18 @@ mod tests {
     fn test_trie_single_key_lookup_returns_leaf() -> Result<()> {
         // -- Setup
         let mut root = TrieNode::new("root");
-        root.insert(&[chord("j")], LeafAction::Action(ActionId::new("move.down")));
+        root.insert(
+            &[chord("j")],
+            LeafAction::Action(ActionId::new("move.down")),
+        );
 
         // -- Exec
         let result = root.get(&chord("j"));
 
         // -- Check
-        assert!(matches!(result, Some(KeyTrie::Leaf(LeafAction::Action(id))) if id.as_str() == "move.down"));
+        assert!(
+            matches!(result, Some(KeyTrie::Leaf(LeafAction::Action(id))) if id.as_str() == "move.down")
+        );
 
         Ok(())
     }
@@ -299,7 +303,9 @@ mod tests {
         let second = node.get(&chord("g"));
 
         // -- Check: second key returns Leaf
-        assert!(matches!(second, Some(KeyTrie::Leaf(LeafAction::Action(id))) if id.as_str() == "goto.top"));
+        assert!(
+            matches!(second, Some(KeyTrie::Leaf(LeafAction::Action(id))) if id.as_str() == "goto.top")
+        );
 
         Ok(())
     }
@@ -308,7 +314,10 @@ mod tests {
     fn test_trie_merge_override_behavior() -> Result<()> {
         // -- Setup
         let mut base = TrieNode::new("base");
-        base.insert(&[chord("j")], LeafAction::Action(ActionId::new("move.down")));
+        base.insert(
+            &[chord("j")],
+            LeafAction::Action(ActionId::new("move.down")),
+        );
         base.insert(&[chord("k")], LeafAction::Action(ActionId::new("move.up")));
 
         let mut overlay = TrieNode::new("overlay");
@@ -338,8 +347,7 @@ mod tests {
         // -- Setup
         let sticky_node = TrieNode::new("goto").with_sticky(true);
         let mut root = TrieNode::new("root");
-        root.children
-            .insert(chord("g"), KeyTrie::Node(sticky_node));
+        root.children.insert(chord("g"), KeyTrie::Node(sticky_node));
 
         // -- Exec
         let result = root.get(&chord("g"));
@@ -389,17 +397,11 @@ mod tests {
         // -- Setup
         let mut root = TrieNode::new("root");
         root.insert(&[chord("i")], LeafAction::SwitchMode(ModeId::insert()));
-        root.insert(
-            &[chord("d")],
-            LeafAction::Operator("delete".to_string()),
-        );
+        root.insert(&[chord("d")], LeafAction::Operator("delete".to_string()));
         root.insert(&[chord("w")], LeafAction::Motion("word".to_string()));
         root.insert(
             &[chord("q")],
-            LeafAction::Sequence(vec![
-                ActionId::new("save"),
-                ActionId::new("quit"),
-            ]),
+            LeafAction::Sequence(vec![ActionId::new("save"), ActionId::new("quit")]),
         );
 
         // -- Check
@@ -466,7 +468,9 @@ mod tests {
 
         // -- Check
         let default = node.default.as_ref().unwrap();
-        assert!(matches!(default.as_ref(), LeafAction::Action(id) if id.as_str() == "default.action"));
+        assert!(
+            matches!(default.as_ref(), LeafAction::Action(id) if id.as_str() == "default.action")
+        );
 
         Ok(())
     }

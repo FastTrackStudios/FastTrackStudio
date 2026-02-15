@@ -9,18 +9,10 @@ use crate::overrides::{NodeOverrideOp, NodePath, NodePathSegment, Override};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OverridePolicyError {
-    InvalidPath {
-        index: usize,
-    },
-    OperationNotAllowed {
-        index: usize,
-    },
-    ParameterTargetRequired {
-        index: usize,
-    },
-    NonParameterTargetRequired {
-        index: usize,
-    },
+    InvalidPath { index: usize },
+    OperationNotAllowed { index: usize },
+    ParameterTargetRequired { index: usize },
+    NonParameterTargetRequired { index: usize },
 }
 
 pub trait OverridePolicy {
@@ -102,7 +94,9 @@ impl OverridePolicy for FreePolicy {
     }
 }
 
-pub fn validate_overrides<P: OverridePolicy>(overrides: &[Override]) -> Result<(), OverridePolicyError> {
+pub fn validate_overrides<P: OverridePolicy>(
+    overrides: &[Override],
+) -> Result<(), OverridePolicyError> {
     for (index, ov) in overrides.iter().enumerate() {
         P::validate_override(index, ov)?;
     }

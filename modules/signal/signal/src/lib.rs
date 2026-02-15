@@ -6,12 +6,12 @@ pub use signal_controller::SignalController;
 pub use signal_live::SignalLive;
 pub use signal_proto::*;
 pub use signal_storage::{
-    default_block_collections, default_module_collections, default_seed_engines, default_seed_layers,
-    default_seed_profiles, default_seed_rigs, default_seed_setlists, default_seed_songs,
-    runtime_seed_bundle, BlockRepo, BlockRepoLive, Database, DatabaseConnection, DbErr, EngineRepo,
-    EngineRepoLive, LayerRepo, LayerRepoLive, ModuleRepo, ModuleRepoLive, ProfileRepo,
-    ProfileRepoLive, RigRepo, RigRepoLive, SetlistRepo, SetlistRepoLive, SongRepo, SongRepoLive,
-    StorageError, StorageResult,
+    default_block_collections, default_module_collections, default_seed_engines,
+    default_seed_layers, default_seed_profiles, default_seed_rigs, default_seed_setlists,
+    default_seed_songs, runtime_seed_bundle, BlockRepo, BlockRepoLive, Database,
+    DatabaseConnection, DbErr, EngineRepo, EngineRepoLive, LayerRepo, LayerRepoLive, ModuleRepo,
+    ModuleRepoLive, ProfileRepo, ProfileRepoLive, RigRepo, RigRepoLive, SetlistRepo,
+    SetlistRepoLive, SongRepo, SongRepoLive, StorageError, StorageResult,
 };
 use std::sync::Arc;
 
@@ -21,9 +21,7 @@ pub async fn bootstrap_in_memory_controller_async() -> Result<SignalController, 
 
     let block_repo = BlockRepoLive::new(db.clone());
     block_repo.init_schema().await?;
-    block_repo
-        .reseed_defaults(&seeds.block_collections)
-        .await?;
+    block_repo.reseed_defaults(&seeds.block_collections).await?;
 
     let module_repo = ModuleRepoLive::new(db.clone());
     module_repo.init_schema().await?;

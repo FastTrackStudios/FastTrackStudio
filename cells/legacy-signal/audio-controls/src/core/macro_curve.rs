@@ -25,7 +25,12 @@ pub enum CurveType {
     /// Step function (quantized levels)
     Stepped { steps: u8 },
     /// Custom bezier curve defined by control points
-    Bezier { cx1: f32, cy1: f32, cx2: f32, cy2: f32 },
+    Bezier {
+        cx1: f32,
+        cy1: f32,
+        cx2: f32,
+        cy2: f32,
+    },
 }
 
 impl CurveType {
@@ -333,8 +338,7 @@ pub mod presets {
         MacroControl::new("mix", "Mix")
             .with_mapping(ParameterMapping::new("wet", "Wet").with_param_range(0.0, 1.0))
             .with_mapping(
-                ParameterMapping::new("dry", "Dry")
-                    .with_param_range(1.0, 0.0), // Inverse
+                ParameterMapping::new("dry", "Dry").with_param_range(1.0, 0.0), // Inverse
             )
     }
 

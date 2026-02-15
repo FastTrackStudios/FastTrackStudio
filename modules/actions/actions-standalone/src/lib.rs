@@ -250,8 +250,8 @@ impl ActionsService for StandaloneActionsServiceImpl {
 /// Use this to register keybindings for standalone actions in the dispatcher,
 /// then register handlers separately.
 pub fn common_action_definitions() -> Vec<ActionDefinition> {
-    use actions_proto::ActionCategory;
     use actions_proto::ids::standalone as ids;
+    use actions_proto::ActionCategory;
 
     vec![
         ActionDefinition::new(

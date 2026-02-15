@@ -1,12 +1,10 @@
 //! Convert Dioxus DOM events into `input` events.
 
 use dioxus::prelude::{
-    InteractionLocation, KeyboardEvent, Key, Modifiers as DioxusModifiers, ModifiersInteraction,
+    InteractionLocation, Key, KeyboardEvent, Modifiers as DioxusModifiers, ModifiersInteraction,
     MouseEvent, PointerInteraction, WheelEvent,
 };
-use input::{
-    InputEvent, KeyCode, KeyEvent, Modifiers, MouseAction, MouseButton, ScrollEvent,
-};
+use input::{InputEvent, KeyCode, KeyEvent, Modifiers, MouseAction, MouseButton, ScrollEvent};
 
 /// Convert a Dioxus key value to an input key code.
 pub fn convert_key(key: &Key) -> Option<KeyCode> {
@@ -61,14 +59,14 @@ pub fn convert_keyboard_event(e: &KeyboardEvent) -> Option<InputEvent> {
 /// Convert a Dioxus mouse event to an input mouse event with explicit action.
 pub fn convert_mouse_event(e: &MouseEvent, action: MouseAction) -> InputEvent {
     let coords = e.client_coordinates();
-    let button = e.trigger_button().map_or(MouseButton::Left, |b| {
-        match format!("{b:?}").as_str() {
-            "Primary" | "Main" => MouseButton::Left,
-            "Secondary" => MouseButton::Right,
-            "Auxiliary" | "Middle" => MouseButton::Middle,
-            _ => MouseButton::Left,
-        }
-    });
+    let button =
+        e.trigger_button()
+            .map_or(MouseButton::Left, |b| match format!("{b:?}").as_str() {
+                "Primary" | "Main" => MouseButton::Left,
+                "Secondary" => MouseButton::Right,
+                "Auxiliary" | "Middle" => MouseButton::Middle,
+                _ => MouseButton::Left,
+            });
 
     InputEvent::Mouse(input::MouseEvent {
         button,

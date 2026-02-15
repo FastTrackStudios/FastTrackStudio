@@ -71,7 +71,9 @@ pub fn presets_from_json(json: &str) -> Result<PresetCollection, Box<dyn std::er
             .map(|p| crate::preset::DockPreset {
                 id: p.id,
                 name: p.name,
-                layout: p.layout.map_or_else(DockLayout::empty, DockLayout::from_tree),
+                layout: p
+                    .layout
+                    .map_or_else(DockLayout::empty, DockLayout::from_tree),
                 hotkey_hint: p.hotkey_hint,
                 is_builtin: p.is_builtin,
                 panel_states: p.panel_states.unwrap_or_default(),
@@ -124,7 +126,9 @@ pub fn workspace_from_json(json: &str) -> Result<DockWorkspaceState, Box<dyn std
                 w.id,
                 DockWindow {
                     id: w.id,
-                    layout: w.layout.map_or_else(DockLayout::empty, DockLayout::from_tree),
+                    layout: w
+                        .layout
+                        .map_or_else(DockLayout::empty, DockLayout::from_tree),
                     title: w.title,
                     bounds: w.bounds,
                     is_main: w.is_main,
@@ -252,10 +256,7 @@ mod tests {
     fn preset_panel_states_roundtrip_and_backward_compat() {
         let mut presets = default_presets();
         presets.active_index = 0;
-        presets.save_active_panel_state(
-            "panel.performance",
-            r#"{"scroll":42,"zoom":1.25}"#,
-        );
+        presets.save_active_panel_state("panel.performance", r#"{"scroll":42,"zoom":1.25}"#);
 
         let json = presets_to_json(&presets).unwrap();
         let restored = presets_from_json(&json).unwrap();
@@ -273,7 +274,10 @@ mod tests {
             .replacen(r#","panel_states":{}"#, "", 1)
             .replacen(r#""panel_states":{},"#, "", 1);
         let legacy_restored = presets_from_json(&legacy).unwrap();
-        assert_eq!(legacy_restored.presets.len(), default_presets().presets.len());
+        assert_eq!(
+            legacy_restored.presets.len(),
+            default_presets().presets.len()
+        );
         assert_eq!(
             legacy_restored.presets[0].load_panel_state("panel.performance"),
             None

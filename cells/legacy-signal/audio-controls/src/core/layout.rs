@@ -62,14 +62,14 @@ impl FormFactor {
             Self::Fullscreen => (16, 9), // Default, but adapts to container
             Self::Widescreen => (16, 9),
             Self::Square => (1, 1),
-            Self::Series500 => (38, 133), // ~0.286 W:H
+            Self::Series500 => (38, 133),       // ~0.286 W:H
             Self::Series500Double => (76, 133), // ~0.571 W:H
-            Self::Rack1U => (482, 44), // Standard 19" rack, ~10.95 W:H
-            Self::Rack1UHalf => (241, 44), // Half rack, ~5.48 W:H
-            Self::Pedal => (64, 114), // ~0.56 W:H (portrait orientation)
-            Self::PedalMini => (38, 89), // ~0.43 W:H (portrait, compact)
-            Self::PedalDouble => (127, 114), // ~1.11 W:H (landscape-ish)
-            Self::Mini => (1, 1), // Square, but small
+            Self::Rack1U => (482, 44),          // Standard 19" rack, ~10.95 W:H
+            Self::Rack1UHalf => (241, 44),      // Half rack, ~5.48 W:H
+            Self::Pedal => (64, 114),           // ~0.56 W:H (portrait orientation)
+            Self::PedalMini => (38, 89),        // ~0.43 W:H (portrait, compact)
+            Self::PedalDouble => (127, 114),    // ~1.11 W:H (landscape-ish)
+            Self::Mini => (1, 1),               // Square, but small
         }
     }
 
@@ -84,9 +84,9 @@ impl FormFactor {
             Self::Series500Double => 152,
             Self::Rack1U => 400,
             Self::Rack1UHalf => 200,
-            Self::Pedal => 120,        // Standard stompbox
-            Self::PedalMini => 80,     // Mini pedal
-            Self::PedalDouble => 240,  // Double-wide pedal
+            Self::Pedal => 120,       // Standard stompbox
+            Self::PedalMini => 80,    // Mini pedal
+            Self::PedalDouble => 240, // Double-wide pedal
             Self::Mini => 48,
         }
     }
@@ -102,9 +102,9 @@ impl FormFactor {
             Self::Series500Double => 266,
             Self::Rack1U => 44,
             Self::Rack1UHalf => 44,
-            Self::Pedal => 200,        // Standard stompbox
-            Self::PedalMini => 160,    // Mini pedal
-            Self::PedalDouble => 200,  // Double-wide pedal
+            Self::Pedal => 200,       // Standard stompbox
+            Self::PedalMini => 160,   // Mini pedal
+            Self::PedalDouble => 200, // Double-wide pedal
             Self::Mini => 48,
         }
     }
@@ -115,7 +115,9 @@ impl FormFactor {
         match self {
             Self::Fullscreen | Self::Widescreen => LevelOfDetail::Full,
             Self::Square | Self::Series500Double | Self::PedalDouble => LevelOfDetail::Standard,
-            Self::Series500 | Self::Rack1U | Self::Rack1UHalf | Self::Pedal => LevelOfDetail::Compact,
+            Self::Series500 | Self::Rack1U | Self::Rack1UHalf | Self::Pedal => {
+                LevelOfDetail::Compact
+            }
             Self::PedalMini | Self::Mini => LevelOfDetail::Mini,
         }
     }
@@ -129,7 +131,10 @@ impl FormFactor {
     /// Check if this is a rack-style form factor.
     #[must_use]
     pub const fn is_rack(&self) -> bool {
-        matches!(self, Self::Series500 | Self::Series500Double | Self::Rack1U | Self::Rack1UHalf)
+        matches!(
+            self,
+            Self::Series500 | Self::Series500Double | Self::Rack1U | Self::Rack1UHalf
+        )
     }
 
     /// Get the style category for theming purposes.
@@ -137,7 +142,9 @@ impl FormFactor {
     pub const fn style_category(&self) -> FormFactorCategory {
         match self {
             Self::Fullscreen | Self::Widescreen | Self::Square => FormFactorCategory::Plugin,
-            Self::Series500 | Self::Series500Double | Self::Rack1U | Self::Rack1UHalf => FormFactorCategory::Rack,
+            Self::Series500 | Self::Series500Double | Self::Rack1U | Self::Rack1UHalf => {
+                FormFactorCategory::Rack
+            }
             Self::Pedal | Self::PedalMini | Self::PedalDouble => FormFactorCategory::Pedal,
             Self::Mini => FormFactorCategory::Minimal,
         }
@@ -240,12 +247,7 @@ impl LayoutConstraints {
 
     /// Create constraints with custom dimensions.
     #[must_use]
-    pub const fn new(
-        form_factor: FormFactor,
-        width: u32,
-        height: u32,
-        lod: LevelOfDetail,
-    ) -> Self {
+    pub const fn new(form_factor: FormFactor, width: u32, height: u32, lod: LevelOfDetail) -> Self {
         Self {
             form_factor,
             available_width: width,

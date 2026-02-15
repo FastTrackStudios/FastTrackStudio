@@ -48,10 +48,7 @@ pub(crate) fn wire_path_d(from: &NodePosition, to: &NodePosition) -> String {
 
     format!(
         "M {},{} C {},{} {},{} {},{}",
-        from.x, from.y,
-        cp1x, from.y,
-        cp2x, to.y,
-        to.x, to.y
+        from.x, from.y, cp1x, from.y, cp2x, to.y, to.x, to.y
     )
 }
 
@@ -111,8 +108,13 @@ pub(crate) fn resolve_all_wires(graph: &NodeGraph, compact: bool) -> Vec<Resolve
             let to_node = module.find_node(wire.to_node);
 
             if let (Some(from_n), Some(to_n)) = (from_node, to_node) {
-                let from_pos =
-                    resolve_node_port_in_module(module, from_n, &wire.from_port, false, title_bar_h);
+                let from_pos = resolve_node_port_in_module(
+                    module,
+                    from_n,
+                    &wire.from_port,
+                    false,
+                    title_bar_h,
+                );
                 let to_pos =
                     resolve_node_port_in_module(module, to_n, &wire.to_port, true, title_bar_h);
 
@@ -120,9 +122,7 @@ pub(crate) fn resolve_all_wires(graph: &NodeGraph, compact: bool) -> Vec<Resolve
                     let color = wire
                         .color
                         .clone()
-                        .unwrap_or_else(|| {
-                            block_type_color(from_n.block_type).bg.to_string()
-                        });
+                        .unwrap_or_else(|| block_type_color(from_n.block_type).bg.to_string());
 
                     resolved.push(ResolvedWire {
                         from: from_p,

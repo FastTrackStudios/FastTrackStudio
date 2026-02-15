@@ -7,7 +7,7 @@
 //! Also tracks cloud sync status so UI components can display a badge.
 
 use crate::prelude::*;
-use signal_storage::{SqliteBackend, Persistable};
+use signal_storage::{Persistable, SqliteBackend};
 use std::sync::Arc;
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -154,7 +154,9 @@ fn keys_mega_rig() -> Rig {
         Metadata::new()
             .with_tag("megarig")
             .with_tag("keys")
-            .with_description("Keys MegaRig showcasing engine/layer/module/block/parameter overrides"),
+            .with_description(
+                "Keys MegaRig showcasing engine/layer/module/block/parameter overrides",
+            ),
     );
     rig.add_variant(wide_scene);
     rig.add_variant(focus_scene);
@@ -221,7 +223,9 @@ fn vocal_mega_rig() -> Rig {
         Metadata::new()
             .with_tag("megarig")
             .with_tag("vocal")
-            .with_description("Vocal MegaRig with Rescue, Correction, Tonal, Modulation, and Time modules"),
+            .with_description(
+                "Vocal MegaRig with Rescue, Correction, Tonal, Modulation, and Time modules",
+            ),
     )
 }
 
@@ -271,7 +275,11 @@ mod tests {
         for ov in &default_scene.overrides {
             let path = ov.path.as_str();
             match &ov.op {
-                NodeOverrideOp::ReplaceRef(_) if path.contains(".layer.") && !path.contains(".module.") && !path.contains(".block.") => {
+                NodeOverrideOp::ReplaceRef(_)
+                    if path.contains(".layer.")
+                        && !path.contains(".module.")
+                        && !path.contains(".block.") =>
+                {
                     has_layer_replace = true;
                 }
                 NodeOverrideOp::ReplaceRef(_) if path.contains(".module.") => {

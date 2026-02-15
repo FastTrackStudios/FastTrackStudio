@@ -61,8 +61,7 @@ impl KeychainTokenStore {
     }
 
     fn entry(key: &str) -> AuthResult<keyring::Entry> {
-        keyring::Entry::new(SERVICE_NAME, key)
-            .map_err(|e| AuthError::TokenStore(e.to_string()))
+        keyring::Entry::new(SERVICE_NAME, key).map_err(|e| AuthError::TokenStore(e.to_string()))
     }
 }
 
@@ -75,8 +74,8 @@ impl Default for KeychainTokenStore {
 impl TokenStore for KeychainTokenStore {
     fn save_token(&self, token: &AuthToken) -> AuthResult<()> {
         let stored = StoredToken::from(token);
-        let json = serde_json::to_string(&stored)
-            .map_err(|e| AuthError::TokenStore(e.to_string()))?;
+        let json =
+            serde_json::to_string(&stored).map_err(|e| AuthError::TokenStore(e.to_string()))?;
         let entry = Self::entry(TOKEN_KEY)?;
         entry
             .set_password(&json)
@@ -150,8 +149,8 @@ impl Default for MockTokenStore {
 impl TokenStore for MockTokenStore {
     fn save_token(&self, token: &AuthToken) -> AuthResult<()> {
         let stored = StoredToken::from(token);
-        let json = serde_json::to_string(&stored)
-            .map_err(|e| AuthError::TokenStore(e.to_string()))?;
+        let json =
+            serde_json::to_string(&stored).map_err(|e| AuthError::TokenStore(e.to_string()))?;
         *self.token.lock().unwrap() = Some(json);
         Ok(())
     }
@@ -160,8 +159,8 @@ impl TokenStore for MockTokenStore {
         let guard = self.token.lock().unwrap();
         match guard.as_deref() {
             Some(json) => {
-                let stored: StoredToken = serde_json::from_str(json)
-                    .map_err(|e| AuthError::TokenStore(e.to_string()))?;
+                let stored: StoredToken =
+                    serde_json::from_str(json).map_err(|e| AuthError::TokenStore(e.to_string()))?;
                 Ok(Some(AuthToken::from(stored)))
             }
             None => Ok(None),

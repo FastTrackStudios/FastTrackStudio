@@ -280,72 +280,99 @@ impl SignalFlowGrid {
         // Row 0-1: Main signal chain with visualizations
 
         // Gate - small 1x1
-        grid.add_block(GridBlock::new("Gate", "GTE", BlockType::Gate, GridPosition::new(0, 1)));
+        grid.add_block(GridBlock::new(
+            "Gate",
+            "GTE",
+            BlockType::Gate,
+            GridPosition::new(0, 1),
+        ));
 
         // Compressor - 3x2 with visualization
         grid.add_block(
-            GridBlock::new("Compressor", "CMP", BlockType::Compressor, GridPosition::new(0, 2))
-                .with_size(GridSize::large())
-                .with_widget(BlockWidget::CompressorGraph)
+            GridBlock::new(
+                "Compressor",
+                "CMP",
+                BlockType::Compressor,
+                GridPosition::new(0, 2),
+            )
+            .with_size(GridSize::large())
+            .with_widget(BlockWidget::CompressorGraph),
         );
 
         // EQ - 4x2 with interactive visualization
         grid.add_block(
             GridBlock::new("EQ", "EQ", BlockType::Eq, GridPosition::new(0, 6))
                 .with_size(GridSize::xlarge())
-                .with_widget(BlockWidget::EqGraph)
+                .with_widget(BlockWidget::EqGraph),
         );
 
         // Drive - 2x2
         grid.add_block(
             GridBlock::new("Drive", "DRV", BlockType::Drive, GridPosition::new(0, 10))
                 .with_size(GridSize::square())
-                .with_widget(BlockWidget::DriveGraph)
+                .with_widget(BlockWidget::DriveGraph),
         );
 
         // Output - 1x1
-        grid.add_block(GridBlock::new("Volume", "VOL", BlockType::Volume, GridPosition::new(0, 13)));
+        grid.add_block(GridBlock::new(
+            "Volume",
+            "VOL",
+            BlockType::Volume,
+            GridPosition::new(0, 13),
+        ));
 
         // Row 2-3: Amp section
         grid.add_block(
             GridBlock::new("Amp", "AMP", BlockType::Amp, GridPosition::new(2, 2))
                 .with_size(GridSize::square())
-                .with_widget(BlockWidget::AmpCab)
+                .with_widget(BlockWidget::AmpCab),
         );
 
         grid.add_block(
-            GridBlock::new("Cabinet", "CAB", BlockType::Cabinet, GridPosition::new(2, 5))
-                .with_size(GridSize::square())
-                .with_widget(BlockWidget::AmpCab)
+            GridBlock::new(
+                "Cabinet",
+                "CAB",
+                BlockType::Cabinet,
+                GridPosition::new(2, 5),
+            )
+            .with_size(GridSize::square())
+            .with_widget(BlockWidget::AmpCab),
         );
 
         // Row 4-5: Effects
         grid.add_block(
-            GridBlock::new("Chorus", "CHR", BlockType::Modulation, GridPosition::new(4, 2))
-                .with_size(GridSize::wide())
-                .with_widget(BlockWidget::ModulationGraph)
+            GridBlock::new(
+                "Chorus",
+                "CHR",
+                BlockType::Modulation,
+                GridPosition::new(4, 2),
+            )
+            .with_size(GridSize::wide())
+            .with_widget(BlockWidget::ModulationGraph),
         );
 
         grid.add_block(
             GridBlock::new("Delay", "DLY", BlockType::Delay, GridPosition::new(4, 5))
                 .with_size(GridSize::large())
-                .with_widget(BlockWidget::DelayGraph)
+                .with_widget(BlockWidget::DelayGraph),
         );
 
         grid.add_block(
             GridBlock::new("Reverb", "REV", BlockType::Reverb, GridPosition::new(4, 9))
                 .with_size(GridSize::large())
-                .with_widget(BlockWidget::ReverbGraph)
+                .with_widget(BlockWidget::ReverbGraph),
         );
 
         // Row 6-7: Utilities
-        grid.add_block(GridBlock::new("Tuner", "TNR", BlockType::Tuner, GridPosition::new(6, 2))
-            .with_widget(BlockWidget::Tuner));
+        grid.add_block(
+            GridBlock::new("Tuner", "TNR", BlockType::Tuner, GridPosition::new(6, 2))
+                .with_widget(BlockWidget::Tuner),
+        );
 
         grid.add_block(
             GridBlock::new("Looper", "LPR", BlockType::Special, GridPosition::new(6, 4))
                 .with_size(GridSize::wide())
-                .with_widget(BlockWidget::Looper)
+                .with_widget(BlockWidget::Looper),
         );
 
         // Connections - simplified horizontal flow

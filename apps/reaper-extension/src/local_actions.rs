@@ -6,7 +6,9 @@ use daw_proto::transport::fts_transport_actions;
 use input_reaper::InputProfile;
 use reaper_high::Reaper;
 use reaper_low::{raw, Swell};
-use reaper_medium::{CommandId, PositionInSeconds, ProjectContext::CurrentProject, SetEditCurPosOptions};
+use reaper_medium::{
+    CommandId, PositionInSeconds, ProjectContext::CurrentProject, SetEditCurPosOptions,
+};
 use std::ffi::CString;
 use std::sync::{Arc, Mutex, OnceLock};
 use tracing::{debug, info};
@@ -164,11 +166,16 @@ fn update_last_play_start_from_current_cursor() {
     if let Ok(mut guard) = last_play_start_storage().lock() {
         *guard = Some(start_seconds);
     }
-    debug!(start_seconds, "FTS transport remembered play start position");
+    debug!(
+        start_seconds,
+        "FTS transport remembered play start position"
+    );
 }
 
 fn remember_start_if_not_playing() {
-    let play_state = Reaper::get().medium_reaper().get_play_state_ex(CurrentProject);
+    let play_state = Reaper::get()
+        .medium_reaper()
+        .get_play_state_ex(CurrentProject);
     if !play_state.is_playing && !play_state.is_recording {
         update_last_play_start_from_current_cursor();
     }
@@ -248,7 +255,9 @@ impl fts_transport_actions::LocalActionBinder for ReaperExtensionTransportAction
     }
 
     fn PLAY_STOP(&self) -> actions_proto::LocalActionImplementation {
-        actions_proto::LocalActionImplementation::Supported(Arc::new(handle_fts_transport_play_stop))
+        actions_proto::LocalActionImplementation::Supported(Arc::new(
+            handle_fts_transport_play_stop,
+        ))
     }
 
     fn PLAY_PAUSE(&self) -> actions_proto::LocalActionImplementation {
@@ -296,11 +305,15 @@ struct ReaperExtensionMarkersRegionsActionBinder;
 
 impl fts_markers_regions_actions::LocalActionBinder for ReaperExtensionMarkersRegionsActionBinder {
     fn INSERT_REGION_AND_EDIT(&self) -> actions_proto::LocalActionImplementation {
-        actions_proto::LocalActionImplementation::Supported(Arc::new(handle_fts_insert_region_and_edit))
+        actions_proto::LocalActionImplementation::Supported(Arc::new(
+            handle_fts_insert_region_and_edit,
+        ))
     }
 
     fn INSERT_MARKER_AND_EDIT(&self) -> actions_proto::LocalActionImplementation {
-        actions_proto::LocalActionImplementation::Supported(Arc::new(handle_fts_insert_marker_and_edit))
+        actions_proto::LocalActionImplementation::Supported(Arc::new(
+            handle_fts_insert_marker_and_edit,
+        ))
     }
 }
 

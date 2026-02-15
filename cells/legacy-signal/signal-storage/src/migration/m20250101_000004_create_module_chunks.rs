@@ -28,11 +28,7 @@ impl MigrationTrait for Migration {
                             .string_len(255)
                             .not_null(),
                     )
-                    .col(
-                        ColumnDef::new(ModuleChunks::Data)
-                            .json_binary()
-                            .not_null(),
-                    )
+                    .col(ColumnDef::new(ModuleChunks::Data).json_binary().not_null())
                     .col(
                         ColumnDef::new(ModuleChunks::CreatedAt)
                             .timestamp_with_time_zone()

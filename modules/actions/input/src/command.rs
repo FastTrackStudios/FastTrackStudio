@@ -32,10 +32,7 @@ pub enum InputCommand {
     /// Execute a simple action.
     Action(ActionId),
     /// Execute an action with composed arguments (count, operator, motion, etc.).
-    ActionWithArgs {
-        action: ActionId,
-        args: InputArgs,
-    },
+    ActionWithArgs { action: ActionId, args: InputArgs },
     /// Switch the base editing mode.
     SwitchMode(ModeId),
     /// Push a transient sub-mode onto the stack.
@@ -47,9 +44,7 @@ pub enum InputCommand {
     /// The event was not handled by any binding.
     Unhandled(InputEvent),
     /// Keys are buffered, waiting for more input.
-    Pending {
-        display: String,
-    },
+    Pending { display: String },
 }
 
 /// Composed arguments for an action (count, operator, motion, etc.).

@@ -123,7 +123,10 @@ pub fn Knob(
     // Rotation angle: 0 = -135deg, 1 = +135deg (270 degree sweep)
     let rotation_deg = -135.0 + (display_normalized * 270.0);
 
-    let default_normalized = default.map(|d| (d - min) / range).unwrap_or(if is_bipolar { 0.5 } else { 0.0 });
+    let default_normalized =
+        default
+            .map(|d| (d - min) / range)
+            .unwrap_or(if is_bipolar { 0.5 } else { 0.0 });
 
     // Format display value
     let display_text = value_display.clone().unwrap_or_else(|| {

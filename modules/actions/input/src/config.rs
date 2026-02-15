@@ -161,7 +161,11 @@ pub fn default_user_config_path() -> Option<PathBuf> {
     #[cfg(target_os = "linux")]
     {
         if let Some(xdg) = env::var_os("XDG_CONFIG_HOME") {
-            return Some(PathBuf::from(xdg).join("fasttrackstudio").join("keymap.styx"));
+            return Some(
+                PathBuf::from(xdg)
+                    .join("fasttrackstudio")
+                    .join("keymap.styx"),
+            );
         }
         let home = env::var_os("HOME")?;
         Some(
@@ -471,7 +475,9 @@ mod tests {
             }),
             &ctx,
         );
-        assert!(matches!(&cmds[0], crate::command::InputCommand::ActionWithArgs{action, ..} if action.as_str() == "mouse.primary"));
+        assert!(
+            matches!(&cmds[0], crate::command::InputCommand::ActionWithArgs{action, ..} if action.as_str() == "mouse.primary")
+        );
 
         // Scroll binding should parse and dispatch.
         let cmds = processor.process(
@@ -485,7 +491,9 @@ mod tests {
             }),
             &ctx,
         );
-        assert!(matches!(&cmds[0], crate::command::InputCommand::ActionWithArgs{action, ..} if action.as_str() == "view.zoom"));
+        assert!(
+            matches!(&cmds[0], crate::command::InputCommand::ActionWithArgs{action, ..} if action.as_str() == "view.zoom")
+        );
         Ok(())
     }
 
@@ -504,10 +512,7 @@ mod tests {
             .insert("j".to_string(), "cursor.custom_down".to_string());
 
         let merged = KeymapConfig::merge(base, user);
-        assert_eq!(
-            merged.keymap["normal"]["j"].as_str(),
-            "cursor.custom_down"
-        );
+        assert_eq!(merged.keymap["normal"]["j"].as_str(), "cursor.custom_down");
         Ok(())
     }
 

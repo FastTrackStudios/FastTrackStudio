@@ -10,9 +10,9 @@ use daw_proto::{Position, TimeSignature};
 use facet::Facet;
 
 // Re-export section types from keyflow-proto as the single source of truth
+pub use keyflow_proto::Chart;
 pub use keyflow_proto::sections::SectionType;
 pub use keyflow_proto::sections::colors::{SectionColors, colors_for_section_type};
-pub use keyflow_proto::Chart;
 
 /// A comment marker within a song
 ///
@@ -304,7 +304,10 @@ impl std::fmt::Debug for Song {
             .field("time_signature", &self.time_signature)
             .field("measure_positions", &self.measure_positions)
             .field("chart_text", &self.chart_text.as_ref().map(|s| s.len()))
-            .field("parsed_chart", &self.parsed_chart.as_ref().map(|_| "parsed"))
+            .field(
+                "parsed_chart",
+                &self.parsed_chart.as_ref().map(|_| "parsed"),
+            )
             .field("detected_chords", &self.detected_chords)
             .field("chart_fingerprint", &self.chart_fingerprint)
             .finish()

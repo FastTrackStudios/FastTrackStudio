@@ -1,4 +1,4 @@
-use daw_proto::{TrackGroup, TrackStructureBuilder, assert_tracks_equal};
+use daw_proto::{assert_tracks_equal, TrackGroup, TrackStructureBuilder};
 use dynamic_template::*;
 
 type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
@@ -40,23 +40,30 @@ fn beatles_dont_let_me_down() -> Result<()> {
     // --- Drums ---
     // Cymbals folder collapsed since only one cymbal (OH)
     let drums = TrackGroup::folder("Drums")
-        .track("Kick").item("01.Kick_01.wav")
-        .track("Snare").item("02.Snare_01.wav")
-        .track("OH").item("03.OH_01.wav")
+        .track("Kick")
+        .item("01.Kick_01.wav")
+        .track("Snare")
+        .item("02.Snare_01.wav")
+        .track("OH")
+        .item("03.OH_01.wav")
         .end();
 
     // --- Bass ---
     // Items expanded to separate tracks
     let bass = TrackGroup::folder("Bass")
-        .track("Bass").item("04.Bass Di_01.wav")
-        .track("Amp").item("05.Bass Amp_01.wav")
+        .track("Bass")
+        .item("04.Bass Di_01.wav")
+        .track("Amp")
+        .item("05.Bass Amp_01.wav")
         .end();
 
     // --- Guitars ---
     // Items expanded to separate tracks
     let guitars = TrackGroup::folder("Guitars")
-        .track("Guitars").item("06.Gtr DI_01.wav")
-        .track("Amp").item("07.Gtr Amp_01.wav")
+        .track("Guitars")
+        .item("06.Gtr DI_01.wav")
+        .track("Amp")
+        .item("07.Gtr Amp_01.wav")
         .end();
 
     // --- Keys ---
@@ -66,8 +73,10 @@ fn beatles_dont_let_me_down() -> Result<()> {
     // Lead collapses into Vocals folder when it's the only vocal type
     // Child tracks keep "Lead 1", "Lead 2" names since they're in the Lead grouping
     let lead = TrackGroup::folder("Vocals")
-        .track("Lead 1").item("09.Vi.Vocal_01.wav")
-        .track("Lead 2").item("10.Caitlin Vocal_01.wav")
+        .track("Lead 1")
+        .item("09.Vi.Vocal_01.wav")
+        .track("Lead 2")
+        .item("10.Caitlin Vocal_01.wav")
         .end();
 
     // --- Reference ---

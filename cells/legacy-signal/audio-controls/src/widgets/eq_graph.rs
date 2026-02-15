@@ -133,7 +133,10 @@ impl EqBandShape {
 
     /// Whether this filter type uses gain.
     pub fn uses_gain(&self) -> bool {
-        !matches!(self, Self::LowCut | Self::HighCut | Self::Notch | Self::AllPass)
+        !matches!(
+            self,
+            Self::LowCut | Self::HighCut | Self::Notch | Self::AllPass
+        )
     }
 
     /// All available filter shapes.
@@ -337,7 +340,7 @@ pub fn EqGraph(
     let mut drag_start: Signal<Option<(f64, f64)>> = use_signal(|| None);
     // Track original band positions for proportional scaling during multi-drag
     let mut drag_start_bands: Signal<Vec<(usize, f32, f32)>> = use_signal(Vec::new); // (idx, freq, gain)
-    // Dropdown states for the popup
+                                                                                     // Dropdown states for the popup
     let mut show_shape_dropdown: Signal<bool> = use_signal(|| false);
     let mut show_more_dropdown: Signal<bool> = use_signal(|| false);
     // Track when mouse left the focused band area (for fade timeout)
@@ -459,7 +462,14 @@ pub fn EqGraph(
         if !show_grid {
             return Vec::new();
         }
-        generate_grid_elements(padding, graph_width, graph_height, min_freq, max_freq, db_range)
+        generate_grid_elements(
+            padding,
+            graph_width,
+            graph_height,
+            min_freq,
+            max_freq,
+            db_range,
+        )
     });
 
     // Generate frequency labels
@@ -1590,8 +1600,13 @@ fn generate_all_eq_curves(
         .map(|&freq| calculate_combined_response(bands, freq, sample_rate))
         .collect();
 
-    let (combined_stroke, combined_fill) =
-        build_curve_paths(&frequencies, &combined_response, &freq_to_x, &db_to_y, zero_y);
+    let (combined_stroke, combined_fill) = build_curve_paths(
+        &frequencies,
+        &combined_response,
+        &freq_to_x,
+        &db_to_y,
+        zero_y,
+    );
 
     // Generate per-band curves
     let mut band_curves = Vec::new();
@@ -1796,7 +1811,14 @@ fn lowshelf_coeffs(w0: f64, gain_linear: f64, q: f64) -> [f64; 6] {
     // Numerator: b0 + b1*s + b2*s²
     // At s=0: H = b0/a0 = gain_linear
     // At s=inf: H = b2/a2 = 1
-    [w02, w0 * g4 / q, 1.0, gain_linear * w02, w0 * sqrt_g * g4 / q, 1.0]
+    [
+        w02,
+        w0 * g4 / q,
+        1.0,
+        gain_linear * w02,
+        w0 * sqrt_g * g4 / q,
+        1.0,
+    ]
 }
 
 /// Get coefficients for a second-order high-shelf filter.
@@ -1812,7 +1834,14 @@ fn highshelf_coeffs(w0: f64, gain_linear: f64, q: f64) -> [f64; 6] {
     // For high shelf: at DC (w=0), we want 1. At high freq, we want gain_linear.
     // At s=0: H = b0/a0 = 1
     // At s=inf: H = b2/a2 = gain_linear
-    [w02, w0 * g4 / q, 1.0, w02, w0 * sqrt_g * g4 / q, gain_linear]
+    [
+        w02,
+        w0 * g4 / q,
+        1.0,
+        w02,
+        w0 * sqrt_g * g4 / q,
+        gain_linear,
+    ]
 }
 
 /// Get coefficients for a second-order peaking/bell filter.

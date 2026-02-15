@@ -727,8 +727,11 @@ mod tests {
                 saved_at_version: None,
             },
         )]);
-        let variant = ModuleSnapshot::new(seed_id("meta-mod-snap"), "Meta", module)
-            .with_metadata(Metadata::new().with_tag("module-snapshot").with_notes("snapshot"));
+        let variant = ModuleSnapshot::new(seed_id("meta-mod-snap"), "Meta", module).with_metadata(
+            Metadata::new()
+                .with_tag("module-snapshot")
+                .with_notes("snapshot"),
+        );
         let collection = ModulePreset::new(
             seed_id("meta-mod-preset"),
             "MetaMod",
@@ -736,7 +739,11 @@ mod tests {
             variant,
             vec![],
         )
-        .with_metadata(Metadata::new().with_tag("module-preset").with_description("desc"));
+        .with_metadata(
+            Metadata::new()
+                .with_tag("module-preset")
+                .with_description("desc"),
+        );
 
         repo.reseed_defaults(&[collection]).await?;
         let loaded = repo
@@ -748,8 +755,15 @@ mod tests {
 
         assert!(loaded.metadata().tags.contains("module-preset"));
         assert_eq!(loaded.metadata().description.as_deref(), Some("desc"));
-        assert!(loaded.default_snapshot().metadata().tags.contains("module-snapshot"));
-        assert_eq!(loaded.default_snapshot().metadata().notes.as_deref(), Some("snapshot"));
+        assert!(loaded
+            .default_snapshot()
+            .metadata()
+            .tags
+            .contains("module-snapshot"));
+        assert_eq!(
+            loaded.default_snapshot().metadata().notes.as_deref(),
+            Some("snapshot")
+        );
         Ok(())
     }
 }

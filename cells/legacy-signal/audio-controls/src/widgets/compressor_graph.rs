@@ -506,14 +506,7 @@ pub fn CompressorGraph(props: CompressorGraphProps) -> Element {
     // Pre-compute marker positions
     let marker_positions: Vec<(f64, f64, f64, i32)> = db_markers
         .iter()
-        .map(|&db| {
-            (
-                layout.db_to_x(db),
-                layout.db_to_y(db),
-                db,
-                db as i32,
-            )
-        })
+        .map(|&db| (layout.db_to_x(db), layout.db_to_y(db), db, db as i32))
         .collect();
 
     // Generate GR history trace path (scrolling waveform from right to left)
@@ -995,8 +988,8 @@ pub fn CompressorGraph(props: CompressorGraphProps) -> Element {
 // CompressorWidget - Full compressor UI with knobs (Pro-C style)
 // =============================================================================
 
-use crate::widgets::knob::Knob;
 use crate::theming::{ThemeContext, ThemeProvider};
+use crate::widgets::knob::Knob;
 
 /// Props for the CompressorWidget component.
 #[derive(Props, Clone, PartialEq)]
@@ -1064,8 +1057,20 @@ pub fn CompressorWidget(props: CompressorWidgetProps) -> Element {
 
     // Value formatters
     let format_db = |v: f32| format!("{v:.0}dB");
-    let format_ratio = |v: f32| if v >= 100.0 { "∞:1".to_string() } else { format!("{v:.1}:1") };
-    let format_ms = |v: f32| if v >= 1000.0 { format!("{:.1}s", v / 1000.0) } else { format!("{v:.0}ms") };
+    let format_ratio = |v: f32| {
+        if v >= 100.0 {
+            "∞:1".to_string()
+        } else {
+            format!("{v:.1}:1")
+        }
+    };
+    let format_ms = |v: f32| {
+        if v >= 1000.0 {
+            format!("{:.1}s", v / 1000.0)
+        } else {
+            format!("{v:.0}ms")
+        }
+    };
 
     // Knob sizes
     let large_knob = 56_u32;

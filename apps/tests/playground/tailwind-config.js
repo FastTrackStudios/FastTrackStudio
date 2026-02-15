@@ -11,6 +11,8 @@ module.exports = {
     "../../../cells/daw/daw-ui/src/**/*.rs",
     "../../../modules/signal/signal-ui/src/**/*.rs",
     "../../../cells/signal/audio-controls/src/**/*.rs",
+    // Include Lumen Blocks components (v0.2.0 tag -> 2675507)
+    `${process.env.HOME}/.cargo/git/checkouts/lumen-blocks-*/2675507/blocks/src/**/*.rs`,
   ],
   theme: {
     extend: {},

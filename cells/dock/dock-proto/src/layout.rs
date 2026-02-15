@@ -195,7 +195,13 @@ impl DockLayout {
 
     /// Compute effective split ratio with panel constraints applied.
     pub fn effective_ratio(&self, node_id: NodeId, available_size: f64) -> f64 {
-        let Some(FlatNode::Split { ratio, first, second, .. }) = self.nodes.get(&node_id) else {
+        let Some(FlatNode::Split {
+            ratio,
+            first,
+            second,
+            ..
+        }) = self.nodes.get(&node_id)
+        else {
             return 50.0;
         };
 
@@ -824,7 +830,8 @@ impl DockLayout {
             let second_collapsed = self.zone_mode(second) == DockZoneMode::AutoHide
                 && !self.expanded_zones.contains(&second);
 
-            let collapsed_ratio = (Self::AUTO_HIDE_COLLAPSED_SIZE / 1000.0 * 100.0).clamp(1.0, 20.0);
+            let collapsed_ratio =
+                (Self::AUTO_HIDE_COLLAPSED_SIZE / 1000.0 * 100.0).clamp(1.0, 20.0);
             let next_ratio = if first_collapsed && !second_collapsed {
                 Some(collapsed_ratio)
             } else if second_collapsed && !first_collapsed {

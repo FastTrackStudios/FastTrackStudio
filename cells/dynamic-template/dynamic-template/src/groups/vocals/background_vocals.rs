@@ -1,7 +1,7 @@
 //! Background vocals (BGVs) group definition
 
-use crate::item_metadata::ItemMetadataField;
 use crate::item_metadata::prelude::*;
+use crate::item_metadata::ItemMetadataField;
 
 /// Background vocals group (BGVs)
 ///
@@ -141,8 +141,8 @@ impl From<BackgroundVocals> for ItemMetadataGroup {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{OrganizeIntoTracks, default_config};
-    use daw_proto::{TrackStructureBuilder, assert_tracks_equal};
+    use crate::{default_config, OrganizeIntoTracks};
+    use daw_proto::{assert_tracks_equal, TrackStructureBuilder};
 
     type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
 
@@ -167,12 +167,16 @@ mod tests {
         let expected = TrackStructureBuilder::new()
             .folder("Vocals")
             .folder("Cody")
-            .track("Soprano").item("BGV Chorus Cody Soprano")
-            .track("Alto").item("BGV Chorus Cody Alto")
+            .track("Soprano")
+            .item("BGV Chorus Cody Soprano")
+            .track("Alto")
+            .item("BGV Chorus Cody Alto")
             .end()
             .folder("JT")
-            .track("Low").item("BGV Chorus JT Low")
-            .track("High").item("BGV Chorus JT High")
+            .track("Low")
+            .item("BGV Chorus JT Low")
+            .track("High")
+            .item("BGV Chorus JT High")
             .end()
             .end()
             .build();
@@ -204,10 +208,14 @@ mod tests {
         // TODO: Add "bass" to non-context words to preserve voice part names
         let expected = TrackStructureBuilder::new()
             .folder("Vocals")
-            .track("Soprano").item("BGV Chorus Cody Soprano")
-            .track("Alto").item("BGV Chorus Cody Alto")
-            .track("Tenor").item("BGV Chorus Cody Tenor")
-            .track("Vocals").item("BGV Chorus Cody Bass")
+            .track("Soprano")
+            .item("BGV Chorus Cody Soprano")
+            .track("Alto")
+            .item("BGV Chorus Cody Alto")
+            .track("Tenor")
+            .item("BGV Chorus Cody Tenor")
+            .track("Vocals")
+            .item("BGV Chorus Cody Bass")
             .end()
             .build();
 
@@ -235,9 +243,12 @@ mod tests {
 
         let expected = TrackStructureBuilder::new()
             .folder("Vocals")
-            .track("Low").item("BGV Chorus Cody Low")
-            .track("High").item("BGV Chorus Cody High")
-            .track("Mid").item("BGV Chorus Cody Mid")
+            .track("Low")
+            .item("BGV Chorus Cody Low")
+            .track("High")
+            .item("BGV Chorus Cody High")
+            .track("Mid")
+            .item("BGV Chorus Cody Mid")
             .end()
             .build();
 
@@ -265,9 +276,12 @@ mod tests {
 
         let expected = TrackStructureBuilder::new()
             .folder("Vocals")
-            .track("Harmony 1").item("BGV Chorus Cody Harmony 1")
-            .track("Harmony 2").item("BGV Chorus Cody Harmony 2")
-            .track("Harmony 3").item("BGV Chorus Cody Harmony 3")
+            .track("Harmony 1")
+            .item("BGV Chorus Cody Harmony 1")
+            .track("Harmony 2")
+            .item("BGV Chorus Cody Harmony 2")
+            .track("Harmony 3")
+            .item("BGV Chorus Cody Harmony 3")
             .end()
             .build();
 
@@ -291,9 +305,12 @@ mod tests {
 
         let expected = TrackStructureBuilder::new()
             .folder("Vocals")
-            .track("Bri").item("BGV Chorus Bri")
-            .track("Cody").item("BGV Chorus Cody")
-            .track("JT").item("BGV Chorus JT")
+            .track("Bri")
+            .item("BGV Chorus Bri")
+            .track("Cody")
+            .item("BGV Chorus Cody")
+            .track("JT")
+            .item("BGV Chorus JT")
             .end()
             .build();
 

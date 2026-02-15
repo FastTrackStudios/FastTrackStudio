@@ -50,4 +50,3 @@ pub fn track_left_click() -> Vec<MouseModifierSetting> {
 pub fn all() -> Vec<MouseModifierSetting> {
     super::merge_sections([media_item_edge(), track_left_drag(), track_left_click()])
 }
-

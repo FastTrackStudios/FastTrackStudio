@@ -298,35 +298,53 @@ pub fn fallback_categories(
     rig_type: Option<RigType>,
 ) -> &'static [TagCategory] {
     match kind {
-        BrowserEntityKind::BlockCollection | BrowserEntityKind::BlockVariant => {
-            &[TagCategory::Block, TagCategory::Tone, TagCategory::Character]
-        }
-        BrowserEntityKind::ModuleCollection | BrowserEntityKind::ModuleVariant => {
-            &[TagCategory::Module, TagCategory::Tone, TagCategory::Character]
-        }
-        BrowserEntityKind::LayerCollection | BrowserEntityKind::LayerVariant => {
-            &[TagCategory::EngineType, TagCategory::Tone, TagCategory::Context]
-        }
-        BrowserEntityKind::EngineCollection | BrowserEntityKind::EngineVariant => {
-            &[TagCategory::EngineType, TagCategory::Tone, TagCategory::Character]
-        }
+        BrowserEntityKind::BlockCollection | BrowserEntityKind::BlockVariant => &[
+            TagCategory::Block,
+            TagCategory::Tone,
+            TagCategory::Character,
+        ],
+        BrowserEntityKind::ModuleCollection | BrowserEntityKind::ModuleVariant => &[
+            TagCategory::Module,
+            TagCategory::Tone,
+            TagCategory::Character,
+        ],
+        BrowserEntityKind::LayerCollection | BrowserEntityKind::LayerVariant => &[
+            TagCategory::EngineType,
+            TagCategory::Tone,
+            TagCategory::Context,
+        ],
+        BrowserEntityKind::EngineCollection | BrowserEntityKind::EngineVariant => &[
+            TagCategory::EngineType,
+            TagCategory::Tone,
+            TagCategory::Character,
+        ],
         BrowserEntityKind::RigCollection | BrowserEntityKind::RigVariant => match rig_type {
             Some(RigType::Keys) => &[
                 TagCategory::RigType,
                 TagCategory::Instrument,
                 TagCategory::Character,
             ],
-            _ => &[TagCategory::RigType, TagCategory::Tone, TagCategory::Character],
+            _ => &[
+                TagCategory::RigType,
+                TagCategory::Tone,
+                TagCategory::Character,
+            ],
         },
-        BrowserEntityKind::ProfileCollection | BrowserEntityKind::ProfileVariant => {
-            &[TagCategory::RigType, TagCategory::Context, TagCategory::Character]
-        }
-        BrowserEntityKind::SongCollection | BrowserEntityKind::SongVariant => {
-            &[TagCategory::Context, TagCategory::Genre, TagCategory::Character]
-        }
-        BrowserEntityKind::SetlistCollection | BrowserEntityKind::SetlistVariant => {
-            &[TagCategory::Context, TagCategory::RigType, TagCategory::Workflow]
-        }
+        BrowserEntityKind::ProfileCollection | BrowserEntityKind::ProfileVariant => &[
+            TagCategory::RigType,
+            TagCategory::Context,
+            TagCategory::Character,
+        ],
+        BrowserEntityKind::SongCollection | BrowserEntityKind::SongVariant => &[
+            TagCategory::Context,
+            TagCategory::Genre,
+            TagCategory::Character,
+        ],
+        BrowserEntityKind::SetlistCollection | BrowserEntityKind::SetlistVariant => &[
+            TagCategory::Context,
+            TagCategory::RigType,
+            TagCategory::Workflow,
+        ],
     }
 }
 
@@ -410,7 +428,8 @@ impl BrowserIndex {
             if !query.kinds.is_empty() && !query.kinds.contains(&e.node.kind) {
                 continue;
             }
-            if !exclude_keys.is_empty() && e.tags.values().any(|t| exclude_keys.contains(&t.key())) {
+            if !exclude_keys.is_empty() && e.tags.values().any(|t| exclude_keys.contains(&t.key()))
+            {
                 continue;
             }
             if query.strict_rig_type
@@ -454,7 +473,11 @@ impl BrowserIndex {
             });
         }
 
-        hits.sort_by(|a, b| b.score.total_cmp(&a.score).then_with(|| a.node.id.cmp(&b.node.id)));
+        hits.sort_by(|a, b| {
+            b.score
+                .total_cmp(&a.score)
+                .then_with(|| a.node.id.cmp(&b.node.id))
+        });
         hits
     }
 }
@@ -537,7 +560,8 @@ pub fn infer_tags_from_name(name: &str) -> TagSet {
             }
             "intro" | "verse" | "chorus" | "bridge" | "outro" | "solo" | "hook" => {
                 out.insert(
-                    StructuredTag::new(TagCategory::Context, w).with_source(TagSource::InferredName),
+                    StructuredTag::new(TagCategory::Context, w)
+                        .with_source(TagSource::InferredName),
                 );
             }
             "worship" | "rock" | "metal" | "jazz" | "country" | "pop" => {
@@ -545,8 +569,8 @@ pub fn infer_tags_from_name(name: &str) -> TagSet {
                     StructuredTag::new(TagCategory::Genre, w).with_source(TagSource::InferredName),
                 );
             }
-            "compressor" | "eq" | "gate" | "deesser" | "delay" | "reverb"
-            | "flanger" | "phaser" | "tremolo" | "saturator" | "amp" => {
+            "compressor" | "eq" | "gate" | "deesser" | "delay" | "reverb" | "flanger"
+            | "phaser" | "tremolo" | "saturator" | "amp" => {
                 out.insert(
                     StructuredTag::new(TagCategory::Block, w).with_source(TagSource::InferredName),
                 );

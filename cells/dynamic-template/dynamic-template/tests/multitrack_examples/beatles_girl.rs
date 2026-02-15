@@ -1,4 +1,4 @@
-use daw_proto::{TrackGroup, TrackStructureBuilder, assert_tracks_equal};
+use daw_proto::{assert_tracks_equal, TrackGroup, TrackStructureBuilder};
 use dynamic_template::*;
 use monarchy::{
     cleanup_display_names, collapse_single_child_folders, expand_items_to_children, monarchy_sort,
@@ -80,55 +80,75 @@ fn beatles_girl() -> Result<()> {
 
     // --- Drums ---
     let kick = TrackGroup::folder("Kick")
-        .track("Kick 1").item("boomK__KickRe20_02.wav")
-        .track("Kick 2").item("kitA_KickRe20_02.wav")
+        .track("Kick 1")
+        .item("boomK__KickRe20_02.wav")
+        .track("Kick 2")
+        .item("kitA_KickRe20_02.wav")
         .end();
 
     // Cymbals folder collapsed to OH (single child)
     let drums = TrackGroup::folder("Drums")
         .group(kick)
-        .track("Snare").item("Snare DRUMS _01.R.wav")
-        .track("Toms").item("boomK__FloorOmni414_02.wav")
-        .track("OH").item("OverHead DRUMS_01.wav")
-        .track("Drum Kit").item("Drums_TAPE_2.wav")
+        .track("Snare")
+        .item("Snare DRUMS _01.R.wav")
+        .track("Toms")
+        .item("boomK__FloorOmni414_02.wav")
+        .track("OH")
+        .item("OverHead DRUMS_01.wav")
+        .track("Drum Kit")
+        .item("Drums_TAPE_2.wav")
         .end();
 
     // --- Bass ---
     let bass = TrackGroup::folder("Bass")
-        .track("Bass 1").item("Bass_TAPE .wav")
-        .track("Bass 2").item("BASS.03_01.wav")
+        .track("Bass 1")
+        .item("Bass_TAPE .wav")
+        .track("Bass 2")
+        .item("BASS.03_01.wav")
         .end();
 
     // --- Guitars ---
     // Sam and Perry are grouped under Acoustic (from J160 and Framus patterns)
     let acoustic = TrackGroup::folder("Acoustic")
-        .track("Acoustic").item("Acoustic Guitar_TAPE .wav")
-        .track("Perry").item("Framus end track Perry_01.wav")
-        .track("Sam 1").item("Girl Sam J160 1_01.wav")
-        .track("Sam 2").item("Girl Sam J160 2_01.wav")
+        .track("Acoustic")
+        .item("Acoustic Guitar_TAPE .wav")
+        .track("Perry")
+        .item("Framus end track Perry_01.wav")
+        .track("Sam 1")
+        .item("Girl Sam J160 1_01.wav")
+        .track("Sam 2")
+        .item("Girl Sam J160 2_01.wav")
         .end();
 
     let guitars = TrackGroup::folder("Guitars")
         .group(acoustic)
-        .track("AC 1").item("AC GTR 1_01.wav")
+        .track("AC 1")
+        .item("AC GTR 1_01.wav")
         .end();
 
     // --- Vocals ---
     // BGVs are organized by performer (moved from Unsorted)
     let chad = TrackGroup::folder("Chad")
-        .track("Chad 1").item("Chad1_01.wav")
-        .track("Chad 2").item("Chad2_01.wav")
+        .track("Chad 1")
+        .item("Chad1_01.wav")
+        .track("Chad 2")
+        .item("Chad2_01.wav")
         .end();
 
     let lou = TrackGroup::folder("Lou")
-        .track("Lou 1").item("Lou1_01.wav")
-        .track("Lou 2").item("Lou2_01.wav")
+        .track("Lou 1")
+        .item("Lou1_01.wav")
+        .track("Lou 2")
+        .item("Lou2_01.wav")
         .end();
 
     let tit = TrackGroup::folder("Tit")
-        .track("Tit 1").item("Tit1_01.wav")
-        .track("Tit 2").item("Tit2_01.wav")
-        .track("Tit 3").item("Tit3_01.wav")
+        .track("Tit 1")
+        .item("Tit1_01.wav")
+        .track("Tit 2")
+        .item("Tit2_01.wav")
+        .track("Tit 3")
+        .item("Tit3_01.wav")
         .end();
 
     let bgvs = TrackGroup::folder("BGVs")
@@ -140,8 +160,10 @@ fn beatles_girl() -> Result<()> {
     // Lead folder is PRESERVED because Lead is a config group that might get siblings (BGVs)
     // Marc items become "Lead", "Lead 2" under the Lead folder
     let lead = TrackGroup::folder("Lead")
-        .track("Lead").item("Marc VOX.wav")
-        .track("Lead 2").item("Marc VOX 2.wav")
+        .track("Lead")
+        .item("Marc VOX.wav")
+        .track("Lead 2")
+        .item("Marc VOX 2.wav")
         .end();
 
     let vocals = TrackGroup::folder("Vocals").group(lead).group(bgvs).end();

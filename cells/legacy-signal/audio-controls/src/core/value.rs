@@ -42,7 +42,11 @@ impl ValueStepping {
     /// ```
     #[must_use]
     pub fn discrete(count: usize) -> Self {
-        let step = if count <= 1 { 1.0 } else { 1.0 / (count - 1) as f32 };
+        let step = if count <= 1 {
+            1.0
+        } else {
+            1.0 / (count - 1) as f32
+        };
         Self {
             step,
             snap: true,
@@ -409,8 +413,12 @@ mod tests {
     fn value_parser_basic() {
         let parser = ValueParser::normalized();
 
-        assert!(matches!(parser.parse("0.5"), ParseResult::Valid(v) if (v - 0.5).abs() < f32::EPSILON));
-        assert!(matches!(parser.parse("50%"), ParseResult::Valid(v) if (v - 0.5).abs() < f32::EPSILON));
+        assert!(
+            matches!(parser.parse("0.5"), ParseResult::Valid(v) if (v - 0.5).abs() < f32::EPSILON)
+        );
+        assert!(
+            matches!(parser.parse("50%"), ParseResult::Valid(v) if (v - 0.5).abs() < f32::EPSILON)
+        );
         assert!(matches!(parser.parse(""), ParseResult::Empty));
         assert!(matches!(parser.parse("abc"), ParseResult::Invalid(_)));
     }
@@ -433,7 +441,11 @@ mod tests {
     fn value_parser_special_cases() {
         let parser = ValueParser::range(-60.0, 6.0);
 
-        assert!(matches!(parser.parse("-inf"), ParseResult::Valid(v) if (v - (-60.0)).abs() < f32::EPSILON));
-        assert!(matches!(parser.parse("-6 dB"), ParseResult::Valid(v) if (v - (-6.0)).abs() < f32::EPSILON));
+        assert!(
+            matches!(parser.parse("-inf"), ParseResult::Valid(v) if (v - (-60.0)).abs() < f32::EPSILON)
+        );
+        assert!(
+            matches!(parser.parse("-6 dB"), ParseResult::Valid(v) if (v - (-6.0)).abs() < f32::EPSILON)
+        );
     }
 }

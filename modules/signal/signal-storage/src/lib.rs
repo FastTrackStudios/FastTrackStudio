@@ -19,9 +19,9 @@ pub use profile_repo::{ProfileRepo, ProfileRepoLive};
 pub use rig_repo::{RigRepo, RigRepoLive};
 pub use sea_orm::{Database, DatabaseConnection, DbErr};
 pub use seed_data::{
-    default_block_collections, default_module_collections, default_seed_engines, default_seed_layers,
-    default_seed_profiles, default_seed_rigs, default_seed_setlists, default_seed_songs,
-    runtime_seed_bundle, SeedBundle,
+    default_block_collections, default_module_collections, default_seed_engines,
+    default_seed_layers, default_seed_profiles, default_seed_rigs, default_seed_setlists,
+    default_seed_songs, runtime_seed_bundle, SeedBundle,
 };
 pub use setlist_repo::{SetlistRepo, SetlistRepoLive};
 pub use song_repo::{SongRepo, SongRepoLive};

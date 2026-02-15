@@ -296,7 +296,10 @@ pub fn register_action_with_reaper(action: &ActionDefinition) -> Result<(), Stri
     }
 
     // Mirror command ID mapping into input-reaper workflow infrastructure.
-    if let Ok(cmd_id) = Reaper::get().action_by_command_name(action_id_static).command_id() {
+    if let Ok(cmd_id) = Reaper::get()
+        .action_by_command_name(action_id_static)
+        .command_id()
+    {
         input_reaper::infrastructure::action_registry::remember_command_id(
             action_id.clone(),
             cmd_id,

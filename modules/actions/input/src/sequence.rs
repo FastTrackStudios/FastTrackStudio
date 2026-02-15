@@ -199,7 +199,10 @@ mod tests {
     fn make_test_trie() -> TrieNode {
         let mut root = TrieNode::new("root");
         // Single key: j → move.down
-        root.insert(&[chord("j")], LeafAction::Action(ActionId::new("move.down")));
+        root.insert(
+            &[chord("j")],
+            LeafAction::Action(ActionId::new("move.down")),
+        );
         // Two-key sequence: g g → goto.top
         root.insert(
             &[chord("g"), chord("g")],

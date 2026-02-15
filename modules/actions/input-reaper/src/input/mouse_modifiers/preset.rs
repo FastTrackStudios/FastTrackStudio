@@ -9,9 +9,9 @@ use crate::input::mouse_modifiers::contexts::ALL_CONTEXTS;
 use crate::input::mouse_modifiers::core::{
     MouseModifierFlag, get_mouse_modifier, set_mouse_modifier,
 };
+use facet::Facet;
 use reaper_high::Reaper;
 use reaper_medium::Reaper as MediumReaper;
-use facet::Facet;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};

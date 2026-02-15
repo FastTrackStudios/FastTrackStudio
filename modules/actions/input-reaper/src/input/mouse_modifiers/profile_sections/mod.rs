@@ -14,4 +14,3 @@ pub fn merge_sections(
 ) -> Vec<MouseModifierSetting> {
     sections.into_iter().flatten().collect()
 }
-

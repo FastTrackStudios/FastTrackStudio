@@ -10,8 +10,8 @@
 //! - Match in action ID: 20
 //! - Match in description: 10
 
-use crate::{ActionCategory, ActionDefinition};
 use crate::when::ActionContext;
+use crate::{ActionCategory, ActionDefinition};
 
 /// A scored search result with match metadata for highlighting.
 pub struct SearchResult<'a> {
@@ -60,7 +60,11 @@ pub fn search_actions<'a>(
         })
         .collect();
 
-    results.sort_by(|a, b| b.score.cmp(&a.score).then_with(|| a.definition.name.cmp(&b.definition.name)));
+    results.sort_by(|a, b| {
+        b.score
+            .cmp(&a.score)
+            .then_with(|| a.definition.name.cmp(&b.definition.name))
+    });
     results
 }
 
@@ -183,14 +187,26 @@ mod tests {
 
     fn test_actions() -> Vec<ActionDefinition> {
         vec![
-            ActionDefinition::new("fts.session.toggle_playback", "Toggle Playback", "Toggle play/pause")
-                .with_category(ActionCategory::Transport),
+            ActionDefinition::new(
+                "fts.session.toggle_playback",
+                "Toggle Playback",
+                "Toggle play/pause",
+            )
+            .with_category(ActionCategory::Transport),
             ActionDefinition::new("fts.session.next_song", "Next Song", "Go to next song")
                 .with_category(ActionCategory::Session),
-            ActionDefinition::new("fts.standalone.open_settings", "Open Settings", "Opens settings")
-                .with_category(ActionCategory::Settings),
-            ActionDefinition::new("fts.standalone.toggle_dark_mode", "Toggle Dark Mode", "Toggle dark/light")
-                .with_category(ActionCategory::View),
+            ActionDefinition::new(
+                "fts.standalone.open_settings",
+                "Open Settings",
+                "Opens settings",
+            )
+            .with_category(ActionCategory::Settings),
+            ActionDefinition::new(
+                "fts.standalone.toggle_dark_mode",
+                "Toggle Dark Mode",
+                "Toggle dark/light",
+            )
+            .with_category(ActionCategory::View),
         ]
     }
 
@@ -215,7 +231,10 @@ mod tests {
         let actions = test_actions();
         let results = search_actions(&actions, "play", None);
         assert!(!results.is_empty());
-        assert_eq!(results[0].definition.id.as_str(), "fts.session.toggle_playback");
+        assert_eq!(
+            results[0].definition.id.as_str(),
+            "fts.session.toggle_playback"
+        );
     }
 
     #[test]
@@ -244,8 +263,7 @@ mod tests {
     fn search_with_context_filters() {
         let actions = vec![
             ActionDefinition::new("a", "Always Active", "desc"),
-            ActionDefinition::new("b", "Performance Only", "desc")
-                .with_when("tab:performance"),
+            ActionDefinition::new("b", "Performance Only", "desc").with_when("tab:performance"),
         ];
 
         let mut ctx = ActionContext::new();

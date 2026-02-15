@@ -4,7 +4,6 @@
 //! range and its real-world value (dB, Hz, ms, etc.). The [`ParamFormat`] enum
 //! encodes the mapping math, while [`ParamSpec`] bundles format with metadata.
 
-
 use crate::normalized::NormalizedF64;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -63,18 +62,13 @@ pub enum ParamFormat {
     },
 
     /// Integer range (linear).
-    Integer {
-        min: i32,
-        max: i32,
-    },
+    Integer { min: i32, max: i32 },
 
     /// Boolean on/off toggle.
     Toggle,
 
     /// Discrete set of named options.
-    Enum {
-        options: Vec<String>,
-    },
+    Enum { options: Vec<String> },
 }
 
 impl ParamFormat {
@@ -103,11 +97,32 @@ impl ParamFormat {
         match self {
             Self::Percent => n * 100.0,
 
-            Self::Decibels { min, max, skew_factor }
-            | Self::Frequency { min, max, skew_factor }
-            | Self::Milliseconds { min, max, skew_factor }
-            | Self::Seconds { min, max, skew_factor }
-            | Self::Float { min, max, skew_factor, .. } => {
+            Self::Decibels {
+                min,
+                max,
+                skew_factor,
+            }
+            | Self::Frequency {
+                min,
+                max,
+                skew_factor,
+            }
+            | Self::Milliseconds {
+                min,
+                max,
+                skew_factor,
+            }
+            | Self::Seconds {
+                min,
+                max,
+                skew_factor,
+            }
+            | Self::Float {
+                min,
+                max,
+                skew_factor,
+                ..
+            } => {
                 let skewed = Self::apply_skew(n, *skew_factor);
                 min + skewed * (max - min)
             }
@@ -118,7 +133,11 @@ impl ParamFormat {
             }
 
             Self::Toggle => {
-                if n >= 0.5 { 1.0 } else { 0.0 }
+                if n >= 0.5 {
+                    1.0
+                } else {
+                    0.0
+                }
             }
 
             Self::Enum { options } => {
@@ -137,11 +156,32 @@ impl ParamFormat {
         match self {
             Self::Percent => (real_value / 100.0).clamp(0.0, 1.0),
 
-            Self::Decibels { min, max, skew_factor }
-            | Self::Frequency { min, max, skew_factor }
-            | Self::Milliseconds { min, max, skew_factor }
-            | Self::Seconds { min, max, skew_factor }
-            | Self::Float { min, max, skew_factor, .. } => {
+            Self::Decibels {
+                min,
+                max,
+                skew_factor,
+            }
+            | Self::Frequency {
+                min,
+                max,
+                skew_factor,
+            }
+            | Self::Milliseconds {
+                min,
+                max,
+                skew_factor,
+            }
+            | Self::Seconds {
+                min,
+                max,
+                skew_factor,
+            }
+            | Self::Float {
+                min,
+                max,
+                skew_factor,
+                ..
+            } => {
                 let range = max - min;
                 if range.abs() < f64::EPSILON {
                     return 0.0;
@@ -159,7 +199,11 @@ impl ParamFormat {
             }
 
             Self::Toggle => {
-                if real_value >= 0.5 { 1.0 } else { 0.0 }
+                if real_value >= 0.5 {
+                    1.0
+                } else {
+                    0.0
+                }
             }
 
             Self::Enum { options } => {
@@ -196,7 +240,11 @@ impl ParamFormat {
                 format!("{int_value}")
             }
             Self::Toggle => {
-                if real_value >= 0.5 { "On".to_string() } else { "Off".to_string() }
+                if real_value >= 0.5 {
+                    "On".to_string()
+                } else {
+                    "Off".to_string()
+                }
             }
             Self::Enum { options } => {
                 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
@@ -220,10 +268,7 @@ impl ParamFormat {
                 s.parse::<f64>().ok()
             }
             Self::Decibels { .. } => {
-                let s = trimmed
-                    .strip_suffix("dB")
-                    .unwrap_or(trimmed)
-                    .trim();
+                let s = trimmed.strip_suffix("dB").unwrap_or(trimmed).trim();
                 s.parse::<f64>().ok()
             }
             Self::Frequency { .. } => {
@@ -469,7 +514,11 @@ mod tests {
 
     #[test]
     fn decibels_linear_roundtrip() {
-        let fmt = ParamFormat::Decibels { min: -60.0, max: 0.0, skew_factor: 1.0 };
+        let fmt = ParamFormat::Decibels {
+            min: -60.0,
+            max: 0.0,
+            skew_factor: 1.0,
+        };
         let real = fmt.denormalize(0.5);
         assert!((real - (-30.0)).abs() < f64::EPSILON);
         let back = fmt.normalize(real);
@@ -478,7 +527,11 @@ mod tests {
 
     #[test]
     fn decibels_skewed_roundtrip() {
-        let fmt = ParamFormat::Decibels { min: -60.0, max: 0.0, skew_factor: 0.5 };
+        let fmt = ParamFormat::Decibels {
+            min: -60.0,
+            max: 0.0,
+            skew_factor: 0.5,
+        };
         for n in [0.0, 0.25, 0.5, 0.75, 1.0] {
             let real = fmt.denormalize(n);
             let back = fmt.normalize(real);
@@ -488,17 +541,28 @@ mod tests {
 
     #[test]
     fn frequency_roundtrip() {
-        let fmt = ParamFormat::Frequency { min: 20.0, max: 20000.0, skew_factor: 0.2 };
+        let fmt = ParamFormat::Frequency {
+            min: 20.0,
+            max: 20000.0,
+            skew_factor: 0.2,
+        };
         for n in [0.0, 0.25, 0.5, 0.75, 1.0] {
             let real = fmt.denormalize(n);
             let back = fmt.normalize(real);
-            assert!((back - n).abs() < 1e-10, "failed at n={n}: real={real}, back={back}");
+            assert!(
+                (back - n).abs() < 1e-10,
+                "failed at n={n}: real={real}, back={back}"
+            );
         }
     }
 
     #[test]
     fn milliseconds_roundtrip() {
-        let fmt = ParamFormat::Milliseconds { min: 0.0, max: 1000.0, skew_factor: 1.0 };
+        let fmt = ParamFormat::Milliseconds {
+            min: 0.0,
+            max: 1000.0,
+            skew_factor: 1.0,
+        };
         let real = fmt.denormalize(0.3);
         assert!((real - 300.0).abs() < f64::EPSILON);
         let back = fmt.normalize(real);
@@ -507,7 +571,11 @@ mod tests {
 
     #[test]
     fn seconds_roundtrip() {
-        let fmt = ParamFormat::Seconds { min: 0.0, max: 10.0, skew_factor: 1.0 };
+        let fmt = ParamFormat::Seconds {
+            min: 0.0,
+            max: 10.0,
+            skew_factor: 1.0,
+        };
         let real = fmt.denormalize(0.5);
         assert!((real - 5.0).abs() < f64::EPSILON);
         let back = fmt.normalize(real);
@@ -516,7 +584,12 @@ mod tests {
 
     #[test]
     fn float_roundtrip() {
-        let fmt = ParamFormat::Float { min: -1.0, max: 1.0, precision: 2, skew_factor: 1.0 };
+        let fmt = ParamFormat::Float {
+            min: -1.0,
+            max: 1.0,
+            precision: 2,
+            skew_factor: 1.0,
+        };
         let real = fmt.denormalize(0.75);
         assert!((real - 0.5).abs() < f64::EPSILON);
         let back = fmt.normalize(real);
@@ -565,37 +638,62 @@ mod tests {
 
     #[test]
     fn format_decibels() {
-        let fmt = ParamFormat::Decibels { min: -60.0, max: 0.0, skew_factor: 1.0 };
+        let fmt = ParamFormat::Decibels {
+            min: -60.0,
+            max: 0.0,
+            skew_factor: 1.0,
+        };
         assert_eq!(fmt.format_value(-30.0), "-30.0 dB");
     }
 
     #[test]
     fn format_frequency_hz() {
-        let fmt = ParamFormat::Frequency { min: 20.0, max: 20000.0, skew_factor: 0.2 };
+        let fmt = ParamFormat::Frequency {
+            min: 20.0,
+            max: 20000.0,
+            skew_factor: 0.2,
+        };
         assert_eq!(fmt.format_value(440.0), "440.0 Hz");
     }
 
     #[test]
     fn format_frequency_khz() {
-        let fmt = ParamFormat::Frequency { min: 20.0, max: 20000.0, skew_factor: 0.2 };
+        let fmt = ParamFormat::Frequency {
+            min: 20.0,
+            max: 20000.0,
+            skew_factor: 0.2,
+        };
         assert_eq!(fmt.format_value(5000.0), "5.00 kHz");
     }
 
     #[test]
     fn format_milliseconds() {
-        let fmt = ParamFormat::Milliseconds { min: 0.0, max: 1000.0, skew_factor: 1.0 };
+        let fmt = ParamFormat::Milliseconds {
+            min: 0.0,
+            max: 1000.0,
+            skew_factor: 1.0,
+        };
         assert_eq!(fmt.format_value(250.5), "250.5 ms");
     }
 
     #[test]
     fn format_seconds() {
-        let fmt = ParamFormat::Seconds { min: 0.0, max: 10.0, skew_factor: 1.0 };
+        let fmt = ParamFormat::Seconds {
+            min: 0.0,
+            max: 10.0,
+            skew_factor: 1.0,
+        };
         assert_eq!(fmt.format_value(3.5), "3.50 s");
     }
 
     #[test]
     fn format_float() {
-        let fmt = ParamFormat::Float { min: 0.0, max: 1.0, precision: 3, skew_factor: 1.0 };
+        let fmt = ParamFormat::Float {
+            min: 0.0,
+            max: 1.0,
+            precision: 3,
+            skew_factor: 1.0,
+        };
         assert_eq!(fmt.format_value(0.123_456), "0.123");
     }
 
@@ -640,14 +738,22 @@ mod tests {
 
     #[test]
     fn parse_decibels() {
-        let fmt = ParamFormat::Decibels { min: -60.0, max: 0.0, skew_factor: 1.0 };
+        let fmt = ParamFormat::Decibels {
+            min: -60.0,
+            max: 0.0,
+            skew_factor: 1.0,
+        };
         assert_eq!(fmt.parse_value("-30 dB"), Some(-30.0));
         assert_eq!(fmt.parse_value("-30"), Some(-30.0));
     }
 
     #[test]
     fn parse_frequency() {
-        let fmt = ParamFormat::Frequency { min: 20.0, max: 20000.0, skew_factor: 0.2 };
+        let fmt = ParamFormat::Frequency {
+            min: 20.0,
+            max: 20000.0,
+            skew_factor: 0.2,
+        };
         assert_eq!(fmt.parse_value("440 Hz"), Some(440.0));
         assert_eq!(fmt.parse_value("5 kHz"), Some(5000.0));
     }
@@ -703,7 +809,11 @@ mod tests {
 
     #[test]
     fn normalize_zero_range() {
-        let fmt = ParamFormat::Decibels { min: 0.0, max: 0.0, skew_factor: 1.0 };
+        let fmt = ParamFormat::Decibels {
+            min: 0.0,
+            max: 0.0,
+            skew_factor: 1.0,
+        };
         assert_eq!(fmt.normalize(0.0), 0.0);
     }
 

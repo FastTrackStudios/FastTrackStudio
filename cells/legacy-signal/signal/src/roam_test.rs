@@ -264,7 +264,11 @@ mod tests {
                 a + b
             }
             async fn divide(&self, _cx: &roam::Context, a: i32, b: i32) -> Result<i32, MathError> {
-                if b == 0 { Err(MathError::DivisionByZero) } else { Ok(a / b) }
+                if b == 0 {
+                    Err(MathError::DivisionByZero)
+                } else {
+                    Ok(a / b)
+                }
             }
         }
 
@@ -310,7 +314,11 @@ mod tests {
                 (a + b) * self.multiplier // Custom behavior!
             }
             async fn divide(&self, _cx: &roam::Context, a: i32, b: i32) -> Result<i32, MathError> {
-                if b == 0 { Err(MathError::DivisionByZero) } else { Ok(a / b) }
+                if b == 0 {
+                    Err(MathError::DivisionByZero)
+                } else {
+                    Ok(a / b)
+                }
             }
         }
 
@@ -481,5 +489,4 @@ mod tests {
         //
         // Change config = InProcess, and your app code stays IDENTICAL!
     }
-
 }

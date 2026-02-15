@@ -18,11 +18,7 @@ impl MigrationTrait for Migration {
                             .primary_key(),
                     )
                     .col(ColumnDef::new(Snapshots::PresetId).uuid().not_null())
-                    .col(
-                        ColumnDef::new(Snapshots::Name)
-                            .string_len(255)
-                            .not_null(),
-                    )
+                    .col(ColumnDef::new(Snapshots::Name).string_len(255).not_null())
                     .col(ColumnDef::new(Snapshots::Data).json_binary().not_null())
                     .col(
                         ColumnDef::new(Snapshots::CreatedAt)

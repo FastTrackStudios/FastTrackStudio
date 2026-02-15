@@ -132,7 +132,11 @@ impl DockWorkspace {
         self.user_closed_contextual
             .retain(|panel_id| should_visible.contains(panel_id));
 
-        let managed: HashSet<String> = self.panel_registry.context_managed_panels().into_iter().collect();
+        let managed: HashSet<String> = self
+            .panel_registry
+            .context_managed_panels()
+            .into_iter()
+            .collect();
 
         for panel_id in &managed {
             let should_show = should_visible.contains(panel_id);
@@ -149,7 +153,6 @@ impl DockWorkspace {
                 self.auto_hide_panel(panel_id);
             }
         }
-
     }
 
     /// Find a panel across all windows. Returns `(window_id, node_id)` if found.
@@ -258,7 +261,9 @@ impl DockWorkspace {
                 continue;
             }
             if let Some(root) = main_window.layout.root() {
-                let _ = main_window.layout.add_panel_at(panel, root, DropZone::Center);
+                let _ = main_window
+                    .layout
+                    .add_panel_at(panel, root, DropZone::Center);
             } else {
                 main_window.layout = DockLayout::single(panel);
             }
@@ -285,7 +290,11 @@ impl DockWorkspace {
         }
 
         if default_position == DockPosition::Float {
-            let Some(source_bounds) = self.windows.get(&self.main_window).map(|w| w.bounds.clone()) else {
+            let Some(source_bounds) = self
+                .windows
+                .get(&self.main_window)
+                .map(|w| w.bounds.clone())
+            else {
                 return;
             };
             let bounds = WindowBounds::new(
@@ -396,20 +405,18 @@ mod tests {
 
         assert_ne!(new_id, source);
         assert!(ws.windows.contains_key(&new_id));
-        assert!(
-            !ws.windows
-                .get(&source)
-                .unwrap()
-                .layout
-                .contains_panel(PanelId::Navigator)
-        );
-        assert!(
-            ws.windows
-                .get(&new_id)
-                .unwrap()
-                .layout
-                .contains_panel(PanelId::Navigator)
-        );
+        assert!(!ws
+            .windows
+            .get(&source)
+            .unwrap()
+            .layout
+            .contains_panel(PanelId::Navigator));
+        assert!(ws
+            .windows
+            .get(&new_id)
+            .unwrap()
+            .layout
+            .contains_panel(PanelId::Navigator));
     }
 
     #[test]
@@ -437,13 +444,12 @@ mod tests {
             DropZone::Center
         ));
         assert!(!ws.windows.contains_key(&floating));
-        assert!(
-            ws.windows
-                .get(&source)
-                .unwrap()
-                .layout
-                .contains_panel(PanelId::Navigator)
-        );
+        assert!(ws
+            .windows
+            .get(&source)
+            .unwrap()
+            .layout
+            .contains_panel(PanelId::Navigator));
     }
 
     #[test]
@@ -472,37 +478,34 @@ mod tests {
 
         assert!(ws.close_window(floating));
         assert!(!ws.windows.contains_key(&floating));
-        assert!(
-            ws.windows
-                .get(&source)
-                .unwrap()
-                .layout
-                .contains_panel(PanelId::Navigator)
-        );
+        assert!(ws
+            .windows
+            .get(&source)
+            .unwrap()
+            .layout
+            .contains_panel(PanelId::Navigator));
     }
 
     #[test]
     fn context_change_shows_panel() {
         let mut ws = make_contextual_workspace();
-        assert!(
-            !ws.windows
-                .get(&ws.main_window)
-                .unwrap()
-                .layout
-                .contains_panel(PanelId::Transport)
-        );
+        assert!(!ws
+            .windows
+            .get(&ws.main_window)
+            .unwrap()
+            .layout
+            .contains_panel(PanelId::Transport));
 
         let mut ctx = ActionContext::new();
         ctx.set_tab("performance");
         ws.apply_context_visibility(&ctx);
 
-        assert!(
-            ws.windows
-                .get(&ws.main_window)
-                .unwrap()
-                .layout
-                .contains_panel(PanelId::Transport)
-        );
+        assert!(ws
+            .windows
+            .get(&ws.main_window)
+            .unwrap()
+            .layout
+            .contains_panel(PanelId::Transport));
     }
 
     #[test]
@@ -511,23 +514,21 @@ mod tests {
         let mut ctx = ActionContext::new();
         ctx.set_tab("performance");
         ws.apply_context_visibility(&ctx);
-        assert!(
-            ws.windows
-                .get(&ws.main_window)
-                .unwrap()
-                .layout
-                .contains_panel(PanelId::Transport)
-        );
+        assert!(ws
+            .windows
+            .get(&ws.main_window)
+            .unwrap()
+            .layout
+            .contains_panel(PanelId::Transport));
 
         ctx.set_tab("chart");
         ws.apply_context_visibility(&ctx);
-        assert!(
-            !ws.windows
-                .get(&ws.main_window)
-                .unwrap()
-                .layout
-                .contains_panel(PanelId::Transport)
-        );
+        assert!(!ws
+            .windows
+            .get(&ws.main_window)
+            .unwrap()
+            .layout
+            .contains_panel(PanelId::Transport));
     }
 
     #[test]
@@ -536,13 +537,12 @@ mod tests {
         let mut ctx = ActionContext::new();
         ctx.set_tab("performance");
         ws.apply_context_visibility(&ctx);
-        assert!(
-            ws.windows
-                .get(&ws.main_window)
-                .unwrap()
-                .layout
-                .contains_panel(PanelId::Transport)
-        );
+        assert!(ws
+            .windows
+            .get(&ws.main_window)
+            .unwrap()
+            .layout
+            .contains_panel(PanelId::Transport));
 
         ws.windows
             .get_mut(&ws.main_window)
@@ -552,24 +552,22 @@ mod tests {
         ws.mark_user_closed(PanelId::Transport.as_str());
 
         ws.apply_context_visibility(&ctx);
-        assert!(
-            !ws.windows
-                .get(&ws.main_window)
-                .unwrap()
-                .layout
-                .contains_panel(PanelId::Transport)
-        );
+        assert!(!ws
+            .windows
+            .get(&ws.main_window)
+            .unwrap()
+            .layout
+            .contains_panel(PanelId::Transport));
 
         ctx.set_tab("chart");
         ws.apply_context_visibility(&ctx);
         ctx.set_tab("performance");
         ws.apply_context_visibility(&ctx);
-        assert!(
-            ws.windows
-                .get(&ws.main_window)
-                .unwrap()
-                .layout
-                .contains_panel(PanelId::Transport)
-        );
+        assert!(ws
+            .windows
+            .get(&ws.main_window)
+            .unwrap()
+            .layout
+            .contains_panel(PanelId::Transport));
     }
 }

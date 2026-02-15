@@ -32,8 +32,8 @@ impl From<Bass> for ItemMetadataGroup {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{OrganizeIntoTracks, default_config};
-    use daw_proto::{TrackStructureBuilder, assert_tracks_equal};
+    use crate::{default_config, OrganizeIntoTracks};
+    use daw_proto::{assert_tracks_equal, TrackStructureBuilder};
 
     type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
 
@@ -52,9 +52,12 @@ mod tests {
 
         let expected = TrackStructureBuilder::new()
             .folder("Bass")
-            .track("Guitar").item("Bass Guitar")
-            .track("Synth").item("Bass Synth")
-            .track("Upright").item("Upright Bass")
+            .track("Guitar")
+            .item("Bass Guitar")
+            .track("Synth")
+            .item("Bass Synth")
+            .track("Upright")
+            .item("Upright Bass")
             .end()
             .build();
 

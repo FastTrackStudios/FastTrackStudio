@@ -53,7 +53,10 @@ pub fn dummy_module(module_type: ModuleType) -> DummyModulePreset {
 
 /// Create dummy module preset definitions for all module types.
 pub fn all_dummy_module_presets() -> Vec<DummyModulePreset> {
-    ALL_MODULE_TYPES.iter().map(|&mt| dummy_module(mt)).collect()
+    ALL_MODULE_TYPES
+        .iter()
+        .map(|&mt| dummy_module(mt))
+        .collect()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -77,7 +80,11 @@ mod tests {
         let mut unique = names.clone();
         unique.sort();
         unique.dedup();
-        assert_eq!(names.len(), unique.len(), "duplicate dummy module names found");
+        assert_eq!(
+            names.len(),
+            unique.len(),
+            "duplicate dummy module names found"
+        );
     }
 
     #[test]

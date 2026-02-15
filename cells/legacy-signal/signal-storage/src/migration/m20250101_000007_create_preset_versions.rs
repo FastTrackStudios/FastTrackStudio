@@ -17,11 +17,7 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .primary_key(),
                     )
-                    .col(
-                        ColumnDef::new(PresetVersions::PresetId)
-                            .uuid()
-                            .not_null(),
-                    )
+                    .col(ColumnDef::new(PresetVersions::PresetId).uuid().not_null())
                     .col(
                         ColumnDef::new(PresetVersions::Version)
                             .big_integer()

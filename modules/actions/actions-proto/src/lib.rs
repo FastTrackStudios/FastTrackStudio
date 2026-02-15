@@ -38,8 +38,8 @@
 
 #![deny(unsafe_code)]
 
-use facet::Facet;
 use convert_case::{Case, Casing};
+use facet::Facet;
 use roam::service;
 
 pub mod ids;

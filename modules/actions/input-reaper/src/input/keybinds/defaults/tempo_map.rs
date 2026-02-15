@@ -13,7 +13,8 @@ fn tempo_map_wheel_bindings() -> Vec<WheelBind> {
         WheelBind::new("", "989").with_description("Scroll view vertically"),
         // Shift + wheel / horizwheel = horizontal scroll reversed (action 977)
         // Action 977: View: Scroll horizontally reversed (MIDI CC relative/mousewheel)
-        WheelBind::new("<S->", "977").with_description("Scroll horizontally reversed (Shift+wheel)"),
+        WheelBind::new("<S->", "977")
+            .with_description("Scroll horizontally reversed (Shift+wheel)"),
         WheelBind::new("<S->", "977")
             .with_horizontal()
             .with_description("Scroll horizontally reversed (Shift+horizwheel)"),

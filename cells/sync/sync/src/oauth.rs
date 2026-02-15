@@ -51,8 +51,12 @@ pub fn build_client(provider: AuthProvider, config: &OAuthConfig) -> AuthResult<
     };
 
     let mut client = BasicClient::new(ClientId::new(config.client_id.clone()))
-        .set_auth_uri(AuthUrl::new(auth_url.to_string()).map_err(|e| AuthError::OAuth(e.to_string()))?)
-        .set_token_uri(TokenUrl::new(token_url.to_string()).map_err(|e| AuthError::OAuth(e.to_string()))?)
+        .set_auth_uri(
+            AuthUrl::new(auth_url.to_string()).map_err(|e| AuthError::OAuth(e.to_string()))?,
+        )
+        .set_token_uri(
+            TokenUrl::new(token_url.to_string()).map_err(|e| AuthError::OAuth(e.to_string()))?,
+        )
         .set_redirect_uri(
             RedirectUrl::new(config.redirect_uri.clone())
                 .map_err(|e| AuthError::OAuth(e.to_string()))?,
@@ -66,10 +70,7 @@ pub fn build_client(provider: AuthProvider, config: &OAuthConfig) -> AuthResult<
 }
 
 /// Generate an authorization URL with PKCE challenge
-pub fn authorize_url(
-    client: &ConfiguredClient,
-    provider: AuthProvider,
-) -> AuthorizationRequest {
+pub fn authorize_url(client: &ConfiguredClient, provider: AuthProvider) -> AuthorizationRequest {
     let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
 
     let scopes = match provider {
@@ -174,10 +175,7 @@ async fn fetch_github_user(
         .json()
         .await?;
 
-    let email = resp["email"]
-        .as_str()
-        .unwrap_or("")
-        .to_string();
+    let email = resp["email"].as_str().unwrap_or("").to_string();
     let display_name = resp["name"]
         .as_str()
         .or_else(|| resp["login"].as_str())
@@ -203,14 +201,8 @@ async fn fetch_google_user(
         .json()
         .await?;
 
-    let email = resp["email"]
-        .as_str()
-        .unwrap_or("")
-        .to_string();
-    let display_name = resp["name"]
-        .as_str()
-        .unwrap_or("Unknown")
-        .to_string();
+    let email = resp["email"].as_str().unwrap_or("").to_string();
+    let display_name = resp["name"].as_str().unwrap_or("Unknown").to_string();
 
     Ok(sync_proto::User::new(
         uuid::Uuid::new_v4(),

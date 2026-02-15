@@ -196,4 +196,3 @@ impl SetlistRepo for SetlistRepoLive {
         }
     }
 }
-

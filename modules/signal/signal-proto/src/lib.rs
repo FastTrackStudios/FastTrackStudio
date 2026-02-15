@@ -20,8 +20,8 @@ pub mod engine;
 pub mod layer;
 pub mod metadata;
 pub mod module_type;
-pub mod overrides;
 pub mod override_policy;
+pub mod overrides;
 pub mod profile;
 pub mod resolve;
 pub mod rig;
@@ -256,7 +256,6 @@ impl EngineType {
         }
     }
 }
-
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Facet)]
 pub struct ParameterValue(f32);
@@ -947,7 +946,11 @@ impl traits::Variant for ModuleSnapshot {
 
 impl traits::DefaultVariant for ModuleSnapshot {
     fn default_named(name: impl Into<String>) -> Self {
-        Self::new(ModuleSnapshotId::new(), name, Module::from_blocks(Vec::new()))
+        Self::new(
+            ModuleSnapshotId::new(),
+            name,
+            Module::from_blocks(Vec::new()),
+        )
     }
 }
 

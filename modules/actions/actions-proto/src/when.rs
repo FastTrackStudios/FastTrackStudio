@@ -186,14 +186,14 @@ impl std::error::Error for ParseError {}
 
 #[derive(Debug, Clone, PartialEq)]
 enum Token {
-    Ident(String),   // "tab:performance", "mode", "normal", "popup_open"
-    And,             // "&&"
-    Or,              // "||"
-    Not,             // "!"
-    Eq,              // "=="
-    Neq,             // "!="
-    LParen,          // "("
-    RParen,          // ")"
+    Ident(String), // "tab:performance", "mode", "normal", "popup_open"
+    And,           // "&&"
+    Or,            // "||"
+    Not,           // "!"
+    Eq,            // "=="
+    Neq,           // "!="
+    LParen,        // "("
+    RParen,        // ")"
 }
 
 fn tokenize(input: &str) -> Result<Vec<Token>, ParseError> {
@@ -331,7 +331,9 @@ fn parse_atom(tokens: &[Token], pos: &mut usize) -> Result<WhenExpr, ParseError>
                     *pos += 1;
                     return Ok(WhenExpr::Eq(name, val));
                 }
-                return Err(ParseError::UnexpectedToken("expected value after ==".into()));
+                return Err(ParseError::UnexpectedToken(
+                    "expected value after ==".into(),
+                ));
             }
             if tokens[*pos] == Token::Neq {
                 *pos += 1;
@@ -343,7 +345,9 @@ fn parse_atom(tokens: &[Token], pos: &mut usize) -> Result<WhenExpr, ParseError>
                     *pos += 1;
                     return Ok(WhenExpr::Neq(name, val));
                 }
-                return Err(ParseError::UnexpectedToken("expected value after !=".into()));
+                return Err(ParseError::UnexpectedToken(
+                    "expected value after !=".into(),
+                ));
             }
         }
 

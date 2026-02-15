@@ -17,7 +17,8 @@ impl ActionSet for ReaperScrolling {
             // Vertical scroll with wheel (no modifiers)
             WheelBind::new("", "989").with_description("Scroll view vertically"),
             // Horizontal scroll with wheel gestures
-            WheelBind::new("<S->", "977").with_description("Scroll horizontally reversed (Shift+wheel)"),
+            WheelBind::new("<S->", "977")
+                .with_description("Scroll horizontally reversed (Shift+wheel)"),
             WheelBind::new("<S->", "977")
                 .with_horizontal()
                 .with_description("Scroll horizontally reversed (Shift+horizwheel)"),
@@ -25,7 +26,8 @@ impl ActionSet for ReaperScrolling {
                 .with_horizontal()
                 .with_description("Scroll horizontally reversed (horizwheel)"),
             // Option+wheel = vertical zoom (MIDI CC relative/mousewheel)
-            WheelBind::new("<A->", "1001").with_description("Zoom vertically reversed (Option+wheel)"),
+            WheelBind::new("<A->", "1001")
+                .with_description("Zoom vertically reversed (Option+wheel)"),
             WheelBind::new("<A->", "1001")
                 .with_horizontal()
                 .with_description("Zoom vertically reversed (Option+wheel, horizontal event)"),
@@ -93,7 +95,8 @@ impl ActionSet for LogicScrolling {
             // Vertical scroll with wheel
             WheelBind::new("", "989").with_description("Scroll view vertically"),
             // Horizontal scroll with wheel gestures
-            WheelBind::new("<S->", "977").with_description("Scroll horizontally reversed (Shift+wheel)"),
+            WheelBind::new("<S->", "977")
+                .with_description("Scroll horizontally reversed (Shift+wheel)"),
             WheelBind::new("<S->", "977")
                 .with_horizontal()
                 .with_description("Scroll horizontally reversed (Shift+horizwheel)"),
@@ -101,7 +104,8 @@ impl ActionSet for LogicScrolling {
                 .with_horizontal()
                 .with_description("Scroll horizontally reversed (horizwheel)"),
             // Option+wheel = vertical zoom (MIDI CC relative/mousewheel)
-            WheelBind::new("<A->", "1001").with_description("Zoom vertically reversed (Option+wheel)"),
+            WheelBind::new("<A->", "1001")
+                .with_description("Zoom vertically reversed (Option+wheel)"),
             WheelBind::new("<A->", "1001")
                 .with_horizontal()
                 .with_description("Zoom vertically reversed (Option+wheel, horizontal event)"),
@@ -139,14 +143,16 @@ impl ActionSet for FtsScrolling {
     fn wheel_binds(&self) -> Vec<WheelBind> {
         let mut bindings = vec![
             WheelBind::new("", "989").with_description("Scroll view vertically"),
-            WheelBind::new("<S->", "977").with_description("Scroll horizontally reversed (Shift+wheel)"),
+            WheelBind::new("<S->", "977")
+                .with_description("Scroll horizontally reversed (Shift+wheel)"),
             WheelBind::new("<S->", "977")
                 .with_horizontal()
                 .with_description("Scroll horizontally reversed (Shift+horizwheel)"),
             WheelBind::new("", "977")
                 .with_horizontal()
                 .with_description("Scroll horizontally reversed (horizwheel)"),
-            WheelBind::new("<A->", "1001").with_description("Zoom vertically reversed (Option+wheel)"),
+            WheelBind::new("<A->", "1001")
+                .with_description("Zoom vertically reversed (Option+wheel)"),
             WheelBind::new("<A->", "1001")
                 .with_horizontal()
                 .with_description("Zoom vertically reversed (Option+wheel, horizontal event)"),

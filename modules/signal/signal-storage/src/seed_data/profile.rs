@@ -83,7 +83,9 @@ fn keys_feature_profile() -> Profile {
         Metadata::new()
             .with_tag("keys")
             .with_tag("setlist")
-            .with_description("Keys profile with four patches mapped to distinct Keys MegaRig scenes"),
+            .with_description(
+                "Keys profile with four patches mapped to distinct Keys MegaRig scenes",
+            ),
     )
 }
 

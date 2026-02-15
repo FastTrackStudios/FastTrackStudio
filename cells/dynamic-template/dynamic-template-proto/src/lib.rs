@@ -38,10 +38,10 @@
 
 #![deny(unsafe_code)]
 
+pub mod actions;
 mod error;
 mod services;
 mod types;
-pub mod actions;
 
 pub use error::*;
 pub use services::*;

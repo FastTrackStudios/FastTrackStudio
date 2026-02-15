@@ -263,12 +263,7 @@ mod tests {
             .with_module(ModuleRef::new(seed_id("mod-drive")));
         let v2 = LayerSnapshot::new(seed_id("v2"), "Heavy")
             .with_module(ModuleRef::new(seed_id("mod-drive")).with_variant(seed_id("push")));
-        let mut layer = Layer::new(
-            seed_id("layer-1"),
-            "Guitar Layer",
-            EngineType::Guitar,
-            v1,
-        );
+        let mut layer = Layer::new(seed_id("layer-1"), "Guitar Layer", EngineType::Guitar, v1);
         layer.add_variant(v2);
         layer
     }

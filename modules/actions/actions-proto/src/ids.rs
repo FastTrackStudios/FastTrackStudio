@@ -64,12 +64,10 @@ impl std::fmt::Display for StaticActionId {
 pub mod standalone {
     use super::StaticActionId;
 
-    pub const OPEN_SETTINGS: StaticActionId =
-        StaticActionId::new("fts.standalone.open_settings");
+    pub const OPEN_SETTINGS: StaticActionId = StaticActionId::new("fts.standalone.open_settings");
     pub const TOGGLE_DARK_MODE: StaticActionId =
         StaticActionId::new("fts.standalone.toggle_dark_mode");
     pub const COMMAND_PALETTE: StaticActionId =
         StaticActionId::new("fts.standalone.command_palette");
-    pub const SHOW_ABOUT: StaticActionId =
-        StaticActionId::new("fts.standalone.show_about");
+    pub const SHOW_ABOUT: StaticActionId = StaticActionId::new("fts.standalone.show_about");
 }

@@ -188,6 +188,7 @@ anyrender = { git = "https://github.com/DioxusLabs/anyrender.git", branch = "mai
 anyrender_vello = { git = "https://github.com/DioxusLabs/anyrender.git", branch = "main" }
 anyrender_svg = { git = "https://github.com/DioxusLabs/anyrender.git", branch = "main" }
 wgpu_context = { git = "https://github.com/DioxusLabs/anyrender.git", branch = "main" }
+taffy = { version = "0.7", default-features = false, features = ["std", "flexbox", "taffy_tree"] }
 
 # Linebender graphics crates (matching anyrender's versions)
 peniko = "0.6"

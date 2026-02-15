@@ -30,7 +30,7 @@ use actions_proto::{
 use roam::session::{ConnectionHandle, Context};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{RwLock, broadcast};
+use tokio::sync::{broadcast, RwLock};
 use tracing::{info, warn};
 
 /// A registered cell with its cached actions and RPC client

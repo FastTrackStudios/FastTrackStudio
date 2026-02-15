@@ -1,7 +1,7 @@
 //! Lead vocals group definition
 
-use crate::item_metadata::ItemMetadataField;
 use crate::item_metadata::prelude::*;
+use crate::item_metadata::ItemMetadataField;
 
 /// Lead vocals group
 ///
@@ -49,8 +49,8 @@ impl From<LeadVocals> for ItemMetadataGroup {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{OrganizeIntoTracks, default_config};
-    use daw_proto::{TrackStructureBuilder, assert_tracks_equal};
+    use crate::{default_config, OrganizeIntoTracks};
+    use daw_proto::{assert_tracks_equal, TrackStructureBuilder};
 
     type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
 
@@ -68,7 +68,8 @@ mod tests {
         daw_proto::display_tracklist(&tracks);
 
         let expected = TrackStructureBuilder::new()
-            .track("Vocals").item("Vocal Chorus Cody DBL L")
+            .track("Vocals")
+            .item("Vocal Chorus Cody DBL L")
             .build();
 
         assert_tracks_equal(&tracks, &expected)?;
@@ -91,8 +92,10 @@ mod tests {
 
         let expected = TrackStructureBuilder::new()
             .folder("Vocals")
-            .track("Chorus").item("Vocal Chorus Cody")
-            .track("Verse").item("Vocal Verse Cody")
+            .track("Chorus")
+            .item("Vocal Chorus Cody")
+            .track("Verse")
+            .item("Vocal Verse Cody")
             .end()
             .build();
 
@@ -116,8 +119,10 @@ mod tests {
 
         let expected = TrackStructureBuilder::new()
             .folder("Vocals")
-            .track("Cody").item("Vocal Chorus Cody")
-            .track("John").item("Vocal Chorus John")
+            .track("Cody")
+            .item("Vocal Chorus Cody")
+            .track("John")
+            .item("Vocal Chorus John")
             .end()
             .build();
 
@@ -141,8 +146,10 @@ mod tests {
 
         let expected = TrackStructureBuilder::new()
             .folder("Vocals")
-            .track("Main").item("Vocal Chorus Cody")
-            .track("DBL").item("Vocal Chorus Cody DBL")
+            .track("Main")
+            .item("Vocal Chorus Cody")
+            .track("DBL")
+            .item("Vocal Chorus Cody DBL")
             .end()
             .build();
 
@@ -170,9 +177,12 @@ mod tests {
 
         let expected = TrackStructureBuilder::new()
             .folder("Vocals")
-            .track("L").item("Vocal Chorus Cody L")
-            .track("C").item("Vocal Chorus Cody C")
-            .track("R").item("Vocal Chorus Cody R")
+            .track("L")
+            .item("Vocal Chorus Cody L")
+            .track("C")
+            .item("Vocal Chorus Cody C")
+            .track("R")
+            .item("Vocal Chorus Cody R")
             .end()
             .build();
 
@@ -204,14 +214,20 @@ mod tests {
         let expected = TrackStructureBuilder::new()
             .folder("Vocals")
             .folder("Main")
-            .track("L").item("Vocal Chorus Cody Main L")
-            .track("C").item("Vocal Chorus Cody Main C")
-            .track("R").item("Vocal Chorus Cody Main R")
+            .track("L")
+            .item("Vocal Chorus Cody Main L")
+            .track("C")
+            .item("Vocal Chorus Cody Main C")
+            .track("R")
+            .item("Vocal Chorus Cody Main R")
             .end()
             .folder("DBL")
-            .track("L").item("Vocal Chorus Cody DBL L")
-            .track("C").item("Vocal Chorus Cody DBL C")
-            .track("R").item("Vocal Chorus Cody DBL R")
+            .track("L")
+            .item("Vocal Chorus Cody DBL L")
+            .track("C")
+            .item("Vocal Chorus Cody DBL C")
+            .track("R")
+            .item("Vocal Chorus Cody DBL R")
             .end()
             .end()
             .build();

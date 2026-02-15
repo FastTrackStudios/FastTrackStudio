@@ -285,7 +285,8 @@ fn should_passthrough_for_text_input(hwnd: HWND) -> bool {
     let medium_reaper = reaper.medium_reaper();
 
     if let Some(target_window) = Window::new(hwnd) {
-        let target_is_text = unsafe { medium_reaper.is_window_text_field(target_window.raw_hwnd()) };
+        let target_is_text =
+            unsafe { medium_reaper.is_window_text_field(target_window.raw_hwnd()) };
         if target_is_text {
             return true;
         }
@@ -389,15 +390,15 @@ unsafe extern "C" fn wheel_hook_proc(hwnd: HWND, msg: UINT, w: WPARAM, l: LPARAM
                             "Executing click action from workflow (legacy)"
                         );
 
-                // Execute the action
-                if let Err(e) = execute_action(&action_command) {
-                    warn!(error = %e, action = %action_command, "Failed to execute click action");
-                } else if crate::input::handler::InputHandler::is_debug_logging() {
-                    reaper.show_console_msg(format!(
-                        "[DEBUG] Execute: click workflow action '{}' in {}\n",
-                        action_command, context_name
-                    ));
-                }
+                        // Execute the action
+                        if let Err(e) = execute_action(&action_command) {
+                            warn!(error = %e, action = %action_command, "Failed to execute click action");
+                        } else if crate::input::handler::InputHandler::is_debug_logging() {
+                            reaper.show_console_msg(format!(
+                                "[DEBUG] Execute: click workflow action '{}' in {}\n",
+                                action_command, context_name
+                            ));
+                        }
 
                         // Eat the click - we handled it
                         return 0;
@@ -423,8 +424,7 @@ unsafe extern "C" fn wheel_hook_proc(hwnd: HWND, msg: UINT, w: WPARAM, l: LPARAM
             let ctrl_from_msg = (key_states & 0x0008) != 0; // MK_CONTROL
             let shift_from_msg = (key_states & 0x0004) != 0; // MK_SHIFT
             let alt_from_msg = (key_states & 0x0020) != 0; // MK_ALT
-            let (ctrl_from_key, shift_from_key, alt_from_key) =
-                read_modifier_state_from_keyboard();
+            let (ctrl_from_key, shift_from_key, alt_from_key) = read_modifier_state_from_keyboard();
             let ctrl = ctrl_from_msg || ctrl_from_key;
             let shift = shift_from_msg || shift_from_key;
             let alt = alt_from_msg || alt_from_key;

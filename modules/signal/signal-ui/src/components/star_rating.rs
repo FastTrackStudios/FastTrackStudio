@@ -54,7 +54,11 @@ pub fn StarRatingInput(
 ) -> Element {
     let score = score.min(5);
     let mut hover_score = use_signal(|| 0u8);
-    let display_score = if hover_score() > 0 { hover_score() } else { score };
+    let display_score = if hover_score() > 0 {
+        hover_score()
+    } else {
+        score
+    };
 
     rsx! {
         span {

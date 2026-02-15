@@ -30,9 +30,9 @@ pub use parse::ParseError;
 
 use std::collections::HashMap;
 
-use actions_proto::ActionDefinition;
 use actions_proto::ids::StaticActionId;
 use actions_proto::when::{ActionContext, WhenExpr};
+use actions_proto::ActionDefinition;
 
 // ============================================================================
 // Key Types
@@ -193,12 +193,7 @@ impl KeybindingDispatcher {
     }
 
     /// Register a single binding manually.
-    pub fn register(
-        &mut self,
-        key: KeyBinding,
-        action_id: StaticActionId,
-        when: WhenExpr,
-    ) {
+    pub fn register(&mut self, key: KeyBinding, action_id: StaticActionId, when: WhenExpr) {
         self.bindings.push(BoundAction {
             key,
             action_id,
@@ -381,11 +376,8 @@ mod tests {
         );
 
         let ctx = ActionContext::new();
-        let result = dispatcher.match_event(
-            &KeyCode::Character(" ".into()),
-            &Modifiers::NONE,
-            &ctx,
-        );
+        let result =
+            dispatcher.match_event(&KeyCode::Character(" ".into()), &Modifiers::NONE, &ctx);
         assert_eq!(result, Some(toggle));
     }
 
@@ -406,20 +398,14 @@ mod tests {
         let mut ctx = ActionContext::new();
 
         // No tag set — should not match
-        let result = dispatcher.match_event(
-            &KeyCode::Character(" ".into()),
-            &Modifiers::NONE,
-            &ctx,
-        );
+        let result =
+            dispatcher.match_event(&KeyCode::Character(" ".into()), &Modifiers::NONE, &ctx);
         assert_eq!(result, None);
 
         // Set the tag — should match
         ctx.set_tag("tab:performance");
-        let result = dispatcher.match_event(
-            &KeyCode::Character(" ".into()),
-            &Modifiers::NONE,
-            &ctx,
-        );
+        let result =
+            dispatcher.match_event(&KeyCode::Character(" ".into()), &Modifiers::NONE, &ctx);
         assert_eq!(result, Some(toggle));
     }
 
@@ -429,8 +415,7 @@ mod tests {
             ActionDefinition::new("a", "Toggle", "desc")
                 .with_shortcut("Space")
                 .with_when("tab:performance"),
-            ActionDefinition::new("b", "Next", "desc")
-                .with_shortcut("Right"),
+            ActionDefinition::new("b", "Next", "desc").with_shortcut("Right"),
         ];
 
         let mut dispatcher = KeybindingDispatcher::new();
@@ -440,20 +425,13 @@ mod tests {
         ctx.set_tab("performance");
 
         // Space should match action "a" (when clause satisfied)
-        let result = dispatcher.match_event(
-            &KeyCode::Character(" ".into()),
-            &Modifiers::NONE,
-            &ctx,
-        );
+        let result =
+            dispatcher.match_event(&KeyCode::Character(" ".into()), &Modifiers::NONE, &ctx);
         assert!(result.is_some());
         assert_eq!(result.unwrap().as_str(), "a");
 
         // Right should match action "b" (no when clause = always)
-        let result = dispatcher.match_event(
-            &KeyCode::ArrowRight,
-            &Modifiers::NONE,
-            &ctx,
-        );
+        let result = dispatcher.match_event(&KeyCode::ArrowRight, &Modifiers::NONE, &ctx);
         assert!(result.is_some());
         assert_eq!(result.unwrap().as_str(), "b");
     }
@@ -479,18 +457,15 @@ mod tests {
 
         let mut dispatcher = ActionDispatcher::new();
         dispatcher.register_actions(&[
-            ActionDefinition::new("test.action", "Test", "desc").with_shortcut("Space"),
+            ActionDefinition::new("test.action", "Test", "desc").with_shortcut("Space")
         ]);
         dispatcher.on(StaticActionId::new("test.action"), move || {
             called_clone.set(true);
         });
 
         let ctx = ActionContext::new();
-        let handled = dispatcher.handle_key_event(
-            &KeyCode::Character(" ".into()),
-            &Modifiers::NONE,
-            &ctx,
-        );
+        let handled =
+            dispatcher.handle_key_event(&KeyCode::Character(" ".into()), &Modifiers::NONE, &ctx);
         assert!(handled);
         assert!(called.get());
     }
@@ -499,16 +474,12 @@ mod tests {
     fn action_dispatcher_returns_false_for_unmatched_key() {
         let mut dispatcher = ActionDispatcher::new();
         dispatcher.register_actions(&[
-            ActionDefinition::new("test.action", "Test", "desc").with_shortcut("Space"),
+            ActionDefinition::new("test.action", "Test", "desc").with_shortcut("Space")
         ]);
         dispatcher.on(StaticActionId::new("test.action"), || {});
 
         let ctx = ActionContext::new();
-        let handled = dispatcher.handle_key_event(
-            &KeyCode::ArrowUp,
-            &Modifiers::NONE,
-            &ctx,
-        );
+        let handled = dispatcher.handle_key_event(&KeyCode::ArrowUp, &Modifiers::NONE, &ctx);
         assert!(!handled);
     }
 
@@ -517,15 +488,12 @@ mod tests {
         let mut dispatcher = ActionDispatcher::new();
         // Register keybinding but no handler
         dispatcher.register_actions(&[
-            ActionDefinition::new("test.action", "Test", "desc").with_shortcut("Space"),
+            ActionDefinition::new("test.action", "Test", "desc").with_shortcut("Space")
         ]);
 
         let ctx = ActionContext::new();
-        let handled = dispatcher.handle_key_event(
-            &KeyCode::Character(" ".into()),
-            &Modifiers::NONE,
-            &ctx,
-        );
+        let handled =
+            dispatcher.handle_key_event(&KeyCode::Character(" ".into()), &Modifiers::NONE, &ctx);
         assert!(!handled);
     }
 
@@ -538,11 +506,9 @@ mod tests {
         let called_clone = called.clone();
 
         let mut dispatcher = ActionDispatcher::new();
-        dispatcher.register_actions(&[
-            ActionDefinition::new("test.action", "Test", "desc")
-                .with_shortcut("Space")
-                .with_when("tab:performance"),
-        ]);
+        dispatcher.register_actions(&[ActionDefinition::new("test.action", "Test", "desc")
+            .with_shortcut("Space")
+            .with_when("tab:performance")]);
         dispatcher.on(StaticActionId::new("test.action"), move || {
             called_clone.set(true);
         });

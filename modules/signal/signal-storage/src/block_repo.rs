@@ -650,7 +650,11 @@ mod tests {
             "MetaSnap",
             Block::from_parameters(vec![BlockParameter::new("gain", "Gain", 0.5)]),
         )
-        .with_metadata(Metadata::new().with_tag("snapshot-tag").with_notes("snapshot-notes"));
+        .with_metadata(
+            Metadata::new()
+                .with_tag("snapshot-tag")
+                .with_notes("snapshot-notes"),
+        );
         let preset = Preset::new(
             seed_id("meta-preset"),
             "MetaPreset",
@@ -658,7 +662,11 @@ mod tests {
             variant,
             vec![],
         )
-        .with_metadata(Metadata::new().with_tag("preset-tag").with_description("preset-desc"));
+        .with_metadata(
+            Metadata::new()
+                .with_tag("preset-tag")
+                .with_description("preset-desc"),
+        );
 
         repo.reseed_defaults(&[preset]).await?;
         let amp = repo.list_block_collections(BlockType::Amp).await?;
@@ -668,8 +676,15 @@ mod tests {
             .expect("meta preset exists");
 
         assert!(loaded.metadata().tags.contains("preset-tag"));
-        assert_eq!(loaded.metadata().description.as_deref(), Some("preset-desc"));
-        assert!(loaded.default_snapshot().metadata().tags.contains("snapshot-tag"));
+        assert_eq!(
+            loaded.metadata().description.as_deref(),
+            Some("preset-desc")
+        );
+        assert!(loaded
+            .default_snapshot()
+            .metadata()
+            .tags
+            .contains("snapshot-tag"));
         assert_eq!(
             loaded.default_snapshot().metadata().notes.as_deref(),
             Some("snapshot-notes")

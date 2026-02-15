@@ -91,8 +91,11 @@ impl ActionSet for FtsTransport {
                 .with_description("FTS Play/Pause"),
             Keybind::new("<A-space>", "FTS_DAW_TRANSPORT_PLAY_SKIP_TIME_SELECTION")
                 .with_description("FTS Play (skip time selection)"),
-            Keybind::new("<S-space>", "FTS_DAW_TRANSPORT_PLAY_FROM_LAST_START_POSITION")
-                .with_description("FTS Play from last start position"),
+            Keybind::new(
+                "<S-space>",
+                "FTS_DAW_TRANSPORT_PLAY_FROM_LAST_START_POSITION",
+            )
+            .with_description("FTS Play from last start position"),
             Keybind::new("<enter>", "40042").with_description("Go to start of project"),
             Keybind::new("r", "FTS_DAW_TRANSPORT_TOGGLE_RECORDING")
                 .with_description("FTS Toggle record"),

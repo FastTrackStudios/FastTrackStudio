@@ -62,10 +62,8 @@ pub fn compute_diff(
     let mut diffs = Vec::new();
 
     // Build a lookup of current states by module type
-    let current_by_type: std::collections::HashMap<ModuleType, &SlotState> = current_states
-        .iter()
-        .map(|s| (s.module_type, s))
-        .collect();
+    let current_by_type: std::collections::HashMap<ModuleType, &SlotState> =
+        current_states.iter().map(|s| (s.module_type, s)).collect();
 
     // Process all module types present in the new targets
     for (module_type, new_slot) in new_targets {
@@ -127,9 +125,7 @@ pub fn compute_diff(
                                     }
                                 } else {
                                     // Different preset — check preload, then load.
-                                    if let Some(handle) =
-                                        preload_lookup(*module_type, new_slot)
-                                    {
+                                    if let Some(handle) = preload_lookup(*module_type, new_slot) {
                                         SlotDiff::Activate {
                                             module_type: *module_type,
                                             handle,
@@ -144,9 +140,7 @@ pub fn compute_diff(
                             }
                             Some(ResolvedSlot::Disabled) | None => {
                                 // Was disabled or never assigned. Load fresh.
-                                if let Some(handle) =
-                                    preload_lookup(*module_type, new_slot)
-                                {
+                                if let Some(handle) = preload_lookup(*module_type, new_slot) {
                                     SlotDiff::Activate {
                                         module_type: *module_type,
                                         handle,
@@ -244,10 +238,7 @@ mod tests {
             is_disabled: false,
         }];
         let mut new_targets = ResolvedModules::new();
-        new_targets.insert(
-            ModuleType::Drive,
-            ResolvedSlot::Active(new_target.clone()),
-        );
+        new_targets.insert(ModuleType::Drive, ResolvedSlot::Active(new_target.clone()));
 
         let diffs = compute_diff(&current, &new_targets, &no_preloads);
 
@@ -274,10 +265,7 @@ mod tests {
             is_disabled: false,
         }];
         let mut new_targets = ResolvedModules::new();
-        new_targets.insert(
-            ModuleType::Drive,
-            ResolvedSlot::Active(new_target),
-        );
+        new_targets.insert(ModuleType::Drive, ResolvedSlot::Active(new_target));
 
         let diffs = compute_diff(&current, &new_targets, &move |_mt, _slot| {
             Some(preloaded_handle)
@@ -395,10 +383,7 @@ mod tests {
 
         let current = vec![];
         let mut new_targets = ResolvedModules::new();
-        new_targets.insert(
-            ModuleType::Modulation,
-            ResolvedSlot::Active(target.clone()),
-        );
+        new_targets.insert(ModuleType::Modulation, ResolvedSlot::Active(target.clone()));
 
         let diffs = compute_diff(&current, &new_targets, &no_preloads);
 
@@ -451,18 +436,21 @@ mod tests {
             },
         ];
         let mut new_targets = ResolvedModules::new();
-        new_targets.insert(
-            ModuleType::Drive,
-            ResolvedSlot::Active(new_drive_target),
-        );
+        new_targets.insert(ModuleType::Drive, ResolvedSlot::Active(new_drive_target));
         new_targets.insert(ModuleType::Amp, ResolvedSlot::Active(amp_target));
 
         let diffs = compute_diff(&current, &new_targets, &no_preloads);
 
         assert_eq!(diffs.len(), 2);
 
-        let drive_diff = diffs.iter().find(|d| d.module_type() == ModuleType::Drive).unwrap();
-        let amp_diff = diffs.iter().find(|d| d.module_type() == ModuleType::Amp).unwrap();
+        let drive_diff = diffs
+            .iter()
+            .find(|d| d.module_type() == ModuleType::Drive)
+            .unwrap();
+        let amp_diff = diffs
+            .iter()
+            .find(|d| d.module_type() == ModuleType::Amp)
+            .unwrap();
 
         assert!(drive_diff.requires_load());
         assert!(amp_diff.is_noop());

@@ -8,7 +8,6 @@
 //!
 //! This metadata is useful for documentation but clutters display names.
 
-
 /// Known microphone models and their variations
 ///
 /// These are common microphone models used in professional recording.

@@ -24,13 +24,12 @@ fn demo_setlist() -> Setlist {
     )
     .with_metadata(Metadata::new().with_tag("dummy"));
 
-    let mut setlist = Setlist::new(seed_id("demo-setlist"), "Demo Setlist", feature)
-        .with_metadata(
-            Metadata::new()
-                .with_tag("demo")
-                .with_tag("setlist")
-                .with_description("Demo setlist containing feature and dummy songs"),
-        );
+    let mut setlist = Setlist::new(seed_id("demo-setlist"), "Demo Setlist", feature).with_metadata(
+        Metadata::new()
+            .with_tag("demo")
+            .with_tag("setlist")
+            .with_description("Demo setlist containing feature and dummy songs"),
+    );
     setlist.add_entry(dummy);
     setlist
 }
@@ -55,4 +54,3 @@ mod tests {
         );
     }
 }
-

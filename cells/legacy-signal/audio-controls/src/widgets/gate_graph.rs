@@ -10,8 +10,8 @@
 
 use crate::prelude::*;
 
-use crate::widgets::knob::Knob;
 use crate::theming::{ThemeContext, ThemeProvider};
+use crate::widgets::knob::Knob;
 
 /// Gate operating mode.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -196,7 +196,8 @@ fn compute_gate_transfer(
             } else if input_db > low_th && knee > 0.0 {
                 let knee_factor = (high_th - input_db) / knee;
                 let knee_factor_sq = knee_factor * knee_factor;
-                let gain_reduction = knee_factor_sq * (ratio - 1.0) * (input_db - threshold) / ratio;
+                let gain_reduction =
+                    knee_factor_sq * (ratio - 1.0) * (input_db - threshold) / ratio;
                 (input_db + gain_reduction).max(range)
             } else {
                 let expanded = threshold + (input_db - threshold) * ratio;
@@ -348,12 +349,18 @@ pub fn GateGraph(props: GateGraphProps) -> Element {
                 let pos = layout.db_to_x(db);
                 lines.push(format!(
                     "M {:.1} {:.1} L {:.1} {:.1}",
-                    pos, layout.padding, pos, layout.padding + layout.graph_size
+                    pos,
+                    layout.padding,
+                    pos,
+                    layout.padding + layout.graph_size
                 ));
                 let ypos = layout.db_to_y(db);
                 lines.push(format!(
                     "M {:.1} {:.1} L {:.1} {:.1}",
-                    layout.padding, ypos, layout.padding + layout.graph_size, ypos
+                    layout.padding,
+                    ypos,
+                    layout.padding + layout.graph_size,
+                    ypos
                 ));
             }
         }
@@ -417,8 +424,20 @@ pub fn GateGraph(props: GateGraphProps) -> Element {
 
     // Value formatters
     let format_db = |v: f32| format!("{v:.0}dB");
-    let format_ratio = |v: f32| if v >= 100.0 { "∞:1".to_string() } else { format!("{v:.0}:1") };
-    let format_ms = |v: f32| if v >= 1000.0 { format!("{:.1}s", v / 1000.0) } else { format!("{v:.0}ms") };
+    let format_ratio = |v: f32| {
+        if v >= 100.0 {
+            "∞:1".to_string()
+        } else {
+            format!("{v:.0}:1")
+        }
+    };
+    let format_ms = |v: f32| {
+        if v >= 1000.0 {
+            format!("{:.1}s", v / 1000.0)
+        } else {
+            format!("{v:.0}ms")
+        }
+    };
 
     // Knob sizes
     let large_knob = 56_u32;

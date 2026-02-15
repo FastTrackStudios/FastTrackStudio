@@ -45,8 +45,7 @@ pub enum VersionChangeKind {
 
 /// Version history for the currently loaded preset.
 /// Populated by the versioning service when a preset is loaded.
-pub static RIG_PRESET_VERSIONS: GlobalSignal<Vec<PresetVersionEntry>> =
-    Signal::global(Vec::new);
+pub static RIG_PRESET_VERSIONS: GlobalSignal<Vec<PresetVersionEntry>> = Signal::global(Vec::new);
 
 // endregion: --- Global Signal
 
@@ -195,10 +194,7 @@ fn VersionRow(props: VersionRowProps) -> Element {
         "border-l-2 border-l-transparent hover:bg-zinc-800/30"
     };
 
-    let message = entry
-        .message
-        .as_deref()
-        .unwrap_or("Auto-saved");
+    let message = entry.message.as_deref().unwrap_or("Auto-saved");
 
     rsx! {
         div {

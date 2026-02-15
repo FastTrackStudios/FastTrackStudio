@@ -25,7 +25,10 @@ impl Model {
 
 impl From<Model> for (PresetId, SnapshotId) {
     fn from(model: Model) -> Self {
-        (model.preset_id_branded(), model.default_snapshot_id_branded())
+        (
+            model.preset_id_branded(),
+            model.default_snapshot_id_branded(),
+        )
     }
 }
 

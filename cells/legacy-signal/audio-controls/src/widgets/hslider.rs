@@ -2,7 +2,9 @@
 
 use crate::prelude::*;
 
-use crate::core::accessibility::{AriaAttributes, FocusState, KeyAction, KeyboardSteps, Orientation};
+use crate::core::accessibility::{
+    AriaAttributes, FocusState, KeyAction, KeyboardSteps, Orientation,
+};
 use crate::core::gesture::{GestureState, ScrollSensitivity};
 use crate::core::modulation::ModulationRange;
 use crate::core::normal::Normal;
@@ -139,7 +141,10 @@ pub fn HSlider(
     };
 
     let fill_percent = display_normalized * 100.0;
-    let default_normalized = default.map(|d| (d - min) / range).unwrap_or(if is_bipolar { 0.5 } else { 0.0 });
+    let default_normalized =
+        default
+            .map(|d| (d - min) / range)
+            .unwrap_or(if is_bipolar { 0.5 } else { 0.0 });
 
     // Format display value
     let display_text = value_display.clone().unwrap_or_else(|| {
@@ -157,15 +162,10 @@ pub fn HSlider(
     });
 
     // ARIA attributes
-    let aria = AriaAttributes::slider(
-        label.as_deref().unwrap_or("Slider"),
-        current,
-        min,
-        max,
-    )
-    .with_value_text(&display_text)
-    .with_orientation(Orientation::Horizontal)
-    .disabled(disabled);
+    let aria = AriaAttributes::slider(label.as_deref().unwrap_or("Slider"), current, min, max)
+        .with_value_text(&display_text)
+        .with_orientation(Orientation::Horizontal)
+        .disabled(disabled);
 
     // Focus ring style
     let focus_ring_class = if focus_state() == FocusState::Focused {
@@ -176,7 +176,13 @@ pub fn HSlider(
 
     // Step indicators for stepped variant
     let step_indicators = if let SliderVariant::Stepped(_steps) = &variant {
-        Some(value_step.all_steps().into_iter().map(|s| s * 100.0).collect::<Vec<_>>())
+        Some(
+            value_step
+                .all_steps()
+                .into_iter()
+                .map(|s| s * 100.0)
+                .collect::<Vec<_>>(),
+        )
     } else {
         None
     };

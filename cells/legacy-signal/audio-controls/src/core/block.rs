@@ -87,7 +87,11 @@ impl ParameterFormat {
                 let s = min + normalized * (max - min);
                 format!("{s:.2} s")
             }
-            Self::Float { min, max, precision } => {
+            Self::Float {
+                min,
+                max,
+                precision,
+            } => {
                 let val = min + normalized * (max - min);
                 format!("{val:.prec$}", prec = *precision as usize)
             }
@@ -588,18 +592,19 @@ pub mod definitions {
                     .with_priority(1)
                     .with_default(0.3),
             )
-            .with_parameter(
-                BlockParameter {
-                    id: "decay".to_string(),
-                    name: "Decay".to_string(),
-                    short_name: "Dec".to_string(),
-                    value: 0.4,
-                    default: 0.4,
-                    unit: "s".to_string(),
-                    format: ParameterFormat::Seconds { min: 0.1, max: 10.0 },
-                    priority: 1,
+            .with_parameter(BlockParameter {
+                id: "decay".to_string(),
+                name: "Decay".to_string(),
+                short_name: "Dec".to_string(),
+                value: 0.4,
+                default: 0.4,
+                unit: "s".to_string(),
+                format: ParameterFormat::Seconds {
+                    min: 0.1,
+                    max: 10.0,
                 },
-            )
+                priority: 1,
+            })
             .with_parameter(
                 BlockParameter::time_ms("predelay", "Pre-Delay", 0.0, 200.0)
                     .with_priority(3)
@@ -640,18 +645,20 @@ pub mod definitions {
                     .with_short_name("Thr")
                     .with_default(0.3),
             )
-            .with_parameter(
-                BlockParameter {
-                    id: "ratio".to_string(),
-                    name: "Ratio".to_string(),
-                    short_name: "Rat".to_string(),
-                    value: 0.16,
-                    default: 0.16,
-                    unit: ":1".to_string(),
-                    format: ParameterFormat::Float { min: 1.0, max: 20.0, precision: 1 },
-                    priority: 1,
+            .with_parameter(BlockParameter {
+                id: "ratio".to_string(),
+                name: "Ratio".to_string(),
+                short_name: "Rat".to_string(),
+                value: 0.16,
+                default: 0.16,
+                unit: ":1".to_string(),
+                format: ParameterFormat::Float {
+                    min: 1.0,
+                    max: 20.0,
+                    precision: 1,
                 },
-            )
+                priority: 1,
+            })
             .with_parameter(
                 BlockParameter::time_ms("attack", "Attack", 0.01, 100.0)
                     .with_priority(2)
@@ -698,18 +705,20 @@ pub mod definitions {
                     .with_short_name("Thr")
                     .with_default(0.5),
             )
-            .with_parameter(
-                BlockParameter {
-                    id: "ratio".to_string(),
-                    name: "Ratio".to_string(),
-                    short_name: "Rat".to_string(),
-                    value: 0.5,
-                    default: 0.5,
-                    unit: ":1".to_string(),
-                    format: ParameterFormat::Float { min: 1.0, max: 20.0, precision: 1 },
-                    priority: 2,
+            .with_parameter(BlockParameter {
+                id: "ratio".to_string(),
+                name: "Ratio".to_string(),
+                short_name: "Rat".to_string(),
+                value: 0.5,
+                default: 0.5,
+                unit: ":1".to_string(),
+                format: ParameterFormat::Float {
+                    min: 1.0,
+                    max: 20.0,
+                    precision: 1,
                 },
-            )
+                priority: 2,
+            })
             .with_parameter(
                 BlockParameter::gain("range", "Range", -80.0, 0.0)
                     .with_priority(1)
@@ -844,18 +853,20 @@ pub mod definitions {
                     .with_short_name("Dly")
                     .with_default(0.2),
             )
-            .with_parameter(
-                BlockParameter {
-                    id: "feedback".to_string(),
-                    name: "Feedback".to_string(),
-                    short_name: "FB".to_string(),
-                    value: 0.5,
-                    default: 0.5,
-                    unit: "".to_string(),
-                    format: ParameterFormat::Float { min: -1.0, max: 1.0, precision: 2 },
-                    priority: 3,
+            .with_parameter(BlockParameter {
+                id: "feedback".to_string(),
+                name: "Feedback".to_string(),
+                short_name: "FB".to_string(),
+                value: 0.5,
+                default: 0.5,
+                unit: "".to_string(),
+                format: ParameterFormat::Float {
+                    min: -1.0,
+                    max: 1.0,
+                    precision: 2,
                 },
-            )
+                priority: 3,
+            })
             .with_parameter(
                 BlockParameter::percent("mix", "Mix")
                     .with_priority(1)
@@ -924,18 +935,20 @@ pub mod definitions {
                     .with_short_name("Rng")
                     .with_default(0.5),
             )
-            .with_parameter(
-                BlockParameter {
-                    id: "ratio".to_string(),
-                    name: "Ratio".to_string(),
-                    short_name: "Rat".to_string(),
-                    value: 0.4,
-                    default: 0.4,
-                    unit: ":1".to_string(),
-                    format: ParameterFormat::Float { min: 1.0, max: 10.0, precision: 1 },
-                    priority: 2,
+            .with_parameter(BlockParameter {
+                id: "ratio".to_string(),
+                name: "Ratio".to_string(),
+                short_name: "Rat".to_string(),
+                value: 0.4,
+                default: 0.4,
+                unit: ":1".to_string(),
+                format: ParameterFormat::Float {
+                    min: 1.0,
+                    max: 10.0,
+                    precision: 1,
                 },
-            )
+                priority: 2,
+            })
             .with_macro_mapping(
                 ParameterMapping::new("threshold", "Threshold")
                     .with_param_range(0.2, 0.8)

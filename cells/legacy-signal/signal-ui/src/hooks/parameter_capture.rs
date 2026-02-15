@@ -23,7 +23,11 @@ pub fn use_parameter_capture() -> Callback<String> {
     Callback::new(move |name: String| {
         let graph = RIG_NODE_GRAPH.read();
         let snapshot = capture_rig_snapshot(&graph, name);
-        tracing::info!("Captured rig snapshot '{}' (id={})", snapshot.name, snapshot.id);
+        tracing::info!(
+            "Captured rig snapshot '{}' (id={})",
+            snapshot.name,
+            snapshot.id
+        );
         RIG_SNAPSHOTS.write().push(snapshot);
     })
 }

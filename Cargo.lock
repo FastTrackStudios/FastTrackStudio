@@ -1147,7 +1147,7 @@ dependencies = [
  "stylo_dom",
  "stylo_taffy",
  "stylo_traits",
- "taffy",
+ "taffy 0.9.2",
  "thread_local",
  "url",
  "usvg 0.46.0",
@@ -1190,7 +1190,7 @@ dependencies = [
  "parley 0.7.0",
  "peniko 0.6.0",
  "stylo",
- "taffy",
+ "taffy 0.9.2",
  "usvg 0.46.0",
 ]
 
@@ -2943,7 +2943,7 @@ dependencies = [
  "global-hotkey",
  "infer",
  "jni",
- "lazy-js-bundle",
+ "lazy-js-bundle 0.7.3",
  "libc",
  "muda",
  "ndk",
@@ -3012,7 +3012,7 @@ dependencies = [
  "futures-channel",
  "futures-util",
  "generational-box",
- "lazy-js-bundle",
+ "lazy-js-bundle 0.7.3",
  "serde",
  "serde_json",
  "tracing",
@@ -3162,7 +3162,7 @@ dependencies = [
  "futures-util",
  "generational-box",
  "keyboard-types 0.7.0",
- "lazy-js-bundle",
+ "lazy-js-bundle 0.7.3",
  "rustversion",
  "serde",
  "serde_json",
@@ -3192,7 +3192,7 @@ dependencies = [
  "dioxus-core-types",
  "dioxus-html",
  "js-sys",
- "lazy-js-bundle",
+ "lazy-js-bundle 0.7.3",
  "rustc-hash 2.1.1",
  "serde",
  "sledgehammer_bindgen",
@@ -3264,6 +3264,19 @@ dependencies = [
  "futures-util",
  "keyboard-types 0.7.0",
  "rustc-hash 1.1.0",
+]
+
+[[package]]
+name = "dioxus-primitives"
+version = "0.0.1"
+source = "git+https://github.com/DioxusLabs/components?rev=8e25631c7d4234ee070509156ed2abebb7b1d6e9#8e25631c7d4234ee070509156ed2abebb7b1d6e9"
+dependencies = [
+ "dioxus",
+ "dioxus-time 0.7.0 (git+https://github.com/ealmloff/dioxus-std?branch=0.7)",
+ "lazy-js-bundle 0.6.2",
+ "num-integer",
+ "time",
+ "tracing",
 ]
 
 [[package]]
@@ -3355,6 +3368,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "dioxus-time"
+version = "0.7.0"
+source = "git+https://github.com/ealmloff/dioxus-std?branch=0.7#8c868ac1d60e3232e3f16f6195d6deb3c016de17"
+dependencies = [
+ "dioxus",
+ "futures",
+ "gloo-timers",
+ "tokio",
+]
+
+[[package]]
+name = "dioxus-time"
+version = "0.7.0"
+source = "git+https://github.com/ealmloff/dioxus-std?rev=7e0c41ef8c5514e46e8ac657227568660cf38987#7e0c41ef8c5514e46e8ac657227568660cf38987"
+dependencies = [
+ "dioxus",
+ "futures",
+ "gloo-timers",
+ "tokio",
+]
+
+[[package]]
 name = "dioxus-web"
 version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3374,7 +3409,7 @@ dependencies = [
  "generational-box",
  "gloo-timers",
  "js-sys",
- "lazy-js-bundle",
+ "lazy-js-bundle 0.7.3",
  "rustc-hash 2.1.1",
  "send_wrapper",
  "serde",
@@ -4428,6 +4463,7 @@ dependencies = [
  "serde",
  "serde_json",
  "skrifa 0.26.6",
+ "taffy 0.7.7",
  "tokio",
 ]
 
@@ -5232,6 +5268,12 @@ checksum = "fdf242682df893b86f33a73828fb09ca4b2d3bb6cc95249707fc684d27484b91"
 dependencies = [
  "bitflags 2.10.0",
 ]
+
+[[package]]
+name = "grid"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "36119f3a540b086b4e436bb2b588cf98a68863470e0e880f4d0842f112a3183a"
 
 [[package]]
 name = "grid"
@@ -6480,7 +6522,7 @@ dependencies = [
  "keyflow",
  "keyflow-proto",
  "kurbo 0.13.0",
- "lucide-dioxus",
+ "lucide-dioxus 2.563.0",
  "peniko 0.6.0",
  "serde_json",
  "session",
@@ -6626,6 +6668,12 @@ checksum = "0de8b303297635ad57c9f5059fd9cee7a47f8e8daa09df0fcd07dd39fb22977f"
 dependencies = [
  "log",
 ]
+
+[[package]]
+name = "lazy-js-bundle"
+version = "0.6.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e49596223b9d9d4947a14a25c142a6e7d8ab3f27eb3ade269d238bb8b5c267e2"
 
 [[package]]
 name = "lazy-js-bundle"
@@ -6919,11 +6967,32 @@ checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
 
 [[package]]
 name = "lucide-dioxus"
+version = "2.26.0"
+source = "git+https://github.com/Leaf-Computer/lucide.git?rev=e3e509d5855324e893aef838747cccb2d115dc15#e3e509d5855324e893aef838747cccb2d115dc15"
+dependencies = [
+ "dioxus",
+]
+
+[[package]]
+name = "lucide-dioxus"
 version = "2.563.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2edbaea8759034dfb5373c6a13d0ea1c1cbcdc5a7d3dafea6f166784ea5aba3a"
 dependencies = [
  "dioxus",
+]
+
+[[package]]
+name = "lumen-blocks"
+version = "0.2.0"
+source = "git+https://github.com/Leaf-Computer/lumen-blocks.git?tag=v0.2.0#267550783eb800f0d8bc4ac0788665fb34068d16"
+dependencies = [
+ "dioxus",
+ "dioxus-primitives",
+ "dioxus-time 0.7.0 (git+https://github.com/ealmloff/dioxus-std?rev=7e0c41ef8c5514e46e8ac657227568660cf38987)",
+ "log",
+ "lucide-dioxus 2.26.0",
+ "tracing",
 ]
 
 [[package]]
@@ -8852,6 +8921,7 @@ dependencies = [
  "frame-proto",
  "frame-ui",
  "kurbo 0.13.0",
+ "lumen-blocks",
  "peniko 0.6.0",
  "serde_json",
  "signal2",
@@ -10837,7 +10907,7 @@ dependencies = [
  "dock-dioxus",
  "dock-proto",
  "eyre",
- "lucide-dioxus",
+ "lucide-dioxus 2.563.0",
  "session-proto",
  "tracing",
  "web-sys",
@@ -10996,7 +11066,7 @@ dependencies = [
  "eyre",
  "facet",
  "facet-json",
- "lucide-dioxus",
+ "lucide-dioxus 2.563.0",
  "nucleo-matcher",
  "roam",
  "serde",
@@ -11890,7 +11960,7 @@ source = "git+https://github.com/DioxusLabs/blitz?rev=b88144ed#b88144edab3f44b6d
 dependencies = [
  "stylo",
  "stylo_atoms",
- "taffy",
+ "taffy 0.9.2",
 ]
 
 [[package]]
@@ -12182,11 +12252,23 @@ dependencies = [
 
 [[package]]
 name = "taffy"
+version = "0.7.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ab4f4d046dd956a47a7e1a2947083d7ac3e6aa3cfaaead36173ceaa5ab11878c"
+dependencies = [
+ "arrayvec",
+ "grid 0.15.0",
+ "serde",
+ "slotmap",
+]
+
+[[package]]
+name = "taffy"
 version = "0.9.2"
 source = "git+https://github.com/DioxusLabs/taffy?rev=25759dad44d8350743a4e866fee54962f996895a#25759dad44d8350743a4e866fee54962f996895a"
 dependencies = [
  "arrayvec",
- "grid",
+ "grid 1.0.0",
  "serde",
  "slotmap",
 ]

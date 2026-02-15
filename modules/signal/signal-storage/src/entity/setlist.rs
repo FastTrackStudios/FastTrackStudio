@@ -34,4 +34,3 @@ impl Related<super::setlist_entry::Entity> for Entity {
 }
 
 impl ActiveModelBehavior for ActiveModel {}
-

@@ -109,7 +109,8 @@ impl WhenExpr {
             Self::True => true,
             Self::Tag(tag) => ctx.has_tag(tag),
             Self::VarEq { key, value } => {
-                ctx.get_var(key).is_some_and(|v| v == value) || ctx.has_tag(&format!("{key}:{value}"))
+                ctx.get_var(key).is_some_and(|v| v == value)
+                    || ctx.has_tag(&format!("{key}:{value}"))
             }
             Self::And(items) => items.iter().all(|expr| expr.evaluate(ctx)),
         }
