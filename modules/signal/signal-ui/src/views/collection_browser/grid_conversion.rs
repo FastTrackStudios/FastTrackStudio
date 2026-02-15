@@ -1,0 +1,344 @@
+//! Grid slot conversion and the `RigGridPanel` wrapper component.
+//!
+//! Converts domain hierarchy data (`EngineFlowData`, `ModuleChainData`,
+//! `SignalChain`) into flat `Vec<GridSlot>` for the `DynamicGridView`.
+
+use dioxus::prelude::*;
+use signal::SignalChain;
+
+use super::inspector::BlockInspectorPanel;
+use super::types::{EngineFlowData, ModuleChainData};
+use crate::components::dynamic_grid::{
+    BlockPickerDropdown, DynamicGridView, GridConnection as DynGridConnection, GridSelection,
+    GridSlot, PICKER_CELL, PICKER_CLICK_POS,
+};
+
+// region: --- Constants
+
+/// Preferred max columns before wrapping a module to the next row band.
+const SOFT_MAX_COLS: usize = 14;
+
+/// Gap between row bands — 2 empty rows for cable routing + split fan-out.
+const ROW_BAND_STRIDE: usize = 3;
+
+// endregion: --- Constants
+
+// region: --- Converters
+
+/// Flatten the full rig hierarchy (engines → layers → modules → blocks)
+/// into a single `Vec<GridSlot>` for the interactive `DynamicGridView`.
+///
+/// Layout strategy (matching legacy `unified_grid_editor`):
+///  - Modules flow left-to-right across the row band
+///  - A module is **never split** across rows — if it won't fit in the
+///    remaining columns, the entire module wraps to the next row band
+///  - Row bands are separated by `ROW_BAND_STRIDE` rows (2 empty gap rows)
+///  - Split nodes fan out vertically within the module's row band
+pub(super) fn engines_to_grid_slots(engines: &[EngineFlowData]) -> Vec<GridSlot> {
+    let mut slots = Vec::new();
+    let mut col: usize = 0;
+    let mut row: usize = 0;
+
+    for engine in engines {
+        let engine_key = engine.name.clone();
+        for layer in &engine.layers {
+            let layer_key = format!("{}/{}", engine.name, layer.name);
+            for mc in &layer.module_chains {
+                let module_key = format!("{}/{}/{}", engine.name, layer.name, mc.name);
+                let mt = mc.module_type;
+
+                // Count how many columns this module needs
+                let module_width = count_chain_width(mc.chain.nodes());
+
+                // Wrap to next row band if module won't fit (never split a module)
+                if col > 0 && col + module_width > SOFT_MAX_COLS {
+                    col = 0;
+                    row += ROW_BAND_STRIDE;
+                }
+
+                let mut col_cursor = col;
+                flatten_chain_nodes(
+                    mc.chain.nodes(),
+                    &module_key,
+                    &layer_key,
+                    &engine_key,
+                    mt,
+                    &mut col_cursor,
+                    row,
+                    &mut slots,
+                );
+
+                col = col_cursor;
+            }
+        }
+    }
+
+    slots
+}
+
+/// Convert a list of module chains into grid slots for `DynamicGridView`.
+/// Used for Engine/Layer detail where we show the module chains without
+/// the full rig hierarchy.
+pub(super) fn module_chains_to_grid_slots(chains: &[ModuleChainData]) -> Vec<GridSlot> {
+    let mut slots = Vec::new();
+    let mut col: usize = 0;
+    let mut row: usize = 0;
+
+    for mc in chains {
+        let module_key = mc.name.clone();
+        let mt = mc.module_type;
+        let module_width = count_chain_width(mc.chain.nodes());
+
+        if col > 0 && col + module_width > SOFT_MAX_COLS {
+            col = 0;
+            row += ROW_BAND_STRIDE;
+        }
+
+        let mut col_cursor = col;
+        flatten_chain_nodes(
+            mc.chain.nodes(),
+            &module_key,
+            &module_key,
+            &module_key,
+            mt,
+            &mut col_cursor,
+            row,
+            &mut slots,
+        );
+        col = col_cursor;
+    }
+    slots
+}
+
+/// Convert a single signal chain into grid slots for `DynamicGridView`.
+/// Used for Module snapshot detail.
+pub(super) fn signal_chain_to_grid_slots(
+    chain: &SignalChain,
+    module_name: &str,
+    module_type: Option<signal::ModuleType>,
+) -> Vec<GridSlot> {
+    let mut slots = Vec::new();
+    let mut col_cursor = 0;
+    flatten_chain_nodes(
+        chain.nodes(),
+        module_name,
+        module_name,
+        module_name,
+        module_type,
+        &mut col_cursor,
+        0,
+        &mut slots,
+    );
+    slots
+}
+
+/// Count the number of columns a chain of nodes needs (for wrapping decisions).
+fn count_chain_width(nodes: &[signal::SignalNode]) -> usize {
+    let mut width = 0;
+    for node in nodes {
+        match node {
+            signal::SignalNode::Block(_) => width += 1,
+            signal::SignalNode::Split { lanes } => {
+                // A split's width is the max width among its lanes.
+                // Empty lanes get a 1-col pass-through placeholder.
+                let max_lane_width = lanes
+                    .iter()
+                    .map(|lane| {
+                        if lane.is_empty() {
+                            1
+                        } else {
+                            count_chain_width(lane.nodes())
+                        }
+                    })
+                    .max()
+                    .unwrap_or(0);
+                width += max_lane_width;
+            }
+        }
+    }
+    width
+}
+
+/// Recursively flatten SignalNodes into GridSlots, handling splits.
+fn flatten_chain_nodes(
+    nodes: &[signal::SignalNode],
+    module_key: &str,
+    layer_key: &str,
+    engine_key: &str,
+    module_type: Option<signal::ModuleType>,
+    col_cursor: &mut usize,
+    base_row: usize,
+    slots: &mut Vec<GridSlot>,
+) {
+    for node in nodes {
+        match node {
+            signal::SignalNode::Block(mb) => {
+                slots.push(GridSlot {
+                    id: uuid::Uuid::new_v4(),
+                    block_type: mb.block_type(),
+                    block_preset_name: Some(mb.label().to_string()),
+                    plugin_name: None,
+                    col: *col_cursor,
+                    row: base_row,
+                    module_group: Some(module_key.to_string()),
+                    module_type,
+                    layer_group: Some(layer_key.to_string()),
+                    engine_group: Some(engine_key.to_string()),
+                    is_template: false,
+                    bypassed: false,
+                    is_phantom: false,
+                });
+                *col_cursor += 1;
+            }
+            signal::SignalNode::Split { lanes } => {
+                // Fan-out: each lane gets its own row, all starting at the same col.
+                // Reorder so empty (dry/pass-through) lanes go in the middle
+                // and wet lanes are at top and bottom.
+                let split_start_col = *col_cursor;
+                let mut max_col = split_start_col;
+
+                let mut wet: Vec<&signal::SignalChain> = Vec::new();
+                let mut dry: Vec<&signal::SignalChain> = Vec::new();
+                for lane in lanes.iter() {
+                    if lane.is_empty() {
+                        dry.push(lane);
+                    } else {
+                        wet.push(lane);
+                    }
+                }
+                // Layout order: first half of wet, then all dry, then second half of wet
+                let mid = (wet.len() + 1) / 2;
+                let mut ordered: Vec<&signal::SignalChain> = Vec::new();
+                ordered.extend_from_slice(&wet[..mid]);
+                ordered.extend_from_slice(&dry);
+                ordered.extend_from_slice(&wet[mid..]);
+
+                // Vertically center: dry lane sits at base_row, wet lanes
+                // fan out above and below. For 3 lanes: offset=1, rows are
+                // base_row-1 (top wet), base_row (dry), base_row+1 (bottom wet).
+                let total_lanes = ordered.len();
+                let vert_offset = (total_lanes.saturating_sub(1)) / 2;
+
+                for (i, lane) in ordered.iter().enumerate() {
+                    let lane_row = (base_row + i).saturating_sub(vert_offset);
+                    let mut lane_col = split_start_col;
+                    if lane.is_empty() {
+                        // Empty lane = dry pass-through. Create a phantom
+                        // slot so the module group bounding box includes
+                        // this row, but it won't render a visible cell.
+                        slots.push(GridSlot {
+                            id: uuid::Uuid::new_v4(),
+                            block_type: signal::BlockType::Send,
+                            block_preset_name: None,
+                            plugin_name: None,
+                            col: lane_col,
+                            row: lane_row,
+                            module_group: Some(module_key.to_string()),
+                            module_type,
+                            layer_group: Some(layer_key.to_string()),
+                            engine_group: Some(engine_key.to_string()),
+                            is_template: false,
+                            bypassed: false,
+                            is_phantom: true,
+                        });
+                        lane_col += 1;
+                    } else {
+                        flatten_chain_nodes(
+                            lane.nodes(),
+                            module_key,
+                            layer_key,
+                            engine_key,
+                            module_type,
+                            &mut lane_col,
+                            lane_row,
+                            slots,
+                        );
+                    }
+                    if lane_col > max_col {
+                        max_col = lane_col;
+                    }
+                }
+                *col_cursor = max_col;
+            }
+        }
+    }
+}
+
+// endregion: --- Converters
+
+// region: --- RigGridPanel
+
+#[derive(Props, Clone, PartialEq)]
+pub(super) struct RigGridPanelProps {
+    pub initial_slots: Vec<GridSlot>,
+}
+
+/// Stateful wrapper around `DynamicGridView` + `BlockPickerDropdown`.
+///
+/// Owns local signals for chain, selection, and connections so the
+/// detail panel can render an interactive grid without lifting state further.
+#[component]
+pub(super) fn RigGridPanel(props: RigGridPanelProps) -> Element {
+    let mut chain = use_signal(|| props.initial_slots.clone());
+    let mut selection = use_signal(|| Option::<GridSelection>::None);
+    let mut connections = use_signal(Vec::<DynGridConnection>::new);
+
+    // Sync when the parent passes new data (e.g. user selects a different preset)
+    use_effect(move || {
+        chain.set(props.initial_slots.clone());
+        selection.set(None);
+        connections.set(Vec::new());
+    });
+
+    let picker_cell = PICKER_CELL();
+    let picker_pos = PICKER_CLICK_POS();
+
+    let current_chain = chain();
+    let current_sel = selection();
+
+    rsx! {
+        div {
+            class: "mt-3",
+            style: "height: 480px;",
+            DynamicGridView {
+                chain: current_chain.clone(),
+                selection: current_sel.clone(),
+                connections: connections(),
+                on_chain_change: move |new_chain: Vec<GridSlot>| {
+                    chain.set(new_chain);
+                },
+                on_connections_change: move |new_conns: Vec<DynGridConnection>| {
+                    connections.set(new_conns);
+                },
+                on_select: move |sel: Option<GridSelection>| {
+                    selection.set(sel);
+                },
+            }
+        }
+        // Block picker rendered outside the transform context
+        if let Some((col, row)) = picker_cell {
+            BlockPickerDropdown {
+                col: col,
+                row: row,
+                click_x: picker_pos.0,
+                click_y: picker_pos.1,
+                on_add_slot: move |slot: GridSlot| {
+                    let mut current = chain();
+                    current.push(slot);
+                    chain.set(current);
+                    *PICKER_CELL.write() = None;
+                },
+                on_close: move |_| {
+                    *PICKER_CELL.write() = None;
+                },
+            }
+        }
+        // Inspector panel for selected block / module
+        BlockInspectorPanel {
+            selection: current_sel,
+            chain: current_chain,
+        }
+    }
+}
+
+// endregion: --- RigGridPanel
