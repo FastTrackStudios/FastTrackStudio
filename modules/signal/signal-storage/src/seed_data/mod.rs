@@ -26,6 +26,7 @@ pub mod reverb;
 pub mod rig;
 pub mod rotary;
 pub mod saturator;
+pub mod setlist;
 pub mod song;
 pub mod tremolo;
 pub mod tuner;
@@ -38,6 +39,7 @@ use signal_proto::{
     layer::Layer,
     profile::Profile,
     rig::Rig,
+    setlist::Setlist,
     song::Song,
     seed_id,
     Block,
@@ -76,6 +78,7 @@ pub struct SeedBundle {
     pub rigs: Vec<Rig>,
     pub profiles: Vec<Profile>,
     pub songs: Vec<Song>,
+    pub setlists: Vec<Setlist>,
 }
 
 /// All default block collections (presets) across every block type.
@@ -137,6 +140,11 @@ pub fn default_seed_songs() -> Vec<Song> {
     song::songs()
 }
 
+/// All default setlist collections.
+pub fn default_seed_setlists() -> Vec<Setlist> {
+    setlist::setlists()
+}
+
 /// Runtime seed bundle with globally-unique IDs for private ("phantom") entries.
 ///
 /// Built-in library seeds remain deterministic. Private entries are generated
@@ -149,6 +157,7 @@ pub fn runtime_seed_bundle() -> SeedBundle {
     let mut rigs = default_seed_rigs();
     let profiles = default_seed_profiles();
     let songs = default_seed_songs();
+    let setlists = default_seed_setlists();
 
     let private_block_preset_id = PresetId::new();
     let private_block_default_snapshot_id = SnapshotId::new();
@@ -287,6 +296,7 @@ pub fn runtime_seed_bundle() -> SeedBundle {
         rigs,
         profiles,
         songs,
+        setlists,
     }
 }
 

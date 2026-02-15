@@ -253,6 +253,8 @@ pub enum BrowserEntityKind {
     ProfileVariant,
     SongCollection,
     SongVariant,
+    SetlistCollection,
+    SetlistVariant,
 }
 
 pub fn browser_columns(mode: BrowserMode, rig_type: Option<RigType>) -> &'static [TagCategory] {
@@ -322,6 +324,9 @@ pub fn fallback_categories(
         BrowserEntityKind::SongCollection | BrowserEntityKind::SongVariant => {
             &[TagCategory::Context, TagCategory::Genre, TagCategory::Character]
         }
+        BrowserEntityKind::SetlistCollection | BrowserEntityKind::SetlistVariant => {
+            &[TagCategory::Context, TagCategory::RigType, TagCategory::Workflow]
+        }
     }
 }
 
@@ -343,6 +348,8 @@ pub struct BrowserEntry {
 pub struct BrowserQuery {
     pub mode: BrowserMode,
     pub rig_type: Option<RigType>,
+    pub strict_rig_type: bool,
+    pub kinds: Vec<BrowserEntityKind>,
     pub include: Vec<String>,
     pub exclude: Vec<String>,
     pub text: Option<String>,
@@ -353,6 +360,8 @@ impl Default for BrowserQuery {
         Self {
             mode: BrowserMode::Semantic,
             rig_type: None,
+            strict_rig_type: false,
+            kinds: Vec::new(),
             include: Vec::new(),
             exclude: Vec::new(),
             text: None,
@@ -394,10 +403,21 @@ impl BrowserIndex {
         for tag in &query.exclude {
             exclude_keys.insert(StructuredTag::parse(tag).key());
         }
+        let strict_rig_tag = query.rig_type.map(|r| format!("rig_type:{}", r.as_str()));
 
         let mut hits = Vec::new();
         for e in &self.entries {
+            if !query.kinds.is_empty() && !query.kinds.contains(&e.node.kind) {
+                continue;
+            }
             if !exclude_keys.is_empty() && e.tags.values().any(|t| exclude_keys.contains(&t.key())) {
+                continue;
+            }
+            if query.strict_rig_type
+                && strict_rig_tag
+                    .as_ref()
+                    .is_some_and(|k| !e.tags.contains_key(k))
+            {
                 continue;
             }
 
@@ -621,6 +641,78 @@ mod tests {
         };
         let hits = index.query(&query, &TagWeights::default());
         assert_eq!(hits.first().map(|h| h.node.id.as_str()), Some("clean"));
+    }
+
+    #[test]
+    fn browser_query_strict_rig_type_filters_results() {
+        let mut keys_tags = TagSet::new();
+        keys_tags.insert(StructuredTag::new(TagCategory::RigType, "keys"));
+        let keys = BrowserEntry {
+            node: BrowserNodeId {
+                kind: BrowserEntityKind::RigVariant,
+                id: "keys-rig".into(),
+            },
+            name: "Keys Rig".into(),
+            tags: keys_tags,
+            aliases: vec![],
+        };
+
+        let mut guitar_tags = TagSet::new();
+        guitar_tags.insert(StructuredTag::new(TagCategory::RigType, "guitar"));
+        let guitar = BrowserEntry {
+            node: BrowserNodeId {
+                kind: BrowserEntityKind::RigVariant,
+                id: "guitar-rig".into(),
+            },
+            name: "Guitar Rig".into(),
+            tags: guitar_tags,
+            aliases: vec![],
+        };
+
+        let index = BrowserIndex::with_entries(vec![guitar, keys]);
+        let query = BrowserQuery {
+            rig_type: Some(RigType::Keys),
+            strict_rig_type: true,
+            ..BrowserQuery::default()
+        };
+
+        let hits = index.query(&query, &TagWeights::default());
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].node.id, "keys-rig");
+    }
+
+    #[test]
+    fn browser_query_kinds_filters_entity_types() {
+        let mut tags = TagSet::new();
+        tags.insert(StructuredTag::new(TagCategory::RigType, "keys"));
+        let setlist = BrowserEntry {
+            node: BrowserNodeId {
+                kind: BrowserEntityKind::SetlistCollection,
+                id: "setlist-1".into(),
+            },
+            name: "Setlist".into(),
+            tags: tags.clone(),
+            aliases: vec![],
+        };
+        let rig = BrowserEntry {
+            node: BrowserNodeId {
+                kind: BrowserEntityKind::RigCollection,
+                id: "rig-1".into(),
+            },
+            name: "Rig".into(),
+            tags,
+            aliases: vec![],
+        };
+
+        let index = BrowserIndex::with_entries(vec![setlist, rig]);
+        let query = BrowserQuery {
+            kinds: vec![BrowserEntityKind::SetlistCollection],
+            ..BrowserQuery::default()
+        };
+
+        let hits = index.query(&query, &TagWeights::default());
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].node.id, "setlist-1");
     }
 
     #[test]

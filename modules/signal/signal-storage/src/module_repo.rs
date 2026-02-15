@@ -2,7 +2,9 @@
 
 use sea_orm::*;
 use sea_orm::{ConnectionTrait, Schema};
-use signal_proto::{Module, ModulePreset, ModulePresetId, ModuleSnapshot, ModuleSnapshotId};
+use signal_proto::{
+    metadata::Metadata, Module, ModulePreset, ModulePresetId, ModuleSnapshot, ModuleSnapshotId,
+};
 
 use crate::entity;
 use crate::{Database, DatabaseConnection, StorageError, StorageResult};
@@ -73,6 +75,18 @@ impl ModuleRepoLive {
             )
             .await
             .ok();
+        self.db
+            .execute_unprepared(
+                "ALTER TABLE module_presets ADD COLUMN metadata_json TEXT NOT NULL DEFAULT '{}'",
+            )
+            .await
+            .ok();
+        self.db
+            .execute_unprepared(
+                "ALTER TABLE module_snapshots ADD COLUMN metadata_json TEXT NOT NULL DEFAULT '{}'",
+            )
+            .await
+            .ok();
 
         Ok(())
     }
@@ -91,6 +105,7 @@ impl ModuleRepoLive {
                 name: Set(collection.name().to_string()),
                 module_type: Set(collection.module_type().as_str().to_string()),
                 default_snapshot_id: Set(collection.default_snapshot().id().to_string()),
+                metadata_json: Set(Self::metadata_to_json(collection.metadata())?),
             })
             .exec(&self.db)
             .await?;
@@ -101,6 +116,7 @@ impl ModuleRepoLive {
                     module_preset_id: Set(collection.id().to_string()),
                     name: Set(variant.name().to_string()),
                     state_json: Set(Self::module_to_json(variant.module())?),
+                    metadata_json: Set(Self::metadata_to_json(variant.metadata())?),
                     version: Set(variant.version() as i32),
                 })
                 .exec(&self.db)
@@ -123,6 +139,16 @@ impl ModuleRepoLive {
             .map_err(|e| StorageError::Data(format!("failed to parse module state json: {e}")))
     }
 
+    fn metadata_to_json(metadata: &Metadata) -> StorageResult<String> {
+        serde_json::to_string(metadata)
+            .map_err(|e| StorageError::Data(format!("failed to serialize metadata: {e}")))
+    }
+
+    fn metadata_from_json(json: &str) -> StorageResult<Metadata> {
+        serde_json::from_str(json)
+            .map_err(|e| StorageError::Data(format!("failed to parse metadata json: {e}")))
+    }
+
     // endregion: --- JSON helpers
 
     // region: --- Model converters
@@ -130,11 +156,12 @@ impl ModuleRepoLive {
     fn module_snapshot_from_model(
         model: &entity::module_snapshot::Model,
     ) -> StorageResult<ModuleSnapshot> {
-        Ok(ModuleSnapshot::with_version(
+        Ok(ModuleSnapshot::with_version_and_metadata(
             model.snapshot_id_branded(),
             model.name.clone(),
             Self::module_from_json(&model.state_json)?,
             model.version as u32,
+            Self::metadata_from_json(&model.metadata_json)?,
         ))
     }
 
@@ -175,13 +202,16 @@ impl ModuleRepoLive {
             .filter(|snapshot| snapshot.id() != &default_variant_id)
             .collect::<Vec<_>>();
 
-        Ok(ModulePreset::new(
+        let preset = ModulePreset::new(
             preset_model.preset_id_branded(),
             preset_model.name.clone(),
             preset_model.module_type_branded(),
             default_variant,
             additional,
-        ))
+        )
+        .with_metadata(Self::metadata_from_json(&preset_model.metadata_json)?);
+
+        Ok(preset)
     }
 
     // endregion: --- Shared query helpers
@@ -261,8 +291,8 @@ impl ModuleRepo for ModuleRepoLive {
 mod tests {
     use super::*;
     use signal_proto::{
-        seed_id, Block, BlockParameter, BlockParameterOverride, BlockType, ModuleBlock,
-        ModuleBlockSource, ModuleType, PresetId, SignalChain, SignalNode,
+        metadata::Metadata, seed_id, Block, BlockParameter, BlockParameterOverride, BlockType,
+        ModuleBlock, ModuleBlockSource, ModuleType, PresetId, SignalChain, SignalNode,
     };
 
     type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
@@ -680,6 +710,46 @@ mod tests {
 
         // dly-2 is still in the other lane of the delay split
         assert!(loaded_blocks.iter().any(|b| b.id() == "dly-2"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn module_collection_and_variant_metadata_round_trip() -> Result<()> {
+        let repo = ModuleRepoLive::connect_sqlite_in_memory().await?;
+        repo.init_schema().await?;
+
+        let module = Module::from_blocks(vec![ModuleBlock::new(
+            "eq",
+            "EQ",
+            BlockType::Eq,
+            ModuleBlockSource::PresetDefault {
+                preset_id: PresetId::from_uuid(seed_id("eq-reaeq")),
+                saved_at_version: None,
+            },
+        )]);
+        let variant = ModuleSnapshot::new(seed_id("meta-mod-snap"), "Meta", module)
+            .with_metadata(Metadata::new().with_tag("module-snapshot").with_notes("snapshot"));
+        let collection = ModulePreset::new(
+            seed_id("meta-mod-preset"),
+            "MetaMod",
+            ModuleType::Custom,
+            variant,
+            vec![],
+        )
+        .with_metadata(Metadata::new().with_tag("module-preset").with_description("desc"));
+
+        repo.reseed_defaults(&[collection]).await?;
+        let loaded = repo
+            .list_module_collections()
+            .await?
+            .into_iter()
+            .find(|m| m.id().as_str() == seed_id("meta-mod-preset").to_string())
+            .expect("meta module preset exists");
+
+        assert!(loaded.metadata().tags.contains("module-preset"));
+        assert_eq!(loaded.metadata().description.as_deref(), Some("desc"));
+        assert!(loaded.default_snapshot().metadata().tags.contains("module-snapshot"));
+        assert_eq!(loaded.default_snapshot().metadata().notes.as_deref(), Some("snapshot"));
         Ok(())
     }
 }

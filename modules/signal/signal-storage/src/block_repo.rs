@@ -2,7 +2,9 @@
 
 use sea_orm::*;
 use sea_orm::{ConnectionTrait, Schema};
-use signal_proto::{Block, BlockType, Preset, PresetId, Snapshot, SnapshotId, ALL_BLOCK_TYPES};
+use signal_proto::{
+    metadata::Metadata, Block, BlockType, Preset, PresetId, Snapshot, SnapshotId, ALL_BLOCK_TYPES,
+};
 
 use crate::entity;
 use crate::{Database, DatabaseConnection, StorageError, StorageResult};
@@ -73,6 +75,18 @@ impl BlockRepoLive {
             )
             .await
             .ok();
+        self.db
+            .execute_unprepared(
+                "ALTER TABLE presets ADD COLUMN metadata_json TEXT NOT NULL DEFAULT '{}'",
+            )
+            .await
+            .ok();
+        self.db
+            .execute_unprepared(
+                "ALTER TABLE snapshots ADD COLUMN metadata_json TEXT NOT NULL DEFAULT '{}'",
+            )
+            .await
+            .ok();
 
         Ok(())
     }
@@ -92,6 +106,7 @@ impl BlockRepoLive {
                 block_type: Set(collection.block_type().as_str().to_string()),
                 name: Set(collection.name().to_string()),
                 default_snapshot_id: Set(collection.default_snapshot().id().to_string()),
+                metadata_json: Set(metadata_to_json(collection.metadata())?),
             })
             .exec(&self.db)
             .await?;
@@ -102,6 +117,7 @@ impl BlockRepoLive {
                     preset_id: Set(collection.id().to_string()),
                     name: Set(variant.name().to_string()),
                     state_json: Set(block_to_json(&variant.block())?),
+                    metadata_json: Set(metadata_to_json(variant.metadata())?),
                     version: Set(variant.version() as i32),
                 })
                 .exec(&self.db)
@@ -137,12 +153,23 @@ fn block_from_json(state_json: &str) -> StorageResult<Block> {
 }
 
 fn snapshot_from_model(model: &entity::snapshot::Model) -> StorageResult<Snapshot> {
-    Ok(Snapshot::with_version(
+    Ok(Snapshot::with_version_and_metadata(
         model.snapshot_id_branded(),
         model.name.clone(),
         block_from_json(&model.state_json)?,
         model.version as u32,
+        metadata_from_json(&model.metadata_json)?,
     ))
+}
+
+fn metadata_to_json(metadata: &Metadata) -> StorageResult<String> {
+    serde_json::to_string(metadata)
+        .map_err(|e| StorageError::Data(format!("failed to serialize metadata: {e}")))
+}
+
+fn metadata_from_json(json: &str) -> StorageResult<Metadata> {
+    serde_json::from_str(json)
+        .map_err(|e| StorageError::Data(format!("failed to parse metadata json: {e}")))
 }
 
 // endregion: --- Private helpers
@@ -184,13 +211,16 @@ impl BlockRepoLive {
             .filter(|s| s.id() != &default_variant_id)
             .collect::<Vec<_>>();
 
-        Ok(Preset::new(
+        let preset = Preset::new(
             preset_model.preset_id_branded(),
             preset_model.name.clone(),
             block_type,
             default_variant,
             additional,
-        ))
+        )
+        .with_metadata(metadata_from_json(&preset_model.metadata_json)?);
+
+        Ok(preset)
     }
 }
 
@@ -309,7 +339,7 @@ impl BlockRepo for BlockRepoLive {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use signal_proto::{seed_id, BlockParameter};
+    use signal_proto::{metadata::Metadata, seed_id, BlockParameter};
 
     type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
 
@@ -607,6 +637,43 @@ mod tests {
                 snap.name()
             );
         }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn block_collection_and_variant_metadata_round_trip() -> Result<()> {
+        let repo = BlockRepoLive::connect_sqlite_in_memory().await?;
+        repo.init_schema().await?;
+
+        let variant = Snapshot::new(
+            seed_id("meta-snap"),
+            "MetaSnap",
+            Block::from_parameters(vec![BlockParameter::new("gain", "Gain", 0.5)]),
+        )
+        .with_metadata(Metadata::new().with_tag("snapshot-tag").with_notes("snapshot-notes"));
+        let preset = Preset::new(
+            seed_id("meta-preset"),
+            "MetaPreset",
+            BlockType::Amp,
+            variant,
+            vec![],
+        )
+        .with_metadata(Metadata::new().with_tag("preset-tag").with_description("preset-desc"));
+
+        repo.reseed_defaults(&[preset]).await?;
+        let amp = repo.list_block_collections(BlockType::Amp).await?;
+        let loaded = amp
+            .iter()
+            .find(|p| p.id().as_str() == seed_id("meta-preset").to_string())
+            .expect("meta preset exists");
+
+        assert!(loaded.metadata().tags.contains("preset-tag"));
+        assert_eq!(loaded.metadata().description.as_deref(), Some("preset-desc"));
+        assert!(loaded.default_snapshot().metadata().tags.contains("snapshot-tag"));
+        assert_eq!(
+            loaded.default_snapshot().metadata().notes.as_deref(),
+            Some("snapshot-notes")
+        );
         Ok(())
     }
 }

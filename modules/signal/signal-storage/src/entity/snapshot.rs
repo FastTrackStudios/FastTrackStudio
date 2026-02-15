@@ -9,6 +9,8 @@ pub struct Model {
     pub preset_id: String,
     pub name: String,
     pub state_json: String,
+    #[sea_orm(default_value = "{}")]
+    pub metadata_json: String,
     #[sea_orm(default_value = "1")]
     pub version: i32,
 }

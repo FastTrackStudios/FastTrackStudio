@@ -7,7 +7,7 @@ use signal_proto::song::{Section, Song};
 
 /// All default song collections.
 pub fn songs() -> Vec<Song> {
-    vec![feature_demo_song()]
+    vec![feature_demo_song(), dummy_song()]
 }
 
 /// Feature-Demo Song
@@ -91,6 +91,23 @@ fn feature_demo_song() -> Song {
     song
 }
 
+fn dummy_song() -> Song {
+    let section = Section::from_rig_scene(
+        seed_id("dummy-song-main"),
+        "Main",
+        seed_id("keys-megarig"),
+        seed_id("keys-megarig-default"),
+    );
+    Song::new(seed_id("dummy-song"), "Dummy Song", section)
+        .with_artist("Signal2")
+        .with_metadata(
+            Metadata::new()
+                .with_tag("setlist")
+                .with_tag("dummy")
+                .with_description("Simple seed song for demo setlists"),
+        )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -98,7 +115,7 @@ mod tests {
 
     #[test]
     fn song_count() {
-        assert_eq!(songs().len(), 1);
+        assert_eq!(songs().len(), 2);
     }
 
     #[test]

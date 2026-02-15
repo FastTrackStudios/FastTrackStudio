@@ -7,10 +7,11 @@ pub use signal_live::SignalLive;
 pub use signal_proto::*;
 pub use signal_storage::{
     default_block_collections, default_module_collections, default_seed_engines, default_seed_layers,
-    default_seed_profiles, default_seed_rigs, default_seed_songs, runtime_seed_bundle, BlockRepo,
-    BlockRepoLive, Database, DatabaseConnection, DbErr, EngineRepo, EngineRepoLive, LayerRepo,
-    LayerRepoLive, ModuleRepo, ModuleRepoLive, ProfileRepo, ProfileRepoLive, RigRepo,
-    RigRepoLive, SongRepo, SongRepoLive, StorageError, StorageResult,
+    default_seed_profiles, default_seed_rigs, default_seed_setlists, default_seed_songs,
+    runtime_seed_bundle, BlockRepo, BlockRepoLive, Database, DatabaseConnection, DbErr, EngineRepo,
+    EngineRepoLive, LayerRepo, LayerRepoLive, ModuleRepo, ModuleRepoLive, ProfileRepo,
+    ProfileRepoLive, RigRepo, RigRepoLive, SetlistRepo, SetlistRepoLive, SongRepo, SongRepoLive,
+    StorageError, StorageResult,
 };
 use std::sync::Arc;
 
@@ -54,10 +55,15 @@ pub async fn bootstrap_in_memory_controller_async() -> Result<SignalController, 
         profile_repo.save_profile(&profile).await?;
     }
 
-    let song_repo = SongRepoLive::new(db);
+    let song_repo = SongRepoLive::new(db.clone());
     song_repo.init_schema().await?;
     for song in seeds.songs {
         song_repo.save_song(&song).await?;
+    }
+    let setlist_repo = SetlistRepoLive::new(db);
+    setlist_repo.init_schema().await?;
+    for setlist in seeds.setlists {
+        setlist_repo.save_setlist(&setlist).await?;
     }
 
     let service = Arc::new(SignalLive::new(
@@ -68,6 +74,7 @@ pub async fn bootstrap_in_memory_controller_async() -> Result<SignalController, 
         Arc::new(rig_repo),
         Arc::new(profile_repo),
         Arc::new(song_repo),
+        Arc::new(setlist_repo),
     ));
     Ok(SignalController::new(service))
 }
@@ -155,6 +162,18 @@ pub fn bootstrap_in_memory_controller() -> SignalController {
                 .save_song(&song)
                 .await
                 .expect("failed to seed song");
+        }
+
+        let setlist_repo = SetlistRepoLive::new(db.clone());
+        setlist_repo
+            .init_schema()
+            .await
+            .expect("failed to initialize setlist schema");
+        for setlist in seeds.setlists {
+            setlist_repo
+                .save_setlist(&setlist)
+                .await
+                .expect("failed to seed setlist");
         }
 
         db

@@ -8,6 +8,7 @@ pub mod module_repo;
 pub mod profile_repo;
 pub mod rig_repo;
 pub mod seed_data;
+pub mod setlist_repo;
 pub mod song_repo;
 
 pub use block_repo::{BlockRepo, BlockRepoLive};
@@ -19,8 +20,10 @@ pub use rig_repo::{RigRepo, RigRepoLive};
 pub use sea_orm::{Database, DatabaseConnection, DbErr};
 pub use seed_data::{
     default_block_collections, default_module_collections, default_seed_engines, default_seed_layers,
-    default_seed_profiles, default_seed_rigs, default_seed_songs, runtime_seed_bundle, SeedBundle,
+    default_seed_profiles, default_seed_rigs, default_seed_setlists, default_seed_songs,
+    runtime_seed_bundle, SeedBundle,
 };
+pub use setlist_repo::{SetlistRepo, SetlistRepoLive};
 pub use song_repo::{SongRepo, SongRepoLive};
 
 #[derive(Debug, thiserror::Error)]

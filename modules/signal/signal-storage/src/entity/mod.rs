@@ -23,3 +23,7 @@ pub mod profile;
 // Song
 pub mod section;
 pub mod song;
+
+// Setlist
+pub mod setlist;
+pub mod setlist_entry;

@@ -23,7 +23,9 @@ pub mod module_type;
 pub mod overrides;
 pub mod override_policy;
 pub mod profile;
+pub mod resolve;
 pub mod rig;
+pub mod setlist;
 pub mod signal_chain;
 pub mod song;
 pub mod tagging;
@@ -362,6 +364,8 @@ pub struct Snapshot {
     id: SnapshotId,
     name: String,
     block: Block,
+    #[serde(default)]
+    metadata: metadata::Metadata,
     #[serde(default = "default_version")]
     version: u32,
 }
@@ -376,6 +380,7 @@ impl Snapshot {
             id: id.into(),
             name: name.into(),
             block,
+            metadata: metadata::Metadata::new(),
             version: 1,
         }
     }
@@ -391,6 +396,24 @@ impl Snapshot {
             id: id.into(),
             name: name.into(),
             block,
+            metadata: metadata::Metadata::new(),
+            version,
+        }
+    }
+
+    /// Create a snapshot with explicit version + metadata (used by storage layer on load).
+    pub fn with_version_and_metadata(
+        id: impl Into<SnapshotId>,
+        name: impl Into<String>,
+        block: Block,
+        version: u32,
+        metadata: metadata::Metadata,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            name: name.into(),
+            block,
+            metadata,
             version,
         }
     }
@@ -409,6 +432,16 @@ impl Snapshot {
 
     pub fn version(&self) -> u32 {
         self.version
+    }
+
+    pub fn metadata(&self) -> &metadata::Metadata {
+        &self.metadata
+    }
+
+    #[must_use]
+    pub fn with_metadata(mut self, metadata: metadata::Metadata) -> Self {
+        self.metadata = metadata;
+        self
     }
 
     /// Bump the version counter. Called by the storage layer when parameter values change.
@@ -471,6 +504,8 @@ pub struct Preset {
     block_type: BlockType,
     default_snapshot: Snapshot,
     snapshots: Vec<Snapshot>,
+    #[serde(default)]
+    metadata: metadata::Metadata,
 }
 
 impl Preset {
@@ -495,6 +530,7 @@ impl Preset {
             block_type,
             default_snapshot,
             snapshots,
+            metadata: metadata::Metadata::new(),
         }
     }
 
@@ -532,6 +568,16 @@ impl Preset {
             .iter()
             .find(|s| s.id() == snapshot_id)
             .cloned()
+    }
+
+    pub fn metadata(&self) -> &metadata::Metadata {
+        &self.metadata
+    }
+
+    #[must_use]
+    pub fn with_metadata(mut self, metadata: metadata::Metadata) -> Self {
+        self.metadata = metadata;
+        self
     }
 }
 
@@ -593,6 +639,26 @@ impl traits::Collection for Preset {
         if let Some(snap) = self.snapshots.iter().find(|s| s.id == id) {
             self.default_snapshot = snap.clone();
         }
+    }
+}
+
+impl traits::HasMetadata for Snapshot {
+    fn metadata(&self) -> &metadata::Metadata {
+        &self.metadata
+    }
+
+    fn metadata_mut(&mut self) -> &mut metadata::Metadata {
+        &mut self.metadata
+    }
+}
+
+impl traits::HasMetadata for Preset {
+    fn metadata(&self) -> &metadata::Metadata {
+        &self.metadata
+    }
+
+    fn metadata_mut(&mut self) -> &mut metadata::Metadata {
+        &mut self.metadata
     }
 }
 
@@ -765,6 +831,8 @@ pub struct ModuleSnapshot {
     id: ModuleSnapshotId,
     name: String,
     module: Module,
+    #[serde(default)]
+    metadata: metadata::Metadata,
     #[serde(default = "default_version")]
     version: u32,
 }
@@ -775,6 +843,7 @@ impl ModuleSnapshot {
             id: id.into(),
             name: name.into(),
             module,
+            metadata: metadata::Metadata::new(),
             version: 1,
         }
     }
@@ -790,6 +859,24 @@ impl ModuleSnapshot {
             id: id.into(),
             name: name.into(),
             module,
+            metadata: metadata::Metadata::new(),
+            version,
+        }
+    }
+
+    /// Create a module snapshot with explicit version + metadata (used by storage layer on load).
+    pub fn with_version_and_metadata(
+        id: impl Into<ModuleSnapshotId>,
+        name: impl Into<String>,
+        module: Module,
+        version: u32,
+        metadata: metadata::Metadata,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            name: name.into(),
+            module,
+            metadata,
             version,
         }
     }
@@ -808,6 +895,16 @@ impl ModuleSnapshot {
 
     pub fn version(&self) -> u32 {
         self.version
+    }
+
+    pub fn metadata(&self) -> &metadata::Metadata {
+        &self.metadata
+    }
+
+    #[must_use]
+    pub fn with_metadata(mut self, metadata: metadata::Metadata) -> Self {
+        self.metadata = metadata;
+        self
     }
 
     /// Bump the version counter. Called by the storage layer when parameter values change.
@@ -861,6 +958,8 @@ pub struct ModulePreset {
     module_type: ModuleType,
     default_snapshot: ModuleSnapshot,
     snapshots: Vec<ModuleSnapshot>,
+    #[serde(default)]
+    metadata: metadata::Metadata,
 }
 
 impl ModulePreset {
@@ -885,6 +984,7 @@ impl ModulePreset {
             module_type,
             default_snapshot,
             snapshots,
+            metadata: metadata::Metadata::new(),
         }
     }
 
@@ -913,6 +1013,16 @@ impl ModulePreset {
             .iter()
             .find(|snapshot| snapshot.id() == snapshot_id)
             .cloned()
+    }
+
+    pub fn metadata(&self) -> &metadata::Metadata {
+        &self.metadata
+    }
+
+    #[must_use]
+    pub fn with_metadata(mut self, metadata: metadata::Metadata) -> Self {
+        self.metadata = metadata;
+        self
     }
 }
 
@@ -954,6 +1064,26 @@ impl traits::Collection for ModulePreset {
         if let Some(snap) = self.snapshots.iter().find(|s| s.id == id) {
             self.default_snapshot = snap.clone();
         }
+    }
+}
+
+impl traits::HasMetadata for ModuleSnapshot {
+    fn metadata(&self) -> &metadata::Metadata {
+        &self.metadata
+    }
+
+    fn metadata_mut(&mut self) -> &mut metadata::Metadata {
+        &mut self.metadata
+    }
+}
+
+impl traits::HasMetadata for ModulePreset {
+    fn metadata(&self) -> &metadata::Metadata {
+        &self.metadata
+    }
+
+    fn metadata_mut(&mut self) -> &mut metadata::Metadata {
+        &mut self.metadata
     }
 }
 
@@ -1044,9 +1174,30 @@ pub trait SongService {
 }
 
 #[roam::service]
+pub trait SetlistService {
+    async fn list_setlists(&self) -> Vec<setlist::Setlist>;
+    async fn load_setlist(&self, id: setlist::SetlistId) -> Option<setlist::Setlist>;
+    async fn save_setlist(&self, setlist: setlist::Setlist) -> ();
+    async fn delete_setlist(&self, id: setlist::SetlistId) -> ();
+    async fn load_setlist_entry(
+        &self,
+        setlist_id: setlist::SetlistId,
+        entry_id: setlist::SetlistEntryId,
+    ) -> Option<setlist::SetlistEntry>;
+}
+
+#[roam::service]
 pub trait BrowserService {
     async fn browser_index(&self) -> tagging::BrowserIndex;
     async fn browse(&self, query: tagging::BrowserQuery) -> Vec<tagging::BrowserHit>;
+}
+
+#[roam::service]
+pub trait ResolveService {
+    async fn resolve_target(
+        &self,
+        target: resolve::ResolveTarget,
+    ) -> Result<resolve::ResolvedGraph, resolve::ResolveError>;
 }
 
 #[cfg(test)]

@@ -9,6 +9,8 @@ pub struct Model {
     pub block_type: String,
     pub name: String,
     pub default_snapshot_id: String,
+    #[sea_orm(default_value = "{}")]
+    pub metadata_json: String,
 }
 
 impl Model {

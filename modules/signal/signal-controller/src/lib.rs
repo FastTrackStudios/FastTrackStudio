@@ -12,14 +12,42 @@ use signal_proto::{
     engine::{Engine, EngineId, EngineScene, EngineSceneId},
     layer::{Layer, LayerId, LayerSnapshot, LayerSnapshotId},
     profile::{Patch, PatchId, Profile, ProfileId},
+    resolve::{ResolveError, ResolveTarget, ResolvedGraph},
     rig::{Rig, RigId, RigScene, RigSceneId},
+    setlist::{Setlist, SetlistEntry, SetlistEntryId, SetlistId},
     song::{Section, SectionId, Song, SongId},
     tagging::{BrowserHit, BrowserIndex, BrowserQuery},
     Block, BlockService, BlockType, BrowserService, EngineService, LayerService, ModulePreset,
     ModulePresetId, ModuleSnapshot, ModuleSnapshotId, Preset, PresetId, PresetService,
-    ProfileService, SnapshotId, SongService,
+    ProfileService, ResolveService, SetlistService, SnapshotId, SongService,
 };
 use std::sync::Arc;
+
+pub trait SignalApi:
+    BlockService
+    + LayerService
+    + EngineService
+    + PresetService
+    + ProfileService
+    + SongService
+    + SetlistService
+    + BrowserService
+    + ResolveService
+{
+}
+
+impl<T> SignalApi for T where
+    T: BlockService
+        + LayerService
+        + EngineService
+        + PresetService
+        + ProfileService
+        + SongService
+        + SetlistService
+        + BrowserService
+        + ResolveService
+{
+}
 
 pub trait ContextFactory: Send + Sync {
     fn make_context(&self) -> roam::Context;
@@ -44,7 +72,7 @@ impl ContextFactory for DefaultContextFactory {
 
 pub struct SignalController<S = SignalLive>
 where
-    S: BlockService + LayerService + EngineService + PresetService + ProfileService + SongService,
+    S: SignalApi,
 {
     service: Arc<S>,
     context_factory: SharedContextFactory,
@@ -52,7 +80,7 @@ where
 
 impl<S> Clone for SignalController<S>
 where
-    S: BlockService + LayerService + EngineService + PresetService + ProfileService + SongService,
+    S: SignalApi,
 {
     fn clone(&self) -> Self {
         Self {
@@ -64,21 +92,18 @@ where
 
 impl<S> PartialEq for SignalController<S>
 where
-    S: BlockService + LayerService + EngineService + PresetService + ProfileService + SongService,
+    S: SignalApi,
 {
     fn eq(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.service, &other.service)
     }
 }
 
-impl<S> Eq for SignalController<S> where
-    S: BlockService + LayerService + EngineService + PresetService + ProfileService + SongService
-{
-}
+impl<S> Eq for SignalController<S> where S: SignalApi {}
 
 impl<S> SignalController<S>
 where
-    S: BlockService + LayerService + EngineService + PresetService + ProfileService + SongService,
+    S: SignalApi,
 {
     pub fn new(service: Arc<S>) -> Self {
         Self::new_with_context(service, Arc::new(DefaultContextFactory))
@@ -289,34 +314,34 @@ where
 
     // endregion: --- Engine operations
 
-    // region: --- Preset (rig) operations
+    // region: --- Rig collection operations
 
-    /// List all rig presets.
-    pub async fn list_presets_all(&self) -> Vec<Rig> {
+    /// List all rig collections.
+    pub async fn list_rig_collections(&self) -> Vec<Rig> {
         let cx = self.context_factory.make_context();
         self.service.list_presets_all(&cx).await
     }
 
-    /// Load a rig preset by ID.
-    pub async fn load_preset_rig(&self, id: impl Into<RigId>) -> Option<Rig> {
+    /// Load a rig collection by ID.
+    pub async fn load_rig_collection(&self, id: impl Into<RigId>) -> Option<Rig> {
         let cx = self.context_factory.make_context();
         self.service.load_preset_rig(&cx, id.into()).await
     }
 
-    /// Save (create or update) a rig preset.
-    pub async fn save_preset(&self, rig: Rig) {
+    /// Save (create or update) a rig collection.
+    pub async fn save_rig_collection(&self, rig: Rig) {
         let cx = self.context_factory.make_context();
         self.service.save_preset(&cx, rig).await;
     }
 
-    /// Delete a rig preset by ID.
-    pub async fn delete_preset(&self, id: impl Into<RigId>) {
+    /// Delete a rig collection by ID.
+    pub async fn delete_rig_collection(&self, id: impl Into<RigId>) {
         let cx = self.context_factory.make_context();
         self.service.delete_preset(&cx, id.into()).await;
     }
 
-    /// Load a specific variant (scene) from a rig preset.
-    pub async fn load_preset_variant(
+    /// Load a specific variant (scene) from a rig collection.
+    pub async fn load_rig_variant(
         &self,
         rig_id: impl Into<RigId>,
         variant_id: impl Into<RigSceneId>,
@@ -327,7 +352,7 @@ where
             .await
     }
 
-    // endregion: --- Preset (rig) operations
+    // endregion: --- Rig collection operations
 
     // region: --- Profile operations
 
@@ -409,6 +434,72 @@ where
 
     // endregion: --- Song operations
 
+    // region: --- Setlist operations
+
+    /// List all setlists.
+    pub async fn list_setlists(&self) -> Vec<Setlist> {
+        let cx = self.context_factory.make_context();
+        self.service.list_setlists(&cx).await
+    }
+
+    /// Load a setlist by ID.
+    pub async fn load_setlist(&self, id: impl Into<SetlistId>) -> Option<Setlist> {
+        let cx = self.context_factory.make_context();
+        self.service.load_setlist(&cx, id.into()).await
+    }
+
+    /// Save (create or update) a setlist.
+    pub async fn save_setlist(&self, setlist: Setlist) {
+        let cx = self.context_factory.make_context();
+        self.service.save_setlist(&cx, setlist).await;
+    }
+
+    /// Delete a setlist by ID.
+    pub async fn delete_setlist(&self, id: impl Into<SetlistId>) {
+        let cx = self.context_factory.make_context();
+        self.service.delete_setlist(&cx, id.into()).await;
+    }
+
+    /// Load a specific entry (variant) from a setlist.
+    pub async fn load_setlist_entry(
+        &self,
+        setlist_id: impl Into<SetlistId>,
+        entry_id: impl Into<SetlistEntryId>,
+    ) -> Option<SetlistEntry> {
+        let cx = self.context_factory.make_context();
+        self.service
+            .load_setlist_entry(&cx, setlist_id.into(), entry_id.into())
+            .await
+    }
+
+    // endregion: --- Setlist operations
+
+    // region: --- Browser operations
+
+    /// Build the current browser index across all signal domain levels.
+    pub async fn browser_index(&self) -> BrowserIndex {
+        let cx = self.context_factory.make_context();
+        self.service.browser_index(&cx).await
+    }
+
+    /// Query the semantic browser using structured tags and fallback scoring.
+    pub async fn browse(&self, query: BrowserQuery) -> Vec<BrowserHit> {
+        let cx = self.context_factory.make_context();
+        self.service.browse(&cx, query).await
+    }
+
+    // endregion: --- Browser operations
+
+    // region: --- Resolve operations
+
+    /// Resolve any target (rig scene, profile patch, song section) into an executable graph.
+    pub async fn resolve_target(&self, target: ResolveTarget) -> Result<ResolvedGraph, ResolveError> {
+        let cx = self.context_factory.make_context();
+        self.service.resolve_target(&cx, target).await
+    }
+
+    // endregion: --- Resolve operations
+
     // region: --- Deprecated shims
 
     /// Deprecated: use [`list_collections`] instead.
@@ -463,28 +554,39 @@ where
         self.load_module_variant(preset_id, snapshot_id).await
     }
 
+    /// Deprecated: use [`list_rig_collections`] instead.
+    #[deprecated(note = "use list_rig_collections")]
+    pub async fn list_presets_all(&self) -> Vec<Rig> {
+        self.list_rig_collections().await
+    }
+
+    /// Deprecated: use [`load_rig_collection`] instead.
+    #[deprecated(note = "use load_rig_collection")]
+    pub async fn load_preset_rig(&self, id: impl Into<RigId>) -> Option<Rig> {
+        self.load_rig_collection(id).await
+    }
+
+    /// Deprecated: use [`save_rig_collection`] instead.
+    #[deprecated(note = "use save_rig_collection")]
+    pub async fn save_preset(&self, rig: Rig) {
+        self.save_rig_collection(rig).await
+    }
+
+    /// Deprecated: use [`delete_rig_collection`] instead.
+    #[deprecated(note = "use delete_rig_collection")]
+    pub async fn delete_preset(&self, id: impl Into<RigId>) {
+        self.delete_rig_collection(id).await
+    }
+
+    /// Deprecated: use [`load_rig_variant`] instead.
+    #[deprecated(note = "use load_rig_variant")]
+    pub async fn load_preset_variant(
+        &self,
+        rig_id: impl Into<RigId>,
+        variant_id: impl Into<RigSceneId>,
+    ) -> Option<RigScene> {
+        self.load_rig_variant(rig_id, variant_id).await
+    }
+
     // endregion: --- Deprecated shims
-}
-
-impl<S> SignalController<S>
-where
-    S: BlockService
-        + LayerService
-        + EngineService
-        + PresetService
-        + ProfileService
-        + SongService
-        + BrowserService,
-{
-    /// Build the current browser index across all signal domain levels.
-    pub async fn browser_index(&self) -> BrowserIndex {
-        let cx = self.context_factory.make_context();
-        self.service.browser_index(&cx).await
-    }
-
-    /// Query the semantic browser using structured tags and fallback scoring.
-    pub async fn browse(&self, query: BrowserQuery) -> Vec<BrowserHit> {
-        let cx = self.context_factory.make_context();
-        self.service.browse(&cx, query).await
-    }
 }

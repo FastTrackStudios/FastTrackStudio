@@ -29,21 +29,30 @@ use signal_proto::{
     engine::{Engine, EngineId, EngineScene, EngineSceneId},
     layer::{Layer, LayerId, LayerSnapshot, LayerSnapshotId},
     profile::{Patch, PatchId, Profile, ProfileId},
+    resolve::{
+        LayerSource, ResolveError, ResolveTarget, ResolvedBlock, ResolvedEngine, ResolvedGraph,
+        ResolvedLayer, ResolvedModule,
+    },
     rig::{Rig, RigId, RigScene, RigSceneId},
+    setlist::{Setlist, SetlistEntry, SetlistEntryId, SetlistId},
     song::{Section, SectionId, Song, SongId},
     tagging::{
         infer_tags_from_name, BrowserEntityKind, BrowserEntry, BrowserHit, BrowserIndex,
         BrowserNodeId, BrowserQuery, StructuredTag, TagCategory, TagSet, TagWeights,
     },
-    Block, BlockService, BlockType, BrowserService, EngineService, LayerService, ModulePreset,
-    ModulePresetId, ModuleSnapshot, ModuleSnapshotId, Preset, PresetId, PresetService,
-    ProfileService, Snapshot, SnapshotId, SongService, ALL_BLOCK_TYPES,
+    override_policy::{validate_overrides, FreePolicy, ScenePolicy, SnapshotPolicy},
+    overrides::{NodeOverrideOp, NodePathSegment},
+    Block, BlockParameterOverride, BlockService, BlockType, BrowserService, EngineService,
+    LayerService, ModuleBlockSource, ModulePreset, ModulePresetId, ModuleSnapshot,
+    ModuleSnapshotId, Preset, PresetId, PresetService, ProfileService, ResolveService,
+    SetlistService, Snapshot, SnapshotId, SongService, ALL_BLOCK_TYPES,
 };
 use signal_storage::{
     BlockRepo, BlockRepoLive, DatabaseConnection, EngineRepo, EngineRepoLive, LayerRepo,
-    LayerRepoLive, ModuleRepo, ModuleRepoLive, ProfileRepo, ProfileRepoLive, RigRepo, RigRepoLive,
-    SongRepo, SongRepoLive,
+    LayerRepoLive, ModuleRepo, ModuleRepoLive, ProfileRepo, ProfileRepoLive, RigRepo,
+    RigRepoLive, SetlistRepo, SetlistRepoLive, SongRepo, SongRepoLive,
 };
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 // region: --- SignalLive
@@ -60,6 +69,7 @@ pub struct SignalLive<
     R = RigRepoLive,
     P = ProfileRepoLive,
     So = SongRepoLive,
+    Se = SetlistRepoLive,
 > where
     B: BlockRepo,
     M: ModuleRepo,
@@ -68,6 +78,7 @@ pub struct SignalLive<
     R: RigRepo,
     P: ProfileRepo,
     So: SongRepo,
+    Se: SetlistRepo,
 {
     block_repo: Arc<B>,
     module_repo: Arc<M>,
@@ -76,9 +87,10 @@ pub struct SignalLive<
     rig_repo: Arc<R>,
     profile_repo: Arc<P>,
     song_repo: Arc<So>,
+    setlist_repo: Arc<Se>,
 }
 
-impl<B, M, L, E, R, P, So> SignalLive<B, M, L, E, R, P, So>
+impl<B, M, L, E, R, P, So, Se> SignalLive<B, M, L, E, R, P, So, Se>
 where
     B: BlockRepo,
     M: ModuleRepo,
@@ -87,6 +99,7 @@ where
     R: RigRepo,
     P: ProfileRepo,
     So: SongRepo,
+    Se: SetlistRepo,
 {
     pub fn new(
         block_repo: Arc<B>,
@@ -96,6 +109,7 @@ where
         rig_repo: Arc<R>,
         profile_repo: Arc<P>,
         song_repo: Arc<So>,
+        setlist_repo: Arc<Se>,
     ) -> Self {
         Self {
             block_repo,
@@ -105,6 +119,7 @@ where
             rig_repo,
             profile_repo,
             song_repo,
+            setlist_repo,
         }
     }
 }
@@ -118,6 +133,7 @@ impl
         RigRepoLive,
         ProfileRepoLive,
         SongRepoLive,
+        SetlistRepoLive,
     >
 {
     pub fn from_db(db: DatabaseConnection) -> Self {
@@ -128,7 +144,8 @@ impl
             Arc::new(EngineRepoLive::new(db.clone())),
             Arc::new(RigRepoLive::new(db.clone())),
             Arc::new(ProfileRepoLive::new(db.clone())),
-            Arc::new(SongRepoLive::new(db)),
+            Arc::new(SongRepoLive::new(db.clone())),
+            Arc::new(SetlistRepoLive::new(db)),
         )
     }
 }
@@ -137,7 +154,7 @@ impl
 
 // region: --- BlockService impl
 
-impl<B, M, L, E, R, P, So> BlockService for SignalLive<B, M, L, E, R, P, So>
+impl<B, M, L, E, R, P, So, Se> BlockService for SignalLive<B, M, L, E, R, P, So, Se>
 where
     B: BlockRepo,
     M: ModuleRepo,
@@ -146,6 +163,7 @@ where
     R: RigRepo,
     P: ProfileRepo,
     So: SongRepo,
+    Se: SetlistRepo,
 {
     /// Load the current active block state for a given block type.
     /// Returns `Block::default()` when no state has been persisted yet.
@@ -262,7 +280,7 @@ where
 
 // region: --- LayerService impl
 
-impl<B, M, L, E, R, P, So> LayerService for SignalLive<B, M, L, E, R, P, So>
+impl<B, M, L, E, R, P, So, Se> LayerService for SignalLive<B, M, L, E, R, P, So, Se>
 where
     B: BlockRepo,
     M: ModuleRepo,
@@ -271,6 +289,7 @@ where
     R: RigRepo,
     P: ProfileRepo,
     So: SongRepo,
+    Se: SetlistRepo,
 {
     async fn list_layers(&self, _cx: &Context) -> Vec<Layer> {
         self.layer_repo.list_layers().await.unwrap_or_default()
@@ -311,7 +330,7 @@ where
 
 // region: --- EngineService impl
 
-impl<B, M, L, E, R, P, So> EngineService for SignalLive<B, M, L, E, R, P, So>
+impl<B, M, L, E, R, P, So, Se> EngineService for SignalLive<B, M, L, E, R, P, So, Se>
 where
     B: BlockRepo,
     M: ModuleRepo,
@@ -320,6 +339,7 @@ where
     R: RigRepo,
     P: ProfileRepo,
     So: SongRepo,
+    Se: SetlistRepo,
 {
     async fn list_engines(&self, _cx: &Context) -> Vec<Engine> {
         self.engine_repo.list_engines().await.unwrap_or_default()
@@ -368,7 +388,7 @@ where
 
 // region: --- PresetService impl
 
-impl<B, M, L, E, R, P, So> PresetService for SignalLive<B, M, L, E, R, P, So>
+impl<B, M, L, E, R, P, So, Se> PresetService for SignalLive<B, M, L, E, R, P, So, Se>
 where
     B: BlockRepo,
     M: ModuleRepo,
@@ -377,6 +397,7 @@ where
     R: RigRepo,
     P: ProfileRepo,
     So: SongRepo,
+    Se: SetlistRepo,
 {
     async fn list_presets_all(&self, _cx: &Context) -> Vec<Rig> {
         self.rig_repo.list_rigs().await.unwrap_or_default()
@@ -417,7 +438,7 @@ where
 
 // region: --- ProfileService impl
 
-impl<B, M, L, E, R, P, So> ProfileService for SignalLive<B, M, L, E, R, P, So>
+impl<B, M, L, E, R, P, So, Se> ProfileService for SignalLive<B, M, L, E, R, P, So, Se>
 where
     B: BlockRepo,
     M: ModuleRepo,
@@ -426,6 +447,7 @@ where
     R: RigRepo,
     P: ProfileRepo,
     So: SongRepo,
+    Se: SetlistRepo,
 {
     async fn list_profiles(&self, _cx: &Context) -> Vec<Profile> {
         self.profile_repo.list_profiles().await.unwrap_or_default()
@@ -466,7 +488,7 @@ where
 
 // region: --- SongService impl
 
-impl<B, M, L, E, R, P, So> SongService for SignalLive<B, M, L, E, R, P, So>
+impl<B, M, L, E, R, P, So, Se> SongService for SignalLive<B, M, L, E, R, P, So, Se>
 where
     B: BlockRepo,
     M: ModuleRepo,
@@ -475,6 +497,7 @@ where
     R: RigRepo,
     P: ProfileRepo,
     So: SongRepo,
+    Se: SetlistRepo,
 {
     async fn list_songs(&self, _cx: &Context) -> Vec<Song> {
         self.song_repo.list_songs().await.unwrap_or_default()
@@ -512,6 +535,51 @@ where
 }
 
 // endregion: --- SongService impl
+
+// region: --- SetlistService impl
+
+impl<B, M, L, E, R, P, So, Se> SetlistService for SignalLive<B, M, L, E, R, P, So, Se>
+where
+    B: BlockRepo,
+    M: ModuleRepo,
+    L: LayerRepo,
+    E: EngineRepo,
+    R: RigRepo,
+    P: ProfileRepo,
+    So: SongRepo,
+    Se: SetlistRepo,
+{
+    async fn list_setlists(&self, _cx: &Context) -> Vec<Setlist> {
+        self.setlist_repo.list_setlists().await.unwrap_or_default()
+    }
+
+    async fn load_setlist(&self, _cx: &Context, id: SetlistId) -> Option<Setlist> {
+        self.setlist_repo.load_setlist(&id).await.ok().flatten()
+    }
+
+    async fn save_setlist(&self, _cx: &Context, setlist: Setlist) -> () {
+        let _ = self.setlist_repo.save_setlist(&setlist).await;
+    }
+
+    async fn delete_setlist(&self, _cx: &Context, id: SetlistId) -> () {
+        let _ = self.setlist_repo.delete_setlist(&id).await;
+    }
+
+    async fn load_setlist_entry(
+        &self,
+        _cx: &Context,
+        setlist_id: SetlistId,
+        entry_id: SetlistEntryId,
+    ) -> Option<SetlistEntry> {
+        self.setlist_repo
+            .load_entry(&setlist_id, &entry_id)
+            .await
+            .ok()
+            .flatten()
+    }
+}
+
+// endregion: --- SetlistService impl
 
 // region: --- BrowserService impl
 
@@ -553,7 +621,7 @@ fn build_entry(
     }
 }
 
-impl<B, M, L, E, R, P, So> BrowserService for SignalLive<B, M, L, E, R, P, So>
+impl<B, M, L, E, R, P, So, Se> BrowserService for SignalLive<B, M, L, E, R, P, So, Se>
 where
     B: BlockRepo,
     M: ModuleRepo,
@@ -562,6 +630,7 @@ where
     R: RigRepo,
     P: ProfileRepo,
     So: SongRepo,
+    Se: SetlistRepo,
 {
     async fn browser_index(&self, _cx: &Context) -> BrowserIndex {
         let mut index = BrowserIndex::default();
@@ -575,6 +644,7 @@ where
 
             for collection in collections {
                 let mut ctags = tags_from_name(collection.name());
+                ctags.merge(&TagSet::from_tags(&collection.metadata().tags));
                 add_domain_tag(&mut ctags, "block_collection");
                 add_block_type_tag(&mut ctags, block_type.as_str());
 
@@ -589,6 +659,7 @@ where
                 for variant in collection.snapshots() {
                     let mut vtags = tags_from_name(variant.name());
                     vtags.merge(&ctags);
+                    vtags.merge(&TagSet::from_tags(&variant.metadata().tags));
                     add_domain_tag(&mut vtags, "block_variant");
                     index.push(build_entry(
                         BrowserEntityKind::BlockVariant,
@@ -608,6 +679,7 @@ where
             .unwrap_or_default();
         for collection in module_collections {
             let mut ctags = tags_from_name(collection.name());
+            ctags.merge(&TagSet::from_tags(&collection.metadata().tags));
             add_domain_tag(&mut ctags, "module_collection");
             add_module_type_tag(&mut ctags, collection.module_type().as_str());
             index.push(build_entry(
@@ -621,6 +693,7 @@ where
             for variant in collection.snapshots() {
                 let mut vtags = tags_from_name(variant.name());
                 vtags.merge(&ctags);
+                vtags.merge(&TagSet::from_tags(&variant.metadata().tags));
                 add_domain_tag(&mut vtags, "module_variant");
                 index.push(build_entry(
                     BrowserEntityKind::ModuleVariant,
@@ -780,6 +853,34 @@ where
             }
         }
 
+        let setlists = self.setlist_repo.list_setlists().await.unwrap_or_default();
+        for setlist in setlists {
+            let mut ctags = tags_from_name(&setlist.name);
+            ctags.merge(&TagSet::from_tags(&setlist.metadata.tags));
+            add_domain_tag(&mut ctags, "setlist_collection");
+            index.push(build_entry(
+                BrowserEntityKind::SetlistCollection,
+                setlist.id.to_string(),
+                setlist.name.clone(),
+                ctags.clone(),
+                vec![],
+            ));
+
+            for variant in &setlist.entries {
+                let mut vtags = tags_from_name(&variant.name);
+                vtags.merge(&ctags);
+                vtags.merge(&TagSet::from_tags(&variant.metadata.tags));
+                add_domain_tag(&mut vtags, "setlist_variant");
+                index.push(build_entry(
+                    BrowserEntityKind::SetlistVariant,
+                    variant.id.to_string(),
+                    variant.name.clone(),
+                    vtags,
+                    vec![setlist.name.clone()],
+                ));
+            }
+        }
+
         index
     }
 
@@ -791,13 +892,860 @@ where
 
 // endregion: --- BrowserService impl
 
+// region: --- ResolveService impl
+
+fn apply_block_parameter_overrides(block: &mut Block, overrides: &[BlockParameterOverride]) {
+    for ov in overrides {
+        if let Some((idx, _)) = block
+            .parameters()
+            .iter()
+            .enumerate()
+            .find(|(_, p)| p.id() == ov.parameter_id())
+        {
+            block.set_parameter_value(idx, ov.value().get());
+        }
+    }
+}
+
+fn merge_override_levels(levels: &[Vec<signal_proto::overrides::Override>]) -> Vec<signal_proto::overrides::Override> {
+    // nearest-scope-wins: later levels replace earlier path entries
+    let mut by_path: HashMap<String, signal_proto::overrides::Override> = HashMap::new();
+    let mut order: Vec<String> = Vec::new();
+    for level in levels {
+        for ov in level {
+            let key = ov.path.as_str();
+            if !by_path.contains_key(&key) {
+                order.push(key.clone());
+            }
+            by_path.insert(key, ov.clone());
+        }
+    }
+    order
+        .into_iter()
+        .filter_map(|k| by_path.remove(&k))
+        .collect()
+}
+
+fn map_policy_err(scope: &str, err: signal_proto::override_policy::OverridePolicyError) -> ResolveError {
+    ResolveError::InvalidReference(format!("{scope} override policy violation: {err:?}"))
+}
+
+fn normalize_ref_id(raw: &str) -> String {
+    let looks_like_uuid = raw.len() == 36
+        && [8, 13, 18, 23].into_iter().all(|i| raw.as_bytes()[i] == b'-')
+        && raw
+            .bytes()
+            .enumerate()
+            .all(|(i, b)| [8, 13, 18, 23].contains(&i) || b.is_ascii_hexdigit());
+    if looks_like_uuid {
+        raw.to_string()
+    } else {
+        signal_proto::seed_id(raw).to_string()
+    }
+}
+
+fn id_matches(entity_id: &str, path_or_alias: &str) -> bool {
+    entity_id == path_or_alias || entity_id == normalize_ref_id(path_or_alias)
+}
+
+fn segment_engine(path: &signal_proto::overrides::NodePath) -> Option<&str> {
+    path.segments().iter().find_map(|seg| match seg {
+        NodePathSegment::Engine(v) => Some(v.as_str()),
+        _ => None,
+    })
+}
+
+fn segment_layer(path: &signal_proto::overrides::NodePath) -> Option<&str> {
+    path.segments().iter().find_map(|seg| match seg {
+        NodePathSegment::Layer(v) => Some(v.as_str()),
+        _ => None,
+    })
+}
+
+fn segment_module(path: &signal_proto::overrides::NodePath) -> Option<&str> {
+    path.segments().iter().find_map(|seg| match seg {
+        NodePathSegment::Module(v) => Some(v.as_str()),
+        _ => None,
+    })
+}
+
+fn segment_block(path: &signal_proto::overrides::NodePath) -> Option<&str> {
+    path.segments().iter().find_map(|seg| match seg {
+        NodePathSegment::Block(v) => Some(v.as_str()),
+        _ => None,
+    })
+}
+
+fn segment_param(path: &signal_proto::overrides::NodePath) -> Option<&str> {
+    path.segments().iter().find_map(|seg| match seg {
+        NodePathSegment::Parameter(v) => Some(v.as_str()),
+        _ => None,
+    })
+}
+
+fn apply_effective_set_overrides(graph: &mut ResolvedGraph) {
+    for ov in &graph.effective_overrides {
+        let NodeOverrideOp::Set(value) = &ov.op else {
+            continue;
+        };
+
+        let engine_id = segment_engine(&ov.path);
+        let layer_id = segment_layer(&ov.path);
+        let module_id = segment_module(&ov.path);
+        let block_id = segment_block(&ov.path);
+        let Some(parameter_id) = segment_param(&ov.path) else {
+            continue;
+        };
+
+        for engine in &mut graph.engines {
+            if let Some(expected) = engine_id {
+                if !id_matches(engine.engine_id.as_str(), expected) {
+                    continue;
+                }
+            }
+            for layer in &mut engine.layers {
+                if let Some(expected) = layer_id {
+                    if !id_matches(layer.layer_id.as_str(), expected) {
+                        continue;
+                    }
+                }
+
+                for module in &mut layer.modules {
+                    if let Some(expected) = module_id {
+                        if !id_matches(module.source_preset_id.as_str(), expected) {
+                            continue;
+                        }
+                    }
+                    for rb in &mut module.blocks {
+                        if let Some(expected) = block_id {
+                            if !id_matches(&rb.node_id, expected) && rb.node_id != expected {
+                                continue;
+                            }
+                        }
+                        if let Some((idx, _)) = rb
+                            .block
+                            .parameters()
+                            .iter()
+                            .enumerate()
+                            .find(|(_, p)| p.id() == parameter_id)
+                        {
+                            rb.block.set_parameter_value(idx, value.get());
+                        }
+                    }
+                }
+
+                for rb in &mut layer.standalone_blocks {
+                    if let Some(expected) = block_id {
+                        if !id_matches(&rb.node_id, expected) && rb.node_id != expected {
+                            continue;
+                        }
+                    }
+                    if let Some((idx, _)) = rb
+                        .block
+                        .parameters()
+                        .iter()
+                        .enumerate()
+                        .find(|(_, p)| p.id() == parameter_id)
+                    {
+                        rb.block.set_parameter_value(idx, value.get());
+                    }
+                }
+            }
+        }
+    }
+}
+
+impl<B, M, L, E, R, P, So, Se> SignalLive<B, M, L, E, R, P, So, Se>
+where
+    B: BlockRepo,
+    M: ModuleRepo,
+    L: LayerRepo,
+    E: EngineRepo,
+    R: RigRepo,
+    P: ProfileRepo,
+    So: SongRepo,
+    Se: SetlistRepo,
+{
+    async fn resolve_block_ref(
+        &self,
+        block_type: BlockType,
+        preset_id: &PresetId,
+        snapshot_id: Option<&SnapshotId>,
+        node_id: String,
+        label: String,
+    ) -> Result<ResolvedBlock, ResolveError> {
+        let snap = match snapshot_id {
+            Some(variant_id) => self
+                .block_repo
+                .load_block_variant(block_type, preset_id, variant_id)
+                .await
+                .map_err(|e| ResolveError::NotFound(format!("block variant load failed: {e}")))?,
+            None => self
+                .block_repo
+                .load_block_default_variant(block_type, preset_id)
+                .await
+                .map_err(|e| ResolveError::NotFound(format!("block default variant load failed: {e}")))?,
+        }
+        .ok_or_else(|| {
+            ResolveError::InvalidReference(match snapshot_id {
+                Some(variant_id) => format!(
+                    "missing block variant: type={} preset={} variant={}",
+                    block_type.as_str(),
+                    preset_id,
+                    variant_id
+                ),
+                None => format!(
+                    "missing block default variant: type={} preset={}",
+                    block_type.as_str(),
+                    preset_id
+                ),
+            })
+        })?;
+
+        Ok(ResolvedBlock {
+            node_id,
+            label,
+            block_type,
+            source_preset_id: Some(preset_id.clone()),
+            source_variant_id: Some(snap.id().clone()),
+            block: snap.block(),
+        })
+    }
+
+    async fn resolve_standalone_block_ref(
+        &self,
+        preset_id: &PresetId,
+        snapshot_id: Option<&SnapshotId>,
+        node_id: String,
+        label: String,
+    ) -> Result<ResolvedBlock, ResolveError> {
+        for block_type in ALL_BLOCK_TYPES {
+            let resolved = self
+                .resolve_block_ref(
+                    *block_type,
+                    preset_id,
+                    snapshot_id,
+                    node_id.clone(),
+                    label.clone(),
+                )
+                .await;
+            if let Ok(resolved) = resolved {
+                return Ok(resolved);
+            }
+        }
+        Err(ResolveError::InvalidReference(match snapshot_id {
+            Some(variant_id) => format!(
+                "standalone block variant not found for any block type: preset={} variant={}",
+                preset_id, variant_id
+            ),
+            None => format!(
+                "standalone block default variant not found for any block type: preset={}",
+                preset_id
+            ),
+        }))
+    }
+
+    async fn resolve_module_snapshot(&self, snapshot: &ModuleSnapshot) -> Result<ResolvedModule, ResolveError> {
+        let mut blocks = Vec::new();
+        for block in snapshot.module().blocks() {
+            let mut resolved = match block.source() {
+                ModuleBlockSource::PresetDefault { preset_id, .. } => self
+                    .resolve_block_ref(
+                        block.block_type(),
+                        preset_id,
+                        None,
+                        block.id().to_string(),
+                        block.label().to_string(),
+                    )
+                    .await?,
+                ModuleBlockSource::PresetSnapshot {
+                    preset_id,
+                    snapshot_id,
+                    ..
+                } => self
+                    .resolve_block_ref(
+                        block.block_type(),
+                        preset_id,
+                        Some(snapshot_id),
+                        block.id().to_string(),
+                        block.label().to_string(),
+                    )
+                    .await?,
+                ModuleBlockSource::Inline { block: inline } => ResolvedBlock {
+                    node_id: block.id().to_string(),
+                    label: block.label().to_string(),
+                    block_type: block.block_type(),
+                    source_preset_id: None,
+                    source_variant_id: None,
+                    block: inline.clone(),
+                },
+            };
+            apply_block_parameter_overrides(&mut resolved.block, block.overrides());
+            blocks.push(resolved);
+        }
+        Ok(ResolvedModule {
+            source_preset_id: ModulePresetId::new(),
+            source_variant_id: snapshot.id().clone(),
+            blocks,
+        })
+    }
+
+    async fn resolve_module_ref(
+        &self,
+        preset_id: &ModulePresetId,
+        variant_id: Option<&ModuleSnapshotId>,
+    ) -> Result<ResolvedModule, ResolveError> {
+        let snapshot = match variant_id {
+            Some(variant_id) => self
+                .module_repo
+                .load_module_variant(preset_id, variant_id)
+                .await
+                .map_err(|e| ResolveError::NotFound(format!("module variant load failed: {e}")))?,
+            None => self
+                .module_repo
+                .load_module_default_variant(preset_id)
+                .await
+                .map_err(|e| ResolveError::NotFound(format!("module default variant load failed: {e}")))?,
+        }
+        .ok_or_else(|| {
+            ResolveError::InvalidReference(match variant_id {
+                Some(variant_id) => format!(
+                    "missing module variant: preset={} variant={}",
+                    preset_id, variant_id
+                ),
+                None => format!("missing module default variant: preset={preset_id}"),
+            })
+        })?;
+        let mut resolved = self.resolve_module_snapshot(&snapshot).await?;
+        resolved.source_preset_id = preset_id.clone();
+        resolved.source_variant_id = snapshot.id().clone();
+        Ok(resolved)
+    }
+
+    async fn resolve_layer_tree(
+        &self,
+        engine_id: &EngineId,
+        start_layer_id: LayerId,
+        start_variant_id: LayerSnapshotId,
+        start_source: LayerSource,
+        selection_overrides: &[signal_proto::overrides::Override],
+    ) -> Result<Vec<ResolvedLayer>, ResolveError> {
+        #[derive(Clone)]
+        enum Phase {
+            Explore,
+            Build,
+        }
+        #[derive(Clone)]
+        struct Frame {
+            layer_id: LayerId,
+            variant_id: LayerSnapshotId,
+            source: LayerSource,
+            phase: Phase,
+        }
+
+        let mut stack = vec![Frame {
+            layer_id: start_layer_id,
+            variant_id: start_variant_id,
+            source: start_source,
+            phase: Phase::Explore,
+        }];
+        let mut active: HashSet<String> = HashSet::new();
+        let mut loaded: HashMap<String, (Layer, LayerSnapshot, LayerSource)> = HashMap::new();
+        let mut resolved = Vec::new();
+
+        while let Some(frame) = stack.pop() {
+            let key = format!("{}::{}", frame.layer_id, frame.variant_id);
+            match frame.phase {
+                Phase::Explore => {
+                    if active.contains(&key) {
+                        return Err(ResolveError::CycleDetected(format!(
+                            "layer variant cycle at {key}"
+                        )));
+                    }
+                    active.insert(key.clone());
+                    let layer = self
+                        .layer_repo
+                        .load_layer(&frame.layer_id)
+                        .await
+                        .map_err(|e| ResolveError::NotFound(format!("layer load failed: {e}")))?
+                        .ok_or_else(|| ResolveError::NotFound(format!("layer not found: {}", frame.layer_id)))?;
+                    let variant = layer
+                        .variant(&frame.variant_id)
+                        .cloned()
+                        .ok_or_else(|| ResolveError::NotFound(format!(
+                            "layer variant not found: {}::{}",
+                            frame.layer_id, frame.variant_id
+                        )))?;
+                    validate_overrides::<SnapshotPolicy>(&variant.overrides)
+                        .map_err(|e| map_policy_err("layer snapshot", e))?;
+                    loaded.insert(key.clone(), (layer.clone(), variant.clone(), frame.source.clone()));
+                    stack.push(Frame {
+                        layer_id: frame.layer_id,
+                        variant_id: frame.variant_id,
+                        source: frame.source,
+                        phase: Phase::Build,
+                    });
+                    for layer_ref in variant.layer_refs.iter().rev() {
+                        let child_layer = self
+                            .layer_repo
+                            .load_layer(&layer_ref.collection_id)
+                            .await
+                            .map_err(|e| ResolveError::NotFound(format!("layer load failed: {e}")))?
+                            .ok_or_else(|| {
+                                ResolveError::InvalidReference(format!(
+                                    "missing layer ref: {}",
+                                    layer_ref.collection_id
+                                ))
+                            })?;
+                        let child_variant_id = layer_ref
+                            .variant_id
+                            .clone()
+                            .unwrap_or_else(|| child_layer.default_variant_id.clone());
+                        stack.push(Frame {
+                            layer_id: child_layer.id.clone(),
+                            variant_id: child_variant_id,
+                            source: LayerSource::InlinedInParent,
+                            phase: Phase::Explore,
+                        });
+                    }
+                }
+                Phase::Build => {
+                    active.remove(&key);
+                    let (layer, variant, source) = loaded
+                        .remove(&key)
+                        .ok_or_else(|| ResolveError::InvalidReference(format!("missing loaded frame {key}")))?;
+
+                    let mut module_refs = variant.module_refs.clone();
+                    let mut block_refs = variant.block_refs.clone();
+                    let mut disabled_module_ids: HashSet<String> = HashSet::new();
+                    let mut disabled_block_ids: HashSet<String> = HashSet::new();
+
+                    for ov in selection_overrides {
+                        if let Some(seg_engine) = segment_engine(&ov.path) {
+                            if !id_matches(engine_id.as_str(), seg_engine) {
+                                continue;
+                            }
+                        }
+                        if let Some(seg_layer) = segment_layer(&ov.path) {
+                            if !id_matches(layer.id.as_str(), seg_layer) {
+                                continue;
+                            }
+                        } else {
+                            continue;
+                        }
+
+                        if let Some(seg_module) = segment_module(&ov.path) {
+                            if let Some(mr) = module_refs
+                                .iter_mut()
+                                .find(|mr| id_matches(mr.collection_id.as_str(), seg_module))
+                            {
+                                match &ov.op {
+                                    NodeOverrideOp::ReplaceRef(next) => {
+                                        let next_variant = ModuleSnapshotId::from(normalize_ref_id(next));
+                                        let exists = self
+                                            .module_repo
+                                            .load_module_variant(&mr.collection_id, &next_variant)
+                                            .await
+                                            .map_err(|e| {
+                                                ResolveError::NotFound(format!(
+                                                    "module variant load failed during replace_ref: {e}"
+                                                ))
+                                            })?
+                                            .is_some();
+                                        if !exists {
+                                            return Err(ResolveError::InvalidReference(format!(
+                                                "replace_ref target module variant not found: module={} variant={} path={}",
+                                                mr.collection_id,
+                                                next_variant,
+                                                ov.path.as_str()
+                                            )));
+                                        }
+                                        mr.variant_id = Some(next_variant);
+                                    }
+                                    NodeOverrideOp::Enable(false) | NodeOverrideOp::Bypass(true) => {
+                                        disabled_module_ids.insert(mr.collection_id.to_string());
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            continue;
+                        }
+
+                        if let Some(seg_block) = segment_block(&ov.path) {
+                            if let Some(br) = block_refs
+                                .iter_mut()
+                                .find(|br| id_matches(br.collection_id.as_str(), seg_block))
+                            {
+                                match &ov.op {
+                                    NodeOverrideOp::ReplaceRef(next) => {
+                                        let next_variant = SnapshotId::from(normalize_ref_id(next));
+                                        // Validate that the replacement exists for this block collection.
+                                        self.resolve_standalone_block_ref(
+                                            &br.collection_id,
+                                            Some(&next_variant),
+                                            br.collection_id.to_string(),
+                                            br.collection_id.to_string(),
+                                        )
+                                        .await?;
+                                        br.variant_id = Some(next_variant);
+                                    }
+                                    NodeOverrideOp::Enable(false) | NodeOverrideOp::Bypass(true) => {
+                                        disabled_block_ids.insert(br.collection_id.to_string());
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                    }
+
+                    let mut modules = Vec::new();
+                    for mr in &module_refs {
+                        if disabled_module_ids.contains(&mr.collection_id.to_string()) {
+                            continue;
+                        }
+                        match self
+                            .resolve_module_ref(&mr.collection_id, mr.variant_id.as_ref())
+                            .await
+                        {
+                            Ok(module) => modules.push(module),
+                            Err(ResolveError::InvalidReference(_)) => {
+                                // Keep existing seed/runtime behavior: unresolved base refs are skipped.
+                                // ReplaceRef targets are still fail-fast validated above.
+                            }
+                            Err(e) => return Err(e),
+                        }
+                    }
+
+                    let mut standalone_blocks = Vec::new();
+                    for br in &block_refs {
+                        if disabled_block_ids.contains(&br.collection_id.to_string()) {
+                            continue;
+                        }
+                        match self
+                            .resolve_standalone_block_ref(
+                                &br.collection_id,
+                                br.variant_id.as_ref(),
+                                br.collection_id.to_string(),
+                                br.collection_id.to_string(),
+                            )
+                            .await
+                        {
+                            Ok(block) => standalone_blocks.push(block),
+                            Err(ResolveError::InvalidReference(_)) => {
+                                // Keep existing seed/runtime behavior: unresolved base refs are skipped.
+                                // ReplaceRef targets are still fail-fast validated above.
+                            }
+                            Err(e) => return Err(e),
+                        }
+                    }
+
+                    resolved.push(ResolvedLayer {
+                        layer_id: layer.id,
+                        layer_variant_id: variant.id,
+                        source,
+                        modules,
+                        standalone_blocks,
+                    });
+                }
+            }
+        }
+
+        Ok(resolved)
+    }
+
+    async fn resolve_target_to_rig_scene(
+        &self,
+        target: &ResolveTarget,
+    ) -> Result<(RigId, RigSceneId, Vec<signal_proto::overrides::Override>), ResolveError> {
+        match target {
+            ResolveTarget::RigScene { rig_id, scene_id } => {
+                let rig = self
+                    .rig_repo
+                    .load_rig(rig_id)
+                    .await
+                    .map_err(|e| ResolveError::NotFound(format!("rig load failed: {e}")))?
+                    .ok_or_else(|| ResolveError::NotFound(format!("rig not found: {rig_id}")))?;
+                let scene = rig
+                    .variant(scene_id)
+                    .cloned()
+                    .ok_or_else(|| ResolveError::NotFound(format!("rig scene not found: {scene_id}")))?;
+                validate_overrides::<ScenePolicy>(&scene.overrides)
+                    .map_err(|e| map_policy_err("rig scene", e))?;
+                Ok((rig.id.clone(), scene.id.clone(), scene.overrides.clone()))
+            }
+            ResolveTarget::ProfilePatch {
+                profile_id,
+                patch_id,
+            } => {
+                let profile = self
+                    .profile_repo
+                    .load_profile(profile_id)
+                    .await
+                    .map_err(|e| ResolveError::NotFound(format!("profile load failed: {e}")))?
+                    .ok_or_else(|| ResolveError::NotFound(format!("profile not found: {profile_id}")))?;
+                let patch = profile
+                    .patch(patch_id)
+                    .cloned()
+                    .ok_or_else(|| ResolveError::NotFound(format!("patch not found: {patch_id}")))?;
+                validate_overrides::<FreePolicy>(&patch.overrides)
+                    .map_err(|e| map_policy_err("profile patch", e))?;
+                Ok((patch.rig_id, patch.rig_variant_id, patch.overrides))
+            }
+            ResolveTarget::SongSection {
+                song_id,
+                section_id,
+            } => {
+                let song = self
+                    .song_repo
+                    .load_song(song_id)
+                    .await
+                    .map_err(|e| ResolveError::NotFound(format!("song load failed: {e}")))?
+                    .ok_or_else(|| ResolveError::NotFound(format!("song not found: {song_id}")))?;
+                let section = song
+                    .section(section_id)
+                    .cloned()
+                    .ok_or_else(|| ResolveError::NotFound(format!("section not found: {section_id}")))?;
+                validate_overrides::<FreePolicy>(&section.overrides)
+                    .map_err(|e| map_policy_err("song section", e))?;
+                match section.source {
+                    signal_proto::song::SectionSource::RigScene { rig_id, scene_id } => {
+                        Ok((rig_id, scene_id, section.overrides))
+                    }
+                    signal_proto::song::SectionSource::Patch { patch_id } => {
+                        let profiles = self.profile_repo.list_profiles().await.map_err(|e| {
+                            ResolveError::NotFound(format!("profiles load failed: {e}"))
+                        })?;
+                        let patch = profiles
+                            .iter()
+                            .find_map(|p| p.patch(&patch_id))
+                            .cloned()
+                            .ok_or_else(|| {
+                                ResolveError::NotFound(format!(
+                                    "section patch source not found: {patch_id}"
+                                ))
+                            })?;
+                        validate_overrides::<FreePolicy>(&patch.overrides)
+                            .map_err(|e| map_policy_err("section source patch", e))?;
+                        let mut ovs = patch.overrides.clone();
+                        ovs.extend(section.overrides);
+                        Ok((patch.rig_id, patch.rig_variant_id, ovs))
+                    }
+                }
+            }
+        }
+    }
+}
+
+impl<B, M, L, E, R, P, So, Se> ResolveService for SignalLive<B, M, L, E, R, P, So, Se>
+where
+    B: BlockRepo,
+    M: ModuleRepo,
+    L: LayerRepo,
+    E: EngineRepo,
+    R: RigRepo,
+    P: ProfileRepo,
+    So: SongRepo,
+    Se: SetlistRepo,
+{
+    async fn resolve_target(
+        &self,
+        _cx: &Context,
+        target: ResolveTarget,
+    ) -> Result<ResolvedGraph, ResolveError> {
+        let (rig_id, rig_scene_id, higher_scope_overrides) =
+            self.resolve_target_to_rig_scene(&target).await?;
+
+        let rig = self
+            .rig_repo
+            .load_rig(&rig_id)
+            .await
+            .map_err(|e| ResolveError::NotFound(format!("rig load failed: {e}")))?
+            .ok_or_else(|| ResolveError::NotFound(format!("rig not found: {rig_id}")))?;
+        let rig_scene = rig
+            .variant(&rig_scene_id)
+            .cloned()
+            .ok_or_else(|| ResolveError::NotFound(format!("rig scene not found: {rig_scene_id}")))?;
+        validate_overrides::<ScenePolicy>(&rig_scene.overrides)
+            .map_err(|e| map_policy_err("rig scene", e))?;
+
+        let mut engines = Vec::new();
+        let global_overrides =
+            merge_override_levels(&[rig_scene.overrides.clone(), higher_scope_overrides.clone()]);
+        let mut level_overrides = vec![global_overrides.clone()];
+
+        for engine_sel in &rig_scene.engine_selections {
+            let mut selected_engine_scene_id = engine_sel.variant_id.clone();
+            let mut engine_enabled = true;
+            let mut engine_replace_path: Option<String> = None;
+            for ov in &global_overrides {
+                let Some(seg_engine) = segment_engine(&ov.path) else {
+                    continue;
+                };
+                if !id_matches(engine_sel.engine_id.as_str(), seg_engine) {
+                    continue;
+                }
+                if segment_layer(&ov.path).is_none()
+                    && segment_module(&ov.path).is_none()
+                    && segment_block(&ov.path).is_none()
+                    && segment_param(&ov.path).is_none()
+                {
+                    match &ov.op {
+                        NodeOverrideOp::ReplaceRef(next) => {
+                            selected_engine_scene_id = EngineSceneId::from(normalize_ref_id(next));
+                            engine_replace_path = Some(ov.path.as_str());
+                        }
+                        NodeOverrideOp::Enable(false) | NodeOverrideOp::Bypass(true) => {
+                            engine_enabled = false;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            if !engine_enabled {
+                continue;
+            }
+
+            let engine = self
+                .engine_repo
+                .load_engine(&engine_sel.engine_id)
+                .await
+                .map_err(|e| ResolveError::NotFound(format!("engine load failed: {e}")))?
+                .ok_or_else(|| {
+                    ResolveError::InvalidReference(format!(
+                        "missing engine ref: {}",
+                        engine_sel.engine_id
+                    ))
+                })?;
+            if engine_replace_path.is_some()
+                && !engine
+                    .variants
+                    .iter()
+                    .any(|v| v.id == selected_engine_scene_id)
+            {
+                return Err(ResolveError::InvalidReference(format!(
+                    "replace_ref target engine scene not found: engine={} variant={} path={}",
+                    engine.id,
+                    selected_engine_scene_id,
+                    engine_replace_path.unwrap_or_default()
+                )));
+            }
+            let engine_scene = engine
+                .variant(&selected_engine_scene_id)
+                .cloned()
+                .ok_or_else(|| {
+                    ResolveError::InvalidReference(format!(
+                        "missing engine scene ref: {}::{}",
+                        engine_sel.engine_id, selected_engine_scene_id
+                    ))
+                })?;
+            validate_overrides::<ScenePolicy>(&engine_scene.overrides)
+                .map_err(|e| map_policy_err("engine scene", e))?;
+            let engine_scope_overrides =
+                merge_override_levels(&[global_overrides.clone(), engine_scene.overrides.clone()]);
+            level_overrides.push(engine_scope_overrides.clone());
+
+            let mut resolved_layers = Vec::new();
+            for layer_sel in &engine_scene.layer_selections {
+                let mut selected_layer_variant_id = layer_sel.variant_id.clone();
+                let mut layer_enabled = true;
+                let mut layer_replace_path: Option<String> = None;
+                for ov in &engine_scope_overrides {
+                    let Some(seg_layer) = segment_layer(&ov.path) else {
+                        continue;
+                    };
+                    if !id_matches(layer_sel.layer_id.as_str(), seg_layer) {
+                        continue;
+                    }
+                    if let Some(seg_engine) = segment_engine(&ov.path) {
+                        if !id_matches(engine.id.as_str(), seg_engine) {
+                            continue;
+                        }
+                    }
+                    if segment_module(&ov.path).is_none()
+                        && segment_block(&ov.path).is_none()
+                        && segment_param(&ov.path).is_none()
+                    {
+                        match &ov.op {
+                            NodeOverrideOp::ReplaceRef(next) => {
+                                selected_layer_variant_id =
+                                    LayerSnapshotId::from(normalize_ref_id(next));
+                                layer_replace_path = Some(ov.path.as_str());
+                            }
+                            NodeOverrideOp::Enable(false) | NodeOverrideOp::Bypass(true) => {
+                                layer_enabled = false;
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                if !layer_enabled {
+                    continue;
+                }
+                let selected_layer_variant = self
+                    .layer_repo
+                    .load_variant(&layer_sel.layer_id, &selected_layer_variant_id)
+                    .await
+                    .map_err(|e| ResolveError::NotFound(format!("layer variant load failed: {e}")))?;
+                if selected_layer_variant.is_none() {
+                    if let Some(path) = layer_replace_path {
+                        return Err(ResolveError::InvalidReference(format!(
+                            "replace_ref target layer variant not found: layer={} variant={} path={}",
+                            layer_sel.layer_id, selected_layer_variant_id, path
+                        )));
+                    }
+                    return Err(ResolveError::InvalidReference(format!(
+                        "missing layer variant ref: layer={} variant={}",
+                        layer_sel.layer_id, selected_layer_variant_id
+                    )));
+                }
+
+                let mut layers = self
+                    .resolve_layer_tree(
+                        &engine.id,
+                        layer_sel.layer_id.clone(),
+                        selected_layer_variant_id.clone(),
+                        LayerSource::LayerPreset {
+                            layer_id: layer_sel.layer_id.clone(),
+                            variant_id: selected_layer_variant_id.clone(),
+                        },
+                        &engine_scope_overrides,
+                    )
+                    .await?;
+                resolved_layers.append(&mut layers);
+
+                if let Some(layer) = selected_layer_variant {
+                    level_overrides.push(layer.overrides.clone());
+                }
+            }
+
+            engines.push(ResolvedEngine {
+                engine_id: engine.id.clone(),
+                engine_scene_id: engine_scene.id.clone(),
+                layers: resolved_layers,
+            });
+        }
+
+        let mut graph = ResolvedGraph {
+            target,
+            rig_id,
+            rig_scene_id,
+            engines,
+            effective_overrides: merge_override_levels(&level_overrides),
+        };
+        apply_effective_set_overrides(&mut graph);
+        Ok(graph)
+    }
+}
+
+    // endregion: --- ResolveService impl
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use signal_proto::seed_id;
     use signal_storage::{
         runtime_seed_bundle, BlockRepoLive, Database, EngineRepoLive, LayerRepoLive,
-        ModuleRepoLive, ProfileRepoLive, RigRepoLive, SongRepoLive,
+        ModuleRepoLive, ProfileRepoLive, RigRepoLive, SetlistRepoLive, SongRepoLive,
     };
 
     type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
@@ -821,6 +1769,7 @@ mod tests {
             RigRepoLive,
             ProfileRepoLive,
             SongRepoLive,
+            SetlistRepoLive,
         >,
     > {
         let db = Database::connect("sqlite::memory:").await?;
@@ -855,10 +1804,15 @@ mod tests {
         for profile in seeds.profiles {
             profile_repo.save_profile(&profile).await?;
         }
-        let song_repo = SongRepoLive::new(db);
+        let song_repo = SongRepoLive::new(db.clone());
         song_repo.init_schema().await?;
         for song in seeds.songs {
             song_repo.save_song(&song).await?;
+        }
+        let setlist_repo = SetlistRepoLive::new(db);
+        setlist_repo.init_schema().await?;
+        for setlist in seeds.setlists {
+            setlist_repo.save_setlist(&setlist).await?;
         }
         Ok(SignalLive::new(
             Arc::new(block_repo),
@@ -868,6 +1822,7 @@ mod tests {
             Arc::new(rig_repo),
             Arc::new(profile_repo),
             Arc::new(song_repo),
+            Arc::new(setlist_repo),
         ))
     }
 
@@ -903,8 +1858,10 @@ mod tests {
         rig_repo.init_schema().await?;
         let profile_repo = ProfileRepoLive::new(db.clone());
         profile_repo.init_schema().await?;
-        let song_repo = SongRepoLive::new(db);
+        let song_repo = SongRepoLive::new(db.clone());
         song_repo.init_schema().await?;
+        let setlist_repo = SetlistRepoLive::new(db);
+        setlist_repo.init_schema().await?;
         let svc = SignalLive::new(
             Arc::new(block_repo),
             Arc::new(module_repo),
@@ -913,6 +1870,7 @@ mod tests {
             Arc::new(rig_repo),
             Arc::new(profile_repo),
             Arc::new(song_repo),
+            Arc::new(setlist_repo),
         );
         let cx = test_context();
 
@@ -944,6 +1902,43 @@ mod tests {
     }
 
     // endregion: --- get_block / set_block
+
+    // region: --- Setlist operations
+
+    #[tokio::test]
+    async fn test_live_list_setlists_returns_demo_setlist() -> Result<()> {
+        let svc = seeded_service().await?;
+        let cx = test_context();
+
+        let setlists = svc.list_setlists(&cx).await;
+
+        assert_eq!(setlists.len(), 1);
+        assert_eq!(setlists[0].name, "Demo Setlist");
+        assert_eq!(setlists[0].entries.len(), 2);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_live_load_setlist_entry_returns_dummy_song_entry() -> Result<()> {
+        let svc = seeded_service().await?;
+        let cx = test_context();
+
+        let entry = svc
+            .load_setlist_entry(
+                &cx,
+                signal_proto::setlist::SetlistId::from(seed_id("demo-setlist")),
+                signal_proto::setlist::SetlistEntryId::from(seed_id("demo-setlist-dummy-song")),
+            )
+            .await;
+
+        assert!(entry.is_some());
+        let entry = entry.unwrap();
+        assert_eq!(entry.name, "Dummy Song");
+        assert_eq!(entry.song_id.as_str(), seed_id("dummy-song").to_string());
+        Ok(())
+    }
+
+    // endregion: --- Setlist operations
 
     // region: --- Block collections (list / load)
 
@@ -979,8 +1974,10 @@ mod tests {
         rig_repo.init_schema().await?;
         let profile_repo = ProfileRepoLive::new(db.clone());
         profile_repo.init_schema().await?;
-        let song_repo = SongRepoLive::new(db);
+        let song_repo = SongRepoLive::new(db.clone());
         song_repo.init_schema().await?;
+        let setlist_repo = SetlistRepoLive::new(db);
+        setlist_repo.init_schema().await?;
         let svc = SignalLive::new(
             Arc::new(block_repo),
             Arc::new(module_repo),
@@ -989,6 +1986,7 @@ mod tests {
             Arc::new(rig_repo),
             Arc::new(profile_repo),
             Arc::new(song_repo),
+            Arc::new(setlist_repo),
         );
         let cx = test_context();
 
@@ -1623,10 +2621,14 @@ mod tests {
         let cx = test_context();
 
         let songs = svc.list_songs(&cx).await;
-        assert_eq!(songs.len(), 1);
-        assert_eq!(songs[0].name, "Feature-Demo Song");
-        assert_eq!(songs[0].sections.len(), 4);
-        assert_eq!(songs[0].artist.as_deref(), Some("Signal2"));
+        assert_eq!(songs.len(), 2);
+        let feature = songs
+            .iter()
+            .find(|s| s.name == "Feature-Demo Song")
+            .expect("feature song exists");
+        assert_eq!(feature.sections.len(), 4);
+        assert_eq!(feature.artist.as_deref(), Some("Signal2"));
+        assert!(songs.iter().any(|s| s.name == "Dummy Song"));
         Ok(())
     }
 
@@ -1655,7 +2657,7 @@ mod tests {
         assert_eq!(loaded.sections.len(), 2);
 
         let songs = svc.list_songs(&cx).await;
-        assert_eq!(songs.len(), 2); // 1 seeded + 1 just saved
+        assert_eq!(songs.len(), 3); // 2 seeded + 1 just saved
 
         svc.delete_song(&cx, SongId::from_uuid(seed_id("song-1")))
             .await;
@@ -1715,6 +2717,14 @@ mod tests {
 
         let index: BrowserIndex = svc.browser_index(&cx).await;
         assert!(!index.entries().is_empty());
+        assert!(index
+            .entries()
+            .iter()
+            .any(|e| matches!(e.node.kind, BrowserEntityKind::SetlistCollection)));
+        assert!(index
+            .entries()
+            .iter()
+            .any(|e| matches!(e.node.kind, BrowserEntityKind::SetlistVariant)));
 
         let hits: Vec<BrowserHit> = svc
             .browse(
@@ -1729,5 +2739,244 @@ mod tests {
         Ok(())
     }
 
+    #[tokio::test]
+    async fn test_live_browser_query_strict_filters() -> Result<()> {
+        let svc = seeded_service().await?;
+        let cx = test_context();
+
+        let setlist_hits: Vec<BrowserHit> = svc
+            .browse(
+                &cx,
+                BrowserQuery {
+                    kinds: vec![BrowserEntityKind::SetlistCollection],
+                    text: Some("demo".to_string()),
+                    ..BrowserQuery::default()
+                },
+            )
+            .await;
+        assert_eq!(setlist_hits.len(), 1);
+        assert!(matches!(
+            setlist_hits[0].node.kind,
+            BrowserEntityKind::SetlistCollection
+        ));
+
+        let strict_keys_hits: Vec<BrowserHit> = svc
+            .browse(
+                &cx,
+                BrowserQuery {
+                    rig_type: Some(signal_proto::rig::RigType::Keys),
+                    strict_rig_type: true,
+                    ..BrowserQuery::default()
+                },
+            )
+            .await;
+        assert!(!strict_keys_hits.is_empty());
+        Ok(())
+    }
+
     // endregion: --- Browser service
+
+    // region: --- Resolver service
+
+    #[tokio::test]
+    async fn test_live_resolve_rig_scene_keys_megarig() -> Result<()> {
+        let svc = seeded_service().await?;
+        let cx = test_context();
+
+        let graph: ResolvedGraph = svc
+            .resolve_target(
+                &cx,
+                ResolveTarget::RigScene {
+                    rig_id: RigId::from_uuid(seed_id("keys-megarig")),
+                    scene_id: RigSceneId::from_uuid(seed_id("keys-megarig-default")),
+                },
+            )
+            .await
+            .expect("resolve rig scene");
+
+        assert_eq!(graph.rig_id.as_str(), seed_id("keys-megarig").to_string());
+        assert!(!graph.engines.is_empty());
+        assert!(!graph.effective_overrides.is_empty());
+        assert!(graph
+            .effective_overrides
+            .iter()
+            .any(|ov| matches!(ov.op, signal_proto::overrides::NodeOverrideOp::Set(_))));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_live_resolve_song_section_from_patch() -> Result<()> {
+        let svc = seeded_service().await?;
+        let cx = test_context();
+
+        let graph: ResolvedGraph = svc
+            .resolve_target(
+                &cx,
+                ResolveTarget::SongSection {
+                    song_id: SongId::from_uuid(seed_id("feature-demo-song")),
+                    section_id: SectionId::from_uuid(seed_id("feature-demo-verse")),
+                },
+            )
+            .await
+            .expect("resolve song section");
+
+        assert_eq!(graph.rig_id.as_str(), seed_id("keys-megarig").to_string());
+        assert!(!graph.engines.is_empty());
+        assert!(!graph.effective_overrides.is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_live_resolve_applies_replace_ref_engine_scene() -> Result<()> {
+        let svc = seeded_service().await?;
+        let cx = test_context();
+
+        let graph: ResolvedGraph = svc
+            .resolve_target(
+                &cx,
+                ResolveTarget::SongSection {
+                    song_id: SongId::from_uuid(seed_id("feature-demo-song")),
+                    section_id: SectionId::from_uuid(seed_id("feature-demo-intro")),
+                },
+            )
+            .await
+            .expect("resolve song intro");
+
+        let synth_engine = graph
+            .engines
+            .iter()
+            .find(|e| e.engine_id.as_str() == seed_id("synth-engine").to_string())
+            .expect("synth engine present");
+        assert_eq!(
+            synth_engine.engine_scene_id.as_str(),
+            seed_id("synth-engine-scene-b").to_string()
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_live_resolve_fails_on_missing_replace_ref_module_variant() -> Result<()> {
+        use signal_proto::overrides::{NodeOverrideOp, NodePath, Override};
+        use signal_proto::song::Section;
+
+        let svc = seeded_service().await?;
+        let cx = test_context();
+
+        let bad = Section::from_rig_scene(
+            seed_id("bad-replace-ref-section"),
+            "Bad ReplaceRef",
+            seed_id("keys-megarig"),
+            seed_id("keys-megarig-default"),
+        )
+        .with_override(Override {
+            path: NodePath::engine("synth-engine")
+                .with_layer("synth-layer-motion")
+                .with_module("time-parallel"),
+            op: NodeOverrideOp::ReplaceRef("does-not-exist".to_string()),
+        });
+
+        let song = Song::new(seed_id("bad-replace-ref-song"), "Bad ReplaceRef Song", bad);
+        svc.save_song(&cx, song).await;
+
+        let resolved: core::result::Result<ResolvedGraph, ResolveError> = svc
+            .resolve_target(
+                &cx,
+                ResolveTarget::SongSection {
+                    song_id: SongId::from_uuid(seed_id("bad-replace-ref-song")),
+                    section_id: SectionId::from_uuid(seed_id("bad-replace-ref-section")),
+                },
+            )
+            .await;
+
+        assert!(resolved.is_err());
+        let err = resolved.err().expect("expected resolve error");
+        assert!(matches!(err, ResolveError::InvalidReference(_)));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_live_resolve_fails_on_missing_replace_ref_engine_scene() -> Result<()> {
+        use signal_proto::overrides::{NodeOverrideOp, NodePath, Override};
+        use signal_proto::song::Section;
+
+        let svc = seeded_service().await?;
+        let cx = test_context();
+
+        let bad = Section::from_rig_scene(
+            seed_id("bad-replace-ref-engine-section"),
+            "Bad Engine ReplaceRef",
+            seed_id("keys-megarig"),
+            seed_id("keys-megarig-default"),
+        )
+        .with_override(Override {
+            path: NodePath::engine("synth-engine"),
+            op: NodeOverrideOp::ReplaceRef("does-not-exist-engine-scene".to_string()),
+        });
+
+        let song = Song::new(
+            seed_id("bad-replace-ref-engine-song"),
+            "Bad Engine ReplaceRef Song",
+            bad,
+        );
+        svc.save_song(&cx, song).await;
+
+        let resolved: core::result::Result<ResolvedGraph, ResolveError> = svc
+            .resolve_target(
+                &cx,
+                ResolveTarget::SongSection {
+                    song_id: SongId::from_uuid(seed_id("bad-replace-ref-engine-song")),
+                    section_id: SectionId::from_uuid(seed_id("bad-replace-ref-engine-section")),
+                },
+            )
+            .await;
+
+        assert!(resolved.is_err());
+        let err = resolved.err().expect("expected resolve error");
+        assert!(matches!(err, ResolveError::InvalidReference(_)));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_live_resolve_fails_on_missing_replace_ref_layer_variant() -> Result<()> {
+        use signal_proto::overrides::{NodeOverrideOp, NodePath, Override};
+        use signal_proto::song::Section;
+
+        let svc = seeded_service().await?;
+        let cx = test_context();
+
+        let bad = Section::from_rig_scene(
+            seed_id("bad-replace-ref-layer-section"),
+            "Bad Layer ReplaceRef",
+            seed_id("keys-megarig"),
+            seed_id("keys-megarig-default"),
+        )
+        .with_override(Override {
+            path: NodePath::engine("synth-engine").with_layer("synth-layer-motion"),
+            op: NodeOverrideOp::ReplaceRef("does-not-exist-layer-variant".to_string()),
+        });
+
+        let song = Song::new(
+            seed_id("bad-replace-ref-layer-song"),
+            "Bad Layer ReplaceRef Song",
+            bad,
+        );
+        svc.save_song(&cx, song).await;
+
+        let resolved: core::result::Result<ResolvedGraph, ResolveError> = svc
+            .resolve_target(
+                &cx,
+                ResolveTarget::SongSection {
+                    song_id: SongId::from_uuid(seed_id("bad-replace-ref-layer-song")),
+                    section_id: SectionId::from_uuid(seed_id("bad-replace-ref-layer-section")),
+                },
+            )
+            .await;
+
+        assert!(resolved.is_err());
+        let err = resolved.err().expect("expected resolve error");
+        assert!(matches!(err, ResolveError::InvalidReference(_)));
+        Ok(())
+    }
+
+    // endregion: --- Resolver service
 }
