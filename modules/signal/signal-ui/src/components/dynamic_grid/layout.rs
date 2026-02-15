@@ -286,21 +286,45 @@ pub(crate) fn compute_container_groups(chain: &[GridSlot]) -> Vec<ContainerGroup
     let cell_size = CELL_SIZE as f64;
     let mut result = Vec::new();
 
-    // Engine level (outermost → rendered first / behind)
+    // Gather bounds at each level
     let engine_bounds = gather_bounds(chain, |s| s.engine_group.as_ref());
-    result.extend(make_rects(
-        engine_bounds,
-        ContainerLevel::Engine,
-        ENGINE_PAD,
-        ENGINE_TITLE_H,
-        step,
-        cell_size,
-    ));
-
-    // Layer level (middle)
     let layer_bounds = gather_bounds(chain, |s| s.layer_group.as_ref());
+    let module_bounds = gather_bounds(chain, |s| s.module_group.as_ref());
+
+    // Bottom-up visibility: module containers always render.
+    // Higher levels only render when they group multiple children.
+    use std::collections::HashMap;
+
+    let num_engines = engine_bounds.len();
+
+    let mut layers_per_engine: HashMap<String, usize> = HashMap::new();
+    for lk in layer_bounds.keys() {
+        let engine_key = lk.split('/').next().unwrap_or(lk);
+        *layers_per_engine.entry(engine_key.to_string()).or_insert(0) += 1;
+    }
+
+    // Engine level — only if there are multiple engines
+    if num_engines > 1 {
+        result.extend(make_rects(
+            engine_bounds,
+            ContainerLevel::Engine,
+            ENGINE_PAD,
+            ENGINE_TITLE_H,
+            step,
+            cell_size,
+        ));
+    }
+
+    // Layer level — only if parent engine has > 1 layer
+    let visible_layers: BTreeMap<String, BoundsInfo> = layer_bounds
+        .into_iter()
+        .filter(|(key, _)| {
+            let engine_key = key.split('/').next().unwrap_or(key);
+            layers_per_engine.get(engine_key).copied().unwrap_or(0) > 1
+        })
+        .collect();
     result.extend(make_rects(
-        layer_bounds,
+        visible_layers,
         ContainerLevel::Layer,
         LAYER_PAD,
         LAYER_TITLE_H,
@@ -308,8 +332,7 @@ pub(crate) fn compute_container_groups(chain: &[GridSlot]) -> Vec<ContainerGroup
         cell_size,
     ));
 
-    // Module level (innermost → rendered last / on top)
-    let module_bounds = gather_bounds(chain, |s| s.module_group.as_ref());
+    // Module level — always rendered (lowest common denominator)
     result.extend(make_rects(
         module_bounds,
         ContainerLevel::Module,
