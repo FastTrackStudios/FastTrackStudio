@@ -136,7 +136,8 @@ impl DockLayout {
         let mut ops = Vec::new();
 
         for panel in from_panels.difference(&to_panels) {
-            let (target_panel, zone) = insertion_hint(from, *panel).unwrap_or((None, DropZone::Center));
+            let (target_panel, zone) =
+                insertion_hint(from, *panel).unwrap_or((None, DropZone::Center));
             ops.push(LayoutOp::RemovePanel {
                 panel: *panel,
                 target_panel,
@@ -145,7 +146,8 @@ impl DockLayout {
         }
 
         for panel in to_panels.difference(&from_panels) {
-            let (target_panel, zone) = insertion_hint(to, *panel).unwrap_or((None, DropZone::Center));
+            let (target_panel, zone) =
+                insertion_hint(to, *panel).unwrap_or((None, DropZone::Center));
             ops.push(LayoutOp::AddPanel {
                 panel: *panel,
                 target_panel,
@@ -255,7 +257,11 @@ impl DockLayout {
             LayoutOp::RemoveTab { panel, .. } => {
                 self.remove_panel(*panel);
             }
-            LayoutOp::SwitchActiveTab { target_panel, to_active, .. } => {
+            LayoutOp::SwitchActiveTab {
+                target_panel,
+                to_active,
+                ..
+            } => {
                 self.set_active_panel(*target_panel, *to_active);
             }
         }

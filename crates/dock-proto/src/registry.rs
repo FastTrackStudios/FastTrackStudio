@@ -380,8 +380,7 @@ mod tests {
     fn test_visible_panels_respects_when() {
         let mut reg = PanelRegistry::new();
         reg.register(
-            PanelDescriptor::new("transport", "Transport")
-                .with_visibility_when("tab:performance"),
+            PanelDescriptor::new("transport", "Transport").with_visibility_when("tab:performance"),
         );
         reg.register(PanelDescriptor::new("settings", "Settings"));
 

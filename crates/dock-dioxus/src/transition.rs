@@ -52,7 +52,11 @@ impl LayoutTransition {
 }
 
 /// Compute logical transition params from one layout to another.
-pub fn compute_transition(from: &DockLayout, to: &DockLayout, duration_ms: u64) -> LayoutTransition {
+pub fn compute_transition(
+    from: &DockLayout,
+    to: &DockLayout,
+    duration_ms: u64,
+) -> LayoutTransition {
     let from_rects = panel_rects(from);
     let to_rects = panel_rects(to);
     let diff = DockLayout::diff(from, to);
@@ -114,7 +118,16 @@ fn panel_rects(layout: &DockLayout) -> HashMap<PanelId, TransitionRect> {
     let Some(tree) = layout.to_tree() else {
         return out;
     };
-    fill_rects(&tree, TransitionRect { x_pct: 0.0, y_pct: 0.0, w_pct: 100.0, h_pct: 100.0 }, &mut out);
+    fill_rects(
+        &tree,
+        TransitionRect {
+            x_pct: 0.0,
+            y_pct: 0.0,
+            w_pct: 100.0,
+            h_pct: 100.0,
+        },
+        &mut out,
+    );
     out
 }
 
