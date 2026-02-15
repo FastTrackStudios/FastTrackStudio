@@ -8,6 +8,15 @@ edition = "2021"
 dioxus = { workspace = true, features = ["router"] }
 signal2.workspace = true
 signal2-ui.workspace = true
+frame-import = { path = "../../../cells/frame/frame-import" }
+frame-proto = { path = "../../../cells/frame/frame-proto" }
+frame-ui = { path = "../../../cells/frame/frame-ui", features = ["anyrender"] }
+anyrender = { workspace = true }
+anyrender_vello = { workspace = true }
+kurbo = { workspace = true }
+peniko = { workspace = true }
+tokio = { workspace = true, features = ["time"] }
+serde_json = { workspace = true }
 
 [features]
 default = ["desktop"]

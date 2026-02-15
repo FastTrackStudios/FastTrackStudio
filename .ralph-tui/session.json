@@ -1,9 +1,9 @@
 {
   "version": 1,
-  "sessionId": "794d3567-5073-4157-af60-c0aeeeb2482c",
-  "status": "completed",
-  "startedAt": "2026-02-08T08:18:19.339Z",
-  "updatedAt": "2026-02-08T10:19:03.349Z",
+  "sessionId": "5bf570dc-fc8e-4662-836a-3e4b0ea27db2",
+  "status": "running",
+  "startedAt": "2026-02-13T12:41:36.705Z",
+  "updatedAt": "2026-02-14T06:58:38.465Z",
   "currentIteration": 0,
   "maxIterations": 10,
   "tasksCompleted": 0,
@@ -11,222 +11,126 @@
   "agentPlugin": "claude",
   "trackerState": {
     "plugin": "beads-bv",
-    "epicId": "roam-test-8xs",
-    "totalTasks": 36,
+    "epicId": "roam-test-5e9",
+    "totalTasks": 20,
     "tasks": [
       {
-        "id": "roam-test-8xs.31",
-        "title": "US-026: Implement LocalStorage with SQLite",
-        "status": "in_progress",
-        "completedInSession": false
-      },
-      {
-        "id": "roam-test-8xs.29",
-        "title": "US-025: Create signal-storage crate with SeaORM entities",
-        "status": "in_progress",
-        "completedInSession": false
-      },
-      {
-        "id": "roam-test-8xs.19",
-        "title": "US-011: Define Parameter and Snapshot data structures",
-        "status": "in_progress",
-        "completedInSession": false
-      },
-      {
-        "id": "roam-test-8xs.6",
-        "title": "US-001: Add graph state persistence to local storage",
-        "status": "in_progress",
-        "completedInSession": false
-      },
-      {
-        "id": "roam-test-8xs.36",
-        "title": "US-030: Integrate better-auth-rs for user authentication",
-        "status": "in_progress",
-        "completedInSession": false
-      },
-      {
-        "id": "roam-test-8xs.35",
-        "title": "US-029: Implement CloudStorage with PostgreSQL",
-        "status": "completed",
-        "completedInSession": false
-      },
-      {
-        "id": "roam-test-8xs.34",
-        "title": "US-028: Implement preset tagging and categorization",
+        "id": "roam-test-5e9.19",
+        "title": "US-019: End-to-end tests for hierarchy and overrides",
         "status": "open",
         "completedInSession": false
       },
       {
-        "id": "roam-test-8xs.33",
-        "title": "US-027: Implement preset CRUD operations",
+        "id": "roam-test-5e9.18",
+        "title": "US-018: Update signal2-ui + playground integration to new APIs",
         "status": "open",
         "completedInSession": false
       },
       {
-        "id": "roam-test-8xs.32",
-        "title": "Integrate storage with signal-ui",
+        "id": "roam-test-5e9.17",
+        "title": "US-017: Update signal2 re-exports and bootstrap path",
         "status": "open",
         "completedInSession": false
       },
       {
-        "id": "roam-test-8xs.30",
-        "title": "Implement preset import/export (JSON, file bundles)",
+        "id": "roam-test-5e9.16",
+        "title": "US-016: Update signal2-controller API to collection/variant terminology",
         "status": "open",
         "completedInSession": false
       },
       {
-        "id": "roam-test-8xs.25",
-        "title": "Implement sync engine with conflict resolution",
+        "id": "roam-test-5e9.15",
+        "title": "US-015: Update signal2-live service to new proto/repo contracts",
         "status": "open",
         "completedInSession": false
       },
       {
-        "id": "roam-test-8xs.24",
-        "title": "US-015: Implement parameter morphing between snapshots",
+        "id": "roam-test-5e9.14",
+        "title": "US-014: Update BlockRepoLive to generic collection repository surface",
         "status": "open",
         "completedInSession": false
       },
       {
-        "id": "roam-test-8xs.23",
-        "title": "US-014: Implement snapshot diffing",
+        "id": "roam-test-5e9.13",
+        "title": "US-013: Refactor storage schema to collection/variant model",
         "status": "open",
         "completedInSession": false
       },
       {
-        "id": "roam-test-8xs.22",
-        "title": "US-013: Implement snapshot recall (instant apply)",
+        "id": "roam-test-5e9.12",
+        "title": "US-012: Add template system for Block→Song levels",
         "status": "open",
         "completedInSession": false
       },
       {
-        "id": "roam-test-8xs.21",
-        "title": "US-012: Implement parameter capture for internal nodes",
+        "id": "roam-test-5e9.11",
+        "title": "US-011: Add Song domain with Section variants referencing Patch or Rig variants",
         "status": "open",
         "completedInSession": false
       },
       {
-        "id": "roam-test-8xs.16",
-        "title": "US-018: Create snapshot slots UI (Snapshooter-style)",
+        "id": "roam-test-5e9.10",
+        "title": "US-010: Add Profile domain with Patch variants referencing Rig variants",
         "status": "open",
         "completedInSession": false
       },
       {
-        "id": "roam-test-8xs.14",
-        "title": "US-016: Implement snapshot crossfade for structural changes",
+        "id": "roam-test-5e9.9",
+        "title": "US-009: Introduce Rig domain with scene-style variants and rig scoping",
         "status": "open",
         "completedInSession": false
       },
       {
-        "id": "roam-test-8xs.9",
-        "title": "US-004: Add node property panel in sidebar",
+        "id": "roam-test-5e9.8",
+        "title": "US-008: Introduce Engine domain with scene-style variants",
         "status": "open",
         "completedInSession": false
       },
       {
-        "id": "roam-test-8xs.8",
-        "title": "US-003: Implement undo/redo system for graph operations",
+        "id": "roam-test-5e9.7",
+        "title": "US-007: Introduce Layer domain with variants and overrides",
         "status": "open",
         "completedInSession": false
       },
       {
-        "id": "roam-test-8xs.7",
-        "title": "US-002: Add parameter editor modal for nodes",
+        "id": "roam-test-5e9.6",
+        "title": "US-006: Migrate Block and Module domain to Collection + Variant",
         "status": "open",
         "completedInSession": false
       },
       {
-        "id": "roam-test-8xs.28",
-        "title": "Implement preset versioning and history",
+        "id": "roam-test-5e9.5",
+        "title": "US-005: Add generic override path/op model",
         "status": "open",
         "completedInSession": false
       },
       {
-        "id": "roam-test-8xs.27",
-        "title": "Implement preset ratings and reviews",
+        "id": "roam-test-5e9.4",
+        "title": "US-004: Replace snapshot/preset naming in proto with collection/variant naming",
         "status": "open",
         "completedInSession": false
       },
       {
-        "id": "roam-test-8xs.26",
-        "title": "Implement preset sharing and community library",
+        "id": "roam-test-5e9.3",
+        "title": "US-003: Implement default normalization helpers and tests",
         "status": "open",
         "completedInSession": false
       },
       {
-        "id": "roam-test-8xs.20",
-        "title": "US-024: Implement A/B comparison mode",
+        "id": "roam-test-5e9.2",
+        "title": "US-002: Add shared metadata implementation (tags, description, notes)",
         "status": "open",
         "completedInSession": false
       },
       {
-        "id": "roam-test-8xs.18",
-        "title": "US-020: Implement module state snapshots (chunk-style)",
+        "id": "roam-test-5e9.1",
+        "title": "US-001: Add core traits Variant, DefaultVariant, Collection, Metadata",
         "status": "open",
         "completedInSession": false
       },
       {
-        "id": "roam-test-8xs.17",
-        "title": "US-019: Implement VST parameter bridge",
-        "status": "open",
-        "completedInSession": false
-      },
-      {
-        "id": "roam-test-8xs.15",
-        "title": "US-017: Implement tweening/easing for animated transitions",
-        "status": "open",
-        "completedInSession": false
-      },
-      {
-        "id": "roam-test-8xs.12",
-        "title": "US-022: Implement expression pedal/MIDI CC control",
-        "status": "open",
-        "completedInSession": false
-      },
-      {
-        "id": "roam-test-8xs.11",
-        "title": "US-021: Implement modulation sources",
-        "status": "open",
-        "completedInSession": false
-      },
-      {
-        "id": "roam-test-8xs.10",
-        "title": "US-005: Implement module preset save/load",
-        "status": "open",
-        "completedInSession": false
-      },
-      {
-        "id": "roam-test-8xs.3",
-        "title": "US-008: Resurrect signal flow grid view",
-        "status": "open",
-        "completedInSession": false
-      },
-      {
-        "id": "roam-test-8xs.2",
-        "title": "US-007: Add live audio visualization to node widgets",
-        "status": "open",
-        "completedInSession": false
-      },
-      {
-        "id": "roam-test-8xs.1",
-        "title": "US-006: Connect real RigControlService when available",
-        "status": "open",
-        "completedInSession": false
-      },
-      {
-        "id": "roam-test-8xs.13",
-        "title": "US-023: Implement snapshot automation/timeline",
-        "status": "open",
-        "completedInSession": false
-      },
-      {
-        "id": "roam-test-8xs.5",
-        "title": "US-010: Implement wire color coding by signal type",
-        "status": "open",
-        "completedInSession": false
-      },
-      {
-        "id": "roam-test-8xs.4",
-        "title": "US-009: Add module group collapse/expand",
+        "id": "roam-test-5e9.20",
+        "title": "US-020: Migration notes and developer docs",
         "status": "open",
         "completedInSession": false
       }
@@ -235,6 +139,10 @@
   "iterations": [],
   "skippedTaskIds": [],
   "cwd": "/Users/codywright/Documents/Development/Rust/roam-test",
-  "activeTaskIds": [],
+  "activeTaskIds": [
+    "roam-test-5e9.4",
+    "roam-test-5e9.3",
+    "roam-test-5e9.2"
+  ],
   "subagentPanelVisible": false
 }

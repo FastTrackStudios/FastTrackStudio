@@ -13,8 +13,14 @@ mod star_rating;
 mod block_colors;
 mod create_modal;
 mod crossfade_indicator;
+pub mod dynamic_grid;
+mod grid_model;
 mod morph_slider;
+pub mod node_graph;
+mod pan_zoom_canvas;
 mod scene_tile;
+mod signal_chain_grid;
+mod signal_flow_grid_view;
 
 // Re-exports: layout
 pub use entity_editor::EntityEditor;
@@ -39,3 +45,30 @@ pub use crossfade_indicator::CrossfadeIndicator;
 
 // Re-exports: create modal
 pub use create_modal::{CreateModal, CreateModalData, ModalConfig, TemplateOption};
+
+// Re-exports: pan/zoom canvas
+pub use pan_zoom_canvas::PanZoomCanvas;
+
+// Re-exports: signal chain grid
+pub use signal_chain_grid::{FlowBlock, SignalChainGrid};
+
+// Re-exports: signal flow grid view (interactive)
+pub use grid_model::{
+    BlockWidget, GridBlock, GridConnection, GridJack, GridPosition, GridSize, SignalFlowGrid,
+};
+pub use signal_flow_grid_view::{
+    EngineGridData, LayerGridData, ModuleBrowserModal, ModuleCategory, ModuleChainGridData,
+    SignalFlowGridView,
+};
+
+// Re-exports: node graph
+pub use node_graph::{
+    EngineData, GraphModule, LayerData, ModuleChainInput, ModuleContainer, Node, NodeBlock,
+    NodeGraph, NodeGraphView, NodePosition, NodeSize, Wire,
+};
+
+// Re-exports: dynamic grid view
+pub use dynamic_grid::{
+    BlockPickerDropdown, DynamicGridView, GridConnection as DynGridConnection, GridSelection,
+    GridSlot, PICKER_CELL, PICKER_CLICK_POS,
+};

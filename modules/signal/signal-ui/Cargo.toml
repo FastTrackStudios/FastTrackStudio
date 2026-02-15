@@ -8,3 +8,6 @@ authors.workspace = true
 [dependencies]
 dioxus.workspace = true
 signal = { package = "signal2", path = "../signal" }
+uuid = { version = "1", features = ["v4"] }
+tokio = { workspace = true }
+audio-controls = { path = "../../../cells/legacy-signal/audio-controls" }

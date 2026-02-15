@@ -1,0 +1,341 @@
+//! Pure grid geometry functions — cell positions, module bounds, collision detection.
+
+use signal::block::BlockColor;
+use signal::ModuleType;
+
+use super::types::GridSlot;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Grid sizing constants
+// ─────────────────────────────────────────────────────────────────────────────
+
+pub(crate) const CELL_SIZE: usize = 88;
+pub(crate) const CELL_GAP: usize = 32;
+pub(crate) const PORT_SIZE: f64 = 10.0;
+
+const MIN_COLS: usize = 14;
+const MIN_ROWS: usize = 1;
+
+// Module-level container padding
+pub(crate) const GROUP_PAD: f64 = CELL_GAP as f64 * 0.25;
+pub(crate) const GROUP_TITLE_H: f64 = 16.0;
+
+// Layer-level container padding (wraps modules)
+pub(crate) const LAYER_PAD: f64 = GROUP_PAD + 12.0;
+pub(crate) const LAYER_TITLE_H: f64 = 20.0;
+
+// Engine-level container padding (wraps layers)
+pub(crate) const ENGINE_PAD: f64 = LAYER_PAD + 12.0;
+pub(crate) const ENGINE_TITLE_H: f64 = 24.0;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Grid bounds
+// ─────────────────────────────────────────────────────────────────────────────
+
+pub(crate) fn compute_grid_bounds(chain: &[GridSlot]) -> (usize, usize) {
+    if chain.is_empty() {
+        return (MIN_COLS, MIN_ROWS);
+    }
+    let max_col = chain.iter().map(|s| s.col).max().unwrap_or(0);
+    let max_row = chain.iter().map(|s| s.row).max().unwrap_or(0);
+    let cols = (max_col + 2).max(MIN_COLS);
+    let rows = (max_row + 2).max(MIN_ROWS);
+    (cols, rows)
+}
+
+pub(crate) fn grid_natural_width(cols: usize) -> usize {
+    cols * CELL_SIZE + cols.saturating_sub(1) * CELL_GAP
+}
+
+pub(crate) fn grid_natural_height(rows: usize) -> usize {
+    rows * CELL_SIZE + rows.saturating_sub(1) * CELL_GAP
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Port positions
+// ─────────────────────────────────────────────────────────────────────────────
+
+pub(crate) fn output_port_pos(col: usize, row: usize) -> (f64, f64) {
+    let x = (col * (CELL_SIZE + CELL_GAP) + CELL_SIZE) as f64;
+    let y = (row * (CELL_SIZE + CELL_GAP)) as f64 + CELL_SIZE as f64 / 2.0;
+    (x, y)
+}
+
+pub(crate) fn input_port_pos(col: usize, row: usize) -> (f64, f64) {
+    let x = (col * (CELL_SIZE + CELL_GAP)) as f64;
+    let y = (row * (CELL_SIZE + CELL_GAP)) as f64 + CELL_SIZE as f64 / 2.0;
+    (x, y)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Module group bounding boxes
+// ─────────────────────────────────────────────────────────────────────────────
+
+pub(crate) struct ModuleGroupRect {
+    pub(crate) name: String,
+    pub(crate) color: BlockColor,
+    pub(crate) x: f64,
+    pub(crate) y: f64,
+    pub(crate) w: f64,
+    pub(crate) h: f64,
+}
+
+pub(crate) fn compute_module_groups(chain: &[GridSlot]) -> Vec<ModuleGroupRect> {
+    use std::collections::BTreeMap;
+
+    struct GroupInfo {
+        min_col: usize,
+        max_col: usize,
+        min_row: usize,
+        max_row: usize,
+        module_type: ModuleType,
+        name: String,
+    }
+
+    let mut groups: BTreeMap<String, GroupInfo> = BTreeMap::new();
+
+    for slot in chain {
+        let Some(ref key) = slot.module_group else {
+            continue;
+        };
+        let mt = slot.module_type.unwrap_or(ModuleType::Custom);
+        groups
+            .entry(key.clone())
+            .and_modify(|g| {
+                g.min_col = g.min_col.min(slot.col);
+                g.max_col = g.max_col.max(slot.col);
+                g.min_row = g.min_row.min(slot.row);
+                g.max_row = g.max_row.max(slot.row);
+            })
+            .or_insert(GroupInfo {
+                min_col: slot.col,
+                max_col: slot.col,
+                min_row: slot.row,
+                max_row: slot.row,
+                module_type: mt,
+                name: key.clone(),
+            });
+    }
+
+    groups
+        .into_values()
+        .map(|g| {
+            let step = (CELL_SIZE + CELL_GAP) as f64;
+            let cell_x = g.min_col as f64 * step;
+            let cell_y = g.min_row as f64 * step;
+            let cell_x2 = g.max_col as f64 * step + CELL_SIZE as f64;
+            let cell_y2 = g.max_row as f64 * step + CELL_SIZE as f64;
+
+            let color = module_type_color(g.module_type);
+
+            ModuleGroupRect {
+                name: g.name,
+                color,
+                x: cell_x - GROUP_PAD,
+                y: cell_y - GROUP_PAD - GROUP_TITLE_H,
+                w: (cell_x2 - cell_x) + GROUP_PAD * 2.0,
+                h: (cell_y2 - cell_y) + GROUP_PAD * 2.0 + GROUP_TITLE_H,
+            }
+        })
+        .collect()
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Collision detection
+// ─────────────────────────────────────────────────────────────────────────────
+
+pub(crate) fn group_move_is_valid(
+    chain: &[GridSlot],
+    group_name: &str,
+    col_delta: isize,
+    row_delta: isize,
+) -> bool {
+    use std::collections::HashSet;
+
+    let occupied: HashSet<(usize, usize)> = chain
+        .iter()
+        .filter(|s| s.module_group.as_deref() != Some(group_name))
+        .map(|s| (s.col, s.row))
+        .collect();
+
+    for s in chain.iter() {
+        if s.module_group.as_deref() != Some(group_name) {
+            continue;
+        }
+        let new_col = s.col as isize + col_delta;
+        let new_row = s.row as isize + row_delta;
+        if new_col < 0 || new_row < 0 {
+            continue;
+        }
+        if occupied.contains(&(new_col as usize, new_row as usize)) {
+            return false;
+        }
+    }
+    true
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Module type → block color mapping
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Hierarchical container groups (Engine → Layer → Module)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Visual nesting level for container backgrounds.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum ContainerLevel {
+    Engine,
+    Layer,
+    Module,
+}
+
+/// A computed container bounding box at any nesting level.
+pub(crate) struct ContainerGroupRect {
+    /// Full group key (e.g. "Engine/Layer/Module").
+    #[allow(dead_code)]
+    pub(crate) key: String,
+    /// Short display label (last path segment).
+    pub(crate) display_name: String,
+    pub(crate) level: ContainerLevel,
+    pub(crate) color: BlockColor,
+    pub(crate) x: f64,
+    pub(crate) y: f64,
+    pub(crate) w: f64,
+    pub(crate) h: f64,
+}
+
+/// Compute hierarchical container bounding boxes at all three levels.
+///
+/// Returns containers sorted outermost-first (Engine, then Layer, then Module)
+/// so they render in correct z-order.
+pub(crate) fn compute_container_groups(chain: &[GridSlot]) -> Vec<ContainerGroupRect> {
+    use std::collections::BTreeMap;
+
+    let step = (CELL_SIZE + CELL_GAP) as f64;
+
+    // Helper: gather bounds for a group field
+    struct BoundsInfo {
+        min_col: usize,
+        max_col: usize,
+        min_row: usize,
+        max_row: usize,
+        module_type: ModuleType,
+    }
+
+    // Gather bounds per group key at each level
+    fn gather_bounds(
+        chain: &[GridSlot],
+        key_fn: impl Fn(&GridSlot) -> Option<&String>,
+    ) -> BTreeMap<String, BoundsInfo> {
+        let mut map = BTreeMap::new();
+        for s in chain {
+            let Some(key) = key_fn(s) else { continue };
+            let mt = s.module_type.unwrap_or(ModuleType::Custom);
+            map.entry(key.clone())
+                .and_modify(|b: &mut BoundsInfo| {
+                    b.min_col = b.min_col.min(s.col);
+                    b.max_col = b.max_col.max(s.col);
+                    b.min_row = b.min_row.min(s.row);
+                    b.max_row = b.max_row.max(s.row);
+                })
+                .or_insert(BoundsInfo {
+                    min_col: s.col,
+                    max_col: s.col,
+                    min_row: s.row,
+                    max_row: s.row,
+                    module_type: mt,
+                });
+        }
+        map
+    }
+
+    fn make_rects(
+        bounds: BTreeMap<String, BoundsInfo>,
+        level: ContainerLevel,
+        pad: f64,
+        title_h: f64,
+        step: f64,
+        cell_size: f64,
+    ) -> Vec<ContainerGroupRect> {
+        bounds
+            .into_iter()
+            .map(|(key, b)| {
+                let cell_x = b.min_col as f64 * step;
+                let cell_y = b.min_row as f64 * step;
+                let cell_x2 = b.max_col as f64 * step + cell_size;
+                let cell_y2 = b.max_row as f64 * step + cell_size;
+
+                let color = module_type_color(b.module_type);
+                let display_name = key.rsplit('/').next().unwrap_or(&key).to_string();
+
+                ContainerGroupRect {
+                    key,
+                    display_name,
+                    level,
+                    color,
+                    x: cell_x - pad,
+                    y: cell_y - pad - title_h,
+                    w: (cell_x2 - cell_x) + pad * 2.0,
+                    h: (cell_y2 - cell_y) + pad * 2.0 + title_h,
+                }
+            })
+            .collect()
+    }
+
+    let cell_size = CELL_SIZE as f64;
+    let mut result = Vec::new();
+
+    // Engine level (outermost → rendered first / behind)
+    let engine_bounds = gather_bounds(chain, |s| s.engine_group.as_ref());
+    result.extend(make_rects(
+        engine_bounds,
+        ContainerLevel::Engine,
+        ENGINE_PAD,
+        ENGINE_TITLE_H,
+        step,
+        cell_size,
+    ));
+
+    // Layer level (middle)
+    let layer_bounds = gather_bounds(chain, |s| s.layer_group.as_ref());
+    result.extend(make_rects(
+        layer_bounds,
+        ContainerLevel::Layer,
+        LAYER_PAD,
+        LAYER_TITLE_H,
+        step,
+        cell_size,
+    ));
+
+    // Module level (innermost → rendered last / on top)
+    let module_bounds = gather_bounds(chain, |s| s.module_group.as_ref());
+    result.extend(make_rects(
+        module_bounds,
+        ContainerLevel::Module,
+        GROUP_PAD,
+        GROUP_TITLE_H,
+        step,
+        cell_size,
+    ));
+
+    result
+}
+
+/// Map a ModuleType to its display color using signal2's built-in color palette.
+pub(crate) fn module_type_color(mt: ModuleType) -> BlockColor {
+    use signal::BlockType;
+    let bt = match mt {
+        ModuleType::Drive => BlockType::Drive,
+        ModuleType::Amp => BlockType::Amp,
+        ModuleType::Eq | ModuleType::PostEq => BlockType::Eq,
+        ModuleType::Dynamics => BlockType::Compressor,
+        ModuleType::Modulation | ModuleType::VocalModulation => BlockType::Modulation,
+        ModuleType::Time => BlockType::Delay,
+        ModuleType::Motion => BlockType::Tremolo,
+        ModuleType::Special | ModuleType::PreFx => BlockType::Special,
+        ModuleType::Master => BlockType::Volume,
+        _ => BlockType::Custom,
+    };
+    bt.color()
+}
