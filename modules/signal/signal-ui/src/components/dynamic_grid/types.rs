@@ -32,6 +32,8 @@ pub struct GridSlot {
     /// Phantom slot — participates in layout (group bounds, grid sizing)
     /// but does not render a visible cell. Used for dry pass-through lanes.
     pub is_phantom: bool,
+    /// Resolved block parameters (name, value 0..1) for the inspector panel.
+    pub parameters: Vec<(String, f32)>,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

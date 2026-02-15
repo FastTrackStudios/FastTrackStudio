@@ -65,6 +65,33 @@ pub(super) fn BlockInspectorPanel(props: BlockInspectorPanelProps) -> Element {
                                 }
                             }
                         }
+                        // Parameter bars
+                        if !slot.parameters.is_empty() {
+                            div { class: "px-3 py-2 border-t border-zinc-800 space-y-1.5",
+                                h4 { class: "text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-1",
+                                    "Parameters ({slot.parameters.len()})"
+                                }
+                                for (name, value) in slot.parameters.iter() {
+                                    {
+                                        let pct = (value * 100.0).round() as u32;
+                                        let width_pct = format!("{}%", pct);
+                                        let name = name.clone();
+                                        rsx! {
+                                            div { class: "flex items-center gap-2",
+                                                span { class: "text-[11px] text-zinc-400 w-24 truncate flex-shrink-0", "{name}" }
+                                                div { class: "flex-1 h-1.5 bg-zinc-800 rounded-full overflow-hidden",
+                                                    div {
+                                                        class: "h-full rounded-full",
+                                                        style: "width: {width_pct}; background-color: {color.bg};",
+                                                    }
+                                                }
+                                                span { class: "text-[10px] text-zinc-600 w-8 text-right flex-shrink-0", "{pct}%" }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             } else {

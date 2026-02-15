@@ -3,6 +3,8 @@
 //! Converts domain hierarchy data (`EngineFlowData`, `ModuleChainData`,
 //! `SignalChain`) into flat `Vec<GridSlot>` for the `DynamicGridView`.
 
+use std::collections::HashMap;
+
 use dioxus::prelude::*;
 use signal::SignalChain;
 
@@ -12,6 +14,48 @@ use crate::components::dynamic_grid::{
     BlockPickerDropdown, DynamicGridView, GridConnection as DynGridConnection, GridSelection,
     GridSlot, PICKER_CELL, PICKER_CLICK_POS,
 };
+
+/// Pre-resolved block parameters keyed by `(preset_id, snapshot_id)`.
+/// Built during async data fetching, passed into synchronous grid conversion.
+pub(super) type ParamLookup = HashMap<(String, String), Vec<(String, f32)>>;
+
+/// Extract parameters for a `ModuleBlock`.
+///
+/// 1. For `Inline { block }` sources, read parameters directly.
+/// 2. For `PresetSnapshot` sources, look up in the pre-resolved map.
+/// 3. For `PresetDefault` sources, look up with snapshot_id = "default".
+/// 4. Apply any overrides on top.
+fn extract_block_params(mb: &signal::ModuleBlock, lookup: &ParamLookup) -> Vec<(String, f32)> {
+    let mut params: Vec<(String, f32)> = match mb.source() {
+        signal::ModuleBlockSource::Inline { block } => block
+            .parameters()
+            .iter()
+            .map(|p| (p.name().to_string(), p.value().get()))
+            .collect(),
+        signal::ModuleBlockSource::PresetSnapshot {
+            preset_id,
+            snapshot_id,
+            ..
+        } => lookup
+            .get(&(preset_id.to_string(), snapshot_id.to_string()))
+            .cloned()
+            .unwrap_or_default(),
+        signal::ModuleBlockSource::PresetDefault { preset_id, .. } => lookup
+            .get(&(preset_id.to_string(), "default".to_string()))
+            .cloned()
+            .unwrap_or_default(),
+    };
+    // Apply overrides
+    for ov in mb.overrides() {
+        if let Some(p) = params
+            .iter_mut()
+            .find(|(name, _)| name == ov.parameter_id())
+        {
+            p.1 = ov.value().get();
+        }
+    }
+    params
+}
 
 // region: --- Constants
 
@@ -34,7 +78,10 @@ const ROW_BAND_STRIDE: usize = 3;
 ///    remaining columns, the entire module wraps to the next row band
 ///  - Row bands are separated by `ROW_BAND_STRIDE` rows (2 empty gap rows)
 ///  - Split nodes fan out vertically within the module's row band
-pub(super) fn engines_to_grid_slots(engines: &[EngineFlowData]) -> Vec<GridSlot> {
+pub(super) fn engines_to_grid_slots(
+    engines: &[EngineFlowData],
+    params: &ParamLookup,
+) -> Vec<GridSlot> {
     let mut slots = Vec::new();
     let mut col: usize = 0;
     let mut row: usize = 0;
@@ -66,6 +113,7 @@ pub(super) fn engines_to_grid_slots(engines: &[EngineFlowData]) -> Vec<GridSlot>
                     &mut col_cursor,
                     row,
                     &mut slots,
+                    params,
                 );
 
                 col = col_cursor;
@@ -79,7 +127,10 @@ pub(super) fn engines_to_grid_slots(engines: &[EngineFlowData]) -> Vec<GridSlot>
 /// Convert a list of module chains into grid slots for `DynamicGridView`.
 /// Used for Engine/Layer detail where we show the module chains without
 /// the full rig hierarchy.
-pub(super) fn module_chains_to_grid_slots(chains: &[ModuleChainData]) -> Vec<GridSlot> {
+pub(super) fn module_chains_to_grid_slots(
+    chains: &[ModuleChainData],
+    params: &ParamLookup,
+) -> Vec<GridSlot> {
     let mut slots = Vec::new();
     let mut col: usize = 0;
     let mut row: usize = 0;
@@ -104,6 +155,7 @@ pub(super) fn module_chains_to_grid_slots(chains: &[ModuleChainData]) -> Vec<Gri
             &mut col_cursor,
             row,
             &mut slots,
+            params,
         );
         col = col_cursor;
     }
@@ -116,6 +168,7 @@ pub(super) fn signal_chain_to_grid_slots(
     chain: &SignalChain,
     module_name: &str,
     module_type: Option<signal::ModuleType>,
+    params: &ParamLookup,
 ) -> Vec<GridSlot> {
     let mut slots = Vec::new();
     let mut col_cursor = 0;
@@ -128,6 +181,7 @@ pub(super) fn signal_chain_to_grid_slots(
         &mut col_cursor,
         0,
         &mut slots,
+        params,
     );
     slots
 }
@@ -169,10 +223,13 @@ fn flatten_chain_nodes(
     col_cursor: &mut usize,
     base_row: usize,
     slots: &mut Vec<GridSlot>,
+    param_lookup: &ParamLookup,
 ) {
     for node in nodes {
         match node {
             signal::SignalNode::Block(mb) => {
+                // Extract parameters from the block source when available.
+                let parameters = extract_block_params(mb, param_lookup);
                 slots.push(GridSlot {
                     id: uuid::Uuid::new_v4(),
                     block_type: mb.block_type(),
@@ -187,6 +244,7 @@ fn flatten_chain_nodes(
                     is_template: false,
                     bypassed: false,
                     is_phantom: false,
+                    parameters,
                 });
                 *col_cursor += 1;
             }
@@ -240,6 +298,7 @@ fn flatten_chain_nodes(
                             is_template: false,
                             bypassed: false,
                             is_phantom: true,
+                            parameters: Vec::new(),
                         });
                         lane_col += 1;
                     } else {
@@ -252,6 +311,7 @@ fn flatten_chain_nodes(
                             &mut lane_col,
                             lane_row,
                             slots,
+                            param_lookup,
                         );
                     }
                     if lane_col > max_col {

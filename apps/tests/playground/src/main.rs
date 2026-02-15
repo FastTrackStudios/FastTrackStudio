@@ -11,13 +11,13 @@ use anyrender_vello::{VelloRendererOptions, VelloWindowRenderer};
 #[cfg(feature = "desktop")]
 use dioxus::desktop::tao::window::Window;
 #[cfg(feature = "desktop")]
-use dioxus::desktop::{Config, tao::window::WindowBuilder};
+use dioxus::desktop::{tao::window::WindowBuilder, Config};
 use dioxus::prelude::dioxus_elements::geometry::WheelDelta;
 use dioxus::prelude::*;
-use frame_import::import_figma_bytes;
+use frame_import::import_figma_bytes_with_diagnostics;
 use frame_proto::{AutoLayout, FrameDocument, NodeId};
 use frame_ui::{
-    TextFontRef, build_layout_boxes, build_paint_primitives, paint_primitives_into_scene_with,
+    build_layout_boxes, build_paint_primitives, paint_primitives_into_scene_with, TextFontRef,
 };
 #[cfg(feature = "desktop")]
 use kurbo::{Affine, Rect, Stroke};
@@ -28,7 +28,7 @@ use lumen_blocks::components::dropdown::{
 use lumen_blocks::components::input::{Input, InputSize};
 #[cfg(feature = "desktop")]
 use peniko::{Color, Fill};
-use signal2::{BlockType, SignalController, bootstrap_in_memory_controller_async};
+use signal2::{bootstrap_in_memory_controller_async, BlockType, SignalController};
 use signal2_ui::views::{
     BlockEditor, CollectionBrowser, MetadataDisplay, ModuleView, ModuleViewMode, RigSceneGrid,
     SignalSlider,
@@ -205,7 +205,7 @@ fn ensure_frame_bridge_running() -> Result<(), String> {
 #[component]
 fn App() -> Element {
     let mut controller = use_signal(|| None::<SignalController>);
-    let mut active_tab = use_signal(|| Tab::Frame);
+    let mut active_tab = use_signal(|| Tab::CollectionBrowser);
     let needs_transparency = active_tab() == Tab::Frame;
 
     use_effect(move || {
@@ -495,6 +495,8 @@ fn FramePreviewTab() -> Element {
         use_signal(std::collections::HashMap::<NodeId, NodeLayoutOverride>::new);
     let mut edit_drag = use_signal(|| None::<EditDragState>);
     let mut cached_primitives = use_signal(Vec::<frame_ui::PaintPrimitive>::new);
+    #[cfg(feature = "desktop")]
+    let mut cached_scene_fragment = use_signal(|| None::<anyrender::Scene>);
     let mut cached_content_bounds = use_signal(PrimitiveBounds::default);
     let mut cached_node_bounds =
         use_signal(std::collections::HashMap::<NodeId, PrimitiveBounds>::new);
@@ -517,11 +519,22 @@ fn FramePreviewTab() -> Element {
         use_signal(|| format!("Source: {FRAME_BRIDGE_JSON_PATH} (auto reload every 350ms)"));
     let mut show_constraints_panel = use_signal(|| true);
     let mut undo_stack = use_signal(Vec::<UndoSnapshot>::new);
+    let mut redo_stack = use_signal(Vec::<UndoSnapshot>::new);
     let mut undo_history = use_signal(Vec::<String>::new);
+    let mut perf_stats = use_signal(FramePerfStats::default);
     #[cfg(feature = "desktop")]
     let graphics = consume_context::<Arc<Mutex<FrameGraphics>>>();
     #[cfg(feature = "desktop")]
     let mut preview_bounds = use_signal(|| FramePreviewBounds::default());
+
+    use_effect(move || {
+        spawn(async move {
+            let _ = document::eval(
+                "setTimeout(() => document.getElementById('frame-preview-root')?.focus(), 0);",
+            )
+            .await;
+        });
+    });
 
     #[cfg(feature = "desktop")]
     {
@@ -551,14 +564,19 @@ fn FramePreviewTab() -> Element {
                         if last_signature != Some(signature) {
                             last_signature = Some(signature);
                             match tokio::fs::read(FRAME_BRIDGE_JSON_PATH).await {
-                                Ok(bytes) => match import_figma_bytes(&bytes) {
-                                    Ok(doc) => {
+                                Ok(bytes) => match import_figma_bytes_with_diagnostics(&bytes) {
+                                    Ok((doc, diagnostics)) => {
                                         frame_doc.set(Some(doc));
                                         frame_error.set(None);
                                         last_error = None;
+                                        let unsupported_keys = diagnostics.unsupported_node_keys.len();
                                         frame_status.set(format!(
-                                            "Source: {FRAME_BRIDGE_JSON_PATH} ({} bytes, updated {})",
-                                            signature.0, modified
+                                            "Source: {FRAME_BRIDGE_JSON_PATH} ({} bytes, updated {}, schema {}, aliases {}, unsupported keys {})",
+                                            signature.0,
+                                            modified,
+                                            diagnostics.source_schema.as_deref().unwrap_or(\"n/a\"),
+                                            diagnostics.normalized_aliases,
+                                            unsupported_keys
                                         ));
                                     }
                                     Err(err) => {
@@ -652,6 +670,7 @@ fn FramePreviewTab() -> Element {
         use_effect(move || {
             let Some(doc) = frame_doc() else {
                 cached_primitives.set(Vec::new());
+                cached_scene_fragment.set(None);
                 cached_content_bounds.set(PrimitiveBounds::default());
                 cached_node_bounds.set(std::collections::HashMap::new());
                 return;
@@ -667,6 +686,29 @@ fn FramePreviewTab() -> Element {
             let mut node_bounds = layout_bounds_map_for_ui(&doc, root, &node_overrides());
             if node_bounds.is_empty() {
                 node_bounds = node_bounds_map_from_primitives(&primitives);
+            }
+            #[cfg(feature = "desktop")]
+            {
+                let mut scene_fragment = anyrender::Scene::new();
+                if let Some(font_bytes) = try_load_system_text_font() {
+                    paint_primitives_into_scene_with(
+                        &mut scene_fragment,
+                        &primitives,
+                        Affine::IDENTITY,
+                        Some(TextFontRef {
+                            bytes: font_bytes.as_slice(),
+                            index: 0,
+                        }),
+                    );
+                } else {
+                    paint_primitives_into_scene_with(
+                        &mut scene_fragment,
+                        &primitives,
+                        Affine::IDENTITY,
+                        None,
+                    );
+                }
+                cached_scene_fragment.set(Some(scene_fragment));
             }
             cached_primitives.set(primitives);
             cached_content_bounds.set(content);
@@ -687,6 +729,7 @@ fn FramePreviewTab() -> Element {
                     }
 
                     let primitives = cached_primitives();
+                    let scene_fragment = cached_scene_fragment();
                     if primitives.is_empty() {
                         continue;
                     }
@@ -735,12 +778,9 @@ fn FramePreviewTab() -> Element {
                         bounds.y + pad + current_pan_y,
                     )) * Affine::scale(zoom)
                         * Affine::translate((-content.min_x, -content.min_y));
-                    let text_font = try_load_system_text_font().map(|bytes| TextFontRef {
-                        bytes: bytes.as_slice(),
-                        index: 0,
-                    });
 
                     if let Ok(mut gfx) = graphics_loop.lock() {
+                        let frame_start = std::time::Instant::now();
                         let win_size = dioxus::desktop::window().window.inner_size();
                         let (sw, sh) = gfx.size();
                         if sw != win_size.width || sh != win_size.height {
@@ -761,13 +801,8 @@ fn FramePreviewTab() -> Element {
                                 None,
                                 &panel,
                             );
-                            if let Some(font) = text_font {
-                                paint_primitives_into_scene_with(
-                                    scene,
-                                    &primitives,
-                                    transform,
-                                    Some(font),
-                                );
+                            if let Some(fragment) = scene_fragment.clone() {
+                                scene.append_scene(fragment, transform);
                             } else {
                                 paint_primitives_into_scene_with(
                                     scene,
@@ -911,6 +946,17 @@ fn FramePreviewTab() -> Element {
                                     }
                                 }
                             }
+                        });
+                        let frame_ms = frame_start.elapsed().as_secs_f64() * 1000.0;
+                        let fps = if frame_ms > 0.0 {
+                            1000.0 / frame_ms
+                        } else {
+                            0.0
+                        };
+                        perf_stats.set(FramePerfStats {
+                            frame_ms,
+                            fps,
+                            primitive_count: primitives.len(),
                         });
                     }
                     dioxus::desktop::window().window.request_redraw();
@@ -1263,6 +1309,7 @@ fn FramePreviewTab() -> Element {
                                     if let Some(world) = selected_world_bounds {
                                         record_undo_snapshot(
                                             &mut undo_stack,
+                                            &mut redo_stack,
                                             &mut undo_history,
                                             &frame_doc,
                                             &node_overrides,
@@ -1317,10 +1364,31 @@ fn FramePreviewTab() -> Element {
                                 variant: ButtonVariant::Outline,
                                 size: ButtonSize::Small,
                                 on_click: move |_| {
-                                    undo_last_edit(&mut undo_stack, &mut undo_history, &mut frame_doc, &mut node_overrides);
+                                    undo_last_edit(
+                                        &mut undo_stack,
+                                        &mut redo_stack,
+                                        &mut undo_history,
+                                        &mut frame_doc,
+                                        &mut node_overrides,
+                                    );
                                 },
                                 class: "h-7",
                                 "Undo"
+                            }
+                            Button {
+                                variant: ButtonVariant::Outline,
+                                size: ButtonSize::Small,
+                                on_click: move |_| {
+                                    redo_last_edit(
+                                        &mut undo_stack,
+                                        &mut redo_stack,
+                                        &mut undo_history,
+                                        &mut frame_doc,
+                                        &mut node_overrides,
+                                    );
+                                },
+                                class: "h-7",
+                                "Redo"
                             }
                             Button {
                                 variant: ButtonVariant::Outline,
@@ -1370,6 +1438,7 @@ fn FramePreviewTab() -> Element {
                                                 on_click: move |_| {
                                                     record_undo_snapshot(
                                                         &mut undo_stack,
+                                                        &mut redo_stack,
                                                         &mut undo_history,
                                                         &frame_doc,
                                                         &node_overrides,
@@ -1389,6 +1458,7 @@ fn FramePreviewTab() -> Element {
                                                 on_click: move |_| {
                                                     record_undo_snapshot(
                                                         &mut undo_stack,
+                                                        &mut redo_stack,
                                                         &mut undo_history,
                                                         &frame_doc,
                                                         &node_overrides,
@@ -1408,6 +1478,7 @@ fn FramePreviewTab() -> Element {
                                                 on_click: move |_| {
                                                     record_undo_snapshot(
                                                         &mut undo_stack,
+                                                        &mut redo_stack,
                                                         &mut undo_history,
                                                         &frame_doc,
                                                         &node_overrides,
@@ -1429,6 +1500,7 @@ fn FramePreviewTab() -> Element {
                                                 on_click: move |_| {
                                                     record_undo_snapshot(
                                                         &mut undo_stack,
+                                                        &mut redo_stack,
                                                         &mut undo_history,
                                                         &frame_doc,
                                                         &node_overrides,
@@ -1448,6 +1520,7 @@ fn FramePreviewTab() -> Element {
                                                 on_click: move |_| {
                                                     record_undo_snapshot(
                                                         &mut undo_stack,
+                                                        &mut redo_stack,
                                                         &mut undo_history,
                                                         &frame_doc,
                                                         &node_overrides,
@@ -1467,6 +1540,7 @@ fn FramePreviewTab() -> Element {
                                                 on_click: move |_| {
                                                     record_undo_snapshot(
                                                         &mut undo_stack,
+                                                        &mut redo_stack,
                                                         &mut undo_history,
                                                         &frame_doc,
                                                         &node_overrides,
@@ -1497,6 +1571,7 @@ fn FramePreviewTab() -> Element {
                                                     on_select: move |_: String| {
                                                         record_undo_snapshot(
                                                             &mut undo_stack,
+                                                            &mut redo_stack,
                                                             &mut undo_history,
                                                             &frame_doc,
                                                             &node_overrides,
@@ -1514,6 +1589,7 @@ fn FramePreviewTab() -> Element {
                                                     on_select: move |_: String| {
                                                         record_undo_snapshot(
                                                             &mut undo_stack,
+                                                            &mut redo_stack,
                                                             &mut undo_history,
                                                             &frame_doc,
                                                             &node_overrides,
@@ -1531,6 +1607,7 @@ fn FramePreviewTab() -> Element {
                                                     on_select: move |_: String| {
                                                         record_undo_snapshot(
                                                             &mut undo_stack,
+                                                            &mut redo_stack,
                                                             &mut undo_history,
                                                             &frame_doc,
                                                             &node_overrides,
@@ -1556,6 +1633,7 @@ fn FramePreviewTab() -> Element {
                                             if let Some(base) = selected_world_bounds {
                                                 record_undo_snapshot(
                                                     &mut undo_stack,
+                                                    &mut redo_stack,
                                                     &mut undo_history,
                                                     &frame_doc,
                                                     &node_overrides,
@@ -1577,6 +1655,7 @@ fn FramePreviewTab() -> Element {
                                             if let Some(base) = selected_world_bounds {
                                                 record_undo_snapshot(
                                                     &mut undo_stack,
+                                                    &mut redo_stack,
                                                     &mut undo_history,
                                                     &frame_doc,
                                                     &node_overrides,
@@ -1608,6 +1687,7 @@ fn FramePreviewTab() -> Element {
                                             if let Some(base) = selected_world_bounds {
                                                 record_undo_snapshot(
                                                     &mut undo_stack,
+                                                    &mut redo_stack,
                                                     &mut undo_history,
                                                     &frame_doc,
                                                     &node_overrides,
@@ -1629,6 +1709,7 @@ fn FramePreviewTab() -> Element {
                                             if let Some(base) = selected_world_bounds {
                                                 record_undo_snapshot(
                                                     &mut undo_stack,
+                                                    &mut redo_stack,
                                                     &mut undo_history,
                                                     &frame_doc,
                                                     &node_overrides,
@@ -2001,23 +2082,127 @@ fn FramePreviewTab() -> Element {
 
     rsx! {
         div {
+            id: "frame-preview-root",
             class: "h-full p-4 overflow-hidden flex flex-col min-h-0",
             tabindex: "0",
+            onmousedown: move |_| {
+                spawn(async move {
+                    let _ = document::eval(
+                        "document.getElementById('frame-preview-root')?.focus();"
+                    )
+                    .await;
+                });
+            },
             onkeydown: move |evt| {
                 let modifiers = evt.modifiers();
                 let is_ctrl = modifiers.contains(keyboard_types::Modifiers::CONTROL)
                     || modifiers.contains(keyboard_types::Modifiers::META);
-                if is_ctrl && evt.key() == Key::Character("z".to_string()) {
+                let is_shift = modifiers.contains(keyboard_types::Modifiers::SHIFT);
+                let key = evt.key().to_string().to_lowercase();
+                if is_ctrl && is_shift && key == "z" {
                     evt.prevent_default();
-                    undo_last_edit(&mut undo_stack, &mut undo_history, &mut frame_doc, &mut node_overrides);
+                    redo_last_edit(
+                        &mut undo_stack,
+                        &mut redo_stack,
+                        &mut undo_history,
+                        &mut frame_doc,
+                        &mut node_overrides,
+                    );
+                } else if is_ctrl && (key == "y") {
+                    evt.prevent_default();
+                    redo_last_edit(
+                        &mut undo_stack,
+                        &mut redo_stack,
+                        &mut undo_history,
+                        &mut frame_doc,
+                        &mut node_overrides,
+                    );
+                } else if is_ctrl && key == "z" {
+                    evt.prevent_default();
+                    undo_last_edit(
+                        &mut undo_stack,
+                        &mut redo_stack,
+                        &mut undo_history,
+                        &mut frame_doc,
+                        &mut node_overrides,
+                    );
+                } else if !is_ctrl
+                    && (key == "arrowup"
+                        || key == "arrowdown"
+                        || key == "arrowleft"
+                        || key == "arrowright")
+                {
+                    let Some(node_id) = selected_layer() else {
+                        return;
+                    };
+                    let bounds_map = cached_node_bounds();
+                    let Some(base_bounds) = bounds_map.get(&node_id).copied() else {
+                        return;
+                    };
+
+                    let step = if is_shift { 10.0 } else { 1.0 };
+                    let (dx, dy) = match key.as_str() {
+                        "arrowup" => (0.0, -step),
+                        "arrowdown" => (0.0, step),
+                        "arrowleft" => (-step, 0.0),
+                        "arrowright" => (step, 0.0),
+                        _ => (0.0, 0.0),
+                    };
+                    if dx == 0.0 && dy == 0.0 {
+                        return;
+                    }
+
+                    evt.prevent_default();
+                    record_undo_snapshot(
+                        &mut undo_stack,
+                        &mut redo_stack,
+                        &mut undo_history,
+                        &frame_doc,
+                        &node_overrides,
+                        "Nudge node",
+                    );
+                    node_overrides.with_mut(|overrides| {
+                        let mut current = overrides
+                            .get(&node_id)
+                            .copied()
+                            .unwrap_or(NodeLayoutOverride {
+                                x: base_bounds.min_x,
+                                y: base_bounds.min_y,
+                                width: (base_bounds.max_x - base_bounds.min_x).max(1.0),
+                                height: (base_bounds.max_y - base_bounds.min_y).max(1.0),
+                            });
+                        current.x += dx;
+                        current.y += dy;
+                        overrides.insert(node_id, current);
+                    });
                 }
             },
             h2 { class: "text-lg font-semibold text-zinc-300 mb-3 shrink-0", "Frame .fig Preview" }
             p { class: "text-xs text-zinc-500 mb-2 shrink-0", "{frame_status()}" }
+            p { class: "text-[11px] text-zinc-400 mb-2 shrink-0", "{perf_stats().format()}" }
             div { class: "flex-1 min-h-0",
                 {frame_content}
             }
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct FramePerfStats {
+    frame_ms: f64,
+    fps: f64,
+    primitive_count: usize,
+}
+
+impl FramePerfStats {
+    fn format(&self) -> String {
+        if self.frame_ms <= 0.0 {
+            return "Perf: waiting for frames".to_string();
+        }
+        format!(
+            "Perf: {:.2} ms/frame ({:.1} FPS), primitives {}",
+            self.frame_ms, self.fps, self.primitive_count
+        )
     }
 }
 
@@ -2064,7 +2249,14 @@ fn primitive_bounds(primitives: &[frame_ui::PaintPrimitive]) -> PrimitiveBounds 
 
     for p in primitives {
         match p {
-            frame_ui::PaintPrimitive::Rect {
+            frame_ui::PaintPrimitive::ClipStart {
+                x,
+                y,
+                width,
+                height,
+                ..
+            }
+            | frame_ui::PaintPrimitive::Rect {
                 x,
                 y,
                 width,
@@ -2083,6 +2275,7 @@ fn primitive_bounds(primitives: &[frame_ui::PaintPrimitive]) -> PrimitiveBounds 
                 out.max_x = out.max_x.max(*x + *width);
                 out.max_y = out.max_y.max(*y + *height);
             }
+            frame_ui::PaintPrimitive::ClipEnd { .. } => {}
             frame_ui::PaintPrimitive::Text {
                 x,
                 y,
@@ -2117,7 +2310,14 @@ fn primitive_bounds(primitives: &[frame_ui::PaintPrimitive]) -> PrimitiveBounds 
 
 fn primitive_world_bounds(primitive: &frame_ui::PaintPrimitive) -> PrimitiveBounds {
     match primitive {
-        frame_ui::PaintPrimitive::Rect {
+        frame_ui::PaintPrimitive::ClipStart {
+            x,
+            y,
+            width,
+            height,
+            ..
+        }
+        | frame_ui::PaintPrimitive::Rect {
             x,
             y,
             width,
@@ -2136,6 +2336,7 @@ fn primitive_world_bounds(primitive: &frame_ui::PaintPrimitive) -> PrimitiveBoun
             max_x: *x + *width,
             max_y: *y + *height,
         },
+        frame_ui::PaintPrimitive::ClipEnd { .. } => PrimitiveBounds::default(),
         frame_ui::PaintPrimitive::Text {
             x,
             y,
@@ -2593,7 +2794,9 @@ fn layout_bounds_map_for_ui(
 
 fn primitive_node_id(primitive: &frame_ui::PaintPrimitive) -> NodeId {
     match primitive {
-        frame_ui::PaintPrimitive::Rect { node_id, .. }
+        frame_ui::PaintPrimitive::ClipStart { node_id, .. }
+        | frame_ui::PaintPrimitive::ClipEnd { node_id }
+        | frame_ui::PaintPrimitive::Rect { node_id, .. }
         | frame_ui::PaintPrimitive::Path { node_id, .. }
         | frame_ui::PaintPrimitive::Text { node_id, .. } => *node_id,
     }
@@ -2609,6 +2812,19 @@ fn transform_primitive(
     sy: f64,
 ) {
     match primitive {
+        frame_ui::PaintPrimitive::ClipStart {
+            x,
+            y,
+            width,
+            height,
+            ..
+        } => {
+            *x = to_x + (*x - from_x) * sx;
+            *y = to_y + (*y - from_y) * sy;
+            *width = (*width * sx).max(1.0);
+            *height = (*height * sy).max(1.0);
+        }
+        frame_ui::PaintPrimitive::ClipEnd { .. } => {}
         frame_ui::PaintPrimitive::Rect {
             x,
             y,
@@ -2653,6 +2869,19 @@ fn node_bounds_map_from_primitives(
         });
 
         match primitive {
+            frame_ui::PaintPrimitive::ClipStart {
+                x,
+                y,
+                width,
+                height,
+                ..
+            } => {
+                entry.min_x = entry.min_x.min(*x);
+                entry.min_y = entry.min_y.min(*y);
+                entry.max_x = entry.max_x.max(*x + *width);
+                entry.max_y = entry.max_y.max(*y + *height);
+            }
+            frame_ui::PaintPrimitive::ClipEnd { .. } => {}
             frame_ui::PaintPrimitive::Rect {
                 x,
                 y,
@@ -2982,6 +3211,7 @@ fn constraint_vertical(doc: &FrameDocument, node_id: NodeId) -> String {
 
 fn record_undo_snapshot(
     undo_stack: &mut Signal<Vec<UndoSnapshot>>,
+    redo_stack: &mut Signal<Vec<UndoSnapshot>>,
     undo_history: &mut Signal<Vec<String>>,
     frame_doc: &Signal<Option<FrameDocument>>,
     node_overrides: &Signal<std::collections::HashMap<NodeId, NodeLayoutOverride>>,
@@ -2998,6 +3228,7 @@ fn record_undo_snapshot(
             stack.remove(0);
         }
     });
+    redo_stack.with_mut(|stack| stack.clear());
     undo_history.with_mut(|history| {
         history.push(format!("Edit: {label}"));
         if history.len() > 200 {
@@ -3008,16 +3239,59 @@ fn record_undo_snapshot(
 
 fn undo_last_edit(
     undo_stack: &mut Signal<Vec<UndoSnapshot>>,
+    redo_stack: &mut Signal<Vec<UndoSnapshot>>,
     undo_history: &mut Signal<Vec<String>>,
     frame_doc: &mut Signal<Option<FrameDocument>>,
     node_overrides: &mut Signal<std::collections::HashMap<NodeId, NodeLayoutOverride>>,
 ) {
+    let current = UndoSnapshot {
+        label: "current".to_string(),
+        frame_doc: frame_doc(),
+        node_overrides: node_overrides(),
+    };
     let previous = undo_stack.with_mut(|stack| stack.pop());
     if let Some(snapshot) = previous {
+        redo_stack.with_mut(|stack| {
+            stack.push(current);
+            if stack.len() > 200 {
+                stack.remove(0);
+            }
+        });
         frame_doc.set(snapshot.frame_doc);
         node_overrides.set(snapshot.node_overrides);
         undo_history.with_mut(|history| {
             history.push(format!("Undo: {}", snapshot.label));
+            if history.len() > 200 {
+                history.remove(0);
+            }
+        });
+    }
+}
+
+fn redo_last_edit(
+    undo_stack: &mut Signal<Vec<UndoSnapshot>>,
+    redo_stack: &mut Signal<Vec<UndoSnapshot>>,
+    undo_history: &mut Signal<Vec<String>>,
+    frame_doc: &mut Signal<Option<FrameDocument>>,
+    node_overrides: &mut Signal<std::collections::HashMap<NodeId, NodeLayoutOverride>>,
+) {
+    let current = UndoSnapshot {
+        label: "current".to_string(),
+        frame_doc: frame_doc(),
+        node_overrides: node_overrides(),
+    };
+    let next = redo_stack.with_mut(|stack| stack.pop());
+    if let Some(snapshot) = next {
+        undo_stack.with_mut(|stack| {
+            stack.push(current);
+            if stack.len() > 200 {
+                stack.remove(0);
+            }
+        });
+        frame_doc.set(snapshot.frame_doc);
+        node_overrides.set(snapshot.node_overrides);
+        undo_history.with_mut(|history| {
+            history.push("Redo".to_string());
             if history.len() > 200 {
                 history.remove(0);
             }

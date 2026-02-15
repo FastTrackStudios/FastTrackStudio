@@ -22,10 +22,11 @@ use signal::rig::RigType;
 use signal::tagging::TagSet;
 use signal::{BlockType, SignalController, ALL_BLOCK_TYPES};
 
-use data_fetching::{fetch_col2, fetch_col3};
+use data_fetching::{build_param_lookup, fetch_col2, fetch_col3};
 use detail_panel::{
     collect_available_tags, filter_and_sort, find_detail, rig_type_display, DetailPanel,
 };
+use grid_conversion::ParamLookup;
 use toolbar::Toolbar;
 use types::{ColumnItem, DetailData, DetailParam, NavCategory, SortMode, RIG_TYPES};
 
@@ -74,6 +75,9 @@ pub fn CollectionBrowser(controller: SignalController) -> Element {
     // Used by col4 to look up snapshots without re-querying the DB.
     let mut block_presets_cache = use_signal(Vec::<signal::Preset>::new);
 
+    // Pre-resolved block parameters for the detail grid inspector.
+    let mut param_lookup = use_signal(ParamLookup::new);
+
     // Search / sort / filter state
     let mut search_text = use_signal(String::new);
     let mut sort_mode = use_signal(|| SortMode::Name);
@@ -95,6 +99,7 @@ pub fn CollectionBrowser(controller: SignalController) -> Element {
             col4_items.set(Vec::new());
             col4_selected.set(None);
             block_presets_cache.set(Vec::new());
+            param_lookup.set(ParamLookup::new());
             search_text.set(String::new());
             active_tag_filters.set(Vec::new());
             spawn(async move {
@@ -110,6 +115,9 @@ pub fn CollectionBrowser(controller: SignalController) -> Element {
                     if !v.is_empty() {
                         col3_selected.set(Some(0));
                     }
+                    // Resolve block parameters for the detail grid
+                    let params = build_param_lookup(&controller, &v).await;
+                    param_lookup.set(params);
                     col3_items.set(v);
                     block_presets_cache.set(presets);
                 }
@@ -268,6 +276,8 @@ pub fn CollectionBrowser(controller: SignalController) -> Element {
                                             let tag = item_tag;
                                             spawn(async move {
                                                 let (v, presets) = fetch_col3(&controller, nav, &id, tag).await;
+                                                let params = build_param_lookup(&controller, &v).await;
+                                                param_lookup.set(params);
                                                 col3_items.set(v);
                                                 block_presets_cache.set(presets);
                                             });
@@ -433,6 +443,7 @@ pub fn CollectionBrowser(controller: SignalController) -> Element {
                     detail_name: detail_name.clone(),
                     detail_meta: detail_meta.cloned(),
                     detail_data: detail_data.cloned(),
+                    param_lookup: param_lookup(),
                 }
             }
 

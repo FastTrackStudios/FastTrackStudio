@@ -4,7 +4,8 @@ use dioxus::prelude::*;
 use signal::metadata::Metadata as MetadataModel;
 
 use super::grid_conversion::{
-    engines_to_grid_slots, module_chains_to_grid_slots, signal_chain_to_grid_slots, RigGridPanel,
+    engines_to_grid_slots, module_chains_to_grid_slots, signal_chain_to_grid_slots, ParamLookup,
+    RigGridPanel,
 };
 use super::types::{ColumnItem, DetailData, DetailParam, SortMode};
 use crate::views::metadata_display::MetadataDisplay;
@@ -16,6 +17,7 @@ pub(super) struct DetailPanelProps {
     pub detail_name: Option<String>,
     pub detail_meta: Option<MetadataModel>,
     pub detail_data: Option<DetailData>,
+    pub param_lookup: ParamLookup,
 }
 
 /// The right-side detail panel showing metadata, grids, and parameter bars.
@@ -43,7 +45,7 @@ pub(super) fn DetailPanel(props: DetailPanelProps) -> Element {
                     // Rig-level: interactive DynamicGridView
                     if !data.engines.is_empty() {
                         {
-                            let grid_slots = engines_to_grid_slots(&data.engines);
+                            let grid_slots = engines_to_grid_slots(&data.engines, &props.param_lookup);
                             rsx! {
                                 RigGridPanel { initial_slots: grid_slots }
                             }
@@ -52,7 +54,7 @@ pub(super) fn DetailPanel(props: DetailPanelProps) -> Element {
                     // Module chains (layer/engine detail) — interactive grid
                     if !data.module_chains.is_empty() {
                         {
-                            let grid_slots = module_chains_to_grid_slots(&data.module_chains);
+                            let grid_slots = module_chains_to_grid_slots(&data.module_chains, &props.param_lookup);
                             rsx! {
                                 RigGridPanel { initial_slots: grid_slots }
                             }
@@ -62,7 +64,7 @@ pub(super) fn DetailPanel(props: DetailPanelProps) -> Element {
                     if let Some(ref chain) = data.chain {
                         {
                             let name = props.detail_name.clone().unwrap_or_default();
-                            let grid_slots = signal_chain_to_grid_slots(chain, &name, None);
+                            let grid_slots = signal_chain_to_grid_slots(chain, &name, None, &props.param_lookup);
                             rsx! {
                                 RigGridPanel { initial_slots: grid_slots }
                             }

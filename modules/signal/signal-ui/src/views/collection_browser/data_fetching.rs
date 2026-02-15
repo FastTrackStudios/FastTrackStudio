@@ -10,6 +10,7 @@ use signal::traits::HasMetadata;
 use signal::SignalController;
 use signal::{Preset, SignalChain, ALL_BLOCK_TYPES};
 
+use super::grid_conversion::ParamLookup;
 use super::types::{
     ColumnItem, DetailData, EngineFlowData, LayerFlowData, ModuleChainData, NavCategory,
 };
@@ -326,6 +327,117 @@ async fn resolve_rig_scene_engines(
 }
 
 // endregion: --- Detail resolution helpers
+
+// region: --- Parameter resolution
+
+/// Walk all column items' detail data, collect block source references,
+/// and resolve them into a parameter lookup table.
+pub(super) async fn build_param_lookup(
+    controller: &SignalController,
+    items: &[ColumnItem],
+) -> ParamLookup {
+    let mut lookup = ParamLookup::new();
+    for item in items {
+        collect_chain_sources(&item.detail, &mut lookup, controller).await;
+    }
+    lookup
+}
+
+/// Collect block parameters from all chains in a DetailData tree.
+async fn collect_chain_sources(
+    data: &DetailData,
+    lookup: &mut ParamLookup,
+    controller: &SignalController,
+) {
+    // Walk engines → layers → module chains → chain nodes
+    for engine in &data.engines {
+        for layer in &engine.layers {
+            for mc in &layer.module_chains {
+                resolve_chain_params(&mc.chain, lookup, controller).await;
+            }
+        }
+    }
+    // Walk module_chains directly
+    for mc in &data.module_chains {
+        resolve_chain_params(&mc.chain, lookup, controller).await;
+    }
+    // Walk standalone chain
+    if let Some(ref chain) = data.chain {
+        resolve_chain_params(chain, lookup, controller).await;
+    }
+}
+
+/// Walk a signal chain and resolve parameters for each block source.
+async fn resolve_chain_params(
+    chain: &SignalChain,
+    lookup: &mut ParamLookup,
+    controller: &SignalController,
+) {
+    for node in chain.nodes() {
+        resolve_node_params(node, lookup, controller).await;
+    }
+}
+
+async fn resolve_node_params(
+    node: &signal::SignalNode,
+    lookup: &mut ParamLookup,
+    controller: &SignalController,
+) {
+    match node {
+        signal::SignalNode::Block(mb) => {
+            match mb.source() {
+                signal::ModuleBlockSource::PresetSnapshot {
+                    preset_id,
+                    snapshot_id,
+                    ..
+                } => {
+                    let key = (preset_id.to_string(), snapshot_id.to_string());
+                    if !lookup.contains_key(&key) {
+                        if let Some(block) = controller
+                            .load_variant(mb.block_type(), preset_id.clone(), snapshot_id.clone())
+                            .await
+                        {
+                            let params: Vec<(String, f32)> = block
+                                .parameters()
+                                .iter()
+                                .map(|p| (p.name().to_string(), p.value().get()))
+                                .collect();
+                            lookup.insert(key, params);
+                        }
+                    }
+                }
+                signal::ModuleBlockSource::PresetDefault { preset_id, .. } => {
+                    let key = (preset_id.to_string(), "default".to_string());
+                    if !lookup.contains_key(&key) {
+                        if let Some(block) = controller
+                            .load_collection_default(mb.block_type(), preset_id.clone())
+                            .await
+                        {
+                            let params: Vec<(String, f32)> = block
+                                .parameters()
+                                .iter()
+                                .map(|p| (p.name().to_string(), p.value().get()))
+                                .collect();
+                            lookup.insert(key, params);
+                        }
+                    }
+                }
+                signal::ModuleBlockSource::Inline { .. } => {
+                    // Inline blocks carry their params directly — handled in extract_block_params
+                }
+            }
+        }
+        signal::SignalNode::Split { lanes } => {
+            for lane in lanes {
+                for n in lane.nodes() {
+                    Box::pin(resolve_node_params(n, lookup, controller)).await;
+                }
+            }
+        }
+    }
+}
+
+// endregion: --- Parameter resolution
 
 // region: --- Utility
 
