@@ -20,12 +20,10 @@ use signal::{BlockType, SignalChain, ALL_BLOCK_TYPES};
 use signal::{Preset, SignalController};
 
 use super::metadata_display::MetadataDisplay;
-use super::signal_chain_layout::{layout_module_chains, layout_signal_chain};
 use crate::components::dynamic_grid::{
     BlockPickerDropdown, DynamicGridView, GridConnection as DynGridConnection, GridSelection,
     GridSlot, PICKER_CELL, PICKER_CLICK_POS,
 };
-use crate::components::SignalChainGrid;
 
 // region: --- Types
 
@@ -717,36 +715,22 @@ pub fn CollectionBrowser(controller: SignalController) -> Element {
                                     }
                                 }
                             }
-                            // Module chains (layer/engine detail) — unified grid
+                            // Module chains (layer/engine detail) — interactive grid
                             if !data.module_chains.is_empty() {
                                 {
-                                    let (flow_blocks, total_cols, total_lanes) =
-                                        layout_module_chains(&data.module_chains);
+                                    let grid_slots = module_chains_to_grid_slots(&data.module_chains);
                                     rsx! {
-                                        div { class: "mt-3",
-                                            SignalChainGrid {
-                                                blocks: flow_blocks,
-                                                total_columns: total_cols,
-                                                total_lanes: total_lanes,
-                                            }
-                                        }
+                                        RigGridPanel { initial_slots: grid_slots }
                                     }
                                 }
                             }
-                            // Signal chain grid (module snapshot detail)
+                            // Signal chain (module snapshot detail) — interactive grid
                             if let Some(ref chain) = data.chain {
                                 {
-                                    let (flow_blocks, total_cols, total_lanes) =
-                                        layout_signal_chain(chain);
+                                    let name = detail_name.clone().unwrap_or_default();
+                                    let grid_slots = signal_chain_to_grid_slots(chain, &name, None);
                                     rsx! {
-                                        div { class: "mt-3",
-                                            h4 { class: "text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-2", "Signal Chain" }
-                                            SignalChainGrid {
-                                                blocks: flow_blocks,
-                                                total_columns: total_cols,
-                                                total_lanes: total_lanes,
-                                            }
-                                        }
+                                        RigGridPanel { initial_slots: grid_slots }
                                     }
                                 }
                             }
@@ -1371,6 +1355,62 @@ fn engines_to_grid_slots(engines: &[EngineFlowData]) -> Vec<GridSlot> {
     slots
 }
 
+/// Convert a list of module chains into grid slots for `DynamicGridView`.
+/// Used for Engine/Layer detail where we show the module chains without
+/// the full rig hierarchy.
+fn module_chains_to_grid_slots(chains: &[ModuleChainData]) -> Vec<GridSlot> {
+    let mut slots = Vec::new();
+    let mut col: usize = 0;
+    let mut row: usize = 0;
+
+    for mc in chains {
+        let module_key = mc.name.clone();
+        let mt = mc.module_type;
+        let module_width = count_chain_width(mc.chain.nodes());
+
+        if col > 0 && col + module_width > SOFT_MAX_COLS {
+            col = 0;
+            row += ROW_BAND_STRIDE;
+        }
+
+        let mut col_cursor = col;
+        flatten_chain_nodes(
+            mc.chain.nodes(),
+            &module_key,
+            &module_key,
+            &module_key,
+            mt,
+            &mut col_cursor,
+            row,
+            &mut slots,
+        );
+        col = col_cursor;
+    }
+    slots
+}
+
+/// Convert a single signal chain into grid slots for `DynamicGridView`.
+/// Used for Module snapshot detail.
+fn signal_chain_to_grid_slots(
+    chain: &SignalChain,
+    module_name: &str,
+    module_type: Option<signal::ModuleType>,
+) -> Vec<GridSlot> {
+    let mut slots = Vec::new();
+    let mut col_cursor = 0;
+    flatten_chain_nodes(
+        chain.nodes(),
+        module_name,
+        module_name,
+        module_name,
+        module_type,
+        &mut col_cursor,
+        0,
+        &mut slots,
+    );
+    slots
+}
+
 /// Count the number of columns a chain of nodes needs (for wrapping decisions).
 fn count_chain_width(nodes: &[signal::SignalNode]) -> usize {
     let mut width = 0;
@@ -1505,6 +1545,133 @@ fn flatten_chain_nodes(
 
 // endregion: --- Grid slot conversion
 
+// region: --- BlockInspectorPanel
+
+#[derive(Props, Clone, PartialEq)]
+struct BlockInspectorPanelProps {
+    selection: Option<GridSelection>,
+    chain: Vec<GridSlot>,
+}
+
+/// Shows properties of the currently selected block or module in the grid.
+#[component]
+fn BlockInspectorPanel(props: BlockInspectorPanelProps) -> Element {
+    let Some(ref sel) = props.selection else {
+        return rsx! {
+            div { class: "mt-3 px-3 py-2 text-xs text-zinc-600 italic",
+                "Select a block or module to inspect"
+            }
+        };
+    };
+
+    match sel {
+        GridSelection::Block(id) => {
+            let slot = props.chain.iter().find(|s| s.id == *id);
+            if let Some(slot) = slot {
+                let bt_display = format!("{:?}", slot.block_type);
+                let color = slot.block_type.color();
+                let preset = slot.block_preset_name.as_deref().unwrap_or("—");
+                let module = slot
+                    .module_group
+                    .as_deref()
+                    .and_then(|k| k.rsplit('/').next())
+                    .unwrap_or("—");
+                let bypassed = if slot.bypassed { "Yes" } else { "No" };
+
+                rsx! {
+                    div { class: "mt-3 rounded border border-zinc-800 bg-zinc-900/60 overflow-hidden",
+                        div { class: "px-3 py-1.5 border-b border-zinc-800 flex items-center gap-2",
+                            span {
+                                class: "w-2.5 h-2.5 rounded-full inline-block",
+                                style: "background-color: {color.bg};",
+                            }
+                            span { class: "text-xs font-semibold text-zinc-200", "{bt_display}" }
+                            span { class: "text-[10px] text-zinc-500", "{preset}" }
+                        }
+                        div { class: "px-3 py-2 text-xs text-zinc-400 space-y-1",
+                            div { class: "flex justify-between",
+                                span { class: "text-zinc-500", "Module" }
+                                span { "{module}" }
+                            }
+                            div { class: "flex justify-between",
+                                span { class: "text-zinc-500", "Position" }
+                                span { "col {slot.col}, row {slot.row}" }
+                            }
+                            div { class: "flex justify-between",
+                                span { class: "text-zinc-500", "Bypassed" }
+                                span { "{bypassed}" }
+                            }
+                            if slot.is_template {
+                                div { class: "flex justify-between",
+                                    span { class: "text-zinc-500", "Template" }
+                                    span { "Yes" }
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                rsx! {}
+            }
+        }
+        GridSelection::Module(name) => {
+            let module_slots: Vec<&GridSlot> = props
+                .chain
+                .iter()
+                .filter(|s| s.module_group.as_deref() == Some(name) && !s.is_phantom)
+                .collect();
+            let display_name = name.rsplit('/').next().unwrap_or(name);
+            let mt_display = module_slots
+                .first()
+                .and_then(|s| s.module_type)
+                .map(|mt| format!("{mt:?}"))
+                .unwrap_or_else(|| "Custom".to_string());
+            let color = module_slots
+                .first()
+                .map(|s| s.block_type.color())
+                .unwrap_or_else(|| signal::BlockType::Custom.color());
+
+            rsx! {
+                div { class: "mt-3 rounded border border-zinc-800 bg-zinc-900/60 overflow-hidden",
+                    div { class: "px-3 py-1.5 border-b border-zinc-800 flex items-center gap-2",
+                        span {
+                            class: "w-2.5 h-2.5 rounded-full inline-block",
+                            style: "background-color: {color.bg};",
+                        }
+                        span { class: "text-xs font-semibold text-zinc-200", "{display_name}" }
+                        span { class: "text-[10px] text-zinc-500", "{mt_display}" }
+                    }
+                    div { class: "px-3 py-2 text-xs text-zinc-400 space-y-1",
+                        div { class: "flex justify-between",
+                            span { class: "text-zinc-500", "Blocks" }
+                            span { "{module_slots.len()}" }
+                        }
+                        for slot in module_slots.iter() {
+                            {
+                                let bt = format!("{:?}", slot.block_type);
+                                let preset = slot.block_preset_name.as_deref().unwrap_or("—");
+                                let sc = slot.block_type.color();
+                                rsx! {
+                                    div { class: "flex items-center gap-2 pl-2",
+                                        span {
+                                            class: "w-1.5 h-1.5 rounded-full inline-block flex-shrink-0",
+                                            style: "background-color: {sc.bg};",
+                                        }
+                                        span { class: "text-zinc-500 truncate", "{bt}" }
+                                        span { class: "text-zinc-300 truncate", "{preset}" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// endregion: --- BlockInspectorPanel
+
 // region: --- RigGridPanel (stateful DynamicGridView wrapper)
 
 #[derive(Props, Clone, PartialEq)]
@@ -1532,13 +1699,16 @@ fn RigGridPanel(props: RigGridPanelProps) -> Element {
     let picker_cell = PICKER_CELL();
     let picker_pos = PICKER_CLICK_POS();
 
+    let current_chain = chain();
+    let current_sel = selection();
+
     rsx! {
         div {
             class: "mt-3",
             style: "height: 480px;",
             DynamicGridView {
-                chain: chain(),
-                selection: selection(),
+                chain: current_chain.clone(),
+                selection: current_sel.clone(),
                 connections: connections(),
                 on_chain_change: move |new_chain: Vec<GridSlot>| {
                     chain.set(new_chain);
@@ -1568,6 +1738,11 @@ fn RigGridPanel(props: RigGridPanelProps) -> Element {
                     *PICKER_CELL.write() = None;
                 },
             }
+        }
+        // Inspector panel for selected block / module
+        BlockInspectorPanel {
+            selection: current_sel,
+            chain: current_chain,
         }
     }
 }
