@@ -369,8 +369,7 @@ pub(super) fn RigGridPanel(props: RigGridPanelProps) -> Element {
 
     rsx! {
         div {
-            class: "mt-3",
-            style: "height: 480px;",
+            class: "flex-1 min-h-0",
             DynamicGridView {
                 chain: current_chain.clone(),
                 selection: current_sel.clone(),

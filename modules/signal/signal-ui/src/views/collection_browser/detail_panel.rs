@@ -8,7 +8,6 @@ use super::grid_conversion::{
     RigGridPanel,
 };
 use super::types::{ColumnItem, DetailData, DetailParam, SortMode};
-use crate::views::metadata_display::MetadataDisplay;
 
 // region: --- Detail panel component
 
@@ -20,66 +19,51 @@ pub(super) struct DetailPanelProps {
     pub param_lookup: ParamLookup,
 }
 
-/// The right-side detail panel showing metadata, grids, and parameter bars.
+/// The right-side detail panel — fills all available space with the grid preview.
 #[component]
 pub(super) fn DetailPanel(props: DetailPanelProps) -> Element {
     rsx! {
-        div { class: "flex-1 min-w-0 flex flex-col min-h-0 bg-zinc-950/20",
-            div { class: "px-4 py-2 border-b border-zinc-800",
-                h3 { class: "text-[10px] font-semibold text-zinc-500 uppercase tracking-wider", "Detail" }
+        div { class: "flex-1 min-w-0 flex flex-col min-h-0",
+            if let Some(ref data) = props.detail_data {
+                // Rig-level: interactive DynamicGridView
+                if !data.engines.is_empty() {
+                    {
+                        let grid_slots = engines_to_grid_slots(&data.engines, &props.param_lookup);
+                        rsx! {
+                            RigGridPanel { initial_slots: grid_slots }
+                        }
+                    }
+                }
+                // Module chains (layer/engine detail) — interactive grid
+                if !data.module_chains.is_empty() {
+                    {
+                        let grid_slots = module_chains_to_grid_slots(&data.module_chains, &props.param_lookup);
+                        rsx! {
+                            RigGridPanel { initial_slots: grid_slots }
+                        }
+                    }
+                }
+                // Signal chain (module snapshot detail) — interactive grid
+                if let Some(ref chain) = data.chain {
+                    {
+                        let name = props.detail_name.clone().unwrap_or_default();
+                        let grid_slots = signal_chain_to_grid_slots(chain, &name, None, &props.param_lookup);
+                        rsx! {
+                            RigGridPanel { initial_slots: grid_slots }
+                        }
+                    }
+                }
+                // Flat params (block snapshot detail)
+                if !data.params.is_empty() {
+                    div { class: "p-4 space-y-2",
+                        h4 { class: "text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-2", "Parameters" }
+                        { render_param_bars(&data.params) }
+                    }
+                }
             }
-            div { class: "flex-1 overflow-y-auto p-4",
-                if let Some(ref name) = props.detail_name {
-                    div { class: "mb-4",
-                        h2 { class: "text-base font-semibold text-zinc-200", "{name}" }
-                    }
-                }
-                if let Some(ref meta) = props.detail_meta {
-                    MetadataDisplay {
-                        tags: meta.tags.as_slice().to_vec(),
-                        description: meta.description.clone(),
-                        notes: meta.notes.clone(),
-                    }
-                }
-                if let Some(ref data) = props.detail_data {
-                    // Rig-level: interactive DynamicGridView
-                    if !data.engines.is_empty() {
-                        {
-                            let grid_slots = engines_to_grid_slots(&data.engines, &props.param_lookup);
-                            rsx! {
-                                RigGridPanel { initial_slots: grid_slots }
-                            }
-                        }
-                    }
-                    // Module chains (layer/engine detail) — interactive grid
-                    if !data.module_chains.is_empty() {
-                        {
-                            let grid_slots = module_chains_to_grid_slots(&data.module_chains, &props.param_lookup);
-                            rsx! {
-                                RigGridPanel { initial_slots: grid_slots }
-                            }
-                        }
-                    }
-                    // Signal chain (module snapshot detail) — interactive grid
-                    if let Some(ref chain) = data.chain {
-                        {
-                            let name = props.detail_name.clone().unwrap_or_default();
-                            let grid_slots = signal_chain_to_grid_slots(chain, &name, None, &props.param_lookup);
-                            rsx! {
-                                RigGridPanel { initial_slots: grid_slots }
-                            }
-                        }
-                    }
-                    // Flat params (block snapshot detail)
-                    if !data.params.is_empty() {
-                        div { class: "mt-3 space-y-2",
-                            h4 { class: "text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-2", "Parameters" }
-                            { render_param_bars(&data.params) }
-                        }
-                    }
-                }
-                if props.detail_name.is_none() {
-                    div { class: "text-xs text-zinc-600 italic", "Select an item to see details" }
+            if props.detail_name.is_none() {
+                div { class: "flex-1 flex items-center justify-center",
+                    span { class: "text-xs text-zinc-600 italic", "Select an item to see details" }
                 }
             }
         }
