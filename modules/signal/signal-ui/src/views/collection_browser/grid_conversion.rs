@@ -86,6 +86,8 @@ const ROW_BAND_STRIDE: usize = 2;
 ///    remaining columns, the entire module wraps to the next row band
 ///  - Row bands are separated by `ROW_BAND_STRIDE` rows (2 empty gap rows)
 ///  - Split nodes fan out vertically within the module's row band
+///  - Whole-module collision avoidance: if a module's footprint overlaps
+///    existing blocks, the entire module shifts to a free row position
 pub(super) fn engines_to_grid_slots(
     engines: &[EngineFlowData],
     params: &ParamLookup,
@@ -108,7 +110,6 @@ pub(super) fn engines_to_grid_slots(
         let mut layer_measures: Vec<LayerMeasure> = Vec::new();
         for layer in &engine.layers {
             let mut temp_slots = Vec::new();
-            let mut temp_occupied = HashSet::new();
             let mut temp_col: usize = 0;
             let temp_row: usize = 0;
             let mut temp_base_row = temp_row;
@@ -129,7 +130,6 @@ pub(super) fn engines_to_grid_slots(
                     temp_base_row,
                     &mut temp_slots,
                     params,
-                    &mut temp_occupied,
                 );
                 temp_col = col_cursor;
             }
@@ -174,20 +174,18 @@ pub(super) fn engines_to_grid_slots(
                     layer_row += ROW_BAND_STRIDE;
                 }
 
-                let mut col_cursor = layer_col;
-                flatten_chain_nodes(
+                layer_col = place_module(
                     mc.chain.nodes(),
                     &module_key,
                     Some(&layer_key),
                     Some(&engine_key),
                     mt,
-                    &mut col_cursor,
+                    layer_col,
                     layer_row,
                     &mut slots,
                     params,
                     &mut occupied,
                 );
-                layer_col = col_cursor;
             }
 
             // Use pre-measured height (from dry-run) for consistent packing.
@@ -227,20 +225,18 @@ pub(super) fn module_chains_to_grid_slots(
             row += ROW_BAND_STRIDE;
         }
 
-        let mut col_cursor = col;
-        flatten_chain_nodes(
+        col = place_module(
             mc.chain.nodes(),
             &module_key,
             None,
             None,
             mt,
-            &mut col_cursor,
+            col,
             row,
             &mut slots,
             params,
             &mut occupied,
         );
-        col = col_cursor;
     }
     slots
 }
@@ -254,7 +250,6 @@ pub(super) fn signal_chain_to_grid_slots(
     params: &ParamLookup,
 ) -> Vec<GridSlot> {
     let mut slots = Vec::new();
-    let mut occupied = HashSet::new();
     let mut col_cursor = 0;
     flatten_chain_nodes(
         chain.nodes(),
@@ -266,7 +261,6 @@ pub(super) fn signal_chain_to_grid_slots(
         0,
         &mut slots,
         params,
-        &mut occupied,
     );
     slots
 }
@@ -296,8 +290,9 @@ fn count_chain_width(nodes: &[signal::SignalNode]) -> usize {
 
 /// Recursively flatten SignalNodes into GridSlots, handling splits.
 ///
-/// `occupied` tracks all `(col, row)` positions that have been placed,
-/// making it impossible for splits to collide with existing blocks.
+/// Lays out blocks and splits relative to `(col_cursor, base_row)`.
+/// Splits fan out symmetrically around `base_row`. This function does NOT
+/// do collision checking — callers use `place_module` for that.
 fn flatten_chain_nodes(
     nodes: &[signal::SignalNode],
     module_key: &str,
@@ -308,22 +303,18 @@ fn flatten_chain_nodes(
     base_row: usize,
     slots: &mut Vec<GridSlot>,
     param_lookup: &ParamLookup,
-    occupied: &mut HashSet<(usize, usize)>,
 ) {
     for node in nodes {
         match node {
             signal::SignalNode::Block(mb) => {
                 let parameters = extract_block_params(mb, param_lookup);
-                let col = *col_cursor;
-                let row = base_row;
-                occupied.insert((col, row));
                 slots.push(GridSlot {
                     id: uuid::Uuid::new_v4(),
                     block_type: mb.block_type(),
                     block_preset_name: Some(mb.label().to_string()),
                     plugin_name: None,
-                    col,
-                    row,
+                    col: *col_cursor,
+                    row: base_row,
                     module_group: Some(module_key.to_string()),
                     module_type,
                     layer_group: layer_key.map(|s| s.to_string()),
@@ -342,26 +333,10 @@ fn flatten_chain_nodes(
                 let wet: Vec<&signal::SignalChain> =
                     lanes.iter().filter(|l| !l.is_empty()).collect();
                 let wet_count = wet.len();
-
-                // Find a contiguous run of `wet_count` free rows at the
-                // split columns, centered as close to `base_row` as possible.
-                let lane_width = wet
-                    .iter()
-                    .map(|l| count_chain_width(l.nodes()))
-                    .max()
-                    .unwrap_or(1);
-                let check_cols = split_start_col..split_start_col + lane_width;
-
-                // Search outward from base_row for a free row range.
-                let start_row = find_free_row_range(
-                    base_row,
-                    wet_count,
-                    &check_cols.collect::<Vec<_>>(),
-                    occupied,
-                );
+                let vert_offset = wet_count.saturating_sub(1) / 2;
 
                 for (i, lane) in wet.iter().enumerate() {
-                    let lane_row = start_row + i;
+                    let lane_row = (base_row + i).saturating_sub(vert_offset);
                     let mut lane_col = split_start_col;
                     flatten_chain_nodes(
                         lane.nodes(),
@@ -373,7 +348,6 @@ fn flatten_chain_nodes(
                         lane_row,
                         slots,
                         param_lookup,
-                        occupied,
                     );
                     if lane_col > max_col {
                         max_col = lane_col;
@@ -386,47 +360,98 @@ fn flatten_chain_nodes(
     }
 }
 
-/// Find a contiguous run of `count` rows where none of the given columns
-/// are occupied. Searches outward from `preferred_row`, trying above first
-/// (to keep splits from pushing into the next row band below).
-fn find_free_row_range(
+/// Lay out a module's chain into temp slots, then shift the entire module
+/// to a row position where it doesn't collide with already-placed blocks.
+///
+/// Returns the column cursor after the module (for advancing `layer_col`).
+fn place_module(
+    nodes: &[signal::SignalNode],
+    module_key: &str,
+    layer_key: Option<&str>,
+    engine_key: Option<&str>,
+    module_type: Option<signal::ModuleType>,
+    start_col: usize,
     preferred_row: usize,
-    count: usize,
-    cols: &[usize],
+    slots: &mut Vec<GridSlot>,
+    param_lookup: &ParamLookup,
+    occupied: &mut HashSet<(usize, usize)>,
+) -> usize {
+    // 1. Dry-run: lay out at (start_col, preferred_row) into temp slots.
+    let mut temp_slots = Vec::new();
+    let mut col_cursor = start_col;
+    flatten_chain_nodes(
+        nodes,
+        module_key,
+        layer_key,
+        engine_key,
+        module_type,
+        &mut col_cursor,
+        preferred_row,
+        &mut temp_slots,
+        param_lookup,
+    );
+
+    if temp_slots.is_empty() {
+        return col_cursor;
+    }
+
+    // 2. Compute the module's bounding rows.
+    let min_row = temp_slots.iter().map(|s| s.row).min().unwrap();
+
+    // Collect relative (col, row_offset) for collision checking.
+    let cells: Vec<(usize, usize)> = temp_slots
+        .iter()
+        .map(|s| (s.col, s.row - min_row))
+        .collect();
+
+    // 3. Find a row where the whole module fits without collision.
+    let place_row = find_free_module_row(min_row, &cells, occupied);
+    let row_shift = place_row as isize - min_row as isize;
+
+    // 4. Shift all temp slots and commit them.
+    for mut slot in temp_slots {
+        slot.row = (slot.row as isize + row_shift) as usize;
+        occupied.insert((slot.col, slot.row));
+        slots.push(slot);
+    }
+
+    col_cursor
+}
+
+/// Find a row position where all cells of a module can be placed without
+/// colliding with occupied positions. Searches outward from `preferred_start`,
+/// trying the preferred position first, then alternating above and below.
+fn find_free_module_row(
+    preferred_start: usize,
+    cells: &[(usize, usize)], // (col, row_offset) pairs
     occupied: &HashSet<(usize, usize)>,
 ) -> usize {
-    // Helper: check if rows [start..start+count] are all free at the given cols.
-    let range_free = |start: usize| -> bool {
-        for r in start..start + count {
-            for &c in cols {
-                if occupied.contains(&(c, r)) {
-                    return false;
-                }
+    let fits_at = |start_row: usize| -> bool {
+        for &(col, row_off) in cells {
+            if occupied.contains(&(col, start_row + row_off)) {
+                return false;
             }
         }
         true
     };
 
-    // Try centering around preferred_row (bottom lane at preferred_row).
-    let centered = preferred_row.saturating_sub(count.saturating_sub(1));
-    if range_free(centered) {
-        return centered;
+    // Try preferred position first.
+    if fits_at(preferred_start) {
+        return preferred_start;
     }
 
-    // Search outward: alternate above and below preferred_row.
+    // Search outward: try above first, then below.
     for offset in 1..50 {
-        let above = preferred_row.saturating_sub(count.saturating_sub(1) + offset);
-        if range_free(above) {
-            return above;
+        if preferred_start >= offset && fits_at(preferred_start - offset) {
+            return preferred_start - offset;
         }
-        let below = preferred_row + offset;
-        if range_free(below) {
-            return below;
+        if fits_at(preferred_start + offset) {
+            return preferred_start + offset;
         }
     }
 
-    // Fallback (shouldn't happen): place far below.
-    preferred_row + 10
+    // Fallback.
+    preferred_start + 10
 }
 
 // endregion: --- Converters
