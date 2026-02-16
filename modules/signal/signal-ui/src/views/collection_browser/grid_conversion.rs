@@ -90,24 +90,82 @@ pub(super) fn engines_to_grid_slots(
 
     for engine in engines {
         let engine_key = engine.name.clone();
+
+        // Two-pass layout: measure each layer, then pack them.
+        // Pre-compute each layer's dimensions by laying it out into a
+        // temporary slot list at origin (0,0).
+        struct LayerMeasure {
+            width: usize,  // max col + 1
+            height: usize, // row count (accounts for split fan-out + wrapping)
+        }
+
+        let mut layer_measures: Vec<LayerMeasure> = Vec::new();
         for layer in &engine.layers {
+            let mut temp_slots = Vec::new();
+            let mut temp_col: usize = 0;
+            let temp_row: usize = 0;
+            let mut temp_base_row = temp_row;
+            for mc in &layer.module_chains {
+                let module_width = count_chain_width(mc.chain.nodes());
+                if temp_col > 0 && temp_col + module_width > SOFT_MAX_COLS {
+                    temp_col = 0;
+                    temp_base_row += ROW_BAND_STRIDE;
+                }
+                let mut col_cursor = temp_col;
+                flatten_chain_nodes(
+                    mc.chain.nodes(),
+                    "measure",
+                    None,
+                    None,
+                    None,
+                    &mut col_cursor,
+                    temp_base_row,
+                    &mut temp_slots,
+                    params,
+                );
+                temp_col = col_cursor;
+            }
+            let max_col = temp_slots.iter().map(|s| s.col).max().unwrap_or(0);
+            let max_row = temp_slots.iter().map(|s| s.row).max().unwrap_or(0);
+            layer_measures.push(LayerMeasure {
+                width: max_col + 1,
+                height: max_row + 1,
+            });
+        }
+
+        // Pack layers left-to-right, wrapping when a layer won't fit.
+        let mut col: usize = 0;
+        let mut band_start_row = row;
+        let mut band_max_height: usize = 0;
+
+        for (li, layer) in engine.layers.iter().enumerate() {
             let layer_key = format!("{}/{}", engine.name, layer.name);
-            // Each layer starts on a fresh row band within the engine.
-            let mut col: usize = 0;
+            let measure = &layer_measures[li];
+
+            // Wrap to next row band if this layer won't fit horizontally.
+            if col > 0 && col + measure.width > SOFT_MAX_COLS {
+                // Advance past the tallest layer in the current band.
+                band_start_row += band_max_height + LAYER_GAP;
+                band_max_height = 0;
+                col = 0;
+            }
+
+            // Place this layer's modules starting at (col, band_start_row).
+            let layer_base_row = band_start_row;
+            let mut layer_col = col;
+            let mut layer_row = layer_base_row;
 
             for mc in &layer.module_chains {
                 let module_key = format!("{}/{}/{}", engine.name, layer.name, mc.name);
                 let mt = mc.module_type;
-
                 let module_width = count_chain_width(mc.chain.nodes());
 
-                // Wrap to next row band if module won't fit (never split a module)
-                if col > 0 && col + module_width > SOFT_MAX_COLS {
-                    col = 0;
-                    row += ROW_BAND_STRIDE;
+                if layer_col > col && layer_col + module_width > col + SOFT_MAX_COLS {
+                    layer_col = col;
+                    layer_row += ROW_BAND_STRIDE;
                 }
 
-                let mut col_cursor = col;
+                let mut col_cursor = layer_col;
                 flatten_chain_nodes(
                     mc.chain.nodes(),
                     &module_key,
@@ -115,23 +173,22 @@ pub(super) fn engines_to_grid_slots(
                     Some(&engine_key),
                     mt,
                     &mut col_cursor,
-                    row,
+                    layer_row,
                     &mut slots,
                     params,
                 );
-
-                col = col_cursor;
+                layer_col = col_cursor;
             }
 
-            // Advance past this layer's content for the next layer.
-            let layer_max_row = slots
-                .iter()
-                .filter(|s| s.layer_group.as_deref() == Some(&layer_key))
-                .map(|s| s.row)
-                .max()
-                .unwrap_or(row);
-            row = layer_max_row + 1 + LAYER_GAP;
+            // Use pre-measured height (from dry-run) for consistent packing.
+            band_max_height = band_max_height.max(measure.height);
+
+            // Advance col past this layer for the next one.
+            col = col + measure.width + 1; // +1 col gap between side-by-side layers
         }
+
+        // Advance row past this engine for the next one.
+        row = band_start_row + band_max_height + LAYER_GAP;
     }
 
     slots
