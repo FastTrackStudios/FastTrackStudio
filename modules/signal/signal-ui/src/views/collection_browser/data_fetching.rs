@@ -8,7 +8,9 @@ use signal::rig::RigType;
 use signal::tagging::{StructuredTag, TagCategory, TagSet};
 use signal::traits::HasMetadata;
 use signal::SignalController;
-use signal::{Preset, SignalChain, ALL_BLOCK_TYPES};
+use signal::{
+    BlockType, ModuleBlock, ModuleBlockSource, Preset, SignalChain, SignalNode, ALL_BLOCK_TYPES,
+};
 
 use super::grid_conversion::ParamLookup;
 use super::types::{
@@ -243,7 +245,12 @@ pub(super) async fn fetch_col3(
 
 // region: --- Detail resolution helpers
 
-/// Resolve a layer's default variant module refs into `ModuleChainData` for grid rendering.
+/// Resolve a layer's default variant refs into `ModuleChainData` for grid rendering.
+///
+/// Handles all three ref types:
+/// - `module_refs` → full module chains from module presets
+/// - `block_refs` → single-block synthetic chains (one per block)
+/// - `layer_refs` → recursively resolved nested layers
 async fn resolve_layer_module_chains(
     controller: &SignalController,
     layer: &Layer,
@@ -254,7 +261,23 @@ async fn resolve_layer_module_chains(
     };
     // Pre-fetch all module presets to look up module types for colors.
     let all_module_presets = controller.list_module_collections().await;
+
+    // Build a block preset lookup: preset_id → (BlockType, preset_name)
+    // so we can resolve block_refs without knowing their type upfront.
+    let block_preset_lookup = build_block_preset_lookup(controller).await;
+
     let mut out = Vec::new();
+
+    // 1) Resolve layer_refs (recursive — nested layers)
+    for lr in &variant.layer_refs {
+        let layer_id_str = lr.collection_id.to_string();
+        if let Some(nested_layer) = controller.load_layer(layer_id_str.as_str()).await {
+            let nested = Box::pin(resolve_layer_module_chains(controller, &nested_layer)).await;
+            out.extend(nested);
+        }
+    }
+
+    // 2) Resolve module_refs (module presets with full signal chains)
     for mr in &variant.module_refs {
         let collection_id_str = mr.collection_id.to_string();
         let module_preset = all_module_presets
@@ -264,9 +287,6 @@ async fn resolve_layer_module_chains(
         let mc = mt
             .map(|m| m.color())
             .unwrap_or(signal::ModuleType::Drive.color());
-        // Use the preset name (e.g. "Source", "Full Drive Stack") not the
-        // snapshot name (e.g. "Default") — snapshot names are not unique across
-        // modules, which causes all modules to share one group key.
         let module_name = module_preset
             .map(|p| p.name().to_string())
             .unwrap_or_else(|| format!("Module {}", mr.collection_id));
@@ -288,7 +308,62 @@ async fn resolve_layer_module_chains(
             module_type: mt,
         });
     }
+
+    // 3) Resolve block_refs (standalone blocks → single-node chains)
+    for br in &variant.block_refs {
+        let preset_id_str = br.collection_id.to_string();
+        let (bt, preset_name) = block_preset_lookup
+            .get(&preset_id_str)
+            .cloned()
+            .unwrap_or((BlockType::Custom, format!("Block {}", br.collection_id)));
+
+        let source = match &br.variant_id {
+            Some(snap_id) => ModuleBlockSource::PresetSnapshot {
+                preset_id: br.collection_id.clone(),
+                snapshot_id: snap_id.clone(),
+                saved_at_version: None,
+            },
+            None => ModuleBlockSource::PresetDefault {
+                preset_id: br.collection_id.clone(),
+                saved_at_version: None,
+            },
+        };
+        let node = SignalNode::Block(ModuleBlock::new(
+            preset_id_str.clone(),
+            &preset_name,
+            bt,
+            source,
+        ));
+        let chain = SignalChain::new(vec![node]);
+        let color = bt.color();
+        out.push(ModuleChainData {
+            name: preset_name,
+            color_bg: color.bg.to_string(),
+            color_fg: color.fg.to_string(),
+            color_border: color.border.to_string(),
+            chain,
+            module_type: None,
+        });
+    }
+
     out
+}
+
+/// Build a lookup table of block preset ID → (BlockType, name).
+///
+/// Loads all block collections across every block type. This is cached
+/// per-call since `resolve_layer_module_chains` may be called multiple
+/// times for nested layers.
+async fn build_block_preset_lookup(
+    controller: &SignalController,
+) -> std::collections::HashMap<String, (BlockType, String)> {
+    let mut lookup = std::collections::HashMap::new();
+    for &bt in ALL_BLOCK_TYPES {
+        for preset in controller.list_collections(bt).await {
+            lookup.insert(preset.id().to_string(), (bt, preset.name().to_string()));
+        }
+    }
+    lookup
 }
 
 /// Resolve a rig scene's full hierarchy into `EngineFlowData` for grid rendering.
