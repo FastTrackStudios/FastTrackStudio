@@ -17,7 +17,8 @@ use dioxus::prelude::*;
 use frame_import::import_figma_bytes_with_diagnostics;
 use frame_proto::{AutoLayout, FrameDocument, NodeId};
 use frame_ui::{
-    build_layout_boxes, build_paint_primitives, paint_primitives_into_scene_with, TextFontRef,
+    build_layout_boxes, build_paint_primitives, collect_render_diagnostics,
+    paint_primitives_into_scene_with, TextFontRef,
 };
 #[cfg(feature = "desktop")]
 use kurbo::{Affine, Rect, Stroke};
@@ -521,11 +522,22 @@ fn FramePreviewTab() -> Element {
     let mut undo_stack = use_signal(Vec::<UndoSnapshot>::new);
     let mut redo_stack = use_signal(Vec::<UndoSnapshot>::new);
     let mut undo_history = use_signal(Vec::<String>::new);
+    let mut deep_select_state = use_signal(|| None::<DeepSelectState>);
     let mut perf_stats = use_signal(FramePerfStats::default);
     #[cfg(feature = "desktop")]
     let graphics = consume_context::<Arc<Mutex<FrameGraphics>>>();
     #[cfg(feature = "desktop")]
     let mut preview_bounds = use_signal(|| FramePreviewBounds::default());
+    let cached_spacing_guides = use_memo(move || {
+        let node_bounds = cached_node_bounds();
+        let active = selected_layer().or(cached_render_root());
+        match (frame_doc(), active) {
+            (Some(doc), Some(selected)) => {
+                spacing_guides_for_selection(&doc, &node_bounds, selected)
+            }
+            _ => Vec::new(),
+        }
+    });
 
     use_effect(move || {
         spawn(async move {
@@ -569,14 +581,26 @@ fn FramePreviewTab() -> Element {
                                         frame_doc.set(Some(doc));
                                         frame_error.set(None);
                                         last_error = None;
-                                        let unsupported_keys = diagnostics.unsupported_node_keys.len();
+                                        let unsupported_keys =
+                                            diagnostics.unsupported_node_keys.len();
+                                        let unsupported_preview = diagnostics
+                                            .top_unsupported_keys(5)
+                                            .into_iter()
+                                            .map(|(k, v)| format!("{k}:{v}"))
+                                            .collect::<Vec<_>>()
+                                            .join(", ");
                                         frame_status.set(format!(
-                                            "Source: {FRAME_BRIDGE_JSON_PATH} ({} bytes, updated {}, schema {}, aliases {}, unsupported keys {})",
+                                            "Source: {FRAME_BRIDGE_JSON_PATH} ({} bytes, updated {}, schema {}, aliases {}, unsupported keys {} [{}])",
                                             signature.0,
                                             modified,
-                                            diagnostics.source_schema.as_deref().unwrap_or(\"n/a\"),
+                                            diagnostics.source_schema.as_deref().unwrap_or("n/a"),
                                             diagnostics.normalized_aliases,
-                                            unsupported_keys
+                                            unsupported_keys,
+                                            if unsupported_preview.is_empty() {
+                                                "none".to_string()
+                                            } else {
+                                                unsupported_preview
+                                            }
                                         ));
                                     }
                                     Err(err) => {
@@ -753,12 +777,7 @@ fn FramePreviewTab() -> Element {
                                 current_pan_y,
                             )
                         });
-                    let spacing_guides = match (frame_doc(), active_node) {
-                        (Some(doc), Some(selected)) => {
-                            spacing_guides_for_selection(&doc, &node_bounds, selected)
-                        }
-                        _ => Vec::new(),
-                    };
+                    let spacing_guides = cached_spacing_guides();
                     let hovered_overlay_css = hovered_node
                         .and_then(|id| node_bounds.get(&id).copied())
                         .filter(|_| hovered_node != active_node)
@@ -801,7 +820,7 @@ fn FramePreviewTab() -> Element {
                                 None,
                                 &panel,
                             );
-                            if let Some(fragment) = scene_fragment.clone() {
+                            if let Some(fragment) = scene_fragment {
                                 scene.append_scene(fragment, transform);
                             } else {
                                 paint_primitives_into_scene_with(
@@ -953,10 +972,8 @@ fn FramePreviewTab() -> Element {
                         } else {
                             0.0
                         };
-                        perf_stats.set(FramePerfStats {
-                            frame_ms,
-                            fps,
-                            primitive_count: primitives.len(),
+                        perf_stats.with_mut(|stats| {
+                            stats.update(frame_ms, fps, primitives.len());
                         });
                     }
                     dioxus::desktop::window().window.request_redraw();
@@ -982,8 +999,7 @@ fn FramePreviewTab() -> Element {
         let content_bounds = cached_content_bounds();
         let active_node = selected_layer().unwrap_or(render_root);
         let selected_world_bounds = node_bounds_map.get(&active_node).copied();
-        let spacing_guides_overlay =
-            spacing_guides_for_selection(&doc, &node_bounds_map, active_node);
+        let spacing_guides_overlay = cached_spacing_guides();
         let hovered_layer_id = hovered_layer();
         let overlay_rect = selected_world_bounds.map(|world| {
             selection_overlay_rect(
@@ -1264,6 +1280,7 @@ fn FramePreviewTab() -> Element {
                                 hit_test_node_stack(&doc_for_click, &click_primitives, world.0, world.1);
                             if let Some(hit) = hit_stack.first().copied() {
                                 selected_layer.set(Some(hit));
+                                deep_select_state.set(None);
                                 if let Some(idx) = frame_option_index_by_id(&options_for_click, hit) {
                                     selected_frame.set(idx);
                                 }
@@ -1282,18 +1299,31 @@ fn FramePreviewTab() -> Element {
                             let hit_stack =
                                 hit_test_node_stack(&doc_for_dblclick, &dblclick_primitives, world.0, world.1);
                             if hit_stack.is_empty() {
+                                deep_select_state.set(None);
                                 return;
                             }
-                            let next = if let Some(sel) = selected_layer() {
-                                if let Some(idx) = hit_stack.iter().position(|id| *id == sel) {
-                                    hit_stack.get(idx + 1).copied().unwrap_or(sel)
-                                } else {
-                                    hit_stack[0]
+                            let mut next_index = 0usize;
+                            let reuse_previous = deep_select_state()
+                                .as_ref()
+                                .map(|prev| prev.matches_cursor(world.0, world.1) && prev.stack == hit_stack)
+                                .unwrap_or(false);
+                            if reuse_previous {
+                                if let Some(prev) = deep_select_state() {
+                                    next_index = (prev.index + 1).min(hit_stack.len().saturating_sub(1));
                                 }
-                            } else {
-                                hit_stack[0]
-                            };
+                            } else if let Some(sel) = selected_layer() {
+                                if let Some(idx) = hit_stack.iter().position(|id| *id == sel) {
+                                    next_index = idx.min(hit_stack.len().saturating_sub(1));
+                                }
+                            }
+                            let next = hit_stack[next_index];
                             selected_layer.set(Some(next));
+                            deep_select_state.set(Some(DeepSelectState {
+                                world_x: world.0,
+                                world_y: world.1,
+                                stack: hit_stack,
+                                index: next_index,
+                            }));
                             if let Some(idx) = frame_option_index_by_id(&options_for_dblclick, next) {
                                 selected_frame.set(idx);
                             }
@@ -1643,7 +1673,6 @@ fn FramePreviewTab() -> Element {
                                                     let mut r: EditableRect = base.into();
                                                     r.x = next;
                                                     map.insert(active_node, NodeLayoutOverride::from_rect(r));
-                                                    sync_override_to_document(&mut frame_doc, active_node, r);
                                                 });
                                             }
                                         }
@@ -1665,7 +1694,6 @@ fn FramePreviewTab() -> Element {
                                                     let mut r: EditableRect = base.into();
                                                     r.y = next;
                                                     map.insert(active_node, NodeLayoutOverride::from_rect(r));
-                                                    sync_override_to_document(&mut frame_doc, active_node, r);
                                                 });
                                             }
                                         }
@@ -1697,7 +1725,6 @@ fn FramePreviewTab() -> Element {
                                                     let mut r: EditableRect = base.into();
                                                     r.width = next.max(1.0);
                                                     map.insert(active_node, NodeLayoutOverride::from_rect(r));
-                                                    sync_override_to_document(&mut frame_doc, active_node, r);
                                                 });
                                             }
                                         }
@@ -1719,7 +1746,6 @@ fn FramePreviewTab() -> Element {
                                                     let mut r: EditableRect = base.into();
                                                     r.height = next.max(1.0);
                                                     map.insert(active_node, NodeLayoutOverride::from_rect(r));
-                                                    sync_override_to_document(&mut frame_doc, active_node, r);
                                                 });
                                             }
                                         }
@@ -2079,6 +2105,18 @@ fn FramePreviewTab() -> Element {
             }
         }
     };
+    let render_diag_summary = frame_doc()
+        .as_ref()
+        .map(|doc| {
+            let options = collect_frame_options(doc);
+            let selected_idx = selected_frame().min(options.len().saturating_sub(1));
+            let render_root = options
+                .get(selected_idx)
+                .map(|o| o.id)
+                .unwrap_or_else(|| preview_scene_root(doc));
+            collect_render_diagnostics(doc, render_root).format_summary()
+        })
+        .unwrap_or_else(|| "Render diag: waiting for document".to_string());
 
     rsx! {
         div {
@@ -2180,6 +2218,7 @@ fn FramePreviewTab() -> Element {
             h2 { class: "text-lg font-semibold text-zinc-300 mb-3 shrink-0", "Frame .fig Preview" }
             p { class: "text-xs text-zinc-500 mb-2 shrink-0", "{frame_status()}" }
             p { class: "text-[11px] text-zinc-400 mb-2 shrink-0", "{perf_stats().format()}" }
+            p { class: "text-[11px] text-zinc-500 mb-2 shrink-0", "{render_diag_summary} (* = currently approximated)" }
             div { class: "flex-1 min-h-0",
                 {frame_content}
             }
@@ -2191,17 +2230,55 @@ fn FramePreviewTab() -> Element {
 struct FramePerfStats {
     frame_ms: f64,
     fps: f64,
+    avg_frame_ms: f64,
+    avg_fps: f64,
+    budget_hit_ratio: f64,
     primitive_count: usize,
+    samples: u64,
 }
 
 impl FramePerfStats {
+    fn update(&mut self, frame_ms: f64, fps: f64, primitive_count: usize) {
+        const EWMA_ALPHA: f64 = 0.12;
+        const TARGET_FRAME_MS: f64 = 8.33;
+        self.frame_ms = frame_ms;
+        self.fps = fps;
+        self.primitive_count = primitive_count;
+        if self.samples == 0 {
+            self.avg_frame_ms = frame_ms;
+            self.avg_fps = fps;
+            self.budget_hit_ratio = if frame_ms <= TARGET_FRAME_MS {
+                1.0
+            } else {
+                0.0
+            };
+        } else {
+            self.avg_frame_ms = (frame_ms * EWMA_ALPHA) + (self.avg_frame_ms * (1.0 - EWMA_ALPHA));
+            self.avg_fps = (fps * EWMA_ALPHA) + (self.avg_fps * (1.0 - EWMA_ALPHA));
+            let hit = if frame_ms <= TARGET_FRAME_MS {
+                1.0
+            } else {
+                0.0
+            };
+            self.budget_hit_ratio =
+                (hit * EWMA_ALPHA) + (self.budget_hit_ratio * (1.0 - EWMA_ALPHA));
+        }
+        self.samples = self.samples.saturating_add(1);
+    }
+
     fn format(&self) -> String {
         if self.frame_ms <= 0.0 {
             return "Perf: waiting for frames".to_string();
         }
+        let budget_pct = (self.budget_hit_ratio * 100.0).clamp(0.0, 100.0);
         format!(
-            "Perf: {:.2} ms/frame ({:.1} FPS), primitives {}",
-            self.frame_ms, self.fps, self.primitive_count
+            "Perf: {:.2} ms ({:.1} FPS) | avg {:.2} ms ({:.1} FPS) | <=8.33ms {:.0}% | primitives {}",
+            self.frame_ms,
+            self.fps,
+            self.avg_frame_ms,
+            self.avg_fps,
+            budget_pct,
+            self.primitive_count
         )
     }
 }
@@ -2249,7 +2326,14 @@ fn primitive_bounds(primitives: &[frame_ui::PaintPrimitive]) -> PrimitiveBounds 
 
     for p in primitives {
         match p {
-            frame_ui::PaintPrimitive::ClipStart {
+            frame_ui::PaintPrimitive::LayerStart {
+                x,
+                y,
+                width,
+                height,
+                ..
+            }
+            | frame_ui::PaintPrimitive::ClipStart {
                 x,
                 y,
                 width,
@@ -2275,7 +2359,8 @@ fn primitive_bounds(primitives: &[frame_ui::PaintPrimitive]) -> PrimitiveBounds 
                 out.max_x = out.max_x.max(*x + *width);
                 out.max_y = out.max_y.max(*y + *height);
             }
-            frame_ui::PaintPrimitive::ClipEnd { .. } => {}
+            frame_ui::PaintPrimitive::LayerEnd { .. }
+            | frame_ui::PaintPrimitive::ClipEnd { .. } => {}
             frame_ui::PaintPrimitive::Text {
                 x,
                 y,
@@ -2310,7 +2395,14 @@ fn primitive_bounds(primitives: &[frame_ui::PaintPrimitive]) -> PrimitiveBounds 
 
 fn primitive_world_bounds(primitive: &frame_ui::PaintPrimitive) -> PrimitiveBounds {
     match primitive {
-        frame_ui::PaintPrimitive::ClipStart {
+        frame_ui::PaintPrimitive::LayerStart {
+            x,
+            y,
+            width,
+            height,
+            ..
+        }
+        | frame_ui::PaintPrimitive::ClipStart {
             x,
             y,
             width,
@@ -2336,7 +2428,9 @@ fn primitive_world_bounds(primitive: &frame_ui::PaintPrimitive) -> PrimitiveBoun
             max_x: *x + *width,
             max_y: *y + *height,
         },
-        frame_ui::PaintPrimitive::ClipEnd { .. } => PrimitiveBounds::default(),
+        frame_ui::PaintPrimitive::LayerEnd { .. } | frame_ui::PaintPrimitive::ClipEnd { .. } => {
+            PrimitiveBounds::default()
+        }
         frame_ui::PaintPrimitive::Text {
             x,
             y,
@@ -2637,7 +2731,7 @@ enum Axis {
     Vertical,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 struct SpacingGuide {
     axis: Axis,
     x0: f64,
@@ -2711,6 +2805,20 @@ struct EditDragState {
     start_mouse: (f64, f64),
     start_rect: EditableRect,
     mode: EditDragMode,
+}
+
+#[derive(Debug, Clone)]
+struct DeepSelectState {
+    world_x: f64,
+    world_y: f64,
+    stack: Vec<NodeId>,
+    index: usize,
+}
+
+impl DeepSelectState {
+    fn matches_cursor(&self, world_x: f64, world_y: f64) -> bool {
+        (self.world_x - world_x).abs() <= 2.0 && (self.world_y - world_y).abs() <= 2.0
+    }
 }
 
 fn build_editor_primitives(
@@ -2794,7 +2902,9 @@ fn layout_bounds_map_for_ui(
 
 fn primitive_node_id(primitive: &frame_ui::PaintPrimitive) -> NodeId {
     match primitive {
-        frame_ui::PaintPrimitive::ClipStart { node_id, .. }
+        frame_ui::PaintPrimitive::LayerStart { node_id, .. }
+        | frame_ui::PaintPrimitive::LayerEnd { node_id }
+        | frame_ui::PaintPrimitive::ClipStart { node_id, .. }
         | frame_ui::PaintPrimitive::ClipEnd { node_id }
         | frame_ui::PaintPrimitive::Rect { node_id, .. }
         | frame_ui::PaintPrimitive::Path { node_id, .. }
@@ -2812,6 +2922,19 @@ fn transform_primitive(
     sy: f64,
 ) {
     match primitive {
+        frame_ui::PaintPrimitive::LayerStart {
+            x,
+            y,
+            width,
+            height,
+            ..
+        } => {
+            *x = to_x + (*x - from_x) * sx;
+            *y = to_y + (*y - from_y) * sy;
+            *width = (*width * sx).max(1.0);
+            *height = (*height * sy).max(1.0);
+        }
+        frame_ui::PaintPrimitive::LayerEnd { .. } => {}
         frame_ui::PaintPrimitive::ClipStart {
             x,
             y,
@@ -2869,6 +2992,19 @@ fn node_bounds_map_from_primitives(
         });
 
         match primitive {
+            frame_ui::PaintPrimitive::LayerStart {
+                x,
+                y,
+                width,
+                height,
+                ..
+            } => {
+                entry.min_x = entry.min_x.min(*x);
+                entry.min_y = entry.min_y.min(*y);
+                entry.max_x = entry.max_x.max(*x + *width);
+                entry.max_y = entry.max_y.max(*y + *height);
+            }
+            frame_ui::PaintPrimitive::LayerEnd { .. } => {}
             frame_ui::PaintPrimitive::ClipStart {
                 x,
                 y,
@@ -3339,42 +3475,6 @@ fn toggle_node_flag(doc: &mut FrameDocument, node_id: NodeId, key: &str) {
     };
     let next = !raw_obj.get(key).and_then(|v| v.as_bool()).unwrap_or(false);
     raw_obj.insert(key.to_string(), serde_json::Value::Bool(next));
-}
-
-fn sync_override_to_document(
-    frame_doc: &mut Signal<Option<FrameDocument>>,
-    node_id: NodeId,
-    rect: EditableRect,
-) {
-    frame_doc.with_mut(|doc_opt| {
-        let Some(doc) = doc_opt.as_mut() else {
-            return;
-        };
-        let Some(node) = doc.get_node_mut(node_id) else {
-            return;
-        };
-        let Some(raw_obj) = node.raw.as_object_mut() else {
-            return;
-        };
-        raw_obj.insert(
-            "size".to_string(),
-            serde_json::json!({ "x": rect.width, "y": rect.height }),
-        );
-        raw_obj.insert(
-            "relativeTransform".to_string(),
-            serde_json::json!([[1.0, 0.0, rect.x], [0.0, 1.0, rect.y]]),
-        );
-        if let Some(bounds) = raw_obj
-            .entry("absoluteBoundingBox".to_string())
-            .or_insert_with(|| serde_json::json!({}))
-            .as_object_mut()
-        {
-            bounds.insert("x".to_string(), serde_json::json!(rect.x));
-            bounds.insert("y".to_string(), serde_json::json!(rect.y));
-            bounds.insert("width".to_string(), serde_json::json!(rect.width));
-            bounds.insert("height".to_string(), serde_json::json!(rect.height));
-        }
-    });
 }
 
 fn tidy_up_parent_children(
