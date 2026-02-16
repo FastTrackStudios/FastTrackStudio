@@ -640,7 +640,7 @@ pub fn DynamicGridView(props: DynamicGridViewProps) -> Element {
 
                         rsx! {
                             ModuleBackground {
-                                name: name,
+                                name: group.display_name.clone(),
                                 bg_color: group.color.bg.to_string(),
                                 fg_color: group.color.fg.to_string(),
                                 x: group.x,

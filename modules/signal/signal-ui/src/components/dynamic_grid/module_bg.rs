@@ -80,42 +80,54 @@ pub(super) struct ContainerBackgroundProps {
 
 #[component]
 pub(super) fn ContainerBackground(props: ContainerBackgroundProps) -> Element {
-    let (bg_alpha, border_alpha, border_style, radius, title_h, z_index, dot_size, font_class) =
-        match props.level {
-            ContainerLevel::Engine => (
-                "06",
-                "15",
+    let (
+        bg_alpha,
+        border_alpha,
+        border_style,
+        radius,
+        title_h,
+        z_index,
+        dot_size,
+        font_class,
+        label_opacity,
+    ) = match props.level {
+        ContainerLevel::Engine => (
+            "04",
+            "10",
+            "solid",
+            "14px",
+            ENGINE_TITLE_H,
+            1,
+            "w-1.5 h-1.5",
+            "text-[7px] font-semibold uppercase tracking-wider",
+            "0.40",
+        ),
+        ContainerLevel::Layer => (
+            "05",
+            "12",
+            "dashed",
+            "12px",
+            LAYER_TITLE_H,
+            2,
+            "w-1.5 h-1.5",
+            "text-[7px] font-medium tracking-wide",
+            "0.35",
+        ),
+        ContainerLevel::Module => {
+            // Module level should use ModuleBackground instead, but handle gracefully
+            (
+                "12",
+                "30",
                 "solid",
-                "14px",
-                ENGINE_TITLE_H,
-                1,
-                "w-2.5 h-2.5",
-                "text-[9px] font-bold",
-            ),
-            ContainerLevel::Layer => (
-                "08",
-                "20",
-                "dashed",
-                "12px",
-                LAYER_TITLE_H,
-                2,
+                "10px",
+                GROUP_TITLE_H,
+                3,
                 "w-2 h-2",
                 "text-[8px] font-semibold",
-            ),
-            ContainerLevel::Module => {
-                // Module level should use ModuleBackground instead, but handle gracefully
-                (
-                    "12",
-                    "30",
-                    "solid",
-                    "10px",
-                    GROUP_TITLE_H,
-                    3,
-                    "w-2 h-2",
-                    "text-[8px] font-semibold",
-                )
-            }
-        };
+                "0.80",
+            )
+        }
+    };
 
     let bg = format!(
         "left: {}px; top: {}px; width: {}px; height: {}px; \
@@ -123,7 +135,7 @@ pub(super) fn ContainerBackground(props: ContainerBackgroundProps) -> Element {
         props.x, props.y, props.w, props.h, props.bg_color, props.bg_color,
     );
     let title_style = format!(
-        "background-color: {}10; border-bottom: 1px {border_style} {}15; \
+        "background-color: {}08; border-bottom: 1px {border_style} {}0a; \
          border-radius: {radius} {radius} 0 0; height: {title_h}px;",
         props.bg_color, props.bg_color,
     );
@@ -134,15 +146,15 @@ pub(super) fn ContainerBackground(props: ContainerBackgroundProps) -> Element {
             class: "absolute overflow-hidden",
             style: "position: absolute; {bg} z-index: {z_index}; pointer-events: none;",
             div {
-                class: "flex items-center gap-1.5 px-2.5",
+                class: "flex items-center gap-1 px-2",
                 style: "{title_style} pointer-events: none;",
                 div {
-                    class: "{dot_size} rounded-full flex-shrink-0 opacity-60",
-                    style: "background-color: {props.bg_color};",
+                    class: "{dot_size} rounded-full flex-shrink-0",
+                    style: "background-color: {props.bg_color}; opacity: {label_opacity};",
                 }
                 span {
-                    class: "{font_class} tracking-wide whitespace-nowrap opacity-60",
-                    style: "color: {props.fg_color};",
+                    class: "{font_class} whitespace-nowrap",
+                    style: "color: {props.fg_color}; opacity: {label_opacity};",
                     "{props.name}"
                 }
             }

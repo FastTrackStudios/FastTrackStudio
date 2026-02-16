@@ -20,13 +20,13 @@ const MIN_ROWS: usize = 1;
 pub(crate) const GROUP_PAD: f64 = CELL_GAP as f64 * 0.25;
 pub(crate) const GROUP_TITLE_H: f64 = 16.0;
 
-// Layer-level container padding (wraps modules)
-pub(crate) const LAYER_PAD: f64 = GROUP_PAD + 12.0;
-pub(crate) const LAYER_TITLE_H: f64 = 20.0;
+// Layer-level container padding (wraps modules) — subtle, less obtrusive
+pub(crate) const LAYER_PAD: f64 = GROUP_PAD + 8.0;
+pub(crate) const LAYER_TITLE_H: f64 = 14.0;
 
-// Engine-level container padding (wraps layers)
-pub(crate) const ENGINE_PAD: f64 = LAYER_PAD + 12.0;
-pub(crate) const ENGINE_TITLE_H: f64 = 24.0;
+// Engine-level container padding (wraps layers) — subtle, less obtrusive
+pub(crate) const ENGINE_PAD: f64 = LAYER_PAD + 8.0;
+pub(crate) const ENGINE_TITLE_H: f64 = 16.0;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Grid bounds
@@ -72,7 +72,10 @@ pub(crate) fn input_port_pos(col: usize, row: usize) -> (f64, f64) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 pub(crate) struct ModuleGroupRect {
+    /// Full group key (e.g. "Engine/Layer/Module") — used for matching.
     pub(crate) name: String,
+    /// Short label for display (last path segment).
+    pub(crate) display_name: String,
     pub(crate) color: BlockColor,
     pub(crate) x: f64,
     pub(crate) y: f64,
@@ -127,9 +130,11 @@ pub(crate) fn compute_module_groups(chain: &[GridSlot]) -> Vec<ModuleGroupRect> 
             let cell_y2 = g.max_row as f64 * step + CELL_SIZE as f64;
 
             let color = module_type_color(g.module_type);
+            let display_name = g.name.rsplit('/').next().unwrap_or(&g.name).to_string();
 
             ModuleGroupRect {
                 name: g.name,
+                display_name,
                 color,
                 x: cell_x - GROUP_PAD,
                 y: cell_y - GROUP_PAD - GROUP_TITLE_H,
