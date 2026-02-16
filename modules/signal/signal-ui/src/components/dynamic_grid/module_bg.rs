@@ -4,7 +4,7 @@
 
 use dioxus::prelude::*;
 
-use super::layout::{ContainerLevel, GROUP_TITLE_H};
+use super::layout::{ContainerLevel, ENGINE_TITLE_H, GROUP_TITLE_H, LAYER_TITLE_H};
 use super::types::ModuleVisualState;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -80,52 +80,44 @@ pub(super) struct ContainerBackgroundProps {
 
 #[component]
 pub(super) fn ContainerBackground(props: ContainerBackgroundProps) -> Element {
-    // Engine labels sit above the border (-20px), Layer labels just above (-10px).
-    // This prevents overlap with each other and with module title bars inside.
-    let (
-        bg_alpha,
-        border_alpha,
-        border_style,
-        radius,
-        z_index,
-        font_class,
-        label_opacity,
-        label_top,
-    ) = match props.level {
-        ContainerLevel::Engine => (
-            "04",
-            "10",
-            "solid",
-            "10px",
-            1,
-            "text-[7px] font-semibold uppercase tracking-wider",
-            "0.35",
-            "-10px",
-        ),
-        ContainerLevel::Layer => (
-            "03",
-            "0a",
-            "dashed",
-            "8px",
-            2,
-            "text-[7px] font-medium tracking-wide",
-            "0.30",
-            "-10px",
-        ),
-        ContainerLevel::Module => {
-            // Module level should use ModuleBackground instead, but handle gracefully
-            (
-                "12",
-                "30",
+    // Each level has its own TITLE_H allocated in the bounding box, so
+    // labels at different nesting depths can never collide.
+    let (bg_alpha, border_alpha, border_style, radius, title_h, z_index, font_class, label_opacity) =
+        match props.level {
+            ContainerLevel::Engine => (
+                "04",
+                "10",
                 "solid",
                 "10px",
-                3,
-                "text-[8px] font-semibold",
-                "0.80",
-                "2px",
-            )
-        }
-    };
+                ENGINE_TITLE_H,
+                1,
+                "text-[7px] font-semibold uppercase tracking-wider",
+                "0.40",
+            ),
+            ContainerLevel::Layer => (
+                "03",
+                "0a",
+                "dashed",
+                "8px",
+                LAYER_TITLE_H,
+                2,
+                "text-[7px] font-medium tracking-wide",
+                "0.35",
+            ),
+            ContainerLevel::Module => {
+                // Module level should use ModuleBackground instead, but handle gracefully
+                (
+                    "12",
+                    "30",
+                    "solid",
+                    "10px",
+                    GROUP_TITLE_H,
+                    3,
+                    "text-[8px] font-semibold",
+                    "0.80",
+                )
+            }
+        };
 
     let bg = format!(
         "left: {}px; top: {}px; width: {}px; height: {}px; \
@@ -136,13 +128,17 @@ pub(super) fn ContainerBackground(props: ContainerBackgroundProps) -> Element {
     rsx! {
         div {
             key: "container-{props.name}",
-            class: "absolute overflow-visible",
+            class: "absolute overflow-hidden",
             style: "position: absolute; {bg} z-index: {z_index}; pointer-events: none;",
-            // Label positioned above the border to avoid overlap with module titles
-            span {
-                class: "{font_class} whitespace-nowrap",
-                style: "position: absolute; top: {label_top}; left: 4px; color: {props.fg_color}; opacity: {label_opacity};",
-                "{props.name}"
+            // Thin title strip — height structurally reserved by TITLE_H in bounding box
+            div {
+                class: "flex items-center px-1.5",
+                style: "height: {title_h}px; pointer-events: none;",
+                span {
+                    class: "{font_class} whitespace-nowrap",
+                    style: "color: {props.fg_color}; opacity: {label_opacity};",
+                    "{props.name}"
+                }
             }
         }
     }
