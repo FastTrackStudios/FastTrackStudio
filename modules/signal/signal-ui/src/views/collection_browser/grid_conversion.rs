@@ -59,8 +59,14 @@ fn extract_block_params(mb: &signal::ModuleBlock, lookup: &ParamLookup) -> Vec<(
 
 // region: --- Constants
 
-/// Preferred max columns before wrapping a module to the next row band.
+/// Preferred max columns before wrapping modules to the next row band
+/// *within* a single layer.
 const SOFT_MAX_COLS: usize = 14;
+
+/// Max columns before layers wrap to the next vertical band.
+/// Wider than SOFT_MAX_COLS because horizontal scrolling handles overflow,
+/// and side-by-side layers are much more compact than stacking vertically.
+const LAYER_PACK_MAX_COLS: usize = 24;
 
 /// Gap rows when a module wraps within a layer.
 /// With phantom dry lanes removed, splits only use wet-lane rows,
@@ -142,7 +148,7 @@ pub(super) fn engines_to_grid_slots(
             let measure = &layer_measures[li];
 
             // Wrap to next row band if this layer won't fit horizontally.
-            if col > 0 && col + measure.width > SOFT_MAX_COLS {
+            if col > 0 && col + measure.width > LAYER_PACK_MAX_COLS {
                 // Advance past the tallest layer in the current band.
                 // +1 row gap only when stacking vertically.
                 band_start_row += band_max_height + 1;
