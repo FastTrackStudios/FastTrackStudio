@@ -62,7 +62,7 @@ impl BrowseLevel {
 #[component]
 pub fn CollectionBrowser(controller: SignalController) -> Element {
     let mut nav = use_signal(|| NavCategory::Presets);
-    let mut rig_type = use_signal(|| RigType::Guitar);
+    let mut rig_type = use_signal(|| RigType::Keys);
 
     let mut col2_items = use_signal(Vec::<ColumnItem>::new);
     let mut col2_selected = use_signal(|| None::<usize>);
