@@ -75,7 +75,7 @@ pub fn SongEditor(props: SongEditorProps) -> Element {
             div {
                 class: "flex items-center justify-between",
                 h3 {
-                    class: "text-sm font-semibold",
+                    class: "text-xs uppercase tracking-widest text-muted-foreground font-semibold",
                     "{props.song_name}"
                 }
                 button {
@@ -193,7 +193,7 @@ pub fn SetlistEditor(props: SetlistEditorProps) -> Element {
             div {
                 class: "flex items-center justify-between",
                 h3 {
-                    class: "text-sm font-semibold",
+                    class: "text-xs uppercase tracking-widest text-muted-foreground font-semibold",
                     "{props.setlist_name}"
                 }
                 button {

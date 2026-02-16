@@ -1,4 +1,4 @@
-use daw_proto::{assert_tracks_equal, TrackStructureBuilder};
+use daw_proto::{assert_tracks_equal, TrackGroup, TrackStructureBuilder};
 use dynamic_template::*;
 
 type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
@@ -50,55 +50,72 @@ fn james_dupre_another_love_song() -> Result<()> {
     println!("\nTrack list:");
     daw_proto::display_tracklist(&tracks);
 
-    let expected = TrackStructureBuilder::new()
-        .folder("Drums")
-        .folder("Drum Kit")
-        .folder("Kick")
+    // ============================================================================
+    // Expected structure
+    // ============================================================================
+
+    // --- Drums ---
+    // Kick: "Out" matches SUM pattern, others are siblings
+    let kick = TrackGroup::folder("Kick")
         .track("SUM")
         .item("02.Kick Out_01.wav")
         .track("Kick 1")
         .item("01.Kick_01.wav")
         .track("Kick 2")
         .item("03.Kick Sample_01.wav")
-        .end()
-        .folder("Snare")
+        .end();
+
+    // Snare: Bottom mic + "Sample Stereo" items aliased to Trig subfolder + bare snare
+    let snare = TrackGroup::folder("Snare")
         .track("Bottom")
         .item("07.Snare Bottom_01.wav")
+        .folder("Trig")
+        .track("Trig 1")
+        .item("05.Snare Sample Stereo_01.wav")
+        .track("Trig 2")
+        .item("06.Snare Sample Stereo 2_01.wav")
+        .end()
         .track("Snare")
         .item("04.Snare _01.wav")
-        .end()
-        .folder("Toms")
+        .end();
+
+    let toms = TrackGroup::folder("Toms")
         .track("T1")
         .item("09.Tom 1_01.wav")
         .track("T2")
         .item("10.Tom 2_01.wav")
-        .end()
-        .folder("Cymbals")
+        .end();
+
+    let cymbals = TrackGroup::folder("Cymbals")
         .track("OH")
         .item("11.OH_01.wav")
         .track("Hi Hat")
         .item("08.Hat_01.wav")
-        .end()
-        .folder("Rooms")
+        .end();
+
+    let rooms = TrackGroup::folder("Rooms")
         .track("Mono")
         .item("13.Room Mono_01.wav")
         .track("Stereo")
         .item("12.Room Stereo_01.wav")
-        .end()
+        .end();
+
+    // Drum Kit collapsed (single child of Drums), so subgroups are direct children of Drums
+    let drums = TrackGroup::folder("Drums")
+        .group(kick)
+        .group(snare)
+        .group(toms)
+        .group(cymbals)
+        .group(rooms)
         .track("Drum Kit")
         .item("14.Kit Mono_01.wav")
-        .end()
-        .folder("Snare")
-        .track("Snare 1")
-        .item("05.Snare Sample Stereo_01.wav")
-        .track("Snare 2")
-        .item("06.Snare Sample Stereo 2_01.wav")
-        .end()
-        .end()
-        .track("Bass")
-        .item("15.Bass_01.wav")
-        .folder("Guitars")
-        .folder("Electric")
+        .end();
+
+    // --- Bass ---
+    let bass = TrackGroup::single_track("Bass", "15.Bass_01.wav");
+
+    // --- Guitars ---
+    let electric = TrackGroup::folder("Electric")
         .track("Electric 1")
         .item("18.EG2 (57)_01.wav")
         .track("Electric 2")
@@ -111,38 +128,64 @@ fn james_dupre_another_love_song() -> Result<()> {
         .item("22.EG3 (57)_01.wav")
         .track("Electric 6")
         .item("23.EG3 (FH)_01.wav")
-        .end()
+        .end();
+
+    let guitars = TrackGroup::folder("Guitars")
+        .group(electric)
         .track("Acoustic")
         .item("16.AG1_01.wav")
         .track("Steel")
         .item("24.Steel_01.wav")
         .track("Banjo")
         .item("17.Banjo  _01.wav")
-        .end()
-        .folder("Keys")
-        .folder("Organ")
+        .end();
+
+    // --- Keys ---
+    let organ = TrackGroup::folder("Organ")
         .track("Organ 1")
         .item("26.B3_01.wav")
         .track("Organ 2")
         .item("27.B3 Low_01.wav")
-        .end()
+        .end();
+
+    let keys = TrackGroup::folder("Keys")
+        .group(organ)
         .track("Keys")
         .item("25.Keys_01.wav")
-        .end()
-        .folder("Vocals")
-        .track("Lead")
-        .item("28.Lead Vocal_01.wav")
-        .folder("BGVs")
+        .end();
+
+    // --- Vocals ---
+    let bgvs = TrackGroup::folder("BGVs")
         .track("BGVs 1")
         .item("29.BGV 1_01.wav")
         .track("BGVs 2")
         .item("30.BGV 2_01.wav")
-        .end()
-        .end()
-        .track("Guide")
-        .item("Click 128.wav")
-        .track("Reference")
-        .item("31.AnotherLoveSong Joe MIX_01.wav")
+        .end();
+
+    let vocals = TrackGroup::folder("Vocals")
+        .track("Lead")
+        .item("28.Lead Vocal_01.wav")
+        .group(bgvs)
+        .end();
+
+    // --- Guide ---
+    let guide = TrackGroup::single_track("Guide", "Click 128.wav");
+
+    // --- Reference ---
+    let reference = TrackGroup::single_track("Reference", "31.AnotherLoveSong Joe MIX_01.wav");
+
+    // ============================================================================
+    // Compose final structure
+    // ============================================================================
+
+    let expected = TrackStructureBuilder::new()
+        .group(drums)
+        .group(bass)
+        .group(guitars)
+        .group(keys)
+        .group(vocals)
+        .group(guide)
+        .group(reference)
         .build();
 
     assert_tracks_equal(&tracks, &expected)?;

@@ -31,9 +31,6 @@ impl From<DrumKit> for Group<ItemMetadata> {
                 "909",
                 "drum machine",
                 "machine",
-                "sample",
-                "sampled",
-                "trigger",
                 "midi drum",
                 "vst drum",
             ])

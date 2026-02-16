@@ -35,8 +35,8 @@ impl CaptureType {
 
     fn badge_class(self) -> &'static str {
         match self {
-            Self::Quick => "bg-blue-500/20 text-blue-400",
-            Self::Full => "bg-purple-500/20 text-purple-400",
+            Self::Quick => "bg-signal-quick/20 text-signal-quick",
+            Self::Full => "bg-signal-full/20 text-signal-full",
         }
     }
 }
@@ -78,7 +78,7 @@ pub fn SnapshotPanel(props: SnapshotPanelProps) -> Element {
 
             // Header
             h3 {
-                class: "text-sm font-semibold",
+                class: "text-xs uppercase tracking-widest text-muted-foreground font-semibold",
                 "DAW Snapshots"
             }
 
@@ -96,7 +96,7 @@ pub fn SnapshotPanel(props: SnapshotPanelProps) -> Element {
                 }
 
                 button {
-                    class: "px-2 py-1 text-xs rounded bg-blue-600 text-white hover:bg-blue-700",
+                    class: "px-2 py-1 text-xs rounded bg-signal-quick text-white hover:bg-signal-quick/90",
                     title: "Quick Capture (params only)",
                     onclick: {
                         let name = capture_name.read().clone();
@@ -110,7 +110,7 @@ pub fn SnapshotPanel(props: SnapshotPanelProps) -> Element {
                 }
 
                 button {
-                    class: "px-2 py-1 text-xs rounded bg-purple-600 text-white hover:bg-purple-700",
+                    class: "px-2 py-1 text-xs rounded bg-signal-full text-white hover:bg-signal-full/90",
                     title: "Full Capture (params + state chunks)",
                     onclick: {
                         let name = capture_name.read().clone();

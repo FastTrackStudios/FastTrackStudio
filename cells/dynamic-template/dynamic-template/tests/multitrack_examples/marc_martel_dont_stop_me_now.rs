@@ -1,4 +1,4 @@
-use daw_proto::{assert_tracks_equal, TrackStructureBuilder};
+use daw_proto::{assert_tracks_equal, TrackGroup, TrackStructureBuilder};
 use dynamic_template::*;
 
 type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
@@ -47,10 +47,13 @@ fn marc_martel_dont_stop_me_now() -> Result<()> {
     println!("\nTrack list:");
     daw_proto::display_tracklist(&tracks);
 
-    let expected = TrackStructureBuilder::new()
-        .folder("Drums")
-        .folder("Drum Kit")
-        .folder("Kick")
+    // ============================================================================
+    // Expected structure
+    // ============================================================================
+
+    // --- Drums ---
+    // Kick has SUM subfolder for In/Out mics, "Kick Sample" stays as sibling (no SUM pattern match)
+    let kick = TrackGroup::folder("Kick")
         .folder("SUM")
         .track("In")
         .item("Kick In")
@@ -59,65 +62,89 @@ fn marc_martel_dont_stop_me_now() -> Result<()> {
         .end()
         .track("Kick")
         .item("Kick Sample")
-        .end()
-        .folder("Snare")
+        .end();
+
+    // Snare has Top/Bottom as direct children, "Sample" items aliased to Trig subfolder
+    let snare = TrackGroup::folder("Snare")
         .track("Top")
         .item("Snare Top")
         .track("Bottom")
         .item("Snare Bottom")
+        .folder("Trig")
+        .track("Trig 1")
+        .item("Snare Sample")
+        .track("Trig 2")
+        .item("Snare Sample Two")
         .end()
-        .folder("Toms")
+        .end();
+
+    let toms = TrackGroup::folder("Toms")
         .track("T1")
         .item("Tom1")
         .track("T2")
         .item("Tom2")
-        .end()
-        .folder("Cymbals")
+        .end();
+
+    // Cymbals: OH and Hi Hat as direct children (no subfolder collapse needed)
+    let cymbals = TrackGroup::folder("Cymbals")
         .track("OH")
         .item("OH")
         .track("Hi Hat")
         .item("HighHat")
-        .end()
+        .end();
+
+    // Drum Kit collapsed away (single child of Drums), so Drums contains kit subgroups directly
+    let drums = TrackGroup::folder("Drums")
+        .group(kick)
+        .group(snare)
+        .group(toms)
+        .group(cymbals)
         .track("Rooms")
         .item("Rooms")
-        .end()
-        .folder("Snare")
-        .track("Snare 1")
-        .item("Snare Sample")
-        .track("Snare 2")
-        .item("Snare Sample Two")
-        .end()
-        .end()
-        .track("Percussion")
-        .item("Percussion")
-        .track("Bass")
-        .item("Bass DI")
-        .folder("Guitars")
-        .folder("Clean")
+        .end();
+
+    // --- Percussion ---
+    let percussion = TrackGroup::single_track("Percussion", "Percussion");
+
+    // --- Bass ---
+    let bass = TrackGroup::single_track("Bass", "Bass DI");
+
+    // --- Guitars ---
+    // Clean and Lead subfolders with Left/Right stereo pairs
+    let clean = TrackGroup::folder("Clean")
         .track("Left")
         .item("Lead Guitar Clean DI Left")
         .track("Right")
         .item("Lead Guitar Clean DI Right")
-        .end()
-        .folder("Lead")
+        .end();
+
+    let lead_guitar = TrackGroup::folder("Lead")
         .track("Left")
         .item("Lead Guitar Amplitube Left")
         .track("Right")
         .item("Lead Guitar Amplitube Right")
-        .end()
-        .end()
-        .track("Keys")
-        .item("Piano")
-        .folder("Vocals")
-        .folder("Lead")
+        .end();
+
+    let guitars = TrackGroup::folder("Guitars")
+        .group(clean)
+        .group(lead_guitar)
+        .end();
+
+    // --- Keys ---
+    let keys = TrackGroup::single_track("Keys", "Piano");
+
+    // --- Vocals ---
+    // Lead folder with main vocal and vocal effects
+    let lead_vocal = TrackGroup::folder("Lead")
         .track("Lead 1")
         .item("Vocal")
         .track("Plate")
         .item("Vocal.Eko.Plate")
         .track("Lead 2")
         .item("Vocal.Magic")
-        .end()
-        .folder("BGVs")
+        .end();
+
+    let bgvs = TrackGroup::folder("BGVs")
         .track("BGVs 1")
         .item("BGV1")
         .track("BGVs 2")
@@ -126,16 +153,36 @@ fn marc_martel_dont_stop_me_now() -> Result<()> {
         .item("BGV3")
         .track("BGVs 4")
         .item("BGV4")
-        .end()
-        .end()
-        .folder("SFX")
+        .end();
+
+    let vocals = TrackGroup::folder("Vocals")
+        .group(lead_vocal)
+        .group(bgvs)
+        .end();
+
+    // --- SFX ---
+    // H3000 effects (harmonizer/effects processor)
+    let sfx = TrackGroup::folder("SFX")
         .track("H3000.One")
         .item("H3000.One")
         .track("H3000.Two")
         .item("H3000.Two")
         .track("H3000.Three")
         .item("H3000.Three")
-        .end()
+        .end();
+
+    // ============================================================================
+    // Compose final structure
+    // ============================================================================
+
+    let expected = TrackStructureBuilder::new()
+        .group(drums)
+        .group(percussion)
+        .group(bass)
+        .group(guitars)
+        .group(keys)
+        .group(vocals)
+        .group(sfx)
         .build();
 
     assert_tracks_equal(&tracks, &expected)?;

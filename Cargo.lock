@@ -4520,6 +4520,7 @@ dependencies = [
  "keyflow",
  "keyflow-ui",
  "kurbo 0.13.0",
+ "lumen-blocks 0.2.0",
  "mimalloc",
  "peniko 0.6.0",
  "roam",
@@ -4532,6 +4533,8 @@ dependencies = [
  "session-ui",
  "signal-control",
  "signal-ui",
+ "signal2",
+ "signal2-ui",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -6210,11 +6213,13 @@ dependencies = [
  "helgoboss-midi",
  "input",
  "once_cell",
+ "reaper-embed",
  "reaper-high",
  "reaper-low",
  "reaper-medium",
  "swell-ui",
  "tracing",
+ "vello",
 ]
 
 [[package]]
@@ -8957,10 +8962,14 @@ dependencies = [
  "kurbo 0.13.0",
  "lumen-blocks 0.2.0 (git+https://github.com/Leaf-Computer/lumen-blocks.git?tag=v0.2.0)",
  "peniko 0.6.0",
+ "pollster 0.4.0",
  "serde_json",
  "signal2",
  "signal2-ui",
  "tokio",
+ "vello",
+ "wgpu 27.0.1",
+ "wgpu_context 0.3.1 (git+https://github.com/DioxusLabs/anyrender.git?branch=main)",
 ]
 
 [[package]]
@@ -9593,6 +9602,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "reaper-embed"
+version = "0.1.0"
+dependencies = [
+ "cocoa 0.26.1",
+ "objc",
+ "pollster 0.4.0",
+ "raw-window-handle 0.6.2",
+ "skrifa 0.40.0",
+ "thiserror 2.0.18",
+ "tracing",
+ "vello",
+ "wgpu 27.0.1",
+]
+
+[[package]]
 name = "reaper-extension"
 version = "0.1.0"
 dependencies = [
@@ -9604,6 +9628,8 @@ dependencies = [
  "crossbeam-channel",
  "daw-proto",
  "daw-reaper",
+ "dynamic-template",
+ "dynamic-template-proto",
  "fragile",
  "host-runtime",
  "input-reaper",

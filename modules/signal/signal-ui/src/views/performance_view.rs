@@ -74,14 +74,14 @@ pub fn PerfSceneGrid(props: PerfSceneGridProps) -> Element {
                 {
                     let scene_id = scene.id.clone();
                     let active_class = if scene.is_active {
-                        "border-primary bg-primary/20 ring-2 ring-primary/50"
+                        "border-primary bg-primary/20 shadow-lg border-2"
                     } else {
-                        "border-border/50 bg-card hover:bg-accent/10"
+                        "border-border/50 bg-card hover:bg-accent/10 shadow-md hover:shadow-lg border-2"
                     };
                     rsx! {
                         button {
                             class: format!(
-                                "flex flex-col items-center justify-center p-6 rounded-xl border-2 transition-all min-h-[100px] {active_class}"
+                                "flex flex-col items-center justify-center p-6 rounded-xl transition-all min-h-[100px] {active_class}"
                             ),
                             onclick: move |_| {
                                 if let Some(cb) = &props.on_scene_select {
@@ -221,9 +221,9 @@ pub fn SnapshotBank(props: SnapshotBankProps) -> Element {
                     };
                     let ab_badge = if slot.is_a { "A" } else { "B" };
                     let ab_color = if slot.is_a {
-                        "text-blue-400"
+                        "text-signal-slot-a"
                     } else {
-                        "text-orange-400"
+                        "text-signal-slot-b"
                     };
                     rsx! {
                         button {
@@ -320,9 +320,9 @@ pub fn SongNav(props: SongNavProps) -> Element {
                         class: "font-semibold text-foreground",
                         "{s.section_name}"
                     }
-                    span { "{section_display}" }
+                    span { class: "font-mono", "{section_display}" }
                     if let Some(tempo) = s.tempo {
-                        span { {format!("\u{266A} {} BPM", tempo)} }
+                        span { class: "font-mono", {format!("\u{266A} {} BPM", tempo)} }
                     }
                     if let Some(key) = &s.key_signature {
                         span { "Key: {key}" }
@@ -362,7 +362,7 @@ pub fn RigStatusBanner(props: RigStatusBannerProps) -> Element {
     let s = &props.status;
     rsx! {
         div {
-            class: format!("flex items-center justify-between px-4 py-2 rounded-lg bg-card border border-border {}", props.class),
+            class: format!("flex items-center justify-between px-4 py-2 rounded-lg bg-background border border-border border-l-2 border-l-primary {}", props.class),
 
             div {
                 class: "flex items-center gap-3",
@@ -383,7 +383,7 @@ pub fn RigStatusBanner(props: RigStatusBannerProps) -> Element {
                     "Active"
                 }
                 span {
-                    class: "text-sm font-semibold text-primary",
+                    class: "text-sm font-semibold text-primary font-mono tracking-wider",
                     "{s.active_scene_name}"
                 }
             }

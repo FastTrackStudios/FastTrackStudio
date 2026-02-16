@@ -7,7 +7,9 @@
 // Primitives — shared UI building blocks (shadcn-style)
 pub mod audio_controls;
 pub mod audio_viz;
+mod context_menu;
 mod dialog;
+mod side_sheet;
 mod slider;
 mod tabs;
 
@@ -34,6 +36,8 @@ pub use audio_controls::{Knob, KnobSize, XYPad};
 pub use audio_viz::{LevelMeter, LevelMeterOrientation, SpectrumAnalyzer, WaveformDisplay};
 pub use dialog::{Dialog, DialogClose, DialogDescription, DialogFooter, DialogHeader, DialogTitle};
 pub use slider::{Slider, SliderOrientation};
+pub use context_menu::{ContextMenu, ContextMenuItem, ContextMenuSeparator};
+pub use side_sheet::{SheetSide, SideSheet};
 pub use tabs::{TabContent, TabList, TabTrigger, Tabs};
 
 // Re-exports: layout

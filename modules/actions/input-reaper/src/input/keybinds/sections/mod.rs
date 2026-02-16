@@ -22,6 +22,7 @@ pub mod navigation;
 pub mod scrolling;
 pub mod transport;
 pub mod views;
+pub mod which_key_fts;
 
 pub use editing::*;
 pub use markers_regions::*;

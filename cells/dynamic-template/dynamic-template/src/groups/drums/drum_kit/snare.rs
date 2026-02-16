@@ -25,6 +25,9 @@ impl From<Snare> for ItemMetadataGroup {
             FieldValueDescriptor::builder("OH")
                 .patterns(["OH", "oh", "overhead"])
                 .build(),
+            FieldValueDescriptor::builder("Trig")
+                .patterns(["Trig", "trig", "trigger", "Sample", "sample", "samp"])
+                .build(),
         ];
 
         // Define SUM tagged collection - all items go into SUM EXCEPT effect prints

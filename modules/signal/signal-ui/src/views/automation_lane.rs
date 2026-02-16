@@ -107,7 +107,7 @@ pub fn AutomationLane(props: AutomationLaneProps) -> Element {
                     }
                 }
                 span {
-                    class: "text-[9px] text-muted-foreground truncate",
+                    class: "text-[10px] text-muted-foreground truncate",
                     "{props.lane.module_name}"
                 }
                 span {

@@ -53,9 +53,6 @@ impl From<ElectronicKit> for Group<ItemMetadata> {
                 "707",
                 "drum machine",
                 "machine",
-                "sample",
-                "sampled",
-                "trigger",
                 "midi drum",
                 "vst drum",
             ])

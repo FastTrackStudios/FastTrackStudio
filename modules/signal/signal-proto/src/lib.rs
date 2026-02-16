@@ -39,6 +39,7 @@ pub mod song;
 pub mod tagging;
 pub mod template;
 pub mod traits;
+pub mod versioning;
 
 pub use block::*;
 pub use module_type::*;

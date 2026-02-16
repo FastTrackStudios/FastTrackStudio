@@ -31,7 +31,7 @@ pub fn Dialog(props: DialogProps) -> Element {
     rsx! {
         // Overlay
         div {
-            class: "fixed inset-0 z-50 bg-black/80",
+            class: "fixed inset-0 z-50 bg-black/80 animate-fade-in",
             "data-state": "open",
             onclick: move |_| {
                 if let Some(cb) = &props.on_close {
@@ -43,7 +43,7 @@ pub fn Dialog(props: DialogProps) -> Element {
         // Content
         div {
             class: format!(
-                "fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border border-border bg-background p-6 shadow-lg sm:rounded-lg {}",
+                "fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg gap-4 border border-border bg-background p-6 shadow-lg sm:rounded-lg animate-scale-in {}",
                 props.class
             ),
             role: "dialog",

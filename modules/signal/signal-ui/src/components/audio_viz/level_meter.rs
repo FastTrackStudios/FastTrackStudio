@@ -54,13 +54,13 @@ pub fn LevelMeter(props: LevelMeterProps) -> Element {
         )
     };
 
-    // Color: green < 75%, yellow 75-90%, red 90%+
+    // Color: safe < 75%, warn 75-90%, danger 90%+
     let bar_color = if level > 0.9 {
-        "bg-red-500"
+        "background-color: var(--signal-danger)"
     } else if level > 0.75 {
-        "bg-yellow-500"
+        "background-color: var(--signal-warn)"
     } else {
-        "bg-green-500"
+        "background-color: var(--signal-safe)"
     };
 
     let bar_style = if is_vertical {
@@ -79,8 +79,8 @@ pub fn LevelMeter(props: LevelMeterProps) -> Element {
 
             // Fill bar
             div {
-                class: format!("{bar_color} transition-all duration-75"),
-                style: bar_style,
+                class: "transition-all duration-75",
+                style: format!("{bar_style} {bar_color}"),
             }
 
             // Peak hold indicator
@@ -104,7 +104,8 @@ pub fn LevelMeter(props: LevelMeterProps) -> Element {
             // Clip indicator
             if props.show_clip && is_clip {
                 div {
-                    class: "absolute inset-0 bg-red-600/30 animate-pulse",
+                    class: "absolute inset-0 animate-pulse",
+                    style: "background-color: color-mix(in oklch, var(--signal-danger) 30%, transparent)",
                 }
             }
         }

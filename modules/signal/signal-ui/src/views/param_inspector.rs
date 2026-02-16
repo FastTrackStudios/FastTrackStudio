@@ -29,10 +29,10 @@ impl ParamSource {
 
     fn badge_class(self) -> &'static str {
         match self {
-            Self::Preset => "bg-blue-500/20 text-blue-400",
-            Self::Override => "bg-orange-500/20 text-orange-400",
-            Self::Automation => "bg-green-500/20 text-green-400",
-            Self::Default => "bg-zinc-500/20 text-zinc-400",
+            Self::Preset => "bg-signal-slot-a/20 text-signal-slot-a",
+            Self::Override => "bg-signal-override/20 text-signal-override",
+            Self::Automation => "bg-signal-automation/20 text-signal-automation",
+            Self::Default => "bg-muted text-muted-foreground",
         }
     }
 }
@@ -146,7 +146,7 @@ fn ParamRowView(props: ParamRowViewProps) -> Element {
             // Modulation indicator
             if row.has_modulation {
                 span {
-                    class: "w-2 h-2 rounded-full bg-purple-500",
+                    class: "w-2 h-2 rounded-full bg-signal-mod",
                     title: "Modulated",
                 }
             } else {
@@ -278,13 +278,13 @@ pub fn ParamInspector(props: ParamInspectorProps) -> Element {
                     span { {format!("{} params", total)} }
                     if override_count > 0 {
                         span {
-                            class: "px-1 rounded bg-orange-500/20 text-orange-400",
+                            class: "px-1 rounded bg-signal-override/20 text-signal-override",
                             {format!("{} overrides", override_count)}
                         }
                     }
                     if mod_count > 0 {
                         span {
-                            class: "px-1 rounded bg-purple-500/20 text-purple-400",
+                            class: "px-1 rounded bg-signal-mod/20 text-signal-mod",
                             {format!("{} modulated", mod_count)}
                         }
                     }

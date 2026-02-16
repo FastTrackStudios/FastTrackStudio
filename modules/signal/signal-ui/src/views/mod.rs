@@ -14,15 +14,22 @@ mod signal_chain_layout;
 mod signal_slider;
 
 // New views
+mod ab_comparison;
 mod automation_lane;
 mod fx_binding_status;
 mod midi_learn;
+mod param_inspector;
+mod performance_view;
 mod profile_editor;
 mod snapshot_panel;
 mod song_setlist_editor;
 
 pub use block_editor::{BlockCard, BlockEditor, MiniKnob};
-pub use collection_browser::{BrowseLevel, CollectionBrowser};
+pub use collection_browser::{
+    engines_to_grid_slots, resolve_layer_engines, resolve_scene_engines, rig_type_to_engine_type,
+    BrowseLevel, CollectionBrowser, EngineFlowData, EngineParamLookup, LayerFlowData,
+    RigGridPanel,
+};
 pub use metadata_display::MetadataDisplay;
 pub use module_view::{ModuleView, ModuleViewMode, ParamChange};
 pub use rig_preset_canvas::RigPresetCanvas;
@@ -43,4 +50,14 @@ pub use profile_editor::{
 pub use snapshot_panel::{CaptureType, SnapshotEntry, SnapshotPanel};
 pub use song_setlist_editor::{
     SectionEntry, SetlistEditor, SetlistEntry, SongEditor, SongEntry,
+};
+pub use ab_comparison::{
+    ABComparison, ComparisonRow, DiffDirection, DiffFilter, PresetHeader,
+};
+pub use param_inspector::{
+    ParamInspector, ParamRow, ParamSource, SortColumn, SortDirection,
+};
+pub use performance_view::{
+    MorphSlider, PerfSceneGrid, PerfSceneTile, PerformanceView, RigStatus,
+    RigStatusBanner, SnapshotBank, SnapshotSlot, SongNav, SongNavState,
 };

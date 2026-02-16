@@ -208,7 +208,7 @@ fn guitar_engine() -> Engine {
         ))
         .with_layer(LayerSelection::new(
             seed_id("guitar-layer-archetype-jm"),
-            seed_id("guitar-layer-archetype-jm-default"),
+            seed_id("guitar-layer-archetype-jm-lead"),
         ))
         .with_override(Override::set(
             NodePath::layer("guitar-layer-main")

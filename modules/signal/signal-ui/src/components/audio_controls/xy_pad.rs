@@ -67,7 +67,7 @@ pub fn XYPad(props: XYPadProps) -> Element {
 
             div {
                 class: format!(
-                    "relative rounded border border-border bg-muted/50 overflow-hidden{disabled_class}"
+                    "relative rounded border border-border bg-muted/30 overflow-hidden shadow-[inset_0_2px_8px_rgba(0,0,0,0.3)]{disabled_class}"
                 ),
                 style: "width: {s}px; height: {s}px;",
 

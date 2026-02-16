@@ -17,7 +17,7 @@ use crate::components::dynamic_grid::{
 
 /// Pre-resolved block parameters keyed by `(preset_id, snapshot_id)`.
 /// Built during async data fetching, passed into synchronous grid conversion.
-pub(super) type ParamLookup = HashMap<(String, String), Vec<(String, f32)>>;
+pub type ParamLookup = HashMap<(String, String), Vec<(String, f32)>>;
 
 /// Extract parameters for a `ModuleBlock`.
 ///
@@ -88,7 +88,7 @@ const ROW_BAND_STRIDE: usize = 2;
 ///  - Split nodes fan out vertically within the module's row band
 ///  - Whole-module collision avoidance: if a module's footprint overlaps
 ///    existing blocks, the entire module shifts to a free row position
-pub(super) fn engines_to_grid_slots(
+pub fn engines_to_grid_slots(
     engines: &[EngineFlowData],
     params: &ParamLookup,
 ) -> Vec<GridSlot> {
@@ -459,7 +459,7 @@ fn find_free_module_row(
 // region: --- RigGridPanel
 
 #[derive(Props, Clone, PartialEq)]
-pub(super) struct RigGridPanelProps {
+pub struct RigGridPanelProps {
     pub initial_slots: Vec<GridSlot>,
 }
 
@@ -468,7 +468,7 @@ pub(super) struct RigGridPanelProps {
 /// Owns local signals for chain, selection, and connections so the
 /// detail panel can render an interactive grid without lifting state further.
 #[component]
-pub(super) fn RigGridPanel(props: RigGridPanelProps) -> Element {
+pub fn RigGridPanel(props: RigGridPanelProps) -> Element {
     let mut chain = use_signal(|| props.initial_slots.clone());
     let mut selection = use_signal(|| Option::<GridSelection>::None);
     let mut connections = use_signal(Vec::<DynGridConnection>::new);

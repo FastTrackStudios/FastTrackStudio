@@ -11,17 +11,25 @@ use signal::SignalChain;
 pub(super) enum NavCategory {
     Presets,
     Engines,
+    Layers,
     Modules,
     Blocks,
 }
 
 impl NavCategory {
-    pub const ALL: &[NavCategory] = &[Self::Presets, Self::Engines, Self::Modules, Self::Blocks];
+    pub const ALL: &[NavCategory] = &[
+        Self::Presets,
+        Self::Engines,
+        Self::Layers,
+        Self::Modules,
+        Self::Blocks,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
             Self::Presets => "Presets",
             Self::Engines => "Engines",
+            Self::Layers => "Layers",
             Self::Modules => "Modules",
             Self::Blocks => "Blocks",
         }
@@ -31,6 +39,7 @@ impl NavCategory {
         match self {
             Self::Presets => "from-amber-500 via-orange-400 to-red-500",
             Self::Engines => "from-rose-500 via-pink-400 to-fuchsia-500",
+            Self::Layers => "from-emerald-500 via-teal-400 to-cyan-500",
             Self::Modules => "from-blue-500 via-indigo-400 to-violet-500",
             Self::Blocks => "from-orange-500 via-amber-400 to-yellow-500",
         }

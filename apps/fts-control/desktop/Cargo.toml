@@ -54,9 +54,16 @@ kurbo.workspace = true
 keyflow-ui = { path = "../../../cells/keyflow/keyflow-ui", default-features = false }
 keyflow = { path = "../../../cells/keyflow/keyflow", features = ["text"] }
 
-# Signal rig control UI
+# Signal rig control UI (legacy)
 signal-ui = { path = "../../../cells/legacy-signal/signal-ui", default-features = false }
 signal-control = { path = "../../../cells/legacy-signal/signal-control" }
+
+# Signal2 — new storage-backed rig control
+signal2.workspace = true
+signal2-ui = { workspace = true, default-features = false }
+
+# Lumen Blocks UI components (dropdown, etc.)
+lumen-blocks.workspace = true
 
 # DAW UI components (mixer, TCP, arrangement, FX browser)
 daw-ui = { path = "../../../cells/daw/daw-ui", default-features = false }

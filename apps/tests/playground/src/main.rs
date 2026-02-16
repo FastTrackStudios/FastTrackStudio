@@ -3,11 +3,9 @@
 //! Tabbed gallery showcasing every smart view in `signal2_ui::views`.
 
 #[cfg(feature = "desktop")]
-use anyrender::PaintScene;
+use anyrender::ImageRenderer;
 #[cfg(feature = "desktop")]
-use anyrender::WindowRenderer;
-#[cfg(feature = "desktop")]
-use anyrender_vello::{VelloRendererOptions, VelloWindowRenderer};
+use anyrender_vello::{VelloImageRenderer, VelloScenePainter};
 #[cfg(feature = "desktop")]
 use dioxus::desktop::tao::window::Window;
 #[cfg(feature = "desktop")]
@@ -121,9 +119,15 @@ fn main() {
     dioxus::launch(App);
 }
 
+/// Custom renderer that drives vello + wgpu directly.
+/// Replaces `VelloWindowRenderer` to:
+///  1. Use Area AA instead of MSAA 16x (~5x less GPU work, ~3ms vs ~60ms per frame)
+///  2. Bypass the anyrender::Scene recording layer overhead
 #[cfg(feature = "desktop")]
 struct FrameGraphics {
-    renderer: VelloWindowRenderer,
+    vello_renderer: vello::Renderer,
+    render_surface: wgpu_context::SurfaceRenderer<'static>,
+    scene: vello::Scene,
     width: u32,
     height: u32,
 }
@@ -131,40 +135,93 @@ struct FrameGraphics {
 #[cfg(feature = "desktop")]
 impl FrameGraphics {
     fn new(window: Arc<Window>, width: u32, height: u32) -> Self {
-        let mut renderer = VelloWindowRenderer::with_options(VelloRendererOptions {
-            base_color: Color::TRANSPARENT,
-            ..Default::default()
-        });
-        renderer.resume(window, width, height);
+        let features = wgpu::Features::CLEAR_TEXTURE | wgpu::Features::PIPELINE_CACHE;
+        let mut wgpu_ctx = wgpu_context::WGPUContext::with_features_and_limits(
+            Some(features),
+            None,
+        );
+        let render_surface = pollster::block_on(wgpu_ctx.create_surface(
+            window,
+            wgpu_context::SurfaceRendererConfiguration {
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                formats: vec![
+                    wgpu::TextureFormat::Rgba8Unorm,
+                    wgpu::TextureFormat::Bgra8Unorm,
+                ],
+                width,
+                height,
+                present_mode: wgpu::PresentMode::AutoVsync,
+                desired_maximum_frame_latency: 2,
+                alpha_mode: wgpu::CompositeAlphaMode::Auto,
+                view_formats: vec![],
+            },
+            Some(wgpu_context::TextureConfiguration {
+                usage: wgpu::TextureUsages::STORAGE_BINDING
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
+            }),
+        ))
+        .expect("Error creating surface");
+
+        let vello_renderer = vello::Renderer::new(
+            render_surface.device(),
+            vello::RendererOptions {
+                antialiasing_support: vello::AaSupport::area_only(),
+                use_cpu: false,
+                num_init_threads: None, // default
+                pipeline_cache: None,
+            },
+        )
+        .expect("Error creating vello renderer");
+
         Self {
-            renderer,
+            vello_renderer,
+            render_surface,
+            scene: vello::Scene::new(),
             width,
             height,
         }
     }
 
-    fn render<F>(&mut self, draw_fn: F)
-    where
-        F: FnOnce(&mut <VelloWindowRenderer as WindowRenderer>::ScenePainter<'_>),
-    {
-        self.renderer.render(draw_fn);
+    fn render<F: FnOnce(&mut vello::Scene)>(&mut self, draw_fn: F) {
+        draw_fn(&mut self.scene);
+
+        let texture_view = self.render_surface.target_texture_view();
+        self.vello_renderer
+            .render_to_texture(
+                self.render_surface.device(),
+                self.render_surface.queue(),
+                &self.scene,
+                &texture_view,
+                &vello::RenderParams {
+                    base_color: Color::TRANSPARENT,
+                    width: self.render_surface.config.width,
+                    height: self.render_surface.config.height,
+                    antialiasing_method: vello::AaConfig::Area,
+                },
+            )
+            .expect("failed to render to texture");
+
+        drop(texture_view);
+        self.render_surface.maybe_blit_and_present();
+
+        // Blocking poll: with Area AA this only costs ~3-5ms (vs ~60ms with MSAA 16x).
+        // Non-blocking poll causes GPU saturation → get_current_texture blocks → UI freeze.
+        self.render_surface
+            .device()
+            .poll(wgpu::PollType::wait_indefinitely())
+            .unwrap();
+
+        self.scene.reset();
     }
 
     fn resize(&mut self, width: u32, height: u32) {
         self.width = width;
         self.height = height;
-        self.renderer.set_size(width, height);
+        self.render_surface.resize(width, height);
     }
 
     fn size(&self) -> (u32, u32) {
         (self.width, self.height)
-    }
-}
-
-#[cfg(feature = "desktop")]
-impl Drop for FrameGraphics {
-    fn drop(&mut self) {
-        self.renderer.suspend();
     }
 }
 
@@ -497,7 +554,9 @@ fn FramePreviewTab() -> Element {
     let mut edit_drag = use_signal(|| None::<EditDragState>);
     let mut cached_primitives = use_signal(Vec::<frame_ui::PaintPrimitive>::new);
     #[cfg(feature = "desktop")]
-    let mut cached_scene_fragment = use_signal(|| None::<anyrender::Scene>);
+    let mut cached_scene_fragment = use_signal(|| None::<vello::Scene>);
+    #[cfg(feature = "desktop")]
+    let mut cached_raster_image = use_signal(|| None::<peniko::ImageBrush>);
     let mut cached_content_bounds = use_signal(PrimitiveBounds::default);
     let mut cached_node_bounds =
         use_signal(std::collections::HashMap::<NodeId, PrimitiveBounds>::new);
@@ -576,8 +635,12 @@ fn FramePreviewTab() -> Element {
                         if last_signature != Some(signature) {
                             last_signature = Some(signature);
                             match tokio::fs::read(FRAME_BRIDGE_JSON_PATH).await {
-                                Ok(bytes) => match import_figma_bytes_with_diagnostics(&bytes) {
-                                    Ok((doc, diagnostics)) => {
+                                Ok(bytes) => match tokio::task::spawn_blocking(move || {
+                                    import_figma_bytes_with_diagnostics(&bytes)
+                                })
+                                .await
+                                {
+                                    Ok(Ok((doc, diagnostics))) => {
                                         frame_doc.set(Some(doc));
                                         frame_error.set(None);
                                         last_error = None;
@@ -603,10 +666,20 @@ fn FramePreviewTab() -> Element {
                                             }
                                         ));
                                     }
-                                    Err(err) => {
+                                    Ok(Err(err)) => {
                                         let msg = format!(
                                             "Import failed for {}: {}",
                                             FRAME_BRIDGE_JSON_PATH, err
+                                        );
+                                        if last_error.as_deref() != Some(msg.as_str()) {
+                                            frame_error.set(Some(msg.clone()));
+                                            last_error = Some(msg);
+                                        }
+                                    }
+                                    Err(join_err) => {
+                                        let msg = format!(
+                                            "Import panicked for {}: {}",
+                                            FRAME_BRIDGE_JSON_PATH, join_err
                                         );
                                         if last_error.as_deref() != Some(msg.as_str()) {
                                             frame_error.set(Some(msg.clone()));
@@ -695,55 +768,111 @@ fn FramePreviewTab() -> Element {
             let Some(doc) = frame_doc() else {
                 cached_primitives.set(Vec::new());
                 cached_scene_fragment.set(None);
+                cached_raster_image.set(None);
                 cached_content_bounds.set(PrimitiveBounds::default());
                 cached_node_bounds.set(std::collections::HashMap::new());
                 return;
             };
-            let options = collect_frame_options(&doc);
-            let selected_idx = selected_frame().min(options.len().saturating_sub(1));
-            let root = options
-                .get(selected_idx)
-                .map(|o| o.id)
-                .unwrap_or_else(|| preview_scene_root(&doc));
-            let primitives = build_editor_primitives(&doc, root, &node_overrides());
-            let content = primitive_bounds(&primitives);
-            let mut node_bounds = layout_bounds_map_for_ui(&doc, root, &node_overrides());
-            if node_bounds.is_empty() {
-                node_bounds = node_bounds_map_from_primitives(&primitives);
-            }
-            #[cfg(feature = "desktop")]
-            {
-                let mut scene_fragment = anyrender::Scene::new();
-                if let Some(font_bytes) = try_load_system_text_font() {
-                    paint_primitives_into_scene_with(
-                        &mut scene_fragment,
-                        &primitives,
-                        Affine::IDENTITY,
-                        Some(TextFontRef {
-                            bytes: font_bytes.as_slice(),
-                            index: 0,
-                        }),
+            let overrides = node_overrides();
+            let sel = selected_frame();
+
+            spawn(async move {
+                let result = tokio::task::spawn_blocking(move || {
+                    let options = collect_frame_options(&doc);
+                    let selected_idx = sel.min(options.len().saturating_sub(1));
+                    let root = options
+                        .get(selected_idx)
+                        .map(|o| o.id)
+                        .unwrap_or_else(|| preview_scene_root(&doc));
+                    let primitives = build_editor_primitives(&doc, root, &overrides);
+                    let content = primitive_bounds(&primitives);
+                    let mut node_bounds = layout_bounds_map_for_ui(&doc, root, &overrides);
+                    if node_bounds.is_empty() {
+                        node_bounds = node_bounds_map_from_primitives(&primitives);
+                    }
+                    let font_bytes = try_load_system_text_font();
+                    let font_ref = font_bytes.as_ref().map(|b| TextFontRef {
+                        bytes: b.as_slice(),
+                        index: 0,
+                    });
+
+                    let mut vello_scene = vello::Scene::new();
+                    {
+                        let mut painter = VelloScenePainter::new(&mut vello_scene);
+                        paint_primitives_into_scene_with(
+                            &mut painter,
+                            &primitives,
+                            Affine::IDENTITY,
+                            font_ref,
+                        );
+                    }
+
+                    // Rasterize the scene for fast pan/zoom rendering
+                    let content_w = (content.max_x - content.min_x).max(1.0);
+                    let content_h = (content.max_y - content.min_y).max(1.0);
+                    let raster_w = (content_w.ceil() as u32).clamp(1, 4096);
+                    let raster_h = (content_h.ceil() as u32).clamp(1, 4096);
+                    let scale_x = raster_w as f64 / content_w;
+                    let scale_y = raster_h as f64 / content_h;
+
+                    let raster_transform = Affine::scale_non_uniform(scale_x, scale_y)
+                        * Affine::translate((-content.min_x, -content.min_y));
+                    let mut img_renderer = VelloImageRenderer::new(raster_w, raster_h);
+                    let mut rgba_buf = Vec::new();
+                    img_renderer.render_to_vec(
+                        |painter| {
+                            paint_primitives_into_scene_with(
+                                painter,
+                                &primitives,
+                                raster_transform,
+                                font_ref,
+                            );
+                        },
+                        &mut rgba_buf,
                     );
-                } else {
-                    paint_primitives_into_scene_with(
-                        &mut scene_fragment,
-                        &primitives,
-                        Affine::IDENTITY,
-                        None,
-                    );
+
+                    let raster_brush = peniko::ImageBrush::new(peniko::ImageData {
+                        data: peniko::Blob::from(rgba_buf),
+                        format: peniko::ImageFormat::Rgba8,
+                        alpha_type: peniko::ImageAlphaType::AlphaPremultiplied,
+                        width: raster_w,
+                        height: raster_h,
+                    });
+
+                    (primitives, content, node_bounds, vello_scene, raster_brush, root)
+                })
+                .await;
+
+                if let Ok((primitives, content, node_bounds, scene, raster_brush, root)) = result {
+                    cached_scene_fragment.set(Some(scene));
+                    cached_raster_image.set(Some(raster_brush));
+                    cached_primitives.set(primitives);
+                    cached_content_bounds.set(content);
+                    cached_node_bounds.set(node_bounds);
+                    cached_render_root.set(Some(root));
                 }
-                cached_scene_fragment.set(Some(scene_fragment));
-            }
-            cached_primitives.set(primitives);
-            cached_content_bounds.set(content);
-            cached_node_bounds.set(node_bounds);
-            cached_render_root.set(Some(root));
+            });
         });
 
         let graphics_loop = graphics.clone();
         use_future(move || {
             let graphics_loop = graphics_loop.clone();
             async move {
+                // Dirty-flag state: only re-render when inputs change.
+                let mut last_zoom = f64::NAN;
+                let mut last_pan_x = f64::NAN;
+                let mut last_pan_y = f64::NAN;
+                let mut last_bounds = FramePreviewBounds::default();
+                let mut last_active_node: Option<NodeId> = None;
+                let mut last_hovered_node: Option<NodeId> = None;
+                let mut last_prim_count: usize = 0;
+                let mut last_scene_gen: usize = 0;
+                let mut scene_gen: usize = 0;
+                let mut last_win_w: u32 = 0;
+                let mut last_win_h: u32 = 0;
+                let mut last_spacing_len: usize = 0;
+                let mut frames_since_viewport_change: u32 = 0;
+
                 loop {
                     tokio::time::sleep(tokio::time::Duration::from_millis(8)).await;
 
@@ -752,19 +881,77 @@ fn FramePreviewTab() -> Element {
                         continue;
                     }
 
-                    let primitives = cached_primitives();
-                    let scene_fragment = cached_scene_fragment();
-                    if primitives.is_empty() {
+                    // Cheap reads for dirty check — no deep clones
+                    let prim_count = cached_primitives.with_peek(|v| v.len());
+                    if prim_count == 0 {
+                        continue;
+                    }
+                    let zoom = *view_zoom.peek();
+                    let current_pan_x = *pan_x.peek();
+                    let current_pan_y = *pan_y.peek();
+                    let content = *cached_content_bounds.peek();
+                    let active_node = (*selected_layer.peek()).or(*cached_render_root.peek());
+                    let hovered_node = *hovered_layer.peek();
+                    let spacing_guides_len = cached_spacing_guides.with_peek(|v| v.len());
+
+                    // Track scene fragment changes via primitive count as a proxy.
+                    if prim_count != last_prim_count {
+                        scene_gen = scene_gen.wrapping_add(1);
+                    }
+
+                    let win_size = dioxus::desktop::window().window.inner_size();
+                    let dirty = zoom != last_zoom
+                        || current_pan_x != last_pan_x
+                        || current_pan_y != last_pan_y
+                        || bounds.x != last_bounds.x
+                        || bounds.y != last_bounds.y
+                        || bounds.width != last_bounds.width
+                        || bounds.height != last_bounds.height
+                        || bounds.dpr != last_bounds.dpr
+                        || active_node != last_active_node
+                        || hovered_node != last_hovered_node
+                        || prim_count != last_prim_count
+                        || scene_gen != last_scene_gen
+                        || win_size.width != last_win_w
+                        || win_size.height != last_win_h
+                        || spacing_guides_len != last_spacing_len;
+
+                    if !dirty {
                         continue;
                     }
 
-                    let zoom = view_zoom();
-                    let current_pan_x = pan_x();
-                    let current_pan_y = pan_y();
-                    let content = cached_content_bounds();
+                    // Detect viewport-only vs content changes for raster/vector switching
+                    let viewport_changed = zoom != last_zoom
+                        || current_pan_x != last_pan_x
+                        || current_pan_y != last_pan_y;
+                    let content_changed = prim_count != last_prim_count
+                        || scene_gen != last_scene_gen;
+
+                    if viewport_changed {
+                        frames_since_viewport_change = 0;
+                    } else {
+                        frames_since_viewport_change =
+                            frames_since_viewport_change.saturating_add(1);
+                    }
+
+                    // Use raster during active pan/zoom, vector when stable (~160ms debounce)
+                    let use_raster = viewport_changed
+                        || (frames_since_viewport_change < 20 && !content_changed);
+
+                    last_zoom = zoom;
+                    last_pan_x = current_pan_x;
+                    last_pan_y = current_pan_y;
+                    last_bounds = bounds;
+                    last_active_node = active_node;
+                    last_hovered_node = hovered_node;
+                    last_prim_count = prim_count;
+                    last_scene_gen = scene_gen;
+                    last_win_w = win_size.width;
+                    last_win_h = win_size.height;
+                    last_spacing_len = spacing_guides_len;
+
+                    // Expensive reads only on dirty frames
                     let node_bounds = cached_node_bounds();
-                    let active_node = selected_layer().or(cached_render_root());
-                    let hovered_node = hovered_layer();
                     let selected_overlay_css = active_node
                         .and_then(|id| node_bounds.get(&id).copied())
                         .map(|world| {
@@ -777,7 +964,6 @@ fn FramePreviewTab() -> Element {
                                 current_pan_y,
                             )
                         });
-                    let spacing_guides = cached_spacing_guides();
                     let hovered_overlay_css = hovered_node
                         .and_then(|id| node_bounds.get(&id).copied())
                         .filter(|_| hovered_node != active_node)
@@ -798,9 +984,10 @@ fn FramePreviewTab() -> Element {
                     )) * Affine::scale(zoom)
                         * Affine::translate((-content.min_x, -content.min_y));
 
+                    let raster_image = cached_raster_image();
+
                     if let Ok(mut gfx) = graphics_loop.lock() {
                         let frame_start = std::time::Instant::now();
-                        let win_size = dioxus::desktop::window().window.inner_size();
                         let (sw, sh) = gfx.size();
                         if sw != win_size.width || sh != win_size.height {
                             gfx.resize(win_size.width, win_size.height);
@@ -820,15 +1007,48 @@ fn FramePreviewTab() -> Element {
                                 None,
                                 &panel,
                             );
-                            if let Some(fragment) = scene_fragment {
-                                scene.append_scene(fragment, transform);
+                            if use_raster {
+                                if let Some(ref raster) = raster_image {
+                                    // Draw cached raster image for fast pan/zoom
+                                    let content_w =
+                                        (content.max_x - content.min_x).max(1.0);
+                                    let content_h =
+                                        (content.max_y - content.min_y).max(1.0);
+                                    let img_transform = Affine::translate((
+                                        bounds.x + pad + current_pan_x,
+                                        bounds.y + pad + current_pan_y,
+                                    )) * Affine::scale(zoom)
+                                        * Affine::scale_non_uniform(
+                                            content_w / raster.image.width as f64,
+                                            content_h / raster.image.height as f64,
+                                        );
+                                    scene.draw_image(
+                                        raster.as_ref(),
+                                        img_transform,
+                                    );
+                                } else {
+                                    // Fallback to vector scene if raster not ready
+                                    let guard = cached_scene_fragment.peek();
+                                    if let Some(ref frag) = *guard {
+                                        scene.append(frag, Some(transform));
+                                    }
+                                }
                             } else {
-                                paint_primitives_into_scene_with(
-                                    scene,
-                                    &primitives,
-                                    transform,
-                                    None,
-                                );
+                                // Stable frame: use vector scene (highest fidelity)
+                                let guard = cached_scene_fragment.peek();
+                                if let Some(ref frag) = *guard {
+                                    scene.append(frag, Some(transform));
+                                } else {
+                                    // No cached scene yet — paint directly
+                                    let primitives = cached_primitives();
+                                    let mut painter = VelloScenePainter::new(scene);
+                                    paint_primitives_into_scene_with(
+                                        &mut painter,
+                                        &primitives,
+                                        transform,
+                                        None,
+                                    );
+                                }
                             }
 
                             if let Some(hover) = hovered_overlay_css {
@@ -882,7 +1102,8 @@ fn FramePreviewTab() -> Element {
                                 }
                             }
 
-                            for guide in &spacing_guides {
+                            let spacing_guides = cached_spacing_guides();
+                            for guide in &*spacing_guides {
                                 let x0 = bounds.x
                                     + world_to_panel_css_x(
                                         guide.x0,
@@ -973,7 +1194,7 @@ fn FramePreviewTab() -> Element {
                             0.0
                         };
                         perf_stats.with_mut(|stats| {
-                            stats.update(frame_ms, fps, primitives.len());
+                            stats.update(frame_ms, fps, prim_count);
                         });
                     }
                     dioxus::desktop::window().window.request_redraw();

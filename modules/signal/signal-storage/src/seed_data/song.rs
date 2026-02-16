@@ -1,4 +1,4 @@
-//! Song seed data — feature demo song showcasing section source + overrides.
+//! Song seed data — demo songs showcasing section source + overrides.
 
 use signal_proto::metadata::Metadata;
 use signal_proto::overrides::{NodeOverrideOp, NodePath, Override};
@@ -7,7 +7,7 @@ use signal_proto::song::{Section, Song};
 
 /// All default song collections.
 pub fn songs() -> Vec<Song> {
-    vec![feature_demo_song(), dummy_song()]
+    vec![feature_demo_song(), dummy_song(), guitar_worship_song()]
 }
 
 /// Feature-Demo Song
@@ -122,6 +122,84 @@ fn dummy_song() -> Song {
         )
 }
 
+/// Guitar Worship Song — demonstrates patch-sourced and rig-scene-sourced sections
+/// using the Worship profile patches.
+fn guitar_worship_song() -> Song {
+    let intro = Section::from_patch(
+        seed_id("guitar-worship-song-intro"),
+        "Intro",
+        seed_id("guitar-worship-clean"),
+    )
+    .with_metadata(Metadata::new().with_tag("guitar").with_tag("patch"));
+
+    let verse = Section::from_patch(
+        seed_id("guitar-worship-song-verse"),
+        "Verse",
+        seed_id("guitar-worship-ambient"),
+    )
+    .with_override(Override::set(
+        NodePath::engine("guitar-engine")
+            .with_layer("guitar-layer-archetype-jm")
+            .with_block("dream-delay")
+            .with_parameter("mix"),
+        0.20,
+    ))
+    .with_metadata(Metadata::new().with_tag("guitar").with_tag("patch"));
+
+    let chorus = Section::from_patch(
+        seed_id("guitar-worship-song-chorus"),
+        "Chorus",
+        seed_id("guitar-worship-drive"),
+    )
+    .with_metadata(Metadata::new().with_tag("guitar").with_tag("patch"));
+
+    let bridge = Section::from_patch(
+        seed_id("guitar-worship-song-bridge"),
+        "Bridge",
+        seed_id("guitar-worship-delay"),
+    )
+    .with_metadata(Metadata::new().with_tag("guitar").with_tag("patch"));
+
+    let solo = Section::from_patch(
+        seed_id("guitar-worship-song-solo"),
+        "Solo",
+        seed_id("guitar-worship-solo"),
+    )
+    .with_override(Override::set(
+        NodePath::engine("guitar-engine")
+            .with_layer("guitar-layer-archetype-jm")
+            .with_block("dream-delay")
+            .with_parameter("feedback"),
+        0.55,
+    ))
+    .with_metadata(Metadata::new().with_tag("guitar").with_tag("patch"));
+
+    let outro = Section::from_rig_scene(
+        seed_id("guitar-worship-song-outro"),
+        "Outro",
+        seed_id("guitar-megarig"),
+        seed_id("guitar-megarig-default"),
+    )
+    .with_metadata(Metadata::new().with_tag("guitar").with_tag("preset"));
+
+    let mut song = Song::new(seed_id("guitar-worship-song"), "Worship Set", intro)
+        .with_artist("Signal2")
+        .with_metadata(
+            Metadata::new()
+                .with_tag("setlist")
+                .with_tag("guitar")
+                .with_description(
+                    "Worship song using clean/ambient/drive/delay/solo patches from Worship profile",
+                ),
+        );
+    song.add_section(verse);
+    song.add_section(chorus);
+    song.add_section(bridge);
+    song.add_section(solo);
+    song.add_section(outro);
+    song
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -129,7 +207,7 @@ mod tests {
 
     #[test]
     fn song_count() {
-        assert_eq!(songs().len(), 2);
+        assert_eq!(songs().len(), 3);
     }
 
     #[test]

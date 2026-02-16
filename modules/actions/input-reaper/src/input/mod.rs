@@ -29,6 +29,7 @@ pub mod state;
 pub mod tempo;
 pub mod utils;
 pub mod wheel_hook;
+pub mod which_key_overlay;
 pub mod window_detection;
 pub mod workflows;
 

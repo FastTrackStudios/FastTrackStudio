@@ -80,7 +80,7 @@ pub fn register_with_config(_config: InputRuntimeConfig) -> Result<(), String> {
         input::handler::register_input_handler().map_err(|e| e.to_string())?;
     }
 
-    InputHandler::set_debug_logging(true);
+    InputHandler::set_debug_logging(false);
     set_profile(current_profile())?;
     set_enabled(true);
 
@@ -164,6 +164,25 @@ pub fn set_profile(profile: InputProfile) -> Result<(), String> {
 
     input::mouse_modifiers::manager::log_state();
     Ok(())
+}
+
+/// Check for which-key sequence timeout.
+///
+/// Called from the REAPER timer callback (~30fps). If a which-key sequence
+/// has been idle for longer than `timeout_ms`, it resets and logs a timeout
+/// message to the console, and hides the overlay.
+pub fn check_which_key_timeout() {
+    if input::keybinds::which_key::check_timeout(5000) {
+        input::which_key_overlay::hide();
+    }
+}
+
+/// Refresh the which-key overlay position/render.
+///
+/// Called from the timer callback so the overlay tracks the arrange view
+/// if the user resizes or moves the window.
+pub fn refresh_which_key_overlay() {
+    input::which_key_overlay::refresh();
 }
 
 pub fn log_state_to_console() {

@@ -4,6 +4,7 @@ pub mod block_repo;
 pub mod daw_snapshot_repo;
 pub mod engine_repo;
 pub mod entity;
+pub mod import_export;
 pub mod layer_repo;
 pub mod module_repo;
 pub mod profile_repo;
@@ -23,6 +24,7 @@ pub use module_repo::{ModuleRepo, ModuleRepoLive};
 pub use profile_repo::{ProfileRepo, ProfileRepoLive};
 pub use rig_repo::{RigRepo, RigRepoLive};
 pub use scene_template_repo::{SceneTemplateRepo, SceneTemplateRepoLive};
+pub use import_export::{ConflictStrategy, ExportBundle, ImportOptions, ImportResult};
 pub use sea_orm::{Database, DatabaseConnection, DbErr};
 pub use seed_data::{
     default_block_collections, default_module_collections, default_seed_engines,

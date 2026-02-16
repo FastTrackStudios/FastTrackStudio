@@ -265,27 +265,38 @@ impl<M: Metadata + ToDisplayName> IntoTracks<M> for Structure<M> {
 /// Convert a monarchy Structure to a TrackHierarchy
 fn structure_to_hierarchy<M: Metadata + ToDisplayName>(structure: &Structure<M>) -> TrackHierarchy {
     let mut tracks = Vec::new();
-    structure_to_tracks_recursive(structure, &mut tracks, true);
+    structure_to_tracks_recursive(structure, &mut tracks, true, &[]);
     TrackHierarchy { tracks }
 }
 
 /// Helper function to recursively convert Structure to TrackNodes
+///
+/// The `group_path` parameter tracks the hierarchy of group names from root to
+/// current node, used for color lookup via `colors::color_for_path()`.
 fn structure_to_tracks_recursive<M: Metadata + ToDisplayName>(
     structure: &Structure<M>,
     tracks: &mut Vec<TrackNode>,
     skip_root: bool,
+    group_path: &[&str],
 ) {
     // Skip root if it's just a container (name is "root" or empty)
     if skip_root && (structure.name == "root" || structure.name.is_empty()) {
         // Process all children
         for child in &structure.children {
-            structure_to_tracks_recursive(child, tracks, false);
+            structure_to_tracks_recursive(child, tracks, false, group_path);
         }
         return;
     }
 
+    // Build the path for this node (used for color lookup)
+    let mut current_path: Vec<&str> = group_path.to_vec();
+    current_path.push(&structure.name);
+
     // Create a track node for this structure
     let mut track = TrackNode::new(structure.name.clone());
+
+    // Look up color from the hierarchical path
+    track.color = colors::color_for_path(&current_path).map(|c| c.to_hex());
 
     // Add items from monarchy structure to the track
     for monarchy_item in &structure.items {
@@ -302,7 +313,7 @@ fn structure_to_tracks_recursive<M: Metadata + ToDisplayName>(
         let num_children = structure.children.len();
         for (i, child) in structure.children.iter().enumerate() {
             let tracks_before = tracks.len();
-            structure_to_tracks_recursive(child, tracks, false);
+            structure_to_tracks_recursive(child, tracks, false, &current_path);
 
             // If this is the last child, apply folder closing to the last track added
             if i == num_children - 1 && tracks.len() > tracks_before {

@@ -44,18 +44,18 @@ pub fn SpectrumAnalyzer(props: SpectrumAnalyzerProps) -> Element {
                 {
                     let mag = bin.clamp(0.0, 1.0);
                     let bar_h = (mag * hf).max(1.0);
-                    // Color gradient: low=green, mid=yellow, high=red
+                    // Color gradient: safe=low, warn=mid, danger=high
                     let color = if mag > 0.85 {
-                        "bg-red-500"
+                        "background-color: var(--signal-danger)"
                     } else if mag > 0.6 {
-                        "bg-yellow-500"
+                        "background-color: var(--signal-warn)"
                     } else {
-                        "bg-green-500"
+                        "background-color: var(--signal-safe)"
                     };
                     rsx! {
                         div {
-                            class: format!("{color} rounded-t transition-all duration-75"),
-                            style: "width: {bar_w:.1}px; height: {bar_h:.1}px;",
+                            class: "rounded-t transition-all duration-75",
+                            style: format!("width: {bar_w:.1}px; height: {bar_h:.1}px; {color}"),
                         }
                     }
                 }

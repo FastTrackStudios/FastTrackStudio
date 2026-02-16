@@ -355,6 +355,12 @@ extern "C" fn timer_callback() {
         // Keep input mouse hooks attached to newly opened windows (MIDI editors).
         input_reaper::check_and_hook_windows();
 
+        // Check for which-key sequence timeout (~1s idle = reset + hide overlay)
+        input_reaper::check_which_key_timeout();
+
+        // Refresh which-key overlay position (tracks arrange view movement)
+        input_reaper::refresh_which_key_overlay();
+
         // Poll transport state and broadcast to subscribers
         // This runs directly on main thread, avoiding async round-trip latency
         daw_reaper::poll_and_broadcast();

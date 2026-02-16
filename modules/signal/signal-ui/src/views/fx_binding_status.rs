@@ -20,9 +20,9 @@ pub enum BindingHealth {
 impl BindingHealth {
     fn color_class(self) -> &'static str {
         match self {
-            Self::Connected => "bg-green-500",
-            Self::Partial => "bg-yellow-500",
-            Self::Disconnected => "bg-red-500",
+            Self::Connected => "bg-signal-safe",
+            Self::Partial => "bg-signal-warn",
+            Self::Disconnected => "bg-signal-danger",
         }
     }
 
@@ -121,7 +121,7 @@ pub fn FxBindingPanel(props: FxBindingPanelProps) -> Element {
             div {
                 class: "flex items-center justify-between",
                 h3 {
-                    class: "text-sm font-semibold",
+                    class: "text-xs uppercase tracking-widest text-muted-foreground font-semibold",
                     "FX Bindings"
                 }
                 span {
@@ -176,7 +176,7 @@ pub fn FxBindingPanel(props: FxBindingPanelProps) -> Element {
                             div {
                                 class: format!(
                                     "w-1.5 h-1.5 rounded-full {}",
-                                    if binding.is_bound { "bg-green-500" } else { "bg-red-500" }
+                                    if binding.is_bound { "bg-signal-safe" } else { "bg-signal-danger" }
                                 ),
                             }
                             span {

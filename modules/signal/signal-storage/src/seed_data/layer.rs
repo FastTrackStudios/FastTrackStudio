@@ -1,7 +1,6 @@
 //! Layer seed data — default layer collections for development/demo.
 
-use signal_proto::defaults::archetype_john_mayer;
-use signal_proto::layer::{BlockRef, Layer, LayerRef, LayerSnapshot, ModuleRef, PluginRef};
+use signal_proto::layer::{BlockRef, Layer, LayerRef, LayerSnapshot, ModuleRef};
 use signal_proto::metadata::Metadata;
 use signal_proto::overrides::{NodePath, Override};
 use signal_proto::{seed_id, EngineType};
@@ -302,14 +301,33 @@ fn pad_layer_shimmer() -> Layer {
 fn guitar_layer_archetype_jm() -> Layer {
     let default_variant =
         LayerSnapshot::new(seed_id("guitar-layer-archetype-jm-default"), "Default")
-            .with_plugin(PluginRef::new(archetype_john_mayer()));
+            .with_module(ModuleRef::new(seed_id("jm-pedals")))
+            .with_module(ModuleRef::new(seed_id("jm-pre-fx")))
+            .with_module(ModuleRef::new(seed_id("jm-amp-module")))
+            .with_module(ModuleRef::new(seed_id("jm-cab-module")))
+            .with_module(ModuleRef::new(seed_id("jm-eq-module")))
+            .with_module(ModuleRef::new(seed_id("jm-post-fx")));
 
-    Layer::new(
+    let lead_variant = LayerSnapshot::new(seed_id("guitar-layer-archetype-jm-lead"), "Lead")
+        .with_module(ModuleRef::new(seed_id("jm-pedals")).with_variant(seed_id("jm-pedals-lead")))
+        .with_module(ModuleRef::new(seed_id("jm-pre-fx")))
+        .with_module(
+            ModuleRef::new(seed_id("jm-amp-module")).with_variant(seed_id("jm-amp-module-crunch")),
+        )
+        .with_module(ModuleRef::new(seed_id("jm-cab-module")))
+        .with_module(ModuleRef::new(seed_id("jm-eq-module")))
+        .with_module(
+            ModuleRef::new(seed_id("jm-post-fx")).with_variant(seed_id("jm-post-fx-ambient")),
+        );
+
+    let mut layer = Layer::new(
         seed_id("guitar-layer-archetype-jm"),
         "Archetype JM",
         EngineType::Guitar,
         default_variant,
-    )
+    );
+    layer.add_variant(lead_variant);
+    layer
 }
 
 fn vocal_layer_main() -> Layer {

@@ -22,7 +22,9 @@ use signal::rig::RigType;
 use signal::tagging::TagSet;
 use signal::{BlockType, SignalController, ALL_BLOCK_TYPES, ALL_MODULE_TYPES};
 
-use data_fetching::{build_param_lookup, fetch_col2, fetch_col3, resolve_scene_detail};
+use data_fetching::{
+    build_param_lookup, fetch_col2, fetch_col3, resolve_layer_detail, resolve_scene_detail,
+};
 use detail_panel::{
     collect_available_tags, filter_and_sort, find_detail, rig_type_display, DetailPanel,
 };
@@ -31,7 +33,37 @@ use toolbar::Toolbar;
 use types::{ColumnItem, DetailData, DetailParam, NavCategory, SortMode, RIG_TYPES};
 
 // Re-export public API types used by grid_conversion (needed by other views).
-pub use types::{EngineFlowData, ModuleChainData};
+pub use types::{EngineFlowData, LayerFlowData, ModuleChainData};
+pub use grid_conversion::{engines_to_grid_slots, RigGridPanel};
+pub use grid_conversion::ParamLookup as EngineParamLookup;
+pub use data_fetching::rig_type_to_engine_type;
+
+/// Public API: resolve a rig scene into engine flow data and parameter lookup
+/// for rendering in `RigGridPanel`.
+///
+/// Loads the rig, finds the matching scene, resolves engines + params.
+/// Returns `None` if the rig or scene is not found.
+pub async fn resolve_scene_engines(
+    controller: &SignalController,
+    rig_id: &str,
+    scene_id: &str,
+) -> Option<(Vec<EngineFlowData>, ParamLookup)> {
+    resolve_scene_detail(controller, rig_id, scene_id).await
+}
+
+/// Public API: resolve a layer variant into engine flow data and parameter lookup
+/// for rendering in `RigGridPanel`.
+///
+/// Loads the layer, resolves module chains for the given variant (or default),
+/// wraps them in a synthetic `EngineFlowData`.
+/// Returns `None` if the layer or variant is not found.
+pub async fn resolve_layer_engines(
+    controller: &SignalController,
+    layer_id: &str,
+    variant_id: Option<&str>,
+) -> Option<(Vec<EngineFlowData>, ParamLookup)> {
+    resolve_layer_detail(controller, layer_id, variant_id).await
+}
 
 // region: --- Public API
 
@@ -62,7 +94,7 @@ impl BrowseLevel {
 #[component]
 pub fn CollectionBrowser(controller: SignalController) -> Element {
     let mut nav = use_signal(|| NavCategory::Presets);
-    let mut rig_type = use_signal(|| RigType::Keys);
+    let mut rig_type = use_signal(|| RigType::Guitar);
 
     let mut col2_items = use_signal(Vec::<ColumnItem>::new);
     let mut col2_selected = use_signal(|| None::<usize>);
@@ -133,9 +165,13 @@ pub fn CollectionBrowser(controller: SignalController) -> Element {
     let current_nav = nav_memo();
     let current_rt = rig_type();
 
+    // Track which column has keyboard focus (2, 3, or 4).
+    let mut focus_col = use_signal(|| 2u8);
+
     // Pre-clone for rsx branches
     let ctrl_c2 = controller.clone();
     let ctrl_c3 = controller.clone();
+    let ctrl_kb = controller.clone();
 
     // Apply search + tag filter + sort to col2 items.
     let all_col2 = filter_and_sort(
@@ -162,12 +198,14 @@ pub fn CollectionBrowser(controller: SignalController) -> Element {
     let col2_header = match current_nav {
         NavCategory::Presets => "Presets",
         NavCategory::Engines => "Engines",
+        NavCategory::Layers => "Layers",
         NavCategory::Modules => "Module Types",
         NavCategory::Blocks => "Block Types",
     };
     let col3_header = match current_nav {
         NavCategory::Presets => "Scenes",
         NavCategory::Engines => "Layers",
+        NavCategory::Layers => "Variants",
         NavCategory::Modules => "Presets",
         NavCategory::Blocks => "Presets",
     };
@@ -184,7 +222,126 @@ pub fn CollectionBrowser(controller: SignalController) -> Element {
     let has_active_filters = !current_search.is_empty() || !current_filters.is_empty();
 
     rsx! {
-        div { class: "h-full w-full flex flex-col overflow-hidden",
+        div {
+            class: "h-full w-full flex flex-col overflow-hidden outline-none",
+            tabindex: "0",
+            onkeydown: move |evt: KeyboardEvent| {
+                let key = evt.key();
+                match key {
+                    Key::ArrowUp => {
+                        evt.prevent_default();
+                        match focus_col() {
+                            2 => {
+                                let idx = col2_selected().unwrap_or(0);
+                                if idx > 0 {
+                                    col2_selected.set(Some(idx - 1));
+                                }
+                            }
+                            3 => {
+                                let idx = col3_selected().unwrap_or(0);
+                                if idx > 0 {
+                                    col3_selected.set(Some(idx - 1));
+                                }
+                            }
+                            4 => {
+                                let idx = col4_selected().unwrap_or(0);
+                                if idx > 0 {
+                                    col4_selected.set(Some(idx - 1));
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    Key::ArrowDown => {
+                        evt.prevent_default();
+                        match focus_col() {
+                            2 => {
+                                let len = col2_items().len();
+                                let idx = col2_selected().map(|i| i + 1).unwrap_or(0);
+                                if idx < len {
+                                    col2_selected.set(Some(idx));
+                                }
+                            }
+                            3 => {
+                                let len = col3_items().len();
+                                let idx = col3_selected().map(|i| i + 1).unwrap_or(0);
+                                if idx < len {
+                                    col3_selected.set(Some(idx));
+                                }
+                            }
+                            4 => {
+                                let len = col4_items().len();
+                                let idx = col4_selected().map(|i| i + 1).unwrap_or(0);
+                                if idx < len {
+                                    col4_selected.set(Some(idx));
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    Key::ArrowRight => {
+                        evt.prevent_default();
+                        let fc = focus_col();
+                        if fc < 4 {
+                            focus_col.set(fc + 1);
+                        }
+                    }
+                    Key::ArrowLeft => {
+                        evt.prevent_default();
+                        let fc = focus_col();
+                        if fc > 2 {
+                            focus_col.set(fc - 1);
+                        }
+                    }
+                    Key::Enter => {
+                        // Trigger click on selected item in focused column
+                        match focus_col() {
+                            2 => {
+                                if let Some(idx) = col2_selected() {
+                                    let items = col2_items();
+                                    if let Some(item) = items.get(idx) {
+                                        let controller = ctrl_kb.clone();
+                                        let nav_val = nav();
+                                        let id = item.id.clone();
+                                        let tag = item.tag;
+                                        col2_current_id.set(id.clone());
+                                        col3_selected.set(None);
+                                        col4_items.set(Vec::new());
+                                        col4_selected.set(None);
+                                        block_presets_cache.set(Vec::new());
+                                        spawn(async move {
+                                            let (v, presets) = fetch_col3(&controller, nav_val, &id, tag).await;
+                                            let params = build_param_lookup(&controller, &v).await;
+                                            param_lookup.set(params);
+                                            col3_items.set(v);
+                                            block_presets_cache.set(presets);
+                                        });
+                                        focus_col.set(3);
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    Key::Escape => {
+                        // Go back: clear selection in focused column
+                        match focus_col() {
+                            4 => {
+                                col4_selected.set(None);
+                                focus_col.set(3);
+                            }
+                            3 => {
+                                col3_selected.set(None);
+                                col3_items.set(Vec::new());
+                                focus_col.set(2);
+                            }
+                            _ => {}
+                        }
+                    }
+                    _ => {}
+                }
+            },
+
             div { class: "h-[2px] w-full bg-gradient-to-r {accent} flex-shrink-0" }
 
             // ── Toolbar: search + sort + filter ──
@@ -239,7 +396,7 @@ pub fn CollectionBrowser(controller: SignalController) -> Element {
                 }
 
                 // ── Col 2: Items (auto-fetched) ──
-                div { class: "w-52 flex-shrink-0 border-r border-zinc-800 flex flex-col min-h-0 bg-zinc-950/50",
+                div { class: "w-64 flex-shrink-0 border-r border-zinc-800 flex flex-col min-h-0 bg-zinc-950/50",
                     div { class: "px-3 py-2 border-b border-zinc-800",
                         h3 { class: "text-[10px] font-semibold text-zinc-500 uppercase tracking-wider", "{col2_header}" }
                     }
@@ -324,7 +481,7 @@ pub fn CollectionBrowser(controller: SignalController) -> Element {
                 }
 
                 // ── Col 3: Children (on col2 click) ──
-                div { class: "w-52 flex-shrink-0 border-r border-zinc-800 flex flex-col min-h-0 bg-zinc-950/40",
+                div { class: "w-64 flex-shrink-0 border-r border-zinc-800 flex flex-col min-h-0 bg-zinc-950/40",
                     div { class: "px-3 py-2 border-b border-zinc-800",
                         h3 { class: "text-[10px] font-semibold text-zinc-500 uppercase tracking-wider",
                             {if col2_selected().is_some() { col3_header } else { "—" }}
@@ -427,7 +584,7 @@ pub fn CollectionBrowser(controller: SignalController) -> Element {
 
                 // ── Col 4: Snapshots (only for Blocks) ──
                 if has_col4 {
-                    div { class: "w-52 flex-shrink-0 border-r border-zinc-800 flex flex-col min-h-0 bg-zinc-950/30",
+                    div { class: "w-64 flex-shrink-0 border-r border-zinc-800 flex flex-col min-h-0 bg-zinc-950/30",
                         div { class: "px-3 py-2 border-b border-zinc-800",
                             h3 { class: "text-[10px] font-semibold text-zinc-500 uppercase tracking-wider",
                                 {if col3_selected().is_some() { "Snapshots" } else { "—" }}

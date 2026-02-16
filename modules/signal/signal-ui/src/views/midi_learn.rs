@@ -65,7 +65,7 @@ pub struct MidiLearnPanelProps {
 pub fn MidiLearnPanel(props: MidiLearnPanelProps) -> Element {
     let is_learning = props.learn_state == LearnState::Learning;
     let learn_btn_class = if is_learning {
-        "bg-red-600 text-white hover:bg-red-700 animate-pulse"
+        "bg-signal-danger text-white hover:bg-signal-danger/90 animate-pulse"
     } else {
         "bg-secondary text-secondary-foreground hover:bg-secondary/80"
     };
@@ -78,7 +78,7 @@ pub fn MidiLearnPanel(props: MidiLearnPanelProps) -> Element {
             div {
                 class: "flex items-center justify-between",
                 h3 {
-                    class: "text-sm font-semibold",
+                    class: "text-xs uppercase tracking-widest text-muted-foreground font-semibold",
                     "MIDI Learn"
                 }
                 button {
@@ -95,9 +95,9 @@ pub fn MidiLearnPanel(props: MidiLearnPanelProps) -> Element {
             // Learning indicator
             if is_learning {
                 div {
-                    class: "flex items-center gap-2 px-3 py-2 rounded bg-red-500/10 border border-red-500/30",
+                    class: "flex items-center gap-2 px-3 py-2 rounded bg-signal-danger/10 border border-signal-danger/30",
                     div {
-                        class: "w-2 h-2 rounded-full bg-red-500 animate-pulse",
+                        class: "w-2 h-2 rounded-full bg-signal-danger animate-pulse",
                     }
                     div {
                         class: "text-xs",
@@ -138,7 +138,7 @@ pub fn MidiLearnPanel(props: MidiLearnPanelProps) -> Element {
                                     class: "flex items-center gap-2 flex-1 min-w-0",
                                     // CC badge
                                     span {
-                                        class: "px-1.5 py-0.5 rounded text-[10px] font-mono bg-muted text-muted-foreground",
+                                        class: "px-1.5 py-0.5 rounded text-[10px] font-mono bg-signal-mod/20 text-signal-mod",
                                         "CC{mapping.cc_number}"
                                     }
                                     div {

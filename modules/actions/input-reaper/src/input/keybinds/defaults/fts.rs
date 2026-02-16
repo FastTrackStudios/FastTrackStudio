@@ -10,6 +10,15 @@ use crate::input::keybinds::{KeybindPreset, PresetBuilder};
 
 /// Create the FastTrackStudio preset using composable sections
 pub fn fastrackstudio_preset() -> KeybindPreset {
+    // Register which-key prefix trees for the FTS preset
+    use crate::input::keybinds::sections::which_key_fts::fts_which_key_trees;
+    use crate::input::keybinds::which_key;
+
+    which_key::clear_trees();
+    for (prefix, label, entries) in fts_which_key_trees() {
+        which_key::register_tree(&prefix, &label, entries);
+    }
+
     PresetBuilder::new(
         "fastrackstudio",
         "FastTrackStudio optimized keybindings with vim-style navigation",

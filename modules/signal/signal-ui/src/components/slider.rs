@@ -127,7 +127,7 @@ pub fn Slider(props: SliderProps) -> Element {
 
                 // Thumb
                 div {
-                    class: "block h-4 w-4 rounded-full border-2 border-primary bg-background ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+                    class: "block h-4 w-4 rounded-full border-2 border-primary bg-background ring-offset-background transition-colors hover:scale-110 transition-transform focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
                     style: thumb_style,
                 }
             }

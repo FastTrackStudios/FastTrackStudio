@@ -37,7 +37,7 @@ pub fn WaveformDisplay(props: WaveformDisplayProps) -> Element {
 
     rsx! {
         div {
-            class: format!("relative overflow-hidden rounded bg-muted/30 {}", props.class),
+            class: format!("relative overflow-hidden rounded bg-muted/30 shadow-[inset_0_1px_4px_rgba(0,0,0,0.2)] {}", props.class),
             style: "width: {w}px; height: {h}px;",
 
             // Center line

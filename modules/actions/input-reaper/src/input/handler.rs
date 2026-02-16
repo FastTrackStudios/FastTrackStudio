@@ -392,25 +392,6 @@ impl TranslateAccel for InputHandler {
             }
         }
 
-        // Check for 'a' key to log mouse cursor context (BR_GetMouseCursorContext equivalent)
-        if key_str == "a" || key_str == "A" {
-            let reaper = Reaper::get();
-            let medium_reaper = reaper.medium_reaper();
-            let (window, segment, details) =
-                crate::input::mouse_context::get_mouse_cursor_context(&medium_reaper);
-
-            // Also get the full context for display
-            let (context, context_name, window_title) = Self::determine_context();
-
-            reaper.show_console_msg(format!(
-                "FTS-Input: Mouse Cursor Context:\n  Window: '{}'\n  Segment: '{}'\n  Details: '{}'\n  Context: {:?} ({})\n  Window Title: '{}'\n",
-                window, segment, details, context, context_name, window_title
-            ));
-
-            // Eat the 'a' key so REAPER doesn't process it
-            return TranslateAccelResult::Eat;
-        }
-
         // Check for 'm' key to log all mouse modifiers
         if key_str == "m" || key_str == "M" {
             let reaper = Reaper::get();
@@ -436,6 +417,74 @@ impl TranslateAccel for InputHandler {
                 behavior.contains(AcceleratorBehavior::Shift),
                 behavior.contains(AcceleratorBehavior::Alt),
             ));
+        }
+
+        // === Cmd+W: Toggle which-key cheat sheet ===
+        if key_str == "<M-w>" {
+            if crate::input::which_key_overlay::is_visible() {
+                crate::input::which_key_overlay::hide();
+            } else {
+                crate::input::which_key_overlay::show_all_prefixes();
+            }
+            return TranslateAccelResult::Eat;
+        }
+
+        // Esc dismisses the cheat sheet overlay if no sequence is active
+        if key_str == "esc" && crate::input::which_key_overlay::is_visible() {
+            crate::input::which_key_overlay::hide();
+            return TranslateAccelResult::Eat;
+        }
+
+        // === Which-Key Sequence Resolution ===
+        // Must run before single-key resolution so prefix keys (v, f, a) are
+        // intercepted before they map to a regular REAPER action.
+        {
+            use crate::input::keybinds::which_key::{self, WhichKeyResult};
+            match which_key::feed_key(&key_str) {
+                WhichKeyResult::FullMatch {
+                    action,
+                    label,
+                    sequence,
+                } => {
+                    crate::input::which_key_overlay::hide();
+                    debug!(sequence = %sequence, label = %label, action = %action, "Which-Key execute");
+                    Self::execute_action(&action);
+                    return TranslateAccelResult::Eat;
+                }
+                WhichKeyResult::PartialMatch {
+                    continuations,
+                    sequence,
+                } => {
+                    crate::input::which_key_overlay::show(&sequence, &continuations);
+                    let opts: Vec<String> = continuations
+                        .iter()
+                        .map(|(k, l, is_branch)| {
+                            if *is_branch {
+                                format!("[{}] +{}", k, l)
+                            } else {
+                                format!("[{}] {}", k, l)
+                            }
+                        })
+                        .collect();
+                    Reaper::get().show_console_msg(format!(
+                        "[Which-Key] {}  │  {}\n",
+                        sequence,
+                        opts.join("  ")
+                    ));
+                    return TranslateAccelResult::Eat;
+                }
+                WhichKeyResult::Cancelled => {
+                    crate::input::which_key_overlay::hide();
+                    return TranslateAccelResult::Eat;
+                }
+                WhichKeyResult::Broken { sequence: _ } => {
+                    crate::input::which_key_overlay::hide();
+                    // Key broke the sequence — fall through to normal resolution
+                }
+                WhichKeyResult::NotAPrefix => {
+                    // Not a which-key prefix — continue to normal resolution
+                }
+            }
         }
 
         // Try to resolve the key to an action via the keybind system
@@ -597,14 +646,6 @@ impl InputHandler {
     /// Set debug logging mode
     pub fn set_debug_logging(enabled: bool) {
         DEBUG_LOGGING.store(enabled, std::sync::atomic::Ordering::Relaxed);
-        let reaper = Reaper::get();
-        if enabled {
-            reaper.show_console_msg(
-                "FTS-Input: Debug logging ENABLED - all key events will be logged\n",
-            );
-        } else {
-            reaper.show_console_msg("FTS-Input: Debug logging DISABLED\n");
-        }
         info!(
             "FTS-Input debug logging {}",
             if enabled { "enabled" } else { "disabled" }

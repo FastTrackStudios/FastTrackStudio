@@ -4,6 +4,7 @@
 //! presets with realistic parameter values modeled after real gear.
 
 pub mod amp;
+pub mod archetype_jm;
 pub mod boost;
 pub mod chorus;
 pub mod compressor;
@@ -87,12 +88,15 @@ pub fn default_block_collections() -> Vec<Preset> {
     out.extend(rotary::presets());
     out.extend(saturator::presets());
     out.extend(tuner::presets());
+    out.extend(archetype_jm::block_presets());
     out
 }
 
 /// All default module collections.
 pub fn default_module_collections() -> Vec<ModulePreset> {
-    module::presets()
+    let mut out = module::presets();
+    out.extend(archetype_jm::module_presets());
+    out
 }
 
 /// All default layer collections.

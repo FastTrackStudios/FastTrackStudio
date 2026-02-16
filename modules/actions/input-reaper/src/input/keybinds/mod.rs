@@ -21,6 +21,7 @@ pub mod defaults;
 mod parser;
 mod resolver;
 pub mod sections;
+pub mod which_key;
 
 pub use config::KeybindConfig;
 pub use parser::{KeySequence, Modifiers, ParsedKey};

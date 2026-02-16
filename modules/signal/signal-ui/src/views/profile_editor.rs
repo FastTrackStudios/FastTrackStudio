@@ -65,7 +65,7 @@ pub fn ProfileList(props: ProfileListProps) -> Element {
             div {
                 class: "flex items-center justify-between px-2 py-1",
                 h3 {
-                    class: "text-sm font-semibold",
+                    class: "text-xs uppercase tracking-widest text-muted-foreground font-semibold",
                     "Profiles"
                 }
                 button {
@@ -168,7 +168,7 @@ pub fn PatchEditor(props: PatchEditorProps) -> Element {
 
             // Header
             h3 {
-                class: "text-sm font-semibold",
+                class: "text-xs uppercase tracking-widest text-muted-foreground font-semibold",
                 "{props.profile_name}"
             }
 

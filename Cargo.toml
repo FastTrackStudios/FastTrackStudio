@@ -107,6 +107,7 @@ color-palette = { path = "crates/color/color-palette" }
 
 # Dynamic template crates
 dynamic-template-proto = { path = "cells/dynamic-template/dynamic-template-proto" }
+dynamic-template = { path = "cells/dynamic-template/dynamic-template" }
 
 # Keyflow/Engraver crates
 keyflow = { path = "cells/keyflow/keyflow" }
@@ -161,6 +162,7 @@ reaper-high = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "ma
 reaper-macros = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master" }
 reaper-common-types = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master", features = ["palette"] }
 swell-ui = { path = "libs/swell-ui" }
+reaper-embed = { path = "libs/reaper-embed" }
 fragile = "2.0.1"
 crossbeam-channel = "0.5"
 scopeguard = "1.1.0"
@@ -197,6 +199,9 @@ wgpu_context = { git = "https://github.com/DioxusLabs/anyrender.git", branch = "
 taffy = { version = "0.7", default-features = false, features = ["std", "flexbox", "taffy_tree"] }
 
 # Linebender graphics crates (matching anyrender's versions)
+vello = { version = "0.7", features = ["wgpu"] }
 peniko = "0.6"
 kurbo = "0.13"
 color = "0.3"
+wgpu = "27"
+pollster = "0.4"

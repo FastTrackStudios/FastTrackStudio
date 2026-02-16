@@ -19,6 +19,9 @@ use super::types::{
     ColumnItem, DetailData, EngineFlowData, LayerFlowData, ModuleChainData, NavCategory,
 };
 
+/// Sentinel tag value to distinguish layer presets from rig presets in the Presets nav.
+const LAYER_PRESET_TAG: usize = usize::MAX;
+
 // region: --- Column fetching
 
 pub(super) async fn fetch_col2(
@@ -28,24 +31,60 @@ pub(super) async fn fetch_col2(
 ) -> Vec<ColumnItem> {
     match nav {
         NavCategory::Presets => {
+            let mut items: Vec<ColumnItem> = Vec::new();
+
+            // Rig presets (tag: None)
             let rigs = controller.list_rig_collections().await;
-            rigs.into_iter()
-                .filter(|r| r.rig_type.map_or(false, |rt| rt == rig_type))
-                .map(|r| {
-                    let meta = r.metadata().clone();
-                    let tags = TagSet::from_tags(&meta.tags);
-                    ColumnItem {
-                        id: r.id.to_string(),
-                        name: r.name.clone(),
-                        subtitle: None,
-                        badge: Some(format!("{}", r.variants.len())),
-                        metadata: Some(meta),
-                        structured_tags: tags,
-                        detail: DetailData::default(),
-                        tag: None,
-                    }
-                })
-                .collect()
+            items.extend(
+                rigs.into_iter()
+                    .filter(|r| r.rig_type.map_or(false, |rt| rt == rig_type))
+                    .map(|r| {
+                        let meta = r.metadata().clone();
+                        let tags = TagSet::from_tags(&meta.tags);
+                        ColumnItem {
+                            id: r.id.to_string(),
+                            name: r.name.clone(),
+                            subtitle: Some("Rig".to_string()),
+                            badge: Some(format!("{}", r.variants.len())),
+                            metadata: Some(meta),
+                            structured_tags: tags,
+                            detail: DetailData::default(),
+                            tag: None,
+                        }
+                    }),
+            );
+
+            // Layer presets (tag: Some(LAYER_PRESET_TAG))
+            let et = rig_type_to_engine_type(rig_type);
+            let layers = controller.list_layers().await;
+            let all_module_presets = controller.list_module_collections().await;
+            let block_preset_lookup = build_block_preset_lookup(controller).await;
+            for layer in layers.into_iter().filter(|l| l.engine_type == et) {
+                let module_chains = resolve_layer_module_chains(
+                    controller,
+                    &layer,
+                    &all_module_presets,
+                    &block_preset_lookup,
+                )
+                .await;
+                let meta = layer.metadata().clone();
+                let tags = TagSet::from_tags(&meta.tags);
+                items.push(ColumnItem {
+                    id: layer.id.to_string(),
+                    name: layer.name.clone(),
+                    subtitle: Some("Layer".to_string()),
+                    badge: Some(format!("{}", layer.variants.len())),
+                    metadata: Some(meta),
+                    structured_tags: tags,
+                    detail: DetailData {
+                        module_chains,
+                        ..Default::default()
+                    },
+                    tag: Some(LAYER_PRESET_TAG),
+                });
+            }
+
+            items
         }
         NavCategory::Engines => {
             let et = rig_type_to_engine_type(rig_type);
@@ -68,6 +107,38 @@ pub(super) async fn fetch_col2(
                     }
                 })
                 .collect()
+        }
+        NavCategory::Layers => {
+            let et = rig_type_to_engine_type(rig_type);
+            let layers = controller.list_layers().await;
+            let all_module_presets = controller.list_module_collections().await;
+            let block_preset_lookup = build_block_preset_lookup(controller).await;
+            let mut items = Vec::new();
+            for layer in layers.into_iter().filter(|l| l.engine_type == et) {
+                let module_chains = resolve_layer_module_chains(
+                    controller,
+                    &layer,
+                    &all_module_presets,
+                    &block_preset_lookup,
+                )
+                .await;
+                let meta = layer.metadata().clone();
+                let tags = TagSet::from_tags(&meta.tags);
+                items.push(ColumnItem {
+                    id: layer.id.to_string(),
+                    name: layer.name.clone(),
+                    subtitle: Some(format!("{} variant(s)", layer.variants.len())),
+                    badge: Some(format!("{}", layer.variants.len())),
+                    metadata: Some(meta),
+                    structured_tags: tags,
+                    detail: DetailData {
+                        module_chains,
+                        ..Default::default()
+                    },
+                    tag: None,
+                });
+            }
+            items
         }
         NavCategory::Modules => {
             // Show module types as col2 items (like Blocks shows block types).
@@ -129,43 +200,83 @@ pub(super) async fn fetch_col3(
 ) -> (Vec<ColumnItem>, Vec<Preset>) {
     match nav {
         NavCategory::Presets => {
-            let items = if let Some(rig) = controller.load_rig_collection(col2_id).await {
-                let all_module_presets = controller.list_module_collections().await;
-                let block_preset_lookup = build_block_preset_lookup(controller).await;
-                let mut out = Vec::new();
-                for (idx, v) in rig.variants.iter().enumerate() {
-                    // Lazy scene resolution: only resolve the first scene eagerly.
-                    // Remaining scenes are resolved on click via resolve_scene_detail.
-                    let engines = if idx == 0 {
-                        resolve_rig_scene_engines(
+            let is_layer = col2_tag == Some(LAYER_PRESET_TAG);
+            let items = if is_layer {
+                // Layer preset — show variants with module chains
+                if let Some(layer) = controller.load_layer(col2_id).await {
+                    let all_module_presets = controller.list_module_collections().await;
+                    let block_preset_lookup = build_block_preset_lookup(controller).await;
+                    let mut out = Vec::new();
+                    for v in &layer.variants {
+                        let module_chains = resolve_variant_module_chains(
                             controller,
                             v,
                             &all_module_presets,
                             &block_preset_lookup,
                         )
-                        .await
-                    } else {
-                        Vec::new()
-                    };
-                    let meta = v.metadata().clone();
-                    let tags = TagSet::from_tags(&meta.tags);
-                    out.push(ColumnItem {
-                        id: v.id.to_string(),
-                        name: v.name.clone(),
-                        subtitle: Some(format!("{} engine(s)", v.engine_selections.len())),
-                        badge: None,
-                        metadata: Some(meta),
-                        structured_tags: tags,
-                        detail: DetailData {
-                            engines,
-                            ..Default::default()
-                        },
-                        tag: None,
-                    });
+                        .await;
+                        let ref_count =
+                            v.module_refs.len() + v.block_refs.len() + v.plugin_refs.len();
+                        let meta = v.metadata().clone();
+                        let tags = TagSet::from_tags(&meta.tags);
+                        out.push(ColumnItem {
+                            id: v.id.to_string(),
+                            name: v.name.clone(),
+                            subtitle: Some(format!("{} module(s)", ref_count)),
+                            badge: None,
+                            metadata: Some(meta),
+                            structured_tags: tags,
+                            detail: DetailData {
+                                module_chains,
+                                ..Default::default()
+                            },
+                            tag: None,
+                        });
+                    }
+                    out
+                } else {
+                    Vec::new()
                 }
-                out
             } else {
-                Vec::new()
+                // Rig preset — show scenes with engines
+                if let Some(rig) = controller.load_rig_collection(col2_id).await {
+                    let all_module_presets = controller.list_module_collections().await;
+                    let block_preset_lookup = build_block_preset_lookup(controller).await;
+                    let mut out = Vec::new();
+                    for (idx, v) in rig.variants.iter().enumerate() {
+                        // Lazy scene resolution: only resolve the first scene eagerly.
+                        // Remaining scenes are resolved on click via resolve_scene_detail.
+                        let engines = if idx == 0 {
+                            resolve_rig_scene_engines(
+                                controller,
+                                v,
+                                &all_module_presets,
+                                &block_preset_lookup,
+                            )
+                            .await
+                        } else {
+                            Vec::new()
+                        };
+                        let meta = v.metadata().clone();
+                        let tags = TagSet::from_tags(&meta.tags);
+                        out.push(ColumnItem {
+                            id: v.id.to_string(),
+                            name: v.name.clone(),
+                            subtitle: Some(format!("{} engine(s)", v.engine_selections.len())),
+                            badge: None,
+                            metadata: Some(meta),
+                            structured_tags: tags,
+                            detail: DetailData {
+                                engines,
+                                ..Default::default()
+                            },
+                            tag: None,
+                        });
+                    }
+                    out
+                } else {
+                    Vec::new()
+                }
             };
             (items, Vec::new())
         }
@@ -201,6 +312,42 @@ pub(super) async fn fetch_col3(
                     }
                 }
                 items
+            } else {
+                Vec::new()
+            };
+            (items, Vec::new())
+        }
+        NavCategory::Layers => {
+            let items = if let Some(layer) = controller.load_layer(col2_id).await {
+                let all_module_presets = controller.list_module_collections().await;
+                let block_preset_lookup = build_block_preset_lookup(controller).await;
+                let mut out = Vec::new();
+                for v in &layer.variants {
+                    let module_chains = resolve_variant_module_chains(
+                        controller,
+                        v,
+                        &all_module_presets,
+                        &block_preset_lookup,
+                    )
+                    .await;
+                    let ref_count = v.module_refs.len() + v.block_refs.len() + v.plugin_refs.len();
+                    let meta = v.metadata().clone();
+                    let tags = TagSet::from_tags(&meta.tags);
+                    out.push(ColumnItem {
+                        id: v.id.to_string(),
+                        name: v.name.clone(),
+                        subtitle: Some(format!("{} module(s)", ref_count)),
+                        badge: None,
+                        metadata: Some(meta),
+                        structured_tags: tags,
+                        detail: DetailData {
+                            module_chains,
+                            ..Default::default()
+                        },
+                        tag: None,
+                    });
+                }
+                out
             } else {
                 Vec::new()
             };
@@ -271,10 +418,7 @@ pub(super) async fn fetch_col3(
 
 /// Resolve a layer's default variant refs into `ModuleChainData` for grid rendering.
 ///
-/// Handles all three ref types:
-/// - `module_refs` → full module chains from module presets
-/// - `block_refs` → single-block synthetic chains (one per block)
-/// - `layer_refs` → recursively resolved nested layers
+/// Delegates to [`resolve_variant_module_chains`] with the layer's default variant.
 async fn resolve_layer_module_chains(
     controller: &SignalController,
     layer: &Layer,
@@ -285,7 +429,23 @@ async fn resolve_layer_module_chains(
         Some(v) => v,
         None => return Vec::new(),
     };
+    resolve_variant_module_chains(controller, variant, all_module_presets, block_preset_lookup)
+        .await
+}
 
+/// Resolve a specific layer snapshot's refs into `ModuleChainData` for grid rendering.
+///
+/// Handles all four ref types:
+/// - `layer_refs` → recursively resolved nested layers
+/// - `module_refs` → full module chains from module presets
+/// - `block_refs` → single-block synthetic chains (one per block)
+/// - `plugin_refs` → virtual module chains from plugin block defs
+async fn resolve_variant_module_chains(
+    controller: &SignalController,
+    variant: &signal::layer::LayerSnapshot,
+    all_module_presets: &[ModulePreset],
+    block_preset_lookup: &HashMap<String, (BlockType, String)>,
+) -> Vec<ModuleChainData> {
     let mut out = Vec::new();
 
     // 1) Resolve layer_refs (recursive — nested layers)
@@ -498,6 +658,59 @@ pub(super) async fn resolve_scene_detail(
     Some((engines, params))
 }
 
+/// On-demand resolution for a layer variant.
+///
+/// Loads the layer, finds the matching variant (or default), resolves its
+/// module chains, wraps them in a synthetic `EngineFlowData`, and builds
+/// a parameter lookup — making the result compatible with `engines_to_grid_slots`.
+pub(super) async fn resolve_layer_detail(
+    controller: &SignalController,
+    layer_id: &str,
+    variant_id: Option<&str>,
+) -> Option<(Vec<EngineFlowData>, ParamLookup)> {
+    let layer = controller.load_layer(layer_id).await?;
+    let all_module_presets = controller.list_module_collections().await;
+    let block_preset_lookup = build_block_preset_lookup(controller).await;
+
+    // Pick the requested variant, falling back to default
+    let variant = variant_id
+        .and_then(|vid| layer.variants.iter().find(|v| v.id.to_string() == vid))
+        .or_else(|| layer.default_variant())?;
+
+    let module_chains =
+        resolve_variant_module_chains(controller, variant, &all_module_presets, &block_preset_lookup)
+            .await;
+
+    // Wrap in a synthetic EngineFlowData so it's grid-compatible
+    let engine = EngineFlowData {
+        name: layer.name.clone(),
+        layers: vec![LayerFlowData {
+            name: variant.name.clone(),
+            module_chains,
+        }],
+    };
+    let engines = vec![engine];
+
+    // Build param lookup
+    let detail = DetailData {
+        engines: engines.clone(),
+        ..Default::default()
+    };
+    let temp_item = ColumnItem {
+        id: layer_id.to_string(),
+        name: String::new(),
+        subtitle: None,
+        badge: None,
+        metadata: None,
+        structured_tags: TagSet::default(),
+        detail,
+        tag: None,
+    };
+    let params = build_param_lookup(controller, &[temp_item]).await;
+
+    Some((engines, params))
+}
+
 // endregion: --- Detail resolution helpers
 
 // region: --- Parameter resolution
@@ -613,7 +826,7 @@ async fn resolve_node_params(
 
 // region: --- Utility
 
-pub(super) fn rig_type_to_engine_type(rig_type: RigType) -> signal::EngineType {
+pub fn rig_type_to_engine_type(rig_type: RigType) -> signal::EngineType {
     match rig_type {
         RigType::Guitar => signal::EngineType::Guitar,
         RigType::Bass => signal::EngineType::Bass,
@@ -624,3 +837,90 @@ pub(super) fn rig_type_to_engine_type(rig_type: RigType) -> signal::EngineType {
 }
 
 // endregion: --- Utility
+
+// region: --- Tests
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use signal::rig::RigType;
+
+    /// Reproduce the exact data pipeline the Manage tab uses:
+    ///   1. bootstrap controller
+    ///   2. list rigs, filter by Guitar
+    ///   3. pick first preset, pick first scene
+    ///   4. call resolve_scene_detail (same as manage's resolve_scene_engines)
+    ///   5. call engines_to_grid_slots
+    ///
+    /// This test will tell us whether the data pipeline produces grid slots.
+    #[tokio::test]
+    async fn manage_tab_guitar_pipeline_produces_grid_slots() {
+        let controller = signal::bootstrap_in_memory_controller_async()
+            .await
+            .expect("bootstrap failed");
+
+        // Step 1: list rigs filtered by Guitar (same as manage tab effect)
+        let rigs = controller.list_rig_collections().await;
+        let guitar_rigs: Vec<_> = rigs
+            .into_iter()
+            .filter(|r| r.rig_type.map_or(false, |t| t == RigType::Guitar))
+            .collect();
+
+        assert!(!guitar_rigs.is_empty(), "expected at least one Guitar rig");
+        eprintln!(
+            "Guitar rigs: {:?}",
+            guitar_rigs.iter().map(|r| (&r.name, r.variants.len())).collect::<Vec<_>>()
+        );
+
+        let first_rig = &guitar_rigs[0];
+        assert_eq!(first_rig.name, "MegaRig");
+        assert_eq!(first_rig.variants.len(), 2, "Guitar MegaRig should have 2 scenes");
+
+        let rig_id = first_rig.id.to_string();
+        let first_scene = &first_rig.variants[0];
+        let scene_id = first_scene.id.to_string();
+        eprintln!("rig_id={} scene_id={} scene_name={}", rig_id, scene_id, first_scene.name);
+
+        // Step 2: resolve scene engines (same path as manage tab)
+        let result = resolve_scene_detail(&controller, &rig_id, &scene_id).await;
+        assert!(result.is_some(), "resolve_scene_detail returned None");
+
+        let (engines, params) = result.unwrap();
+        eprintln!("engines count: {}", engines.len());
+        for (i, engine) in engines.iter().enumerate() {
+            eprintln!("  engine[{}] name={} layers={}", i, engine.name, engine.layers.len());
+            for (j, layer) in engine.layers.iter().enumerate() {
+                eprintln!(
+                    "    layer[{}] name={} module_chains={}",
+                    j, layer.name, layer.module_chains.len()
+                );
+                for (k, mc) in layer.module_chains.iter().enumerate() {
+                    eprintln!(
+                        "      chain[{}] name={} nodes={}",
+                        k, mc.name, mc.chain.nodes().len()
+                    );
+                }
+            }
+        }
+        eprintln!("params count: {}", params.len());
+
+        // Assertions
+        assert!(!engines.is_empty(), "expected at least one engine");
+        assert!(
+            engines.iter().all(|e| !e.layers.is_empty()),
+            "every engine should have at least one layer"
+        );
+        assert!(
+            engines.iter().flat_map(|e| &e.layers).any(|l| !l.module_chains.is_empty()),
+            "at least one layer should have module chains"
+        );
+
+        // Step 3: convert to grid slots (same as manage tab RSX)
+        let grid_slots = super::super::grid_conversion::engines_to_grid_slots(&engines, &params);
+        eprintln!("grid_slots count: {}", grid_slots.len());
+        assert!(
+            !grid_slots.is_empty(),
+            "engines_to_grid_slots should produce non-empty grid slots"
+        );
+    }
+}

@@ -3,15 +3,18 @@
 use actions_proto::{ActionId, ActionResult};
 use daw_proto::markers_regions::fts_markers_regions_actions;
 use daw_proto::transport::fts_transport_actions;
+use dynamic_template_proto::actions::dynamic_template_actions;
+use dynamic_template_proto::visibility_manager::actions::visibility_manager_actions;
 use input_reaper::InputProfile;
 use reaper_high::Reaper;
 use reaper_low::{raw, Swell};
 use reaper_medium::{
     CommandId, PositionInSeconds, ProjectContext::CurrentProject, SetEditCurPosOptions,
 };
+use std::collections::{HashMap, HashSet};
 use std::ffi::CString;
 use std::sync::{Arc, Mutex, OnceLock};
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 actions_proto::define_actions! {
     pub reaper_extension_actions {
@@ -318,8 +321,9 @@ impl fts_markers_regions_actions::LocalActionBinder for ReaperExtensionMarkersRe
 }
 
 fn handle_log_input() -> ActionResult {
-    input_reaper::log_state_to_console();
-    ActionResult::success_with_message("Logged input runtime state")
+    let now_enabled = input_reaper::toggle_debug_logging();
+    refresh_toolbar("FTS_INPUT_LOG_INPUT_RUNTIME_STATE");
+    ActionResult::success_with_message(format!("Input debug logging enabled={}", now_enabled))
 }
 
 fn handle_toggle_input() -> ActionResult {
@@ -536,6 +540,456 @@ fn handle_workflow_deactivate() -> ActionResult {
     })
 }
 
+// ============================================================================
+// Dynamic Template: Sorting Actions
+// ============================================================================
+
+/// Item info for REAPER media items (pointer, name, original track)
+struct DtItemInfo {
+    media_item: *mut raw::MediaItem,
+    name: String,
+    original_track: *mut raw::MediaTrack,
+}
+
+/// Get info for all selected items in the current project
+fn get_selected_item_info() -> Vec<DtItemInfo> {
+    let low = Reaper::get().medium_reaper().low();
+    let mut items = Vec::new();
+    unsafe {
+        let count = low.CountSelectedMediaItems(std::ptr::null_mut());
+        for i in 0..count {
+            let item = low.GetSelectedMediaItem(std::ptr::null_mut(), i);
+            if item.is_null() {
+                continue;
+            }
+            let original_track = low.GetMediaItem_Track(item);
+            let take = low.GetActiveTake(item);
+            let name = if take.is_null() {
+                format!("Item {}", i)
+            } else {
+                let ptr = low.GetTakeName(take);
+                if ptr.is_null() {
+                    format!("Item {}", i)
+                } else {
+                    std::ffi::CStr::from_ptr(ptr).to_string_lossy().into_owned()
+                }
+            };
+            items.push(DtItemInfo {
+                media_item: item,
+                name,
+                original_track,
+            });
+        }
+    }
+    items
+}
+
+/// Get info for ALL items in the current project
+fn get_all_item_info() -> Vec<DtItemInfo> {
+    let low = Reaper::get().medium_reaper().low();
+    let mut items = Vec::new();
+    unsafe {
+        let count = low.CountMediaItems(std::ptr::null_mut());
+        for i in 0..count {
+            let item = low.GetMediaItem(std::ptr::null_mut(), i);
+            if item.is_null() {
+                continue;
+            }
+            let original_track = low.GetMediaItem_Track(item);
+            let take = low.GetActiveTake(item);
+            let name = if take.is_null() {
+                format!("Item {}", i)
+            } else {
+                let ptr = low.GetTakeName(take);
+                if ptr.is_null() {
+                    format!("Item {}", i)
+                } else {
+                    std::ffi::CStr::from_ptr(ptr).to_string_lossy().into_owned()
+                }
+            };
+            items.push(DtItemInfo {
+                media_item: item,
+                name,
+                original_track,
+            });
+        }
+    }
+    items
+}
+
+/// Delete empty tracks from a set of track pointers
+fn delete_empty_tracks(tracks: &HashSet<*mut raw::MediaTrack>) {
+    let reaper = Reaper::get();
+    let low = reaper.medium_reaper().low();
+    let mut deleted = 0;
+    unsafe {
+        for &track in tracks {
+            if track.is_null() {
+                continue;
+            }
+            if low.CountTrackMediaItems(track) == 0 {
+                low.DeleteTrack(track);
+                deleted += 1;
+            }
+        }
+    }
+    if deleted > 0 {
+        reaper.show_console_msg(format!("Deleted {} empty original track(s)\n", deleted));
+    }
+}
+
+/// Core sorting logic: takes items, organizes via dynamic-template, creates REAPER tracks
+fn sort_items_core(items: Vec<DtItemInfo>, undo_label: &str) -> ActionResult {
+    use daw_proto::FolderDepthChange;
+    use dynamic_template::{default_config, OrganizeIntoTracks};
+
+    let reaper = Reaper::get();
+    let low = reaper.medium_reaper().low();
+
+    if items.is_empty() {
+        reaper.show_console_msg("No items found to sort.\n");
+        return ActionResult::failure("No items to sort");
+    }
+
+    reaper.show_console_msg(format!("Found {} item(s) to sort\n", items.len()));
+
+    // Collect original tracks so we can delete empties after moving items
+    let original_tracks: HashSet<*mut raw::MediaTrack> = items
+        .iter()
+        .map(|i| i.original_track)
+        .filter(|t| !t.is_null())
+        .collect();
+
+    let item_names: Vec<String> = items.iter().map(|i| i.name.clone()).collect();
+
+    let config = default_config();
+    let hierarchy = match item_names.organize_into_tracks(&config, None) {
+        Ok(h) => h,
+        Err(e) => {
+            let msg = format!("Error organizing items: {}\n", e);
+            reaper.show_console_msg(msg.as_str());
+            return ActionResult::failure(msg);
+        }
+    };
+
+    // Build name→MediaItem lookup (multiple items can share a name)
+    let mut item_map: HashMap<&str, Vec<*mut raw::MediaItem>> = HashMap::new();
+    for info in &items {
+        item_map
+            .entry(info.name.as_str())
+            .or_default()
+            .push(info.media_item);
+    }
+
+    unsafe {
+        let undo_cstr = CString::new(undo_label).unwrap_or_default();
+        low.Undo_BeginBlock();
+
+        let mut track_index = low.CountTracks(std::ptr::null_mut());
+
+        for track_node in &hierarchy.tracks {
+            low.InsertTrackAtIndex(track_index, true);
+            let reaper_track = low.GetTrack(std::ptr::null_mut(), track_index);
+            if reaper_track.is_null() {
+                track_index += 1;
+                continue;
+            }
+
+            // Set track name
+            let name_cstr = CString::new(track_node.name.as_str()).unwrap_or_default();
+            let param_name = CString::new("P_NAME").unwrap();
+            low.GetSetMediaTrackInfo_String(
+                reaper_track,
+                param_name.as_ptr(),
+                name_cstr.as_ptr() as *mut _,
+                true,
+            );
+
+            // Set folder depth
+            let param_folder = CString::new("I_FOLDERDEPTH").unwrap();
+            let folder_value = track_node.folder_depth_change.to_raw_value() as f64;
+            low.SetMediaTrackInfo_Value(reaper_track, param_folder.as_ptr(), folder_value);
+
+            // Move matching items to this track
+            for item_name in &track_node.items {
+                if let Some(media_items) = item_map.get(item_name.as_str()) {
+                    for &media_item in media_items {
+                        low.MoveMediaItemToTrack(media_item, reaper_track);
+                    }
+                }
+            }
+
+            track_index += 1;
+        }
+
+        delete_empty_tracks(&original_tracks);
+        low.Undo_EndBlock(undo_cstr.as_ptr(), 0);
+    }
+
+    let msg = format!(
+        "Sorted {} items into {} tracks",
+        items.len(),
+        hierarchy.tracks.len()
+    );
+    reaper.show_console_msg(format!("{}\n", msg));
+    ActionResult::success_with_message(msg)
+}
+
+fn handle_dt_sort_selected() -> ActionResult {
+    let items = get_selected_item_info();
+    if items.is_empty() {
+        Reaper::get().show_console_msg("No items selected.\n");
+        return ActionResult::failure("No items selected");
+    }
+    sort_items_core(items, "Sort selected items into template")
+}
+
+fn handle_dt_sort_all() -> ActionResult {
+    let items = get_all_item_info();
+    if items.is_empty() {
+        Reaper::get().show_console_msg("No items in project.\n");
+        return ActionResult::failure("No items in project");
+    }
+    sort_items_core(items, "Sort all items into template")
+}
+
+fn handle_dt_import_and_sort() -> ActionResult {
+    let reaper = Reaper::get();
+    let low = reaper.medium_reaper().low();
+
+    unsafe {
+        let mut file_buf = vec![0u8; 4096];
+        let title = CString::new("Select audio files to import and sort").unwrap();
+
+        let result = low.GetUserFileNameForRead(
+            file_buf.as_mut_ptr() as *mut i8,
+            title.as_ptr(),
+            std::ptr::null(),
+        );
+
+        if !result {
+            return ActionResult::success_with_message("Import cancelled");
+        }
+
+        let file_path = std::ffi::CStr::from_ptr(file_buf.as_ptr() as *const i8)
+            .to_string_lossy()
+            .into_owned();
+
+        if file_path.is_empty() {
+            return ActionResult::failure("No file selected");
+        }
+
+        reaper.show_console_msg(format!("Importing: {}\n", file_path));
+
+        let undo_label = CString::new("Import and sort files into template").unwrap();
+        low.Undo_BeginBlock();
+
+        let file_cstr = CString::new(file_path).unwrap_or_default();
+        low.InsertMedia(file_cstr.as_ptr(), 1);
+
+        let items = get_selected_item_info();
+        if items.is_empty() {
+            low.Undo_EndBlock(undo_label.as_ptr(), 0);
+            return ActionResult::failure("No items were imported");
+        }
+
+        reaper.show_console_msg(format!("Imported {} item(s), sorting...\n", items.len()));
+
+        // Collect original tracks before sorting
+        let original_tracks: HashSet<*mut raw::MediaTrack> = items
+            .iter()
+            .map(|i| i.original_track)
+            .filter(|t| !t.is_null())
+            .collect();
+
+        let item_names: Vec<String> = items.iter().map(|i| i.name.clone()).collect();
+
+        let config = dynamic_template::default_config();
+        match dynamic_template::OrganizeIntoTracks::organize_into_tracks(item_names, &config, None)
+        {
+            Ok(hierarchy) => {
+                let mut item_map: HashMap<&str, Vec<*mut raw::MediaItem>> = HashMap::new();
+                for info in &items {
+                    item_map
+                        .entry(info.name.as_str())
+                        .or_default()
+                        .push(info.media_item);
+                }
+
+                let mut track_index = low.CountTracks(std::ptr::null_mut());
+                for track_node in &hierarchy.tracks {
+                    low.InsertTrackAtIndex(track_index, true);
+                    let reaper_track = low.GetTrack(std::ptr::null_mut(), track_index);
+                    if reaper_track.is_null() {
+                        track_index += 1;
+                        continue;
+                    }
+
+                    let name_cstr = CString::new(track_node.name.as_str()).unwrap_or_default();
+                    let param_name = CString::new("P_NAME").unwrap();
+                    low.GetSetMediaTrackInfo_String(
+                        reaper_track,
+                        param_name.as_ptr(),
+                        name_cstr.as_ptr() as *mut _,
+                        true,
+                    );
+
+                    let param_folder = CString::new("I_FOLDERDEPTH").unwrap();
+                    let folder_value = track_node.folder_depth_change.to_raw_value() as f64;
+                    low.SetMediaTrackInfo_Value(reaper_track, param_folder.as_ptr(), folder_value);
+
+                    for item_name in &track_node.items {
+                        if let Some(media_items) = item_map.get(item_name.as_str()) {
+                            for &media_item in media_items {
+                                low.MoveMediaItemToTrack(media_item, reaper_track);
+                            }
+                        }
+                    }
+
+                    track_index += 1;
+                }
+
+                delete_empty_tracks(&original_tracks);
+            }
+            Err(e) => {
+                reaper.show_console_msg(format!("Error organizing: {}\n", e));
+                low.Undo_EndBlock(undo_label.as_ptr(), 0);
+                return ActionResult::failure(format!("Error organizing: {}", e));
+            }
+        }
+
+        low.Undo_EndBlock(undo_label.as_ptr(), 0);
+    }
+
+    ActionResult::success_with_message("Import and sort completed")
+}
+
+struct DynamicTemplateActionBinder;
+
+impl dynamic_template_actions::LocalActionBinder for DynamicTemplateActionBinder {
+    fn SORT_SELECTED(&self) -> actions_proto::LocalActionImplementation {
+        actions_proto::LocalActionImplementation::Supported(Arc::new(handle_dt_sort_selected))
+    }
+
+    fn SORT_ALL(&self) -> actions_proto::LocalActionImplementation {
+        actions_proto::LocalActionImplementation::Supported(Arc::new(handle_dt_sort_all))
+    }
+
+    fn IMPORT_AND_SORT(&self) -> actions_proto::LocalActionImplementation {
+        actions_proto::LocalActionImplementation::Supported(Arc::new(handle_dt_import_and_sort))
+    }
+
+    fn ORGANIZE_DEMO(&self) -> actions_proto::LocalActionImplementation {
+        actions_proto::LocalActionImplementation::Unsupported("Demo-only action")
+    }
+
+    fn LOG_STATUS(&self) -> actions_proto::LocalActionImplementation {
+        actions_proto::LocalActionImplementation::Unsupported("Dev-only action")
+    }
+
+    fn LOG_GROUPS(&self) -> actions_proto::LocalActionImplementation {
+        actions_proto::LocalActionImplementation::Unsupported("Dev-only action")
+    }
+}
+
+// ============================================================================
+// Visibility Manager: Group Toggle Actions
+// ============================================================================
+
+fn handle_vis_toggle(group: &str) -> ActionResult {
+    let visible = crate::visibility::toggle_group(group);
+    ActionResult::success_with_message(format!(
+        "{} {}",
+        group,
+        if visible { "shown" } else { "hidden" }
+    ))
+}
+
+fn handle_vis_show_all() -> ActionResult {
+    crate::visibility::show_all();
+    ActionResult::success_with_message("All tracks shown")
+}
+
+fn handle_vis_hide_all() -> ActionResult {
+    crate::visibility::hide_all();
+    ActionResult::success_with_message("All group tracks hidden")
+}
+
+fn handle_vis_rebuild_cache() -> ActionResult {
+    crate::visibility::rebuild_cache();
+    ActionResult::success_with_message("Visibility cache rebuilt")
+}
+
+struct VisibilityManagerActionBinder;
+
+impl visibility_manager_actions::LocalActionBinder for VisibilityManagerActionBinder {
+    fn TOGGLE_DRUMS(&self) -> actions_proto::LocalActionImplementation {
+        actions_proto::LocalActionImplementation::Supported(Arc::new(|| handle_vis_toggle("Drums")))
+    }
+    fn TOGGLE_PERCUSSION(&self) -> actions_proto::LocalActionImplementation {
+        actions_proto::LocalActionImplementation::Supported(Arc::new(|| {
+            handle_vis_toggle("Percussion")
+        }))
+    }
+    fn TOGGLE_BASS(&self) -> actions_proto::LocalActionImplementation {
+        actions_proto::LocalActionImplementation::Supported(Arc::new(|| handle_vis_toggle("Bass")))
+    }
+    fn TOGGLE_GUITARS(&self) -> actions_proto::LocalActionImplementation {
+        actions_proto::LocalActionImplementation::Supported(Arc::new(|| {
+            handle_vis_toggle("Guitars")
+        }))
+    }
+    fn TOGGLE_KEYS(&self) -> actions_proto::LocalActionImplementation {
+        actions_proto::LocalActionImplementation::Supported(Arc::new(|| handle_vis_toggle("Keys")))
+    }
+    fn TOGGLE_SYNTHS(&self) -> actions_proto::LocalActionImplementation {
+        actions_proto::LocalActionImplementation::Supported(Arc::new(|| {
+            handle_vis_toggle("Synths")
+        }))
+    }
+    fn TOGGLE_HORNS(&self) -> actions_proto::LocalActionImplementation {
+        actions_proto::LocalActionImplementation::Supported(Arc::new(|| handle_vis_toggle("Horns")))
+    }
+    fn TOGGLE_HARMONICA(&self) -> actions_proto::LocalActionImplementation {
+        actions_proto::LocalActionImplementation::Supported(Arc::new(|| {
+            handle_vis_toggle("Harmonica")
+        }))
+    }
+    fn TOGGLE_VOCALS(&self) -> actions_proto::LocalActionImplementation {
+        actions_proto::LocalActionImplementation::Supported(Arc::new(|| {
+            handle_vis_toggle("Vocals")
+        }))
+    }
+    fn TOGGLE_CHOIR(&self) -> actions_proto::LocalActionImplementation {
+        actions_proto::LocalActionImplementation::Supported(Arc::new(|| handle_vis_toggle("Choir")))
+    }
+    fn TOGGLE_ORCHESTRA(&self) -> actions_proto::LocalActionImplementation {
+        actions_proto::LocalActionImplementation::Supported(Arc::new(|| {
+            handle_vis_toggle("Orchestra")
+        }))
+    }
+    fn TOGGLE_SFX(&self) -> actions_proto::LocalActionImplementation {
+        actions_proto::LocalActionImplementation::Supported(Arc::new(|| handle_vis_toggle("SFX")))
+    }
+    fn TOGGLE_GUIDE(&self) -> actions_proto::LocalActionImplementation {
+        actions_proto::LocalActionImplementation::Supported(Arc::new(|| handle_vis_toggle("Guide")))
+    }
+    fn TOGGLE_REFERENCE(&self) -> actions_proto::LocalActionImplementation {
+        actions_proto::LocalActionImplementation::Supported(Arc::new(|| {
+            handle_vis_toggle("Reference")
+        }))
+    }
+    fn SHOW_ALL(&self) -> actions_proto::LocalActionImplementation {
+        actions_proto::LocalActionImplementation::Supported(Arc::new(handle_vis_show_all))
+    }
+    fn HIDE_ALL(&self) -> actions_proto::LocalActionImplementation {
+        actions_proto::LocalActionImplementation::Supported(Arc::new(handle_vis_hide_all))
+    }
+    fn REBUILD_CACHE(&self) -> actions_proto::LocalActionImplementation {
+        actions_proto::LocalActionImplementation::Supported(Arc::new(handle_vis_rebuild_cache))
+    }
+}
+
 /// Built-in local actions owned by reaper-extension.
 pub fn builtin_local_actions() -> Vec<actions_proto::LocalActionRegistration> {
     let mut actions = reaper_extension_actions::definitions_with_handlers();
@@ -544,6 +998,12 @@ pub fn builtin_local_actions() -> Vec<actions_proto::LocalActionRegistration> {
     ));
     actions.extend(fts_markers_regions_actions::definitions_with_binder(
         &ReaperExtensionMarkersRegionsActionBinder,
+    ));
+    actions.extend(dynamic_template_actions::definitions_with_binder(
+        &DynamicTemplateActionBinder,
+    ));
+    actions.extend(visibility_manager_actions::definitions_with_binder(
+        &VisibilityManagerActionBinder,
     ));
     actions
         .into_iter()
@@ -572,6 +1032,10 @@ pub fn register_toggle_states() {
         Arc::new(input_reaper::is_debug_logging),
     );
     crate::action_registry::set_local_toggle_getter(
+        "FTS_INPUT_LOG_INPUT_RUNTIME_STATE",
+        Arc::new(input_reaper::is_debug_logging),
+    );
+    crate::action_registry::set_local_toggle_getter(
         "FTS_INPUT_PROFILES_INPUT_PROFILE_FAST_TRACK_STUDIO",
         Arc::new(|| input_reaper::current_profile() == InputProfile::FastTrackStudio),
     );
@@ -591,6 +1055,30 @@ pub fn register_toggle_states() {
         "FTS_INPUT_WORKFLOWS_WORKFLOW_FAST_SLIP_EDIT",
         Arc::new(|| input_reaper::input::workflows::is_active("fast_slip_edit")),
     );
+
+    // Visibility Manager toggle states
+    for (cmd_id, group) in [
+        ("FTS_VISIBILITY_MANAGER_TOGGLE_DRUMS", "Drums"),
+        ("FTS_VISIBILITY_MANAGER_TOGGLE_PERCUSSION", "Percussion"),
+        ("FTS_VISIBILITY_MANAGER_TOGGLE_BASS", "Bass"),
+        ("FTS_VISIBILITY_MANAGER_TOGGLE_GUITARS", "Guitars"),
+        ("FTS_VISIBILITY_MANAGER_TOGGLE_KEYS", "Keys"),
+        ("FTS_VISIBILITY_MANAGER_TOGGLE_SYNTHS", "Synths"),
+        ("FTS_VISIBILITY_MANAGER_TOGGLE_HORNS", "Horns"),
+        ("FTS_VISIBILITY_MANAGER_TOGGLE_HARMONICA", "Harmonica"),
+        ("FTS_VISIBILITY_MANAGER_TOGGLE_VOCALS", "Vocals"),
+        ("FTS_VISIBILITY_MANAGER_TOGGLE_CHOIR", "Choir"),
+        ("FTS_VISIBILITY_MANAGER_TOGGLE_ORCHESTRA", "Orchestra"),
+        ("FTS_VISIBILITY_MANAGER_TOGGLE_SFX", "SFX"),
+        ("FTS_VISIBILITY_MANAGER_TOGGLE_GUIDE", "Guide"),
+        ("FTS_VISIBILITY_MANAGER_TOGGLE_REFERENCE", "Reference"),
+    ] {
+        let group = group.to_string();
+        crate::action_registry::set_local_toggle_getter(
+            cmd_id,
+            Arc::new(move || crate::visibility::is_group_visible(&group)),
+        );
+    }
 }
 
 fn refresh_toolbar(command_id: &str) {

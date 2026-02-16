@@ -162,9 +162,9 @@ impl ActionSet for FtsEditing {
             Keybind::new("c", "40060").with_description("Copy selected items"),
             Keybind::new("p", "40058").with_description("Paste items"),
             Keybind::new("u", "40029").with_description("Undo"),
+            Keybind::new("<M-z>", "40029").with_description("Undo"),
             Keybind::new("<C-r>", "40030").with_description("Redo"),
-            // Selection mode toggle
-            Keybind::new("v", "40769").with_description("Toggle item selection follows cursor"),
+            // NOTE: "v" is now a which-key prefix for the Visibility Manager tree
             // Track management
             Keybind::new("n", "40001").with_description("Insert new track"),
             Keybind::new("<S-n>", "40702").with_description("Duplicate tracks"),

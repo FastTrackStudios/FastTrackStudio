@@ -42,6 +42,7 @@ pub mod actions;
 mod error;
 mod services;
 mod types;
+pub mod visibility_manager;
 
 pub use error::*;
 pub use services::*;

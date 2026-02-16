@@ -148,7 +148,7 @@ pub fn Knob(props: KnobProps) -> Element {
                     d: "{track_path}",
                     fill: "none",
                     stroke: "var(--muted, #374151)",
-                    stroke_width: "3",
+                    stroke_width: "3.5",
                     stroke_linecap: "round",
                 }
 
@@ -158,7 +158,7 @@ pub fn Knob(props: KnobProps) -> Element {
                         d: "{value_path}",
                         fill: "none",
                         stroke: "var(--primary, #3b82f6)",
-                        stroke_width: "3",
+                        stroke_width: "4",
                         stroke_linecap: "round",
                     }
                 }
@@ -168,7 +168,7 @@ pub fn Knob(props: KnobProps) -> Element {
                     path {
                         d: "{mod_path}",
                         fill: "none",
-                        stroke: "var(--accent, #8b5cf6)",
+                        stroke: "var(--signal-mod, #8b5cf6)",
                         stroke_width: "2",
                         stroke_linecap: "round",
                         opacity: "0.6",
