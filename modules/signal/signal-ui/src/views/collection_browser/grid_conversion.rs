@@ -62,8 +62,10 @@ fn extract_block_params(mb: &signal::ModuleBlock, lookup: &ParamLookup) -> Vec<(
 /// Preferred max columns before wrapping a module to the next row band.
 const SOFT_MAX_COLS: usize = 14;
 
-/// Gap rows when a module wraps within a layer (needs space for split fan-out).
-const ROW_BAND_STRIDE: usize = 2;
+/// Gap rows when a module wraps within a layer.
+/// With phantom dry lanes removed, splits only use wet-lane rows,
+/// so a stride of 1 is sufficient.
+const ROW_BAND_STRIDE: usize = 1;
 
 // endregion: --- Constants
 

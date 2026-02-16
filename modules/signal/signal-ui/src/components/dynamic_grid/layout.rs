@@ -9,8 +9,8 @@ use super::types::GridSlot;
 // Grid sizing constants
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(crate) const CELL_SIZE: usize = 88;
-pub(crate) const CELL_GAP: usize = 32;
+pub(crate) const CELL_SIZE: usize = 76;
+pub(crate) const CELL_GAP: usize = 20;
 pub(crate) const PORT_SIZE: f64 = 10.0;
 
 const MIN_COLS: usize = 14;
@@ -18,7 +18,7 @@ const MIN_ROWS: usize = 1;
 
 // Module-level container padding
 pub(crate) const GROUP_PAD: f64 = CELL_GAP as f64 * 0.25;
-pub(crate) const GROUP_TITLE_H: f64 = 16.0;
+pub(crate) const GROUP_TITLE_H: f64 = 12.0;
 
 // Layer-level container padding (wraps modules) — subtle, less obtrusive
 pub(crate) const LAYER_PAD: f64 = GROUP_PAD + 8.0;
