@@ -2,9 +2,10 @@
 //!
 //! Supports three nesting levels: Engine (outermost), Layer (middle), Module (innermost).
 
+use audio_controls::widgets::VSlider;
 use dioxus::prelude::*;
 
-use super::layout::{ContainerLevel, ENGINE_TITLE_H, GROUP_TITLE_H, LAYER_TITLE_H};
+use super::layout::{ContainerLevel, ENGINE_TITLE_H, GROUP_TITLE_H, LAYER_LEFT_PAD};
 use super::types::ModuleVisualState;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -80,44 +81,14 @@ pub(super) struct ContainerBackgroundProps {
 
 #[component]
 pub(super) fn ContainerBackground(props: ContainerBackgroundProps) -> Element {
-    // Each level has its own TITLE_H allocated in the bounding box, so
-    // labels at different nesting depths can never collide.
-    let (bg_alpha, border_alpha, border_style, radius, title_h, z_index, font_class, label_opacity) =
-        match props.level {
-            ContainerLevel::Engine => (
-                "04",
-                "10",
-                "solid",
-                "10px",
-                ENGINE_TITLE_H,
-                1,
-                "text-[7px] font-semibold uppercase tracking-wider",
-                "0.40",
-            ),
-            ContainerLevel::Layer => (
-                "03",
-                "0a",
-                "dashed",
-                "8px",
-                LAYER_TITLE_H,
-                2,
-                "text-[7px] font-medium tracking-wide",
-                "0.35",
-            ),
-            ContainerLevel::Module => {
-                // Module level should use ModuleBackground instead, but handle gracefully
-                (
-                    "12",
-                    "30",
-                    "solid",
-                    "10px",
-                    GROUP_TITLE_H,
-                    3,
-                    "text-[8px] font-semibold",
-                    "0.80",
-                )
-            }
-        };
+    // Each level has its own structural space allocated in the bounding box,
+    // so labels at different nesting depths can never collide.
+    // Engine: top title strip. Layer: left side label (rotated).
+    let (bg_alpha, border_alpha, border_style, radius, z_index) = match props.level {
+        ContainerLevel::Engine => ("0a", "18", "solid", "10px", 1),
+        ContainerLevel::Layer => ("08", "14", "dashed", "8px", 2),
+        ContainerLevel::Module => ("12", "30", "solid", "10px", 3),
+    };
 
     let bg = format!(
         "left: {}px; top: {}px; width: {}px; height: {}px; \
@@ -125,19 +96,75 @@ pub(super) fn ContainerBackground(props: ContainerBackgroundProps) -> Element {
         props.x, props.y, props.w, props.h, props.bg_color, props.bg_color,
     );
 
+    let is_layer = props.level == ContainerLevel::Layer;
+
+    // Layer side panel needs a local volume signal (visual prototype, not yet
+    // wired to domain model).
+    let volume = use_signal(|| 1.0f32);
+
+    // Fader height: full container minus top/bottom padding.
+    let fader_h = (props.h - 8.0).max(20.0) as u32;
+
     rsx! {
         div {
             key: "container-{props.name}",
-            class: "absolute overflow-hidden",
+            class: "absolute",
             style: "position: absolute; {bg} z-index: {z_index}; pointer-events: none;",
-            // Thin title strip — height structurally reserved by TITLE_H in bounding box
-            div {
-                class: "flex items-center px-1.5",
-                style: "height: {title_h}px; pointer-events: none;",
-                span {
-                    class: "{font_class} whitespace-nowrap",
-                    style: "color: {props.fg_color}; opacity: {label_opacity};",
-                    "{props.name}"
+            if is_layer {
+                // Left side panel: rotated name + volume fader, side by side
+                div {
+                    style: "position: absolute; left: 0; top: 0; width: {LAYER_LEFT_PAD}px; height: {props.h}px; \
+                            display: flex; flex-direction: row; align-items: stretch; \
+                            padding: 4px 2px; gap: 0px; pointer-events: auto;",
+                    // Rotated layer name on the far left
+                    div {
+                        style: "display: flex; align-items: center; justify-content: center; width: 14px; flex-shrink: 0;",
+                        span {
+                            class: "text-[7px] font-medium tracking-wide whitespace-nowrap",
+                            style: "color: {props.fg_color}; opacity: 0.60; \
+                                    writing-mode: vertical-lr; transform: rotate(180deg);",
+                            "{props.name}"
+                        }
+                    }
+                    // Volume fader to the right of the name
+                    div {
+                        style: "display: flex; align-items: center; justify-content: center; flex: 1;",
+                        VSlider {
+                            value: volume,
+                            height: fader_h,
+                            width: 16,
+                            min: 0.0,
+                            max: 1.0,
+                        }
+                    }
+                }
+            } else {
+                // Top title strip for Engine (and Module fallback)
+                {
+                    let title_h = match props.level {
+                        ContainerLevel::Engine => ENGINE_TITLE_H,
+                        ContainerLevel::Module => GROUP_TITLE_H,
+                        _ => 0.0,
+                    };
+                    let font_class = match props.level {
+                        ContainerLevel::Engine => "text-[7px] font-semibold uppercase tracking-wider",
+                        _ => "text-[8px] font-semibold",
+                    };
+                    let label_opacity = match props.level {
+                        ContainerLevel::Engine => "0.50",
+                        _ => "0.80",
+                    };
+                    rsx! {
+                        div {
+                            class: "flex items-center px-1.5",
+                            style: "height: {title_h}px; pointer-events: none;",
+                            span {
+                                class: "{font_class} whitespace-nowrap",
+                                style: "color: {props.fg_color}; opacity: {label_opacity};",
+                                "{props.name}"
+                            }
+                        }
+                    }
                 }
             }
         }

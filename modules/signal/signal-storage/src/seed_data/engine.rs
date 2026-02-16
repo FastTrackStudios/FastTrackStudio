@@ -189,6 +189,10 @@ fn guitar_engine() -> Engine {
             seed_id("guitar-layer-main"),
             seed_id("guitar-layer-main-default"),
         ))
+        .with_layer(LayerSelection::new(
+            seed_id("guitar-layer-archetype-jm"),
+            seed_id("guitar-layer-archetype-jm-default"),
+        ))
         .with_override(Override::set(
             NodePath::layer("guitar-layer-main")
                 .with_module("gtr-amp")
@@ -202,6 +206,10 @@ fn guitar_engine() -> Engine {
             seed_id("guitar-layer-main"),
             seed_id("guitar-layer-main-lead"),
         ))
+        .with_layer(LayerSelection::new(
+            seed_id("guitar-layer-archetype-jm"),
+            seed_id("guitar-layer-archetype-jm-default"),
+        ))
         .with_override(Override::set(
             NodePath::layer("guitar-layer-main")
                 .with_module("drive-full-stack")
@@ -214,7 +222,10 @@ fn guitar_engine() -> Engine {
         seed_id("guitar-engine"),
         "Guitar Engine",
         EngineType::Guitar,
-        vec![LayerId::from(seed_id("guitar-layer-main"))],
+        vec![
+            LayerId::from(seed_id("guitar-layer-main")),
+            LayerId::from(seed_id("guitar-layer-archetype-jm")),
+        ],
         default_scene,
     )
     .with_metadata(Metadata::new().with_tag("guitar").with_tag("template"));

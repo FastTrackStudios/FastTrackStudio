@@ -14,17 +14,25 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 // ─── Domain modules ─────────────────────────────────────────────
+pub mod automation;
 pub mod block;
 pub mod defaults;
+pub mod easing;
 pub mod engine;
 pub mod layer;
 pub mod metadata;
+pub mod midi;
+pub mod modulation;
 pub mod module_type;
 pub mod override_policy;
 pub mod overrides;
+pub mod plugin_block;
 pub mod profile;
+pub mod rack;
 pub mod resolve;
 pub mod rig;
+pub mod routing;
+pub mod scene_template;
 pub mod setlist;
 pub mod signal_chain;
 pub mod song;
@@ -1201,6 +1209,21 @@ pub trait ResolveService {
         &self,
         target: resolve::ResolveTarget,
     ) -> Result<resolve::ResolvedGraph, resolve::ResolveError>;
+}
+
+#[roam::service]
+pub trait SceneTemplateService {
+    async fn list_scene_templates(&self) -> Vec<scene_template::SceneTemplate>;
+    async fn load_scene_template(
+        &self,
+        id: scene_template::SceneTemplateId,
+    ) -> Option<scene_template::SceneTemplate>;
+    async fn save_scene_template(&self, template: scene_template::SceneTemplate) -> ();
+    async fn delete_scene_template(&self, id: scene_template::SceneTemplateId) -> ();
+    async fn reorder_scene_templates(
+        &self,
+        ordered_ids: Vec<scene_template::SceneTemplateId>,
+    ) -> ();
 }
 
 #[cfg(test)]

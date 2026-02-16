@@ -4,6 +4,13 @@
 //! have zero knowledge of signal types, services, or global signals.
 //! Domain-aware wrappers compose these into full editor views.
 
+// Primitives — shared UI building blocks (shadcn-style)
+pub mod audio_controls;
+pub mod audio_viz;
+mod dialog;
+mod slider;
+mod tabs;
+
 // Tier 1 — direct ports (zero domain deps)
 mod entity_editor;
 mod review_list;
@@ -21,6 +28,13 @@ mod pan_zoom_canvas;
 mod scene_tile;
 mod signal_chain_grid;
 mod signal_flow_grid_view;
+
+// Re-exports: primitives
+pub use audio_controls::{Knob, KnobSize, XYPad};
+pub use audio_viz::{LevelMeter, LevelMeterOrientation, SpectrumAnalyzer, WaveformDisplay};
+pub use dialog::{Dialog, DialogClose, DialogDescription, DialogFooter, DialogHeader, DialogTitle};
+pub use slider::{Slider, SliderOrientation};
+pub use tabs::{TabContent, TabList, TabTrigger, Tabs};
 
 // Re-exports: layout
 pub use entity_editor::EntityEditor;

@@ -195,9 +195,9 @@ pub(super) fn engines_to_grid_slots(
             col = col + measure.width + 1; // +1 col gap between side-by-side layers
         }
 
-        // Advance row past this engine for the next one.
-        // Only add a gap row if there's actually a next engine to separate from.
-        row = band_start_row + band_max_height;
+        // Advance row past this engine.
+        // Always add 1 gap row so the engine title strip has clear space above.
+        row = band_start_row + band_max_height + 1;
     }
 
     slots

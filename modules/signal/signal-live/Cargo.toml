@@ -9,6 +9,11 @@ authors.workspace = true
 signal-proto = { package = "signal2-proto", path = "../signal-proto" }
 signal-storage = { package = "signal2-storage", path = "../signal-storage" }
 roam.workspace = true
+serde = { workspace = true }
+serde_json = { workspace = true }
+base64 = "0.22"
+uuid = { workspace = true }
+tokio = { workspace = true, features = ["sync"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt", "macros"] }

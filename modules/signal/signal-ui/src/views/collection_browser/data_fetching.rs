@@ -9,8 +9,10 @@ use signal::tagging::{StructuredTag, TagCategory, TagSet};
 use signal::traits::HasMetadata;
 use signal::SignalController;
 use signal::{
-    BlockType, ModuleBlock, ModuleBlockSource, Preset, SignalChain, SignalNode, ALL_BLOCK_TYPES,
+    BlockType, ModuleBlock, ModuleBlockSource, ModulePreset, Preset, SignalChain, SignalNode,
+    ALL_BLOCK_TYPES,
 };
+use std::collections::HashMap;
 
 use super::grid_conversion::ParamLookup;
 use super::types::{
@@ -128,9 +130,23 @@ pub(super) async fn fetch_col3(
     match nav {
         NavCategory::Presets => {
             let items = if let Some(rig) = controller.load_rig_collection(col2_id).await {
+                let all_module_presets = controller.list_module_collections().await;
+                let block_preset_lookup = build_block_preset_lookup(controller).await;
                 let mut out = Vec::new();
-                for v in &rig.variants {
-                    let engines = resolve_rig_scene_engines(controller, v).await;
+                for (idx, v) in rig.variants.iter().enumerate() {
+                    // Lazy scene resolution: only resolve the first scene eagerly.
+                    // Remaining scenes are resolved on click via resolve_scene_detail.
+                    let engines = if idx == 0 {
+                        resolve_rig_scene_engines(
+                            controller,
+                            v,
+                            &all_module_presets,
+                            &block_preset_lookup,
+                        )
+                        .await
+                    } else {
+                        Vec::new()
+                    };
                     let meta = v.metadata().clone();
                     let tags = TagSet::from_tags(&meta.tags);
                     out.push(ColumnItem {
@@ -155,10 +171,18 @@ pub(super) async fn fetch_col3(
         }
         NavCategory::Engines => {
             let items = if let Some(engine) = controller.load_engine(col2_id).await {
+                let all_module_presets = controller.list_module_collections().await;
+                let block_preset_lookup = build_block_preset_lookup(controller).await;
                 let mut items = Vec::new();
                 for layer_id in &engine.layer_ids {
                     if let Some(layer) = controller.load_layer(layer_id.as_str()).await {
-                        let module_chains = resolve_layer_module_chains(controller, &layer).await;
+                        let module_chains = resolve_layer_module_chains(
+                            controller,
+                            &layer,
+                            &all_module_presets,
+                            &block_preset_lookup,
+                        )
+                        .await;
                         let meta = layer.metadata().clone();
                         let tags = TagSet::from_tags(&meta.tags);
                         items.push(ColumnItem {
@@ -254,17 +278,13 @@ pub(super) async fn fetch_col3(
 async fn resolve_layer_module_chains(
     controller: &SignalController,
     layer: &Layer,
+    all_module_presets: &[ModulePreset],
+    block_preset_lookup: &HashMap<String, (BlockType, String)>,
 ) -> Vec<ModuleChainData> {
     let variant = match layer.default_variant() {
         Some(v) => v,
         None => return Vec::new(),
     };
-    // Pre-fetch all module presets to look up module types for colors.
-    let all_module_presets = controller.list_module_collections().await;
-
-    // Build a block preset lookup: preset_id → (BlockType, preset_name)
-    // so we can resolve block_refs without knowing their type upfront.
-    let block_preset_lookup = build_block_preset_lookup(controller).await;
 
     let mut out = Vec::new();
 
@@ -272,7 +292,13 @@ async fn resolve_layer_module_chains(
     for lr in &variant.layer_refs {
         let layer_id_str = lr.collection_id.to_string();
         if let Some(nested_layer) = controller.load_layer(layer_id_str.as_str()).await {
-            let nested = Box::pin(resolve_layer_module_chains(controller, &nested_layer)).await;
+            let nested = Box::pin(resolve_layer_module_chains(
+                controller,
+                &nested_layer,
+                all_module_presets,
+                block_preset_lookup,
+            ))
+            .await;
             out.extend(nested);
         }
     }
@@ -346,6 +372,21 @@ async fn resolve_layer_module_chains(
         });
     }
 
+    // 4) Resolve plugin_refs (plugin block defs → virtual module chains)
+    for pr in &variant.plugin_refs {
+        for (label, mt, chain) in pr.def.to_module_chains() {
+            let mc = mt.color();
+            out.push(ModuleChainData {
+                name: format!("{} / {}", pr.def.plugin_name, label),
+                color_bg: mc.bg.to_string(),
+                color_fg: mc.fg.to_string(),
+                color_border: mc.border.to_string(),
+                chain,
+                module_type: Some(mt),
+            });
+        }
+    }
+
     out
 }
 
@@ -372,6 +413,8 @@ async fn build_block_preset_lookup(
 async fn resolve_rig_scene_engines(
     controller: &SignalController,
     scene: &signal::rig::RigScene,
+    all_module_presets: &[ModulePreset],
+    block_preset_lookup: &HashMap<String, (BlockType, String)>,
 ) -> Vec<EngineFlowData> {
     let mut engines = Vec::new();
     for es in &scene.engine_selections {
@@ -395,7 +438,13 @@ async fn resolve_rig_scene_engines(
                 Some(l) => l,
                 None => continue,
             };
-            let module_chains = resolve_layer_module_chains(controller, &layer).await;
+            let module_chains = resolve_layer_module_chains(
+                controller,
+                &layer,
+                all_module_presets,
+                block_preset_lookup,
+            )
+            .await;
             layers.push(LayerFlowData {
                 name: layer.name.clone(),
                 module_chains,
@@ -407,6 +456,46 @@ async fn resolve_rig_scene_engines(
         });
     }
     engines
+}
+
+/// On-demand resolution for a lazily-loaded rig scene.
+///
+/// Called when the user clicks a scene that was not eagerly resolved
+/// (i.e. any scene other than the first). Loads the rig, finds the
+/// matching scene, resolves engines, and builds a parameter lookup.
+pub(super) async fn resolve_scene_detail(
+    controller: &SignalController,
+    rig_id: &str,
+    scene_id: &str,
+) -> Option<(Vec<EngineFlowData>, ParamLookup)> {
+    let rig = controller.load_rig_collection(rig_id).await?;
+    let scene = rig.variants.iter().find(|v| v.id.to_string() == scene_id)?;
+
+    let all_module_presets = controller.list_module_collections().await;
+    let block_preset_lookup = build_block_preset_lookup(controller).await;
+
+    let engines =
+        resolve_rig_scene_engines(controller, scene, &all_module_presets, &block_preset_lookup)
+            .await;
+
+    // Build param lookup from the resolved engines
+    let detail = DetailData {
+        engines: engines.clone(),
+        ..Default::default()
+    };
+    let temp_item = ColumnItem {
+        id: scene_id.to_string(),
+        name: String::new(),
+        subtitle: None,
+        badge: None,
+        metadata: None,
+        structured_tags: TagSet::default(),
+        detail,
+        tag: None,
+    };
+    let params = build_param_lookup(controller, &[temp_item]).await;
+
+    Some((engines, params))
 }
 
 // endregion: --- Detail resolution helpers

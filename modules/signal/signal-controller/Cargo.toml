@@ -9,3 +9,7 @@ authors.workspace = true
 signal-proto = { package = "signal2-proto", path = "../signal-proto" }
 signal-live = { package = "signal2-live", path = "../signal-live" }
 roam.workspace = true
+tokio = { workspace = true, features = ["sync"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt", "macros"] }

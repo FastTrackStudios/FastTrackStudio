@@ -2,7 +2,7 @@
 
 use sea_orm::*;
 use signal_proto::layer::{
-    BlockRef, Layer, LayerId, LayerRef, LayerSnapshot, LayerSnapshotId, ModuleRef,
+    BlockRef, Layer, LayerId, LayerRef, LayerSnapshot, LayerSnapshotId, ModuleRef, PluginRef,
 };
 use signal_proto::metadata::Metadata;
 use signal_proto::overrides::Override;
@@ -63,6 +63,7 @@ impl LayerRepoLive {
             layer_refs: &variant.layer_refs,
             module_refs: &variant.module_refs,
             block_refs: &variant.block_refs,
+            plugin_refs: &variant.plugin_refs,
             overrides: &variant.overrides,
             enabled: variant.enabled,
         };
@@ -98,6 +99,7 @@ impl LayerRepoLive {
             layer_refs: state.layer_refs,
             module_refs: state.module_refs,
             block_refs: state.block_refs,
+            plugin_refs: state.plugin_refs,
             overrides: state.overrides,
             enabled: state.enabled,
             metadata,
@@ -140,6 +142,7 @@ struct VariantState<'a> {
     layer_refs: &'a [LayerRef],
     module_refs: &'a [ModuleRef],
     block_refs: &'a [BlockRef],
+    plugin_refs: &'a [PluginRef],
     overrides: &'a [Override],
     enabled: bool,
 }
@@ -149,6 +152,8 @@ struct VariantStateOwned {
     layer_refs: Vec<LayerRef>,
     module_refs: Vec<ModuleRef>,
     block_refs: Vec<BlockRef>,
+    #[serde(default)]
+    plugin_refs: Vec<PluginRef>,
     overrides: Vec<Override>,
     enabled: bool,
 }

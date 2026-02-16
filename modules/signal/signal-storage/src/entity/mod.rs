@@ -27,3 +27,9 @@ pub mod song;
 // Setlist
 pub mod setlist;
 pub mod setlist_entry;
+
+// Scene template
+pub mod scene_template;
+
+// DAW snapshots
+pub mod daw_snapshot;

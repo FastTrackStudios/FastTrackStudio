@@ -7,6 +7,9 @@
 //!
 //! Each domain level (block, module, layer, engine, preset/rig, profile, song) gets its own method region.
 
+pub mod events;
+
+use events::EventBus;
 use signal_live::SignalLive;
 use signal_proto::{
     engine::{Engine, EngineId, EngineScene, EngineSceneId},
@@ -17,9 +20,10 @@ use signal_proto::{
     setlist::{Setlist, SetlistEntry, SetlistEntryId, SetlistId},
     song::{Section, SectionId, Song, SongId},
     tagging::{BrowserHit, BrowserIndex, BrowserQuery},
+    scene_template::{SceneTemplate, SceneTemplateId},
     Block, BlockService, BlockType, BrowserService, EngineService, LayerService, ModulePreset,
     ModulePresetId, ModuleSnapshot, ModuleSnapshotId, Preset, PresetId, PresetService,
-    ProfileService, ResolveService, SetlistService, SnapshotId, SongService,
+    ProfileService, ResolveService, SceneTemplateService, SetlistService, SnapshotId, SongService,
 };
 use std::sync::Arc;
 
@@ -33,6 +37,7 @@ pub trait SignalApi:
     + SetlistService
     + BrowserService
     + ResolveService
+    + SceneTemplateService
 {
 }
 
@@ -46,6 +51,7 @@ impl<T> SignalApi for T where
         + SetlistService
         + BrowserService
         + ResolveService
+        + SceneTemplateService
 {
 }
 
@@ -76,6 +82,7 @@ where
 {
     service: Arc<S>,
     context_factory: SharedContextFactory,
+    event_bus: Arc<EventBus>,
 }
 
 impl<S> Clone for SignalController<S>
@@ -86,6 +93,7 @@ where
         Self {
             service: self.service.clone(),
             context_factory: self.context_factory.clone(),
+            event_bus: self.event_bus.clone(),
         }
     }
 }
@@ -113,8 +121,23 @@ where
         Self {
             service,
             context_factory,
+            event_bus: Arc::new(EventBus::default()),
         }
     }
+
+    // region: --- Event streaming
+
+    /// Subscribe to signal events for reactive UI updates.
+    pub fn subscribe(&self) -> tokio::sync::broadcast::Receiver<events::SignalEvent> {
+        self.event_bus.subscribe()
+    }
+
+    /// Get the event bus (for internal use by methods that emit events).
+    pub fn event_bus(&self) -> &EventBus {
+        &self.event_bus
+    }
+
+    // endregion: --- Event streaming
 
     // region: --- Block operations
 
@@ -592,4 +615,146 @@ where
     }
 
     // endregion: --- Deprecated shims
+
+    // endregion: --- Deprecated shims v2
+
+    // region: --- Filtered queries (by tag)
+
+    /// List profiles filtered by a tag (exact match against tags list).
+    pub async fn list_profiles_by_tag(&self, tag: &str) -> Vec<signal_proto::profile::Profile> {
+        let all = self.list_profiles().await;
+        all.into_iter()
+            .filter(|p| p.metadata.tags.contains(tag))
+            .collect()
+    }
+
+    /// List rig collections filtered by a tag (exact match against tags list).
+    pub async fn list_rig_collections_by_tag(&self, tag: &str) -> Vec<Rig> {
+        let all = self.list_rig_collections().await;
+        all.into_iter()
+            .filter(|r| r.metadata.tags.contains(tag))
+            .collect()
+    }
+
+    // endregion: --- Filtered queries
+
+    // region: --- Scene templates
+
+    pub async fn list_scene_templates(&self) -> Vec<SceneTemplate> {
+        let cx = self.context_factory.make_context();
+        self.service.list_scene_templates(&cx).await
+    }
+
+    pub async fn load_scene_template(
+        &self,
+        id: impl Into<SceneTemplateId>,
+    ) -> Option<SceneTemplate> {
+        let cx = self.context_factory.make_context();
+        self.service.load_scene_template(&cx, id.into()).await
+    }
+
+    pub async fn save_scene_template(&self, template: SceneTemplate) {
+        let cx = self.context_factory.make_context();
+        self.service.save_scene_template(&cx, template).await;
+    }
+
+    pub async fn delete_scene_template(&self, id: impl Into<SceneTemplateId>) {
+        let cx = self.context_factory.make_context();
+        self.service.delete_scene_template(&cx, id.into()).await;
+    }
+
+    pub async fn reorder_scene_templates(&self, ordered_ids: Vec<SceneTemplateId>) {
+        let cx = self.context_factory.make_context();
+        self.service
+            .reorder_scene_templates(&cx, ordered_ids)
+            .await;
+    }
+
+    // endregion: --- Scene templates
+
+    // region: --- Reorder helpers
+
+    /// Reorder rig scene variants. Takes the rig ID and the desired scene order.
+    /// The rig is loaded, variants reordered to match, and saved back.
+    pub async fn reorder_rig_scenes(
+        &self,
+        rig_id: impl Into<RigId>,
+        ordered_scene_ids: &[RigSceneId],
+    ) {
+        let rig_id = rig_id.into();
+        if let Some(mut rig) = self.load_rig_collection(rig_id.clone()).await {
+            let mut reordered = Vec::with_capacity(rig.variants.len());
+            for scene_id in ordered_scene_ids {
+                if let Some(pos) = rig.variants.iter().position(|v| &v.id == scene_id) {
+                    reordered.push(rig.variants.remove(pos));
+                }
+            }
+            // Append any remaining variants not in the order list.
+            reordered.append(&mut rig.variants);
+            rig.variants = reordered;
+            self.save_rig_collection(rig).await;
+        }
+    }
+
+    /// Reorder profile patches. Takes the profile ID and the desired patch order.
+    pub async fn reorder_profile_patches(
+        &self,
+        profile_id: impl Into<ProfileId>,
+        ordered_patch_ids: &[PatchId],
+    ) {
+        let profile_id = profile_id.into();
+        if let Some(mut profile) = self.load_profile(profile_id.clone()).await {
+            let mut reordered = Vec::with_capacity(profile.patches.len());
+            for patch_id in ordered_patch_ids {
+                if let Some(pos) = profile.patches.iter().position(|p| &p.id == patch_id) {
+                    reordered.push(profile.patches.remove(pos));
+                }
+            }
+            reordered.append(&mut profile.patches);
+            profile.patches = reordered;
+            self.save_profile(profile).await;
+        }
+    }
+
+    /// Reorder song sections. Takes the song ID and the desired section order.
+    pub async fn reorder_song_sections(
+        &self,
+        song_id: impl Into<SongId>,
+        ordered_section_ids: &[SectionId],
+    ) {
+        let song_id = song_id.into();
+        if let Some(mut song) = self.load_song(song_id.clone()).await {
+            let mut reordered = Vec::with_capacity(song.sections.len());
+            for section_id in ordered_section_ids {
+                if let Some(pos) = song.sections.iter().position(|s| &s.id == section_id) {
+                    reordered.push(song.sections.remove(pos));
+                }
+            }
+            reordered.append(&mut song.sections);
+            song.sections = reordered;
+            self.save_song(song).await;
+        }
+    }
+
+    /// Reorder setlist entries. Takes the setlist ID and the desired entry order.
+    pub async fn reorder_setlist_entries(
+        &self,
+        setlist_id: impl Into<SetlistId>,
+        ordered_entry_ids: &[SetlistEntryId],
+    ) {
+        let setlist_id = setlist_id.into();
+        if let Some(mut setlist) = self.load_setlist(setlist_id.clone()).await {
+            let mut reordered = Vec::with_capacity(setlist.entries.len());
+            for entry_id in ordered_entry_ids {
+                if let Some(pos) = setlist.entries.iter().position(|e| &e.id == entry_id) {
+                    reordered.push(setlist.entries.remove(pos));
+                }
+            }
+            reordered.append(&mut setlist.entries);
+            setlist.entries = reordered;
+            self.save_setlist(setlist).await;
+        }
+    }
+
+    // endregion: --- Reorder helpers
 }

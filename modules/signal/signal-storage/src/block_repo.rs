@@ -1,6 +1,9 @@
 //! Block repository — data access for block state, collections, and variants.
 
+use std::collections::HashMap;
+
 use sea_orm::*;
+use sea_orm::sea_query::Index;
 use sea_orm::{ConnectionTrait, Schema};
 use signal_proto::{
     metadata::Metadata, Block, BlockType, Preset, PresetId, Snapshot, SnapshotId, ALL_BLOCK_TYPES,
@@ -63,6 +66,18 @@ impl BlockRepoLive {
         let mut snapshots = schema.create_table_from_entity(entity::snapshot::Entity);
         snapshots.if_not_exists();
         self.db.execute(backend.build(&snapshots)).await?;
+        self.db
+            .execute(
+                backend.build(
+                    Index::create()
+                        .name("idx_snapshots_preset_id_id")
+                        .table(entity::snapshot::Entity)
+                        .col(entity::snapshot::Column::PresetId)
+                        .col(entity::snapshot::Column::Id)
+                        .if_not_exists(),
+                ),
+            )
+            .await?;
 
         let mut current_block = schema.create_table_from_entity(entity::current_block::Entity);
         current_block.if_not_exists();
@@ -177,20 +192,14 @@ fn metadata_from_json(json: &str) -> StorageResult<Metadata> {
 // region: --- Shared query helpers
 
 impl BlockRepoLive {
-    /// Assemble a full `Preset` (collection) from its entity model by loading all variant snapshots.
-    async fn assemble_block_collection(
-        &self,
+    /// Assemble a full `Preset` (collection) from its entity model and variant snapshot models.
+    fn assemble_block_collection(
         preset_model: &entity::preset::Model,
+        snapshot_models: &[entity::snapshot::Model],
         block_type: BlockType,
     ) -> StorageResult<Preset> {
-        let snapshot_models = entity::snapshot::Entity::find()
-            .filter(entity::snapshot::Column::PresetId.eq(preset_model.id.clone()))
-            .order_by_asc(entity::snapshot::Column::Id)
-            .all(&self.db)
-            .await?;
-
         let mut variants = Vec::with_capacity(snapshot_models.len());
-        for model in &snapshot_models {
+        for model in snapshot_models {
             variants.push(snapshot_from_model(model)?);
         }
 
@@ -264,21 +273,46 @@ impl BlockRepo for BlockRepoLive {
     }
 
     async fn list_block_collections(&self, block_type: BlockType) -> StorageResult<Vec<Preset>> {
-        let preset_models = entity::preset::Entity::find()
+        let preset_models: Vec<entity::preset::Model> = entity::preset::Entity::find()
             .filter(entity::preset::Column::BlockType.eq(block_type.as_str().to_string()))
             .order_by_asc(entity::preset::Column::Id)
             .all(&self.db)
             .await?;
+        let preset_models: Vec<entity::preset::Model> = preset_models
+            .into_iter()
+            .filter(|p| !p.name.starts_with("__phantom__"))
+            .collect();
+
+        if preset_models.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let preset_ids: Vec<String> = preset_models.iter().map(|p| p.id.clone()).collect();
+        let snapshot_models: Vec<entity::snapshot::Model> = entity::snapshot::Entity::find()
+            .filter(entity::snapshot::Column::PresetId.is_in(preset_ids))
+            .order_by_asc(entity::snapshot::Column::PresetId)
+            .order_by_asc(entity::snapshot::Column::Id)
+            .all(&self.db)
+            .await?;
+        let mut snapshots_by_preset: HashMap<String, Vec<entity::snapshot::Model>> =
+            HashMap::new();
+        for snapshot_model in snapshot_models {
+            snapshots_by_preset
+                .entry(snapshot_model.preset_id.clone())
+                .or_default()
+                .push(snapshot_model);
+        }
 
         let mut out = Vec::with_capacity(preset_models.len());
-        for preset_model in preset_models
-            .iter()
-            .filter(|p| !p.name.starts_with("__phantom__"))
-        {
-            out.push(
-                self.assemble_block_collection(preset_model, block_type)
-                    .await?,
-            );
+        for preset_model in &preset_models {
+            let snapshot_models = snapshots_by_preset
+                .remove(&preset_model.id)
+                .unwrap_or_default();
+            out.push(Self::assemble_block_collection(
+                preset_model,
+                &snapshot_models,
+                block_type,
+            )?);
         }
 
         Ok(out)

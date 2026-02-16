@@ -104,6 +104,25 @@ impl LayerRef {
     }
 }
 
+// ─── Plugin reference ────────────────────────────────────────────
+
+/// A reference to a plugin block definition embedded inline in a layer.
+///
+/// Unlike `ModuleRef` and `BlockRef` which point to database entities,
+/// a `PluginRef` carries the full `PluginBlockDef` inline. This keeps
+/// plugin block definitions lightweight and self-contained.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+pub struct PluginRef {
+    /// The plugin block definition (embedded, not a DB reference).
+    pub def: crate::plugin_block::PluginBlockDef,
+}
+
+impl PluginRef {
+    pub fn new(def: crate::plugin_block::PluginBlockDef) -> Self {
+        Self { def }
+    }
+}
+
 // ─── LayerSnapshot ───────────────────────────────────────────────
 
 /// A specific configuration of a Layer — which modules and blocks to use.
@@ -114,6 +133,8 @@ pub struct LayerSnapshot {
     pub layer_refs: Vec<LayerRef>,
     pub module_refs: Vec<ModuleRef>,
     pub block_refs: Vec<BlockRef>,
+    #[serde(default)]
+    pub plugin_refs: Vec<PluginRef>,
     pub overrides: Vec<Override>,
     pub enabled: bool,
     pub metadata: Metadata,
@@ -127,6 +148,7 @@ impl LayerSnapshot {
             layer_refs: Vec::new(),
             module_refs: Vec::new(),
             block_refs: Vec::new(),
+            plugin_refs: Vec::new(),
             overrides: Vec::new(),
             enabled: true,
             metadata: Metadata::new(),
@@ -148,6 +170,12 @@ impl LayerSnapshot {
     #[must_use]
     pub fn with_block(mut self, block_ref: BlockRef) -> Self {
         self.block_refs.push(block_ref);
+        self
+    }
+
+    #[must_use]
+    pub fn with_plugin(mut self, plugin_ref: PluginRef) -> Self {
+        self.plugin_refs.push(plugin_ref);
         self
     }
 

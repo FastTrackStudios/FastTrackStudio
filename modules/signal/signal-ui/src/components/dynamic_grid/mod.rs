@@ -10,6 +10,7 @@ pub(crate) mod cables;
 mod empty_cell;
 pub(crate) mod interaction;
 pub(crate) mod layout;
+pub mod minimap;
 mod module_bg;
 pub(crate) mod types;
 
@@ -205,6 +206,36 @@ pub fn DynamicGridView(props: DynamicGridViewProps) -> Element {
     let module_ports = compute_module_ports(&drag_chain);
     let module_groups = compute_module_groups(&drag_chain);
     let container_groups = compute_container_groups(&drag_chain);
+
+    // Cells that overlap a layer's left-side fader panel should not be interactive.
+    let layer_blocked_cells: std::collections::HashSet<(usize, usize)> = {
+        let step = (CELL_SIZE + CELL_GAP) as f64;
+        let cs = CELL_SIZE as f64;
+        let mut blocked = std::collections::HashSet::new();
+        for cg in container_groups.iter() {
+            if cg.level != ContainerLevel::Layer {
+                continue;
+            }
+            // The fader panel occupies [cg.x, cg.x + LAYER_LEFT_PAD] × [cg.y, cg.y + cg.h]
+            let panel_right = cg.x + LAYER_LEFT_PAD as f64;
+            let panel_bottom = cg.y + cg.h;
+            for r in 0..rows {
+                let cell_top = r as f64 * step;
+                let cell_bottom = cell_top + cs;
+                if cell_top >= panel_bottom || cell_bottom <= cg.y {
+                    continue;
+                }
+                for c in 0..cols {
+                    let cell_left = c as f64 * step;
+                    let cell_right = cell_left + cs;
+                    if cell_left < panel_right && cell_right > cg.x {
+                        blocked.insert((c, r));
+                    }
+                }
+            }
+        }
+        blocked
+    };
 
     let current_zoom = zoom();
     let block_drag = interaction().dragged_slot_id().and_then(|_| {
@@ -806,6 +837,15 @@ pub fn DynamicGridView(props: DynamicGridViewProps) -> Element {
                                                     hovered_port_slot.set(None);
                                                 }
                                             },
+                                        }
+                                    }
+                                } else if layer_blocked_cells.contains(&(col, row)) {
+                                    // Cell overlaps a layer's fader panel — render
+                                    // an invisible placeholder so the CSS grid stays
+                                    // aligned but the cell is non-interactive.
+                                    rsx! {
+                                        div {
+                                            style: "pointer-events: none;",
                                         }
                                     }
                                 } else {

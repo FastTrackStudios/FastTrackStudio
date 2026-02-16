@@ -22,7 +22,7 @@ use signal::rig::RigType;
 use signal::tagging::TagSet;
 use signal::{BlockType, SignalController, ALL_BLOCK_TYPES, ALL_MODULE_TYPES};
 
-use data_fetching::{build_param_lookup, fetch_col2, fetch_col3};
+use data_fetching::{build_param_lookup, fetch_col2, fetch_col3, resolve_scene_detail};
 use detail_panel::{
     collect_available_tags, filter_and_sort, find_detail, rig_type_display, DetailPanel,
 };
@@ -71,6 +71,9 @@ pub fn CollectionBrowser(controller: SignalController) -> Element {
     let mut col4_items = use_signal(Vec::<ColumnItem>::new);
     let mut col4_selected = use_signal(|| None::<usize>);
 
+    // Track the selected col2 item's ID for lazy scene resolution.
+    let mut col2_current_id = use_signal(String::new);
+
     // Cache of raw Preset objects from the last Blocks col3 fetch.
     // Used by col4 to look up snapshots without re-querying the DB.
     let mut block_presets_cache = use_signal(Vec::<signal::Preset>::new);
@@ -109,6 +112,7 @@ pub fn CollectionBrowser(controller: SignalController) -> Element {
                     let first_id = items[0].id.clone();
                     let first_tag = items[0].tag;
                     col2_selected.set(Some(0));
+                    col2_current_id.set(first_id.clone());
                     let (v, presets) =
                         fetch_col3(&controller, category, &first_id, first_tag).await;
                     // Auto-select first scene too
@@ -131,6 +135,7 @@ pub fn CollectionBrowser(controller: SignalController) -> Element {
 
     // Pre-clone for rsx branches
     let ctrl_c2 = controller.clone();
+    let ctrl_c3 = controller.clone();
 
     // Apply search + tag filter + sort to col2 items.
     let all_col2 = filter_and_sort(
@@ -270,6 +275,7 @@ pub fn CollectionBrowser(controller: SignalController) -> Element {
                                         },
                                         onclick: move |_| {
                                             col2_selected.set(Some(idx));
+                                            col2_current_id.set(item_id.clone());
                                             col3_selected.set(None);
                                             col4_items.set(Vec::new());
                                             col4_selected.set(None);
@@ -336,9 +342,12 @@ pub fn CollectionBrowser(controller: SignalController) -> Element {
                                 let name = child.name.clone();
                                 let subtitle = child.subtitle.clone();
                                 let badge = child.badge.clone();
+                                let child_id = child.id.clone();
+                                let child_engines_empty = child.detail.engines.is_empty();
+                                let controller_c3 = ctrl_c3.clone();
                                 rsx! {
                                     button {
-                                        key: "{child.id}",
+                                        key: "{child_id}",
                                         class: if is_sel {
                                             "w-full text-left px-3 py-2 border-b border-zinc-800/50 bg-zinc-700/60"
                                         } else {
@@ -347,6 +356,25 @@ pub fn CollectionBrowser(controller: SignalController) -> Element {
                                         onclick: move |_| {
                                             col3_selected.set(Some(cidx));
                                             col4_selected.set(None);
+                                            // Lazy scene resolution: if this is a Presets scene
+                                            // that wasn't resolved eagerly, resolve it now.
+                                            if current_nav == NavCategory::Presets && child_engines_empty {
+                                                let controller = controller_c3.clone();
+                                                let rig_id = col2_current_id().clone();
+                                                let scene_id = child_id.clone();
+                                                spawn(async move {
+                                                    if let Some((engines, params)) =
+                                                        resolve_scene_detail(&controller, &rig_id, &scene_id).await
+                                                    {
+                                                        let mut items = col3_items();
+                                                        if let Some(item) = items.get_mut(cidx) {
+                                                            item.detail.engines = engines;
+                                                        }
+                                                        param_lookup.set(params);
+                                                        col3_items.set(items);
+                                                    }
+                                                });
+                                            }
                                             if has_col4 {
                                                 let items = col3_items();
                                                 if let Some(item) = items.get(cidx) {

@@ -20,14 +20,15 @@ const MIN_ROWS: usize = 1;
 pub(crate) const GROUP_PAD: f64 = CELL_GAP as f64 * 0.25;
 pub(crate) const GROUP_TITLE_H: f64 = 12.0;
 
-// Layer-level: thin title that fits within the padding band between
-// the layer border and its child module containers.
+// Layer-level: left-side label, no top title bar needed.
+// Extra left padding to fit the rotated label.
 pub(crate) const LAYER_PAD: f64 = GROUP_PAD + 8.0;
-pub(crate) const LAYER_TITLE_H: f64 = 10.0;
+pub(crate) const LAYER_LEFT_PAD: f64 = 36.0;
+pub(crate) const LAYER_TITLE_H: f64 = 0.0;
 
-// Engine-level: thin title in the padding band between engine and layer.
+// Engine-level: top label with enough height for clear separation.
 pub(crate) const ENGINE_PAD: f64 = LAYER_PAD + 8.0;
-pub(crate) const ENGINE_TITLE_H: f64 = 10.0;
+pub(crate) const ENGINE_TITLE_H: f64 = 14.0;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Grid bounds
@@ -260,6 +261,7 @@ pub(crate) fn compute_container_groups(chain: &[GridSlot]) -> Vec<ContainerGroup
         bounds: BTreeMap<String, BoundsInfo>,
         level: ContainerLevel,
         pad: f64,
+        left_extra: f64,
         title_h: f64,
         step: f64,
         cell_size: f64,
@@ -280,9 +282,9 @@ pub(crate) fn compute_container_groups(chain: &[GridSlot]) -> Vec<ContainerGroup
                     display_name,
                     level,
                     color,
-                    x: cell_x - pad,
+                    x: cell_x - pad - left_extra,
                     y: cell_y - pad - title_h,
-                    w: (cell_x2 - cell_x) + pad * 2.0,
+                    w: (cell_x2 - cell_x) + pad * 2.0 + left_extra,
                     h: (cell_y2 - cell_y) + pad * 2.0 + title_h,
                 }
             })
@@ -309,18 +311,6 @@ pub(crate) fn compute_container_groups(chain: &[GridSlot]) -> Vec<ContainerGroup
         *layers_per_engine.entry(engine_key.to_string()).or_insert(0) += 1;
     }
 
-    // Engine level — only if there are multiple engines
-    if num_engines > 1 {
-        result.extend(make_rects(
-            engine_bounds,
-            ContainerLevel::Engine,
-            ENGINE_PAD,
-            ENGINE_TITLE_H,
-            step,
-            cell_size,
-        ));
-    }
-
     // Layer level — only if parent engine has > 1 layer
     let visible_layers: BTreeMap<String, BoundsInfo> = layer_bounds
         .into_iter()
@@ -329,20 +319,68 @@ pub(crate) fn compute_container_groups(chain: &[GridSlot]) -> Vec<ContainerGroup
             layers_per_engine.get(engine_key).copied().unwrap_or(0) > 1
         })
         .collect();
-    result.extend(make_rects(
+    let layer_rects = make_rects(
         visible_layers,
         ContainerLevel::Layer,
         LAYER_PAD,
+        LAYER_LEFT_PAD,
         LAYER_TITLE_H,
         step,
         cell_size,
-    ));
+    );
+
+    // Engine level — built from child layer/cell bounds so it wraps correctly.
+    // Uses the actual layer rects when available, falls back to cell bounds.
+    if num_engines > 1 {
+        for (engine_key, eb) in &engine_bounds {
+            // Start with the engine's own cell bounds
+            let cell_x = eb.min_col as f64 * step;
+            let cell_y = eb.min_row as f64 * step;
+            let cell_x2 = eb.max_col as f64 * step + cell_size;
+            let cell_y2 = eb.max_row as f64 * step + cell_size;
+            let mut min_x = cell_x;
+            let mut min_y = cell_y;
+            let mut max_x = cell_x2;
+            let mut max_y = cell_y2;
+
+            // Expand to encompass child layer rects
+            for lr in &layer_rects {
+                if lr.key.starts_with(engine_key) {
+                    min_x = min_x.min(lr.x);
+                    min_y = min_y.min(lr.y);
+                    max_x = max_x.max(lr.x + lr.w);
+                    max_y = max_y.max(lr.y + lr.h);
+                }
+            }
+
+            let color = module_type_color(eb.module_type);
+            let display_name = engine_key
+                .rsplit('/')
+                .next()
+                .unwrap_or(engine_key)
+                .to_string();
+
+            result.push(ContainerGroupRect {
+                key: engine_key.clone(),
+                display_name,
+                level: ContainerLevel::Engine,
+                color,
+                x: min_x - ENGINE_PAD,
+                y: min_y - ENGINE_PAD - ENGINE_TITLE_H,
+                w: (max_x - min_x) + ENGINE_PAD * 2.0,
+                h: (max_y - min_y) + ENGINE_PAD * 2.0 + ENGINE_TITLE_H,
+            });
+        }
+    }
+
+    result.extend(layer_rects);
 
     // Module level — always rendered (lowest common denominator)
     result.extend(make_rects(
         module_bounds,
         ContainerLevel::Module,
         GROUP_PAD,
+        0.0,
         GROUP_TITLE_H,
         step,
         cell_size,

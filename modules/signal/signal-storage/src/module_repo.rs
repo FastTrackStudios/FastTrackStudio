@@ -1,6 +1,9 @@
 //! Module repository — data access for module collections and variants.
 
+use std::collections::HashMap;
+
 use sea_orm::*;
+use sea_orm::sea_query::Index;
 use sea_orm::{ConnectionTrait, Schema};
 use signal_proto::{
     metadata::Metadata, Module, ModulePreset, ModulePresetId, ModuleSnapshot, ModuleSnapshotId,
@@ -59,6 +62,18 @@ impl ModuleRepoLive {
         let mut module_snapshots = schema.create_table_from_entity(entity::module_snapshot::Entity);
         module_snapshots.if_not_exists();
         self.db.execute(backend.build(&module_snapshots)).await?;
+        self.db
+            .execute(
+                backend.build(
+                    Index::create()
+                        .name("idx_module_snapshots_preset_id_id")
+                        .table(entity::module_snapshot::Entity)
+                        .col(entity::module_snapshot::Column::ModulePresetId)
+                        .col(entity::module_snapshot::Column::Id)
+                        .if_not_exists(),
+                ),
+            )
+            .await?;
 
         // Add version column if missing
         self.db
@@ -169,19 +184,13 @@ impl ModuleRepoLive {
 
     // region: --- Shared query helpers
 
-    /// Assemble a full `ModulePreset` (collection) from its entity model by loading all variant snapshots.
-    async fn assemble_module_collection(
-        &self,
+    /// Assemble a full `ModulePreset` (collection) from its entity model and variant snapshot models.
+    fn assemble_module_collection(
         preset_model: &entity::module_preset::Model,
+        snapshot_models: &[entity::module_snapshot::Model],
     ) -> StorageResult<ModulePreset> {
-        let snapshot_models = entity::module_snapshot::Entity::find()
-            .filter(entity::module_snapshot::Column::ModulePresetId.eq(preset_model.id.clone()))
-            .order_by_asc(entity::module_snapshot::Column::Id)
-            .all(&self.db)
-            .await?;
-
         let mut variants = Vec::with_capacity(snapshot_models.len());
-        for model in &snapshot_models {
+        for model in snapshot_models {
             variants.push(Self::module_snapshot_from_model(model)?);
         }
 
@@ -224,17 +233,44 @@ impl ModuleRepoLive {
 #[async_trait::async_trait]
 impl ModuleRepo for ModuleRepoLive {
     async fn list_module_collections(&self) -> StorageResult<Vec<ModulePreset>> {
-        let preset_models = entity::module_preset::Entity::find()
+        let preset_models: Vec<entity::module_preset::Model> = entity::module_preset::Entity::find()
             .order_by_asc(entity::module_preset::Column::Id)
             .all(&self.db)
             .await?;
+        let preset_models: Vec<entity::module_preset::Model> = preset_models
+            .into_iter()
+            .filter(|p| !p.name.starts_with("__phantom__"))
+            .collect();
+
+        if preset_models.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let preset_ids: Vec<String> = preset_models.iter().map(|p| p.id.clone()).collect();
+        let snapshot_models: Vec<entity::module_snapshot::Model> = entity::module_snapshot::Entity::find()
+            .filter(entity::module_snapshot::Column::ModulePresetId.is_in(preset_ids))
+            .order_by_asc(entity::module_snapshot::Column::ModulePresetId)
+            .order_by_asc(entity::module_snapshot::Column::Id)
+            .all(&self.db)
+            .await?;
+        let mut snapshots_by_preset: HashMap<String, Vec<entity::module_snapshot::Model>> =
+            HashMap::new();
+        for snapshot_model in snapshot_models {
+            snapshots_by_preset
+                .entry(snapshot_model.module_preset_id.clone())
+                .or_default()
+                .push(snapshot_model);
+        }
 
         let mut out = Vec::with_capacity(preset_models.len());
-        for preset_model in preset_models
-            .iter()
-            .filter(|p| !p.name.starts_with("__phantom__"))
-        {
-            out.push(self.assemble_module_collection(preset_model).await?);
+        for preset_model in &preset_models {
+            let snapshot_models = snapshots_by_preset
+                .remove(&preset_model.id)
+                .unwrap_or_default();
+            out.push(Self::assemble_module_collection(
+                preset_model,
+                &snapshot_models,
+            )?);
         }
 
         Ok(out)

@@ -24,6 +24,8 @@
 //! the current active block.  This deterministic "load = apply" contract ensures
 //! the active block always reflects the last loaded variant.
 
+pub mod engine;
+
 use roam::Context;
 use signal_proto::{
     engine::{Engine, EngineId, EngineScene, EngineSceneId},
@@ -42,18 +44,46 @@ use signal_proto::{
         infer_tags_from_name, BrowserEntityKind, BrowserEntry, BrowserHit, BrowserIndex,
         BrowserNodeId, BrowserQuery, StructuredTag, TagCategory, TagSet, TagWeights,
     },
+    scene_template::{SceneTemplate, SceneTemplateId},
     Block, BlockParameterOverride, BlockService, BlockType, BrowserService, EngineService,
     LayerService, ModuleBlockSource, ModulePreset, ModulePresetId, ModuleSnapshot,
     ModuleSnapshotId, Preset, PresetId, PresetService, ProfileService, ResolveService,
-    SetlistService, Snapshot, SnapshotId, SongService, ALL_BLOCK_TYPES,
+    SceneTemplateService, SetlistService, Snapshot, SnapshotId, SongService, ALL_BLOCK_TYPES,
 };
 use signal_storage::{
     BlockRepo, BlockRepoLive, DatabaseConnection, EngineRepo, EngineRepoLive, LayerRepo,
     LayerRepoLive, ModuleRepo, ModuleRepoLive, ProfileRepo, ProfileRepoLive, RigRepo, RigRepoLive,
-    SetlistRepo, SetlistRepoLive, SongRepo, SongRepoLive,
+    SceneTemplateRepo, SceneTemplateRepoLive, SetlistRepo, SetlistRepoLive, SongRepo, SongRepoLive,
 };
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use tokio::sync::RwLock;
+
+// region: --- ServiceCache
+
+/// In-memory read cache for list queries. Populated on first access, invalidated
+/// on writes. All fields are `Option` — `None` means "not yet cached".
+struct ServiceCache {
+    block_collections: HashMap<BlockType, Vec<Preset>>,
+    module_collections: Option<Vec<ModulePreset>>,
+    layers: Option<Vec<Layer>>,
+    engines: Option<Vec<Engine>>,
+    rigs: Option<Vec<Rig>>,
+}
+
+impl ServiceCache {
+    fn new() -> Self {
+        Self {
+            block_collections: HashMap::new(),
+            module_collections: None,
+            layers: None,
+            engines: None,
+            rigs: None,
+        }
+    }
+}
+
+// endregion: --- ServiceCache
 
 // region: --- SignalLive
 
@@ -70,6 +100,7 @@ pub struct SignalLive<
     P = ProfileRepoLive,
     So = SongRepoLive,
     Se = SetlistRepoLive,
+    St = SceneTemplateRepoLive,
 > where
     B: BlockRepo,
     M: ModuleRepo,
@@ -79,6 +110,7 @@ pub struct SignalLive<
     P: ProfileRepo,
     So: SongRepo,
     Se: SetlistRepo,
+    St: SceneTemplateRepo,
 {
     block_repo: Arc<B>,
     module_repo: Arc<M>,
@@ -88,9 +120,11 @@ pub struct SignalLive<
     profile_repo: Arc<P>,
     song_repo: Arc<So>,
     setlist_repo: Arc<Se>,
+    scene_template_repo: Arc<St>,
+    cache: Arc<RwLock<ServiceCache>>,
 }
 
-impl<B, M, L, E, R, P, So, Se> SignalLive<B, M, L, E, R, P, So, Se>
+impl<B, M, L, E, R, P, So, Se, St> SignalLive<B, M, L, E, R, P, So, Se, St>
 where
     B: BlockRepo,
     M: ModuleRepo,
@@ -100,6 +134,7 @@ where
     P: ProfileRepo,
     So: SongRepo,
     Se: SetlistRepo,
+    St: SceneTemplateRepo,
 {
     pub fn new(
         block_repo: Arc<B>,
@@ -110,6 +145,7 @@ where
         profile_repo: Arc<P>,
         song_repo: Arc<So>,
         setlist_repo: Arc<Se>,
+        scene_template_repo: Arc<St>,
     ) -> Self {
         Self {
             block_repo,
@@ -120,6 +156,8 @@ where
             profile_repo,
             song_repo,
             setlist_repo,
+            scene_template_repo,
+            cache: Arc::new(RwLock::new(ServiceCache::new())),
         }
     }
 }
@@ -134,6 +172,7 @@ impl
         ProfileRepoLive,
         SongRepoLive,
         SetlistRepoLive,
+        SceneTemplateRepoLive,
     >
 {
     pub fn from_db(db: DatabaseConnection) -> Self {
@@ -145,7 +184,8 @@ impl
             Arc::new(RigRepoLive::new(db.clone())),
             Arc::new(ProfileRepoLive::new(db.clone())),
             Arc::new(SongRepoLive::new(db.clone())),
-            Arc::new(SetlistRepoLive::new(db)),
+            Arc::new(SetlistRepoLive::new(db.clone())),
+            Arc::new(SceneTemplateRepoLive::new(db)),
         )
     }
 }
@@ -154,7 +194,7 @@ impl
 
 // region: --- BlockService impl
 
-impl<B, M, L, E, R, P, So, Se> BlockService for SignalLive<B, M, L, E, R, P, So, Se>
+impl<B, M, L, E, R, P, So, Se, St> BlockService for SignalLive<B, M, L, E, R, P, So, Se, St>
 where
     B: BlockRepo,
     M: ModuleRepo,
@@ -164,6 +204,7 @@ where
     P: ProfileRepo,
     So: SongRepo,
     Se: SetlistRepo,
+    St: SceneTemplateRepo,
 {
     /// Load the current active block state for a given block type.
     /// Returns `Block::default()` when no state has been persisted yet.
@@ -187,10 +228,24 @@ where
 
     /// List all block collections (presets) for a given block type.
     async fn list_presets(&self, _cx: &Context, block_type: BlockType) -> Vec<Preset> {
-        self.block_repo
+        {
+            let cache = self.cache.read().await;
+            if let Some(cached) = cache.block_collections.get(&block_type) {
+                return cached.clone();
+            }
+        }
+        let result = self
+            .block_repo
             .list_block_collections(block_type)
             .await
-            .unwrap_or_default()
+            .unwrap_or_default();
+        {
+            let mut cache = self.cache.write().await;
+            cache
+                .block_collections
+                .insert(block_type, result.clone());
+        }
+        result
     }
 
     /// Load the default variant of a block collection and apply it as the
@@ -242,10 +297,22 @@ where
 
     /// List all module collections.
     async fn list_module_presets(&self, _cx: &Context) -> Vec<ModulePreset> {
-        self.module_repo
+        {
+            let cache = self.cache.read().await;
+            if let Some(cached) = cache.module_collections.as_ref() {
+                return cached.clone();
+            }
+        }
+        let result = self
+            .module_repo
             .list_module_collections()
             .await
-            .unwrap_or_default()
+            .unwrap_or_default();
+        {
+            let mut cache = self.cache.write().await;
+            cache.module_collections = Some(result.clone());
+        }
+        result
     }
 
     /// Load the default variant of a module collection.
@@ -280,7 +347,7 @@ where
 
 // region: --- LayerService impl
 
-impl<B, M, L, E, R, P, So, Se> LayerService for SignalLive<B, M, L, E, R, P, So, Se>
+impl<B, M, L, E, R, P, So, Se, St> LayerService for SignalLive<B, M, L, E, R, P, So, Se, St>
 where
     B: BlockRepo,
     M: ModuleRepo,
@@ -290,9 +357,21 @@ where
     P: ProfileRepo,
     So: SongRepo,
     Se: SetlistRepo,
+    St: SceneTemplateRepo,
 {
     async fn list_layers(&self, _cx: &Context) -> Vec<Layer> {
-        self.layer_repo.list_layers().await.unwrap_or_default()
+        {
+            let cache = self.cache.read().await;
+            if let Some(cached) = cache.layers.as_ref() {
+                return cached.clone();
+            }
+        }
+        let result = self.layer_repo.list_layers().await.unwrap_or_default();
+        {
+            let mut cache = self.cache.write().await;
+            cache.layers = Some(result.clone());
+        }
+        result
     }
 
     async fn load_layer(&self, _cx: &Context, id: LayerId) -> Option<Layer> {
@@ -306,10 +385,12 @@ where
             }
         }
         let _ = self.layer_repo.save_layer(&layer).await;
+        self.cache.write().await.layers = None;
     }
 
     async fn delete_layer(&self, _cx: &Context, id: LayerId) -> () {
         let _ = self.layer_repo.delete_layer(&id).await;
+        self.cache.write().await.layers = None;
     }
 
     async fn load_layer_variant(
@@ -330,7 +411,7 @@ where
 
 // region: --- EngineService impl
 
-impl<B, M, L, E, R, P, So, Se> EngineService for SignalLive<B, M, L, E, R, P, So, Se>
+impl<B, M, L, E, R, P, So, Se, St> EngineService for SignalLive<B, M, L, E, R, P, So, Se, St>
 where
     B: BlockRepo,
     M: ModuleRepo,
@@ -340,9 +421,21 @@ where
     P: ProfileRepo,
     So: SongRepo,
     Se: SetlistRepo,
+    St: SceneTemplateRepo,
 {
     async fn list_engines(&self, _cx: &Context) -> Vec<Engine> {
-        self.engine_repo.list_engines().await.unwrap_or_default()
+        {
+            let cache = self.cache.read().await;
+            if let Some(cached) = cache.engines.as_ref() {
+                return cached.clone();
+            }
+        }
+        let result = self.engine_repo.list_engines().await.unwrap_or_default();
+        {
+            let mut cache = self.cache.write().await;
+            cache.engines = Some(result.clone());
+        }
+        result
     }
 
     async fn load_engine(&self, _cx: &Context, id: EngineId) -> Option<Engine> {
@@ -364,10 +457,12 @@ where
             }
         }
         let _ = self.engine_repo.save_engine(&engine).await;
+        self.cache.write().await.engines = None;
     }
 
     async fn delete_engine(&self, _cx: &Context, id: EngineId) -> () {
         let _ = self.engine_repo.delete_engine(&id).await;
+        self.cache.write().await.engines = None;
     }
 
     async fn load_engine_variant(
@@ -388,7 +483,7 @@ where
 
 // region: --- PresetService impl
 
-impl<B, M, L, E, R, P, So, Se> PresetService for SignalLive<B, M, L, E, R, P, So, Se>
+impl<B, M, L, E, R, P, So, Se, St> PresetService for SignalLive<B, M, L, E, R, P, So, Se, St>
 where
     B: BlockRepo,
     M: ModuleRepo,
@@ -398,9 +493,21 @@ where
     P: ProfileRepo,
     So: SongRepo,
     Se: SetlistRepo,
+    St: SceneTemplateRepo,
 {
     async fn list_presets_all(&self, _cx: &Context) -> Vec<Rig> {
-        self.rig_repo.list_rigs().await.unwrap_or_default()
+        {
+            let cache = self.cache.read().await;
+            if let Some(cached) = cache.rigs.as_ref() {
+                return cached.clone();
+            }
+        }
+        let result = self.rig_repo.list_rigs().await.unwrap_or_default();
+        {
+            let mut cache = self.cache.write().await;
+            cache.rigs = Some(result.clone());
+        }
+        result
     }
 
     async fn load_preset_rig(&self, _cx: &Context, id: RigId) -> Option<Rig> {
@@ -414,10 +521,12 @@ where
             }
         }
         let _ = self.rig_repo.save_rig(&rig).await;
+        self.cache.write().await.rigs = None;
     }
 
     async fn delete_preset(&self, _cx: &Context, id: RigId) -> () {
         let _ = self.rig_repo.delete_rig(&id).await;
+        self.cache.write().await.rigs = None;
     }
 
     async fn load_preset_variant(
@@ -438,7 +547,7 @@ where
 
 // region: --- ProfileService impl
 
-impl<B, M, L, E, R, P, So, Se> ProfileService for SignalLive<B, M, L, E, R, P, So, Se>
+impl<B, M, L, E, R, P, So, Se, St> ProfileService for SignalLive<B, M, L, E, R, P, So, Se, St>
 where
     B: BlockRepo,
     M: ModuleRepo,
@@ -448,6 +557,7 @@ where
     P: ProfileRepo,
     So: SongRepo,
     Se: SetlistRepo,
+    St: SceneTemplateRepo,
 {
     async fn list_profiles(&self, _cx: &Context) -> Vec<Profile> {
         self.profile_repo.list_profiles().await.unwrap_or_default()
@@ -488,7 +598,7 @@ where
 
 // region: --- SongService impl
 
-impl<B, M, L, E, R, P, So, Se> SongService for SignalLive<B, M, L, E, R, P, So, Se>
+impl<B, M, L, E, R, P, So, Se, St> SongService for SignalLive<B, M, L, E, R, P, So, Se, St>
 where
     B: BlockRepo,
     M: ModuleRepo,
@@ -498,6 +608,7 @@ where
     P: ProfileRepo,
     So: SongRepo,
     Se: SetlistRepo,
+    St: SceneTemplateRepo,
 {
     async fn list_songs(&self, _cx: &Context) -> Vec<Song> {
         self.song_repo.list_songs().await.unwrap_or_default()
@@ -538,7 +649,7 @@ where
 
 // region: --- SetlistService impl
 
-impl<B, M, L, E, R, P, So, Se> SetlistService for SignalLive<B, M, L, E, R, P, So, Se>
+impl<B, M, L, E, R, P, So, Se, St> SetlistService for SignalLive<B, M, L, E, R, P, So, Se, St>
 where
     B: BlockRepo,
     M: ModuleRepo,
@@ -548,6 +659,7 @@ where
     P: ProfileRepo,
     So: SongRepo,
     Se: SetlistRepo,
+    St: SceneTemplateRepo,
 {
     async fn list_setlists(&self, _cx: &Context) -> Vec<Setlist> {
         self.setlist_repo.list_setlists().await.unwrap_or_default()
@@ -621,7 +733,7 @@ fn build_entry(
     }
 }
 
-impl<B, M, L, E, R, P, So, Se> BrowserService for SignalLive<B, M, L, E, R, P, So, Se>
+impl<B, M, L, E, R, P, So, Se, St> BrowserService for SignalLive<B, M, L, E, R, P, So, Se, St>
 where
     B: BlockRepo,
     M: ModuleRepo,
@@ -631,6 +743,7 @@ where
     P: ProfileRepo,
     So: SongRepo,
     Se: SetlistRepo,
+    St: SceneTemplateRepo,
 {
     async fn browser_index(&self, _cx: &Context) -> BrowserIndex {
         let mut index = BrowserIndex::default();
@@ -1062,7 +1175,7 @@ fn apply_effective_set_overrides(graph: &mut ResolvedGraph) {
     }
 }
 
-impl<B, M, L, E, R, P, So, Se> SignalLive<B, M, L, E, R, P, So, Se>
+impl<B, M, L, E, R, P, So, Se, St> SignalLive<B, M, L, E, R, P, So, Se, St>
 where
     B: BlockRepo,
     M: ModuleRepo,
@@ -1072,6 +1185,7 @@ where
     P: ProfileRepo,
     So: SongRepo,
     Se: SetlistRepo,
+    St: SceneTemplateRepo,
 {
     async fn resolve_block_ref(
         &self,
@@ -1558,7 +1672,7 @@ where
     }
 }
 
-impl<B, M, L, E, R, P, So, Se> ResolveService for SignalLive<B, M, L, E, R, P, So, Se>
+impl<B, M, L, E, R, P, So, Se, St> ResolveService for SignalLive<B, M, L, E, R, P, So, Se, St>
 where
     B: BlockRepo,
     M: ModuleRepo,
@@ -1568,6 +1682,7 @@ where
     P: ProfileRepo,
     So: SongRepo,
     Se: SetlistRepo,
+    St: SceneTemplateRepo,
 {
     async fn resolve_target(
         &self,
@@ -1762,9 +1877,65 @@ where
 
 // endregion: --- ResolveService impl
 
+// region: --- SceneTemplateService impl
+
+impl<B, M, L, E, R, P, So, Se, St> SceneTemplateService
+    for SignalLive<B, M, L, E, R, P, So, Se, St>
+where
+    B: BlockRepo,
+    M: ModuleRepo,
+    L: LayerRepo,
+    E: EngineRepo,
+    R: RigRepo,
+    P: ProfileRepo,
+    So: SongRepo,
+    Se: SetlistRepo,
+    St: SceneTemplateRepo,
+{
+    async fn list_scene_templates(&self, _cx: &Context) -> Vec<SceneTemplate> {
+        self.scene_template_repo
+            .list_scene_templates()
+            .await
+            .unwrap_or_default()
+    }
+
+    async fn load_scene_template(
+        &self,
+        _cx: &Context,
+        id: SceneTemplateId,
+    ) -> Option<SceneTemplate> {
+        self.scene_template_repo
+            .load_scene_template(&id)
+            .await
+            .ok()
+            .flatten()
+    }
+
+    async fn save_scene_template(&self, _cx: &Context, template: SceneTemplate) {
+        let _ = self
+            .scene_template_repo
+            .save_scene_template(&template)
+            .await;
+    }
+
+    async fn delete_scene_template(&self, _cx: &Context, id: SceneTemplateId) {
+        let _ = self.scene_template_repo.delete_scene_template(&id).await;
+    }
+
+    async fn reorder_scene_templates(&self, _cx: &Context, ordered_ids: Vec<SceneTemplateId>) {
+        let _ = self
+            .scene_template_repo
+            .reorder_scene_templates(&ordered_ids)
+            .await;
+    }
+}
+
+// endregion: --- SceneTemplateService impl
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{Duration, Instant};
     use signal_proto::seed_id;
     use signal_storage::{
         runtime_seed_bundle, BlockRepoLive, Database, EngineRepoLive, LayerRepoLive,
@@ -1830,11 +2001,13 @@ mod tests {
         for song in seeds.songs {
             song_repo.save_song(&song).await?;
         }
-        let setlist_repo = SetlistRepoLive::new(db);
+        let setlist_repo = SetlistRepoLive::new(db.clone());
         setlist_repo.init_schema().await?;
         for setlist in seeds.setlists {
             setlist_repo.save_setlist(&setlist).await?;
         }
+        let scene_template_repo = SceneTemplateRepoLive::new(db);
+        scene_template_repo.init_schema().await?;
         Ok(SignalLive::new(
             Arc::new(block_repo),
             Arc::new(module_repo),
@@ -1844,6 +2017,7 @@ mod tests {
             Arc::new(profile_repo),
             Arc::new(song_repo),
             Arc::new(setlist_repo),
+            Arc::new(scene_template_repo),
         ))
     }
 
@@ -1881,8 +2055,10 @@ mod tests {
         profile_repo.init_schema().await?;
         let song_repo = SongRepoLive::new(db.clone());
         song_repo.init_schema().await?;
-        let setlist_repo = SetlistRepoLive::new(db);
+        let setlist_repo = SetlistRepoLive::new(db.clone());
         setlist_repo.init_schema().await?;
+        let scene_template_repo = SceneTemplateRepoLive::new(db);
+        scene_template_repo.init_schema().await?;
         let svc = SignalLive::new(
             Arc::new(block_repo),
             Arc::new(module_repo),
@@ -1892,6 +2068,7 @@ mod tests {
             Arc::new(profile_repo),
             Arc::new(song_repo),
             Arc::new(setlist_repo),
+            Arc::new(scene_template_repo),
         );
         let cx = test_context();
 
@@ -1997,8 +2174,10 @@ mod tests {
         profile_repo.init_schema().await?;
         let song_repo = SongRepoLive::new(db.clone());
         song_repo.init_schema().await?;
-        let setlist_repo = SetlistRepoLive::new(db);
+        let setlist_repo = SetlistRepoLive::new(db.clone());
         setlist_repo.init_schema().await?;
+        let scene_template_repo = SceneTemplateRepoLive::new(db);
+        scene_template_repo.init_schema().await?;
         let svc = SignalLive::new(
             Arc::new(block_repo),
             Arc::new(module_repo),
@@ -2008,6 +2187,7 @@ mod tests {
             Arc::new(profile_repo),
             Arc::new(song_repo),
             Arc::new(setlist_repo),
+            Arc::new(scene_template_repo),
         );
         let cx = test_context();
 
@@ -2804,6 +2984,72 @@ mod tests {
         Ok(())
     }
 
+    #[tokio::test]
+    async fn test_live_browser_index_load_time_smoke() -> Result<()> {
+        let svc = seeded_service().await?;
+        let cx = test_context();
+
+        let started = Instant::now();
+        let index: BrowserIndex = svc.browser_index(&cx).await;
+        let elapsed = started.elapsed();
+
+        assert!(!index.entries().is_empty());
+        assert!(
+            elapsed < Duration::from_secs(5),
+            "browser index build exceeded smoke budget: {:?}",
+            elapsed
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[ignore = "performance benchmark; run manually to profile browser index build time"]
+    async fn test_live_browser_index_load_time_benchmark() -> Result<()> {
+        let svc = seeded_service().await?;
+        let cx = test_context();
+
+        let iterations: usize = std::env::var("SIGNAL2_BROWSER_INDEX_BENCH_ITERS")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .filter(|v| *v > 0)
+            .unwrap_or(25);
+        let max_budget_ms: Option<u64> = std::env::var("SIGNAL2_BROWSER_INDEX_BENCH_MAX_MS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok());
+
+        let mut runs = Vec::with_capacity(iterations);
+        for _ in 0..iterations {
+            let started = Instant::now();
+            let index: BrowserIndex = svc.browser_index(&cx).await;
+            runs.push(started.elapsed());
+            assert!(!index.entries().is_empty());
+        }
+
+        let mut micros: Vec<u128> = runs.iter().map(|d| d.as_micros()).collect();
+        micros.sort_unstable();
+        let p95_idx = ((micros.len().saturating_sub(1)) * 95) / 100;
+        let p95 = micros[p95_idx];
+        let max = micros.last().copied().unwrap_or(0);
+        let avg = micros.iter().sum::<u128>() / micros.len() as u128;
+
+        println!(
+            "browser-index benchmark: iterations={}, avg={}us, p95={}us, max={}us",
+            iterations, avg, p95, max
+        );
+
+        if let Some(max_budget_ms) = max_budget_ms {
+            let max_budget_us = (max_budget_ms as u128) * 1_000;
+            assert!(
+                p95 <= max_budget_us,
+                "browser index p95 {}us exceeded configured budget {}us ({}ms)",
+                p95,
+                max_budget_us,
+                max_budget_ms
+            );
+        }
+        Ok(())
+    }
+
     // endregion: --- Browser service
 
     // region: --- Resolver service
@@ -2831,6 +3077,90 @@ mod tests {
             .effective_overrides
             .iter()
             .any(|ov| matches!(ov.op, signal_proto::overrides::NodeOverrideOp::Set(_))));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_live_keys_megarig_load_time_smoke() -> Result<()> {
+        let svc = seeded_service().await?;
+        let cx = test_context();
+
+        let started = Instant::now();
+        let graph: ResolvedGraph = svc
+            .resolve_target(
+                &cx,
+                ResolveTarget::RigScene {
+                    rig_id: RigId::from_uuid(seed_id("keys-megarig")),
+                    scene_id: RigSceneId::from_uuid(seed_id("keys-megarig-default")),
+                },
+            )
+            .await
+            .expect("resolve keys megarig");
+        let elapsed = started.elapsed();
+
+        assert_eq!(graph.rig_id.as_str(), seed_id("keys-megarig").to_string());
+        assert!(
+            elapsed < Duration::from_secs(5),
+            "keys megarig load exceeded smoke budget: {:?}",
+            elapsed
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[ignore = "performance benchmark; run manually to profile Keys MegaRig load time"]
+    async fn test_live_keys_megarig_load_time_benchmark() -> Result<()> {
+        let svc = seeded_service().await?;
+        let cx = test_context();
+
+        let iterations: usize = std::env::var("SIGNAL2_KEYS_MEGARIG_BENCH_ITERS")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .filter(|v| *v > 0)
+            .unwrap_or(50);
+        let max_budget_ms: Option<u64> = std::env::var("SIGNAL2_KEYS_MEGARIG_BENCH_MAX_MS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok());
+
+        let mut runs = Vec::with_capacity(iterations);
+        for _ in 0..iterations {
+            let started = Instant::now();
+            let graph: ResolvedGraph = svc
+                .resolve_target(
+                    &cx,
+                    ResolveTarget::RigScene {
+                        rig_id: RigId::from_uuid(seed_id("keys-megarig")),
+                        scene_id: RigSceneId::from_uuid(seed_id("keys-megarig-default")),
+                    },
+                )
+                .await
+                .expect("resolve keys megarig");
+            runs.push(started.elapsed());
+            assert_eq!(graph.rig_id.as_str(), seed_id("keys-megarig").to_string());
+        }
+
+        let mut micros: Vec<u128> = runs.iter().map(|d| d.as_micros()).collect();
+        micros.sort_unstable();
+        let p95_idx = ((micros.len().saturating_sub(1)) * 95) / 100;
+        let p95 = micros[p95_idx];
+        let max = micros.last().copied().unwrap_or(0);
+        let avg = micros.iter().sum::<u128>() / micros.len() as u128;
+
+        println!(
+            "keys-megarig load benchmark: iterations={}, avg={}us, p95={}us, max={}us",
+            iterations, avg, p95, max
+        );
+
+        if let Some(max_budget_ms) = max_budget_ms {
+            let max_budget_us = (max_budget_ms as u128) * 1_000;
+            assert!(
+                p95 <= max_budget_us,
+                "keys megarig p95 {}us exceeded configured budget {}us ({}ms)",
+                p95,
+                max_budget_us,
+                max_budget_ms
+            );
+        }
         Ok(())
     }
 

@@ -1,6 +1,7 @@
 //! Layer seed data — default layer collections for development/demo.
 
-use signal_proto::layer::{BlockRef, Layer, LayerRef, LayerSnapshot, ModuleRef};
+use signal_proto::defaults::archetype_john_mayer;
+use signal_proto::layer::{BlockRef, Layer, LayerRef, LayerSnapshot, ModuleRef, PluginRef};
 use signal_proto::metadata::Metadata;
 use signal_proto::overrides::{NodePath, Override};
 use signal_proto::{seed_id, EngineType};
@@ -11,6 +12,7 @@ pub fn layers() -> Vec<Layer> {
         keys_layer_core(),
         keys_layer_space(),
         guitar_layer_main(),
+        guitar_layer_archetype_jm(),
         synth_layer_osc(),
         synth_layer_motion(),
         synth_layer_texture(),
@@ -297,6 +299,19 @@ fn pad_layer_shimmer() -> Layer {
     )
 }
 
+fn guitar_layer_archetype_jm() -> Layer {
+    let default_variant =
+        LayerSnapshot::new(seed_id("guitar-layer-archetype-jm-default"), "Default")
+            .with_plugin(PluginRef::new(archetype_john_mayer()));
+
+    Layer::new(
+        seed_id("guitar-layer-archetype-jm"),
+        "Archetype JM",
+        EngineType::Guitar,
+        default_variant,
+    )
+}
+
 fn vocal_layer_main() -> Layer {
     let default_variant = LayerSnapshot::new(seed_id("vocal-layer-main-default"), "Default")
         .with_module(ModuleRef::new(seed_id("vox-rescue")))
@@ -325,7 +340,7 @@ mod tests {
 
     #[test]
     fn layer_count() {
-        assert_eq!(layers().len(), 11);
+        assert_eq!(layers().len(), 12);
     }
 
     #[test]
@@ -364,7 +379,7 @@ mod tests {
                 .iter()
                 .filter(|l| l.engine_type == EngineType::Guitar)
                 .count(),
-            1
+            2
         );
         assert_eq!(
             layers
