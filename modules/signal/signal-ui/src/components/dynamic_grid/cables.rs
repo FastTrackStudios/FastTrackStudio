@@ -126,6 +126,7 @@ pub(crate) fn compute_module_ports(chain: &[GridSlot]) -> Vec<ModulePort> {
 
 struct ModuleIO {
     name: String,
+    layer_group: Option<String>,
     #[allow(dead_code)]
     left_edge: Vec<(usize, usize)>,
     right_edge: Vec<(usize, usize)>,
@@ -170,7 +171,9 @@ pub(crate) fn resolve_cables(chain: &[GridSlot]) -> Vec<Cable> {
         return cables;
     }
 
-    let mut group_map: Vec<(String, usize, usize, usize, usize, String)> = Vec::new();
+    // (name, min_col, max_col, min_row, max_row, color, layer_group)
+    let mut group_map: Vec<(String, usize, usize, usize, usize, String, Option<String>)> =
+        Vec::new();
     let mut seen: BTreeMap<String, usize> = BTreeMap::new();
 
     for s in chain.iter() {
@@ -186,13 +189,21 @@ pub(crate) fn resolve_cables(chain: &[GridSlot]) -> Vec<Cable> {
             entry.4 = entry.4.max(s.row);
         } else {
             seen.insert(g.clone(), group_map.len());
-            group_map.push((g.clone(), s.col, s.col, s.row, s.row, color));
+            group_map.push((
+                g.clone(),
+                s.col,
+                s.col,
+                s.row,
+                s.row,
+                color,
+                s.layer_group.clone(),
+            ));
         }
     }
 
     let modules: Vec<ModuleIO> = group_map
         .iter()
-        .map(|(name, min_c, max_c, min_r, max_r, color)| {
+        .map(|(name, min_c, max_c, min_r, max_r, color, layer_group)| {
             let mut left_edge: Vec<(usize, usize)> = chain
                 .iter()
                 .filter(|s| {
@@ -213,6 +224,7 @@ pub(crate) fn resolve_cables(chain: &[GridSlot]) -> Vec<Cable> {
 
             ModuleIO {
                 name: name.clone(),
+                layer_group: layer_group.clone(),
                 left_edge,
                 right_edge,
                 min_col: *min_c,
@@ -300,51 +312,65 @@ pub(crate) fn resolve_cables(chain: &[GridSlot]) -> Vec<Cable> {
         }
     }
 
-    // 3. Inter-module cables
+    // 3. Inter-module cables — only within the same layer.
+    //    Layers are parallel signal paths within an engine, and engines are
+    //    parallel to each other, so we must NOT draw cables across layers or
+    //    engines. Group modules by layer_group and connect sequentially
+    //    within each group.
     {
         let step = (CELL_SIZE + CELL_GAP) as f64;
 
-        for pair in modules.windows(2) {
-            let from_mod = &pair[0];
-            let to_mod = &pair[1];
-            let from_pt = from_mod.output_point();
-            let to_pt = to_mod.input_point();
-            let color = from_mod.color.clone();
-            let both_bypassed =
-                module_all_bypassed(&from_mod.name) && module_all_bypassed(&to_mod.name);
-
-            let rows_overlap =
-                from_mod.min_row <= to_mod.max_row && to_mod.min_row <= from_mod.max_row;
-
-            if rows_overlap {
-                // Same row band — direct Bézier between module I/O ports
-                cables.push(Cable::new(from_pt, to_pt, color, both_bypassed));
+        // Group module indices by layer_group, preserving insertion order.
+        let mut layer_groups: Vec<(Option<String>, Vec<usize>)> = Vec::new();
+        let mut layer_idx_map: BTreeMap<Option<String>, usize> = BTreeMap::new();
+        for (i, m) in modules.iter().enumerate() {
+            if let Some(&idx) = layer_idx_map.get(&m.layer_group) {
+                layer_groups[idx].1.push(i);
             } else {
-                // Cross-row: check if this is a row wrap (output right → input left below)
-                let is_wrap = to_pt.0 < from_pt.0 && to_pt.1 > from_pt.1;
+                layer_idx_map.insert(m.layer_group.clone(), layer_groups.len());
+                layer_groups.push((m.layer_group.clone(), vec![i]));
+            }
+        }
 
-                if is_wrap {
-                    // Row wrap — route horizontal segment through the gap
-                    // channel just below the source module's row band.
-                    // Hug the bottom of the source row's cells
-                    let channel_y =
-                        from_mod.max_row as f64 * step + CELL_SIZE as f64 + CELL_GAP as f64 * 0.12;
-                    let mut c = Cable::new(from_pt, to_pt, color, both_bypassed);
-                    c.route_y = Some(channel_y);
-                    cables.push(c);
+        for (_layer, mod_indices) in &layer_groups {
+            for pair in mod_indices.windows(2) {
+                let from_mod = &modules[pair[0]];
+                let to_mod = &modules[pair[1]];
+                let from_pt = from_mod.output_point();
+                let to_pt = to_mod.input_point();
+                let color = from_mod.color.clone();
+                let both_bypassed =
+                    module_all_bypassed(&from_mod.name) && module_all_bypassed(&to_mod.name);
+
+                let rows_overlap =
+                    from_mod.min_row <= to_mod.max_row && to_mod.min_row <= from_mod.max_row;
+
+                if rows_overlap {
+                    cables.push(Cable::new(from_pt, to_pt, color, both_bypassed));
                 } else {
-                    // Forward cross-row — route through gap channel
-                    let upper_bottom_row = from_mod.max_row.min(to_mod.max_row);
-                    let channel_y =
-                        upper_bottom_row as f64 * step + CELL_SIZE as f64 + CELL_GAP as f64 * 0.25;
+                    let is_wrap = to_pt.0 < from_pt.0 && to_pt.1 > from_pt.1;
 
-                    cables.push(Cable::routed(
-                        from_pt,
-                        to_pt,
-                        color,
-                        channel_y,
-                        both_bypassed,
-                    ));
+                    if is_wrap {
+                        let channel_y = from_mod.max_row as f64 * step
+                            + CELL_SIZE as f64
+                            + CELL_GAP as f64 * 0.12;
+                        let mut c = Cable::new(from_pt, to_pt, color, both_bypassed);
+                        c.route_y = Some(channel_y);
+                        cables.push(c);
+                    } else {
+                        let upper_bottom_row = from_mod.max_row.min(to_mod.max_row);
+                        let channel_y = upper_bottom_row as f64 * step
+                            + CELL_SIZE as f64
+                            + CELL_GAP as f64 * 0.25;
+
+                        cables.push(Cable::routed(
+                            from_pt,
+                            to_pt,
+                            color,
+                            channel_y,
+                            both_bypassed,
+                        ));
+                    }
                 }
             }
         }
