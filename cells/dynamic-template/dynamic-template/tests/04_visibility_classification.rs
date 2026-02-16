@@ -13,15 +13,25 @@ use std::collections::HashMap;
 
 type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
 
+/// Classification results: both item-level and track-level group mappings.
+struct Classification {
+    /// Original input name → top-level group (e.g., "Kick In" → "Drums")
+    items: HashMap<String, String>,
+    /// Track display name → top-level group (e.g., "Left" → "Guitars")
+    /// Note: track names can repeat across groups (e.g., "Left" in Guitars and "Left" in
+    /// another group), so this stores ALL (name, group) pairs as a Vec for lookup.
+    tracks: Vec<(String, String)>,
+}
+
 /// Walk a TrackHierarchy and classify each track into its top-level visibility group.
 ///
 /// This replicates the folder-depth propagation algorithm from visibility.rs:
 /// - Folder tracks that start at depth 0 define a top-level group
 /// - All descendants inherit that group via a stack
 /// - Tracks that close folder levels pop from the stack
-fn classify_tracks(hierarchy: &TrackHierarchy) -> HashMap<String, String> {
+fn classify_tracks(hierarchy: &TrackHierarchy) -> Classification {
     let mut item_to_group: HashMap<String, String> = HashMap::new();
-    let mut track_to_group: HashMap<String, String> = HashMap::new();
+    let mut track_entries: Vec<(String, String)> = Vec::new();
 
     // Stack of group names — group_stack[0] is always the top-level group
     let mut group_stack: Vec<String> = Vec::new();
@@ -36,8 +46,8 @@ fn classify_tracks(hierarchy: &TrackHierarchy) -> HashMap<String, String> {
             group_stack[0].clone()
         };
 
-        // Map this track's name to its group
-        track_to_group.insert(track.name.clone(), current_group.clone());
+        // Record this track's group assignment
+        track_entries.push((track.name.clone(), current_group.clone()));
 
         // Map all items on this track to the group
         for item in &track.items {
@@ -56,7 +66,10 @@ fn classify_tracks(hierarchy: &TrackHierarchy) -> HashMap<String, String> {
         }
     }
 
-    item_to_group
+    Classification {
+        items: item_to_group,
+        tracks: track_entries,
+    }
 }
 
 // =============================================================================
@@ -101,7 +114,8 @@ fn marc_martel_visibility_groups() -> Result<()> {
 
     let config = default_config();
     let tracks = items.clone().organize_into_tracks(&config, None)?;
-    let groups = classify_tracks(&tracks);
+    let classification = classify_tracks(&tracks);
+    let groups = &classification.items;
 
     // --- Drums: all kick, snare, tom, cymbal, and room tracks ---
     assert_eq!(groups.get("Kick In").unwrap(), "Drums", "Kick In → Drums");
@@ -208,6 +222,145 @@ fn marc_martel_visibility_groups() -> Result<()> {
     Ok(())
 }
 
+/// Verify that ALL tracks in the hierarchy — including intermediate folder tracks
+/// and leaf tracks with generic names like "Left", "Right", "SUM", "Top" — inherit
+/// the correct top-level group through folder-depth propagation.
+///
+/// This is the critical test for the visibility manager: in REAPER, these tracks
+/// exist as real tracks with names that don't match any monarchy pattern. They
+/// must inherit their group from the parent folder chain.
+#[test]
+fn marc_martel_all_tracks_inherit_group() -> Result<()> {
+    let items = vec![
+        "Kick In",
+        "Kick Out",
+        "Kick Sample",
+        "Snare Top",
+        "Snare Bottom",
+        "Snare Sample",
+        "Snare Sample Two",
+        "Tom1",
+        "Tom2",
+        "HighHat",
+        "OH",
+        "Rooms",
+        "Percussion",
+        "Bass DI",
+        "Piano",
+        "Lead Guitar Amplitube Left",
+        "Lead Guitar Amplitube Right",
+        "Lead Guitar Clean DI Left",
+        "Lead Guitar Clean DI Right",
+        "Vocal",
+        "H3000.One",
+        "H3000.Two",
+        "H3000.Three",
+        "Vocal.Eko.Plate",
+        "Vocal.Magic",
+        "BGV1",
+        "BGV2",
+        "BGV3",
+        "BGV4",
+    ];
+
+    let config = default_config();
+    let tracks = items.organize_into_tracks(&config, None)?;
+    let classification = classify_tracks(&tracks);
+
+    // Every track in the hierarchy (folders, subfolders, and leaves) must belong
+    // to a top-level group. This verifies folder-depth propagation works for
+    // tracks whose display names don't match any monarchy pattern.
+    let known_groups = [
+        "Drums",
+        "Percussion",
+        "Bass",
+        "Guitars",
+        "Keys",
+        "Synths",
+        "Horns",
+        "Harmonica",
+        "Vocals",
+        "Choir",
+        "Orchestra",
+        "SFX",
+        "Guide",
+        "Reference",
+    ];
+
+    for (track_name, group) in &classification.tracks {
+        assert!(
+            known_groups.contains(&group.as_str()),
+            "Track '{}' classified as '{}' which is not a known visibility group",
+            track_name,
+            group
+        );
+    }
+
+    // Verify specific intermediate/leaf track names that DON'T match monarchy patterns
+    // but MUST inherit from their parent folder:
+
+    // Drums substructure: folder and leaf tracks
+    let drums_tracks = [
+        "Drums", "Kick", "SUM", "In", "Out", "Snare", "Top", "Bottom", "Trig", "Toms", "T1", "T2",
+        "Cymbals", "OH", "Hi Hat", "Rooms",
+    ];
+    for name in &drums_tracks {
+        let found = classification
+            .tracks
+            .iter()
+            .find(|(n, g)| n == name && g == "Drums");
+        assert!(
+            found.is_some(),
+            "Track '{}' should be classified as Drums (via folder inheritance)",
+            name
+        );
+    }
+
+    // Guitars substructure
+    let guitar_tracks = ["Guitars", "Clean", "Lead", "Left", "Right"];
+    for name in &guitar_tracks {
+        let found = classification
+            .tracks
+            .iter()
+            .any(|(n, g)| n == name && g == "Guitars");
+        assert!(
+            found,
+            "Track '{}' should be classified as Guitars (via folder inheritance)",
+            name
+        );
+    }
+
+    // Vocals substructure
+    let vocal_tracks = ["Vocals", "Lead", "BGVs"];
+    for name in &vocal_tracks {
+        let found = classification
+            .tracks
+            .iter()
+            .any(|(n, g)| n == name && g == "Vocals");
+        assert!(
+            found,
+            "Track '{}' should be classified as Vocals (via folder inheritance)",
+            name
+        );
+    }
+
+    // SFX tracks
+    let sfx_tracks = ["SFX", "H3000.One", "H3000.Two", "H3000.Three"];
+    for name in &sfx_tracks {
+        let found = classification
+            .tracks
+            .iter()
+            .any(|(n, g)| n == name && g == "SFX");
+        assert!(
+            found,
+            "Track '{}' should be classified as SFX (via folder inheritance)",
+            name
+        );
+    }
+
+    Ok(())
+}
+
 /// Verify group counts: the number of items per group should match expectations.
 #[test]
 fn marc_martel_group_counts() -> Result<()> {
@@ -245,7 +398,8 @@ fn marc_martel_group_counts() -> Result<()> {
 
     let config = default_config();
     let tracks = items.clone().organize_into_tracks(&config, None)?;
-    let groups = classify_tracks(&tracks);
+    let classification = classify_tracks(&tracks);
+    let groups = &classification.items;
 
     // Count items per group
     let mut counts: HashMap<String, usize> = HashMap::new();
@@ -330,7 +484,8 @@ fn marc_martel_no_unclassified() -> Result<()> {
 
     let config = default_config();
     let tracks = items.clone().organize_into_tracks(&config, None)?;
-    let groups = classify_tracks(&tracks);
+    let classification = classify_tracks(&tracks);
+    let groups = &classification.items;
 
     for item in &items {
         let group = groups
