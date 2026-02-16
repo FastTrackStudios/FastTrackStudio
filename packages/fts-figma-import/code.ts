@@ -366,9 +366,25 @@ function queueExport(): void {
   setTimeout(async () => {
     exportQueued = false;
     const options = normalizeOptions(undefined);
-    await exportSelection(options, 'live');
+    // Serialize once, reuse for both UI + bridge
+    const result = await buildExportPayload(options);
+    if (!result) {
+      return;
+    }
+    const { payload, totalNodes } = result;
+    const json = JSON.stringify(payload);
+    figma.ui.postMessage({
+      type: 'export-result',
+      reason: 'live',
+      json,
+      stats: {
+        totalRoots: payload.nodes.length,
+        totalNodes,
+        bytes: json.length,
+      },
+    });
     if (bridgeLiveEnabled) {
-      await exportToBridge(options, bridgeLiveUrl, true);
+      await sendToBridge(json, totalNodes, bridgeLiveUrl, true);
     }
   }, 150);
 }
@@ -381,62 +397,77 @@ function normalizeOptions(input?: Partial<ExportOptions>): ExportOptions {
   };
 }
 
-async function exportSelection(options: ExportOptions, reason: 'manual' | 'live'): Promise<void> {
+async function buildExportPayload(
+  options: ExportOptions,
+): Promise<{ payload: ExportPayload; totalNodes: number } | null> {
   const roots = resolveExportRoots();
   if (roots.length === 0) {
-    figma.ui.postMessage({
-      type: 'export-error',
-      message:
-        'No export roots. Pin a frame with "Select Frame" or select a frame on canvas.',
-    });
-    return;
+    return null;
   }
 
+  const assetAccumulator = createAssetAccumulator();
+  const nodes = await Promise.all(
+    roots.map((node) => serializeNode(node, 0, options, assetAccumulator)),
+  );
+  const totalNodes = nodes.reduce((count, node) => count + countNodes(node), 0);
+
+  const payload: ExportPayload = {
+    schema: 'fts.figma.export/v2',
+    generatedAt: new Date().toISOString(),
+    source: {
+      plugin: 'fts-figma-import',
+      pluginVersion: '0.1.0',
+      editorType: figma.editorType,
+      fileKey: figma.fileKey ?? undefined,
+      page: {
+        id: figma.currentPage.id,
+        name: figma.currentPage.name,
+      },
+    },
+    selection: {
+      ids: roots.map((node) => node.id),
+      names: roots.map((node) => node.name),
+      totalRoots: roots.length,
+      totalNodes,
+    },
+    options,
+    assets: assetAccumulator.assets,
+    nodes,
+  };
+
+  return { payload, totalNodes };
+}
+
+async function exportSelection(options: ExportOptions, reason: 'manual' | 'live'): Promise<void> {
   try {
-    const assetAccumulator = createAssetAccumulator();
-    const nodes = await Promise.all(
-      roots.map((node) => serializeNode(node, 0, options, assetAccumulator)),
-    );
-    const totalNodes = nodes.reduce((count, node) => count + countNodes(node), 0);
+    const result = await buildExportPayload(options);
+    if (!result) {
+      figma.ui.postMessage({
+        type: 'export-error',
+        message:
+          'No export roots. Pin a frame with "Select Frame" or select a frame on canvas.',
+      });
+      return;
+    }
 
-    const payload: ExportPayload = {
-      schema: 'fts.figma.export/v2',
-      generatedAt: new Date().toISOString(),
-      source: {
-        plugin: 'fts-figma-import',
-        pluginVersion: '0.1.0',
-        editorType: figma.editorType,
-        fileKey: figma.fileKey ?? undefined,
-        page: {
-          id: figma.currentPage.id,
-          name: figma.currentPage.name,
-        },
-      },
-      selection: {
-        ids: roots.map((node) => node.id),
-        names: roots.map((node) => node.name),
-        totalRoots: roots.length,
-        totalNodes,
-      },
-      options,
-      assets: assetAccumulator.assets,
-      nodes,
-    };
-
-    const json = JSON.stringify(payload, null, 2);
+    const { payload, totalNodes } = result;
+    // Pretty-print for manual (human-readable), compact for live (speed)
+    const json = reason === 'manual'
+      ? JSON.stringify(payload, null, 2)
+      : JSON.stringify(payload);
     figma.ui.postMessage({
       type: 'export-result',
       reason,
       json,
       stats: {
-        totalRoots: roots.length,
+        totalRoots: payload.nodes.length,
         totalNodes,
         bytes: json.length,
       },
     });
 
     if (reason === 'manual') {
-      figma.notify(`Exported ${totalNodes} nodes from ${roots.length} root(s).`);
+      figma.notify(`Exported ${totalNodes} nodes from ${payload.nodes.length} root(s).`);
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -452,85 +483,67 @@ async function exportToBridge(
   bridgeUrl?: string,
   silent = false,
 ): Promise<void> {
-  const roots = resolveExportRoots();
-  if (roots.length === 0) {
-    figma.ui.postMessage({
-      type: 'bridge-error',
-      message:
-        'No export roots. Pin a frame with "Select Frame" or select a frame on canvas.',
-    });
-    return;
-  }
-
   try {
-    const assetAccumulator = createAssetAccumulator();
-    const nodes = await Promise.all(
-      roots.map((node) => serializeNode(node, 0, options, assetAccumulator)),
-    );
-    const totalNodes = nodes.reduce((count, node) => count + countNodes(node), 0);
-    const payload: ExportPayload = {
-      schema: 'fts.figma.export/v2',
-      generatedAt: new Date().toISOString(),
-      source: {
-        plugin: 'fts-figma-import',
-        pluginVersion: '0.1.0',
-        editorType: figma.editorType,
-        fileKey: figma.fileKey ?? undefined,
-        page: {
-          id: figma.currentPage.id,
-          name: figma.currentPage.name,
-        },
-      },
-      selection: {
-        ids: roots.map((node) => node.id),
-        names: roots.map((node) => node.name),
-        totalRoots: roots.length,
-        totalNodes,
-      },
-      options,
-      assets: assetAccumulator.assets,
-      nodes,
-    };
-    const json = JSON.stringify(payload, null, 2);
-    const url = bridgeUrl?.trim() || 'http://localhost:43123/figma-export';
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: json,
-    });
-
-    if (!res.ok) {
-      throw new Error(`Bridge responded ${res.status} ${res.statusText}`);
+    const result = await buildExportPayload(options);
+    if (!result) {
+      figma.ui.postMessage({
+        type: 'bridge-error',
+        message:
+          'No export roots. Pin a frame with "Select Frame" or select a frame on canvas.',
+      });
+      return;
     }
 
-    const responseBody = (await res.json()) as {
-      ok?: boolean;
-      path?: string;
-      bytes?: number;
-      error?: string;
-    };
-
-    if (!responseBody.ok) {
-      throw new Error(responseBody.error ?? 'Bridge failed to write file.');
-    }
-
-    figma.ui.postMessage({
-      type: 'bridge-result',
-      path: responseBody.path,
-      bytes: responseBody.bytes,
-      totalNodes,
-    });
-    if (!silent) {
-      figma.notify(
-        `Sent ${totalNodes} nodes to bridge (${responseBody.path ?? '/tmp/fts-figma-export.json'}).`,
-      );
-    }
+    const { payload, totalNodes } = result;
+    const json = JSON.stringify(payload);
+    await sendToBridge(json, totalNodes, bridgeUrl, silent);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     figma.ui.postMessage({
       type: 'bridge-error',
       message,
     });
+  }
+}
+
+async function sendToBridge(
+  json: string,
+  totalNodes: number,
+  bridgeUrl?: string,
+  silent = false,
+): Promise<void> {
+  const url = bridgeUrl?.trim() || 'http://localhost:43123/figma-export';
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: json,
+  });
+
+  if (!res.ok) {
+    throw new Error(`Bridge responded ${res.status} ${res.statusText}`);
+  }
+
+  const responseBody = (await res.json()) as {
+    ok?: boolean;
+    path?: string;
+    bytes?: number;
+    error?: string;
+  };
+
+  if (!responseBody.ok) {
+    throw new Error(responseBody.error ?? 'Bridge failed to write file.');
+  }
+
+  figma.ui.postMessage({
+    type: 'bridge-result',
+    path: responseBody.path,
+    bytes: responseBody.bytes,
+    totalNodes,
+  });
+  if (!silent) {
+    figma.notify(
+      `Sent ${totalNodes} nodes to bridge (${responseBody.path ?? '/tmp/fts-figma-export.json'}).`,
+    );
   }
 }
 
@@ -541,6 +554,17 @@ async function serializeNode(
   assets: AssetAccumulator,
   parentBounds?: RectLike,
 ): Promise<ExportNode> {
+  // Early-out for invisible subtrees — still emit a minimal stub so the
+  // tree structure is preserved, but skip all expensive work.
+  if (!node.visible) {
+    return pruneUndefined({
+      id: node.id,
+      name: node.name,
+      type: node.type,
+      visible: false,
+    } as ExportNode);
+  }
+
   const absoluteBoundingBox = readAbsoluteBoundingBox(node);
   const relativeTransform = normalizeRelativeTransform(
     sanitize(readProp(node, 'relativeTransform')),
@@ -664,7 +688,12 @@ async function serializeNode(
   }
 
   if (options.includeSvg || options.includePng) {
-    base.assetRefs = await exportNodeAssets(node, options, assets);
+    // Only export SVG/PNG for nodes that benefit from rasterized fallback.
+    // Frames, groups, and rectangles are rendered natively; exporting them
+    // is the dominant cost for complex designs.
+    if (needsAssetExport(node)) {
+      base.assetRefs = await exportNodeAssets(node, options, assets);
+    }
   }
 
   const imageFillAssetRefs = await exportImageFillAssets(node, assets);
@@ -764,6 +793,15 @@ async function exportImageFillAssets(
     if (paint.type !== 'IMAGE' || typeof paint.imageHash !== 'string' || !paint.imageHash) {
       continue;
     }
+
+    // Use Figma's imageHash as the dedup key — avoids hashing multi-MB base64 strings
+    const dedupKey = `image-fill:${paint.imageHash}`;
+    const existingId = assets.byHash.get(dedupKey);
+    if (existingId) {
+      refs[paint.imageHash] = existingId;
+      continue;
+    }
+
     const image = figma.getImageByHash(paint.imageHash);
     if (!image) {
       continue;
@@ -771,20 +809,41 @@ async function exportImageFillAssets(
     try {
       const bytes = await image.getBytesAsync();
       const base64 = bytesToBase64(bytes);
-      const assetId = recordAsset(
-        assets,
-        'image-fill',
-        'application/octet-stream',
-        base64,
-        bytes.length,
-      );
-      refs[paint.imageHash] = assetId;
+      const id = `image-fill:${paint.imageHash}`;
+      assets.assets.push({
+        id,
+        kind: 'image-fill',
+        mime: 'application/octet-stream',
+        encoding: 'base64',
+        data: base64,
+        byteLength: bytes.length,
+      });
+      assets.byHash.set(dedupKey, id);
+      refs[paint.imageHash] = id;
     } catch {
       // Ignore image decode/export failures for individual fills.
     }
   }
 
   return refs;
+}
+
+function needsAssetExport(node: SceneNode): boolean {
+  // These types have complex geometry that our renderer handles natively
+  // via fill/stroke/layout — no SVG fallback needed.
+  switch (node.type) {
+    case 'FRAME':
+    case 'GROUP':
+    case 'RECTANGLE':
+    case 'TEXT':
+    case 'SECTION':
+    case 'SLICE':
+      return false;
+    default:
+      // Component instances, vectors, boolean ops, ellipses, polygons,
+      // stars, lines — benefit from SVG fallback.
+      return true;
+  }
 }
 
 function supportsVectorExport(node: SceneNode): boolean {
@@ -847,6 +906,19 @@ function sanitize<T>(value: T): T {
   // Primitives do not need deep JSON sanitization.
   if (typeof value !== 'object') {
     return value;
+  }
+
+  // Fast path: arrays of numbers/strings (e.g., dashPattern, rectangleCornerRadii,
+  // relativeTransform rows) — these never contain figma.mixed or bigint.
+  if (Array.isArray(value) && value.length > 0) {
+    const first = value[0];
+    if (typeof first === 'number' || typeof first === 'string') {
+      return value as T;
+    }
+    // Array of arrays of numbers (e.g., relativeTransform) — also safe
+    if (Array.isArray(first) && first.length > 0 && typeof first[0] === 'number') {
+      return value as T;
+    }
   }
 
   const json = JSON.stringify(value, (_k, v) => {
@@ -936,21 +1008,21 @@ function hashString(input: string): string {
 
 function bytesToBase64(bytes: Uint8Array): string {
   const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-  let output = '';
-  for (let i = 0; i < bytes.length; i += 3) {
+  // Pre-allocate array and join at end — avoids O(n) intermediate string allocations
+  const chunks: string[] = [];
+  const len = bytes.length;
+  for (let i = 0; i < len; i += 3) {
     const a = bytes[i];
-    const b = i + 1 < bytes.length ? bytes[i + 1] : 0;
-    const c = i + 2 < bytes.length ? bytes[i + 2] : 0;
+    const b = i + 1 < len ? bytes[i + 1] : 0;
+    const c = i + 2 < len ? bytes[i + 2] : 0;
 
     const triple = (a << 16) | (b << 8) | c;
-    const enc1 = (triple >> 18) & 63;
-    const enc2 = (triple >> 12) & 63;
-    const enc3 = (triple >> 6) & 63;
-    const enc4 = triple & 63;
-
-    output += alphabet[enc1] + alphabet[enc2];
-    output += i + 1 < bytes.length ? alphabet[enc3] : '=';
-    output += i + 2 < bytes.length ? alphabet[enc4] : '=';
+    chunks.push(
+      alphabet[(triple >> 18) & 63],
+      alphabet[(triple >> 12) & 63],
+      i + 1 < len ? alphabet[(triple >> 6) & 63] : '=',
+      i + 2 < len ? alphabet[triple & 63] : '=',
+    );
   }
-  return output;
+  return chunks.join('');
 }
