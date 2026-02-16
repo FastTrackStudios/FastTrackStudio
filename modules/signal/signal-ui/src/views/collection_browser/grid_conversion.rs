@@ -3,7 +3,7 @@
 //! Converts domain hierarchy data (`EngineFlowData`, `ModuleChainData`,
 //! `SignalChain`) into flat `Vec<GridSlot>` for the `DynamicGridView`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use dioxus::prelude::*;
 use signal::SignalChain;
@@ -91,6 +91,7 @@ pub(super) fn engines_to_grid_slots(
     params: &ParamLookup,
 ) -> Vec<GridSlot> {
     let mut slots = Vec::new();
+    let mut occupied = HashSet::new();
     let mut row: usize = 0;
 
     for engine in engines {
@@ -107,6 +108,7 @@ pub(super) fn engines_to_grid_slots(
         let mut layer_measures: Vec<LayerMeasure> = Vec::new();
         for layer in &engine.layers {
             let mut temp_slots = Vec::new();
+            let mut temp_occupied = HashSet::new();
             let mut temp_col: usize = 0;
             let temp_row: usize = 0;
             let mut temp_base_row = temp_row;
@@ -127,6 +129,7 @@ pub(super) fn engines_to_grid_slots(
                     temp_base_row,
                     &mut temp_slots,
                     params,
+                    &mut temp_occupied,
                 );
                 temp_col = col_cursor;
             }
@@ -182,6 +185,7 @@ pub(super) fn engines_to_grid_slots(
                     layer_row,
                     &mut slots,
                     params,
+                    &mut occupied,
                 );
                 layer_col = col_cursor;
             }
@@ -209,6 +213,7 @@ pub(super) fn module_chains_to_grid_slots(
     params: &ParamLookup,
 ) -> Vec<GridSlot> {
     let mut slots = Vec::new();
+    let mut occupied = HashSet::new();
     let mut col: usize = 0;
     let mut row: usize = 0;
 
@@ -233,6 +238,7 @@ pub(super) fn module_chains_to_grid_slots(
             row,
             &mut slots,
             params,
+            &mut occupied,
         );
         col = col_cursor;
     }
@@ -248,6 +254,7 @@ pub(super) fn signal_chain_to_grid_slots(
     params: &ParamLookup,
 ) -> Vec<GridSlot> {
     let mut slots = Vec::new();
+    let mut occupied = HashSet::new();
     let mut col_cursor = 0;
     flatten_chain_nodes(
         chain.nodes(),
@@ -259,6 +266,7 @@ pub(super) fn signal_chain_to_grid_slots(
         0,
         &mut slots,
         params,
+        &mut occupied,
     );
     slots
 }
@@ -287,6 +295,9 @@ fn count_chain_width(nodes: &[signal::SignalNode]) -> usize {
 }
 
 /// Recursively flatten SignalNodes into GridSlots, handling splits.
+///
+/// `occupied` tracks all `(col, row)` positions that have been placed,
+/// making it impossible for splits to collide with existing blocks.
 fn flatten_chain_nodes(
     nodes: &[signal::SignalNode],
     module_key: &str,
@@ -297,19 +308,22 @@ fn flatten_chain_nodes(
     base_row: usize,
     slots: &mut Vec<GridSlot>,
     param_lookup: &ParamLookup,
+    occupied: &mut HashSet<(usize, usize)>,
 ) {
     for node in nodes {
         match node {
             signal::SignalNode::Block(mb) => {
-                // Extract parameters from the block source when available.
                 let parameters = extract_block_params(mb, param_lookup);
+                let col = *col_cursor;
+                let row = base_row;
+                occupied.insert((col, row));
                 slots.push(GridSlot {
                     id: uuid::Uuid::new_v4(),
                     block_type: mb.block_type(),
                     block_preset_name: Some(mb.label().to_string()),
                     plugin_name: None,
-                    col: *col_cursor,
-                    row: base_row,
+                    col,
+                    row,
                     module_group: Some(module_key.to_string()),
                     module_type,
                     layer_group: layer_key.map(|s| s.to_string()),
@@ -322,26 +336,32 @@ fn flatten_chain_nodes(
                 *col_cursor += 1;
             }
             signal::SignalNode::Split { lanes } => {
-                // Fan-out: each wet lane gets its own row, starting at the same col.
-                // Dry (empty) lanes are NOT placed as cells — the cable layer draws
-                // a pass-through cable from module input → output instead.
                 let split_start_col = *col_cursor;
                 let mut max_col = split_start_col;
 
                 let wet: Vec<&signal::SignalChain> =
                     lanes.iter().filter(|l| !l.is_empty()).collect();
-
-                // Fan splits upward from base_row: the last (bottom) lane
-                // stays at base_row so it aligns with the module's row band.
-                // Extra lanes go above, into the gap from ROW_BAND_STRIDE.
-                // This prevents downward fan-out from colliding with modules
-                // that wrap to the next row band below.
                 let wet_count = wet.len();
 
+                // Find a contiguous run of `wet_count` free rows at the
+                // split columns, centered as close to `base_row` as possible.
+                let lane_width = wet
+                    .iter()
+                    .map(|l| count_chain_width(l.nodes()))
+                    .max()
+                    .unwrap_or(1);
+                let check_cols = split_start_col..split_start_col + lane_width;
+
+                // Search outward from base_row for a free row range.
+                let start_row = find_free_row_range(
+                    base_row,
+                    wet_count,
+                    &check_cols.collect::<Vec<_>>(),
+                    occupied,
+                );
+
                 for (i, lane) in wet.iter().enumerate() {
-                    let lane_row = base_row
-                        .saturating_sub(wet_count.saturating_sub(1))
-                        .saturating_add(i);
+                    let lane_row = start_row + i;
                     let mut lane_col = split_start_col;
                     flatten_chain_nodes(
                         lane.nodes(),
@@ -353,6 +373,7 @@ fn flatten_chain_nodes(
                         lane_row,
                         slots,
                         param_lookup,
+                        occupied,
                     );
                     if lane_col > max_col {
                         max_col = lane_col;
@@ -363,6 +384,49 @@ fn flatten_chain_nodes(
             }
         }
     }
+}
+
+/// Find a contiguous run of `count` rows where none of the given columns
+/// are occupied. Searches outward from `preferred_row`, trying above first
+/// (to keep splits from pushing into the next row band below).
+fn find_free_row_range(
+    preferred_row: usize,
+    count: usize,
+    cols: &[usize],
+    occupied: &HashSet<(usize, usize)>,
+) -> usize {
+    // Helper: check if rows [start..start+count] are all free at the given cols.
+    let range_free = |start: usize| -> bool {
+        for r in start..start + count {
+            for &c in cols {
+                if occupied.contains(&(c, r)) {
+                    return false;
+                }
+            }
+        }
+        true
+    };
+
+    // Try centering around preferred_row (bottom lane at preferred_row).
+    let centered = preferred_row.saturating_sub(count.saturating_sub(1));
+    if range_free(centered) {
+        return centered;
+    }
+
+    // Search outward: alternate above and below preferred_row.
+    for offset in 1..50 {
+        let above = preferred_row.saturating_sub(count.saturating_sub(1) + offset);
+        if range_free(above) {
+            return above;
+        }
+        let below = preferred_row + offset;
+        if range_free(below) {
+            return below;
+        }
+    }
+
+    // Fallback (shouldn't happen): place far below.
+    preferred_row + 10
 }
 
 // endregion: --- Converters
