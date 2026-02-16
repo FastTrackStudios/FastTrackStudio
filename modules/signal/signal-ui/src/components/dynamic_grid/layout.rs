@@ -20,13 +20,13 @@ const MIN_ROWS: usize = 1;
 pub(crate) const GROUP_PAD: f64 = CELL_GAP as f64 * 0.25;
 pub(crate) const GROUP_TITLE_H: f64 = 12.0;
 
-// Layer-level container padding (wraps modules) — subtle, less obtrusive
-pub(crate) const LAYER_PAD: f64 = GROUP_PAD + 8.0;
-pub(crate) const LAYER_TITLE_H: f64 = 14.0;
+// Layer-level container padding (wraps modules) — no title bar, just border
+pub(crate) const LAYER_PAD: f64 = GROUP_PAD + 6.0;
+pub(crate) const LAYER_TITLE_H: f64 = 0.0;
 
-// Engine-level container padding (wraps layers) — subtle, less obtrusive
-pub(crate) const ENGINE_PAD: f64 = LAYER_PAD + 8.0;
-pub(crate) const ENGINE_TITLE_H: f64 = 16.0;
+// Engine-level container padding (wraps layers) — no title bar, just border
+pub(crate) const ENGINE_PAD: f64 = LAYER_PAD + 6.0;
+pub(crate) const ENGINE_TITLE_H: f64 = 0.0;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Grid bounds

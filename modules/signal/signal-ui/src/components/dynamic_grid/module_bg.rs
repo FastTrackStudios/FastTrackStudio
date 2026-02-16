@@ -4,7 +4,7 @@
 
 use dioxus::prelude::*;
 
-use super::layout::{ContainerLevel, ENGINE_TITLE_H, GROUP_TITLE_H, LAYER_TITLE_H};
+use super::layout::{ContainerLevel, GROUP_TITLE_H};
 use super::types::ModuleVisualState;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -80,83 +80,56 @@ pub(super) struct ContainerBackgroundProps {
 
 #[component]
 pub(super) fn ContainerBackground(props: ContainerBackgroundProps) -> Element {
-    let (
-        bg_alpha,
-        border_alpha,
-        border_style,
-        radius,
-        title_h,
-        z_index,
-        dot_size,
-        font_class,
-        label_opacity,
-    ) = match props.level {
-        ContainerLevel::Engine => (
-            "04",
-            "10",
-            "solid",
-            "14px",
-            ENGINE_TITLE_H,
-            1,
-            "w-1.5 h-1.5",
-            "text-[7px] font-semibold uppercase tracking-wider",
-            "0.40",
-        ),
-        ContainerLevel::Layer => (
-            "05",
-            "12",
-            "dashed",
-            "12px",
-            LAYER_TITLE_H,
-            2,
-            "w-1.5 h-1.5",
-            "text-[7px] font-medium tracking-wide",
-            "0.35",
-        ),
-        ContainerLevel::Module => {
-            // Module level should use ModuleBackground instead, but handle gracefully
-            (
-                "12",
-                "30",
+    let (bg_alpha, border_alpha, border_style, radius, z_index, font_class, label_opacity) =
+        match props.level {
+            ContainerLevel::Engine => (
+                "04",
+                "10",
                 "solid",
                 "10px",
-                GROUP_TITLE_H,
-                3,
-                "w-2 h-2",
-                "text-[8px] font-semibold",
-                "0.80",
-            )
-        }
-    };
+                1,
+                "text-[7px] font-semibold uppercase tracking-wider",
+                "0.35",
+            ),
+            ContainerLevel::Layer => (
+                "03",
+                "0a",
+                "dashed",
+                "8px",
+                2,
+                "text-[7px] font-medium tracking-wide",
+                "0.30",
+            ),
+            ContainerLevel::Module => {
+                // Module level should use ModuleBackground instead, but handle gracefully
+                (
+                    "12",
+                    "30",
+                    "solid",
+                    "10px",
+                    3,
+                    "text-[8px] font-semibold",
+                    "0.80",
+                )
+            }
+        };
 
     let bg = format!(
         "left: {}px; top: {}px; width: {}px; height: {}px; \
          background-color: {}{bg_alpha}; border: 1px {border_style} {}{border_alpha}; border-radius: {radius};",
         props.x, props.y, props.w, props.h, props.bg_color, props.bg_color,
     );
-    let title_style = format!(
-        "background-color: {}08; border-bottom: 1px {border_style} {}0a; \
-         border-radius: {radius} {radius} 0 0; height: {title_h}px;",
-        props.bg_color, props.bg_color,
-    );
 
     rsx! {
         div {
             key: "container-{props.name}",
-            class: "absolute overflow-hidden",
+            class: "absolute",
             style: "position: absolute; {bg} z-index: {z_index}; pointer-events: none;",
-            div {
-                class: "flex items-center gap-1 px-2",
-                style: "{title_style} pointer-events: none;",
-                div {
-                    class: "{dot_size} rounded-full flex-shrink-0",
-                    style: "background-color: {props.bg_color}; opacity: {label_opacity};",
-                }
-                span {
-                    class: "{font_class} whitespace-nowrap",
-                    style: "color: {props.fg_color}; opacity: {label_opacity};",
-                    "{props.name}"
-                }
+            // Floating corner label — no title bar, no height cost
+            span {
+                class: "{font_class} whitespace-nowrap",
+                style: "position: absolute; top: 2px; left: 6px; color: {props.fg_color}; opacity: {label_opacity};",
+                "{props.name}"
             }
         }
     }
