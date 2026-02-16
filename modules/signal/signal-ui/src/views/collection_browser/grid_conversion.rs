@@ -62,8 +62,11 @@ fn extract_block_params(mb: &signal::ModuleBlock, lookup: &ParamLookup) -> Vec<(
 /// Preferred max columns before wrapping a module to the next row band.
 const SOFT_MAX_COLS: usize = 14;
 
-/// Gap between row bands — 2 empty rows for cable routing + split fan-out.
-const ROW_BAND_STRIDE: usize = 3;
+/// Gap rows when a module wraps within a layer (needs space for split fan-out).
+const ROW_BAND_STRIDE: usize = 2;
+
+/// Gap rows between layers/engines (just enough for container title + breathing room).
+const LAYER_GAP: usize = 1;
 
 // endregion: --- Constants
 
@@ -120,15 +123,14 @@ pub(super) fn engines_to_grid_slots(
                 col = col_cursor;
             }
 
-            // Advance to the next row band for the next layer.
-            // Compute max row used by this layer's slots to account for splits.
+            // Advance past this layer's content for the next layer.
             let layer_max_row = slots
                 .iter()
                 .filter(|s| s.layer_group.as_deref() == Some(&layer_key))
                 .map(|s| s.row)
                 .max()
                 .unwrap_or(row);
-            row = layer_max_row + ROW_BAND_STRIDE;
+            row = layer_max_row + 1 + LAYER_GAP;
         }
     }
 
