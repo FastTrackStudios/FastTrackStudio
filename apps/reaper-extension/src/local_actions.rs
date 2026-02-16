@@ -864,6 +864,35 @@ fn handle_dt_import_and_sort() -> ActionResult {
     ActionResult::success_with_message("Import and sort completed")
 }
 
+fn handle_auto_color_all() -> ActionResult {
+    crate::auto_color::apply_colors_to_all_tracks();
+    ActionResult::success_with_message("Auto-color applied to all tracks")
+}
+
+fn handle_auto_color_selected() -> ActionResult {
+    crate::auto_color::apply_colors_to_selected();
+    ActionResult::success_with_message("Auto-color applied to selected tracks")
+}
+
+fn handle_auto_color_toggle() -> ActionResult {
+    let enabled = crate::auto_color::toggle_auto_color();
+    refresh_toolbar("FTS_DYNAMIC_TEMPLATE_AUTO_COLOR_TOGGLE");
+    ActionResult::success_with_message(format!(
+        "Auto-color {}",
+        if enabled { "enabled" } else { "disabled" }
+    ))
+}
+
+fn handle_auto_color_clear_all() -> ActionResult {
+    crate::auto_color::clear_all_track_colors();
+    ActionResult::success_with_message("All track colors cleared")
+}
+
+fn handle_auto_color_clear_selected() -> ActionResult {
+    crate::auto_color::clear_selected_track_colors();
+    ActionResult::success_with_message("Selected track colors cleared")
+}
+
 struct DynamicTemplateActionBinder;
 
 impl dynamic_template_actions::LocalActionBinder for DynamicTemplateActionBinder {
@@ -889,6 +918,26 @@ impl dynamic_template_actions::LocalActionBinder for DynamicTemplateActionBinder
 
     fn LOG_GROUPS(&self) -> actions_proto::LocalActionImplementation {
         actions_proto::LocalActionImplementation::Unsupported("Dev-only action")
+    }
+
+    fn AUTO_COLOR_ALL(&self) -> actions_proto::LocalActionImplementation {
+        actions_proto::LocalActionImplementation::Supported(Arc::new(handle_auto_color_all))
+    }
+
+    fn AUTO_COLOR_SELECTED(&self) -> actions_proto::LocalActionImplementation {
+        actions_proto::LocalActionImplementation::Supported(Arc::new(handle_auto_color_selected))
+    }
+
+    fn AUTO_COLOR_TOGGLE(&self) -> actions_proto::LocalActionImplementation {
+        actions_proto::LocalActionImplementation::Supported(Arc::new(handle_auto_color_toggle))
+    }
+
+    fn AUTO_COLOR_CLEAR_ALL(&self) -> actions_proto::LocalActionImplementation {
+        actions_proto::LocalActionImplementation::Supported(Arc::new(handle_auto_color_clear_all))
+    }
+
+    fn AUTO_COLOR_CLEAR_SELECTED(&self) -> actions_proto::LocalActionImplementation {
+        actions_proto::LocalActionImplementation::Supported(Arc::new(handle_auto_color_clear_selected))
     }
 }
 
@@ -1054,6 +1103,12 @@ pub fn register_toggle_states() {
     crate::action_registry::set_local_toggle_getter(
         "FTS_INPUT_WORKFLOWS_WORKFLOW_FAST_SLIP_EDIT",
         Arc::new(|| input_reaper::input::workflows::is_active("fast_slip_edit")),
+    );
+
+    // Auto-color toggle state
+    crate::action_registry::set_local_toggle_getter(
+        "FTS_DYNAMIC_TEMPLATE_AUTO_COLOR_TOGGLE",
+        Arc::new(crate::auto_color::is_auto_color_enabled),
     );
 
     // Visibility Manager toggle states

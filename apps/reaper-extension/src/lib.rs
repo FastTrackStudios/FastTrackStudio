@@ -9,6 +9,7 @@
 //! (like the fts-control desktop app) via the host runtime infrastructure.
 
 mod action_registry;
+mod auto_color;
 mod global;
 mod local_actions;
 mod menu;
