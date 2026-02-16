@@ -81,30 +81,47 @@ fn collect_items_recursive(
     }
 }
 
-/// Rebuild the track-to-group classification cache by running all track names
-/// through `dynamic_template::monarchy_sort`.
+/// Per-track info collected during the first pass over REAPER's track list.
+struct TrackEntry {
+    guid: String,
+    name: String,
+    /// REAPER folder depth change: 1 = starts folder, 0 = normal, -N = closes N levels
+    folder_depth_change: i32,
+}
+
+/// Rebuild the track-to-group classification cache.
+///
+/// Two-pass approach:
+/// 1. Classify track names via `monarchy_sort` to get name → group mappings
+/// 2. Walk the track list in order using `I_FOLDERDEPTH` to propagate group
+///    membership from parent folders to all descendants. This ensures that
+///    e.g. "Drums > Kick > Sum > In > Out" all belong to the "Drums" group,
+///    even though "Sum", "In", "Out" don't match any monarchy pattern.
 pub fn rebuild_cache() {
     let reaper = Reaper::get();
     let project = reaper.current_project();
     let track_count = project.track_count();
 
-    // Collect track names and GUIDs
-    let mut track_info: Vec<(String, String)> = Vec::new(); // (guid, name)
+    // Pass 1: collect track info (name, GUID, folder depth) from REAPER
+    let mut entries: Vec<TrackEntry> = Vec::with_capacity(track_count as usize);
     for i in 0..track_count {
         let Some(track) = project.track_by_index(i) else {
             continue;
         };
-        let Some(name) = track.name().map(|n| n.to_string()) else {
-            continue;
-        };
+        let name = track.name().map(|n| n.to_string()).unwrap_or_default();
         let guid = (*track.guid()).to_string_without_braces();
+        let folder_depth_change = track.folder_depth_change();
         if !guid.is_empty() {
-            track_info.push((guid, name));
+            entries.push(TrackEntry {
+                guid,
+                name,
+                folder_depth_change,
+            });
         }
     }
 
-    // Run all track names through monarchy_sort to classify into groups
-    let names: Vec<String> = track_info.iter().map(|(_, name)| name.clone()).collect();
+    // Run all track names through monarchy_sort to classify known names
+    let names: Vec<String> = entries.iter().map(|e| e.name.clone()).collect();
     let config = default_config();
 
     let name_to_group = match monarchy_sort(names, config) {
@@ -115,21 +132,54 @@ pub fn rebuild_cache() {
         }
     };
 
-    // Build GUID → group mapping by matching track names back
+    // Pass 2: walk tracks in order, propagating group from parent folders
+    // to all children via folder depth tracking.
+    //
+    // REAPER folder model:
+    //   folder_depth_change = 1  → this track starts a folder (is a parent)
+    //   folder_depth_change = 0  → normal track (child of current folder)
+    //   folder_depth_change = -N → this track closes N folder levels
+    //
+    // We maintain a stack of inherited group names. When a folder track has
+    // a group (either from monarchy or direct name match), all descendants
+    // inherit that group until the folder closes.
     let mut new_map = HashMap::new();
-    for (guid, name) in &track_info {
-        if let Some(group) = name_to_group.get(name.as_str()) {
-            new_map.insert(guid.clone(), group.clone());
-        } else {
+    let mut group_stack: Vec<Option<String>> = Vec::new(); // stack of inherited groups
+
+    for entry in &entries {
+        // Determine this track's own group from monarchy classification
+        let own_group = name_to_group.get(&entry.name).cloned().or_else(|| {
             // Fallback: check if the track name itself is a group name (folder tracks)
-            let upper = name.to_uppercase();
-            for &group in ALL_GROUPS {
-                if upper == group.to_uppercase() {
-                    new_map.insert(guid.clone(), group.to_string());
-                    break;
-                }
+            let upper = entry.name.to_uppercase();
+            ALL_GROUPS
+                .iter()
+                .find(|&&g| g.to_uppercase() == upper)
+                .map(|&g| g.to_string())
+        });
+
+        // The effective group is either this track's own classification
+        // or the inherited group from the nearest classified ancestor folder
+        let inherited_group = group_stack.iter().rev().find_map(|g| g.clone());
+        let effective_group = own_group.clone().or(inherited_group);
+
+        // Assign the effective group to this track
+        if let Some(ref group) = effective_group {
+            new_map.insert(entry.guid.clone(), group.clone());
+        }
+
+        // Update the folder stack based on this track's folder depth change
+        if entry.folder_depth_change >= 1 {
+            // This track starts a folder — push its group onto the stack.
+            // Children will inherit this group if they don't have their own.
+            group_stack.push(effective_group);
+        } else if entry.folder_depth_change < 0 {
+            // This track closes N folder levels — pop N entries from the stack
+            let levels_to_close = (-entry.folder_depth_change) as usize;
+            for _ in 0..levels_to_close {
+                group_stack.pop();
             }
         }
+        // folder_depth_change == 0 → normal track, no stack change
     }
 
     let classified = new_map.len();
