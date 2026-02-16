@@ -83,18 +83,19 @@ pub(super) fn engines_to_grid_slots(
     params: &ParamLookup,
 ) -> Vec<GridSlot> {
     let mut slots = Vec::new();
-    let mut col: usize = 0;
     let mut row: usize = 0;
 
     for engine in engines {
         let engine_key = engine.name.clone();
         for layer in &engine.layers {
             let layer_key = format!("{}/{}", engine.name, layer.name);
+            // Each layer starts on a fresh row band within the engine.
+            let mut col: usize = 0;
+
             for mc in &layer.module_chains {
                 let module_key = format!("{}/{}/{}", engine.name, layer.name, mc.name);
                 let mt = mc.module_type;
 
-                // Count how many columns this module needs
                 let module_width = count_chain_width(mc.chain.nodes());
 
                 // Wrap to next row band if module won't fit (never split a module)
@@ -118,6 +119,16 @@ pub(super) fn engines_to_grid_slots(
 
                 col = col_cursor;
             }
+
+            // Advance to the next row band for the next layer.
+            // Compute max row used by this layer's slots to account for splits.
+            let layer_max_row = slots
+                .iter()
+                .filter(|s| s.layer_group.as_deref() == Some(&layer_key))
+                .map(|s| s.row)
+                .max()
+                .unwrap_or(row);
+            row = layer_max_row + ROW_BAND_STRIDE;
         }
     }
 
