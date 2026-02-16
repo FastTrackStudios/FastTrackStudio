@@ -302,13 +302,9 @@ pub(crate) fn resolve_cables(chain: &[GridSlot]) -> Vec<Cable> {
                 ));
             }
 
-            let center_row = (m.min_row + m.max_row) / 2;
-            let has_center_block = chain.iter().any(|s| {
-                s.module_group.as_deref() == Some(&m.name) && s.row == center_row && !s.is_phantom
-            });
-            if !has_center_block && m.max_row - m.min_row >= 2 {
-                cables.push(Cable::new(mod_in, mod_out, m.color.clone(), mod_bypassed));
-            }
+            // Dry pass-through: straight cable from module input → output.
+            // Represents the unprocessed signal path through a wet/dry split.
+            cables.push(Cable::new(mod_in, mod_out, m.color.clone(), mod_bypassed));
         }
     }
 

@@ -263,17 +263,13 @@ fn count_chain_width(nodes: &[signal::SignalNode]) -> usize {
         match node {
             signal::SignalNode::Block(_) => width += 1,
             signal::SignalNode::Split { lanes } => {
-                // A split's width is the max width among its lanes.
-                // Empty lanes get a 1-col pass-through placeholder.
+                // A split's width is the max width among its wet lanes.
+                // Empty (dry) lanes have no cells — the cable layer draws
+                // the pass-through.
                 let max_lane_width = lanes
                     .iter()
-                    .map(|lane| {
-                        if lane.is_empty() {
-                            1
-                        } else {
-                            count_chain_width(lane.nodes())
-                        }
-                    })
+                    .filter(|lane| !lane.is_empty())
+                    .map(|lane| count_chain_width(lane.nodes()))
                     .max()
                     .unwrap_or(0);
                 width += max_lane_width;
@@ -319,75 +315,38 @@ fn flatten_chain_nodes(
                 *col_cursor += 1;
             }
             signal::SignalNode::Split { lanes } => {
-                // Fan-out: each lane gets its own row, all starting at the same col.
-                // Reorder so empty (dry/pass-through) lanes go in the middle
-                // and wet lanes are at top and bottom.
+                // Fan-out: each wet lane gets its own row, starting at the same col.
+                // Dry (empty) lanes are NOT placed as cells — the cable layer draws
+                // a pass-through cable from module input → output instead.
                 let split_start_col = *col_cursor;
                 let mut max_col = split_start_col;
 
-                let mut wet: Vec<&signal::SignalChain> = Vec::new();
-                let mut dry: Vec<&signal::SignalChain> = Vec::new();
-                for lane in lanes.iter() {
-                    if lane.is_empty() {
-                        dry.push(lane);
-                    } else {
-                        wet.push(lane);
-                    }
-                }
-                // Layout order: first half of wet, then all dry, then second half of wet
-                let mid = (wet.len() + 1) / 2;
-                let mut ordered: Vec<&signal::SignalChain> = Vec::new();
-                ordered.extend_from_slice(&wet[..mid]);
-                ordered.extend_from_slice(&dry);
-                ordered.extend_from_slice(&wet[mid..]);
+                let wet: Vec<&signal::SignalChain> =
+                    lanes.iter().filter(|l| !l.is_empty()).collect();
 
-                // Vertically center: dry lane sits at base_row, wet lanes
-                // fan out above and below. For 3 lanes: offset=1, rows are
-                // base_row-1 (top wet), base_row (dry), base_row+1 (bottom wet).
-                let total_lanes = ordered.len();
-                let vert_offset = (total_lanes.saturating_sub(1)) / 2;
+                // Vertically center the wet lanes around base_row.
+                let wet_count = wet.len();
+                let vert_offset = wet_count.saturating_sub(1) / 2;
 
-                for (i, lane) in ordered.iter().enumerate() {
+                for (i, lane) in wet.iter().enumerate() {
                     let lane_row = (base_row + i).saturating_sub(vert_offset);
                     let mut lane_col = split_start_col;
-                    if lane.is_empty() {
-                        // Empty lane = dry pass-through. Create a phantom
-                        // slot so the module group bounding box includes
-                        // this row, but it won't render a visible cell.
-                        slots.push(GridSlot {
-                            id: uuid::Uuid::new_v4(),
-                            block_type: signal::BlockType::Send,
-                            block_preset_name: None,
-                            plugin_name: None,
-                            col: lane_col,
-                            row: lane_row,
-                            module_group: Some(module_key.to_string()),
-                            module_type,
-                            layer_group: layer_key.map(|s| s.to_string()),
-                            engine_group: engine_key.map(|s| s.to_string()),
-                            is_template: false,
-                            bypassed: false,
-                            is_phantom: true,
-                            parameters: Vec::new(),
-                        });
-                        lane_col += 1;
-                    } else {
-                        flatten_chain_nodes(
-                            lane.nodes(),
-                            module_key,
-                            layer_key,
-                            engine_key,
-                            module_type,
-                            &mut lane_col,
-                            lane_row,
-                            slots,
-                            param_lookup,
-                        );
-                    }
+                    flatten_chain_nodes(
+                        lane.nodes(),
+                        module_key,
+                        layer_key,
+                        engine_key,
+                        module_type,
+                        &mut lane_col,
+                        lane_row,
+                        slots,
+                        param_lookup,
+                    );
                     if lane_col > max_col {
                         max_col = lane_col;
                     }
                 }
+
                 *col_cursor = max_col;
             }
         }
