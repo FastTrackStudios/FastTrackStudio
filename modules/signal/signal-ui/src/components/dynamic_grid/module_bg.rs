@@ -80,39 +80,52 @@ pub(super) struct ContainerBackgroundProps {
 
 #[component]
 pub(super) fn ContainerBackground(props: ContainerBackgroundProps) -> Element {
-    let (bg_alpha, border_alpha, border_style, radius, z_index, font_class, label_opacity) =
-        match props.level {
-            ContainerLevel::Engine => (
-                "04",
-                "10",
+    // Engine labels sit above the border (-20px), Layer labels just above (-10px).
+    // This prevents overlap with each other and with module title bars inside.
+    let (
+        bg_alpha,
+        border_alpha,
+        border_style,
+        radius,
+        z_index,
+        font_class,
+        label_opacity,
+        label_top,
+    ) = match props.level {
+        ContainerLevel::Engine => (
+            "04",
+            "10",
+            "solid",
+            "10px",
+            1,
+            "text-[7px] font-semibold uppercase tracking-wider",
+            "0.35",
+            "-10px",
+        ),
+        ContainerLevel::Layer => (
+            "03",
+            "0a",
+            "dashed",
+            "8px",
+            2,
+            "text-[7px] font-medium tracking-wide",
+            "0.30",
+            "-10px",
+        ),
+        ContainerLevel::Module => {
+            // Module level should use ModuleBackground instead, but handle gracefully
+            (
+                "12",
+                "30",
                 "solid",
                 "10px",
-                1,
-                "text-[7px] font-semibold uppercase tracking-wider",
-                "0.35",
-            ),
-            ContainerLevel::Layer => (
-                "03",
-                "0a",
-                "dashed",
-                "8px",
-                2,
-                "text-[7px] font-medium tracking-wide",
-                "0.30",
-            ),
-            ContainerLevel::Module => {
-                // Module level should use ModuleBackground instead, but handle gracefully
-                (
-                    "12",
-                    "30",
-                    "solid",
-                    "10px",
-                    3,
-                    "text-[8px] font-semibold",
-                    "0.80",
-                )
-            }
-        };
+                3,
+                "text-[8px] font-semibold",
+                "0.80",
+                "2px",
+            )
+        }
+    };
 
     let bg = format!(
         "left: {}px; top: {}px; width: {}px; height: {}px; \
@@ -123,12 +136,12 @@ pub(super) fn ContainerBackground(props: ContainerBackgroundProps) -> Element {
     rsx! {
         div {
             key: "container-{props.name}",
-            class: "absolute",
+            class: "absolute overflow-visible",
             style: "position: absolute; {bg} z-index: {z_index}; pointer-events: none;",
-            // Floating corner label — no title bar, no height cost
+            // Label positioned above the border to avoid overlap with module titles
             span {
                 class: "{font_class} whitespace-nowrap",
-                style: "position: absolute; top: 2px; left: 6px; color: {props.fg_color}; opacity: {label_opacity};",
+                style: "position: absolute; top: {label_top}; left: 4px; color: {props.fg_color}; opacity: {label_opacity};",
                 "{props.name}"
             }
         }
