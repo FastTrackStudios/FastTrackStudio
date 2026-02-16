@@ -3705,7 +3705,7 @@ dependencies = [
  "color-eyre",
  "colored",
  "derive_more 1.0.0",
- "env_logger",
+ "env_logger 0.11.8",
  "facet",
  "getrandom 0.2.17",
  "helgoboss-midi",
@@ -3788,6 +3788,19 @@ checksum = "1bf3c259d255ca70051b30e2e95b5446cdb8949ac4cd22c0d7fd634d89f568e2"
 dependencies = [
  "log",
  "regex",
+]
+
+[[package]]
+name = "env_logger"
+version = "0.10.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4cd405aab171cb85d6735e5c8d9db038c17d3ca007a4d2c25f337935c3d90580"
+dependencies = [
+ "humantime",
+ "is-terminal",
+ "log",
+ "regex",
+ "termcolor",
 ]
 
 [[package]]
@@ -4457,7 +4470,9 @@ dependencies = [
  "base64 0.22.1",
  "dioxus",
  "dioxus-native",
+ "figma-api",
  "frame-proto",
+ "image",
  "kurbo 0.13.0",
  "peniko 0.6.0",
  "serde",
@@ -5747,6 +5762,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9"
 
 [[package]]
+name = "humantime"
+version = "2.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "135b12329e5e3ce057a9f972339ea52bc954fe1e9358ef27f95e89716fbc5424"
+
+[[package]]
 name = "hyper"
 version = "1.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6980,6 +7001,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2edbaea8759034dfb5373c6a13d0ea1c1cbcdc5a7d3dafea6f166784ea5aba3a"
 dependencies = [
  "dioxus",
+]
+
+[[package]]
+name = "lumen-blocks"
+version = "0.2.0"
+dependencies = [
+ "dioxus",
+ "dioxus-primitives",
+ "dioxus-time 0.7.0 (git+https://github.com/ealmloff/dioxus-std?rev=7e0c41ef8c5514e46e8ac657227568660cf38987)",
+ "env_logger 0.10.2",
+ "log",
+ "lucide-dioxus 2.26.0",
+ "tracing",
 ]
 
 [[package]]
@@ -8921,7 +8955,7 @@ dependencies = [
  "frame-proto",
  "frame-ui",
  "kurbo 0.13.0",
- "lumen-blocks",
+ "lumen-blocks 0.2.0 (git+https://github.com/Leaf-Computer/lumen-blocks.git?tag=v0.2.0)",
  "peniko 0.6.0",
  "serde_json",
  "signal2",
@@ -11096,16 +11130,21 @@ dependencies = [
  "roam",
  "signal2-live",
  "signal2-proto",
+ "tokio",
 ]
 
 [[package]]
 name = "signal2-live"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "roam",
+ "serde",
+ "serde_json",
  "signal2-proto",
  "signal2-storage",
  "tokio",
+ "uuid",
 ]
 
 [[package]]
@@ -11139,6 +11178,7 @@ version = "0.1.0"
 dependencies = [
  "audio-controls",
  "dioxus",
+ "lumen-blocks 0.2.0",
  "signal2",
  "tokio",
  "uuid",

@@ -21,6 +21,7 @@ members = [
     "apps/fts-control/*",
     "apps/fasttrackstudio/*",
     "apps/reaper-extension",
+    "reference/lumen-blocks/blocks",
 ]
 exclude = []
 resolver = "2"
@@ -64,7 +65,7 @@ syn = { version = "2.0", features = ["full", "extra-traits"] }
 quote = "1.0"
 proc-macro2 = "1.0"
 tokio = { version = "1.48", features = ["full"] }
-tracing = "0.1"
+tracing = { version = "0.1", features = ["std"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 eyre = "0.6"
 futures = "0.3"
@@ -165,6 +166,11 @@ crossbeam-channel = "0.5"
 scopeguard = "1.1.0"
 raw-window-handle = "0.4.2"
 palette = "0.7.3"
+
+# Lumen blocks (Dioxus shadcn-inspired components)
+lumen-blocks = { path = "reference/lumen-blocks/blocks" }
+dioxus-time = { git = "https://github.com/ealmloff/dioxus-std", rev = "7e0c41ef8c5514e46e8ac657227568660cf38987" }
+lucide-dioxus = { git = "https://github.com/Leaf-Computer/lucide.git", rev = "e3e509d5855324e893aef838747cccb2d115dc15", features = ["all-icons"] }
 
 # Dioxus UI framework (pinned to 0.7.2 - native 0.7.3 not yet on crates.io)
 dioxus = "0.7.2"

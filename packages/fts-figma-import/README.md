@@ -10,7 +10,9 @@ Exports selected Figma layers/frames as a high-fidelity JSON payload intended fo
 - Optional per-node SVG (base64) for vector-faithful rendering
 - Optional per-node PNG (base64) as fallback raster
 
-Schema tag: `fts.figma.export/v1`
+Schema tags:
+- `fts.figma.export/v1` (legacy)
+- `fts.figma.export/v2` (current, deduped assets table + node asset refs)
 
 ## Setup (pnpm)
 

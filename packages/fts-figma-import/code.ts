@@ -40,10 +40,14 @@ type ExportNode = {
   fills?: unknown[];
   strokes?: unknown[];
   strokeWeight?: number;
+  strokeMiterLimit?: number;
   strokeAlign?: string;
   strokeJoin?: string;
   strokeCap?: string;
   dashPattern?: number[];
+  isMask?: boolean;
+  maskType?: string;
+  cornerSmoothing?: number;
   cornerRadius?: number;
   topLeftRadius?: number;
   topRightRadius?: number;
@@ -63,6 +67,12 @@ type ExportNode = {
   textCase?: string;
   textDecoration?: string;
   textStyleId?: string;
+  componentProperties?: unknown;
+  componentPropertyReferences?: unknown;
+  explicitVariableModes?: unknown;
+  boundVariables?: unknown;
+  pluginData?: unknown;
+  sharedPluginData?: unknown;
   componentId?: string;
   componentSetId?: string;
   variantProperties?: Record<string, string>;
@@ -70,6 +80,11 @@ type ExportNode = {
     svgBase64?: string;
     pngBase64?: string;
   };
+  assetRefs?: {
+    svg?: string;
+    png?: string;
+  };
+  imageFillAssetRefs?: Record<string, string>;
   children?: ExportNode[];
 };
 
@@ -86,7 +101,7 @@ type SizeLike = {
 };
 
 type ExportPayload = {
-  schema: 'fts.figma.export/v1';
+  schema: 'fts.figma.export/v1' | 'fts.figma.export/v2';
   generatedAt: string;
   source: {
     plugin: string;
@@ -102,7 +117,24 @@ type ExportPayload = {
     totalNodes: number;
   };
   options: ExportOptions;
+  assets?: ExportAsset[];
   nodes: ExportNode[];
+};
+
+type ExportAssetKind = 'svg' | 'png' | 'image-fill';
+
+type ExportAsset = {
+  id: string;
+  kind: ExportAssetKind;
+  mime: string;
+  encoding: 'base64';
+  data: string;
+  byteLength: number;
+};
+
+type AssetAccumulator = {
+  assets: ExportAsset[];
+  byHash: Map<string, string>;
 };
 
 type ExportRoot = SceneNode;
@@ -356,11 +388,14 @@ async function exportSelection(options: ExportOptions, reason: 'manual' | 'live'
   }
 
   try {
-    const nodes = await Promise.all(roots.map((node) => serializeNode(node, 0, options)));
+    const assetAccumulator = createAssetAccumulator();
+    const nodes = await Promise.all(
+      roots.map((node) => serializeNode(node, 0, options, assetAccumulator)),
+    );
     const totalNodes = nodes.reduce((count, node) => count + countNodes(node), 0);
 
     const payload: ExportPayload = {
-      schema: 'fts.figma.export/v1',
+      schema: 'fts.figma.export/v2',
       generatedAt: new Date().toISOString(),
       source: {
         plugin: 'fts-figma-import',
@@ -379,6 +414,7 @@ async function exportSelection(options: ExportOptions, reason: 'manual' | 'live'
         totalNodes,
       },
       options,
+      assets: assetAccumulator.assets,
       nodes,
     };
 
@@ -422,10 +458,13 @@ async function exportToBridge(
   }
 
   try {
-    const nodes = await Promise.all(roots.map((node) => serializeNode(node, 0, options)));
+    const assetAccumulator = createAssetAccumulator();
+    const nodes = await Promise.all(
+      roots.map((node) => serializeNode(node, 0, options, assetAccumulator)),
+    );
     const totalNodes = nodes.reduce((count, node) => count + countNodes(node), 0);
     const payload: ExportPayload = {
-      schema: 'fts.figma.export/v1',
+      schema: 'fts.figma.export/v2',
       generatedAt: new Date().toISOString(),
       source: {
         plugin: 'fts-figma-import',
@@ -444,6 +483,7 @@ async function exportToBridge(
         totalNodes,
       },
       options,
+      assets: assetAccumulator.assets,
       nodes,
     };
     const json = JSON.stringify(payload, null, 2);
@@ -493,6 +533,7 @@ async function serializeNode(
   node: SceneNode,
   depth: number,
   options: ExportOptions,
+  assets: AssetAccumulator,
   parentBounds?: RectLike,
 ): Promise<ExportNode> {
   const absoluteBoundingBox = readAbsoluteBoundingBox(node);
@@ -535,10 +576,14 @@ async function serializeNode(
     fills: sanitize(readProp(node, 'fills')),
     strokes: sanitize(readProp(node, 'strokes')),
     strokeWeight: readProp(node, 'strokeWeight'),
+    strokeMiterLimit: readProp(node, 'strokeMiterLimit'),
     strokeAlign: readProp(node, 'strokeAlign'),
     strokeJoin: readProp(node, 'strokeJoin'),
     strokeCap: readProp(node, 'strokeCap'),
     dashPattern: sanitize(readProp(node, 'dashPattern')),
+    isMask: readProp(node, 'isMask'),
+    maskType: readProp(node, 'maskType'),
+    cornerSmoothing: readProp(node, 'cornerSmoothing'),
     cornerRadius: readProp(node, 'cornerRadius'),
     topLeftRadius: readProp(node, 'topLeftRadius'),
     topRightRadius: readProp(node, 'topRightRadius'),
@@ -547,6 +592,12 @@ async function serializeNode(
     rectangleCornerRadii: sanitize(readProp(node, 'rectangleCornerRadii')),
     fillGeometry: sanitize(readProp(node, 'fillGeometry')),
     strokeGeometry: sanitize(readProp(node, 'strokeGeometry')),
+    componentProperties: sanitize(readProp(node, 'componentProperties')),
+    componentPropertyReferences: sanitize(readProp(node, 'componentPropertyReferences')),
+    explicitVariableModes: sanitize(readProp(node, 'explicitVariableModes')),
+    boundVariables: sanitize(readProp(node, 'boundVariables')),
+    pluginData: sanitize(readProp(node, 'pluginData')),
+    sharedPluginData: sanitize(readProp(node, 'sharedPluginData')),
     componentId: readProp(node, 'componentId'),
     componentSetId: readProp(node, 'componentSetId'),
     variantProperties: sanitize(readProp(node, 'variantProperties')),
@@ -567,13 +618,20 @@ async function serializeNode(
   }
 
   if (options.includeSvg || options.includePng) {
-    base.exports = await exportNodeAssets(node, options);
+    base.assetRefs = await exportNodeAssets(node, options, assets);
+  }
+
+  const imageFillAssetRefs = await exportImageFillAssets(node, assets);
+  if (Object.keys(imageFillAssetRefs).length > 0) {
+    base.imageFillAssetRefs = imageFillAssetRefs;
   }
 
   if ('children' in node && depth < options.maxDepth) {
     const sceneChildren = node.children.filter(isSceneNode);
     base.children = await Promise.all(
-      sceneChildren.map((child) => serializeNode(child, depth + 1, options, absoluteBoundingBox)),
+      sceneChildren.map((child) =>
+        serializeNode(child, depth + 1, options, assets, absoluteBoundingBox),
+      ),
     );
   }
 
@@ -612,13 +670,15 @@ function normalizeRelativeTransform(
 async function exportNodeAssets(
   node: SceneNode,
   options: ExportOptions,
-): Promise<{ svgBase64?: string; pngBase64?: string }> {
-  const result: { svgBase64?: string; pngBase64?: string } = {};
+  assets: AssetAccumulator,
+): Promise<{ svg?: string; png?: string }> {
+  const refs: { svg?: string; png?: string } = {};
 
   if (options.includeSvg && supportsVectorExport(node)) {
     try {
       const svgBytes = await node.exportAsync({ format: 'SVG' });
-      result.svgBase64 = bytesToBase64(svgBytes);
+      const svgBase64 = bytesToBase64(svgBytes);
+      refs.svg = recordAsset(assets, 'svg', 'image/svg+xml', svgBase64, svgBytes.length);
     } catch {
       // Ignore unsupported SVG exports for individual nodes.
     }
@@ -630,13 +690,55 @@ async function exportNodeAssets(
         format: 'PNG',
         constraint: { type: 'SCALE', value: 1 },
       });
-      result.pngBase64 = bytesToBase64(pngBytes);
+      const pngBase64 = bytesToBase64(pngBytes);
+      refs.png = recordAsset(assets, 'png', 'image/png', pngBase64, pngBytes.length);
     } catch {
       // Ignore unsupported PNG exports for individual nodes.
     }
   }
 
-  return result;
+  return refs;
+}
+
+async function exportImageFillAssets(
+  node: SceneNode,
+  assets: AssetAccumulator,
+): Promise<Record<string, string>> {
+  const refs: Record<string, string> = {};
+  const fills = readProp<unknown[]>(node, 'fills');
+  if (!Array.isArray(fills)) {
+    return refs;
+  }
+
+  for (const fill of fills) {
+    if (!fill || typeof fill !== 'object') {
+      continue;
+    }
+    const paint = fill as { type?: unknown; imageHash?: unknown };
+    if (paint.type !== 'IMAGE' || typeof paint.imageHash !== 'string' || !paint.imageHash) {
+      continue;
+    }
+    const image = figma.getImageByHash(paint.imageHash);
+    if (!image) {
+      continue;
+    }
+    try {
+      const bytes = await image.getBytesAsync();
+      const base64 = bytesToBase64(bytes);
+      const assetId = recordAsset(
+        assets,
+        'image-fill',
+        'application/octet-stream',
+        base64,
+        bytes.length,
+      );
+      refs[paint.imageHash] = assetId;
+    } catch {
+      // Ignore image decode/export failures for individual fills.
+    }
+  }
+
+  return refs;
 }
 
 function supportsVectorExport(node: SceneNode): boolean {
@@ -742,6 +844,48 @@ function countNodes(node: ExportNode): number {
     count += countNodes(child);
   }
   return count;
+}
+
+function createAssetAccumulator(): AssetAccumulator {
+  return {
+    assets: [],
+    byHash: new Map<string, string>(),
+  };
+}
+
+function recordAsset(
+  assets: AssetAccumulator,
+  kind: ExportAssetKind,
+  mime: string,
+  data: string,
+  byteLength: number,
+): string {
+  const hash = hashString(`${kind}|${mime}|${data}`);
+  const existing = assets.byHash.get(hash);
+  if (existing) {
+    return existing;
+  }
+  const id = `${kind}:${hash}`;
+  assets.assets.push({
+    id,
+    kind,
+    mime,
+    encoding: 'base64',
+    data,
+    byteLength,
+  });
+  assets.byHash.set(hash, id);
+  return id;
+}
+
+function hashString(input: string): string {
+  // FNV-1a 32-bit (hex) for deterministic asset IDs.
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < input.length; i += 1) {
+    hash ^= input.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(16).padStart(8, '0');
 }
 
 function bytesToBase64(bytes: Uint8Array): string {
