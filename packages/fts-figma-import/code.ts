@@ -57,6 +57,11 @@ type ExportNode = {
   fillGeometry?: unknown;
   strokeGeometry?: unknown;
   characters?: string;
+  fontSize?: number;
+  fontFamily?: string;
+  fontWeight?: number;
+  lineHeightPx?: number;
+  letterSpacingPx?: number;
   textAlignHorizontal?: string;
   textAlignVertical?: string;
   textAutoResize?: string;
@@ -615,6 +620,47 @@ async function serializeNode(
     base.paragraphIndent = node.paragraphIndent;
     base.textCase = sanitize(node.textCase) as string;
     base.textDecoration = sanitize(node.textDecoration) as string;
+
+    // Numeric text metrics — resolve mixed values to first-character range
+    const fs = node.fontSize;
+    if (typeof fs === 'number') {
+      base.fontSize = fs;
+    } else if (fs === figma.mixed && node.characters.length > 0) {
+      base.fontSize = node.getRangeFontSize(0, 1) as number;
+    }
+
+    const fn_ = node.fontName;
+    if (fn_ && fn_ !== figma.mixed) {
+      base.fontFamily = (fn_ as FontName).family;
+      base.fontWeight = node.fontWeight as number;
+    } else if (fn_ === figma.mixed && node.characters.length > 0) {
+      const rangeFn = node.getRangeFontName(0, 1) as FontName;
+      base.fontFamily = rangeFn.family;
+      base.fontWeight = node.getRangeFontWeight(0, 1) as number;
+    }
+
+    // Compute lineHeightPx from the lineHeight object
+    const lh = node.lineHeight;
+    if (lh && lh !== figma.mixed) {
+      const lhObj = lh as LineHeight;
+      if (lhObj.unit === 'PIXELS') {
+        base.lineHeightPx = lhObj.value;
+      } else if (lhObj.unit === 'PERCENT' && base.fontSize) {
+        base.lineHeightPx = base.fontSize * lhObj.value / 100;
+      }
+      // unit === 'AUTO' → leave undefined, renderer computes default
+    }
+
+    // Compute letterSpacingPx
+    const ls = node.letterSpacing;
+    if (ls && ls !== figma.mixed) {
+      const lsObj = ls as LetterSpacing;
+      if (lsObj.unit === 'PIXELS') {
+        base.letterSpacingPx = lsObj.value;
+      } else if (lsObj.unit === 'PERCENT' && base.fontSize) {
+        base.letterSpacingPx = base.fontSize * lsObj.value / 100;
+      }
+    }
   }
 
   if (options.includeSvg || options.includePng) {
