@@ -69,9 +69,9 @@ const SOFT_MAX_COLS: usize = 14;
 const LAYER_PACK_MAX_COLS: usize = 24;
 
 /// Gap rows when a module wraps within a layer.
-/// With phantom dry lanes removed, splits only use wet-lane rows,
-/// so a stride of 1 is sufficient.
-const ROW_BAND_STRIDE: usize = 1;
+/// Must be >= max split fan-out (typically 2 wet lanes = 1 extra row)
+/// since splits fan upward into this gap space.
+const ROW_BAND_STRIDE: usize = 2;
 
 // endregion: --- Constants
 
@@ -331,12 +331,17 @@ fn flatten_chain_nodes(
                 let wet: Vec<&signal::SignalChain> =
                     lanes.iter().filter(|l| !l.is_empty()).collect();
 
-                // Vertically center the wet lanes around base_row.
+                // Fan splits upward from base_row: the last (bottom) lane
+                // stays at base_row so it aligns with the module's row band.
+                // Extra lanes go above, into the gap from ROW_BAND_STRIDE.
+                // This prevents downward fan-out from colliding with modules
+                // that wrap to the next row band below.
                 let wet_count = wet.len();
-                let vert_offset = wet_count.saturating_sub(1) / 2;
 
                 for (i, lane) in wet.iter().enumerate() {
-                    let lane_row = (base_row + i).saturating_sub(vert_offset);
+                    let lane_row = base_row
+                        .saturating_sub(wet_count.saturating_sub(1))
+                        .saturating_add(i);
                     let mut lane_col = split_start_col;
                     flatten_chain_nodes(
                         lane.nodes(),
