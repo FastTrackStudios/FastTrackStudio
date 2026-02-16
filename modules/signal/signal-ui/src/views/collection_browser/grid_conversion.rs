@@ -65,9 +65,6 @@ const SOFT_MAX_COLS: usize = 14;
 /// Gap rows when a module wraps within a layer (needs space for split fan-out).
 const ROW_BAND_STRIDE: usize = 2;
 
-/// Gap rows between layers/engines (just enough for container title + breathing room).
-const LAYER_GAP: usize = 1;
-
 // endregion: --- Constants
 
 // region: --- Converters
@@ -145,7 +142,8 @@ pub(super) fn engines_to_grid_slots(
             // Wrap to next row band if this layer won't fit horizontally.
             if col > 0 && col + measure.width > SOFT_MAX_COLS {
                 // Advance past the tallest layer in the current band.
-                band_start_row += band_max_height + LAYER_GAP;
+                // +1 row gap only when stacking vertically.
+                band_start_row += band_max_height + 1;
                 band_max_height = 0;
                 col = 0;
             }
@@ -188,7 +186,8 @@ pub(super) fn engines_to_grid_slots(
         }
 
         // Advance row past this engine for the next one.
-        row = band_start_row + band_max_height + LAYER_GAP;
+        // Only add a gap row if there's actually a next engine to separate from.
+        row = band_start_row + band_max_height;
     }
 
     slots
