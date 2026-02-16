@@ -345,20 +345,12 @@ pub(crate) fn compute_container_groups(chain: &[GridSlot]) -> Vec<ContainerGroup
     result
 }
 
-/// Map a ModuleType to its display color using signal2's built-in color palette.
+/// Map a ModuleType to its display color using the ModuleType's own color palette.
 pub(crate) fn module_type_color(mt: ModuleType) -> BlockColor {
-    use signal::BlockType;
-    let bt = match mt {
-        ModuleType::Drive => BlockType::Drive,
-        ModuleType::Amp => BlockType::Amp,
-        ModuleType::Eq | ModuleType::PostEq => BlockType::Eq,
-        ModuleType::Dynamics => BlockType::Compressor,
-        ModuleType::Modulation | ModuleType::VocalModulation => BlockType::Modulation,
-        ModuleType::Time => BlockType::Delay,
-        ModuleType::Motion => BlockType::Tremolo,
-        ModuleType::Special | ModuleType::PreFx => BlockType::Special,
-        ModuleType::Master => BlockType::Volume,
-        _ => BlockType::Custom,
-    };
-    bt.color()
+    let mc = mt.color();
+    BlockColor {
+        bg: mc.bg,
+        fg: mc.fg,
+        border: mc.border,
+    }
 }

@@ -66,24 +66,29 @@ pub(super) async fn fetch_col2(
                 .collect()
         }
         NavCategory::Modules => {
-            let presets = controller.list_module_collections().await;
-            presets
-                .into_iter()
-                .map(|p| {
+            // Show module types as col2 items (like Blocks shows block types).
+            // Count how many presets exist per module type for the badge.
+            let all_presets = controller.list_module_collections().await;
+            signal::ALL_MODULE_TYPES
+                .iter()
+                .enumerate()
+                .map(|(idx, &mt)| {
+                    let count = all_presets.iter().filter(|p| p.module_type() == mt).count();
                     let mut tags = TagSet::default();
-                    tags.insert(StructuredTag::new(
-                        TagCategory::Module,
-                        p.module_type().as_str(),
-                    ));
+                    tags.insert(StructuredTag::new(TagCategory::Module, mt.as_str()));
                     ColumnItem {
-                        id: p.id().to_string(),
-                        name: p.name().to_string(),
-                        subtitle: Some(p.module_type().display_name().to_string()),
-                        badge: Some(format!("{}", p.snapshots().len())),
+                        id: mt.as_str().to_string(),
+                        name: mt.display_name().to_string(),
+                        subtitle: Some(mt.category().display_name().to_string()),
+                        badge: if count > 0 {
+                            Some(format!("{count}"))
+                        } else {
+                            None
+                        },
                         metadata: None,
                         structured_tags: tags,
                         detail: DetailData::default(),
-                        tag: None,
+                        tag: Some(idx),
                     }
                 })
                 .collect()
@@ -176,32 +181,35 @@ pub(super) async fn fetch_col3(
             (items, Vec::new())
         }
         NavCategory::Modules => {
-            let presets = controller.list_module_collections().await;
-            let items = if let Some(preset) = presets.iter().find(|p| p.id().to_string() == col2_id)
-            {
-                let mut out = Vec::new();
-                for s in preset.snapshots() {
-                    let block_count = s.module().blocks().len();
-                    let chain = s.module().chain().clone();
-                    out.push(ColumnItem {
-                        id: s.id().to_string(),
-                        name: s.name().to_string(),
-                        subtitle: Some(format!("{block_count} block(s)")),
-                        badge: None,
-                        metadata: None,
-                        structured_tags: TagSet::default(),
-                        detail: DetailData {
-                            chain: Some(chain),
-                            ..Default::default()
-                        },
-                        tag: None,
-                    });
+            // col2 is a module type index — show presets for that type.
+            if let Some(idx) = col2_tag {
+                if let Some(&mt) = signal::ALL_MODULE_TYPES.get(idx) {
+                    let all_presets = controller.list_module_collections().await;
+                    let items: Vec<ColumnItem> = all_presets
+                        .iter()
+                        .filter(|p| p.module_type() == mt)
+                        .map(|p| {
+                            // Load default snapshot chain for detail preview
+                            let chain = p.snapshots().first().map(|s| s.module().chain().clone());
+                            ColumnItem {
+                                id: p.id().to_string(),
+                                name: p.name().to_string(),
+                                subtitle: Some(format!("{} snapshot(s)", p.snapshots().len())),
+                                badge: Some(format!("{}", p.snapshots().len())),
+                                metadata: None,
+                                structured_tags: TagSet::default(),
+                                detail: DetailData {
+                                    chain,
+                                    ..Default::default()
+                                },
+                                tag: col2_tag,
+                            }
+                        })
+                        .collect();
+                    return (items, Vec::new());
                 }
-                out
-            } else {
-                Vec::new()
-            };
-            (items, Vec::new())
+            }
+            (Vec::new(), Vec::new())
         }
         NavCategory::Blocks => {
             if let Some(idx) = col2_tag {

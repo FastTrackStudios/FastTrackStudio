@@ -7,7 +7,7 @@
 //! |----------|---------------------------|-------------------|----------------|
 //! | Presets  | Presets for rig type      | Scenes            | —              |
 //! | Engines  | Engines for rig type      | Layers for engine | —              |
-//! | Modules  | Module presets            | Snapshots         | —              |
+//! | Modules  | Module types (color dots) | Presets for type  | —              |
 //! | Blocks   | Block types (color dots)  | Presets for type  | Snapshots      |
 
 mod data_fetching;
@@ -20,7 +20,7 @@ mod types;
 use dioxus::prelude::*;
 use signal::rig::RigType;
 use signal::tagging::TagSet;
-use signal::{BlockType, SignalController, ALL_BLOCK_TYPES};
+use signal::{BlockType, SignalController, ALL_BLOCK_TYPES, ALL_MODULE_TYPES};
 
 use data_fetching::{build_param_lookup, fetch_col2, fetch_col3};
 use detail_panel::{
@@ -157,18 +157,18 @@ pub fn CollectionBrowser(controller: SignalController) -> Element {
     let col2_header = match current_nav {
         NavCategory::Presets => "Presets",
         NavCategory::Engines => "Engines",
-        NavCategory::Modules => "Module Presets",
+        NavCategory::Modules => "Module Types",
         NavCategory::Blocks => "Block Types",
     };
     let col3_header = match current_nav {
         NavCategory::Presets => "Scenes",
         NavCategory::Engines => "Layers",
-        NavCategory::Modules => "Snapshots",
+        NavCategory::Modules => "Presets",
         NavCategory::Blocks => "Presets",
     };
 
     let accent = current_nav.accent();
-    let show_block_dots = current_nav == NavCategory::Blocks;
+    let show_type_dots = current_nav == NavCategory::Blocks || current_nav == NavCategory::Modules;
 
     // Compute available tags from the unfiltered col2 items for the tag panel.
     let available_tags = collect_available_tags(&col2_items());
@@ -248,8 +248,12 @@ pub fn CollectionBrowser(controller: SignalController) -> Element {
                                 let name = item.name.clone();
                                 let subtitle = item.subtitle.clone();
                                 let badge = item.badge.clone();
-                                let color_bg = if show_block_dots {
-                                    item.tag.and_then(|t| ALL_BLOCK_TYPES.get(t)).map(|bt| bt.color().bg.to_string())
+                                let color_bg = if show_type_dots {
+                                    match current_nav {
+                                        NavCategory::Blocks => item.tag.and_then(|t| ALL_BLOCK_TYPES.get(t)).map(|bt| bt.color().bg.to_string()),
+                                        NavCategory::Modules => item.tag.and_then(|t| ALL_MODULE_TYPES.get(t)).map(|mt| mt.color().bg.to_string()),
+                                        _ => None,
+                                    }
                                 } else {
                                     None
                                 };
