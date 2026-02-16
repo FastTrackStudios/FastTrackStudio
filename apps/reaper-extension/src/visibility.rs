@@ -1,11 +1,12 @@
 //! Visibility Manager — track-to-group classification and batch visibility toggling.
 //!
 //! Classifies REAPER tracks into dynamic-template top-level groups (Drums, Bass,
-//! Guitars, etc.) by parsing track names through monarchy, then provides toggle/show/hide
+//! Guitars, etc.) using `dynamic_template::monarchy_sort`, then provides toggle/show/hide
 //! operations per group with efficient batch REAPER API calls.
 
-use monarchy::Parser;
-use reaper_high::{Reaper, TrackArea};
+use dynamic_template::{default_config, monarchy_sort, ItemMetadata, Structure};
+use reaper_high::Reaper;
+use reaper_medium::TrackArea;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use tracing::{debug, info, warn};
@@ -55,17 +56,40 @@ fn state() -> &'static Mutex<VisibilityState> {
     STATE.get_or_init(|| Mutex::new(VisibilityState::new()))
 }
 
-/// Rebuild the track-to-group classification cache by parsing every track name
-/// through the dynamic-template config.
+/// Walk a `Structure` tree and collect item_name → group_name mappings.
+/// Only looks at the top-level children (the groups themselves).
+fn collect_group_mappings(structure: &Structure<ItemMetadata>) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    for child in &structure.children {
+        let group_name = &child.name;
+        collect_items_recursive(child, group_name, &mut map);
+    }
+    map
+}
+
+/// Recursively collect all item original names under a group subtree.
+fn collect_items_recursive(
+    node: &Structure<ItemMetadata>,
+    group_name: &str,
+    map: &mut HashMap<String, String>,
+) {
+    for item in &node.items {
+        map.insert(item.original.clone(), group_name.to_string());
+    }
+    for child in &node.children {
+        collect_items_recursive(child, group_name, map);
+    }
+}
+
+/// Rebuild the track-to-group classification cache by running all track names
+/// through `dynamic_template::monarchy_sort`.
 pub fn rebuild_cache() {
-    let config = dynamic_template::default_config();
-    let parser = Parser::new(config);
     let reaper = Reaper::get();
     let project = reaper.current_project();
-
-    let mut new_map = HashMap::new();
     let track_count = project.track_count();
 
+    // Collect track names and GUIDs
+    let mut track_info: Vec<(String, String)> = Vec::new(); // (guid, name)
     for i in 0..track_count {
         let Some(track) = project.track_by_index(i) else {
             continue;
@@ -74,25 +98,35 @@ pub fn rebuild_cache() {
             continue;
         };
         let guid = (*track.guid()).to_string_without_braces();
-        if guid.is_empty() {
-            continue;
+        if !guid.is_empty() {
+            track_info.push((guid, name));
         }
+    }
 
-        // Parse track name through monarchy to get its top-level group
-        match parser.parse(name.clone()) {
-            Ok(item) => {
-                if let Some(group) = item.matched_groups.first() {
-                    new_map.insert(guid, group.name.clone());
-                }
-            }
-            Err(_) => {
-                // Unmatched track — check if it's a folder whose name matches a group
-                let upper = name.to_uppercase();
-                for &group in ALL_GROUPS {
-                    if upper == group.to_uppercase() {
-                        new_map.insert(guid.clone(), group.to_string());
-                        break;
-                    }
+    // Run all track names through monarchy_sort to classify into groups
+    let names: Vec<String> = track_info.iter().map(|(_, name)| name.clone()).collect();
+    let config = default_config();
+
+    let name_to_group = match monarchy_sort(names, config) {
+        Ok(structure) => collect_group_mappings(&structure),
+        Err(e) => {
+            warn!("Visibility cache: monarchy_sort failed: {e}");
+            HashMap::new()
+        }
+    };
+
+    // Build GUID → group mapping by matching track names back
+    let mut new_map = HashMap::new();
+    for (guid, name) in &track_info {
+        if let Some(group) = name_to_group.get(name.as_str()) {
+            new_map.insert(guid.clone(), group.clone());
+        } else {
+            // Fallback: check if the track name itself is a group name (folder tracks)
+            let upper = name.to_uppercase();
+            for &group in ALL_GROUPS {
+                if upper == group.to_uppercase() {
+                    new_map.insert(guid.clone(), group.to_string());
+                    break;
                 }
             }
         }

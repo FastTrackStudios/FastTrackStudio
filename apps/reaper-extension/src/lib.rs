@@ -13,6 +13,7 @@ mod global;
 mod local_actions;
 mod menu;
 mod toolbar_manager;
+mod visibility;
 
 use fragile::Fragile;
 use reaper_high::{MainTaskMiddleware, Reaper as HighReaper};
