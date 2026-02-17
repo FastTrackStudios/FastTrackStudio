@@ -69,8 +69,8 @@ use keyflow_ui::{ChartPreviewPanel, ChartView, SESSION_CHART_SOURCE};
 use lumen_blocks::components::dropdown::{
     Dropdown, DropdownContent, DropdownItem, DropdownTrigger,
 };
-use signal2::{bootstrap_in_memory_controller_async, SignalController};
-use signal2_ui::views::CollectionBrowser;
+use signal::{bootstrap_in_memory_controller_async, SignalController};
+use signal_ui::views::CollectionBrowser;
 
 use dock_dioxus::{
     init_dock_presets, init_rig_dock, DockProvider, DockRoot, PanelRenderer, PanelRendererRegistry,
@@ -227,7 +227,7 @@ fn main() {
                 .add_directive("fts_control_desktop=info".parse().unwrap())
                 .add_directive("session=info".parse().unwrap())
                 .add_directive("gateway_ws=info".parse().unwrap())
-                .add_directive("signal2_ui=info".parse().unwrap())
+                .add_directive("signal_ui=info".parse().unwrap())
                 .add_directive("daw_control::fx=debug".parse().unwrap()),
         )
         .init();
@@ -345,7 +345,7 @@ fn App() -> Element {
 
         // Domain crates register their panels
         session_ui::register_panels(&mut registry);
-        signal2_ui::register_panels(&mut registry);
+        signal_ui::register_panels(&mut registry);
         registry.register(PanelId::FxBrowser, || {
             rsx! { FxBrowserDockPanel {} }
         });
@@ -372,16 +372,16 @@ fn App() -> Element {
         PanelRenderer::new(move |panel_id| registry.render(panel_id))
     });
 
-    // Signal2 in-memory storage controller (same bootstrap as playground)
-    let mut signal2_controller = use_signal(|| None::<SignalController>);
+    // Signal in-memory storage controller (same bootstrap as playground)
+    let mut signal_controller = use_signal(|| None::<SignalController>);
     use_effect(move || {
         spawn(async move {
             match bootstrap_in_memory_controller_async().await {
                 Ok(ctrl) => {
                     provide_context(ctrl.clone());
-                    signal2_controller.set(Some(ctrl));
+                    signal_controller.set(Some(ctrl));
                 }
-                Err(e) => tracing::error!("Failed to bootstrap signal2 storage: {e}"),
+                Err(e) => tracing::error!("Failed to bootstrap signal storage: {e}"),
             }
         });
     });
@@ -878,11 +878,11 @@ fn App() -> Element {
 
                         // ── Page content ─────────────────────────────────────
                         if *TOP_PAGE.read() == "rig" {
-                            // Signal page: signal2 views
+                            // Signal page: signal views
                             div {
                                 class: "flex-1 overflow-hidden relative",
-                                if let Some(ctrl) = signal2_controller() {
-                                    Signal2View { controller: ctrl }
+                                if let Some(ctrl) = signal_controller() {
+                                    SignalView { controller: ctrl }
                                 } else {
                                     div { class: "flex items-center justify-center h-full",
                                         p { class: "text-sm text-muted-foreground", "Bootstrapping signal storage..." }
@@ -917,8 +917,8 @@ fn App() -> Element {
                                     "chart" => rsx! { ChartView {} },
                                     "setlist" => rsx! { SetlistView {} },
                                     "rig" => rsx! {
-                                        if let Some(ctrl) = signal2_controller() {
-                                            Signal2View { controller: ctrl }
+                                        if let Some(ctrl) = signal_controller() {
+                                            SignalView { controller: ctrl }
                                         } else {
                                             div { class: "flex items-center justify-center h-full",
                                                 p { class: "text-sm text-muted-foreground", "Bootstrapping signal storage..." }
@@ -1220,7 +1220,7 @@ fn PerformanceWithChartToggle() -> Element {
 }
 
 // ---------------------------------------------------------------------------
-// Signal2 view — Performance + Manage sub-tabs, browser dialog
+// Signal view — Performance + Manage sub-tabs, browser dialog
 // ---------------------------------------------------------------------------
 
 /// Sub-tabs for the Signal page.
@@ -1231,9 +1231,9 @@ enum SignalTab {
     Editor,
 }
 
-/// Signal2 top-level view with Performance / Manage tabs and a Browser dialog.
+/// Signal top-level view with Performance / Manage tabs and a Browser dialog.
 #[component]
-fn Signal2View(controller: SignalController) -> Element {
+fn SignalView(controller: SignalController) -> Element {
     let mut active_tab = use_signal(|| SignalTab::Manage);
     let mut browser_open = use_signal(|| false);
 
@@ -1273,20 +1273,20 @@ fn Signal2View(controller: SignalController) -> Element {
             div { class: "flex-1 min-h-0 overflow-hidden",
                 match active_tab() {
                     SignalTab::Performance => rsx! {
-                        Signal2PerformanceTab { controller: controller.clone() }
+                        SignalPerformanceTab { controller: controller.clone() }
                     },
                     SignalTab::Manage => rsx! {
-                        Signal2ManageTab { controller: controller.clone() }
+                        SignalManageTab { controller: controller.clone() }
                     },
                     SignalTab::Editor => rsx! {
-                        Signal2EditorTab { controller: controller.clone() }
+                        SignalEditorTab { controller: controller.clone() }
                     },
                 }
             }
 
             // Browser dialog (near-full-screen)
             if browser_open() {
-                Signal2BrowserDialog {
+                SignalBrowserDialog {
                     controller: controller.clone(),
                     on_close: move |_| browser_open.set(false),
                 }
@@ -1301,15 +1301,13 @@ fn Signal2View(controller: SignalController) -> Element {
 
 /// Performance tab — loads rig + song data and renders PerformanceView.
 #[component]
-fn Signal2PerformanceTab(controller: SignalController) -> Element {
-    use signal2_ui::views::{
-        PerfSceneTile, PerformanceView, RigStatus, SnapshotSlot, SongNavState,
-    };
+fn SignalPerformanceTab(controller: SignalController) -> Element {
+    use signal_ui::views::{PerfSceneTile, PerformanceView, RigStatus, SnapshotSlot, SongNavState};
 
-    let mut rig_data = use_signal(|| None::<signal2::rig::Rig>);
+    let mut rig_data = use_signal(|| None::<signal::rig::Rig>);
     let mut active_scene_id = use_signal(|| None::<String>);
     let mut morph_value = use_signal(|| 0.0_f64);
-    let mut song_data = use_signal(|| None::<signal2::song::Song>);
+    let mut song_data = use_signal(|| None::<signal::song::Song>);
     let mut section_index = use_signal(|| 0_usize);
 
     // Fetch first rig + first song
@@ -1465,10 +1463,10 @@ struct ManageProfileItem {
 }
 
 #[component]
-fn Signal2ManageTab(controller: SignalController) -> Element {
-    use signal2::rig::RigType;
-    use signal2::song::SectionSource;
-    use signal2_ui::views::{
+fn SignalManageTab(controller: SignalController) -> Element {
+    use signal::rig::RigType;
+    use signal::song::SectionSource;
+    use signal_ui::views::{
         engines_to_grid_slots, rig_type_to_engine_type, EngineFlowData, EngineParamLookup,
         RigGridPanel, SectionEntry, SongEditor, SongEntry,
     };
@@ -1521,7 +1519,7 @@ fn Signal2ManageTab(controller: SignalController) -> Element {
 
     /// Build a SectionEntry with resolved source labels, and track its source.
     fn build_section_entry(
-        sec: &signal2::song::Section,
+        sec: &signal::song::Section,
         presets: &[ManagePresetItem],
         profiles: &[ManageProfileItem],
     ) -> (SectionEntry, SectionSource) {
@@ -1755,7 +1753,7 @@ fn Signal2ManageTab(controller: SignalController) -> Element {
                         let scene_id = first_scene.id.to_string();
                         active_scene_id.set(Some(scene_id.clone()));
                         selected_sub_id.set(Some(scene_id.clone()));
-                        if let Some((engines, params)) = signal2_ui::views::resolve_scene_engines(
+                        if let Some((engines, params)) = signal_ui::views::resolve_scene_engines(
                             &controller,
                             &first_id,
                             &scene_id,
@@ -1935,10 +1933,10 @@ fn Signal2ManageTab(controller: SignalController) -> Element {
                 let is_rig = item.is_rig;
                 spawn(async move {
                     let result = if is_rig {
-                        signal2_ui::views::resolve_scene_engines(&controller, &item_id, &sub_id)
+                        signal_ui::views::resolve_scene_engines(&controller, &item_id, &sub_id)
                             .await
                     } else {
-                        signal2_ui::views::resolve_layer_engines(
+                        signal_ui::views::resolve_layer_engines(
                             &controller,
                             &item_id,
                             Some(&sub_id),
@@ -1973,9 +1971,9 @@ fn Signal2ManageTab(controller: SignalController) -> Element {
             canvas_params.set(EngineParamLookup::new());
             spawn(async move {
                 let result = if is_rig {
-                    signal2_ui::views::resolve_scene_engines(&controller, &parent_id, &sub_id).await
+                    signal_ui::views::resolve_scene_engines(&controller, &parent_id, &sub_id).await
                 } else {
-                    signal2_ui::views::resolve_layer_engines(&controller, &parent_id, Some(&sub_id))
+                    signal_ui::views::resolve_layer_engines(&controller, &parent_id, Some(&sub_id))
                         .await
                 };
                 if let Some((engines, params)) = result {
@@ -2123,9 +2121,9 @@ fn Signal2ManageTab(controller: SignalController) -> Element {
             canvas_params.set(EngineParamLookup::new());
             spawn(async move {
                 let result = if is_rig {
-                    signal2_ui::views::resolve_scene_engines(&controller, &rid_str, &sid_str).await
+                    signal_ui::views::resolve_scene_engines(&controller, &rid_str, &sid_str).await
                 } else {
-                    signal2_ui::views::resolve_layer_engines(&controller, &rid_str, Some(&sid_str))
+                    signal_ui::views::resolve_layer_engines(&controller, &rid_str, Some(&sid_str))
                         .await
                 };
                 if let Some((engines, params)) = result {
@@ -2501,9 +2499,9 @@ fn Signal2ManageTab(controller: SignalController) -> Element {
                                     let c = ctrl.clone();
                                     spawn(async move {
                                         let result = if is_rig {
-                                            signal2_ui::views::resolve_scene_engines(&c, &rid, &sid).await
+                                            signal_ui::views::resolve_scene_engines(&c, &rid, &sid).await
                                         } else {
-                                            signal2_ui::views::resolve_layer_engines(&c, &rid, Some(&sid)).await
+                                            signal_ui::views::resolve_layer_engines(&c, &rid, Some(&sid)).await
                                         };
                                         if let Some((engines, params)) = result {
                                             canvas_engines.set(engines);
@@ -2542,14 +2540,14 @@ fn Signal2ManageTab(controller: SignalController) -> Element {
                                     RigGridPanel {
                                         key: "{grid_key}",
                                         initial_slots: grid_slots,
-                                        on_save: move |slot: signal2_ui::components::GridSlot| {
+                                        on_save: move |slot: signal_ui::components::GridSlot| {
                                             let ctrl = save_controller.clone();
                                             let bt = slot.block_type;
                                             let pid = slot.preset_id.clone().unwrap_or_default();
                                             let sid = slot.snapshot_id.clone();
-                                            let block = signal2::Block::from_parameters(
+                                            let block = signal::Block::from_parameters(
                                                 slot.parameters.iter()
-                                                    .map(|(name, val)| signal2::BlockParameter::new(
+                                                    .map(|(name, val)| signal::BlockParameter::new(
                                                         name.to_lowercase().replace(' ', "-"),
                                                         name.clone(),
                                                         *val,
@@ -2625,9 +2623,9 @@ fn Signal2ManageTab(controller: SignalController) -> Element {
                                 let c = ctrl.clone();
                                 spawn(async move {
                                     let result = if is_rig {
-                                        signal2_ui::views::resolve_scene_engines(&c, &rid, &sid).await
+                                        signal_ui::views::resolve_scene_engines(&c, &rid, &sid).await
                                     } else {
-                                        signal2_ui::views::resolve_layer_engines(&c, &rid, Some(&sid)).await
+                                        signal_ui::views::resolve_layer_engines(&c, &rid, Some(&sid)).await
                                     };
                                     if let Some((engines, params)) = result {
                                         canvas_engines.set(engines);
@@ -2839,10 +2837,10 @@ fn render_profile_list(
 // ---------------------------------------------------------------------------
 
 #[component]
-fn Signal2EditorTab(controller: SignalController) -> Element {
-    use signal2::rig::RigType;
-    use signal2_ui::components::{GridSelection, GridSlot};
-    use signal2_ui::views::{
+fn SignalEditorTab(controller: SignalController) -> Element {
+    use signal::rig::RigType;
+    use signal_ui::components::{GridSelection, GridSlot};
+    use signal_ui::views::{
         engines_to_grid_slots, EditorInspectorPanel, EngineFlowData, EngineParamLookup,
         RigGridPanel,
     };
@@ -2920,7 +2918,7 @@ fn Signal2EditorTab(controller: SignalController) -> Element {
                         let scene_id = first_scene.id.to_string();
                         active_scene_id.set(Some(scene_id.clone()));
                         selected_sub_id.set(Some(scene_id.clone()));
-                        if let Some((engines, params)) = signal2_ui::views::resolve_scene_engines(
+                        if let Some((engines, params)) = signal_ui::views::resolve_scene_engines(
                             &controller,
                             &first_id,
                             &scene_id,
@@ -2960,7 +2958,7 @@ fn Signal2EditorTab(controller: SignalController) -> Element {
                 canvas_params.set(EngineParamLookup::new());
                 spawn(async move {
                     if let Some((engines, params)) =
-                        signal2_ui::views::resolve_scene_engines(&controller, &item_id, &sub_id)
+                        signal_ui::views::resolve_scene_engines(&controller, &item_id, &sub_id)
                             .await
                     {
                         canvas_engines.set(engines);
@@ -2988,7 +2986,7 @@ fn Signal2EditorTab(controller: SignalController) -> Element {
             canvas_params.set(EngineParamLookup::new());
             spawn(async move {
                 if let Some((engines, params)) =
-                    signal2_ui::views::resolve_scene_engines(&controller, &parent_id, &sub_id).await
+                    signal_ui::views::resolve_scene_engines(&controller, &parent_id, &sub_id).await
                 {
                     canvas_engines.set(engines);
                     canvas_params.set(params);
@@ -3168,9 +3166,9 @@ fn Signal2EditorTab(controller: SignalController) -> Element {
                                         let bt = slot.block_type;
                                         let pid = slot.preset_id.clone().unwrap_or_default();
                                         let sid = slot.snapshot_id.clone();
-                                        let block = signal2::Block::from_parameters(
+                                        let block = signal::Block::from_parameters(
                                             slot.parameters.iter()
-                                                .map(|(name, val)| signal2::BlockParameter::new(
+                                                .map(|(name, val)| signal::BlockParameter::new(
                                                     name.to_lowercase().replace(' ', "-"),
                                                     name.clone(),
                                                     *val,
@@ -3217,7 +3215,7 @@ fn Signal2EditorTab(controller: SignalController) -> Element {
 // ---------------------------------------------------------------------------
 
 #[component]
-fn Signal2BrowserDialog(controller: SignalController, on_close: Callback<()>) -> Element {
+fn SignalBrowserDialog(controller: SignalController, on_close: Callback<()>) -> Element {
     rsx! {
         // Overlay
         div {

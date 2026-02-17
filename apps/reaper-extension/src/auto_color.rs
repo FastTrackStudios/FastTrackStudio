@@ -5,17 +5,24 @@
 //! are fed through `monarchy_sort()` → Structure, then `color_for_path()` maps
 //! each group to a color from the shared palette.
 
-use color_palette::Color;
 use dynamic_template::colors;
 use reaper_high::Reaper;
 use reaper_low::raw;
-use std::collections::HashMap;
 use std::ffi::CString;
 use std::sync::Mutex;
 use tracing::info;
 
 /// Whether auto-color is enabled (persists across action invocations)
 static AUTO_COLOR_ENABLED: Mutex<bool> = Mutex::new(false);
+
+/// Cached track names from last poll (for change detection)
+static TRACK_NAME_CACHE: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// Tick counter for throttling polls (resets at POLL_INTERVAL)
+static POLL_TICK_COUNTER: Mutex<u32> = Mutex::new(0);
+
+/// Poll every N timer ticks (~30 ticks ≈ 1 second at 30Hz)
+const POLL_INTERVAL: u32 = 30;
 
 // ============================================================================
 // Public API
@@ -87,7 +94,8 @@ pub fn clear_selected_track_colors() {
     }
 }
 
-/// Toggle auto-color on/off. When enabled, applies colors; when disabled, clears them.
+/// Toggle auto-color on/off. When enabled, applies colors and starts
+/// continuous polling; when disabled, clears colors and stops polling.
 pub fn toggle_auto_color() -> bool {
     let mut guard = AUTO_COLOR_ENABLED.lock().unwrap();
     *guard = !*guard;
@@ -96,10 +104,45 @@ pub fn toggle_auto_color() -> bool {
 
     if enabled {
         apply_colors_to_all_tracks();
+        // Seed cache so the first poll doesn't redundantly re-apply
+        *TRACK_NAME_CACHE.lock().unwrap() = read_all_track_names();
+        *POLL_TICK_COUNTER.lock().unwrap() = 0;
     } else {
         clear_all_track_colors();
+        TRACK_NAME_CACHE.lock().unwrap().clear();
     }
     enabled
+}
+
+/// Called from `timer_callback()`. When auto-color is enabled, periodically
+/// checks if track names changed and re-applies colors if so.
+pub fn poll_and_recolor() {
+    if !is_auto_color_enabled() {
+        return;
+    }
+
+    // Throttle: only poll every POLL_INTERVAL ticks
+    {
+        let mut counter = POLL_TICK_COUNTER.lock().unwrap();
+        *counter += 1;
+        if *counter < POLL_INTERVAL {
+            return;
+        }
+        *counter = 0;
+    }
+
+    let current_names = read_all_track_names();
+
+    let mut cache = TRACK_NAME_CACHE.lock().unwrap();
+    if *cache == current_names {
+        return;
+    }
+
+    // Names changed — update cache and re-apply colors
+    *cache = current_names;
+    drop(cache);
+
+    apply_colors_to_all_tracks();
 }
 
 /// Check if auto-color is currently enabled.
@@ -111,16 +154,29 @@ pub fn is_auto_color_enabled() -> bool {
 // Internal
 // ============================================================================
 
+/// Read all track names from REAPER (lightweight — just string reads).
+fn read_all_track_names() -> Vec<String> {
+    let low = Reaper::get().medium_reaper().low();
+    let count = unsafe { low.CountTracks(std::ptr::null_mut()) };
+    let mut names = Vec::with_capacity(count as usize);
+    unsafe {
+        for i in 0..count {
+            let track = low.GetTrack(std::ptr::null_mut(), i);
+            if !track.is_null() {
+                names.push(get_track_name(low, track));
+            }
+        }
+    }
+    names
+}
+
 struct TrackInfo {
     ptr: *mut raw::MediaTrack,
     name: String,
 }
 
 /// Collect track pointers and names for a range of track indices.
-fn collect_track_info(
-    low: &reaper_low::Reaper,
-    range: std::ops::Range<i32>,
-) -> Vec<TrackInfo> {
+fn collect_track_info(low: &reaper_low::Reaper, range: std::ops::Range<i32>) -> Vec<TrackInfo> {
     let mut tracks = Vec::new();
     unsafe {
         for i in range {
@@ -145,7 +201,7 @@ unsafe fn get_track_name(low: &reaper_low::Reaper, track: *mut raw::MediaTrack) 
         .into_owned()
 }
 
-/// Core logic: classify track names via monarchy sort, look up colors, apply to REAPER tracks.
+/// Core logic: classify track names via dynamic-template, then apply colors to REAPER tracks.
 fn apply_colors_to_tracks(low: &reaper_low::Reaper, tracks: &[TrackInfo]) {
     if tracks.is_empty() {
         return;
@@ -153,32 +209,17 @@ fn apply_colors_to_tracks(low: &reaper_low::Reaper, tracks: &[TrackInfo]) {
 
     let track_names: Vec<String> = tracks.iter().map(|t| t.name.clone()).collect();
 
-    // Run monarchy classification
-    let config = dynamic_template::default_config();
-    let structure = match monarchy::monarchy_sort(track_names.clone(), config) {
-        Ok(s) => s,
-        Err(e) => {
-            info!("Auto-color classification failed: {}", e);
-            return;
-        }
-    };
+    // Classify and get color mapping from dynamic-template
+    let color_map = dynamic_template::auto_color::classify_and_color(track_names);
 
-    // Build name → color map by walking the classified structure
-    let mut color_map: HashMap<String, Color> = HashMap::new();
-    collect_colors_from_structure(&structure, &[], &mut color_map);
-
-    // Apply colors
+    // Apply colors to REAPER tracks
     let param = CString::new("I_CUSTOMCOLOR").unwrap();
     let mut colored = 0u32;
     unsafe {
         for track_info in tracks {
             if let Some(color) = color_map.get(&track_info.name) {
                 let native = colors::to_reaper_color(*color);
-                low.SetMediaTrackInfo_Value(
-                    track_info.ptr,
-                    param.as_ptr(),
-                    native as f64,
-                );
+                low.SetMediaTrackInfo_Value(track_info.ptr, param.as_ptr(), native as f64);
                 colored += 1;
             }
         }
@@ -187,32 +228,4 @@ fn apply_colors_to_tracks(low: &reaper_low::Reaper, tracks: &[TrackInfo]) {
     }
 
     info!("Auto-color: colored {}/{} tracks", colored, tracks.len());
-}
-
-/// Walk a Structure tree, mapping item original names → their group's color.
-fn collect_colors_from_structure<M: monarchy::Metadata>(
-    structure: &monarchy::Structure<M>,
-    parent_path: &[&str],
-    color_map: &mut HashMap<String, Color>,
-) {
-    // Build path for this node
-    let mut current_path: Vec<&str> = parent_path.to_vec();
-    if !structure.name.is_empty() && structure.name != "root" {
-        current_path.push(&structure.name);
-    }
-
-    // Look up color for this group path
-    let color = colors::color_for_path(&current_path);
-
-    // Assign color to items at this level
-    if let Some(c) = color {
-        for item in &structure.items {
-            color_map.insert(item.original.clone(), c);
-        }
-    }
-
-    // Recurse into children — children may have more specific colors
-    for child in &structure.children {
-        collect_colors_from_structure(child, &current_path, color_map);
-    }
 }

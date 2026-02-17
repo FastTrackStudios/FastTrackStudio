@@ -1,13 +1,13 @@
 [package]
-name = "signal2-controller"
+name = "signal-controller"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
 
 [dependencies]
-signal-proto = { package = "signal2-proto", path = "../signal-proto" }
-signal-live = { package = "signal2-live", path = "../signal-live" }
+signal-proto = { path = "../signal-proto" }
+signal-live = { path = "../signal-live" }
 roam.workspace = true
 tokio = { workspace = true, features = ["sync"] }
 

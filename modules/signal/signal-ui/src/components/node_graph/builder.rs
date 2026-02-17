@@ -1,7 +1,7 @@
 //! Factory and builder methods for [`NodeGraph`].
 //!
 //! Contains `widget_for_block_type`, `create_module_for_block_type`,
-//! and `build_from_engines` (bridge from signal2 domain types).
+//! and `build_from_engines` (bridge from signal domain types).
 
 use signal::{BlockType, ModuleBlock, SignalChain};
 use uuid::Uuid;
@@ -76,7 +76,7 @@ impl NodeGraph {
         NodePosition::new(x, max_bottom + 40.0)
     }
 
-    /// Build a node graph from signal2 `EngineFlowData` slices.
+    /// Build a node graph from signal `EngineFlowData` slices.
     ///
     /// Creates a `GraphModule` per module chain within each engine/layer,
     /// with child `Node`s for each block in the signal chain. Modules are

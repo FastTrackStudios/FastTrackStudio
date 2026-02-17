@@ -452,6 +452,11 @@ impl Snapshot {
         self
     }
 
+    /// Replace the block state. Used when saving parameter changes.
+    pub fn set_block(&mut self, block: Block) {
+        self.block = block;
+    }
+
     /// Bump the version counter. Called by the storage layer when parameter values change.
     pub fn increment_version(&mut self) {
         self.version += 1;
@@ -1111,6 +1116,7 @@ pub trait BlockService {
         preset_id: PresetId,
         snapshot_id: SnapshotId,
     ) -> Option<Snapshot>;
+    async fn save_block_collection(&self, preset: Preset) -> ();
     async fn list_module_presets(&self) -> Vec<ModulePreset>;
     async fn load_module_preset(&self, preset_id: ModulePresetId) -> Option<ModuleSnapshot>;
     async fn load_module_preset_snapshot(

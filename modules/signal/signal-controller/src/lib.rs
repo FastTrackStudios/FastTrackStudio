@@ -18,9 +18,10 @@ use signal_proto::{
     resolve::{ResolveError, ResolveTarget, ResolvedGraph},
     rig::{Rig, RigId, RigScene, RigSceneId},
     setlist::{Setlist, SetlistEntry, SetlistEntryId, SetlistId},
-    song::{Section, SectionId, Song, SongId},
+    song::{Section, SectionId, SectionSource, Song, SongId},
     tagging::{BrowserHit, BrowserIndex, BrowserQuery},
     scene_template::{SceneTemplate, SceneTemplateId},
+    traits::Collection,
     Block, BlockService, BlockType, BrowserService, EngineService, LayerService, ModulePreset,
     ModulePresetId, ModuleSnapshot, ModuleSnapshotId, Preset, PresetId, PresetService,
     ProfileService, ResolveService, SceneTemplateService, SetlistService, SnapshotId, SongService,
@@ -199,6 +200,32 @@ where
             .load_preset_snapshot(&cx, block_type, collection_id.into(), variant_id.into())
             .await
             .map(|snapshot| snapshot.block())
+    }
+
+    /// Save (upsert) a block collection.
+    pub async fn save_block_collection(&self, preset: Preset) {
+        let cx = self.context_factory.make_context();
+        self.service.save_block_collection(&cx, preset).await;
+    }
+
+    /// Targeted update: load the preset, find the snapshot, replace its block, bump version, save.
+    pub async fn update_snapshot_params(
+        &self,
+        block_type: BlockType,
+        preset_id: impl Into<PresetId>,
+        snapshot_id: impl Into<SnapshotId>,
+        block: Block,
+    ) {
+        let preset_id = preset_id.into();
+        let snapshot_id = snapshot_id.into();
+        let presets = self.list_collections(block_type).await;
+        if let Some(mut preset) = presets.into_iter().find(|p| *p.id() == preset_id) {
+            if let Some(snap) = preset.variants_mut().iter_mut().find(|s| *s.id() == snapshot_id) {
+                snap.set_block(block);
+                snap.increment_version();
+            }
+            self.save_block_collection(preset).await;
+        }
     }
 
     // endregion: --- Collection + variant operations (block-level)
@@ -455,7 +482,49 @@ where
             .await
     }
 
+    /// Update a song section's source reference (e.g. assign a new preset/scene or patch).
+    pub async fn set_section_source(
+        &self,
+        song_id: impl Into<SongId>,
+        section_id: impl Into<SectionId>,
+        source: SectionSource,
+    ) {
+        let song_id = song_id.into();
+        let section_id = section_id.into();
+        if let Some(mut song) = self.load_song(song_id).await {
+            if let Some(section) = song.sections.iter_mut().find(|s| s.id == section_id) {
+                section.source = source;
+            }
+            self.save_song(song).await;
+        }
+    }
+
     // endregion: --- Song operations
+
+    // region: --- Profile mutation helpers
+
+    /// Update a profile patch's underlying rig/scene reference.
+    pub async fn set_patch_preset(
+        &self,
+        profile_id: impl Into<ProfileId>,
+        patch_id: impl Into<PatchId>,
+        rig_id: impl Into<RigId>,
+        scene_id: impl Into<RigSceneId>,
+    ) {
+        let profile_id = profile_id.into();
+        let patch_id = patch_id.into();
+        let rig_id = rig_id.into();
+        let scene_id = scene_id.into();
+        if let Some(mut profile) = self.load_profile(profile_id).await {
+            if let Some(patch) = profile.patches.iter_mut().find(|p| p.id == patch_id) {
+                patch.rig_id = rig_id;
+                patch.rig_variant_id = scene_id;
+            }
+            self.save_profile(profile).await;
+        }
+    }
+
+    // endregion: --- Profile mutation helpers
 
     // region: --- Setlist operations
 

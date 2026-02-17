@@ -30,6 +30,7 @@ pub trait BlockRepo: Send + Sync {
         collection_id: &PresetId,
         variant_id: &SnapshotId,
     ) -> StorageResult<Option<Snapshot>>;
+    async fn save_block_collection(&self, preset: Preset) -> StorageResult<()>;
 }
 
 // endregion: --- Trait
@@ -364,6 +365,48 @@ impl BlockRepo for BlockRepoLive {
             None => Ok(None),
         }
     }
+
+    async fn save_block_collection(&self, preset: Preset) -> StorageResult<()> {
+        let preset_id = preset.id().to_string();
+
+        // Delete existing snapshots for this preset
+        entity::snapshot::Entity::delete_many()
+            .filter(entity::snapshot::Column::PresetId.eq(preset_id.clone()))
+            .exec(&self.db)
+            .await?;
+
+        // Delete existing preset row
+        entity::preset::Entity::delete_by_id(preset_id.clone())
+            .exec(&self.db)
+            .await?;
+
+        // Insert the preset row
+        entity::preset::Entity::insert(entity::preset::ActiveModel {
+            id: Set(preset_id.clone()),
+            block_type: Set(preset.block_type().as_str().to_string()),
+            name: Set(preset.name().to_string()),
+            default_snapshot_id: Set(preset.default_snapshot().id().to_string()),
+            metadata_json: Set(metadata_to_json(preset.metadata())?),
+        })
+        .exec(&self.db)
+        .await?;
+
+        // Insert all snapshots
+        for variant in preset.snapshots() {
+            entity::snapshot::Entity::insert(entity::snapshot::ActiveModel {
+                id: Set(variant.id().to_string()),
+                preset_id: Set(preset_id.clone()),
+                name: Set(variant.name().to_string()),
+                state_json: Set(block_to_json(&variant.block())?),
+                metadata_json: Set(metadata_to_json(variant.metadata())?),
+                version: Set(variant.version() as i32),
+            })
+            .exec(&self.db)
+            .await?;
+        }
+
+        Ok(())
+    }
 }
 
 // endregion: --- Trait impl
@@ -373,7 +416,7 @@ impl BlockRepo for BlockRepoLive {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use signal_proto::{metadata::Metadata, seed_id, BlockParameter};
+    use signal_proto::{metadata::Metadata, seed_id, traits::Collection, BlockParameter};
 
     type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
 
@@ -723,6 +766,41 @@ mod tests {
             loaded.default_snapshot().metadata().notes.as_deref(),
             Some("snapshot-notes")
         );
+        Ok(())
+    }
+
+    // -- save_block_collection
+
+    #[tokio::test]
+    async fn save_block_collection_round_trip() -> Result<()> {
+        // -- Setup & Fixtures
+        let repo = seeded_repo().await?;
+        let preset_id = PresetId::from_uuid(seed_id("amp-twin"));
+
+        // Load the preset, mutate a snapshot param, save it back
+        let collections = repo.list_block_collections(BlockType::Amp).await?;
+        let mut preset = collections
+            .into_iter()
+            .find(|c| *c.id() == preset_id)
+            .expect("twin preset");
+        let snap = &mut preset.variants_mut()[0];
+        let mut block = snap.block();
+        block.set_parameter_value(0, 0.99);
+        snap.set_block(block);
+        snap.increment_version();
+
+        repo.save_block_collection(preset.clone()).await?;
+
+        // Reload and verify
+        let reloaded = repo.list_block_collections(BlockType::Amp).await?;
+        let twin = reloaded
+            .iter()
+            .find(|c| *c.id() == preset_id)
+            .expect("twin after save");
+        assert_eq!(twin.snapshots().len(), preset.snapshots().len());
+        let first_param = twin.snapshots()[0].block().parameters()[0].value().get();
+        assert!((first_param - 0.99).abs() < 0.001);
+        assert_eq!(twin.snapshots()[0].version(), 2);
         Ok(())
     }
 }

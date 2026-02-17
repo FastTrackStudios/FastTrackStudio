@@ -1,7 +1,7 @@
 //! FxRigBinding — discover rig structure from a DAW track's FX chain.
 //!
 //! Scans an FX chain (via `DawBridge`) and maps FX plugins to module slots.
-//! This bridges the gap between "what the DAW has" and "what signal2 models."
+//! This bridges the gap between "what the DAW has" and "what signal models."
 
 use signal_proto::module_type::ModuleType;
 use std::collections::HashMap;
@@ -38,7 +38,7 @@ pub struct DiscoveredRig {
     pub modules: Vec<DiscoveredModule>,
 }
 
-/// Binding state tracking how a signal2 rig maps to DAW FX.
+/// Binding state tracking how a signal rig maps to DAW FX.
 #[derive(Debug)]
 pub struct FxRigBinding {
     /// Track this binding is attached to.
@@ -92,7 +92,10 @@ impl FxRigBinding {
 
     /// Get FX IDs for a module type.
     pub fn fx_ids_for_module(&self, module_type: ModuleType) -> &[String] {
-        self.fx_map.get(&module_type).map(|v| v.as_slice()).unwrap_or(&[])
+        self.fx_map
+            .get(&module_type)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[])
     }
 
     /// All module types that are bound.

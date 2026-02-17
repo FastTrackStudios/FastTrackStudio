@@ -4519,8 +4519,8 @@ dependencies = [
  "session",
  "session-proto",
  "session-ui",
- "signal2",
- "signal2-ui",
+ "signal",
+ "signal-ui",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -8940,8 +8940,8 @@ dependencies = [
  "peniko 0.6.0",
  "pollster 0.4.0",
  "serde_json",
- "signal2",
- "signal2-ui",
+ "signal",
+ "signal-ui",
  "tokio",
  "vello",
  "wgpu 27.0.1",
@@ -10930,6 +10930,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "signal"
+version = "0.1.0"
+dependencies = [
+ "signal-controller",
+ "signal-live",
+ "signal-proto",
+ "signal-storage",
+ "tokio",
+]
+
+[[package]]
+name = "signal-controller"
+version = "0.1.0"
+dependencies = [
+ "roam",
+ "signal-live",
+ "signal-proto",
+ "tokio",
+]
+
+[[package]]
 name = "signal-hook"
 version = "0.3.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10950,42 +10971,21 @@ dependencies = [
 ]
 
 [[package]]
-name = "signal2"
-version = "0.1.0"
-dependencies = [
- "signal2-controller",
- "signal2-live",
- "signal2-proto",
- "signal2-storage",
- "tokio",
-]
-
-[[package]]
-name = "signal2-controller"
-version = "0.1.0"
-dependencies = [
- "roam",
- "signal2-live",
- "signal2-proto",
- "tokio",
-]
-
-[[package]]
-name = "signal2-live"
+name = "signal-live"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "roam",
  "serde",
  "serde_json",
- "signal2-proto",
- "signal2-storage",
+ "signal-proto",
+ "signal-storage",
  "tokio",
  "uuid",
 ]
 
 [[package]]
-name = "signal2-proto"
+name = "signal-proto"
 version = "0.1.0"
 dependencies = [
  "facet",
@@ -10996,21 +10996,21 @@ dependencies = [
 ]
 
 [[package]]
-name = "signal2-storage"
+name = "signal-storage"
 version = "0.1.0"
 dependencies = [
  "async-trait",
  "sea-orm",
  "serde",
  "serde_json",
- "signal2-proto",
+ "signal-proto",
  "thiserror 2.0.18",
  "tokio",
  "uuid",
 ]
 
 [[package]]
-name = "signal2-ui"
+name = "signal-ui"
 version = "0.1.0"
 dependencies = [
  "audio-controls",
@@ -11018,7 +11018,7 @@ dependencies = [
  "dock-dioxus",
  "dock-proto",
  "lumen-blocks 0.2.0",
- "signal2",
+ "signal",
  "tokio",
  "uuid",
 ]

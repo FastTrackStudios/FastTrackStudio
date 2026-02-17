@@ -37,30 +37,6 @@ actions_proto::define_actions! {
             category: Dev,
             group: "Dev",
         }
-        AUTO_COLOR_ALL = "auto_color_all" {
-            name: "Auto Color All Tracks",
-            description: "Classify all tracks by instrument group and apply colors",
-            category: General,
-        }
-        AUTO_COLOR_SELECTED = "auto_color_selected" {
-            name: "Auto Color Selected",
-            description: "Classify selected tracks by instrument group and apply colors",
-            category: General,
-        }
-        AUTO_COLOR_TOGGLE = "auto_color_toggle" {
-            name: "Toggle Auto Color",
-            description: "Toggle auto-color on/off (applies or clears all track colors)",
-            category: General,
-        }
-        AUTO_COLOR_CLEAR_ALL = "auto_color_clear_all" {
-            name: "Clear All Track Colors",
-            description: "Reset colors on all tracks to default",
-            category: General,
-        }
-        AUTO_COLOR_CLEAR_SELECTED = "auto_color_clear_selected" {
-            name: "Clear Selected Track Colors",
-            description: "Reset colors on selected tracks to default",
-            category: General,
-        }
+
     }
 }

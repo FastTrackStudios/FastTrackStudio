@@ -10,6 +10,7 @@
 
 // region: --- Modules
 
+pub mod actions;
 pub mod bindings;
 pub mod constants;
 pub mod continuous_action;

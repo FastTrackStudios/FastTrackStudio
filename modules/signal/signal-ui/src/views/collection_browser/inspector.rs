@@ -8,6 +8,10 @@ use crate::components::dynamic_grid::{GridSelection, GridSlot};
 pub(super) struct BlockInspectorPanelProps {
     pub selection: Option<GridSelection>,
     pub chain: Vec<GridSlot>,
+    #[props(default)]
+    pub on_param_change: Option<EventHandler<(uuid::Uuid, String, f32)>>,
+    #[props(default)]
+    pub on_save: Option<EventHandler<GridSlot>>,
 }
 
 /// Shows properties of the currently selected block or module in the grid.
@@ -34,6 +38,8 @@ pub(super) fn BlockInspectorPanel(props: BlockInspectorPanelProps) -> Element {
                     .and_then(|k| k.rsplit('/').next())
                     .unwrap_or("—");
                 let bypassed = if slot.bypassed { "Yes" } else { "No" };
+                let slot_clone = slot.clone();
+                let has_preset = slot.preset_id.is_some();
 
                 rsx! {
                     div { class: "mt-3 rounded border border-zinc-800 bg-zinc-900/60 overflow-hidden",
@@ -65,7 +71,7 @@ pub(super) fn BlockInspectorPanel(props: BlockInspectorPanelProps) -> Element {
                                 }
                             }
                         }
-                        // Parameter bars
+                        // Interactive parameter sliders
                         if !slot.parameters.is_empty() {
                             div { class: "px-3 py-2 border-t border-zinc-800 space-y-1.5",
                                 h4 { class: "text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-1",
@@ -74,19 +80,52 @@ pub(super) fn BlockInspectorPanel(props: BlockInspectorPanelProps) -> Element {
                                 for (name, value) in slot.parameters.iter() {
                                     {
                                         let pct = (value * 100.0).round() as u32;
-                                        let width_pct = format!("{}%", pct);
                                         let name = name.clone();
+                                        let slot_id = slot.id;
+                                        let on_change = props.on_param_change.clone();
                                         rsx! {
                                             div { class: "flex items-center gap-2",
                                                 span { class: "text-[11px] text-zinc-400 w-24 truncate flex-shrink-0", "{name}" }
-                                                div { class: "flex-1 h-1.5 bg-zinc-800 rounded-full overflow-hidden",
-                                                    div {
-                                                        class: "h-full rounded-full",
-                                                        style: "width: {width_pct}; background-color: {color.bg};",
-                                                    }
+                                                input {
+                                                    r#type: "range",
+                                                    min: "0",
+                                                    max: "100",
+                                                    value: "{pct}",
+                                                    class: "flex-1 h-1.5",
+                                                    style: "accent-color: {color.bg};",
+                                                    oninput: move |evt: Event<FormData>| {
+                                                        if let Ok(v) = evt.value().parse::<f32>() {
+                                                            let normalized = (v / 100.0).clamp(0.0, 1.0);
+                                                            if let Some(ref cb) = on_change {
+                                                                cb.call((slot_id, name.clone(), normalized));
+                                                            }
+                                                        }
+                                                    },
                                                 }
                                                 span { class: "text-[10px] text-zinc-600 w-8 text-right flex-shrink-0", "{pct}%" }
                                             }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        // Save button (only when slot has a preset_id to save back to)
+                        if has_preset {
+                            {
+                                let on_save = props.on_save.clone();
+                                let save_slot = slot_clone.clone();
+                                rsx! {
+                                    div { class: "px-3 py-2 border-t border-zinc-800",
+                                        button {
+                                            class: "w-full px-3 py-1.5 text-xs rounded \
+                                                    bg-zinc-700 hover:bg-zinc-600 text-zinc-200 \
+                                                    transition-colors duration-150",
+                                            onclick: move |_| {
+                                                if let Some(ref cb) = on_save {
+                                                    cb.call(save_slot.clone());
+                                                }
+                                            },
+                                            "Save Snapshot"
                                         }
                                     }
                                 }

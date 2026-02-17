@@ -54,9 +54,9 @@ kurbo.workspace = true
 keyflow-ui = { path = "../../../cells/keyflow/keyflow-ui", default-features = false }
 keyflow = { path = "../../../cells/keyflow/keyflow", features = ["text"] }
 
-# Signal2 — storage-backed rig control
-signal2.workspace = true
-signal2-ui = { workspace = true, default-features = false }
+# Signal — storage-backed rig control
+signal.workspace = true
+signal-ui = { workspace = true, default-features = false }
 
 # Lumen Blocks UI components (dropdown, etc.)
 lumen-blocks.workspace = true
@@ -84,10 +84,10 @@ mimalloc = "0.1"
 default = ["desktop"]
 
 # Desktop renderer using Wry/WebView (recommended)
-desktop = ["dioxus", "session-ui/web", "keyflow-ui/web", "signal2-ui/web", "daw-ui/web", "dock-dioxus/web"]
+desktop = ["dioxus", "session-ui/web", "keyflow-ui/web", "signal-ui/web", "daw-ui/web", "dock-dioxus/web"]
 
 # Native GPU-accelerated renderer using Blitz (experimental)
-native = ["dioxus-native", "session-ui/native", "keyflow-ui/native", "signal2-ui/native", "daw-ui/native", "dock-dioxus/native"]
+native = ["dioxus-native", "session-ui/native", "keyflow-ui/native", "signal-ui/native", "daw-ui/native", "dock-dioxus/native"]
 
 # Enable Blitz's built-in frame time logging (only works with native feature)
 log-frame-times = ["dioxus-native/log-frame-times"]

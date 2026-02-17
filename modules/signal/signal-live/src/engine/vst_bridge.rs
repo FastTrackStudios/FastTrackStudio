@@ -1,7 +1,7 @@
 //! VST parameter bridge for bidirectional sync between internal state and DAW plugins.
 //!
 //! The `VstParameterBridge` trait defines how parameter values flow between
-//! the signal2 engine and DAW plugin instances. `ParameterSyncManager` coordinates
+//! the signal engine and DAW plugin instances. `ParameterSyncManager` coordinates
 //! the sync, handling debouncing and conflict resolution.
 
 use std::collections::HashMap;

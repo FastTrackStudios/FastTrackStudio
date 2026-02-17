@@ -308,6 +308,17 @@ fn flatten_chain_nodes(
         match node {
             signal::SignalNode::Block(mb) => {
                 let parameters = extract_block_params(mb, param_lookup);
+                let (preset_id, snapshot_id) = match mb.source() {
+                    signal::ModuleBlockSource::PresetSnapshot {
+                        preset_id,
+                        snapshot_id,
+                        ..
+                    } => (Some(preset_id.to_string()), Some(snapshot_id.to_string())),
+                    signal::ModuleBlockSource::PresetDefault { preset_id, .. } => {
+                        (Some(preset_id.to_string()), None)
+                    }
+                    signal::ModuleBlockSource::Inline { .. } => (None, None),
+                };
                 slots.push(GridSlot {
                     id: uuid::Uuid::new_v4(),
                     block_type: mb.block_type(),
@@ -323,6 +334,8 @@ fn flatten_chain_nodes(
                     bypassed: false,
                     is_phantom: false,
                     parameters,
+                    preset_id,
+                    snapshot_id,
                 });
                 *col_cursor += 1;
             }
@@ -461,6 +474,12 @@ fn find_free_module_row(
 #[derive(Props, Clone, PartialEq)]
 pub struct RigGridPanelProps {
     pub initial_slots: Vec<GridSlot>,
+    #[props(default)]
+    pub on_param_change: Option<EventHandler<(uuid::Uuid, String, f32)>>,
+    #[props(default)]
+    pub on_save: Option<EventHandler<GridSlot>>,
+    #[props(default)]
+    pub on_selection_change: Option<EventHandler<Option<GridSelection>>>,
 }
 
 /// Stateful wrapper around `DynamicGridView` + `BlockPickerDropdown`.
@@ -483,8 +502,28 @@ pub fn RigGridPanel(props: RigGridPanelProps) -> Element {
     let picker_cell = PICKER_CELL();
     let picker_pos = PICKER_CLICK_POS();
 
+    let on_param_change_prop = props.on_param_change.clone();
+    let on_save_prop = props.on_save.clone();
+    let on_selection_change_prop = props.on_selection_change.clone();
+
     let current_chain = chain();
     let current_sel = selection();
+
+    // Handler: update local chain when a parameter changes in the inspector.
+    let param_change_handler = {
+        EventHandler::new(move |(id, name, value): (uuid::Uuid, String, f32)| {
+            let mut current = chain();
+            if let Some(slot) = current.iter_mut().find(|s| s.id == id) {
+                if let Some(p) = slot.parameters.iter_mut().find(|(n, _)| *n == name) {
+                    p.1 = value;
+                }
+            }
+            chain.set(current);
+            if let Some(ref cb) = on_param_change_prop {
+                cb.call((id, name, value));
+            }
+        })
+    };
 
     rsx! {
         div {
@@ -500,7 +539,10 @@ pub fn RigGridPanel(props: RigGridPanelProps) -> Element {
                     connections.set(new_conns);
                 },
                 on_select: move |sel: Option<GridSelection>| {
-                    selection.set(sel);
+                    selection.set(sel.clone());
+                    if let Some(ref cb) = on_selection_change_prop {
+                        cb.call(sel);
+                    }
                 },
             }
         }
@@ -526,6 +568,8 @@ pub fn RigGridPanel(props: RigGridPanelProps) -> Element {
         BlockInspectorPanel {
             selection: current_sel,
             chain: current_chain,
+            on_param_change: param_change_handler,
+            on_save: on_save_prop.clone(),
         }
     }
 }

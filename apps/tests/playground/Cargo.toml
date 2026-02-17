@@ -6,8 +6,8 @@ edition = "2021"
 
 [dependencies]
 dioxus = { workspace = true, features = ["router"] }
-signal2.workspace = true
-signal2-ui.workspace = true
+signal.workspace = true
+signal-ui.workspace = true
 frame-import = { path = "../../../cells/frame/frame-import" }
 frame-proto = { path = "../../../cells/frame/frame-proto" }
 frame-ui = { path = "../../../cells/frame/frame-ui", features = ["anyrender"] }

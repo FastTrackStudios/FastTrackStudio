@@ -10,7 +10,7 @@ module.exports = {
     "../../../cells/dock/dock-dioxus/src/**/*.rs",
     "../../../cells/daw/daw-ui/src/**/*.rs",
     "../../../cells/signal/audio-controls/src/**/*.rs",
-    // Include signal2 UI components
+    // Include signal UI components
     "../../../modules/signal/signal-ui/src/**/*.rs",
     // Include lumen-blocks shared components
     "../../../reference/lumen-blocks/blocks/src/**/*.rs",

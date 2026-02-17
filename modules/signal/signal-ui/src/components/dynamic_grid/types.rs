@@ -3,7 +3,7 @@
 use signal::block::BlockColor;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Grid slot — the signal2 equivalent of CompositionSlot
+// Grid slot — the signal equivalent of CompositionSlot
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// A single cell in the grid. Replaces legacy `CompositionSlot`.
@@ -34,6 +34,10 @@ pub struct GridSlot {
     pub is_phantom: bool,
     /// Resolved block parameters (name, value 0..1) for the inspector panel.
     pub parameters: Vec<(String, f32)>,
+    /// Preset ID this block was loaded from (for save-back). `None` for inline/template blocks.
+    pub preset_id: Option<String>,
+    /// Snapshot ID this block was loaded from. `None` for default snapshots or inline blocks.
+    pub snapshot_id: Option<String>,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

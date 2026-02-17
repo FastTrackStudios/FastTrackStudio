@@ -370,6 +370,9 @@ extern "C" fn timer_callback() {
         // Poll FX chain state and broadcast events for monitored chains
         daw_reaper::poll_and_broadcast_fx();
 
+        // Re-apply auto-color when track names change (throttled ~1s)
+        crate::auto_color::poll_and_recolor();
+
         // Apply deferred toolbar operations from workflow/input systems.
         toolbar_manager::process_deferred_ops();
     }

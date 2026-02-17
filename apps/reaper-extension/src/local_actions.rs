@@ -4,6 +4,7 @@ use actions_proto::{ActionId, ActionResult};
 use daw_proto::markers_regions::fts_markers_regions_actions;
 use daw_proto::transport::fts_transport_actions;
 use dynamic_template_proto::actions::dynamic_template_actions;
+use dynamic_template_proto::auto_color::actions::auto_color_actions;
 use dynamic_template_proto::visibility_manager::actions::visibility_manager_actions;
 use input_reaper::InputProfile;
 use reaper_high::Reaper;
@@ -876,7 +877,7 @@ fn handle_auto_color_selected() -> ActionResult {
 
 fn handle_auto_color_toggle() -> ActionResult {
     let enabled = crate::auto_color::toggle_auto_color();
-    refresh_toolbar("FTS_DYNAMIC_TEMPLATE_AUTO_COLOR_TOGGLE");
+    refresh_toolbar("FTS_AUTO_COLOR_TOGGLE");
     ActionResult::success_with_message(format!(
         "Auto-color {}",
         if enabled { "enabled" } else { "disabled" }
@@ -919,25 +920,35 @@ impl dynamic_template_actions::LocalActionBinder for DynamicTemplateActionBinder
     fn LOG_GROUPS(&self) -> actions_proto::LocalActionImplementation {
         actions_proto::LocalActionImplementation::Unsupported("Dev-only action")
     }
+}
 
-    fn AUTO_COLOR_ALL(&self) -> actions_proto::LocalActionImplementation {
+// ============================================================================
+// Auto Color Actions
+// ============================================================================
+
+struct AutoColorActionBinder;
+
+impl auto_color_actions::LocalActionBinder for AutoColorActionBinder {
+    fn COLOR_ALL(&self) -> actions_proto::LocalActionImplementation {
         actions_proto::LocalActionImplementation::Supported(Arc::new(handle_auto_color_all))
     }
 
-    fn AUTO_COLOR_SELECTED(&self) -> actions_proto::LocalActionImplementation {
+    fn COLOR_SELECTED(&self) -> actions_proto::LocalActionImplementation {
         actions_proto::LocalActionImplementation::Supported(Arc::new(handle_auto_color_selected))
     }
 
-    fn AUTO_COLOR_TOGGLE(&self) -> actions_proto::LocalActionImplementation {
+    fn TOGGLE(&self) -> actions_proto::LocalActionImplementation {
         actions_proto::LocalActionImplementation::Supported(Arc::new(handle_auto_color_toggle))
     }
 
-    fn AUTO_COLOR_CLEAR_ALL(&self) -> actions_proto::LocalActionImplementation {
+    fn CLEAR_ALL(&self) -> actions_proto::LocalActionImplementation {
         actions_proto::LocalActionImplementation::Supported(Arc::new(handle_auto_color_clear_all))
     }
 
-    fn AUTO_COLOR_CLEAR_SELECTED(&self) -> actions_proto::LocalActionImplementation {
-        actions_proto::LocalActionImplementation::Supported(Arc::new(handle_auto_color_clear_selected))
+    fn CLEAR_SELECTED(&self) -> actions_proto::LocalActionImplementation {
+        actions_proto::LocalActionImplementation::Supported(Arc::new(
+            handle_auto_color_clear_selected,
+        ))
     }
 }
 
@@ -1051,6 +1062,9 @@ pub fn builtin_local_actions() -> Vec<actions_proto::LocalActionRegistration> {
     actions.extend(dynamic_template_actions::definitions_with_binder(
         &DynamicTemplateActionBinder,
     ));
+    actions.extend(auto_color_actions::definitions_with_binder(
+        &AutoColorActionBinder,
+    ));
     actions.extend(visibility_manager_actions::definitions_with_binder(
         &VisibilityManagerActionBinder,
     ));
@@ -1107,7 +1121,7 @@ pub fn register_toggle_states() {
 
     // Auto-color toggle state
     crate::action_registry::set_local_toggle_getter(
-        "FTS_DYNAMIC_TEMPLATE_AUTO_COLOR_TOGGLE",
+        "FTS_AUTO_COLOR_TOGGLE",
         Arc::new(crate::auto_color::is_auto_color_enabled),
     );
 

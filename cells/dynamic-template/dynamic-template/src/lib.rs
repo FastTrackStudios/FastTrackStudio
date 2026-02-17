@@ -3,6 +3,7 @@ use monarchy::*;
 
 // region: --- Modules
 
+pub mod auto_color;
 pub mod colors;
 pub mod equipment;
 mod error;

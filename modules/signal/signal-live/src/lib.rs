@@ -1,4 +1,4 @@
-//! Live service implementation for signal2.
+//! Live service implementation for signal.
 //!
 //! Maps service traits onto storage repos:
 //! - `BlockService` → `BlockRepo` + `ModuleRepo`
@@ -38,13 +38,13 @@ use signal_proto::{
         ResolvedLayer, ResolvedModule,
     },
     rig::{Rig, RigId, RigScene, RigSceneId},
+    scene_template::{SceneTemplate, SceneTemplateId},
     setlist::{Setlist, SetlistEntry, SetlistEntryId, SetlistId},
     song::{Section, SectionId, Song, SongId},
     tagging::{
         infer_tags_from_name, BrowserEntityKind, BrowserEntry, BrowserHit, BrowserIndex,
         BrowserNodeId, BrowserQuery, StructuredTag, TagCategory, TagSet, TagWeights,
     },
-    scene_template::{SceneTemplate, SceneTemplateId},
     Block, BlockParameterOverride, BlockService, BlockType, BrowserService, EngineService,
     LayerService, ModuleBlockSource, ModulePreset, ModulePresetId, ModuleSnapshot,
     ModuleSnapshotId, Preset, PresetId, PresetService, ProfileService, ResolveService,
@@ -241,9 +241,7 @@ where
             .unwrap_or_default();
         {
             let mut cache = self.cache.write().await;
-            cache
-                .block_collections
-                .insert(block_type, result.clone());
+            cache.block_collections.insert(block_type, result.clone());
         }
         result
     }
@@ -340,6 +338,14 @@ where
             .await
             .ok()
             .flatten()
+    }
+
+    /// Save (upsert) a block collection and invalidate the cache for its block type.
+    async fn save_block_collection(&self, _cx: &Context, preset: Preset) -> () {
+        let bt = preset.block_type();
+        let _ = self.block_repo.save_block_collection(preset).await;
+        let mut cache = self.cache.write().await;
+        cache.block_collections.remove(&bt);
     }
 }
 
@@ -1879,8 +1885,7 @@ where
 
 // region: --- SceneTemplateService impl
 
-impl<B, M, L, E, R, P, So, Se, St> SceneTemplateService
-    for SignalLive<B, M, L, E, R, P, So, Se, St>
+impl<B, M, L, E, R, P, So, Se, St> SceneTemplateService for SignalLive<B, M, L, E, R, P, So, Se, St>
 where
     B: BlockRepo,
     M: ModuleRepo,
@@ -1935,12 +1940,12 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::{Duration, Instant};
     use signal_proto::seed_id;
     use signal_storage::{
         runtime_seed_bundle, BlockRepoLive, Database, EngineRepoLive, LayerRepoLive,
         ModuleRepoLive, ProfileRepoLive, RigRepoLive, SetlistRepoLive, SongRepoLive,
     };
+    use std::time::{Duration, Instant};
 
     type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
 

@@ -22,6 +22,7 @@ mod param_inspector;
 mod performance_view;
 mod profile_editor;
 mod snapshot_panel;
+mod editor_inspector;
 mod song_setlist_editor;
 
 pub use block_editor::{BlockCard, BlockEditor, MiniKnob};
@@ -57,6 +58,7 @@ pub use ab_comparison::{
 pub use param_inspector::{
     ParamInspector, ParamRow, ParamSource, SortColumn, SortDirection,
 };
+pub use editor_inspector::EditorInspectorPanel;
 pub use performance_view::{
     MorphSlider, PerfSceneGrid, PerfSceneTile, PerformanceView, RigStatus,
     RigStatusBanner, SnapshotBank, SnapshotSlot, SongNav, SongNavState,

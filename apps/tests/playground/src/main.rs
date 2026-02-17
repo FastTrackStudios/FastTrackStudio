@@ -1,6 +1,6 @@
-//! Playground for signal2 collection/variant UI.
+//! Playground for signal collection/variant UI.
 //!
-//! Tabbed gallery showcasing every smart view in `signal2_ui::views`.
+//! Tabbed gallery showcasing every smart view in `signal_ui::views`.
 
 #[cfg(feature = "desktop")]
 use anyrender::ImageRenderer;
@@ -27,8 +27,8 @@ use lumen_blocks::components::dropdown::{
 use lumen_blocks::components::input::{Input, InputSize};
 #[cfg(feature = "desktop")]
 use peniko::{Color, Fill};
-use signal2::{bootstrap_in_memory_controller_async, BlockType, SignalController};
-use signal2_ui::views::{
+use signal::{bootstrap_in_memory_controller_async, BlockType, SignalController};
+use signal_ui::views::{
     BlockEditor, CollectionBrowser, MetadataDisplay, ModuleView, ModuleViewMode, RigSceneGrid,
     SignalSlider,
 };
@@ -119,109 +119,490 @@ fn main() {
     dioxus::launch(App);
 }
 
-/// Custom renderer that drives vello + wgpu directly.
-/// Replaces `VelloWindowRenderer` to:
-///  1. Use Area AA instead of MSAA 16x (~5x less GPU work, ~3ms vs ~60ms per frame)
-///  2. Bypass the anyrender::Scene recording layer overhead
+/// Custom renderer using `vello::util::RenderContext` directly.
+///
+/// This matches vello's own example architecture:
+///   1. `render_to_texture` into an intermediate texture (compute shader)
+///   2. `get_current_texture` from the swap chain (natural backpressure point)
+///   3. Blit intermediate → surface via `TextureBlitter`
+///   4. Present + non-blocking poll (CPU/GPU pipelining)
+///
+/// This avoids `wgpu_context`'s `MemoryHints::MemoryUsage` which tells the
+/// Metal driver to minimize memory at the cost of performance.
 #[cfg(feature = "desktop")]
 struct FrameGraphics {
+    render_cx: vello::util::RenderContext,
+    surface: vello::util::RenderSurface<'static>,
     vello_renderer: vello::Renderer,
-    render_surface: wgpu_context::SurfaceRenderer<'static>,
     scene: vello::Scene,
     width: u32,
     height: u32,
+    frame_count: u64,
+    phase_accum: [f64; 5], // draw_fn, render_to_tex, get_texture, blit+present, poll
+    // GPU content cache — render complex scene once, blit per frame
+    content_texture: Option<wgpu::Texture>,
+    content_view: Option<wgpu::TextureView>,
+    content_width: u32,
+    content_height: u32,
+    // Custom blit pipeline (fullscreen triangle + texture sample with transform)
+    blit_pipeline: wgpu::RenderPipeline,
+    blit_bind_group_layout: wgpu::BindGroupLayout,
+    blit_sampler: wgpu::Sampler,
+    blit_uniform_buffer: wgpu::Buffer,
 }
+
+/// Uniform buffer layout for the blit shader (7 × vec4<f32> = 112 bytes).
+#[repr(C)]
+#[derive(Clone, Copy)]
+#[cfg(feature = "desktop")]
+struct BlitParams {
+    /// xy = screen-space offset where content origin appears, zw = screen-space size of content
+    content_offset_scale: [f32; 4],
+    /// Panel background color (linear RGBA)
+    bg_color: [f32; 4],
+    /// Selection overlay rect [x0, y0, x1, y1] in screen pixels (all zeros = no selection)
+    sel_rect: [f32; 4],
+    /// Selection border color (linear RGBA)
+    sel_color: [f32; 4],
+    /// Hover overlay rect [x0, y0, x1, y1] in screen pixels (all zeros = no hover)
+    hover_rect: [f32; 4],
+    /// Hover border color (linear RGBA)
+    hover_color: [f32; 4],
+    /// x = border_width, y = dpr, zw = unused
+    misc: [f32; 4],
+}
+
+#[cfg(feature = "desktop")]
+const BLIT_SHADER: &str = r#"
+struct Params {
+    content_offset_scale: vec4<f32>,
+    bg_color: vec4<f32>,
+    sel_rect: vec4<f32>,
+    sel_color: vec4<f32>,
+    hover_rect: vec4<f32>,
+    hover_color: vec4<f32>,
+    misc: vec4<f32>,
+}
+
+@group(0) @binding(0) var content_tex: texture_2d<f32>;
+@group(0) @binding(1) var content_samp: sampler;
+@group(0) @binding(2) var<uniform> params: Params;
+
+@vertex
+fn vs_main(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4<f32> {
+    // Fullscreen triangle: 3 vertices cover the entire clip space
+    let uv = vec2<f32>(f32((vi << 1u) & 2u), f32(vi & 2u));
+    return vec4<f32>(uv * 2.0 - 1.0, 0.0, 1.0);
+}
+
+fn is_on_border(pos: vec2<f32>, rect: vec4<f32>, w: f32) -> bool {
+    if rect.z <= rect.x || rect.w <= rect.y { return false; }
+    let outer = pos.x >= rect.x - w && pos.x <= rect.z + w
+             && pos.y >= rect.y - w && pos.y <= rect.w + w;
+    let inner = pos.x > rect.x + w && pos.x < rect.z - w
+             && pos.y > rect.y + w && pos.y < rect.w - w;
+    return outer && !inner;
+}
+
+@fragment
+fn fs_main(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
+    let px = pos.xy;
+    let uv = (px - params.content_offset_scale.xy) / params.content_offset_scale.zw;
+    var color = params.bg_color;
+
+    if uv.x >= 0.0 && uv.x <= 1.0 && uv.y >= 0.0 && uv.y <= 1.0 {
+        let tex = textureSample(content_tex, content_samp, uv);
+        color = vec4<f32>(tex.rgb + color.rgb * (1.0 - tex.a), 1.0);
+    }
+
+    let bw = params.misc.x;
+    if is_on_border(px, params.sel_rect, bw) {
+        let c = params.sel_color;
+        color = vec4<f32>(c.rgb * c.a + color.rgb * (1.0 - c.a), 1.0);
+    }
+    if is_on_border(px, params.hover_rect, bw * 0.67) {
+        let c = params.hover_color;
+        color = vec4<f32>(c.rgb * c.a + color.rgb * (1.0 - c.a), 1.0);
+    }
+    return color;
+}
+"#;
 
 #[cfg(feature = "desktop")]
 impl FrameGraphics {
     fn new(window: Arc<Window>, width: u32, height: u32) -> Self {
-        let features = wgpu::Features::CLEAR_TEXTURE | wgpu::Features::PIPELINE_CACHE;
-        let mut wgpu_ctx = wgpu_context::WGPUContext::with_features_and_limits(
-            Some(features),
-            None,
-        );
-        let render_surface = pollster::block_on(wgpu_ctx.create_surface(
-            window,
-            wgpu_context::SurfaceRendererConfiguration {
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-                formats: vec![
-                    wgpu::TextureFormat::Rgba8Unorm,
-                    wgpu::TextureFormat::Bgra8Unorm,
-                ],
-                width,
-                height,
-                present_mode: wgpu::PresentMode::AutoVsync,
-                desired_maximum_frame_latency: 2,
-                alpha_mode: wgpu::CompositeAlphaMode::Auto,
-                view_formats: vec![],
-            },
-            Some(wgpu_context::TextureConfiguration {
-                usage: wgpu::TextureUsages::STORAGE_BINDING
-                    | wgpu::TextureUsages::TEXTURE_BINDING,
-            }),
-        ))
-        .expect("Error creating surface");
+        let mut render_cx = vello::util::RenderContext::new();
 
+        let surface = pollster::block_on(render_cx.create_surface(
+            window,
+            width,
+            height,
+            wgpu::PresentMode::AutoVsync,
+        ))
+        .expect("Error creating vello render surface");
+
+        let device_handle = &render_cx.devices[surface.dev_id];
         let vello_renderer = vello::Renderer::new(
-            render_surface.device(),
+            &device_handle.device,
             vello::RendererOptions {
                 antialiasing_support: vello::AaSupport::area_only(),
                 use_cpu: false,
-                num_init_threads: None, // default
+                num_init_threads: None,
                 pipeline_cache: None,
             },
         )
         .expect("Error creating vello renderer");
 
+        // Build custom blit pipeline for GPU-cached content
+        let blit_shader = device_handle
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("Blit Shader"),
+                source: wgpu::ShaderSource::Wgsl(BLIT_SHADER.into()),
+            });
+        let blit_bind_group_layout =
+            device_handle
+                .device
+                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("Blit BGL"),
+                    entries: &[
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Texture {
+                                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                                view_dimension: wgpu::TextureViewDimension::D2,
+                                multisampled: false,
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 1,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 2,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Uniform,
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                    ],
+                });
+        let blit_pipeline_layout =
+            device_handle
+                .device
+                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some("Blit PL"),
+                    bind_group_layouts: &[&blit_bind_group_layout],
+                    push_constant_ranges: &[],
+                });
+        let surface_format = surface.config.format;
+        let blit_pipeline =
+            device_handle
+                .device
+                .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                    label: Some("Blit Pipeline"),
+                    layout: Some(&blit_pipeline_layout),
+                    vertex: wgpu::VertexState {
+                        module: &blit_shader,
+                        entry_point: Some("vs_main"),
+                        buffers: &[],
+                        compilation_options: Default::default(),
+                    },
+                    fragment: Some(wgpu::FragmentState {
+                        module: &blit_shader,
+                        entry_point: Some("fs_main"),
+                        targets: &[Some(wgpu::ColorTargetState {
+                            format: surface_format,
+                            blend: None,
+                            write_mask: wgpu::ColorWrites::ALL,
+                        })],
+                        compilation_options: Default::default(),
+                    }),
+                    primitive: wgpu::PrimitiveState::default(),
+                    depth_stencil: None,
+                    multisample: wgpu::MultisampleState::default(),
+                    multiview: None,
+                    cache: None,
+                });
+        let blit_sampler = device_handle
+            .device
+            .create_sampler(&wgpu::SamplerDescriptor {
+                label: Some("Blit Sampler"),
+                mag_filter: wgpu::FilterMode::Linear,
+                min_filter: wgpu::FilterMode::Linear,
+                ..Default::default()
+            });
+        let blit_uniform_buffer = device_handle.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Blit Params"),
+            size: std::mem::size_of::<BlitParams>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
         Self {
+            render_cx,
+            surface,
             vello_renderer,
-            render_surface,
             scene: vello::Scene::new(),
             width,
             height,
+            frame_count: 0,
+            phase_accum: [0.0; 5],
+            content_texture: None,
+            content_view: None,
+            content_width: 0,
+            content_height: 0,
+            blit_pipeline,
+            blit_bind_group_layout,
+            blit_sampler,
+            blit_uniform_buffer,
         }
     }
 
     fn render<F: FnOnce(&mut vello::Scene)>(&mut self, draw_fn: F) {
-        draw_fn(&mut self.scene);
+        use std::time::Instant;
 
-        let texture_view = self.render_surface.target_texture_view();
+        let t0 = Instant::now();
+        draw_fn(&mut self.scene);
+        let t1 = Instant::now();
+
+        let device_handle = &self.render_cx.devices[self.surface.dev_id];
+
+        // 1. Render scene to intermediate texture (vello compute pipeline)
         self.vello_renderer
             .render_to_texture(
-                self.render_surface.device(),
-                self.render_surface.queue(),
+                &device_handle.device,
+                &device_handle.queue,
                 &self.scene,
-                &texture_view,
+                &self.surface.target_view,
                 &vello::RenderParams {
                     base_color: Color::TRANSPARENT,
-                    width: self.render_surface.config.width,
-                    height: self.render_surface.config.height,
+                    width: self.surface.config.width,
+                    height: self.surface.config.height,
                     antialiasing_method: vello::AaConfig::Area,
                 },
             )
             .expect("failed to render to texture");
+        let t2 = Instant::now();
 
-        drop(texture_view);
-        self.render_surface.maybe_blit_and_present();
+        // 2. Acquire swap chain texture (BACKPRESSURE POINT — blocks if GPU is behind)
+        let surface_texture = self
+            .surface
+            .surface
+            .get_current_texture()
+            .expect("failed to get surface texture");
+        let t3 = Instant::now();
 
-        // Blocking poll: with Area AA this only costs ~3-5ms (vs ~60ms with MSAA 16x).
-        // Non-blocking poll causes GPU saturation → get_current_texture blocks → UI freeze.
-        self.render_surface
-            .device()
-            .poll(wgpu::PollType::wait_indefinitely())
-            .unwrap();
+        // 3. Blit intermediate → surface
+        let mut encoder =
+            device_handle
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("Surface Blit"),
+                });
+        let surface_view = surface_texture
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+        self.surface.blitter.copy(
+            &device_handle.device,
+            &mut encoder,
+            &self.surface.target_view,
+            &surface_view,
+        );
+        device_handle.queue.submit([encoder.finish()]);
+
+        // 4. Present + non-blocking poll (matches vello examples exactly)
+        surface_texture.present();
+        let _ = device_handle.device.poll(wgpu::PollType::Poll);
+        let t4 = Instant::now();
 
         self.scene.reset();
+
+        // Phase timing — print every 60 frames
+        self.phase_accum[0] += (t1 - t0).as_secs_f64() * 1000.0;
+        self.phase_accum[1] += (t2 - t1).as_secs_f64() * 1000.0;
+        self.phase_accum[2] += (t3 - t2).as_secs_f64() * 1000.0;
+        self.phase_accum[3] += (t4 - t3).as_secs_f64() * 1000.0;
+        self.phase_accum[4] += (t4 - t0).as_secs_f64() * 1000.0;
+        self.frame_count += 1;
+
+        if self.frame_count % 60 == 0 {
+            let n = 60.0;
+            eprintln!(
+                "[frame {}] avg/60: draw={:.2}ms  render_to_tex={:.2}ms  get_tex={:.2}ms  blit+present={:.2}ms  TOTAL={:.2}ms  ({:.0} effective fps)",
+                self.frame_count,
+                self.phase_accum[0] / n,
+                self.phase_accum[1] / n,
+                self.phase_accum[2] / n,
+                self.phase_accum[3] / n,
+                self.phase_accum[4] / n,
+                n / (self.phase_accum[4] / 1000.0),
+            );
+            self.phase_accum = [0.0; 5];
+        }
     }
 
     fn resize(&mut self, width: u32, height: u32) {
         self.width = width;
         self.height = height;
-        self.render_surface.resize(width, height);
+        self.render_cx
+            .resize_surface(&mut self.surface, width, height);
     }
 
     fn size(&self) -> (u32, u32) {
         (self.width, self.height)
+    }
+
+    /// Ensure the GPU content cache texture exists at the given size.
+    fn ensure_content_texture(&mut self, width: u32, height: u32) {
+        if self.content_width == width
+            && self.content_height == height
+            && self.content_texture.is_some()
+        {
+            return;
+        }
+        let device_handle = &self.render_cx.devices[self.surface.dev_id];
+        let texture = device_handle
+            .device
+            .create_texture(&wgpu::TextureDescriptor {
+                label: Some("Cached Content"),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                // Rgba8Unorm — matches vello's render_to_texture target format
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        self.content_texture = Some(texture);
+        self.content_view = Some(view);
+        self.content_width = width;
+        self.content_height = height;
+    }
+
+    /// Render a vello scene into the GPU content cache. Called once per content change.
+    fn render_to_content_cache(&mut self, scene: &vello::Scene, content_w: u32, content_h: u32) {
+        self.ensure_content_texture(content_w, content_h);
+        let device_handle = &self.render_cx.devices[self.surface.dev_id];
+        self.vello_renderer
+            .render_to_texture(
+                &device_handle.device,
+                &device_handle.queue,
+                scene,
+                self.content_view.as_ref().unwrap(),
+                &vello::RenderParams {
+                    base_color: Color::TRANSPARENT,
+                    width: content_w,
+                    height: content_h,
+                    antialiasing_method: vello::AaConfig::Area,
+                },
+            )
+            .expect("failed to render content to cache");
+    }
+
+    /// Fast path: blit the cached GPU texture to the surface with a viewport transform.
+    /// Bypasses vello's compute pipeline entirely — sub-millisecond.
+    fn blit_cached(&mut self, params: &BlitParams) {
+        let content_view = match self.content_view.as_ref() {
+            Some(v) => v,
+            None => return,
+        };
+
+        let device_handle = &self.render_cx.devices[self.surface.dev_id];
+
+        // Write uniform buffer
+        let params_bytes: &[u8] = unsafe {
+            std::slice::from_raw_parts(
+                params as *const BlitParams as *const u8,
+                std::mem::size_of::<BlitParams>(),
+            )
+        };
+        device_handle
+            .queue
+            .write_buffer(&self.blit_uniform_buffer, 0, params_bytes);
+
+        // Create bind group (recreated per frame since content_view may change)
+        let bind_group = device_handle
+            .device
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Blit BG"),
+                layout: &self.blit_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(content_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&self.blit_sampler),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: self.blit_uniform_buffer.as_entire_binding(),
+                    },
+                ],
+            });
+
+        // Acquire swap chain texture
+        let surface_texture = self
+            .surface
+            .surface
+            .get_current_texture()
+            .expect("failed to get surface texture");
+        let surface_view = surface_texture
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+
+        // Single render pass: fullscreen triangle sampling cached content
+        let mut encoder =
+            device_handle
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("Blit Render"),
+                });
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Blit Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &surface_view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                ..Default::default()
+            });
+            pass.set_pipeline(&self.blit_pipeline);
+            pass.set_bind_group(0, &bind_group, &[]);
+            pass.draw(0..3, 0..1);
+        }
+        device_handle.queue.submit([encoder.finish()]);
+
+        surface_texture.present();
+        let _ = device_handle.device.poll(wgpu::PollType::Poll);
+
+        self.scene.reset();
+        self.frame_count += 1;
+    }
+
+    fn has_cached_content(&self) -> bool {
+        self.content_texture.is_some()
     }
 }
 
@@ -306,7 +687,7 @@ fn App() -> Element {
                 } else {
                     "flex items-center gap-1 px-4 py-2 border-b border-zinc-800 bg-zinc-900/80 flex-shrink-0"
                 },
-                span { class: "text-xs font-bold text-zinc-500 uppercase tracking-wider mr-3", "signal2" }
+                span { class: "text-xs font-bold text-zinc-500 uppercase tracking-wider mr-3", "signal" }
                 for tab in Tab::ALL.iter() {
                     {
                         let t = *tab;
@@ -418,7 +799,7 @@ fn render_tab(tab: Tab, controller: SignalController) -> Element {
 /// Module view tab — loads a module collection and displays it.
 #[component]
 fn ModuleViewTab(controller: SignalController) -> Element {
-    let mut module_data = use_signal(|| None::<signal2::Module>);
+    let mut module_data = use_signal(|| None::<signal::Module>);
     let mut view_mode = use_signal(|| ModuleViewMode::Compact);
 
     {
@@ -470,7 +851,7 @@ fn ModuleViewTab(controller: SignalController) -> Element {
                     module,
                     view_mode: view_mode(),
                     on_toggle_bypass: move |_block_id: String| {},
-                    on_param_change: move |_change: signal2_ui::views::ParamChange| {},
+                    on_param_change: move |_change: signal_ui::views::ParamChange| {},
                 }
             } else {
                 p { class: "text-sm text-zinc-500", "Loading module data..." }
@@ -839,7 +1220,14 @@ fn FramePreviewTab() -> Element {
                         height: raster_h,
                     });
 
-                    (primitives, content, node_bounds, vello_scene, raster_brush, root)
+                    (
+                        primitives,
+                        content,
+                        node_bounds,
+                        vello_scene,
+                        raster_brush,
+                        root,
+                    )
                 })
                 .await;
 
@@ -872,9 +1260,13 @@ fn FramePreviewTab() -> Element {
                 let mut last_win_h: u32 = 0;
                 let mut last_spacing_len: usize = 0;
                 let mut frames_since_viewport_change: u32 = 0;
+                let mut loop_frame_count: u64 = 0;
+                let mut loop_accum = [0.0f64; 3]; // dirty_check, lock+render, total_iter
+                let mut last_cache_scene_gen: usize = usize::MAX; // force first cache update
 
                 loop {
                     tokio::time::sleep(tokio::time::Duration::from_millis(8)).await;
+                    let loop_start = std::time::Instant::now();
 
                     let bounds = preview_bounds();
                     if !bounds.is_valid() {
@@ -924,8 +1316,8 @@ fn FramePreviewTab() -> Element {
                     let viewport_changed = zoom != last_zoom
                         || current_pan_x != last_pan_x
                         || current_pan_y != last_pan_y;
-                    let content_changed = prim_count != last_prim_count
-                        || scene_gen != last_scene_gen;
+                    let content_changed =
+                        prim_count != last_prim_count || scene_gen != last_scene_gen;
 
                     if viewport_changed {
                         frames_since_viewport_change = 0;
@@ -934,9 +1326,9 @@ fn FramePreviewTab() -> Element {
                             frames_since_viewport_change.saturating_add(1);
                     }
 
-                    // Use raster during active pan/zoom, vector when stable (~160ms debounce)
-                    let use_raster = viewport_changed
-                        || (frames_since_viewport_change < 20 && !content_changed);
+                    // (raster path superseded by GPU blit — kept for reference)
+                    let _use_raster =
+                        viewport_changed || (frames_since_viewport_change < 20 && !content_changed);
 
                     last_zoom = zoom;
                     last_pan_x = current_pan_x;
@@ -984,7 +1376,10 @@ fn FramePreviewTab() -> Element {
                     )) * Affine::scale(zoom)
                         * Affine::translate((-content.min_x, -content.min_y));
 
-                    let raster_image = cached_raster_image();
+                    let dirty_check_ms = loop_start.elapsed().as_secs_f64() * 1000.0;
+
+                    let lock_start = std::time::Instant::now();
+                    let use_blit = viewport_changed && !content_changed;
 
                     if let Ok(mut gfx) = graphics_loop.lock() {
                         let frame_start = std::time::Instant::now();
@@ -993,53 +1388,113 @@ fn FramePreviewTab() -> Element {
                             gfx.resize(win_size.width, win_size.height);
                         }
 
-                        gfx.render(|scene| {
-                            let panel = Rect::new(
-                                bounds.x,
-                                bounds.y,
-                                bounds.x + bounds.width,
-                                bounds.y + bounds.height,
-                            );
-                            scene.fill(
-                                Fill::NonZero,
-                                Affine::IDENTITY,
-                                Color::from_rgb8(5, 6, 12),
-                                None,
-                                &panel,
-                            );
-                            if use_raster {
-                                if let Some(ref raster) = raster_image {
-                                    // Draw cached raster image for fast pan/zoom
-                                    let content_w =
-                                        (content.max_x - content.min_x).max(1.0);
-                                    let content_h =
-                                        (content.max_y - content.min_y).max(1.0);
-                                    let img_transform = Affine::translate((
-                                        bounds.x + pad + current_pan_x,
-                                        bounds.y + pad + current_pan_y,
-                                    )) * Affine::scale(zoom)
-                                        * Affine::scale_non_uniform(
-                                            content_w / raster.image.width as f64,
-                                            content_h / raster.image.height as f64,
-                                        );
-                                    scene.draw_image(
-                                        raster.as_ref(),
-                                        img_transform,
-                                    );
-                                } else {
-                                    // Fallback to vector scene if raster not ready
-                                    let guard = cached_scene_fragment.peek();
-                                    if let Some(ref frag) = *guard {
-                                        scene.append(frag, Some(transform));
-                                    }
-                                }
+                        // Update GPU content cache when scene changes
+                        if scene_gen != last_cache_scene_gen {
+                            let guard = cached_scene_fragment.peek();
+                            if let Some(ref frag) = *guard {
+                                let cw = ((content.max_x - content.min_x).ceil() as u32).max(1);
+                                let ch = ((content.max_y - content.min_y).ceil() as u32).max(1);
+                                let mut cache_scene = vello::Scene::new();
+                                cache_scene.append(
+                                    frag,
+                                    Some(Affine::translate((-content.min_x, -content.min_y))),
+                                );
+                                let t_cache = std::time::Instant::now();
+                                gfx.render_to_content_cache(&cache_scene, cw, ch);
+                                eprintln!(
+                                    "[cache] rendered {}x{} content to GPU texture in {:.1}ms",
+                                    cw,
+                                    ch,
+                                    t_cache.elapsed().as_secs_f64() * 1000.0
+                                );
+                                last_cache_scene_gen = scene_gen;
+                            }
+                        }
+
+                        let render_path;
+                        if use_blit && gfx.has_cached_content() {
+                            // FAST PATH: blit GPU-cached texture with viewport transform
+                            // Bypasses vello's compute pipeline entirely — sub-millisecond.
+                            render_path = "gpu-blit";
+                            let content_w = (content.max_x - content.min_x).max(1.0);
+                            let content_h = (content.max_y - content.min_y).max(1.0);
+                            let params = BlitParams {
+                                content_offset_scale: [
+                                    (bounds.x + pad + current_pan_x) as f32,
+                                    (bounds.y + pad + current_pan_y) as f32,
+                                    (zoom * content_w) as f32,
+                                    (zoom * content_h) as f32,
+                                ],
+                                bg_color: [5.0 / 255.0, 6.0 / 255.0, 12.0 / 255.0, 1.0],
+                                sel_rect: selected_overlay_css
+                                    .as_ref()
+                                    .map(|s| {
+                                        [
+                                            (bounds.x + s.x * bounds.dpr) as f32,
+                                            (bounds.y + s.y * bounds.dpr) as f32,
+                                            (bounds.x + (s.x + s.width) * bounds.dpr) as f32,
+                                            (bounds.y + (s.y + s.height) * bounds.dpr) as f32,
+                                        ]
+                                    })
+                                    .unwrap_or([0.0; 4]),
+                                sel_color: [
+                                    59.0 / 255.0,
+                                    130.0 / 255.0,
+                                    246.0 / 255.0,
+                                    230.0 / 255.0,
+                                ],
+                                hover_rect: hovered_overlay_css
+                                    .as_ref()
+                                    .map(|h| {
+                                        [
+                                            (bounds.x + h.x * bounds.dpr) as f32,
+                                            (bounds.y + h.y * bounds.dpr) as f32,
+                                            (bounds.x + (h.x + h.width) * bounds.dpr) as f32,
+                                            (bounds.y + (h.y + h.height) * bounds.dpr) as f32,
+                                        ]
+                                    })
+                                    .unwrap_or([0.0; 4]),
+                                hover_color: [
+                                    220.0 / 255.0,
+                                    220.0 / 255.0,
+                                    225.0 / 255.0,
+                                    170.0 / 255.0,
+                                ],
+                                misc: [
+                                    (1.5 * bounds.dpr.max(1.0)) as f32,
+                                    (bounds.dpr as f32).max(1.0),
+                                    0.0,
+                                    0.0,
+                                ],
+                            };
+                            gfx.blit_cached(&params);
+                        } else {
+                            // FULL VELLO PATH: pixel-perfect with all overlays
+                            render_path = if gfx.has_cached_content() {
+                                "vello-cached"
                             } else {
-                                // Stable frame: use vector scene (highest fidelity)
+                                "vello-full"
+                            };
+                            gfx.render(|scene| {
+                                let panel = Rect::new(
+                                    bounds.x,
+                                    bounds.y,
+                                    bounds.x + bounds.width,
+                                    bounds.y + bounds.height,
+                                );
+                                scene.fill(
+                                    Fill::NonZero,
+                                    Affine::IDENTITY,
+                                    Color::from_rgb8(5, 6, 12),
+                                    None,
+                                    &panel,
+                                );
+
+                                // Use cached scene fragment (append is just a memcpy)
                                 let guard = cached_scene_fragment.peek();
                                 if let Some(ref frag) = *guard {
                                     scene.append(frag, Some(transform));
                                 } else {
-                                    // No cached scene yet — paint directly
                                     let primitives = cached_primitives();
                                     let mut painter = VelloScenePainter::new(scene);
                                     paint_primitives_into_scene_with(
@@ -1049,144 +1504,149 @@ fn FramePreviewTab() -> Element {
                                         None,
                                     );
                                 }
-                            }
 
-                            if let Some(hover) = hovered_overlay_css {
-                                let rect = Rect::new(
-                                    bounds.x + hover.x * bounds.dpr,
-                                    bounds.y + hover.y * bounds.dpr,
-                                    bounds.x + (hover.x + hover.width) * bounds.dpr,
-                                    bounds.y + (hover.y + hover.height) * bounds.dpr,
-                                );
-                                scene.stroke(
-                                    &Stroke::new(1.0 * bounds.dpr.max(1.0)),
-                                    Affine::IDENTITY,
-                                    Color::from_rgba8(220, 220, 225, 170),
-                                    None,
-                                    &rect,
-                                );
-                            }
-
-                            if let Some(sel) = selected_overlay_css {
-                                let rect = Rect::new(
-                                    bounds.x + sel.x * bounds.dpr,
-                                    bounds.y + sel.y * bounds.dpr,
-                                    bounds.x + (sel.x + sel.width) * bounds.dpr,
-                                    bounds.y + (sel.y + sel.height) * bounds.dpr,
-                                );
-                                scene.stroke(
-                                    &Stroke::new(1.5 * bounds.dpr.max(1.0)),
-                                    Affine::IDENTITY,
-                                    Color::from_rgba8(59, 130, 246, 230),
-                                    None,
-                                    &rect,
-                                );
-
-                                let handle_size = 8.0 * bounds.dpr.max(1.0);
-                                let half = handle_size * 0.5;
-                                for (hx, hy) in [
-                                    (rect.x0, rect.y0),
-                                    (rect.x1, rect.y0),
-                                    (rect.x0, rect.y1),
-                                    (rect.x1, rect.y1),
-                                ] {
-                                    let handle_rect =
-                                        Rect::new(hx - half, hy - half, hx + half, hy + half);
-                                    scene.fill(
-                                        Fill::NonZero,
+                                if let Some(hover) = hovered_overlay_css {
+                                    let rect = Rect::new(
+                                        bounds.x + hover.x * bounds.dpr,
+                                        bounds.y + hover.y * bounds.dpr,
+                                        bounds.x + (hover.x + hover.width) * bounds.dpr,
+                                        bounds.y + (hover.y + hover.height) * bounds.dpr,
+                                    );
+                                    scene.stroke(
+                                        &Stroke::new(1.0 * bounds.dpr.max(1.0)),
                                         Affine::IDENTITY,
-                                        Color::from_rgba8(59, 130, 246, 240),
+                                        Color::from_rgba8(220, 220, 225, 170),
                                         None,
-                                        &handle_rect,
+                                        &rect,
                                     );
                                 }
-                            }
 
-                            let spacing_guides = cached_spacing_guides();
-                            for guide in &*spacing_guides {
-                                let x0 = bounds.x
-                                    + world_to_panel_css_x(
-                                        guide.x0,
-                                        content,
-                                        zoom,
-                                        current_pan_x,
-                                        bounds.dpr,
-                                    ) * bounds.dpr;
-                                let y0 = bounds.y
-                                    + world_to_panel_css_y(
-                                        guide.y0,
-                                        content,
-                                        zoom,
-                                        current_pan_y,
-                                        bounds.dpr,
-                                    ) * bounds.dpr;
-                                let x1 = bounds.x
-                                    + world_to_panel_css_x(
-                                        guide.x1,
-                                        content,
-                                        zoom,
-                                        current_pan_x,
-                                        bounds.dpr,
-                                    ) * bounds.dpr;
-                                let y1 = bounds.y
-                                    + world_to_panel_css_y(
-                                        guide.y1,
-                                        content,
-                                        zoom,
-                                        current_pan_y,
-                                        bounds.dpr,
-                                    ) * bounds.dpr;
+                                if let Some(sel) = selected_overlay_css {
+                                    let rect = Rect::new(
+                                        bounds.x + sel.x * bounds.dpr,
+                                        bounds.y + sel.y * bounds.dpr,
+                                        bounds.x + (sel.x + sel.width) * bounds.dpr,
+                                        bounds.y + (sel.y + sel.height) * bounds.dpr,
+                                    );
+                                    scene.stroke(
+                                        &Stroke::new(1.5 * bounds.dpr.max(1.0)),
+                                        Affine::IDENTITY,
+                                        Color::from_rgba8(59, 130, 246, 230),
+                                        None,
+                                        &rect,
+                                    );
 
-                                let line = kurbo::Line::new((x0, y0), (x1, y1));
-                                scene.stroke(
-                                    &Stroke::new(1.0 * bounds.dpr.max(1.0)),
-                                    Affine::IDENTITY,
-                                    Color::from_rgba8(255, 54, 129, 220),
-                                    None,
-                                    &line,
-                                );
-
-                                let tick = 4.0 * bounds.dpr.max(1.0);
-                                match guide.axis {
-                                    Axis::Horizontal => {
-                                        let t0 = kurbo::Line::new((x0, y0 - tick), (x0, y0 + tick));
-                                        let t1 = kurbo::Line::new((x1, y1 - tick), (x1, y1 + tick));
-                                        scene.stroke(
-                                            &Stroke::new(1.0 * bounds.dpr.max(1.0)),
+                                    let handle_size = 8.0 * bounds.dpr.max(1.0);
+                                    let half = handle_size * 0.5;
+                                    for (hx, hy) in [
+                                        (rect.x0, rect.y0),
+                                        (rect.x1, rect.y0),
+                                        (rect.x0, rect.y1),
+                                        (rect.x1, rect.y1),
+                                    ] {
+                                        let handle_rect =
+                                            Rect::new(hx - half, hy - half, hx + half, hy + half);
+                                        scene.fill(
+                                            Fill::NonZero,
                                             Affine::IDENTITY,
-                                            Color::from_rgba8(255, 54, 129, 220),
+                                            Color::from_rgba8(59, 130, 246, 240),
                                             None,
-                                            &t0,
-                                        );
-                                        scene.stroke(
-                                            &Stroke::new(1.0 * bounds.dpr.max(1.0)),
-                                            Affine::IDENTITY,
-                                            Color::from_rgba8(255, 54, 129, 220),
-                                            None,
-                                            &t1,
-                                        );
-                                    }
-                                    Axis::Vertical => {
-                                        let t0 = kurbo::Line::new((x0 - tick, y0), (x0 + tick, y0));
-                                        let t1 = kurbo::Line::new((x1 - tick, y1), (x1 + tick, y1));
-                                        scene.stroke(
-                                            &Stroke::new(1.0 * bounds.dpr.max(1.0)),
-                                            Affine::IDENTITY,
-                                            Color::from_rgba8(255, 54, 129, 220),
-                                            None,
-                                            &t0,
-                                        );
-                                        scene.stroke(
-                                            &Stroke::new(1.0 * bounds.dpr.max(1.0)),
-                                            Affine::IDENTITY,
-                                            Color::from_rgba8(255, 54, 129, 220),
-                                            None,
-                                            &t1,
+                                            &handle_rect,
                                         );
                                     }
                                 }
-                            }
-                        });
+
+                                let spacing_guides = cached_spacing_guides();
+                                for guide in &*spacing_guides {
+                                    let x0 = bounds.x
+                                        + world_to_panel_css_x(
+                                            guide.x0,
+                                            content,
+                                            zoom,
+                                            current_pan_x,
+                                            bounds.dpr,
+                                        ) * bounds.dpr;
+                                    let y0 = bounds.y
+                                        + world_to_panel_css_y(
+                                            guide.y0,
+                                            content,
+                                            zoom,
+                                            current_pan_y,
+                                            bounds.dpr,
+                                        ) * bounds.dpr;
+                                    let x1 = bounds.x
+                                        + world_to_panel_css_x(
+                                            guide.x1,
+                                            content,
+                                            zoom,
+                                            current_pan_x,
+                                            bounds.dpr,
+                                        ) * bounds.dpr;
+                                    let y1 = bounds.y
+                                        + world_to_panel_css_y(
+                                            guide.y1,
+                                            content,
+                                            zoom,
+                                            current_pan_y,
+                                            bounds.dpr,
+                                        ) * bounds.dpr;
+
+                                    let line = kurbo::Line::new((x0, y0), (x1, y1));
+                                    scene.stroke(
+                                        &Stroke::new(1.0 * bounds.dpr.max(1.0)),
+                                        Affine::IDENTITY,
+                                        Color::from_rgba8(255, 54, 129, 220),
+                                        None,
+                                        &line,
+                                    );
+
+                                    let tick = 4.0 * bounds.dpr.max(1.0);
+                                    match guide.axis {
+                                        Axis::Horizontal => {
+                                            let t0 =
+                                                kurbo::Line::new((x0, y0 - tick), (x0, y0 + tick));
+                                            let t1 =
+                                                kurbo::Line::new((x1, y1 - tick), (x1, y1 + tick));
+                                            scene.stroke(
+                                                &Stroke::new(1.0 * bounds.dpr.max(1.0)),
+                                                Affine::IDENTITY,
+                                                Color::from_rgba8(255, 54, 129, 220),
+                                                None,
+                                                &t0,
+                                            );
+                                            scene.stroke(
+                                                &Stroke::new(1.0 * bounds.dpr.max(1.0)),
+                                                Affine::IDENTITY,
+                                                Color::from_rgba8(255, 54, 129, 220),
+                                                None,
+                                                &t1,
+                                            );
+                                        }
+                                        Axis::Vertical => {
+                                            let t0 =
+                                                kurbo::Line::new((x0 - tick, y0), (x0 + tick, y0));
+                                            let t1 =
+                                                kurbo::Line::new((x1 - tick, y1), (x1 + tick, y1));
+                                            scene.stroke(
+                                                &Stroke::new(1.0 * bounds.dpr.max(1.0)),
+                                                Affine::IDENTITY,
+                                                Color::from_rgba8(255, 54, 129, 220),
+                                                None,
+                                                &t0,
+                                            );
+                                            scene.stroke(
+                                                &Stroke::new(1.0 * bounds.dpr.max(1.0)),
+                                                Affine::IDENTITY,
+                                                Color::from_rgba8(255, 54, 129, 220),
+                                                None,
+                                                &t1,
+                                            );
+                                        }
+                                    }
+                                }
+                            });
+                        }
+
                         let frame_ms = frame_start.elapsed().as_secs_f64() * 1000.0;
                         let fps = if frame_ms > 0.0 {
                             1000.0 / frame_ms
@@ -1196,6 +1656,27 @@ fn FramePreviewTab() -> Element {
                         perf_stats.with_mut(|stats| {
                             stats.update(frame_ms, fps, prim_count);
                         });
+
+                        // Loop-level timing
+                        let total_iter_ms = loop_start.elapsed().as_secs_f64() * 1000.0;
+                        let lock_render_ms = lock_start.elapsed().as_secs_f64() * 1000.0;
+                        loop_accum[0] += dirty_check_ms;
+                        loop_accum[1] += lock_render_ms;
+                        loop_accum[2] += total_iter_ms;
+                        loop_frame_count += 1;
+                        if loop_frame_count % 60 == 0 {
+                            let n = 60.0;
+                            eprintln!(
+                                "[loop {}] avg/60: dirty_check={:.2}ms  lock+render={:.2}ms  total_iter={:.2}ms  ({:.0} fps) path={}",
+                                loop_frame_count,
+                                loop_accum[0] / n,
+                                loop_accum[1] / n,
+                                loop_accum[2] / n,
+                                n / (loop_accum[2] / 1000.0),
+                                render_path,
+                            );
+                            loop_accum = [0.0; 3];
+                        }
                     }
                     dioxus::desktop::window().window.request_redraw();
                 }

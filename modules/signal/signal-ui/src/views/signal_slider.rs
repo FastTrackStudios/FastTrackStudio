@@ -64,7 +64,7 @@ pub fn SignalSlider(controller: SignalController) -> Element {
 
     rsx! {
         div { class: "max-w-2xl mx-auto p-6 space-y-8",
-            h1 { class: "text-xl font-semibold mb-4", "signal2 block" }
+            h1 { class: "text-xl font-semibold mb-4", "signal block" }
 
             // -- Block type selector
             div { class: "flex gap-2",

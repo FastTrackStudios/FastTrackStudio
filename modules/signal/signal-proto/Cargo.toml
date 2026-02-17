@@ -1,5 +1,5 @@
 [package]
-name = "signal2-proto"
+name = "signal-proto"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

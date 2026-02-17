@@ -1,5 +1,5 @@
 [package]
-name = "signal2-ui"
+name = "signal-ui"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,7 +8,7 @@ authors.workspace = true
 [dependencies]
 dioxus.workspace = true
 lumen-blocks.workspace = true
-signal = { package = "signal2", path = "../signal" }
+signal = { path = "../signal" }
 uuid = { version = "1", features = ["v4"] }
 tokio = { workspace = true }
 audio-controls = { path = "../../../cells/audio-controls" }

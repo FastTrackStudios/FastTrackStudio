@@ -1,6 +1,6 @@
-//! Dock panel registration for the signal2 domain.
+//! Dock panel registration for the signal domain.
 //!
-//! Registers signal2-ui panels with the dock renderer registry,
+//! Registers signal-ui panels with the dock renderer registry,
 //! decoupling panel definitions from the central app binary.
 //!
 //! All panels read [`signal::SignalController`] from Dioxus context
@@ -17,7 +17,7 @@ use crate::views::{
     EngineParamLookup, RigGridPanel, RigSceneGrid,
 };
 
-/// Register all signal2 panels with the renderer registry.
+/// Register all signal panels with the renderer registry.
 pub fn register_panels(registry: &mut PanelRendererRegistry) {
     registry.register(PanelId::RigGrid, || {
         rsx! { RigGridDockPanel {} }

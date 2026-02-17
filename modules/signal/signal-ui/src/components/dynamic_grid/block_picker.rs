@@ -221,6 +221,8 @@ pub fn BlockPickerDropdown(props: BlockPickerDropdownProps) -> Element {
                                                     bypassed: false,
                                                     is_phantom: false,
                                                     parameters: Vec::new(),
+                                                    preset_id: None,
+                                                    snapshot_id: None,
                                                 };
                                                 props.on_add_slot.call(new_slot);
                                             },
@@ -284,6 +286,8 @@ pub fn BlockPickerDropdown(props: BlockPickerDropdownProps) -> Element {
                                                                 bypassed: false,
                                                                 is_phantom: false,
                                                                 parameters: Vec::new(),
+                                                                preset_id: None,
+                                                                snapshot_id: None,
                                                             };
                                                             props.on_add_slot.call(new_slot);
                                                         },
