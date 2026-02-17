@@ -129,6 +129,11 @@ impl Song {
         self.sections.push(section);
     }
 
+    /// Semantic alias for `variants()` — returns all sections in this song.
+    pub fn sections(&self) -> &[Section] {
+        &self.sections
+    }
+
     pub fn default_section(&self) -> Option<&Section> {
         self.sections
             .iter()

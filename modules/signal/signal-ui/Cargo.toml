@@ -11,4 +11,11 @@ lumen-blocks.workspace = true
 signal = { package = "signal2", path = "../signal" }
 uuid = { version = "1", features = ["v4"] }
 tokio = { workspace = true }
-audio-controls = { path = "../../../cells/legacy-signal/audio-controls" }
+audio-controls = { path = "../../../cells/audio-controls" }
+dock-dioxus = { path = "../../../cells/dock/dock-dioxus", default-features = false }
+dock-proto = { path = "../../../cells/dock/dock-proto" }
+
+[features]
+default = ["web"]
+web = ["dock-dioxus/web"]
+native = ["dock-dioxus/native"]

@@ -13,7 +13,9 @@
 //! full editor/browser views.
 
 pub mod components;
+pub mod panel_registration;
 pub mod views;
 
 // Convenience re-exports
+pub use panel_registration::register_panels;
 pub use views::SignalSlider;

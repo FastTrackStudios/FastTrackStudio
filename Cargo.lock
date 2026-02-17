@@ -2621,6 +2621,7 @@ dependencies = [
  "keyflow",
  "roam",
  "roam-telemetry",
+ "roam-wire",
  "tokio",
  "tracing",
  "uuid",
@@ -2697,21 +2698,6 @@ dependencies = [
  "quote",
  "syn 1.0.109",
 ]
-
-[[package]]
-name = "derive_aliases"
-version = "0.4.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a42564b20fdeb062b38ad78d567d0479b2b318ff679b20895d9a1de3b6896002"
-dependencies = [
- "derive_aliases_proc_macro",
-]
-
-[[package]]
-name = "derive_aliases_proc_macro"
-version = "0.4.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e81edf3b0f0a7d68f2113aee7cedffa73d1fadea46fc85e468786a7f7aac998c"
 
 [[package]]
 name = "derive_arbitrary"
@@ -3634,12 +3620,14 @@ dependencies = [
  "anyhow",
  "color-palette",
  "daw-proto",
+ "daw-standalone",
  "dynamic-template-proto",
  "facet",
  "insta",
  "monarchy",
  "pretty_assertions",
  "roam",
+ "roam-wire",
  "serde",
  "serde_json",
  "tempfile",
@@ -4531,8 +4519,6 @@ dependencies = [
  "session",
  "session-proto",
  "session-ui",
- "signal-control",
- "signal-ui",
  "signal2",
  "signal2-ui",
  "tokio",
@@ -7683,16 +7669,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "nucleo-matcher"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf33f538733d1a5a3494b836ba913207f14d9d4a1d3cd67030c5061bdd2cac85"
-dependencies = [
- "memchr",
- "unicode-segmentation",
-]
-
-[[package]]
 name = "num-bigint"
 version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10503,25 +10479,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sea-orm-cli"
-version = "1.1.19"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c94492e2ab6c045b4cc38013809ce255d14c3d352c9f0d11e6b920e2adc948ad"
-dependencies = [
- "chrono",
- "clap",
- "dotenvy",
- "glob",
- "regex",
- "sea-schema",
- "sqlx",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "url",
-]
-
-[[package]]
 name = "sea-orm-macros"
 version = "1.1.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10536,22 +10493,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sea-orm-migration"
-version = "1.1.19"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7315c0cadb7e60fb17ee2bb282aa27d01911fc2a7e5836ec1d4ac37d19250bb4"
-dependencies = [
- "async-trait",
- "clap",
- "dotenvy",
- "sea-orm",
- "sea-orm-cli",
- "sea-schema",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "sea-query"
 version = "0.32.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10562,7 +10503,6 @@ dependencies = [
  "inherent",
  "ordered-float 4.6.0",
  "rust_decimal",
- "sea-query-derive",
  "serde_json",
  "time",
  "uuid",
@@ -10582,45 +10522,6 @@ dependencies = [
  "sqlx",
  "time",
  "uuid",
-]
-
-[[package]]
-name = "sea-query-derive"
-version = "0.4.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bae0cbad6ab996955664982739354128c58d16e126114fe88c2a493642502aab"
-dependencies = [
- "darling 0.20.11",
- "heck 0.4.1",
- "proc-macro2",
- "quote",
- "syn 2.0.114",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "sea-schema"
-version = "0.16.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2239ff574c04858ca77485f112afea1a15e53135d3097d0c86509cef1def1338"
-dependencies = [
- "futures",
- "sea-query",
- "sea-query-binder",
- "sea-schema-derive",
- "sqlx",
-]
-
-[[package]]
-name = "sea-schema-derive"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "debdc8729c37fdbf88472f97fd470393089f997a909e535ff67c544d18cfccf0"
-dependencies = [
- "heck 0.4.1",
- "proc-macro2",
- "quote",
- "syn 2.0.114",
 ]
 
 [[package]]
@@ -11029,37 +10930,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "signal"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "daw-proto",
- "facet",
- "roam",
- "signal-proto",
- "tokio",
- "uuid",
-]
-
-[[package]]
-name = "signal-control"
-version = "0.1.0"
-dependencies = [
- "daw-control",
- "daw-proto",
- "eyre",
- "facet",
- "facet-json",
- "roam",
- "serde_json",
- "signal",
- "signal-storage",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
 name = "signal-hook"
 version = "0.3.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11077,65 +10947,6 @@ checksum = "c4db69cba1110affc0e9f7bcd48bbf87b3f4fc7c61fc9155afd4c469eb3d6c1b"
 dependencies = [
  "errno",
  "libc",
-]
-
-[[package]]
-name = "signal-proto"
-version = "0.1.0"
-dependencies = [
- "daw-proto",
- "derive_aliases",
- "facet",
- "facet-json",
- "uuid",
-]
-
-[[package]]
-name = "signal-storage"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "dirs",
- "facet",
- "facet-json",
- "sea-orm",
- "sea-orm-migration",
- "serde",
- "serde_json",
- "signal",
- "signal-proto",
- "sqlx",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "signal-ui"
-version = "0.1.0"
-dependencies = [
- "audio-controls",
- "daw-control",
- "daw-ui",
- "dioxus",
- "dioxus-native",
- "dock-dioxus",
- "dock-proto",
- "eyre",
- "facet",
- "facet-json",
- "lucide-dioxus 2.563.0",
- "nucleo-matcher",
- "roam",
- "serde",
- "serde_json",
- "signal-control",
- "signal-storage",
- "tokio",
- "tracing",
- "uuid",
 ]
 
 [[package]]
@@ -11204,6 +11015,8 @@ version = "0.1.0"
 dependencies = [
  "audio-controls",
  "dioxus",
+ "dock-dioxus",
+ "dock-proto",
  "lumen-blocks 0.2.0",
  "signal2",
  "tokio",
