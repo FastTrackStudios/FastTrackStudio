@@ -15253,6 +15253,8 @@ dependencies = [
  "clap",
  "facet",
  "figue",
+ "serde_json",
+ "signal-proto",
  "xshell",
 ]
 

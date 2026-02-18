@@ -684,251 +684,13 @@ async fn override_stacking(ctx: &ReaperTestContext) -> Result<()> {
 }
 
 // ─────────────────────────────────────────────────────────────
-//  Neural DSP preset library scanner
+//  Neural DSP preset library scanner — uses signal_proto::catalog
 // ─────────────────────────────────────────────────────────────
 
-/// A preset discovered on disk in the Neural DSP preset library.
-#[derive(Debug, Clone)]
-struct DiskPreset {
-    name: String,
-    category: String, // folder hierarchy, e.g. "John Mayer" or "Artists/Cory Wong"
-    tags: Vec<String>,
-    /// Key parameter values used as a fingerprint for matching.
-    fingerprint: PresetFingerprint,
-}
-
-/// A small set of parameter values that uniquely identify a preset.
-/// Extracted from both disk files (binary format) and REAPER state chunks (XML).
-#[derive(Debug, Clone)]
-struct PresetFingerprint {
-    selected_amp: Option<String>,
-    three_in_one_gain: Option<f64>,
-    output_gain: Option<f64>,
-    katana_output: Option<f64>,
-    centaur_gain: Option<f64>,
-    dumble_gain: Option<f64>,
-    reverb_mix: Option<f64>,
-    reverb_decay: Option<f64>,
-    overdrive_gain: Option<f64>,
-}
-
-impl PresetFingerprint {
-    /// Compute a distance score between two fingerprints.
-    /// Lower = closer match. 0.0 = identical.
-    fn distance(&self, other: &PresetFingerprint) -> f64 {
-        let mut total = 0.0;
-        let mut count = 0;
-
-        let pairs: Vec<(Option<f64>, Option<f64>)> = vec![
-            (self.three_in_one_gain, other.three_in_one_gain),
-            (self.output_gain, other.output_gain),
-            (self.katana_output, other.katana_output),
-            (self.centaur_gain, other.centaur_gain),
-            (self.dumble_gain, other.dumble_gain),
-            (self.reverb_mix, other.reverb_mix),
-            (self.reverb_decay, other.reverb_decay),
-            (self.overdrive_gain, other.overdrive_gain),
-        ];
-
-        for (a, b) in pairs {
-            if let (Some(a), Some(b)) = (a, b) {
-                total += (a - b).abs();
-                count += 1;
-            }
-        }
-
-        // Amp selection mismatch is a large penalty
-        if self.selected_amp != other.selected_amp {
-            total += 10.0;
-        }
-
-        if count > 0 {
-            total / count as f64
-        } else {
-            f64::MAX
-        }
-    }
-}
-
-/// Extract a string value for `key` from the Neural DSP binary preset format.
-///
-/// Format: `<key>\0 <type_byte> <length_byte> \x05 <string_bytes> \0`
-fn ndsp_binary_string(data: &[u8], key: &[u8]) -> Option<String> {
-    let needle = [key, b"\x00"].concat();
-    let idx = data.windows(needle.len()).position(|w| w == needle)?;
-    let offset = idx + needle.len();
-    if offset + 3 > data.len() {
-        return None;
-    }
-    let length_byte = data[offset + 1] as usize;
-    if data[offset + 2] != 0x05 || length_byte < 2 {
-        return None;
-    }
-    let str_len = length_byte - 2; // subtract marker byte + null
-    let start = offset + 3;
-    if start + str_len > data.len() {
-        return None;
-    }
-    let bytes = &data[start..start + str_len];
-    Some(
-        String::from_utf8_lossy(bytes)
-            .trim_end_matches('\0')
-            .to_string(),
-    )
-}
-
-/// Extract tags from a Neural DSP binary preset file.
-fn ndsp_binary_tags(data: &[u8]) -> Vec<String> {
-    let mut tags = Vec::new();
-    let tag_section = match data.windows(5).position(|w| w == b"tags\x00") {
-        Some(idx) => idx,
-        None => return tags,
-    };
-    // Tags end where appModel begins
-    let end = data
-        .windows(9)
-        .position(|w| w == b"appModel\x00")
-        .unwrap_or(data.len());
-
-    let mut search_start = tag_section;
-    while search_start < end {
-        let val_needle = b"value\x00";
-        let val_idx = match data[search_start..end]
-            .windows(val_needle.len())
-            .position(|w| w == val_needle)
-        {
-            Some(rel) => search_start + rel,
-            None => break,
-        };
-        // Parse the string value directly at this offset (can't use
-        // ndsp_binary_string here because it always finds the FIRST occurrence).
-        let offset = val_idx + val_needle.len();
-        if offset + 3 <= data.len() {
-            let length_byte = data[offset + 1] as usize;
-            if data[offset + 2] == 0x05 && length_byte >= 2 {
-                let str_len = length_byte - 2;
-                let start = offset + 3;
-                if start + str_len <= data.len() {
-                    let bytes = &data[start..start + str_len];
-                    let tag = String::from_utf8_lossy(bytes)
-                        .trim_end_matches('\0')
-                        .to_string();
-                    if !tag.is_empty() {
-                        tags.push(tag);
-                    }
-                }
-            }
-        }
-        search_start = val_idx + val_needle.len();
-    }
-    tags
-}
-
-/// Build a fingerprint from a Neural DSP binary preset file on disk.
-fn fingerprint_from_disk(data: &[u8]) -> PresetFingerprint {
-    PresetFingerprint {
-        selected_amp: ndsp_binary_string(data, b"selectedAmp"),
-        three_in_one_gain: ndsp_binary_string(data, b"threeInOneGain").and_then(|s| s.parse().ok()),
-        output_gain: ndsp_binary_string(data, b"outputGain").and_then(|s| s.parse().ok()),
-        katana_output: ndsp_binary_string(data, b"katanaOutput").and_then(|s| s.parse().ok()),
-        centaur_gain: ndsp_binary_string(data, b"centaurGain").and_then(|s| s.parse().ok()),
-        dumble_gain: ndsp_binary_string(data, b"dumbleGain").and_then(|s| s.parse().ok()),
-        reverb_mix: ndsp_binary_string(data, b"reverbMix").and_then(|s| s.parse().ok()),
-        reverb_decay: ndsp_binary_string(data, b"reverbDecay").and_then(|s| s.parse().ok()),
-        overdrive_gain: ndsp_binary_string(data, b"overdriveGain").and_then(|s| s.parse().ok()),
-    }
-}
-
-/// Extract an XML attribute value: `key="value"` → `value`.
-fn xml_attr(xml: &str, key: &str) -> Option<String> {
-    let needle = format!("{}=\"", key);
-    let start = xml.find(&needle)? + needle.len();
-    let end = xml[start..].find('"')? + start;
-    Some(xml[start..end].to_string())
-}
-
-/// Build a fingerprint from the REAPER state chunk's embedded XML.
-fn fingerprint_from_xml(xml: &str) -> PresetFingerprint {
-    PresetFingerprint {
-        selected_amp: xml_attr(xml, "selectedAmp"),
-        three_in_one_gain: xml_attr(xml, "threeInOneGain").and_then(|s| s.parse().ok()),
-        output_gain: xml_attr(xml, "outputGain").and_then(|s| s.parse().ok()),
-        katana_output: xml_attr(xml, "katanaOutput").and_then(|s| s.parse().ok()),
-        centaur_gain: xml_attr(xml, "centaurGain").and_then(|s| s.parse().ok()),
-        dumble_gain: xml_attr(xml, "dumbleGain").and_then(|s| s.parse().ok()),
-        reverb_mix: xml_attr(xml, "reverbMix").and_then(|s| s.parse().ok()),
-        reverb_decay: xml_attr(xml, "reverbDecay").and_then(|s| s.parse().ok()),
-        overdrive_gain: xml_attr(xml, "overdriveGain").and_then(|s| s.parse().ok()),
-    }
-}
-
-/// Extract the embedded XML from the REAPER state chunk's raw bytes.
-/// The XML is the second readable ASCII string (after "VC2!...").
-fn extract_xml_from_chunk(data: &[u8]) -> Option<String> {
-    let xml_start = data.windows(5).position(|w| w == b"<?xml")?;
-    // Find the end: last '>' before the next non-printable section
-    let mut end = xml_start;
-    for i in xml_start..data.len() {
-        if data[i] >= 0x20 && data[i] < 0x7F {
-            end = i + 1;
-        } else {
-            break;
-        }
-    }
-    Some(String::from_utf8_lossy(&data[xml_start..end]).to_string())
-}
-
-/// Scan the Neural DSP preset library on disk and return all presets.
-fn scan_preset_library(preset_dir: &std::path::Path) -> Vec<DiskPreset> {
-    let mut presets = Vec::new();
-
-    fn walk(dir: &std::path::Path, base: &std::path::Path, presets: &mut Vec<DiskPreset>) {
-        let Ok(entries) = std::fs::read_dir(dir) else {
-            return;
-        };
-        let mut entries: Vec<_> = entries.flatten().collect();
-        entries.sort_by_key(|e| e.file_name());
-
-        for entry in entries {
-            let path = entry.path();
-            if path.is_dir() {
-                walk(&path, base, presets);
-            } else if path.extension().map(|e| e == "xml").unwrap_or(false) {
-                let Ok(data) = std::fs::read(&path) else {
-                    continue;
-                };
-                let name = ndsp_binary_string(&data, b"name").unwrap_or_default();
-                let category = path
-                    .parent()
-                    .and_then(|p| p.strip_prefix(base).ok())
-                    .map(|p| p.to_string_lossy().to_string())
-                    .unwrap_or_default();
-                let tags = ndsp_binary_tags(&data);
-                let fingerprint = fingerprint_from_disk(&data);
-                presets.push(DiskPreset {
-                    name,
-                    category,
-                    tags,
-                    fingerprint,
-                });
-            }
-        }
-    }
-
-    walk(preset_dir, preset_dir, &mut presets);
-    presets
-}
-
-/// Find the best matching disk preset for a given fingerprint.
-fn match_preset<'a>(
-    library: &'a [DiskPreset],
-    fp: &PresetFingerprint,
-) -> Option<(&'a DiskPreset, f64)> {
-    library
-        .iter()
-        .map(|p| (p, p.fingerprint.distance(fp)))
-        .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
-}
+use signal_proto::catalog::{
+    extract_xml_from_chunk, fingerprint_from_xml, match_preset, scan_preset_library, xml_attr,
+    DiskPreset, PresetFingerprint,
+};
 
 // ─────────────────────────────────────────────────────────────
 //  Scenario 12: Harvest all JM factory presets
@@ -1062,21 +824,10 @@ async fn harvest_jm_factory_presets(ctx: &ReaperTestContext) -> Result<()> {
         let mut harvested: Vec<HarvestedPreset> = Vec::new();
 
         // Match initial preset
-        let initial_fp =
-            first_xml
-                .as_deref()
-                .map(fingerprint_from_xml)
-                .unwrap_or(PresetFingerprint {
-                    selected_amp: None,
-                    three_in_one_gain: None,
-                    output_gain: None,
-                    katana_output: None,
-                    centaur_gain: None,
-                    dumble_gain: None,
-                    reverb_mix: None,
-                    reverb_decay: None,
-                    overdrive_gain: None,
-                });
+        let initial_fp = first_xml
+            .as_deref()
+            .map(fingerprint_from_xml)
+            .unwrap_or_default();
         let initial_uid = first_xml
             .as_deref()
             .and_then(|x| xml_attr(x, "presetUid"))
@@ -1139,20 +890,7 @@ async fn harvest_jm_factory_presets(ctx: &ReaperTestContext) -> Result<()> {
 
             // Extract XML and match
             let xml = extract_xml_from_chunk(&raw);
-            let fp = xml
-                .as_deref()
-                .map(fingerprint_from_xml)
-                .unwrap_or(PresetFingerprint {
-                    selected_amp: None,
-                    three_in_one_gain: None,
-                    output_gain: None,
-                    katana_output: None,
-                    centaur_gain: None,
-                    dumble_gain: None,
-                    reverb_mix: None,
-                    reverb_decay: None,
-                    overdrive_gain: None,
-                });
+            let fp = xml.as_deref().map(fingerprint_from_xml).unwrap_or_default();
             let uid = xml
                 .as_deref()
                 .and_then(|x| xml_attr(x, "presetUid"))

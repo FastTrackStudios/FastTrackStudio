@@ -57,6 +57,12 @@ pub struct Metadata {
     pub tags: Tags,
     pub description: Option<String>,
     pub notes: Option<String>,
+    /// Folder path for organizing this entity in a hierarchy.
+    ///
+    /// Uses forward-slash separators (e.g., `"Artists/Cory Wong"`, `"John Mayer"`).
+    /// `None` means the entity lives at the root level of its collection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder: Option<String>,
 }
 
 impl Metadata {
@@ -79,6 +85,12 @@ impl Metadata {
     #[must_use]
     pub fn with_tag(mut self, tag: impl Into<String>) -> Self {
         self.tags.add(tag);
+        self
+    }
+
+    #[must_use]
+    pub fn with_folder(mut self, folder: impl Into<String>) -> Self {
+        self.folder = Some(folder.into());
         self
     }
 }
@@ -112,5 +124,44 @@ mod tests {
         assert_eq!(meta.description.as_deref(), Some("A cool preset"));
         assert_eq!(meta.notes.as_deref(), Some("Tweak the gain for taste"));
         assert_eq!(meta.tags.len(), 2);
+        assert_eq!(meta.folder, None);
+    }
+
+    #[test]
+    fn test_metadata_with_folder() {
+        let meta = Metadata::new()
+            .with_folder("Artists/Cory Wong")
+            .with_tag("Clean");
+
+        assert_eq!(meta.folder.as_deref(), Some("Artists/Cory Wong"));
+        assert!(meta.tags.contains("Clean"));
+    }
+
+    #[test]
+    fn test_metadata_folder_backwards_compat() {
+        // Existing JSON without folder field should deserialize with folder=None
+        let json = r#"{"tags":["rock"],"description":"Old preset","notes":null}"#;
+        let meta: Metadata = serde_json::from_str(json).unwrap();
+        assert_eq!(meta.folder, None);
+        assert!(meta.tags.contains("rock"));
+    }
+
+    #[test]
+    fn test_metadata_folder_skip_serializing_none() {
+        // folder=None should not appear in JSON output
+        let meta = Metadata::new().with_tag("blues");
+        let json = serde_json::to_string(&meta).unwrap();
+        assert!(!json.contains("folder"), "folder=None should be omitted");
+    }
+
+    #[test]
+    fn test_metadata_folder_round_trip() {
+        let meta = Metadata::new()
+            .with_folder("John Mayer")
+            .with_tag("Clean")
+            .with_description("A clean tone");
+        let json = serde_json::to_string(&meta).unwrap();
+        let roundtrip: Metadata = serde_json::from_str(&json).unwrap();
+        assert_eq!(roundtrip.folder.as_deref(), Some("John Mayer"));
     }
 }

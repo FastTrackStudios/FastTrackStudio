@@ -6,6 +6,7 @@ use std::process::ExitCode;
 
 use facet::Facet;
 use figue as args;
+use signal_proto::catalog;
 use xshell::{Shell, cmd};
 
 /// Development tasks for FastTrackStudio
@@ -72,6 +73,12 @@ enum Commands {
         /// Skip building the extension before running tests
         #[facet(args::named, default)]
         no_build: bool,
+    },
+    /// Scan all Neural DSP preset libraries and write a structured catalogue
+    Catalog {
+        /// Output directory for the catalogue (default: ~/Music/FastTrackStudio/Presets)
+        #[facet(args::positional, default)]
+        output: Option<String>,
     },
 }
 
@@ -459,7 +466,158 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
             println!("\n=== Integration tests passed ===");
         }
+        Commands::Catalog { output } => {
+            run_catalog(output)?;
+        }
     }
 
     Ok(())
+}
+
+fn run_catalog(output: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
+    let output_dir = match output {
+        Some(dir) => std::path::PathBuf::from(dir),
+        None => {
+            let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+            std::path::PathBuf::from(home).join("Music/FastTrackStudio/Presets")
+        }
+    };
+
+    println!("=== Neural DSP Preset Catalogue ===");
+    println!("Output: {}", output_dir.display());
+
+    std::fs::create_dir_all(&output_dir)?;
+    let ndsp_dir = output_dir.join("neural-dsp");
+    std::fs::create_dir_all(&ndsp_dir)?;
+
+    let mut catalog_plugins = Vec::new();
+    let mut total_presets = 0usize;
+    let mut total_plugins = 0usize;
+
+    for plugin in catalog::NDSP_PLUGINS {
+        let lib_path = plugin.disk_library_path();
+        if !lib_path.exists() {
+            println!("  SKIP {} (not installed)", plugin.name);
+            continue;
+        }
+
+        // Scan disk preset library
+        let presets = catalog::scan_preset_library(&lib_path);
+        if presets.is_empty() {
+            println!("  SKIP {} (0 presets found)", plugin.name);
+            continue;
+        }
+
+        total_plugins += 1;
+        total_presets += presets.len();
+
+        // Create plugin directory structure
+        let plugin_dir = ndsp_dir.join(plugin.slug);
+        let presets_dir = plugin_dir.join("presets");
+        std::fs::create_dir_all(&presets_dir)?;
+
+        // Collect categories
+        let mut categories: Vec<String> = presets
+            .iter()
+            .map(|p| p.category.clone())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        categories.sort();
+
+        // Create category directories and write preset files
+        for preset in &presets {
+            let cat_dir = if preset.category.is_empty() {
+                presets_dir.clone()
+            } else {
+                presets_dir.join(&preset.category)
+            };
+            std::fs::create_dir_all(&cat_dir)?;
+
+            // Use the original filename (sans .xml extension) to preserve
+            // spaces, apostrophes, etc. The slug is stored as an ID inside
+            // the JSON metadata for programmatic access.
+            let original_stem = preset
+                .source_path
+                .file_stem()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_else(|| preset.name.clone());
+            if original_stem.is_empty() {
+                continue;
+            }
+
+            // Write binary preset file (copy of the original)
+            let bin_path = cat_dir.join(format!("{original_stem}.bin"));
+            std::fs::copy(&preset.source_path, &bin_path)?;
+
+            // Write JSON metadata
+            let meta = catalog::PresetMetadata {
+                name: preset.name.clone(),
+                id: catalog::slugify(&preset.name),
+                plugin: plugin.slug.to_string(),
+                category: preset.category.clone(),
+                tags: preset.tags.clone(),
+                preset_uid: None,
+                midi_cycle_index: None,
+                state_file: format!("{original_stem}.bin"),
+                fingerprint: preset.fingerprint.clone(),
+            };
+            let json_path = cat_dir.join(format!("{original_stem}.json"));
+            let json = serde_json::to_string_pretty(&meta)?;
+            std::fs::write(&json_path, json)?;
+        }
+
+        // Write plugin.json
+        let plugin_meta = catalog::PluginMetadata {
+            name: plugin.name.to_string(),
+            manufacturer: "Neural DSP".to_string(),
+            slug: plugin.slug.to_string(),
+            binary_id: plugin.binary_id.to_string(),
+            preset_format: "ndsp-juce-binary".to_string(),
+            disk_library_path: lib_path.to_string_lossy().to_string(),
+            total_disk_presets: presets.len(),
+            categories: categories.clone(),
+        };
+        let plugin_json = serde_json::to_string_pretty(&plugin_meta)?;
+        std::fs::write(plugin_dir.join("plugin.json"), plugin_json)?;
+
+        catalog_plugins.push(catalog::CatalogPlugin {
+            name: plugin.name.to_string(),
+            manufacturer: "Neural DSP".to_string(),
+            slug: plugin.slug.to_string(),
+            binary_id: plugin.binary_id.to_string(),
+            disk_library_path: lib_path.to_string_lossy().to_string(),
+            total_presets: presets.len(),
+            categories,
+        });
+
+        println!("  OK {} — {} presets", plugin.name, presets.len());
+    }
+
+    // Write top-level catalog.json
+    let cat = catalog::Catalog {
+        version: 1,
+        generated: chrono_now(),
+        plugins: catalog_plugins,
+    };
+    let catalog_json = serde_json::to_string_pretty(&cat)?;
+    std::fs::write(output_dir.join("catalog.json"), catalog_json)?;
+
+    println!("\n=== Catalogue complete ===");
+    println!("  Plugins: {}", total_plugins);
+    println!("  Presets: {}", total_presets);
+    println!("  Output:  {}", output_dir.display());
+
+    Ok(())
+}
+
+/// Simple ISO-8601 timestamp without pulling in chrono.
+fn chrono_now() -> String {
+    use std::time::SystemTime;
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    // Good enough for a generated timestamp
+    format!("unix:{}", now)
 }

@@ -17,6 +17,7 @@ use uuid::Uuid;
 pub mod actions;
 pub mod automation;
 pub mod block;
+pub mod catalog;
 pub mod defaults;
 pub mod easing;
 pub mod engine;
