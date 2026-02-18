@@ -8,6 +8,7 @@ pub mod import_export;
 pub mod layer_repo;
 pub mod module_repo;
 pub mod profile_repo;
+pub mod rack_repo;
 pub mod rig_repo;
 pub mod scene_template_repo;
 pub mod seed_data;
@@ -19,12 +20,13 @@ pub use daw_snapshot_repo::{
     DawSnapshotRepo, DawSnapshotRepoLive, StoredChunkSnapshot, StoredParamSnapshot,
 };
 pub use engine_repo::{EngineRepo, EngineRepoLive};
+pub use import_export::{ConflictStrategy, ExportBundle, ImportOptions, ImportResult};
 pub use layer_repo::{LayerRepo, LayerRepoLive};
 pub use module_repo::{ModuleRepo, ModuleRepoLive};
 pub use profile_repo::{ProfileRepo, ProfileRepoLive};
+pub use rack_repo::{RackRepo, RackRepoLive};
 pub use rig_repo::{RigRepo, RigRepoLive};
 pub use scene_template_repo::{SceneTemplateRepo, SceneTemplateRepoLive};
-pub use import_export::{ConflictStrategy, ExportBundle, ImportOptions, ImportResult};
 pub use sea_orm::{Database, DatabaseConnection, DbErr};
 pub use seed_data::{
     default_block_collections, default_module_collections, default_seed_engines,

@@ -15,16 +15,18 @@ use signal_proto::{
     engine::{Engine, EngineId, EngineScene, EngineSceneId},
     layer::{Layer, LayerId, LayerSnapshot, LayerSnapshotId},
     profile::{Patch, PatchId, Profile, ProfileId},
+    rack::{Rack, RackId},
     resolve::{ResolveError, ResolveTarget, ResolvedGraph},
     rig::{Rig, RigId, RigScene, RigSceneId},
+    scene_template::{SceneTemplate, SceneTemplateId},
     setlist::{Setlist, SetlistEntry, SetlistEntryId, SetlistId},
     song::{Section, SectionId, SectionSource, Song, SongId},
     tagging::{BrowserHit, BrowserIndex, BrowserQuery},
-    scene_template::{SceneTemplate, SceneTemplateId},
     traits::Collection,
     Block, BlockService, BlockType, BrowserService, EngineService, LayerService, ModulePreset,
     ModulePresetId, ModuleSnapshot, ModuleSnapshotId, Preset, PresetId, PresetService,
-    ProfileService, ResolveService, SceneTemplateService, SetlistService, SnapshotId, SongService,
+    ProfileService, RackService, ResolveService, SceneTemplateService, SetlistService, SnapshotId,
+    SongService,
 };
 use std::sync::Arc;
 
@@ -39,6 +41,7 @@ pub trait SignalApi:
     + BrowserService
     + ResolveService
     + SceneTemplateService
+    + RackService
 {
 }
 
@@ -53,6 +56,7 @@ impl<T> SignalApi for T where
         + BrowserService
         + ResolveService
         + SceneTemplateService
+        + RackService
 {
 }
 
@@ -220,7 +224,11 @@ where
         let snapshot_id = snapshot_id.into();
         let presets = self.list_collections(block_type).await;
         if let Some(mut preset) = presets.into_iter().find(|p| *p.id() == preset_id) {
-            if let Some(snap) = preset.variants_mut().iter_mut().find(|s| *s.id() == snapshot_id) {
+            if let Some(snap) = preset
+                .variants_mut()
+                .iter_mut()
+                .find(|s| *s.id() == snapshot_id)
+            {
                 snap.set_block(block);
                 snap.increment_version();
             }
@@ -259,6 +267,18 @@ where
         self.service
             .load_module_preset_snapshot(&cx, collection_id.into(), variant_id.into())
             .await
+    }
+
+    /// Save (create or update) a module collection.
+    pub async fn save_module_collection(&self, preset: ModulePreset) {
+        let cx = self.context_factory.make_context();
+        self.service.save_module_collection(&cx, preset).await;
+    }
+
+    /// Delete a module collection by ID.
+    pub async fn delete_module_collection(&self, id: impl Into<ModulePresetId>) {
+        let cx = self.context_factory.make_context();
+        self.service.delete_module_collection(&cx, id.into()).await;
     }
 
     // endregion: --- Collection + variant operations (module-level)
@@ -734,12 +754,38 @@ where
 
     pub async fn reorder_scene_templates(&self, ordered_ids: Vec<SceneTemplateId>) {
         let cx = self.context_factory.make_context();
-        self.service
-            .reorder_scene_templates(&cx, ordered_ids)
-            .await;
+        self.service.reorder_scene_templates(&cx, ordered_ids).await;
     }
 
     // endregion: --- Scene templates
+
+    // region: --- Rack operations
+
+    /// List all racks.
+    pub async fn list_racks(&self) -> Vec<Rack> {
+        let cx = self.context_factory.make_context();
+        self.service.list_racks(&cx).await
+    }
+
+    /// Load a rack by ID.
+    pub async fn load_rack(&self, id: impl Into<RackId>) -> Option<Rack> {
+        let cx = self.context_factory.make_context();
+        self.service.load_rack(&cx, id.into()).await
+    }
+
+    /// Save (create or update) a rack.
+    pub async fn save_rack(&self, rack: Rack) {
+        let cx = self.context_factory.make_context();
+        self.service.save_rack(&cx, rack).await;
+    }
+
+    /// Delete a rack by ID.
+    pub async fn delete_rack(&self, id: impl Into<RackId>) {
+        let cx = self.context_factory.make_context();
+        self.service.delete_rack(&cx, id.into()).await;
+    }
+
+    // endregion: --- Rack operations
 
     // region: --- Reorder helpers
 

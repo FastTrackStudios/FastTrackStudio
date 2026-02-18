@@ -83,7 +83,7 @@ impl SetlistRepoLive {
     async fn assemble_setlist(&self, model: &entity::setlist::Model) -> StorageResult<Setlist> {
         let entry_models = entity::setlist_entry::Entity::find()
             .filter(entity::setlist_entry::Column::SetlistId.eq(model.id.clone()))
-            .order_by_asc(entity::setlist_entry::Column::Id)
+            .order_by_asc(entity::setlist_entry::Column::Position)
             .all(&self.db)
             .await?;
 
@@ -159,10 +159,11 @@ impl SetlistRepo for SetlistRepoLive {
             .exec(&self.db)
             .await?;
 
-        for entry in &setlist.entries {
+        for (position, entry) in setlist.entries.iter().enumerate() {
             entity::setlist_entry::Entity::insert(entity::setlist_entry::ActiveModel {
                 id: Set(entry.id.to_string()),
                 setlist_id: Set(setlist.id.to_string()),
+                position: Set(position as i32),
                 name: Set(entry.name.clone()),
                 state_json: Set(Self::entry_state_to_json(entry)?),
                 metadata_json: Set(Self::metadata_to_json(&entry.metadata)?),

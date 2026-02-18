@@ -33,6 +33,7 @@ use signal_proto::{
     override_policy::{validate_overrides, FreePolicy, ScenePolicy, SnapshotPolicy},
     overrides::{NodeOverrideOp, NodePathSegment},
     profile::{Patch, PatchId, Profile, ProfileId},
+    rack::{Rack, RackId},
     resolve::{
         LayerSource, ResolveError, ResolveTarget, ResolvedBlock, ResolvedEngine, ResolvedGraph,
         ResolvedLayer, ResolvedModule,
@@ -47,13 +48,14 @@ use signal_proto::{
     },
     Block, BlockParameterOverride, BlockService, BlockType, BrowserService, EngineService,
     LayerService, ModuleBlockSource, ModulePreset, ModulePresetId, ModuleSnapshot,
-    ModuleSnapshotId, Preset, PresetId, PresetService, ProfileService, ResolveService,
+    ModuleSnapshotId, Preset, PresetId, PresetService, ProfileService, RackService, ResolveService,
     SceneTemplateService, SetlistService, Snapshot, SnapshotId, SongService, ALL_BLOCK_TYPES,
 };
 use signal_storage::{
     BlockRepo, BlockRepoLive, DatabaseConnection, EngineRepo, EngineRepoLive, LayerRepo,
-    LayerRepoLive, ModuleRepo, ModuleRepoLive, ProfileRepo, ProfileRepoLive, RigRepo, RigRepoLive,
-    SceneTemplateRepo, SceneTemplateRepoLive, SetlistRepo, SetlistRepoLive, SongRepo, SongRepoLive,
+    LayerRepoLive, ModuleRepo, ModuleRepoLive, ProfileRepo, ProfileRepoLive, RackRepo,
+    RackRepoLive, RigRepo, RigRepoLive, SceneTemplateRepo, SceneTemplateRepoLive, SetlistRepo,
+    SetlistRepoLive, SongRepo, SongRepoLive,
 };
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -69,6 +71,7 @@ struct ServiceCache {
     layers: Option<Vec<Layer>>,
     engines: Option<Vec<Engine>>,
     rigs: Option<Vec<Rig>>,
+    racks: Option<Vec<Rack>>,
 }
 
 impl ServiceCache {
@@ -79,6 +82,7 @@ impl ServiceCache {
             layers: None,
             engines: None,
             rigs: None,
+            racks: None,
         }
     }
 }
@@ -101,6 +105,7 @@ pub struct SignalLive<
     So = SongRepoLive,
     Se = SetlistRepoLive,
     St = SceneTemplateRepoLive,
+    Ra = RackRepoLive,
 > where
     B: BlockRepo,
     M: ModuleRepo,
@@ -111,6 +116,7 @@ pub struct SignalLive<
     So: SongRepo,
     Se: SetlistRepo,
     St: SceneTemplateRepo,
+    Ra: RackRepo,
 {
     block_repo: Arc<B>,
     module_repo: Arc<M>,
@@ -121,10 +127,11 @@ pub struct SignalLive<
     song_repo: Arc<So>,
     setlist_repo: Arc<Se>,
     scene_template_repo: Arc<St>,
+    rack_repo: Arc<Ra>,
     cache: Arc<RwLock<ServiceCache>>,
 }
 
-impl<B, M, L, E, R, P, So, Se, St> SignalLive<B, M, L, E, R, P, So, Se, St>
+impl<B, M, L, E, R, P, So, Se, St, Ra> SignalLive<B, M, L, E, R, P, So, Se, St, Ra>
 where
     B: BlockRepo,
     M: ModuleRepo,
@@ -135,6 +142,7 @@ where
     So: SongRepo,
     Se: SetlistRepo,
     St: SceneTemplateRepo,
+    Ra: RackRepo,
 {
     pub fn new(
         block_repo: Arc<B>,
@@ -146,6 +154,7 @@ where
         song_repo: Arc<So>,
         setlist_repo: Arc<Se>,
         scene_template_repo: Arc<St>,
+        rack_repo: Arc<Ra>,
     ) -> Self {
         Self {
             block_repo,
@@ -157,6 +166,7 @@ where
             song_repo,
             setlist_repo,
             scene_template_repo,
+            rack_repo,
             cache: Arc::new(RwLock::new(ServiceCache::new())),
         }
     }
@@ -173,6 +183,7 @@ impl
         SongRepoLive,
         SetlistRepoLive,
         SceneTemplateRepoLive,
+        RackRepoLive,
     >
 {
     pub fn from_db(db: DatabaseConnection) -> Self {
@@ -185,7 +196,8 @@ impl
             Arc::new(ProfileRepoLive::new(db.clone())),
             Arc::new(SongRepoLive::new(db.clone())),
             Arc::new(SetlistRepoLive::new(db.clone())),
-            Arc::new(SceneTemplateRepoLive::new(db)),
+            Arc::new(SceneTemplateRepoLive::new(db.clone())),
+            Arc::new(RackRepoLive::new(db)),
         )
     }
 }
@@ -194,7 +206,7 @@ impl
 
 // region: --- BlockService impl
 
-impl<B, M, L, E, R, P, So, Se, St> BlockService for SignalLive<B, M, L, E, R, P, So, Se, St>
+impl<B, M, L, E, R, P, So, Se, St, Ra> BlockService for SignalLive<B, M, L, E, R, P, So, Se, St, Ra>
 where
     B: BlockRepo,
     M: ModuleRepo,
@@ -205,6 +217,7 @@ where
     So: SongRepo,
     Se: SetlistRepo,
     St: SceneTemplateRepo,
+    Ra: RackRepo,
 {
     /// Load the current active block state for a given block type.
     /// Returns `Block::default()` when no state has been persisted yet.
@@ -347,13 +360,27 @@ where
         let mut cache = self.cache.write().await;
         cache.block_collections.remove(&bt);
     }
+
+    /// Save (upsert) a module collection and invalidate the module cache.
+    async fn save_module_collection(&self, _cx: &Context, preset: ModulePreset) -> () {
+        let _ = self.module_repo.save_module_collection(preset).await;
+        let mut cache = self.cache.write().await;
+        cache.module_collections = None;
+    }
+
+    /// Delete a module collection and invalidate the module cache.
+    async fn delete_module_collection(&self, _cx: &Context, id: ModulePresetId) -> () {
+        let _ = self.module_repo.delete_module_collection(&id).await;
+        let mut cache = self.cache.write().await;
+        cache.module_collections = None;
+    }
 }
 
 // endregion: --- BlockService impl
 
 // region: --- LayerService impl
 
-impl<B, M, L, E, R, P, So, Se, St> LayerService for SignalLive<B, M, L, E, R, P, So, Se, St>
+impl<B, M, L, E, R, P, So, Se, St, Ra> LayerService for SignalLive<B, M, L, E, R, P, So, Se, St, Ra>
 where
     B: BlockRepo,
     M: ModuleRepo,
@@ -364,6 +391,7 @@ where
     So: SongRepo,
     Se: SetlistRepo,
     St: SceneTemplateRepo,
+    Ra: RackRepo,
 {
     async fn list_layers(&self, _cx: &Context) -> Vec<Layer> {
         {
@@ -417,7 +445,8 @@ where
 
 // region: --- EngineService impl
 
-impl<B, M, L, E, R, P, So, Se, St> EngineService for SignalLive<B, M, L, E, R, P, So, Se, St>
+impl<B, M, L, E, R, P, So, Se, St, Ra> EngineService
+    for SignalLive<B, M, L, E, R, P, So, Se, St, Ra>
 where
     B: BlockRepo,
     M: ModuleRepo,
@@ -428,6 +457,7 @@ where
     So: SongRepo,
     Se: SetlistRepo,
     St: SceneTemplateRepo,
+    Ra: RackRepo,
 {
     async fn list_engines(&self, _cx: &Context) -> Vec<Engine> {
         {
@@ -489,7 +519,8 @@ where
 
 // region: --- PresetService impl
 
-impl<B, M, L, E, R, P, So, Se, St> PresetService for SignalLive<B, M, L, E, R, P, So, Se, St>
+impl<B, M, L, E, R, P, So, Se, St, Ra> PresetService
+    for SignalLive<B, M, L, E, R, P, So, Se, St, Ra>
 where
     B: BlockRepo,
     M: ModuleRepo,
@@ -500,6 +531,7 @@ where
     So: SongRepo,
     Se: SetlistRepo,
     St: SceneTemplateRepo,
+    Ra: RackRepo,
 {
     async fn list_presets_all(&self, _cx: &Context) -> Vec<Rig> {
         {
@@ -553,7 +585,8 @@ where
 
 // region: --- ProfileService impl
 
-impl<B, M, L, E, R, P, So, Se, St> ProfileService for SignalLive<B, M, L, E, R, P, So, Se, St>
+impl<B, M, L, E, R, P, So, Se, St, Ra> ProfileService
+    for SignalLive<B, M, L, E, R, P, So, Se, St, Ra>
 where
     B: BlockRepo,
     M: ModuleRepo,
@@ -564,6 +597,7 @@ where
     So: SongRepo,
     Se: SetlistRepo,
     St: SceneTemplateRepo,
+    Ra: RackRepo,
 {
     async fn list_profiles(&self, _cx: &Context) -> Vec<Profile> {
         self.profile_repo.list_profiles().await.unwrap_or_default()
@@ -604,7 +638,7 @@ where
 
 // region: --- SongService impl
 
-impl<B, M, L, E, R, P, So, Se, St> SongService for SignalLive<B, M, L, E, R, P, So, Se, St>
+impl<B, M, L, E, R, P, So, Se, St, Ra> SongService for SignalLive<B, M, L, E, R, P, So, Se, St, Ra>
 where
     B: BlockRepo,
     M: ModuleRepo,
@@ -615,6 +649,7 @@ where
     So: SongRepo,
     Se: SetlistRepo,
     St: SceneTemplateRepo,
+    Ra: RackRepo,
 {
     async fn list_songs(&self, _cx: &Context) -> Vec<Song> {
         self.song_repo.list_songs().await.unwrap_or_default()
@@ -655,7 +690,8 @@ where
 
 // region: --- SetlistService impl
 
-impl<B, M, L, E, R, P, So, Se, St> SetlistService for SignalLive<B, M, L, E, R, P, So, Se, St>
+impl<B, M, L, E, R, P, So, Se, St, Ra> SetlistService
+    for SignalLive<B, M, L, E, R, P, So, Se, St, Ra>
 where
     B: BlockRepo,
     M: ModuleRepo,
@@ -666,6 +702,7 @@ where
     So: SongRepo,
     Se: SetlistRepo,
     St: SceneTemplateRepo,
+    Ra: RackRepo,
 {
     async fn list_setlists(&self, _cx: &Context) -> Vec<Setlist> {
         self.setlist_repo.list_setlists().await.unwrap_or_default()
@@ -739,7 +776,8 @@ fn build_entry(
     }
 }
 
-impl<B, M, L, E, R, P, So, Se, St> BrowserService for SignalLive<B, M, L, E, R, P, So, Se, St>
+impl<B, M, L, E, R, P, So, Se, St, Ra> BrowserService
+    for SignalLive<B, M, L, E, R, P, So, Se, St, Ra>
 where
     B: BlockRepo,
     M: ModuleRepo,
@@ -750,6 +788,7 @@ where
     So: SongRepo,
     Se: SetlistRepo,
     St: SceneTemplateRepo,
+    Ra: RackRepo,
 {
     async fn browser_index(&self, _cx: &Context) -> BrowserIndex {
         let mut index = BrowserIndex::default();
@@ -1181,7 +1220,7 @@ fn apply_effective_set_overrides(graph: &mut ResolvedGraph) {
     }
 }
 
-impl<B, M, L, E, R, P, So, Se, St> SignalLive<B, M, L, E, R, P, So, Se, St>
+impl<B, M, L, E, R, P, So, Se, St, Ra> SignalLive<B, M, L, E, R, P, So, Se, St, Ra>
 where
     B: BlockRepo,
     M: ModuleRepo,
@@ -1192,6 +1231,7 @@ where
     So: SongRepo,
     Se: SetlistRepo,
     St: SceneTemplateRepo,
+    Ra: RackRepo,
 {
     async fn resolve_block_ref(
         &self,
@@ -1678,7 +1718,8 @@ where
     }
 }
 
-impl<B, M, L, E, R, P, So, Se, St> ResolveService for SignalLive<B, M, L, E, R, P, So, Se, St>
+impl<B, M, L, E, R, P, So, Se, St, Ra> ResolveService
+    for SignalLive<B, M, L, E, R, P, So, Se, St, Ra>
 where
     B: BlockRepo,
     M: ModuleRepo,
@@ -1689,6 +1730,7 @@ where
     So: SongRepo,
     Se: SetlistRepo,
     St: SceneTemplateRepo,
+    Ra: RackRepo,
 {
     async fn resolve_target(
         &self,
@@ -1885,7 +1927,8 @@ where
 
 // region: --- SceneTemplateService impl
 
-impl<B, M, L, E, R, P, So, Se, St> SceneTemplateService for SignalLive<B, M, L, E, R, P, So, Se, St>
+impl<B, M, L, E, R, P, So, Se, St, Ra> SceneTemplateService
+    for SignalLive<B, M, L, E, R, P, So, Se, St, Ra>
 where
     B: BlockRepo,
     M: ModuleRepo,
@@ -1896,6 +1939,7 @@ where
     So: SongRepo,
     Se: SetlistRepo,
     St: SceneTemplateRepo,
+    Ra: RackRepo,
 {
     async fn list_scene_templates(&self, _cx: &Context) -> Vec<SceneTemplate> {
         self.scene_template_repo
@@ -1937,13 +1981,57 @@ where
 
 // endregion: --- SceneTemplateService impl
 
+// region: --- RackService impl
+
+impl<B, M, L, E, R, P, So, Se, St, Ra> RackService for SignalLive<B, M, L, E, R, P, So, Se, St, Ra>
+where
+    B: BlockRepo,
+    M: ModuleRepo,
+    L: LayerRepo,
+    E: EngineRepo,
+    R: RigRepo,
+    P: ProfileRepo,
+    So: SongRepo,
+    Se: SetlistRepo,
+    St: SceneTemplateRepo,
+    Ra: RackRepo,
+{
+    async fn list_racks(&self, _cx: &Context) -> Vec<Rack> {
+        {
+            let cache = self.cache.read().await;
+            if let Some(cached) = cache.racks.as_ref() {
+                return cached.clone();
+            }
+        }
+        let result = self.rack_repo.list_racks().await.unwrap_or_default();
+        self.cache.write().await.racks = Some(result.clone());
+        result
+    }
+
+    async fn load_rack(&self, _cx: &Context, id: RackId) -> Option<Rack> {
+        self.rack_repo.load_rack(&id).await.ok().flatten()
+    }
+
+    async fn save_rack(&self, _cx: &Context, rack: Rack) {
+        let _ = self.rack_repo.save_rack(&rack).await;
+        self.cache.write().await.racks = None;
+    }
+
+    async fn delete_rack(&self, _cx: &Context, id: RackId) {
+        let _ = self.rack_repo.delete_rack(&id).await;
+        self.cache.write().await.racks = None;
+    }
+}
+
+// endregion: --- RackService impl
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use signal_proto::seed_id;
     use signal_storage::{
         runtime_seed_bundle, BlockRepoLive, Database, EngineRepoLive, LayerRepoLive,
-        ModuleRepoLive, ProfileRepoLive, RigRepoLive, SetlistRepoLive, SongRepoLive,
+        ModuleRepoLive, ProfileRepoLive, RackRepoLive, RigRepoLive, SetlistRepoLive, SongRepoLive,
     };
     use std::time::{Duration, Instant};
 
@@ -2011,8 +2099,10 @@ mod tests {
         for setlist in seeds.setlists {
             setlist_repo.save_setlist(&setlist).await?;
         }
-        let scene_template_repo = SceneTemplateRepoLive::new(db);
+        let scene_template_repo = SceneTemplateRepoLive::new(db.clone());
         scene_template_repo.init_schema().await?;
+        let rack_repo = RackRepoLive::new(db);
+        rack_repo.init_schema().await?;
         Ok(SignalLive::new(
             Arc::new(block_repo),
             Arc::new(module_repo),
@@ -2023,6 +2113,7 @@ mod tests {
             Arc::new(song_repo),
             Arc::new(setlist_repo),
             Arc::new(scene_template_repo),
+            Arc::new(rack_repo),
         ))
     }
 
@@ -2062,8 +2153,10 @@ mod tests {
         song_repo.init_schema().await?;
         let setlist_repo = SetlistRepoLive::new(db.clone());
         setlist_repo.init_schema().await?;
-        let scene_template_repo = SceneTemplateRepoLive::new(db);
+        let scene_template_repo = SceneTemplateRepoLive::new(db.clone());
         scene_template_repo.init_schema().await?;
+        let rack_repo = RackRepoLive::new(db);
+        rack_repo.init_schema().await?;
         let svc = SignalLive::new(
             Arc::new(block_repo),
             Arc::new(module_repo),
@@ -2074,6 +2167,7 @@ mod tests {
             Arc::new(song_repo),
             Arc::new(setlist_repo),
             Arc::new(scene_template_repo),
+            Arc::new(rack_repo),
         );
         let cx = test_context();
 
@@ -2181,8 +2275,10 @@ mod tests {
         song_repo.init_schema().await?;
         let setlist_repo = SetlistRepoLive::new(db.clone());
         setlist_repo.init_schema().await?;
-        let scene_template_repo = SceneTemplateRepoLive::new(db);
+        let scene_template_repo = SceneTemplateRepoLive::new(db.clone());
         scene_template_repo.init_schema().await?;
+        let rack_repo = RackRepoLive::new(db);
+        rack_repo.init_schema().await?;
         let svc = SignalLive::new(
             Arc::new(block_repo),
             Arc::new(module_repo),
@@ -2193,6 +2289,7 @@ mod tests {
             Arc::new(song_repo),
             Arc::new(setlist_repo),
             Arc::new(scene_template_repo),
+            Arc::new(rack_repo),
         );
         let cx = test_context();
 

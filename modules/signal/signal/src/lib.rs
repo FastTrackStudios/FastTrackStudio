@@ -3,6 +3,11 @@
 //! Re-exports protocol types and controller APIs for consumers.
 
 pub use signal_controller::SignalController;
+pub use signal_live::engine::{
+    block_to_snapshot, find_param_index, graph_to_snapshot, live_params_into_block,
+    param_name_matches, DawParamValue, DawParameterSnapshot, LiveParam, MorphDiffEntry,
+    MorphEngine, MorphParamChange,
+};
 pub use signal_live::SignalLive;
 pub use signal_proto::*;
 pub use signal_storage::{
@@ -10,9 +15,9 @@ pub use signal_storage::{
     default_seed_layers, default_seed_profiles, default_seed_rigs, default_seed_setlists,
     default_seed_songs, runtime_seed_bundle, BlockRepo, BlockRepoLive, Database,
     DatabaseConnection, DbErr, EngineRepo, EngineRepoLive, LayerRepo, LayerRepoLive, ModuleRepo,
-    ModuleRepoLive, ProfileRepo, ProfileRepoLive, RigRepo, RigRepoLive, SceneTemplateRepo,
-    SceneTemplateRepoLive, SetlistRepo, SetlistRepoLive, SongRepo, SongRepoLive, StorageError,
-    StorageResult,
+    ModuleRepoLive, ProfileRepo, ProfileRepoLive, RackRepo, RackRepoLive, RigRepo, RigRepoLive,
+    SceneTemplateRepo, SceneTemplateRepoLive, SetlistRepo, SetlistRepoLive, SongRepo, SongRepoLive,
+    StorageError, StorageResult,
 };
 use std::sync::Arc;
 
@@ -64,8 +69,11 @@ pub async fn bootstrap_in_memory_controller_async() -> Result<SignalController, 
     for setlist in seeds.setlists {
         setlist_repo.save_setlist(&setlist).await?;
     }
-    let scene_template_repo = signal_storage::SceneTemplateRepoLive::new(db);
+    let scene_template_repo = signal_storage::SceneTemplateRepoLive::new(db.clone());
     scene_template_repo.init_schema().await?;
+
+    let rack_repo = RackRepoLive::new(db);
+    rack_repo.init_schema().await?;
 
     let service = Arc::new(SignalLive::new(
         Arc::new(block_repo),
@@ -77,6 +85,7 @@ pub async fn bootstrap_in_memory_controller_async() -> Result<SignalController, 
         Arc::new(song_repo),
         Arc::new(setlist_repo),
         Arc::new(scene_template_repo),
+        Arc::new(rack_repo),
     ));
     Ok(SignalController::new(service))
 }
@@ -257,6 +266,7 @@ async fn init_all_schemas(db: &DatabaseConnection) -> Result<(), StorageError> {
     SongRepoLive::new(db.clone()).init_schema().await?;
     SetlistRepoLive::new(db.clone()).init_schema().await?;
     SceneTemplateRepoLive::new(db.clone()).init_schema().await?;
+    RackRepoLive::new(db.clone()).init_schema().await?;
     Ok(())
 }
 

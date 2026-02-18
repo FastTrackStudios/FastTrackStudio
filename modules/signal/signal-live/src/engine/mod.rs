@@ -9,6 +9,7 @@
 //! - [`rig_engine`] — Top-level orchestrator trait for all module slots
 //! - [`commands`] — Command dispatch and event streaming
 //! - [`daw_bridge`] — DAW FX chain snapshot types and capture/apply
+//! - [`param_bridge`] — Signal domain Block/Graph → DawParameterSnapshot mapping
 //! - [`vst_bridge`] — VST parameter bridge for bidirectional sync
 //! - [`error`] — Engine error types
 
@@ -17,8 +18,10 @@ pub mod daw_bridge;
 pub mod diff;
 pub mod error;
 pub mod fx_binding;
+pub mod gapless;
 pub mod mock;
 pub mod morph;
+pub mod param_bridge;
 pub mod rig_engine;
 pub mod slot;
 pub mod snapshot_ops;
@@ -32,17 +35,24 @@ pub use daw_bridge::{
 };
 pub use diff::{compute_diff, SlotDiff};
 pub use error::EngineError;
+pub use fx_binding::{DiscoveredFx, DiscoveredModule, DiscoveredRig, FxRigBinding};
+pub use gapless::{GaplessSwapEngine, SwapConfig, SwapResult};
 pub use mock::MockRigEngine;
-pub use morph::{DawParamValue, DawParameterSnapshot, MorphDiffEntry, MorphEngine, MorphParamChange};
+pub use morph::{
+    DawParamValue, DawParameterSnapshot, MorphDiffEntry, MorphEngine, MorphParamChange,
+};
+pub use param_bridge::{
+    block_to_snapshot, find_param_index, graph_to_snapshot, live_params_into_block,
+    param_name_matches, LiveParam,
+};
 pub use rig_engine::{
     PreloadPriority, PresetLoadHandle, PresetReadiness, RigEngine, SnapshotTween, SwitchOutcome,
     TransitionResult, TweenState,
 };
 pub use slot::{ActivateResult, InstanceHandle, InstanceState, LoadResult, ModuleSlot};
-pub use target::{ModuleTarget, ResolvedSlot, SlotState};
-pub use fx_binding::{DiscoveredFx, DiscoveredModule, DiscoveredRig, FxRigBinding};
 pub use snapshot_ops::{
     capture_and_save_preset, capture_and_save_snapshot, recall_preset, recall_snapshot,
     SnapshotError,
 };
+pub use target::{ModuleTarget, ResolvedSlot, SlotState};
 pub use vst_bridge::{MockVstBridge, ParameterSyncManager, VstParameterBridge};

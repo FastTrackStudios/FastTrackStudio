@@ -11,3 +11,12 @@ signal-live = { path = "../signal-live" }
 signal-proto = { path = "../signal-proto" }
 signal-storage = { path = "../signal-storage" }
 tokio.workspace = true
+
+[dev-dependencies]
+host-client.workspace = true
+daw-control.workspace = true
+daw-proto.workspace = true
+signal-live = { path = "../signal-live" }
+reaper-test = { path = "../../../libs/reaper-test" }
+eyre.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

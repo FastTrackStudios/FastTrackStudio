@@ -2,8 +2,8 @@
 
 use std::collections::HashMap;
 
-use sea_orm::*;
 use sea_orm::sea_query::Index;
+use sea_orm::*;
 use sea_orm::{ConnectionTrait, Schema};
 use signal_proto::{
     metadata::Metadata, Module, ModulePreset, ModulePresetId, ModuleSnapshot, ModuleSnapshotId,
@@ -26,6 +26,8 @@ pub trait ModuleRepo: Send + Sync {
         collection_id: &ModulePresetId,
         variant_id: &ModuleSnapshotId,
     ) -> StorageResult<Option<ModuleSnapshot>>;
+    async fn save_module_collection(&self, preset: ModulePreset) -> StorageResult<()>;
+    async fn delete_module_collection(&self, id: &ModulePresetId) -> StorageResult<()>;
 }
 
 // endregion: --- Trait
@@ -233,10 +235,11 @@ impl ModuleRepoLive {
 #[async_trait::async_trait]
 impl ModuleRepo for ModuleRepoLive {
     async fn list_module_collections(&self) -> StorageResult<Vec<ModulePreset>> {
-        let preset_models: Vec<entity::module_preset::Model> = entity::module_preset::Entity::find()
-            .order_by_asc(entity::module_preset::Column::Id)
-            .all(&self.db)
-            .await?;
+        let preset_models: Vec<entity::module_preset::Model> =
+            entity::module_preset::Entity::find()
+                .order_by_asc(entity::module_preset::Column::Id)
+                .all(&self.db)
+                .await?;
         let preset_models: Vec<entity::module_preset::Model> = preset_models
             .into_iter()
             .filter(|p| !p.name.starts_with("__phantom__"))
@@ -247,12 +250,13 @@ impl ModuleRepo for ModuleRepoLive {
         }
 
         let preset_ids: Vec<String> = preset_models.iter().map(|p| p.id.clone()).collect();
-        let snapshot_models: Vec<entity::module_snapshot::Model> = entity::module_snapshot::Entity::find()
-            .filter(entity::module_snapshot::Column::ModulePresetId.is_in(preset_ids))
-            .order_by_asc(entity::module_snapshot::Column::ModulePresetId)
-            .order_by_asc(entity::module_snapshot::Column::Id)
-            .all(&self.db)
-            .await?;
+        let snapshot_models: Vec<entity::module_snapshot::Model> =
+            entity::module_snapshot::Entity::find()
+                .filter(entity::module_snapshot::Column::ModulePresetId.is_in(preset_ids))
+                .order_by_asc(entity::module_snapshot::Column::ModulePresetId)
+                .order_by_asc(entity::module_snapshot::Column::Id)
+                .all(&self.db)
+                .await?;
         let mut snapshots_by_preset: HashMap<String, Vec<entity::module_snapshot::Model>> =
             HashMap::new();
         for snapshot_model in snapshot_models {
@@ -316,6 +320,63 @@ impl ModuleRepo for ModuleRepoLive {
             Some(model) => Ok(Some(Self::module_snapshot_from_model(&model)?)),
             None => Ok(None),
         }
+    }
+
+    async fn save_module_collection(&self, preset: ModulePreset) -> StorageResult<()> {
+        let preset_id = preset.id().to_string();
+
+        // Delete existing snapshots for this preset
+        entity::module_snapshot::Entity::delete_many()
+            .filter(entity::module_snapshot::Column::ModulePresetId.eq(preset_id.clone()))
+            .exec(&self.db)
+            .await?;
+
+        // Delete existing preset row
+        entity::module_preset::Entity::delete_by_id(preset_id.clone())
+            .exec(&self.db)
+            .await?;
+
+        // Insert the preset row
+        entity::module_preset::Entity::insert(entity::module_preset::ActiveModel {
+            id: Set(preset_id.clone()),
+            name: Set(preset.name().to_string()),
+            module_type: Set(preset.module_type().as_str().to_string()),
+            default_snapshot_id: Set(preset.default_snapshot().id().to_string()),
+            metadata_json: Set(Self::metadata_to_json(preset.metadata())?),
+        })
+        .exec(&self.db)
+        .await?;
+
+        // Insert all snapshots
+        for variant in preset.snapshots() {
+            entity::module_snapshot::Entity::insert(entity::module_snapshot::ActiveModel {
+                id: Set(variant.id().to_string()),
+                module_preset_id: Set(preset_id.clone()),
+                name: Set(variant.name().to_string()),
+                state_json: Set(Self::module_to_json(variant.module())?),
+                metadata_json: Set(Self::metadata_to_json(variant.metadata())?),
+                version: Set(variant.version() as i32),
+            })
+            .exec(&self.db)
+            .await?;
+        }
+
+        Ok(())
+    }
+
+    async fn delete_module_collection(&self, id: &ModulePresetId) -> StorageResult<()> {
+        let preset_id = id.to_string();
+
+        entity::module_snapshot::Entity::delete_many()
+            .filter(entity::module_snapshot::Column::ModulePresetId.eq(preset_id.clone()))
+            .exec(&self.db)
+            .await?;
+
+        entity::module_preset::Entity::delete_by_id(preset_id)
+            .exec(&self.db)
+            .await?;
+
+        Ok(())
     }
 }
 

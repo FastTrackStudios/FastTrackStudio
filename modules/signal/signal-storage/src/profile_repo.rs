@@ -94,7 +94,7 @@ impl ProfileRepoLive {
     async fn assemble_profile(&self, model: &entity::profile::Model) -> StorageResult<Profile> {
         let variant_models = entity::patch::Entity::find()
             .filter(entity::patch::Column::ProfileId.eq(model.id.clone()))
-            .order_by_asc(entity::patch::Column::Id)
+            .order_by_asc(entity::patch::Column::Position)
             .all(&self.db)
             .await?;
 
@@ -177,10 +177,11 @@ impl ProfileRepo for ProfileRepoLive {
         .exec(&self.db)
         .await?;
 
-        for patch in &profile.patches {
+        for (position, patch) in profile.patches.iter().enumerate() {
             entity::patch::Entity::insert(entity::patch::ActiveModel {
                 id: Set(patch.id.as_str().to_string()),
                 profile_id: Set(profile.id.as_str().to_string()),
+                position: Set(position as i32),
                 name: Set(patch.name.clone()),
                 state_json: Set(Self::variant_state_to_json(patch)?),
                 metadata_json: Set(Self::metadata_to_json(&patch.metadata)?),

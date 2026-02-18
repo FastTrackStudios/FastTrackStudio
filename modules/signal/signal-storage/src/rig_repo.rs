@@ -104,7 +104,7 @@ impl RigRepoLive {
     async fn assemble_rig(&self, model: &entity::rig::Model) -> StorageResult<Rig> {
         let variant_models = entity::rig_scene::Entity::find()
             .filter(entity::rig_scene::Column::RigId.eq(model.id.clone()))
-            .order_by_asc(entity::rig_scene::Column::Id)
+            .order_by_asc(entity::rig_scene::Column::Position)
             .all(&self.db)
             .await?;
 
@@ -127,6 +127,8 @@ impl RigRepoLive {
             engine_ids,
             default_variant_id: model.default_variant_id_branded(),
             variants,
+            fx_sends: Vec::new(),
+            input_track_ref: None,
             metadata,
         })
     }
@@ -194,10 +196,11 @@ impl RigRepo for RigRepoLive {
         .exec(&self.db)
         .await?;
 
-        for variant in &rig.variants {
+        for (position, variant) in rig.variants.iter().enumerate() {
             entity::rig_scene::Entity::insert(entity::rig_scene::ActiveModel {
                 id: Set(variant.id.as_str().to_string()),
                 rig_id: Set(rig.id.as_str().to_string()),
+                position: Set(position as i32),
                 name: Set(variant.name.clone()),
                 state_json: Set(Self::variant_state_to_json(variant)?),
                 metadata_json: Set(Self::metadata_to_json(&variant.metadata)?),

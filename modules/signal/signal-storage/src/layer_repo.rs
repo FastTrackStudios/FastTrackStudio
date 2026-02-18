@@ -109,7 +109,7 @@ impl LayerRepoLive {
     async fn assemble_layer(&self, model: &entity::layer::Model) -> StorageResult<Layer> {
         let variant_models = entity::layer_snapshot::Entity::find()
             .filter(entity::layer_snapshot::Column::LayerId.eq(model.id.clone()))
-            .order_by_asc(entity::layer_snapshot::Column::Id)
+            .order_by_asc(entity::layer_snapshot::Column::Position)
             .all(&self.db)
             .await?;
 
@@ -126,6 +126,7 @@ impl LayerRepoLive {
             engine_type: EngineType::from_str(&model.engine_type).unwrap_or_default(),
             default_variant_id: model.default_variant_id_branded(),
             variants,
+            fx_sends: Vec::new(),
             metadata,
         })
     }
@@ -204,10 +205,11 @@ impl LayerRepo for LayerRepoLive {
         .exec(&self.db)
         .await?;
 
-        for variant in &layer.variants {
+        for (position, variant) in layer.variants.iter().enumerate() {
             entity::layer_snapshot::Entity::insert(entity::layer_snapshot::ActiveModel {
                 id: Set(variant.id.as_str().to_string()),
                 layer_id: Set(layer.id.as_str().to_string()),
+                position: Set(position as i32),
                 name: Set(variant.name.clone()),
                 state_json: Set(Self::variant_state_to_json(variant)?),
                 metadata_json: Set(Self::metadata_to_json(&variant.metadata)?),

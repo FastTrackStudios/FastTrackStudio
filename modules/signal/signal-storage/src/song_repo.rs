@@ -91,7 +91,7 @@ impl SongRepoLive {
     async fn assemble_song(&self, model: &entity::song::Model) -> StorageResult<Song> {
         let variant_models = entity::section::Entity::find()
             .filter(entity::section::Column::SongId.eq(model.id.clone()))
-            .order_by_asc(entity::section::Column::Id)
+            .order_by_asc(entity::section::Column::Position)
             .all(&self.db)
             .await?;
 
@@ -174,10 +174,11 @@ impl SongRepo for SongRepoLive {
         .exec(&self.db)
         .await?;
 
-        for section in &song.sections {
+        for (position, section) in song.sections.iter().enumerate() {
             entity::section::Entity::insert(entity::section::ActiveModel {
                 id: Set(section.id.as_str().to_string()),
                 song_id: Set(song.id.as_str().to_string()),
+                position: Set(position as i32),
                 name: Set(section.name.clone()),
                 state_json: Set(Self::variant_state_to_json(section)?),
                 metadata_json: Set(Self::metadata_to_json(&section.metadata)?),

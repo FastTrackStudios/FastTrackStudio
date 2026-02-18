@@ -105,7 +105,7 @@ impl EngineRepoLive {
     async fn assemble_engine(&self, model: &entity::engine::Model) -> StorageResult<Engine> {
         let variant_models = entity::engine_scene::Entity::find()
             .filter(entity::engine_scene::Column::EngineId.eq(model.id.clone()))
-            .order_by_asc(entity::engine_scene::Column::Id)
+            .order_by_asc(entity::engine_scene::Column::Position)
             .all(&self.db)
             .await?;
 
@@ -124,6 +124,8 @@ impl EngineRepoLive {
             layer_ids,
             default_variant_id: model.default_variant_id_branded(),
             variants,
+            fx_sends: Vec::new(),
+            input_track_ref: None,
             metadata,
         })
     }
@@ -191,10 +193,11 @@ impl EngineRepo for EngineRepoLive {
         .exec(&self.db)
         .await?;
 
-        for variant in &engine.variants {
+        for (position, variant) in engine.variants.iter().enumerate() {
             entity::engine_scene::Entity::insert(entity::engine_scene::ActiveModel {
                 id: Set(variant.id.as_str().to_string()),
                 engine_id: Set(engine.id.as_str().to_string()),
+                position: Set(position as i32),
                 name: Set(variant.name.clone()),
                 state_json: Set(Self::variant_state_to_json(variant)?),
                 metadata_json: Set(Self::metadata_to_json(&variant.metadata)?),
