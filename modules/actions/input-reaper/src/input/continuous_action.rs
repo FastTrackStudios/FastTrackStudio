@@ -346,7 +346,7 @@ mod tests {
 
         register_continuous_action(action);
 
-        let registry = get_registry().lock();
+        let registry = get_registry().lock().unwrap();
         assert!(registry.contains_key("TEST_ACTION"));
     }
 }
