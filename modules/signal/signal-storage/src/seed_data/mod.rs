@@ -6,6 +6,7 @@
 pub mod amp;
 pub mod archetype_jm;
 pub mod boost;
+pub mod catalog_import;
 pub mod chorus;
 pub mod compressor;
 pub mod de_esser;
@@ -89,6 +90,12 @@ pub fn default_block_collections() -> Vec<Preset> {
     out.extend(saturator::presets());
     out.extend(tuner::presets());
     out.extend(archetype_jm::block_presets());
+
+    // Neural DSP catalog from disk (graceful skip if missing)
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+    let library_path = std::path::PathBuf::from(home).join("Music/FastTrackStudio/Library");
+    out.extend(catalog_import::catalog_block_collections(&library_path));
+
     out
 }
 
