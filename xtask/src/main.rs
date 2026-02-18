@@ -64,6 +64,15 @@ enum Commands {
     },
     /// Run native integration tests (spawns test-extension)
     Integration,
+    /// Run REAPER integration tests (spawns REAPER, runs #[reaper_test] tests)
+    ReaperTest {
+        /// Specific test name filter (passed to cargo test as filter)
+        #[facet(args::positional, default)]
+        filter: Option<String>,
+        /// Skip building the extension before running tests
+        #[facet(args::named, default)]
+        no_build: bool,
+    },
 }
 
 #[derive(Facet)]
@@ -297,6 +306,133 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             cmd!(sh, "nix develop --command bash -c {nix_cmd}").run()?;
 
             println!("\n=== Playwright tests completed ===");
+        }
+        Commands::ReaperTest { filter, no_build } => {
+            println!("=== Running REAPER integration tests ===");
+
+            // Step 1: Build extension (unless --no-build)
+            if !no_build {
+                println!("\n>>> Building REAPER extension...");
+                cmd!(sh, "cargo build -p reaper-extension").run()?;
+
+                // Copy dylib to REAPER's UserPlugins
+                let reaper_path = std::env::var("REAPER_PATH").unwrap_or_else(|_| {
+                    "/Users/codywright/Music/FastTrackStudio/Reaper/FTS-TRACKS/".to_string()
+                });
+                let plugins_dir = std::path::PathBuf::from(&reaper_path).join("UserPlugins");
+                std::fs::create_dir_all(&plugins_dir)?;
+
+                let dylib_src = workspace_root.join("target/debug/libreaper_fts.dylib");
+                let dylib_dst = plugins_dir.join("libreaper_fts.dylib");
+                if dylib_src.exists() {
+                    // Use symlink if not already linked
+                    if dylib_dst.exists() || dylib_dst.is_symlink() {
+                        std::fs::remove_file(&dylib_dst)?;
+                    }
+                    #[cfg(unix)]
+                    std::os::unix::fs::symlink(&dylib_src, &dylib_dst)?;
+                    println!("  Linked extension to {}", dylib_dst.display());
+                } else {
+                    println!(
+                        "  Warning: {} not found, skipping copy",
+                        dylib_src.display()
+                    );
+                }
+            }
+
+            // Step 2: Spawn REAPER (empty project, no splash)
+            println!("\n>>> Spawning REAPER...");
+            let reaper_exe = std::env::var("REAPER_EXECUTABLE").unwrap_or_else(|_| {
+                "/Users/codywright/Music/FastTrackStudio/Reaper/FTS-TRACKS/FTS-LIVE.app/Contents/MacOS/REAPER".to_string()
+            });
+            let reaper_resources = std::env::var("REAPER_RESOURCES").unwrap_or_else(|_| {
+                "/Users/codywright/Music/FastTrackStudio/Reaper/FTS-TRACKS/FTS-LIVE.app/Contents/Resources".to_string()
+            });
+
+            let socket_path = "/tmp/fts-control.sock";
+            let _ = std::fs::remove_file(socket_path);
+
+            let mut reaper_child = std::process::Command::new(&reaper_exe)
+                .current_dir(&reaper_resources)
+                .arg("-nosplash")
+                .arg("-ignoreerrors")
+                .spawn()
+                .map_err(|e| format!("Failed to spawn REAPER at {reaper_exe}: {e}"))?;
+            let reaper_pid = reaper_child.id();
+            println!("  Spawned REAPER (PID {reaper_pid})");
+
+            // Wait for socket
+            let socket = std::path::Path::new(socket_path);
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+            print!("  Waiting for socket");
+            while !socket.exists() {
+                if std::time::Instant::now() > deadline {
+                    println!();
+                    let _ = reaper_child.kill();
+                    let _ = reaper_child.wait();
+                    return Err("Timed out waiting for REAPER socket".into());
+                }
+                std::thread::sleep(std::time::Duration::from_millis(500));
+                print!(".");
+            }
+            println!("\n  Socket ready");
+
+            // Step 3: Prepare per-test log directory
+            let log_dir = std::path::PathBuf::from("/tmp/reaper-tests");
+            if log_dir.exists() {
+                let _ = std::fs::remove_dir_all(&log_dir);
+            }
+            std::fs::create_dir_all(&log_dir)?;
+            println!("  Log directory: {}", log_dir.display());
+
+            // Step 4: Run REAPER tests (parallel with limited concurrency)
+            // Each test gets its own project tab; limit threads to avoid overwhelming
+            // REAPER's main thread with too many concurrent plugin loads.
+            println!("\n>>> Running tests...");
+            let test_result = if let Some(ref f) = filter {
+                cmd!(
+                    sh,
+                    "cargo test -p signal -- --ignored --nocapture --test-threads=4 {f}"
+                )
+                .run()
+            } else {
+                cmd!(
+                    sh,
+                    "cargo test -p signal -- --ignored --nocapture --test-threads=4"
+                )
+                .run()
+            };
+
+            // Step 5: Kill REAPER
+            println!("\n>>> Stopping REAPER (PID {reaper_pid})...");
+            let _ = reaper_child.kill();
+            let _ = reaper_child.wait();
+            let _ = std::fs::remove_file(socket_path);
+
+            // Step 6: On failure, summarize per-test log files
+            if test_result.is_err() {
+                println!("\n>>> Test logs (non-empty):");
+                if let Ok(entries) = std::fs::read_dir(&log_dir) {
+                    let mut found_logs = false;
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        if path.extension().map(|e| e == "log").unwrap_or(false) {
+                            if let Ok(meta) = path.metadata() {
+                                if meta.len() > 0 {
+                                    found_logs = true;
+                                    println!("  {} ({} bytes)", path.display(), meta.len());
+                                }
+                            }
+                        }
+                    }
+                    if !found_logs {
+                        println!("  (no log files found)");
+                    }
+                }
+            }
+
+            test_result?;
+            println!("\n=== REAPER integration tests passed ===");
         }
         Commands::Integration => {
             println!("=== Running native integration tests ===");
