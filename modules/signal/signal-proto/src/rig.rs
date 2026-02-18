@@ -7,6 +7,7 @@ use facet::Facet;
 use serde::{Deserialize, Serialize};
 
 use crate::engine::{EngineId, EngineSceneId};
+use crate::fx_send::FxSend;
 use crate::metadata::Metadata;
 use crate::override_policy::{validate_overrides, OverridePolicyError, ScenePolicy};
 use crate::overrides::Override;
@@ -152,6 +153,12 @@ pub struct Rig {
     pub engine_ids: Vec<EngineId>,
     pub default_variant_id: RigSceneId,
     pub variants: Vec<RigScene>,
+    /// FX sends owned by this rig (reverb, delay, etc.).
+    #[serde(default)]
+    pub fx_sends: Vec<FxSend>,
+    /// DAW track reference for this rig's input track (GUID or name).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_track_ref: Option<String>,
     pub metadata: Metadata,
 }
 
@@ -170,6 +177,8 @@ impl Rig {
             engine_ids,
             default_variant_id,
             variants: vec![default_variant],
+            fx_sends: Vec::new(),
+            input_track_ref: None,
             metadata: Metadata::new(),
         }
     }
@@ -191,6 +200,18 @@ impl Rig {
     #[must_use]
     pub fn with_rig_type(mut self, rig_type: impl Into<RigType>) -> Self {
         self.rig_type = Some(rig_type.into());
+        self
+    }
+
+    #[must_use]
+    pub fn with_fx_send(mut self, send: FxSend) -> Self {
+        self.fx_sends.push(send);
+        self
+    }
+
+    #[must_use]
+    pub fn with_input_track(mut self, track_ref: impl Into<String>) -> Self {
+        self.input_track_ref = Some(track_ref.into());
         self
     }
 

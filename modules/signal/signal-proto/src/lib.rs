@@ -14,14 +14,17 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 // ─── Domain modules ─────────────────────────────────────────────
+pub mod actions;
 pub mod automation;
 pub mod block;
 pub mod defaults;
 pub mod easing;
 pub mod engine;
+pub mod fx_send;
 pub mod layer;
 pub mod metadata;
 pub mod midi;
+pub mod midi_actions;
 pub mod modulation;
 pub mod module_type;
 pub mod override_policy;
@@ -1124,6 +1127,8 @@ pub trait BlockService {
         preset_id: ModulePresetId,
         snapshot_id: ModuleSnapshotId,
     ) -> Option<ModuleSnapshot>;
+    async fn save_module_collection(&self, preset: ModulePreset) -> ();
+    async fn delete_module_collection(&self, id: ModulePresetId) -> ();
 }
 
 #[roam::service]
@@ -1231,6 +1236,14 @@ pub trait SceneTemplateService {
         &self,
         ordered_ids: Vec<scene_template::SceneTemplateId>,
     ) -> ();
+}
+
+#[roam::service]
+pub trait RackService {
+    async fn list_racks(&self) -> Vec<rack::Rack>;
+    async fn load_rack(&self, id: rack::RackId) -> Option<rack::Rack>;
+    async fn save_rack(&self, rack: rack::Rack) -> ();
+    async fn delete_rack(&self, id: rack::RackId) -> ();
 }
 
 #[cfg(test)]

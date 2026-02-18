@@ -6,6 +6,7 @@ license.workspace = true
 authors.workspace = true
 
 [dependencies]
+actions-proto.workspace = true
 serde.workspace = true
 facet.workspace = true
 roam.workspace = true

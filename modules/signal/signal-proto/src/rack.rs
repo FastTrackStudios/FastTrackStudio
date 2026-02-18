@@ -9,7 +9,10 @@
 //! A **Director** manages a session's entire signal routing (multiple Racks).
 //! A **Rack** groups related Rigs (e.g. "Guitar Rack" with clean/dirty rigs).
 
+use facet::Facet;
 use serde::{Deserialize, Serialize};
+
+use crate::fx_send::FxSendBus;
 
 crate::typed_uuid_id!(
     /// Unique identifier for a Rack.
@@ -22,7 +25,7 @@ crate::typed_uuid_id!(
 );
 
 /// A slot in a Rack that references a Rig.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct RackSlot {
     /// Position index within the rack.
     pub position: u32,
@@ -35,7 +38,7 @@ pub struct RackSlot {
 /// A Rack groups multiple Rigs for organized switching.
 ///
 /// Example: "Guitar Rack" might contain a clean rig, crunch rig, and lead rig.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct Rack {
     pub id: RackId,
     pub name: String,
@@ -43,6 +46,9 @@ pub struct Rack {
     pub slots: Vec<RackSlot>,
     /// Index of the currently selected slot.
     pub active_slot: Option<u32>,
+    /// Rack-level FX send buses (e.g. "AUX", "TIME" sub-categories).
+    #[serde(default)]
+    pub fx_send_buses: Vec<FxSendBus>,
 }
 
 impl Rack {
@@ -52,7 +58,14 @@ impl Rack {
             name: name.into(),
             slots: Vec::new(),
             active_slot: None,
+            fx_send_buses: Vec::new(),
         }
+    }
+
+    #[must_use]
+    pub fn with_fx_send_bus(mut self, bus: FxSendBus) -> Self {
+        self.fx_send_buses.push(bus);
+        self
     }
 
     pub fn active_rig_id(&self) -> Option<&crate::rig::RigId> {

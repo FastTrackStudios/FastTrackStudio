@@ -9,6 +9,7 @@
 use facet::Facet;
 use serde::{Deserialize, Serialize};
 
+use crate::fx_send::FxSend;
 use crate::metadata::Metadata;
 use crate::override_policy::{validate_overrides, OverridePolicyError, SnapshotPolicy};
 use crate::overrides::Override;
@@ -206,6 +207,9 @@ pub struct Layer {
     pub engine_type: EngineType,
     pub default_variant_id: LayerSnapshotId,
     pub variants: Vec<LayerSnapshot>,
+    /// FX sends owned by this layer (optional — most layers don't have these).
+    #[serde(default)]
+    pub fx_sends: Vec<FxSend>,
     pub metadata: Metadata,
 }
 
@@ -223,6 +227,7 @@ impl Layer {
             engine_type,
             default_variant_id,
             variants: vec![default_variant],
+            fx_sends: Vec::new(),
             metadata: Metadata::new(),
         }
     }
@@ -239,6 +244,12 @@ impl Layer {
 
     pub fn variant(&self, id: &LayerSnapshotId) -> Option<&LayerSnapshot> {
         self.variants.iter().find(|v| &v.id == id)
+    }
+
+    #[must_use]
+    pub fn with_fx_send(mut self, send: FxSend) -> Self {
+        self.fx_sends.push(send);
+        self
     }
 
     #[must_use]

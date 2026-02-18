@@ -6,6 +6,7 @@
 use facet::Facet;
 use serde::{Deserialize, Serialize};
 
+use crate::fx_send::FxSend;
 use crate::layer::{LayerId, LayerSnapshotId};
 use crate::metadata::Metadata;
 use crate::override_policy::{validate_overrides, OverridePolicyError, ScenePolicy};
@@ -98,6 +99,12 @@ pub struct Engine {
     pub layer_ids: Vec<LayerId>,
     pub default_variant_id: EngineSceneId,
     pub variants: Vec<EngineScene>,
+    /// FX sends owned by this engine (reverb, delay, etc.).
+    #[serde(default)]
+    pub fx_sends: Vec<FxSend>,
+    /// DAW track reference for this engine's input track (GUID or name).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_track_ref: Option<String>,
     pub metadata: Metadata,
 }
 
@@ -117,6 +124,8 @@ impl Engine {
             layer_ids,
             default_variant_id,
             variants: vec![default_variant],
+            fx_sends: Vec::new(),
+            input_track_ref: None,
             metadata: Metadata::new(),
         }
     }
@@ -137,6 +146,18 @@ impl Engine {
 
     pub fn is_layer_type_compatible(&self, layer_type: EngineType) -> bool {
         self.engine_type == layer_type
+    }
+
+    #[must_use]
+    pub fn with_fx_send(mut self, send: FxSend) -> Self {
+        self.fx_sends.push(send);
+        self
+    }
+
+    #[must_use]
+    pub fn with_input_track(mut self, track_ref: impl Into<String>) -> Self {
+        self.input_track_ref = Some(track_ref.into());
+        self
     }
 
     #[must_use]
