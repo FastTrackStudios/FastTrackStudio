@@ -115,7 +115,7 @@ pub struct Catalog {
     pub plugins: Vec<CatalogPlugin>,
 }
 
-/// Per-plugin metadata in the catalogue.
+/// Per-plugin block entry in the top-level catalogue index.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CatalogPlugin {
     pub name: String,
@@ -123,8 +123,8 @@ pub struct CatalogPlugin {
     pub slug: String,
     pub binary_id: String,
     pub disk_library_path: String,
-    pub total_presets: usize,
-    pub categories: Vec<String>,
+    pub total_snapshots: usize,
+    pub folders: Vec<String>,
 }
 
 /// A preset discovered on disk in a plugin's preset library.
@@ -193,14 +193,19 @@ impl PresetFingerprint {
     }
 }
 
-/// Per-preset metadata written to the catalogue as JSON.
+/// Per-snapshot metadata written to the catalogue as JSON.
+///
+/// Each Neural DSP "preset" maps to a **Snapshot** in our domain model —
+/// a saved parameter state of a plugin block.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PresetMetadata {
+pub struct SnapshotMetadata {
     pub name: String,
     /// URL/filesystem-safe slug derived from the name (e.g., "gravity-clean").
     pub id: String,
-    pub plugin: String,
-    pub category: String,
+    /// Slug of the parent plugin block (e.g., "archetype-john-mayer-x").
+    pub block: String,
+    /// Folder path within the block's snapshot tree (e.g., "John Mayer", "Artists/Cory Wong").
+    pub folder: String,
     pub tags: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub preset_uid: Option<String>,
@@ -210,17 +215,21 @@ pub struct PresetMetadata {
     pub fingerprint: PresetFingerprint,
 }
 
-/// Plugin metadata written to the catalogue as JSON.
+/// Plugin block metadata written to the catalogue as `block.json`.
+///
+/// Each Neural DSP plugin maps to a single **PluginBlock** — the block
+/// definition with all its parameter mappings. The snapshots (factory
+/// "presets") live in the `snapshots/` subdirectory.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PluginMetadata {
+pub struct BlockMetadata {
     pub name: String,
     pub manufacturer: String,
     pub slug: String,
     pub binary_id: String,
-    pub preset_format: String,
+    pub format: String,
     pub disk_library_path: String,
-    pub total_disk_presets: usize,
-    pub categories: Vec<String>,
+    pub total_snapshots: usize,
+    pub folders: Vec<String>,
 }
 
 // ─── NDSP Binary Format Parser ──────────────────────────────────
@@ -653,12 +662,12 @@ mod tests {
     }
 
     #[test]
-    fn test_preset_metadata_serde() {
-        let meta = PresetMetadata {
+    fn test_snapshot_metadata_serde() {
+        let meta = SnapshotMetadata {
             name: "Gravity Clean".to_string(),
             id: "gravity-clean".to_string(),
-            plugin: "archetype-john-mayer-x".to_string(),
-            category: "John Mayer".to_string(),
+            block: "archetype-john-mayer-x".to_string(),
+            folder: "John Mayer".to_string(),
             tags: vec!["Clean".to_string(), "Blues".to_string()],
             preset_uid: Some("4361648983680894524".to_string()),
             midi_cycle_index: Some(2),
@@ -666,9 +675,11 @@ mod tests {
             fingerprint: PresetFingerprint::default(),
         };
         let json = serde_json::to_string_pretty(&meta).unwrap();
-        let roundtrip: PresetMetadata = serde_json::from_str(&json).unwrap();
+        let roundtrip: SnapshotMetadata = serde_json::from_str(&json).unwrap();
         assert_eq!(roundtrip.name, "Gravity Clean");
         assert_eq!(roundtrip.id, "gravity-clean");
+        assert_eq!(roundtrip.block, "archetype-john-mayer-x");
+        assert_eq!(roundtrip.folder, "John Mayer");
         assert_eq!(roundtrip.state_file, "Gravity Clean.bin");
         assert_eq!(
             roundtrip.preset_uid,
