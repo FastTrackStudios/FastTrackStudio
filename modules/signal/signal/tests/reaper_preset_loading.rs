@@ -682,3 +682,618 @@ async fn override_stacking(ctx: &ReaperTestContext) -> Result<()> {
     println!("PASS");
     Ok(())
 }
+
+// ─────────────────────────────────────────────────────────────
+//  Neural DSP preset library scanner
+// ─────────────────────────────────────────────────────────────
+
+/// A preset discovered on disk in the Neural DSP preset library.
+#[derive(Debug, Clone)]
+struct DiskPreset {
+    name: String,
+    category: String, // folder hierarchy, e.g. "John Mayer" or "Artists/Cory Wong"
+    tags: Vec<String>,
+    /// Key parameter values used as a fingerprint for matching.
+    fingerprint: PresetFingerprint,
+}
+
+/// A small set of parameter values that uniquely identify a preset.
+/// Extracted from both disk files (binary format) and REAPER state chunks (XML).
+#[derive(Debug, Clone)]
+struct PresetFingerprint {
+    selected_amp: Option<String>,
+    three_in_one_gain: Option<f64>,
+    output_gain: Option<f64>,
+    katana_output: Option<f64>,
+    centaur_gain: Option<f64>,
+    dumble_gain: Option<f64>,
+    reverb_mix: Option<f64>,
+    reverb_decay: Option<f64>,
+    overdrive_gain: Option<f64>,
+}
+
+impl PresetFingerprint {
+    /// Compute a distance score between two fingerprints.
+    /// Lower = closer match. 0.0 = identical.
+    fn distance(&self, other: &PresetFingerprint) -> f64 {
+        let mut total = 0.0;
+        let mut count = 0;
+
+        let pairs: Vec<(Option<f64>, Option<f64>)> = vec![
+            (self.three_in_one_gain, other.three_in_one_gain),
+            (self.output_gain, other.output_gain),
+            (self.katana_output, other.katana_output),
+            (self.centaur_gain, other.centaur_gain),
+            (self.dumble_gain, other.dumble_gain),
+            (self.reverb_mix, other.reverb_mix),
+            (self.reverb_decay, other.reverb_decay),
+            (self.overdrive_gain, other.overdrive_gain),
+        ];
+
+        for (a, b) in pairs {
+            if let (Some(a), Some(b)) = (a, b) {
+                total += (a - b).abs();
+                count += 1;
+            }
+        }
+
+        // Amp selection mismatch is a large penalty
+        if self.selected_amp != other.selected_amp {
+            total += 10.0;
+        }
+
+        if count > 0 {
+            total / count as f64
+        } else {
+            f64::MAX
+        }
+    }
+}
+
+/// Extract a string value for `key` from the Neural DSP binary preset format.
+///
+/// Format: `<key>\0 <type_byte> <length_byte> \x05 <string_bytes> \0`
+fn ndsp_binary_string(data: &[u8], key: &[u8]) -> Option<String> {
+    let needle = [key, b"\x00"].concat();
+    let idx = data.windows(needle.len()).position(|w| w == needle)?;
+    let offset = idx + needle.len();
+    if offset + 3 > data.len() {
+        return None;
+    }
+    let length_byte = data[offset + 1] as usize;
+    if data[offset + 2] != 0x05 || length_byte < 2 {
+        return None;
+    }
+    let str_len = length_byte - 2; // subtract marker byte + null
+    let start = offset + 3;
+    if start + str_len > data.len() {
+        return None;
+    }
+    let bytes = &data[start..start + str_len];
+    Some(
+        String::from_utf8_lossy(bytes)
+            .trim_end_matches('\0')
+            .to_string(),
+    )
+}
+
+/// Extract tags from a Neural DSP binary preset file.
+fn ndsp_binary_tags(data: &[u8]) -> Vec<String> {
+    let mut tags = Vec::new();
+    let tag_section = match data.windows(5).position(|w| w == b"tags\x00") {
+        Some(idx) => idx,
+        None => return tags,
+    };
+    // Tags end where appModel begins
+    let end = data
+        .windows(9)
+        .position(|w| w == b"appModel\x00")
+        .unwrap_or(data.len());
+
+    let mut search_start = tag_section;
+    while search_start < end {
+        let val_needle = b"value\x00";
+        let val_idx = match data[search_start..end]
+            .windows(val_needle.len())
+            .position(|w| w == val_needle)
+        {
+            Some(rel) => search_start + rel,
+            None => break,
+        };
+        // Parse the string value directly at this offset (can't use
+        // ndsp_binary_string here because it always finds the FIRST occurrence).
+        let offset = val_idx + val_needle.len();
+        if offset + 3 <= data.len() {
+            let length_byte = data[offset + 1] as usize;
+            if data[offset + 2] == 0x05 && length_byte >= 2 {
+                let str_len = length_byte - 2;
+                let start = offset + 3;
+                if start + str_len <= data.len() {
+                    let bytes = &data[start..start + str_len];
+                    let tag = String::from_utf8_lossy(bytes)
+                        .trim_end_matches('\0')
+                        .to_string();
+                    if !tag.is_empty() {
+                        tags.push(tag);
+                    }
+                }
+            }
+        }
+        search_start = val_idx + val_needle.len();
+    }
+    tags
+}
+
+/// Build a fingerprint from a Neural DSP binary preset file on disk.
+fn fingerprint_from_disk(data: &[u8]) -> PresetFingerprint {
+    PresetFingerprint {
+        selected_amp: ndsp_binary_string(data, b"selectedAmp"),
+        three_in_one_gain: ndsp_binary_string(data, b"threeInOneGain").and_then(|s| s.parse().ok()),
+        output_gain: ndsp_binary_string(data, b"outputGain").and_then(|s| s.parse().ok()),
+        katana_output: ndsp_binary_string(data, b"katanaOutput").and_then(|s| s.parse().ok()),
+        centaur_gain: ndsp_binary_string(data, b"centaurGain").and_then(|s| s.parse().ok()),
+        dumble_gain: ndsp_binary_string(data, b"dumbleGain").and_then(|s| s.parse().ok()),
+        reverb_mix: ndsp_binary_string(data, b"reverbMix").and_then(|s| s.parse().ok()),
+        reverb_decay: ndsp_binary_string(data, b"reverbDecay").and_then(|s| s.parse().ok()),
+        overdrive_gain: ndsp_binary_string(data, b"overdriveGain").and_then(|s| s.parse().ok()),
+    }
+}
+
+/// Extract an XML attribute value: `key="value"` → `value`.
+fn xml_attr(xml: &str, key: &str) -> Option<String> {
+    let needle = format!("{}=\"", key);
+    let start = xml.find(&needle)? + needle.len();
+    let end = xml[start..].find('"')? + start;
+    Some(xml[start..end].to_string())
+}
+
+/// Build a fingerprint from the REAPER state chunk's embedded XML.
+fn fingerprint_from_xml(xml: &str) -> PresetFingerprint {
+    PresetFingerprint {
+        selected_amp: xml_attr(xml, "selectedAmp"),
+        three_in_one_gain: xml_attr(xml, "threeInOneGain").and_then(|s| s.parse().ok()),
+        output_gain: xml_attr(xml, "outputGain").and_then(|s| s.parse().ok()),
+        katana_output: xml_attr(xml, "katanaOutput").and_then(|s| s.parse().ok()),
+        centaur_gain: xml_attr(xml, "centaurGain").and_then(|s| s.parse().ok()),
+        dumble_gain: xml_attr(xml, "dumbleGain").and_then(|s| s.parse().ok()),
+        reverb_mix: xml_attr(xml, "reverbMix").and_then(|s| s.parse().ok()),
+        reverb_decay: xml_attr(xml, "reverbDecay").and_then(|s| s.parse().ok()),
+        overdrive_gain: xml_attr(xml, "overdriveGain").and_then(|s| s.parse().ok()),
+    }
+}
+
+/// Extract the embedded XML from the REAPER state chunk's raw bytes.
+/// The XML is the second readable ASCII string (after "VC2!...").
+fn extract_xml_from_chunk(data: &[u8]) -> Option<String> {
+    let xml_start = data.windows(5).position(|w| w == b"<?xml")?;
+    // Find the end: last '>' before the next non-printable section
+    let mut end = xml_start;
+    for i in xml_start..data.len() {
+        if data[i] >= 0x20 && data[i] < 0x7F {
+            end = i + 1;
+        } else {
+            break;
+        }
+    }
+    Some(String::from_utf8_lossy(&data[xml_start..end]).to_string())
+}
+
+/// Scan the Neural DSP preset library on disk and return all presets.
+fn scan_preset_library(preset_dir: &std::path::Path) -> Vec<DiskPreset> {
+    let mut presets = Vec::new();
+
+    fn walk(dir: &std::path::Path, base: &std::path::Path, presets: &mut Vec<DiskPreset>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        let mut entries: Vec<_> = entries.flatten().collect();
+        entries.sort_by_key(|e| e.file_name());
+
+        for entry in entries {
+            let path = entry.path();
+            if path.is_dir() {
+                walk(&path, base, presets);
+            } else if path.extension().map(|e| e == "xml").unwrap_or(false) {
+                let Ok(data) = std::fs::read(&path) else {
+                    continue;
+                };
+                let name = ndsp_binary_string(&data, b"name").unwrap_or_default();
+                let category = path
+                    .parent()
+                    .and_then(|p| p.strip_prefix(base).ok())
+                    .map(|p| p.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                let tags = ndsp_binary_tags(&data);
+                let fingerprint = fingerprint_from_disk(&data);
+                presets.push(DiskPreset {
+                    name,
+                    category,
+                    tags,
+                    fingerprint,
+                });
+            }
+        }
+    }
+
+    walk(preset_dir, preset_dir, &mut presets);
+    presets
+}
+
+/// Find the best matching disk preset for a given fingerprint.
+fn match_preset<'a>(
+    library: &'a [DiskPreset],
+    fp: &PresetFingerprint,
+) -> Option<(&'a DiskPreset, f64)> {
+    library
+        .iter()
+        .map(|p| (p, p.fingerprint.distance(fp)))
+        .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+}
+
+// ─────────────────────────────────────────────────────────────
+//  Scenario 12: Harvest all JM factory presets
+//
+//  Neural DSP plugins don't expose presets via REAPER's standard
+//  GetPresetIndex/NavigatePresets API (count=0). Instead we:
+//
+//  1. Set the track's record input to MIDI Virtual Keyboard (VKB)
+//  2. Arm the track with input monitoring = Normal
+//  3. Send MIDI CC#1 ch1 val=127 via StuffMIDIMessage → VKB queue
+//     (this triggers the plugin's internal "Preset Next" via its
+//     MIDI mapping: CC Absolute → Preset Next → Channel 1 → CC #1)
+//  4. Read the state chunk after each advance, detect cycle by
+//     comparing chunks (names may be empty for internal presets)
+// ─────────────────────────────────────────────────────────────
+
+#[reaper_test]
+async fn harvest_jm_factory_presets(ctx: &ReaperTestContext) -> Result<()> {
+    use daw_proto::{InputMonitoringMode, MidiMessage, RecordInput, StuffMidiTarget};
+
+    println!("\n=== scenario: harvest_jm_factory_presets ===");
+
+    let track = add_jm_track(ctx.project(), "JM Preset Harvest").await?;
+    let fx = get_fx0(&track).await?;
+
+    let info = fx.info().await?;
+    println!("FX: {} ({})", info.name, info.plugin_name);
+
+    // Query initial preset state
+    let initial = fx
+        .preset_index()
+        .await?
+        .ok_or_else(|| eyre::eyre!("get_preset_index returned None for JM plugin"))?;
+    println!(
+        "  Initial: index={:?}, count={}, name={:?}",
+        initial.index, initial.count, initial.name
+    );
+
+    if initial.count > 0 {
+        // Standard path: plugin exposes presets via REAPER's program list
+        println!(
+            "\n  Plugin exposes {} presets via standard API",
+            initial.count
+        );
+
+        fx.set_preset(0).await?;
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+        println!("\n  {:>4}  {:<50}  {:>10}", "#", "Name", "State Bytes");
+        println!(
+            "  {}  {}  {}",
+            "-".repeat(4),
+            "-".repeat(50),
+            "-".repeat(10)
+        );
+
+        let mut presets: Vec<(u32, String, usize)> = Vec::new();
+        for i in 0..initial.count {
+            fx.set_preset(i).await?;
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+            let preset_info = fx
+                .preset_index()
+                .await?
+                .ok_or_else(|| eyre::eyre!("get_preset_index returned None at preset {}", i))?;
+            let name = preset_info
+                .name
+                .unwrap_or_else(|| format!("(unnamed #{})", i));
+            let chunk = fx.state_chunk_encoded().await?.unwrap_or_default();
+            println!("  {:>4}  {:<50}  {:>10}", i, name, chunk.len());
+            presets.push((i, name, chunk.len()));
+        }
+
+        println!("\n  Total: {} factory presets harvested", presets.len());
+    } else {
+        // MIDI-based discovery for plugins with internal preset managers
+        // (Neural DSP, Helix Native, etc.)
+        //
+        // Strategy:
+        //   1. Scan the preset library on disk → name, category, tags, fingerprint
+        //   2. Advance presets via MIDI CC and capture REAPER state chunks
+        //   3. Match each loaded state to a disk preset via parameter fingerprinting
+        //   4. Output: cycle order + name + category + tags + state chunk
+        println!("\n  Plugin uses internal preset manager (count=0).");
+
+        // ── Step 1: Scan disk preset library ──
+        let preset_dir =
+            std::path::PathBuf::from("/Library/Audio/Presets/Neural DSP/Archetype John Mayer X");
+        let library = scan_preset_library(&preset_dir);
+        println!("  Scanned {} presets from disk library", library.len());
+
+        // ── Step 2: Configure track for MIDI VKB input ──
+        track
+            .set_record_input(RecordInput::midi_virtual_keyboard())
+            .await?;
+        track.arm().await?;
+        track
+            .set_input_monitoring(InputMonitoringMode::Normal)
+            .await?;
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        println!("  Track armed with VKB input + monitoring ON");
+
+        // ── Step 3: Advance presets and match ──
+        let output_path = std::path::PathBuf::from("/tmp/reaper-tests/harvest_output.txt");
+        let mut out = std::fs::File::create(&output_path)
+            .map_err(|e| eyre::eyre!("create output file: {e}"))?;
+        use std::io::Write as _;
+
+        writeln!(
+            out,
+            "Neural DSP Archetype John Mayer X — Factory Preset Catalogue"
+        )?;
+        writeln!(out, "Disk library: {} presets", library.len())?;
+        writeln!(out)?;
+
+        // Capture initial state
+        let first_chunk = fx.state_chunk_encoded().await?.unwrap_or_default();
+        let first_raw = fx.state_chunk().await?.unwrap_or_default();
+        let first_xml = extract_xml_from_chunk(&first_raw);
+
+        struct HarvestedPreset {
+            index: u32,
+            name: String,
+            category: String,
+            tags: Vec<String>,
+            match_distance: f64,
+            chunk_len: usize,
+            preset_uid: String,
+        }
+
+        let mut harvested: Vec<HarvestedPreset> = Vec::new();
+
+        // Match initial preset
+        let initial_fp =
+            first_xml
+                .as_deref()
+                .map(fingerprint_from_xml)
+                .unwrap_or(PresetFingerprint {
+                    selected_amp: None,
+                    three_in_one_gain: None,
+                    output_gain: None,
+                    katana_output: None,
+                    centaur_gain: None,
+                    dumble_gain: None,
+                    reverb_mix: None,
+                    reverb_decay: None,
+                    overdrive_gain: None,
+                });
+        let initial_uid = first_xml
+            .as_deref()
+            .and_then(|x| xml_attr(x, "presetUid"))
+            .unwrap_or_default();
+
+        let (initial_name, initial_cat, initial_tags, initial_dist) =
+            match match_preset(&library, &initial_fp) {
+                Some((dp, dist)) => (dp.name.clone(), dp.category.clone(), dp.tags.clone(), dist),
+                None => (
+                    "(unmatched)".to_string(),
+                    String::new(),
+                    Vec::new(),
+                    f64::MAX,
+                ),
+            };
+
+        harvested.push(HarvestedPreset {
+            index: 0,
+            name: initial_name,
+            category: initial_cat,
+            tags: initial_tags,
+            match_distance: initial_dist,
+            chunk_len: first_chunk.len(),
+            preset_uid: initial_uid,
+        });
+
+        // Walk all 385+ presets. If we detect a cycle we break early.
+        const MAX_PRESETS: u32 = 500;
+
+        for i in 1..MAX_PRESETS {
+            // Send CC#1 ch1: 0→127 transition to trigger "Preset Next"
+            ctx.daw
+                .stuff_midi(
+                    StuffMidiTarget::VirtualMidiKeyboard,
+                    MidiMessage::control_change(0, 1, 0),
+                )
+                .await?;
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            ctx.daw
+                .stuff_midi(
+                    StuffMidiTarget::VirtualMidiKeyboard,
+                    MidiMessage::control_change(0, 1, 127),
+                )
+                .await?;
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+            // Read state
+            let chunk = fx.state_chunk_encoded().await?.unwrap_or_default();
+            let raw = fx.state_chunk().await?.unwrap_or_default();
+
+            // Cycle detection
+            if chunk == first_chunk && i > 1 {
+                writeln!(
+                    out,
+                    "\n── Cycle detected at step {} (returned to preset 0) ──",
+                    i
+                )?;
+                break;
+            }
+
+            // Extract XML and match
+            let xml = extract_xml_from_chunk(&raw);
+            let fp = xml
+                .as_deref()
+                .map(fingerprint_from_xml)
+                .unwrap_or(PresetFingerprint {
+                    selected_amp: None,
+                    three_in_one_gain: None,
+                    output_gain: None,
+                    katana_output: None,
+                    centaur_gain: None,
+                    dumble_gain: None,
+                    reverb_mix: None,
+                    reverb_decay: None,
+                    overdrive_gain: None,
+                });
+            let uid = xml
+                .as_deref()
+                .and_then(|x| xml_attr(x, "presetUid"))
+                .unwrap_or_default();
+
+            let (name, cat, tags, dist) = match match_preset(&library, &fp) {
+                Some((dp, dist)) => (dp.name.clone(), dp.category.clone(), dp.tags.clone(), dist),
+                None => (
+                    format!("(unmatched #{})", i),
+                    String::new(),
+                    Vec::new(),
+                    f64::MAX,
+                ),
+            };
+
+            harvested.push(HarvestedPreset {
+                index: i,
+                name,
+                category: cat,
+                tags,
+                match_distance: dist,
+                chunk_len: chunk.len(),
+                preset_uid: uid,
+            });
+
+            // Progress every 50 presets
+            if i % 50 == 0 {
+                println!("  ... advanced {} presets", i);
+            }
+        }
+
+        // ── Step 4: Write formatted output ──
+        writeln!(
+            out,
+            "{:>4}  {:<40}  {:<30}  {:>8}  {:>8}",
+            "#", "Name", "Category", "Dist", "Bytes"
+        )?;
+        writeln!(
+            out,
+            "{}  {}  {}  {}  {}",
+            "-".repeat(4),
+            "-".repeat(40),
+            "-".repeat(30),
+            "-".repeat(8),
+            "-".repeat(8)
+        )?;
+
+        for p in &harvested {
+            writeln!(
+                out,
+                "{:>4}  {:<40}  {:<30}  {:>8.6}  {:>8}",
+                p.index, p.name, p.category, p.match_distance, p.chunk_len
+            )?;
+        }
+
+        // Summary stats
+        let matched = harvested
+            .iter()
+            .filter(|p| p.match_distance < 0.001)
+            .count();
+        let close = harvested
+            .iter()
+            .filter(|p| p.match_distance >= 0.001 && p.match_distance < 1.0)
+            .count();
+        let unmatched = harvested.iter().filter(|p| p.match_distance >= 1.0).count();
+
+        writeln!(out)?;
+        writeln!(out, "── Summary ──")?;
+        writeln!(out, "Total presets in cycle: {}", harvested.len())?;
+        writeln!(
+            out,
+            "Exact matches (dist < 0.001): {} ({:.0}%)",
+            matched,
+            matched as f64 / harvested.len() as f64 * 100.0
+        )?;
+        writeln!(
+            out,
+            "Close matches (dist < 1.0):   {} ({:.0}%)",
+            close,
+            close as f64 / harvested.len() as f64 * 100.0
+        )?;
+        writeln!(out, "Unmatched (dist >= 1.0):      {}", unmatched)?;
+        writeln!(out, "Disk library size:            {}", library.len())?;
+
+        // Write tags for matched presets
+        writeln!(out)?;
+        writeln!(out, "── Tags ──")?;
+        for p in &harvested {
+            if !p.tags.is_empty() {
+                writeln!(out, "  {:>4} {}: {}", p.index, p.name, p.tags.join(", "))?;
+            }
+        }
+
+        // List worst matches for debugging
+        let mut worst: Vec<&HarvestedPreset> = harvested
+            .iter()
+            .filter(|p| p.match_distance > 0.001)
+            .collect();
+        worst.sort_by(|a, b| {
+            b.match_distance
+                .partial_cmp(&a.match_distance)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        if !worst.is_empty() {
+            writeln!(out)?;
+            writeln!(out, "── Worst matches (top 10) ──")?;
+            for p in worst.iter().take(10) {
+                writeln!(
+                    out,
+                    "  #{}: {} (dist={:.6}, uid={})",
+                    p.index, p.name, p.match_distance, p.preset_uid
+                )?;
+            }
+        }
+
+        out.flush()?;
+
+        // Console summary
+        println!(
+            "  Harvested {} presets ({} exact, {} close, {} unmatched)",
+            harvested.len(),
+            matched,
+            close,
+            unmatched
+        );
+        println!("  Full output: {}", output_path.display());
+
+        // Assertions
+        assert!(
+            harvested.len() > 1,
+            "Should have more than 1 preset — check MIDI CC mapping"
+        );
+        let unique_uids: std::collections::HashSet<&str> =
+            harvested.iter().map(|p| p.preset_uid.as_str()).collect();
+        assert!(
+            unique_uids.len() > 1,
+            "All presets have the same UID — MIDI advancement not working"
+        );
+    }
+
+    remove_track(ctx.project(), track).await;
+    println!("PASS");
+    Ok(())
+}

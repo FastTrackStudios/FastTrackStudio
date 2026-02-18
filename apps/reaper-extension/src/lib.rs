@@ -35,10 +35,10 @@ use std::time::Duration;
 
 // Service dispatchers for method ID routing
 use daw_proto::{
-    AudioEngineServiceDispatcher, FxServiceDispatcher, MarkerServiceDispatcher,
-    MidiAnalysisServiceDispatcher, MidiServiceDispatcher, ProjectServiceDispatcher,
-    RegionServiceDispatcher, TempoMapServiceDispatcher, TrackServiceDispatcher,
-    TransportServiceDispatcher,
+    AudioEngineServiceDispatcher, FxServiceDispatcher, LiveMidiServiceDispatcher,
+    MarkerServiceDispatcher, MidiAnalysisServiceDispatcher, MidiServiceDispatcher,
+    ProjectServiceDispatcher, RegionServiceDispatcher, TempoMapServiceDispatcher,
+    TrackServiceDispatcher, TransportServiceDispatcher,
 };
 
 // ============================================================================
@@ -211,6 +211,7 @@ fn register_daw_dispatcher() {
     let midi_analysis = daw_reaper::ReaperMidiAnalysis::new();
     let fx = daw_reaper::ReaperFx::new();
     let track = daw_reaper::ReaperTrack::new();
+    let live_midi = daw_reaper::ReaperLiveMidi::new();
 
     // Create dispatchers with telemetry middleware
     let transport_dispatcher =
@@ -227,7 +228,8 @@ fn register_daw_dispatcher() {
     let audio_engine_dispatcher =
         AudioEngineServiceDispatcher::new(audio_engine).with_middleware(telemetry.clone());
     let fx_dispatcher = FxServiceDispatcher::new(fx).with_middleware(telemetry.clone());
-    let track_dispatcher = TrackServiceDispatcher::new(track).with_middleware(telemetry);
+    let track_dispatcher = TrackServiceDispatcher::new(track).with_middleware(telemetry.clone());
+    let live_midi_dispatcher = LiveMidiServiceDispatcher::new(live_midi).with_middleware(telemetry);
 
     // Compose all dispatchers together using RoutedDispatcher chaining
     // The RoutedDispatcher chains dispatchers: first tries left, falls through to right
@@ -239,7 +241,8 @@ fn register_daw_dispatcher() {
     let with_midi_analysis = RoutedDispatcher::new(with_midi, midi_analysis_dispatcher);
     let with_audio_engine = RoutedDispatcher::new(with_midi_analysis, audio_engine_dispatcher);
     let with_fx = RoutedDispatcher::new(with_audio_engine, fx_dispatcher);
-    let daw_dispatcher = RoutedDispatcher::new(with_fx, track_dispatcher);
+    let with_track = RoutedDispatcher::new(with_fx, track_dispatcher);
+    let daw_dispatcher = RoutedDispatcher::new(with_track, live_midi_dispatcher);
 
     // Register with the Host
     Host::get().set_daw_dispatcher(Arc::new(daw_dispatcher));
@@ -253,7 +256,7 @@ fn register_daw_dispatcher() {
     });
 
     info!(
-        "DAW dispatcher registered (Transport, Project, Marker, Region, TempoMap, Midi, MidiAnalysis, AudioEngine, Fx, Track) with OTLP telemetry"
+        "DAW dispatcher registered (Transport, Project, Marker, Region, TempoMap, Midi, MidiAnalysis, AudioEngine, Fx, Track, LiveMidi) with OTLP telemetry"
     );
     info!("daw-reaper marked as ready for in-process DAW calls");
 }
