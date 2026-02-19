@@ -5,14 +5,11 @@ name = "fasttrackstudio"
 members = [
     "cells/*/*",
     "crates/*/*",
-    "modules/actions/input-reaper",
     "modules/signal/*",
-    "libs/*",
     "xtask",
     "apps/tests/*",
     "apps/fts-control/*",
     "apps/fasttrackstudio/*",
-    "apps/reaper-extension",
 ]
 exclude = ["cells/audio-controls/src"]
 resolver = "2"
@@ -106,7 +103,7 @@ actions-standalone = { git = "https://github.com/FastTrackStudios/input_actions.
 actions-keybindings = { git = "https://github.com/FastTrackStudios/input_actions.git", branch = "master" }
 input-dioxus = { git = "https://github.com/FastTrackStudios/input_actions.git", branch = "master" }
 input = { git = "https://github.com/FastTrackStudios/input_actions.git", branch = "master" }
-input-reaper = { path = "modules/actions/input-reaper" }
+input-reaper = { git = "https://github.com/FastTrackStudios/FTS-Extensions.git", branch = "main" }
 
 # Dynamic template (FastTrackStudios/dynamic-template)
 color-palette = { git = "https://github.com/FastTrackStudios/dynamic-template.git", branch = "master" }
@@ -135,8 +132,9 @@ reaper-medium = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "
 reaper-high = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master" }
 reaper-macros = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master" }
 reaper-common-types = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master", features = ["palette"] }
-swell-ui = { path = "libs/swell-ui" }
-reaper-embed = { path = "libs/reaper-embed" }
+# FTS Extensions (FastTrackStudios/FTS-Extensions)
+swell-ui = { git = "https://github.com/FastTrackStudios/FTS-Extensions.git", branch = "main" }
+reaper-embed = { git = "https://github.com/FastTrackStudios/FTS-Extensions.git", branch = "main" }
 fragile = "2.0.1"
 crossbeam-channel = "0.5"
 scopeguard = "1.1.0"
