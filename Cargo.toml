@@ -5,13 +5,11 @@ name = "fasttrackstudio"
 members = [
     "cells/*/*",
     "crates/*/*",
-    "modules/signal/*",
     "xtask",
     "apps/tests/*",
     "apps/fts-control/*",
     "apps/fasttrackstudio/*",
 ]
-exclude = ["cells/audio-controls/src"]
 resolver = "2"
 
 [workspace.lints.rust]
@@ -111,19 +109,19 @@ dynamic-template-proto = { git = "https://github.com/FastTrackStudios/dynamic-te
 dynamic-template = { git = "https://github.com/FastTrackStudios/dynamic-template.git", branch = "master" }
 
 # Local crates
-session-proto = { path = "cells/session/session-proto" }
-session = { path = "cells/session/session" }
-session-ui = { path = "cells/session/session-ui" }
-audio-controls = { path = "cells/audio-controls" }
-signal = { path = "modules/signal/signal" }
-signal-proto = { path = "modules/signal/signal-proto" }
-signal-storage = { path = "modules/signal/signal-storage" }
-signal-live = { path = "modules/signal/signal-live" }
-signal-controller = { path = "modules/signal/signal-controller" }
-signal-ui = { path = "modules/signal/signal-ui", default-features = false }
-sync-proto = { path = "cells/sync/sync-proto" }
-sync = { path = "cells/sync/sync" }
-sync-ui = { path = "cells/sync/sync-ui" }
+session-proto = { path = "crates/session/session-proto" }
+session = { path = "crates/session/session" }
+session-ui = { path = "crates/session/session-ui" }
+audio-controls = { git = "https://github.com/FastTrackStudios/daw.git", branch = "master" }
+signal = { path = "crates/signal/signal" }
+signal-proto = { path = "crates/signal/signal-proto" }
+signal-storage = { path = "crates/signal/signal-storage" }
+signal-live = { path = "crates/signal/signal-live" }
+signal-controller = { path = "crates/signal/signal-controller" }
+signal-ui = { path = "crates/signal/signal-ui", default-features = false }
+sync-proto = { path = "crates/sync/sync-proto" }
+sync = { path = "crates/sync/sync" }
+sync-ui = { path = "crates/sync/sync-ui" }
 gateway-proto = { path = "cells/gateway/gateway-proto" }
 
 # REAPER extension dependencies
