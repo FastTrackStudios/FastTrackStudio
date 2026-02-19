@@ -12,7 +12,6 @@ name = "session"
 path = "src/main.rs"
 
 [dependencies]
-cell-runtime.workspace = true
 session-proto = { path = "../session-proto" }
 actions-proto.workspace = true
 daw-control.workspace = true

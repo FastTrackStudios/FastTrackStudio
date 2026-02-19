@@ -5,14 +5,12 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-# UI framework (conditional on feature)
+# UI framework
 dioxus = { workspace = true, optional = true }
-dioxus-native = { workspace = true, optional = true }
 
 [features]
 default = ["web"]
 web = ["dep:dioxus"]
-native = ["dep:dioxus-native"]
 
 [lints]
 workspace = true

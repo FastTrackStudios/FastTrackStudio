@@ -12,9 +12,6 @@ name = "gateway-ws"
 path = "src/main.rs"
 
 [dependencies]
-# Cell runtime
-cell-runtime.workspace = true
-
 # Protocols
 gateway-proto.workspace = true
 

@@ -399,16 +399,24 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             let test_result = if let Some(ref f) = filter {
                 cmd!(
                     sh,
-                    "cargo test -p signal -- --ignored --nocapture --test-threads=4 {f}"
+                    "cargo test -p signal --features daw -- --ignored --nocapture --test-threads=4 {f}"
                 )
                 .run()
             } else {
                 cmd!(
                     sh,
-                    "cargo test -p signal -- --ignored --nocapture --test-threads=4"
+                    "cargo test -p signal --features daw -- --ignored --nocapture --test-threads=4"
                 )
                 .run()
             };
+
+            // Step 4b: Final cleanup — remove leftover tracks/tabs
+            println!("\n>>> Cleaning up REAPER state...");
+            let _ = cmd!(
+                sh,
+                "cargo test -p signal --features daw --test reaper_connection -- --ignored --nocapture final_cleanup"
+            )
+            .run();
 
             // Step 5: Kill REAPER
             println!("\n>>> Stopping REAPER (PID {reaper_pid})...");
@@ -550,6 +558,14 @@ fn run_catalog(output: Option<String>) -> Result<(), Box<dyn std::error::Error>>
             std::fs::copy(&preset.source_path, &bin_path)?;
 
             // Write snapshot JSON metadata
+            // Check if a REAPER chunk file already exists (from a previous harvest)
+            let chunk_filename = format!("{original_stem}.chunk");
+            let reaper_chunk_file = if folder_dir.join(&chunk_filename).exists() {
+                Some(chunk_filename)
+            } else {
+                None
+            };
+
             let meta = catalog::SnapshotMetadata {
                 name: preset.name.clone(),
                 id: catalog::slugify(&preset.name),
@@ -559,6 +575,7 @@ fn run_catalog(output: Option<String>) -> Result<(), Box<dyn std::error::Error>>
                 preset_uid: None,
                 midi_cycle_index: None,
                 state_file: format!("{original_stem}.bin"),
+                reaper_chunk_file,
                 fingerprint: preset.fingerprint.clone(),
             };
             let json_path = folder_dir.join(format!("{original_stem}.json"));

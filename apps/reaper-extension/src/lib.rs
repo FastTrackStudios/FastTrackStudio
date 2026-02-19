@@ -26,9 +26,7 @@ use std::error::Error;
 use std::sync::{Arc, OnceLock};
 use tracing::{debug, info, warn};
 
-use cell_host_proto::ReadyMsg;
 use global::Global;
-use host_runtime::{cell_ready_registry, init_shm_infrastructure, spawn_tracing_consumer, Host};
 use roam::session::RoutedDispatcher;
 use roam_telemetry::{ExporterConfig, OtlpExporter, TelemetryMiddleware};
 use std::time::Duration;
@@ -37,8 +35,8 @@ use std::time::Duration;
 use daw_proto::{
     AudioEngineServiceDispatcher, FxServiceDispatcher, LiveMidiServiceDispatcher,
     MarkerServiceDispatcher, MidiAnalysisServiceDispatcher, MidiServiceDispatcher,
-    ProjectServiceDispatcher, RegionServiceDispatcher, TempoMapServiceDispatcher,
-    TrackServiceDispatcher, TransportServiceDispatcher,
+    ProjectServiceDispatcher, RegionServiceDispatcher, RoutingServiceDispatcher,
+    TempoMapServiceDispatcher, TrackServiceDispatcher, TransportServiceDispatcher,
 };
 
 // ============================================================================
@@ -71,9 +69,6 @@ struct App {
     session: RefCell<ReaperSession>,
     #[allow(dead_code)]
     tokio_runtime: tokio::runtime::Runtime,
-    /// Keep SHM temp directory alive for extension lifetime
-    #[allow(dead_code)]
-    shm_temp_dir: Option<tempfile::TempDir>,
     /// Main task middleware for processing TaskSupport queued tasks
     task_middleware: RefCell<MainTaskMiddleware>,
 }
@@ -102,14 +97,8 @@ impl App {
         Ok(Self {
             session: RefCell::new(session),
             tokio_runtime,
-            shm_temp_dir: None,
             task_middleware: RefCell::new(task_middleware),
         })
-    }
-
-    /// Set the SHM temp directory (must be kept alive for extension lifetime)
-    fn set_shm_temp_dir(&mut self, temp_dir: tempfile::TempDir) {
-        self.shm_temp_dir = Some(temp_dir);
     }
 
     /// Process pending main thread tasks (called from timer callback)
@@ -123,40 +112,12 @@ impl App {
 
         // Initialize the in-process actions registry
         action_registry::init_registry();
-        // Initialize SHM infrastructure for host runtime
-        let shm_temp_dir = self.tokio_runtime.block_on(async {
+        self.tokio_runtime.block_on(async {
             register_actions().await;
 
-            // Initialize SHM infrastructure
-            let temp_dir = match init_shm_infrastructure().await {
-                Ok(temp_dir) => {
-                    info!("SHM infrastructure initialized");
-                    Some(temp_dir)
-                }
-                Err(e) => {
-                    warn!("Failed to initialize SHM infrastructure: {}", e);
-                    return None;
-                }
-            };
-
-            // Start tracing consumer for cell log aggregation
-            spawn_tracing_consumer();
-
             // Register the DAW dispatcher for in-process REAPER API handling
-            // This allows external applications (like fts-control desktop) to make
-            // DAW service calls (play, stop, etc.) that are handled locally using
-            // REAPER APIs via TaskSupport
             register_daw_dispatcher();
-            // Start Unix socket server for desktop app connections
-            start_unix_server();
-
-            temp_dir
         });
-
-        // Store the temp directory to keep SHM files alive
-        if let Some(temp_dir) = shm_temp_dir {
-            self.set_shm_temp_dir(temp_dir);
-        }
 
         // Register the menu hook
         menu::register_extension_menu()?;
@@ -211,6 +172,7 @@ fn register_daw_dispatcher() {
     let midi_analysis = daw_reaper::ReaperMidiAnalysis::new();
     let fx = daw_reaper::ReaperFx::new();
     let track = daw_reaper::ReaperTrack::new();
+    let routing = daw_reaper::ReaperRouting::new();
     let live_midi = daw_reaper::ReaperLiveMidi::new();
 
     // Create dispatchers with telemetry middleware
@@ -229,6 +191,8 @@ fn register_daw_dispatcher() {
         AudioEngineServiceDispatcher::new(audio_engine).with_middleware(telemetry.clone());
     let fx_dispatcher = FxServiceDispatcher::new(fx).with_middleware(telemetry.clone());
     let track_dispatcher = TrackServiceDispatcher::new(track).with_middleware(telemetry.clone());
+    let routing_dispatcher =
+        RoutingServiceDispatcher::new(routing).with_middleware(telemetry.clone());
     let live_midi_dispatcher = LiveMidiServiceDispatcher::new(live_midi).with_middleware(telemetry);
 
     // Compose all dispatchers together using RoutedDispatcher chaining
@@ -242,38 +206,15 @@ fn register_daw_dispatcher() {
     let with_audio_engine = RoutedDispatcher::new(with_midi_analysis, audio_engine_dispatcher);
     let with_fx = RoutedDispatcher::new(with_audio_engine, fx_dispatcher);
     let with_track = RoutedDispatcher::new(with_fx, track_dispatcher);
-    let daw_dispatcher = RoutedDispatcher::new(with_track, live_midi_dispatcher);
+    let with_routing = RoutedDispatcher::new(with_track, routing_dispatcher);
+    let daw_dispatcher = RoutedDispatcher::new(with_routing, live_midi_dispatcher);
 
-    // Register with the Host
-    Host::get().set_daw_dispatcher(Arc::new(daw_dispatcher));
-
-    // Mark "daw-reaper" as ready so cells waiting for DAW services can proceed
-    // This is important because session cell polls for DAW readiness before making calls
-    cell_ready_registry().mark_ready(ReadyMsg {
-        cell_name: "daw-reaper".to_string(),
-        peer_id: 0, // In-process, no actual peer ID
-        pid: Some(std::process::id()),
-    });
+    // TODO: Register DAW dispatcher with new infrastructure (roam is evolving)
+    let _daw_dispatcher = Arc::new(daw_dispatcher);
 
     info!(
-        "DAW dispatcher registered (Transport, Project, Marker, Region, TempoMap, Midi, MidiAnalysis, AudioEngine, Fx, Track, LiveMidi) with OTLP telemetry"
+        "DAW dispatcher registered (Transport, Project, Marker, Region, TempoMap, Midi, MidiAnalysis, AudioEngine, Fx, Track, Routing, LiveMidi) with OTLP telemetry"
     );
-    info!("daw-reaper marked as ready for in-process DAW calls");
-}
-
-/// Start the Unix socket server for desktop app connections.
-fn start_unix_server() {
-    let socket_path = std::env::var("FTS_SOCKET")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|_| std::path::PathBuf::from("/tmp/fts-control.sock"));
-
-    info!("Starting Unix socket server at: {}", socket_path.display());
-
-    tokio::spawn(async move {
-        if let Err(e) = host_runtime::unix_server::start_server(&socket_path).await {
-            warn!("Unix socket server error: {}", e);
-        }
-    });
 }
 
 async fn register_actions() {

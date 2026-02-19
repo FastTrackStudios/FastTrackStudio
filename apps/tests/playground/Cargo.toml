@@ -8,9 +8,9 @@ edition = "2021"
 dioxus = { workspace = true, features = ["router"] }
 signal.workspace = true
 signal-ui.workspace = true
-frame-import = { path = "../../../cells/frame/frame-import" }
-frame-proto = { path = "../../../cells/frame/frame-proto" }
-frame-ui = { path = "../../../cells/frame/frame-ui", features = ["anyrender"] }
+frame-import = { git = "https://github.com/FastTrackStudios/frame.git", branch = "main" }
+frame-proto = { git = "https://github.com/FastTrackStudios/frame.git", branch = "main" }
+frame-ui = { git = "https://github.com/FastTrackStudios/frame.git", branch = "main", features = ["anyrender"] }
 anyrender = { workspace = true }
 anyrender_vello = { workspace = true }
 vello = { workspace = true }

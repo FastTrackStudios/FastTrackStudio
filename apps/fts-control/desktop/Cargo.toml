@@ -5,9 +5,8 @@ authors = ["Cody Wright <acodywright@gmail.com>"]
 edition = "2021"
 
 [dependencies]
-# UI - conditionally use Dioxus desktop (Wry/WebView) or native (Blitz/GPU)
+# UI - Dioxus desktop (Wry/WebView)
 dioxus = { version = "0.7.2", features = ["desktop"], optional = true }
-dioxus-native = { workspace = true, optional = true }
 
 # Session UI components - feature selected based on renderer
 session-ui = { path = "../../../cells/session/session-ui", default-features = false }
@@ -24,14 +23,9 @@ roam-stream.workspace = true
 roam-local.workspace = true
 roam-session.workspace = true
 
-# DAW connection via Unix socket
-host-client.workspace = true
-
 # Protocols
 daw-proto.workspace = true
 daw-control.workspace = true
-host-manager-proto.workspace = true
-host-manager.workspace = true
 
 # Async
 tokio = { workspace = true, features = ["full"] }
@@ -80,14 +74,5 @@ engraver-proto = { path = "../../../cells/keyflow/engraver-proto", features = ["
 mimalloc = "0.1"
 
 [features]
-# Default to desktop (Wry/WebView) renderer - fast and stable
 default = ["desktop"]
-
-# Desktop renderer using Wry/WebView (recommended)
 desktop = ["dioxus", "session-ui/web", "keyflow-ui/web", "signal-ui/web", "daw-ui/web", "dock-dioxus/web"]
-
-# Native GPU-accelerated renderer using Blitz (experimental)
-native = ["dioxus-native", "session-ui/native", "keyflow-ui/native", "signal-ui/native", "daw-ui/native", "dock-dioxus/native"]
-
-# Enable Blitz's built-in frame time logging (only works with native feature)
-log-frame-times = ["dioxus-native/log-frame-times"]
