@@ -1,8 +1,0 @@
-[package]
-name = "host-manager-proto"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-facet.workspace = true
-roam.workspace = true

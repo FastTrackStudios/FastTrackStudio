@@ -1,8 +1,0 @@
-[package]
-name = "cell-host-proto"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]
-facet = { workspace = true }
-roam = { workspace = true }
