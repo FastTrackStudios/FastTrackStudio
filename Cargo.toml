@@ -1,12 +1,11 @@
+[workspace.metadata.crane]
+name = "fasttrackstudio"
+
 [workspace]
 members = [
     "cells/*/*",
     "crates/*/*",
     "modules/dawfile/*",
-    "modules/cell-runtime",
-    "modules/host-client",
-    "modules/host-runtime",
-    "modules/integration-tests",
     "modules/actions/actions-proto",
     "modules/actions/actions-registry",
     "modules/actions/actions-standalone",
@@ -21,7 +20,6 @@ members = [
     "apps/fts-control/*",
     "apps/fasttrackstudio/*",
     "apps/reaper-extension",
-    "reference/lumen-blocks/blocks",
 ]
 exclude = ["cells/audio-controls/src"]
 resolver = "2"
@@ -50,9 +48,6 @@ facet-toml = { git = "https://github.com/facet-rs/facet", branch = "main" }
 facet-value = { git = "https://github.com/facet-rs/facet", branch = "main" }
 facet-yaml = { git = "https://github.com/facet-rs/facet", branch = "main" }
 
-# Figma API (types only — models used, client feature pulled in due to upstream lib.rs bug)
-figma-api = { git = "https://github.com/gridaco/figma-api-rust.git" }
-
 # Common dependencies
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -78,7 +73,6 @@ roam-hash = { git = "https://github.com/bearcove/roam.git", branch = "main" }
 roam-schema = { git = "https://github.com/bearcove/roam.git", branch = "main" }
 roam-service-macros = { git = "https://github.com/bearcove/roam.git", branch = "main" }
 roam-session = { git = "https://github.com/bearcove/roam.git", branch = "main" }
-roam-shm = { git = "https://github.com/bearcove/roam.git", branch = "main", features = ["tracing"] }
 roam-stream = { git = "https://github.com/bearcove/roam.git", branch = "main" }
 roam-task-local = { git = "https://github.com/bearcove/roam.git", branch = "main" }
 roam-telemetry = { git = "https://github.com/bearcove/roam.git", branch = "main" }
@@ -93,10 +87,6 @@ shm-primitives = { git = "https://github.com/bearcove/roam.git", branch = "main"
 
 # Local modules
 dawfile-reaper = { path = "modules/dawfile/dawfile-reaper" }
-integration-tests = { path = "modules/integration-tests" }
-cell-runtime = { path = "modules/cell-runtime" }
-host-client = { path = "modules/host-client" }
-host-runtime = { path = "modules/host-runtime" }
 
 # Monarchy crates
 monarchy = { path = "crates/monarchy/monarchy" }
@@ -119,7 +109,6 @@ engraver-proto = { path = "cells/keyflow/engraver-proto" }
 keyflow-ui = { path = "cells/keyflow/keyflow-ui" }
 
 # Protocol crates
-cell-host-proto = { path = "cells/cell-host/cell-host-proto" }
 session-proto = { path = "cells/session/session-proto" }
 daw-proto = { path = "cells/daw/daw-proto" }
 daw-control = { path = "cells/daw/daw-control" }
@@ -138,8 +127,6 @@ sync-ui = { path = "cells/sync/sync-ui" }
 dock-proto = { path = "cells/dock/dock-proto" }
 dock-dioxus = { path = "cells/dock/dock-dioxus" }
 gateway-proto = { path = "cells/gateway/gateway-proto" }
-host-manager-proto = { path = "cells/host-manager/host-manager-proto" }
-host-manager = { path = "cells/host-manager/host-manager" }
 daw-standalone = { path = "cells/daw/daw-standalone" }
 daw-reaper = { path = "cells/daw/daw-reaper" }
 actions-proto = { path = "modules/actions/actions-proto" }
@@ -165,14 +152,12 @@ raw-window-handle = "0.4.2"
 palette = "0.7.3"
 
 # Lumen blocks (Dioxus shadcn-inspired components)
-lumen-blocks = { path = "reference/lumen-blocks/blocks" }
+lumen-blocks = { git = "https://github.com/Leaf-Computer/lumen-blocks.git", tag = "v0.2.0" }
 dioxus-time = { git = "https://github.com/ealmloff/dioxus-std", rev = "7e0c41ef8c5514e46e8ac657227568660cf38987" }
 lucide-dioxus = { git = "https://github.com/Leaf-Computer/lucide.git", rev = "e3e509d5855324e893aef838747cccb2d115dc15", features = ["all-icons"] }
 
 # Dioxus UI framework (pinned to 0.7.2 - native 0.7.3 not yet on crates.io)
 dioxus = "0.7.2"
-# Dioxus native renderer (GPU-accelerated, no WebView) - using latest git for performance improvements
-dioxus-native = { git = "https://github.com/DioxusLabs/blitz", rev = "b88144ed", features = ["prelude", "system-fonts"] }
 rxrust = { git = "https://github.com/rxRust/rxRust", rev = "349e50b3197e05926e2378ef8fc45cb67ad43b83" }
 
 # macOS dependencies for swell-ui (using exact versions for compatibility)
@@ -183,8 +168,7 @@ objc2-foundation = "0.2.0"
 winapi = { version = "0.3", features = ["winuser", "uxtheme"] }
 libloading = "0.9"
 
-# Image crate - pinned to 0.25.6 for blitz-dom compatibility (dioxus-native)
-image = "=0.25.6"
+image = "0.25"
 
 # Anyrender - 2D rendering abstraction (WGPU/Vello backend)
 anyrender = { git = "https://github.com/DioxusLabs/anyrender.git", branch = "main" }
