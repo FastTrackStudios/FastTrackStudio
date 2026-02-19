@@ -94,7 +94,7 @@ pub fn SplitPane(
             div {
                 class: "{handle_size} {handle_cursor} bg-border hover:bg-blue-500/50 active:bg-blue-500/70 transition-colors flex-shrink-0 relative group",
                 onmousedown: {
-                    let container_id = container_id.clone();
+                    let container_id = container_id;
                     move |e: MouseEvent| {
                         e.prevent_default();
                         dragging.set(true);
