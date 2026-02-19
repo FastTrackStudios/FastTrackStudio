@@ -24,6 +24,3 @@ facet = { workspace = true }
 [features]
 default = ["derive"]
 derive = []
-
-[lints]
-workspace = true

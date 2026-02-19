@@ -4,7 +4,6 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
-repository.workspace = true
 
 [lib]
 proc-macro = true
@@ -17,6 +16,3 @@ convert_case = "0.6"
 
 [dev-dependencies]
 monarchy = { workspace = true }
-
-[lints]
-workspace = true
