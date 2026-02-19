@@ -639,7 +639,7 @@ pub fn move_unsorted_to_group<M: Metadata>(
         return Ok(0);
     }
 
-    let total_items = items.len();
+    let _total_items = items.len();
 
     // Step 2: Assign items to target group and organize by metadata fields
     // This trusts that the user knows these items belong to the target group
@@ -665,11 +665,10 @@ pub fn move_unsorted_to_group<M: Metadata>(
     }
 
     // Step 5: Clean up empty Unsorted folder if needed
-    if let Some(unsorted) = root.find_child("Unsorted") {
-        if unsorted.is_empty() {
+    if let Some(unsorted) = root.find_child("Unsorted")
+        && unsorted.is_empty() {
             root.remove_child("Unsorted");
         }
-    }
 
     Ok(sorted_count)
 }
@@ -1042,20 +1041,18 @@ fn cleanup_empty_nodes<M: Metadata>(root: &mut Structure<M>, path: &[&str]) {
 
     // Check if the source is empty and remove it
     if path.len() == 1 {
-        if let Some(source) = root.find_child(path[0]) {
-            if source.is_empty() {
+        if let Some(source) = root.find_child(path[0])
+            && source.is_empty() {
                 root.remove_child(path[0]);
             }
-        }
     } else {
         // Navigate to parent and check child
         if let Some(parent) = root.find_at_path_mut(&path[..path.len() - 1]) {
             let child_name = path[path.len() - 1];
-            if let Some(child) = parent.find_child(child_name) {
-                if child.is_empty() {
+            if let Some(child) = parent.find_child(child_name)
+                && child.is_empty() {
                     parent.remove_child(child_name);
                 }
-            }
         }
     }
 }
@@ -1266,8 +1263,8 @@ pub fn format_metadata_value<M: Metadata>(value: &M::Value) -> String {
     let value_str = format!("{:?}", value);
     // Remove enum variant wrapper if present (e.g., "MultiMic([\"In\"])" -> "In")
     // This is a simple heuristic - we might need a better way
-    if let Some(start) = value_str.find('(') {
-        if let Some(end) = value_str.rfind(')') {
+    if let Some(start) = value_str.find('(')
+        && let Some(end) = value_str.rfind(')') {
             let inner = &value_str[start + 1..end];
             // If it's a Vec format like ["In", "Out"], extract values
             if inner.starts_with('[') && inner.ends_with(']') {
@@ -1297,6 +1294,5 @@ pub fn format_metadata_value<M: Metadata>(value: &M::Value) -> String {
             let without_trailing = without_leading.strip_suffix('"').unwrap_or(without_leading);
             return without_trailing.replace("\\\"", "\"");
         }
-    }
     value_str
 }

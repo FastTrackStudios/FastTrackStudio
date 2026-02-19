@@ -361,7 +361,7 @@ impl<M: Metadata> Organizer<M> {
             .field_grouping_strategies
             .get(&field_name)
             .cloned()
-            .unwrap_or_else(|| crate::FieldGroupingStrategy::Default);
+            .unwrap_or(crate::FieldGroupingStrategy::Default);
 
         // Group items by this field's value
         let mut field_groups: Vec<(String, Vec<Item<M>>)> = Vec::new();
@@ -398,10 +398,10 @@ impl<M: Metadata> Organizer<M> {
                 descriptors.iter().map(|d| d.value.clone()).collect();
             field_groups.sort_by(|a, b| {
                 // Check if either is the default value - default comes first
-                let a_is_default = default_value.as_ref().map_or(false, |d| {
+                let a_is_default = default_value.as_ref().is_some_and(|d| {
                     a.0 == *d || a.0.to_lowercase() == d.to_lowercase()
                 });
-                let b_is_default = default_value.as_ref().map_or(false, |d| {
+                let b_is_default = default_value.as_ref().is_some_and(|d| {
                     b.0 == *d || b.0.to_lowercase() == d.to_lowercase()
                 });
                 match (a_is_default, b_is_default) {
@@ -436,10 +436,10 @@ impl<M: Metadata> Organizer<M> {
                 let pattern_order: Vec<String> = nested_group.patterns.clone();
                 field_groups.sort_by(|a, b| {
                     // Check if either is the default value - default comes first
-                    let a_is_default = default_value.as_ref().map_or(false, |d| {
+                    let a_is_default = default_value.as_ref().is_some_and(|d| {
                         a.0 == *d || a.0.to_lowercase() == d.to_lowercase()
                     });
-                    let b_is_default = default_value.as_ref().map_or(false, |d| {
+                    let b_is_default = default_value.as_ref().is_some_and(|d| {
                         b.0 == *d || b.0.to_lowercase() == d.to_lowercase()
                     });
                     match (a_is_default, b_is_default) {

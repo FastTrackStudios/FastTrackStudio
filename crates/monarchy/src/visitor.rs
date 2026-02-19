@@ -927,7 +927,7 @@ impl CleanupDisplayNames {
         // Step 2: Remove trailing version/playlist suffixes
         // Patterns like "_03", ".2_03", ".dup1_03", ".01.R.05_03"
         // These are typically Pro Tools or DAW-specific suffixes
-        let suffix_patterns = [
+        let _suffix_patterns = [
             // Full patterns with underscores
             r"[._]\d+[._]\d+$",           // .05_03, _05_03
             r"[._]dup\d*[._]?\d*$",       // .dup1_03, .dup1
@@ -1214,8 +1214,8 @@ impl CleanupDisplayNames {
         }
 
         // If we found digits, check for separator
-        if num_end > 0 {
-            if let Some(&sep) = chars.peek() {
+        if num_end > 0
+            && let Some(&sep) = chars.peek() {
                 match sep {
                     '.' | '-' | '_' => {
                         chars.next();
@@ -1245,7 +1245,6 @@ impl CleanupDisplayNames {
                     _ => {}
                 }
             }
-        }
 
         trimmed.to_string()
     }
@@ -1370,12 +1369,11 @@ impl CleanupDisplayNames {
         }
 
         // Check for %
-        if num_end > 0 {
-            if let Some(&'%') = chars.peek() {
+        if num_end > 0
+            && let Some(&'%') = chars.peek() {
                 let rest = &trimmed[num_end + 1..].trim_start();
                 return rest;
             }
-        }
 
         s
     }

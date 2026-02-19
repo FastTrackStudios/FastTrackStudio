@@ -119,7 +119,7 @@ impl<M: Metadata> Parser<M> {
                         best_match_count = match_count;
                         matched_group = Some(deepest_group);
                         // Clone the groups to store them
-                        matched_groups = path.into_iter().map(|g| g.clone()).collect();
+                        matched_groups = path.into_iter().cloned().collect();
                     }
                 }
             }
@@ -137,11 +137,10 @@ impl<M: Metadata> Parser<M> {
             for path_group in &matched_groups {
                 for field in &path_group.metadata_fields {
                     // Only set if not already set (deepest group takes precedence for conflicts)
-                    if metadata.get(field).is_none() {
-                        if let Some(value) = self.extract_field_value(&input, field, path_group) {
+                    if metadata.get(field).is_none()
+                        && let Some(value) = self.extract_field_value(&input, field, path_group) {
                             metadata.set(field.clone(), value);
                         }
-                    }
                 }
 
                 // Check if item matches any tagged collections in this group
@@ -154,11 +153,10 @@ impl<M: Metadata> Parser<M> {
 
             // Also extract from the deepest group (in case it wasn't in the path for some reason)
             for field in &group.metadata_fields {
-                if metadata.get(field).is_none() {
-                    if let Some(value) = self.extract_field_value(&input, field, group) {
+                if metadata.get(field).is_none()
+                    && let Some(value) = self.extract_field_value(&input, field, group) {
                         metadata.set(field.clone(), value);
                     }
-                }
             }
 
             // Check tagged collection on deepest group too
@@ -173,11 +171,10 @@ impl<M: Metadata> Parser<M> {
         self.set_original_name_field(&mut metadata, &input);
 
         // Handle unmatched items based on fallback strategy
-        if matched_groups.is_empty() {
-            if let crate::config::FallbackStrategy::Reject = self.config.fallback_strategy {
+        if matched_groups.is_empty()
+            && let crate::config::FallbackStrategy::Reject = self.config.fallback_strategy {
                 return Err(MonarchyError::NoMatch(input));
             }
-        }
 
         Ok(Item {
             id: generate_id(),
