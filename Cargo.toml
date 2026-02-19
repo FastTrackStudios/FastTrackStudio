@@ -5,14 +5,7 @@ name = "fasttrackstudio"
 members = [
     "cells/*/*",
     "crates/*/*",
-    "modules/dawfile/*",
-    "modules/actions/actions-proto",
-    "modules/actions/actions-registry",
-    "modules/actions/actions-standalone",
-    "modules/actions/actions-keybindings",
-    "modules/actions/input-dioxus",
     "modules/actions/input-reaper",
-    "modules/actions/input",
     "modules/signal/*",
     "libs/*",
     "xtask",
@@ -85,29 +78,43 @@ subject-rust = { git = "https://github.com/bearcove/roam.git", branch = "main" }
 ur-taking-me-with-you = { git = "https://github.com/bearcove/roam.git", branch = "main", features = ["tokio"] }
 shm-primitives = { git = "https://github.com/bearcove/roam.git", branch = "main" }
 
-# Local modules
-dawfile-reaper = { path = "modules/dawfile/dawfile-reaper" }
+# Keyflow/Engraver crates (FastTrackStudios/keyflow)
+keyflow = { git = "https://github.com/FastTrackStudios/keyflow.git", branch = "master" }
+keyflow-proto = { git = "https://github.com/FastTrackStudios/keyflow.git", branch = "master" }
+keyflow-text = { git = "https://github.com/FastTrackStudios/keyflow.git", branch = "master" }
+keyflow-midi = { git = "https://github.com/FastTrackStudios/keyflow.git", branch = "master" }
+engraver = { git = "https://github.com/FastTrackStudios/keyflow.git", branch = "master" }
+engraver-proto = { git = "https://github.com/FastTrackStudios/keyflow.git", branch = "master" }
+keyflow-ui = { git = "https://github.com/FastTrackStudios/keyflow.git", branch = "master" }
 
-# Color palette crate
-color-palette = { path = "crates/color/color-palette" }
+# DAW crates (FastTrackStudios/daw)
+dawfile-reaper = { git = "https://github.com/FastTrackStudios/daw.git", branch = "master" }
+daw-proto = { git = "https://github.com/FastTrackStudios/daw.git", branch = "master" }
+daw-control = { git = "https://github.com/FastTrackStudios/daw.git", branch = "master" }
+daw-standalone = { git = "https://github.com/FastTrackStudios/daw.git", branch = "master" }
+daw-reaper = { git = "https://github.com/FastTrackStudios/daw.git", branch = "master" }
+daw-ui = { git = "https://github.com/FastTrackStudios/daw.git", branch = "master" }
 
-# Dynamic template crates
-dynamic-template-proto = { path = "cells/dynamic-template/dynamic-template-proto" }
-dynamic-template = { path = "cells/dynamic-template/dynamic-template" }
+# Dock UI (FastTrackStudios/dock-dioxus)
+dock-proto = { git = "https://github.com/FastTrackStudios/dock-dioxus.git", branch = "master" }
+dock-dioxus = { git = "https://github.com/FastTrackStudios/dock-dioxus.git", branch = "master" }
 
-# Keyflow/Engraver crates
-keyflow = { path = "cells/keyflow/keyflow" }
-keyflow-proto = { path = "cells/keyflow/keyflow-proto" }
-keyflow-text = { path = "cells/keyflow/keyflow-text" }
-keyflow-midi = { path = "cells/keyflow/keyflow-midi" }
-engraver = { path = "cells/keyflow/engraver" }
-engraver-proto = { path = "cells/keyflow/engraver-proto" }
-keyflow-ui = { path = "cells/keyflow/keyflow-ui" }
+# Actions / Input (FastTrackStudios/input_actions)
+actions-proto = { git = "https://github.com/FastTrackStudios/input_actions.git", branch = "master" }
+actions-registry = { git = "https://github.com/FastTrackStudios/input_actions.git", branch = "master" }
+actions-standalone = { git = "https://github.com/FastTrackStudios/input_actions.git", branch = "master" }
+actions-keybindings = { git = "https://github.com/FastTrackStudios/input_actions.git", branch = "master" }
+input-dioxus = { git = "https://github.com/FastTrackStudios/input_actions.git", branch = "master" }
+input = { git = "https://github.com/FastTrackStudios/input_actions.git", branch = "master" }
+input-reaper = { path = "modules/actions/input-reaper" }
 
-# Protocol crates
+# Dynamic template (FastTrackStudios/dynamic-template)
+color-palette = { git = "https://github.com/FastTrackStudios/dynamic-template.git", branch = "master" }
+dynamic-template-proto = { git = "https://github.com/FastTrackStudios/dynamic-template.git", branch = "master" }
+dynamic-template = { git = "https://github.com/FastTrackStudios/dynamic-template.git", branch = "master" }
+
+# Local crates
 session-proto = { path = "cells/session/session-proto" }
-daw-proto = { path = "cells/daw/daw-proto" }
-daw-control = { path = "cells/daw/daw-control" }
 session = { path = "cells/session/session" }
 session-ui = { path = "cells/session/session-ui" }
 audio-controls = { path = "cells/audio-controls" }
@@ -120,18 +127,7 @@ signal-ui = { path = "modules/signal/signal-ui", default-features = false }
 sync-proto = { path = "cells/sync/sync-proto" }
 sync = { path = "cells/sync/sync" }
 sync-ui = { path = "cells/sync/sync-ui" }
-dock-proto = { path = "cells/dock/dock-proto" }
-dock-dioxus = { path = "cells/dock/dock-dioxus" }
 gateway-proto = { path = "cells/gateway/gateway-proto" }
-daw-standalone = { path = "cells/daw/daw-standalone" }
-daw-reaper = { path = "cells/daw/daw-reaper" }
-actions-proto = { path = "modules/actions/actions-proto" }
-actions-registry = { path = "modules/actions/actions-registry" }
-actions-standalone = { path = "modules/actions/actions-standalone" }
-actions-keybindings = { path = "modules/actions/actions-keybindings" }
-input-dioxus = { path = "modules/actions/input-dioxus" }
-input-reaper = { path = "modules/actions/input-reaper" }
-input = { path = "modules/actions/input" }
 
 # REAPER extension dependencies
 reaper-low = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master" }
