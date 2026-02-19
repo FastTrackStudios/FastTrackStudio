@@ -3,7 +3,6 @@ name = "fasttrackstudio"
 
 [workspace]
 members = [
-    "cells/*/*",
     "crates/*/*",
     "xtask",
     "apps/tests/*",
@@ -53,66 +52,69 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 eyre = "0.6"
 futures = "0.3"
 
-# Roam crates (bearcove upstream)
-roam = { git = "https://github.com/bearcove/roam.git", branch = "main" }
-roam-codegen = { git = "https://github.com/bearcove/roam.git", branch = "main" }
-roam-frame = { git = "https://github.com/bearcove/roam.git", branch = "main" }
-roam-hash = { git = "https://github.com/bearcove/roam.git", branch = "main" }
-roam-schema = { git = "https://github.com/bearcove/roam.git", branch = "main" }
-roam-service-macros = { git = "https://github.com/bearcove/roam.git", branch = "main" }
-roam-session = { git = "https://github.com/bearcove/roam.git", branch = "main" }
-roam-stream = { git = "https://github.com/bearcove/roam.git", branch = "main" }
-roam-task-local = { git = "https://github.com/bearcove/roam.git", branch = "main" }
-roam-telemetry = { git = "https://github.com/bearcove/roam.git", branch = "main" }
-roam-tracing = { git = "https://github.com/bearcove/roam.git", branch = "main" }
-roam-websocket = { git = "https://github.com/bearcove/roam.git", branch = "main" }
-roam-wire = { git = "https://github.com/bearcove/roam.git", branch = "main" }
-roam-local = { git = "https://github.com/bearcove/roam.git", branch = "main" }
-roam-http-bridge = { git = "https://github.com/bearcove/roam.git", branch = "main" }
-subject-rust = { git = "https://github.com/bearcove/roam.git", branch = "main" }
-ur-taking-me-with-you = { git = "https://github.com/bearcove/roam.git", branch = "main", features = ["tokio"] }
-shm-primitives = { git = "https://github.com/bearcove/roam.git", branch = "main" }
+# Roam crates (bearcove upstream — pinned, latest main needs peeps sub-crates not yet published)
+roam = { git = "https://github.com/bearcove/roam.git", rev = "30a8e10" }
+roam-codegen = { git = "https://github.com/bearcove/roam.git", rev = "30a8e10" }
+roam-frame = { git = "https://github.com/bearcove/roam.git", rev = "30a8e10" }
+roam-hash = { git = "https://github.com/bearcove/roam.git", rev = "30a8e10" }
+roam-schema = { git = "https://github.com/bearcove/roam.git", rev = "30a8e10" }
+roam-service-macros = { git = "https://github.com/bearcove/roam.git", rev = "30a8e10" }
+roam-session = { git = "https://github.com/bearcove/roam.git", rev = "30a8e10" }
+roam-stream = { git = "https://github.com/bearcove/roam.git", rev = "30a8e10" }
+roam-task-local = { git = "https://github.com/bearcove/roam.git", rev = "30a8e10" }
+roam-telemetry = { git = "https://github.com/bearcove/roam.git", rev = "30a8e10" }
+roam-tracing = { git = "https://github.com/bearcove/roam.git", rev = "30a8e10" }
+roam-websocket = { git = "https://github.com/bearcove/roam.git", rev = "30a8e10" }
+roam-wire = { git = "https://github.com/bearcove/roam.git", rev = "30a8e10" }
+roam-local = { git = "https://github.com/bearcove/roam.git", rev = "30a8e10" }
+roam-http-bridge = { git = "https://github.com/bearcove/roam.git", rev = "30a8e10" }
+subject-rust = { git = "https://github.com/bearcove/roam.git", rev = "30a8e10" }
+ur-taking-me-with-you = { git = "https://github.com/bearcove/roam.git", rev = "30a8e10", features = ["tokio"] }
+shm-primitives = { git = "https://github.com/bearcove/roam.git", rev = "30a8e10" }
 
-# Keyflow/Engraver crates (FastTrackStudios/keyflow)
-keyflow = { git = "https://github.com/FastTrackStudios/keyflow.git", branch = "master" }
-keyflow-proto = { git = "https://github.com/FastTrackStudios/keyflow.git", branch = "master" }
-keyflow-text = { git = "https://github.com/FastTrackStudios/keyflow.git", branch = "master" }
-keyflow-midi = { git = "https://github.com/FastTrackStudios/keyflow.git", branch = "master" }
-engraver = { git = "https://github.com/FastTrackStudios/keyflow.git", branch = "master" }
-engraver-proto = { git = "https://github.com/FastTrackStudios/keyflow.git", branch = "master" }
-keyflow-ui = { git = "https://github.com/FastTrackStudios/keyflow.git", branch = "master" }
+# Instrumentation
+peeps = { git = "https://github.com/bearcove/peeps", branch = "main", features = ["diagnostics"] }
 
-# DAW crates (FastTrackStudios/daw)
-dawfile-reaper = { git = "https://github.com/FastTrackStudios/daw.git", branch = "master" }
-daw-proto = { git = "https://github.com/FastTrackStudios/daw.git", branch = "master" }
-daw-control = { git = "https://github.com/FastTrackStudios/daw.git", branch = "master" }
-daw-standalone = { git = "https://github.com/FastTrackStudios/daw.git", branch = "master" }
-daw-reaper = { git = "https://github.com/FastTrackStudios/daw.git", branch = "master" }
-daw-ui = { git = "https://github.com/FastTrackStudios/daw.git", branch = "master" }
+# Keyflow/Engraver crates (sibling repo — local paths)
+keyflow = { path = "../keyflow/crates/keyflow" }
+keyflow-proto = { path = "../keyflow/crates/keyflow-proto" }
+keyflow-text = { path = "../keyflow/crates/keyflow-text" }
+keyflow-midi = { path = "../keyflow/crates/keyflow-midi" }
+engraver = { path = "../keyflow/crates/engraver" }
+engraver-proto = { path = "../keyflow/crates/engraver-proto" }
+keyflow-ui = { path = "../keyflow/crates/keyflow-ui" }
 
-# Dock UI (FastTrackStudios/dock-dioxus)
-dock-proto = { git = "https://github.com/FastTrackStudios/dock-dioxus.git", branch = "master" }
-dock-dioxus = { git = "https://github.com/FastTrackStudios/dock-dioxus.git", branch = "master" }
+# DAW crates (sibling repo — local paths)
+dawfile-reaper = { path = "../daw/crates/dawfile-reaper" }
+daw-proto = { path = "../daw/crates/daw-proto" }
+daw-control = { path = "../daw/crates/daw-control" }
+daw-standalone = { path = "../daw/crates/daw-standalone" }
+daw-reaper = { path = "../daw/crates/daw-reaper" }
+daw-ui = { path = "../daw/crates/daw-ui" }
 
-# Actions / Input (FastTrackStudios/input_actions)
-actions-proto = { git = "https://github.com/FastTrackStudios/input_actions.git", branch = "master" }
-actions-registry = { git = "https://github.com/FastTrackStudios/input_actions.git", branch = "master" }
-actions-standalone = { git = "https://github.com/FastTrackStudios/input_actions.git", branch = "master" }
-actions-keybindings = { git = "https://github.com/FastTrackStudios/input_actions.git", branch = "master" }
-input-dioxus = { git = "https://github.com/FastTrackStudios/input_actions.git", branch = "master" }
-input = { git = "https://github.com/FastTrackStudios/input_actions.git", branch = "master" }
-input-reaper = { git = "https://github.com/FastTrackStudios/FTS-Extensions.git", branch = "main" }
+# Dock UI (sibling repo — local paths)
+dock-proto = { path = "../dock-dioxus/crates/dock-proto" }
+dock-dioxus = { path = "../dock-dioxus/crates/dock-dioxus" }
 
-# Dynamic template (FastTrackStudios/dynamic-template)
-color-palette = { git = "https://github.com/FastTrackStudios/dynamic-template.git", branch = "master" }
-dynamic-template-proto = { git = "https://github.com/FastTrackStudios/dynamic-template.git", branch = "master" }
-dynamic-template = { git = "https://github.com/FastTrackStudios/dynamic-template.git", branch = "master" }
+# Actions / Input (sibling repo — local paths)
+actions-proto = { path = "../input_actions/crates/actions-proto" }
+actions-registry = { path = "../input_actions/crates/actions-registry" }
+actions-standalone = { path = "../input_actions/crates/actions-standalone" }
+actions-keybindings = { path = "../input_actions/crates/actions-keybindings" }
+input-dioxus = { path = "../input_actions/crates/input-dioxus" }
+input = { path = "../input_actions/crates/input" }
+input-reaper = { path = "../FTS-Extensions/crates/input-reaper" }
+
+# Dynamic template (sibling repo — local paths)
+color-palette = { path = "../dynamic-template/crates/color-palette" }
+dynamic-template-proto = { path = "../dynamic-template/crates/dynamic-template-proto" }
+dynamic-template = { path = "../dynamic-template/crates/dynamic-template" }
 
 # Local crates
 session-proto = { path = "crates/session/session-proto" }
 session = { path = "crates/session/session" }
 session-ui = { path = "crates/session/session-ui" }
-audio-controls = { git = "https://github.com/FastTrackStudios/daw.git", branch = "master" }
+audio-controls = { path = "../daw/crates/audio-controls" }
 signal = { path = "crates/signal/signal" }
 signal-proto = { path = "crates/signal/signal-proto" }
 signal-storage = { path = "crates/signal/signal-storage" }
@@ -129,9 +131,9 @@ reaper-medium = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "
 reaper-high = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master" }
 reaper-macros = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master" }
 reaper-common-types = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master", features = ["palette"] }
-# FTS Extensions (FastTrackStudios/FTS-Extensions)
-swell-ui = { git = "https://github.com/FastTrackStudios/FTS-Extensions.git", branch = "main" }
-reaper-embed = { git = "https://github.com/FastTrackStudios/FTS-Extensions.git", branch = "main" }
+# FTS Extensions (sibling repo — local paths)
+swell-ui = { path = "../FTS-Extensions/libs/swell-ui" }
+reaper-embed = { path = "../FTS-Extensions/crates/reaper-embed" }
 fragile = "2.0.1"
 crossbeam-channel = "0.5"
 scopeguard = "1.1.0"

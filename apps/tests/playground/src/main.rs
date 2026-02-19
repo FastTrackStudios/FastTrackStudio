@@ -721,7 +721,10 @@ fn App() -> Element {
                     ""
                 },
                 if let Some(ctrl) = controller() {
-                    {render_tab(active_tab(), ctrl)}
+                    {
+                        provide_context(ctrl);
+                        render_tab(active_tab())
+                    }
                 } else {
                     div { class: "flex items-center justify-center h-full",
                         p { class: "text-sm text-zinc-600", "Bootstrapping in-memory signal storage..." }
@@ -732,30 +735,30 @@ fn App() -> Element {
     }
 }
 
-fn render_tab(tab: Tab, controller: SignalController) -> Element {
+fn render_tab(tab: Tab) -> Element {
     match tab {
         Tab::Slider => rsx! {
             div { class: "max-w-2xl mx-auto p-6",
-                SignalSlider { controller }
+                SignalSlider {}
             }
         },
         Tab::BlockEditor => rsx! {
             div { class: "max-w-xl mx-auto p-6 space-y-6",
                 h2 { class: "text-lg font-semibold text-zinc-300 mb-4", "Block Editors" }
-                BlockEditor { controller: controller.clone(), block_type: BlockType::Amp }
-                BlockEditor { controller: controller.clone(), block_type: BlockType::Drive }
-                BlockEditor { controller: controller.clone(), block_type: BlockType::Cabinet }
-                BlockEditor { controller, block_type: BlockType::Reverb }
+                BlockEditor { block_type: BlockType::Amp }
+                BlockEditor { block_type: BlockType::Drive }
+                BlockEditor { block_type: BlockType::Cabinet }
+                BlockEditor { block_type: BlockType::Reverb }
             }
         },
         Tab::ModuleView => rsx! {
-            ModuleViewTab { controller }
+            ModuleViewTab {}
         },
         Tab::CollectionBrowser => rsx! {
-            CollectionBrowserTab { controller }
+            CollectionBrowserTab {}
         },
         Tab::SceneGrid => rsx! {
-            SceneGridTab { controller }
+            SceneGridTab {}
         },
         Tab::Metadata => rsx! {
             div { class: "max-w-lg mx-auto p-6 space-y-6",
@@ -798,7 +801,8 @@ fn render_tab(tab: Tab, controller: SignalController) -> Element {
 
 /// Module view tab — loads a module collection and displays it.
 #[component]
-fn ModuleViewTab(controller: SignalController) -> Element {
+fn ModuleViewTab() -> Element {
+    let controller = signal_ui::use_signal_service();
     let mut module_data = use_signal(|| None::<signal::Module>);
     let mut view_mode = use_signal(|| ModuleViewMode::Compact);
 
@@ -867,10 +871,10 @@ fn ModuleViewTab(controller: SignalController) -> Element {
 
 /// Collection browser tab — self-contained multi-column cascading browser.
 #[component]
-fn CollectionBrowserTab(controller: SignalController) -> Element {
+fn CollectionBrowserTab() -> Element {
     rsx! {
         div { class: "h-full",
-            CollectionBrowser { controller }
+            CollectionBrowser {}
         }
     }
 }
@@ -881,7 +885,8 @@ fn CollectionBrowserTab(controller: SignalController) -> Element {
 
 /// Scene grid tab — loads the first rig and displays its scenes.
 #[component]
-fn SceneGridTab(controller: SignalController) -> Element {
+fn SceneGridTab() -> Element {
+    let controller = signal_ui::use_signal_service();
     let mut rig_id = use_signal(|| None::<String>);
     let mut active_scene = use_signal(|| None::<String>);
 
@@ -905,7 +910,6 @@ fn SceneGridTab(controller: SignalController) -> Element {
             if let Some(id) = rig_id() {
                 div { class: "h-64 rounded-lg overflow-hidden border border-zinc-700",
                     RigSceneGrid {
-                        controller,
                         rig_id: id,
                         active_scene_id: active_scene(),
                         on_scene_select: move |scene_id: String| {

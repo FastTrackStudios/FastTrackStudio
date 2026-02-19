@@ -39,3 +39,26 @@ bd sync               # Sync with git
 - If push fails, resolve and retry until it succeeds
 
 Use 'bd' for task tracking
+
+## btca — Source Code Search
+
+Use **btca** to query the actual source code of key dependencies before implementing features or debugging. Prefer this over web searches or docs that may be outdated.
+
+```bash
+btca ask -r <resource> -q "your question"
+btca ask -r facet -r roam -q "How does roam use facet for serialization?"
+btca resources   # list all available resources
+```
+
+### Relevant Resources for This Repo
+
+| Resource | Repo | Description |
+|----------|------|-------------|
+| `facet` | facet-rs/facet | Rust reflection — shapes, derive macros, serialization, pretty-printing |
+| `roam` | bearcove/roam | Rust-native RPC framework where Rust traits are the schema, with TS/Swift codegen |
+| `tracey` | bearcove/tracey | Traceability tool linking requirements/specs to code implementations via annotations |
+| `dodeca` | bearcove/dodeca | Fully incremental static site generator with query-based caching |
+| `captain` | bearcove/captain | Dev automation via git pre-commit/pre-push hooks — formatting, validation, README gen |
+| `peeps` | bearcove/peeps | Low-overhead instrumentation for tokio tasks, threads, locks, and RPC calls |
+| `styx` | bearcove/styx | Data serialization format — cleaner alternative to JSON/YAML with schema support |
+| `figue` | bearcove/figue | Config parsing from CLI args, env vars, and config files using facet reflection |

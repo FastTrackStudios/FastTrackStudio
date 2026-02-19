@@ -94,7 +94,7 @@ static COMMAND_PALETTE_OPEN: GlobalSignal<bool> = Signal::global(|| false);
 static COMMAND_PALETTE_QUERY: GlobalSignal<String> = Signal::global(String::new);
 
 use actions::{dispatch_action, dispatch_input_commands, handle_dock_preset_shortcut};
-use command_palette::{build_input_config, build_palette_entries, PaletteEntry};
+use command_palette::{build_input_config, build_palette_entries};
 use signal_views::{PerformanceWithChartToggle, SignalView};
 
 const FAVICON: Asset = asset!("/assets/favicon.ico");
@@ -135,6 +135,9 @@ fn main() {
                 .add_directive("daw_control::fx=debug".parse().unwrap()),
         )
         .init();
+
+    // Initialize peeps instrumentation for diagnostics
+    peeps::init!();
 
     #[cfg(feature = "desktop")]
     debug!("Starting FTS Control Desktop (Wry/WebView + WGPU hybrid renderer)");
@@ -1035,6 +1038,65 @@ pub fn is_daw_connected() -> bool {
     DAW_CONNECTED.load(std::sync::atomic::Ordering::Relaxed)
 }
 
+// ============================================================================
+// REAPER Connection (Unix Socket Client)
+// ============================================================================
+
+/// Default socket path, overridable via `FTS_SOCKET` env var.
+const DEFAULT_SOCKET_PATH: &str = "/tmp/fts-control.sock";
+
+/// Connector for the REAPER extension's Unix socket.
+///
+/// Implements `roam_stream::Connector` so that `roam_stream::connect()` can
+/// establish (and automatically reconnect) a roam session over the well-known
+/// socket at `/tmp/fts-control.sock`.
+struct ReaperConnector {
+    path: std::path::PathBuf,
+}
+
+impl roam_stream::Connector for ReaperConnector {
+    type Transport = tokio::net::UnixStream;
+
+    async fn connect(&self) -> std::io::Result<Self::Transport> {
+        tokio::net::UnixStream::connect(&self.path).await
+    }
+}
+
+/// Connect to the REAPER extension via Unix socket and initialize the DAW singleton.
+///
+/// Uses `roam_stream::connect()` which retries with backoff until the socket is
+/// available, making it safe to start fts-control before REAPER is fully loaded.
+async fn connect_to_reaper() {
+    let socket_path = std::env::var("FTS_SOCKET")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| std::path::PathBuf::from(DEFAULT_SOCKET_PATH));
+    debug!("Connecting to REAPER at {}", socket_path.display());
+
+    let connector = ReaperConnector { path: socket_path };
+    let config = roam_session::HandshakeConfig {
+        max_payload_size: 1024 * 1024,            // 1 MiB
+        initial_channel_credit: 16 * 1024 * 1024, // 16 MiB — matches server
+        max_concurrent_requests: 64,
+        ..Default::default()
+    };
+
+    let client = roam_stream::connect(connector, config, roam_session::NoDispatcher);
+
+    match client.handle().await {
+        Ok(handle) => {
+            if let Err(e) = daw_control::Daw::init(handle) {
+                tracing::error!("Failed to initialize DAW singleton: {}", e);
+                return;
+            }
+            DAW_CONNECTED.store(true, std::sync::atomic::Ordering::Relaxed);
+            debug!("Connected to REAPER via Unix socket — DAW singleton initialized");
+        }
+        Err(e) => {
+            tracing::error!("Failed to connect to REAPER: {}", e);
+        }
+    }
+}
+
 /// Run background services (session services, gateway)
 async fn run_services() {
     use gateway::{start_gateway, GatewayConfig};
@@ -1043,11 +1105,14 @@ async fn run_services() {
 
     debug!("Initializing services...");
 
-    // 1. Create local session services
+    // 1. Connect to REAPER via Unix socket (initializes Daw singleton)
+    connect_to_reaper().await;
+
+    // 2. Create local session services (these use Daw::get() internally)
     let services = LocalServices::new();
     debug!("Local services initialized");
 
-    // 2. Initialize Session singleton for UI components
+    // 3. Initialize Session singleton for UI components
     match services.create_setlist_client().await {
         Ok(setlist_client) => {
             if let Err(e) = Session::init(setlist_client) {
@@ -1061,10 +1126,10 @@ async fn run_services() {
         }
     }
 
-    // 3. Create dispatcher for gateway
+    // 4. Create dispatcher for gateway
     let dispatcher = services.create_dispatcher();
 
-    // 4. Start WebSocket gateway for browser access
+    // 5. Start WebSocket gateway for browser access
     let config = GatewayConfig::default();
     debug!("Starting gateway on {}", config.bind_addr);
 

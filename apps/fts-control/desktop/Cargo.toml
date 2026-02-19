@@ -9,10 +9,10 @@ edition = "2021"
 dioxus = { version = "0.7.2", features = ["desktop"], optional = true }
 
 # Session UI components - feature selected based on renderer
-session-ui = { path = "../../../cells/session/session-ui", default-features = false }
+session-ui = { workspace = true, default-features = false }
 
 # Services (run in-process)
-session = { path = "../../../cells/session/session" }
+session.workspace = true
 session-proto.workspace = true
 
 # Roam - for connecting to host and service dispatch
@@ -20,6 +20,10 @@ roam.workspace = true
 roam-stream.workspace = true
 roam-local.workspace = true
 roam-session.workspace = true
+roam-wire.workspace = true
+
+# Instrumentation
+peeps.workspace = true
 
 # WebSocket gateway (inlined — replaces gateway-ws crate)
 axum = { version = "0.8", features = ["ws"] }
@@ -49,8 +53,8 @@ peniko.workspace = true
 kurbo.workspace = true
 
 # Keyflow chart editor UI
-keyflow-ui = { path = "../../../cells/keyflow/keyflow-ui", default-features = false }
-keyflow = { path = "../../../cells/keyflow/keyflow", features = ["text"] }
+keyflow-ui = { workspace = true, default-features = false }
+keyflow = { workspace = true, features = ["text"] }
 
 # Signal — storage-backed rig control
 signal.workspace = true
@@ -60,11 +64,11 @@ signal-ui = { workspace = true, default-features = false }
 lumen-blocks.workspace = true
 
 # DAW UI components (mixer, TCP, arrangement, FX browser)
-daw-ui = { path = "../../../cells/daw/daw-ui", default-features = false }
+daw-ui = { workspace = true, default-features = false }
 
 # Dock modular layout system
-dock-dioxus = { path = "../../../cells/dock/dock-dioxus", default-features = false }
-dock-proto = { path = "../../../cells/dock/dock-proto" }
+dock-dioxus = { workspace = true, default-features = false }
+dock-proto.workspace = true
 
 # Actions system
 actions-proto.workspace = true
@@ -74,7 +78,7 @@ input-dioxus.workspace = true
 input.workspace = true
 
 # Chart engraver
-engraver-proto = { path = "../../../cells/keyflow/engraver-proto", features = ["engraver"] }
+engraver-proto = { workspace = true, features = ["engraver"] }
 mimalloc = "0.1"
 
 [features]

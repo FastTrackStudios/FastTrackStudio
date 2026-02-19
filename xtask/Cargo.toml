@@ -9,7 +9,7 @@ clap = { version = "4.5", features = ["derive"] }
 facet = { git = "https://github.com/facet-rs/facet", branch = "main" }
 figue = { git = "https://github.com/bearcove/figue" }
 serde_json = "1.0"
-signal-proto = { path = "../modules/signal/signal-proto" }
+signal-proto.workspace = true
 xshell = "0.2"
 
 [[bin]]
