@@ -15,7 +15,7 @@ path = "src/main.rs"
 [dependencies]
 dynamic-template-proto = { workspace = true }
 daw-proto = { workspace = true }
-monarchy = { workspace = true }
+monarchy = { git = "https://github.com/FastTrackStudios/monarchy.git", branch = "main" }
 color-palette = { workspace = true }
 facet = { workspace = true }
 roam = { workspace = true }

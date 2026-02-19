@@ -88,10 +88,6 @@ shm-primitives = { git = "https://github.com/bearcove/roam.git", branch = "main"
 # Local modules
 dawfile-reaper = { path = "modules/dawfile/dawfile-reaper" }
 
-# Monarchy crates
-monarchy = { path = "crates/monarchy/monarchy" }
-monarchy_derive = { path = "crates/monarchy/monarchy-derive" }
-
 # Color palette crate
 color-palette = { path = "crates/color/color-palette" }
 
