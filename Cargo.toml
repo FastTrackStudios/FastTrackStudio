@@ -122,7 +122,6 @@ signal-ui = { path = "crates/signal/signal-ui", default-features = false }
 sync-proto = { path = "crates/sync/sync-proto" }
 sync = { path = "crates/sync/sync" }
 sync-ui = { path = "crates/sync/sync-ui" }
-gateway-proto = { path = "cells/gateway/gateway-proto" }
 
 # REAPER extension dependencies
 reaper-low = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master" }

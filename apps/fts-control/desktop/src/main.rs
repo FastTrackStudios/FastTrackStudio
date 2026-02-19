@@ -131,8 +131,7 @@ fn main() {
             tracing_subscriber::EnvFilter::from_default_env()
                 .add_directive("fts_control_desktop=info".parse().unwrap())
                 .add_directive("session=info".parse().unwrap())
-                .add_directive("gateway_ws=info".parse().unwrap())
-                .add_directive("signal_ui=info".parse().unwrap())
+.add_directive("signal_ui=info".parse().unwrap())
                 .add_directive("daw_control::fx=debug".parse().unwrap()),
         )
         .init();

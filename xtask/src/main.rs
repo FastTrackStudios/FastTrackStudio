@@ -456,7 +456,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             println!("\n>>> Building test-extension and cells...");
             cmd!(
                 sh,
-                "cargo build -p test-extension -p daw-standalone -p session -p gateway-ws"
+                "cargo build -p test-extension -p daw-standalone -p session"
             )
             .run()?;
 

@@ -14,14 +14,18 @@ session-ui = { path = "../../../cells/session/session-ui", default-features = fa
 # Services (run in-process)
 session = { path = "../../../cells/session/session" }
 session-proto.workspace = true
-gateway-ws = { path = "../../../cells/gateway/gateway-ws" }
-gateway-proto.workspace = true
 
 # Roam - for connecting to host and service dispatch
 roam.workspace = true
 roam-stream.workspace = true
 roam-local.workspace = true
 roam-session.workspace = true
+
+# WebSocket gateway (inlined — replaces gateway-ws crate)
+axum = { version = "0.8", features = ["ws"] }
+tower-http = { version = "0.6", features = ["fs", "cors"] }
+futures-util = "0.3"
+facet-postcard.workspace = true
 
 # Protocols
 daw-proto.workspace = true
