@@ -22,6 +22,7 @@ pub mod gapless;
 pub mod mock;
 pub mod morph;
 pub mod param_bridge;
+pub mod patch_applier;
 pub mod rig_engine;
 pub mod slot;
 pub mod snapshot_ops;
@@ -42,9 +43,10 @@ pub use morph::{
     DawParamValue, DawParameterSnapshot, MorphDiffEntry, MorphEngine, MorphParamChange,
 };
 pub use param_bridge::{
-    block_to_snapshot, find_param_index, graph_to_snapshot, live_params_into_block,
-    param_name_matches, LiveParam,
+    block_to_snapshot, find_param_index, graph_state_chunks, graph_to_snapshot,
+    live_params_into_block, param_name_matches, LiveParam,
 };
+pub use patch_applier::{DawPatchApplier, PatchApplyError};
 pub use rig_engine::{
     PreloadPriority, PresetLoadHandle, PresetReadiness, RigEngine, SnapshotTween, SwitchOutcome,
     TransitionResult, TweenState,

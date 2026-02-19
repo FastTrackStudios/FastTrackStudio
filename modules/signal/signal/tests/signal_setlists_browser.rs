@@ -3,11 +3,13 @@
 //!
 //!   cargo test -p signal --test signal_setlists_browser -- --nocapture
 
+mod fixtures;
+
+use fixtures::*;
 use signal::{
-    bootstrap_in_memory_controller_async,
     engine::EngineId,
     overrides::{NodePath, Override},
-    profile::{Patch, PatchId, Profile, ProfileId},
+    profile::{Patch, PatchId, PatchTarget, Profile, ProfileId},
     rig::{EngineSelection, RigId, RigSceneId},
     scene_template::SceneTemplate,
     seed_id,
@@ -16,30 +18,14 @@ use signal::{
     tagging::{BrowserMode, BrowserQuery},
 };
 
-async fn controller() -> signal::SignalController {
-    bootstrap_in_memory_controller_async()
-        .await
-        .expect("failed to bootstrap in-memory controller")
-}
-
-fn guitar_megarig_id() -> RigId {
-    seed_id("guitar-megarig").into()
-}
-fn guitar_megarig_default_scene() -> RigSceneId {
-    seed_id("guitar-megarig-default").into()
-}
-fn guitar_megarig_lead_scene() -> RigSceneId {
-    seed_id("guitar-megarig-lead").into()
-}
-
 // ─────────────────────────────────────────────────────────────
 //  Setlist tests
 // ─────────────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn seed_setlists_are_loaded() {
-    let ctrl = controller().await;
-    let setlists = ctrl.list_setlists().await;
+    let signal = controller().await;
+    let setlists = signal.setlists().list().await;
     println!("Seeded setlists:");
     for s in &setlists {
         println!("  {} — {} ({} entries)", s.id, s.name, s.entries.len());
@@ -54,7 +40,7 @@ async fn seed_setlists_are_loaded() {
 
 #[tokio::test]
 async fn create_and_reload_custom_setlist() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     let entry1_id = SetlistEntryId::new();
     let entry2_id = SetlistEntryId::new();
@@ -65,10 +51,10 @@ async fn create_and_reload_custom_setlist() {
 
     let mut setlist = Setlist::new(setlist_id.clone(), "Custom Gig", entry1);
     setlist.add_entry(entry2);
-    ctrl.save_setlist(setlist).await;
+    signal.setlists().save(setlist).await;
 
-    let reloaded = ctrl
-        .load_setlist(setlist_id.clone())
+    let reloaded = signal
+        .setlists().load(setlist_id.clone())
         .await
         .expect("setlist not found");
     println!(
@@ -83,10 +69,10 @@ async fn create_and_reload_custom_setlist() {
 
 #[tokio::test]
 async fn load_setlist_entry_by_id() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
-    let entry = ctrl
-        .load_setlist_entry(seed_id("worship-set"), seed_id("worship-set-worship-song"))
+    let entry = signal
+        .setlists().load_entry(seed_id("worship-set"), seed_id("worship-set-worship-song"))
         .await
         .expect("setlist entry not found");
 
@@ -96,7 +82,7 @@ async fn load_setlist_entry_by_id() {
 
 #[tokio::test]
 async fn reorder_setlist_entries() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     let e1 = SetlistEntryId::new();
     let e2 = SetlistEntryId::new();
@@ -110,24 +96,16 @@ async fn reorder_setlist_entries() {
     );
     setlist.add_entry(SetlistEntry::new(e2.clone(), "B", seed_id("dummy-song")));
     setlist.add_entry(SetlistEntry::new(e3.clone(), "C", seed_id("dummy-song")));
-    ctrl.save_setlist(setlist).await;
+    signal.setlists().save(setlist).await;
 
-    // Apply reorder in-memory and verify the controller correctly reorders the vec.
-    // Note: the storage layer orders by ID, not position, so we verify the controller
-    // logic directly by loading, reordering, and checking the returned struct.
-    let mut setlist = ctrl
-        .load_setlist(sid.clone())
+    // Use the controller's reorder method instead of duplicating the logic.
+    signal.setlists().reorder_entries(sid.clone(), &[e3.clone(), e1.clone(), e2.clone()])
+        .await;
+
+    let setlist = signal
+        .setlists().load(sid.clone())
         .await
         .expect("setlist not found");
-    let ids_in_order = vec![e3.clone(), e1.clone(), e2.clone()];
-    let mut reordered = Vec::with_capacity(setlist.entries.len());
-    for eid in &ids_in_order {
-        if let Some(pos) = setlist.entries.iter().position(|e| &e.id == eid) {
-            reordered.push(setlist.entries.remove(pos));
-        }
-    }
-    reordered.append(&mut setlist.entries);
-    setlist.entries = reordered;
 
     println!(
         "After reorder: {:?}",
@@ -140,7 +118,7 @@ async fn reorder_setlist_entries() {
 
 #[tokio::test]
 async fn delete_setlist() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     let sid = SetlistId::new();
     let setlist = Setlist::new(
@@ -148,15 +126,15 @@ async fn delete_setlist() {
         "Temp Setlist",
         SetlistEntry::new(SetlistEntryId::new(), "A", seed_id("dummy-song")),
     );
-    ctrl.save_setlist(setlist).await;
+    signal.setlists().save(setlist).await;
 
     assert!(
-        ctrl.load_setlist(sid.clone()).await.is_some(),
+        signal.setlists().load(sid.clone()).await.is_some(),
         "should exist before delete"
     );
-    ctrl.delete_setlist(sid.clone()).await;
+    signal.setlists().delete(sid.clone()).await;
     assert!(
-        ctrl.load_setlist(sid).await.is_none(),
+        signal.setlists().load(sid).await.is_none(),
         "should be gone after delete"
     );
     println!("✓ Setlist deleted");
@@ -168,10 +146,10 @@ async fn delete_setlist() {
 
 #[tokio::test]
 async fn reorder_profile_patches() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
-    let mut worship = ctrl
-        .load_profile(seed_id("guitar-worship-profile"))
+    let worship = signal
+        .profiles().load(seed_id("guitar-worship-profile"))
         .await
         .expect("worship not found");
     let original_order: Vec<String> = worship.patches.iter().map(|p| p.name.clone()).collect();
@@ -181,15 +159,15 @@ async fn reorder_profile_patches() {
     let mut new_order = ids.clone();
     new_order.rotate_right(1);
 
-    // Verify the reorder logic on the in-memory struct (storage orders by ID, not position).
-    let mut reordered_patches = Vec::with_capacity(worship.patches.len());
-    for patch_id in &new_order {
-        if let Some(pos) = worship.patches.iter().position(|p| &p.id == patch_id) {
-            reordered_patches.push(worship.patches.remove(pos));
-        }
-    }
-    reordered_patches.append(&mut worship.patches);
-    let new_names: Vec<String> = reordered_patches.iter().map(|p| p.name.clone()).collect();
+    // Use the controller's reorder method.
+    signal.profiles().reorder_patches(seed_id("guitar-worship-profile"), &new_order)
+        .await;
+
+    let worship = signal
+        .profiles().load(seed_id("guitar-worship-profile"))
+        .await
+        .expect("worship not found after reorder");
+    let new_names: Vec<String> = worship.patches.iter().map(|p| p.name.clone()).collect();
 
     println!("Patch order: {:?} → {:?}", original_order, new_names);
     assert_ne!(original_order, new_names, "order should have changed");
@@ -199,7 +177,7 @@ async fn reorder_profile_patches() {
 
 #[tokio::test]
 async fn reorder_song_sections() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     let s1 = SectionId::new();
     let s2 = SectionId::new();
@@ -228,19 +206,14 @@ async fn reorder_song_sections() {
         guitar_megarig_id(),
         guitar_megarig_lead_scene(),
     ));
-    ctrl.save_song(song).await;
+    signal.songs().save(song).await;
 
-    // Verify reorder logic on the in-memory struct.
-    let mut song = ctrl.load_song(song_id).await.expect("song not found");
-    let order = [s3.clone(), s1.clone(), s2.clone()];
-    let mut reordered = Vec::with_capacity(song.sections.len());
-    for sid in &order {
-        if let Some(pos) = song.sections.iter().position(|s| &s.id == sid) {
-            reordered.push(song.sections.remove(pos));
-        }
-    }
-    reordered.append(&mut song.sections);
-    let names: Vec<&str> = reordered.iter().map(|s| s.name.as_str()).collect();
+    // Use the controller's reorder method.
+    signal.songs().reorder_sections(song_id.clone(), &[s3.clone(), s1.clone(), s2.clone()])
+        .await;
+
+    let song = signal.songs().load(song_id).await.expect("song not found");
+    let names: Vec<&str> = song.sections.iter().map(|s| s.name.as_str()).collect();
     println!("Sections after reorder: {:?}", names);
     assert_eq!(names, ["Bridge", "Verse", "Chorus"]);
 }
@@ -251,7 +224,7 @@ async fn reorder_song_sections() {
 
 #[tokio::test]
 async fn set_section_source_switches_from_patch_to_rig_scene() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     let section_id = SectionId::new();
     let song_id = SongId::new();
@@ -259,10 +232,10 @@ async fn set_section_source_switches_from_patch_to_rig_scene() {
     // Start with a Patch source
     let section = Section::from_patch(section_id.clone(), "Intro", seed_id("guitar-worship-clean"));
     let song = Song::new(song_id.clone(), "Mutation Test Song", section);
-    ctrl.save_song(song).await;
+    signal.songs().save(song).await;
 
     {
-        let loaded = ctrl.load_song(song_id.clone()).await.unwrap();
+        let loaded = signal.songs().load(song_id.clone()).await.unwrap();
         let s = loaded.section(&section_id).unwrap();
         assert!(
             matches!(s.source, SectionSource::Patch { .. }),
@@ -272,7 +245,7 @@ async fn set_section_source_switches_from_patch_to_rig_scene() {
     }
 
     // Switch to RigScene source
-    ctrl.set_section_source(
+    signal.songs().set_section_source(
         song_id.clone(),
         section_id.clone(),
         SectionSource::RigScene {
@@ -282,7 +255,7 @@ async fn set_section_source_switches_from_patch_to_rig_scene() {
     )
     .await;
 
-    let reloaded = ctrl.load_song(song_id).await.unwrap();
+    let reloaded = signal.songs().load(song_id).await.unwrap();
     let updated = reloaded.section(&section_id).unwrap();
     println!("After: {:?}", updated.source);
     assert!(
@@ -293,45 +266,50 @@ async fn set_section_source_switches_from_patch_to_rig_scene() {
 
 #[tokio::test]
 async fn set_patch_preset_retargets_rig_scene() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
-    // Load blues profile, retarget Clean patch from default → lead scene
-    let before = ctrl
-        .load_profile_variant(
-            seed_id("guitar-blues-profile"),
-            seed_id("guitar-blues-clean"),
-        )
+    // Load rock profile, retarget Clean patch from default → lead scene
+    // (Blues patches are now BlockSnapshot targets, so use Rock which still uses RigScene)
+    let before = signal
+        .profiles().load_patch(seed_id("guitar-rock-profile"), seed_id("guitar-rock-clean"))
         .await
-        .expect("blues clean not found");
+        .expect("rock clean not found");
 
-    println!("Before retarget: scene={}", before.rig_variant_id);
-    assert_eq!(
-        before.rig_variant_id.to_string(),
-        seed_id("guitar-megarig-default").to_string()
-    );
+    match &before.target {
+        PatchTarget::RigScene { scene_id, .. } => {
+            println!("Before retarget: scene={}", scene_id);
+            assert_eq!(
+                scene_id.to_string(),
+                seed_id("guitar-megarig-default").to_string()
+            );
+        }
+        _ => panic!("expected RigScene target"),
+    }
 
-    ctrl.set_patch_preset(
-        seed_id("guitar-blues-profile"),
-        seed_id("guitar-blues-clean"),
+    signal.profiles().set_patch_preset(
+        seed_id("guitar-rock-profile"),
+        seed_id("guitar-rock-clean"),
         guitar_megarig_id(),
         guitar_megarig_lead_scene(),
     )
     .await;
 
-    let after = ctrl
-        .load_profile_variant(
-            seed_id("guitar-blues-profile"),
-            seed_id("guitar-blues-clean"),
-        )
+    let after = signal
+        .profiles().load_patch(seed_id("guitar-rock-profile"), seed_id("guitar-rock-clean"))
         .await
-        .expect("blues clean not found after retarget");
+        .expect("rock clean not found after retarget");
 
-    println!("After retarget: scene={}", after.rig_variant_id);
-    assert_eq!(
-        after.rig_variant_id.to_string(),
-        seed_id("guitar-megarig-lead").to_string(),
-        "patch should now target lead scene"
-    );
+    match &after.target {
+        PatchTarget::RigScene { scene_id, .. } => {
+            println!("After retarget: scene={}", scene_id);
+            assert_eq!(
+                scene_id.to_string(),
+                seed_id("guitar-megarig-lead").to_string(),
+                "patch should now target lead scene"
+            );
+        }
+        _ => panic!("expected RigScene target"),
+    }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -340,22 +318,22 @@ async fn set_patch_preset_retargets_rig_scene() {
 
 #[tokio::test]
 async fn delete_profile_and_verify_gone() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     let id = ProfileId::new();
-    let patch = Patch::new(
+    let patch = Patch::from_rig_scene(
         PatchId::new(),
         "P",
         guitar_megarig_id(),
         guitar_megarig_default_scene(),
     );
-    ctrl.save_profile(Profile::new(id.clone(), "Temp Profile", patch))
+    signal.profiles().save(Profile::new(id.clone(), "Temp Profile", patch))
         .await;
-    assert!(ctrl.load_profile(id.clone()).await.is_some());
+    assert!(signal.profiles().load(id.clone()).await.is_some());
 
-    ctrl.delete_profile(id.clone()).await;
+    signal.profiles().delete(id.clone()).await;
     assert!(
-        ctrl.load_profile(id).await.is_none(),
+        signal.profiles().load(id).await.is_none(),
         "profile should be deleted"
     );
     println!("✓ Profile deleted");
@@ -363,7 +341,7 @@ async fn delete_profile_and_verify_gone() {
 
 #[tokio::test]
 async fn delete_song_and_verify_gone() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     let id = SongId::new();
     let section = Section::from_rig_scene(
@@ -372,12 +350,12 @@ async fn delete_song_and_verify_gone() {
         guitar_megarig_id(),
         guitar_megarig_default_scene(),
     );
-    ctrl.save_song(Song::new(id.clone(), "Temp Song", section))
+    signal.songs().save(Song::new(id.clone(), "Temp Song", section))
         .await;
-    assert!(ctrl.load_song(id.clone()).await.is_some());
+    assert!(signal.songs().load(id.clone()).await.is_some());
 
-    ctrl.delete_song(id.clone()).await;
-    assert!(ctrl.load_song(id).await.is_none(), "song should be deleted");
+    signal.songs().delete(id.clone()).await;
+    assert!(signal.songs().load(id).await.is_none(), "song should be deleted");
     println!("✓ Song deleted");
 }
 
@@ -387,7 +365,7 @@ async fn delete_song_and_verify_gone() {
 
 #[tokio::test]
 async fn save_and_reload_scene_template() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     let tmpl = SceneTemplate::new(
         signal::scene_template::SceneTemplateId::new(),
@@ -406,10 +384,10 @@ async fn save_and_reload_scene_template() {
     ));
 
     let tmpl_id = tmpl.id.clone();
-    ctrl.save_scene_template(tmpl).await;
+    signal.scene_templates().save(tmpl).await;
 
-    let reloaded = ctrl
-        .load_scene_template(tmpl_id.clone())
+    let reloaded = signal
+        .scene_templates().load(tmpl_id.clone())
         .await
         .expect("template not found");
     println!(
@@ -432,47 +410,47 @@ async fn save_and_reload_scene_template() {
 
 #[tokio::test]
 async fn list_and_delete_scene_templates() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
-    let before = ctrl.list_scene_templates().await.len();
+    let before = signal.scene_templates().list().await.len();
 
     let id1 = signal::scene_template::SceneTemplateId::new();
     let id2 = signal::scene_template::SceneTemplateId::new();
-    ctrl.save_scene_template(SceneTemplate::new(id1.clone(), "T1"))
+    signal.scene_templates().save(SceneTemplate::new(id1.clone(), "T1"))
         .await;
-    ctrl.save_scene_template(SceneTemplate::new(id2.clone(), "T2"))
+    signal.scene_templates().save(SceneTemplate::new(id2.clone(), "T2"))
         .await;
 
-    assert_eq!(ctrl.list_scene_templates().await.len(), before + 2);
+    assert_eq!(signal.scene_templates().list().await.len(), before + 2);
 
-    ctrl.delete_scene_template(id1).await;
-    assert_eq!(ctrl.list_scene_templates().await.len(), before + 1);
+    signal.scene_templates().delete(id1).await;
+    assert_eq!(signal.scene_templates().list().await.len(), before + 1);
 
-    ctrl.delete_scene_template(id2).await;
-    assert_eq!(ctrl.list_scene_templates().await.len(), before);
+    signal.scene_templates().delete(id2).await;
+    assert_eq!(signal.scene_templates().list().await.len(), before);
     println!("✓ Scene templates created and deleted");
 }
 
 #[tokio::test]
 async fn reorder_scene_templates() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     let t1 = signal::scene_template::SceneTemplateId::new();
     let t2 = signal::scene_template::SceneTemplateId::new();
     let t3 = signal::scene_template::SceneTemplateId::new();
 
-    ctrl.save_scene_template(SceneTemplate::new(t1.clone(), "Alpha"))
+    signal.scene_templates().save(SceneTemplate::new(t1.clone(), "Alpha"))
         .await;
-    ctrl.save_scene_template(SceneTemplate::new(t2.clone(), "Beta"))
+    signal.scene_templates().save(SceneTemplate::new(t2.clone(), "Beta"))
         .await;
-    ctrl.save_scene_template(SceneTemplate::new(t3.clone(), "Gamma"))
+    signal.scene_templates().save(SceneTemplate::new(t3.clone(), "Gamma"))
         .await;
 
     // Reorder: Gamma, Alpha, Beta
-    ctrl.reorder_scene_templates(vec![t3.clone(), t1.clone(), t2.clone()])
+    signal.scene_templates().reorder(vec![t3.clone(), t1.clone(), t2.clone()])
         .await;
 
-    let templates = ctrl.list_scene_templates().await;
+    let templates = signal.scene_templates().list().await;
     // Find our three and check relative order
     let positions: Vec<(usize, &str)> = templates
         .iter()
@@ -508,9 +486,9 @@ async fn reorder_scene_templates() {
 
 #[tokio::test]
 async fn browser_index_covers_all_domain_levels() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
-    let index = ctrl.browser_index().await;
+    let index = signal.browser_index().await;
     let entries = index.entries();
     println!("Browser index: {} entries", entries.len());
 
@@ -542,10 +520,10 @@ fn text_query(text: &str) -> BrowserQuery {
 
 #[tokio::test]
 async fn browse_by_text_finds_jm_amp() {
-    let ctrl = controller().await;
-    let index = ctrl.browser_index().await;
+    let signal = controller().await;
+    let index = signal.browser_index().await;
 
-    let hits = ctrl.browse(text_query("JM Amp")).await;
+    let hits = signal.browse(text_query("JM Amp")).await;
     println!("Browse 'JM Amp': {} hits", hits.len());
     for h in hits.iter().take(5) {
         // Look up name in the index
@@ -578,9 +556,9 @@ async fn browse_by_text_finds_jm_amp() {
 
 #[tokio::test]
 async fn browse_by_text_finds_guitar_worship() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
-    let hits = ctrl.browse(text_query("Worship")).await;
+    let hits = signal.browse(text_query("Worship")).await;
     println!("Browse 'Worship': {} hits", hits.len());
     assert!(!hits.is_empty(), "should find worship-related hits");
     for h in hits.iter().take(3) {
@@ -590,8 +568,8 @@ async fn browse_by_text_finds_guitar_worship() {
 
 #[tokio::test]
 async fn browse_returns_empty_for_nonsense_query() {
-    let ctrl = controller().await;
-    let hits = ctrl
+    let signal = controller().await;
+    let hits = signal
         .browse(text_query("xyzzy_definitely_not_a_preset_zzz"))
         .await;
     println!("Browse nonsense: {} hits", hits.len());
@@ -603,8 +581,8 @@ async fn browse_returns_empty_for_nonsense_query() {
 
 #[tokio::test]
 async fn list_rig_collections_by_guitar_tag() {
-    let ctrl = controller().await;
-    let rigs = ctrl.list_rig_collections_by_tag("guitar").await;
+    let signal = controller().await;
+    let rigs = signal.rigs().by_tag("guitar").await;
     println!("Guitar-tagged rigs: {}", rigs.len());
     for r in &rigs {
         println!("  {} — {}", r.id, r.name);
@@ -614,8 +592,8 @@ async fn list_rig_collections_by_guitar_tag() {
 
 #[tokio::test]
 async fn list_profiles_by_worship_tag() {
-    let ctrl = controller().await;
-    let profiles = ctrl.list_profiles_by_tag("worship").await;
+    let signal = controller().await;
+    let profiles = signal.profiles().by_tag("worship").await;
     println!("Worship-tagged profiles: {}", profiles.len());
     assert!(!profiles.is_empty(), "should find worship-tagged profiles");
     assert!(
@@ -634,15 +612,15 @@ async fn list_profiles_by_worship_tag() {
 async fn resolve_all_guitar_profile_patches() {
     use signal::resolve::ResolveTarget;
 
-    let ctrl = controller().await;
-    let profiles = ctrl.list_profiles_by_tag("guitar").await;
+    let signal = controller().await;
+    let profiles = signal.profiles().by_tag("guitar").await;
 
     let mut total = 0;
     let mut errors = vec![];
 
     for profile in &profiles {
         for patch in &profile.patches {
-            let result = ctrl
+            let result = signal
                 .resolve_target(ResolveTarget::ProfilePatch {
                     profile_id: profile.id.clone().into(),
                     patch_id: patch.id.clone().into(),
@@ -689,15 +667,15 @@ async fn resolve_all_guitar_profile_patches() {
 async fn resolve_all_seeded_song_sections() {
     use signal::resolve::ResolveTarget;
 
-    let ctrl = controller().await;
-    let songs = ctrl.list_songs().await;
+    let signal = controller().await;
+    let songs = signal.songs().list().await;
 
     let mut total = 0;
     let mut errors = vec![];
 
     for song in &songs {
         for section in &song.sections {
-            let result = ctrl
+            let result = signal
                 .resolve_target(ResolveTarget::SongSection {
                     song_id: song.id.clone().into(),
                     section_id: section.id.clone().into(),

@@ -8,14 +8,16 @@
 //!
 //! ## `views` -- domain-aware smart components
 //!
-//! Components that use [`signal::SignalController`] and signal domain types
+//! Components that use [`signal::Signal`] (via context) and signal domain types
 //! to fetch data, manage state, and compose the dumb `components` into
 //! full editor/browser views.
 
 pub mod components;
+pub mod hooks;
 pub mod panel_registration;
 pub mod views;
 
 // Convenience re-exports
+pub use hooks::use_signal_service;
 pub use panel_registration::register_panels;
 pub use views::SignalSlider;

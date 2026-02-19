@@ -212,6 +212,10 @@ pub struct SnapshotMetadata {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub midi_cycle_index: Option<u32>,
     pub state_file: String,
+    /// REAPER VST chunk file (captured by harvest). Preferred over `state_file`
+    /// because it contains the exact binary blob that `set_vst_chunk` expects.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reaper_chunk_file: Option<String>,
     pub fingerprint: PresetFingerprint,
 }
 
@@ -672,6 +676,7 @@ mod tests {
             preset_uid: Some("4361648983680894524".to_string()),
             midi_cycle_index: Some(2),
             state_file: "Gravity Clean.bin".to_string(),
+            reaper_chunk_file: Some("Gravity Clean.chunk".to_string()),
             fingerprint: PresetFingerprint::default(),
         };
         let json = serde_json::to_string_pretty(&meta).unwrap();
@@ -682,8 +687,17 @@ mod tests {
         assert_eq!(roundtrip.folder, "John Mayer");
         assert_eq!(roundtrip.state_file, "Gravity Clean.bin");
         assert_eq!(
+            roundtrip.reaper_chunk_file,
+            Some("Gravity Clean.chunk".to_string())
+        );
+        assert_eq!(
             roundtrip.preset_uid,
             Some("4361648983680894524".to_string())
         );
+
+        // Test backwards compat: no reaper_chunk_file in old JSON
+        let old_json = r#"{"name":"Test","id":"test","block":"b","folder":"","tags":[],"state_file":"Test.bin","fingerprint":{"params":{}}}"#;
+        let old: SnapshotMetadata = serde_json::from_str(old_json).unwrap();
+        assert_eq!(old.reaper_chunk_file, None);
     }
 }

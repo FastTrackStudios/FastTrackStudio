@@ -9,8 +9,10 @@ authors.workspace = true
 dioxus.workspace = true
 lumen-blocks.workspace = true
 signal = { path = "../signal" }
+signal-controller = { path = "../signal-controller" }
 uuid = { version = "1", features = ["v4"] }
 tokio = { workspace = true }
+tracing.workspace = true
 audio-controls = { path = "../../../cells/audio-controls" }
 dock-dioxus = { path = "../../../cells/dock/dock-dioxus", default-features = false }
 dock-proto = { path = "../../../cells/dock/dock-proto" }
@@ -18,4 +20,3 @@ dock-proto = { path = "../../../cells/dock/dock-proto" }
 [features]
 default = ["web"]
 web = ["dock-dioxus/web"]
-native = ["dock-dioxus/native"]

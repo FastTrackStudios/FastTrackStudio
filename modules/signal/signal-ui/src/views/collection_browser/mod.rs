@@ -20,7 +20,7 @@ mod types;
 use dioxus::prelude::*;
 use signal::rig::RigType;
 use signal::tagging::TagSet;
-use signal::{BlockType, SignalController, ALL_BLOCK_TYPES, ALL_MODULE_TYPES};
+use signal::{BlockType, ALL_BLOCK_TYPES, ALL_MODULE_TYPES};
 
 use data_fetching::{
     build_param_lookup, fetch_col2, fetch_col3, resolve_layer_detail, resolve_scene_detail,
@@ -33,10 +33,10 @@ use toolbar::Toolbar;
 use types::{ColumnItem, DetailData, DetailParam, NavCategory, SortMode, RIG_TYPES};
 
 // Re-export public API types used by grid_conversion (needed by other views).
-pub use types::{EngineFlowData, LayerFlowData, ModuleChainData};
-pub use grid_conversion::{engines_to_grid_slots, RigGridPanel};
-pub use grid_conversion::ParamLookup as EngineParamLookup;
 pub use data_fetching::rig_type_to_engine_type;
+pub use grid_conversion::ParamLookup as EngineParamLookup;
+pub use grid_conversion::{engines_to_grid_slots, RigGridPanel};
+pub use types::{EngineFlowData, LayerFlowData, ModuleChainData};
 
 /// Public API: resolve a rig scene into engine flow data and parameter lookup
 /// for rendering in `RigGridPanel`.
@@ -44,11 +44,11 @@ pub use data_fetching::rig_type_to_engine_type;
 /// Loads the rig, finds the matching scene, resolves engines + params.
 /// Returns `None` if the rig or scene is not found.
 pub async fn resolve_scene_engines(
-    controller: &SignalController,
+    signal: &signal::Signal,
     rig_id: &str,
     scene_id: &str,
 ) -> Option<(Vec<EngineFlowData>, ParamLookup)> {
-    resolve_scene_detail(controller, rig_id, scene_id).await
+    resolve_scene_detail(signal, rig_id, scene_id).await
 }
 
 /// Public API: resolve a layer variant into engine flow data and parameter lookup
@@ -58,11 +58,11 @@ pub async fn resolve_scene_engines(
 /// wraps them in a synthetic `EngineFlowData`.
 /// Returns `None` if the layer or variant is not found.
 pub async fn resolve_layer_engines(
-    controller: &SignalController,
+    signal: &signal::Signal,
     layer_id: &str,
     variant_id: Option<&str>,
 ) -> Option<(Vec<EngineFlowData>, ParamLookup)> {
-    resolve_layer_detail(controller, layer_id, variant_id).await
+    resolve_layer_detail(signal, layer_id, variant_id).await
 }
 
 // region: --- Public API
@@ -92,7 +92,8 @@ impl BrowseLevel {
 // region: --- CollectionBrowser
 
 #[component]
-pub fn CollectionBrowser(controller: SignalController) -> Element {
+pub fn CollectionBrowser() -> Element {
+    let signal = crate::use_signal_service();
     let mut nav = use_signal(|| NavCategory::Presets);
     let mut rig_type = use_signal(|| RigType::Guitar);
 
@@ -123,9 +124,9 @@ pub fn CollectionBrowser(controller: SignalController) -> Element {
 
     // Auto-fetch col2 when nav or rig_type changes.
     {
-        let controller = controller.clone();
+        let signal = signal.clone();
         use_effect(move || {
-            let controller = controller.clone();
+            let signal = signal.clone();
             let category = nav_memo();
             let rt = rig_type();
             col2_selected.set(None);
@@ -138,21 +139,20 @@ pub fn CollectionBrowser(controller: SignalController) -> Element {
             search_text.set(String::new());
             active_tag_filters.set(Vec::new());
             spawn(async move {
-                let items = fetch_col2(&controller, category, rt).await;
+                let items = fetch_col2(&signal, category, rt).await;
                 // Auto-select the first item so detail panel is populated on load.
                 if !items.is_empty() && category == NavCategory::Presets {
                     let first_id = items[0].id.clone();
                     let first_tag = items[0].tag;
                     col2_selected.set(Some(0));
                     col2_current_id.set(first_id.clone());
-                    let (v, presets) =
-                        fetch_col3(&controller, category, &first_id, first_tag).await;
+                    let (v, presets) = fetch_col3(&signal, category, &first_id, first_tag).await;
                     // Auto-select first scene too
                     if !v.is_empty() {
                         col3_selected.set(Some(0));
                     }
                     // Resolve block parameters for the detail grid
-                    let params = build_param_lookup(&controller, &v).await;
+                    let params = build_param_lookup(&signal, &v).await;
                     param_lookup.set(params);
                     col3_items.set(v);
                     block_presets_cache.set(presets);
@@ -167,11 +167,6 @@ pub fn CollectionBrowser(controller: SignalController) -> Element {
 
     // Track which column has keyboard focus (2, 3, or 4).
     let mut focus_col = use_signal(|| 2u8);
-
-    // Pre-clone for rsx branches
-    let ctrl_c2 = controller.clone();
-    let ctrl_c3 = controller.clone();
-    let ctrl_kb = controller.clone();
 
     // Apply search + tag filter + sort to col2 items.
     let all_col2 = filter_and_sort(
@@ -300,7 +295,7 @@ pub fn CollectionBrowser(controller: SignalController) -> Element {
                                 if let Some(idx) = col2_selected() {
                                     let items = col2_items();
                                     if let Some(item) = items.get(idx) {
-                                        let controller = ctrl_kb.clone();
+                                        let signal = signal.clone();
                                         let nav_val = nav();
                                         let id = item.id.clone();
                                         let tag = item.tag;
@@ -310,8 +305,8 @@ pub fn CollectionBrowser(controller: SignalController) -> Element {
                                         col4_selected.set(None);
                                         block_presets_cache.set(Vec::new());
                                         spawn(async move {
-                                            let (v, presets) = fetch_col3(&controller, nav_val, &id, tag).await;
-                                            let params = build_param_lookup(&controller, &v).await;
+                                            let (v, presets) = fetch_col3(&signal, nav_val, &id, tag).await;
+                                            let params = build_param_lookup(&signal, &v).await;
                                             param_lookup.set(params);
                                             col3_items.set(v);
                                             block_presets_cache.set(presets);
@@ -419,7 +414,7 @@ pub fn CollectionBrowser(controller: SignalController) -> Element {
                                 } else {
                                     None
                                 };
-                                let controller = ctrl_c2.clone();
+                                let signal = signal.clone();
                                 let item_id = item.id.clone();
                                 let item_tag = item.tag;
                                 rsx! {
@@ -437,13 +432,13 @@ pub fn CollectionBrowser(controller: SignalController) -> Element {
                                             col4_items.set(Vec::new());
                                             col4_selected.set(None);
                                             block_presets_cache.set(Vec::new());
-                                            let controller = controller.clone();
+                                            let signal = signal.clone();
                                             let nav = nav();
                                             let id = item_id.clone();
                                             let tag = item_tag;
                                             spawn(async move {
-                                                let (v, presets) = fetch_col3(&controller, nav, &id, tag).await;
-                                                let params = build_param_lookup(&controller, &v).await;
+                                                let (v, presets) = fetch_col3(&signal, nav, &id, tag).await;
+                                                let params = build_param_lookup(&signal, &v).await;
                                                 param_lookup.set(params);
                                                 col3_items.set(v);
                                                 block_presets_cache.set(presets);
@@ -501,7 +496,7 @@ pub fn CollectionBrowser(controller: SignalController) -> Element {
                                 let badge = child.badge.clone();
                                 let child_id = child.id.clone();
                                 let child_engines_empty = child.detail.engines.is_empty();
-                                let controller_c3 = ctrl_c3.clone();
+                                let signal = signal.clone();
                                 rsx! {
                                     button {
                                         key: "{child_id}",
@@ -516,12 +511,12 @@ pub fn CollectionBrowser(controller: SignalController) -> Element {
                                             // Lazy scene resolution: if this is a Presets scene
                                             // that wasn't resolved eagerly, resolve it now.
                                             if current_nav == NavCategory::Presets && child_engines_empty {
-                                                let controller = controller_c3.clone();
+                                                let signal = signal.clone();
                                                 let rig_id = col2_current_id().clone();
                                                 let scene_id = child_id.clone();
                                                 spawn(async move {
                                                     if let Some((engines, params)) =
-                                                        resolve_scene_detail(&controller, &rig_id, &scene_id).await
+                                                        resolve_scene_detail(&signal, &rig_id, &scene_id).await
                                                     {
                                                         let mut items = col3_items();
                                                         if let Some(item) = items.get_mut(cidx) {

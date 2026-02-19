@@ -10,14 +10,16 @@
 //!
 //!   cargo test -p signal --test signal_keys_engine_api -- --nocapture
 
+mod fixtures;
+
+use fixtures::*;
 use signal::{
     block::BlockType,
-    bootstrap_in_memory_controller_async,
     engine::{Engine, EngineScene, LayerSelection},
     layer::{BlockRef, Layer, LayerRef, LayerSnapshot, ModuleRef},
     module_type::ModuleType,
     overrides::{NodeOverrideOp, NodePath, Override},
-    profile::{Patch, Profile},
+    profile::{Patch, PatchTarget, Profile},
     resolve::{ResolveTarget, ResolvedGraph},
     rig::{EngineSelection, Rig, RigId, RigScene, RigSceneId, RigType},
     seed_id,
@@ -28,69 +30,6 @@ use signal::{
     ModuleSnapshot, Preset, SignalChain, Snapshot,
 };
 
-// ─────────────────────────────────────────────────────────────
-//  Helpers
-// ─────────────────────────────────────────────────────────────
-
-async fn controller() -> signal::SignalController {
-    bootstrap_in_memory_controller_async()
-        .await
-        .expect("failed to bootstrap in-memory controller")
-}
-
-fn keys_megarig_id() -> RigId {
-    seed_id("keys-megarig").into()
-}
-
-fn keys_megarig_default_scene() -> RigSceneId {
-    seed_id("keys-megarig-default").into()
-}
-
-fn keys_megarig_wide_scene() -> RigSceneId {
-    seed_id("keys-megarig-wide").into()
-}
-
-fn keys_megarig_focus_scene() -> RigSceneId {
-    seed_id("keys-megarig-focus").into()
-}
-
-fn keys_megarig_air_scene() -> RigSceneId {
-    seed_id("keys-megarig-air").into()
-}
-
-/// Walk a ResolvedGraph and find a block parameter value by block_id fragment and param_id.
-fn find_param_in_graph(
-    graph: &ResolvedGraph,
-    block_id_fragment: &str,
-    param_id: &str,
-) -> Option<f32> {
-    for engine in &graph.engines {
-        for layer in &engine.layers {
-            for module in &layer.modules {
-                for block in &module.blocks {
-                    if block.node_id.contains(block_id_fragment) {
-                        for param in block.block.parameters() {
-                            if param.id() == param_id {
-                                return Some(param.value().get());
-                            }
-                        }
-                    }
-                }
-            }
-            for block in &layer.standalone_blocks {
-                if block.node_id.contains(block_id_fragment) {
-                    for param in block.block.parameters() {
-                        if param.id() == param_id {
-                            return Some(param.value().get());
-                        }
-                    }
-                }
-            }
-        }
-    }
-    None
-}
-
 // ═════════════════════════════════════════════════════════════
 //  Group A: Seeded Keys Rig Verification (4 tests)
 // ═════════════════════════════════════════════════════════════
@@ -98,10 +37,10 @@ fn find_param_in_graph(
 /// The seeded keys-megarig has 4 engines and 4 scenes.
 #[tokio::test]
 async fn keys_megarig_structure() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
-    let rig = ctrl
-        .load_rig_collection(keys_megarig_id())
+    let rig = signal
+        .rigs().load(keys_megarig_id())
         .await
         .expect("keys-megarig should exist");
 
@@ -120,9 +59,9 @@ async fn keys_megarig_structure() {
 /// Each keys engine has the expected layer count and scene count.
 #[tokio::test]
 async fn keys_engines_have_correct_structure() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
-    let engines = ctrl.list_engines().await;
+    let engines = signal.engines().list().await;
 
     let keys = engines
         .iter()
@@ -158,9 +97,9 @@ async fn keys_engines_have_correct_structure() {
 /// Resolve the keys-megarig default scene and verify multi-engine graph.
 #[tokio::test]
 async fn resolve_keys_default_scene_multi_engine() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
-    let graph = ctrl
+    let graph = signal
         .resolve_target(ResolveTarget::RigScene {
             rig_id: keys_megarig_id(),
             scene_id: keys_megarig_default_scene(),
@@ -185,7 +124,7 @@ async fn resolve_keys_default_scene_multi_engine() {
 /// Resolve all 4 keys scenes and verify each produces a valid graph.
 #[tokio::test]
 async fn resolve_all_keys_scenes() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     let scenes = [
         ("Default", keys_megarig_default_scene()),
@@ -195,7 +134,7 @@ async fn resolve_all_keys_scenes() {
     ];
 
     for (name, scene_id) in &scenes {
-        let result = ctrl
+        let result = signal
             .resolve_target(ResolveTarget::RigScene {
                 rig_id: keys_megarig_id(),
                 scene_id: scene_id.clone(),
@@ -221,7 +160,7 @@ async fn resolve_all_keys_scenes() {
 /// Create a new engine with multiple scenes (presets), save, reload, verify.
 #[tokio::test]
 async fn create_engine_with_multiple_scenes() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     // First create layers for this engine
     let layer_a_snap = LayerSnapshot::new(seed_id("custom-keys-core-snap"), "Default");
@@ -238,8 +177,8 @@ async fn create_engine_with_multiple_scenes() {
         EngineType::Keys,
         layer_b_snap,
     );
-    ctrl.save_layer(layer_a).await;
-    ctrl.save_layer(layer_b).await;
+    signal.layers().save(layer_a).await;
+    signal.layers().save(layer_b).await;
 
     // Create engine with 3 scenes
     let default_scene = EngineScene::new(seed_id("cke-scene-warm"), "Warm")
@@ -280,10 +219,10 @@ async fn create_engine_with_multiple_scenes() {
     );
     engine.add_variant(bright_scene);
     engine.add_variant(ambient_scene);
-    ctrl.save_engine(engine).await;
+    signal.engines().save(engine).await;
 
-    let loaded = ctrl
-        .load_engine(seed_id("custom-keys-engine"))
+    let loaded = signal
+        .engines().load(seed_id("custom-keys-engine"))
         .await
         .expect("engine should exist");
 
@@ -299,9 +238,9 @@ async fn create_engine_with_multiple_scenes() {
 /// Add a new scene to an existing engine, save, reload, verify.
 #[tokio::test]
 async fn add_scene_to_existing_engine() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
-    let engines = ctrl.list_engines().await;
+    let engines = signal.engines().list().await;
     let mut keys_engine = engines
         .iter()
         .find(|e| e.name == "Keys Engine")
@@ -323,10 +262,10 @@ async fn add_scene_to_existing_engine() {
         ));
 
     keys_engine.add_variant(new_scene);
-    ctrl.save_engine(keys_engine).await;
+    signal.engines().save(keys_engine).await;
 
-    let reloaded = ctrl
-        .load_engine(seed_id("keys-engine"))
+    let reloaded = signal
+        .engines().load(seed_id("keys-engine"))
         .await
         .expect("keys engine");
 
@@ -342,10 +281,10 @@ async fn add_scene_to_existing_engine() {
 /// Load a specific engine scene variant by ID.
 #[tokio::test]
 async fn load_engine_scene_by_id() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
-    let scene = ctrl
-        .load_engine_variant(seed_id("keys-engine"), seed_id("keys-engine-bright"))
+    let scene = signal
+        .engines().load_variant(seed_id("keys-engine"), seed_id("keys-engine-bright"))
         .await
         .expect("bright scene should exist");
 
@@ -356,7 +295,7 @@ async fn load_engine_scene_by_id() {
 /// Engine scene overrides survive save/load round-trip.
 #[tokio::test]
 async fn engine_scene_overrides_round_trip() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     let snap = LayerSnapshot::new(seed_id("ovr-eng-layer-snap"), "Default");
     let layer = Layer::new(
@@ -365,7 +304,7 @@ async fn engine_scene_overrides_round_trip() {
         EngineType::Keys,
         snap,
     );
-    ctrl.save_layer(layer).await;
+    signal.layers().save(layer).await;
 
     let scene = EngineScene::new(seed_id("ovr-eng-scene"), "Override Scene")
         .with_layer(LayerSelection::new(
@@ -390,16 +329,16 @@ async fn engine_scene_overrides_round_trip() {
         vec![seed_id("ovr-eng-layer").into()],
         scene,
     );
-    ctrl.save_engine(engine).await;
+    signal.engines().save(engine).await;
 
-    let loaded = ctrl.load_engine(seed_id("ovr-eng")).await.expect("engine");
+    let loaded = signal.engines().load(seed_id("ovr-eng")).await.expect("engine");
     assert_eq!(loaded.variants[0].overrides.len(), 2);
 }
 
 /// Delete an engine, verify gone.
 #[tokio::test]
 async fn delete_engine() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     let snap = LayerSnapshot::new(seed_id("del-eng-layer-snap"), "Default");
     let layer = Layer::new(
@@ -408,7 +347,7 @@ async fn delete_engine() {
         EngineType::Keys,
         snap,
     );
-    ctrl.save_layer(layer).await;
+    signal.layers().save(layer).await;
 
     let engine = Engine::new(
         seed_id("del-eng"),
@@ -417,14 +356,14 @@ async fn delete_engine() {
         vec![seed_id("del-eng-layer").into()],
         EngineScene::new(seed_id("del-eng-scene"), "Default"),
     );
-    ctrl.save_engine(engine).await;
+    signal.engines().save(engine).await;
 
-    let exists = ctrl.load_engine(seed_id("del-eng")).await;
+    let exists = signal.engines().load(seed_id("del-eng")).await;
     assert!(exists.is_some());
 
-    ctrl.delete_engine(seed_id("del-eng")).await;
+    signal.engines().delete(seed_id("del-eng")).await;
 
-    let gone = ctrl.load_engine(seed_id("del-eng")).await;
+    let gone = signal.engines().load(seed_id("del-eng")).await;
     assert!(gone.is_none());
 }
 
@@ -435,7 +374,7 @@ async fn delete_engine() {
 /// Create a keys layer with multiple variants (snapshots), each selecting different refs.
 #[tokio::test]
 async fn layer_with_multiple_ref_types() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     let mut default_snap = LayerSnapshot::new(seed_id("mixed-refs-default"), "Default");
     default_snap.module_refs = vec![ModuleRef::new(seed_id("time-parallel"))];
@@ -457,10 +396,10 @@ async fn layer_with_multiple_ref_types() {
         default_snap,
     );
     layer.add_variant(alt_snap);
-    ctrl.save_layer(layer).await;
+    signal.layers().save(layer).await;
 
-    let loaded = ctrl
-        .load_layer(seed_id("mixed-refs-layer"))
+    let loaded = signal
+        .layers().load(seed_id("mixed-refs-layer"))
         .await
         .expect("layer should exist");
 
@@ -470,8 +409,8 @@ async fn layer_with_multiple_ref_types() {
     assert_eq!(default.module_refs.len(), 1);
     assert_eq!(default.block_refs.len(), 2);
 
-    let alt = ctrl
-        .load_layer_variant(seed_id("mixed-refs-layer"), seed_id("mixed-refs-alt"))
+    let alt = signal
+        .layers().load_variant(seed_id("mixed-refs-layer"), seed_id("mixed-refs-alt"))
         .await
         .expect("alt variant");
     assert_eq!(alt.name, "Alt");
@@ -481,7 +420,7 @@ async fn layer_with_multiple_ref_types() {
 /// Layer with layer_refs (cross-layer embedding) round-trips.
 #[tokio::test]
 async fn layer_with_layer_refs() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     let mut snap = LayerSnapshot::new(seed_id("layerref-snap"), "Default");
     snap.layer_refs = vec![
@@ -495,10 +434,10 @@ async fn layer_with_layer_refs() {
         EngineType::Keys,
         snap,
     );
-    ctrl.save_layer(layer).await;
+    signal.layers().save(layer).await;
 
-    let loaded = ctrl
-        .load_layer(seed_id("layerref-layer"))
+    let loaded = signal
+        .layers().load(seed_id("layerref-layer"))
         .await
         .expect("layer");
 
@@ -510,7 +449,7 @@ async fn layer_with_layer_refs() {
 /// Layer snapshot overrides at block-parameter level survive round-trip.
 #[tokio::test]
 async fn layer_snapshot_block_param_overrides() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     let mut snap = LayerSnapshot::new(seed_id("block-param-snap"), "Overridden");
     snap.block_refs = vec![BlockRef::new(seed_id("jm-comp"))];
@@ -526,10 +465,10 @@ async fn layer_snapshot_block_param_overrides() {
         EngineType::Keys,
         snap,
     );
-    ctrl.save_layer(layer).await;
+    signal.layers().save(layer).await;
 
-    let loaded = ctrl
-        .load_layer(seed_id("block-param-layer"))
+    let loaded = signal
+        .layers().load(seed_id("block-param-layer"))
         .await
         .expect("layer");
 
@@ -547,7 +486,7 @@ async fn layer_snapshot_block_param_overrides() {
 /// Enabled/disabled flag on layer snapshots persists.
 #[tokio::test]
 async fn layer_snapshot_enabled_flag() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     let mut enabled_snap = LayerSnapshot::new(seed_id("enabled-snap"), "Enabled");
     enabled_snap.enabled = true;
@@ -561,10 +500,10 @@ async fn layer_snapshot_enabled_flag() {
         enabled_snap,
     );
     layer.add_variant(disabled_snap);
-    ctrl.save_layer(layer).await;
+    signal.layers().save(layer).await;
 
-    let loaded = ctrl
-        .load_layer(seed_id("enabled-test-layer"))
+    let loaded = signal
+        .layers().load(seed_id("enabled-test-layer"))
         .await
         .expect("layer");
 
@@ -575,7 +514,7 @@ async fn layer_snapshot_enabled_flag() {
 /// Delete a layer, verify gone.
 #[tokio::test]
 async fn delete_layer() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     let layer = Layer::new(
         seed_id("ephemeral-layer"),
@@ -583,11 +522,11 @@ async fn delete_layer() {
         EngineType::Keys,
         LayerSnapshot::new(seed_id("ephemeral-snap"), "Default"),
     );
-    ctrl.save_layer(layer).await;
+    signal.layers().save(layer).await;
 
-    assert!(ctrl.load_layer(seed_id("ephemeral-layer")).await.is_some());
-    ctrl.delete_layer(seed_id("ephemeral-layer")).await;
-    assert!(ctrl.load_layer(seed_id("ephemeral-layer")).await.is_none());
+    assert!(signal.layers().load(seed_id("ephemeral-layer")).await.is_some());
+    signal.layers().delete(seed_id("ephemeral-layer")).await;
+    assert!(signal.layers().load(seed_id("ephemeral-layer")).await.is_none());
 }
 
 // ═════════════════════════════════════════════════════════════
@@ -597,7 +536,7 @@ async fn delete_layer() {
 /// Add a 5th engine to the keys megarig, save, reload, verify.
 #[tokio::test]
 async fn add_engine_to_rig() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     // Create a new effects engine
     let fx_snap = LayerSnapshot::new(seed_id("fx-eng-layer-snap"), "Default");
@@ -607,7 +546,7 @@ async fn add_engine_to_rig() {
         EngineType::Keys,
         fx_snap,
     );
-    ctrl.save_layer(fx_layer).await;
+    signal.layers().save(fx_layer).await;
 
     let fx_engine = Engine::new(
         seed_id("fx-engine"),
@@ -616,20 +555,20 @@ async fn add_engine_to_rig() {
         vec![seed_id("fx-eng-layer").into()],
         EngineScene::new(seed_id("fx-eng-scene-default"), "Default"),
     );
-    ctrl.save_engine(fx_engine).await;
+    signal.engines().save(fx_engine).await;
 
     // Load rig, add engine
-    let mut rig = ctrl
-        .load_rig_collection(keys_megarig_id())
+    let mut rig = signal
+        .rigs().load(keys_megarig_id())
         .await
         .expect("keys rig");
     let original_engine_count = rig.engine_ids.len();
 
     rig.engine_ids.push(seed_id("fx-engine").into());
-    ctrl.save_rig_collection(rig).await;
+    signal.rigs().save(rig).await;
 
-    let reloaded = ctrl
-        .load_rig_collection(keys_megarig_id())
+    let reloaded = signal
+        .rigs().load(keys_megarig_id())
         .await
         .expect("keys rig");
     assert_eq!(reloaded.engine_ids.len(), original_engine_count + 1);
@@ -638,7 +577,7 @@ async fn add_engine_to_rig() {
 /// Remove an engine from the keys megarig, save, reload, verify.
 #[tokio::test]
 async fn remove_engine_from_rig() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     // Create a fresh rig with 3 engines
     let snap_a = LayerSnapshot::new(seed_id("rem-layer-a-snap"), "Default");
@@ -647,9 +586,9 @@ async fn remove_engine_from_rig() {
     let layer_b = Layer::new(seed_id("rem-layer-b"), "Layer B", EngineType::Synth, snap_b);
     let snap_c = LayerSnapshot::new(seed_id("rem-layer-c-snap"), "Default");
     let layer_c = Layer::new(seed_id("rem-layer-c"), "Layer C", EngineType::Organ, snap_c);
-    ctrl.save_layer(layer_a).await;
-    ctrl.save_layer(layer_b).await;
-    ctrl.save_layer(layer_c).await;
+    signal.layers().save(layer_a).await;
+    signal.layers().save(layer_b).await;
+    signal.layers().save(layer_c).await;
 
     let eng_a = Engine::new(
         seed_id("rem-eng-a"),
@@ -672,9 +611,9 @@ async fn remove_engine_from_rig() {
         vec![seed_id("rem-layer-c").into()],
         EngineScene::new(seed_id("rem-eng-c-scene"), "Default"),
     );
-    ctrl.save_engine(eng_a).await;
-    ctrl.save_engine(eng_b).await;
-    ctrl.save_engine(eng_c).await;
+    signal.engines().save(eng_a).await;
+    signal.engines().save(eng_b).await;
+    signal.engines().save(eng_c).await;
 
     let rig = Rig::new(
         seed_id("removable-rig"),
@@ -686,19 +625,19 @@ async fn remove_engine_from_rig() {
         ],
         RigScene::new(seed_id("removable-rig-default"), "Default"),
     );
-    ctrl.save_rig_collection(rig).await;
+    signal.rigs().save(rig).await;
 
     // Remove engine B
-    let mut loaded = ctrl
-        .load_rig_collection(seed_id("removable-rig"))
+    let mut loaded = signal
+        .rigs().load(seed_id("removable-rig"))
         .await
         .expect("rig");
     let eng_b_id = seed_id("rem-eng-b").to_string();
     loaded.engine_ids.retain(|id| id.as_str() != eng_b_id);
-    ctrl.save_rig_collection(loaded).await;
+    signal.rigs().save(loaded).await;
 
-    let reloaded = ctrl
-        .load_rig_collection(seed_id("removable-rig"))
+    let reloaded = signal
+        .rigs().load(seed_id("removable-rig"))
         .await
         .expect("rig");
     assert_eq!(reloaded.engine_ids.len(), 2);
@@ -708,7 +647,7 @@ async fn remove_engine_from_rig() {
 /// Build a multi-engine rig from scratch with cross-engine scene selections.
 #[tokio::test]
 async fn build_multi_engine_rig_from_scratch() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     // Use seeded engines
     let scene_a = RigScene::new(seed_id("multi-rig-scene-a"), "Scene A")
@@ -742,10 +681,10 @@ async fn build_multi_engine_rig_from_scratch() {
     )
     .with_rig_type("keys");
     rig.add_variant(scene_b);
-    ctrl.save_rig_collection(rig).await;
+    signal.rigs().save(rig).await;
 
-    let loaded = ctrl
-        .load_rig_collection(seed_id("custom-multi-rig"))
+    let loaded = signal
+        .rigs().load(seed_id("custom-multi-rig"))
         .await
         .expect("rig");
 
@@ -761,10 +700,10 @@ async fn build_multi_engine_rig_from_scratch() {
 /// Reorder engines within a rig.
 #[tokio::test]
 async fn reorder_engines_in_rig() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
-    let mut rig = ctrl
-        .load_rig_collection(seed_id("removable-rig"))
+    let mut rig = signal
+        .rigs().load(seed_id("removable-rig"))
         .await
         .or_else(|| {
             // Might not exist if tests run in isolation — create fresh
@@ -786,8 +725,8 @@ async fn reorder_engines_in_rig() {
         EngineType::Synth,
         snap_y,
     );
-    ctrl.save_layer(layer_x).await;
-    ctrl.save_layer(layer_y).await;
+    signal.layers().save(layer_x).await;
+    signal.layers().save(layer_y).await;
 
     let eng_x = Engine::new(
         seed_id("reord-eng-x"),
@@ -803,8 +742,8 @@ async fn reorder_engines_in_rig() {
         vec![seed_id("reord-layer-y").into()],
         EngineScene::new(seed_id("reord-eng-y-scene"), "Default"),
     );
-    ctrl.save_engine(eng_x).await;
-    ctrl.save_engine(eng_y).await;
+    signal.engines().save(eng_x).await;
+    signal.engines().save(eng_y).await;
 
     let rig_to_save = Rig::new(
         seed_id("reord-rig"),
@@ -812,18 +751,18 @@ async fn reorder_engines_in_rig() {
         vec![seed_id("reord-eng-x").into(), seed_id("reord-eng-y").into()],
         RigScene::new(seed_id("reord-rig-default"), "Default"),
     );
-    ctrl.save_rig_collection(rig_to_save).await;
+    signal.rigs().save(rig_to_save).await;
 
     // Swap engine order: [Y, X]
-    let mut loaded = ctrl
-        .load_rig_collection(seed_id("reord-rig"))
+    let mut loaded = signal
+        .rigs().load(seed_id("reord-rig"))
         .await
         .expect("rig");
     loaded.engine_ids.reverse();
-    ctrl.save_rig_collection(loaded).await;
+    signal.rigs().save(loaded).await;
 
-    let reloaded = ctrl
-        .load_rig_collection(seed_id("reord-rig"))
+    let reloaded = signal
+        .rigs().load(seed_id("reord-rig"))
         .await
         .expect("rig");
 
@@ -844,7 +783,7 @@ async fn reorder_engines_in_rig() {
 /// Rig scene with overrides at every level: engine, layer, module, block, param.
 #[tokio::test]
 async fn multi_level_overrides_in_rig_scene() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     let scene = RigScene::new(seed_id("ml-override-scene"), "Multi-Level")
         .with_override(Override::set(
@@ -872,10 +811,10 @@ async fn multi_level_overrides_in_rig_scene() {
         vec![],
         scene,
     );
-    ctrl.save_rig_collection(rig).await;
+    signal.rigs().save(rig).await;
 
-    let loaded = ctrl
-        .load_rig_collection(seed_id("ml-override-rig"))
+    let loaded = signal
+        .rigs().load(seed_id("ml-override-rig"))
         .await
         .expect("rig");
 
@@ -898,7 +837,7 @@ async fn multi_level_overrides_in_rig_scene() {
 /// ReplaceRef override: replace a layer variant within a rig scene.
 #[tokio::test]
 async fn replace_ref_override_in_rig_scene() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     let scene =
         RigScene::new(seed_id("replace-ref-scene"), "Replace Ref Test").with_override(Override {
@@ -907,10 +846,10 @@ async fn replace_ref_override_in_rig_scene() {
         });
 
     let rig = Rig::new(seed_id("replace-ref-rig"), "Replace Ref Rig", vec![], scene);
-    ctrl.save_rig_collection(rig).await;
+    signal.rigs().save(rig).await;
 
-    let loaded = ctrl
-        .load_rig_collection(seed_id("replace-ref-rig"))
+    let loaded = signal
+        .rigs().load(seed_id("replace-ref-rig"))
         .await
         .expect("rig");
 
@@ -923,7 +862,7 @@ async fn replace_ref_override_in_rig_scene() {
 /// Bypass override on a block.
 #[tokio::test]
 async fn bypass_override_in_rig_scene() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     let scene =
         RigScene::new(seed_id("bypass-scene"), "Bypass Test").with_override(Override::bypass(
@@ -934,10 +873,10 @@ async fn bypass_override_in_rig_scene() {
         ));
 
     let rig = Rig::new(seed_id("bypass-rig"), "Bypass Rig", vec![], scene);
-    ctrl.save_rig_collection(rig).await;
+    signal.rigs().save(rig).await;
 
-    let loaded = ctrl
-        .load_rig_collection(seed_id("bypass-rig"))
+    let loaded = signal
+        .rigs().load(seed_id("bypass-rig"))
         .await
         .expect("rig");
 
@@ -948,7 +887,7 @@ async fn bypass_override_in_rig_scene() {
 /// Mixed override types in a single scene.
 #[tokio::test]
 async fn mixed_override_types_in_scene() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     let scene = RigScene::new(seed_id("mixed-ovr-scene"), "Mixed Overrides")
         .with_override(Override::set(
@@ -975,10 +914,10 @@ async fn mixed_override_types_in_scene() {
         vec![],
         scene,
     );
-    ctrl.save_rig_collection(rig).await;
+    signal.rigs().save(rig).await;
 
-    let loaded = ctrl
-        .load_rig_collection(seed_id("mixed-ovr-rig"))
+    let loaded = signal
+        .rigs().load(seed_id("mixed-ovr-rig"))
         .await
         .expect("rig");
 
@@ -1006,9 +945,9 @@ async fn mixed_override_types_in_scene() {
 /// The seeded Keys Feature profile has 4 patches targeting keys rig scenes.
 #[tokio::test]
 async fn keys_profile_structure() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
-    let profiles = ctrl.list_profiles().await;
+    let profiles = signal.profiles().list().await;
     let keys_profile = profiles
         .iter()
         .find(|p| p.name == "Keys Feature")
@@ -1028,28 +967,33 @@ async fn keys_profile_structure() {
 
     // All patches should target the keys megarig
     for patch in &keys_profile.patches {
-        assert_eq!(
-            patch.rig_id.as_str(),
-            keys_megarig_id().as_str(),
-            "patch '{}' should target keys megarig",
-            patch.name
-        );
+        match &patch.target {
+            PatchTarget::RigScene { rig_id, .. } => {
+                assert_eq!(
+                    rig_id.as_str(),
+                    keys_megarig_id().as_str(),
+                    "patch '{}' should target keys megarig",
+                    patch.name
+                );
+            }
+            _ => panic!("patch '{}' should have RigScene target", patch.name),
+        }
     }
 }
 
 /// Resolve keys profile patches — each should produce a valid multi-engine graph.
 #[tokio::test]
 async fn resolve_keys_profile_patches() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
-    let profiles = ctrl.list_profiles().await;
+    let profiles = signal.profiles().list().await;
     let keys_profile = profiles
         .iter()
         .find(|p| p.name == "Keys Feature")
         .expect("Keys Feature");
 
     for patch in &keys_profile.patches {
-        let result = ctrl
+        let result = signal
             .resolve_target(ResolveTarget::ProfilePatch {
                 profile_id: keys_profile.id.clone(),
                 patch_id: patch.id.clone(),
@@ -1073,28 +1017,28 @@ async fn resolve_keys_profile_patches() {
 /// Create a custom keys profile, retarget patches between scenes.
 #[tokio::test]
 async fn custom_keys_profile_with_retarget() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     let mut profile = Profile::new(
         seed_id("custom-keys-profile"),
         "Custom Keys Profile",
-        Patch::new(
+        Patch::from_rig_scene(
             seed_id("ckp-warm"),
             "Warm",
             keys_megarig_id(),
             keys_megarig_default_scene(),
         ),
     );
-    profile.add_patch(Patch::new(
+    profile.add_patch(Patch::from_rig_scene(
         seed_id("ckp-bright"),
         "Bright",
         keys_megarig_id(),
         keys_megarig_wide_scene(),
     ));
-    ctrl.save_profile(profile).await;
+    signal.profiles().save(profile).await;
 
     // Retarget "Bright" to the Focus scene
-    ctrl.set_patch_preset(
+    signal.profiles().set_patch_preset(
         seed_id("custom-keys-profile"),
         seed_id("ckp-bright"),
         keys_megarig_id(),
@@ -1102,8 +1046,8 @@ async fn custom_keys_profile_with_retarget() {
     )
     .await;
 
-    let loaded = ctrl
-        .load_profile(seed_id("custom-keys-profile"))
+    let loaded = signal
+        .profiles().load(seed_id("custom-keys-profile"))
         .await
         .expect("profile");
     let bright = loaded
@@ -1111,15 +1055,20 @@ async fn custom_keys_profile_with_retarget() {
         .iter()
         .find(|p| p.name == "Bright")
         .expect("Bright patch");
-    assert_eq!(bright.rig_variant_id, keys_megarig_focus_scene());
+    match &bright.target {
+        PatchTarget::RigScene { scene_id, .. } => {
+            assert_eq!(*scene_id, keys_megarig_focus_scene());
+        }
+        _ => panic!("expected RigScene target"),
+    }
 }
 
 /// Feature-Demo Song sections resolve through the keys rig.
 #[tokio::test]
 async fn feature_demo_song_resolves() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
-    let songs = ctrl.list_songs().await;
+    let songs = signal.songs().list().await;
     let demo = songs
         .iter()
         .find(|s| s.name == "Feature-Demo Song")
@@ -1128,7 +1077,7 @@ async fn feature_demo_song_resolves() {
     assert_eq!(demo.sections.len(), 4);
 
     for section in &demo.sections {
-        let result = ctrl
+        let result = signal
             .resolve_target(ResolveTarget::SongSection {
                 song_id: demo.id.clone(),
                 section_id: section.id.clone(),
@@ -1150,14 +1099,14 @@ async fn feature_demo_song_resolves() {
 /// Different rig scenes select different engine scenes for the same engine.
 #[tokio::test]
 async fn different_scenes_select_different_engine_scenes() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
-    let default_scene = ctrl
-        .load_rig_variant(keys_megarig_id(), keys_megarig_default_scene())
+    let default_scene = signal
+        .rigs().load_variant(keys_megarig_id(), keys_megarig_default_scene())
         .await
         .expect("default scene");
-    let wide_scene = ctrl
-        .load_rig_variant(keys_megarig_id(), keys_megarig_wide_scene())
+    let wide_scene = signal
+        .rigs().load_variant(keys_megarig_id(), keys_megarig_wide_scene())
         .await
         .expect("wide scene");
 
@@ -1186,9 +1135,9 @@ async fn different_scenes_select_different_engine_scenes() {
 /// Resolve two different rig scenes and compare their resolved engine structures.
 #[tokio::test]
 async fn resolved_graphs_differ_between_scenes() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
-    let graph_default = ctrl
+    let graph_default = signal
         .resolve_target(ResolveTarget::RigScene {
             rig_id: keys_megarig_id(),
             scene_id: keys_megarig_default_scene(),
@@ -1196,7 +1145,7 @@ async fn resolved_graphs_differ_between_scenes() {
         .await
         .expect("default");
 
-    let graph_wide = ctrl
+    let graph_wide = signal
         .resolve_target(ResolveTarget::RigScene {
             rig_id: keys_megarig_id(),
             scene_id: keys_megarig_wide_scene(),
@@ -1218,7 +1167,7 @@ async fn resolved_graphs_differ_between_scenes() {
 /// Build a rig with mixed engine types (Keys + Synth + Organ) and resolve.
 #[tokio::test]
 async fn mixed_engine_type_rig_resolves() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     let scene = RigScene::new(seed_id("mixed-type-scene"), "Mixed")
         .with_engine(EngineSelection::new(
@@ -1245,9 +1194,9 @@ async fn mixed_engine_type_rig_resolves() {
         scene,
     )
     .with_rig_type("keys");
-    ctrl.save_rig_collection(rig).await;
+    signal.rigs().save(rig).await;
 
-    let graph = ctrl
+    let graph = signal
         .resolve_target(ResolveTarget::RigScene {
             rig_id: seed_id("mixed-type-rig").into(),
             scene_id: seed_id("mixed-type-scene").into(),
@@ -1269,7 +1218,7 @@ async fn mixed_engine_type_rig_resolves() {
 /// Reorder engine scenes by mutating variants and re-saving.
 #[tokio::test]
 async fn reorder_engine_scenes() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     // Create engine with 4 scenes
     let snap = LayerSnapshot::new(seed_id("reord-scene-layer-snap"), "Default");
@@ -1279,7 +1228,7 @@ async fn reorder_engine_scenes() {
         EngineType::Keys,
         snap,
     );
-    ctrl.save_layer(layer).await;
+    signal.layers().save(layer).await;
 
     let mut engine = Engine::new(
         seed_id("reord-scene-engine"),
@@ -1291,11 +1240,11 @@ async fn reorder_engine_scenes() {
     engine.add_variant(EngineScene::new(seed_id("rse-b"), "B"));
     engine.add_variant(EngineScene::new(seed_id("rse-c"), "C"));
     engine.add_variant(EngineScene::new(seed_id("rse-d"), "D"));
-    ctrl.save_engine(engine).await;
+    signal.engines().save(engine).await;
 
     // Reorder to [D, B, C, A] by manipulating variants
-    let mut loaded = ctrl
-        .load_engine(seed_id("reord-scene-engine"))
+    let mut loaded = signal
+        .engines().load(seed_id("reord-scene-engine"))
         .await
         .expect("engine");
     let original = loaded.variants.clone();
@@ -1305,10 +1254,10 @@ async fn reorder_engine_scenes() {
         original.iter().find(|v| v.name == "C").unwrap().clone(),
         original.iter().find(|v| v.name == "A").unwrap().clone(),
     ];
-    ctrl.save_engine(loaded).await;
+    signal.engines().save(loaded).await;
 
-    let reloaded = ctrl
-        .load_engine(seed_id("reord-scene-engine"))
+    let reloaded = signal
+        .engines().load(seed_id("reord-scene-engine"))
         .await
         .expect("engine");
     let names: Vec<&str> = reloaded.variants.iter().map(|v| v.name.as_str()).collect();
@@ -1318,7 +1267,7 @@ async fn reorder_engine_scenes() {
 /// Reorder layer variants by mutating and re-saving.
 #[tokio::test]
 async fn reorder_layer_variants() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     let mut layer = Layer::new(
         seed_id("reord-variant-layer"),
@@ -1328,11 +1277,11 @@ async fn reorder_layer_variants() {
     );
     layer.add_variant(LayerSnapshot::new(seed_id("rvl-beta"), "Beta"));
     layer.add_variant(LayerSnapshot::new(seed_id("rvl-gamma"), "Gamma"));
-    ctrl.save_layer(layer).await;
+    signal.layers().save(layer).await;
 
     // Reorder to [Gamma, Alpha, Beta]
-    let mut loaded = ctrl
-        .load_layer(seed_id("reord-variant-layer"))
+    let mut loaded = signal
+        .layers().load(seed_id("reord-variant-layer"))
         .await
         .expect("layer");
     let original = loaded.variants.clone();
@@ -1341,10 +1290,10 @@ async fn reorder_layer_variants() {
         original.iter().find(|v| v.name == "Alpha").unwrap().clone(),
         original.iter().find(|v| v.name == "Beta").unwrap().clone(),
     ];
-    ctrl.save_layer(loaded).await;
+    signal.layers().save(loaded).await;
 
-    let reloaded = ctrl
-        .load_layer(seed_id("reord-variant-layer"))
+    let reloaded = signal
+        .layers().load(seed_id("reord-variant-layer"))
         .await
         .expect("layer");
     let names: Vec<&str> = reloaded.variants.iter().map(|v| v.name.as_str()).collect();
@@ -1358,9 +1307,9 @@ async fn reorder_layer_variants() {
 /// Resolve all seeded keys profile patches end-to-end.
 #[tokio::test]
 async fn resolve_all_keys_patches_end_to_end() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
-    let profiles = ctrl.list_profiles().await;
+    let profiles = signal.profiles().list().await;
     let keys_profile = profiles
         .iter()
         .find(|p| p.name == "Keys Feature")
@@ -1368,7 +1317,7 @@ async fn resolve_all_keys_patches_end_to_end() {
 
     let mut total_engines = 0;
     for patch in &keys_profile.patches {
-        let graph = ctrl
+        let graph = signal
             .resolve_target(ResolveTarget::ProfilePatch {
                 profile_id: keys_profile.id.clone(),
                 patch_id: patch.id.clone(),
@@ -1387,9 +1336,9 @@ async fn resolve_all_keys_patches_end_to_end() {
 /// Full setlist → song → section → resolve sweep including keys songs.
 #[tokio::test]
 async fn full_setlist_sweep_includes_keys() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
-    let setlists = ctrl.list_setlists().await;
+    let setlists = signal.setlists().list().await;
     assert!(!setlists.is_empty());
 
     let mut resolved_count = 0;
@@ -1397,12 +1346,12 @@ async fn full_setlist_sweep_includes_keys() {
 
     for setlist in &setlists {
         for entry in &setlist.entries {
-            if let Some(song) = ctrl.load_song(entry.song_id.clone()).await {
+            if let Some(song) = signal.songs().load(entry.song_id.clone()).await {
                 if song.name == "Feature-Demo Song" {
                     keys_song_found = true;
                 }
                 for section in &song.sections {
-                    let result = ctrl
+                    let result = signal
                         .resolve_target(ResolveTarget::SongSection {
                             song_id: song.id.clone(),
                             section_id: section.id.clone(),

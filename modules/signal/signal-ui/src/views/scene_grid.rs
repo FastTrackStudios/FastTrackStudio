@@ -5,7 +5,6 @@
 
 use dioxus::prelude::*;
 use signal::rig::Rig;
-use signal::SignalController;
 
 use crate::components::{SceneTileGrid, TileData};
 
@@ -17,8 +16,6 @@ use crate::components::{SceneTileGrid, TileData};
 /// and renders them using the dumb `SceneTileGrid` component.
 #[component]
 pub fn RigSceneGrid(
-    /// Controller for fetching rig data.
-    controller: SignalController,
     /// Rig collection ID to display scenes for.
     rig_id: String,
     /// Currently active scene ID, if any.
@@ -27,17 +24,18 @@ pub fn RigSceneGrid(
     /// Callback when a scene tile is selected.
     on_scene_select: EventHandler<String>,
 ) -> Element {
+    let signal = crate::use_signal_service();
     let mut rig = use_signal(|| None::<Rig>);
 
     // Fetch rig when rig_id changes.
     {
-        let controller = controller.clone();
+        let signal = signal.clone();
         let rig_id = rig_id.clone();
         use_effect(move || {
-            let controller = controller.clone();
+            let signal = signal.clone();
             let rig_id = rig_id.clone();
             spawn(async move {
-                rig.set(controller.load_rig_collection(rig_id.as_str()).await);
+                rig.set(signal.rigs().load(rig_id.as_str()).await);
             });
         });
     }

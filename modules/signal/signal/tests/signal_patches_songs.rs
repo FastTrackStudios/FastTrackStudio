@@ -10,37 +10,17 @@
 //! Run with:
 //!   cargo test -p signal --test signal_patches_songs -- --nocapture
 
+mod fixtures;
+
+use fixtures::*;
 use signal::{
-    bootstrap_in_memory_controller_async,
     overrides::{NodePath, Override},
-    profile::{Patch, PatchId, Profile, ProfileId},
+    profile::{Patch, PatchId, PatchTarget, Profile, ProfileId},
     resolve::{ResolveTarget, ResolvedGraph},
     rig::{RigId, RigSceneId},
     seed_id,
     song::{Section, SectionId, SectionSource, Song, SongId},
 };
-
-// ─────────────────────────────────────────────────────────────
-//  Helpers
-// ─────────────────────────────────────────────────────────────
-
-async fn controller() -> signal::SignalController {
-    bootstrap_in_memory_controller_async()
-        .await
-        .expect("failed to bootstrap in-memory controller")
-}
-
-fn guitar_megarig_id() -> RigId {
-    seed_id("guitar-megarig").into()
-}
-
-fn guitar_megarig_default_scene() -> RigSceneId {
-    seed_id("guitar-megarig-default").into()
-}
-
-fn guitar_megarig_lead_scene() -> RigSceneId {
-    seed_id("guitar-megarig-lead").into()
-}
 
 // ─────────────────────────────────────────────────────────────
 //  Profile / Patch tests
@@ -49,9 +29,9 @@ fn guitar_megarig_lead_scene() -> RigSceneId {
 /// Verify seed profiles are present.
 #[tokio::test]
 async fn seed_profiles_are_loaded() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
-    let profiles = ctrl.list_profiles().await;
+    let profiles = signal.profiles().list().await;
     println!("Seeded profiles:");
     for p in &profiles {
         println!("  {} — {} ({} patches)", p.id, p.name, p.patches.len());
@@ -78,34 +58,36 @@ async fn seed_profiles_are_loaded() {
 /// Load a specific profile patch by ID and verify its rig reference.
 #[tokio::test]
 async fn load_worship_lead_patch() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
-    let patch = ctrl
-        .load_profile_variant(
+    let patch = signal
+        .profiles().load_patch(
             seed_id("guitar-worship-profile"),
             seed_id("guitar-worship-lead"),
         )
         .await
         .expect("guitar-worship-lead patch not found");
 
-    println!(
-        "Patch '{}': rig={} scene={} overrides={}",
-        patch.name,
-        patch.rig_id,
-        patch.rig_variant_id,
-        patch.overrides.len()
-    );
+    match &patch.target {
+        PatchTarget::RigScene { rig_id, scene_id } => {
+            println!(
+                "Patch '{}': rig={} scene={} overrides={}",
+                patch.name,
+                rig_id,
+                scene_id,
+                patch.overrides.len()
+            );
 
-    assert_eq!(patch.name, "Lead");
-    assert_eq!(
-        patch.rig_id.to_string(),
-        seed_id("guitar-megarig").to_string()
-    );
-    // Lead patch targets the lead scene
-    assert_eq!(
-        patch.rig_variant_id.to_string(),
-        seed_id("guitar-megarig-lead").to_string()
-    );
+            assert_eq!(patch.name, "Lead");
+            assert_eq!(rig_id.to_string(), seed_id("guitar-megarig").to_string());
+            // Lead patch targets the lead scene
+            assert_eq!(
+                scene_id.to_string(),
+                seed_id("guitar-megarig-lead").to_string()
+            );
+        }
+        _ => panic!("expected RigScene target"),
+    }
     assert!(
         !patch.overrides.is_empty(),
         "Lead patch should have overrides"
@@ -115,13 +97,13 @@ async fn load_worship_lead_patch() {
 /// Create a new profile with two patches, save it, reload, verify round-trip.
 #[tokio::test]
 async fn create_and_reload_custom_profile() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     let clean_id = PatchId::new();
     let lead_id = PatchId::new();
     let profile_id = ProfileId::new();
 
-    let clean = Patch::new(
+    let clean = Patch::from_rig_scene(
         clean_id.clone(),
         "Clean",
         guitar_megarig_id(),
@@ -135,7 +117,7 @@ async fn create_and_reload_custom_profile() {
         0.20,
     ));
 
-    let lead = Patch::new(
+    let lead = Patch::from_rig_scene(
         lead_id.clone(),
         "Lead",
         guitar_megarig_id(),
@@ -152,10 +134,10 @@ async fn create_and_reload_custom_profile() {
     let mut profile = Profile::new(profile_id.clone(), "Test Profile", clean);
     profile.add_patch(lead);
 
-    ctrl.save_profile(profile).await;
+    signal.profiles().save(profile).await;
 
-    let reloaded = ctrl
-        .load_profile(profile_id.clone())
+    let reloaded = signal
+        .profiles().load(profile_id.clone())
         .await
         .expect("custom profile not found after save");
 
@@ -182,16 +164,16 @@ async fn create_and_reload_custom_profile() {
 /// Add a patch to an existing profile, save, verify count increases.
 #[tokio::test]
 async fn add_patch_to_existing_profile() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
-    let mut worship = ctrl
-        .load_profile(seed_id("guitar-worship-profile"))
+    let mut worship = signal
+        .profiles().load(seed_id("guitar-worship-profile"))
         .await
         .expect("worship profile not found");
 
     let original_count = worship.patches.len();
 
-    let bonus = Patch::new(
+    let bonus = Patch::from_rig_scene(
         PatchId::new(),
         "Bonus Clean",
         guitar_megarig_id(),
@@ -199,10 +181,10 @@ async fn add_patch_to_existing_profile() {
     );
     worship.add_patch(bonus);
 
-    ctrl.save_profile(worship).await;
+    signal.profiles().save(worship).await;
 
-    let reloaded = ctrl
-        .load_profile(seed_id("guitar-worship-profile"))
+    let reloaded = signal
+        .profiles().load(seed_id("guitar-worship-profile"))
         .await
         .expect("worship profile not found after update");
 
@@ -218,10 +200,10 @@ async fn add_patch_to_existing_profile() {
 /// Blues profile has non-default default patch (Crunch, not Clean).
 #[tokio::test]
 async fn blues_profile_default_is_crunch() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
-    let blues = ctrl
-        .load_profile(seed_id("guitar-blues-profile"))
+    let blues = signal
+        .profiles().load(seed_id("guitar-blues-profile"))
         .await
         .expect("blues profile not found");
 
@@ -245,9 +227,9 @@ async fn blues_profile_default_is_crunch() {
 /// Verify seed songs are present.
 #[tokio::test]
 async fn seed_songs_are_loaded() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
-    let songs = ctrl.list_songs().await;
+    let songs = signal.songs().list().await;
     println!("Seeded songs:");
     for s in &songs {
         println!("  {} — {} ({} sections)", s.id, s.name, s.sections.len());
@@ -259,7 +241,7 @@ async fn seed_songs_are_loaded() {
 /// Create a song with both Patch-sourced and RigScene-sourced sections, save, reload.
 #[tokio::test]
 async fn create_song_with_mixed_section_sources() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     let verse_id = SectionId::new();
     let chorus_id = SectionId::new();
@@ -295,10 +277,10 @@ async fn create_song_with_mixed_section_sources() {
     song.add_section(chorus);
     song.add_section(bridge);
 
-    ctrl.save_song(song).await;
+    signal.songs().save(song).await;
 
-    let reloaded = ctrl
-        .load_song(song_id.clone())
+    let reloaded = signal
+        .songs().load(song_id.clone())
         .await
         .expect("test song not found after save");
 
@@ -340,7 +322,7 @@ async fn create_song_with_mixed_section_sources() {
 /// Modify a section's overrides after initial save, verify update persists.
 #[tokio::test]
 async fn update_section_override_persists() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     let section_id = SectionId::new();
     let song_id = SongId::new();
@@ -352,7 +334,7 @@ async fn update_section_override_persists() {
         guitar_megarig_default_scene(),
     );
     let mut song = Song::new(song_id.clone(), "Override Test Song", section);
-    ctrl.save_song(song.clone()).await;
+    signal.songs().save(song.clone()).await;
 
     // Add an override to the existing section
     if let Some(s) = song.sections.iter_mut().find(|s| s.id == section_id) {
@@ -364,10 +346,10 @@ async fn update_section_override_persists() {
             0.65,
         ));
     }
-    ctrl.save_song(song).await;
+    signal.songs().save(song).await;
 
-    let reloaded = ctrl
-        .load_song(song_id)
+    let reloaded = signal
+        .songs().load(song_id)
         .await
         .expect("song not found after update");
     let section = reloaded.section(&section_id).unwrap();
@@ -392,9 +374,9 @@ async fn update_section_override_persists() {
 /// Resolve a bare RigScene — verifies the basic resolution pipeline works.
 #[tokio::test]
 async fn resolve_rig_scene_produces_graph() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
-    let graph = ctrl
+    let graph = signal
         .resolve_target(ResolveTarget::RigScene {
             rig_id: guitar_megarig_id(),
             scene_id: guitar_megarig_default_scene(),
@@ -430,10 +412,10 @@ async fn resolve_rig_scene_produces_graph() {
 /// modify the final resolved block value.
 #[tokio::test]
 async fn resolve_profile_patch_applies_gain_override() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     // guitar-worship-clean sets amp gain to 0.18
-    let graph = ctrl
+    let graph = signal
         .resolve_target(ResolveTarget::ProfilePatch {
             profile_id: seed_id("guitar-worship-profile").into(),
             patch_id: seed_id("guitar-worship-clean").into(),
@@ -448,7 +430,7 @@ async fn resolve_profile_patch_applies_gain_override() {
     );
 
     // Find the amp block's gain parameter in the resolved graph
-    let gain = find_param_in_graph(&graph, "amp", "gain");
+    let gain = graph.find_param("amp", "gain");
     println!("  Resolved amp gain: {:?}", gain);
 
     // Patch sets gain to 0.18; default is 0.45 — must be overridden
@@ -463,9 +445,9 @@ async fn resolve_profile_patch_applies_gain_override() {
 /// Resolve the Lead patch and verify the resolved amp gain is higher than Clean.
 #[tokio::test]
 async fn resolve_lead_patch_has_higher_gain_than_clean() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
-    let clean_graph = ctrl
+    let clean_graph = signal
         .resolve_target(ResolveTarget::ProfilePatch {
             profile_id: seed_id("guitar-worship-profile").into(),
             patch_id: seed_id("guitar-worship-clean").into(),
@@ -473,7 +455,7 @@ async fn resolve_lead_patch_has_higher_gain_than_clean() {
         .await
         .expect("resolve clean failed");
 
-    let lead_graph = ctrl
+    let lead_graph = signal
         .resolve_target(ResolveTarget::ProfilePatch {
             profile_id: seed_id("guitar-worship-profile").into(),
             patch_id: seed_id("guitar-worship-lead").into(),
@@ -481,8 +463,8 @@ async fn resolve_lead_patch_has_higher_gain_than_clean() {
         .await
         .expect("resolve lead failed");
 
-    let clean_gain = find_param_in_graph(&clean_graph, "amp", "gain");
-    let lead_gain = find_param_in_graph(&lead_graph, "amp", "gain");
+    let clean_gain = clean_graph.find_param("amp", "gain");
+    let lead_gain = lead_graph.find_param("amp", "gain");
 
     println!("Resolved gain: clean={:?} lead={:?}", clean_gain, lead_gain);
 
@@ -498,10 +480,10 @@ async fn resolve_lead_patch_has_higher_gain_than_clean() {
 /// to resolving that patch directly.
 #[tokio::test]
 async fn resolve_song_section_via_patch_matches_direct_patch() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     // guitar-worship-song uses patches from the worship profile
-    let songs = ctrl.list_songs().await;
+    let songs = signal.songs().list().await;
     let worship_song = songs
         .iter()
         .find(|s| s.name.contains("Worship") || s.name.contains("worship"));
@@ -514,9 +496,9 @@ async fn resolve_song_section_via_patch_matches_direct_patch() {
         let song_id = SongId::new();
         let section_id = section.id.clone();
         let song = Song::new(song_id.clone(), "Test Worship Song", section);
-        ctrl.save_song(song).await;
+        signal.songs().save(song).await;
 
-        let graph = ctrl
+        let graph = signal
             .resolve_target(ResolveTarget::SongSection {
                 song_id: song_id.into(),
                 section_id: section_id.into(),
@@ -536,7 +518,7 @@ async fn resolve_song_section_via_patch_matches_direct_patch() {
         first_section.name, song.name
     );
 
-    let graph = ctrl
+    let graph = signal
         .resolve_target(ResolveTarget::SongSection {
             song_id: song.id.clone().into(),
             section_id: first_section.id.clone().into(),
@@ -561,7 +543,7 @@ async fn resolve_song_section_via_patch_matches_direct_patch() {
 /// to the equivalent RigScene target.
 #[tokio::test]
 async fn resolve_rig_scene_section_equals_direct_rig_scene() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     let section_id = SectionId::new();
     let song_id = SongId::new();
@@ -573,9 +555,9 @@ async fn resolve_rig_scene_section_equals_direct_rig_scene() {
         guitar_megarig_default_scene(),
     );
     let song = Song::new(song_id.clone(), "Direct Scene Song", section);
-    ctrl.save_song(song).await;
+    signal.songs().save(song).await;
 
-    let via_section = ctrl
+    let via_section = signal
         .resolve_target(ResolveTarget::SongSection {
             song_id: song_id.into(),
             section_id: section_id.into(),
@@ -583,7 +565,7 @@ async fn resolve_rig_scene_section_equals_direct_rig_scene() {
         .await
         .expect("resolve via section failed");
 
-    let via_rig = ctrl
+    let via_rig = signal
         .resolve_target(ResolveTarget::RigScene {
             rig_id: guitar_megarig_id(),
             scene_id: guitar_megarig_default_scene(),
@@ -609,10 +591,10 @@ async fn resolve_rig_scene_section_equals_direct_rig_scene() {
 /// Solo patch in Worship profile targets lead scene + adds own overrides.
 #[tokio::test]
 async fn patch_overrides_stack_on_top_of_rig_scene_overrides() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     // Resolve the lead rig scene directly (baseline)
-    let rig_graph = ctrl
+    let rig_graph = signal
         .resolve_target(ResolveTarget::RigScene {
             rig_id: guitar_megarig_id(),
             scene_id: guitar_megarig_lead_scene(),
@@ -621,7 +603,7 @@ async fn patch_overrides_stack_on_top_of_rig_scene_overrides() {
         .expect("resolve rig scene failed");
 
     // Resolve the Solo patch (targets lead scene + own gain+delay overrides)
-    let patch_graph = ctrl
+    let patch_graph = signal
         .resolve_target(ResolveTarget::ProfilePatch {
             profile_id: seed_id("guitar-worship-profile").into(),
             patch_id: seed_id("guitar-worship-solo").into(),
@@ -645,7 +627,7 @@ async fn patch_overrides_stack_on_top_of_rig_scene_overrides() {
     );
 
     // Solo patch sets gain=0.72 and delay mix=0.30
-    let solo_gain = find_param_in_graph(&patch_graph, "amp", "gain");
+    let solo_gain = patch_graph.find_param("amp", "gain");
     println!("Solo resolved gain: {:?}", solo_gain);
     if let Some(g) = solo_gain {
         assert!(
@@ -656,43 +638,62 @@ async fn patch_overrides_stack_on_top_of_rig_scene_overrides() {
 }
 
 // ─────────────────────────────────────────────────────────────
-//  Helper: walk a ResolvedGraph to find a parameter value
+//  All-Around profile — activate_patch for every slot
 // ─────────────────────────────────────────────────────────────
 
-/// Walk all engines → layers → modules → blocks to find the first parameter
-/// matching `block_id_fragment` and `param_id`.
-fn find_param_in_graph(
-    graph: &ResolvedGraph,
-    block_id_fragment: &str,
-    param_id: &str,
-) -> Option<f32> {
-    for engine in &graph.engines {
-        for layer in &engine.layers {
-            for module in &layer.modules {
-                for block in &module.blocks {
-                    if block.node_id.contains(block_id_fragment)
-                        || block.label.to_lowercase().contains(block_id_fragment)
-                    {
-                        for param in block.block.parameters() {
-                            if param.id() == param_id {
-                                return Some(param.value().get());
-                            }
-                        }
-                    }
-                }
-            }
-            for block in &layer.standalone_blocks {
-                if block.node_id.contains(block_id_fragment)
-                    || block.label.to_lowercase().contains(block_id_fragment)
-                {
-                    for param in block.block.parameters() {
-                        if param.id() == param_id {
-                            return Some(param.value().get());
-                        }
-                    }
-                }
-            }
-        }
+/// Activate each patch in the All-Around profile via activate_patch().
+///
+/// The All-Around profile draws from 4 different NDSP plugins + a
+/// profile-level RfxChain. Each patch targets a BlockSnapshot. This test
+/// verifies that activate_patch resolves successfully for every slot,
+/// including the default (None) path.
+#[tokio::test]
+async fn all_around_activate_each_patch() {
+    use signal::profile::PatchId;
+
+    let signal = controller().await;
+    let profile_id = seed_id("guitar-allaround-profile");
+
+    let profile = signal
+        .profiles().load(profile_id.clone())
+        .await
+        .expect("All-Around profile not found");
+
+    assert_eq!(profile.patches.len(), 8, "All-Around should have 8 patches");
+
+    let expected_names = [
+        "Clean", "Crunch", "Drive", "Lead", "Funk", "Ambient", "Q-Tron", "Solo",
+    ];
+
+    // Activate default (None) — should resolve to Clean
+    let default_graph = signal
+        .profiles().activate(profile_id.clone(), None::<PatchId>)
+        .await
+        .expect("activate_patch(default) failed");
+    println!(
+        "Default patch resolved: {} engine(s)",
+        default_graph.engines.len()
+    );
+
+    // Activate each patch by ID
+    for (i, patch) in profile.patches.iter().enumerate() {
+        assert_eq!(
+            patch.name, expected_names[i],
+            "patch {i} name mismatch: expected '{}', got '{}'",
+            expected_names[i], patch.name
+        );
+
+        let graph = signal
+            .profiles().activate(profile_id.clone(), Some(patch.id.clone()))
+            .await
+            .unwrap_or_else(|e| panic!("activate_patch('{}') failed: {:?}", patch.name, e));
+
+        println!(
+            "  [{}] {} — {} engine(s), {} overrides",
+            i + 1,
+            patch.name,
+            graph.engines.len(),
+            graph.effective_overrides.len()
+        );
     }
-    None
 }

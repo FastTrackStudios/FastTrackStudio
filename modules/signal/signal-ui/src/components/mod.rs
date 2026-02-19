@@ -9,6 +9,7 @@ pub mod audio_controls;
 pub mod audio_viz;
 mod context_menu;
 mod dialog;
+mod manage_buttons;
 mod side_sheet;
 mod slider;
 mod tabs;
@@ -34,10 +35,11 @@ mod signal_flow_grid_view;
 // Re-exports: primitives
 pub use audio_controls::{Knob, KnobSize, XYPad};
 pub use audio_viz::{LevelMeter, LevelMeterOrientation, SpectrumAnalyzer, WaveformDisplay};
-pub use dialog::{Dialog, DialogClose, DialogDescription, DialogFooter, DialogHeader, DialogTitle};
-pub use slider::{Slider, SliderOrientation};
 pub use context_menu::{ContextMenu, ContextMenuItem, ContextMenuSeparator};
+pub use dialog::{Dialog, DialogClose, DialogDescription, DialogFooter, DialogHeader, DialogTitle};
+pub use manage_buttons::{CaptureButton, CreateProfileButton, CreateSongButton};
 pub use side_sheet::{SheetSide, SideSheet};
+pub use slider::{Slider, SliderOrientation};
 pub use tabs::{TabContent, TabList, TabTrigger, Tabs};
 
 // Re-exports: layout

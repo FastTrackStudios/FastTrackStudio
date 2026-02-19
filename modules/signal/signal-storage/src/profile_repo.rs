@@ -3,8 +3,7 @@
 use sea_orm::*;
 use signal_proto::metadata::Metadata;
 use signal_proto::overrides::Override;
-use signal_proto::profile::{Patch, PatchId, Profile, ProfileId};
-use signal_proto::rig::{RigId, RigSceneId};
+use signal_proto::profile::{Patch, PatchId, PatchTarget, Profile, ProfileId};
 
 use crate::entity;
 use crate::{DatabaseConnection, StorageError, StorageResult};
@@ -55,8 +54,7 @@ impl ProfileRepoLive {
 
     fn variant_state_to_json(patch: &Patch) -> StorageResult<String> {
         let state = PatchState {
-            rig_id: patch.rig_id.as_str(),
-            rig_variant_id: patch.rig_variant_id.as_str(),
+            target: &patch.target,
             overrides: &patch.overrides,
         };
         serde_json::to_string(&state)
@@ -84,8 +82,7 @@ impl ProfileRepoLive {
         Ok(Patch {
             id: model.variant_id_branded(),
             name: model.name.clone(),
-            rig_id: RigId::from(state.rig_id),
-            rig_variant_id: RigSceneId::from(state.rig_variant_id),
+            target: state.target,
             overrides: state.overrides,
             metadata,
         })
@@ -121,15 +118,13 @@ impl ProfileRepoLive {
 
 #[derive(serde::Serialize)]
 struct PatchState<'a> {
-    rig_id: &'a str,
-    rig_variant_id: &'a str,
+    target: &'a PatchTarget,
     overrides: &'a [Override],
 }
 
 #[derive(serde::Deserialize)]
 struct PatchStateOwned {
-    rig_id: String,
-    rig_variant_id: String,
+    target: PatchTarget,
     overrides: Vec<Override>,
 }
 
@@ -225,6 +220,7 @@ impl ProfileRepo for ProfileRepoLive {
 mod tests {
     use super::*;
     use crate::Database;
+    use signal_proto::rig::{RigId, RigSceneId};
     use signal_proto::seed_id;
 
     type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
@@ -244,13 +240,13 @@ mod tests {
     }
 
     fn sample_profile() -> Profile {
-        let patch1 = Patch::new(
+        let patch1 = Patch::from_rig_scene(
             seed_id("p-clean"),
             "Clean",
             seed_id("rig-1"),
             seed_id("rs-clean"),
         );
-        let patch2 = Patch::new(
+        let patch2 = Patch::from_rig_scene(
             seed_id("p-lead"),
             "Lead",
             seed_id("rig-1"),
@@ -280,12 +276,12 @@ mod tests {
         let p1 = Profile::new(
             seed_id("p1"),
             "Profile 1",
-            Patch::new(seed_id("pa1"), "Default", seed_id("r1"), seed_id("rs1")),
+            Patch::from_rig_scene(seed_id("pa1"), "Default", seed_id("r1"), seed_id("rs1")),
         );
         let p2 = Profile::new(
             seed_id("p2"),
             "Profile 2",
-            Patch::new(seed_id("pa2"), "Default", seed_id("r2"), seed_id("rs2")),
+            Patch::from_rig_scene(seed_id("pa2"), "Default", seed_id("r2"), seed_id("rs2")),
         );
         repo.save_profile(&p1).await?;
         repo.save_profile(&p2).await?;
@@ -323,10 +319,12 @@ mod tests {
             .await?;
         let variant = variant.expect("should find patch");
         assert_eq!(variant.name, "Lead");
-        assert_eq!(variant.rig_id, RigId::from_uuid(seed_id("rig-1")));
         assert_eq!(
-            variant.rig_variant_id,
-            RigSceneId::from_uuid(seed_id("rs-lead"))
+            variant.target,
+            PatchTarget::RigScene {
+                rig_id: RigId::from_uuid(seed_id("rig-1")),
+                scene_id: RigSceneId::from_uuid(seed_id("rs-lead")),
+            }
         );
         Ok(())
     }
@@ -334,7 +332,7 @@ mod tests {
     #[tokio::test]
     async fn patch_rig_references_round_trip() -> Result<()> {
         let repo = test_repo().await?;
-        let patch = Patch::new(
+        let patch = Patch::from_rig_scene(
             seed_id("p1"),
             "Test",
             seed_id("rig-guitar"),
@@ -349,10 +347,12 @@ mod tests {
 
         let loaded = repo.load_profile(&pid("prof-1")).await?.unwrap();
         let p = &loaded.patches[0];
-        assert_eq!(p.rig_id, RigId::from_uuid(seed_id("rig-guitar")));
         assert_eq!(
-            p.rig_variant_id,
-            RigSceneId::from_uuid(seed_id("scene-heavy"))
+            p.target,
+            PatchTarget::RigScene {
+                rig_id: RigId::from_uuid(seed_id("rig-guitar")),
+                scene_id: RigSceneId::from_uuid(seed_id("scene-heavy")),
+            }
         );
         assert_eq!(p.overrides.len(), 1);
         Ok(())

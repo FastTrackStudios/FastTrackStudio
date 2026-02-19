@@ -89,6 +89,27 @@ pub trait Collection {
             .find(|v| v.variant_id() == default_id)
     }
 
+    /// Mutable access to the designated default variant.
+    fn default_variant_mut(&mut self) -> Option<&mut Self::Variant>
+    where
+        <Self::Variant as Variant>::Id: Clone,
+    {
+        let default_id = self.default_variant_id().clone();
+        self.variants_mut()
+            .iter_mut()
+            .find(|v| v.variant_id() == &default_id)
+    }
+
+    /// Look up a variant by name (first match).
+    fn variant_by_name(&self, name: &str) -> Option<&Self::Variant> {
+        self.variants().iter().find(|v| v.name() == name)
+    }
+
+    /// Mutable lookup by name (first match).
+    fn variant_by_name_mut(&mut self, name: &str) -> Option<&mut Self::Variant> {
+        self.variants_mut().iter_mut().find(|v| v.name() == name)
+    }
+
     /// Ensure the collection satisfies the normalization contract.
     fn normalize_default(&mut self)
     where

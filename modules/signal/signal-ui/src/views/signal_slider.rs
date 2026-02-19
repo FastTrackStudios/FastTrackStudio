@@ -5,12 +5,13 @@
 
 use dioxus::prelude::*;
 use signal::tagging::{BrowserHit, BrowserMode, BrowserQuery};
-use signal::{Block, BlockType, ModulePreset, Preset, SignalController, Snapshot};
+use signal::{Block, BlockType, ModulePreset, Preset, Snapshot};
 
 // region: --- Main Component
 
 #[component]
-pub fn SignalSlider(controller: SignalController) -> Element {
+pub fn SignalSlider() -> Element {
+    let signal = crate::use_signal_service();
     let mut block_type = use_signal(|| BlockType::Amp);
     let mut block = use_signal(Block::default);
     let mut collections = use_signal(Vec::<Preset>::new);
@@ -22,16 +23,14 @@ pub fn SignalSlider(controller: SignalController) -> Element {
 
     // Fetch block state, block collections, and module collections on type change.
     {
-        let controller = controller.clone();
+        let signal = signal.clone();
         use_effect(move || {
-            let controller = controller.clone();
+            let signal = signal.clone();
             let selected = block_type();
             spawn(async move {
-                block.set(controller.get_block(selected).await);
-                #[allow(deprecated)]
-                collections.set(controller.list_presets(selected).await);
-                #[allow(deprecated)]
-                module_collections.set(controller.list_module_presets().await);
+                block.set(signal.blocks().get(selected).await);
+                collections.set(signal.block_presets().list(selected).await);
+                module_collections.set(signal.module_presets().list().await);
                 active_variant_id.set(None);
             });
         });
@@ -39,14 +38,14 @@ pub fn SignalSlider(controller: SignalController) -> Element {
 
     // Prime browser index and initial semantic query once at mount.
     {
-        let controller = controller.clone();
+        let signal = signal.clone();
         use_effect(move || {
-            let controller = controller.clone();
+            let signal = signal.clone();
             spawn(async move {
-                let index = controller.browser_index().await;
+                let index = signal.browser_index().await;
                 browser_entry_count.set(index.entries().len());
                 browser_hits.set(
-                    controller
+                    signal
                         .browse(BrowserQuery {
                             mode: BrowserMode::Semantic,
                             include: vec!["tone:clean".to_string()],
@@ -86,7 +85,7 @@ pub fn SignalSlider(controller: SignalController) -> Element {
                     {
                         let label = parameter.name().to_string();
                         let value = parameter.value().get();
-                        let row_controller = controller.clone();
+                        let row_signal = signal.clone();
                         rsx! {
                             ParameterSlider {
                                 key: "{parameter.id()}",
@@ -97,10 +96,10 @@ pub fn SignalSlider(controller: SignalController) -> Element {
                                         let mut current = block();
                                         current.set_parameter_value(index, next);
                                         block.set(current.clone());
-                                        let controller = row_controller.clone();
+                                        let signal = row_signal.clone();
                                         let selected = active_block_type;
                                         spawn(async move {
-                                            let _ = controller.set_block(selected, current).await;
+                                            let _ = signal.blocks().set(selected, current).await;
                                         });
                                     }
                                 },
@@ -120,7 +119,6 @@ pub fn SignalSlider(controller: SignalController) -> Element {
                             CollectionCard {
                                 key: "{collection_id}",
                                 collection,
-                                controller: controller.clone(),
                                 block_type: active_block_type,
                                 block,
                                 active_variant_id,
@@ -141,7 +139,6 @@ pub fn SignalSlider(controller: SignalController) -> Element {
                                 ModuleCollectionCard {
                                     key: "{mc_id}",
                                     collection: module_collection,
-                                    controller: controller.clone(),
                                 }
                             }
                         }
@@ -163,9 +160,9 @@ pub fn SignalSlider(controller: SignalController) -> Element {
                     button {
                         class: "px-3 py-1 rounded border border-zinc-400 hover:bg-zinc-100 text-sm",
                         onclick: {
-                            let controller = controller.clone();
+                            let signal = signal.clone();
                             move |_| {
-                                let controller = controller.clone();
+                                let signal = signal.clone();
                                 let raw = browser_query_input();
                                 let include = raw
                                     .split_whitespace()
@@ -174,7 +171,7 @@ pub fn SignalSlider(controller: SignalController) -> Element {
                                     .map(ToString::to_string)
                                     .collect::<Vec<_>>();
                                 spawn(async move {
-                                    let hits = controller
+                                    let hits = signal
                                         .browse(BrowserQuery {
                                             mode: BrowserMode::Semantic,
                                             include,
@@ -210,11 +207,11 @@ pub fn SignalSlider(controller: SignalController) -> Element {
 #[component]
 fn CollectionCard(
     collection: Preset,
-    controller: SignalController,
     block_type: BlockType,
     mut block: Signal<Block>,
     mut active_variant_id: Signal<Option<String>>,
 ) -> Element {
+    let signal = crate::use_signal_service();
     let collection_id = collection.id().to_string();
     let collection_name = collection.name().to_string();
     let variants = collection.snapshots().to_vec();
@@ -229,16 +226,15 @@ fn CollectionCard(
                 button {
                     class: "px-2 py-1 text-xs rounded border border-zinc-400 hover:bg-zinc-100",
                     onclick: {
-                        let controller = controller.clone();
+                        let signal = signal.clone();
                         let collection_id = collection_id.clone();
                         let default_id = default_variant_id.clone();
                         move |_| {
-                            let controller = controller.clone();
+                            let signal = signal.clone();
                             let collection_id = collection_id.clone();
                             let default_id = default_id.clone();
                             spawn(async move {
-                                #[allow(deprecated)]
-                                if let Some(next_block) = controller.load_preset_snapshot(block_type, collection_id.as_str(), default_id.as_str()).await {
+                                if let Some(next_block) = signal.block_presets().load_variant(block_type, collection_id.as_str(), default_id.as_str()).await {
                                     block.set(next_block);
                                     active_variant_id.set(Some(default_id));
                                 }
@@ -263,16 +259,15 @@ fn CollectionCard(
                                 key: "{variant_id}",
                                 class: if is_active { "w-full text-left p-2 rounded border-2 border-zinc-400 bg-zinc-50" } else { "w-full text-left p-2 rounded border border-zinc-200 hover:bg-zinc-50" },
                                 onclick: {
-                                    let controller = controller.clone();
+                                    let signal = signal.clone();
                                     let collection_id = collection_id.clone();
                                     let variant_id = variant_id.clone();
                                     move |_| {
-                                        let controller = controller.clone();
+                                        let signal = signal.clone();
                                         let collection_id = collection_id.clone();
                                         let variant_id = variant_id.clone();
                                         spawn(async move {
-                                            #[allow(deprecated)]
-                                            if let Some(next_block) = controller.load_preset_snapshot(block_type, collection_id.as_str(), variant_id.as_str()).await {
+                                            if let Some(next_block) = signal.block_presets().load_variant(block_type, collection_id.as_str(), variant_id.as_str()).await {
                                                 block.set(next_block);
                                                 active_variant_id.set(Some(variant_id));
                                             }
@@ -299,7 +294,8 @@ fn CollectionCard(
 // region: --- Module Collection Card
 
 #[component]
-fn ModuleCollectionCard(collection: ModulePreset, controller: SignalController) -> Element {
+fn ModuleCollectionCard(collection: ModulePreset) -> Element {
+    let signal = crate::use_signal_service();
     let collection_id = collection.id().to_string();
     let collection_name = collection.name().to_string();
     let variants = collection.snapshots().to_vec();
@@ -313,16 +309,15 @@ fn ModuleCollectionCard(collection: ModulePreset, controller: SignalController) 
                 button {
                     class: "px-2 py-1 text-xs rounded border border-zinc-400 hover:bg-zinc-100",
                     onclick: {
-                        let controller = controller.clone();
+                        let signal = signal.clone();
                         let collection_id = collection_id.clone();
                         let default_variant_id = default_variant_id.clone();
                         move |_| {
-                            let controller = controller.clone();
+                            let signal = signal.clone();
                             let collection_id = collection_id.clone();
                             let default_variant_id = default_variant_id.clone();
                             spawn(async move {
-                                #[allow(deprecated)]
-                                let _ = controller.load_module_preset_snapshot(collection_id.as_str(), default_variant_id.as_str()).await;
+                                let _ = signal.module_presets().load_variant(collection_id.as_str(), default_variant_id.as_str()).await;
                                 loaded_variant.set(Some(default_variant_id));
                             });
                         }
@@ -345,16 +340,15 @@ fn ModuleCollectionCard(collection: ModulePreset, controller: SignalController) 
                                 key: "{variant_id}",
                                 class: if is_active { "w-full text-left p-2 rounded border-2 border-zinc-400 bg-zinc-50" } else { "w-full text-left p-2 rounded border border-zinc-200 hover:bg-zinc-50" },
                                 onclick: {
-                                    let controller = controller.clone();
+                                    let signal = signal.clone();
                                     let collection_id = collection_id.clone();
                                     let variant_id = variant_id.clone();
                                     move |_| {
-                                        let controller = controller.clone();
+                                        let signal = signal.clone();
                                         let collection_id = collection_id.clone();
                                         let variant_id = variant_id.clone();
                                         spawn(async move {
-                                            #[allow(deprecated)]
-                                            let _ = controller.load_module_preset_snapshot(collection_id.as_str(), variant_id.as_str()).await;
+                                            let _ = signal.module_presets().load_variant(collection_id.as_str(), variant_id.as_str()).await;
                                             loaded_variant.set(Some(variant_id));
                                         });
                                     }

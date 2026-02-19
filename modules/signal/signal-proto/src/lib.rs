@@ -17,6 +17,7 @@ use uuid::Uuid;
 pub mod actions;
 pub mod automation;
 pub mod block;
+pub mod builder;
 pub mod catalog;
 pub mod defaults;
 pub mod easing;
@@ -380,6 +381,13 @@ pub struct Snapshot {
     metadata: metadata::Metadata,
     #[serde(default = "default_version")]
     version: u32,
+    /// Optional binary plugin state (e.g. JUCE preset `.bin` data).
+    ///
+    /// When present, the DAW bridge loads this via `set_state_chunk` instead
+    /// of setting parameters one-by-one. This is required for plugins like
+    /// Neural DSP where fingerprint param names don't match REAPER-exposed names.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    state_data: Option<Vec<u8>>,
 }
 
 fn default_version() -> u32 {
@@ -394,6 +402,7 @@ impl Snapshot {
             block,
             metadata: metadata::Metadata::new(),
             version: 1,
+            state_data: None,
         }
     }
 
@@ -410,6 +419,7 @@ impl Snapshot {
             block,
             metadata: metadata::Metadata::new(),
             version,
+            state_data: None,
         }
     }
 
@@ -427,6 +437,7 @@ impl Snapshot {
             block,
             metadata,
             version,
+            state_data: None,
         }
     }
 
@@ -454,6 +465,18 @@ impl Snapshot {
     pub fn with_metadata(mut self, metadata: metadata::Metadata) -> Self {
         self.metadata = metadata;
         self
+    }
+
+    /// Attach binary plugin state data (e.g. JUCE `.bin` preset file).
+    #[must_use]
+    pub fn with_state_data(mut self, data: Vec<u8>) -> Self {
+        self.state_data = Some(data);
+        self
+    }
+
+    /// Binary plugin state data, if available.
+    pub fn state_data(&self) -> Option<&[u8]> {
+        self.state_data.as_deref()
     }
 
     /// Replace the block state. Used when saving parameter changes.
@@ -585,6 +608,13 @@ impl Preset {
             .iter()
             .find(|s| s.id() == snapshot_id)
             .cloned()
+    }
+
+    /// Add a snapshot to this preset's variant list.
+    pub fn add_snapshot(&mut self, snapshot: Snapshot) {
+        if !self.snapshots.iter().any(|s| s.id == snapshot.id) {
+            self.snapshots.push(snapshot);
+        }
     }
 
     pub fn metadata(&self) -> &metadata::Metadata {
@@ -1036,6 +1066,13 @@ impl ModulePreset {
             .cloned()
     }
 
+    /// Add a snapshot to this module preset's variant list.
+    pub fn add_snapshot(&mut self, snapshot: ModuleSnapshot) {
+        if !self.snapshots.iter().any(|s| s.id == snapshot.id) {
+            self.snapshots.push(snapshot);
+        }
+    }
+
     pub fn metadata(&self) -> &metadata::Metadata {
         &self.metadata
     }
@@ -1112,15 +1149,20 @@ impl traits::HasMetadata for ModulePreset {
 pub trait BlockService {
     async fn get_block(&self, block_type: BlockType) -> Block;
     async fn set_block(&self, block_type: BlockType, block: Block) -> Block;
-    async fn list_presets(&self, block_type: BlockType) -> Vec<Preset>;
-    async fn load_preset(&self, block_type: BlockType, preset_id: PresetId) -> Option<Snapshot>;
-    async fn load_preset_snapshot(
+    async fn list_block_presets(&self, block_type: BlockType) -> Vec<Preset>;
+    async fn load_block_preset(
+        &self,
+        block_type: BlockType,
+        preset_id: PresetId,
+    ) -> Option<Snapshot>;
+    async fn load_block_preset_snapshot(
         &self,
         block_type: BlockType,
         preset_id: PresetId,
         snapshot_id: SnapshotId,
     ) -> Option<Snapshot>;
-    async fn save_block_collection(&self, preset: Preset) -> ();
+    async fn save_block_preset(&self, preset: Preset) -> ();
+    async fn delete_block_preset(&self, block_type: BlockType, preset_id: PresetId) -> ();
     async fn list_module_presets(&self) -> Vec<ModulePreset>;
     async fn load_module_preset(&self, preset_id: ModulePresetId) -> Option<ModuleSnapshot>;
     async fn load_module_preset_snapshot(
@@ -1159,12 +1201,12 @@ pub trait EngineService {
 }
 
 #[roam::service]
-pub trait PresetService {
-    async fn list_presets_all(&self) -> Vec<rig::Rig>;
-    async fn load_preset_rig(&self, id: rig::RigId) -> Option<rig::Rig>;
-    async fn save_preset(&self, rig: rig::Rig) -> ();
-    async fn delete_preset(&self, id: rig::RigId) -> ();
-    async fn load_preset_variant(
+pub trait RigService {
+    async fn list_rigs(&self) -> Vec<rig::Rig>;
+    async fn load_rig(&self, id: rig::RigId) -> Option<rig::Rig>;
+    async fn save_rig(&self, rig: rig::Rig) -> ();
+    async fn delete_rig(&self, id: rig::RigId) -> ();
+    async fn load_rig_variant(
         &self,
         rig_id: rig::RigId,
         variant_id: rig::RigSceneId,

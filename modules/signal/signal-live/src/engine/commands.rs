@@ -120,6 +120,7 @@ impl From<&TransitionResult> for TransitionEventData {
 }
 
 /// Service trait for rig control — wraps engine with command/event pattern.
+#[allow(async_fn_in_trait)]
 pub trait RigControlService: Send + Sync {
     /// Execute a command and return resulting events.
     ///

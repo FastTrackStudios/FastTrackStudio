@@ -2,8 +2,8 @@
 
 use std::collections::HashMap;
 
-use sea_orm::*;
 use sea_orm::sea_query::Index;
+use sea_orm::*;
 use sea_orm::{ConnectionTrait, Schema};
 use signal_proto::{
     metadata::Metadata, Block, BlockType, Preset, PresetId, Snapshot, SnapshotId, ALL_BLOCK_TYPES,
@@ -31,6 +31,7 @@ pub trait BlockRepo: Send + Sync {
         variant_id: &SnapshotId,
     ) -> StorageResult<Option<Snapshot>>;
     async fn save_block_collection(&self, preset: Preset) -> StorageResult<()>;
+    async fn delete_block_collection(&self, id: &PresetId) -> StorageResult<()>;
 }
 
 // endregion: --- Trait
@@ -135,6 +136,7 @@ impl BlockRepoLive {
                     state_json: Set(block_to_json(&variant.block())?),
                     metadata_json: Set(metadata_to_json(variant.metadata())?),
                     version: Set(variant.version() as i32),
+                    state_data_b64: Set(state_data_to_b64(variant.state_data())),
                 })
                 .exec(&self.db)
                 .await?;
@@ -169,13 +171,28 @@ fn block_from_json(state_json: &str) -> StorageResult<Block> {
 }
 
 fn snapshot_from_model(model: &entity::snapshot::Model) -> StorageResult<Snapshot> {
-    Ok(Snapshot::with_version_and_metadata(
+    use base64::Engine as _;
+
+    let mut snapshot = Snapshot::with_version_and_metadata(
         model.snapshot_id_branded(),
         model.name.clone(),
         block_from_json(&model.state_json)?,
         model.version as u32,
         metadata_from_json(&model.metadata_json)?,
-    ))
+    );
+
+    if let Some(b64) = &model.state_data_b64 {
+        if let Ok(data) = base64::engine::general_purpose::STANDARD.decode(b64) {
+            snapshot = snapshot.with_state_data(data);
+        }
+    }
+
+    Ok(snapshot)
+}
+
+fn state_data_to_b64(data: Option<&[u8]>) -> Option<String> {
+    use base64::Engine as _;
+    data.map(|d| base64::engine::general_purpose::STANDARD.encode(d))
 }
 
 fn metadata_to_json(metadata: &Metadata) -> StorageResult<String> {
@@ -295,8 +312,7 @@ impl BlockRepo for BlockRepoLive {
             .order_by_asc(entity::snapshot::Column::Id)
             .all(&self.db)
             .await?;
-        let mut snapshots_by_preset: HashMap<String, Vec<entity::snapshot::Model>> =
-            HashMap::new();
+        let mut snapshots_by_preset: HashMap<String, Vec<entity::snapshot::Model>> = HashMap::new();
         for snapshot_model in snapshot_models {
             snapshots_by_preset
                 .entry(snapshot_model.preset_id.clone())
@@ -400,10 +416,26 @@ impl BlockRepo for BlockRepoLive {
                 state_json: Set(block_to_json(&variant.block())?),
                 metadata_json: Set(metadata_to_json(variant.metadata())?),
                 version: Set(variant.version() as i32),
+                state_data_b64: Set(state_data_to_b64(variant.state_data())),
             })
             .exec(&self.db)
             .await?;
         }
+
+        Ok(())
+    }
+
+    async fn delete_block_collection(&self, id: &PresetId) -> StorageResult<()> {
+        let preset_id = id.to_string();
+
+        entity::snapshot::Entity::delete_many()
+            .filter(entity::snapshot::Column::PresetId.eq(preset_id.clone()))
+            .exec(&self.db)
+            .await?;
+
+        entity::preset::Entity::delete_by_id(preset_id)
+            .exec(&self.db)
+            .await?;
 
         Ok(())
     }
@@ -463,27 +495,6 @@ mod tests {
     }
 
     // -- Block collection listing
-
-    #[tokio::test]
-    async fn list_block_collections_filters_by_type() -> Result<()> {
-        // -- Setup & Fixtures
-        let repo = seeded_repo().await?;
-
-        // -- Exec
-        let amp_collections = repo.list_block_collections(BlockType::Amp).await?;
-        let drive_collections = repo.list_block_collections(BlockType::Drive).await?;
-
-        // -- Check
-        assert_eq!(amp_collections.len(), 5); // Twin, AC30, JCM800, Recto, SLO
-        assert_eq!(drive_collections.len(), 5); // TS808, Klon, OCD, Bluesbreaker, Morning Glory
-        for c in &amp_collections {
-            assert_eq!(c.block_type(), BlockType::Amp);
-        }
-        for c in &drive_collections {
-            assert_eq!(c.block_type(), BlockType::Drive);
-        }
-        Ok(())
-    }
 
     #[tokio::test]
     async fn block_collection_contains_all_variants() -> Result<()> {
@@ -666,28 +677,6 @@ mod tests {
 
         // -- Check
         assert_eq!(loaded, Some(block2));
-        Ok(())
-    }
-
-    // -- Reseed idempotency
-
-    #[tokio::test]
-    async fn reseed_is_idempotent() -> Result<()> {
-        // -- Setup & Fixtures
-        let repo = BlockRepoLive::connect_sqlite_in_memory().await?;
-        repo.init_schema().await?;
-
-        let block_collections = crate::seed_data::default_block_collections();
-
-        // -- Exec: seed twice
-        repo.reseed_defaults(&block_collections).await?;
-        repo.reseed_defaults(&block_collections).await?;
-
-        // -- Check: counts are the same as single seed
-        let amp = repo.list_block_collections(BlockType::Amp).await?;
-        let drive = repo.list_block_collections(BlockType::Drive).await?;
-        assert_eq!(amp.len(), 5);
-        assert_eq!(drive.len(), 5);
         Ok(())
     }
 

@@ -87,6 +87,7 @@ pub enum ActivateResult {
 ///
 /// Implementors handle the DAW-specific FX chain manipulation. The trait
 /// defines the gapless switching protocol that `RigEngine` orchestrates.
+#[allow(async_fn_in_trait)]
 pub trait ModuleSlot: Send + Sync {
     /// Which processing stage this slot manages.
     fn module_type(&self) -> ModuleType;

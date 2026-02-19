@@ -38,6 +38,18 @@ impl SetlistEntry {
         }
     }
 
+    /// Clone this entry with a new ID and name.
+    pub fn duplicate(
+        &self,
+        new_id: impl Into<SetlistEntryId>,
+        new_name: impl Into<String>,
+    ) -> Self {
+        let mut dup = self.clone();
+        dup.id = new_id.into();
+        dup.name = new_name.into();
+        dup
+    }
+
     #[must_use]
     pub fn with_metadata(mut self, metadata: Metadata) -> Self {
         self.metadata = metadata;
@@ -77,6 +89,15 @@ impl Setlist {
 
     pub fn entry(&self, id: &SetlistEntryId) -> Option<&SetlistEntry> {
         self.entries.iter().find(|e| &e.id == id)
+    }
+
+    pub fn entry_mut(&mut self, id: &SetlistEntryId) -> Option<&mut SetlistEntry> {
+        self.entries.iter_mut().find(|e| &e.id == id)
+    }
+
+    pub fn remove_entry(&mut self, id: &SetlistEntryId) -> Option<SetlistEntry> {
+        let pos = self.entries.iter().position(|e| &e.id == id)?;
+        Some(self.entries.remove(pos))
     }
 
     #[must_use]

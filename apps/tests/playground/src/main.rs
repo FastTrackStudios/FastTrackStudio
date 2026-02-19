@@ -807,10 +807,11 @@ fn ModuleViewTab(controller: SignalController) -> Element {
         use_effect(move || {
             let controller = controller.clone();
             spawn(async move {
-                let collections = controller.list_module_collections().await;
+                let collections = controller.module_presets().list().await;
                 if let Some(first) = collections.first() {
                     let snapshot = controller
-                        .load_module_collection_default(first.id().to_string())
+                        .module_presets()
+                        .load_default(first.id().to_string())
                         .await;
                     if let Some(snap) = snapshot {
                         module_data.set(Some(snap.module().clone()));
@@ -889,7 +890,7 @@ fn SceneGridTab(controller: SignalController) -> Element {
         use_effect(move || {
             let controller = controller.clone();
             spawn(async move {
-                let rigs = controller.list_rig_collections().await;
+                let rigs = controller.rigs().list().await;
                 if let Some(first) = rigs.first() {
                     rig_id.set(Some(first.id.to_string()));
                 }

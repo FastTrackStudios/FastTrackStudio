@@ -57,6 +57,9 @@ pub struct ResolvedBlock {
     pub source_preset_id: Option<PresetId>,
     pub source_variant_id: Option<SnapshotId>,
     pub block: Block,
+    /// Binary plugin state data for direct chunk loading (bypasses param name matching).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state_data: Option<Vec<u8>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
@@ -89,4 +92,50 @@ pub struct ResolvedGraph {
     pub rig_scene_id: RigSceneId,
     pub engines: Vec<ResolvedEngine>,
     pub effective_overrides: Vec<Override>,
+}
+
+impl ResolvedGraph {
+    /// Find a block parameter value by matching `block_id_fragment` against
+    /// each block's `node_id` or `label` (case-insensitive), then returning
+    /// the value of the parameter whose id matches `param_id`.
+    ///
+    /// Walks engines → layers → modules → blocks and standalone blocks.
+    pub fn find_param(&self, block_id_fragment: &str, param_id: &str) -> Option<f32> {
+        for engine in &self.engines {
+            for layer in &engine.layers {
+                for module in &layer.modules {
+                    if let Some(v) =
+                        find_param_in_block(&module.blocks, block_id_fragment, param_id)
+                    {
+                        return Some(v);
+                    }
+                }
+                if let Some(v) =
+                    find_param_in_block(&layer.standalone_blocks, block_id_fragment, param_id)
+                {
+                    return Some(v);
+                }
+            }
+        }
+        None
+    }
+}
+
+fn find_param_in_block(
+    blocks: &[ResolvedBlock],
+    block_id_fragment: &str,
+    param_id: &str,
+) -> Option<f32> {
+    for block in blocks {
+        if block.node_id.contains(block_id_fragment)
+            || block.label.to_lowercase().contains(block_id_fragment)
+        {
+            for param in block.block.parameters() {
+                if param.id() == param_id {
+                    return Some(param.value().get());
+                }
+            }
+        }
+    }
+    None
 }

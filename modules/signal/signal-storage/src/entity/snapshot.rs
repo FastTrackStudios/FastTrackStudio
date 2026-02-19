@@ -13,6 +13,10 @@ pub struct Model {
     pub metadata_json: String,
     #[sea_orm(default_value = "1")]
     pub version: i32,
+    /// Binary plugin state (e.g. JUCE preset `.bin`), base64-encoded.
+    /// NULL when no binary state is available.
+    #[sea_orm(column_type = "Text", nullable)]
+    pub state_data_b64: Option<String>,
 }
 
 impl Model {

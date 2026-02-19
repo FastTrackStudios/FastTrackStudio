@@ -3,13 +3,13 @@
 //! Registers signal-ui panels with the dock renderer registry,
 //! decoupling panel definitions from the central app binary.
 //!
-//! All panels read [`signal::SignalController`] from Dioxus context
+//! All panels read [`signal::Signal`] from Dioxus context
 //! (the app must `provide_context` it before the dock renders).
 
 use dioxus::prelude::*;
 use dock_dioxus::PanelRendererRegistry;
 use dock_proto::PanelId;
-use signal::SignalController;
+use signal::Signal;
 
 use crate::components::GridSlot;
 use crate::views::{
@@ -52,17 +52,17 @@ pub fn register_panels(registry: &mut PanelRendererRegistry) {
 }
 
 // ---------------------------------------------------------------------------
-// Helper: try to get the SignalController from context
+// Helper: try to get Signal from context
 // ---------------------------------------------------------------------------
 
-fn use_controller() -> Option<SignalController> {
-    try_consume_context::<SignalController>()
+fn use_controller() -> Option<Signal> {
+    try_consume_context::<Signal>()
 }
 
 fn no_controller() -> Element {
     rsx! {
         div { class: "flex items-center justify-center h-full w-full text-sm text-muted-foreground",
-            "Signal controller not available"
+            "Signal service not available"
         }
     }
 }
@@ -81,7 +81,7 @@ fn placeholder(label: &str) -> Element {
 
 #[component]
 fn RigGridDockPanel() -> Element {
-    let Some(controller) = use_controller() else {
+    let Some(signal) = use_controller() else {
         return no_controller();
     };
 
@@ -89,17 +89,17 @@ fn RigGridDockPanel() -> Element {
     let mut loaded = use_signal(|| false);
 
     {
-        let controller = controller.clone();
+        let signal = signal.clone();
         use_effect(move || {
-            let controller = controller.clone();
+            let signal = signal.clone();
             spawn(async move {
-                let rigs = controller.list_rig_collections().await;
+                let rigs = signal.rigs().list().await;
                 if let Some(rig) = rigs.first() {
                     if let Some(scene) = rig.variants.first() {
                         let rig_id = rig.id.to_string();
                         let scene_id = scene.id.to_string();
                         if let Some((engines, params)) =
-                            resolve_scene_engines(&controller, &rig_id, &scene_id).await
+                            resolve_scene_engines(&signal, &rig_id, &scene_id).await
                         {
                             slots.set(engines_to_grid_slots(&engines, &params));
                         }
@@ -130,11 +130,11 @@ fn RigGridDockPanel() -> Element {
 
 #[component]
 fn PresetBrowserDockPanel() -> Element {
-    let Some(controller) = use_controller() else {
+    let Some(_signal) = use_controller() else {
         return no_controller();
     };
     rsx! {
-        CollectionBrowser { controller }
+        CollectionBrowser {}
     }
 }
 
@@ -144,11 +144,11 @@ fn PresetBrowserDockPanel() -> Element {
 
 #[component]
 fn ProfileBrowserDockPanel() -> Element {
-    let Some(controller) = use_controller() else {
+    let Some(_signal) = use_controller() else {
         return no_controller();
     };
     rsx! {
-        CollectionBrowser { controller }
+        CollectionBrowser {}
     }
 }
 
@@ -158,7 +158,7 @@ fn ProfileBrowserDockPanel() -> Element {
 
 #[component]
 fn SongPartsDockPanel() -> Element {
-    let Some(controller) = use_controller() else {
+    let Some(signal) = use_controller() else {
         return no_controller();
     };
 
@@ -169,11 +169,11 @@ fn SongPartsDockPanel() -> Element {
     let mut selected_section = use_signal(|| None::<String>);
 
     {
-        let controller = controller.clone();
+        let signal = signal.clone();
         use_effect(move || {
-            let controller = controller.clone();
+            let signal = signal.clone();
             spawn(async move {
-                let songs = controller.list_songs().await;
+                let songs = signal.songs().list().await;
                 if let Some(song) = songs.first() {
                     song_name.set(song.name.clone());
                     let entries: Vec<SectionEntry> = song
@@ -216,7 +216,7 @@ fn SongPartsDockPanel() -> Element {
 
 #[component]
 fn SongSelectorDockPanel() -> Element {
-    let Some(controller) = use_controller() else {
+    let Some(signal) = use_controller() else {
         return no_controller();
     };
 
@@ -226,11 +226,11 @@ fn SongSelectorDockPanel() -> Element {
     let mut selected_song = use_signal(|| None::<String>);
 
     {
-        let controller = controller.clone();
+        let signal = signal.clone();
         use_effect(move || {
-            let controller = controller.clone();
+            let signal = signal.clone();
             spawn(async move {
-                let song_list = controller.list_songs().await;
+                let song_list = signal.songs().list().await;
                 let entries: Vec<SongEntry> = song_list
                     .iter()
                     .map(|s| SongEntry {
@@ -294,7 +294,7 @@ fn SongSelectorDockPanel() -> Element {
 
 #[component]
 fn SceneGridDockPanel() -> Element {
-    let Some(controller) = use_controller() else {
+    let Some(signal) = use_controller() else {
         return no_controller();
     };
 
@@ -302,11 +302,11 @@ fn SceneGridDockPanel() -> Element {
     let mut active_scene = use_signal(|| None::<String>);
 
     {
-        let controller = controller.clone();
+        let signal = signal.clone();
         use_effect(move || {
-            let controller = controller.clone();
+            let signal = signal.clone();
             spawn(async move {
-                let rigs = controller.list_rig_collections().await;
+                let rigs = signal.rigs().list().await;
                 if let Some(rig) = rigs.first() {
                     rig_id.set(Some(rig.id.to_string()));
                     if let Some(scene) = rig.variants.first() {
@@ -320,7 +320,6 @@ fn SceneGridDockPanel() -> Element {
     if let Some(rid) = rig_id() {
         rsx! {
             RigSceneGrid {
-                controller: controller.clone(),
                 rig_id: rid,
                 active_scene_id: active_scene(),
                 on_scene_select: move |id: String| {
@@ -348,7 +347,7 @@ fn RigEditorDockPanel() -> Element {
 
 #[component]
 fn RigGridEditorDockPanel() -> Element {
-    let Some(controller) = use_controller() else {
+    let Some(signal) = use_controller() else {
         return no_controller();
     };
 
@@ -357,17 +356,17 @@ fn RigGridEditorDockPanel() -> Element {
     let mut loaded = use_signal(|| false);
 
     {
-        let controller = controller.clone();
+        let signal = signal.clone();
         use_effect(move || {
-            let controller = controller.clone();
+            let signal = signal.clone();
             spawn(async move {
-                let rigs = controller.list_rig_collections().await;
+                let rigs = signal.rigs().list().await;
                 if let Some(rig) = rigs.first() {
                     if let Some(scene) = rig.variants.first() {
                         let rig_id = rig.id.to_string();
                         let scene_id = scene.id.to_string();
                         if let Some((engines, p)) =
-                            resolve_scene_engines(&controller, &rig_id, &scene_id).await
+                            resolve_scene_engines(&signal, &rig_id, &scene_id).await
                         {
                             slots.set(engines_to_grid_slots(&engines, &p));
                             params.set(p);

@@ -11,9 +11,7 @@ use signal_proto::{BlockType, ModulePresetId, ModuleSnapshotId, PresetId, Snapsh
 #[derive(Debug, Clone)]
 pub enum SignalEvent {
     /// A block's parameter state changed.
-    BlockChanged {
-        block_type: BlockType,
-    },
+    BlockChanged { block_type: BlockType },
     /// A preset was loaded.
     PresetLoaded {
         block_type: BlockType,
@@ -26,34 +24,22 @@ pub enum SignalEvent {
         snapshot_id: ModuleSnapshotId,
     },
     /// A scene transition completed.
-    SceneChanged {
-        scene_id: Option<RigSceneId>,
-    },
+    SceneChanged { scene_id: Option<RigSceneId> },
     /// A snapshot was applied to a slot.
     SnapshotApplied {
         module_type: ModuleType,
         snapshot_id: ModuleSnapshotId,
     },
     /// A slot was disabled.
-    SlotDisabled {
-        module_type: ModuleType,
-    },
+    SlotDisabled { module_type: ModuleType },
     /// A slot was enabled.
-    SlotEnabled {
-        module_type: ModuleType,
-    },
+    SlotEnabled { module_type: ModuleType },
     /// Navigated to a different song.
-    SongChanged {
-        song_id: String,
-    },
+    SongChanged { song_id: String },
     /// Navigated to a different section.
-    SectionChanged {
-        section_id: String,
-    },
+    SectionChanged { section_id: String },
     /// Morph position changed.
-    MorphPositionChanged {
-        position: f32,
-    },
+    MorphPositionChanged { position: f32 },
     /// A collection (preset, module, layer, etc.) was saved.
     CollectionSaved {
         entity_type: &'static str,
@@ -63,6 +49,12 @@ pub enum SignalEvent {
     CollectionDeleted {
         entity_type: &'static str,
         id: String,
+    },
+    /// A profile patch was activated (resolved + optionally applied to DAW).
+    PatchActivated {
+        profile_id: String,
+        patch_id: String,
+        applied_to_daw: bool,
     },
 }
 

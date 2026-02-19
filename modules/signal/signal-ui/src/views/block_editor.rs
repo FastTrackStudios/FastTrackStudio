@@ -1,11 +1,11 @@
 //! Block editor view -- parameter editing with colored cards and knobs.
 //!
-//! Smart component that takes `SignalController` + `BlockType` and renders
+//! Smart component that takes a `BlockType` and renders
 //! parameter sliders with color-coded block cards. Composes
 //! `components::block_color()` for styling.
 
 use dioxus::prelude::*;
-use signal::{Block, BlockType, SignalController};
+use signal::{Block, BlockType};
 
 use crate::components::block_color;
 
@@ -16,15 +16,16 @@ use crate::components::block_color;
 /// Fetches the current block state from the controller and renders
 /// an interactive parameter card with colored header and knobs.
 #[component]
-pub fn BlockEditor(controller: SignalController, block_type: BlockType) -> Element {
+pub fn BlockEditor(block_type: BlockType) -> Element {
+    let signal = crate::use_signal_service();
     let mut block = use_signal(Block::default);
 
     {
-        let controller = controller.clone();
+        let signal = signal.clone();
         use_effect(move || {
-            let controller = controller.clone();
+            let signal = signal.clone();
             spawn(async move {
-                block.set(controller.get_block(block_type).await);
+                block.set(signal.blocks().get(block_type).await);
             });
         });
     }
@@ -58,7 +59,7 @@ pub fn BlockEditor(controller: SignalController, block_type: BlockType) -> Eleme
                             {
                                 let label = parameter.name().to_string();
                                 let value = parameter.value().get();
-                                let row_controller = controller.clone();
+                                let row_signal = signal.clone();
                                 rsx! {
                                     MiniKnobParam {
                                         key: "{parameter.id()}",
@@ -68,9 +69,9 @@ pub fn BlockEditor(controller: SignalController, block_type: BlockType) -> Eleme
                                             let mut current = block();
                                             current.set_parameter_value(index, new_val);
                                             block.set(current.clone());
-                                            let controller = row_controller.clone();
+                                            let signal = row_signal.clone();
                                             spawn(async move {
-                                                let _ = controller.set_block(block_type, current).await;
+                                                let _ = signal.blocks().set(block_type, current).await;
                                             });
                                         },
                                     }

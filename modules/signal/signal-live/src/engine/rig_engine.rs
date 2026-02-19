@@ -92,6 +92,7 @@ impl TransitionResult {
 ///
 /// Scene transitions flow through: resolve → diff → execute per-slot.
 /// The engine also manages preloading and periodic tail cleanup.
+#[allow(async_fn_in_trait)]
 pub trait RigEngine: Send + Sync {
     /// Apply parameter changes to a specific slot (no instance switch).
     async fn apply_snapshot(

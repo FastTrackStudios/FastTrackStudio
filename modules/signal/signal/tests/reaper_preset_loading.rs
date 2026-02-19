@@ -8,19 +8,17 @@
 mod daw_helpers;
 
 use daw_helpers::{
-    add_jm_track, apply_block, apply_graph, build_morph_engine, capture_block_from_fx, get_fx0,
-    read_gain, remove_track,
+    add_jm_track, apply_block, apply_graph, apply_graph_with_state, build_morph_engine,
+    capture_block_from_fx, get_fx0, read_gain, remove_track,
 };
 use reaper_test::reaper_test;
-use signal::{
-    bootstrap_in_memory_controller_async, resolve::ResolveTarget, seed_id, SignalController,
-};
+use signal::{bootstrap_in_memory_controller_async, resolve::ResolveTarget, seed_id, Signal};
 use signal_proto::easing::EasingCurve;
 
 // FX ID used as the key in DawParameterSnapshot entries for the JM plugin.
 const JM_FX_ID: &str = "jm-amp";
 
-async fn signal_controller() -> SignalController {
+async fn signal_controller() -> Signal {
     bootstrap_in_memory_controller_async()
         .await
         .expect("failed to bootstrap signal controller")
@@ -62,11 +60,11 @@ async fn load_jm_plugin(ctx: &ReaperTestContext) -> Result<()> {
 #[reaper_test]
 async fn amp_default_block(ctx: &ReaperTestContext) -> Result<()> {
     println!("\n=== scenario: apply_jm_amp_default_block_to_live_fx ===");
-    let ctrl = signal_controller().await;
+    let signal = signal_controller().await;
     let track = add_jm_track(ctx.project(), "JM Amp Default Block").await?;
 
-    let block = ctrl
-        .load_collection_default(signal::BlockType::Amp, seed_id("jm-amp"))
+    let block = signal
+        .block_presets().load_default(signal::BlockType::Amp, seed_id("jm-amp"))
         .await
         .expect("jm-amp default not found");
 
@@ -85,7 +83,7 @@ async fn amp_default_block(ctx: &ReaperTestContext) -> Result<()> {
 #[reaper_test]
 async fn each_jm_block_preset(ctx: &ReaperTestContext) -> Result<()> {
     println!("\n=== scenario: apply_each_jm_block_preset_to_new_track ===");
-    let ctrl = signal_controller().await;
+    let signal = signal_controller().await;
 
     let jm_presets = [
         (signal::BlockType::Boost, "jm-justa-boost", "Justa Boost"),
@@ -120,8 +118,8 @@ async fn each_jm_block_preset(ctx: &ReaperTestContext) -> Result<()> {
 
     let mut tracks = Vec::new();
     for (block_type, preset_id, label) in &jm_presets {
-        let block = match ctrl
-            .load_collection_default(*block_type, seed_id(preset_id))
+        let block = match signal
+            .block_presets().load_default(*block_type, seed_id(preset_id))
             .await
         {
             Some(b) => b,
@@ -150,10 +148,10 @@ async fn each_jm_block_preset(ctx: &ReaperTestContext) -> Result<()> {
 #[reaper_test]
 async fn worship_patches(ctx: &ReaperTestContext) -> Result<()> {
     println!("\n=== scenario: apply_worship_profile_patches_to_tracks ===");
-    let ctrl = signal_controller().await;
+    let signal = signal_controller().await;
 
-    let worship = ctrl
-        .load_profile(seed_id("guitar-worship-profile"))
+    let worship = signal
+        .profiles().load(seed_id("guitar-worship-profile"))
         .await
         .expect("worship profile not found");
 
@@ -161,7 +159,7 @@ async fn worship_patches(ctx: &ReaperTestContext) -> Result<()> {
 
     let mut tracks = Vec::new();
     for patch in &worship.patches {
-        let graph = ctrl
+        let graph = signal
             .resolve_target(ResolveTarget::ProfilePatch {
                 profile_id: seed_id("guitar-worship-profile").into(),
                 patch_id: patch.id.clone().into(),
@@ -187,15 +185,188 @@ async fn worship_patches(ctx: &ReaperTestContext) -> Result<()> {
 }
 
 // ─────────────────────────────────────────────────────────────
+//  Scenario 4b: Apply blues profile patches to tracks
+// ─────────────────────────────────────────────────────────────
+
+#[reaper_test]
+async fn blues_patches(ctx: &ReaperTestContext) -> Result<()> {
+    println!("\n=== scenario: apply_blues_profile_patches_to_tracks ===");
+    let signal = signal_controller().await;
+
+    let blues = signal
+        .profiles().load(seed_id("guitar-blues-profile"))
+        .await
+        .expect("blues profile not found");
+
+    println!("Applying {} Blues patches:", blues.patches.len());
+    assert_eq!(
+        blues.patches.len(),
+        8,
+        "blues profile should have 8 patches"
+    );
+
+    // Blues patches target NDSP catalog BlockSnapshots directly.
+    // Each resolves to a REAPER VST chunk (from the harvest .chunk files).
+    let expected_names = [
+        "Gravity Clean",
+        "Gravity Rhythm",
+        "Gravity OD",
+        "Lead 1 Live Room",
+        "Ultra Clean",
+        "E Flat Voodoo",
+        "Golden Gate",
+        "Stately Blues Lead",
+    ];
+
+    // Catalog JSON paths for fingerprint verification.
+    // These map preset names → JSON files on disk with expected fingerprints.
+    let catalog_base = std::path::PathBuf::from(std::env::var("HOME").unwrap())
+        .join("Music/FastTrackStudio/Library/blocks/plugin/neural-dsp/archetype-john-mayer-x/snapshots/John Mayer");
+
+    // Capture default plugin state as baseline (before any preset loads)
+    let baseline_track = add_jm_track(ctx.project(), "Blues/Baseline").await?;
+    let baseline_fx = get_fx0(&baseline_track).await?;
+    let default_params: Vec<(u32, f64)> = baseline_fx
+        .parameters()
+        .await?
+        .iter()
+        .map(|p| (p.index, p.value))
+        .collect();
+    let default_chunk = baseline_fx.state_chunk().await?.unwrap_or_default();
+    let default_xml = extract_xml_from_chunk(&default_chunk);
+    let default_fp = default_xml
+        .as_deref()
+        .map(fingerprint_from_xml)
+        .unwrap_or_default();
+    println!(
+        "  Baseline: {} params, {} fingerprint keys",
+        default_params.len(),
+        default_fp.params.len()
+    );
+    remove_track(ctx.project(), baseline_track).await;
+
+    let mut tracks = Vec::new();
+    for (i, patch) in blues.patches.iter().enumerate() {
+        assert_eq!(patch.name, expected_names[i], "patch {i} name mismatch");
+
+        let graph = signal
+            .resolve_target(ResolveTarget::ProfilePatch {
+                profile_id: seed_id("guitar-blues-profile").into(),
+                patch_id: patch.id.clone().into(),
+            })
+            .await
+            .map_err(|e| eyre::eyre!("resolve '{}' failed: {:?}", patch.name, e))?;
+
+        let track = add_jm_track(ctx.project(), &format!("Blues/{}", patch.name)).await?;
+
+        // Apply the REAPER VST chunk from the catalog harvest.
+        let used_state_chunk = apply_graph_with_state(&track, &graph, JM_FX_ID).await?;
+        assert!(
+            used_state_chunk,
+            "'{}' should have state_data from catalog",
+            patch.name
+        );
+
+        // Allow plugin time to process the state chunk
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+        // ── Verify every parameter via fingerprint matching ──
+        //
+        // Read the chunk back from REAPER, extract XML, build a fingerprint,
+        // then compare against the catalog fingerprint from disk.
+        let fx = get_fx0(&track).await?;
+        let loaded_chunk = fx.state_chunk().await?.unwrap_or_default();
+        let loaded_xml = extract_xml_from_chunk(&loaded_chunk);
+        let loaded_fp = loaded_xml
+            .as_deref()
+            .map(fingerprint_from_xml)
+            .unwrap_or_default();
+
+        // Load expected fingerprint from catalog JSON
+        let json_stem = match patch.name.as_str() {
+            // Map preset names to their catalog JSON filenames
+            name => name.to_string(),
+        };
+        let json_path = catalog_base.join(format!("{json_stem}.json"));
+        let catalog_fp = if json_path.exists() {
+            let json_str = std::fs::read_to_string(&json_path)
+                .map_err(|e| eyre::eyre!("read catalog JSON for '{}': {}", patch.name, e))?;
+            let meta: SnapshotMetadata = serde_json::from_str(&json_str)
+                .map_err(|e| eyre::eyre!("parse catalog JSON for '{}': {}", patch.name, e))?;
+            meta.fingerprint
+        } else {
+            // Fall back to the default fingerprint distance check
+            println!(
+                "  ⚠ No catalog JSON at {}, skipping fingerprint check",
+                json_path.display()
+            );
+            PresetFingerprint::default()
+        };
+
+        // Compare loaded fingerprint vs catalog fingerprint
+        let fp_distance = loaded_fp.distance(&catalog_fp);
+
+        // Compare loaded fingerprint vs default to confirm state actually changed
+        let default_distance = loaded_fp.distance(&default_fp);
+
+        // Read all params and count how many differ from default
+        let loaded_params = fx.parameters().await?;
+        let changed_count = loaded_params
+            .iter()
+            .zip(default_params.iter())
+            .filter(|(loaded, (_, default_val))| (loaded.value - default_val).abs() > 1e-6)
+            .count();
+
+        println!(
+            "  {} — fp_dist={:.6}, default_dist={:.6}, changed={}/{} params",
+            patch.name,
+            fp_distance,
+            default_distance,
+            changed_count,
+            loaded_params.len()
+        );
+
+        // The loaded state should exactly match the catalog fingerprint
+        if !catalog_fp.params.is_empty() {
+            assert!(
+                fp_distance < 0.001,
+                "'{}' fingerprint distance {:.6} — preset did NOT load correctly \
+                 (should be ≈0). Is the .chunk file missing? Run `cargo xtask reaper-test \
+                 harvest_jm_factory_presets` first.",
+                patch.name,
+                fp_distance
+            );
+        }
+
+        // The loaded state should differ from the plugin default
+        assert!(
+            changed_count > 20,
+            "'{}' only {} params differ from default — preset did NOT load \
+             (state chunk may be wrong format)",
+            patch.name,
+            changed_count
+        );
+
+        tracks.push(track);
+    }
+
+    for track in tracks {
+        remove_track(ctx.project(), track).await;
+    }
+    println!("PASS");
+    Ok(())
+}
+
+// ─────────────────────────────────────────────────────────────
 //  Scenario 5: Apply worship song sections to tracks
 // ─────────────────────────────────────────────────────────────
 
 #[reaper_test]
 async fn worship_song_sections(ctx: &ReaperTestContext) -> Result<()> {
     println!("\n=== scenario: apply_worship_song_sections_to_tracks ===");
-    let ctrl = signal_controller().await;
+    let signal = signal_controller().await;
 
-    let songs = ctrl.list_songs().await;
+    let songs = signal.songs().list().await;
     let worship_song = songs
         .iter()
         .find(|s| s.name.contains("Worship"))
@@ -209,7 +380,7 @@ async fn worship_song_sections(ctx: &ReaperTestContext) -> Result<()> {
 
     let mut tracks = Vec::new();
     for section in &worship_song.sections {
-        let graph = ctrl
+        let graph = signal
             .resolve_target(ResolveTarget::SongSection {
                 song_id: worship_song.id.clone().into(),
                 section_id: section.id.clone().into(),
@@ -242,7 +413,7 @@ async fn worship_song_sections(ctx: &ReaperTestContext) -> Result<()> {
 #[reaper_test]
 async fn snapshot_round_trip(ctx: &ReaperTestContext) -> Result<()> {
     println!("\n=== scenario: snapshot_live_params_save_recall ===");
-    let ctrl = signal_controller().await;
+    let signal = signal_controller().await;
 
     let track = add_jm_track(ctx.project(), "Snapshot Round-Trip").await?;
     let fx = get_fx0(&track).await?;
@@ -252,8 +423,8 @@ async fn snapshot_round_trip(ctx: &ReaperTestContext) -> Result<()> {
         println!("  [{}] {} = {:.4}", p.index, p.name, p.value);
     }
 
-    let amp_block = ctrl
-        .load_collection_default(signal::BlockType::Amp, seed_id("jm-amp"))
+    let amp_block = signal
+        .block_presets().load_default(signal::BlockType::Amp, seed_id("jm-amp"))
         .await
         .expect("jm-amp not found");
 
@@ -261,17 +432,18 @@ async fn snapshot_round_trip(ctx: &ReaperTestContext) -> Result<()> {
     let captured = capture_block_from_fx(&track, amp_block).await?;
 
     // Overwrite the default snapshot with captured values
-    ctrl.update_snapshot_params(
-        signal::BlockType::Amp,
-        seed_id("jm-amp"),
-        seed_id("jm-amp-default"),
-        captured.clone(),
-    )
-    .await;
+    signal
+        .block_presets().update_snapshot_params(
+            signal::BlockType::Amp,
+            seed_id("jm-amp"),
+            seed_id("jm-amp-default"),
+            captured.clone(),
+        )
+        .await;
 
     // Apply Lead to dirty state
-    let lead_block = ctrl
-        .load_variant(
+    let lead_block = signal
+        .block_presets().load_variant(
             signal::BlockType::Amp,
             seed_id("jm-amp"),
             seed_id("jm-amp-lead"),
@@ -282,8 +454,8 @@ async fn snapshot_round_trip(ctx: &ReaperTestContext) -> Result<()> {
     println!("Applied Lead snapshot.");
 
     // Restore default
-    let restored = ctrl
-        .load_collection_default(signal::BlockType::Amp, seed_id("jm-amp"))
+    let restored = signal
+        .block_presets().load_default(signal::BlockType::Amp, seed_id("jm-amp"))
         .await
         .expect("jm-amp not found after save");
     apply_block(&track, &restored, JM_FX_ID).await?;
@@ -328,21 +500,21 @@ async fn snapshot_round_trip(ctx: &ReaperTestContext) -> Result<()> {
 #[reaper_test]
 async fn morph_between_patches(ctx: &ReaperTestContext) -> Result<()> {
     println!("\n=== scenario: morph_between_patches ===");
-    let ctrl = signal_controller().await;
+    let signal = signal_controller().await;
 
     let track = add_jm_track(ctx.project(), "Morph Clean→Lead").await?;
     let fx = get_fx0(&track).await?;
 
-    let clean = ctrl
-        .load_variant(
+    let clean = signal
+        .block_presets().load_variant(
             signal::BlockType::Amp,
             seed_id("jm-amp"),
             seed_id("jm-amp-clean"),
         )
         .await
         .expect("jm-amp-clean not found");
-    let lead = ctrl
-        .load_variant(
+    let lead = signal
+        .block_presets().load_variant(
             signal::BlockType::Amp,
             seed_id("jm-amp"),
             seed_id("jm-amp-lead"),
@@ -415,21 +587,21 @@ async fn morph_between_patches(ctx: &ReaperTestContext) -> Result<()> {
 #[reaper_test]
 async fn morph_easing_curves(ctx: &ReaperTestContext) -> Result<()> {
     println!("\n=== scenario: morph_easing_curves ===");
-    let ctrl = signal_controller().await;
+    let signal = signal_controller().await;
 
     let track = add_jm_track(ctx.project(), "Morph Easing").await?;
     let fx = get_fx0(&track).await?;
 
-    let clean = ctrl
-        .load_variant(
+    let clean = signal
+        .block_presets().load_variant(
             signal::BlockType::Amp,
             seed_id("jm-amp"),
             seed_id("jm-amp-clean"),
         )
         .await
         .expect("jm-amp-clean");
-    let lead = ctrl
-        .load_variant(
+    let lead = signal
+        .block_presets().load_variant(
             signal::BlockType::Amp,
             seed_id("jm-amp"),
             seed_id("jm-amp-lead"),
@@ -492,7 +664,7 @@ async fn morph_easing_curves(ctx: &ReaperTestContext) -> Result<()> {
 #[reaper_test]
 async fn variant_cycling(ctx: &ReaperTestContext) -> Result<()> {
     println!("\n=== scenario: variant_cycling ===");
-    let ctrl = signal_controller().await;
+    let signal = signal_controller().await;
 
     let track = add_jm_track(ctx.project(), "Amp Variants").await?;
 
@@ -504,8 +676,8 @@ async fn variant_cycling(ctx: &ReaperTestContext) -> Result<()> {
     ];
 
     for (variant_id, label, expected_gain) in &variants {
-        let block = match ctrl
-            .load_variant(
+        let block = match signal
+            .block_presets().load_variant(
                 signal::BlockType::Amp,
                 seed_id("jm-amp"),
                 seed_id(variant_id),
@@ -545,13 +717,13 @@ async fn variant_cycling(ctx: &ReaperTestContext) -> Result<()> {
 #[reaper_test]
 async fn save_new_snapshot(ctx: &ReaperTestContext) -> Result<()> {
     println!("\n=== scenario: save_new_block_snapshot ===");
-    let ctrl = signal_controller().await;
+    let signal = signal_controller().await;
 
     let track = add_jm_track(ctx.project(), "Save Snapshot").await?;
 
     // Apply Lead to put the plugin in a known state
-    let lead = ctrl
-        .load_variant(
+    let lead = signal
+        .block_presets().load_variant(
             signal::BlockType::Amp,
             seed_id("jm-amp"),
             seed_id("jm-amp-lead"),
@@ -561,24 +733,25 @@ async fn save_new_snapshot(ctx: &ReaperTestContext) -> Result<()> {
     apply_block(&track, &lead, JM_FX_ID).await?;
 
     // Capture live (post-Lead) → domain block
-    let template = ctrl
-        .load_collection_default(signal::BlockType::Amp, seed_id("jm-amp"))
+    let template = signal
+        .block_presets().load_default(signal::BlockType::Amp, seed_id("jm-amp"))
         .await
         .expect("jm-amp default");
     let captured = capture_block_from_fx(&track, template).await?;
 
     // Save as the default snapshot
-    ctrl.update_snapshot_params(
-        signal::BlockType::Amp,
-        seed_id("jm-amp"),
-        seed_id("jm-amp-default"),
-        captured.clone(),
-    )
-    .await;
+    signal
+        .block_presets().update_snapshot_params(
+            signal::BlockType::Amp,
+            seed_id("jm-amp"),
+            seed_id("jm-amp-default"),
+            captured.clone(),
+        )
+        .await;
 
     // Reload and verify every parameter round-tripped
-    let reloaded = ctrl
-        .load_collection_default(signal::BlockType::Amp, seed_id("jm-amp"))
+    let reloaded = signal
+        .block_presets().load_default(signal::BlockType::Amp, seed_id("jm-amp"))
         .await
         .expect("jm-amp default after save");
 
@@ -620,9 +793,9 @@ async fn save_new_snapshot(ctx: &ReaperTestContext) -> Result<()> {
 #[reaper_test]
 async fn override_stacking(ctx: &ReaperTestContext) -> Result<()> {
     println!("\n=== scenario: override_stacking ===");
-    let ctrl = signal_controller().await;
+    let signal = signal_controller().await;
 
-    let songs = ctrl.list_songs().await;
+    let songs = signal.songs().list().await;
     let worship = songs
         .iter()
         .find(|s| s.name.contains("Worship"))
@@ -636,7 +809,7 @@ async fn override_stacking(ctx: &ReaperTestContext) -> Result<()> {
     let mut results = Vec::new();
 
     for section in &worship.sections {
-        let graph = ctrl
+        let graph = signal
             .resolve_target(ResolveTarget::SongSection {
                 song_id: worship.id.clone().into(),
                 section_id: section.id.clone().into(),
@@ -689,7 +862,7 @@ async fn override_stacking(ctx: &ReaperTestContext) -> Result<()> {
 
 use signal_proto::catalog::{
     extract_xml_from_chunk, fingerprint_from_xml, match_preset, scan_preset_library, xml_attr,
-    DiskPreset, PresetFingerprint,
+    DiskPreset, PresetFingerprint, SnapshotMetadata,
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -819,6 +992,8 @@ async fn harvest_jm_factory_presets(ctx: &ReaperTestContext) -> Result<()> {
             match_distance: f64,
             chunk_len: usize,
             preset_uid: String,
+            chunk_data: Vec<u8>,
+            matched_source_path: Option<std::path::PathBuf>,
         }
 
         let mut harvested: Vec<HarvestedPreset> = Vec::new();
@@ -833,14 +1008,21 @@ async fn harvest_jm_factory_presets(ctx: &ReaperTestContext) -> Result<()> {
             .and_then(|x| xml_attr(x, "presetUid"))
             .unwrap_or_default();
 
-        let (initial_name, initial_cat, initial_tags, initial_dist) =
+        let (initial_name, initial_cat, initial_tags, initial_dist, initial_source) =
             match match_preset(&library, &initial_fp) {
-                Some((dp, dist)) => (dp.name.clone(), dp.category.clone(), dp.tags.clone(), dist),
+                Some((dp, dist)) => (
+                    dp.name.clone(),
+                    dp.category.clone(),
+                    dp.tags.clone(),
+                    dist,
+                    Some(dp.source_path.clone()),
+                ),
                 None => (
                     "(unmatched)".to_string(),
                     String::new(),
                     Vec::new(),
                     f64::MAX,
+                    None,
                 ),
             };
 
@@ -852,6 +1034,8 @@ async fn harvest_jm_factory_presets(ctx: &ReaperTestContext) -> Result<()> {
             match_distance: initial_dist,
             chunk_len: first_chunk.len(),
             preset_uid: initial_uid,
+            chunk_data: first_raw,
+            matched_source_path: initial_source,
         });
 
         // Walk all 385+ presets. If we detect a cycle we break early.
@@ -896,13 +1080,20 @@ async fn harvest_jm_factory_presets(ctx: &ReaperTestContext) -> Result<()> {
                 .and_then(|x| xml_attr(x, "presetUid"))
                 .unwrap_or_default();
 
-            let (name, cat, tags, dist) = match match_preset(&library, &fp) {
-                Some((dp, dist)) => (dp.name.clone(), dp.category.clone(), dp.tags.clone(), dist),
+            let (name, cat, tags, dist, source) = match match_preset(&library, &fp) {
+                Some((dp, dist)) => (
+                    dp.name.clone(),
+                    dp.category.clone(),
+                    dp.tags.clone(),
+                    dist,
+                    Some(dp.source_path.clone()),
+                ),
                 None => (
                     format!("(unmatched #{})", i),
                     String::new(),
                     Vec::new(),
                     f64::MAX,
+                    None,
                 ),
             };
 
@@ -914,6 +1105,8 @@ async fn harvest_jm_factory_presets(ctx: &ReaperTestContext) -> Result<()> {
                 match_distance: dist,
                 chunk_len: chunk.len(),
                 preset_uid: uid,
+                chunk_data: raw,
+                matched_source_path: source,
             });
 
             // Progress every 50 presets
@@ -1007,6 +1200,74 @@ async fn harvest_jm_factory_presets(ctx: &ReaperTestContext) -> Result<()> {
         }
 
         out.flush()?;
+
+        // ── Step 5: Write REAPER chunks to catalog directory ──
+        //
+        // For each exact-matched preset, write the REAPER VST chunk as a
+        // .chunk file alongside the existing .json/.bin in the catalog.
+        // This gives catalog_import.rs a REAPER-native blob for set_vst_chunk.
+        let catalog_snapshots_dir = std::path::PathBuf::from(std::env::var("HOME").unwrap())
+            .join("Music/FastTrackStudio/Library/blocks/plugin/neural-dsp/archetype-john-mayer-x/snapshots");
+        let mut chunks_written = 0usize;
+
+        for h in &harvested {
+            // Only write for exact matches with non-empty chunk data
+            if h.match_distance >= 0.001 || h.chunk_data.is_empty() {
+                continue;
+            }
+            let Some(source_path) = &h.matched_source_path else {
+                continue;
+            };
+
+            // Derive catalog path from the original disk preset filename.
+            // source_path: /Library/Audio/Presets/Neural DSP/.../John Mayer/Gravity Clean.xml
+            // catalog:     ~/Music/.../snapshots/John Mayer/Gravity Clean.chunk
+            let stem = source_path
+                .file_stem()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_default();
+            if stem.is_empty() {
+                continue;
+            }
+
+            let folder_dir = if h.category.is_empty() {
+                catalog_snapshots_dir.clone()
+            } else {
+                catalog_snapshots_dir.join(&h.category)
+            };
+
+            // Write .chunk file
+            let chunk_path = folder_dir.join(format!("{stem}.chunk"));
+            if let Err(e) = std::fs::write(&chunk_path, &h.chunk_data) {
+                println!("  ⚠ Failed to write chunk for '{}': {}", h.name, e);
+                continue;
+            }
+
+            // Update the .json metadata to reference the chunk file
+            let json_path = folder_dir.join(format!("{stem}.json"));
+            if json_path.exists() {
+                if let Ok(json_str) = std::fs::read_to_string(&json_path) {
+                    if let Ok(mut meta) =
+                        serde_json::from_str::<signal_proto::catalog::SnapshotMetadata>(&json_str)
+                    {
+                        meta.reaper_chunk_file = Some(format!("{stem}.chunk"));
+                        meta.preset_uid = if h.preset_uid.is_empty() {
+                            None
+                        } else {
+                            Some(h.preset_uid.clone())
+                        };
+                        meta.midi_cycle_index = Some(h.index);
+                        if let Ok(updated) = serde_json::to_string_pretty(&meta) {
+                            let _ = std::fs::write(&json_path, updated);
+                        }
+                    }
+                }
+            }
+
+            chunks_written += 1;
+        }
+
+        println!("  Wrote {} REAPER chunk files to catalog", chunks_written);
 
         // Console summary
         println!(

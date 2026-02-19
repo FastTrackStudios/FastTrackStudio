@@ -12,8 +12,8 @@ use daw_proto::fx::tree::FxNodeKind;
 use eyre::Result;
 use signal::resolve::ResolvedGraph;
 use signal::{
-    block_to_snapshot, find_param_index, graph_to_snapshot, live_params_into_block, Block,
-    DawParameterSnapshot, LiveParam, MorphEngine,
+    block_to_snapshot, find_param_index, graph_state_chunks, graph_to_snapshot,
+    live_params_into_block, Block, DawParameterSnapshot, LiveParam, MorphEngine,
 };
 
 // ─── Track discovery ─────────────────────────────────────────────────────────
@@ -27,20 +27,44 @@ pub async fn track_by_name(project: &Project, name: &str) -> Result<TrackHandle>
         .ok_or_else(|| eyre::eyre!("track not found: '{name}'"))
 }
 
-/// Return all tracks whose `parent_guid` matches the given track's GUID.
+/// Return all direct child tracks of a folder track using REAPER's folder depth.
 ///
-/// This requires listing all tracks and filtering — there is no dedicated
-/// "children" API in daw-control.
+/// REAPER doesn't expose parent GUIDs — folder hierarchy is determined by
+/// `I_FOLDERDEPTH`: +1 = folder start, 0 = normal child, -1 = close folder.
+/// Children are all tracks between the folder and its matching close, at depth 1.
 pub async fn child_tracks(
     project: &Project,
     parent: &TrackHandle,
 ) -> Result<Vec<daw_proto::Track>> {
     let parent_info = parent.info().await?;
     let all = project.tracks().all().await?;
-    Ok(all
-        .into_iter()
-        .filter(|t| t.parent_guid.as_deref() == Some(&parent_info.guid))
-        .collect())
+
+    // Find the folder track by index
+    let folder_idx = parent_info.index as usize;
+    let mut children = Vec::new();
+    let mut depth = 0i32;
+
+    for track in all.iter().skip(folder_idx + 1) {
+        // First track after folder: depth goes to 1 (we're inside the folder)
+        if depth == 0 {
+            depth = 1;
+        }
+
+        // Accumulate folder depth changes
+        depth += track.folder_depth;
+
+        if depth <= 0 {
+            // We've exited the folder
+            break;
+        }
+
+        // Only collect direct children (depth == 1), not nested sub-folder contents
+        if depth == 1 {
+            children.push(track.clone());
+        }
+    }
+
+    Ok(children)
 }
 
 // ─── FX chain helpers (any index) ────────────────────────────────────────────
@@ -223,6 +247,30 @@ pub async fn apply_graph(track: &TrackHandle, graph: &ResolvedGraph, fx_id: &str
     Ok(count)
 }
 
+/// Apply a resolved graph that carries binary state data.
+///
+/// If the graph has state chunks (e.g. from a catalog `.bin` file), loads
+/// them directly via `set_state_chunk` — this sets ALL plugin params at once
+/// and shows the correct preset name in the plugin UI. Falls back to
+/// param-by-param matching if no state data is present.
+///
+/// Returns `true` if a state chunk was loaded, `false` if param-by-param was used.
+pub async fn apply_graph_with_state(
+    track: &TrackHandle,
+    graph: &ResolvedGraph,
+    fx_id: &str,
+) -> Result<bool> {
+    let chunks = graph_state_chunks(graph, fx_id);
+    if let Some(chunk) = chunks.first() {
+        let fx = get_fx0(track).await?;
+        fx.set_state_chunk(chunk.chunk_data.clone()).await?;
+        Ok(true)
+    } else {
+        apply_graph(track, graph, fx_id).await?;
+        Ok(false)
+    }
+}
+
 // ─── Snapshot capture ────────────────────────────────────────────────────────
 
 /// Capture the current FX index 0 parameter values as a `DawParameterSnapshot`.
@@ -288,6 +336,73 @@ pub async fn read_gain(track: &TrackHandle) -> Result<Option<f64>> {
     } else {
         Ok(None)
     }
+}
+
+// ─── RfxChain capture ────────────────────────────────────────────────────────
+
+/// Capture the FXCHAIN inner content from a track as bytes.
+///
+/// Gets the full RPP track chunk, extracts the `<FXCHAIN ...>` block, strips
+/// the header and closing `>`, and returns the inner content as UTF-8 bytes.
+/// This is the format expected by `ReaperPatchApplier::splice_fxchain`.
+pub async fn capture_rfxchain_bytes(track: &TrackHandle) -> Result<Vec<u8>> {
+    let chunk = track.get_chunk().await.map_err(|e| eyre::eyre!(e))?;
+    let inner = extract_fxchain_inner(&chunk)
+        .ok_or_else(|| eyre::eyre!("no FXCHAIN block found in track chunk"))?;
+    Ok(inner.as_bytes().to_vec())
+}
+
+/// Extract the inner content of an `<FXCHAIN ...>` block from a track chunk.
+///
+/// Returns everything between the first header line and the matching closing `>`.
+fn extract_fxchain_inner(track_chunk: &str) -> Option<String> {
+    let start = track_chunk.find("<FXCHAIN")?;
+    let after = &track_chunk[start..];
+
+    // Skip the `<FXCHAIN` header line
+    let first_newline = after.find('\n')? + 1;
+
+    // Find the matching closing `>` by counting bracket depth
+    let mut depth = 1i32; // we're already inside the opening <FXCHAIN
+    let mut end_byte = None;
+    for (i, line) in after[first_newline..].split('\n').enumerate() {
+        if line.trim_start().starts_with('<') {
+            depth += 1;
+        }
+        if line.trim() == ">" {
+            depth -= 1;
+            if depth == 0 {
+                // Calculate byte offset within after[first_newline..]
+                let byte_pos: usize = after[first_newline..]
+                    .split('\n')
+                    .take(i)
+                    .map(|l| l.len() + 1)
+                    .sum();
+                end_byte = Some(byte_pos);
+                break;
+            }
+        }
+    }
+
+    let end = end_byte?;
+    let inner = &after[first_newline..first_newline + end];
+
+    // Strip SHOW/LASTSEL/DOCKED header lines that splice_fxchain adds back
+    let mut content = String::new();
+    for line in inner.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("SHOW ")
+            || trimmed.starts_with("LASTSEL ")
+            || trimmed.starts_with("DOCKED ")
+        {
+            continue;
+        }
+        if !content.is_empty() {
+            content.push('\n');
+        }
+        content.push_str(line);
+    }
+    Some(content)
 }
 
 // ─── Track creation ──────────────────────────────────────────────────────────

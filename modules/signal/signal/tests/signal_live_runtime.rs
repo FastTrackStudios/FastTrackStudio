@@ -15,8 +15,10 @@
 //!
 //!   cargo test -p signal --test signal_live_runtime -- --nocapture
 
+mod fixtures;
+
+use fixtures::controller;
 use signal::{
-    bootstrap_in_memory_controller_async,
     engine::{Engine, EngineScene},
     layer::{Layer, LayerSnapshot},
     module_type::ModuleType,
@@ -43,12 +45,6 @@ use std::collections::HashMap;
 // ─────────────────────────────────────────────────────────────
 //  Helpers
 // ─────────────────────────────────────────────────────────────
-
-async fn controller() -> signal::SignalController {
-    bootstrap_in_memory_controller_async()
-        .await
-        .expect("failed to bootstrap in-memory controller")
-}
 
 fn guitar_rig_id() -> RigId {
     seed_id("guitar-megarig").into()
@@ -699,56 +695,56 @@ fn morph_reset_mid_animation() {
 /// Loading a nonexistent rig returns None.
 #[tokio::test]
 async fn load_nonexistent_rig_returns_none() {
-    let ctrl = controller().await;
-    let result = ctrl.load_rig_collection(seed_id("does-not-exist")).await;
+    let signal = controller().await;
+    let result = signal.rigs().load(seed_id("does-not-exist")).await;
     assert!(result.is_none());
 }
 
 /// Loading a nonexistent engine returns None.
 #[tokio::test]
 async fn load_nonexistent_engine_returns_none() {
-    let ctrl = controller().await;
-    let result = ctrl.load_engine(seed_id("does-not-exist")).await;
+    let signal = controller().await;
+    let result = signal.engines().load(seed_id("does-not-exist")).await;
     assert!(result.is_none());
 }
 
 /// Loading a nonexistent profile returns None.
 #[tokio::test]
 async fn load_nonexistent_profile_returns_none() {
-    let ctrl = controller().await;
-    let result = ctrl.load_profile(seed_id("does-not-exist")).await;
+    let signal = controller().await;
+    let result = signal.profiles().load(seed_id("does-not-exist")).await;
     assert!(result.is_none());
 }
 
 /// Loading a nonexistent song returns None.
 #[tokio::test]
 async fn load_nonexistent_song_returns_none() {
-    let ctrl = controller().await;
-    let result = ctrl.load_song(seed_id("does-not-exist")).await;
+    let signal = controller().await;
+    let result = signal.songs().load(seed_id("does-not-exist")).await;
     assert!(result.is_none());
 }
 
 /// Loading a nonexistent layer returns None.
 #[tokio::test]
 async fn load_nonexistent_layer_returns_none() {
-    let ctrl = controller().await;
-    let result = ctrl.load_layer(seed_id("does-not-exist")).await;
+    let signal = controller().await;
+    let result = signal.layers().load(seed_id("does-not-exist")).await;
     assert!(result.is_none());
 }
 
 /// Loading a nonexistent setlist returns None.
 #[tokio::test]
 async fn load_nonexistent_setlist_returns_none() {
-    let ctrl = controller().await;
-    let result = ctrl.load_setlist(seed_id("does-not-exist")).await;
+    let signal = controller().await;
+    let result = signal.setlists().load(seed_id("does-not-exist")).await;
     assert!(result.is_none());
 }
 
 /// Resolving a nonexistent rig scene returns an error.
 #[tokio::test]
 async fn resolve_nonexistent_rig_scene_returns_error() {
-    let ctrl = controller().await;
-    let result = ctrl
+    let signal = controller().await;
+    let result = signal
         .resolve_target(ResolveTarget::RigScene {
             rig_id: seed_id("does-not-exist").into(),
             scene_id: seed_id("does-not-exist").into(),
@@ -761,8 +757,8 @@ async fn resolve_nonexistent_rig_scene_returns_error() {
 /// Resolving a nonexistent profile patch returns an error.
 #[tokio::test]
 async fn resolve_nonexistent_profile_patch_returns_error() {
-    let ctrl = controller().await;
-    let result = ctrl
+    let signal = controller().await;
+    let result = signal
         .resolve_target(ResolveTarget::ProfilePatch {
             profile_id: seed_id("does-not-exist").into(),
             patch_id: seed_id("does-not-exist").into(),
@@ -778,17 +774,17 @@ async fn resolve_nonexistent_profile_patch_returns_error() {
 /// Save and load an empty rig (no engines).
 #[tokio::test]
 async fn empty_rig_save_load() {
-    let ctrl = controller().await;
+    let signal = controller().await;
     let rig = Rig::new(
         seed_id("empty-rig"),
         "Empty Rig",
         vec![], // no engines
         RigScene::new(seed_id("empty-rig-scene"), "Default"),
     );
-    ctrl.save_rig_collection(rig).await;
+    signal.rigs().save(rig).await;
 
-    let loaded = ctrl
-        .load_rig_collection(seed_id("empty-rig"))
+    let loaded = signal
+        .rigs().load(seed_id("empty-rig"))
         .await
         .expect("empty rig should save/load");
     assert_eq!(loaded.engine_ids.len(), 0);
@@ -798,7 +794,7 @@ async fn empty_rig_save_load() {
 /// Save and load an engine with no layers.
 #[tokio::test]
 async fn empty_engine_save_load() {
-    let ctrl = controller().await;
+    let signal = controller().await;
     let engine = Engine::new(
         seed_id("empty-engine"),
         "Empty Engine",
@@ -806,10 +802,10 @@ async fn empty_engine_save_load() {
         vec![], // no layers
         EngineScene::new(seed_id("empty-engine-scene"), "Default"),
     );
-    ctrl.save_engine(engine).await;
+    signal.engines().save(engine).await;
 
-    let loaded = ctrl
-        .load_engine(seed_id("empty-engine"))
+    let loaded = signal
+        .engines().load(seed_id("empty-engine"))
         .await
         .expect("empty engine should save/load");
     assert_eq!(loaded.layer_ids.len(), 0);
@@ -819,7 +815,7 @@ async fn empty_engine_save_load() {
 /// Save and load a layer with empty refs.
 #[tokio::test]
 async fn empty_layer_snapshot_save_load() {
-    let ctrl = controller().await;
+    let signal = controller().await;
     let snap = LayerSnapshot::new(seed_id("empty-layer-snap"), "Default");
     // snap has empty module_refs, block_refs, layer_refs, overrides by default
     let layer = Layer::new(
@@ -828,10 +824,10 @@ async fn empty_layer_snapshot_save_load() {
         EngineType::Keys,
         snap,
     );
-    ctrl.save_layer(layer).await;
+    signal.layers().save(layer).await;
 
-    let loaded = ctrl
-        .load_layer(seed_id("empty-layer"))
+    let loaded = signal
+        .layers().load(seed_id("empty-layer"))
         .await
         .expect("empty layer should save/load");
     assert_eq!(loaded.variants.len(), 1);
@@ -842,10 +838,10 @@ async fn empty_layer_snapshot_save_load() {
 /// Save and load a minimal setlist (one entry).
 #[tokio::test]
 async fn minimal_setlist_save_load() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     // Setlist::new requires a default entry — create one referencing a seeded song
-    let songs = ctrl.list_songs().await;
+    let songs = signal.songs().list().await;
     let first_song = &songs[0];
     let entry = SetlistEntry::new(
         seed_id("min-setlist-entry"),
@@ -853,10 +849,10 @@ async fn minimal_setlist_save_load() {
         first_song.id.clone(),
     );
     let setlist = Setlist::new(seed_id("min-setlist"), "Minimal Setlist", entry);
-    ctrl.save_setlist(setlist).await;
+    signal.setlists().save(setlist).await;
 
-    let loaded = ctrl
-        .load_setlist(seed_id("min-setlist"))
+    let loaded = signal
+        .setlists().load(seed_id("min-setlist"))
         .await
         .expect("minimal setlist should save/load");
     assert_eq!(loaded.entries.len(), 1);
@@ -865,7 +861,7 @@ async fn minimal_setlist_save_load() {
 /// Duplicate names are allowed (different IDs).
 #[tokio::test]
 async fn duplicate_names_coexist() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     let rig_a = Rig::new(
         seed_id("dup-name-rig-a"),
@@ -879,10 +875,10 @@ async fn duplicate_names_coexist() {
         vec![],
         RigScene::new(seed_id("dup-b-scene"), "Default"),
     );
-    ctrl.save_rig_collection(rig_a).await;
-    ctrl.save_rig_collection(rig_b).await;
+    signal.rigs().save(rig_a).await;
+    signal.rigs().save(rig_b).await;
 
-    let all = ctrl.list_rig_collections().await;
+    let all = signal.rigs().list().await;
     let dups: Vec<_> = all.iter().filter(|r| r.name == "Same Name Rig").collect();
     assert_eq!(dups.len(), 2);
 }
@@ -890,7 +886,7 @@ async fn duplicate_names_coexist() {
 /// Save and load a song with zero sections.
 #[tokio::test]
 async fn empty_song_save_load() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     // Song::new requires at least one section as the default.
     // Create a song with one section, then verify it at least works.
@@ -904,9 +900,9 @@ async fn empty_song_save_load() {
             guitar_default_scene(),
         ),
     );
-    ctrl.save_song(song).await;
+    signal.songs().save(song).await;
 
-    let loaded = ctrl.load_song(seed_id("minimal-song")).await.expect("song");
+    let loaded = signal.songs().load(seed_id("minimal-song")).await.expect("song");
     assert_eq!(loaded.sections.len(), 1);
 }
 
@@ -917,7 +913,7 @@ async fn empty_song_save_load() {
 /// Delete a rig collection, verify it's gone.
 #[tokio::test]
 async fn delete_rig_collection() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     let rig = Rig::new(
         seed_id("del-rig"),
@@ -925,53 +921,53 @@ async fn delete_rig_collection() {
         vec![],
         RigScene::new(seed_id("del-rig-scene"), "Default"),
     );
-    ctrl.save_rig_collection(rig).await;
-    assert!(ctrl.load_rig_collection(seed_id("del-rig")).await.is_some());
+    signal.rigs().save(rig).await;
+    assert!(signal.rigs().load(seed_id("del-rig")).await.is_some());
 
-    ctrl.delete_rig_collection(seed_id("del-rig")).await;
-    assert!(ctrl.load_rig_collection(seed_id("del-rig")).await.is_none());
+    signal.rigs().delete(seed_id("del-rig")).await;
+    assert!(signal.rigs().load(seed_id("del-rig")).await.is_none());
 }
 
 /// Delete a module collection, verify it's gone.
 #[tokio::test]
 async fn delete_module_collection() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
-    let modules = ctrl.list_module_collections().await;
+    let modules = signal.module_presets().list().await;
     assert!(!modules.is_empty());
     let first_id = modules[0].id().clone();
 
-    ctrl.delete_module_collection(first_id.clone()).await;
-    let after = ctrl.list_module_collections().await;
+    signal.module_presets().delete(first_id.clone()).await;
+    let after = signal.module_presets().list().await;
     assert!(after.iter().all(|m| m.id() != &first_id));
 }
 
 /// Delete a profile, verify it's gone.
 #[tokio::test]
 async fn delete_profile() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     let profile = Profile::new(
         seed_id("del-profile"),
         "Deletable Profile",
-        Patch::new(
+        Patch::from_rig_scene(
             seed_id("del-patch"),
             "P1",
             guitar_rig_id(),
             guitar_default_scene(),
         ),
     );
-    ctrl.save_profile(profile).await;
-    assert!(ctrl.load_profile(seed_id("del-profile")).await.is_some());
+    signal.profiles().save(profile).await;
+    assert!(signal.profiles().load(seed_id("del-profile")).await.is_some());
 
-    ctrl.delete_profile(seed_id("del-profile")).await;
-    assert!(ctrl.load_profile(seed_id("del-profile")).await.is_none());
+    signal.profiles().delete(seed_id("del-profile")).await;
+    assert!(signal.profiles().load(seed_id("del-profile")).await.is_none());
 }
 
 /// Delete a song, verify it's gone.
 #[tokio::test]
 async fn delete_song() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     let song = Song::new(
         seed_id("del-song"),
@@ -983,19 +979,19 @@ async fn delete_song() {
             guitar_default_scene(),
         ),
     );
-    ctrl.save_song(song).await;
-    assert!(ctrl.load_song(seed_id("del-song")).await.is_some());
+    signal.songs().save(song).await;
+    assert!(signal.songs().load(seed_id("del-song")).await.is_some());
 
-    ctrl.delete_song(seed_id("del-song")).await;
-    assert!(ctrl.load_song(seed_id("del-song")).await.is_none());
+    signal.songs().delete(seed_id("del-song")).await;
+    assert!(signal.songs().load(seed_id("del-song")).await.is_none());
 }
 
 /// Delete a setlist, verify it's gone.
 #[tokio::test]
 async fn delete_setlist() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
-    let songs = ctrl.list_songs().await;
+    let songs = signal.songs().list().await;
     let first_song = &songs[0];
     let entry = SetlistEntry::new(
         seed_id("del-setlist-entry"),
@@ -1003,11 +999,11 @@ async fn delete_setlist() {
         first_song.id.clone(),
     );
     let setlist = Setlist::new(seed_id("del-setlist"), "Deletable Setlist", entry);
-    ctrl.save_setlist(setlist).await;
-    assert!(ctrl.load_setlist(seed_id("del-setlist")).await.is_some());
+    signal.setlists().save(setlist).await;
+    assert!(signal.setlists().load(seed_id("del-setlist")).await.is_some());
 
-    ctrl.delete_setlist(seed_id("del-setlist")).await;
-    assert!(ctrl.load_setlist(seed_id("del-setlist")).await.is_none());
+    signal.setlists().delete(seed_id("del-setlist")).await;
+    assert!(signal.setlists().load(seed_id("del-setlist")).await.is_none());
 }
 
 // ═════════════════════════════════════════════════════════════
@@ -1017,7 +1013,7 @@ async fn delete_setlist() {
 /// Create, save, and load a scene template.
 #[tokio::test]
 async fn scene_template_create_save_load() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     let template = SceneTemplate::new(seed_id("clean-template"), "Clean")
         .with_engine(EngineSelection::new(
@@ -1028,10 +1024,10 @@ async fn scene_template_create_save_load() {
             NodePath::engine("keys-engine").with_parameter("volume"),
             0.7,
         ));
-    ctrl.save_scene_template(template).await;
+    signal.scene_templates().save(template).await;
 
-    let loaded = ctrl
-        .load_scene_template(seed_id("clean-template"))
+    let loaded = signal
+        .scene_templates().load(seed_id("clean-template"))
         .await
         .expect("template should exist");
     assert_eq!(loaded.name, "Clean");
@@ -1042,36 +1038,36 @@ async fn scene_template_create_save_load() {
 /// List scene templates after saving multiple.
 #[tokio::test]
 async fn scene_template_list() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
-    ctrl.save_scene_template(SceneTemplate::new(seed_id("tpl-a"), "Template A"))
+    signal.scene_templates().save(SceneTemplate::new(seed_id("tpl-a"), "Template A"))
         .await;
-    ctrl.save_scene_template(SceneTemplate::new(seed_id("tpl-b"), "Template B"))
+    signal.scene_templates().save(SceneTemplate::new(seed_id("tpl-b"), "Template B"))
         .await;
-    ctrl.save_scene_template(SceneTemplate::new(seed_id("tpl-c"), "Template C"))
+    signal.scene_templates().save(SceneTemplate::new(seed_id("tpl-c"), "Template C"))
         .await;
 
-    let templates = ctrl.list_scene_templates().await;
+    let templates = signal.scene_templates().list().await;
     assert!(templates.len() >= 3);
 }
 
 /// Delete a scene template.
 #[tokio::test]
 async fn scene_template_delete() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
-    ctrl.save_scene_template(SceneTemplate::new(seed_id("tpl-del"), "Delete Me"))
+    signal.scene_templates().save(SceneTemplate::new(seed_id("tpl-del"), "Delete Me"))
         .await;
-    assert!(ctrl.load_scene_template(seed_id("tpl-del")).await.is_some());
+    assert!(signal.scene_templates().load(seed_id("tpl-del")).await.is_some());
 
-    ctrl.delete_scene_template(seed_id("tpl-del")).await;
-    assert!(ctrl.load_scene_template(seed_id("tpl-del")).await.is_none());
+    signal.scene_templates().delete(seed_id("tpl-del")).await;
+    assert!(signal.scene_templates().load(seed_id("tpl-del")).await.is_none());
 }
 
 /// Convert scene template to rig scene.
 #[tokio::test]
 async fn scene_template_to_rig_scene() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     let template = SceneTemplate::new(seed_id("lead-tpl"), "Lead Template")
         .with_engine(EngineSelection::new(
@@ -1098,10 +1094,10 @@ async fn scene_template_to_rig_scene() {
         vec![seed_id("keys-engine").into()],
         scene,
     );
-    ctrl.save_rig_collection(rig).await;
+    signal.rigs().save(rig).await;
 
-    let loaded = ctrl
-        .load_rig_collection(seed_id("tpl-rig"))
+    let loaded = signal
+        .rigs().load(seed_id("tpl-rig"))
         .await
         .expect("rig");
     assert_eq!(loaded.variants[0].name, "Lead Template");
@@ -1114,29 +1110,29 @@ async fn scene_template_to_rig_scene() {
 /// Subscribe to event bus, verify it connects.
 #[tokio::test]
 async fn event_bus_subscribe() {
-    let ctrl = controller().await;
-    let _rx = ctrl.subscribe();
+    let signal = controller().await;
+    let _rx = signal.subscribe();
     // Just verify subscribe() doesn't panic and returns a receiver
-    assert!(ctrl.event_bus().subscriber_count() >= 1);
+    assert!(signal.event_bus().subscriber_count() >= 1);
 }
 
 /// Event bus delivers events to multiple subscribers.
 #[tokio::test]
 async fn event_bus_multiple_subscribers() {
-    let ctrl = controller().await;
-    let _rx1 = ctrl.subscribe();
-    let _rx2 = ctrl.subscribe();
-    assert!(ctrl.event_bus().subscriber_count() >= 2);
+    let signal = controller().await;
+    let _rx1 = signal.subscribe();
+    let _rx2 = signal.subscribe();
+    assert!(signal.event_bus().subscriber_count() >= 2);
 }
 
 /// Event bus emits CollectionSaved when we save via the event bus directly.
 #[tokio::test]
 async fn event_bus_emit_and_receive() {
-    let ctrl = controller().await;
-    let mut rx = ctrl.subscribe();
+    let signal = controller().await;
+    let mut rx = signal.subscribe();
 
     // Manually emit via event bus
-    ctrl.event_bus().emit(SignalEvent::CollectionSaved {
+    signal.event_bus().emit(SignalEvent::CollectionSaved {
         entity_type: "rig",
         id: "test-id".into(),
     });
@@ -1158,14 +1154,14 @@ async fn event_bus_emit_and_receive() {
 /// Two simultaneous resolve operations on the same scene don't panic.
 #[tokio::test]
 async fn concurrent_resolve_same_scene() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     let (result_a, result_b) = tokio::join!(
-        ctrl.resolve_target(ResolveTarget::RigScene {
+        signal.resolve_target(ResolveTarget::RigScene {
             rig_id: guitar_rig_id(),
             scene_id: guitar_default_scene(),
         }),
-        ctrl.resolve_target(ResolveTarget::RigScene {
+        signal.resolve_target(ResolveTarget::RigScene {
             rig_id: guitar_rig_id(),
             scene_id: guitar_default_scene(),
         })
@@ -1183,14 +1179,14 @@ async fn concurrent_resolve_same_scene() {
 /// Resolve guitar rig and keys rig simultaneously.
 #[tokio::test]
 async fn concurrent_resolve_different_rigs() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     let (guitar_result, keys_result) = tokio::join!(
-        ctrl.resolve_target(ResolveTarget::RigScene {
+        signal.resolve_target(ResolveTarget::RigScene {
             rig_id: guitar_rig_id(),
             scene_id: guitar_default_scene(),
         }),
-        ctrl.resolve_target(ResolveTarget::RigScene {
+        signal.resolve_target(ResolveTarget::RigScene {
             rig_id: keys_rig_id(),
             scene_id: keys_default_scene(),
         })
@@ -1323,7 +1319,7 @@ async fn engine_rapid_scene_switches() {
 /// Resolve 4 different scenes of the same rig in sequence (simulating live setlist navigation).
 #[tokio::test]
 async fn resolve_rapid_scene_sequence() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     let scene_ids = vec![
         seed_id("keys-megarig-default"),
@@ -1334,7 +1330,7 @@ async fn resolve_rapid_scene_sequence() {
 
     let mut prev_engine_count = 0;
     for (i, scene_id) in scene_ids.iter().enumerate() {
-        let result = ctrl
+        let result = signal
             .resolve_target(ResolveTarget::RigScene {
                 rig_id: keys_rig_id(),
                 scene_id: scene_id.clone().into(),
@@ -1368,9 +1364,9 @@ async fn resolve_rapid_scene_sequence() {
 /// Resolve guitar rig + keys rig, build diff between them.
 #[tokio::test]
 async fn diff_between_guitar_and_keys_rigs() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
-    let guitar_graph = ctrl
+    let guitar_graph = signal
         .resolve_target(ResolveTarget::RigScene {
             rig_id: guitar_rig_id(),
             scene_id: guitar_default_scene(),
@@ -1378,7 +1374,7 @@ async fn diff_between_guitar_and_keys_rigs() {
         .await
         .expect("guitar resolve");
 
-    let keys_graph = ctrl
+    let keys_graph = signal
         .resolve_target(ResolveTarget::RigScene {
             rig_id: keys_rig_id(),
             scene_id: keys_default_scene(),
@@ -1436,17 +1432,17 @@ fn morph_between_mismatched_param_sets() {
 /// Load a specific song section by variant ID.
 #[tokio::test]
 async fn load_song_variant_by_id() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
-    let songs = ctrl.list_songs().await;
+    let songs = signal.songs().list().await;
     let song = songs
         .iter()
         .find(|s| !s.sections.is_empty())
         .expect("need a song with sections");
     let first_section = &song.sections[0];
 
-    let loaded = ctrl
-        .load_song_variant(song.id.clone(), first_section.id.clone())
+    let loaded = signal
+        .songs().load_section(song.id.clone(), first_section.id.clone())
         .await;
     assert!(loaded.is_some());
     let section = loaded.unwrap();
@@ -1456,11 +1452,11 @@ async fn load_song_variant_by_id() {
 /// Load a nonexistent variant returns None.
 #[tokio::test]
 async fn load_nonexistent_variant_returns_none() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     // Valid rig, nonexistent scene
-    let result = ctrl
-        .load_rig_variant(guitar_rig_id(), seed_id("nonexistent-scene"))
+    let result = signal
+        .rigs().load_variant(guitar_rig_id(), seed_id("nonexistent-scene"))
         .await;
     assert!(result.is_none());
 }
@@ -1468,10 +1464,10 @@ async fn load_nonexistent_variant_returns_none() {
 /// Load a nonexistent engine variant returns None.
 #[tokio::test]
 async fn load_nonexistent_engine_variant_returns_none() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
-    let result = ctrl
-        .load_engine_variant(seed_id("keys-engine"), seed_id("nonexistent-variant"))
+    let result = signal
+        .engines().load_variant(seed_id("keys-engine"), seed_id("nonexistent-variant"))
         .await;
     assert!(result.is_none());
 }

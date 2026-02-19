@@ -445,3 +445,125 @@ async fn fx_snapshot_save_and_recall(ctx: &ReaperTestContext) -> eyre::Result<()
 
     Ok(())
 }
+
+// ---------------------------------------------------------------------------
+// Preset harvesting: cycle through all factory presets, capture name + state
+// ---------------------------------------------------------------------------
+
+#[reaper_test]
+async fn harvest_factory_presets(ctx: &ReaperTestContext) -> eyre::Result<()> {
+    let project = ctx.project().clone();
+
+    let track = project.tracks().add("Preset Harvest", None).await?;
+    let chain = track.fx_chain();
+
+    // ReaComp has factory presets; ReaEQ has zero.
+    let fx = chain.add("ReaComp").await?;
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+    let info = fx.info().await?;
+    println!("FX: {} ({})", info.name, info.plugin_name);
+
+    // Query initial preset state
+    let initial = fx
+        .preset_index()
+        .await?
+        .ok_or_else(|| eyre::eyre!("get_preset_index returned None"))?;
+    println!(
+        "  Initial: index={:?}, count={}, name={:?}",
+        initial.index, initial.count, initial.name
+    );
+
+    if initial.count == 0 {
+        println!("  Plugin has 0 factory presets — skipping harvest");
+        return Ok(());
+    }
+
+    // Set to preset 0 as a known starting point
+    fx.set_preset(0).await?;
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    // Harvest: cycle forward through every preset, capturing name + state chunk
+    struct HarvestedPreset {
+        index: u32,
+        name: String,
+        chunk_len: usize,
+    }
+    let mut harvested: Vec<HarvestedPreset> = Vec::new();
+
+    for i in 0..initial.count {
+        fx.set_preset(i).await?;
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        let preset_info = fx
+            .preset_index()
+            .await?
+            .ok_or_else(|| eyre::eyre!("get_preset_index returned None at index {}", i))?;
+
+        let name = preset_info
+            .name
+            .unwrap_or_else(|| format!("(unnamed #{})", i));
+
+        let chunk = fx.state_chunk_encoded().await?.unwrap_or_default();
+
+        println!("  [{}] {:?} — {} bytes state", i, name, chunk.len());
+
+        harvested.push(HarvestedPreset {
+            index: i,
+            name,
+            chunk_len: chunk.len(),
+        });
+    }
+
+    println!(
+        "\nHarvested {} / {} presets",
+        harvested.len(),
+        initial.count
+    );
+
+    // Verify we got presets
+    assert!(
+        !harvested.is_empty(),
+        "should have harvested at least 1 preset"
+    );
+    assert_eq!(
+        harvested.len() as u32,
+        initial.count,
+        "should have harvested all reported presets"
+    );
+
+    // Verify presets have state data
+    for hp in &harvested {
+        assert!(
+            hp.chunk_len > 0,
+            "preset [{}] '{}' should have non-empty state chunk",
+            hp.index,
+            hp.name
+        );
+    }
+
+    // Verify we can navigate back to preset 0 and the name matches
+    fx.set_preset(0).await?;
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    let final_info = fx.preset_index().await?.expect("preset_index after reset");
+    assert_eq!(
+        final_info.index,
+        Some(0),
+        "should be back at preset 0 after cycling"
+    );
+
+    println!("PASS — all {} factory presets harvested", harvested.len());
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Final cleanup — run after all other tests to remove leftover tracks/tabs
+// ---------------------------------------------------------------------------
+
+#[reaper_test(isolated)]
+async fn final_cleanup(ctx: &ReaperTestContext) -> eyre::Result<()> {
+    println!("\n=== final cleanup ===");
+    reaper_test::cleanup_all_projects(&ctx.daw).await?;
+    println!("PASS");
+    Ok(())
+}

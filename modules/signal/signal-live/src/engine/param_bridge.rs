@@ -23,6 +23,7 @@
 
 use signal_proto::{resolve::ResolvedGraph, Block};
 
+use super::daw_bridge::DawStateChunk;
 use super::morph::{DawParamValue, DawParameterSnapshot};
 
 /// A single DAW parameter as seen by the bridge: just a name and a value.
@@ -39,10 +40,22 @@ pub struct LiveParam {
 
 /// Match a signal domain parameter ID against a live DAW parameter name.
 ///
-/// Returns `true` if `signal_id` is a case-insensitive substring of `daw_name`.
-/// This is the canonical matching rule for the whole signal↔DAW bridge.
+/// Returns `true` if `signal_id` is a case-insensitive substring of `daw_name`,
+/// comparing after stripping separators (spaces, hyphens, underscores).
+/// This handles camelCase fingerprint names like `"dumbleGain"` matching
+/// DAW-exposed names like `"Dumble Gain"`.
 pub fn param_name_matches(signal_id: &str, daw_name: &str) -> bool {
-    daw_name.to_lowercase().contains(&signal_id.to_lowercase())
+    let norm_daw: String = daw_name
+        .chars()
+        .filter(|c| !matches!(c, ' ' | '-' | '_'))
+        .flat_map(|c| c.to_lowercase())
+        .collect();
+    let norm_sig: String = signal_id
+        .chars()
+        .filter(|c| !matches!(c, ' ' | '-' | '_'))
+        .flat_map(|c| c.to_lowercase())
+        .collect();
+    norm_daw.contains(&norm_sig)
 }
 
 /// Build a [`DawParameterSnapshot`] by mapping a [`Block`]'s parameters onto
@@ -103,6 +116,35 @@ pub fn graph_to_snapshot(
     (DawParameterSnapshot::new(values), count)
 }
 
+/// Extract [`DawStateChunk`]s from a resolved graph.
+///
+/// Walks all engines → layers → modules → blocks and collects binary state
+/// data from any [`ResolvedBlock`] that carries `state_data`. Each chunk is
+/// tagged with the provided `fx_id` and the block's label.
+///
+/// Returns an empty `Vec` when no blocks carry state data (the normal case
+/// for rig-based resolution). For `BlockSnapshot` targets pointing at catalog
+/// presets with `.bin` files, this returns one chunk per block.
+pub fn graph_state_chunks(graph: &ResolvedGraph, fx_id: &str) -> Vec<DawStateChunk> {
+    let mut chunks = Vec::new();
+    for engine in &graph.engines {
+        for layer in &engine.layers {
+            for module in &layer.modules {
+                for rb in &module.blocks {
+                    if let Some(data) = &rb.state_data {
+                        chunks.push(DawStateChunk {
+                            fx_id: fx_id.to_string(),
+                            plugin_name: rb.label.clone(),
+                            chunk_data: data.clone(),
+                        });
+                    }
+                }
+            }
+        }
+    }
+    chunks
+}
+
 /// Map live DAW parameter values back onto a domain [`Block`].
 ///
 /// Matches each block parameter by name against `live`, overwriting the
@@ -153,7 +195,7 @@ mod tests {
         Block::from_parameters(
             params
                 .iter()
-                .map(|(id, label, val)| BlockParameter::new(id, label, *val))
+                .map(|(id, label, val)| BlockParameter::new(*id, *label, *val))
                 .collect(),
         )
     }

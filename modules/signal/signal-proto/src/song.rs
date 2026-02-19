@@ -97,6 +97,14 @@ impl Section {
     pub fn validate_overrides(&self) -> Result<(), OverridePolicyError> {
         validate_overrides::<FreePolicy>(&self.overrides)
     }
+
+    /// Clone this section with a new ID and name.
+    pub fn duplicate(&self, new_id: impl Into<SectionId>, new_name: impl Into<String>) -> Self {
+        let mut dup = self.clone();
+        dup.id = new_id.into();
+        dup.name = new_name.into();
+        dup
+    }
 }
 
 // ─── Song ───────────────────────────────────────────────────────
@@ -142,6 +150,15 @@ impl Song {
 
     pub fn section(&self, id: &SectionId) -> Option<&Section> {
         self.sections.iter().find(|s| &s.id == id)
+    }
+
+    pub fn section_mut(&mut self, id: &SectionId) -> Option<&mut Section> {
+        self.sections.iter_mut().find(|s| &s.id == id)
+    }
+
+    pub fn remove_section(&mut self, id: &SectionId) -> Option<Section> {
+        let pos = self.sections.iter().position(|s| &s.id == id)?;
+        Some(self.sections.remove(pos))
     }
 
     #[must_use]

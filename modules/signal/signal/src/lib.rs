@@ -2,11 +2,18 @@
 //!
 //! Re-exports protocol types and controller APIs for consumers.
 
+#[cfg(feature = "daw")]
+pub mod reaper_applier;
+
+pub use signal_controller::ops;
 pub use signal_controller::SignalController;
+
+/// Ergonomic alias: `let signal = Signal::new(service);`
+pub type Signal = SignalController;
 pub use signal_live::engine::{
-    block_to_snapshot, find_param_index, graph_to_snapshot, live_params_into_block,
-    param_name_matches, DawParamValue, DawParameterSnapshot, LiveParam, MorphDiffEntry,
-    MorphEngine, MorphParamChange,
+    block_to_snapshot, find_param_index, graph_state_chunks, graph_to_snapshot,
+    live_params_into_block, param_name_matches, DawParamValue, DawParameterSnapshot, DawStateChunk,
+    LiveParam, MorphDiffEntry, MorphEngine, MorphParamChange,
 };
 pub use signal_live::SignalLive;
 pub use signal_proto::*;

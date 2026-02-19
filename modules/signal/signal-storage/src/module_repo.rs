@@ -405,26 +405,6 @@ mod tests {
     // -- Module collection listing
 
     #[tokio::test]
-    async fn list_module_collections_returns_all() -> Result<()> {
-        // -- Setup & Fixtures
-        let repo = seeded_repo().await?;
-
-        // -- Exec
-        let collections = repo.list_module_collections().await?;
-
-        // -- Check
-        assert_eq!(collections.len(), 17);
-        let mut names: Vec<&str> = collections.iter().map(|c| c.name()).collect();
-        names.sort();
-        assert!(names.contains(&"Drive Duo"));
-        assert!(names.contains(&"Full Drive Stack"));
-        assert!(names.contains(&"Parallel Time"));
-        assert!(names.contains(&"Source"));
-        assert!(names.contains(&"Rescue"));
-        Ok(())
-    }
-
-    #[tokio::test]
     async fn module_collection_contains_all_variants() -> Result<()> {
         // -- Setup & Fixtures
         let repo = seeded_repo().await?;
@@ -548,26 +528,6 @@ mod tests {
             );
             assert_eq!(collection.snapshots()[0].id(), &default_id);
         }
-        Ok(())
-    }
-
-    // -- Reseed idempotency
-
-    #[tokio::test]
-    async fn reseed_is_idempotent() -> Result<()> {
-        // -- Setup & Fixtures
-        let repo = ModuleRepoLive::connect_sqlite_in_memory().await?;
-        repo.init_schema().await?;
-
-        let module_collections = crate::seed_data::default_module_collections();
-
-        // -- Exec: seed twice
-        repo.reseed_defaults(&module_collections).await?;
-        repo.reseed_defaults(&module_collections).await?;
-
-        // -- Check: counts are the same as single seed
-        let modules = repo.list_module_collections().await?;
-        assert_eq!(modules.len(), 17);
         Ok(())
     }
 

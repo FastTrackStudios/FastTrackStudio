@@ -8,14 +8,16 @@
 //!
 //!   cargo test -p signal --test signal_guitar_rig_api -- --nocapture
 
+mod fixtures;
+
+use fixtures::*;
 use signal::{
     block::BlockType,
-    bootstrap_in_memory_controller_async,
     engine::{Engine, EngineScene, LayerSelection},
     layer::{Layer, LayerSnapshot, ModuleRef},
     module_type::ModuleType,
     overrides::{NodePath, Override},
-    profile::{Patch, Profile},
+    profile::{Patch, PatchTarget, Profile},
     resolve::{ResolveTarget, ResolvedGraph},
     rig::{EngineSelection, Rig, RigId, RigScene, RigSceneId},
     seed_id,
@@ -30,61 +32,6 @@ use signal_live::engine::{
     compute_diff, slot::InstanceHandle, ModuleTarget, ResolvedSlot, SlotDiff, SlotState,
 };
 
-// ─────────────────────────────────────────────────────────────
-//  Helpers
-// ─────────────────────────────────────────────────────────────
-
-async fn controller() -> signal::SignalController {
-    bootstrap_in_memory_controller_async()
-        .await
-        .expect("failed to bootstrap in-memory controller")
-}
-
-fn guitar_megarig_id() -> RigId {
-    seed_id("guitar-megarig").into()
-}
-
-fn guitar_megarig_default_scene() -> RigSceneId {
-    seed_id("guitar-megarig-default").into()
-}
-
-fn guitar_megarig_lead_scene() -> RigSceneId {
-    seed_id("guitar-megarig-lead").into()
-}
-
-/// Walk a ResolvedGraph and find a block parameter value by block_id fragment and param_id.
-fn find_param_in_graph(
-    graph: &ResolvedGraph,
-    block_id_fragment: &str,
-    param_id: &str,
-) -> Option<f32> {
-    for engine in &graph.engines {
-        for layer in &engine.layers {
-            for module in &layer.modules {
-                for block in &module.blocks {
-                    if block.node_id.contains(block_id_fragment) {
-                        for param in block.block.parameters() {
-                            if param.id() == param_id {
-                                return Some(param.value().get());
-                            }
-                        }
-                    }
-                }
-            }
-            for block in &layer.standalone_blocks {
-                if block.node_id.contains(block_id_fragment) {
-                    for param in block.block.parameters() {
-                        if param.id() == param_id {
-                            return Some(param.value().get());
-                        }
-                    }
-                }
-            }
-        }
-    }
-    None
-}
-
 // ═════════════════════════════════════════════════════════════
 //  Group A: Block Collection CRUD
 // ═════════════════════════════════════════════════════════════
@@ -92,7 +39,7 @@ fn find_param_in_graph(
 /// Create a brand-new block collection with 3 snapshots, save, reload, verify.
 #[tokio::test]
 async fn create_new_block_collection() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     let default_snap = Snapshot::new(
         seed_id("custom-drive-default"),
@@ -127,10 +74,10 @@ async fn create_new_block_collection() {
         vec![crunch, high_gain],
     );
 
-    ctrl.save_block_collection(preset).await;
+    signal.block_presets().save(preset).await;
 
     // Reload
-    let collections = ctrl.list_collections(BlockType::Drive).await;
+    let collections = signal.block_presets().list(BlockType::Drive).await;
     let loaded = collections
         .iter()
         .find(|p| p.name() == "Custom Drive")
@@ -140,8 +87,8 @@ async fn create_new_block_collection() {
     assert_eq!(loaded.default_snapshot().name(), "Default");
 
     // Verify specific snapshot
-    let block = ctrl
-        .load_variant(
+    let block = signal
+        .block_presets().load_variant(
             BlockType::Drive,
             loaded.id().clone(),
             seed_id("custom-drive-high"),
@@ -154,9 +101,9 @@ async fn create_new_block_collection() {
 /// Add a snapshot to an existing seeded block collection.
 #[tokio::test]
 async fn add_snapshot_to_existing_collection() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
-    let amp_collections = ctrl.list_collections(BlockType::Amp).await;
+    let amp_collections = signal.block_presets().list(BlockType::Amp).await;
     let mut jm_amp = amp_collections
         .iter()
         .find(|p| p.id().to_string() == seed_id("jm-amp").to_string())
@@ -179,10 +126,10 @@ async fn add_snapshot_to_existing_collection() {
         ]),
     );
     jm_amp.variants_mut().push(new_snap);
-    ctrl.save_block_collection(jm_amp).await;
+    signal.block_presets().save(jm_amp).await;
 
     // Reload and verify
-    let reloaded = ctrl.list_collections(BlockType::Amp).await;
+    let reloaded = signal.block_presets().list(BlockType::Amp).await;
     let loaded = reloaded
         .iter()
         .find(|p| p.id().to_string() == seed_id("jm-amp").to_string())
@@ -190,8 +137,8 @@ async fn add_snapshot_to_existing_collection() {
 
     assert_eq!(loaded.snapshots().len(), original_count + 1);
 
-    let high_gain = ctrl
-        .load_variant(
+    let high_gain = signal
+        .block_presets().load_variant(
             BlockType::Amp,
             loaded.id().clone(),
             seed_id("jm-amp-highgain"),
@@ -204,10 +151,10 @@ async fn add_snapshot_to_existing_collection() {
 /// Verify update_snapshot_params increments the version.
 #[tokio::test]
 async fn update_snapshot_params_increments_version() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     // Load the jm-amp Lead snapshot's version before
-    let collections = ctrl.list_collections(BlockType::Amp).await;
+    let collections = signal.block_presets().list(BlockType::Amp).await;
     let jm_amp = collections
         .iter()
         .find(|p| p.id().to_string() == seed_id("jm-amp").to_string())
@@ -223,7 +170,7 @@ async fn update_snapshot_params_increments_version() {
     // Update params
     let mut block = lead_snap.block();
     block.set_first_value(0.85);
-    ctrl.update_snapshot_params(
+    signal.block_presets().update_snapshot_params(
         BlockType::Amp,
         jm_amp.id().clone(),
         lead_snap.id().clone(),
@@ -232,7 +179,7 @@ async fn update_snapshot_params_increments_version() {
     .await;
 
     // Reload
-    let reloaded = ctrl.list_collections(BlockType::Amp).await;
+    let reloaded = signal.block_presets().list(BlockType::Amp).await;
     let jm_amp_reloaded = reloaded
         .iter()
         .find(|p| p.id().to_string() == seed_id("jm-amp").to_string())
@@ -250,7 +197,7 @@ async fn update_snapshot_params_increments_version() {
 /// Block collections are isolated by type.
 #[tokio::test]
 async fn block_collections_isolated_by_type() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     let custom = Preset::with_default_snapshot(
         seed_id("isolated-drive"),
@@ -262,12 +209,52 @@ async fn block_collections_isolated_by_type() {
             Block::from_parameters(vec![BlockParameter::new("gain", "Gain", 0.5)]),
         ),
     );
-    ctrl.save_block_collection(custom).await;
+    signal.block_presets().save(custom).await;
 
-    let amp_collections = ctrl.list_collections(BlockType::Amp).await;
+    let amp_collections = signal.block_presets().list(BlockType::Amp).await;
     assert!(
         !amp_collections.iter().any(|p| p.name() == "Isolated Drive"),
         "drive collection should not appear in amp list"
+    );
+}
+
+/// Delete a block preset and verify it's gone from the listing.
+#[tokio::test]
+async fn delete_block_preset() {
+    let signal = controller().await;
+
+    // Create a custom drive collection so we have something to delete
+    let preset = Preset::new(
+        seed_id("delete-me-drive"),
+        "Delete Me Drive",
+        BlockType::Drive,
+        Snapshot::new(
+            seed_id("delete-me-drive-default"),
+            "Default",
+            Block::from_parameters(vec![BlockParameter::new("gain", "Gain", 0.5)]),
+        ),
+        vec![],
+    );
+    signal.block_presets().save(preset).await;
+
+    // Verify it exists
+    let before = signal.block_presets().list(BlockType::Drive).await;
+    let count_before = before.len();
+    assert!(
+        before.iter().any(|p| p.name() == "Delete Me Drive"),
+        "preset should exist before deletion"
+    );
+
+    // Delete it
+    signal.block_presets().delete(BlockType::Drive, seed_id("delete-me-drive"))
+        .await;
+
+    // Verify it's gone
+    let after = signal.block_presets().list(BlockType::Drive).await;
+    assert_eq!(after.len(), count_before - 1, "count should decrease by 1");
+    assert!(
+        !after.iter().any(|p| p.name() == "Delete Me Drive"),
+        "deleted preset should not appear in listing"
     );
 }
 
@@ -278,7 +265,7 @@ async fn block_collections_isolated_by_type() {
 /// Create a new module collection with a serial signal chain.
 #[tokio::test]
 async fn create_new_module_collection() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     let module = Module::from_blocks(vec![
         ModuleBlock::new(
@@ -322,10 +309,10 @@ async fn create_new_module_collection() {
         vec![],
     );
 
-    ctrl.save_module_collection(preset).await;
+    signal.module_presets().save(preset).await;
 
     // Reload
-    let modules = ctrl.list_module_collections().await;
+    let modules = signal.module_presets().list().await;
     let loaded = modules
         .iter()
         .find(|m| m.name() == "Custom Guitar Module")
@@ -342,9 +329,9 @@ async fn create_new_module_collection() {
 /// Add a variant to an existing module collection.
 #[tokio::test]
 async fn add_variant_to_module_collection() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
-    let modules = ctrl.list_module_collections().await;
+    let modules = signal.module_presets().list().await;
     let jm_pedals = modules
         .iter()
         .find(|m| m.name() == "JM Pedals")
@@ -368,10 +355,10 @@ async fn add_variant_to_module_collection() {
 
     let mut updated = jm_pedals;
     updated.variants_mut().push(heavy_snap);
-    ctrl.save_module_collection(updated).await;
+    signal.module_presets().save(updated).await;
 
     // Reload
-    let reloaded = ctrl.list_module_collections().await;
+    let reloaded = signal.module_presets().list().await;
     let loaded = reloaded
         .iter()
         .find(|m| m.name() == "JM Pedals")
@@ -390,7 +377,7 @@ async fn add_variant_to_module_collection() {
 /// Module block sources (PresetDefault, PresetSnapshot) round-trip correctly.
 #[tokio::test]
 async fn module_block_source_references() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     let module = Module::from_blocks(vec![
         ModuleBlock::new(
@@ -422,11 +409,11 @@ async fn module_block_source_references() {
         snap,
         vec![],
     );
-    ctrl.save_module_collection(preset).await;
+    signal.module_presets().save(preset).await;
 
     // Reload
-    let loaded_snap = ctrl
-        .load_module_collection_default(seed_id("source-test"))
+    let loaded_snap = signal
+        .module_presets().load_default(seed_id("source-test"))
         .await
         .expect("should find module");
 
@@ -447,7 +434,7 @@ async fn module_block_source_references() {
 /// Signal chain with split (parallel routing) survives save/load.
 #[tokio::test]
 async fn module_signal_chain_with_split() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     let chain = SignalChain::new(vec![
         SignalNode::Block(ModuleBlock::new(
@@ -493,10 +480,10 @@ async fn module_signal_chain_with_split() {
         snap,
         vec![],
     );
-    ctrl.save_module_collection(preset).await;
+    signal.module_presets().save(preset).await;
 
-    let loaded = ctrl
-        .load_module_collection_default(seed_id("split-test"))
+    let loaded = signal
+        .module_presets().load_default(seed_id("split-test"))
         .await
         .expect("should load split module");
 
@@ -514,7 +501,7 @@ async fn module_signal_chain_with_split() {
 /// Build a layer from scratch with module_refs.
 #[tokio::test]
 async fn build_layer_from_scratch() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     let mut default_snap = LayerSnapshot::new(seed_id("test-layer-default"), "Default");
     default_snap.module_refs = vec![
@@ -528,10 +515,10 @@ async fn build_layer_from_scratch() {
         EngineType::Guitar,
         default_snap,
     );
-    ctrl.save_layer(layer).await;
+    signal.layers().save(layer).await;
 
-    let loaded = ctrl
-        .load_layer(seed_id("test-guitar-layer"))
+    let loaded = signal
+        .layers().load(seed_id("test-guitar-layer"))
         .await
         .expect("layer should exist");
 
@@ -544,7 +531,7 @@ async fn build_layer_from_scratch() {
 /// Layer with multiple variants selecting different module snapshots.
 #[tokio::test]
 async fn layer_with_multiple_variants() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     let mut clean = LayerSnapshot::new(seed_id("multi-layer-clean"), "Clean");
     clean.module_refs = vec![ModuleRef::new(seed_id("jm-pedals"))];
@@ -565,17 +552,17 @@ async fn layer_with_multiple_variants() {
     );
     layer.add_variant(crunch);
     layer.add_variant(lead);
-    ctrl.save_layer(layer).await;
+    signal.layers().save(layer).await;
 
-    let loaded = ctrl
-        .load_layer(seed_id("multi-variant-layer"))
+    let loaded = signal
+        .layers().load(seed_id("multi-variant-layer"))
         .await
         .expect("layer should exist");
 
     assert_eq!(loaded.variants.len(), 3);
 
-    let crunch_loaded = ctrl
-        .load_layer_variant(
+    let crunch_loaded = signal
+        .layers().load_variant(
             seed_id("multi-variant-layer"),
             seed_id("multi-layer-crunch"),
         )
@@ -588,7 +575,7 @@ async fn layer_with_multiple_variants() {
 /// Layer snapshot overrides survive save/load.
 #[tokio::test]
 async fn layer_snapshot_overrides_round_trip() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     let mut snap = LayerSnapshot::new(seed_id("override-layer-snap"), "With Overrides");
     snap.overrides = vec![
@@ -602,10 +589,10 @@ async fn layer_snapshot_overrides_round_trip() {
         EngineType::Guitar,
         snap,
     );
-    ctrl.save_layer(layer).await;
+    signal.layers().save(layer).await;
 
-    let loaded = ctrl
-        .load_layer(seed_id("override-layer"))
+    let loaded = signal
+        .layers().load(seed_id("override-layer"))
         .await
         .expect("layer should exist");
 
@@ -627,7 +614,7 @@ async fn layer_snapshot_overrides_round_trip() {
 /// Build an engine with layers and multiple scenes.
 #[tokio::test]
 async fn build_engine_with_layers() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     // First save two layers
     let layer_a_snap = LayerSnapshot::new(seed_id("eng-layer-a-snap"), "Default");
@@ -644,8 +631,8 @@ async fn build_engine_with_layers() {
         EngineType::Guitar,
         layer_b_snap,
     );
-    ctrl.save_layer(layer_a).await;
-    ctrl.save_layer(layer_b).await;
+    signal.layers().save(layer_a).await;
+    signal.layers().save(layer_b).await;
 
     // Build engine with two scenes
     let default_scene = EngineScene::new(seed_id("eng-scene-default"), "Default").with_layer(
@@ -663,10 +650,10 @@ async fn build_engine_with_layers() {
         default_scene,
     );
     engine.add_variant(lead_scene);
-    ctrl.save_engine(engine).await;
+    signal.engines().save(engine).await;
 
-    let loaded = ctrl
-        .load_engine(seed_id("test-engine"))
+    let loaded = signal
+        .engines().load(seed_id("test-engine"))
         .await
         .expect("engine should exist");
 
@@ -674,8 +661,8 @@ async fn build_engine_with_layers() {
     assert_eq!(loaded.layer_ids.len(), 2);
     assert_eq!(loaded.variants.len(), 2);
 
-    let lead = ctrl
-        .load_engine_variant(seed_id("test-engine"), seed_id("eng-scene-lead"))
+    let lead = signal
+        .engines().load_variant(seed_id("test-engine"), seed_id("eng-scene-lead"))
         .await
         .expect("lead scene should exist");
     assert_eq!(lead.name, "Lead");
@@ -684,7 +671,7 @@ async fn build_engine_with_layers() {
 /// Build a rig with 4 scenes and overrides.
 #[tokio::test]
 async fn build_rig_with_scenes() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     let default_scene = RigScene::new(seed_id("rig-scene-clean"), "Clean");
     let crunch = RigScene::new(seed_id("rig-scene-crunch"), "Crunch");
@@ -711,18 +698,18 @@ async fn build_rig_with_scenes() {
     rig.add_variant(crunch);
     rig.add_variant(lead);
     rig.add_variant(solo);
-    ctrl.save_rig_collection(rig).await;
+    signal.rigs().save(rig).await;
 
-    let loaded = ctrl
-        .load_rig_collection(seed_id("custom-guitar-rig"))
+    let loaded = signal
+        .rigs().load(seed_id("custom-guitar-rig"))
         .await
         .expect("rig should exist");
 
     assert_eq!(loaded.name, "Custom Guitar Rig");
     assert_eq!(loaded.variants.len(), 4);
 
-    let solo_loaded = ctrl
-        .load_rig_variant(seed_id("custom-guitar-rig"), seed_id("rig-scene-solo"))
+    let solo_loaded = signal
+        .rigs().load_variant(seed_id("custom-guitar-rig"), seed_id("rig-scene-solo"))
         .await
         .expect("solo scene should exist");
     assert_eq!(solo_loaded.overrides.len(), 2);
@@ -731,7 +718,7 @@ async fn build_rig_with_scenes() {
 /// Rig scene overrides at different NodePath depths are preserved.
 #[tokio::test]
 async fn rig_scene_overrides_stack() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     let scene = RigScene::new(seed_id("override-scene"), "Deep Overrides")
         .with_override(Override::set(
@@ -748,10 +735,10 @@ async fn rig_scene_overrides_stack() {
         ));
 
     let rig = Rig::new(seed_id("override-rig"), "Override Rig", vec![], scene);
-    ctrl.save_rig_collection(rig).await;
+    signal.rigs().save(rig).await;
 
-    let loaded = ctrl
-        .load_rig_collection(seed_id("override-rig"))
+    let loaded = signal
+        .rigs().load(seed_id("override-rig"))
         .await
         .expect("rig should exist");
 
@@ -769,7 +756,7 @@ async fn rig_scene_overrides_stack() {
 /// Each rig scene selects a different engine scene.
 #[tokio::test]
 async fn rig_scene_engine_selections() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     let scene_a = RigScene::new(seed_id("sel-scene-a"), "Scene A").with_engine(
         EngineSelection::new(seed_id("eng-1"), seed_id("eng-1-default")),
@@ -785,10 +772,10 @@ async fn rig_scene_engine_selections() {
         scene_a,
     );
     rig.add_variant(scene_b);
-    ctrl.save_rig_collection(rig).await;
+    signal.rigs().save(rig).await;
 
-    let loaded = ctrl
-        .load_rig_collection(seed_id("sel-rig"))
+    let loaded = signal
+        .rigs().load(seed_id("sel-rig"))
         .await
         .expect("rig");
 
@@ -807,7 +794,7 @@ async fn rig_scene_engine_selections() {
 /// Reorder rig scenes via the controller API.
 #[tokio::test]
 async fn reorder_rig_scenes() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     let mut rig = Rig::new(
         seed_id("reorder-rig"),
@@ -818,10 +805,10 @@ async fn reorder_rig_scenes() {
     rig.add_variant(RigScene::new(seed_id("r-scene-b"), "B"));
     rig.add_variant(RigScene::new(seed_id("r-scene-c"), "C"));
     rig.add_variant(RigScene::new(seed_id("r-scene-d"), "D"));
-    ctrl.save_rig_collection(rig).await;
+    signal.rigs().save(rig).await;
 
     // Reorder to [D, B, A, C]
-    ctrl.reorder_rig_scenes(
+    signal.rigs().reorder_scenes(
         seed_id("reorder-rig"),
         &[
             seed_id("r-scene-d").into(),
@@ -832,8 +819,8 @@ async fn reorder_rig_scenes() {
     )
     .await;
 
-    let loaded = ctrl
-        .load_rig_collection(seed_id("reorder-rig"))
+    let loaded = signal
+        .rigs().load(seed_id("reorder-rig"))
         .await
         .expect("rig");
 
@@ -844,7 +831,7 @@ async fn reorder_rig_scenes() {
 /// Reorder profile patches via the controller API.
 #[tokio::test]
 async fn reorder_profile_patches() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     let rig_id: RigId = guitar_megarig_id();
     let scene_id: RigSceneId = guitar_megarig_default_scene();
@@ -852,35 +839,35 @@ async fn reorder_profile_patches() {
     let mut profile = Profile::new(
         seed_id("reorder-profile"),
         "Reorder Profile",
-        Patch::new(seed_id("rp-a"), "A", rig_id.clone(), scene_id.clone()),
+        Patch::from_rig_scene(seed_id("rp-a"), "A", rig_id.clone(), scene_id.clone()),
     );
-    profile.add_patch(Patch::new(
+    profile.add_patch(Patch::from_rig_scene(
         seed_id("rp-b"),
         "B",
         rig_id.clone(),
         scene_id.clone(),
     ));
-    profile.add_patch(Patch::new(
+    profile.add_patch(Patch::from_rig_scene(
         seed_id("rp-c"),
         "C",
         rig_id.clone(),
         scene_id.clone(),
     ));
-    profile.add_patch(Patch::new(
+    profile.add_patch(Patch::from_rig_scene(
         seed_id("rp-d"),
         "D",
         rig_id.clone(),
         scene_id.clone(),
     ));
-    profile.add_patch(Patch::new(
+    profile.add_patch(Patch::from_rig_scene(
         seed_id("rp-e"),
         "E",
         rig_id.clone(),
         scene_id.clone(),
     ));
-    ctrl.save_profile(profile).await;
+    signal.profiles().save(profile).await;
 
-    ctrl.reorder_profile_patches(
+    signal.profiles().reorder_patches(
         seed_id("reorder-profile"),
         &[
             seed_id("rp-e").into(),
@@ -892,8 +879,8 @@ async fn reorder_profile_patches() {
     )
     .await;
 
-    let loaded = ctrl
-        .load_profile(seed_id("reorder-profile"))
+    let loaded = signal
+        .profiles().load(seed_id("reorder-profile"))
         .await
         .expect("profile");
 
@@ -904,7 +891,7 @@ async fn reorder_profile_patches() {
 /// Reorder song sections via the controller API.
 #[tokio::test]
 async fn reorder_song_sections() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     let rig_id: RigId = guitar_megarig_id();
     let scene_id: RigSceneId = guitar_megarig_default_scene();
@@ -937,9 +924,9 @@ async fn reorder_song_sections() {
         rig_id.clone(),
         scene_id.clone(),
     ));
-    ctrl.save_song(song).await;
+    signal.songs().save(song).await;
 
-    ctrl.reorder_song_sections(
+    signal.songs().reorder_sections(
         seed_id("reorder-song"),
         &[
             seed_id("rs-bridge").into(),
@@ -950,7 +937,7 @@ async fn reorder_song_sections() {
     )
     .await;
 
-    let loaded = ctrl.load_song(seed_id("reorder-song")).await.expect("song");
+    let loaded = signal.songs().load(seed_id("reorder-song")).await.expect("song");
 
     let names: Vec<&str> = loaded.sections.iter().map(|s| s.name.as_str()).collect();
     assert_eq!(names, vec!["Bridge", "Verse", "Outro", "Chorus"]);
@@ -959,10 +946,10 @@ async fn reorder_song_sections() {
 /// Reorder setlist entries via the controller API.
 #[tokio::test]
 async fn reorder_setlist_entries() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     // We need valid song IDs — use seeded songs
-    let songs = ctrl.list_songs().await;
+    let songs = signal.songs().list().await;
     assert!(!songs.is_empty(), "need at least one seeded song");
     let song_id = songs[0].id.clone();
 
@@ -981,9 +968,9 @@ async fn reorder_setlist_entries() {
         "Entry 3",
         song_id.clone(),
     ));
-    ctrl.save_setlist(setlist).await;
+    signal.setlists().save(setlist).await;
 
-    ctrl.reorder_setlist_entries(
+    signal.setlists().reorder_entries(
         seed_id("reorder-setlist"),
         &[
             seed_id("rse-3").into(),
@@ -993,8 +980,8 @@ async fn reorder_setlist_entries() {
     )
     .await;
 
-    let loaded = ctrl
-        .load_setlist(seed_id("reorder-setlist"))
+    let loaded = signal
+        .setlists().load(seed_id("reorder-setlist"))
         .await
         .expect("setlist");
 
@@ -1009,7 +996,7 @@ async fn reorder_setlist_entries() {
 /// Create a profile with multiple patches targeting different rig scenes.
 #[tokio::test]
 async fn create_profile_with_patches() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     let rig_id = guitar_megarig_id();
     let default_scene = guitar_megarig_default_scene();
@@ -1018,47 +1005,47 @@ async fn create_profile_with_patches() {
     let mut profile = Profile::new(
         seed_id("custom-profile"),
         "Custom Guitar Profile",
-        Patch::new(
+        Patch::from_rig_scene(
             seed_id("cp-clean"),
             "Clean",
             rig_id.clone(),
             default_scene.clone(),
         ),
     );
-    profile.add_patch(Patch::new(
+    profile.add_patch(Patch::from_rig_scene(
         seed_id("cp-crunch"),
         "Crunch",
         rig_id.clone(),
         default_scene.clone(),
     ));
-    profile.add_patch(Patch::new(
+    profile.add_patch(Patch::from_rig_scene(
         seed_id("cp-lead"),
         "Lead",
         rig_id.clone(),
         lead_scene.clone(),
     ));
-    profile.add_patch(Patch::new(
+    profile.add_patch(Patch::from_rig_scene(
         seed_id("cp-solo"),
         "Solo",
         rig_id.clone(),
         lead_scene.clone(),
     ));
-    profile.add_patch(Patch::new(
+    profile.add_patch(Patch::from_rig_scene(
         seed_id("cp-ambient"),
         "Ambient",
         rig_id.clone(),
         default_scene.clone(),
     ));
-    profile.add_patch(Patch::new(
+    profile.add_patch(Patch::from_rig_scene(
         seed_id("cp-rhythmic"),
         "Rhythmic",
         rig_id.clone(),
         default_scene.clone(),
     ));
-    ctrl.save_profile(profile).await;
+    signal.profiles().save(profile).await;
 
-    let loaded = ctrl
-        .load_profile(seed_id("custom-profile"))
+    let loaded = signal
+        .profiles().load(seed_id("custom-profile"))
         .await
         .expect("profile");
 
@@ -1073,10 +1060,10 @@ async fn create_profile_with_patches() {
 /// Load a specific patch and verify it targets the correct rig scene.
 #[tokio::test]
 async fn patch_targets_correct_rig_scene() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     // Use seeded Worship profile
-    let profiles = ctrl.list_profiles().await;
+    let profiles = signal.profiles().list().await;
     let worship = profiles
         .iter()
         .find(|p| p.name == "Worship")
@@ -1088,19 +1075,24 @@ async fn patch_targets_correct_rig_scene() {
         .find(|p| p.name == "Lead")
         .expect("lead patch");
 
-    let loaded = ctrl
-        .load_profile_variant(worship.id.clone(), lead_patch.id.clone())
+    let loaded = signal
+        .profiles().load_patch(worship.id.clone(), lead_patch.id.clone())
         .await
         .expect("lead patch variant");
 
     assert_eq!(loaded.name, "Lead");
-    assert_eq!(loaded.rig_id.to_string(), guitar_megarig_id().to_string());
+    match &loaded.target {
+        PatchTarget::RigScene { rig_id, .. } => {
+            assert_eq!(rig_id.to_string(), guitar_megarig_id().to_string());
+        }
+        _ => panic!("expected RigScene target"),
+    }
 }
 
 /// Retarget a patch to a different rig scene via set_patch_preset.
 #[tokio::test]
 async fn retarget_patch_via_set_patch_preset() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     let rig_id = guitar_megarig_id();
     let scene_a = guitar_megarig_default_scene();
@@ -1109,24 +1101,27 @@ async fn retarget_patch_via_set_patch_preset() {
     let profile = Profile::new(
         seed_id("retarget-profile"),
         "Retarget Profile",
-        Patch::new(
+        Patch::from_rig_scene(
             seed_id("retarget-patch"),
             "Target",
             rig_id.clone(),
             scene_a.clone(),
         ),
     );
-    ctrl.save_profile(profile).await;
+    signal.profiles().save(profile).await;
 
     // Verify initial target
-    let loaded_before = ctrl
-        .load_profile(seed_id("retarget-profile"))
+    let loaded_before = signal
+        .profiles().load(seed_id("retarget-profile"))
         .await
         .expect("profile");
-    assert_eq!(loaded_before.patches[0].rig_variant_id, scene_a);
+    match &loaded_before.patches[0].target {
+        PatchTarget::RigScene { scene_id, .. } => assert_eq!(*scene_id, scene_a),
+        _ => panic!("expected RigScene target"),
+    }
 
     // Retarget
-    ctrl.set_patch_preset(
+    signal.profiles().set_patch_preset(
         seed_id("retarget-profile"),
         seed_id("retarget-patch"),
         rig_id.clone(),
@@ -1134,20 +1129,23 @@ async fn retarget_patch_via_set_patch_preset() {
     )
     .await;
 
-    let loaded_after = ctrl
-        .load_profile(seed_id("retarget-profile"))
+    let loaded_after = signal
+        .profiles().load(seed_id("retarget-profile"))
         .await
         .expect("profile after retarget");
-    assert_eq!(loaded_after.patches[0].rig_variant_id, scene_b);
+    match &loaded_after.patches[0].target {
+        PatchTarget::RigScene { scene_id, .. } => assert_eq!(*scene_id, scene_b),
+        _ => panic!("expected RigScene target"),
+    }
 }
 
 /// Patch overrides affect resolved parameter values.
 #[tokio::test]
 async fn patch_overrides_affect_resolved_values() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     // The seeded worship profile has patches with overrides
-    let profiles = ctrl.list_profiles().await;
+    let profiles = signal.profiles().list().await;
     let worship = profiles
         .iter()
         .find(|p| p.name == "Worship")
@@ -1160,7 +1158,7 @@ async fn patch_overrides_affect_resolved_values() {
         .find(|p| p.name == "Clean")
         .expect("clean patch");
 
-    let graph = ctrl
+    let graph = signal
         .resolve_target(ResolveTarget::ProfilePatch {
             profile_id: worship.id.clone(),
             patch_id: clean_patch.id.clone(),
@@ -1174,7 +1172,7 @@ async fn patch_overrides_affect_resolved_values() {
     );
 
     // Find the amp gain param
-    if let Some(gain) = find_param_in_graph(&graph, "amp", "gain") {
+    if let Some(gain) = graph.find_param("amp", "gain") {
         // Clean patch overrides gain to be low
         assert!(
             gain < 0.3,
@@ -1190,7 +1188,7 @@ async fn patch_overrides_affect_resolved_values() {
 /// Create a song with sections from both patches and rig scenes.
 #[tokio::test]
 async fn create_song_with_mixed_sections() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     let rig_id = guitar_megarig_id();
     let scene_id = guitar_megarig_default_scene();
@@ -1199,14 +1197,14 @@ async fn create_song_with_mixed_sections() {
     let profile = Profile::new(
         seed_id("song-profile"),
         "Song Profile",
-        Patch::new(
+        Patch::from_rig_scene(
             seed_id("song-patch"),
             "Song Patch",
             rig_id.clone(),
             scene_id.clone(),
         ),
     );
-    ctrl.save_profile(profile).await;
+    signal.profiles().save(profile).await;
 
     let mut song = Song::new(
         seed_id("mixed-song"),
@@ -1224,9 +1222,9 @@ async fn create_song_with_mixed_sections() {
         "Bridge",
         seed_id("song-patch"),
     ));
-    ctrl.save_song(song).await;
+    signal.songs().save(song).await;
 
-    let loaded = ctrl.load_song(seed_id("mixed-song")).await.expect("song");
+    let loaded = signal.songs().load(seed_id("mixed-song")).await.expect("song");
 
     assert_eq!(loaded.sections.len(), 3);
     assert!(matches!(
@@ -1246,7 +1244,7 @@ async fn create_song_with_mixed_sections() {
 /// Switch a section's source from patch to rig scene.
 #[tokio::test]
 async fn switch_section_source() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     let rig_id = guitar_megarig_id();
     let scene_id = guitar_megarig_default_scene();
@@ -1260,17 +1258,17 @@ async fn switch_section_source() {
             seed_id("song-patch"),
         ),
     );
-    ctrl.save_song(song).await;
+    signal.songs().save(song).await;
 
     // Verify initial source
-    let before = ctrl.load_song(seed_id("switch-song")).await.expect("song");
+    let before = signal.songs().load(seed_id("switch-song")).await.expect("song");
     assert!(matches!(
         before.sections[0].source,
         SectionSource::Patch { .. }
     ));
 
     // Switch to rig scene
-    ctrl.set_section_source(
+    signal.songs().set_section_source(
         seed_id("switch-song"),
         seed_id("switch-section"),
         SectionSource::RigScene {
@@ -1280,7 +1278,7 @@ async fn switch_section_source() {
     )
     .await;
 
-    let after = ctrl.load_song(seed_id("switch-song")).await.expect("song");
+    let after = signal.songs().load(seed_id("switch-song")).await.expect("song");
     assert!(matches!(
         after.sections[0].source,
         SectionSource::RigScene { .. }
@@ -1290,15 +1288,15 @@ async fn switch_section_source() {
 /// Resolve all sections in a song.
 #[tokio::test]
 async fn resolve_all_song_sections() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
     // Use seeded songs
-    let songs = ctrl.list_songs().await;
+    let songs = signal.songs().list().await;
     assert!(!songs.is_empty(), "need seeded songs");
 
     for song in &songs {
         for section in &song.sections {
-            let result = ctrl
+            let result = signal
                 .resolve_target(ResolveTarget::SongSection {
                     song_id: song.id.clone(),
                     section_id: section.id.clone(),
@@ -1328,9 +1326,9 @@ async fn resolve_all_song_sections() {
 /// Create a setlist from songs.
 #[tokio::test]
 async fn create_setlist_from_songs() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
-    let songs = ctrl.list_songs().await;
+    let songs = signal.songs().list().await;
     assert!(!songs.is_empty());
     let song_id = songs[0].id.clone();
 
@@ -1344,10 +1342,10 @@ async fn create_setlist_from_songs() {
         "Song 2",
         song_id.clone(),
     ));
-    ctrl.save_setlist(setlist).await;
+    signal.setlists().save(setlist).await;
 
-    let loaded = ctrl
-        .load_setlist(seed_id("test-setlist"))
+    let loaded = signal
+        .setlists().load(seed_id("test-setlist"))
         .await
         .expect("setlist");
 
@@ -1359,18 +1357,18 @@ async fn create_setlist_from_songs() {
 /// Full hierarchy resolve sweep: setlist → songs → sections.
 #[tokio::test]
 async fn full_hierarchy_resolve_sweep() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
-    let setlists = ctrl.list_setlists().await;
+    let setlists = signal.setlists().list().await;
     assert!(!setlists.is_empty(), "need seeded setlists");
 
     let mut total_resolved = 0;
     for setlist in &setlists {
         for entry in &setlist.entries {
-            let song = ctrl.load_song(entry.song_id.clone()).await;
+            let song = signal.songs().load(entry.song_id.clone()).await;
             if let Some(song) = song {
                 for section in &song.sections {
-                    let result = ctrl
+                    let result = signal
                         .resolve_target(ResolveTarget::SongSection {
                             song_id: song.id.clone(),
                             section_id: section.id.clone(),

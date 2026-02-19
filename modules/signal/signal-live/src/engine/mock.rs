@@ -17,7 +17,7 @@ use super::target::ModuleTarget;
 /// Tracks state for a single mock slot.
 #[derive(Debug)]
 struct MockSlotState {
-    module_type: ModuleType,
+    _module_type: ModuleType,
     active_target: Option<ModuleTarget>,
     instance_state: InstanceState,
     is_disabled: bool,
@@ -30,7 +30,7 @@ struct MockSlotState {
 #[derive(Debug)]
 pub struct MockRigEngine {
     slots: Mutex<HashMap<ModuleType, MockSlotState>>,
-    next_handle: Mutex<u64>,
+    _next_handle: Mutex<u64>,
 }
 
 impl Default for MockRigEngine {
@@ -43,7 +43,7 @@ impl MockRigEngine {
     pub fn new() -> Self {
         Self {
             slots: Mutex::new(HashMap::new()),
-            next_handle: Mutex::new(1),
+            _next_handle: Mutex::new(1),
         }
     }
 
@@ -52,7 +52,7 @@ impl MockRigEngine {
         let mut slots = self.slots.lock().unwrap();
         for &mt in module_types {
             slots.entry(mt).or_insert_with(|| MockSlotState {
-                module_type: mt,
+                _module_type: mt,
                 active_target: None,
                 instance_state: InstanceState::Unloaded,
                 is_disabled: false,
@@ -68,7 +68,7 @@ impl MockRigEngine {
         targets: HashMap<ModuleType, ModuleTarget>,
     ) -> TransitionResult {
         let mut slots = self.slots.lock().unwrap();
-        let mut errors = Vec::new();
+        let errors = Vec::new();
 
         // Disable slots not present in new targets.
         for (mt, slot) in slots.iter_mut() {
@@ -81,7 +81,7 @@ impl MockRigEngine {
         // Activate or load targets.
         for (mt, target) in targets {
             let slot = slots.entry(mt).or_insert_with(|| MockSlotState {
-                module_type: mt,
+                _module_type: mt,
                 active_target: None,
                 instance_state: InstanceState::Unloaded,
                 is_disabled: false,
@@ -132,8 +132,8 @@ impl MockRigEngine {
             .unwrap_or(true)
     }
 
-    fn next_handle(&self) -> u64 {
-        let mut h = self.next_handle.lock().unwrap();
+    fn _next_handle(&self) -> u64 {
+        let mut h = self._next_handle.lock().unwrap();
         let val = *h;
         *h += 1;
         val

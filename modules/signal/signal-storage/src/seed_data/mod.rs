@@ -96,6 +96,9 @@ pub fn default_block_collections() -> Vec<Preset> {
     let library_path = std::path::PathBuf::from(home).join("Music/FastTrackStudio/Library");
     out.extend(catalog_import::catalog_block_collections(&library_path));
 
+    // RfxChain files from blocks/ and profiles/ directories
+    out.extend(catalog_import::rfxchain_block_collections(&library_path));
+
     out
 }
 

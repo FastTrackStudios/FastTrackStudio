@@ -140,6 +140,14 @@ impl RigScene {
     pub fn validate_overrides(&self) -> Result<(), OverridePolicyError> {
         validate_overrides::<ScenePolicy>(&self.overrides)
     }
+
+    /// Clone this scene with a new ID and name.
+    pub fn duplicate(&self, new_id: impl Into<RigSceneId>, new_name: impl Into<String>) -> Self {
+        let mut dup = self.clone();
+        dup.id = new_id.into();
+        dup.name = new_name.into();
+        dup
+    }
 }
 
 // ─── Rig ────────────────────────────────────────────────────────
@@ -185,6 +193,15 @@ impl Rig {
 
     pub fn add_variant(&mut self, variant: RigScene) {
         self.variants.push(variant);
+    }
+
+    pub fn variant_mut(&mut self, id: &RigSceneId) -> Option<&mut RigScene> {
+        self.variants.iter_mut().find(|v| &v.id == id)
+    }
+
+    pub fn remove_variant(&mut self, id: &RigSceneId) -> Option<RigScene> {
+        let pos = self.variants.iter().position(|v| &v.id == id)?;
+        Some(self.variants.remove(pos))
     }
 
     pub fn default_variant(&self) -> Option<&RigScene> {

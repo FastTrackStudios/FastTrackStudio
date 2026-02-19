@@ -19,7 +19,7 @@ use signal::{
 //  Helpers
 // ─────────────────────────────────────────────────────────────
 
-async fn controller() -> signal::SignalController {
+async fn controller() -> signal::Signal {
     bootstrap_in_memory_controller_async()
         .await
         .expect("failed to bootstrap in-memory controller")
@@ -32,9 +32,9 @@ async fn controller() -> signal::SignalController {
 /// Verify the JM block presets are present in the seeded DB.
 #[tokio::test]
 async fn jm_block_presets_are_seeded() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
-    let boosts = ctrl.list_collections(BlockType::Boost).await;
+    let boosts = signal.block_presets().list(BlockType::Boost).await;
     assert!(
         boosts
             .iter()
@@ -42,7 +42,7 @@ async fn jm_block_presets_are_seeded() {
         "jm-justa-boost not found in Boost collections"
     );
 
-    let drives = ctrl.list_collections(BlockType::Drive).await;
+    let drives = signal.block_presets().list(BlockType::Drive).await;
     assert!(
         drives
             .iter()
@@ -56,7 +56,7 @@ async fn jm_block_presets_are_seeded() {
         "jm-tealbreaker not found in Drive collections"
     );
 
-    let amps = ctrl.list_collections(BlockType::Amp).await;
+    let amps = signal.block_presets().list(BlockType::Amp).await;
     assert!(
         amps.iter()
             .any(|p| p.id().to_string() == seed_id("jm-amp").to_string()),
@@ -74,10 +74,10 @@ async fn jm_block_presets_are_seeded() {
 /// Load the default snapshot of jm-amp and verify parameter values.
 #[tokio::test]
 async fn load_jm_amp_default_block() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
-    let block = ctrl
-        .load_collection_default(BlockType::Amp, seed_id("jm-amp"))
+    let block = signal
+        .block_presets().load_default(BlockType::Amp, seed_id("jm-amp"))
         .await
         .expect("jm-amp default snapshot not found");
 
@@ -113,15 +113,15 @@ async fn load_jm_amp_default_block() {
 /// Load Lead and Clean snapshots of jm-amp and verify lead has higher gain.
 #[tokio::test]
 async fn load_jm_amp_lead_snapshot() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
-    let lead_block = ctrl
-        .load_variant(BlockType::Amp, seed_id("jm-amp"), seed_id("jm-amp-lead"))
+    let lead_block = signal
+        .block_presets().load_variant(BlockType::Amp, seed_id("jm-amp"), seed_id("jm-amp-lead"))
         .await
         .expect("jm-amp lead snapshot not found");
 
-    let clean_block = ctrl
-        .load_variant(BlockType::Amp, seed_id("jm-amp"), seed_id("jm-amp-clean"))
+    let clean_block = signal
+        .block_presets().load_variant(BlockType::Amp, seed_id("jm-amp"), seed_id("jm-amp-clean"))
         .await
         .expect("jm-amp clean snapshot not found");
 
@@ -152,10 +152,10 @@ async fn load_jm_amp_lead_snapshot() {
 /// Mutate a block's parameters, save back, reload, and verify persistence.
 #[tokio::test]
 async fn mutate_and_persist_jm_boost_snapshot() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
-    let original = ctrl
-        .load_collection_default(BlockType::Boost, seed_id("jm-justa-boost"))
+    let original = signal
+        .block_presets().load_default(BlockType::Boost, seed_id("jm-justa-boost"))
         .await
         .expect("jm-justa-boost default not found");
 
@@ -173,16 +173,17 @@ async fn mutate_and_persist_jm_boost_snapshot() {
         mutated.set_parameter_value(idx, new_level);
     }
 
-    ctrl.update_snapshot_params(
-        BlockType::Boost,
-        seed_id("jm-justa-boost"),
-        seed_id("jm-justa-boost-default"),
-        mutated,
-    )
-    .await;
+    signal
+        .block_presets().update_snapshot_params(
+            BlockType::Boost,
+            seed_id("jm-justa-boost"),
+            seed_id("jm-justa-boost-default"),
+            mutated,
+        )
+        .await;
 
-    let reloaded = ctrl
-        .load_collection_default(BlockType::Boost, seed_id("jm-justa-boost"))
+    let reloaded = signal
+        .block_presets().load_default(BlockType::Boost, seed_id("jm-justa-boost"))
         .await
         .expect("jm-justa-boost default not found after save");
 
@@ -211,9 +212,9 @@ async fn mutate_and_persist_jm_boost_snapshot() {
 /// Verify all JM module collections are seeded.
 #[tokio::test]
 async fn jm_module_presets_are_seeded() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
-    let modules = ctrl.list_module_collections().await;
+    let modules = signal.module_presets().list().await;
 
     let jm_module_ids = [
         "jm-pedals",
@@ -238,10 +239,10 @@ async fn jm_module_presets_are_seeded() {
 /// Load the JM pedals module default snapshot and verify it has 5 blocks.
 #[tokio::test]
 async fn jm_pedals_module_has_5_blocks() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
-    let snapshot = ctrl
-        .load_module_collection_default(seed_id("jm-pedals"))
+    let snapshot = signal
+        .module_presets().load_default(seed_id("jm-pedals"))
         .await
         .expect("jm-pedals default snapshot not found");
 
@@ -258,15 +259,15 @@ async fn jm_pedals_module_has_5_blocks() {
 /// Load the "Lead" variant of jm-pedals and verify justa-boost uses the Edge snapshot.
 #[tokio::test]
 async fn jm_pedals_lead_variant_uses_edge_snapshot() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
-    let default_snap = ctrl
-        .load_module_collection_default(seed_id("jm-pedals"))
+    let default_snap = signal
+        .module_presets().load_default(seed_id("jm-pedals"))
         .await
         .expect("jm-pedals default not found");
 
-    let lead_snap = ctrl
-        .load_module_variant(seed_id("jm-pedals"), seed_id("jm-pedals-lead"))
+    let lead_snap = signal
+        .module_presets().load_variant(seed_id("jm-pedals"), seed_id("jm-pedals-lead"))
         .await
         .expect("jm-pedals lead variant not found");
 
@@ -308,9 +309,9 @@ async fn jm_pedals_lead_variant_uses_edge_snapshot() {
 /// Load the JM amp module and verify it has 4 snapshots (default + 3 named).
 #[tokio::test]
 async fn jm_amp_module_has_4_snapshots() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
-    let modules = ctrl.list_module_collections().await;
+    let modules = signal.module_presets().list().await;
     let amp_module = modules
         .iter()
         .find(|m| m.id().to_string() == seed_id("jm-amp-module").to_string())
@@ -336,10 +337,10 @@ async fn jm_amp_module_has_4_snapshots() {
 /// Verify the guitar-layer-archetype-jm layer is present and has both variants.
 #[tokio::test]
 async fn guitar_layer_archetype_jm_is_seeded() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
-    let layer = ctrl
-        .load_layer(seed_id("guitar-layer-archetype-jm"))
+    let layer = signal
+        .layers().load(seed_id("guitar-layer-archetype-jm"))
         .await
         .expect("guitar-layer-archetype-jm not found");
 
@@ -363,10 +364,10 @@ async fn guitar_layer_archetype_jm_is_seeded() {
 /// Load the default layer variant and verify it references all 6 JM modules.
 #[tokio::test]
 async fn jm_layer_default_has_6_module_refs() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
-    let variant = ctrl
-        .load_layer_variant(
+    let variant = signal
+        .layers().load_variant(
             seed_id("guitar-layer-archetype-jm"),
             seed_id("guitar-layer-archetype-jm-default"),
         )
@@ -388,10 +389,10 @@ async fn jm_layer_default_has_6_module_refs() {
 /// Load the Lead layer variant and verify it selects jm-amp-module-crunch.
 #[tokio::test]
 async fn jm_layer_lead_variant_selects_crunch_amp() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
-    let lead_variant = ctrl
-        .load_layer_variant(
+    let lead_variant = signal
+        .layers().load_variant(
             seed_id("guitar-layer-archetype-jm"),
             seed_id("guitar-layer-archetype-jm-lead"),
         )
@@ -420,20 +421,20 @@ async fn jm_layer_lead_variant_selects_crunch_amp() {
 /// Save a modified layer and confirm changes persist.
 #[tokio::test]
 async fn save_and_reload_jm_layer() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
-    let mut layer = ctrl
-        .load_layer(seed_id("guitar-layer-archetype-jm"))
+    let mut layer = signal
+        .layers().load(seed_id("guitar-layer-archetype-jm"))
         .await
         .expect("layer not found");
 
     let original_name = layer.name.clone();
     layer.name = format!("{} (modified)", original_name);
 
-    ctrl.save_layer(layer).await;
+    signal.layers().save(layer).await;
 
-    let reloaded = ctrl
-        .load_layer(seed_id("guitar-layer-archetype-jm"))
+    let reloaded = signal
+        .layers().load(seed_id("guitar-layer-archetype-jm"))
         .await
         .expect("layer not found after save");
 
@@ -448,10 +449,10 @@ async fn save_and_reload_jm_layer() {
 /// Verify the guitar engine is seeded and references the JM archetype layer.
 #[tokio::test]
 async fn guitar_engine_has_jm_layer() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
-    let engine = ctrl
-        .load_engine(seed_id("guitar-engine"))
+    let engine = signal
+        .engines().load(seed_id("guitar-engine"))
         .await
         .expect("guitar-engine not found");
 
@@ -480,10 +481,10 @@ async fn guitar_engine_has_jm_layer() {
 /// Load the default scene of the guitar engine.
 #[tokio::test]
 async fn guitar_engine_default_scene_loads() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
-    let scene = ctrl
-        .load_engine_variant(seed_id("guitar-engine"), seed_id("guitar-engine-default"))
+    let scene = signal
+        .engines().load_variant(seed_id("guitar-engine"), seed_id("guitar-engine-default"))
         .await
         .expect("guitar-engine default scene not found");
 
@@ -504,9 +505,9 @@ async fn guitar_engine_default_scene_loads() {
 /// Verify the guitar MegaRig is seeded with multiple scenes.
 #[tokio::test]
 async fn guitar_megarig_is_seeded() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
-    let rigs = ctrl.list_rig_collections().await;
+    let rigs = signal.rigs().list().await;
     println!("Rigs:");
     for r in &rigs {
         println!("  {} — {} ({} variants)", r.id, r.name, r.variants.len());
@@ -527,10 +528,10 @@ async fn guitar_megarig_is_seeded() {
 /// Load the guitar MegaRig lead scene and verify it has engine selections and overrides.
 #[tokio::test]
 async fn guitar_megarig_lead_scene_has_overrides() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
-    let scene = ctrl
-        .load_rig_variant(seed_id("guitar-megarig"), seed_id("guitar-megarig-lead"))
+    let scene = signal
+        .rigs().load_variant(seed_id("guitar-megarig"), seed_id("guitar-megarig-lead"))
         .await
         .expect("guitar-megarig lead scene not found");
 
@@ -554,10 +555,10 @@ async fn guitar_megarig_lead_scene_has_overrides() {
 /// Add a custom scene to the guitar MegaRig with a parameter override, save, reload, verify.
 #[tokio::test]
 async fn save_rig_with_custom_scene_and_override() {
-    let ctrl = controller().await;
+    let signal = controller().await;
 
-    let mut rig = ctrl
-        .load_rig_collection(seed_id("guitar-megarig"))
+    let mut rig = signal
+        .rigs().load(seed_id("guitar-megarig"))
         .await
         .expect("guitar-megarig not found");
 
@@ -579,10 +580,10 @@ async fn save_rig_with_custom_scene_and_override() {
         ));
 
     rig.variants.push(custom_scene);
-    ctrl.save_rig_collection(rig).await;
+    signal.rigs().save(rig).await;
 
-    let reloaded = ctrl
-        .load_rig_collection(seed_id("guitar-megarig"))
+    let reloaded = signal
+        .rigs().load(seed_id("guitar-megarig"))
         .await
         .expect("guitar-megarig not found after save");
 
