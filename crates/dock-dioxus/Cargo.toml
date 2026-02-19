@@ -14,12 +14,10 @@ tokio = { workspace = true, features = ["time"] }
 
 # UI framework (conditional on feature)
 dioxus = { workspace = true, optional = true, features = ["desktop"] }
-dioxus-native = { workspace = true, optional = true }
 
 [features]
 default = ["web"]
 web = ["dep:dioxus", "dep:tracing"]
-native = ["dep:dioxus-native", "dep:tracing"]
 
 [lints]
 workspace = true
