@@ -525,12 +525,11 @@ fn is_vec_string_type(ty: &Type) -> bool {
         if let Some(segment) = type_path.path.segments.last() {
             if segment.ident == "Vec" {
                 if let syn::PathArguments::AngleBracketed(args) = &segment.arguments {
-                    if let Some(syn::GenericArgument::Type(inner_type)) = args.args.first() {
-                        // Check if inner type is String
-                        if let Type::Path(inner_path) = inner_type {
-                            if let Some(inner_segment) = inner_path.path.segments.last() {
-                                return inner_segment.ident == "String";
-                            }
+                    if let Some(syn::GenericArgument::Type(Type::Path(inner_path))) =
+                        args.args.first()
+                    {
+                        if let Some(inner_segment) = inner_path.path.segments.last() {
+                            return inner_segment.ident == "String";
                         }
                     }
                 }

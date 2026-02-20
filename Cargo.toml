@@ -2,6 +2,9 @@
 members = ["crates/monarchy", "crates/monarchy-derive"]
 resolver = "2"
 
+[workspace.lints.rust]
+dead_code = "allow"
+
 [workspace.package]
 version = "0.1.0"
 edition = "2021"

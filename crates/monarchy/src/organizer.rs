@@ -32,7 +32,7 @@
 //! let structure = organizer.organize(items);
 //! ```
 
-use crate::{CollapseHierarchy, Config, Group, Item, Metadata, Structure};
+use crate::{CollapseHierarchy, Config, Item, Metadata, Structure};
 use facet::Facet;
 
 /// Organizes parsed [`Item`]s into a hierarchical [`Structure`].
@@ -584,28 +584,5 @@ impl<M: Metadata> Organizer<M> {
     /// Uses the format_metadata_value helper from lib.rs which handles Vec<String> properly.
     fn format_metadata_value_for_grouping(&self, value: &M::Value) -> String {
         crate::format_metadata_value::<M>(value)
-    }
-
-    /// Find a group in the config by name (recursively searches nested groups)
-    /// Static method to avoid lifetime issues with closures
-    fn find_group_in_config_static<'a>(config: &'a Config<M>, name: &str) -> Option<&'a Group<M>> {
-        fn search_group<'a, M: Metadata>(group: &'a Group<M>, name: &str) -> Option<&'a Group<M>> {
-            if group.name == name {
-                return Some(group);
-            }
-            for nested in &group.groups {
-                if let Some(found) = search_group(nested, name) {
-                    return Some(found);
-                }
-            }
-            None
-        }
-
-        for group in &config.groups {
-            if let Some(found) = search_group(group, name) {
-                return Some(found);
-            }
-        }
-        None
     }
 }

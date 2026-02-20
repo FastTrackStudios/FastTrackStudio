@@ -281,44 +281,6 @@ impl<M: Metadata> Parser<M> {
         }
     }
 
-    /// Find the hierarchy path to a group by recursively searching the config
-    fn find_group_hierarchy(&self, group_name: &str) -> Vec<String> {
-        // Recursively search through groups and their nested groups
-        fn search_group<M: Metadata>(
-            group: &crate::Group<M>,
-            target_name: &str,
-            current_path: &mut Vec<String>,
-        ) -> bool {
-            current_path.push(group.name.clone());
-
-            // Check if this is the target group
-            if group.name == target_name {
-                return true;
-            }
-
-            // Recursively search nested groups
-            for nested_group in &group.groups {
-                if search_group(nested_group, target_name, current_path) {
-                    return true;
-                }
-            }
-
-            // Not found in this branch, backtrack
-            current_path.pop();
-            false
-        }
-
-        let mut path = Vec::new();
-        for group in &self.config.groups {
-            if search_group(group, group_name, &mut path) {
-                return path;
-            }
-        }
-
-        // If not found in hierarchy, return just the group name
-        vec![String::from(group_name)]
-    }
-
     /// Set the group trail field in metadata
     fn set_group_field(&self, metadata: &mut M, group_trail: &[String]) {
         for field in M::fields() {

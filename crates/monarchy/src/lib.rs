@@ -855,31 +855,6 @@ pub fn move_items_matching_any_to_group<M: Metadata>(
     Ok(sorted_count)
 }
 
-/// Helper: Extract items matching a pattern from a structure (recursively)
-fn extract_items_matching<M: Metadata>(
-    node: &mut Structure<M>,
-    pattern: &str,
-    out: &mut Vec<Item<M>>,
-) {
-    // Extract matching items from this node
-    let mut remaining = Vec::new();
-    for item in std::mem::take(&mut node.items) {
-        if crate::utils::contains_word(&item.original, pattern) {
-            out.push(item);
-        } else {
-            remaining.push(item);
-        }
-    }
-    node.items = remaining;
-
-    // Recursively process children
-    for child in &mut node.children {
-        extract_items_matching(child, pattern, out);
-    }
-
-    // Remove empty children
-    node.children.retain(|c| !c.is_empty());
-}
 
 /// Helper: Extract items matching ANY of multiple patterns from a structure (recursively)
 fn extract_items_matching_any<M: Metadata>(
@@ -1233,30 +1208,6 @@ where
     }
 }
 
-/// Helper to find a group in the config by name (recursively searches nested groups)
-fn find_group_in_config<'a, M: Metadata>(
-    config: &'a Config<M>,
-    name: &str,
-) -> Option<&'a Group<M>> {
-    fn search_group<'a, M: Metadata>(group: &'a Group<M>, name: &str) -> Option<&'a Group<M>> {
-        if group.name == name {
-            return Some(group);
-        }
-        for nested in &group.groups {
-            if let Some(found) = search_group(nested, name) {
-                return Some(found);
-            }
-        }
-        None
-    }
-
-    for group in &config.groups {
-        if let Some(found) = search_group(group, name) {
-            return Some(found);
-        }
-    }
-    None
-}
 
 /// Format a metadata value as a string for display
 pub fn format_metadata_value<M: Metadata>(value: &M::Value) -> String {

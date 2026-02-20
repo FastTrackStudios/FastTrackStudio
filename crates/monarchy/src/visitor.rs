@@ -161,38 +161,6 @@ impl<'a, M: Metadata> CollapseHelper<'a, M> {
             .unwrap_or(false)
     }
 
-    /// Find the parent group of a given group name
-    fn find_parent_group(&self, child_name: &str) -> Option<&'a Group<M>> {
-        fn search_parent<'a, M: Metadata>(
-            parent: &'a Group<M>,
-            child_name: &str,
-        ) -> Option<&'a Group<M>> {
-            for child in &parent.groups {
-                if child.name.eq_ignore_ascii_case(child_name) {
-                    return Some(parent);
-                }
-                if let Some(found) = search_parent(child, child_name) {
-                    return Some(found);
-                }
-            }
-            None
-        }
-
-        for group in &self.config.groups {
-            // Check if this top-level group is the parent
-            for child in &group.groups {
-                if child.name.eq_ignore_ascii_case(child_name) {
-                    return Some(group);
-                }
-            }
-            // Search deeper
-            if let Some(found) = search_parent(group, child_name) {
-                return Some(found);
-            }
-        }
-        None
-    }
-
     /// Check if a top-level category is transparent
     /// Transparent groups have their children promoted to top level
     fn is_top_level_transparent(&self, name: &str) -> bool {
@@ -202,33 +170,6 @@ impl<'a, M: Metadata> CollapseHelper<'a, M> {
             .find(|g| g.name.eq_ignore_ascii_case(name))
             .map(|g| g.transparent)
             .unwrap_or(false)
-    }
-
-    /// Check if a child group shares any patterns with its parent
-    /// If true, the child should collapse INTO the parent's name (e.g., Lead Vocals -> Vocals)
-    /// If false, the child should keep its own name (e.g., BGVs stays BGVs)
-    fn child_shares_parent_patterns(&self, child_name: &str) -> bool {
-        let child_group = match self.find_group(child_name) {
-            Some(g) => g,
-            None => return false,
-        };
-
-        let parent_group = match self.find_parent_group(child_name) {
-            Some(g) => g,
-            None => return false,
-        };
-
-        // Check if any pattern in child matches any pattern in parent
-        for child_pattern in &child_group.patterns {
-            let child_pattern_lower = child_pattern.to_lowercase();
-            for parent_pattern in &parent_group.patterns {
-                if child_pattern_lower == parent_pattern.to_lowercase() {
-                    return true;
-                }
-            }
-        }
-
-        false
     }
 }
 
@@ -1510,6 +1451,7 @@ mod tests {
     use super::*;
     use crate::metadata::FieldName;
     use serde::{Deserialize, Serialize};
+    use facet::Facet;
 
     // region:    --- Test Fixtures
 
@@ -1521,7 +1463,8 @@ mod tests {
         multi_mic: Option<String>,
     }
 
-    #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+    #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Facet)]
+    #[repr(u8)]
     enum TestMetadataField {
         Group,
         MultiMic,
@@ -1536,7 +1479,8 @@ mod tests {
         }
     }
 
-    #[derive(Clone, Debug)]
+    #[derive(Clone, Debug, Facet)]
+    #[repr(C)]
     enum TestMetadataValue {
         Group(String),
         MultiMic(String),
