@@ -46,6 +46,7 @@ fn main_layout_clone() -> Option<DockLayout> {
     ws.windows.get(&ws.main_window).map(|w| w.layout.clone())
 }
 
+#[allow(deprecated)]
 fn sync_main_layout_signal(workspace: &DockWorkspace) {
     if let Some(main) = workspace.windows.get(&workspace.main_window) {
         *DOCK_LAYOUT.write() = main.layout.clone();
@@ -523,6 +524,7 @@ pub fn load_rig_preset(index: usize) {
 ///
 /// Call this once at app startup. It tries to load saved presets
 /// from disk, falling back to built-in defaults.
+#[allow(deprecated)]
 pub fn init_dock_presets() {
     // Temporary behavior: always use built-in presets at startup.
     // Ignore on-disk presets until layout behavior is finalized.

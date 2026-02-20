@@ -18,6 +18,7 @@ dioxus = { workspace = true, optional = true, features = ["desktop"] }
 [features]
 default = ["web"]
 web = ["dep:dioxus", "dep:tracing"]
+native = []
 
 [lints]
 workspace = true
