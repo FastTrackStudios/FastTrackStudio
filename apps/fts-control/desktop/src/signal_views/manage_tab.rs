@@ -147,7 +147,7 @@ pub(crate) fn SignalManageTab() -> Element {
 
             spawn(async move {
                 // 1) Rigs filtered by type
-                let rigs = signal.rigs().list().await;
+                let rigs = signal.rigs().list().await.unwrap_or_default();
                 let filtered: Vec<_> = rigs
                     .into_iter()
                     .filter(|r| r.rig_type.map_or(false, |t| t == rt))
@@ -157,7 +157,7 @@ pub(crate) fn SignalManageTab() -> Element {
 
                 // 2) Layers filtered by engine type
                 let et = rig_type_to_engine_type(rt);
-                let all_layers = signal.layers().list().await;
+                let all_layers = signal.layers().list().await.unwrap_or_default();
                 let matching_layers: Vec<_> = all_layers
                     .into_iter()
                     .filter(|l| l.engine_type == et)
@@ -192,7 +192,7 @@ pub(crate) fn SignalManageTab() -> Element {
                 manage_presets.set(items);
 
                 // 3) Profiles — keep only those with patches targeting a rig of this type
-                let all_profiles = signal.profiles().list().await;
+                let all_profiles = signal.profiles().list().await.unwrap_or_default();
                 let matching_profiles: Vec<_> = all_profiles
                     .into_iter()
                     .filter(|p| {
@@ -253,7 +253,7 @@ pub(crate) fn SignalManageTab() -> Element {
                 patch_display_labels.set(labels);
 
                 // 4) Setlists — build dropdown options + "All Songs" union
-                let all_setlists = signal.setlists().list().await;
+                let all_setlists = signal.setlists().list().await.unwrap_or_default();
                 let mut opts: Vec<(String, String)> =
                     vec![("all".to_string(), "All Songs".to_string())];
                 for sl in &all_setlists {
@@ -269,7 +269,7 @@ pub(crate) fn SignalManageTab() -> Element {
                     for entry in &sl.entries {
                         let sid = entry.song_id.to_string();
                         if seen_song_ids.insert(sid.clone()) {
-                            if let Some(song) = signal.songs().load(sid).await {
+                            if let Some(song) = signal.songs().load(sid).await.ok().flatten() {
                                 all_union_songs.push(song);
                             }
                         }
@@ -344,7 +344,7 @@ pub(crate) fn SignalManageTab() -> Element {
             selected_song_id.set(Some(song_id.clone()));
             selected_section_id.set(None);
             spawn(async move {
-                if let Some(song) = signal.songs().load(song_id).await {
+                if let Some(song) = signal.songs().load(song_id).await.ok().flatten() {
                     active_song_name.set(song.name.clone());
                     let cur_presets = manage_presets();
                     let cur_profiles = manage_profiles();
@@ -375,14 +375,14 @@ pub(crate) fn SignalManageTab() -> Element {
             spawn(async move {
                 if setlist_id == "all" {
                     // "All Songs" = union of all songs from all setlists (deduped)
-                    let all_setlists = signal.setlists().list().await;
+                    let all_setlists = signal.setlists().list().await.unwrap_or_default();
                     let mut seen_ids = std::collections::HashSet::new();
                     let mut all_union = Vec::new();
                     for sl in &all_setlists {
                         for entry in &sl.entries {
                             let sid = entry.song_id.to_string();
                             if seen_ids.insert(sid.clone()) {
-                                if let Some(song) = signal.songs().load(sid).await {
+                                if let Some(song) = signal.songs().load(sid).await.ok().flatten() {
                                     all_union.push(song);
                                 }
                             }
@@ -415,12 +415,20 @@ pub(crate) fn SignalManageTab() -> Element {
                         song_sections.set(entries);
                         section_sources.set(sources);
                     }
-                } else if let Some(setlist) = signal.setlists().load(setlist_id).await {
+                } else if let Some(setlist) =
+                    signal.setlists().load(setlist_id).await.ok().flatten()
+                {
                     // Load songs from this specific setlist
                     let mut song_entries = Vec::new();
                     let mut first_song = None;
                     for entry in &setlist.entries {
-                        if let Some(song) = signal.songs().load(entry.song_id.clone()).await {
+                        if let Some(song) = signal
+                            .songs()
+                            .load(entry.song_id.clone())
+                            .await
+                            .ok()
+                            .flatten()
+                        {
                             song_entries.push(SongEntry {
                                 id: song.id.to_string(),
                                 name: song.name.clone(),

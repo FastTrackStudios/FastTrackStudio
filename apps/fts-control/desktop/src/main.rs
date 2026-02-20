@@ -1,10 +1,19 @@
 //! FTS Control Desktop Application
 //!
 //! Central hub for FastTrackStudio that:
-//! - Connects to REAPER(s) via Unix socket
+//! - Discovers and connects to multiple REAPER instances via `/tmp/fts-daw-{pid}.sock`
+//! - Classifies each as Session (setlist/transport) or Signal (rig/patch application)
 //! - Runs session services in-process (no SHM complexity)
 //! - Runs WebSocket gateway for browser access
 //! - Renders the same UI as the web app
+//!
+//! # Multi-DAW Discovery
+//!
+//! Each REAPER instance runs the FTS extension, which listens on a PID-based
+//! Unix socket (`/tmp/fts-daw-{pid}.sock`). A background discovery loop scans
+//! for these sockets every 2 seconds and establishes auto-reconnecting
+//! connections. DAWs with projects named `FTS-GUITAR`, `FTS-KEYS`, `FTS-BASS`,
+//! or `FTS-VOCALS` are classified as Signal DAWs; all others are Session DAWs.
 //!
 //! # Renderer Selection
 //!
@@ -17,31 +26,27 @@
 //! # Architecture
 //!
 //! ```text
-//! ┌─────────────────┐     Unix Socket      ┌──────────────────────────────────┐
-//! │ REAPER Extension│◄────────────────────►│       fts-control Desktop        │
-//! │  (daw-reaper)   │                      │  ┌─────────────────────────────┐ │
-//! │                 │                      │  │ Same UI (session-ui crate)  │ │
-//! └─────────────────┘                      │  │ PerformanceLayout, TopBar   │ │
-//!                                          │  └─────────────────────────────┘ │
-//!                                          │  ┌─────────────────────────────┐ │
-//!                                          │  │ Session/Setlist Services    │ │
-//!                                          │  │ (in-process, no SHM)        │ │
-//!                                          │  └─────────────────────────────┘ │
+//! /tmp/fts-daw-*.sock                      ┌──────────────────────────────────┐
+//! ┌─────────────────┐  auto-reconnect      │       fts-control Desktop        │
+//! │ REAPER (Session)│◄────────────────────►│  ┌─────────────────────────────┐ │
+//! └─────────────────┘                      │  │ DawRegistry (N connections) │ │
+//! ┌─────────────────┐  auto-reconnect      │  └─────────────────────────────┘ │
+//! │ REAPER (Signal) │◄────────────────────►│  ┌─────────────────────────────┐ │
+//! └─────────────────┘                      │  │ Session/Setlist Services    │ │
+//!    ...more DAWs                          │  └─────────────────────────────┘ │
 //!                                          │  ┌─────────────────────────────┐ │
 //!                                          │  │ WebSocket Gateway           │ │
-//!                                          │  │ (Axum server for browsers)  │ │
 //!                                          │  └─────────────────────────────┘ │
 //!                                          └──────────────────────────────────┘
-//!                                                           ▲
-//!                                                      WebSocket
-//!                                                     ┌────┴────┐
-//!                                                     │ Browser │ (same UI via web)
-//!                                                     └─────────┘
 //! ```
 
 mod actions;
 mod command_palette;
+mod dashboard;
+mod daw_registry;
 mod gateway;
+mod launcher;
+mod persistence;
 mod services;
 mod signal_views;
 
@@ -87,14 +92,15 @@ static GLOBAL_ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
 /// Whether the dock layout system is active (vs. classic tab navigation).
 static DOCK_MODE: GlobalSignal<bool> = Signal::global(|| true);
 
-/// Top-level page: "main" (dock/classic tabs) or "rig" (rig dock view).
-static TOP_PAGE: GlobalSignal<&'static str> = Signal::global(|| "rig");
+/// Top-level page: "dashboard", "main" (dock/classic tabs), or "rig" (rig dock view).
+static TOP_PAGE: GlobalSignal<&'static str> = Signal::global(|| "dashboard");
 
 static COMMAND_PALETTE_OPEN: GlobalSignal<bool> = Signal::global(|| false);
 static COMMAND_PALETTE_QUERY: GlobalSignal<String> = Signal::global(String::new);
 
 use actions::{dispatch_action, dispatch_input_commands, handle_dock_preset_shortcut};
 use command_palette::{build_input_config, build_palette_entries};
+use dashboard::Dashboard;
 use signal_views::{PerformanceWithChartToggle, SignalView};
 
 const FAVICON: Asset = asset!("/assets/favicon.ico");
@@ -131,7 +137,7 @@ fn main() {
             tracing_subscriber::EnvFilter::from_default_env()
                 .add_directive("fts_control_desktop=info".parse().unwrap())
                 .add_directive("session=info".parse().unwrap())
-.add_directive("signal_ui=info".parse().unwrap())
+                .add_directive("signal_ui=info".parse().unwrap())
                 .add_directive("daw_control::fx=debug".parse().unwrap()),
         )
         .init();
@@ -294,6 +300,13 @@ fn App() -> Element {
 
             match connect_db_seeded(&db_path).await {
                 Ok(ctrl) => {
+                    // Attach signal DAW applier if one has been discovered
+                    let ctrl = if let Some(applier) = daw_registry::signal_applier() {
+                        tracing::info!("Attaching signal DAW applier to SignalController");
+                        ctrl.with_daw_applier(applier)
+                    } else {
+                        ctrl
+                    };
                     tracing::info!("Signal database connected at: {}", db_path);
                     provide_context(ctrl.clone());
                     signal_store.set(Some(ctrl));
@@ -406,9 +419,11 @@ fn App() -> Element {
             SONG_TRANSPORT,
         };
 
-        // Wait for DAW to connect
+        // Wait for DAW to connect AND Session to be initialized (by run_services).
+        // Session::init() happens on the background thread after DAW discovery,
+        // so we need to wait for both before calling Session::get().
         loop {
-            if is_daw_connected() {
+            if is_daw_connected() && Session::try_get().is_some() {
                 break;
             }
             tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
@@ -771,23 +786,22 @@ fn App() -> Element {
                         // ── Page switcher (Main / Rig) ──────────────────────
                         {
                             let current_page = *TOP_PAGE.read();
+                            let active_class = "px-3 py-1 text-xs font-medium text-white bg-zinc-700 rounded-md transition-colors";
+                            let inactive_class = "px-3 py-1 text-xs font-medium text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded-md transition-colors";
                             rsx! {
                                 div { class: "flex items-center gap-0 bg-zinc-950 border-b border-zinc-800 px-2 py-0.5 flex-shrink-0",
                                     button {
-                                        class: if current_page == "main" {
-                                            "px-3 py-1 text-xs font-medium text-white bg-zinc-700 rounded-md transition-colors"
-                                        } else {
-                                            "px-3 py-1 text-xs font-medium text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded-md transition-colors"
-                                        },
+                                        class: if current_page == "dashboard" { active_class } else { inactive_class },
+                                        onclick: move |_| { *TOP_PAGE.write() = "dashboard"; },
+                                        "Dashboard"
+                                    }
+                                    button {
+                                        class: if current_page == "main" { active_class } else { inactive_class },
                                         onclick: move |_| { *TOP_PAGE.write() = "main"; },
                                         "Session"
                                     }
                                     button {
-                                        class: if current_page == "rig" {
-                                            "px-3 py-1 text-xs font-medium text-white bg-zinc-700 rounded-md transition-colors"
-                                        } else {
-                                            "px-3 py-1 text-xs font-medium text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded-md transition-colors"
-                                        },
+                                        class: if current_page == "rig" { active_class } else { inactive_class },
                                         onclick: move |_| { *TOP_PAGE.write() = "rig"; },
                                         "Signal"
                                     }
@@ -796,7 +810,12 @@ fn App() -> Element {
                         }
 
                         // ── Page content ─────────────────────────────────────
-                        if *TOP_PAGE.read() == "rig" {
+                        if *TOP_PAGE.read() == "dashboard" {
+                            div {
+                                class: "flex-1 overflow-hidden relative",
+                                Dashboard {}
+                            }
+                        } else if *TOP_PAGE.read() == "rig" {
                             // Signal page: signal views
                             div {
                                 class: "flex-1 overflow-hidden relative",
@@ -1039,65 +1058,10 @@ pub fn is_daw_connected() -> bool {
 }
 
 // ============================================================================
-// REAPER Connection (Unix Socket Client)
+// Multi-DAW Discovery & Connection
 // ============================================================================
 
-/// Default socket path, overridable via `FTS_SOCKET` env var.
-const DEFAULT_SOCKET_PATH: &str = "/tmp/fts-control.sock";
-
-/// Connector for the REAPER extension's Unix socket.
-///
-/// Implements `roam_stream::Connector` so that `roam_stream::connect()` can
-/// establish (and automatically reconnect) a roam session over the well-known
-/// socket at `/tmp/fts-control.sock`.
-struct ReaperConnector {
-    path: std::path::PathBuf,
-}
-
-impl roam_stream::Connector for ReaperConnector {
-    type Transport = tokio::net::UnixStream;
-
-    async fn connect(&self) -> std::io::Result<Self::Transport> {
-        tokio::net::UnixStream::connect(&self.path).await
-    }
-}
-
-/// Connect to the REAPER extension via Unix socket and initialize the DAW singleton.
-///
-/// Uses `roam_stream::connect()` which retries with backoff until the socket is
-/// available, making it safe to start fts-control before REAPER is fully loaded.
-async fn connect_to_reaper() {
-    let socket_path = std::env::var("FTS_SOCKET")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|_| std::path::PathBuf::from(DEFAULT_SOCKET_PATH));
-    debug!("Connecting to REAPER at {}", socket_path.display());
-
-    let connector = ReaperConnector { path: socket_path };
-    let config = roam_session::HandshakeConfig {
-        max_payload_size: 1024 * 1024,            // 1 MiB
-        initial_channel_credit: 16 * 1024 * 1024, // 16 MiB — matches server
-        max_concurrent_requests: 64,
-        ..Default::default()
-    };
-
-    let client = roam_stream::connect(connector, config, roam_session::NoDispatcher);
-
-    match client.handle().await {
-        Ok(handle) => {
-            if let Err(e) = daw_control::Daw::init(handle) {
-                tracing::error!("Failed to initialize DAW singleton: {}", e);
-                return;
-            }
-            DAW_CONNECTED.store(true, std::sync::atomic::Ordering::Relaxed);
-            debug!("Connected to REAPER via Unix socket — DAW singleton initialized");
-        }
-        Err(e) => {
-            tracing::error!("Failed to connect to REAPER: {}", e);
-        }
-    }
-}
-
-/// Run background services (session services, gateway)
+/// Run background services (session services, gateway, DAW discovery)
 async fn run_services() {
     use gateway::{start_gateway, GatewayConfig};
     use services::LocalServices;
@@ -1105,14 +1069,24 @@ async fn run_services() {
 
     debug!("Initializing services...");
 
-    // 1. Connect to REAPER via Unix socket (initializes Daw singleton)
-    connect_to_reaper().await;
+    // 1. Initialize the DAW registry and start discovery loop
+    daw_registry::DawRegistry::init();
+    tokio::spawn(daw_registry::daw_discovery_loop());
+    debug!("DAW discovery loop started");
 
-    // 2. Create local session services (these use Daw::get() internally)
+    // 2. Wait for at least one session DAW to connect (Daw::init() called by discovery loop)
+    loop {
+        if is_daw_connected() {
+            break;
+        }
+        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+    }
+
+    // 3. Create local session services (these use Daw::get() internally)
     let services = LocalServices::new();
     debug!("Local services initialized");
 
-    // 3. Initialize Session singleton for UI components
+    // 4. Initialize Session singleton for UI components
     match services.create_setlist_client().await {
         Ok(setlist_client) => {
             if let Err(e) = Session::init(setlist_client) {
@@ -1126,10 +1100,10 @@ async fn run_services() {
         }
     }
 
-    // 4. Create dispatcher for gateway
+    // 5. Create dispatcher for gateway
     let dispatcher = services.create_dispatcher();
 
-    // 5. Start WebSocket gateway for browser access
+    // 6. Start WebSocket gateway for browser access
     let config = GatewayConfig::default();
     debug!("Starting gateway on {}", config.bind_addr);
 

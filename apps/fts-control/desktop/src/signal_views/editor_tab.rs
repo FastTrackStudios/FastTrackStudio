@@ -51,7 +51,7 @@ pub(crate) fn SignalEditorTab() -> Element {
             editor_chain.set(Vec::new());
 
             spawn(async move {
-                let rigs = signal.rigs().list().await;
+                let rigs = signal.rigs().list().await.unwrap_or_default();
                 let filtered: Vec<_> = rigs
                     .into_iter()
                     .filter(|r| r.rig_type.map_or(false, |t| t == rt))

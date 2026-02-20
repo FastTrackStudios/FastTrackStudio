@@ -17,18 +17,30 @@ pub(crate) fn SignalPerformanceTab() -> Element {
         use_effect(move || {
             let signal = signal.clone();
             spawn(async move {
-                let rigs = signal.rigs().list().await;
+                let rigs = signal.rigs().list().await.unwrap_or_default();
                 if let Some(first) = rigs.first() {
-                    if let Some(rig) = signal.rigs().load(first.id.to_string()).await {
+                    if let Some(rig) = signal
+                        .rigs()
+                        .load(first.id.to_string())
+                        .await
+                        .ok()
+                        .flatten()
+                    {
                         if let Some(v) = rig.variants.first() {
                             active_scene_id.set(Some(v.id.to_string()));
                         }
                         rig_data.set(Some(rig));
                     }
                 }
-                let songs = signal.songs().list().await;
+                let songs = signal.songs().list().await.unwrap_or_default();
                 if let Some(first) = songs.first() {
-                    if let Some(song) = signal.songs().load(first.id.to_string()).await {
+                    if let Some(song) = signal
+                        .songs()
+                        .load(first.id.to_string())
+                        .await
+                        .ok()
+                        .flatten()
+                    {
                         song_data.set(Some(song));
                     }
                 }
