@@ -356,20 +356,20 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 "/Users/codywright/Music/FastTrackStudio/Reaper/FTS-TRACKS/FTS-LIVE.app/Contents/Resources".to_string()
             });
 
-            let socket_path = "/tmp/fts-control.sock";
-            let _ = std::fs::remove_file(socket_path);
-
             let mut reaper_child = std::process::Command::new(&reaper_exe)
                 .current_dir(&reaper_resources)
+                .arg("-newinst")
                 .arg("-nosplash")
                 .arg("-ignoreerrors")
                 .spawn()
                 .map_err(|e| format!("Failed to spawn REAPER at {reaper_exe}: {e}"))?;
             let reaper_pid = reaper_child.id();
-            println!("  Spawned REAPER (PID {reaper_pid})");
+            let socket_path = format!("/tmp/fts-daw-{reaper_pid}.sock");
+            let _ = std::fs::remove_file(&socket_path);
+            println!("  Spawned REAPER (PID {reaper_pid}), socket: {socket_path}");
 
             // Wait for socket
-            let socket = std::path::Path::new(socket_path);
+            let socket = std::path::Path::new(&socket_path);
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
             print!("  Waiting for socket");
             while !socket.exists() {
@@ -395,6 +395,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             // Step 4: Run REAPER tests (parallel with limited concurrency)
             // Each test gets its own project tab; limit threads to avoid overwhelming
             // REAPER's main thread with too many concurrent plugin loads.
+            // Set FTS_SOCKET so tests connect to the right REAPER instance
+            sh.set_var("FTS_SOCKET", &socket_path);
+
             println!("\n>>> Running tests...");
             let test_result = if let Some(ref f) = filter {
                 cmd!(

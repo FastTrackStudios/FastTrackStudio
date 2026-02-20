@@ -811,12 +811,14 @@ fn ModuleViewTab() -> Element {
         use_effect(move || {
             let controller = controller.clone();
             spawn(async move {
-                let collections = controller.module_presets().list().await;
+                let collections = controller.module_presets().list().await.unwrap_or_default();
                 if let Some(first) = collections.first() {
                     let snapshot = controller
                         .module_presets()
                         .load_default(first.id().to_string())
-                        .await;
+                        .await
+                        .ok()
+                        .flatten();
                     if let Some(snap) = snapshot {
                         module_data.set(Some(snap.module().clone()));
                     }
@@ -895,7 +897,7 @@ fn SceneGridTab() -> Element {
         use_effect(move || {
             let controller = controller.clone();
             spawn(async move {
-                let rigs = controller.rigs().list().await;
+                let rigs = controller.rigs().list().await.unwrap_or_default();
                 if let Some(first) = rigs.first() {
                     rig_id.set(Some(first.id.to_string()));
                 }
