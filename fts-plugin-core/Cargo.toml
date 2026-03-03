@@ -1,0 +1,19 @@
+[package]
+name = "fts-plugin-core"
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+description = "Core abstraction layer for FTS audio plugins (nih_plug + dioxus)"
+
+[features]
+default = ["gui"]
+gui = ["nih_plug_dioxus"]
+
+[dependencies]
+nih_plug = { workspace = true }
+nih_plug_dioxus = { workspace = true, optional = true }
+atomic_float = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
