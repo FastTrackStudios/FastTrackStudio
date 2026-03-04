@@ -5,23 +5,12 @@ authors = ["Cody Wright <acodywright@gmail.com>"]
 edition = "2021"
 
 [dependencies]
-dioxus = { workspace = true, features = ["router"] }
+dioxus = { workspace = true }
 signal.workspace = true
 signal-ui.workspace = true
-frame-import = { git = "https://github.com/FastTrackStudios/frame.git", branch = "main" }
-frame-proto = { git = "https://github.com/FastTrackStudios/frame.git", branch = "main" }
-frame-ui = { git = "https://github.com/FastTrackStudios/frame.git", branch = "main", features = ["anyrender"] }
-anyrender = { workspace = true }
-anyrender_vello = { workspace = true }
-vello = { workspace = true }
-wgpu_context = { workspace = true }
-wgpu = { workspace = true }
-pollster = { workspace = true }
-kurbo = { workspace = true }
-peniko = { workspace = true }
+macromod.workspace = true
+lumen-blocks.workspace = true
 tokio = { workspace = true, features = ["time"] }
-serde_json = { workspace = true }
-lumen-blocks = { git = "https://github.com/Leaf-Computer/lumen-blocks.git", tag = "v0.2.0" }
 
 [features]
 default = ["desktop"]

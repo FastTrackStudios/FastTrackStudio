@@ -2,21 +2,5 @@
 body {
   margin: 0;
   padding: 0;
-}
-
-/* Match fts-control hybrid transparency behavior for WGPU-under-WebView rendering */
-html.transparent-mode,
-html.transparent-mode body {
-  background: transparent !important;
-  background-color: transparent !important;
-}
-
-html.transparent-mode [style*="background: transparent"] {
-  background: transparent !important;
-  background-color: transparent !important;
-}
-
-html.transparent-mode #frame-preview-surface {
-  background: transparent !important;
-  background-color: transparent !important;
+  background-color: var(--background, #0f1116);
 }
