@@ -1,0 +1,24 @@
+[package]
+name = "fts-cli"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "fts"
+path = "src/main.rs"
+
+[dependencies]
+daw-cli.workspace = true
+daw-control.workspace = true
+daw-proto.workspace = true
+signal-cli.workspace = true
+session-cli.workspace = true
+tokio.workspace = true
+eyre.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+serde_json.workspace = true
+serde.workspace = true
+signal-proto.workspace = true
+macromod.workspace = true
+clap = { version = "4", features = ["derive"] }
