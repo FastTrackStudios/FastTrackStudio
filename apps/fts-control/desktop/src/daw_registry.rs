@@ -102,12 +102,58 @@ pub struct DawRegistry {
 
 static REGISTRY: OnceLock<DawRegistry> = OnceLock::new();
 
-/// Global signal applier, set when a Signal DAW is first discovered.
-static SIGNAL_APPLIER: OnceLock<Arc<dyn DawPatchApplier>> = OnceLock::new();
+/// Global signal applier — resettable so a new Signal DAW can re-wire after disconnect.
+static SIGNAL_APPLIER: RwLock<Option<Arc<dyn DawPatchApplier>>> = RwLock::new(None);
+
+/// Concrete ReaperPatchApplier for input configuration (configure_input, etc.).
+static SIGNAL_REAPER_APPLIER: RwLock<Option<Arc<ReaperPatchApplier>>> = RwLock::new(None);
+
+/// The Signal DAW handle for querying audio device info.
+static SIGNAL_DAW: RwLock<Option<Daw>> = RwLock::new(None);
+
+/// Maps preset_id → FX GUID so we can find the REAPER plugin for write-back.
+/// Populated at capture time, used by apply and live-push operations.
+static BLOCK_FX_MAP: std::sync::LazyLock<RwLock<HashMap<String, String>>> =
+    std::sync::LazyLock::new(|| RwLock::new(HashMap::new()));
 
 /// Get the signal applier if a Signal DAW has been discovered and wired.
 pub fn signal_applier() -> Option<Arc<dyn DawPatchApplier>> {
-    SIGNAL_APPLIER.get().cloned()
+    SIGNAL_APPLIER.read().expect("lock poisoned").clone()
+}
+
+/// Get the concrete ReaperPatchApplier for input configuration.
+pub fn signal_reaper_applier() -> Option<Arc<ReaperPatchApplier>> {
+    SIGNAL_REAPER_APPLIER.read().expect("lock poisoned").clone()
+}
+
+/// Get the Signal DAW handle for audio device queries.
+pub fn signal_daw() -> Option<Daw> {
+    SIGNAL_DAW.read().expect("lock poisoned").clone()
+}
+
+/// Register a preset_id → FX GUID mapping (called after FX capture).
+pub fn register_block_fx(preset_id: &str, fx_guid: &str) {
+    BLOCK_FX_MAP
+        .write()
+        .expect("lock poisoned")
+        .insert(preset_id.to_string(), fx_guid.to_string());
+}
+
+/// Look up the FX GUID for a previously captured block preset.
+pub fn fx_guid_for_block(preset_id: &str) -> Option<String> {
+    BLOCK_FX_MAP
+        .read()
+        .expect("lock poisoned")
+        .get(preset_id)
+        .cloned()
+}
+
+/// Clear all signal statics (called when a Signal DAW disconnects).
+fn clear_signal_statics() {
+    *SIGNAL_APPLIER.write().expect("lock poisoned") = None;
+    *SIGNAL_REAPER_APPLIER.write().expect("lock poisoned") = None;
+    *SIGNAL_DAW.write().expect("lock poisoned") = None;
+    BLOCK_FX_MAP.write().expect("lock poisoned").clear();
 }
 
 impl DawRegistry {
@@ -164,14 +210,23 @@ impl DawRegistry {
     }
 
     /// Remove a DAW connection by PID.
+    /// If the removed entry was a Signal DAW, clears the signal statics
+    /// so a new Signal DAW can re-wire on next discovery.
     pub fn unregister(&self, pid: u32) {
         self.connecting
             .write()
             .expect("connecting lock poisoned")
             .remove(&pid);
         let mut entries = self.entries.write().expect("registry lock poisoned");
-        if entries.remove(&pid).is_some() {
-            info!(pid, "DAW unregistered (socket gone)");
+        if let Some(entry) = entries.remove(&pid) {
+            info!(pid, role = ?entry.role, "DAW unregistered (socket gone)");
+            if entry.role == DawRole::Signal {
+                clear_signal_statics();
+                info!(
+                    pid,
+                    "Signal statics cleared — ready to re-wire on next Signal DAW"
+                );
+            }
         }
     }
 
@@ -221,6 +276,12 @@ impl DawRegistry {
     pub fn connection_info(&self) -> Vec<DawConnectionInfo> {
         let entries = self.entries.read().expect("registry lock poisoned");
         entries.values().map(DawConnectionInfo::from).collect()
+    }
+
+    /// Get `(pid, daw)` pairs for all registered entries (used for health-checking).
+    pub fn daw_handles(&self) -> Vec<(u32, Daw)> {
+        let entries = self.entries.read().expect("registry lock poisoned");
+        entries.values().map(|e| (e.pid, e.daw.clone())).collect()
     }
 
     /// Total number of registered DAWs.
@@ -311,6 +372,18 @@ fn classify_by_project_names(projects: &[ProjectInfo]) -> DawRole {
 // Socket Discovery
 // ============================================================================
 
+/// Check if a process is still alive by running `kill -0 {pid}`.
+/// Returns `false` if the process has exited.
+fn is_process_alive(pid: u32) -> bool {
+    std::process::Command::new("kill")
+        .args(["-0", &pid.to_string()])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
 /// Extract the PID from a socket filename like `fts-daw-12345.sock`.
 fn pid_from_socket_path(path: &Path) -> Option<u32> {
     let filename = path.file_name()?.to_str()?;
@@ -380,9 +453,20 @@ fn spawn_daw_connection(pid: u32, path: PathBuf) {
                 }
             }
             DawRole::Signal => {
-                // Wire up ReaperPatchApplier for the first matching project
-                if SIGNAL_APPLIER.get().is_none() {
+                // Wire up ReaperPatchApplier (re-wires if previous Signal DAW disconnected)
+                let needs_wiring = SIGNAL_APPLIER.read().expect("lock poisoned").is_none();
+                if needs_wiring {
+                    info!(
+                        pid,
+                        "Wiring signal applier for {} project(s)...",
+                        projects.len()
+                    );
                     wire_signal_applier(&daw, &projects).await;
+                    if signal_applier().is_some() {
+                        info!(pid, "Signal applier successfully wired");
+                    } else {
+                        warn!(pid, "Signal applier wiring FAILED — applier not set");
+                    }
                 }
             }
         }
@@ -423,32 +507,61 @@ fn spawn_daw_connection(pid: u32, path: PathBuf) {
 /// Creates a folder-based rig structure in the matching REAPER project
 /// and stores the applier globally for `SignalController` to use.
 async fn wire_signal_applier(daw: &Daw, projects: &[ProjectInfo]) {
-    for info in projects {
-        if !SIGNAL_PROJECT_TITLES.iter().any(|t| info.name == *t) {
-            continue;
+    // Use the first project in the Signal DAW — the DAW role is already confirmed
+    // via ExtState, so we don't need to filter by project name.
+    let Some(info) = projects.first() else {
+        warn!("Signal DAW has no projects, cannot wire applier");
+        return;
+    };
+
+    let project = match daw.project(&info.guid).await {
+        Ok(p) => p,
+        Err(e) => {
+            warn!("Failed to get signal project '{}': {}", info.name, e);
+            return;
         }
+    };
 
-        let project = match daw.project(&info.guid).await {
-            Ok(p) => p,
-            Err(e) => {
-                warn!("Failed to get signal project '{}': {}", info.name, e);
-                continue;
-            }
-        };
+    let rig_name = if SIGNAL_PROJECT_TITLES.iter().any(|t| info.name == *t) {
+        info.name.clone()
+    } else {
+        "Guitar Rig".to_string()
+    };
 
-        let applier = Arc::new(ReaperPatchApplier::new());
-        if let Err(e) = applier.set_target(project, &info.name).await {
-            warn!(
-                "Failed to set signal applier target '{}': {:?}",
-                info.name, e
-            );
-            continue;
-        }
-
-        let _ = SIGNAL_APPLIER.set(applier);
-        info!("Signal applier wired to project '{}'", info.name);
+    let applier = Arc::new(ReaperPatchApplier::new());
+    if let Err(e) = applier.set_target(project, &rig_name).await {
+        warn!(
+            "Failed to set signal applier target '{}': {:?}",
+            rig_name, e
+        );
         return;
     }
+
+    // Auto-configure input from saved RigSetup before exposing the applier.
+    // This ensures record-arm + input monitoring are set even if the user
+    // launches from the Dashboard and hasn't visited the Signal page yet.
+    if let Ok(audio_info) = daw.audio_engine().get_audio_inputs().await {
+        if let Some(setup) = persistence::find_rig_setup(&audio_info.device_name) {
+            match applier.configure_input(setup.channel_index).await {
+                Ok(()) => info!(
+                    "Auto-configured input channel {} ('{}') for '{}'",
+                    setup.channel_index, setup.channel_label, audio_info.device_name
+                ),
+                Err(e) => warn!(
+                    "Failed to auto-configure input for '{}': {e:?}",
+                    audio_info.device_name
+                ),
+            }
+        }
+    }
+
+    *SIGNAL_REAPER_APPLIER.write().expect("lock poisoned") = Some(applier.clone());
+    *SIGNAL_DAW.write().expect("lock poisoned") = Some(daw.clone());
+    *SIGNAL_APPLIER.write().expect("lock poisoned") = Some(applier);
+    info!(
+        "Signal applier wired to project '{}' (rig: {})",
+        info.name, rig_name
+    );
 }
 
 /// Fetch project metadata from a connected DAW.
@@ -486,19 +599,40 @@ pub async fn daw_discovery_loop() {
         let found_sockets = discover_sockets();
         let registry = DawRegistry::global();
 
-        // Spawn connections for newly discovered sockets
+        // Spawn connections for newly discovered sockets (skip dead processes)
         for (pid, path) in &found_sockets {
+            if !is_process_alive(*pid) {
+                // Stale socket from a dead process — clean it up
+                let _ = std::fs::remove_file(path);
+                registry.unregister(*pid);
+                continue;
+            }
             if !registry.contains(*pid) {
                 debug!(pid, path = %path.display(), "Discovered new DAW socket");
                 spawn_daw_connection(*pid, path.clone());
             }
         }
 
-        // Remove entries for sockets that no longer exist on disk
-        let found_pids: std::collections::HashSet<u32> =
-            found_sockets.iter().map(|(pid, _)| *pid).collect();
-        for pid in registry.registered_pids() {
-            if !found_pids.contains(&pid) {
+        // Health-check all registered DAWs: ping via RPC + check process liveness.
+        // A failed ping catches connection-level disconnects (extension unloaded,
+        // socket closed) much faster than process-death polling alone.
+        for (pid, daw) in registry.daw_handles() {
+            if !is_process_alive(pid) {
+                info!(pid, "DAW process dead — unregistering");
+                registry.unregister(pid);
+                let stale_path =
+                    PathBuf::from(format!("{SOCKET_DIR}/{SOCKET_PREFIX}{pid}{SOCKET_SUFFIX}"));
+                let _ = std::fs::remove_file(&stale_path);
+                continue;
+            }
+
+            // RPC ping with a short timeout — if it fails, the connection is dead
+            let alive = tokio::time::timeout(Duration::from_secs(2), daw.healthcheck())
+                .await
+                .unwrap_or(false);
+
+            if !alive {
+                warn!(pid, "DAW health-check failed — unregistering");
                 registry.unregister(pid);
             }
         }

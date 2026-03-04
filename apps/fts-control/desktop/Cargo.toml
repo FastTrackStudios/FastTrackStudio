@@ -47,6 +47,13 @@ serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 rfd = "0.15"
 
+# MIDI I/O
+midir = "0.10"
+helgoboss-midi = "0.4"
+
+# Signal proto (for MIDI action types)
+signal-proto.workspace = true
+
 # Chart rendering via anyrender (WGPU/Vello backend)
 anyrender.workspace = true
 anyrender_vello.workspace = true
@@ -62,6 +69,9 @@ keyflow = { workspace = true, features = ["text"] }
 signal = { workspace = true, features = ["daw"] }
 signal-live.workspace = true
 signal-ui = { workspace = true, default-features = false }
+
+# FTS design system (wraps lumen-blocks, layout, typography)
+fts-ui.workspace = true
 
 # Lumen Blocks UI components (dropdown, etc.)
 lumen-blocks.workspace = true

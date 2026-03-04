@@ -46,6 +46,7 @@ mod dashboard;
 mod daw_registry;
 mod gateway;
 mod launcher;
+mod midi_service;
 mod persistence;
 mod services;
 mod signal_views;
@@ -81,7 +82,7 @@ use dock_dioxus::{
 use dock_proto::PanelId;
 
 use input::config::default_user_config_path;
-use input_dioxus::{use_input_processor, ACTION_CONTEXT, TEXT_INPUT_FOCUS_COUNT};
+use input_dioxus::{use_input_processor, InputVisualizer, ACTION_CONTEXT, TEXT_INPUT_FOCUS_COUNT};
 
 use tokio;
 use tracing::debug;
@@ -93,12 +94,15 @@ static GLOBAL_ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
 static DOCK_MODE: GlobalSignal<bool> = Signal::global(|| true);
 
 /// Top-level page: "dashboard", "main" (dock/classic tabs), or "rig" (rig dock view).
-static TOP_PAGE: GlobalSignal<&'static str> = Signal::global(|| "dashboard");
+pub static TOP_PAGE: GlobalSignal<&'static str> = Signal::global(|| "dashboard");
 
 static COMMAND_PALETTE_OPEN: GlobalSignal<bool> = Signal::global(|| false);
 static COMMAND_PALETTE_QUERY: GlobalSignal<String> = Signal::global(String::new);
 
-use actions::{dispatch_action, dispatch_input_commands, handle_dock_preset_shortcut};
+use actions::{
+    dispatch_action, dispatch_input_commands, handle_dock_preset_shortcut,
+    handle_signal_patch_shortcut,
+};
 use command_palette::{build_input_config, build_palette_entries};
 use dashboard::Dashboard;
 use signal_views::{PerformanceWithChartToggle, SignalView};
@@ -253,37 +257,47 @@ fn App() -> Element {
     });
 
     // Panel renderer — decentralized: each domain crate registers its own panels.
-    let render_panel = use_hook(|| {
-        let mut registry = PanelRendererRegistry::new();
+    let render_panel = {
+        let input_handle_for_panel = input_handle.clone();
+        use_hook(move || {
+            let mut registry = PanelRendererRegistry::new();
 
-        // Domain crates register their panels
-        session_ui::register_panels(&mut registry);
-        signal_ui::register_panels(&mut registry);
-        registry.register(PanelId::FxBrowser, || {
-            rsx! { FxBrowserDockPanel {} }
-        });
-        daw_ui::register_panels(&mut registry);
+            // Domain crates register their panels
+            session_ui::register_panels(&mut registry);
+            signal_ui::register_panels(&mut registry);
+            registry.register(PanelId::FxBrowser, || {
+                rsx! { FxBrowserDockPanel {} }
+            });
+            daw_ui::register_panels(&mut registry);
 
-        // App-level panels (components defined in this binary)
-        registry.register(PanelId::Performance, || {
-            rsx! { PerformanceWithChartToggle {} }
-        });
-        registry.register(PanelId::ChartEditor, || {
-            rsx! { ChartView {} }
-        });
-        registry.register(PanelId::ChartPreview, || {
-            rsx! { ChartPreviewPanel {} }
-        });
-        registry.register(PanelId::Setlist, || {
-            rsx! { SetlistView {} }
-        });
-        registry.register(PanelId::Settings, || {
-            rsx! { SettingsView {} }
-        });
+            // App-level panels (components defined in this binary)
+            registry.register(PanelId::Performance, || {
+                rsx! { PerformanceWithChartToggle {} }
+            });
+            registry.register(PanelId::ChartEditor, || {
+                rsx! { ChartView {} }
+            });
+            registry.register(PanelId::ChartPreview, || {
+                rsx! { ChartPreviewPanel {} }
+            });
+            registry.register(PanelId::Setlist, || {
+                rsx! { SetlistView {} }
+            });
+            registry.register(PanelId::Settings, || {
+                rsx! { SettingsView {} }
+            });
 
-        let registry = Rc::new(registry);
-        PanelRenderer::new(move |panel_id| registry.render(panel_id))
-    });
+            // Keyboard & mouse modifier visualizer
+            let ih = (*input_handle_for_panel).clone();
+            registry.register(PanelId::KeyboardVisualizer, move || {
+                let handle = ih.clone();
+                rsx! { InputVisualizer { handle } }
+            });
+
+            let registry = Rc::new(registry);
+            PanelRenderer::new(move |panel_id| registry.render(panel_id))
+        })
+    };
 
     // Signal disk-based storage signal
     let mut signal_store = use_signal(|| None::<signal::Signal>);
@@ -317,6 +331,9 @@ fn App() -> Element {
             }
         });
     });
+
+    // MIDI service — runs in Dioxus context so dispatch_action() can call spawn()
+    let _midi_task = use_future(|| midi_service::run_midi_service());
 
     // Connection state - tracks DAW connection
     let mut connection_state = use_signal(|| ConnectionState::Connecting);
@@ -759,6 +776,11 @@ fn App() -> Element {
                             return;
                         }
 
+                        if handle_signal_patch_shortcut(&e) {
+                            e.prevent_default();
+                            return;
+                        }
+
                         let commands = input_handle_key.handle_key(&e);
                         let handled = dispatch_input_commands(commands);
                         ACTION_CONTEXT
@@ -805,6 +827,11 @@ fn App() -> Element {
                                         onclick: move |_| { *TOP_PAGE.write() = "rig"; },
                                         "Signal"
                                     }
+                                    button {
+                                        class: if current_page == "actions" { active_class } else { inactive_class },
+                                        onclick: move |_| { *TOP_PAGE.write() = "actions"; },
+                                        "Actions"
+                                    }
                                 }
                             }
                         }
@@ -826,6 +853,12 @@ fn App() -> Element {
                                         p { class: "text-sm text-muted-foreground", "Bootstrapping signal storage..." }
                                     }
                                 }
+                            }
+                        } else if *TOP_PAGE.read() == "actions" {
+                            // Actions page: keyboard & mouse modifier visualizer
+                            div {
+                                class: "flex-1 overflow-auto relative",
+                                InputVisualizer { handle: (*input_handle).clone() }
                             }
                         } else if *DOCK_MODE.read() {
                             // Main page, dock mode: preset bar + dock root

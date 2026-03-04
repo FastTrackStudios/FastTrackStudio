@@ -248,6 +248,154 @@ pub fn save_last_session_setlist(projects: &[(String, String)]) {
 }
 
 // ============================================================================
+// Rig Setups (saved audio input preferences per device)
+// ============================================================================
+
+const RIG_SETUPS_FILE: &str = "rig-setups.json";
+
+/// A saved audio input preference for a specific audio device.
+///
+/// When a Signal DAW connects and the audio device name matches a saved setup,
+/// the input channel is automatically configured (record input, arm, monitoring).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct RigSetup {
+    /// Audio device name as reported by the DAW (e.g. "Galaxy 32").
+    pub device_name: String,
+    /// 0-based mono hardware input channel index.
+    pub channel_index: u32,
+    /// Human-readable channel label at time of save (e.g. "In 5").
+    pub channel_label: String,
+}
+
+fn rig_setups_path() -> Option<PathBuf> {
+    library_path().map(|lib| lib.join(RIG_SETUPS_FILE))
+}
+
+/// Load rig setups from disk. Returns empty vec on any error.
+pub fn load_rig_setups() -> Vec<RigSetup> {
+    let Some(path) = rig_setups_path() else {
+        return Vec::new();
+    };
+    match std::fs::read_to_string(&path) {
+        Ok(contents) => serde_json::from_str(&contents).unwrap_or_else(|e| {
+            warn!("Failed to parse {}: {e}", path.display());
+            Vec::new()
+        }),
+        Err(_) => Vec::new(),
+    }
+}
+
+/// Save rig setups to disk.
+pub fn save_rig_setups(setups: &[RigSetup]) {
+    let Some(path) = rig_setups_path() else {
+        return;
+    };
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    match serde_json::to_string_pretty(setups) {
+        Ok(json) => {
+            if let Err(e) = std::fs::write(&path, json) {
+                warn!("Failed to write {}: {e}", path.display());
+            }
+        }
+        Err(e) => warn!("Failed to serialize rig setups: {e}"),
+    }
+}
+
+/// Find a saved setup for the given audio device name.
+pub fn find_rig_setup(device_name: &str) -> Option<RigSetup> {
+    load_rig_setups()
+        .into_iter()
+        .find(|s| s.device_name == device_name)
+}
+
+/// Save or update the setup for a device. One setup per device name.
+pub fn upsert_rig_setup(device_name: &str, channel_index: u32, channel_label: &str) {
+    let mut setups = load_rig_setups();
+
+    if let Some(existing) = setups.iter_mut().find(|s| s.device_name == device_name) {
+        existing.channel_index = channel_index;
+        existing.channel_label = channel_label.to_string();
+    } else {
+        setups.push(RigSetup {
+            device_name: device_name.to_string(),
+            channel_index,
+            channel_label: channel_label.to_string(),
+        });
+    }
+
+    save_rig_setups(&setups);
+    debug!(
+        "Rig setup saved: '{}' → channel {} ('{}')",
+        device_name, channel_index, channel_label
+    );
+}
+
+// ============================================================================
+// MIDI Config
+// ============================================================================
+
+const MIDI_CONFIG_FILE: &str = "midi-config.json";
+
+/// Persistent MIDI configuration: selected device, action map, and enabled state.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct MidiConfig {
+    /// Name of the MIDI port to auto-connect on startup.
+    pub selected_port_name: Option<String>,
+    /// MIDI message → action ID mapping.
+    pub action_map: signal_proto::midi_actions::MidiActionMap,
+    /// Whether the MIDI service is enabled.
+    pub enabled: bool,
+}
+
+impl Default for MidiConfig {
+    fn default() -> Self {
+        Self {
+            selected_port_name: None,
+            action_map: signal_proto::midi_actions::MidiActionMap::with_defaults(),
+            enabled: true,
+        }
+    }
+}
+
+fn midi_config_path() -> Option<PathBuf> {
+    library_path().map(|lib| lib.join(MIDI_CONFIG_FILE))
+}
+
+/// Load MIDI config from disk. Returns defaults if file is missing or corrupt.
+pub fn load_midi_config() -> MidiConfig {
+    let Some(path) = midi_config_path() else {
+        return MidiConfig::default();
+    };
+    match std::fs::read_to_string(&path) {
+        Ok(contents) => serde_json::from_str(&contents).unwrap_or_else(|e| {
+            warn!("Failed to parse {}: {e}", path.display());
+            MidiConfig::default()
+        }),
+        Err(_) => MidiConfig::default(),
+    }
+}
+
+/// Save MIDI config to disk.
+pub fn save_midi_config(config: &MidiConfig) {
+    let Some(path) = midi_config_path() else {
+        return;
+    };
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    match serde_json::to_string_pretty(config) {
+        Ok(json) => {
+            if let Err(e) = std::fs::write(&path, json) {
+                warn!("Failed to write {}: {e}", path.display());
+            }
+        }
+        Err(e) => warn!("Failed to serialize MIDI config: {e}"),
+    }
+}
+
+// ============================================================================
 // Helpers
 // ============================================================================
 

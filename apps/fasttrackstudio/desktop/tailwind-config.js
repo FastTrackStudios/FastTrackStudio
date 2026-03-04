@@ -14,8 +14,6 @@ module.exports = {
     "../../../../daw/crates/audio-controls/src/**/*.rs",
     // Input actions UI — sibling repo
     "../../../../input_actions/crates/input-dioxus/src/**/*.rs",
-    // FTS design system — sibling repo (at Development/fts-ui)
-    "../../../../../fts-ui/crates/fts-ui/src/**/*.rs",
     // Lumen-blocks shared components
     "../../../reference/lumen-blocks/blocks/src/**/*.rs",
   ],

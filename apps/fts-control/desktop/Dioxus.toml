@@ -23,3 +23,12 @@ script = []
 # Javascript code file
 # serve: [dev-server] only
 script = []
+
+[bundle]
+identifier = "com.fasttrackstudio.fts-control"
+publisher = "FastTrack Studio"
+icon = ["./assets/favicon.ico"]
+name = "FTS Control"
+
+[bundle.macos]
+minimum_system_version = "13.0"

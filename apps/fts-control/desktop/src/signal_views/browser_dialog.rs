@@ -1,11 +1,21 @@
 use dioxus::prelude::*;
-use signal_ui::views::CollectionBrowser;
+use signal_ui::views::{BrowserAssignment, CollectionBrowser};
 
 // Browser dialog (near-full-screen)
 // ---------------------------------------------------------------------------
 
 #[component]
-pub(crate) fn SignalBrowserDialog(on_close: Callback<()>) -> Element {
+pub(crate) fn SignalBrowserDialog(
+    on_close: Callback<()>,
+    #[props(default)] on_assign: Option<EventHandler<BrowserAssignment>>,
+) -> Element {
+    let pick_mode = on_assign.is_some();
+    let title = if pick_mode {
+        "Assign from Browser"
+    } else {
+        "Collection Browser"
+    };
+
     rsx! {
         // Overlay
         div {
@@ -21,7 +31,14 @@ pub(crate) fn SignalBrowserDialog(on_close: Callback<()>) -> Element {
 
             // Header
             div { class: "flex items-center justify-between px-4 py-2 border-b border-border bg-muted/30 flex-shrink-0",
-                h2 { class: "text-sm font-semibold", "Collection Browser" }
+                div { class: "flex items-center gap-2",
+                    h2 { class: "text-sm font-semibold", "{title}" }
+                    if pick_mode {
+                        span { class: "px-1.5 py-0.5 text-[10px] rounded bg-amber-900/40 text-amber-400 font-medium",
+                            "Pick Mode"
+                        }
+                    }
+                }
                 button {
                     class: "px-2 py-1 text-xs rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors",
                     onclick: move |_| on_close.call(()),
@@ -31,7 +48,9 @@ pub(crate) fn SignalBrowserDialog(on_close: Callback<()>) -> Element {
 
             // Browser body
             div { class: "flex-1 min-h-0 overflow-hidden",
-                CollectionBrowser {}
+                CollectionBrowser {
+                    on_assign: on_assign.clone(),
+                }
             }
         }
     }

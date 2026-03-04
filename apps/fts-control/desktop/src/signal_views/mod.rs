@@ -1,15 +1,26 @@
 mod browser_dialog;
 mod editor_tab;
+mod fx_capture;
 mod manage_tab;
-mod performance_tab;
+mod midi_tab;
+pub(crate) mod performance_tab;
+mod setlist_tab;
 
 use dioxus::prelude::*;
 use session_ui::PerformanceLayout;
 
 pub(crate) use browser_dialog::SignalBrowserDialog;
 pub(crate) use editor_tab::SignalEditorTab;
+pub(crate) use fx_capture::SignalCaptureTab;
 pub(crate) use manage_tab::SignalManageTab;
 pub(crate) use performance_tab::SignalPerformanceTab;
+pub(crate) use midi_tab::SignalMidiTab;
+pub(crate) use setlist_tab::SignalSetlistTab;
+
+/// Global signal for the selected setlist in Signal tabs.
+/// Uses `"all"` for the virtual "All Songs" selection.
+pub(crate) static SIGNAL_SELECTED_SETLIST_ID: GlobalSignal<String> =
+    Signal::global(|| "all".to_string());
 
 /// A preset item in the manage tab sidebar — either a Rig or Layer.
 #[derive(Clone, PartialEq)]
@@ -40,7 +51,7 @@ pub(crate) fn PerformanceWithChartToggle() -> Element {
 }
 
 // ---------------------------------------------------------------------------
-// Signal view — Performance + Manage sub-tabs, browser dialog
+// Signal view — sub-tabs + browser dialog
 // ---------------------------------------------------------------------------
 
 /// Sub-tabs for the Signal page.
@@ -48,13 +59,16 @@ pub(crate) fn PerformanceWithChartToggle() -> Element {
 enum SignalTab {
     Performance,
     Manage,
+    Setlist,
     Editor,
+    Capture,
+    MidiSettings,
 }
 
-/// Signal top-level view with Performance / Manage tabs and a Browser dialog.
+/// Signal top-level view with Signal tabs and a Browser dialog.
 #[component]
 pub(crate) fn SignalView() -> Element {
-    let mut active_tab = use_signal(|| SignalTab::Manage);
+    let mut active_tab = use_signal(|| SignalTab::Performance);
     let mut browser_open = use_signal(|| false);
 
     rsx! {
@@ -63,7 +77,14 @@ pub(crate) fn SignalView() -> Element {
             div { class: "flex items-center justify-between px-3 py-1.5 border-b border-border bg-zinc-900/60 flex-shrink-0",
                 // Left: sub-tab pills
                 div { class: "flex items-center gap-0.5 bg-zinc-800/80 rounded-lg p-0.5",
-                    for (tab, label) in [(SignalTab::Performance, "Performance"), (SignalTab::Manage, "Manage"), (SignalTab::Editor, "Editor")] {
+                    for (tab, label) in [
+                        (SignalTab::Performance, "Performance"),
+                        (SignalTab::Manage, "Manage"),
+                        (SignalTab::Setlist, "Setlist"),
+                        (SignalTab::Editor, "Editor"),
+                        (SignalTab::Capture, "Capture"),
+                        (SignalTab::MidiSettings, "MIDI"),
+                    ] {
                         {
                             let is_active = active_tab() == tab;
                             rsx! {
@@ -98,8 +119,17 @@ pub(crate) fn SignalView() -> Element {
                     SignalTab::Manage => rsx! {
                         SignalManageTab {}
                     },
+                    SignalTab::Setlist => rsx! {
+                        SignalSetlistTab {}
+                    },
                     SignalTab::Editor => rsx! {
                         SignalEditorTab {}
+                    },
+                    SignalTab::Capture => rsx! {
+                        SignalCaptureTab {}
+                    },
+                    SignalTab::MidiSettings => rsx! {
+                        SignalMidiTab {}
                     },
                 }
             }

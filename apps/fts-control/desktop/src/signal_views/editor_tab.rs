@@ -1,10 +1,59 @@
 use dioxus::prelude::*;
 
 use super::ManagePresetItem;
+use crate::daw_registry::fx_guid_for_block;
 
 // ---------------------------------------------------------------------------
 // Editor tab — split grid + gradient inspector
 // ---------------------------------------------------------------------------
+
+/// Convert a GridSlot's parameters into a domain `Block`.
+fn slot_to_block(slot: &signal_ui::components::GridSlot) -> signal::Block {
+    signal::Block::from_parameters(
+        slot.parameters
+            .iter()
+            .map(|(name, val)| {
+                signal::BlockParameter::new(
+                    name.to_lowercase().replace(' ', "-"),
+                    name.clone(),
+                    *val,
+                )
+            })
+            .collect(),
+    )
+}
+
+/// Convert a set of module GridSlots into a domain `Module`.
+fn slots_to_module(slots: &[signal_ui::components::GridSlot]) -> signal::Module {
+    let blocks: Vec<signal::ModuleBlock> = slots
+        .iter()
+        .map(|s| {
+            let source = match (&s.preset_id, &s.snapshot_id) {
+                (Some(pid), Some(sid)) => signal::ModuleBlockSource::PresetSnapshot {
+                    preset_id: pid.clone().into(),
+                    snapshot_id: sid.clone().into(),
+                    saved_at_version: None,
+                },
+                (Some(pid), None) => signal::ModuleBlockSource::PresetDefault {
+                    preset_id: pid.clone().into(),
+                    saved_at_version: None,
+                },
+                _ => signal::ModuleBlockSource::Inline {
+                    block: slot_to_block(s),
+                },
+            };
+            signal::ModuleBlock::new(
+                s.id.to_string(),
+                s.block_preset_name
+                    .clone()
+                    .unwrap_or_else(|| format!("{:?}", s.block_type)),
+                s.block_type,
+                source,
+            )
+        })
+        .collect();
+    signal::Module::from_blocks(blocks)
+}
 
 #[component]
 pub(crate) fn SignalEditorTab() -> Element {
@@ -12,8 +61,8 @@ pub(crate) fn SignalEditorTab() -> Element {
     use signal::rig::RigType;
     use signal_ui::components::{GridSelection, GridSlot};
     use signal_ui::views::{
-        engines_to_grid_slots, EditorInspectorPanel, EngineFlowData, EngineParamLookup,
-        RigGridPanel,
+        engines_to_grid_slots, BlockDetailPanel, EditorInspectorPanel, EngineFlowData,
+        EngineParamLookup, RigGridPanel,
     };
 
     // Rig type selector — filters presets
@@ -34,6 +83,10 @@ pub(crate) fn SignalEditorTab() -> Element {
     // Selection state lifted from RigGridPanel for the inspector
     let mut editor_selection = use_signal(|| None::<GridSelection>);
     let mut editor_chain = use_signal(Vec::<GridSlot>::new);
+
+    // Block detail panel expanded state
+    let mut detail_expanded = use_signal(|| false);
+
 
     // Load presets when rig_type changes
     {
@@ -311,6 +364,11 @@ pub(crate) fn SignalEditorTab() -> Element {
                             let inspector_slots = grid_slots.clone();
                             editor_chain.set(inspector_slots);
                             let signal = signal.clone();
+                            let signal2 = signal.clone();
+                            let signal3 = signal.clone();
+                            let signal4 = signal.clone();
+                            let signal5 = signal.clone();
+                            let signal6 = signal.clone();
                             rsx! {
                                 RigGridPanel {
                                     key: "{grid_key}",
@@ -318,12 +376,33 @@ pub(crate) fn SignalEditorTab() -> Element {
                                     on_selection_change: move |sel: Option<GridSelection>| {
                                         editor_selection.set(sel);
                                     },
-                                    on_param_change: move |(id, name, value)| {
+                                    on_param_change: move |(id, name, value): (_, String, f32)| {
                                         // Update inspector chain too
                                         let mut current = editor_chain();
                                         if let Some(slot) = current.iter_mut().find(|s| s.id == id) {
                                             if let Some(p) = slot.parameters.iter_mut().find(|(n, _)| *n == name) {
                                                 p.1 = value;
+                                            }
+                                            // Push to REAPER if we have a mapping
+                                            if let Some(ref pid) = slot.preset_id {
+                                                if let Some(fx_guid) = fx_guid_for_block(pid) {
+                                                    let param_name = name.clone();
+                                                    spawn(async move {
+                                                        if let Some(daw) = crate::daw_registry::signal_daw() {
+                                                            if let Ok(project) = daw.current_project().await {
+                                                                let tracks = project.tracks().all().await.unwrap_or_default();
+                                                                for t in &tracks {
+                                                                    if let Ok(Some(handle)) = project.tracks().by_guid(&t.guid).await {
+                                                                        if let Ok(Some(fx)) = handle.fx_chain().by_guid(&fx_guid).await {
+                                                                            let _ = fx.param_by_name(&param_name).set(value as f64).await;
+                                                                            break;
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    });
+                                                }
                                             }
                                         }
                                         editor_chain.set(current);
@@ -333,22 +412,76 @@ pub(crate) fn SignalEditorTab() -> Element {
                                         let bt = slot.block_type;
                                         let pid = slot.preset_id.clone().unwrap_or_default();
                                         let sid = slot.snapshot_id.clone();
-                                        let block = signal::Block::from_parameters(
-                                            slot.parameters.iter()
-                                                .map(|(name, val)| signal::BlockParameter::new(
-                                                    name.to_lowercase().replace(' ', "-"),
-                                                    name.clone(),
-                                                    *val,
-                                                ))
-                                                .collect()
-                                        );
+                                        let block = slot_to_block(&slot);
                                         spawn(async move {
-                                            signal.block_presets().update_snapshot_params(
+                                            let _ = signal.block_presets().update_snapshot_params(
                                                 bt,
                                                 pid,
                                                 sid.unwrap_or_default(),
                                                 block,
                                             ).await;
+                                        });
+                                    },
+                                    on_save_as_new: move |(slot, name): (GridSlot, String)| {
+                                        let signal = signal2.clone();
+                                        let bt = slot.block_type;
+                                        let block = slot_to_block(&slot);
+                                        spawn(async move {
+                                            let _ = signal.block_presets().create(name, bt, block).await;
+                                        });
+                                    },
+                                    on_save_block_snapshot: move |slot: GridSlot| {
+                                        let signal = signal3.clone();
+                                        let bt = slot.block_type;
+                                        let pid = slot.preset_id.clone().unwrap_or_default();
+                                        let block = slot_to_block(&slot);
+                                        let snap = signal::Snapshot::new(signal::SnapshotId::new(), "Snapshot", block);
+                                        spawn(async move {
+                                            if let Ok(presets) = signal.block_presets().list(bt).await {
+                                                if let Some(mut preset) = presets.into_iter().find(|p| p.id().to_string() == pid) {
+                                                    preset.add_snapshot(snap);
+                                                    let _ = signal.block_presets().save(preset).await;
+                                                }
+                                            }
+                                        });
+                                    },
+                                    on_save_block_snapshot_as: move |(slot, name): (GridSlot, String)| {
+                                        let signal = signal4.clone();
+                                        let bt = slot.block_type;
+                                        let pid = slot.preset_id.clone().unwrap_or_default();
+                                        let block = slot_to_block(&slot);
+                                        let snap = signal::Snapshot::new(signal::SnapshotId::new(), name, block);
+                                        spawn(async move {
+                                            if let Ok(presets) = signal.block_presets().list(bt).await {
+                                                if let Some(mut preset) = presets.into_iter().find(|p| p.id().to_string() == pid) {
+                                                    preset.add_snapshot(snap);
+                                                    let _ = signal.block_presets().save(preset).await;
+                                                }
+                                            }
+                                        });
+                                    },
+                                    on_save_module_preset_as: move |(slots, name, mt): (Vec<GridSlot>, String, signal::ModuleType)| {
+                                        let signal = signal5.clone();
+                                        let module = slots_to_module(&slots);
+                                        let snapshot = signal::ModuleSnapshot::new(signal::ModuleSnapshotId::new(), "Default", module);
+                                        let preset = signal::ModulePreset::new(signal::ModulePresetId::new(), name, mt, snapshot, vec![]);
+                                        spawn(async move {
+                                            let _ = signal.module_presets().save(preset).await;
+                                        });
+                                    },
+                                    on_save_module_snapshot_as: move |(slots, name, _mt): (Vec<GridSlot>, String, signal::ModuleType)| {
+                                        let signal = signal6.clone();
+                                        let module = slots_to_module(&slots);
+                                        let snap = signal::ModuleSnapshot::new(signal::ModuleSnapshotId::new(), name, module);
+                                        let preset = signal::ModulePreset::new(
+                                            signal::ModulePresetId::new(),
+                                            "Module Preset",
+                                            _mt,
+                                            snap,
+                                            vec![],
+                                        );
+                                        spawn(async move {
+                                            let _ = signal.module_presets().save(preset).await;
                                         });
                                     },
                                 }
@@ -366,13 +499,115 @@ pub(crate) fn SignalEditorTab() -> Element {
                 }
 
                 // ── Right: Editor Inspector ──
-                div { class: "w-80 flex-shrink-0 border-l border-border overflow-y-auto bg-zinc-950/30",
-                    EditorInspectorPanel {
-                        selection: editor_selection(),
-                        chain: editor_chain(),
+                {
+                    let signal = signal.clone();
+                    let signal_save = signal.clone();
+                    rsx! {
+                        div { class: "w-80 flex-shrink-0 border-l border-border overflow-y-auto bg-zinc-950/30",
+                            EditorInspectorPanel {
+                                selection: editor_selection(),
+                                chain: editor_chain(),
+                                on_param_change: move |(id, name, value): (_, String, f32)| {
+                                    // Mirror param change into editor_chain
+                                    let mut current = editor_chain();
+                                    if let Some(slot) = current.iter_mut().find(|s| s.id == id) {
+                                        if let Some(p) = slot.parameters.iter_mut().find(|(n, _)| *n == name) {
+                                            p.1 = value;
+                                        }
+                                        // Push to REAPER if mapped
+                                        if let Some(ref pid) = slot.preset_id {
+                                            if let Some(fx_guid) = fx_guid_for_block(pid) {
+                                                let param_name = name.clone();
+                                                spawn(async move {
+                                                    if let Some(daw) = crate::daw_registry::signal_daw() {
+                                                        if let Ok(project) = daw.current_project().await {
+                                                            let tracks = project.tracks().all().await.unwrap_or_default();
+                                                            for t in &tracks {
+                                                                if let Ok(Some(handle)) = project.tracks().by_guid(&t.guid).await {
+                                                                    if let Ok(Some(fx)) = handle.fx_chain().by_guid(&fx_guid).await {
+                                                                        let _ = fx.param_by_name(&param_name).set(value as f64).await;
+                                                                        break;
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                });
+                                            }
+                                        }
+                                    }
+                                    editor_chain.set(current);
+                                },
+                                on_save: move |slot: GridSlot| {
+                                    let signal = signal_save.clone();
+                                    let bt = slot.block_type;
+                                    let pid = slot.preset_id.clone().unwrap_or_default();
+                                    let sid = slot.snapshot_id.clone();
+                                    let block = slot_to_block(&slot);
+                                    spawn(async move {
+                                        let _ = signal.block_presets().update_snapshot_params(
+                                            bt,
+                                            pid,
+                                            sid.unwrap_or_default(),
+                                            block,
+                                        ).await;
+                                    });
+                                },
+                                on_save_as_new: move |(slot, name): (GridSlot, String)| {
+                                    let signal = signal.clone();
+                                    let bt = slot.block_type;
+                                    let block = slot_to_block(&slot);
+                                    spawn(async move {
+                                        let _ = signal.block_presets().create(name, bt, block).await;
+                                    });
+                                },
+                                on_expand_detail: move |_| {
+                                    detail_expanded.set(true);
+                                },
+                            }
+                        }
+                    }
+                }
+
+                // ── Block Detail Panel overlay (expanded) ──
+                if detail_expanded() {
+                    {
+                        // Build a domain Block from the currently selected slot
+                        let sel_block = editor_selection()
+                            .as_ref()
+                            .and_then(|sel| match sel {
+                                GridSelection::Block(id) => {
+                                    editor_chain().iter().find(|s| s.id == *id).cloned()
+                                }
+                                _ => None,
+                            });
+                        if let Some(ref slot) = sel_block {
+                            let block = slot_to_block(slot);
+                            let bt = slot.block_type;
+                            rsx! {
+                                div { class: "w-96 flex-shrink-0 border-l border-zinc-800",
+                                    BlockDetailPanel {
+                                        block,
+                                        block_type: bt,
+                                        on_close: move |_| {
+                                            detail_expanded.set(false);
+                                        },
+                                    }
+                                }
+                            }
+                        } else {
+                            rsx! {
+                                div { class: "w-96 flex-shrink-0 border-l border-zinc-800 flex items-center justify-center",
+                                    div { class: "text-xs text-zinc-600 text-center px-4",
+                                        "Select a block to view its detail panel."
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
+
         }
     }
 }

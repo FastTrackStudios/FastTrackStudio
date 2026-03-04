@@ -7,9 +7,15 @@
 
 use dioxus::prelude::*;
 
+use session_ui::Session;
+
 use crate::daw_registry::{DawConnectionInfo, DawRole};
 use crate::launcher::{self, REAPER_CONFIGS};
 use crate::persistence::{self, RecentProject, SetlistDefinition};
+use crate::TOP_PAGE;
+
+/// Flag set when a setlist launch navigates to the Signal performance page.
+pub(crate) static SIGNAL_LAUNCHING: GlobalSignal<bool> = Signal::global(|| false);
 
 // ============================================================================
 // Signals (written by discovery loop, read by Dashboard UI)
@@ -61,6 +67,290 @@ pub fn Dashboard() -> Element {
                 InstancesPanel {}
                 SetlistsPanel {}
                 RecentProjectsPanel {}
+            }
+
+            // Quick Launch grid at bottom
+            QuickLaunchGrid {}
+        }
+    }
+}
+
+// ============================================================================
+// Quick Launch Grid
+// ============================================================================
+
+/// A launch card definition.
+struct LaunchCard {
+    label: &'static str,
+    subtitle: &'static str,
+    /// Hex color for the card background.
+    color: &'static str,
+    icon: LaunchIcon,
+    /// Launcher config id, or None if not yet available.
+    config_id: Option<&'static str>,
+    /// Page to navigate to after launch (e.g. "rig" for Signal page).
+    navigate_to: Option<&'static str>,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum LaunchIcon {
+    Tracks,
+    Guitar,
+    Keys,
+    Bass,
+    Drums,
+    DrumReplacement,
+    Vocals,
+    Mixer,
+}
+
+const LAUNCH_CARDS: &[LaunchCard] = &[
+    LaunchCard {
+        label: "Tracks",
+        subtitle: "Session timeline",
+        color: "#d4d4d8",
+        icon: LaunchIcon::Tracks,
+        config_id: Some("fts-tracks"),
+        navigate_to: Some("main"),
+    },
+    LaunchCard {
+        label: "Guitar",
+        subtitle: "Signal rig",
+        color: "#3b82f6",
+        icon: LaunchIcon::Guitar,
+        config_id: Some("fts-guitar"),
+        navigate_to: Some("rig"),
+    },
+    LaunchCard {
+        label: "Keys",
+        subtitle: "Keyboard stack",
+        color: "#22c55e",
+        icon: LaunchIcon::Keys,
+        config_id: None,
+        navigate_to: None,
+    },
+    LaunchCard {
+        label: "Bass",
+        subtitle: "Low-end chain",
+        color: "#eab308",
+        icon: LaunchIcon::Bass,
+        config_id: None,
+        navigate_to: None,
+    },
+    LaunchCard {
+        label: "Drums",
+        subtitle: "Kit processing",
+        color: "#ef4444",
+        icon: LaunchIcon::Drums,
+        config_id: None,
+        navigate_to: None,
+    },
+    LaunchCard {
+        label: "Drum Replacement",
+        subtitle: "Sample layering",
+        color: "#f97316",
+        icon: LaunchIcon::DrumReplacement,
+        config_id: None,
+        navigate_to: None,
+    },
+    LaunchCard {
+        label: "Vocals",
+        subtitle: "Voice FX",
+        color: "#ec4899",
+        icon: LaunchIcon::Vocals,
+        config_id: Some("fts-guitar"),
+        navigate_to: Some("rig"),
+    },
+    LaunchCard {
+        label: "Mixer",
+        subtitle: "Console view",
+        color: "#a78bfa",
+        icon: LaunchIcon::Mixer,
+        config_id: None,
+        navigate_to: None,
+    },
+];
+
+#[component]
+fn LaunchCardIcon(icon: LaunchIcon) -> Element {
+    match icon {
+        LaunchIcon::Tracks => rsx! {
+            svg { view_box: "0 0 24 24", class: "w-6 h-6", fill: "none", stroke: "currentColor", stroke_width: "1.8",
+                rect { x: "3", y: "4", width: "18", height: "16", rx: "2" }
+                line { x1: "8", y1: "8", x2: "8", y2: "16" }
+                line { x1: "12", y1: "8", x2: "12", y2: "16" }
+                line { x1: "16", y1: "8", x2: "16", y2: "16" }
+            }
+        },
+        LaunchIcon::Guitar | LaunchIcon::Bass => rsx! {
+            svg { view_box: "0 0 24 24", class: "w-6 h-6", fill: "none", stroke: "currentColor", stroke_width: "1.8",
+                circle { cx: "7", cy: "16", r: "3.5" }
+                line { x1: "9.7", y1: "13.3", x2: "18.5", y2: "4.5" }
+                circle { cx: "19.2", cy: "3.8", r: "1.2" }
+                circle { cx: "20.8", cy: "5.4", r: "1.0" }
+            }
+        },
+        LaunchIcon::Keys => rsx! {
+            svg { view_box: "0 0 24 24", class: "w-6 h-6", fill: "none", stroke: "currentColor", stroke_width: "1.8",
+                rect { x: "3", y: "6", width: "18", height: "12", rx: "2" }
+                line { x1: "7", y1: "6", x2: "7", y2: "13" }
+                line { x1: "11", y1: "6", x2: "11", y2: "13" }
+                line { x1: "15", y1: "6", x2: "15", y2: "13" }
+            }
+        },
+        LaunchIcon::Drums | LaunchIcon::DrumReplacement => rsx! {
+            svg { view_box: "0 0 24 24", class: "w-6 h-6", fill: "none", stroke: "currentColor", stroke_width: "1.8",
+                ellipse { cx: "12", cy: "14", rx: "6.5", ry: "3.5" }
+                line { x1: "5.5", y1: "14", x2: "5.5", y2: "18" }
+                line { x1: "18.5", y1: "14", x2: "18.5", y2: "18" }
+                line { x1: "5.5", y1: "18", x2: "18.5", y2: "18" }
+                line { x1: "7", y1: "8", x2: "11", y2: "10" }
+                line { x1: "17", y1: "8", x2: "13", y2: "10" }
+            }
+        },
+        LaunchIcon::Vocals => rsx! {
+            svg { view_box: "0 0 24 24", class: "w-6 h-6", fill: "none", stroke: "currentColor", stroke_width: "1.8",
+                rect { x: "9", y: "4", width: "6", height: "10", rx: "3" }
+                path { d: "M6 11a6 6 0 0 0 12 0" }
+                line { x1: "12", y1: "17", x2: "12", y2: "20" }
+                line { x1: "9", y1: "20", x2: "15", y2: "20" }
+            }
+        },
+        LaunchIcon::Mixer => rsx! {
+            svg { view_box: "0 0 24 24", class: "w-6 h-6", fill: "none", stroke: "currentColor", stroke_width: "1.8",
+                line { x1: "6", y1: "4", x2: "6", y2: "20" }
+                circle { cx: "6", cy: "10", r: "2" }
+                line { x1: "12", y1: "4", x2: "12", y2: "20" }
+                circle { cx: "12", cy: "15", r: "2" }
+                line { x1: "18", y1: "4", x2: "18", y2: "20" }
+                circle { cx: "18", cy: "8", r: "2" }
+            }
+        },
+    }
+}
+
+#[component]
+fn QuickLaunchGrid() -> Element {
+    let connections = DASHBOARD_CONNECTIONS.read();
+
+    rsx! {
+        div { class: "flex flex-col gap-4 flex-shrink-0",
+            div { class: "flex items-end justify-between",
+                div {
+                    h2 { class: "text-sm font-medium text-zinc-400 uppercase tracking-[0.14em]", "Quick Launch" }
+                    p { class: "text-xs text-zinc-500 mt-1", "Launch your instrument environment and jump straight into the right workspace." }
+                }
+            }
+
+            div { class: "grid grid-cols-8 gap-3",
+                for card in LAUNCH_CARDS.iter() {
+                    {
+                        let enabled = card.config_id.is_some();
+                        let is_running = card.config_id.map_or(false, |id| {
+                            connections.iter().any(|c| {
+                                match (id, c.role) {
+                                    ("fts-tracks", DawRole::Session) => true,
+                                    ("fts-guitar", DawRole::Signal) => true,
+                                    _ => false,
+                                }
+                            })
+                        });
+
+                        let text_color = if card.color == "#d4d4d8" { "#18181b" } else { "#ffffff" };
+
+                        let bg_style = if !enabled {
+                            format!(
+                                "background: linear-gradient(165deg, {} 0%, #111827 100%); opacity: 0.6;",
+                                card.color
+                            )
+                        } else {
+                            format!(
+                                "background: linear-gradient(165deg, {} 0%, #111827 100%);",
+                                card.color
+                            )
+                        };
+
+                        let config_id = card.config_id;
+                        let navigate_to = card.navigate_to;
+
+                        rsx! {
+                            button {
+                                class: if is_running {
+                                    "relative h-88 w-full min-w-0 rounded-2xl border border-white/20 p-4 text-left transition-all duration-200 ring-2 ring-emerald-400 shadow-[0_18px_35px_rgba(16,185,129,0.35)]"
+                                } else if enabled {
+                                    "relative h-88 w-full min-w-0 rounded-2xl border border-white/15 p-4 text-left transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_18px_35px_rgba(0,0,0,0.45)]"
+                                } else {
+                                    "relative h-88 w-full min-w-0 rounded-2xl border border-white/10 p-4 text-left cursor-default"
+                                },
+                                style: "{bg_style}",
+                                disabled: !enabled || is_running,
+                                onclick: move |_| {
+                                    if let Some(id) = config_id {
+                                        if let Some(config) = launcher::config_by_id(id) {
+                                            match launcher::spawn_reaper(config, &[]) {
+                                                Ok(pid) => {
+                                                    tracing::info!("Launched {} (PID {pid})", config.label);
+                                                    // Signal DAW launches set the launching flag
+                                                    // so the performance tab shows "Starting..."
+                                                    if id == "fts-guitar" {
+                                                        *SIGNAL_LAUNCHING.write() = true;
+                                                    }
+                                                }
+                                                Err(e) => tracing::error!("Failed to launch {}: {e}", config.label),
+                                            }
+                                        }
+                                    }
+                                    if let Some(page) = navigate_to {
+                                        *TOP_PAGE.write() = page;
+                                    }
+                                },
+
+                                div { class: "flex h-full flex-col justify-between",
+                                    div { class: "flex items-start justify-between",
+                                        div {
+                                            class: "w-11 h-11 rounded-xl bg-black/25 backdrop-blur-sm flex items-center justify-center border border-white/20",
+                                            style: "color: {text_color};",
+                                            LaunchCardIcon { icon: card.icon }
+                                        }
+                                        if is_running {
+                                            span {
+                                                class: "px-2 py-1 text-[10px] font-semibold rounded-full bg-emerald-500/25 border border-emerald-300/40 uppercase tracking-wide",
+                                                style: "color: {text_color};",
+                                                "Live"
+                                            }
+                                        } else if !enabled {
+                                            span {
+                                                class: "px-2 py-1 text-[10px] font-semibold rounded-full bg-black/25 border border-white/20 uppercase tracking-wide",
+                                                style: "color: {text_color};",
+                                                "Soon"
+                                            }
+                                        }
+                                    }
+
+                                    div {
+                                        h3 {
+                                            class: "text-lg font-semibold leading-tight",
+                                            style: "color: {text_color}; text-shadow: 0 2px 8px rgba(0,0,0,0.35);",
+                                            "{card.label}"
+                                        }
+                                        p {
+                                            class: "text-xs mt-1",
+                                            style: "color: {text_color}; opacity: 0.82;",
+                                            "{card.subtitle}"
+                                        }
+                                        if enabled && !is_running {
+                                            p {
+                                                class: "text-[11px] mt-2 font-medium uppercase tracking-[0.12em]",
+                                                style: "color: {text_color}; opacity: 0.92;",
+                                                "Launch"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -136,8 +426,19 @@ fn InstancesPanel() -> Element {
                                     "Launch"
                                 }
                             } else {
-                                span { class: "px-3 py-1.5 text-xs font-medium rounded-md bg-emerald-900/30 text-emerald-400",
-                                    "Connected"
+                                {
+                                    let pids: Vec<u32> = matching.iter().map(|c| c.pid).collect();
+                                    rsx! {
+                                        button {
+                                            class: "px-3 py-1.5 text-xs font-medium rounded-md bg-red-900/30 hover:bg-red-900/50 text-red-400 transition-colors",
+                                            onclick: move |_| {
+                                                for &pid in &pids {
+                                                    launcher::kill_reaper(pid);
+                                                }
+                                            },
+                                            "Stop"
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -345,6 +646,24 @@ async fn launch_setlist_async(setlist: SetlistDefinition) {
         setlist.projects.len(),
         pid
     );
+
+    // Wait for Session to be ready (run_services initializes it after DAW connects),
+    // then rebuild the setlist so the Session tab picks up the newly opened projects.
+    for _ in 0..50 {
+        if Session::try_get().is_some() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    if let Some(session) = Session::try_get() {
+        // Small delay for REAPER to finish loading all project tabs.
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        session.setlist().build_from_open_projects().await;
+        tracing::info!("Rebuilt setlist after opening projects");
+    }
+
+    // Navigate to the Session tab.
+    *TOP_PAGE.write() = "main";
 }
 
 // ============================================================================
@@ -410,6 +729,12 @@ async fn open_recent_project_async(path: String) {
             match entry.daw.open_project(&path).await {
                 Ok(_) => {
                     tracing::info!("Opened project in existing session DAW: {path}");
+                    // Rebuild the setlist so the Session tab picks up the new project.
+                    if let Some(session) = Session::try_get() {
+                        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                        session.setlist().build_from_open_projects().await;
+                    }
+                    *TOP_PAGE.write() = "main";
                     return;
                 }
                 Err(e) => {

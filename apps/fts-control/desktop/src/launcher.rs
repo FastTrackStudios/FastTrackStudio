@@ -4,7 +4,8 @@
 //! with fire-and-forget semantics — the `Child` handle is dropped immediately
 //! so REAPER survives even if fts-control crashes or exits.
 
-use std::process::Command;
+use std::os::unix::process::CommandExt;
+use std::process::{Command, Stdio};
 use tracing::info;
 
 /// A known REAPER configuration (app bundle + role).
@@ -58,6 +59,14 @@ pub fn spawn_reaper(config: &ReaperConfig, project_paths: &[&str]) -> eyre::Resu
     let mut cmd = Command::new(config.executable);
     cmd.current_dir(config.resources)
         .env("FTS_DAW_ROLE", config.role)
+        // Put REAPER in its own process group so it survives when
+        // fts-control exits (prevents SIGHUP from killing it).
+        .process_group(0)
+        // Fully detach stdio so REAPER's output doesn't appear in
+        // dx serve logs and broken pipes can't kill the process.
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .arg("-newinst")
         .arg("-nosplash")
         .arg("-ignoreerrors");
@@ -83,4 +92,25 @@ pub fn spawn_reaper(config: &ReaperConfig, project_paths: &[&str]) -> eyre::Resu
     );
 
     Ok(pid)
+}
+
+/// Send SIGTERM to a REAPER instance by PID.
+///
+/// The discovery loop will detect the process death and unregister it
+/// automatically. Returns `true` if the signal was sent successfully.
+pub fn kill_reaper(pid: u32) -> bool {
+    let ok = Command::new("kill")
+        .args(["-TERM", &pid.to_string()])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+
+    if ok {
+        info!("Sent SIGTERM to REAPER PID {pid}");
+    } else {
+        tracing::warn!("Failed to kill REAPER PID {pid}");
+    }
+    ok
 }
