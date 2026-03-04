@@ -8,6 +8,9 @@ members = [
     "apps/tests/*",
     "apps/fts-control/*",
     "apps/fasttrackstudio/*",
+    "apps/fts-cli",
+    "apps/signal-cli",
+    "apps/session-cli",
 ]
 resolver = "2"
 
@@ -91,6 +94,9 @@ daw-control = { path = "../daw/crates/daw-control" }
 daw-standalone = { path = "../daw/crates/daw-standalone" }
 daw-reaper = { path = "../daw/crates/daw-reaper" }
 daw-ui = { path = "../daw/crates/daw-ui" }
+daw-cli = { path = "../daw/apps/daw" }
+signal-cli = { path = "apps/signal-cli" }
+session-cli = { path = "apps/session-cli" }
 
 # Dock UI (sibling repo — local paths)
 dock-proto = { path = "../dock-dioxus/crates/dock-proto" }
@@ -111,6 +117,7 @@ dynamic-template-proto = { path = "../dynamic-template/crates/dynamic-template-p
 dynamic-template = { path = "../dynamic-template/crates/dynamic-template" }
 
 # Local crates
+macromod = { path = "crates/macromod/macromod" }
 session-proto = { path = "crates/session/session-proto" }
 session = { path = "crates/session/session" }
 session-ui = { path = "crates/session/session-ui" }
@@ -121,6 +128,7 @@ signal-storage = { path = "crates/signal/signal-storage" }
 signal-live = { path = "crates/signal/signal-live" }
 signal-controller = { path = "crates/signal/signal-controller" }
 signal-ui = { path = "crates/signal/signal-ui", default-features = false }
+nam-manager = { path = "crates/signal/nam-manager" }
 sync-proto = { path = "crates/sync/sync-proto" }
 sync = { path = "crates/sync/sync" }
 sync-ui = { path = "crates/sync/sync-ui" }
@@ -139,6 +147,9 @@ crossbeam-channel = "0.5"
 scopeguard = "1.1.0"
 raw-window-handle = "0.4.2"
 palette = "0.7.3"
+
+# FTS design system (wraps lumen-blocks, lucide-dioxus, layout, typography)
+fts-ui = { path = "../../fts-ui/crates/fts-ui" }
 
 # Lumen blocks (Dioxus shadcn-inspired components)
 lumen-blocks = { git = "https://github.com/Leaf-Computer/lumen-blocks.git", tag = "v0.2.0" }
