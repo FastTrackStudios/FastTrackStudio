@@ -1,0 +1,19 @@
+[workspace]
+members = ["crates/*"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["FastTrack Studio"]
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+fts-ui = { path = "crates/fts-ui" }
+dioxus = "0.7.2"
+lumen-blocks = { git = "https://github.com/Leaf-Computer/lumen-blocks.git", tag = "v0.2.0" }
+lucide-dioxus = { git = "https://github.com/Leaf-Computer/lucide.git", rev = "e3e509d5855324e893aef838747cccb2d115dc15", features = ["all-icons"] }
+tracing = { version = "0.1", features = ["std"] }
+
+[workspace.lints.rust]
+unused = "warn"
