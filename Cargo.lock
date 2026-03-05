@@ -1794,6 +1794,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "be1e0bca6c3637f992fc1cc7cbc52a78c1ef6db076dbf1059c4323d6a2048376"
 
 [[package]]
+name = "daw"
+version = "0.1.0"
+dependencies = [
+ "daw-control",
+ "daw-proto",
+]
+
+[[package]]
 name = "daw-cli"
 version = "0.1.0"
 dependencies = [
@@ -8255,6 +8263,7 @@ dependencies = [
  "dock-dioxus",
  "dock-proto",
  "eyre",
+ "fts-ui",
  "lucide-dioxus 2.563.0",
  "session-proto",
  "tracing",
@@ -8324,6 +8333,8 @@ name = "signal-cli"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "daw-cli",
+ "daw-control",
  "eyre",
  "serde_json",
  "signal",
@@ -8384,6 +8395,7 @@ name = "signal-live"
 version = "0.1.0"
 dependencies = [
  "base64",
+ "daw",
  "daw-control",
  "daw-proto",
  "eyre",
@@ -8433,6 +8445,7 @@ dependencies = [
  "dioxus",
  "dock-dioxus",
  "dock-proto",
+ "fts-ui",
  "lumen-blocks",
  "signal",
  "signal-controller",
