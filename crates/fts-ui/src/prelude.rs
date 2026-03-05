@@ -11,6 +11,8 @@ pub use crate::components::{
     // New
     Badge, BadgeVariant,
     Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle,
+    SearchableDropdown,
+    SearchableList, SearchableListItem,
 };
 
 // Re-exported component modules (used via fts_ui::prelude::checkbox::Checkbox etc.)

@@ -27,6 +27,10 @@ pub use tabs::*;
 // --- New FTS components ---
 mod badge;
 mod card;
+mod searchable_dropdown;
+mod searchable_list;
 
 pub use badge::*;
 pub use card::*;
+pub use searchable_dropdown::*;
+pub use searchable_list::*;
