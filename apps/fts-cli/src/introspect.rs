@@ -146,8 +146,7 @@ pub async fn introspect_all(daw: &Daw) -> Result<Vec<(String, IntrospectResult)>
                 .ok_or_else(|| eyre::eyre!("FX at index {} not found", fx_info.index))?;
 
             let params = fx_handle.parameters().await?;
-            let state_chunk = fx_handle.state_chunk_encoded().await?;
-            let result = build_result(fx_info.clone(), &params, state_chunk);
+            let result = build_result(fx_info.clone(), &params, None);
             results.push((track_info.name.clone(), result));
         }
     }
@@ -156,10 +155,12 @@ pub async fn introspect_all(daw: &Daw) -> Result<Vec<(String, IntrospectResult)>
 }
 
 fn build_result(fx_info: Fx, params: &[FxParameter], state_chunk: Option<String>) -> IntrospectResult {
+    let (clean_name, vendor) = clean_plugin_name(&fx_info.plugin_name);
+
     let raw = RawPluginData {
         schema_version: 1,
-        plugin_name: fx_info.plugin_name.clone(),
-        vendor: None,
+        plugin_name: clean_name.clone(),
+        vendor: vendor.clone(),
         plugin_type: fx_type_string(&fx_info.plugin_type),
         parameter_count: fx_info.parameter_count,
         parameters: params
@@ -179,7 +180,10 @@ fn build_result(fx_info: Fx, params: &[FxParameter], state_chunk: Option<String>
             .collect(),
     };
 
-    let blocks = PluginBlockDef::new(&fx_info.plugin_name, fx_info.parameter_count);
+    let mut blocks = PluginBlockDef::new(&clean_name, fx_info.parameter_count);
+    if let Some(ref v) = vendor {
+        blocks = blocks.with_vendor(v);
+    }
 
     IntrospectResult {
         raw,
@@ -187,6 +191,38 @@ fn build_result(fx_info: Fx, params: &[FxParameter], state_chunk: Option<String>
         state_chunk,
         fx_info,
     }
+}
+
+/// Strip REAPER's format prefix and vendor suffix from a plugin name.
+///
+/// `"VST3: Archetype John Mayer X (Neural DSP)"` → `("Archetype John Mayer X", Some("Neural DSP"))`
+/// `"JS: QDelay"` → `("QDelay", None)`
+/// `"ReaComp (Cockos)"` → `("ReaComp", Some("Cockos"))`
+fn clean_plugin_name(raw_name: &str) -> (String, Option<String>) {
+    let mut name = raw_name.to_string();
+
+    // Strip format prefix: "VST3: ", "VST: ", "CLAP: ", "AU: ", "JS: "
+    for prefix in &["VST3: ", "VST: ", "CLAP: ", "AU: ", "JS: "] {
+        if let Some(rest) = name.strip_prefix(prefix) {
+            name = rest.to_string();
+            break;
+        }
+    }
+
+    // Extract vendor from trailing parentheses: "Name (Vendor)" → ("Name", "Vendor")
+    let vendor = if let Some(paren_start) = name.rfind(" (") {
+        if name.ends_with(')') {
+            let vendor = name[paren_start + 2..name.len() - 1].to_string();
+            name = name[..paren_start].to_string();
+            Some(vendor)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    (name.trim().to_string(), vendor)
 }
 
 fn fx_type_string(ft: &FxType) -> String {
@@ -394,5 +430,52 @@ mod tests {
         assert_eq!(slugify("---Leading---"), "leading");
         assert_eq!(slugify("a"), "a");
         assert_eq!(slugify("A B  C"), "a-b-c");
+    }
+
+    #[test]
+    fn clean_plugin_name_vst3() {
+        let (name, vendor) = clean_plugin_name("VST3: Archetype John Mayer X (Neural DSP)");
+        assert_eq!(name, "Archetype John Mayer X");
+        assert_eq!(vendor.as_deref(), Some("Neural DSP"));
+    }
+
+    #[test]
+    fn clean_plugin_name_vst2() {
+        let (name, vendor) = clean_plugin_name("VST: ReaEQ (Cockos)");
+        assert_eq!(name, "ReaEQ");
+        assert_eq!(vendor.as_deref(), Some("Cockos"));
+    }
+
+    #[test]
+    fn clean_plugin_name_clap() {
+        let (name, vendor) = clean_plugin_name("CLAP: Pro-Q 4 (FabFilter)");
+        assert_eq!(name, "Pro-Q 4");
+        assert_eq!(vendor.as_deref(), Some("FabFilter"));
+    }
+
+    #[test]
+    fn clean_plugin_name_js_no_vendor() {
+        let (name, vendor) = clean_plugin_name("JS: QDelay");
+        assert_eq!(name, "QDelay");
+        assert_eq!(vendor, None);
+    }
+
+    #[test]
+    fn clean_plugin_name_no_prefix() {
+        let (name, vendor) = clean_plugin_name("ReaComp (Cockos)");
+        assert_eq!(name, "ReaComp");
+        assert_eq!(vendor.as_deref(), Some("Cockos"));
+    }
+
+    #[test]
+    fn infer_block_type_from_track_names() {
+        assert_eq!(infer_block_type("Amp"), "amp");
+        assert_eq!(infer_block_type("EQ"), "eq");
+        assert_eq!(infer_block_type("Compressor"), "compressor");
+        assert_eq!(infer_block_type("Drive"), "drive");
+        assert_eq!(infer_block_type("Reverb"), "reverb");
+        assert_eq!(infer_block_type("Delay"), "delay");
+        assert_eq!(infer_block_type("Plugin"), "plugin");
+        assert_eq!(infer_block_type("Guitar Rig"), "plugin");
     }
 }
