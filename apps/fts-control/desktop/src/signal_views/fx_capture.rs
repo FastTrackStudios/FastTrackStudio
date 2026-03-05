@@ -69,8 +69,8 @@ struct LibraryItem {
     tags: Vec<String>,
     /// Default snapshot id for loading.
     default_snapshot_id: String,
-    /// All snapshot (id, name) pairs for the snapshot picker.
-    snapshots: Vec<(String, String)>,
+    /// All snapshot (id, name, folder) tuples for the snapshot picker.
+    snapshots: Vec<(String, String, Option<String>)>,
 }
 
 impl LibraryItem {
@@ -320,12 +320,16 @@ async fn fetch_library(signal: &signal::Signal) -> Vec<LibraryItem> {
                 let format = all_tags.iter().find_map(|t| {
                     t.strip_prefix("plugin:").map(|v| v.to_string())
                 });
-                let is_template = source_tag.is_none();
+                let has_workflow_imported = all_tags.iter().any(|t| t == "workflow:imported");
+                let is_template = source_tag.is_none() && !has_workflow_imported;
                 let default_snapshot_id = p.default_snapshot().id().to_string();
-                let snapshots: Vec<(String, String)> = p
+                let snapshots: Vec<(String, String, Option<String>)> = p
                     .snapshots()
                     .iter()
-                    .map(|s| (s.id().to_string(), s.name().to_string()))
+                    .map(|s| {
+                        let folder = s.metadata().folder.clone();
+                        (s.id().to_string(), s.name().to_string(), folder)
+                    })
                     .collect();
                 items.push(LibraryItem {
                     preset_id: p.id().to_string(),
@@ -401,6 +405,210 @@ fn parse_plugin_name(raw: &str) -> ParsedPluginName {
         clean_name,
         vendor,
         format_tag,
+    }
+}
+
+/// Render the snapshot picker for a library item.
+///
+/// Adapts its layout based on the number of snapshots:
+/// - <=10: flat button row (original behavior)
+/// - >10: searchable, folder-grouped scrollable list
+fn render_snapshot_picker(
+    snapshots: Vec<(String, String, Option<String>)>,
+    mut selected_snapshot_idx: Signal<usize>,
+    mut snapshot_search: Signal<String>,
+    mut snapshot_expanded_folder: Signal<Option<String>>,
+) -> Element {
+    let total = snapshots.len();
+
+    // Small snapshot count — use simple flat buttons
+    if total <= 10 {
+        return rsx! {
+            div { class: "space-y-1",
+                label { class: "text-[10px] text-zinc-500 uppercase tracking-wider",
+                    "Snapshot"
+                }
+                div { class: "flex flex-wrap gap-1",
+                    for (idx, (sid, sname, _folder)) in snapshots.iter().cloned().enumerate() {
+                        {
+                            let is_active = selected_snapshot_idx() == idx;
+                            rsx! {
+                                button {
+                                    key: "{sid}",
+                                    class: if is_active {
+                                        "px-2 py-0.5 text-[10px] rounded bg-blue-700/80 text-blue-200 border border-blue-600"
+                                    } else {
+                                        "px-2 py-0.5 text-[10px] rounded text-zinc-400 hover:text-zinc-200 border border-zinc-700 hover:border-zinc-500"
+                                    },
+                                    onclick: move |_| selected_snapshot_idx.set(idx),
+                                    "{sname}"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        };
+    }
+
+    // Large snapshot count — searchable, folder-grouped scrollable list
+    let search_query = snapshot_search().to_ascii_lowercase();
+    let expanded = snapshot_expanded_folder();
+
+    // Check if any snapshots have folders
+    let has_folders = snapshots.iter().any(|(_, _, f)| f.is_some());
+
+    // Build folder groups: (folder_name, Vec<(original_idx, id, name)>)
+    let mut folders: Vec<(String, Vec<(usize, String, String)>)> = Vec::new();
+    let mut folder_map: std::collections::BTreeMap<String, Vec<(usize, String, String)>> =
+        std::collections::BTreeMap::new();
+
+    for (idx, (sid, sname, folder)) in snapshots.iter().enumerate() {
+        // Apply search filter
+        if !search_query.is_empty() && !sname.to_ascii_lowercase().contains(&search_query) {
+            continue;
+        }
+        let key = folder.clone().unwrap_or_default();
+        folder_map
+            .entry(key)
+            .or_default()
+            .push((idx, sid.clone(), sname.clone()));
+    }
+
+    for (folder, items) in folder_map {
+        folders.push((folder, items));
+    }
+
+    let matched_count: usize = folders.iter().map(|(_, items)| items.len()).sum();
+
+    rsx! {
+        div { class: "space-y-1",
+            label { class: "text-[10px] text-zinc-500 uppercase tracking-wider",
+                "Snapshot ({total})"
+            }
+            // Search input
+            div { class: "relative",
+                input {
+                    class: "w-full px-2 py-1 text-[11px] rounded bg-zinc-800 border border-zinc-700 text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-blue-600",
+                    placeholder: "Search snapshots...",
+                    value: "{snapshot_search}",
+                    oninput: move |e| snapshot_search.set(e.value()),
+                }
+                if !snapshot_search().is_empty() {
+                    button {
+                        class: "absolute right-1.5 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 text-[10px]",
+                        onclick: move |_| snapshot_search.set(String::new()),
+                        "✕"
+                    }
+                }
+            }
+
+            if matched_count == 0 {
+                div { class: "text-[10px] text-zinc-500 italic py-2",
+                    "No snapshots match"
+                }
+            } else {
+                // Scrollable list
+                div { class: "max-h-[240px] overflow-y-auto rounded border border-zinc-800",
+                    if has_folders && search_query.is_empty() {
+                        // Folder-grouped view
+                        for (folder_name, items) in folders.iter() {
+                            {
+                                let folder_display = if folder_name.is_empty() {
+                                    "Default".to_string()
+                                } else {
+                                    folder_name.clone()
+                                };
+                                let item_count = items.len();
+                                let is_expanded = expanded.as_deref() == Some(folder_name.as_str())
+                                    || (expanded.is_none() && items.iter().any(|(idx, _, _)| *idx == selected_snapshot_idx()));
+                                let folder_key = folder_name.clone();
+                                rsx! {
+                                    div {
+                                        // Folder header
+                                        button {
+                                            key: "folder-{folder_key}",
+                                            class: "w-full flex items-center gap-1.5 px-2 py-1 text-[10px] text-zinc-400 hover:text-zinc-200 bg-zinc-900/50 border-b border-zinc-800/50",
+                                            onclick: {
+                                                let folder_key = folder_key.clone();
+                                                move |_| {
+                                                    let current = snapshot_expanded_folder();
+                                                    if current.as_deref() == Some(folder_key.as_str()) {
+                                                        snapshot_expanded_folder.set(None);
+                                                    } else {
+                                                        snapshot_expanded_folder.set(Some(folder_key.clone()));
+                                                    }
+                                                }
+                                            },
+                                            span { class: "text-[8px]",
+                                                if is_expanded { "▼" } else { "▶" }
+                                            }
+                                            span { class: "font-medium truncate", "{folder_display}" }
+                                            span { class: "text-zinc-600 ml-auto flex-shrink-0", "{item_count}" }
+                                        }
+                                        // Folder items (when expanded)
+                                        if is_expanded {
+                                            for (idx, sid, sname) in items.iter() {
+                                                {
+                                                    let idx = *idx;
+                                                    let is_active = selected_snapshot_idx() == idx;
+                                                    let sid = sid.clone();
+                                                    rsx! {
+                                                        button {
+                                                            key: "{sid}",
+                                                            class: if is_active {
+                                                                "w-full text-left pl-5 pr-2 py-0.5 text-[10px] bg-blue-900/30 text-blue-200 border-b border-zinc-800/30"
+                                                            } else {
+                                                                "w-full text-left pl-5 pr-2 py-0.5 text-[10px] text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/30 border-b border-zinc-800/30"
+                                                            },
+                                                            onclick: move |_| selected_snapshot_idx.set(idx),
+                                                            "{sname}"
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        // Flat list (search results or no folders)
+                        for (folder_name, items) in folders.iter() {
+                            for (idx, sid, sname) in items.iter() {
+                                {
+                                    let idx = *idx;
+                                    let is_active = selected_snapshot_idx() == idx;
+                                    let sid = sid.clone();
+                                    let folder_label = if has_folders && !folder_name.is_empty() {
+                                        folder_name.clone()
+                                    } else {
+                                        String::new()
+                                    };
+                                    rsx! {
+                                        button {
+                                            key: "{sid}",
+                                            class: if is_active {
+                                                "w-full flex items-center gap-2 px-2 py-0.5 text-[10px] bg-blue-900/30 text-blue-200 border-b border-zinc-800/30"
+                                            } else {
+                                                "w-full flex items-center gap-2 px-2 py-0.5 text-[10px] text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/30 border-b border-zinc-800/30"
+                                            },
+                                            onclick: move |_| selected_snapshot_idx.set(idx),
+                                            span { class: "truncate", "{sname}" }
+                                            if !folder_label.is_empty() {
+                                                span { class: "text-zinc-600 text-[9px] ml-auto flex-shrink-0 truncate max-w-[80px]",
+                                                    "{folder_label}"
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -646,6 +854,8 @@ fn MacroEditorDialog(
                                     },
                                     MiniKnob {
                                         value,
+                                        color: Some(accent.clone()),
+                                        tooltip: Some(format!("{knob_label}: {:.0}%", value * 100.0)),
                                         on_change: {
                                             let kid = kid.clone();
                                             let tg = track_guid.clone();
@@ -1096,6 +1306,10 @@ pub(crate) fn SignalCaptureTab() -> Element {
     let mut selected_library_item = use_signal(|| None::<LibraryItem>);
     // Index into the selected library item's `snapshots` vec. 0 = default.
     let mut selected_snapshot_idx = use_signal(|| 0usize);
+    // Search filter for the snapshot picker (used when >10 snapshots).
+    let mut snapshot_search = use_signal(String::new);
+    // Currently expanded folder in the snapshot picker (None = all collapsed initially).
+    let mut snapshot_expanded_folder = use_signal(|| None::<String>);
     let mut applying = use_signal(|| false);
 
     // ── Block library ──
@@ -1327,6 +1541,8 @@ pub(crate) fn SignalCaptureTab() -> Element {
     // ── Library item selection handler ──
     let on_select_library_item = move |item: LibraryItem| {
         selected_snapshot_idx.set(0);
+        snapshot_search.set(String::new());
+        snapshot_expanded_folder.set(None);
         error_msg.set(None);
         selected_library_item.set(Some(item));
     };
@@ -1621,30 +1837,7 @@ pub(crate) fn SignalCaptureTab() -> Element {
 
                                         // Snapshot picker (if multiple snapshots)
                                         if snapshots.len() > 1 {
-                                            div { class: "space-y-1",
-                                                label { class: "text-[10px] text-zinc-500 uppercase tracking-wider",
-                                                    "Snapshot"
-                                                }
-                                                div { class: "flex flex-wrap gap-1",
-                                                    for (idx, (_sid, sname)) in snapshots.iter().cloned().enumerate() {
-                                                        {
-                                                            let is_active = selected_snapshot_idx() == idx;
-                                                            rsx! {
-                                                                button {
-                                                                    key: "{_sid}",
-                                                                    class: if is_active {
-                                                                        "px-2 py-0.5 text-[10px] rounded bg-blue-700/80 text-blue-200 border border-blue-600"
-                                                                    } else {
-                                                                        "px-2 py-0.5 text-[10px] rounded text-zinc-400 hover:text-zinc-200 border border-zinc-700 hover:border-zinc-500"
-                                                                    },
-                                                                    onclick: move |_| selected_snapshot_idx.set(idx),
-                                                                    "{sname}"
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
+                                            {render_snapshot_picker(snapshots.clone(), selected_snapshot_idx, snapshot_search, snapshot_expanded_folder)}
                                         }
 
                                         // Error message
@@ -1781,30 +1974,7 @@ pub(crate) fn SignalCaptureTab() -> Element {
 
                                         // Snapshot picker (if multiple snapshots and not a template)
                                         if !is_tmpl && snapshots.len() > 1 {
-                                            div { class: "space-y-1",
-                                                label { class: "text-[10px] text-zinc-500 uppercase tracking-wider",
-                                                    "Snapshot"
-                                                }
-                                                div { class: "flex flex-wrap gap-1",
-                                                    for (idx, (_sid, sname)) in snapshots.iter().cloned().enumerate() {
-                                                        {
-                                                            let is_active = selected_snapshot_idx() == idx;
-                                                            rsx! {
-                                                                button {
-                                                                    key: "{_sid}",
-                                                                    class: if is_active {
-                                                                        "px-2 py-0.5 text-[10px] rounded bg-blue-700/80 text-blue-200 border border-blue-600"
-                                                                    } else {
-                                                                        "px-2 py-0.5 text-[10px] rounded text-zinc-400 hover:text-zinc-200 border border-zinc-700 hover:border-zinc-500"
-                                                                    },
-                                                                    onclick: move |_| selected_snapshot_idx.set(idx),
-                                                                    "{sname}"
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
+                                            {render_snapshot_picker(snapshots.clone(), selected_snapshot_idx, snapshot_search, snapshot_expanded_folder)}
                                         }
 
                                         // Error message
@@ -2281,6 +2451,7 @@ pub(crate) fn SignalCaptureTab() -> Element {
                                                                 },
                                                                 MiniKnob {
                                                                     value: knob_value,
+                                                                    tooltip: Some(format!("{knob_label}: {:.0}%", knob_value * 100.0)),
                                                                     on_change: {
                                                                         let kid = knob_id.clone();
                                                                         move |new_val: f32| {
@@ -2530,6 +2701,7 @@ pub(crate) fn SignalCaptureTab() -> Element {
                                                                                 class: "flex flex-col items-center gap-1",
                                                                                 MiniKnob {
                                                                                     value: pval,
+                                                                                    tooltip: Some(format!("{pname}: {:.0}%", pval * 100.0)),
                                                                                     on_change: {
                                                                                         let pid = pid.clone();
                                                                                         move |new_val: f32| {
