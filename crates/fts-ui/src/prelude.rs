@@ -11,8 +11,17 @@ pub use crate::components::{
     // New
     Badge, BadgeVariant,
     Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle,
+    EmptyState,
+    FormField,
+    InlineEdit,
+    KeyValueRow,
+    ListRow,
     SearchableDropdown,
     SearchableList, SearchableListItem,
+    SectionHeader, SectionHeaderSize,
+    SegmentedControl, SegmentedControlSize,
+    StatusBadge, StatusBadgeVariant,
+    StatusDot, StatusDotColor, StatusDotSize,
 };
 
 // Re-exported component modules (used via fts_ui::prelude::checkbox::Checkbox etc.)
