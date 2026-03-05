@@ -41,6 +41,7 @@ pub enum PanelId {
     // Utility panels
     Navigator,
     Inspector,
+    KeyboardVisualizer,
 
     // Test / development panels
     SnapshotTest,
@@ -85,6 +86,7 @@ impl PanelId {
             Self::ArrangementView => "arrangement-view",
             Self::Navigator => "navigator",
             Self::Inspector => "inspector",
+            Self::KeyboardVisualizer => "keyboard-visualizer",
             Self::SnapshotTest => "snapshot-test",
         }
     }
@@ -116,6 +118,7 @@ impl PanelId {
             "arrangement-view" => Some(Self::ArrangementView),
             "navigator" => Some(Self::Navigator),
             "inspector" => Some(Self::Inspector),
+            "keyboard-visualizer" => Some(Self::KeyboardVisualizer),
             "snapshot-test" => Some(Self::SnapshotTest),
             _ => None,
         }
@@ -151,7 +154,7 @@ impl PanelId {
                 | Self::FxChainTree
                 | Self::TrackControlPanel
                 | Self::ArrangementView => "DAW",
-                Self::Navigator | Self::Inspector => "Utility",
+                Self::Navigator | Self::Inspector | Self::KeyboardVisualizer => "Utility",
                 Self::SnapshotTest => "Signal",
             };
 
@@ -212,6 +215,7 @@ impl PanelId {
             Self::ArrangementView => "Arrangement",
             Self::Navigator => "Navigator",
             Self::Inspector => "Inspector",
+            Self::KeyboardVisualizer => "Keyboard Visualizer",
             Self::SnapshotTest => "Snapshot Test",
         }
     }
@@ -242,6 +246,7 @@ impl PanelId {
             Self::ArrangementView => "layout-dashboard",
             Self::Navigator => "compass",
             Self::Inspector => "search",
+            Self::KeyboardVisualizer => "keyboard",
             Self::SnapshotTest => "camera",
         }
     }
@@ -271,6 +276,7 @@ impl PanelId {
             Self::ArrangementView,
             Self::Navigator,
             Self::Inspector,
+            Self::KeyboardVisualizer,
             Self::SnapshotTest,
             Self::Settings,
         ]
