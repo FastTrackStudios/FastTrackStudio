@@ -60,7 +60,7 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Command::Daw(cmd) => daw::run(cli.socket, cmd, cli.json).await?,
-        Command::Signal(cmd) => signal_cli::run(cli.db, cmd, cli.json).await?,
+        Command::Signal(cmd) => signal_cli::run(cli.db, cli.socket.clone(), cmd, cli.json).await?,
         Command::Session(cmd) => session_cli::run(cli.socket, cmd, cli.json).await?,
     }
 

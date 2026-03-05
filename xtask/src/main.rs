@@ -73,6 +73,9 @@ enum Commands {
         /// Skip building the extension before running tests
         #[facet(args::named, default)]
         no_build: bool,
+        /// Keep REAPER open after tests complete (for inspecting results)
+        #[facet(args::named, default)]
+        keep_open: bool,
     },
     /// Scan all Neural DSP preset libraries and write a structured catalogue
     Catalog {
@@ -314,13 +317,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
             println!("\n=== Playwright tests completed ===");
         }
-        Commands::ReaperTest { filter, no_build } => {
+        Commands::ReaperTest { filter, no_build, keep_open } => {
             println!("=== Running REAPER integration tests ===");
 
             // Step 1: Build extension (unless --no-build)
             if !no_build {
                 println!("\n>>> Building REAPER extension...");
-                cmd!(sh, "cargo build -p reaper-extension").run()?;
+                let ext_dir = workspace_root.parent().unwrap().join("FTS-Extensions");
+                cmd!(sh, "cargo build -p reaper-extension --manifest-path {ext_dir}/Cargo.toml").run()?;
 
                 // Copy dylib to REAPER's UserPlugins
                 let reaper_path = std::env::var("REAPER_PATH").unwrap_or_else(|_| {
@@ -397,6 +401,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             // REAPER's main thread with too many concurrent plugin loads.
             // Set FTS_SOCKET so tests connect to the right REAPER instance
             sh.set_var("FTS_SOCKET", &socket_path);
+            // Tell reaper-test to skip project tab cleanup when --keep-open
+            if keep_open {
+                sh.set_var("FTS_KEEP_OPEN", "1");
+            }
 
             println!("\n>>> Running tests...");
             let test_result = if let Some(ref f) = filter {
@@ -413,19 +421,27 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 .run()
             };
 
-            // Step 4b: Final cleanup — remove leftover tracks/tabs
-            println!("\n>>> Cleaning up REAPER state...");
-            let _ = cmd!(
-                sh,
-                "cargo test -p signal --features daw --test reaper_connection -- --ignored --nocapture final_cleanup"
-            )
-            .run();
+            // Step 4b: Final cleanup — remove leftover tracks/tabs (skip with --keep-open)
+            if !keep_open {
+                println!("\n>>> Cleaning up REAPER state...");
+                let _ = cmd!(
+                    sh,
+                    "cargo test -p signal --features daw --test reaper_connection -- --ignored --nocapture final_cleanup"
+                )
+                .run();
+            }
 
-            // Step 5: Kill REAPER
-            println!("\n>>> Stopping REAPER (PID {reaper_pid})...");
-            let _ = reaper_child.kill();
-            let _ = reaper_child.wait();
-            let _ = std::fs::remove_file(socket_path);
+            // Step 5: Kill REAPER (unless --keep-open)
+            if keep_open {
+                println!("\n>>> Keeping REAPER open (PID {reaper_pid})");
+                println!("  Socket: {socket_path}");
+                println!("  Kill manually with: kill {reaper_pid}");
+            } else {
+                println!("\n>>> Stopping REAPER (PID {reaper_pid})...");
+                let _ = reaper_child.kill();
+                let _ = reaper_child.wait();
+                let _ = std::fs::remove_file(socket_path);
+            }
 
             // Step 6: On failure, summarize per-test log files
             if test_result.is_err() {
