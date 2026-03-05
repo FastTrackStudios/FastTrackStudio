@@ -33,7 +33,6 @@
 //! prefers matches where more parent groups also match the input.
 
 use crate::{Config, Item, Metadata, MonarchyError, Result};
-use facet::Facet;
 
 /// Parser that converts input strings into [`Item`]s with extracted metadata.
 ///
@@ -53,14 +52,14 @@ use facet::Facet;
 /// println!("Matched groups: {:?}", item.matched_groups);
 /// println!("Metadata: {:?}", item.metadata);
 /// ```
-#[derive(Clone, Debug, Facet)]
-pub struct Parser<M: Metadata> {
-    config: Config<M>,
+#[derive(Clone, Debug)]
+pub struct Parser<'a, M: Metadata> {
+    config: &'a Config<M>,
 }
 
-impl<M: Metadata> Parser<M> {
+impl<'a, M: Metadata> Parser<'a, M> {
     /// Create a new parser with the given configuration
-    pub fn new(config: Config<M>) -> Self {
+    pub fn new(config: &'a Config<M>) -> Self {
         Self { config }
     }
 
@@ -187,7 +186,7 @@ impl<M: Metadata> Parser<M> {
     /// Recursively find the deepest matching group within a group hierarchy
     /// Returns the deepest matching group and its full path from root (as Group references)
     /// If a nested group matches, the parent is included in the path even if it doesn't match itself
-    fn find_deepest_matching_group<'a>(
+    fn find_deepest_matching_group(
         &self,
         group: &'a crate::Group<M>,
         input: &str,

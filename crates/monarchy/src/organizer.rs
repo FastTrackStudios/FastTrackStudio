@@ -33,7 +33,6 @@
 //! ```
 
 use crate::{CollapseHierarchy, Config, Item, Metadata, Structure};
-use facet::Facet;
 
 /// Organizes parsed [`Item`]s into a hierarchical [`Structure`].
 ///
@@ -52,14 +51,14 @@ use facet::Facet;
 /// // The structure now contains a tree of groups and items
 /// structure.print_tree();
 /// ```
-#[derive(Clone, Debug, Facet)]
-pub struct Organizer<M: Metadata> {
-    config: Config<M>,
+#[derive(Clone, Debug)]
+pub struct Organizer<'a, M: Metadata> {
+    config: &'a Config<M>,
 }
 
-impl<M: Metadata> Organizer<M> {
+impl<'a, M: Metadata> Organizer<'a, M> {
     /// Create a new organizer with the given configuration.
-    pub fn new(config: Config<M>) -> Self {
+    pub fn new(config: &'a Config<M>) -> Self {
         Self { config }
     }
 
@@ -116,7 +115,7 @@ impl<M: Metadata> Organizer<M> {
         // Apply enhanced collapse algorithm using the two-pass system
         // Pass 1: Collapse intermediate groups between top-level and deepest groups
         // Pass 2: Collapse top-level groups that have only a single child
-        let collapse = CollapseHierarchy::new(&self.config);
+        let collapse = CollapseHierarchy::new(self.config);
         collapse.apply(&mut root);
 
         root

@@ -117,7 +117,7 @@ pub struct ScopedSortResult<M: Metadata> {
 /// ```
 pub fn monarchy_sort_scoped<M>(
     items: Vec<Item<M>>,
-    config: Config<M>,
+    config: &Config<M>,
     scope: &str,
 ) -> Result<ScopedSortResult<M>>
 where
@@ -139,7 +139,7 @@ where
     };
 
     // Parse and organize with scoped config
-    let parser = Parser::new(scoped_config.clone());
+    let parser = Parser::new(&scoped_config);
     let mut parsed_items = Vec::new();
     let mut unsorted = Vec::new();
 
@@ -161,7 +161,7 @@ where
         }
     }
 
-    let organizer = Organizer::new(scoped_config);
+    let organizer = Organizer::new(&scoped_config);
     let sorted = organizer.organize(parsed_items);
 
     Ok(ScopedSortResult { sorted, unsorted })
@@ -264,7 +264,7 @@ where
         parser_rules: config.parser_rules.clone(),
     };
 
-    let organizer = Organizer::new(org_config);
+    let organizer = Organizer::new(&org_config);
     let sorted = organizer.organize(parsed_items);
 
     Ok(ScopedSortResult {
@@ -490,7 +490,7 @@ pub fn sort_and_merge<M: Metadata>(
     target_path: &[&str],
 ) -> Result<ScopedSortResult<M>> {
     // Sort items within the target group's scope
-    let result = monarchy_sort_scoped(items, config.clone(), target_group)?;
+    let result = monarchy_sort_scoped(items, config, target_group)?;
 
     // Merge sorted result into target path
     if !result.sorted.is_empty() {
