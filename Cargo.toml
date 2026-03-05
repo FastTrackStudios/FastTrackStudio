@@ -128,6 +128,7 @@ signal-storage = { path = "crates/signal/signal-storage" }
 signal-live = { path = "crates/signal/signal-live" }
 signal-controller = { path = "crates/signal/signal-controller" }
 signal-ui = { path = "crates/signal/signal-ui", default-features = false }
+signal-import = { path = "crates/signal/signal-import" }
 nam-manager = { path = "crates/signal/nam-manager" }
 sync-proto = { path = "crates/sync/sync-proto" }
 sync = { path = "crates/sync/sync" }
