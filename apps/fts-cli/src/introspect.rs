@@ -113,9 +113,13 @@ pub async fn introspect_fx(daw: &Daw, track_arg: &str, fx_arg: &str) -> Result<I
 
     let fx_info = fx_handle.info().await?;
     let params = fx_handle.parameters().await?;
-    let state_chunk = fx_handle.state_chunk_encoded().await?;
 
-    Ok(build_result(fx_info, &params, state_chunk))
+    // Extract this FX's RPP chunk from the chain text
+    let chain_text = fx_chain.fx_chain_chunk_text().await?;
+    let fx_chunks = extract_fx_chunks(&chain_text);
+    let rfx_chunk = fx_chunks.get(&fx_info.guid).cloned();
+
+    Ok(build_result(fx_info, &params, rfx_chunk))
 }
 
 /// Introspect ALL FX across all tracks.
@@ -134,6 +138,14 @@ pub async fn introspect_all(daw: &Daw) -> Result<Vec<(String, IntrospectResult)>
         let fx_chain = track_handle.fx_chain();
         let fx_list = fx_chain.all().await?;
 
+        if fx_list.is_empty() {
+            continue;
+        }
+
+        // Get the full chain text once per track, extract per-FX chunks
+        let chain_text = fx_chain.fx_chain_chunk_text().await?;
+        let fx_chunks = extract_fx_chunks(&chain_text);
+
         for fx_info in &fx_list {
             // Skip containers (param_count <= 1)
             if fx_info.parameter_count <= 1 {
@@ -146,7 +158,8 @@ pub async fn introspect_all(daw: &Daw) -> Result<Vec<(String, IntrospectResult)>
                 .ok_or_else(|| eyre::eyre!("FX at index {} not found", fx_info.index))?;
 
             let params = fx_handle.parameters().await?;
-            let result = build_result(fx_info.clone(), &params, None);
+            let rfx_chunk = fx_chunks.get(&fx_info.guid).cloned();
+            let result = build_result(fx_info.clone(), &params, rfx_chunk);
             results.push((track_info.name.clone(), result));
         }
     }
@@ -235,6 +248,82 @@ fn fx_type_string(ft: &FxType) -> String {
         FxType::Unknown => "Unknown",
     }
     .to_string()
+}
+
+// ============================================================================
+// RPP Chunk Extraction
+// ============================================================================
+
+/// Extract per-FX RPP chunks from an FXCHAIN chunk text, keyed by FXID GUID.
+///
+/// Each FX entry in the chain has this structure:
+/// ```text
+///     BYPASS 0 0 0
+///     <VST "..." ...>
+///       ...state data...
+///     >
+///     FLOATPOS 0 0 0 0
+///     FXID {guid}
+///     WAK 0 0
+/// ```
+///
+/// Returns a map of GUID → complete FX chunk text (wrapped in `<FXCHAIN>` for .rfxchain import).
+fn extract_fx_chunks(chain_text: &str) -> HashMap<String, String> {
+    let mut chunks: HashMap<String, String> = HashMap::new();
+    let lines: Vec<&str> = chain_text.lines().collect();
+
+    // Find each FXID line, then walk backwards to find the FX entry start
+    let mut i = 0;
+    while i < lines.len() {
+        let trimmed = lines[i].trim();
+
+        // Look for FXID lines
+        if let Some(guid) = trimmed.strip_prefix("FXID {").and_then(|s| s.strip_suffix('}')) {
+            let fxid_line = i;
+            let guid = guid.to_string();
+
+            // Walk backwards from FXID to find the BYPASS line that starts this FX entry.
+            // The FX block (<VST/CLAP/JS>) is between BYPASS and FLOATPOS.
+            let mut entry_start = fxid_line;
+            let mut depth: i32 = 0;
+
+            // First, walk back past FLOATPOS and the FX block close
+            let mut j = fxid_line - 1;
+            while j > 0 {
+                let line = lines[j].trim();
+                if line == ">" {
+                    depth += 1;
+                } else if line.starts_with('<') {
+                    depth -= 1;
+                    if depth <= 0 {
+                        // Found the opening of the FX block
+                        entry_start = j;
+                        // Check if the line before is BYPASS
+                        if j > 0 && lines[j - 1].trim().starts_with("BYPASS") {
+                            entry_start = j - 1;
+                        }
+                        break;
+                    }
+                }
+                j -= 1;
+            }
+
+            // Walk forward past FXID to include WAK line
+            let mut entry_end = fxid_line;
+            if fxid_line + 1 < lines.len() && lines[fxid_line + 1].trim().starts_with("WAK") {
+                entry_end = fxid_line + 1;
+            }
+
+            // Collect the FX entry lines
+            let fx_lines: Vec<&str> = lines[entry_start..=entry_end].to_vec();
+            let fx_chunk = fx_lines.join("\n");
+
+            chunks.insert(guid, fx_chunk);
+        }
+        i += 1;
+    }
+
+    chunks
 }
 
 // ============================================================================
