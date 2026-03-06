@@ -13,7 +13,7 @@ pub(crate) fn SignalBrowserDialog(
     let title = if pick_mode {
         "Assign from Browser"
     } else {
-        "Collection Browser"
+        "Signal Browser"
     };
 
     rsx! {

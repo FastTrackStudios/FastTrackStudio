@@ -10,5 +10,8 @@ subagentTracingDetail = "minimal"
 beadsDir = ".beads"
 labels = ""
 
+[parallel]
+mode = "auto"
+
 [notifications]
 sound = "system"

@@ -58,7 +58,7 @@ pub(crate) struct ManageProfileItem {
 pub(crate) fn PerformanceWithChartToggle() -> Element {
     rsx! {
         div {
-            class: "relative h-full w-full bg-background",
+            class: "relative h-full w-full bg-zinc-950",
             PerformanceLayout {}
         }
     }
@@ -87,12 +87,12 @@ pub(crate) fn SignalView() -> Element {
     let mode = SIGNAL_MODE();
 
     rsx! {
-        div { class: "h-full w-full flex flex-col bg-card overflow-hidden",
+        div { class: "h-full w-full flex flex-col bg-zinc-950 overflow-hidden",
             // Top row: mode selector (left) + browser button (right)
-            div { class: "flex items-center justify-between px-3 py-1.5 border-b border-border bg-zinc-900/60 flex-shrink-0",
+            div { class: "flex items-center justify-between px-3 py-1.5 border-b border-white/[0.06] bg-white/[0.02] flex-shrink-0",
                 div { class: "flex items-center gap-2",
                     // Mode selector — primary tabs
-                    div { class: "flex items-center gap-0.5 bg-zinc-800/80 rounded-lg p-0.5",
+                    div { class: "flex items-center gap-0.5 bg-white/[0.06] rounded-lg p-0.5",
                         for (m, label) in [
                             (SignalMode::Preset, "Preset"),
                             (SignalMode::Profile, "Profile"),
@@ -103,9 +103,9 @@ pub(crate) fn SignalView() -> Element {
                                 rsx! {
                                     button {
                                         class: if is_active {
-                                            "px-3 py-1 text-xs font-semibold text-white bg-primary/80 rounded-md transition-colors"
+                                            "px-3 py-1 text-xs font-semibold text-white bg-white/[0.15] rounded-md transition-colors"
                                         } else {
-                                            "px-3 py-1 text-xs font-medium text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded-md transition-colors"
+                                            "px-3 py-1 text-xs font-medium text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.06] rounded-md transition-colors"
                                         },
                                         onclick: move |_| *SIGNAL_MODE.write() = m,
                                         "{label}"
@@ -117,7 +117,7 @@ pub(crate) fn SignalView() -> Element {
 
                     // Sub-tab pills — only shown in Profile/Song modes
                     if mode != SignalMode::Preset {
-                        div { class: "flex items-center gap-0.5 bg-zinc-800/60 rounded-lg p-0.5 ml-1",
+                        div { class: "flex items-center gap-0.5 bg-white/[0.04] rounded-lg p-0.5 ml-1",
                             for (tab, label) in [
                                 (SignalTab::Performance, "Performance"),
                                 (SignalTab::Manage, "Manage"),
@@ -131,9 +131,9 @@ pub(crate) fn SignalView() -> Element {
                                     rsx! {
                                         button {
                                             class: if is_active {
-                                                "px-2.5 py-0.5 text-[11px] font-medium text-white bg-zinc-700 rounded-md transition-colors"
+                                                "px-2.5 py-0.5 text-[11px] font-medium text-white bg-white/[0.10] rounded-md transition-colors"
                                             } else {
-                                                "px-2.5 py-0.5 text-[11px] font-medium text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 rounded-md transition-colors"
+                                                "px-2.5 py-0.5 text-[11px] font-medium text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.06] rounded-md transition-colors"
                                             },
                                             onclick: move |_| active_tab.set(tab),
                                             "{label}"
@@ -147,7 +147,7 @@ pub(crate) fn SignalView() -> Element {
 
                 // Right: browser button
                 button {
-                    class: "px-3 py-1 text-xs font-medium text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded-md transition-colors",
+                    class: "px-3 py-1 text-xs font-medium text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.06] rounded-md transition-colors",
                     onclick: move |_| browser_open.set(true),
                     "Browser"
                 }

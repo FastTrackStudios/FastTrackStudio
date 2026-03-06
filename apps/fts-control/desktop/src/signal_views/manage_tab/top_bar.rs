@@ -24,7 +24,7 @@ pub(crate) fn render_top_bar(
     signal: signal::Signal,
 ) -> Element {
     rsx! {
-        div { class: "flex items-center gap-2 px-3 py-1.5 border-b border-border bg-zinc-900/40 flex-shrink-0",
+        div { class: "flex items-center gap-2 px-3 py-1.5 border-b border-white/[0.06] bg-white/[0.02] flex-shrink-0",
             // Capture preset button
             signal_ui::components::CaptureButton {
                 on_capture: move |_| {
@@ -45,7 +45,7 @@ pub(crate) fn render_top_bar(
             }
 
             // Mode tabs — grouped pill
-            div { class: "flex items-center gap-0.5 bg-zinc-800/50 rounded px-0.5 py-0.5",
+            div { class: "flex items-center gap-0.5 bg-white/[0.04] rounded px-0.5 py-0.5",
                 for &(m, label) in &[(ManageMode::Song, "Song"), (ManageMode::Profile, "Profile"), (ManageMode::Preset, "Preset")] {
                     {
                         let is_active = mode == m;
@@ -53,9 +53,9 @@ pub(crate) fn render_top_bar(
                             button {
                                 key: "{label}",
                                 class: if is_active {
-                                    "px-2.5 py-1 text-xs font-semibold rounded bg-zinc-600 text-zinc-100"
+                                    "px-2.5 py-1 text-xs font-semibold rounded bg-white/[0.15] text-zinc-100"
                                 } else {
-                                    "px-2.5 py-1 text-xs text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700 rounded"
+                                    "px-2.5 py-1 text-xs text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.10] rounded"
                                 },
                                 onclick: move |_| manage_mode.set(m),
                                 "{label}"
@@ -66,7 +66,7 @@ pub(crate) fn render_top_bar(
             }
 
             // Rig type selector — grouped pill
-            div { class: "flex items-center gap-0.5 bg-zinc-800/50 rounded px-0.5 py-0.5",
+            div { class: "flex items-center gap-0.5 bg-white/[0.04] rounded px-0.5 py-0.5",
                 for &rt in &[RigType::Guitar, RigType::Bass, RigType::Keys, RigType::Vocals] {
                     {
                         let is_active = rig_type() == rt;
@@ -81,9 +81,9 @@ pub(crate) fn render_top_bar(
                             button {
                                 key: "{label}",
                                 class: if is_active {
-                                    "px-2 py-0.5 text-[11px] font-medium rounded bg-zinc-600 text-zinc-100"
+                                    "px-2 py-0.5 text-[11px] font-medium rounded bg-white/[0.15] text-zinc-100"
                                 } else {
-                                    "px-2 py-0.5 text-[11px] text-zinc-500 hover:text-zinc-300 hover:bg-zinc-700 rounded"
+                                    "px-2 py-0.5 text-[11px] text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.10] rounded"
                                 },
                                 onclick: move |_| rig_type.set(rt),
                                 "{label}"
@@ -118,7 +118,7 @@ pub(crate) fn render_top_bar(
                             if is_editing {
                                 input {
                                     key: "{sid}",
-                                    class: "px-2 py-0.5 text-xs text-zinc-200 bg-zinc-800 border border-zinc-600 rounded outline-none w-20",
+                                    class: "px-2 py-0.5 text-xs text-zinc-200 bg-white/[0.06] border border-white/[0.08] rounded outline-none w-20",
                                     value: "{editing_text}",
                                     autofocus: true,
                                     oninput: move |e| editing_text.set(e.value()),
@@ -134,9 +134,9 @@ pub(crate) fn render_top_bar(
                                 button {
                                     key: "{sid}",
                                     class: if is_active {
-                                        "px-2.5 py-1 text-xs font-medium rounded bg-zinc-700 text-zinc-100"
+                                        "px-2.5 py-1 text-xs font-medium rounded bg-white/[0.10] text-zinc-100"
                                     } else {
-                                        "px-2.5 py-1 text-xs text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded"
+                                        "px-2.5 py-1 text-xs text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.06] rounded"
                                     },
                                     onclick: move |_| {
                                         on_click(rid.clone(), scene_id.clone(), true);
@@ -158,7 +158,7 @@ pub(crate) fn render_top_bar(
                     let mut cb = on_scene_created.clone();
                     rsx! {
                         button {
-                            class: "px-2 py-0.5 text-[10px] text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 rounded",
+                            class: "px-2 py-0.5 text-[10px] text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.06] rounded",
                             onclick: move |_| {
                                 let signal = signal.clone();
                                 let mut cb = cb.clone();

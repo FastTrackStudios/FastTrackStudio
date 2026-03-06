@@ -101,7 +101,7 @@ pub(crate) fn SignalPerformanceTab() -> Element {
                             }
                             None => rsx! {
                                 div { class: "flex items-center justify-center h-full",
-                                    p { class: "text-sm text-muted-foreground animate-pulse", "Loading profile..." }
+                                    p { class: "text-sm text-zinc-500 animate-pulse", "Loading profile..." }
                                 }
                             },
                         }
@@ -140,14 +140,14 @@ pub(crate) fn SignalPerformanceTab() -> Element {
                             }
                             None => rsx! {
                                 div { class: "flex items-center justify-center h-full",
-                                    p { class: "text-sm text-muted-foreground animate-pulse", "Loading song..." }
+                                    p { class: "text-sm text-zinc-500 animate-pulse", "Loading song..." }
                                 }
                             },
                         }
                     }
                     SignalMode::Preset => rsx! {
                         div { class: "flex items-center justify-center h-full",
-                            p { class: "text-sm text-muted-foreground", "Switch to Profile or Song mode to see the performance grid." }
+                            p { class: "text-sm text-zinc-500", "Switch to Profile or Song mode to see the performance grid." }
                         }
                     },
                 }}

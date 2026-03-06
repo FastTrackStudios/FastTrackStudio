@@ -1,0 +1,15 @@
+{
+  "id": "bc084395-49df-4f6c-a09e-b5550e8d2252",
+  "status": "failed",
+  "startedAt": "2026-03-06T09:33:31.323Z",
+  "updatedAt": "2026-03-06T09:33:32.748Z",
+  "agentPlugin": "claude",
+  "trackerPlugin": "beads",
+  "epicId": "fts-ofc",
+  "currentIteration": 0,
+  "maxIterations": 10,
+  "totalTasks": 0,
+  "tasksCompleted": 0,
+  "cwd": "/Users/codywright/Documents/Development/FastTrackStudio/FastTrackStudio",
+  "endedAt": "2026-03-06T09:33:32.748Z"
+}

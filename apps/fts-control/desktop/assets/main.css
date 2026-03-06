@@ -1,3 +1,50 @@
+/*
+ * Pro Studio Glass Utilities
+ *
+ * White-alpha compositing for dark UI glass aesthetic.
+ * These mirror Tailwind arbitrary-value classes but are defined here
+ * so they work immediately without waiting for Tailwind regeneration.
+ * Safe to remove once `dx serve` is restarted (Tailwind will generate them).
+ */
+
+/* Backgrounds */
+.bg-white\/\[0\.02\] { background-color: rgba(255,255,255,0.02); }
+.bg-white\/\[0\.03\] { background-color: rgba(255,255,255,0.03); }
+.bg-white\/\[0\.04\] { background-color: rgba(255,255,255,0.04); }
+.bg-white\/\[0\.06\] { background-color: rgba(255,255,255,0.06); }
+.bg-white\/\[0\.08\] { background-color: rgba(255,255,255,0.08); }
+.bg-white\/\[0\.10\] { background-color: rgba(255,255,255,0.10); }
+.bg-white\/\[0\.12\] { background-color: rgba(255,255,255,0.12); }
+.bg-white\/\[0\.15\] { background-color: rgba(255,255,255,0.15); }
+
+/* Hover backgrounds */
+.hover\:bg-white\/\[0\.03\]:hover { background-color: rgba(255,255,255,0.03); }
+.hover\:bg-white\/\[0\.04\]:hover { background-color: rgba(255,255,255,0.04); }
+.hover\:bg-white\/\[0\.05\]:hover { background-color: rgba(255,255,255,0.05); }
+.hover\:bg-white\/\[0\.06\]:hover { background-color: rgba(255,255,255,0.06); }
+.hover\:bg-white\/\[0\.08\]:hover { background-color: rgba(255,255,255,0.08); }
+.hover\:bg-white\/\[0\.10\]:hover { background-color: rgba(255,255,255,0.10); }
+.hover\:bg-white\/\[0\.12\]:hover { background-color: rgba(255,255,255,0.12); }
+
+/* Borders */
+.border-white\/\[0\.04\] { border-color: rgba(255,255,255,0.04); }
+.border-white\/\[0\.06\] { border-color: rgba(255,255,255,0.06); }
+.border-white\/\[0\.08\] { border-color: rgba(255,255,255,0.08); }
+.border-white\/\[0\.12\] { border-color: rgba(255,255,255,0.12); }
+.border-white\/\[0\.15\] { border-color: rgba(255,255,255,0.15); }
+
+/* Hover borders */
+.hover\:border-white\/\[0\.12\]:hover { border-color: rgba(255,255,255,0.12); }
+.hover\:border-white\/\[0\.15\]:hover { border-color: rgba(255,255,255,0.15); }
+
+/* Focus borders */
+.focus\:border-blue-500\/50:focus { border-color: rgba(59,130,246,0.5); }
+
+/* Blue accent (replacing semantic --primary) */
+.border-blue-500 { border-color: rgb(59,130,246); }
+.bg-blue-500\/10 { background-color: rgba(59,130,246,0.1); }
+.border-blue-500\/50 { border-color: rgba(59,130,246,0.5); }
+
 /* App-wide styling */
 html,
 body {

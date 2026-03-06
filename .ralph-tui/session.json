@@ -1,136 +1,83 @@
 {
   "version": 1,
-  "sessionId": "5bf570dc-fc8e-4662-836a-3e4b0ea27db2",
-  "status": "running",
-  "startedAt": "2026-02-13T12:41:36.705Z",
-  "updatedAt": "2026-02-14T06:58:38.465Z",
+  "sessionId": "bc084395-49df-4f6c-a09e-b5550e8d2252",
+  "status": "failed",
+  "startedAt": "2026-03-06T09:33:32.657Z",
+  "updatedAt": "2026-03-06T09:33:32.745Z",
   "currentIteration": 0,
   "maxIterations": 10,
   "tasksCompleted": 0,
   "isPaused": false,
   "agentPlugin": "claude",
+  "model": "sonnet",
   "trackerState": {
-    "plugin": "beads-bv",
-    "epicId": "roam-test-5e9",
-    "totalTasks": 20,
+    "plugin": "beads",
+    "epicId": "fts-ofc",
+    "totalTasks": 11,
     "tasks": [
       {
-        "id": "roam-test-5e9.19",
-        "title": "US-019: End-to-end tests for hierarchy and overrides",
+        "id": "fts-ofc.1",
+        "title": "US-001: Add parallel container routing to module loading",
         "status": "open",
         "completedInSession": false
       },
       {
-        "id": "roam-test-5e9.18",
-        "title": "US-018: Update signal2-ui + playground integration to new APIs",
+        "id": "fts-ofc.2",
+        "title": "US-002: Map Utility/Trim block to real REAPER plugin",
         "status": "open",
         "completedInSession": false
       },
       {
-        "id": "roam-test-5e9.17",
-        "title": "US-017: Update signal2 re-exports and bootstrap path",
+        "id": "fts-ofc.3",
+        "title": "US-003: Add ParametricOD block with plugin mapping",
         "status": "open",
         "completedInSession": false
       },
       {
-        "id": "roam-test-5e9.16",
-        "title": "US-016: Update signal2-controller API to collection/variant terminology",
+        "id": "fts-ofc.4",
+        "title": "US-004: Import and map FabFilter presets for all rig blocks",
         "status": "open",
         "completedInSession": false
       },
       {
-        "id": "roam-test-5e9.15",
-        "title": "US-015: Update signal2-live service to new proto/repo contracts",
+        "id": "fts-ofc.5",
+        "title": "US-005: Define worship guitar rig as a loadable Rig template",
         "status": "open",
         "completedInSession": false
       },
       {
-        "id": "roam-test-5e9.14",
-        "title": "US-014: Update BlockRepoLive to generic collection repository surface",
+        "id": "fts-ofc.6",
+        "title": "US-006: Implement load_rig_to_daw for full rig provisioning",
         "status": "open",
         "completedInSession": false
       },
       {
-        "id": "roam-test-5e9.13",
-        "title": "US-013: Refactor storage schema to collection/variant model",
+        "id": "fts-ofc.7",
+        "title": "US-007: Define Dry and Ambient scene states for the worship rig",
         "status": "open",
         "completedInSession": false
       },
       {
-        "id": "roam-test-5e9.12",
-        "title": "US-012: Add template system for Block→Song levels",
+        "id": "fts-ofc.8",
+        "title": "US-008: Implement scene switching for loaded rig in REAPER",
         "status": "open",
         "completedInSession": false
       },
       {
-        "id": "roam-test-5e9.11",
-        "title": "US-011: Add Song domain with Section variants referencing Patch or Rig variants",
+        "id": "fts-ofc.9",
+        "title": "US-009: Wire macro system to worship rig plugin parameters",
         "status": "open",
         "completedInSession": false
       },
       {
-        "id": "roam-test-5e9.10",
-        "title": "US-010: Add Profile domain with Patch variants referencing Rig variants",
+        "id": "fts-ofc.10",
+        "title": "US-010: Create worship Profile with persistent scene patches",
         "status": "open",
         "completedInSession": false
       },
       {
-        "id": "roam-test-5e9.9",
-        "title": "US-009: Introduce Rig domain with scene-style variants and rig scoping",
-        "status": "open",
-        "completedInSession": false
-      },
-      {
-        "id": "roam-test-5e9.8",
-        "title": "US-008: Introduce Engine domain with scene-style variants",
-        "status": "open",
-        "completedInSession": false
-      },
-      {
-        "id": "roam-test-5e9.7",
-        "title": "US-007: Introduce Layer domain with variants and overrides",
-        "status": "open",
-        "completedInSession": false
-      },
-      {
-        "id": "roam-test-5e9.6",
-        "title": "US-006: Migrate Block and Module domain to Collection + Variant",
-        "status": "open",
-        "completedInSession": false
-      },
-      {
-        "id": "roam-test-5e9.5",
-        "title": "US-005: Add generic override path/op model",
-        "status": "open",
-        "completedInSession": false
-      },
-      {
-        "id": "roam-test-5e9.4",
-        "title": "US-004: Replace snapshot/preset naming in proto with collection/variant naming",
-        "status": "open",
-        "completedInSession": false
-      },
-      {
-        "id": "roam-test-5e9.3",
-        "title": "US-003: Implement default normalization helpers and tests",
-        "status": "open",
-        "completedInSession": false
-      },
-      {
-        "id": "roam-test-5e9.2",
-        "title": "US-002: Add shared metadata implementation (tags, description, notes)",
-        "status": "open",
-        "completedInSession": false
-      },
-      {
-        "id": "roam-test-5e9.1",
-        "title": "US-001: Add core traits Variant, DefaultVariant, Collection, Metadata",
-        "status": "open",
-        "completedInSession": false
-      },
-      {
-        "id": "roam-test-5e9.20",
-        "title": "US-020: Migration notes and developer docs",
+        "id": "fts-ofc.11",
+        "title": "US-011: REAPER integration test — full worship rig load + scene switch",
         "status": "open",
         "completedInSession": false
       }
@@ -138,11 +85,7 @@
   },
   "iterations": [],
   "skippedTaskIds": [],
-  "cwd": "/Users/codywright/Documents/Development/Rust/roam-test",
-  "activeTaskIds": [
-    "roam-test-5e9.4",
-    "roam-test-5e9.3",
-    "roam-test-5e9.2"
-  ],
+  "cwd": "/Users/codywright/Documents/Development/FastTrackStudio/FastTrackStudio",
+  "activeTaskIds": [],
   "subagentPanelVisible": false
 }

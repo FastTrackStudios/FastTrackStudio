@@ -36,9 +36,9 @@ pub(crate) fn SignalMidiTab() -> Element {
             div { class: "flex-1 overflow-y-auto p-4 space-y-4",
                 // ── Header + Refresh ──────────────────────────────────────────
                 div { class: "flex items-center justify-between",
-                    h2 { class: "text-lg font-semibold text-zinc-100", "MIDI Settings" }
+                    h2 { class: "text-lg font-semibold text-zinc-100", "MIDI Configuration" }
                     button {
-                        class: "px-3 py-1.5 text-xs font-medium text-zinc-300 bg-zinc-800 hover:bg-zinc-700 rounded-md transition-colors",
+                        class: "px-3 py-1.5 text-xs font-medium text-zinc-300 bg-white/[0.08] hover:bg-white/[0.12] rounded-md transition-colors",
                         onclick: move |_| {
                             refresh_devices();
                         },
@@ -47,11 +47,11 @@ pub(crate) fn SignalMidiTab() -> Element {
                 }
 
                 // ── Device selector + connection ──────────────────────────────
-                div { class: "rounded-lg border border-zinc-800 bg-zinc-900/60 p-4 space-y-3",
+                div { class: "rounded-lg border border-white/[0.06] bg-zinc-900/40 p-4 space-y-3",
                     div { class: "flex items-center gap-3",
                         label { class: "text-sm text-zinc-400 w-16 flex-shrink-0", "Device" }
                         select {
-                            class: "flex-1 bg-zinc-800 border border-zinc-700 rounded-md px-3 py-1.5 text-sm text-zinc-100 outline-none focus:border-zinc-500",
+                            class: "flex-1 bg-white/[0.06] border border-white/[0.08] rounded-md px-3 py-1.5 text-sm text-zinc-100 outline-none focus:border-blue-500/50",
                             value: "{selected_port}",
                             onchange: move |e| {
                                 selected_port.set(e.value());
@@ -122,7 +122,7 @@ pub(crate) fn SignalMidiTab() -> Element {
                             }
                         }
                         button {
-                            class: "px-2 py-1 text-xs text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded transition-colors",
+                            class: "px-2 py-1 text-xs text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.06] rounded transition-colors",
                             onclick: move |_| cancel_learn(),
                             "Cancel"
                         }
@@ -130,11 +130,11 @@ pub(crate) fn SignalMidiTab() -> Element {
                 }
 
                 // ── Action Mappings ───────────────────────────────────────────
-                div { class: "rounded-lg border border-zinc-800 bg-zinc-900/60 p-4 space-y-3",
+                div { class: "rounded-lg border border-white/[0.06] bg-zinc-900/40 p-4 space-y-3",
                     div { class: "flex items-center justify-between mb-2",
                         h3 { class: "text-sm font-medium text-zinc-200", "Action Mappings" }
                         button {
-                            class: "px-2 py-1 text-xs text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded transition-colors",
+                            class: "px-2 py-1 text-xs text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.06] rounded transition-colors",
                             onclick: move |_| {
                                 let default_map = signal_proto::midi_actions::MidiActionMap::with_defaults();
                                 update_action_map(default_map.clone());
@@ -157,7 +157,7 @@ pub(crate) fn SignalMidiTab() -> Element {
                                         class: if is_learning {
                                             "flex items-center justify-between py-1.5 px-2 rounded bg-amber-900/30 border border-amber-700/40"
                                         } else {
-                                            "flex items-center justify-between py-1.5 px-2 rounded bg-zinc-800/50 hover:bg-zinc-800/80"
+                                            "flex items-center justify-between py-1.5 px-2 rounded bg-white/[0.04] hover:bg-white/[0.06]"
                                         },
                                         div { class: "flex items-center gap-2 flex-1 min-w-0",
                                             span { class: "text-xs text-zinc-300 font-mono flex-shrink-0",
@@ -184,11 +184,11 @@ pub(crate) fn SignalMidiTab() -> Element {
                 }
 
                 // ── MIDI Monitor ──────────────────────────────────────────────
-                div { class: "rounded-lg border border-zinc-800 bg-zinc-900/60 p-4 space-y-2",
+                div { class: "rounded-lg border border-white/[0.06] bg-zinc-900/40 p-4 space-y-2",
                     div { class: "flex items-center justify-between mb-1",
                         h3 { class: "text-sm font-medium text-zinc-200", "MIDI Monitor" }
                         button {
-                            class: "px-2 py-1 text-xs text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded transition-colors",
+                            class: "px-2 py-1 text-xs text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.06] rounded transition-colors",
                             onclick: move |_| clear_monitor(),
                             "Clear"
                         }
