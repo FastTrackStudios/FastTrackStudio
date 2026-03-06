@@ -396,6 +396,63 @@ pub fn save_midi_config(config: &MidiConfig) {
 }
 
 // ============================================================================
+// App Preferences
+// ============================================================================
+
+const APP_PREFS_FILE: &str = "app-preferences.json";
+
+/// Persistent application preferences (e.g., default startup screen).
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct AppPreferences {
+    /// Which page to show on startup: "dashboard", "main", "rig", "actions".
+    pub default_screen: String,
+}
+
+impl Default for AppPreferences {
+    fn default() -> Self {
+        Self {
+            default_screen: "rig".to_string(),
+        }
+    }
+}
+
+fn app_prefs_path() -> Option<PathBuf> {
+    library_path().map(|lib| lib.join(APP_PREFS_FILE))
+}
+
+/// Load app preferences from disk. Returns defaults if file is missing or corrupt.
+pub fn load_app_preferences() -> AppPreferences {
+    let Some(path) = app_prefs_path() else {
+        return AppPreferences::default();
+    };
+    match std::fs::read_to_string(&path) {
+        Ok(contents) => serde_json::from_str(&contents).unwrap_or_else(|e| {
+            warn!("Failed to parse {}: {e}", path.display());
+            AppPreferences::default()
+        }),
+        Err(_) => AppPreferences::default(),
+    }
+}
+
+/// Save app preferences to disk.
+pub fn save_app_preferences(prefs: &AppPreferences) {
+    let Some(path) = app_prefs_path() else {
+        return;
+    };
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    match serde_json::to_string_pretty(prefs) {
+        Ok(json) => {
+            if let Err(e) = std::fs::write(&path, json) {
+                warn!("Failed to write {}: {e}", path.display());
+            }
+        }
+        Err(e) => warn!("Failed to serialize app preferences: {e}"),
+    }
+}
+
+// ============================================================================
 // Helpers
 // ============================================================================
 

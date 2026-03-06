@@ -1,146 +1,156 @@
 use dioxus::prelude::*;
+use signal_ui::views::{ProfilePatchGrid, SongSectionGrid};
 
+use super::macro_bar::{build_bypass_rules, mock_preset_macro_bar, MacroBar};
+use super::{SignalMode, SIGNAL_MODE};
+use crate::actions::{SIGNAL_ACTIVE_PATCH_ID, SIGNAL_PATCH_IDS};
+
+/// Performance tab — macro bar on top, 4x2 tile grid below.
+///
+/// The macro bar shows the current preset's macro knobs. When the active patch
+/// changes, the macro bank updates to reflect the new preset's macros.
+/// For now, a mock macro bank is used until real macro banks are wired to presets.
 #[component]
 pub(crate) fn SignalPerformanceTab() -> Element {
     let signal = signal_ui::use_signal_service();
-    use signal_ui::views::{PerfSceneTile, PerformanceView, RigStatus, SnapshotSlot, SongNavState};
+    let mode = SIGNAL_MODE();
 
-    let mut rig_data = use_signal(|| None::<signal::rig::Rig>);
-    let mut active_scene_id = use_signal(|| None::<String>);
-    let mut morph_value = use_signal(|| 0.0_f64);
-    let mut song_data = use_signal(|| None::<signal::song::Song>);
-    let mut section_index = use_signal(|| 0_usize);
+    // Macro bank state — initialized with mock data, will be swapped per-preset later
+    let macro_bank = use_signal(mock_preset_macro_bar);
+    let bypass_rules = use_signal(build_bypass_rules);
 
-    // Fetch first rig + first song
+    // Discover the first profile and first song IDs on mount.
+    let mut profile_id = use_signal(|| None::<String>);
+    let mut song_id = use_signal(|| None::<String>);
+    let active_id = SIGNAL_ACTIVE_PATCH_ID();
+
     {
         let signal = signal.clone();
         use_effect(move || {
             let signal = signal.clone();
             spawn(async move {
-                let rigs = signal.rigs().list().await.unwrap_or_default();
-                if let Some(first) = rigs.first() {
-                    if let Some(rig) = signal
-                        .rigs()
-                        .load(first.id.to_string())
-                        .await
-                        .ok()
-                        .flatten()
-                    {
-                        if let Some(v) = rig.variants.first() {
-                            active_scene_id.set(Some(v.id.to_string()));
+                // Load first profile
+                if let Ok(profiles) = signal.profiles().list().await {
+                    if let Some(first) = profiles.first() {
+                        let pid = first.id.to_string();
+
+                        // Populate SIGNAL_PATCH_IDS with this profile's patch IDs
+                        let patch_ids: Vec<String> =
+                            first.patches.iter().map(|p| p.id.to_string()).collect();
+                        *SIGNAL_PATCH_IDS.write() = patch_ids;
+
+                        // Set default active patch if none set
+                        if SIGNAL_ACTIVE_PATCH_ID.peek().is_none() {
+                            if let Some(first_patch) = first.patches.first() {
+                                *SIGNAL_ACTIVE_PATCH_ID.write() =
+                                    Some(first_patch.id.to_string());
+                            }
                         }
-                        rig_data.set(Some(rig));
+
+                        profile_id.set(Some(pid));
                     }
                 }
-                let songs = signal.songs().list().await.unwrap_or_default();
-                if let Some(first) = songs.first() {
-                    if let Some(song) = signal
-                        .songs()
-                        .load(first.id.to_string())
-                        .await
-                        .ok()
-                        .flatten()
-                    {
-                        song_data.set(Some(song));
+
+                // Load first song
+                if let Ok(songs) = signal.songs().list().await {
+                    if let Some(first) = songs.first() {
+                        song_id.set(Some(first.id.to_string()));
                     }
                 }
             });
         });
     }
 
-    // Map rig → props
-    let (status, scenes, snapshot_slots, morph_a, morph_b) = if let Some(rig) = rig_data() {
-        let active_id = active_scene_id();
-        let active_name = active_id
-            .as_ref()
-            .and_then(|id| rig.variants.iter().find(|v| v.id.to_string() == *id))
-            .map(|v| v.name.clone())
-            .unwrap_or_else(|| "None".to_string());
-
-        let status = RigStatus {
-            rig_name: rig.name.clone(),
-            engine_count: rig.engine_ids.len(),
-            layer_count: 0,
-            active_scene_name: active_name,
-        };
-
-        let scenes: Vec<PerfSceneTile> = rig
-            .variants
-            .iter()
-            .map(|v| PerfSceneTile {
-                id: v.id.to_string(),
-                name: v.name.clone(),
-                is_active: active_id.as_deref() == Some(&v.id.to_string()),
-                summary: format!("{} engines", v.engine_selections.len()),
-            })
-            .collect();
-
-        let slots: Vec<SnapshotSlot> = (0..8)
-            .map(|i| SnapshotSlot {
-                index: i,
-                name: None,
-                is_a: i < 4,
-                is_active: false,
-            })
-            .collect();
-
-        let morph_a = scenes
-            .first()
-            .map(|s| s.name.clone())
-            .unwrap_or_else(|| "A".to_string());
-        let morph_b = scenes
-            .get(1)
-            .map(|s| s.name.clone())
-            .unwrap_or_else(|| "B".to_string());
-
-        (Some(status), scenes, slots, morph_a, morph_b)
-    } else {
-        (None, vec![], vec![], "A".to_string(), "B".to_string())
-    };
-
-    let song_nav = song_data().map(|song| {
-        let idx = section_index();
-        let section = song.sections.get(idx);
-        SongNavState {
-            song_name: song.name.clone(),
-            section_name: section
-                .map(|s| s.name.clone())
-                .unwrap_or_else(|| "—".to_string()),
-            section_index: idx,
-            section_count: song.sections.len(),
-            tempo: None,
-            key_signature: None,
-        }
-    });
-
     rsx! {
-        div { class: "h-full overflow-auto",
-            if let Some(rig_status) = status {
-                PerformanceView {
-                    status: rig_status,
-                    scenes,
-                    morph_value: morph_value(),
-                    morph_scene_a: morph_a,
-                    morph_scene_b: morph_b,
-                    snapshot_slots,
-                    song_nav,
-                    on_scene_select: move |id: String| { active_scene_id.set(Some(id)); },
-                    on_morph_change: move |val: f64| { morph_value.set(val); },
-                    on_prev_section: move |_| {
-                        let idx = section_index();
-                        if idx > 0 { section_index.set(idx - 1); }
-                    },
-                    on_next_section: move |_| {
-                        let idx = section_index();
-                        if let Some(song) = song_data() {
-                            if idx + 1 < song.sections.len() { section_index.set(idx + 1); }
+        div { class: "flex flex-col h-full w-full overflow-hidden",
+            // Macro bar at the top
+            MacroBar {
+                bank: macro_bank,
+                bypass_rules: bypass_rules,
+            }
+
+            // Tile grid below
+            div { class: "flex-1 min-h-0 overflow-hidden",
+                {match mode {
+                    SignalMode::Profile => {
+                        match profile_id() {
+                            Some(pid) => {
+                                let signal = signal.clone();
+                                rsx! {
+                                    ProfilePatchGrid {
+                                        profile_id: pid,
+                                        active_patch_id: active_id.clone(),
+                                        on_patch_select: move |(profile_id, patch_id): (String, String)| {
+                                            let signal = signal.clone();
+                                            // Optimistic highlight
+                                            *SIGNAL_ACTIVE_PATCH_ID.write() = Some(patch_id.clone());
+                                            spawn(async move {
+                                                let patch_id_typed: signal::profile::PatchId = patch_id.clone().into();
+                                                match signal.profiles().activate(profile_id, Some(patch_id_typed)).await {
+                                                    Ok(_) => {
+                                                        tracing::info!("Activated patch '{patch_id}'");
+                                                    }
+                                                    Err(e) => {
+                                                        tracing::warn!("Patch activation failed: {e:?}");
+                                                    }
+                                                }
+                                            });
+                                        },
+                                    }
+                                }
+                            }
+                            None => rsx! {
+                                div { class: "flex items-center justify-center h-full",
+                                    p { class: "text-sm text-muted-foreground animate-pulse", "Loading profile..." }
+                                }
+                            },
+                        }
+                    }
+                    SignalMode::Song => {
+                        match song_id() {
+                            Some(sid) => {
+                                let signal = signal.clone();
+                                rsx! {
+                                    SongSectionGrid {
+                                        song_id: sid,
+                                        active_section_id: active_id.clone(),
+                                        on_section_select: move |(song_id_str, section_id_str): (String, String)| {
+                                            let signal = signal.clone();
+                                            // Optimistic highlight
+                                            *SIGNAL_ACTIVE_PATCH_ID.write() = Some(section_id_str.clone());
+                                            spawn(async move {
+                                                let target = signal_proto::resolve::ResolveTarget::SongSection {
+                                                    song_id: song_id_str.into(),
+                                                    section_id: section_id_str.clone().into(),
+                                                };
+                                                match signal.resolve_target(target).await {
+                                                    Ok(_graph) => {
+                                                        if signal.has_daw_applier() {
+                                                            tracing::info!("Resolved section '{section_id_str}' — applying to DAW");
+                                                        }
+                                                    }
+                                                    Err(e) => {
+                                                        tracing::warn!("Section resolve failed: {e:?}");
+                                                    }
+                                                }
+                                            });
+                                        },
+                                    }
+                                }
+                            }
+                            None => rsx! {
+                                div { class: "flex items-center justify-center h-full",
+                                    p { class: "text-sm text-muted-foreground animate-pulse", "Loading song..." }
+                                }
+                            },
+                        }
+                    }
+                    SignalMode::Preset => rsx! {
+                        div { class: "flex items-center justify-center h-full",
+                            p { class: "text-sm text-muted-foreground", "Switch to Profile or Song mode to see the performance grid." }
                         }
                     },
-                }
-            } else {
-                div { class: "flex items-center justify-center h-full",
-                    p { class: "text-sm text-muted-foreground", "Loading rig data..." }
-                }
+                }}
             }
         }
     }

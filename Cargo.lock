@@ -3670,6 +3670,7 @@ dependencies = [
  "keyflow-ui",
  "kurbo 0.13.0",
  "lumen-blocks",
+ "macromod",
  "midir",
  "mimalloc",
  "peeps",
@@ -8953,12 +8954,16 @@ dependencies = [
  "daw-control",
  "daw-proto",
  "eyre",
+ "futures",
+ "nam-manager",
  "reaper-test",
  "signal-controller",
+ "signal-import",
  "signal-live",
  "signal-proto",
  "signal-storage",
  "tokio",
+ "uuid",
 ]
 
 [[package]]
@@ -9032,7 +9037,9 @@ dependencies = [
  "daw-control",
  "daw-proto",
  "eyre",
+ "futures",
  "macromod",
+ "nam-manager",
  "roam",
  "serde",
  "serde_json",
@@ -9061,6 +9068,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
+ "nam-manager",
  "sea-orm",
  "serde",
  "serde_json",

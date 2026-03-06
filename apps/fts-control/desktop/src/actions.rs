@@ -7,6 +7,7 @@ use session::session_actions;
 use session_ui::Session;
 use signal_proto::actions::signal_actions;
 
+use crate::signal_views::{SignalMode, SIGNAL_MODE};
 use crate::{COMMAND_PALETTE_OPEN, COMMAND_PALETTE_QUERY, DOCK_MODE, TOP_PAGE};
 
 // Global signals for Signal patch switching and navigation.
@@ -23,7 +24,11 @@ pub(crate) static SIGNAL_NAV_PREV_SECTION: GlobalSignal<u64> = Signal::global(||
 /// is still current, so rapid key-mashing only fires the last one.
 static PATCH_SWITCH_GEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
-/// Handle number keys 1–8 to switch Signal patches when on the rig page.
+/// Handle number keys 1–8 to switch Signal patches/presets when on the rig page.
+///
+/// Dispatches based on `SIGNAL_MODE`:
+/// - **Preset mode**: activates the Nth block preset directly via `block_presets().activate()`
+/// - **Profile/Song mode**: activates the Nth patch in the active profile
 pub(crate) fn handle_signal_patch_shortcut(e: &KeyboardEvent) -> bool {
     // Only active on the Signal ("rig") page
     if *TOP_PAGE.peek() != "rig" {
@@ -65,20 +70,73 @@ pub(crate) fn handle_signal_patch_shortcut(e: &KeyboardEvent) -> bool {
     // Update the tile highlight immediately (before the async activate completes)
     *SIGNAL_ACTIVE_PATCH_ID.write() = Some(patch_id_str.clone());
 
-    let signal = signal_ui::use_signal_service();
+    let mode = *SIGNAL_MODE.peek();
 
-    spawn(async move {
-        // Small delay so rapid keypresses coalesce — only the last one proceeds
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-
-        // Check if a newer keypress has superseded us
-        if PATCH_SWITCH_GEN.load(std::sync::atomic::Ordering::Relaxed) != gen {
-            return;
+    match mode {
+        SignalMode::Preset => {
+            // Preset mode: activate block preset directly
+            if let Some(signal) = try_consume_context::<signal::Signal>() {
+                spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                    if PATCH_SWITCH_GEN.load(std::sync::atomic::Ordering::Relaxed) != gen {
+                        return;
+                    }
+                    activate_preset_by_id(&signal, &patch_id_str).await;
+                });
+            }
         }
+        SignalMode::Profile | SignalMode::Song => {
+            // Profile/Song mode: activate patch in active profile
+            if let Some(signal) = try_consume_context::<signal::Signal>() {
+                spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                    if PATCH_SWITCH_GEN.load(std::sync::atomic::Ordering::Relaxed) != gen {
+                        return;
+                    }
+                    activate_profile_patch(&signal, &patch_id_str).await;
+                });
+            }
+        }
+    }
 
-        let profile = signal.profiles().find_by_name("All-Around").await;
-        if let Ok(Some(profile)) = profile {
-            let patch_id: signal::profile::PatchId = patch_id_str.clone().into();
+    true
+}
+
+/// Activate a block preset by its ID (used in Preset mode).
+/// Finds the matching preset from all block types and activates its default snapshot.
+async fn activate_preset_by_id(signal: &signal::Signal, preset_id_str: &str) {
+    let preset_id: signal_proto::PresetId = preset_id_str.to_string().into();
+
+    // Search all block types for the matching preset
+    for &bt in signal_proto::ALL_BLOCK_TYPES {
+        if let Ok(presets) = signal.block_presets().list(bt).await {
+            if let Some(preset) = presets.iter().find(|p| *p.id() == preset_id) {
+                let snap_id = preset.default_snapshot().id().clone();
+                match signal
+                    .block_presets()
+                    .activate(bt, preset_id, snap_id)
+                    .await
+                {
+                    Ok(_) => {
+                        tracing::info!("Hotkey-activated preset '{}'", preset.name());
+                    }
+                    Err(e) => {
+                        tracing::warn!("Preset activation failed: {e:?}");
+                    }
+                }
+                return;
+            }
+        }
+    }
+    tracing::warn!("Preset not found for hotkey: {preset_id_str}");
+}
+
+/// Activate a profile patch by its ID (used in Profile/Song mode).
+async fn activate_profile_patch(signal: &signal::Signal, patch_id_str: &str) {
+    // Find the first available profile and activate the patch within it
+    if let Ok(profiles) = signal.profiles().list().await {
+        if let Some(profile) = profiles.first() {
+            let patch_id: signal::profile::PatchId = patch_id_str.to_string().into();
             match signal
                 .profiles()
                 .activate(profile.id.clone(), Some(patch_id))
@@ -95,9 +153,7 @@ pub(crate) fn handle_signal_patch_shortcut(e: &KeyboardEvent) -> bool {
                 }
             }
         }
-    });
-
-    true
+    }
 }
 
 pub(crate) fn handle_dock_preset_shortcut(e: &KeyboardEvent) -> bool {
@@ -246,7 +302,7 @@ pub(crate) fn dispatch_action(action_id: &str) {
             *SIGNAL_NAV_PREV_SECTION.write() += 1;
         }
 
-        // ── Load Variant 1–24 (direct patch activation by index) ──
+        // ── Load Variant 1–24 (direct patch/preset activation by index) ──
         id if id.starts_with("fts.signal.load_variant.") => {
             if let Some(idx_str) = id.strip_prefix("fts.signal.load_variant.") {
                 if let Ok(variant_num) = idx_str.parse::<usize>() {
@@ -262,6 +318,7 @@ pub(crate) fn dispatch_action(action_id: &str) {
                                 + 1;
                             *SIGNAL_ACTIVE_PATCH_ID.write() = Some(patch_id_str.clone());
 
+                            let mode = *SIGNAL_MODE.peek();
                             if let Some(signal) = try_consume_context::<signal::Signal>() {
                                 spawn(async move {
                                     tokio::time::sleep(std::time::Duration::from_millis(50))
@@ -272,26 +329,12 @@ pub(crate) fn dispatch_action(action_id: &str) {
                                     {
                                         return;
                                     }
-                                    let profile =
-                                        signal.profiles().find_by_name("All-Around").await;
-                                    if let Ok(Some(profile)) = profile {
-                                        let patch_id: signal::profile::PatchId =
-                                            patch_id_str.clone().into();
-                                        match signal
-                                            .profiles()
-                                            .activate(profile.id.clone(), Some(patch_id))
-                                            .await
-                                        {
-                                            Ok(_) => {
-                                                tracing::info!(
-                                                    "Activated patch '{patch_id_str}' (variant {variant_num})"
-                                                );
-                                            }
-                                            Err(e) => {
-                                                tracing::warn!(
-                                                    "Patch activation failed: {e:?}"
-                                                );
-                                            }
+                                    match mode {
+                                        SignalMode::Preset => {
+                                            activate_preset_by_id(&signal, &patch_id_str).await;
+                                        }
+                                        SignalMode::Profile | SignalMode::Song => {
+                                            activate_profile_patch(&signal, &patch_id_str).await;
                                         }
                                     }
                                 });
