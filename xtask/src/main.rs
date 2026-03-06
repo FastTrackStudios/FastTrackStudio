@@ -438,16 +438,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 .run()
             };
 
-            // Step 4b: Final cleanup — remove leftover tracks/tabs (skip with --keep-open)
-            if !keep_open {
-                println!("\n>>> Cleaning up REAPER state...");
-                let _ = cmd!(
-                    sh,
-                    "cargo test -p signal --features daw --test reaper_connection -- --ignored --nocapture final_cleanup"
-                )
-                .run();
-            }
-
             // Step 5: Kill REAPER (unless --keep-open)
             if keep_open {
                 println!("\n>>> Keeping REAPER open (PID {reaper_pid})");

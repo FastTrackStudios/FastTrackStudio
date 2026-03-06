@@ -124,7 +124,7 @@ pub fn rebuild_cache() {
     let names: Vec<String> = entries.iter().map(|e| e.name.clone()).collect();
     let config = default_config();
 
-    let name_to_group = match monarchy_sort(names, config) {
+    let name_to_group = match monarchy_sort(names, &config) {
         Ok(structure) => collect_group_mappings(&structure),
         Err(e) => {
             warn!("Visibility cache: monarchy_sort failed: {e}");
