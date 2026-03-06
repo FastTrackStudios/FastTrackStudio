@@ -11,6 +11,7 @@ members = [
     "apps/fts-cli",
     "apps/signal-cli",
     "apps/session-cli",
+    "apps/reaper-extension",
 ]
 resolver = "2"
 
@@ -110,7 +111,7 @@ actions-standalone = { path = "../input_actions/crates/actions-standalone" }
 actions-keybindings = { path = "../input_actions/crates/actions-keybindings" }
 input-dioxus = { path = "../input_actions/crates/input-dioxus" }
 input = { path = "../input_actions/crates/input" }
-input-reaper = { path = "../FTS-Extensions/crates/input-reaper" }
+input-reaper = { path = "crates/reaper/input-reaper" }
 
 # Dynamic template (sibling repo — local paths)
 color-palette = { path = "../dynamic-template/crates/color-palette" }
@@ -141,9 +142,12 @@ reaper-medium = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "
 reaper-high = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master" }
 reaper-macros = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master" }
 reaper-common-types = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master", features = ["palette"] }
-# FTS Extensions (sibling repo — local paths)
-swell-ui = { path = "../FTS-Extensions/libs/swell-ui" }
-reaper-embed = { path = "../FTS-Extensions/crates/reaper-embed" }
+# FTS REAPER crates (in-workspace)
+swell-ui = { path = "crates/reaper/swell-ui" }
+reaper-embed = { path = "crates/reaper/reaper-embed" }
+reaper-test = { path = "crates/reaper/reaper-test" }
+reaper-test-macro = { path = "crates/reaper/reaper-test-macro" }
+reaper-extension = { path = "apps/reaper-extension" }
 fragile = "2.0.1"
 crossbeam-channel = "0.5"
 scopeguard = "1.1.0"

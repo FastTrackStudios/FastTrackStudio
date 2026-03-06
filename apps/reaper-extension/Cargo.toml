@@ -1,0 +1,60 @@
+[package]
+name = "reaper-extension"
+version = "0.1.0"
+edition = "2021"
+description = "REAPER extension that provides FastTrackStudio integration"
+
+[lib]
+crate-type = ["cdylib"]
+name = "reaper_fts"
+path = "src/lib.rs"
+
+[dependencies]
+# REAPER bindings
+reaper-low.workspace = true
+reaper-medium.workspace = true
+reaper-high.workspace = true
+reaper-macros.workspace = true
+swell-ui.workspace = true
+
+# Protocols
+actions-proto.workspace = true
+actions-registry.workspace = true
+daw-proto.workspace = true
+input-reaper.workspace = true
+
+# DAW REAPER implementation (in-process, not a cell)
+daw-reaper.workspace = true
+
+# Keyflow guide generation
+keyflow-proto.workspace = true
+keyflow-midi.workspace = true
+
+# Dynamic template (sorting items into track hierarchies)
+dynamic-template-proto.workspace = true
+dynamic-template.workspace = true
+
+# Session (setlist management, navigation, auto-advance)
+session-proto.workspace = true
+session.workspace = true
+daw-control.workspace = true
+
+# Runtime
+roam.workspace = true
+roam-wire.workspace = true
+roam-stream.workspace = true
+roam-session.workspace = true
+roam-telemetry.workspace = true
+peeps.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+fragile.workspace = true
+anyhow = "1.0"
+eyre = "0.6"
+crossbeam-channel.workspace = true
+camino = "1.1"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc = "0.2.7"
+cocoa = "0.26"

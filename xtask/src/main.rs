@@ -320,21 +320,40 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         Commands::ReaperTest { filter, no_build, keep_open } => {
             println!("=== Running REAPER integration tests ===");
 
+            // Platform-aware defaults
+            let (default_reaper_path, default_reaper_exe, default_reaper_resources, ext_filename) =
+                if cfg!(target_os = "macos") {
+                    (
+                        "/Users/codywright/Music/FastTrackStudio/Reaper/FTS-TRACKS/".to_string(),
+                        "/Users/codywright/Music/FastTrackStudio/Reaper/FTS-TRACKS/FTS-LIVE.app/Contents/MacOS/REAPER".to_string(),
+                        "/Users/codywright/Music/FastTrackStudio/Reaper/FTS-TRACKS/FTS-LIVE.app/Contents/Resources".to_string(),
+                        "libreaper_fts.dylib",
+                    )
+                } else {
+                    // Linux: REAPER config in ~/.config/REAPER, executable on PATH
+                    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+                    let config_dir = format!("{home}/.config/REAPER/");
+                    (
+                        config_dir.clone(),
+                        "reaper".to_string(),
+                        config_dir,
+                        "libreaper_fts.so",
+                    )
+                };
+
             // Step 1: Build extension (unless --no-build)
             if !no_build {
                 println!("\n>>> Building REAPER extension...");
-                let ext_dir = workspace_root.parent().unwrap().join("FTS-Extensions");
-                cmd!(sh, "cargo build -p reaper-extension --manifest-path {ext_dir}/Cargo.toml").run()?;
+                cmd!(sh, "cargo build -p reaper-extension").run()?;
 
-                // Copy dylib to REAPER's UserPlugins
-                let reaper_path = std::env::var("REAPER_PATH").unwrap_or_else(|_| {
-                    "/Users/codywright/Music/FastTrackStudio/Reaper/FTS-TRACKS/".to_string()
-                });
+                // Copy dylib/so to REAPER's UserPlugins
+                let reaper_path = std::env::var("REAPER_PATH")
+                    .unwrap_or_else(|_| default_reaper_path.clone());
                 let plugins_dir = std::path::PathBuf::from(&reaper_path).join("UserPlugins");
                 std::fs::create_dir_all(&plugins_dir)?;
 
-                let dylib_src = workspace_root.join("target/debug/libreaper_fts.dylib");
-                let dylib_dst = plugins_dir.join("libreaper_fts.dylib");
+                let dylib_src = workspace_root.join(format!("target/debug/{ext_filename}"));
+                let dylib_dst = plugins_dir.join(ext_filename);
                 if dylib_src.exists() {
                     // Use symlink if not already linked
                     if dylib_dst.exists() || dylib_dst.is_symlink() {
@@ -353,12 +372,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
             // Step 2: Spawn REAPER (empty project, no splash)
             println!("\n>>> Spawning REAPER...");
-            let reaper_exe = std::env::var("REAPER_EXECUTABLE").unwrap_or_else(|_| {
-                "/Users/codywright/Music/FastTrackStudio/Reaper/FTS-TRACKS/FTS-LIVE.app/Contents/MacOS/REAPER".to_string()
-            });
-            let reaper_resources = std::env::var("REAPER_RESOURCES").unwrap_or_else(|_| {
-                "/Users/codywright/Music/FastTrackStudio/Reaper/FTS-TRACKS/FTS-LIVE.app/Contents/Resources".to_string()
-            });
+            let reaper_exe = std::env::var("REAPER_EXECUTABLE")
+                .unwrap_or(default_reaper_exe);
+            let reaper_resources = std::env::var("REAPER_RESOURCES")
+                .unwrap_or(default_reaper_resources);
 
             let mut reaper_child = std::process::Command::new(&reaper_exe)
                 .current_dir(&reaper_resources)
