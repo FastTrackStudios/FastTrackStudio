@@ -8975,6 +8975,7 @@ dependencies = [
  "daw-cli",
  "daw-control",
  "eyre",
+ "nam-manager",
  "serde_json",
  "signal",
  "signal-controller",
@@ -9069,8 +9070,6 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
- "macromod",
- "nam-manager",
  "sea-orm",
  "serde",
  "serde_json",
