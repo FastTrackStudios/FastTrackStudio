@@ -3687,6 +3687,7 @@ dependencies = [
  "session-proto",
  "session-ui",
  "signal",
+ "signal-daw-bridge",
  "signal-live",
  "signal-proto",
  "signal-ui",
@@ -8974,11 +8975,13 @@ dependencies = [
  "clap",
  "daw-cli",
  "daw-control",
+ "dawfile-reaper",
  "eyre",
  "nam-manager",
  "serde_json",
  "signal",
  "signal-controller",
+ "signal-daw-bridge",
  "signal-import",
  "signal-proto",
  "tokio",
@@ -8995,6 +8998,16 @@ dependencies = [
  "signal-live",
  "signal-proto",
  "tokio",
+]
+
+[[package]]
+name = "signal-daw-bridge"
+version = "0.1.0"
+dependencies = [
+ "daw-proto",
+ "serde",
+ "signal-import",
+ "signal-proto",
 ]
 
 [[package]]
@@ -9091,6 +9104,7 @@ dependencies = [
  "lumen-blocks",
  "signal",
  "signal-controller",
+ "signal-daw-bridge",
  "tokio",
  "tracing",
  "uuid",
