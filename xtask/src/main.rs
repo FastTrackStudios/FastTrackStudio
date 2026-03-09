@@ -370,7 +370,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
 
-            // Step 2: Spawn REAPER (empty project, no splash)
+            // Step 2: Pre-build test binary (before spawning REAPER so it's ready to run)
+            println!("\n>>> Pre-building test binary...");
+            cmd!(sh, "cargo test -p signal --features daw --no-run").run()?;
+
+            // Step 3: Spawn REAPER (empty project, no splash)
             println!("\n>>> Spawning REAPER...");
             let reaper_exe = std::env::var("REAPER_EXECUTABLE")
                 .unwrap_or(default_reaper_exe);
@@ -405,7 +409,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
             println!("\n  Socket ready");
 
-            // Step 3: Prepare per-test log directory
+            // Step 4: Prepare per-test log directory
             let log_dir = std::path::PathBuf::from("/tmp/reaper-tests");
             if log_dir.exists() {
                 let _ = std::fs::remove_dir_all(&log_dir);
@@ -413,7 +417,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             std::fs::create_dir_all(&log_dir)?;
             println!("  Log directory: {}", log_dir.display());
 
-            // Step 4: Run REAPER tests (parallel with limited concurrency)
+            // Step 5: Run REAPER tests (parallel with limited concurrency)
             // Each test gets its own project tab; limit threads to avoid overwhelming
             // REAPER's main thread with too many concurrent plugin loads.
             // Set FTS_SOCKET so tests connect to the right REAPER instance
@@ -438,7 +442,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 .run()
             };
 
-            // Step 5: Kill REAPER (unless --keep-open)
+            // Step 6: Kill REAPER (unless --keep-open)
             if keep_open {
                 println!("\n>>> Keeping REAPER open (PID {reaper_pid})");
                 println!("  Socket: {socket_path}");
@@ -450,7 +454,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 let _ = std::fs::remove_file(socket_path);
             }
 
-            // Step 6: On failure, summarize per-test log files
+            // Step 7: On failure, summarize per-test log files
             if test_result.is_err() {
                 println!("\n>>> Test logs (non-empty):");
                 if let Ok(entries) = std::fs::read_dir(&log_dir) {

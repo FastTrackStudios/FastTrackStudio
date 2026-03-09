@@ -2,6 +2,7 @@
 //! MIDI learn, and live MIDI monitor.
 
 use dioxus::prelude::*;
+use fts_ui::prelude::*;
 
 use crate::midi_service::{
     cancel_learn, clear_monitor, connect_device, disconnect_device, refresh_devices, start_learn,
@@ -9,13 +10,6 @@ use crate::midi_service::{
     MIDI_DEVICES, MIDI_LEARN_TARGET, MIDI_MONITOR_LOG,
 };
 use crate::persistence::{load_midi_config, save_midi_config};
-
-// Glass design tokens (inline style values)
-const GLASS_CARD: &str = "border: 1px solid rgba(255,255,255,0.06); background: rgba(24,24,27,0.4);";
-const GLASS_BTN: &str = "background: rgba(255,255,255,0.08);";
-const GLASS_INPUT: &str = "background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08);";
-const GLASS_ROW: &str = "background: rgba(255,255,255,0.03);";
-const GLASS_ROW_LEARN: &str = "background: rgba(120,53,15,0.3); border: 1px solid rgba(180,83,9,0.4);";
 
 /// MIDI settings tab component.
 #[component]
@@ -43,26 +37,21 @@ pub(crate) fn SignalMidiTab() -> Element {
             div { class: "flex-1 overflow-y-auto p-4 space-y-4",
                 // ── Header + Refresh ──────────────────────────────────────────
                 div { class: "flex items-center justify-between",
-                    h2 { class: "text-lg font-semibold text-zinc-100", "MIDI Configuration" }
-                    button {
-                        class: "px-3 py-1.5 text-xs font-medium text-zinc-300 rounded-md transition-colors",
-                        style: GLASS_BTN,
-                        onclick: move |_| {
-                            refresh_devices();
-                        },
+                    h2 { class: "text-lg font-semibold text-foreground", "MIDI Configuration" }
+                    Button {
+                        variant: ButtonVariant::Ghost,
+                        size: ButtonSize::Small,
+                        on_click: move |_| { refresh_devices(); },
                         "Refresh"
                     }
                 }
 
                 // ── Device selector + connection ──────────────────────────────
-                div {
-                    class: "rounded-lg p-4 space-y-3",
-                    style: GLASS_CARD,
+                Card { class: "p-4 space-y-3",
                     div { class: "flex items-center gap-3",
-                        label { class: "text-sm text-zinc-400 w-16 flex-shrink-0", "Device" }
+                        label { class: "text-sm text-muted-foreground w-16 flex-shrink-0", "Device" }
                         select {
-                            class: "flex-1 rounded-md px-3 py-1.5 text-sm text-zinc-100 outline-none",
-                            style: GLASS_INPUT,
+                            class: "flex-1 rounded-md px-3 py-1.5 text-sm text-foreground outline-none bg-secondary border border-border",
                             value: "{selected_port}",
                             onchange: move |e| {
                                 selected_port.set(e.value());
@@ -79,37 +68,35 @@ pub(crate) fn SignalMidiTab() -> Element {
 
                     div { class: "flex items-center justify-between",
                         div { class: "flex items-center gap-2",
-                            span { class: "text-sm text-zinc-400", "Status:" }
+                            span { class: "text-sm text-muted-foreground", "Status:" }
                             match *MIDI_CONNECTION_STATE.read() {
                                 MidiConnectionState::Connected => rsx! {
-                                    span { class: "inline-block w-2 h-2 rounded-full bg-emerald-400" }
-                                    span { class: "text-sm text-emerald-300", "Connected" }
+                                    StatusBadge { variant: StatusBadgeVariant::Success, label: "Connected" }
                                     if let Some(port) = MIDI_CONNECTED_PORT.read().as_ref() {
-                                        span { class: "text-xs text-zinc-500 ml-1", "({port})" }
+                                        span { class: "text-xs text-muted-foreground ml-1", "({port})" }
                                     }
                                 },
                                 MidiConnectionState::Disconnected => rsx! {
-                                    span { class: "inline-block w-2 h-2 rounded-full bg-zinc-500" }
-                                    span { class: "text-sm text-zinc-400", "Disconnected" }
+                                    StatusBadge { variant: StatusBadgeVariant::Neutral, label: "Disconnected" }
                                 },
                             }
                         }
 
                         match *MIDI_CONNECTION_STATE.read() {
                             MidiConnectionState::Connected => rsx! {
-                                button {
-                                    class: "px-3 py-1.5 text-xs font-medium text-red-300 rounded-md transition-colors",
-                                    style: "background: rgba(127,29,29,0.3); border: 1px solid rgba(153,27,27,0.5);",
-                                    onclick: move |_| disconnect_device(),
+                                Button {
+                                    variant: ButtonVariant::Destructive,
+                                    size: ButtonSize::Small,
+                                    on_click: move |_| disconnect_device(),
                                     "Disconnect"
                                 }
                             },
                             MidiConnectionState::Disconnected => rsx! {
-                                button {
-                                    class: "px-3 py-1.5 text-xs font-medium text-emerald-300 rounded-md transition-colors disabled:opacity-40 disabled:cursor-not-allowed",
-                                    style: "background: rgba(6,78,59,0.3); border: 1px solid rgba(6,95,70,0.5);",
+                                Button {
+                                    variant: ButtonVariant::Secondary,
+                                    size: ButtonSize::Small,
                                     disabled: selected_port().is_empty(),
-                                    onclick: move |_| {
+                                    on_click: move |_| {
                                         let port = selected_port();
                                         if !port.is_empty() {
                                             connect_device(&port);
@@ -136,23 +123,23 @@ pub(crate) fn SignalMidiTab() -> Element {
                                 "{format_action_name(target)}"
                             }
                         }
-                        button {
-                            class: "px-2 py-1 text-xs text-zinc-400 rounded transition-colors",
-                            onclick: move |_| cancel_learn(),
+                        Button {
+                            variant: ButtonVariant::Ghost,
+                            size: ButtonSize::Small,
+                            on_click: move |_| cancel_learn(),
                             "Cancel"
                         }
                     }
                 }
 
                 // ── Action Mappings ───────────────────────────────────────────
-                div {
-                    class: "rounded-lg p-4 space-y-3",
-                    style: GLASS_CARD,
+                Card { class: "p-4 space-y-3",
                     div { class: "flex items-center justify-between mb-2",
-                        h3 { class: "text-sm font-medium text-zinc-200", "Action Mappings" }
-                        button {
-                            class: "px-2 py-1 text-xs text-zinc-400 rounded transition-colors",
-                            onclick: move |_| {
+                        SectionHeader { label: "Action Mappings", size: SectionHeaderSize::Small }
+                        Button {
+                            variant: ButtonVariant::Ghost,
+                            size: ButtonSize::Small,
+                            on_click: move |_| {
                                 let default_map = signal_proto::midi_actions::MidiActionMap::with_defaults();
                                 update_action_map(default_map.clone());
                                 let mut cfg = config();
@@ -171,20 +158,24 @@ pub(crate) fn SignalMidiTab() -> Element {
                                 let is_learning = learn_target.as_deref() == Some(action_id.as_str());
                                 rsx! {
                                     div {
-                                        class: "flex items-center justify-between py-1.5 px-2 rounded",
-                                        style: if is_learning { GLASS_ROW_LEARN } else { GLASS_ROW },
+                                        class: if is_learning {
+                                            "flex items-center justify-between py-1.5 px-2 rounded border border-amber-700/40 bg-amber-900/30"
+                                        } else {
+                                            "flex items-center justify-between py-1.5 px-2 rounded border-b border-border/30 bg-card/30"
+                                        },
                                         div { class: "flex items-center gap-2 flex-1 min-w-0",
-                                            span { class: "text-xs text-zinc-300 font-mono flex-shrink-0",
+                                            span { class: "text-xs text-foreground font-mono flex-shrink-0",
                                                 "{format_trigger(&binding.trigger)}"
                                             }
-                                            span { class: "text-xs text-zinc-600", "\u{2192}" }
-                                            span { class: "text-xs text-zinc-200 truncate",
+                                            span { class: "text-xs text-muted-foreground", "\u{2192}" }
+                                            span { class: "text-xs text-foreground truncate",
                                                 "{format_action_name(&binding.action_id)}"
                                             }
                                         }
-                                        button {
-                                            class: "px-2 py-0.5 text-xs text-cyan-400 rounded transition-colors flex-shrink-0 ml-2",
-                                            onclick: {
+                                        Button {
+                                            variant: ButtonVariant::Ghost,
+                                            size: ButtonSize::Small,
+                                            on_click: {
                                                 let aid = action_id.clone();
                                                 move |_| start_learn(&aid)
                                             },
@@ -198,14 +189,13 @@ pub(crate) fn SignalMidiTab() -> Element {
                 }
 
                 // ── MIDI Monitor ──────────────────────────────────────────────
-                div {
-                    class: "rounded-lg p-4 space-y-2",
-                    style: GLASS_CARD,
+                Card { class: "p-4 space-y-2",
                     div { class: "flex items-center justify-between mb-1",
-                        h3 { class: "text-sm font-medium text-zinc-200", "MIDI Monitor" }
-                        button {
-                            class: "px-2 py-1 text-xs text-zinc-400 rounded transition-colors",
-                            onclick: move |_| clear_monitor(),
+                        SectionHeader { label: "MIDI Monitor", size: SectionHeaderSize::Small }
+                        Button {
+                            variant: ButtonVariant::Ghost,
+                            size: ButtonSize::Small,
+                            on_click: move |_| clear_monitor(),
                             "Clear"
                         }
                     }
@@ -215,7 +205,7 @@ pub(crate) fn SignalMidiTab() -> Element {
                             let log = MIDI_MONITOR_LOG.read();
                             if log.is_empty() {
                                 rsx! {
-                                    div { class: "text-zinc-600 py-2 text-center",
+                                    div { class: "text-muted-foreground py-2 text-center",
                                         "No MIDI messages received"
                                     }
                                 }
@@ -225,7 +215,7 @@ pub(crate) fn SignalMidiTab() -> Element {
                                         div {
                                             key: "{i}",
                                             class: "flex items-center gap-2 py-0.5 px-1",
-                                            span { class: "text-zinc-400", "{entry.message}" }
+                                            span { class: "text-muted-foreground", "{entry.message}" }
                                             if let Some(ref action) = entry.matched_action {
                                                 span { class: "text-emerald-400", "\u{2192} {format_action_name(action)}" }
                                             }

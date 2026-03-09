@@ -137,11 +137,10 @@ pub(crate) fn SignalPresetTab() -> Element {
 
                                 rsx! {
                                     button {
-                                        class: "relative flex flex-col items-start p-3 rounded-lg text-left transition-all",
-                                        style: if is_active {
-                                            "border: 2px solid rgb(59,130,246); background: rgba(59,130,246,0.1);"
+                                        class: if is_active {
+                                            "relative flex flex-col items-start p-3 rounded-lg text-left transition-all bg-primary/10 border-2 border-primary text-primary-foreground"
                                         } else {
-                                            "border: 1px solid rgba(255,255,255,0.06); background: rgba(255,255,255,0.04);"
+                                            "relative flex flex-col items-start p-3 rounded-lg text-left transition-all bg-card border border-border hover:bg-accent/30"
                                         },
                                         onclick: move |_| {
                                             let pid = preset_id.clone();
@@ -150,6 +149,8 @@ pub(crate) fn SignalPresetTab() -> Element {
                                             let pid_str = pid.to_string();
                                             activating.set(Some(pid_str.clone()));
                                             *SIGNAL_ACTIVE_PATCH_ID.write() = Some(pid_str);
+                                            // Clear stale macro bindings from previous preset
+                                            signal_live::macro_registry::clear();
 
                                             spawn(async move {
                                                 match signal.block_presets().activate(bt, pid, sid).await {
@@ -165,13 +166,13 @@ pub(crate) fn SignalPresetTab() -> Element {
                                         },
 
                                         // Preset name
-                                        span { class: "text-sm font-medium text-zinc-100 truncate w-full",
+                                        span { class: "text-sm font-medium text-foreground truncate w-full",
                                             "{entry.preset_name}"
                                         }
 
                                         // Snapshot count
                                         if entry.snapshot_count > 1 {
-                                            span { class: "text-[10px] text-zinc-500 mt-0.5",
+                                            span { class: "text-[10px] text-muted-foreground mt-0.5",
                                                 "{entry.snapshot_count} snapshots"
                                             }
                                         }
@@ -179,9 +180,7 @@ pub(crate) fn SignalPresetTab() -> Element {
                                         // Loading spinner overlay
                                         if is_activating {
                                             div { class: "absolute inset-0 flex items-center justify-center bg-black/30 rounded-lg",
-                                                div { class: "w-4 h-4 rounded-full animate-spin",
-                                                    style: "border: 2px solid rgb(59,130,246); border-top-color: transparent;",
-                                                }
+                                                div { class: "w-4 h-4 rounded-full animate-spin border-2 border-primary border-t-transparent" }
                                             }
                                         }
                                     }

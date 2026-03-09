@@ -20,6 +20,10 @@ pub(crate) fn SignalPerformanceTab() -> Element {
     let macro_bank = use_signal(mock_preset_macro_bar);
     let bypass_rules = use_signal(build_bypass_rules);
 
+    // Macro recording state
+    let recorder = use_signal(signal_live::MacroRecorder::new);
+    let mut is_recording = use_signal(|| false);
+
     // Discover the first profile and first song IDs on mount.
     let mut profile_id = use_signal(|| None::<String>);
     let mut song_id = use_signal(|| None::<String>);
@@ -64,6 +68,11 @@ pub(crate) fn SignalPerformanceTab() -> Element {
 
     // Handler for macro knob changes — drives DAW FX parameters directly
     let on_macro_change = move |(knob_id, new_val): (String, f32)| {
+        // Record the macro change if recording is active
+        if is_recording() {
+            recorder.read().record(knob_id.clone(), new_val);
+        }
+
         let targets = signal_live::macro_registry::get_targets(&knob_id);
         if targets.is_empty() {
             return;
@@ -98,7 +107,42 @@ pub(crate) fn SignalPerformanceTab() -> Element {
 
     rsx! {
         div { class: "flex flex-col h-full w-full overflow-hidden",
-            // Macro bar at the top
+            // Control bar with recording button
+            div { class: "shrink-0 px-3 py-2 border-b border-zinc-800/50 bg-zinc-950/30 flex items-center gap-2",
+                button {
+                    class: if is_recording() {
+                        "px-3 py-1.5 rounded-lg text-sm font-medium \
+                         bg-red-600 text-white hover:bg-red-700 transition-colors \
+                         flex items-center gap-1"
+                    } else {
+                        "px-3 py-1.5 rounded-lg text-sm font-medium \
+                         bg-zinc-700 text-zinc-200 hover:bg-zinc-600 transition-colors \
+                         flex items-center gap-1"
+                    },
+                    onclick: move |_| {
+                        if is_recording() {
+                            let records = recorder.read().stop();
+                            is_recording.set(false);
+                            if !records.is_empty() {
+                                tracing::info!("Recorded {} macro changes", records.len());
+                            }
+                        } else {
+                            recorder.read().start();
+                            is_recording.set(true);
+                            tracing::info!("Started macro recording");
+                        }
+                    },
+                    "●"
+                    if is_recording() { "Stop" } else { "Record" }
+                }
+                if is_recording() {
+                    span { class: "text-xs text-red-500 font-medium ml-2",
+                        "Recording..."
+                    }
+                }
+            }
+
+            // Macro bar
             MacroBar {
                 bank: macro_bank,
                 bypass_rules: bypass_rules,
@@ -120,6 +164,8 @@ pub(crate) fn SignalPerformanceTab() -> Element {
                                             let signal = signal.clone();
                                             // Optimistic highlight
                                             *SIGNAL_ACTIVE_PATCH_ID.write() = Some(patch_id.clone());
+                                            // Clear stale macro bindings from previous patch
+                                            signal_live::macro_registry::clear();
                                             spawn(async move {
                                                 let patch_id_typed: signal::profile::PatchId = patch_id.clone().into();
                                                 match signal.profiles().activate(profile_id, Some(patch_id_typed)).await {
@@ -154,6 +200,8 @@ pub(crate) fn SignalPerformanceTab() -> Element {
                                             let signal = signal.clone();
                                             // Optimistic highlight
                                             *SIGNAL_ACTIVE_PATCH_ID.write() = Some(section_id_str.clone());
+                                            // Clear stale macro bindings from previous section
+                                            signal_live::macro_registry::clear();
                                             spawn(async move {
                                                 let target = signal_proto::resolve::ResolveTarget::SongSection {
                                                     song_id: song_id_str.into(),
