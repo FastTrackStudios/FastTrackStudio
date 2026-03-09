@@ -46,6 +46,7 @@ mod dashboard;
 mod daw_registry;
 mod gateway;
 mod launcher;
+mod macro_handler;
 mod midi_service;
 mod persistence;
 mod services;

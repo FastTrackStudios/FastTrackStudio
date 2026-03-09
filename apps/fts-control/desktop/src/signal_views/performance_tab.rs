@@ -5,6 +5,7 @@ use super::macro_bar::{build_bypass_rules, mock_preset_macro_bar, MacroBar};
 use super::{SignalMode, SIGNAL_MODE};
 use crate::actions::{SIGNAL_ACTIVE_PATCH_ID, SIGNAL_PATCH_IDS};
 use crate::daw_registry;
+use crate::macro_handler;
 
 /// Performance tab — macro bar on top, 4x2 tile grid below.
 ///
@@ -67,43 +68,8 @@ pub(crate) fn SignalPerformanceTab() -> Element {
     }
 
     // Handler for macro knob changes — drives DAW FX parameters directly
-    let on_macro_change = move |(knob_id, new_val): (String, f32)| {
-        // Record the macro change if recording is active
-        if is_recording() {
-            recorder.read().record(knob_id.clone(), new_val);
-        }
-
-        let targets = signal_live::macro_registry::get_targets(&knob_id);
-        if targets.is_empty() {
-            return;
-        }
-
-        let Some(daw) = daw_registry::signal_daw() else {
-            return;
-        };
-
-        spawn(async move {
-            let Ok(project) = daw.current_project().await else {
-                return;
-            };
-
-            for target in targets {
-                // Map macro value (0.0–1.0) through the parameter range [min, max]
-                let param_val = (target.min + (target.max - target.min) * new_val) as f64;
-
-                let Ok(Some(track)) = project.tracks().by_guid(&target.track_guid).await else {
-                    continue;
-                };
-
-                let Ok(Some(fx)) = track.fx_chain().by_guid(&target.fx_guid).await else {
-                    continue;
-                };
-
-                // Set the parameter on the FX plugin
-                let _ = fx.param(target.param_index).set(param_val).await;
-            }
-        });
-    };
+    let on_macro_change =
+        macro_handler::create_macro_change_handler(recorder, is_recording);
 
     rsx! {
         div { class: "flex flex-col h-full w-full overflow-hidden",
