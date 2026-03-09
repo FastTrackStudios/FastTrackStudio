@@ -1682,9 +1682,6 @@
   .border-transparent {
     border-color: transparent;
   }
-  .border-white {
-    border-color: var(--color-white);
-  }
   .border-white\/40 {
     border-color: color-mix(in srgb, #fff 40%, transparent);
     @supports (color: color-mix(in lab, red, red)) {

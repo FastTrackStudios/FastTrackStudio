@@ -69,6 +69,7 @@ keyflow = { workspace = true, features = ["text"] }
 signal = { workspace = true, features = ["daw"] }
 signal-live.workspace = true
 signal-ui = { workspace = true, default-features = false }
+signal-daw-bridge.workspace = true
 
 # Macro system (for macro bar in performance view)
 macromod.workspace = true

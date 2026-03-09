@@ -1,6 +1,7 @@
 mod browser_dialog;
 mod editor_tab;
 mod fx_capture;
+mod live_fx_view;
 pub(crate) mod macro_bar;
 mod manage_tab;
 mod midi_tab;
@@ -75,6 +76,7 @@ enum SignalTab {
     Manage,
     Setlist,
     Editor,
+    LiveFx,
     Capture,
     MidiSettings,
 }
@@ -123,6 +125,7 @@ pub(crate) fn SignalView() -> Element {
                                 (SignalTab::Manage, "Manage"),
                                 (SignalTab::Setlist, "Setlist"),
                                 (SignalTab::Editor, "Editor"),
+                                (SignalTab::LiveFx, "Live FX"),
                                 (SignalTab::Capture, "Capture"),
                                 (SignalTab::MidiSettings, "MIDI"),
                             ] {
@@ -173,6 +176,9 @@ pub(crate) fn SignalView() -> Element {
                             },
                             SignalTab::Editor => rsx! {
                                 SignalEditorTab {}
+                            },
+                            SignalTab::LiveFx => rsx! {
+                                live_fx_view::LiveFxView {}
                             },
                             SignalTab::Capture => rsx! {
                                 SignalCaptureTab {}
