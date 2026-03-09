@@ -216,6 +216,7 @@ pub(crate) fn mock_preset_macro_bar() -> MacroBank {
 pub(crate) fn MacroBar(
     bank: Signal<MacroBank>,
     bypass_rules: Signal<BypassRules>,
+    on_macro_change: Option<EventHandler<(String, f32)>>,
 ) -> Element {
     let current_bank = bank();
 
@@ -227,6 +228,7 @@ pub(crate) fn MacroBar(
                         knob: knob.clone(),
                         bank: bank,
                         bypass_rules: bypass_rules,
+                        on_macro_change: on_macro_change.clone(),
                     }
                 }
             }
@@ -243,6 +245,7 @@ fn MacroCell(
     knob: MacroKnob,
     bank: Signal<MacroBank>,
     bypass_rules: Signal<BypassRules>,
+    on_macro_change: Option<EventHandler<(String, f32)>>,
 ) -> Element {
     let kid = knob.id.clone();
     let knob_label = knob.label.clone();
@@ -290,6 +293,7 @@ fn MacroCell(
                         let kid = kid.clone();
                         let bindings = knob_bindings.clone();
                         let has_kids = has_children;
+                        let on_macro_change = on_macro_change.clone();
                         move |new_val: f32| {
                             let mut bk = bank();
                             if let Some(k) = bk.get_knob_mut(&kid) {
@@ -307,6 +311,10 @@ fn MacroCell(
                             }
                             apply_bypass_rules(&mut bk, &bypass_rules());
                             bank.set(bk);
+                            // Fire the macro change callback
+                            if let Some(ref cb) = on_macro_change {
+                                cb.call((kid.clone(), new_val));
+                            }
                         }
                     },
                 }
@@ -327,6 +335,7 @@ fn MacroCell(
                         headers: vec![String::from("Type"), String::from("Time"), String::from("Feedback"), String::from("Filter"), String::from("Level")],
                         children_knobs: children_data,
                         bank: bank,
+                        on_macro_change: on_macro_change.clone(),
                     }
                 } else if kid == "reverb" {
                     DualRowDropdown {
@@ -334,6 +343,7 @@ fn MacroCell(
                         headers: vec![String::from("Type"), String::from("Time"), String::from("Pre-Delay"), String::from("Character"), String::from("Level")],
                         children_knobs: children_data,
                         bank: bank,
+                        on_macro_change: on_macro_change.clone(),
                     }
                 } else {
                     SubMacroDropdown {
@@ -341,6 +351,7 @@ fn MacroCell(
                         children_knobs: children_data,
                         bank: bank,
                         bypass_rules: bypass_rules,
+                        on_macro_change: on_macro_change.clone(),
                     }
                 }
             }
@@ -429,6 +440,7 @@ fn SubMacroDropdown(
     children_knobs: Vec<MacroKnob>,
     bank: Signal<MacroBank>,
     bypass_rules: Signal<BypassRules>,
+    on_macro_change: Option<EventHandler<(String, f32)>>,
 ) -> Element {
     let rules = bypass_rules();
     let parent_rules = rules.get(&parent_id);
@@ -517,12 +529,17 @@ fn SubMacroDropdown(
                                     color: child_color.clone(),
                                     on_change: {
                                         let child_id = child_id.clone();
+                                        let on_macro_change = on_macro_change.clone();
                                         move |new_val: f32| {
                                             let mut bk = bank();
                                             if let Some(k) = bk.get_knob_mut(&child_id) {
                                                 k.set_value(new_val);
                                             }
                                             bank.set(bk);
+                                            // Fire the macro change callback
+                                            if let Some(ref cb) = on_macro_change {
+                                                cb.call((child_id.clone(), new_val));
+                                            }
                                         }
                                     },
                                 }
@@ -554,6 +571,7 @@ fn DualRowDropdown(
     headers: Vec<String>,
     children_knobs: Vec<MacroKnob>,
     bank: Signal<MacroBank>,
+    on_macro_change: Option<EventHandler<(String, f32)>>,
 ) -> Element {
     let mut type_linked = use_signal(|| false);
     let mut time_linked = use_signal(|| false);
@@ -580,7 +598,7 @@ fn DualRowDropdown(
 
                 // ── Row 1 ──
                 for child in row1.iter() {
-                    {dual_row_knob_cell(child, &prefix, bank, type_linked, time_linked)}
+                    {dual_row_knob_cell(child, &prefix, bank, type_linked, time_linked, on_macro_change.clone())}
                 }
 
                 // ── Link buttons row ──
@@ -619,7 +637,7 @@ fn DualRowDropdown(
 
                 // ── Row 2 ──
                 for child in row2.iter() {
-                    {dual_row_knob_cell(child, &prefix_clone, bank, type_linked, time_linked)}
+                    {dual_row_knob_cell(child, &prefix_clone, bank, type_linked, time_linked, on_macro_change.clone())}
                 }
             }
         }
@@ -633,6 +651,7 @@ fn dual_row_knob_cell(
     mut bank: Signal<MacroBank>,
     type_linked: Signal<bool>,
     time_linked: Signal<bool>,
+    on_macro_change: Option<EventHandler<(String, f32)>>,
 ) -> Element {
     let child_id = child.id.clone();
     let child_label = child.label.clone();
@@ -665,6 +684,7 @@ fn dual_row_knob_cell(
                 on_change: {
                     let child_id = child_id.clone();
                     let prefix = prefix.clone();
+                    let on_macro_change = on_macro_change.clone();
                     move |new_val: f32| {
                         let mut bk = bank();
                         if let Some(k) = bk.get_knob_mut(&child_id) {
@@ -678,6 +698,10 @@ fn dual_row_knob_cell(
                             }
                         }
                         bank.set(bk);
+                        // Fire the macro change callback
+                        if let Some(ref cb) = on_macro_change {
+                            cb.call((child_id.clone(), new_val));
+                        }
                     }
                 },
             }

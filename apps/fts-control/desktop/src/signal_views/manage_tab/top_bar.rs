@@ -1,4 +1,5 @@
 use dioxus::prelude::*;
+use fts_ui::prelude::*;
 use input_dioxus::TEXT_INPUT_FOCUS_COUNT;
 use std::rc::Rc;
 
@@ -24,7 +25,7 @@ pub(crate) fn render_top_bar(
     signal: signal::Signal,
 ) -> Element {
     rsx! {
-        div { class: "flex items-center gap-2 px-3 py-1.5 border-b border-white/[0.06] bg-white/[0.02] flex-shrink-0",
+        div { class: "flex items-center gap-2 px-3 py-1.5 flex-shrink-0 border-b border-border bg-card/50",
             // Capture preset button
             signal_ui::components::CaptureButton {
                 on_capture: move |_| {
@@ -44,53 +45,55 @@ pub(crate) fn render_top_bar(
                 }
             }
 
-            // Mode tabs — grouped pill
-            div { class: "flex items-center gap-0.5 bg-white/[0.04] rounded px-0.5 py-0.5",
-                for &(m, label) in &[(ManageMode::Song, "Song"), (ManageMode::Profile, "Profile"), (ManageMode::Preset, "Preset")] {
-                    {
-                        let is_active = mode == m;
-                        rsx! {
-                            button {
-                                key: "{label}",
-                                class: if is_active {
-                                    "px-2.5 py-1 text-xs font-semibold rounded bg-white/[0.15] text-zinc-100"
-                                } else {
-                                    "px-2.5 py-1 text-xs text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.10] rounded"
-                                },
-                                onclick: move |_| manage_mode.set(m),
-                                "{label}"
-                            }
-                        }
-                    }
-                }
+            // Mode tabs
+            SegmentedControl {
+                value: match mode {
+                    ManageMode::Song => String::from("song"),
+                    ManageMode::Profile => String::from("profile"),
+                    ManageMode::Preset => String::from("preset"),
+                },
+                on_change: move |v: String| {
+                    let m = match v.as_str() {
+                        "song" => ManageMode::Song,
+                        "profile" => ManageMode::Profile,
+                        "preset" => ManageMode::Preset,
+                        _ => return,
+                    };
+                    manage_mode.set(m);
+                },
+                options: vec![
+                    (String::from("song"), String::from("Song")),
+                    (String::from("profile"), String::from("Profile")),
+                    (String::from("preset"), String::from("Preset")),
+                ],
             }
 
-            // Rig type selector — grouped pill
-            div { class: "flex items-center gap-0.5 bg-white/[0.04] rounded px-0.5 py-0.5",
-                for &rt in &[RigType::Guitar, RigType::Bass, RigType::Keys, RigType::Vocals] {
-                    {
-                        let is_active = rig_type() == rt;
-                        let label = match rt {
-                            RigType::Guitar => "Guitar",
-                            RigType::Bass => "Bass",
-                            RigType::Keys => "Keys",
-                            RigType::Vocals => "Vocals",
-                            _ => "Other",
-                        };
-                        rsx! {
-                            button {
-                                key: "{label}",
-                                class: if is_active {
-                                    "px-2 py-0.5 text-[11px] font-medium rounded bg-white/[0.15] text-zinc-100"
-                                } else {
-                                    "px-2 py-0.5 text-[11px] text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.10] rounded"
-                                },
-                                onclick: move |_| rig_type.set(rt),
-                                "{label}"
-                            }
-                        }
-                    }
-                }
+            // Rig type selector
+            SegmentedControl {
+                value: match rig_type() {
+                    RigType::Guitar => String::from("guitar"),
+                    RigType::Bass => String::from("bass"),
+                    RigType::Keys => String::from("keys"),
+                    RigType::Vocals => String::from("vocals"),
+                    _ => String::from("guitar"),
+                },
+                on_change: move |v: String| {
+                    let rt = match v.as_str() {
+                        "guitar" => RigType::Guitar,
+                        "bass" => RigType::Bass,
+                        "keys" => RigType::Keys,
+                        "vocals" => RigType::Vocals,
+                        _ => return,
+                    };
+                    rig_type.set(rt);
+                },
+                options: vec![
+                    (String::from("guitar"), String::from("Guitar")),
+                    (String::from("bass"), String::from("Bass")),
+                    (String::from("keys"), String::from("Keys")),
+                    (String::from("vocals"), String::from("Vocals")),
+                ],
+                size: SegmentedControlSize::Small,
             }
 
             // Spacer pushes scene tabs to the right
@@ -98,7 +101,7 @@ pub(crate) fn render_top_bar(
 
             // Scene tabs (only shown for rig presets)
             if is_rig_active && !scenes.is_empty() {
-                span { class: "text-[10px] text-zinc-500 mr-1 flex-shrink-0", "Scenes" }
+                span { class: "text-[10px] text-muted-foreground mr-1 flex-shrink-0", "Scenes" }
                 for (sid, sname) in scenes.iter() {
                     {
                         let is_active = current_scene.as_deref() == Some(sid.as_str());
@@ -118,7 +121,7 @@ pub(crate) fn render_top_bar(
                             if is_editing {
                                 input {
                                     key: "{sid}",
-                                    class: "px-2 py-0.5 text-xs text-zinc-200 bg-white/[0.06] border border-white/[0.08] rounded outline-none w-20",
+                                    class: "px-2 py-0.5 text-xs text-foreground rounded outline-none w-20 bg-secondary border border-border",
                                     value: "{editing_text}",
                                     autofocus: true,
                                     oninput: move |e| editing_text.set(e.value()),
@@ -134,9 +137,9 @@ pub(crate) fn render_top_bar(
                                 button {
                                     key: "{sid}",
                                     class: if is_active {
-                                        "px-2.5 py-1 text-xs font-medium rounded bg-white/[0.10] text-zinc-100"
+                                        "px-2.5 py-1 text-xs rounded font-medium bg-accent text-accent-foreground"
                                     } else {
-                                        "px-2.5 py-1 text-xs text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.06] rounded"
+                                        "px-2.5 py-1 text-xs rounded text-muted-foreground hover:bg-accent/50"
                                     },
                                     onclick: move |_| {
                                         on_click(rid.clone(), scene_id.clone(), true);
@@ -158,7 +161,7 @@ pub(crate) fn render_top_bar(
                     let mut cb = on_scene_created.clone();
                     rsx! {
                         button {
-                            class: "px-2 py-0.5 text-[10px] text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.06] rounded",
+                            class: "px-2 py-0.5 text-[10px] text-muted-foreground rounded hover:bg-accent/30",
                             onclick: move |_| {
                                 let signal = signal.clone();
                                 let mut cb = cb.clone();

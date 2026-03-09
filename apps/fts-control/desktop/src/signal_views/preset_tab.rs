@@ -137,10 +137,11 @@ pub(crate) fn SignalPresetTab() -> Element {
 
                                 rsx! {
                                     button {
-                                        class: if is_active {
-                                            "relative flex flex-col items-start p-3 rounded-lg border-2 border-blue-500 bg-blue-500/10 text-left transition-all"
+                                        class: "relative flex flex-col items-start p-3 rounded-lg text-left transition-all",
+                                        style: if is_active {
+                                            "border: 2px solid rgb(59,130,246); background: rgba(59,130,246,0.1);"
                                         } else {
-                                            "relative flex flex-col items-start p-3 rounded-lg border border-white/[0.06] bg-white/[0.04] hover:bg-white/[0.08] hover:border-white/[0.12] text-left transition-all"
+                                            "border: 1px solid rgba(255,255,255,0.06); background: rgba(255,255,255,0.04);"
                                         },
                                         onclick: move |_| {
                                             let pid = preset_id.clone();
@@ -178,7 +179,9 @@ pub(crate) fn SignalPresetTab() -> Element {
                                         // Loading spinner overlay
                                         if is_activating {
                                             div { class: "absolute inset-0 flex items-center justify-center bg-black/30 rounded-lg",
-                                                div { class: "w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" }
+                                                div { class: "w-4 h-4 rounded-full animate-spin",
+                                                    style: "border: 2px solid rgb(59,130,246); border-top-color: transparent;",
+                                                }
                                             }
                                         }
                                     }

@@ -10,6 +10,7 @@ pub(crate) mod preset_tab;
 mod setlist_tab;
 
 use dioxus::prelude::*;
+use fts_ui::prelude::*;
 use session_ui::PerformanceLayout;
 
 pub(crate) use browser_dialog::SignalBrowserDialog;
@@ -91,67 +92,63 @@ pub(crate) fn SignalView() -> Element {
     rsx! {
         div { class: "h-full w-full flex flex-col bg-zinc-950 overflow-hidden",
             // Top row: mode selector (left) + browser button (right)
-            div { class: "flex items-center justify-between px-3 py-1.5 border-b border-white/[0.06] bg-white/[0.02] flex-shrink-0",
+            div { class: "flex items-center justify-between px-3 py-1.5 flex-shrink-0 border-b border-border bg-card/50",
                 div { class: "flex items-center gap-2",
                     // Mode selector — primary tabs
-                    div { class: "flex items-center gap-0.5 bg-white/[0.06] rounded-lg p-0.5",
-                        for (m, label) in [
-                            (SignalMode::Preset, "Preset"),
-                            (SignalMode::Profile, "Profile"),
-                            (SignalMode::Song, "Song"),
-                        ] {
-                            {
-                                let is_active = mode == m;
-                                rsx! {
-                                    button {
-                                        class: if is_active {
-                                            "px-3 py-1 text-xs font-semibold text-white bg-white/[0.15] rounded-md transition-colors"
-                                        } else {
-                                            "px-3 py-1 text-xs font-medium text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.06] rounded-md transition-colors"
-                                        },
-                                        onclick: move |_| *SIGNAL_MODE.write() = m,
-                                        "{label}"
-                                    }
-                                }
-                            }
-                        }
+                    SegmentedControl {
+                        value: format!("{:?}", mode).to_lowercase(),
+                        on_change: move |v: String| {
+                            let m = match v.as_str() {
+                                "preset" => SignalMode::Preset,
+                                "profile" => SignalMode::Profile,
+                                "song" => SignalMode::Song,
+                                _ => return,
+                            };
+                            *SIGNAL_MODE.write() = m;
+                        },
+                        options: vec![
+                            (String::from("preset"), String::from("Preset")),
+                            (String::from("profile"), String::from("Profile")),
+                            (String::from("song"), String::from("Song")),
+                        ],
                     }
 
                     // Sub-tab pills — only shown in Profile/Song modes
                     if mode != SignalMode::Preset {
-                        div { class: "flex items-center gap-0.5 bg-white/[0.04] rounded-lg p-0.5 ml-1",
-                            for (tab, label) in [
-                                (SignalTab::Performance, "Performance"),
-                                (SignalTab::Manage, "Manage"),
-                                (SignalTab::Setlist, "Setlist"),
-                                (SignalTab::Editor, "Editor"),
-                                (SignalTab::LiveFx, "Live FX"),
-                                (SignalTab::Capture, "Capture"),
-                                (SignalTab::MidiSettings, "MIDI"),
-                            ] {
-                                {
-                                    let is_active = active_tab() == tab;
-                                    rsx! {
-                                        button {
-                                            class: if is_active {
-                                                "px-2.5 py-0.5 text-[11px] font-medium text-white bg-white/[0.10] rounded-md transition-colors"
-                                            } else {
-                                                "px-2.5 py-0.5 text-[11px] font-medium text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.06] rounded-md transition-colors"
-                                            },
-                                            onclick: move |_| active_tab.set(tab),
-                                            "{label}"
-                                        }
-                                    }
-                                }
-                            }
+                        SegmentedControl {
+                            value: format!("{:?}", active_tab()).to_lowercase(),
+                            on_change: move |v: String| {
+                                let tab = match v.as_str() {
+                                    "performance" => SignalTab::Performance,
+                                    "manage" => SignalTab::Manage,
+                                    "setlist" => SignalTab::Setlist,
+                                    "editor" => SignalTab::Editor,
+                                    "livefx" => SignalTab::LiveFx,
+                                    "capture" => SignalTab::Capture,
+                                    "midisettings" => SignalTab::MidiSettings,
+                                    _ => return,
+                                };
+                                active_tab.set(tab);
+                            },
+                            options: vec![
+                                (String::from("performance"), String::from("Performance")),
+                                (String::from("manage"), String::from("Manage")),
+                                (String::from("setlist"), String::from("Setlist")),
+                                (String::from("editor"), String::from("Editor")),
+                                (String::from("livefx"), String::from("Live FX")),
+                                (String::from("capture"), String::from("Capture")),
+                                (String::from("midisettings"), String::from("MIDI")),
+                            ],
+                            size: SegmentedControlSize::Small,
                         }
                     }
                 }
 
                 // Right: browser button
-                button {
-                    class: "px-3 py-1 text-xs font-medium text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.06] rounded-md transition-colors",
-                    onclick: move |_| browser_open.set(true),
+                Button {
+                    variant: ButtonVariant::Ghost,
+                    size: ButtonSize::Small,
+                    on_click: move |_| browser_open.set(true),
                     "Browser"
                 }
             }

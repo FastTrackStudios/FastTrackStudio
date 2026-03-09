@@ -10,6 +10,13 @@ use crate::midi_service::{
 };
 use crate::persistence::{load_midi_config, save_midi_config};
 
+// Glass design tokens (inline style values)
+const GLASS_CARD: &str = "border: 1px solid rgba(255,255,255,0.06); background: rgba(24,24,27,0.4);";
+const GLASS_BTN: &str = "background: rgba(255,255,255,0.08);";
+const GLASS_INPUT: &str = "background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08);";
+const GLASS_ROW: &str = "background: rgba(255,255,255,0.03);";
+const GLASS_ROW_LEARN: &str = "background: rgba(120,53,15,0.3); border: 1px solid rgba(180,83,9,0.4);";
+
 /// MIDI settings tab component.
 #[component]
 pub(crate) fn SignalMidiTab() -> Element {
@@ -38,7 +45,8 @@ pub(crate) fn SignalMidiTab() -> Element {
                 div { class: "flex items-center justify-between",
                     h2 { class: "text-lg font-semibold text-zinc-100", "MIDI Configuration" }
                     button {
-                        class: "px-3 py-1.5 text-xs font-medium text-zinc-300 bg-white/[0.08] hover:bg-white/[0.12] rounded-md transition-colors",
+                        class: "px-3 py-1.5 text-xs font-medium text-zinc-300 rounded-md transition-colors",
+                        style: GLASS_BTN,
                         onclick: move |_| {
                             refresh_devices();
                         },
@@ -47,11 +55,14 @@ pub(crate) fn SignalMidiTab() -> Element {
                 }
 
                 // ── Device selector + connection ──────────────────────────────
-                div { class: "rounded-lg border border-white/[0.06] bg-zinc-900/40 p-4 space-y-3",
+                div {
+                    class: "rounded-lg p-4 space-y-3",
+                    style: GLASS_CARD,
                     div { class: "flex items-center gap-3",
                         label { class: "text-sm text-zinc-400 w-16 flex-shrink-0", "Device" }
                         select {
-                            class: "flex-1 bg-white/[0.06] border border-white/[0.08] rounded-md px-3 py-1.5 text-sm text-zinc-100 outline-none focus:border-blue-500/50",
+                            class: "flex-1 rounded-md px-3 py-1.5 text-sm text-zinc-100 outline-none",
+                            style: GLASS_INPUT,
                             value: "{selected_port}",
                             onchange: move |e| {
                                 selected_port.set(e.value());
@@ -87,14 +98,16 @@ pub(crate) fn SignalMidiTab() -> Element {
                         match *MIDI_CONNECTION_STATE.read() {
                             MidiConnectionState::Connected => rsx! {
                                 button {
-                                    class: "px-3 py-1.5 text-xs font-medium text-red-300 bg-red-900/30 hover:bg-red-900/50 border border-red-800/50 rounded-md transition-colors",
+                                    class: "px-3 py-1.5 text-xs font-medium text-red-300 rounded-md transition-colors",
+                                    style: "background: rgba(127,29,29,0.3); border: 1px solid rgba(153,27,27,0.5);",
                                     onclick: move |_| disconnect_device(),
                                     "Disconnect"
                                 }
                             },
                             MidiConnectionState::Disconnected => rsx! {
                                 button {
-                                    class: "px-3 py-1.5 text-xs font-medium text-emerald-300 bg-emerald-900/30 hover:bg-emerald-900/50 border border-emerald-800/50 rounded-md transition-colors disabled:opacity-40 disabled:cursor-not-allowed",
+                                    class: "px-3 py-1.5 text-xs font-medium text-emerald-300 rounded-md transition-colors disabled:opacity-40 disabled:cursor-not-allowed",
+                                    style: "background: rgba(6,78,59,0.3); border: 1px solid rgba(6,95,70,0.5);",
                                     disabled: selected_port().is_empty(),
                                     onclick: move |_| {
                                         let port = selected_port();
@@ -111,7 +124,9 @@ pub(crate) fn SignalMidiTab() -> Element {
 
                 // ── MIDI Learn banner ─────────────────────────────────────────
                 if let Some(ref target) = learn_target {
-                    div { class: "rounded-lg border border-amber-700/60 bg-amber-900/20 p-3 flex items-center justify-between",
+                    div {
+                        class: "rounded-lg p-3 flex items-center justify-between",
+                        style: "border: 1px solid rgba(180,83,9,0.6); background: rgba(120,53,15,0.2);",
                         div { class: "flex items-center gap-2",
                             span { class: "inline-block w-2 h-2 rounded-full bg-amber-400 animate-pulse" }
                             span { class: "text-sm text-amber-200",
@@ -122,7 +137,7 @@ pub(crate) fn SignalMidiTab() -> Element {
                             }
                         }
                         button {
-                            class: "px-2 py-1 text-xs text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.06] rounded transition-colors",
+                            class: "px-2 py-1 text-xs text-zinc-400 rounded transition-colors",
                             onclick: move |_| cancel_learn(),
                             "Cancel"
                         }
@@ -130,11 +145,13 @@ pub(crate) fn SignalMidiTab() -> Element {
                 }
 
                 // ── Action Mappings ───────────────────────────────────────────
-                div { class: "rounded-lg border border-white/[0.06] bg-zinc-900/40 p-4 space-y-3",
+                div {
+                    class: "rounded-lg p-4 space-y-3",
+                    style: GLASS_CARD,
                     div { class: "flex items-center justify-between mb-2",
                         h3 { class: "text-sm font-medium text-zinc-200", "Action Mappings" }
                         button {
-                            class: "px-2 py-1 text-xs text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.06] rounded transition-colors",
+                            class: "px-2 py-1 text-xs text-zinc-400 rounded transition-colors",
                             onclick: move |_| {
                                 let default_map = signal_proto::midi_actions::MidiActionMap::with_defaults();
                                 update_action_map(default_map.clone());
@@ -154,11 +171,8 @@ pub(crate) fn SignalMidiTab() -> Element {
                                 let is_learning = learn_target.as_deref() == Some(action_id.as_str());
                                 rsx! {
                                     div {
-                                        class: if is_learning {
-                                            "flex items-center justify-between py-1.5 px-2 rounded bg-amber-900/30 border border-amber-700/40"
-                                        } else {
-                                            "flex items-center justify-between py-1.5 px-2 rounded bg-white/[0.04] hover:bg-white/[0.06]"
-                                        },
+                                        class: "flex items-center justify-between py-1.5 px-2 rounded",
+                                        style: if is_learning { GLASS_ROW_LEARN } else { GLASS_ROW },
                                         div { class: "flex items-center gap-2 flex-1 min-w-0",
                                             span { class: "text-xs text-zinc-300 font-mono flex-shrink-0",
                                                 "{format_trigger(&binding.trigger)}"
@@ -169,7 +183,7 @@ pub(crate) fn SignalMidiTab() -> Element {
                                             }
                                         }
                                         button {
-                                            class: "px-2 py-0.5 text-xs text-cyan-400 hover:text-cyan-300 hover:bg-cyan-900/30 rounded transition-colors flex-shrink-0 ml-2",
+                                            class: "px-2 py-0.5 text-xs text-cyan-400 rounded transition-colors flex-shrink-0 ml-2",
                                             onclick: {
                                                 let aid = action_id.clone();
                                                 move |_| start_learn(&aid)
@@ -184,11 +198,13 @@ pub(crate) fn SignalMidiTab() -> Element {
                 }
 
                 // ── MIDI Monitor ──────────────────────────────────────────────
-                div { class: "rounded-lg border border-white/[0.06] bg-zinc-900/40 p-4 space-y-2",
+                div {
+                    class: "rounded-lg p-4 space-y-2",
+                    style: GLASS_CARD,
                     div { class: "flex items-center justify-between mb-1",
                         h3 { class: "text-sm font-medium text-zinc-200", "MIDI Monitor" }
                         button {
-                            class: "px-2 py-1 text-xs text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.06] rounded transition-colors",
+                            class: "px-2 py-1 text-xs text-zinc-400 rounded transition-colors",
                             onclick: move |_| clear_monitor(),
                             "Clear"
                         }
