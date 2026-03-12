@@ -41,7 +41,6 @@ daw-control.workspace = true
 
 # Runtime
 roam.workspace = true
-roam-wire.workspace = true
 roam-stream.workspace = true
 peeps.workspace = true
 tokio.workspace = true

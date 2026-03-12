@@ -69,7 +69,6 @@ roam-stream = { git = "https://github.com/bearcove/roam.git", branch = "main" }
 roam-task-local = { git = "https://github.com/bearcove/roam.git", branch = "main" }
 roam-tracing = { git = "https://github.com/bearcove/roam.git", branch = "main" }
 roam-websocket = { git = "https://github.com/bearcove/roam.git", branch = "main" }
-roam-wire = { git = "https://github.com/bearcove/roam.git", branch = "main" }
 roam-local = { git = "https://github.com/bearcove/roam.git", branch = "main" }
 roam-http-bridge = { git = "https://github.com/bearcove/roam.git", branch = "main" }
 subject-rust = { git = "https://github.com/bearcove/roam.git", branch = "main" }
