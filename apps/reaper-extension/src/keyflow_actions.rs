@@ -2,7 +2,7 @@ use actions_proto::ActionResult;
 use daw_proto::routing::{MidiChannelMapping, MidiDestinationChannel, MidiSourceChannel};
 use daw_reaper::safe_wrappers::{
     item as item_sw, markers as markers_sw, midi as midi_sw, routing as routing_sw,
-    tempo as tempo_sw,
+    tempo as tempo_sw, time_map as time_map_sw, ReaperLow,
 };
 use daw_reaper::track::{add_track_on_main_thread, set_folder_depth_on_main_thread};
 use midly::{
@@ -342,6 +342,9 @@ fn gather_marker_events(bounds: &ExportBounds, song_start_tick: u32) -> Vec<Abso
 }
 
 fn gather_region_events(bounds: &ExportBounds, song_start_tick: u32) -> Vec<AbsoluteEvent> {
+    let reaper = Reaper::get();
+    let low = reaper.medium_reaper().low();
+    let project = std::ptr::null_mut();
     let mut result = Vec::new();
     for region in daw_reaper::region::get_regions_on_main_thread() {
         if region.name.is_empty()
@@ -357,8 +360,17 @@ fn gather_region_events(bounds: &ExportBounds, song_start_tick: u32) -> Vec<Abso
         result.push(AbsoluteEvent {
             tick,
             priority: 6,
-            kind: TrackEventKind::Meta(MetaMessage::Marker(leak_bytes(region.name))),
+            kind: TrackEventKind::Meta(MetaMessage::Marker(leak_bytes(region.name.clone()))),
         });
+        if let Some(metadata) =
+            encode_keyflow_section_metadata(low, project, &region.name, region.start_seconds(), region.end_seconds())
+        {
+            result.push(AbsoluteEvent {
+                tick,
+                priority: 7,
+                kind: TrackEventKind::Meta(MetaMessage::Text(leak_bytes(metadata))),
+            });
+        }
     }
     result
 }
@@ -770,6 +782,26 @@ fn mapping_output_channel(mapping: &MidiChannelMapping, source_channel: u8) -> u
 
 fn qn_to_tick(qn: f64) -> u32 {
     (qn * f64::from(TICKS_PER_QUARTER)).round().max(0.0) as u32
+}
+
+fn encode_keyflow_section_metadata(
+    low: &ReaperLow,
+    project: *mut reaper_low::raw::ReaProject,
+    name: &str,
+    start_seconds: f64,
+    end_seconds: f64,
+) -> Option<String> {
+    if end_seconds <= start_seconds {
+        return None;
+    }
+
+    let start_qn = daw_reaper::tempo_map::time_to_qn_on_main_thread(start_seconds);
+    let end_qn = daw_reaper::tempo_map::time_to_qn_on_main_thread(end_seconds);
+    let start_measure = time_map_sw::qn_to_measures(low, project, start_qn).measure_index + 1;
+    let end_measure = time_map_sw::qn_to_measures(low, project, end_qn).measure_index + 1;
+    let length = (end_measure - start_measure).max(1);
+
+    Some(format!("KFSECTION\t{}\t{}\t{}", name, start_measure, length))
 }
 
 fn track_name(track: &Track) -> String {

@@ -692,6 +692,11 @@ fn gather_region_events(
     summary: &mut ExportSummary,
 ) -> Vec<AbsoluteEvent> {
     let mut result = Vec::new();
+    let project_measure_offset = project
+        .properties
+        .proj_offs
+        .map(|(_, measure, _)| measure)
+        .unwrap_or(0);
     for region in normalized_regions(project) {
         if region.name.is_empty()
             || region.start_seconds < bounds.start_seconds
@@ -704,8 +709,17 @@ fn gather_region_events(
         result.push(AbsoluteEvent {
             tick,
             priority: 6,
-            kind: TrackEventKind::Meta(MetaMessage::Marker(leak_bytes(region.name))),
+            kind: TrackEventKind::Meta(MetaMessage::Marker(leak_bytes(region.name.clone()))),
         });
+        if let Some(metadata) =
+            encode_keyflow_section_metadata(project, &region, project_measure_offset)
+        {
+            result.push(AbsoluteEvent {
+                tick,
+                priority: 7,
+                kind: TrackEventKind::Meta(MetaMessage::Text(leak_bytes(metadata))),
+            });
+        }
     }
     result
 }
@@ -920,6 +934,25 @@ fn bpm_to_tempo(bpm: f64) -> u24 {
 
 fn qn_to_tick(qn: f64) -> u32 {
     (qn * f64::from(TICKS_PER_QUARTER)).round().max(0.0) as u32
+}
+
+fn encode_keyflow_section_metadata(
+    project: &ReaperProject,
+    region: &NamedRange,
+    project_measure_offset: i32,
+) -> Option<String> {
+    let end_seconds = region.end_seconds?;
+    if end_seconds <= region.start_seconds {
+        return None;
+    }
+
+    let start_measure = seconds_to_measure_index(project, region.start_seconds) + project_measure_offset;
+    let end_measure = seconds_to_measure_index(project, end_seconds) + project_measure_offset;
+    let length = (end_measure - start_measure).max(1);
+    Some(format!(
+        "KFSECTION\t{}\t{}\t{}",
+        region.name, start_measure, length
+    ))
 }
 
 fn default_export_path(rpp_path: &Path) -> PathBuf {
