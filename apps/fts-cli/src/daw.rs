@@ -5,7 +5,7 @@ use daw_control::Daw;
 use eyre::Result;
 use serde_json::json;
 
-use crate::introspect;
+use crate::{introspect, keyflow};
 
 // ============================================================================
 // CLI Definitions
@@ -59,8 +59,34 @@ pub enum DawCommand {
     Regions,
     /// Health check
     Ping,
+    /// Keyflow chart import/export utilities
+    #[command(subcommand)]
+    Keyflow(KeyflowCommand),
     /// Introspect plugin(s) and generate JSON library entries
     Introspect(IntrospectArgs),
+}
+
+#[derive(Subcommand)]
+pub enum KeyflowCommand {
+    /// Export a Keyflow chart directly from an .RPP file without REAPER running
+    ExportRpp {
+        /// Path to the REAPER project file
+        rpp: PathBuf,
+        /// Output MIDI file path (defaults to <project>.keyflow.mid)
+        #[arg(long, short)]
+        output: Option<PathBuf>,
+        /// Parent track name to treat as the Keyflow aggregation track
+        #[arg(long)]
+        parent_track: Option<String>,
+    },
+    /// Analyze Keyflow markers, regions, item bounds, and resolved export bounds from an .RPP file
+    AnalyzeRpp {
+        /// Path to the REAPER project file
+        rpp: PathBuf,
+        /// Parent track name to treat as the Keyflow aggregation track
+        #[arg(long)]
+        parent_track: Option<String>,
+    },
 }
 
 #[derive(Args)]
@@ -218,101 +244,112 @@ pub enum ParamCommand {
 // ============================================================================
 
 pub async fn run(socket: Option<PathBuf>, cmd: DawCommand, as_json: bool) -> Result<()> {
-    let daw = daw_cli::connect(socket).await?;
-
     match cmd {
-        // ── Read commands (delegate to daw-cli lib) ──
-        DawCommand::Info => daw_cli::cmd_info(&daw, as_json).await,
-        DawCommand::Tracks => daw_cli::cmd_tracks(&daw, as_json).await,
-        DawCommand::Track(TrackCommand::Show { ref track }) => {
-            daw_cli::cmd_track(&daw, track, as_json).await
-        }
-        DawCommand::Fx(FxCommand::List { ref track }) => {
-            daw_cli::cmd_fx(&daw, track, as_json).await
-        }
-        DawCommand::Params {
-            ref track,
-            ref fx,
-        } => daw_cli::cmd_params(&daw, track, fx, as_json).await,
-        DawCommand::Transport => daw_cli::cmd_transport(&daw, as_json).await,
-        DawCommand::Markers => daw_cli::cmd_markers(&daw, as_json).await,
-        DawCommand::Regions => daw_cli::cmd_regions(&daw, as_json).await,
-        DawCommand::Ping => daw_cli::cmd_ping(&daw).await,
-
-        // ── Track write commands ──
-        DawCommand::Track(TrackCommand::Mute { ref track }) => {
-            cmd_track_toggle(&daw, track, "mute", as_json).await
-        }
-        DawCommand::Track(TrackCommand::Unmute { ref track }) => {
-            cmd_track_toggle(&daw, track, "unmute", as_json).await
-        }
-        DawCommand::Track(TrackCommand::Solo { ref track }) => {
-            cmd_track_toggle(&daw, track, "solo", as_json).await
-        }
-        DawCommand::Track(TrackCommand::Unsolo { ref track }) => {
-            cmd_track_toggle(&daw, track, "unsolo", as_json).await
-        }
-        DawCommand::Track(TrackCommand::Arm { ref track }) => {
-            cmd_track_toggle(&daw, track, "arm", as_json).await
-        }
-        DawCommand::Track(TrackCommand::Disarm { ref track }) => {
-            cmd_track_toggle(&daw, track, "disarm", as_json).await
-        }
-        DawCommand::Track(TrackCommand::Volume { ref track, value }) => {
-            cmd_track_volume(&daw, track, value, as_json).await
-        }
-        DawCommand::Track(TrackCommand::Pan { ref track, value }) => {
-            cmd_track_pan(&daw, track, value, as_json).await
-        }
-        DawCommand::Track(TrackCommand::Add { ref name }) => {
-            cmd_track_add(&daw, name, as_json).await
-        }
-        DawCommand::Track(TrackCommand::Remove { ref track }) => {
-            cmd_track_remove(&daw, track, as_json).await
-        }
-        DawCommand::Track(TrackCommand::Rename { ref track, ref name }) => {
-            cmd_track_rename(&daw, track, name, as_json).await
+        DawCommand::Keyflow(KeyflowCommand::ExportRpp {
+            rpp,
+            output,
+            parent_track,
+        }) => keyflow::export_rpp_keyflow_chart(rpp, output, parent_track, as_json),
+        DawCommand::Keyflow(KeyflowCommand::AnalyzeRpp { rpp, parent_track }) => {
+            keyflow::analyze_rpp_keyflow_chart(rpp, parent_track, as_json)
         }
 
-        // ── FX write commands ──
-        DawCommand::Fx(FxCommand::Add {
-            ref track,
-            ref plugin,
-        }) => cmd_fx_add(&daw, track, plugin, as_json).await,
-        DawCommand::Fx(FxCommand::Remove {
-            ref track,
-            ref fx,
-        }) => cmd_fx_remove(&daw, track, fx, as_json).await,
-        DawCommand::Fx(FxCommand::Enable {
-            ref track,
-            ref fx,
-        }) => cmd_fx_enable(&daw, track, fx, as_json).await,
-        DawCommand::Fx(FxCommand::Bypass {
-            ref track,
-            ref fx,
-        }) => cmd_fx_bypass(&daw, track, fx, as_json).await,
+        cmd => {
+            let daw = daw_cli::connect(socket).await?;
 
-        // ── Param commands ──
-        DawCommand::Param(ParamCommand::Get {
-            ref track,
-            ref fx,
-            ref param,
-        }) => cmd_param_get(&daw, track, fx, param, as_json).await,
-        DawCommand::Param(ParamCommand::Set {
-            ref track,
-            ref fx,
-            ref param,
-            value,
-        }) => cmd_param_set(&daw, track, fx, param, value, as_json).await,
+            match cmd {
+                // ── Read commands (delegate to daw-cli lib) ──
+                DawCommand::Info => daw_cli::cmd_info(&daw, as_json).await,
+                DawCommand::Tracks => daw_cli::cmd_tracks(&daw, as_json).await,
+                DawCommand::Track(TrackCommand::Show { ref track }) => {
+                    daw_cli::cmd_track(&daw, track, as_json).await
+                }
+                DawCommand::Fx(FxCommand::List { ref track }) => {
+                    daw_cli::cmd_fx(&daw, track, as_json).await
+                }
+                DawCommand::Params { ref track, ref fx } => {
+                    daw_cli::cmd_params(&daw, track, fx, as_json).await
+                }
+                DawCommand::Transport => daw_cli::cmd_transport(&daw, as_json).await,
+                DawCommand::Markers => daw_cli::cmd_markers(&daw, as_json).await,
+                DawCommand::Regions => daw_cli::cmd_regions(&daw, as_json).await,
+                DawCommand::Ping => daw_cli::cmd_ping(&daw).await,
 
-        // ── Transport write commands ──
-        DawCommand::Play => cmd_transport_action(&daw, "play", as_json).await,
-        DawCommand::Pause => cmd_transport_action(&daw, "pause", as_json).await,
-        DawCommand::Stop => cmd_transport_action(&daw, "stop", as_json).await,
-        DawCommand::Record => cmd_transport_action(&daw, "record", as_json).await,
-        DawCommand::Tempo { bpm } => cmd_tempo(&daw, bpm, as_json).await,
-        DawCommand::Seek { position } => cmd_seek(&daw, position, as_json).await,
-        DawCommand::Introspect(args) => cmd_introspect(&daw, args).await,
+                // ── Track write commands ──
+                DawCommand::Track(TrackCommand::Mute { ref track }) => {
+                    cmd_track_toggle(&daw, track, "mute", as_json).await
+                }
+                DawCommand::Track(TrackCommand::Unmute { ref track }) => {
+                    cmd_track_toggle(&daw, track, "unmute", as_json).await
+                }
+                DawCommand::Track(TrackCommand::Solo { ref track }) => {
+                    cmd_track_toggle(&daw, track, "solo", as_json).await
+                }
+                DawCommand::Track(TrackCommand::Unsolo { ref track }) => {
+                    cmd_track_toggle(&daw, track, "unsolo", as_json).await
+                }
+                DawCommand::Track(TrackCommand::Arm { ref track }) => {
+                    cmd_track_toggle(&daw, track, "arm", as_json).await
+                }
+                DawCommand::Track(TrackCommand::Disarm { ref track }) => {
+                    cmd_track_toggle(&daw, track, "disarm", as_json).await
+                }
+                DawCommand::Track(TrackCommand::Volume { ref track, value }) => {
+                    cmd_track_volume(&daw, track, value, as_json).await
+                }
+                DawCommand::Track(TrackCommand::Pan { ref track, value }) => {
+                    cmd_track_pan(&daw, track, value, as_json).await
+                }
+                DawCommand::Track(TrackCommand::Add { ref name }) => {
+                    cmd_track_add(&daw, name, as_json).await
+                }
+                DawCommand::Track(TrackCommand::Remove { ref track }) => {
+                    cmd_track_remove(&daw, track, as_json).await
+                }
+                DawCommand::Track(TrackCommand::Rename {
+                    ref track,
+                    ref name,
+                }) => cmd_track_rename(&daw, track, name, as_json).await,
+
+                // ── FX write commands ──
+                DawCommand::Fx(FxCommand::Add {
+                    ref track,
+                    ref plugin,
+                }) => cmd_fx_add(&daw, track, plugin, as_json).await,
+                DawCommand::Fx(FxCommand::Remove { ref track, ref fx }) => {
+                    cmd_fx_remove(&daw, track, fx, as_json).await
+                }
+                DawCommand::Fx(FxCommand::Enable { ref track, ref fx }) => {
+                    cmd_fx_enable(&daw, track, fx, as_json).await
+                }
+                DawCommand::Fx(FxCommand::Bypass { ref track, ref fx }) => {
+                    cmd_fx_bypass(&daw, track, fx, as_json).await
+                }
+
+                // ── Param commands ──
+                DawCommand::Param(ParamCommand::Get {
+                    ref track,
+                    ref fx,
+                    ref param,
+                }) => cmd_param_get(&daw, track, fx, param, as_json).await,
+                DawCommand::Param(ParamCommand::Set {
+                    ref track,
+                    ref fx,
+                    ref param,
+                    value,
+                }) => cmd_param_set(&daw, track, fx, param, value, as_json).await,
+
+                // ── Transport write commands ──
+                DawCommand::Play => cmd_transport_action(&daw, "play", as_json).await,
+                DawCommand::Pause => cmd_transport_action(&daw, "pause", as_json).await,
+                DawCommand::Stop => cmd_transport_action(&daw, "stop", as_json).await,
+                DawCommand::Record => cmd_transport_action(&daw, "record", as_json).await,
+                DawCommand::Tempo { bpm } => cmd_tempo(&daw, bpm, as_json).await,
+                DawCommand::Seek { position } => cmd_seek(&daw, position, as_json).await,
+                DawCommand::Introspect(args) => cmd_introspect(&daw, args).await,
+                DawCommand::Keyflow(_) => unreachable!("handled above"),
+            }
+        }
     }
 }
 
@@ -471,12 +508,7 @@ async fn cmd_track_remove(daw: &Daw, track_arg: &str, as_json: bool) -> Result<(
     Ok(())
 }
 
-async fn cmd_track_rename(
-    daw: &Daw,
-    track_arg: &str,
-    new_name: &str,
-    as_json: bool,
-) -> Result<()> {
+async fn cmd_track_rename(daw: &Daw, track_arg: &str, new_name: &str, as_json: bool) -> Result<()> {
     let handle = daw_cli::resolve_track_handle(daw, track_arg).await?;
     let old_name = handle.info().await?.name.clone();
     handle.rename(new_name).await?;
@@ -501,12 +533,7 @@ async fn cmd_track_rename(
 // FX Write Commands
 // ============================================================================
 
-async fn cmd_fx_add(
-    daw: &Daw,
-    track_arg: &str,
-    plugin: &str,
-    as_json: bool,
-) -> Result<()> {
+async fn cmd_fx_add(daw: &Daw, track_arg: &str, plugin: &str, as_json: bool) -> Result<()> {
     let handle = daw_cli::resolve_track_handle(daw, track_arg).await?;
     let track_name = handle.info().await?.name.clone();
     let fx_handle = handle.fx_chain().add(plugin).await?;
@@ -532,12 +559,7 @@ async fn cmd_fx_add(
     Ok(())
 }
 
-async fn cmd_fx_remove(
-    daw: &Daw,
-    track_arg: &str,
-    fx_arg: &str,
-    as_json: bool,
-) -> Result<()> {
+async fn cmd_fx_remove(daw: &Daw, track_arg: &str, fx_arg: &str, as_json: bool) -> Result<()> {
     let (_, track_name) = daw_cli::resolve_track(daw, track_arg).await?;
     let handle = daw_cli::resolve_track_handle(daw, track_arg).await?;
     let fx_chain = handle.fx_chain();
@@ -561,12 +583,7 @@ async fn cmd_fx_remove(
     Ok(())
 }
 
-async fn cmd_fx_enable(
-    daw: &Daw,
-    track_arg: &str,
-    fx_arg: &str,
-    as_json: bool,
-) -> Result<()> {
+async fn cmd_fx_enable(daw: &Daw, track_arg: &str, fx_arg: &str, as_json: bool) -> Result<()> {
     let (_, track_name) = daw_cli::resolve_track(daw, track_arg).await?;
     let handle = daw_cli::resolve_track_handle(daw, track_arg).await?;
     let fx_chain = handle.fx_chain();
@@ -590,12 +607,7 @@ async fn cmd_fx_enable(
     Ok(())
 }
 
-async fn cmd_fx_bypass(
-    daw: &Daw,
-    track_arg: &str,
-    fx_arg: &str,
-    as_json: bool,
-) -> Result<()> {
+async fn cmd_fx_bypass(daw: &Daw, track_arg: &str, fx_arg: &str, as_json: bool) -> Result<()> {
     let (_, track_name) = daw_cli::resolve_track(daw, track_arg).await?;
     let handle = daw_cli::resolve_track_handle(daw, track_arg).await?;
     let fx_chain = handle.fx_chain();
@@ -646,7 +658,11 @@ async fn resolve_param_handle(
             .find(|p| p.name.eq_ignore_ascii_case(param_arg));
         match found {
             Some(p) => fx_handle.param(p.index),
-            None => eyre::bail!("Parameter \"{}\" not found on FX \"{}\"", param_arg, fx_name),
+            None => eyre::bail!(
+                "Parameter \"{}\" not found on FX \"{}\"",
+                param_arg,
+                fx_name
+            ),
         }
     };
 

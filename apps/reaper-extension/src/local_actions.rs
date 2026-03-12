@@ -132,6 +132,20 @@ actions_proto::define_actions! {
             group: "Guide",
             implementation: supported(super::handle_generate_guide_track),
         }
+        GENERATE_KEYFLOW_TRACKS = "generate_keyflow_tracks" {
+            name: "Generate Keyflow Tracks",
+            description: "Create/configure the Keyflow folder and child MIDI sends",
+            category: Dev,
+            group: "Keyflow",
+            implementation: supported(super::handle_generate_keyflow_tracks),
+        }
+        EXPORT_KEYFLOW_CHART_TO_MIDI = "export_keyflow_chart_to_midi" {
+            name: "Export Keyflow Chart to MIDI",
+            description: "Export the Keyflow chart tracks, markers, and regions to MIDI",
+            category: Dev,
+            group: "Keyflow",
+            implementation: supported(super::handle_export_keyflow_chart_to_midi),
+        }
     }
 }
 
@@ -556,6 +570,14 @@ fn handle_generate_guide_track() -> ActionResult {
     crate::guide_track::generate_guide_tracks()
 }
 
+fn handle_generate_keyflow_tracks() -> ActionResult {
+    crate::keyflow_actions::generate_keyflow_tracks()
+}
+
+fn handle_export_keyflow_chart_to_midi() -> ActionResult {
+    crate::keyflow_actions::export_keyflow_chart_to_midi()
+}
+
 // ============================================================================
 // Dynamic Template: Sorting Actions
 // ============================================================================
@@ -656,7 +678,6 @@ fn delete_empty_tracks(tracks: &HashSet<*mut raw::MediaTrack>) {
 
 /// Core sorting logic: takes items, organizes via dynamic-template, creates REAPER tracks
 fn sort_items_core(items: Vec<DtItemInfo>, undo_label: &str) -> ActionResult {
-    
     use dynamic_template::{default_config, OrganizeIntoTracks};
 
     let reaper = Reaper::get();

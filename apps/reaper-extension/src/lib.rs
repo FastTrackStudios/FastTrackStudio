@@ -14,6 +14,7 @@ mod auto_color;
 mod dock_icon;
 mod global;
 mod guide_track;
+mod keyflow_actions;
 mod local_actions;
 mod menu;
 mod session;
@@ -468,8 +469,8 @@ extern "C" fn timer_callback() {
 #[reaper_extension_plugin]
 fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     // Initialize tracing — write to /tmp/fts-reaper.log
-    let log_file = std::fs::File::create("/tmp/fts-reaper.log")
-        .expect("Failed to create /tmp/fts-reaper.log");
+    let log_file =
+        std::fs::File::create("/tmp/fts-reaper.log").expect("Failed to create /tmp/fts-reaper.log");
     tracing_subscriber::fmt()
         .with_writer(std::sync::Mutex::new(log_file))
         .with_env_filter(

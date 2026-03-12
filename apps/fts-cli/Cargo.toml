@@ -11,6 +11,7 @@ path = "src/main.rs"
 daw-cli.workspace = true
 daw-control.workspace = true
 daw-proto.workspace = true
+dawfile-reaper.workspace = true
 signal-cli.workspace = true
 session-cli.workspace = true
 tokio.workspace = true
@@ -22,3 +23,4 @@ serde.workspace = true
 signal-proto.workspace = true
 macromod.workspace = true
 clap = { version = "4", features = ["derive"] }
+midly = "0.5.3"

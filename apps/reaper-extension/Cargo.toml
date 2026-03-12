@@ -54,6 +54,7 @@ anyhow = "1.0"
 eyre = "0.6"
 crossbeam-channel.workspace = true
 camino = "1.1"
+midly = "0.5.3"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc = "0.2.7"

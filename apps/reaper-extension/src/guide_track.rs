@@ -14,12 +14,13 @@ use daw_proto::MidiNoteCreate;
 use daw_reaper::midi::{add_notes_to_take_on_main_thread, create_midi_item_on_main_thread};
 use daw_reaper::region::get_regions_on_main_thread;
 use daw_reaper::tempo_map::{
-    get_tempo_and_time_sig_at_on_main_thread, qn_to_time_on_main_thread,
-    time_to_qn_on_main_thread,
+    get_tempo_and_time_sig_at_on_main_thread, qn_to_time_on_main_thread, time_to_qn_on_main_thread,
 };
 use daw_reaper::track::{add_track_on_main_thread, set_folder_depth_on_main_thread};
 use keyflow_midi::guide::GuideGenerator;
-use keyflow_proto::{ClickConfig, CountInConfig, GuideConfig, GuideEvent, SectionType, TimeSignature};
+use keyflow_proto::{
+    ClickConfig, CountInConfig, GuideConfig, GuideEvent, SectionType, TimeSignature,
+};
 use reaper_high::Reaper;
 use tracing::info;
 
@@ -91,11 +92,13 @@ fn create_midi_item_with_notes(
     // Resolve the track GUID to a raw pointer via reaper_high
     let reaper = Reaper::get();
     let proj = reaper.current_project();
-    let track = proj.tracks().find(|t| {
-        t.guid().to_string_without_braces() == track_guid
-    });
+    let track = proj
+        .tracks()
+        .find(|t| t.guid().to_string_without_braces() == track_guid);
     let Some(track) = track else { return };
-    let Ok(raw_track) = track.raw().map(|t| t.as_ptr()) else { return };
+    let Ok(raw_track) = track.raw().map(|t| t.as_ptr()) else {
+        return;
+    };
 
     let Some(take) = create_midi_item_on_main_thread(raw_track, start_seconds, end_seconds) else {
         return;
@@ -110,8 +113,8 @@ fn create_midi_item_with_notes(
             channel: 0,
             pitch: note,
             velocity: vel,
-            start_ppq: pos_qn,   // project QN position (converted to PPQ by helper)
-            length_ppq: 120.0,   // short trigger note (~eighth note at 960 PPQ)
+            start_ppq: pos_qn, // project QN position (converted to PPQ by helper)
+            length_ppq: 120.0, // short trigger note (~eighth note at 960 PPQ)
         })
         .collect();
 
@@ -214,7 +217,10 @@ pub fn generate_guide_tracks() -> ActionResult {
             prev_region_end_seconds = Some(region.end_seconds());
         }
 
-        Some(format!("Generated guide tracks for {} regions", regions.len()))
+        Some(format!(
+            "Generated guide tracks for {} regions",
+            regions.len()
+        ))
     });
 
     match result {

@@ -167,7 +167,11 @@ pub async fn introspect_all(daw: &Daw) -> Result<Vec<(String, IntrospectResult)>
     Ok(results)
 }
 
-fn build_result(fx_info: Fx, params: &[FxParameter], state_chunk: Option<String>) -> IntrospectResult {
+fn build_result(
+    fx_info: Fx,
+    params: &[FxParameter],
+    state_chunk: Option<String>,
+) -> IntrospectResult {
     let (clean_name, vendor) = clean_plugin_name(&fx_info.plugin_name);
 
     let raw = RawPluginData {
@@ -185,9 +189,13 @@ fn build_result(fx_info: Fx, params: &[FxParameter], state_chunk: Option<String>
                 formatted: p.formatted.clone(),
                 is_toggle: p.is_toggle,
                 step_count: p.step_count,
-                step_labels: p.step_labels
+                step_labels: p
+                    .step_labels
                     .iter()
-                    .map(|(v, l)| StepLabel { value: *v, label: l.clone() })
+                    .map(|(v, l)| StepLabel {
+                        value: *v,
+                        label: l.clone(),
+                    })
                     .collect(),
             })
             .collect(),
@@ -278,7 +286,10 @@ fn extract_fx_chunks(chain_text: &str) -> HashMap<String, String> {
         let trimmed = lines[i].trim();
 
         // Look for FXID lines
-        if let Some(guid) = trimmed.strip_prefix("FXID {").and_then(|s| s.strip_suffix('}')) {
+        if let Some(guid) = trimmed
+            .strip_prefix("FXID {")
+            .and_then(|s| s.strip_suffix('}'))
+        {
             let fxid_line = i;
             let guid = guid.to_string();
 
@@ -383,10 +394,7 @@ pub fn print_result(result: &IntrospectResult) -> Result<()> {
 ///
 /// Block type is inferred from the track name (e.g., track "Amps" → block type "amp").
 /// Falls back to "plugin" for unrecognized track names.
-pub fn write_all_to_dir(
-    entries: &[(String, IntrospectResult)],
-    output_dir: &Path,
-) -> Result<()> {
+pub fn write_all_to_dir(entries: &[(String, IntrospectResult)], output_dir: &Path) -> Result<()> {
     let mut seen = std::collections::HashSet::new();
     let mut written = 0u32;
     let mut skipped = 0u32;
@@ -402,11 +410,17 @@ pub fn write_all_to_dir(
         let dir = output_dir.join(&block_type).join(&plugin_slug);
         write_plugin_dir(result, &dir)?;
 
-        eprintln!("  {} / {} → {}/{}/", track_name, result.fx_info.name, block_type, plugin_slug);
+        eprintln!(
+            "  {} / {} → {}/{}/",
+            track_name, result.fx_info.name, block_type, plugin_slug
+        );
         written += 1;
     }
 
-    eprintln!("\nWrote {} plugin(s), skipped {} duplicate(s).", written, skipped);
+    eprintln!(
+        "\nWrote {} plugin(s), skipped {} duplicate(s).",
+        written, skipped
+    );
     Ok(())
 }
 
@@ -506,10 +520,7 @@ mod tests {
 
     #[test]
     fn slugify_special_chars() {
-        assert_eq!(
-            slugify("Archetype: John Mayer X"),
-            "archetype-john-mayer-x"
-        );
+        assert_eq!(slugify("Archetype: John Mayer X"), "archetype-john-mayer-x");
         assert_eq!(slugify("Pro-Q 4"), "pro-q-4");
         assert_eq!(slugify("ReaEQ (Cockos)"), "reaeq-cockos");
     }
