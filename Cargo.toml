@@ -57,24 +57,24 @@ eyre = "0.6"
 futures = "0.3"
 
 # Roam crates (bearcove upstream — pinned, latest main needs peeps sub-crates not yet published)
-roam = { git = "https://github.com/bearcove/roam.git", rev = "30a8e10" }
-roam-codegen = { git = "https://github.com/bearcove/roam.git", rev = "30a8e10" }
-roam-frame = { git = "https://github.com/bearcove/roam.git", rev = "30a8e10" }
-roam-hash = { git = "https://github.com/bearcove/roam.git", rev = "30a8e10" }
-roam-schema = { git = "https://github.com/bearcove/roam.git", rev = "30a8e10" }
-roam-service-macros = { git = "https://github.com/bearcove/roam.git", rev = "30a8e10" }
-roam-session = { git = "https://github.com/bearcove/roam.git", rev = "30a8e10" }
-roam-stream = { git = "https://github.com/bearcove/roam.git", rev = "30a8e10" }
-roam-task-local = { git = "https://github.com/bearcove/roam.git", rev = "30a8e10" }
-roam-telemetry = { git = "https://github.com/bearcove/roam.git", rev = "30a8e10" }
-roam-tracing = { git = "https://github.com/bearcove/roam.git", rev = "30a8e10" }
-roam-websocket = { git = "https://github.com/bearcove/roam.git", rev = "30a8e10" }
-roam-wire = { git = "https://github.com/bearcove/roam.git", rev = "30a8e10" }
-roam-local = { git = "https://github.com/bearcove/roam.git", rev = "30a8e10" }
-roam-http-bridge = { git = "https://github.com/bearcove/roam.git", rev = "30a8e10" }
-subject-rust = { git = "https://github.com/bearcove/roam.git", rev = "30a8e10" }
-ur-taking-me-with-you = { git = "https://github.com/bearcove/roam.git", rev = "30a8e10", features = ["tokio"] }
-shm-primitives = { git = "https://github.com/bearcove/roam.git", rev = "30a8e10" }
+roam = { git = "https://github.com/bearcove/roam.git", rev = "3d67688515fadaf33be9c4368f0a1fee02b22321" }
+roam-codegen = { git = "https://github.com/bearcove/roam.git", rev = "3d67688515fadaf33be9c4368f0a1fee02b22321" }
+roam-frame = { git = "https://github.com/bearcove/roam.git", rev = "3d67688515fadaf33be9c4368f0a1fee02b22321" }
+roam-hash = { git = "https://github.com/bearcove/roam.git", rev = "3d67688515fadaf33be9c4368f0a1fee02b22321" }
+roam-schema = { git = "https://github.com/bearcove/roam.git", rev = "3d67688515fadaf33be9c4368f0a1fee02b22321" }
+roam-service-macros = { git = "https://github.com/bearcove/roam.git", rev = "3d67688515fadaf33be9c4368f0a1fee02b22321" }
+roam-session = { git = "https://github.com/bearcove/roam.git", rev = "3d67688515fadaf33be9c4368f0a1fee02b22321" }
+roam-stream = { git = "https://github.com/bearcove/roam.git", rev = "3d67688515fadaf33be9c4368f0a1fee02b22321" }
+roam-task-local = { git = "https://github.com/bearcove/roam.git", rev = "3d67688515fadaf33be9c4368f0a1fee02b22321" }
+roam-telemetry = { git = "https://github.com/bearcove/roam.git", rev = "3d67688515fadaf33be9c4368f0a1fee02b22321" }
+roam-tracing = { git = "https://github.com/bearcove/roam.git", rev = "3d67688515fadaf33be9c4368f0a1fee02b22321" }
+roam-websocket = { git = "https://github.com/bearcove/roam.git", rev = "3d67688515fadaf33be9c4368f0a1fee02b22321" }
+roam-wire = { git = "https://github.com/bearcove/roam.git", rev = "3d67688515fadaf33be9c4368f0a1fee02b22321" }
+roam-local = { git = "https://github.com/bearcove/roam.git", rev = "3d67688515fadaf33be9c4368f0a1fee02b22321" }
+roam-http-bridge = { git = "https://github.com/bearcove/roam.git", rev = "3d67688515fadaf33be9c4368f0a1fee02b22321" }
+subject-rust = { git = "https://github.com/bearcove/roam.git", rev = "3d67688515fadaf33be9c4368f0a1fee02b22321" }
+ur-taking-me-with-you = { git = "https://github.com/bearcove/roam.git", rev = "3d67688515fadaf33be9c4368f0a1fee02b22321", features = ["tokio"] }
+shm-primitives = { git = "https://github.com/bearcove/roam.git", rev = "3d67688515fadaf33be9c4368f0a1fee02b22321" }
 
 # Instrumentation
 peeps = { git = "https://github.com/bearcove/peeps", branch = "main", features = ["diagnostics"] }

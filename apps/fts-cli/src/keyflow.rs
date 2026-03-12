@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use daw_proto::routing::{MidiChannelMapping, MidiDestinationChannel, MidiSourceChannel};
 use dawfile_reaper::types::item::Take;
 use dawfile_reaper::{
-    read_project, MidiEvent, MidiEventType, MidiSource, ReaperProject, SourceType,
+    read_project, MidiEvent, MidiEventType, MidiSource, MidiSourceEvent, ReaperProject, SourceType,
     TempoTimeEnvelope, Track,
 };
 use eyre::{eyre, Result};
@@ -865,8 +865,11 @@ fn extract_note_spans(midi: &MidiSource) -> Vec<NoteSpan> {
     let mut active: HashMap<(u8, u8), Vec<(u32, u8)>> = HashMap::new();
     let mut absolute_tick = 0u32;
 
-    for event in &midi.events {
-        absolute_tick = absolute_tick.saturating_add(event.delta_ticks);
+    for event in &midi.event_stream {
+        absolute_tick = absolute_tick.saturating_add(event.delta_ticks());
+        let MidiSourceEvent::Midi(event) = event else {
+            continue;
+        };
         match event.event_type() {
             MidiEventType::NoteOn => {
                 if let Some((channel, pitch, velocity)) = parse_note_on(event) {
