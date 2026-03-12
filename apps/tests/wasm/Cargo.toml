@@ -10,7 +10,6 @@ dioxus = { version = "0.7.1" }
 
 # Roam RPC
 roam.workspace = true
-roam-session.workspace = true
 roam-websocket.workspace = true
 
 # DAW API (same as web app uses)

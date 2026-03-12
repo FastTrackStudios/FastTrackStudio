@@ -19,7 +19,6 @@ session-proto.workspace = true
 roam.workspace = true
 roam-stream.workspace = true
 roam-local.workspace = true
-roam-session.workspace = true
 roam-wire.workspace = true
 
 # Instrumentation

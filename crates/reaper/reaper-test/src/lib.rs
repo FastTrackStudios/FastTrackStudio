@@ -396,14 +396,7 @@ pub async fn connect_daw_at(socket_override: Option<&Path>) -> Result<Daw> {
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     let connector = SocketConnector { path: socket_path };
-    let config = roam_session::HandshakeConfig {
-        max_payload_size: 1024 * 1024,
-        initial_channel_credit: 16 * 1024 * 1024,
-        max_concurrent_requests: 64,
-        ..Default::default()
-    };
-
-    let client = roam_stream::connect(connector, config, roam_session::NoDispatcher);
+    let client = roam_inprocess::connect(connector).await?;
 
     let handle = client
         .handle()

@@ -10,7 +10,6 @@ dioxus = { version = "0.7.2", features = ["router"] }
 
 # Roam RPC over WebSocket (WASM-compatible)
 roam.workspace = true
-roam-session.workspace = true
 roam-websocket.workspace = true
 
 # DAW control API - same API works on desktop and web
