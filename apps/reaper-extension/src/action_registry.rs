@@ -9,7 +9,7 @@
 use actions_proto::{ActionDefinition, LocalActionImplementation, LocalActionRegistration};
 use actions_registry::ActionsRegistry;
 use reaper_high::{ActionKind, Reaper, RegisteredAction};
-use roam::session::ConnectionHandle;
+use roam::ErasedCaller;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 use tracing::{debug, info, warn};
@@ -100,7 +100,7 @@ pub enum ActionRegistrationSource {
     Local(Vec<LocalActionRegistration>),
     Cell {
         cell_name: String,
-        handle: ConnectionHandle,
+        handle: ErasedCaller,
     },
 }
 
@@ -135,7 +135,7 @@ pub async fn register_actions(sources: Vec<ActionRegistrationSource>) -> Result<
 ///
 /// This queries the cell for actions via `DefinesActions::get_actions()` and
 /// registers each action with REAPER's action system.
-pub async fn register_cell(cell_name: &str, handle: ConnectionHandle) {
+pub async fn register_cell(cell_name: &str, handle: ErasedCaller) {
     let _ = register_actions(vec![ActionRegistrationSource::Cell {
         cell_name: cell_name.to_string(),
         handle,
@@ -145,7 +145,7 @@ pub async fn register_cell(cell_name: &str, handle: ConnectionHandle) {
 
 async fn register_cell_actions_internal(
     cell_name: &str,
-    handle: ConnectionHandle,
+    handle: ErasedCaller,
 ) -> Result<usize, String> {
     let registry = match get_registry() {
         Some(r) => r,

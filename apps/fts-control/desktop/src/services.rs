@@ -20,17 +20,19 @@
 //!                               │
 //!                               ▼
 //!                      ┌──────────────────┐
-//!                      │ RoutedDispatcher │
+//!                      │  RoutedHandler   │
 //!                      │ (routes by       │
 //!                      │  method ID)      │
 //!                      └──────────────────┘
 //! ```
 
-use roam::session::{ConnectionHandle, HandshakeConfig, ServiceDispatcher};
-use roam_session::RoutedDispatcher;
-use roam_stream::LengthPrefixedFramed;
+use crate::routed_handler::RoutedHandler;
+use roam::{DriverCaller, ErasedCaller};
 use session::{SetlistServiceImpl, SongServiceImpl};
-use session_proto::{SetlistServiceClient, SetlistServiceDispatcher, SongServiceDispatcher};
+use session_proto::{
+    SetlistServiceClient, SetlistServiceDispatcher, SongServiceDispatcher,
+    setlist_service_service_descriptor, song_service_service_descriptor,
+};
 use tracing::debug;
 
 /// Local session services running in-process.
@@ -65,80 +67,64 @@ impl LocalServices {
         &self.song
     }
 
-    /// Create a combined dispatcher for all local services.
+    /// Create a combined handler for all local services.
     ///
-    /// The dispatcher routes RPC calls to the appropriate service based on
+    /// The handler routes RPC calls to the appropriate service based on
     /// method ID. This can be passed to the WebSocket gateway to handle
     /// incoming browser connections.
-    pub fn create_dispatcher(&self) -> impl ServiceDispatcher + Clone {
+    pub fn create_handler(&self) -> RoutedHandler {
         let setlist_dispatcher = SetlistServiceDispatcher::new(self.setlist.clone());
         let song_dispatcher = SongServiceDispatcher::new(self.song.clone());
 
-        RoutedDispatcher::new(setlist_dispatcher, song_dispatcher)
+        RoutedHandler::new()
+            .with(setlist_service_service_descriptor(), setlist_dispatcher)
+            .with(song_service_service_descriptor(), song_dispatcher)
     }
 
     /// Create an in-process loopback connection to the local services.
     ///
-    /// This creates a `ConnectionHandle` that routes RPC calls directly to
-    /// the local service implementations via an in-memory duplex pipe.
+    /// This creates an `ErasedCaller` that routes RPC calls directly to
+    /// the local service implementations via an in-memory link pair.
     /// Used to initialize `Session::init()` for UI components.
-    pub async fn create_loopback_connection(&self) -> eyre::Result<ConnectionHandle> {
-        // Create an in-memory bidirectional pipe (larger buffer for high-frequency updates)
-        let (client_stream, server_stream) = tokio::io::duplex(256 * 1024);
+    pub async fn create_loopback_connection(&self) -> eyre::Result<ErasedCaller> {
+        // Create an in-memory bidirectional link pair
+        let (client_link, server_link) = roam::memory_link_pair(256);
 
-        // Create the dispatcher for the server side
-        let dispatcher = self.create_dispatcher();
-
-        // Wrap both sides in length-prefixed framing
-        let client_framed = LengthPrefixedFramed::new(client_stream);
-        let server_framed = LengthPrefixedFramed::new(server_stream);
-
-        // Use larger credit for high-frequency streaming (60Hz transport updates)
-        // Default is 64KB which can exhaust quickly
-        let config = HandshakeConfig {
-            max_payload_size: 1024 * 1024,            // 1 MiB (default)
-            initial_channel_credit: 16 * 1024 * 1024, // 16 MiB - effectively infinite for local
-            max_concurrent_requests: 64,
-        };
+        // Create the handler for the server side
+        let handler = self.create_handler();
 
         // Start the server side (accepts connection and handles requests)
-        let server_config = config.clone();
         tokio::spawn(async move {
-            match roam_session::accept_framed(server_framed, server_config, dispatcher).await {
-                Ok((_handle, _incoming, driver)) => {
-                    // Run the driver to process requests
-                    if let Err(e) = driver.run().await {
-                        tracing::warn!("Loopback server driver error: {}", e);
-                    }
+            match roam::acceptor(server_link)
+                .establish::<DriverCaller>(handler)
+                .await
+            {
+                Ok((_caller, _session_handle)) => {
+                    // Session is alive as long as this task lives; wait forever.
+                    std::future::pending::<()>().await;
                 }
                 Err(e) => {
-                    tracing::error!("Loopback server accept failed: {}", e);
+                    tracing::error!("Loopback server accept failed: {:?}", e);
                 }
             }
         });
 
-        // Connect from the client side
-        let (handle, _incoming, driver) =
-            roam_session::initiate_framed(client_framed, config, roam_session::NoDispatcher)
-                .await?;
-
-        // Spawn the client driver
-        tokio::spawn(async move {
-            if let Err(e) = driver.run().await {
-                tracing::warn!("Loopback client driver error: {}", e);
-            }
-        });
+        // Connect from the client side (no handler needed — we only send requests)
+        let (caller, _session_handle) = roam::initiator(client_link)
+            .establish::<DriverCaller>(())
+            .await
+            .map_err(|e| eyre::eyre!("Failed to establish roam session: {:?}", e))?;
 
         debug!("Created loopback connection to local services");
-        Ok(handle)
+        Ok(ErasedCaller::new(caller))
     }
 
     /// Create a SetlistServiceClient connected to the local services.
     ///
     /// This is the main entry point for UI code to access session services.
     pub async fn create_setlist_client(&self) -> eyre::Result<SetlistServiceClient> {
-        let handle = self.create_loopback_connection().await?;
-        Ok(SetlistServiceClient::new(handle))
+        let caller = self.create_loopback_connection().await?;
+        Ok(SetlistServiceClient::new(caller))
     }
 }
 

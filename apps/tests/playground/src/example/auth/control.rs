@@ -77,7 +77,7 @@ where
         let cx = self.context_factory.make_context();
         match self
             .service
-            .sign_up(&cx, email.into(), password.into(), name.into())
+            .sign_up(email.into(), password.into(), name.into())
             .await
         {
             AuthResult::Success { session } => Ok(AuthControl {
@@ -97,7 +97,7 @@ where
         let cx = self.context_factory.make_context();
         match self
             .service
-            .sign_in(&cx, email.into(), password.into())
+            .sign_in(email.into(), password.into())
             .await
         {
             AuthResult::Success { session } => Ok(AuthControl {
@@ -131,7 +131,7 @@ where
     pub async fn sign_out(self) {
         let token = self.session().token.clone();
         let cx = self.context_factory.make_context();
-        self.service.sign_out(&cx, token).await;
+        self.service.sign_out(token).await;
     }
 }
 
@@ -200,7 +200,7 @@ mod tests {
     impl AuthService for FakeAuthService {
         async fn sign_up(
             &self,
-            _cx: &Context,
+            ,
             _email: String,
             _password: String,
             _name: String,
@@ -214,7 +214,7 @@ mod tests {
                 })
         }
 
-        async fn sign_in(&self, _cx: &Context, _email: String, _password: String) -> AuthResult {
+        async fn sign_in(&self, __email: String, _password: String) -> AuthResult {
             self.next_sign_in
                 .lock()
                 .unwrap()
@@ -224,11 +224,11 @@ mod tests {
                 })
         }
 
-        async fn validate_session(&self, _cx: &Context, _token: String) -> Option<SessionToken> {
+        async fn validate_session(&self, __token: String) -> Option<SessionToken> {
             None
         }
 
-        async fn sign_out(&self, _cx: &Context, token: String) {
+        async fn sign_out(&self, _token: String) {
             self.signed_out_tokens.lock().unwrap().push(token);
         }
     }

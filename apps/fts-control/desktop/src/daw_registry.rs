@@ -14,8 +14,8 @@
 //! # Discovery
 //!
 //! A background loop globs `/tmp/fts-daw-*.sock` every 2 seconds, connects to
-//! new sockets using roam's auto-reconnect logic, classifies them, and removes
-//! entries for vanished sockets.
+//! new sockets with retry/backoff, classifies them, and removes entries for
+//! vanished sockets.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -24,7 +24,7 @@ use std::time::Duration;
 
 use daw_control::Daw;
 use daw_proto::ProjectInfo;
-use roam_session::HandshakeConfig;
+use roam::ErasedCaller;
 use signal::reaper_applier::ReaperPatchApplier;
 use signal_live::engine::DawPatchApplier;
 use tracing::{debug, info, warn};
@@ -293,33 +293,20 @@ impl DawRegistry {
 }
 
 // ============================================================================
-// Connector (reuses roam auto-reconnect)
+// Connection Helper
 // ============================================================================
 
-/// Connector for a specific REAPER socket path.
+/// Connect to a REAPER socket and establish a roam session.
 ///
-/// Implements `roam_stream::Connector` so `roam_stream::connect()` handles
-/// automatic reconnection with exponential backoff.
-struct ReaperConnector {
-    path: PathBuf,
-}
-
-impl roam_stream::Connector for ReaperConnector {
-    type Transport = tokio::net::UnixStream;
-
-    async fn connect(&self) -> std::io::Result<Self::Transport> {
-        tokio::net::UnixStream::connect(&self.path).await
-    }
-}
-
-/// Roam handshake config shared across all DAW connections.
-fn handshake_config() -> HandshakeConfig {
-    HandshakeConfig {
-        max_payload_size: 1024 * 1024,            // 1 MiB
-        initial_channel_credit: 16 * 1024 * 1024, // 16 MiB — matches server
-        max_concurrent_requests: 64,
-        ..Default::default()
-    }
+/// Returns an `ErasedCaller` suitable for `Daw::new()` / `Daw::init()`.
+async fn connect_to_daw(path: &Path) -> eyre::Result<ErasedCaller> {
+    let stream = tokio::net::UnixStream::connect(path).await?;
+    let link = roam_stream::StreamLink::unix(stream);
+    let (caller, _session_handle) = roam::initiator(link)
+        .max_concurrent_requests(64)
+        .establish::<roam::DriverCaller>(())
+        .await?;
+    Ok(ErasedCaller::new(caller))
 }
 
 // ============================================================================
@@ -408,11 +395,10 @@ fn discover_sockets() -> Vec<(u32, PathBuf)> {
         .collect()
 }
 
-/// Connect to a DAW socket using roam's auto-reconnect `Connector` pattern.
+/// Connect to a DAW socket with retry, then classify and register it.
 ///
-/// This spawns a persistent connection that automatically reconnects with
-/// exponential backoff if the DAW restarts. Once connected, it queries
-/// project names, classifies the DAW, and registers it.
+/// Retries connection with exponential backoff (up to ~8 s) since the socket
+/// may appear on disk before the REAPER extension is ready to accept.
 fn spawn_daw_connection(pid: u32, path: PathBuf) {
     // Mark as connecting before spawning to prevent duplicate spawns
     if !DawRegistry::global().mark_connecting(pid) {
@@ -420,20 +406,33 @@ fn spawn_daw_connection(pid: u32, path: PathBuf) {
     }
 
     tokio::spawn(async move {
-        let connector = ReaperConnector { path: path.clone() };
-        let config = handshake_config();
-        let client = roam_stream::connect(connector, config, roam_session::NoDispatcher);
+        // Retry with exponential backoff (250ms, 500ms, 1s, 2s, 4s, 8s)
+        let mut delay = Duration::from_millis(250);
+        let max_attempts: u32 = 6;
+        let mut attempt = 0;
 
-        // Wait for the initial connection (roam retries with backoff)
-        let handle = match client.handle().await {
-            Ok(h) => h,
-            Err(e) => {
-                warn!(pid, "Failed to connect to DAW: {}", e);
-                return;
+        let caller = loop {
+            match connect_to_daw(&path).await {
+                Ok(c) => break c,
+                Err(e) => {
+                    attempt += 1;
+                    if attempt >= max_attempts {
+                        warn!(pid, "Failed to connect to DAW after {} attempts: {}", attempt, e);
+                        DawRegistry::global()
+                            .connecting
+                            .write()
+                            .expect("connecting lock poisoned")
+                            .remove(&pid);
+                        return;
+                    }
+                    debug!(pid, attempt, delay_ms = delay.as_millis(), "Connection attempt failed, retrying: {}", e);
+                    tokio::time::sleep(delay).await;
+                    delay *= 2;
+                }
             }
         };
 
-        let daw = Daw::new(handle.clone());
+        let daw = Daw::new(caller.clone());
         info!(pid, path = %path.display(), "Connected to DAW");
 
         // Classify by ExtState role (primary) or project names (fallback)
@@ -444,7 +443,7 @@ fn spawn_daw_connection(pid: u32, path: PathBuf) {
             DawRole::Session => {
                 // If first session DAW, init the global Daw singleton
                 if Daw::try_get().is_none() {
-                    if let Err(e) = Daw::init(handle) {
+                    if let Err(e) = Daw::init(caller) {
                         warn!("Failed to init global DAW singleton: {}", e);
                     } else {
                         info!(pid, "Global DAW singleton initialized (first session DAW)");
@@ -585,8 +584,8 @@ async fn fetch_projects(daw: &Daw) -> Vec<ProjectInfo> {
 
 /// The main discovery loop. Runs forever, scanning for new DAW sockets.
 ///
-/// For each new socket found, spawns a persistent auto-reconnecting connection
-/// via `roam_stream::connect()`. Removes registry entries when sockets vanish.
+/// For each new socket found, spawns a connection task with retry/backoff.
+/// Removes registry entries when sockets vanish or health-checks fail.
 ///
 /// Call once via `tokio::spawn(daw_discovery_loop())`.
 pub async fn daw_discovery_loop() {

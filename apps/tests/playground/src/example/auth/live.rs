@@ -5,7 +5,6 @@ use better_auth::adapters::MemoryDatabaseAdapter;
 use better_auth::plugins::{EmailPasswordPlugin, SessionManagementPlugin};
 use better_auth::{AuthBuilder, AuthConfig, BetterAuth};
 use better_auth_core::types::{AuthRequest, HttpMethod};
-use roam::Context;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -102,7 +101,7 @@ impl AuthServiceLive {
 impl AuthService for AuthServiceLive {
     async fn sign_up(
         &self,
-        _cx: &Context,
+        ,
         email: String,
         password: String,
         name: String,
@@ -132,7 +131,7 @@ impl AuthService for AuthServiceLive {
         }
     }
 
-    async fn sign_in(&self, _cx: &Context, email: String, password: String) -> AuthResult {
+    async fn sign_in(&self, _email: String, password: String) -> AuthResult {
         let req = Self::make_request(
             HttpMethod::Post,
             "/sign-in/email",
@@ -158,7 +157,7 @@ impl AuthService for AuthServiceLive {
         }
     }
 
-    async fn validate_session(&self, _cx: &Context, token: String) -> Option<SessionToken> {
+    async fn validate_session(&self, _token: String) -> Option<SessionToken> {
         let req = Self::bearer_request(HttpMethod::Get, "/get-session", &token);
         match self.auth.handle_request(req).await {
             Ok(resp) if resp.status == 200 => {
@@ -174,7 +173,7 @@ impl AuthService for AuthServiceLive {
         }
     }
 
-    async fn sign_out(&self, _cx: &Context, token: String) {
+    async fn sign_out(&self, _token: String) {
         let req = Self::bearer_request(HttpMethod::Post, "/sign-out", &token);
         let _ = self.auth.handle_request(req).await;
     }

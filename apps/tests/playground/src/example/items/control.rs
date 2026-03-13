@@ -88,14 +88,14 @@ where
 
     pub async fn list(&self, token: &SessionToken) -> Vec<ItemInfo> {
         let cx = self.context_factory.make_context();
-        self.service.list_items(&cx, token.clone()).await
+        self.service.list_items(token.clone()).await
     }
 
     pub async fn create(&self, token: &SessionToken, name: ItemName<ValidName>) -> Option<String> {
         let cx = self.context_factory.make_context();
         let id = self
             .service
-            .create_item(&cx, token.clone(), name.as_str().to_string())
+            .create_item(token.clone(), name.as_str().to_string())
             .await;
         if id.is_empty() {
             None
@@ -107,21 +107,21 @@ where
     pub async fn toggle(&self, token: &SessionToken, id: &str) {
         let cx = self.context_factory.make_context();
         self.service
-            .toggle_item(&cx, token.clone(), id.to_string())
+            .toggle_item(token.clone(), id.to_string())
             .await;
     }
 
     pub async fn delete(&self, token: &SessionToken, id: &str) {
         let cx = self.context_factory.make_context();
         self.service
-            .delete_item(&cx, token.clone(), id.to_string())
+            .delete_item(token.clone(), id.to_string())
             .await;
     }
 
     pub async fn subscribe(&self, token: &SessionToken) -> eyre::Result<roam::Rx<ItemEvent>> {
         let cx = self.context_factory.make_context();
         let (tx, rx) = roam::channel::<ItemEvent>();
-        self.service.subscribe(&cx, token.clone(), tx).await;
+        self.service.subscribe(token.clone(), tx).await;
         Ok(rx)
     }
 }
@@ -130,7 +130,7 @@ where
 mod tests {
     use super::*;
     use crate::example::context::ContextFactory;
-    use roam::{Context, Tx};
+    use roam::Tx;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Mutex;
 
@@ -177,7 +177,7 @@ mod tests {
     }
 
     impl ItemService for FakeItemService {
-        async fn list_items(&self, _cx: &Context, _token: SessionToken) -> Vec<ItemInfo> {
+        async fn list_items(&self, __token: SessionToken) -> Vec<ItemInfo> {
             vec![ItemInfo {
                 id: "i-1".into(),
                 name: "demo".into(),
@@ -185,15 +185,15 @@ mod tests {
             }]
         }
 
-        async fn create_item(&self, _cx: &Context, _token: SessionToken, _name: String) -> String {
+        async fn create_item(&self, __token: SessionToken, _name: String) -> String {
             self.next_create_id.lock().unwrap().clone()
         }
 
-        async fn toggle_item(&self, _cx: &Context, _token: SessionToken, _id: String) {}
+        async fn toggle_item(&self, __token: SessionToken, _id: String) {}
 
-        async fn delete_item(&self, _cx: &Context, _token: SessionToken, _id: String) {}
+        async fn delete_item(&self, __token: SessionToken, _id: String) {}
 
-        async fn subscribe(&self, _cx: &Context, _token: SessionToken, _tx: Tx<ItemEvent>) {}
+        async fn subscribe(&self, __token: SessionToken, _tx: Tx<ItemEvent>) {}
     }
 
     fn token() -> SessionToken {

@@ -347,18 +347,7 @@ async fn release_batch_tab(daw: &Daw, batch: &Arc<BatchTab>) {
 //  Connection
 // ─────────────────────────────────────────────────────────────
 
-/// Connector for the REAPER extension's Unix socket.
-struct SocketConnector {
-    path: PathBuf,
-}
-
-impl roam_stream::Connector for SocketConnector {
-    type Transport = tokio::net::UnixStream;
-
-    async fn connect(&self) -> std::io::Result<Self::Transport> {
-        tokio::net::UnixStream::connect(&self.path).await
-    }
-}
+// Connection uses roam v7 initiator API (no more Connector trait)
 
 /// Connect to a running REAPER instance via roam over Unix socket.
 ///
@@ -395,15 +384,14 @@ pub async fn connect_daw_at(socket_override: Option<&Path>) -> Result<Daw> {
     // Brief pause to let the listener fully bind
     tokio::time::sleep(Duration::from_millis(200)).await;
 
-    let connector = SocketConnector { path: socket_path };
-    let client = roam_inprocess::connect(connector).await?;
-
-    let handle = client
-        .handle()
+    let stream = tokio::net::UnixStream::connect(&socket_path).await?;
+    let link = roam_stream::StreamLink::unix(stream);
+    let (caller, _session) = roam::initiator(link)
+        .establish::<roam::DriverCaller>(())
         .await
-        .map_err(|e| eyre::eyre!("Failed to get roam connection handle: {e}"))?;
+        .map_err(|e| eyre::eyre!("Failed to establish roam session: {:?}", e))?;
 
-    Ok(Daw::new(handle))
+    Ok(Daw::new(roam::ErasedCaller::new(caller)))
 }
 
 /// Discover the first available `/tmp/fts-daw-*.sock` socket.

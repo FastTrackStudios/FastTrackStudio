@@ -21,7 +21,7 @@ roam-stream.workspace = true
 roam-local.workspace = true
 
 # Instrumentation
-peeps.workspace = true
+moire.workspace = true
 
 # WebSocket gateway (inlined — replaces gateway-ws crate)
 axum = { version = "0.8", features = ["ws"] }

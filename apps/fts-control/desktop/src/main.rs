@@ -49,6 +49,7 @@ mod launcher;
 mod macro_handler;
 mod midi_service;
 mod persistence;
+mod routed_handler;
 mod services;
 mod signal_views;
 
@@ -147,8 +148,7 @@ fn main() {
         )
         .init();
 
-    // Initialize peeps instrumentation for diagnostics
-    peeps::init!();
+    // moire instrumentation (init! removed in v7)
 
     #[cfg(feature = "desktop")]
     debug!("Starting FTS Control Desktop (Wry/WebView + WGPU hybrid renderer)");
@@ -434,7 +434,7 @@ fn App() -> Element {
                     }
                 }
                 Err(e) => {
-                    tracing::warn!("Failed to get audio latency: {}", e);
+                    tracing::warn!("Failed to get audio latency: {:?}", e);
                 }
             }
 
@@ -469,7 +469,7 @@ fn App() -> Element {
 
         // Build setlist from open REAPER projects
         if let Err(e) = setlist_client.build_from_open_projects().await {
-            tracing::warn!("Failed to build setlist: {}", e);
+            tracing::warn!("Failed to build setlist: {:?}", e);
             return;
         }
 
@@ -507,7 +507,7 @@ fn App() -> Element {
                 refresh_session_chart_source();
             }
             Ok(None) => debug!("No setlist available"),
-            Err(e) => tracing::warn!("Failed to get setlist: {}", e),
+            Err(e) => tracing::warn!("Failed to get setlist: {:?}", e),
         }
 
         // Subscribe to setlist events (transport updates, active song changes, etc.)
@@ -519,8 +519,8 @@ fn App() -> Element {
                 debug!("Subscribed to SetlistService events (60Hz transport updates)");
 
                 // Process events continuously
-                while let Ok(Some(event)) = rx.recv().await {
-                    match event {
+                while let Ok(Some(event_ref)) = rx.recv().await {
+                    match &*event_ref {
                         session_proto::SetlistEvent::SetlistChanged(setlist) => {
                             debug!("Setlist changed: {} songs", setlist.songs.len());
                             let valid_guids: std::collections::HashSet<String> = setlist
@@ -531,14 +531,15 @@ fn App() -> Element {
                             SONG_CHARTS
                                 .write()
                                 .retain(|guid, _| valid_guids.contains(guid));
-                            *SETLIST_STRUCTURE.write() = setlist;
+                            *SETLIST_STRUCTURE.write() = setlist.clone();
                             refresh_session_chart_source();
                         }
                         session_proto::SetlistEvent::SongHydrated { index, song } => {
+                            let index = *index;
                             let is_active_song = ACTIVE_INDICES.peek().song_index == Some(index);
                             let mut setlist = SETLIST_STRUCTURE.write();
                             if index < setlist.songs.len() {
-                                setlist.songs[index] = song;
+                                setlist.songs[index] = song.clone();
                             }
                             drop(setlist);
                             if is_active_song {
@@ -559,7 +560,7 @@ fn App() -> Element {
                             }
                         }
 
-                        session_proto::SetlistEvent::TransportUpdate(transports) => {
+                        session_proto::SetlistEvent::TransportUpdate(transports) => { let transports = transports.clone();
                             // PERFORMANCE: Only write to signals if values actually changed.
                             // Each .write() triggers re-renders for all subscribers.
 
@@ -700,6 +701,8 @@ fn App() -> Element {
                         }
 
                         session_proto::SetlistEvent::SongChartHydrated { index, chart } => {
+                            let index = *index;
+                            let chart = chart.clone();
                             SONG_CHARTS
                                 .write()
                                 .insert(chart.project_guid.clone(), chart);
@@ -711,7 +714,7 @@ fn App() -> Element {
 
                         session_proto::SetlistEvent::PositionChanged { indices, .. } => {
                             // High-frequency position update - update active indices
-                            *ACTIVE_INDICES.write() = indices;
+                            *ACTIVE_INDICES.write() = indices.clone();
                         }
                     }
                 }
@@ -719,7 +722,7 @@ fn App() -> Element {
                 tracing::warn!("SetlistEvent stream ended");
             }
             Err(e) => {
-                tracing::error!("Failed to subscribe to setlist events: {}", e);
+                tracing::error!("Failed to subscribe to setlist events: {:?}", e);
             }
         }
     });
@@ -1204,8 +1207,8 @@ async fn run_services() {
         }
     }
 
-    // 5. Create dispatcher for gateway
-    let dispatcher = services.create_dispatcher();
+    // 5. Create handler for gateway
+    let dispatcher = services.create_handler();
 
     // 6. Start WebSocket gateway for browser access
     let config = GatewayConfig::default();

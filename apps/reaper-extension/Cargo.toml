@@ -42,7 +42,7 @@ daw-control.workspace = true
 # Runtime
 roam.workspace = true
 roam-stream.workspace = true
-peeps.workspace = true
+moire.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true

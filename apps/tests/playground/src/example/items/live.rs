@@ -7,7 +7,7 @@ use super::repo::ItemRepo;
 use crate::example::auth::live::Auth;
 use crate::example::auth::proto::SessionToken;
 use better_auth_core::types::{AuthRequest, HttpMethod};
-use roam::{Context, Tx};
+use roam::Tx;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
@@ -93,14 +93,14 @@ impl ItemServiceLive {
 }
 
 impl ItemService for ItemServiceLive {
-    async fn list_items(&self, _cx: &Context, token: SessionToken) -> Vec<ItemInfo> {
+    async fn list_items(&self, _token: SessionToken) -> Vec<ItemInfo> {
         match self.validate(&token).await {
             Some(user_id) => self.read_items(&user_id).await,
             None => Vec::new(),
         }
     }
 
-    async fn create_item(&self, _cx: &Context, token: SessionToken, name: String) -> String {
+    async fn create_item(&self, _token: SessionToken, name: String) -> String {
         let Some(user_id) = self.validate(&token).await else {
             return String::new();
         };
@@ -116,7 +116,7 @@ impl ItemService for ItemServiceLive {
         id
     }
 
-    async fn toggle_item(&self, _cx: &Context, token: SessionToken, id: String) {
+    async fn toggle_item(&self, _token: SessionToken, id: String) {
         let Some(user_id) = self.validate(&token).await else {
             return;
         };
@@ -125,7 +125,7 @@ impl ItemService for ItemServiceLive {
         }
     }
 
-    async fn delete_item(&self, _cx: &Context, token: SessionToken, id: String) {
+    async fn delete_item(&self, _token: SessionToken, id: String) {
         let Some(user_id) = self.validate(&token).await else {
             return;
         };
@@ -134,7 +134,7 @@ impl ItemService for ItemServiceLive {
         }
     }
 
-    async fn subscribe(&self, _cx: &Context, token: SessionToken, tx: Tx<ItemEvent>) {
+    async fn subscribe(&self, _token: SessionToken, tx: Tx<ItemEvent>) {
         if let Some(user_id) = self.validate(&token).await {
             let items = self.read_items(&user_id).await;
             let _ = tx.send(&ItemEvent::ListChanged { items }).await;

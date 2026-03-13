@@ -6,91 +6,223 @@
 //! # Architecture
 //!
 //! ```text
-//!     Browser ──WebSocket──► axum server ──► roam accept_framed ──► LocalServices
+//!     Browser ──WebSocket──► axum server ──► roam acceptor ──► Handler
 //! ```
 
 use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::Duration;
 
 use axum::Router;
 use axum::extract::ws::{Message, WebSocket};
 use axum::extract::{State, WebSocketUpgrade};
 use axum::response::IntoResponse;
 use axum::routing::get;
-use futures_util::{SinkExt, StreamExt};
-use roam::session::ServiceDispatcher;
-use roam_session::MessageTransport;
-use roam_stream::{HandshakeConfig, accept_framed};
-use roam_wire::Message as RoamMessage;
+use roam::{Backing, DriverCaller, DriverReplySink, Handler, Link, LinkRx, LinkTx, LinkTxPermit, WriteSlot};
 use tokio::net::TcpListener;
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, mpsc};
+use tokio::task::JoinHandle;
 use tower_http::services::ServeDir;
 use tracing::{debug, info, warn};
 
 // ============================================================================
-// AxumWsTransport
+// AxumWsLink — implements roam's Link trait for axum WebSocket
 // ============================================================================
 
-struct AxumWsTransport {
-    sender: futures_util::stream::SplitSink<WebSocket, Message>,
-    receiver: futures_util::stream::SplitStream<WebSocket>,
-    last_decoded: Vec<u8>,
+/// A [`Link`] implementation over an axum [`WebSocket`] connection.
+///
+/// Each roam payload maps 1:1 to a binary WebSocket frame. The WebSocket
+/// protocol preserves message boundaries natively, so no length-prefix
+/// framing is needed.
+struct AxumWsLink {
+    socket: WebSocket,
 }
 
-impl AxumWsTransport {
+impl AxumWsLink {
     fn new(socket: WebSocket) -> Self {
-        let (sender, receiver) = socket.split();
-        Self { sender, receiver, last_decoded: Vec::new() }
+        Self { socket }
     }
 }
 
-impl MessageTransport for AxumWsTransport {
-    async fn send(&mut self, msg: &RoamMessage) -> io::Result<()> {
-        let payload = facet_postcard::to_vec(msg)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
-        self.sender
-            .send(Message::Binary(payload.into()))
-            .await
-            .map_err(|e| io::Error::other(format!("WebSocket send failed: {e}")))?;
-        Ok(())
-    }
+impl Link for AxumWsLink {
+    type Tx = AxumWsLinkTx;
+    type Rx = AxumWsLinkRx;
 
-    async fn recv_timeout(&mut self, timeout: Duration) -> io::Result<Option<RoamMessage>> {
+    fn split(self) -> (Self::Tx, Self::Rx) {
+        let (tx_out, rx_out) = mpsc::channel::<Vec<u8>>(1);
+        let (tx_in, rx_in) = mpsc::channel::<Result<Message, io::Error>>(1);
+
+        let io_task = tokio::spawn(axum_ws_io_loop(self.socket, rx_out, tx_in));
+
+        (
+            AxumWsLinkTx {
+                tx: tx_out,
+                io_task,
+            },
+            AxumWsLinkRx { rx: rx_in },
+        )
+    }
+}
+
+/// Background I/O task that owns the axum WebSocket.
+///
+/// Multiplexes outbound writes (from the mpsc channel) with inbound reads
+/// (forwarded to the read channel).
+async fn axum_ws_io_loop(
+    mut ws: WebSocket,
+    mut rx_out: mpsc::Receiver<Vec<u8>>,
+    tx_in: mpsc::Sender<Result<Message, io::Error>>,
+) {
+    loop {
         tokio::select! {
-            result = self.recv() => result,
-            _ = tokio::time::sleep(timeout) => Ok(None),
-        }
-    }
-
-    async fn recv(&mut self) -> io::Result<Option<RoamMessage>> {
-        loop {
-            match self.receiver.next().await {
-                Some(Ok(Message::Binary(data))) => {
-                    self.last_decoded = data.to_vec();
-                    let msg: RoamMessage = facet_postcard::from_slice(&self.last_decoded)
-                        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("postcard: {e}")))?;
-                    return Ok(Some(msg));
+            msg = rx_out.recv() => {
+                match msg {
+                    Some(bytes) => {
+                        if let Err(e) = ws.send(Message::Binary(bytes.into())).await {
+                            let _ = tx_in.send(Err(io::Error::other(e.to_string()))).await;
+                            return;
+                        }
+                    }
+                    None => {
+                        // Write channel closed — drop the WebSocket.
+                        return;
+                    }
                 }
-                Some(Ok(Message::Text(text))) => {
-                    self.last_decoded = text.as_bytes().to_vec();
-                    let msg: RoamMessage = facet_postcard::from_slice(&self.last_decoded)
-                        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("postcard: {e}")))?;
-                    return Ok(Some(msg));
+            }
+            frame = ws.recv() => {
+                match frame {
+                    Some(Ok(msg)) => {
+                        if tx_in.send(Ok(msg)).await.is_err() {
+                            // Reader dropped — shut down.
+                            return;
+                        }
+                    }
+                    Some(Err(e)) => {
+                        let _ = tx_in.send(Err(io::Error::other(e.to_string()))).await;
+                        return;
+                    }
+                    None => {
+                        // WebSocket stream ended.
+                        return;
+                    }
                 }
-                Some(Ok(Message::Close(_))) => return Ok(None),
-                Some(Ok(Message::Ping(_) | Message::Pong(_))) => continue,
-                Some(Err(e)) => {
-                    return Err(io::Error::other(format!("WebSocket error: {e}")));
-                }
-                None => return Ok(None),
             }
         }
     }
+}
 
-    fn last_decoded(&self) -> &[u8] {
-        &self.last_decoded
+// ---------------------------------------------------------------------------
+// Tx
+// ---------------------------------------------------------------------------
+
+/// Sending half of an [`AxumWsLink`].
+struct AxumWsLinkTx {
+    tx: mpsc::Sender<Vec<u8>>,
+    io_task: JoinHandle<()>,
+}
+
+/// Permit for sending one payload through an [`AxumWsLinkTx`].
+struct AxumWsLinkTxPermit {
+    permit: mpsc::OwnedPermit<Vec<u8>>,
+}
+
+/// Write slot for [`AxumWsLinkTx`].
+struct AxumWsWriteSlot {
+    buf: Vec<u8>,
+    permit: mpsc::OwnedPermit<Vec<u8>>,
+}
+
+impl LinkTx for AxumWsLinkTx {
+    type Permit = AxumWsLinkTxPermit;
+
+    async fn reserve(&self) -> io::Result<Self::Permit> {
+        let permit = self.tx.clone().reserve_owned().await.map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::ConnectionReset,
+                "websocket writer task stopped",
+            )
+        })?;
+        Ok(AxumWsLinkTxPermit { permit })
+    }
+
+    async fn close(self) -> io::Result<()> {
+        drop(self.tx);
+        self.io_task.await.map_err(io::Error::other)
+    }
+}
+
+impl LinkTxPermit for AxumWsLinkTxPermit {
+    type Slot = AxumWsWriteSlot;
+
+    fn alloc(self, len: usize) -> io::Result<Self::Slot> {
+        Ok(AxumWsWriteSlot {
+            buf: vec![0u8; len],
+            permit: self.permit,
+        })
+    }
+}
+
+impl WriteSlot for AxumWsWriteSlot {
+    fn as_mut_slice(&mut self) -> &mut [u8] {
+        &mut self.buf
+    }
+
+    fn commit(self) {
+        drop(self.permit.send(self.buf));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Rx
+// ---------------------------------------------------------------------------
+
+/// Receiving half of an [`AxumWsLink`].
+struct AxumWsLinkRx {
+    rx: mpsc::Receiver<Result<Message, io::Error>>,
+}
+
+/// Error type for [`AxumWsLinkRx`].
+#[derive(Debug)]
+struct AxumWsLinkRxError(io::Error);
+
+impl std::fmt::Display for AxumWsLinkRxError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "axum websocket rx: {}", self.0)
+    }
+}
+
+impl std::error::Error for AxumWsLinkRxError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.0)
+    }
+}
+
+impl LinkRx for AxumWsLinkRx {
+    type Error = AxumWsLinkRxError;
+
+    async fn recv(&mut self) -> Result<Option<Backing>, Self::Error> {
+        loop {
+            match self.rx.recv().await {
+                Some(Ok(Message::Binary(data))) => {
+                    return Ok(Some(Backing::Boxed(Vec::from(data).into_boxed_slice())));
+                }
+                Some(Ok(Message::Close(_))) | None => {
+                    return Ok(None);
+                }
+                Some(Ok(Message::Ping(_) | Message::Pong(_))) => {
+                    continue;
+                }
+                Some(Ok(Message::Text(_))) => {
+                    return Err(AxumWsLinkRxError(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "text frames not allowed on roam websocket link",
+                    )));
+                }
+                Some(Err(e)) => {
+                    return Err(AxumWsLinkRxError(e));
+                }
+            }
+        }
     }
 }
 
@@ -104,16 +236,16 @@ enum GatewayState {
     Suspended,
 }
 
-struct StandaloneGateway<D: ServiceDispatcher + Clone + Send + Sync + 'static> {
-    dispatcher: D,
+struct StandaloneGateway<H: Handler<DriverReplySink> + Clone + Send + Sync + 'static> {
+    handler: H,
     state: Arc<RwLock<GatewayState>>,
     static_dir: Option<String>,
 }
 
-impl<D: ServiceDispatcher + Clone + Send + Sync + 'static> StandaloneGateway<D> {
-    fn new(dispatcher: D) -> Self {
+impl<H: Handler<DriverReplySink> + Clone + Send + Sync + 'static> StandaloneGateway<H> {
+    fn new(handler: H) -> Self {
         let static_dir = std::env::var("GATEWAY_WS_STATIC_DIR").ok();
-        Self { dispatcher, state: Arc::new(RwLock::new(GatewayState::Active)), static_dir }
+        Self { handler, state: Arc::new(RwLock::new(GatewayState::Active)), static_dir }
     }
 
     fn with_static_dir(mut self, dir: impl Into<String>) -> Self {
@@ -126,7 +258,7 @@ impl<D: ServiceDispatcher + Clone + Send + Sync + 'static> StandaloneGateway<D> 
         let gateway = Arc::new(self);
 
         let mut app = Router::new()
-            .route("/ws", get(ws_handler::<D>))
+            .route("/ws", get(ws_handler::<H>))
             .with_state(gateway.clone());
 
         if let Some(ref static_dir) = gateway.static_dir {
@@ -141,34 +273,32 @@ impl<D: ServiceDispatcher + Clone + Send + Sync + 'static> StandaloneGateway<D> 
     }
 }
 
-async fn ws_handler<D: ServiceDispatcher + Clone + Send + Sync + 'static>(
+async fn ws_handler<H: Handler<DriverReplySink> + Clone + Send + Sync + 'static>(
     ws: WebSocketUpgrade,
-    State(gateway): State<Arc<StandaloneGateway<D>>>,
+    State(gateway): State<Arc<StandaloneGateway<H>>>,
 ) -> impl IntoResponse {
     ws.on_upgrade(move |socket| handle_socket(socket, gateway))
 }
 
-async fn handle_socket<D: ServiceDispatcher + Clone + Send + Sync + 'static>(
+async fn handle_socket<H: Handler<DriverReplySink> + Clone + Send + Sync + 'static>(
     socket: WebSocket,
-    gateway: Arc<StandaloneGateway<D>>,
+    gateway: Arc<StandaloneGateway<H>>,
 ) {
     if *gateway.state.read().await == GatewayState::Suspended {
         warn!("Connection rejected: gateway suspended");
         return;
     }
 
-    let transport = AxumWsTransport::new(socket);
-    let config = HandshakeConfig {
-        max_payload_size: 1024 * 1024,
-        initial_channel_credit: 16 * 1024 * 1024,
-        max_concurrent_requests: 64,
-    };
-    match accept_framed(transport, config, gateway.dispatcher.clone()).await {
-        Ok((_handle, _incoming, driver)) => {
-            debug!("WebSocket client connected");
-            if let Err(e) = driver.run().await {
-                debug!("WebSocket session ended: {:?}", e);
-            }
+    let link = AxumWsLink::new(socket);
+    match roam::acceptor(link)
+        .max_concurrent_requests(64)
+        .establish::<DriverCaller>(gateway.handler.clone())
+        .await
+    {
+        Ok((_caller, _session_handle)) => {
+            debug!("WebSocket client connected, session established");
+            // Session runs in background (spawned by establish).
+            // Keep the handler alive until the connection drops.
         }
         Err(e) => warn!("WebSocket handshake failed: {:?}", e),
     }
@@ -179,16 +309,16 @@ async fn handle_socket<D: ServiceDispatcher + Clone + Send + Sync + 'static>(
 // ============================================================================
 
 /// Start the WebSocket gateway server.
-pub async fn start_gateway<D>(
-    dispatcher: D,
+pub async fn start_gateway<H>(
+    handler: H,
     bind_addr: &str,
     static_dir: Option<&str>,
 ) -> eyre::Result<()>
 where
-    D: ServiceDispatcher + Clone + Send + Sync + 'static,
+    H: Handler<DriverReplySink> + Clone + Send + Sync + 'static,
 {
     debug!("Starting WebSocket gateway on {}", bind_addr);
-    let mut gateway = StandaloneGateway::new(dispatcher);
+    let mut gateway = StandaloneGateway::new(handler);
     if let Some(dir) = static_dir {
         gateway = gateway.with_static_dir(dir);
     }

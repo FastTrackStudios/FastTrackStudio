@@ -14,7 +14,7 @@
 //!                                     Daw (loopback conn)
 //!                                              │
 //!                                              ▼
-//!                                     DAW Dispatcher (in-process)
+//!                                     DAW Handler (in-process)
 //!                                              │
 //!                                              ▼
 //!                                     daw-reaper (REAPER API)
@@ -22,13 +22,13 @@
 
 use actions_proto::ActionResult;
 use daw_control::Daw;
-use roam::session::{ConnectionHandle, HandshakeConfig, ServiceDispatcher};
-use roam_session::RoutedDispatcher;
-use roam_stream::LengthPrefixedFramed;
+use roam::{DriverCaller, ErasedCaller};
 use session::{SetlistServiceImpl, SongServiceImpl};
 use session_proto::{SetlistServiceDispatcher, SongServiceDispatcher};
 use std::sync::OnceLock;
 use tracing::{debug, info, warn};
+
+use crate::routed_handler::RoutedHandler;
 
 /// Global session manager singleton.
 static SESSION: OnceLock<SessionManager> = OnceLock::new();
@@ -37,6 +37,8 @@ static SESSION: OnceLock<SessionManager> = OnceLock::new();
 pub struct SessionManager {
     setlist_service: SetlistServiceImpl,
     song_service: SongServiceImpl,
+    /// The combined DAW + session handler for the Unix socket server.
+    daw_handler: RoutedHandler,
 }
 
 impl SessionManager {
@@ -60,11 +62,22 @@ impl SessionManager {
         &self.song_service
     }
 
-    /// Create a combined session dispatcher for the Unix socket chain.
-    pub fn create_dispatcher(&self) -> impl ServiceDispatcher + Clone {
+    /// Create a combined DAW + session handler for the Unix socket.
+    pub fn create_handler(&self) -> RoutedHandler {
+        use session_proto::{
+            setlist_service_service_descriptor, song_service_service_descriptor,
+        };
+
         let setlist_dispatcher = SetlistServiceDispatcher::new(self.setlist_service.clone());
         let song_dispatcher = SongServiceDispatcher::new(self.song_service.clone());
-        RoutedDispatcher::new(setlist_dispatcher, song_dispatcher)
+
+        self.daw_handler
+            .clone()
+            .with(
+                setlist_service_service_descriptor(),
+                setlist_dispatcher,
+            )
+            .with(song_service_service_descriptor(), song_dispatcher)
     }
 }
 
@@ -76,18 +89,15 @@ impl SessionManager {
 /// Must be called from within a tokio runtime context (e.g., `block_on`).
 /// Must be called AFTER the DAW dispatcher is registered (so the loopback
 /// connection has services to talk to).
-pub async fn init<D>(daw_dispatcher: D) -> eyre::Result<()>
-where
-    D: ServiceDispatcher + Clone + Send + Sync + 'static,
-{
+pub async fn init(daw_handler: RoutedHandler) -> eyre::Result<()> {
     info!("Initializing session subsystem...");
 
     // Create in-process loopback connection to DAW services
-    let handle = create_loopback_connection(daw_dispatcher).await?;
+    let caller = create_loopback_connection(&daw_handler).await?;
 
     // Initialize the global Daw singleton so the session crate can call
     // daw-control methods that resolve locally via the loopback
-    Daw::init(handle)?;
+    Daw::init(caller)?;
     info!("Daw singleton initialized via in-process loopback");
 
     // Create session services
@@ -98,6 +108,7 @@ where
         .set(SessionManager {
             setlist_service,
             song_service,
+            daw_handler,
         })
         .map_err(|_| eyre::eyre!("SessionManager already initialized"))?;
 
@@ -105,55 +116,42 @@ where
     Ok(())
 }
 
-/// Create an in-process loopback connection to the DAW dispatcher.
+/// Create an in-process loopback connection to the DAW handler.
 ///
-/// Uses `tokio::io::duplex` for a zero-copy in-memory bidirectional pipe,
-/// wrapped in `LengthPrefixedFramed` for roam message framing.
-async fn create_loopback_connection<D>(dispatcher: D) -> eyre::Result<ConnectionHandle>
-where
-    D: ServiceDispatcher + Clone + Send + Sync + 'static,
-{
-    // In-memory bidirectional pipe (256 KB buffer for high-frequency updates)
-    let (client_stream, server_stream) = tokio::io::duplex(256 * 1024);
-
-    let client_framed = LengthPrefixedFramed::new(client_stream);
-    let server_framed = LengthPrefixedFramed::new(server_stream);
-
-    // Large credit for 60Hz transport streaming
-    let config = HandshakeConfig {
-        max_payload_size: 1024 * 1024,            // 1 MiB
-        initial_channel_credit: 16 * 1024 * 1024, // 16 MiB
-        max_concurrent_requests: 64,
-        ..Default::default()
-    };
+/// Uses `roam::memory_link_pair` for a zero-copy in-memory bidirectional pipe.
+async fn create_loopback_connection(
+    handler: &RoutedHandler,
+) -> eyre::Result<ErasedCaller> {
+    // In-memory bidirectional link pair
+    let (client_link, server_link) = roam::memory_link_pair(256);
 
     // Server side: accepts and dispatches DAW service requests
-    let server_config = config.clone();
+    let server_handler = handler.clone();
     tokio::spawn(async move {
-        match roam_session::accept_framed(server_framed, server_config, dispatcher).await {
-            Ok((_handle, _incoming, driver)) => {
-                if let Err(e) = driver.run().await {
-                    warn!("DAW loopback server driver ended: {}", e);
-                }
+        match roam::acceptor(server_link)
+            .establish::<DriverCaller>(server_handler)
+            .await
+        {
+            Ok((_caller, _session_handle)) => {
+                // Session runs in background (spawned by establish)
+                debug!("DAW loopback server session established");
+                // Keep alive until dropped
+                std::future::pending::<()>().await;
             }
             Err(e) => {
-                warn!("DAW loopback server accept failed: {}", e);
+                warn!("DAW loopback server accept failed: {:?}", e);
             }
         }
     });
 
-    // Client side: we get the ConnectionHandle for Daw::init()
-    let (handle, _incoming, driver) =
-        roam_session::initiate_framed(client_framed, config, roam_session::NoDispatcher).await?;
-
-    tokio::spawn(async move {
-        if let Err(e) = driver.run().await {
-            warn!("DAW loopback client driver ended: {}", e);
-        }
-    });
+    // Client side: we get the ErasedCaller for Daw::init()
+    let (caller, _session_handle) = roam::initiator(client_link)
+        .establish::<DriverCaller>(())
+        .await
+        .map_err(|e| eyre::eyre!("Failed to establish roam session: {:?}", e))?;
 
     debug!("Created in-process loopback connection to DAW services");
-    Ok(handle)
+    Ok(ErasedCaller::new(caller))
 }
 
 // =============================================================================
@@ -162,17 +160,6 @@ where
 //
 // These handlers are called from REAPER actions (main thread, synchronous).
 // They use the tokio runtime to call async session service methods.
-
-/// Create a dummy roam Context for direct (non-RPC) service calls.
-fn dummy_context() -> roam::session::Context {
-    roam::session::Context::new(
-        roam_wire::ConnectionId::ROOT,
-        roam_wire::RequestId::new(0),
-        roam_wire::MethodId::new(0),
-        roam_wire::Metadata::default(),
-        Vec::new(),
-    )
-}
 
 /// Handle: Build Setlist from open projects
 pub fn handle_build_setlist() -> ActionResult {
@@ -183,9 +170,8 @@ pub fn handle_build_setlist() -> ActionResult {
     // The SetlistService::build_from_open_projects is async.
     // Dispatch to the tokio runtime via a spawned task.
     let setlist_svc = session.setlist_service().clone();
-    peeps::spawn_tracked!("session-build-setlist", async move {
-        let cx = dummy_context();
-        session_proto::SetlistService::build_from_open_projects(&setlist_svc, &cx).await;
+    moire::task::spawn(async move {
+        session_proto::SetlistService::build_from_open_projects(&setlist_svc).await;
         info!("Setlist built from open projects");
     });
 
@@ -198,9 +184,8 @@ pub fn handle_next_song() -> ActionResult {
         return ActionResult::failure("Session not initialized");
     };
     let setlist_svc = session.setlist_service().clone();
-    peeps::spawn_tracked!("session-next-song", async move {
-        let cx = dummy_context();
-        session_proto::SetlistService::next_song(&setlist_svc, &cx).await;
+    moire::task::spawn(async move {
+        session_proto::SetlistService::next_song(&setlist_svc).await;
     });
     ActionResult::success()
 }
@@ -211,9 +196,8 @@ pub fn handle_previous_song() -> ActionResult {
         return ActionResult::failure("Session not initialized");
     };
     let setlist_svc = session.setlist_service().clone();
-    peeps::spawn_tracked!("session-prev-song", async move {
-        let cx = dummy_context();
-        session_proto::SetlistService::previous_song(&setlist_svc, &cx).await;
+    moire::task::spawn(async move {
+        session_proto::SetlistService::previous_song(&setlist_svc).await;
     });
     ActionResult::success()
 }
@@ -224,9 +208,8 @@ pub fn handle_next_section() -> ActionResult {
         return ActionResult::failure("Session not initialized");
     };
     let setlist_svc = session.setlist_service().clone();
-    peeps::spawn_tracked!("session-next-section", async move {
-        let cx = dummy_context();
-        session_proto::SetlistService::next_section(&setlist_svc, &cx).await;
+    moire::task::spawn(async move {
+        session_proto::SetlistService::next_section(&setlist_svc).await;
     });
     ActionResult::success()
 }
@@ -237,9 +220,8 @@ pub fn handle_previous_section() -> ActionResult {
         return ActionResult::failure("Session not initialized");
     };
     let setlist_svc = session.setlist_service().clone();
-    peeps::spawn_tracked!("session-prev-section", async move {
-        let cx = dummy_context();
-        session_proto::SetlistService::previous_section(&setlist_svc, &cx).await;
+    moire::task::spawn(async move {
+        session_proto::SetlistService::previous_section(&setlist_svc).await;
     });
     ActionResult::success()
 }
@@ -250,9 +232,8 @@ pub fn handle_toggle_playback() -> ActionResult {
         return ActionResult::failure("Session not initialized");
     };
     let setlist_svc = session.setlist_service().clone();
-    peeps::spawn_tracked!("session-toggle-playback", async move {
-        let cx = dummy_context();
-        session_proto::SetlistService::toggle_playback(&setlist_svc, &cx).await;
+    moire::task::spawn(async move {
+        session_proto::SetlistService::toggle_playback(&setlist_svc).await;
     });
     ActionResult::success()
 }
@@ -263,9 +244,8 @@ pub fn handle_toggle_song_loop() -> ActionResult {
         return ActionResult::failure("Session not initialized");
     };
     let setlist_svc = session.setlist_service().clone();
-    peeps::spawn_tracked!("session-toggle-song-loop", async move {
-        let cx = dummy_context();
-        session_proto::SetlistService::toggle_song_loop(&setlist_svc, &cx).await;
+    moire::task::spawn(async move {
+        session_proto::SetlistService::toggle_song_loop(&setlist_svc).await;
     });
     ActionResult::success()
 }
@@ -276,9 +256,8 @@ pub fn handle_log_status() -> ActionResult {
         return ActionResult::failure("Session not initialized");
     };
     let setlist_svc = session.setlist_service().clone();
-    peeps::spawn_tracked!("session-log-status", async move {
-        let cx = dummy_context();
-        let setlist = session_proto::SetlistService::get_setlist(&setlist_svc, &cx).await;
+    moire::task::spawn(async move {
+        let setlist = session_proto::SetlistService::get_setlist(&setlist_svc).await;
         match setlist {
             Some(sl) => info!(
                 "Session status: {} songs in setlist '{}'",
