@@ -38,6 +38,90 @@ use routed_handler::RoutedHandler;
 use std::path::PathBuf;
 use tokio::net::UnixListener;
 
+// ============================================================================
+// Eager Plugin Loading (Helgobox pattern)
+// ============================================================================
+
+/// Loaded plugin libraries — kept alive for the process lifetime.
+static LOADED_PLUGINS: OnceLock<Vec<libloading::Library>> = OnceLock::new();
+
+/// Eagerly load FTS CLAP plugins and call `ReaperPluginEntry` on them.
+///
+/// This follows the Helgobox pattern: the extension loads the plugin .dylib
+/// and calls its `ReaperPluginEntry`, giving the plugin its own initialized
+/// `PluginContext`. Each .dylib has separate Rust statics, so the plugin
+/// gets its own `reaper-high::Reaper`, `TaskSupport`, and `daw-reaper`.
+fn eagerly_load_fts_plugins(context: PluginContext) {
+    let mut loaded = Vec::new();
+
+    // Reconstruct the raw plugin info from our PluginContext
+    let ext_context = match context.type_specific() {
+        reaper_low::TypeSpecificPluginContext::Extension(ext) => ext,
+        _ => {
+            warn!("Cannot eagerly load plugins: not an extension context");
+            return;
+        }
+    };
+    let mut raw_info = ext_context.to_raw();
+    let h_instance = context.h_instance();
+
+    // Search paths for fts-macros.clap bundle
+    let resource_path = HighReaper::get().resource_path().to_path_buf();
+    let home = std::env::var("HOME").unwrap_or_default();
+    let candidates: Vec<PathBuf> = vec![
+        // REAPER resource path (portable install)
+        resource_path.join("UserPlugins/FX/fts-macros.clap/Contents/MacOS/fts-macros").into(),
+        // Alternate: underscore variant (cdylib naming)
+        resource_path.join("UserPlugins/FX/fts-macros.clap/Contents/MacOS/fts_macros").into(),
+        // Standard system CLAP directory (macOS)
+        PathBuf::from(&home)
+            .join("Library/Audio/Plug-Ins/CLAP/fts-macros.clap/Contents/MacOS/fts-macros"),
+    ];
+
+    for path in &candidates {
+        if !path.exists() {
+            debug!("FTS plugin not found at: {}", path.display());
+            continue;
+        }
+
+        info!("Eagerly loading fts-macros from: {}", path.display());
+        match unsafe { libloading::Library::new(path) } {
+            Ok(lib) => {
+                // Look up ReaperPluginEntry symbol
+                type EntryFn = unsafe extern "C" fn(
+                    reaper_low::raw::HINSTANCE,
+                    *mut reaper_low::raw::reaper_plugin_info_t,
+                ) -> std::os::raw::c_int;
+
+                match unsafe { lib.get::<EntryFn>(b"ReaperPluginEntry\0") } {
+                    Ok(entry_fn) => {
+                        let result =
+                            unsafe { entry_fn(h_instance, &mut raw_info as *mut _) };
+                        if result != 0 {
+                            info!("FTS Macros: ReaperPluginEntry succeeded (result={})", result);
+                            loaded.push(lib);
+                        } else {
+                            warn!("FTS Macros: ReaperPluginEntry returned 0 (init failed)");
+                        }
+                    }
+                    Err(e) => {
+                        warn!(
+                            "FTS Macros: ReaperPluginEntry symbol not found: {}",
+                            e
+                        );
+                    }
+                }
+                break; // Found the plugin, stop searching
+            }
+            Err(e) => {
+                warn!("Failed to load fts-macros from {}: {}", path.display(), e);
+            }
+        }
+    }
+
+    let _ = LOADED_PLUGINS.set(loaded);
+}
+
 // Service dispatchers for method ID routing
 use daw_proto::{
     AudioEngineServiceDispatcher, ExtStateServiceDispatcher, FxServiceDispatcher,
@@ -466,6 +550,10 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     {
         warn!(%error, "Failed to register input-reaper runtime");
     }
+
+    // Eagerly load FTS CLAP plugins (Helgobox pattern)
+    // Must happen after initialize() so TaskSupport is ready
+    eagerly_load_fts_plugins(context);
 
     // Store app globally
     APP_INSTANCE

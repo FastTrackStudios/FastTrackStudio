@@ -38,6 +38,7 @@ dynamic-template.workspace = true
 session-proto.workspace = true
 session.workspace = true
 daw-control.workspace = true
+daw-control-sync.workspace = true
 
 # Runtime
 roam.workspace = true
@@ -49,6 +50,7 @@ tracing-subscriber.workspace = true
 fragile.workspace = true
 anyhow = "1.0"
 eyre = "0.6"
+libloading = "0.8"
 crossbeam-channel.workspace = true
 camino = "1.1"
 midly = "0.5.3"
