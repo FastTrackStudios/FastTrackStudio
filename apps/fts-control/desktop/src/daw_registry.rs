@@ -26,7 +26,9 @@ use daw_control::Daw;
 use daw_proto::ProjectInfo;
 use roam::ErasedCaller;
 use signal::reaper_applier::ReaperPatchApplier;
+use signal::rig_scene_manager::RigSceneManager;
 use signal_live::engine::DawPatchApplier;
+use signal_live::engine::RigSceneApplier;
 use tracing::{debug, info, warn};
 
 use crate::persistence;
@@ -111,6 +113,9 @@ static SIGNAL_REAPER_APPLIER: RwLock<Option<Arc<ReaperPatchApplier>>> = RwLock::
 /// The Signal DAW handle for querying audio device info.
 static SIGNAL_DAW: RwLock<Option<Daw>> = RwLock::new(None);
 
+/// Global rig scene manager for preloaded rig hierarchy switching.
+static SIGNAL_RIG_SCENE_MANAGER: RwLock<Option<Arc<RigSceneManager>>> = RwLock::new(None);
+
 /// Maps preset_id → FX GUID so we can find the REAPER plugin for write-back.
 /// Populated at capture time, used by apply and live-push operations.
 static BLOCK_FX_MAP: std::sync::LazyLock<RwLock<HashMap<String, String>>> =
@@ -129,6 +134,11 @@ pub fn signal_reaper_applier() -> Option<Arc<ReaperPatchApplier>> {
 /// Get the Signal DAW handle for audio device queries.
 pub fn signal_daw() -> Option<Daw> {
     SIGNAL_DAW.read().expect("lock poisoned").clone()
+}
+
+/// Get the rig scene manager if a Signal DAW has been discovered and wired.
+pub fn signal_rig_scene_manager() -> Option<Arc<RigSceneManager>> {
+    SIGNAL_RIG_SCENE_MANAGER.read().expect("lock poisoned").clone()
 }
 
 /// Register a preset_id → FX GUID mapping (called after FX capture).
@@ -153,6 +163,7 @@ fn clear_signal_statics() {
     *SIGNAL_APPLIER.write().expect("lock poisoned") = None;
     *SIGNAL_REAPER_APPLIER.write().expect("lock poisoned") = None;
     *SIGNAL_DAW.write().expect("lock poisoned") = None;
+    *SIGNAL_RIG_SCENE_MANAGER.write().expect("lock poisoned") = None;
     BLOCK_FX_MAP.write().expect("lock poisoned").clear();
 }
 
@@ -561,6 +572,60 @@ async fn wire_signal_applier(daw: &Daw, projects: &[ProjectInfo]) {
         "Signal applier wired to project '{}' (rig: {})",
         info.name, rig_name
     );
+
+    // Wire rig scene manager for preloaded scene switching
+    wire_rig_scene_manager(daw, &info.name, &rig_name).await;
+}
+
+/// Set up the `RigSceneManager` for preloaded rig hierarchy switching.
+///
+/// Creates an input track, stores the manager globally. Background preloading
+/// of scenes happens later when a rig is activated via the controller.
+async fn wire_rig_scene_manager(daw: &Daw, project_name: &str, rig_name: &str) {
+    let project = match daw.projects().await {
+        Ok(projects) => {
+            let mut found = None;
+            for p in projects {
+                if let Ok(info) = p.info().await {
+                    if info.name == project_name {
+                        found = Some(p);
+                        break;
+                    }
+                }
+            }
+            match found {
+                Some(p) => p,
+                None => {
+                    warn!("Cannot wire rig scene manager: project '{}' not found", project_name);
+                    return;
+                }
+            }
+        }
+        Err(e) => {
+            warn!("Cannot wire rig scene manager: failed to list projects: {}", e);
+            return;
+        }
+    };
+
+    // We need a SignalLive instance — construct a minimal one from a temporary in-memory DB.
+    // The RigSceneManager only uses load_rig_to_daw which needs repo access.
+    // In practice, this will be replaced with the real SignalLive when the controller is connected.
+    let signal_live = match signal::bootstrap_in_memory_controller_async().await {
+        Ok(ctrl) => ctrl.service().clone(),
+        Err(e) => {
+            warn!("Cannot wire rig scene manager: bootstrap failed: {}", e);
+            return;
+        }
+    };
+
+    let manager = Arc::new(RigSceneManager::new(signal_live));
+    if let Err(e) = manager.set_target(rig_name, project).await {
+        warn!("Failed to set rig scene manager target: {e}");
+        return;
+    }
+
+    *SIGNAL_RIG_SCENE_MANAGER.write().expect("lock poisoned") = Some(manager.clone());
+    info!("Rig scene manager wired for '{}'", rig_name);
 }
 
 /// Fetch project metadata from a connected DAW.
