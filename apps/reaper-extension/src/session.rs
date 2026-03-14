@@ -22,11 +22,11 @@
 
 use actions_proto::ActionResult;
 use daw_control::Daw;
-use roam::{DriverCaller, ErasedCaller};
+use daw_control_sync::LocalCaller;
 use session::{SetlistServiceImpl, SongServiceImpl};
 use session_proto::{SetlistServiceDispatcher, SongServiceDispatcher};
 use std::sync::OnceLock;
-use tracing::{debug, info, warn};
+use tracing::info;
 
 use crate::routed_handler::RoutedHandler;
 
@@ -39,6 +39,8 @@ pub struct SessionManager {
     song_service: SongServiceImpl,
     /// The combined DAW + session handler for the Unix socket server.
     daw_handler: RoutedHandler,
+    /// Keeps the in-process loopback connection alive.
+    _local_caller: LocalCaller,
 }
 
 impl SessionManager {
@@ -93,12 +95,12 @@ pub async fn init(daw_handler: RoutedHandler) -> eyre::Result<()> {
     info!("Initializing session subsystem...");
 
     // Create in-process loopback connection to DAW services
-    let caller = create_loopback_connection(&daw_handler).await?;
+    let local_caller = LocalCaller::new(daw_handler.clone()).await?;
 
     // Initialize the global Daw singleton so the session crate can call
     // daw-control methods that resolve locally via the loopback
-    Daw::init(caller)?;
-    info!("Daw singleton initialized via in-process loopback");
+    Daw::init(local_caller.erased_caller())?;
+    info!("Daw singleton initialized via LocalCaller (in-process)");
 
     // Create session services
     let setlist_service = SetlistServiceImpl::new();
@@ -109,49 +111,12 @@ pub async fn init(daw_handler: RoutedHandler) -> eyre::Result<()> {
             setlist_service,
             song_service,
             daw_handler,
+            _local_caller: local_caller,
         })
         .map_err(|_| eyre::eyre!("SessionManager already initialized"))?;
 
     info!("Session subsystem initialized");
     Ok(())
-}
-
-/// Create an in-process loopback connection to the DAW handler.
-///
-/// Uses `roam::memory_link_pair` for a zero-copy in-memory bidirectional pipe.
-async fn create_loopback_connection(
-    handler: &RoutedHandler,
-) -> eyre::Result<ErasedCaller> {
-    // In-memory bidirectional link pair
-    let (client_link, server_link) = roam::memory_link_pair(256);
-
-    // Server side: accepts and dispatches DAW service requests
-    let server_handler = handler.clone();
-    tokio::spawn(async move {
-        match roam::acceptor(server_link)
-            .establish::<DriverCaller>(server_handler)
-            .await
-        {
-            Ok((_caller, _session_handle)) => {
-                // Session runs in background (spawned by establish)
-                debug!("DAW loopback server session established");
-                // Keep alive until dropped
-                std::future::pending::<()>().await;
-            }
-            Err(e) => {
-                warn!("DAW loopback server accept failed: {:?}", e);
-            }
-        }
-    });
-
-    // Client side: we get the ErasedCaller for Daw::init()
-    let (caller, _session_handle) = roam::initiator(client_link)
-        .establish::<DriverCaller>(())
-        .await
-        .map_err(|e| eyre::eyre!("Failed to establish roam session: {:?}", e))?;
-
-    debug!("Created in-process loopback connection to DAW services");
-    Ok(ErasedCaller::new(caller))
 }
 
 // =============================================================================
@@ -259,12 +224,12 @@ pub fn handle_log_status() -> ActionResult {
     moire::task::spawn(async move {
         let setlist = session_proto::SetlistService::get_setlist(&setlist_svc).await;
         match setlist {
-            Some(sl) => info!(
+            Ok(sl) => info!(
                 "Session status: {} songs in setlist '{}'",
                 sl.songs.len(),
                 sl.name
             ),
-            None => info!("Session status: no setlist loaded"),
+            Err(_) => info!("Session status: no setlist loaded"),
         }
     });
     ActionResult::success()

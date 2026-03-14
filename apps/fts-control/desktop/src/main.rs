@@ -335,6 +335,14 @@ fn App() -> Element {
                     } else {
                         ctrl
                     };
+
+                    // Attach rig scene applier if a rig scene manager has been wired
+                    let ctrl = if let Some(manager) = daw_registry::signal_rig_scene_manager() {
+                        tracing::info!("Attaching rig scene applier to SignalController");
+                        ctrl.with_rig_scene_applier(manager)
+                    } else {
+                        ctrl
+                    };
                     tracing::info!("Signal database connected at: {}", db_path);
                     provide_context(ctrl.clone());
                     signal_store.set(Some(ctrl));
@@ -475,7 +483,7 @@ fn App() -> Element {
 
         // Get initial setlist
         match setlist_client.get_setlist().await {
-            Ok(Some(setlist)) => {
+            Ok(setlist) => {
                 debug!(
                     "Got setlist '{}' with {} songs",
                     setlist.name,
@@ -486,7 +494,7 @@ fn App() -> Element {
 
                 // Set initial active song
                 match setlist_client.get_active_song().await {
-                    Ok(Some(active_song)) => {
+                    Ok(active_song) => {
                         if let Some(idx) = songs
                             .iter()
                             .position(|s| s.project_guid == active_song.project_guid)
@@ -497,7 +505,7 @@ fn App() -> Element {
                             debug!("Active song: {} (index {})", active_song.name, idx);
                         }
                     }
-                    Ok(None) if !songs.is_empty() => {
+                    Err(_) if !songs.is_empty() => {
                         let mut indices = ACTIVE_INDICES.write();
                         indices.song_index = Some(0);
                         indices.section_index = Some(0);
@@ -506,7 +514,6 @@ fn App() -> Element {
                 }
                 refresh_session_chart_source();
             }
-            Ok(None) => debug!("No setlist available"),
             Err(e) => tracing::warn!("Failed to get setlist: {:?}", e),
         }
 
@@ -534,7 +541,7 @@ fn App() -> Element {
                             *SETLIST_STRUCTURE.write() = setlist.clone();
                             refresh_session_chart_source();
                         }
-                        session_proto::SetlistEvent::SongHydrated { index, song } => {
+                        session_proto::SetlistEvent::SongHydrated { index, song, .. } => {
                             let index = *index;
                             let is_active_song = ACTIVE_INDICES.peek().song_index == Some(index);
                             let mut setlist = SETLIST_STRUCTURE.write();
@@ -674,11 +681,11 @@ fn App() -> Element {
                             }
                         }
 
-                        session_proto::SetlistEvent::SongEntered { index, song } => {
+                        session_proto::SetlistEvent::SongEntered { index, song, .. } => {
                             debug!("Entered song {}: {}", index, song.name);
                         }
 
-                        session_proto::SetlistEvent::SongExited { index } => {
+                        session_proto::SetlistEvent::SongExited { index, .. } => {
                             debug!("Exited song {}", index);
                         }
 
@@ -686,6 +693,7 @@ fn App() -> Element {
                             song_index,
                             section_index,
                             section,
+                            ..
                         } => {
                             debug!(
                                 "Entered section {}.{}: {}",
@@ -696,11 +704,12 @@ fn App() -> Element {
                         session_proto::SetlistEvent::SectionExited {
                             song_index,
                             section_index,
+                            ..
                         } => {
                             debug!("Exited section {}.{}", song_index, section_index);
                         }
 
-                        session_proto::SetlistEvent::SongChartHydrated { index, chart } => {
+                        session_proto::SetlistEvent::SongChartHydrated { index, chart, .. } => {
                             let index = *index;
                             let chart = chart.clone();
                             SONG_CHARTS
@@ -1195,12 +1204,13 @@ async fn run_services() {
 
     // 4. Initialize Session singleton for UI components
     match services.create_setlist_client().await {
-        Ok(setlist_client) => {
+        Ok((setlist_client, _local_caller)) => {
             if let Err(e) = Session::init(setlist_client) {
                 tracing::warn!("Failed to initialize Session singleton: {}", e);
             } else {
                 debug!("Session singleton initialized");
             }
+            // _local_caller is kept alive for the duration of this scope
         }
         Err(e) => {
             tracing::error!("Failed to create setlist client: {}", e);
