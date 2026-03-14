@@ -11,8 +11,8 @@ members = [
     "apps/signal-cli",
     "apps/session-cli",
     "apps/reaper-extension",
+    "xtask",
 ]
-exclude = ["xtask"]
 resolver = "2"
 
 [workspace.lints.rust]
@@ -92,6 +92,7 @@ dawfile-reaper = { path = "../daw/crates/dawfile-reaper" }
 daw = { path = "../daw/crates/daw" }
 daw-proto = { path = "../daw/crates/daw-proto" }
 daw-control = { path = "../daw/crates/daw-control" }
+daw-control-sync = { path = "../daw/crates/daw-control-sync" }
 daw-standalone = { path = "../daw/crates/daw-standalone" }
 daw-reaper = { path = "../daw/crates/daw-reaper" }
 daw-ui = { path = "../daw/crates/daw-ui" }
@@ -130,6 +131,7 @@ signal-live = { path = "crates/signal/signal-live" }
 signal-controller = { path = "crates/signal/signal-controller" }
 signal-ui = { path = "crates/signal/signal-ui", default-features = false }
 signal-import = { path = "crates/signal/signal-import" }
+utils = { path = "crates/shared/utils" }
 signal-daw-bridge = { path = "crates/signal/signal-daw-bridge" }
 nam-manager = { path = "crates/signal/nam-manager" }
 sync-proto = { path = "crates/sync/sync-proto" }

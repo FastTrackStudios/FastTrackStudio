@@ -313,6 +313,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ariadne"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8454c8a44ce2cb9cc7e7fae67fc6128465b343b92c6631e94beca3c8d1524ea5"
+dependencies = [
+ "unicode-width",
+ "yansi",
+]
+
+[[package]]
 name = "arrayref"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -804,15 +814,6 @@ dependencies = [
  "num-bigint",
  "num-integer",
  "num-traits",
- "serde",
-]
-
-[[package]]
-name = "bincode"
-version = "1.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b1f45e9417d87227c7a56d22e471c6206462cba514c7590c09aff4cf6d1ddcad"
-dependencies = [
  "serde",
 ]
 
@@ -2002,6 +2003,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "daw-control-sync"
+version = "0.1.0"
+dependencies = [
+ "daw-control",
+ "eyre",
+ "roam",
+ "roam-stream",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "daw-proto"
 version = "0.1.0"
 dependencies = [
@@ -3167,6 +3180,7 @@ dependencies = [
  "const-fnv1a-hash",
  "iddqd",
  "impls",
+ "indexmap",
  "uuid",
 ]
 
@@ -3285,6 +3299,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "facet-pretty"
+version = "0.44.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c80ee6d1e8e94ee292e9d48815b106dd8f895dc9d4d539c47c3d86e0e1100084"
+dependencies = [
+ "facet-core",
+ "facet-reflect",
+ "owo-colors",
+]
+
+[[package]]
 name = "facet-reflect"
 version = "0.44.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3378,6 +3403,41 @@ checksum = "38e2275cc4e4fc009b0669731a1e5ab7ebf11f469eaede2bab9309a5b4d6057f"
 dependencies = [
  "memoffset",
  "rustc_version",
+]
+
+[[package]]
+name = "figue"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f33f286df173a047e864b39279b14de5e08dc5c7c5c719f81e96a8602049d4dd"
+dependencies = [
+ "ariadne",
+ "camino",
+ "facet",
+ "facet-core",
+ "facet-error",
+ "facet-format",
+ "facet-json",
+ "facet-pretty",
+ "facet-reflect",
+ "figue-attrs",
+ "heck 0.5.0",
+ "indexmap",
+ "owo-colors",
+ "strip-ansi-escapes",
+ "strsim 0.11.1",
+ "supports-color 3.0.2",
+ "tracing",
+ "unicode-width",
+]
+
+[[package]]
+name = "figue-attrs"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b09be1cd2a5c7295aa5dae9dd5585db38b3ab59c751336ebd4d692b867415703"
+dependencies = [
+ "facet",
 ]
 
 [[package]]
@@ -3586,12 +3646,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "28dd6caf6059519a65843af8fe2a3ae298b14b80179855aeb4adc2c1934ee619"
 
 [[package]]
-name = "fst"
-version = "0.4.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7ab85b9b05e3978cc9a9cf8fea7f01b494e1a09ed3037e16ba39edc7a29eb61a"
-
-[[package]]
 name = "fts-cli"
 version = "0.1.0"
 dependencies = [
@@ -3624,6 +3678,7 @@ dependencies = [
  "anyrender_vello",
  "axum",
  "daw-control",
+ "daw-control-sync",
  "daw-proto",
  "daw-ui",
  "dioxus",
@@ -4687,28 +4742,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "hyphenation"
-version = "0.8.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bcf4dd4c44ae85155502a52c48739c8a48185d1449fff1963cffee63c28a50f0"
-dependencies = [
- "bincode",
- "fst",
- "hyphenation_commons",
- "serde",
-]
-
-[[package]]
-name = "hyphenation_commons"
-version = "0.8.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5febe7a2ade5c7d98eb8b75f946c046b335324b06a14ea0998271504134c05bf"
-dependencies = [
- "fst",
- "serde",
-]
-
-[[package]]
 name = "iana-time-zone"
 version = "0.1.65"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5024,6 +5057,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "is-terminal"
+version = "0.4.17"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
+dependencies = [
+ "hermit-abi",
+ "libc",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "is_ci"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7655c9839580ee829dfacba1d1278c2b7883e50a277ff7541299489d6bdfdc45"
+
+[[package]]
 name = "is_terminal_polyfill"
 version = "1.70.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5252,7 +5302,6 @@ dependencies = [
  "daw-control",
  "facet",
  "helgoboss-midi",
- "hyphenation",
  "roam",
  "serde",
  "thiserror 2.0.18",
@@ -6985,6 +7034,10 @@ name = "owo-colors"
 version = "4.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d211803b9b6b570f68772237e415a029d5a50c65d382910b879fb19d3271f94d"
+dependencies = [
+ "supports-color 2.1.0",
+ "supports-color 3.0.2",
+]
 
 [[package]]
 name = "palette"
@@ -8040,6 +8093,7 @@ dependencies = [
  "cocoa",
  "crossbeam-channel",
  "daw-control",
+ "daw-control-sync",
  "daw-proto",
  "daw-reaper",
  "dynamic-template",
@@ -8049,6 +8103,7 @@ dependencies = [
  "input-reaper",
  "keyflow-midi",
  "keyflow-proto",
+ "libloading 0.8.9",
  "midly",
  "moire 1.0.0 (git+https://github.com/bearcove/peeps?branch=main)",
  "objc",
@@ -8422,7 +8477,7 @@ dependencies = [
 [[package]]
 name = "roam"
 version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#30ec4387dfa3eb062270df8628c4da9c018ae35e"
+source = "git+https://github.com/bearcove/roam.git?branch=main#e9a214c4fb7b482a1d7b37519ad5f10922da4532"
 dependencies = [
  "facet",
  "facet-postcard",
@@ -8436,7 +8491,7 @@ dependencies = [
 [[package]]
 name = "roam-core"
 version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#30ec4387dfa3eb062270df8628c4da9c018ae35e"
+source = "git+https://github.com/bearcove/roam.git?branch=main#e9a214c4fb7b482a1d7b37519ad5f10922da4532"
 dependencies = [
  "facet",
  "facet-core",
@@ -8457,7 +8512,7 @@ dependencies = [
 [[package]]
 name = "roam-hash"
 version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#30ec4387dfa3eb062270df8628c4da9c018ae35e"
+source = "git+https://github.com/bearcove/roam.git?branch=main#e9a214c4fb7b482a1d7b37519ad5f10922da4532"
 dependencies = [
  "blake3",
  "facet-core",
@@ -8468,7 +8523,7 @@ dependencies = [
 [[package]]
 name = "roam-local"
 version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#30ec4387dfa3eb062270df8628c4da9c018ae35e"
+source = "git+https://github.com/bearcove/roam.git?branch=main#e9a214c4fb7b482a1d7b37519ad5f10922da4532"
 dependencies = [
  "moire 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "tokio",
@@ -8477,7 +8532,7 @@ dependencies = [
 [[package]]
 name = "roam-macros-core"
 version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#30ec4387dfa3eb062270df8628c4da9c018ae35e"
+source = "git+https://github.com/bearcove/roam.git?branch=main#e9a214c4fb7b482a1d7b37519ad5f10922da4532"
 dependencies = [
  "facet-cargo-toml",
  "heck 0.5.0",
@@ -8489,7 +8544,7 @@ dependencies = [
 [[package]]
 name = "roam-macros-parse"
 version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#30ec4387dfa3eb062270df8628c4da9c018ae35e"
+source = "git+https://github.com/bearcove/roam.git?branch=main#e9a214c4fb7b482a1d7b37519ad5f10922da4532"
 dependencies = [
  "proc-macro2",
  "unsynn",
@@ -8498,7 +8553,7 @@ dependencies = [
 [[package]]
 name = "roam-service-macros"
 version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#30ec4387dfa3eb062270df8628c4da9c018ae35e"
+source = "git+https://github.com/bearcove/roam.git?branch=main#e9a214c4fb7b482a1d7b37519ad5f10922da4532"
 dependencies = [
  "proc-macro2",
  "roam-macros-core",
@@ -8507,7 +8562,7 @@ dependencies = [
 [[package]]
 name = "roam-stream"
 version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#30ec4387dfa3eb062270df8628c4da9c018ae35e"
+source = "git+https://github.com/bearcove/roam.git?branch=main#e9a214c4fb7b482a1d7b37519ad5f10922da4532"
 dependencies = [
  "moire 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "roam-types",
@@ -8517,7 +8572,7 @@ dependencies = [
 [[package]]
 name = "roam-types"
 version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#30ec4387dfa3eb062270df8628c4da9c018ae35e"
+source = "git+https://github.com/bearcove/roam.git?branch=main#e9a214c4fb7b482a1d7b37519ad5f10922da4532"
 dependencies = [
  "bitflags 2.11.0",
  "facet",
@@ -8533,7 +8588,7 @@ dependencies = [
 [[package]]
 name = "roam-websocket"
 version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#30ec4387dfa3eb062270df8628c4da9c018ae35e"
+source = "git+https://github.com/bearcove/roam.git?branch=main#e9a214c4fb7b482a1d7b37519ad5f10922da4532"
 dependencies = [
  "futures-channel",
  "futures-util",
@@ -9112,13 +9167,17 @@ dependencies = [
  "actions-proto",
  "daw-control",
  "daw-proto",
+ "eyre",
  "facet",
  "futures",
  "gloo-timers",
  "keyflow-proto",
  "roam",
+ "serde",
+ "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "utils",
  "uuid",
 ]
 
@@ -9193,6 +9252,7 @@ dependencies = [
  "futures",
  "nam-manager",
  "reaper-test",
+ "serde_json",
  "signal-controller",
  "signal-daw-bridge",
  "signal-import",
@@ -9232,6 +9292,7 @@ dependencies = [
  "roam",
  "signal-live",
  "signal-proto",
+ "thiserror 2.0.18",
  "tokio",
 ]
 
@@ -9309,6 +9370,8 @@ dependencies = [
  "roam",
  "serde",
  "serde_json",
+ "thiserror 2.0.18",
+ "utils",
  "uuid",
 ]
 
@@ -9841,6 +9904,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "strip-ansi-escapes"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2a8f8038e7e7969abb3f1b7c2a811225e9296da208539e0f79c5251d6cac0025"
+dependencies = [
+ "vte",
+]
+
+[[package]]
 name = "strsim"
 version = "0.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9914,6 +9986,25 @@ name = "subtle"
 version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
+
+[[package]]
+name = "supports-color"
+version = "2.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d6398cde53adc3c4557306a96ce67b302968513830a77a95b2b17305d9719a89"
+dependencies = [
+ "is-terminal",
+ "is_ci",
+]
+
+[[package]]
+name = "supports-color"
+version = "3.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c64fc7232dd8d2e4ac5ce4ef302b1d81e0b80d055b9d77c7c4f51f6aa4c867d6"
+dependencies = [
+ "is_ci",
+]
 
 [[package]]
 name = "svg2pdf"
@@ -10956,6 +11047,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 
 [[package]]
+name = "utils"
+version = "0.1.0"
+dependencies = [
+ "facet",
+ "serde",
+ "uuid",
+]
+
+[[package]]
 name = "uuid"
 version = "1.22.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11065,6 +11165,15 @@ dependencies = [
  "log",
  "num-traits",
  "num_enum 0.5.11",
+]
+
+[[package]]
+name = "vte"
+version = "0.14.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "231fdcd7ef3037e8330d8e17e61011a2c244126acc0a982f4040ac3f9f0bc077"
+dependencies = [
+ "memchr",
 ]
 
 [[package]]
@@ -12509,6 +12618,34 @@ name = "xmlwriter"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
+
+[[package]]
+name = "xshell"
+version = "0.2.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9e7290c623014758632efe00737145b6867b66292c42167f2ec381eb566a373d"
+dependencies = [
+ "xshell-macros",
+]
+
+[[package]]
+name = "xshell-macros"
+version = "0.2.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32ac00cd3f8ec9c1d33fb3e7958a82df6989c42d747bd326c822b1d625283547"
+
+[[package]]
+name = "xtask"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "facet",
+ "figue",
+ "serde_json",
+ "signal-proto",
+ "xshell",
+]
 
 [[package]]
 name = "xxhash-rust"
