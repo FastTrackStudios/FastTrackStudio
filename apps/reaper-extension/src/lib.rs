@@ -384,8 +384,12 @@ fn start_unix_socket_server(handler: RoutedHandler) {
                             .await
                         {
                             Ok((_caller, _session_handle)) => {
-                                // Session runs in background (spawned by establish)
+                                // Session message processing runs in background tasks
+                                // spawned by establish(). We must keep `_caller` alive —
+                                // dropping it closes the root connection in roam v7,
+                                // which cancels any pending RPCs from the client.
                                 debug!("Unix socket session established");
+                                std::future::pending::<()>().await;
                             }
                             Err(e) => {
                                 warn!("Unix socket handshake failed: {:?}", e);

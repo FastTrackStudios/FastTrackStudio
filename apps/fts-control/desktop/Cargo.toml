@@ -32,6 +32,7 @@ facet-postcard.workspace = true
 # Protocols
 daw-proto.workspace = true
 daw-control.workspace = true
+daw-control-sync.workspace = true
 
 # Async
 tokio = { workspace = true, features = ["full"] }

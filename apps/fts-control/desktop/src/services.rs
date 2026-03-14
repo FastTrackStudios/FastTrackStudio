@@ -27,13 +27,13 @@
 //! ```
 
 use crate::routed_handler::RoutedHandler;
-use roam::{DriverCaller, ErasedCaller};
+use daw_control_sync::LocalCaller;
+use roam::ErasedCaller;
 use session::{SetlistServiceImpl, SongServiceImpl};
 use session_proto::{
     SetlistServiceClient, SetlistServiceDispatcher, SongServiceDispatcher,
     setlist_service_service_descriptor, song_service_service_descriptor,
 };
-use tracing::debug;
 
 /// Local session services running in-process.
 ///
@@ -83,48 +83,21 @@ impl LocalServices {
 
     /// Create an in-process loopback connection to the local services.
     ///
-    /// This creates an `ErasedCaller` that routes RPC calls directly to
-    /// the local service implementations via an in-memory link pair.
-    /// Used to initialize `Session::init()` for UI components.
-    pub async fn create_loopback_connection(&self) -> eyre::Result<ErasedCaller> {
-        // Create an in-memory bidirectional link pair
-        let (client_link, server_link) = roam::memory_link_pair(256);
-
-        // Create the handler for the server side
+    /// Uses `LocalCaller` for the memory channel setup. Returns both the
+    /// `ErasedCaller` and the `LocalCaller` (which must be kept alive).
+    pub async fn create_loopback_connection(&self) -> eyre::Result<(ErasedCaller, LocalCaller)> {
         let handler = self.create_handler();
-
-        // Start the server side (accepts connection and handles requests)
-        tokio::spawn(async move {
-            match roam::acceptor(server_link)
-                .establish::<DriverCaller>(handler)
-                .await
-            {
-                Ok((_caller, _session_handle)) => {
-                    // Session is alive as long as this task lives; wait forever.
-                    std::future::pending::<()>().await;
-                }
-                Err(e) => {
-                    tracing::error!("Loopback server accept failed: {:?}", e);
-                }
-            }
-        });
-
-        // Connect from the client side (no handler needed — we only send requests)
-        let (caller, _session_handle) = roam::initiator(client_link)
-            .establish::<DriverCaller>(())
-            .await
-            .map_err(|e| eyre::eyre!("Failed to establish roam session: {:?}", e))?;
-
-        debug!("Created loopback connection to local services");
-        Ok(ErasedCaller::new(caller))
+        let local = LocalCaller::new(handler).await?;
+        Ok((local.erased_caller(), local))
     }
 
     /// Create a SetlistServiceClient connected to the local services.
     ///
     /// This is the main entry point for UI code to access session services.
-    pub async fn create_setlist_client(&self) -> eyre::Result<SetlistServiceClient> {
-        let caller = self.create_loopback_connection().await?;
-        Ok(SetlistServiceClient::new(caller))
+    /// Returns the client and the `LocalCaller` keep-alive handle.
+    pub async fn create_setlist_client(&self) -> eyre::Result<(SetlistServiceClient, LocalCaller)> {
+        let (caller, local) = self.create_loopback_connection().await?;
+        Ok((SetlistServiceClient::new(caller), local))
     }
 }
 
