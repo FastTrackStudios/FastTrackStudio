@@ -368,6 +368,44 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         dylib_src.display()
                     );
                 }
+
+                // Step 1b: Build and install fts-macros CLAP plugin.
+                // The extension eagerly loads fts-macros.clap on startup,
+                // so it must be present before REAPER launches.
+                let fts_plugins_dir = workspace_root
+                    .parent()
+                    .map(|p| p.join("fts-plugins"))
+                    .unwrap_or_else(|| workspace_root.join("../fts-plugins"));
+                if fts_plugins_dir.exists() {
+                    println!("\n>>> Building fts-macros CLAP plugin...");
+                    let sh_plugins = Shell::new()?;
+                    sh_plugins.change_dir(&fts_plugins_dir);
+                    cmd!(sh_plugins, "cargo run --package xtask -- bundle fts-macros --release")
+                        .run()?;
+
+                    // Install .clap bundle to REAPER's FX directory
+                    let fx_dir = plugins_dir.join("FX");
+                    std::fs::create_dir_all(&fx_dir)?;
+                    let clap_src = fts_plugins_dir.join("target/bundled/fts-macros.clap");
+                    let clap_dst = fx_dir.join("fts-macros.clap");
+                    if clap_src.exists() {
+                        if clap_dst.exists() {
+                            std::fs::remove_dir_all(&clap_dst)?;
+                        }
+                        copy_dir_recursive(&clap_src, &clap_dst)?;
+                        println!("  Installed fts-macros.clap to {}", fx_dir.display());
+                    } else {
+                        println!(
+                            "  Warning: fts-macros.clap not found at {}",
+                            clap_src.display()
+                        );
+                    }
+                } else {
+                    println!(
+                        "\n>>> Skipping fts-macros (fts-plugins not found at {})",
+                        fts_plugins_dir.display()
+                    );
+                }
             }
 
             // Step 2: Pre-build test binary (before spawning REAPER so it's ready to run)
@@ -392,6 +430,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             let socket_path = format!("/tmp/fts-daw-{reaper_pid}.sock");
             let _ = std::fs::remove_file(&socket_path);
             println!("  Spawned REAPER (PID {reaper_pid}), socket: {socket_path}");
+            println!("  Extension log: /tmp/fts-reaper.log");
 
             // Wait for socket
             let socket = std::path::Path::new(&socket_path);
@@ -400,6 +439,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             while !socket.exists() {
                 if std::time::Instant::now() > deadline {
                     println!();
+                    // Dump extension log if available
+                    if let Ok(log) = std::fs::read_to_string("/tmp/fts-reaper.log") {
+                        let lines: Vec<&str> = log.lines().collect();
+                        if !lines.is_empty() {
+                            println!("\n>>> Extension log (last 20 lines):");
+                            for line in lines.iter().rev().take(20).rev() {
+                                println!("  {line}");
+                            }
+                        }
+                    }
                     let _ = reaper_child.kill();
                     let _ = reaper_child.wait();
                     return Err("Timed out waiting for REAPER socket".into());
@@ -658,6 +707,23 @@ fn run_catalog(output: Option<String>) -> Result<(), Box<dyn std::error::Error>>
 }
 
 /// Simple ISO-8601 timestamp without pulling in chrono.
+/// Recursively copy a directory tree (for .clap bundles).
+fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let ty = entry.file_type()?;
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+        if ty.is_dir() {
+            copy_dir_recursive(&src_path, &dst_path)?;
+        } else {
+            std::fs::copy(&src_path, &dst_path)?;
+        }
+    }
+    Ok(())
+}
+
 fn chrono_now() -> String {
     use std::time::SystemTime;
     let now = SystemTime::now()
