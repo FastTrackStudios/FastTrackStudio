@@ -478,11 +478,27 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
             println!("\n>>> Running tests...");
             let test_result = if let Some(ref f) = filter {
-                cmd!(
-                    sh,
-                    "cargo test -p signal --features daw -- --ignored --nocapture --test-threads=4 {f}"
-                )
-                .run()
+                // When a filter is given, find matching test binaries so we
+                // don't spawn all 25+ integration test binaries just to skip
+                // them.  Each unrelated binary adds ~1-2s of process overhead.
+                let test_bins = find_matching_test_binaries(f);
+                if test_bins.is_empty() {
+                    // No binary name matched — fall back to running all
+                    // binaries (the filter string may match a function name
+                    // inside a differently-named file).
+                    cmd!(
+                        sh,
+                        "cargo test -p signal --features daw -- --ignored --nocapture --test-threads=4 {f}"
+                    )
+                    .run()
+                } else {
+                    let mut c = cmd!(sh, "cargo test -p signal --features daw");
+                    for bin in &test_bins {
+                        c = c.arg("--test").arg(bin);
+                    }
+                    c = c.arg("--").arg("--ignored").arg("--nocapture").arg("--test-threads=4").arg(f);
+                    c.run()
+                }
             } else {
                 cmd!(
                     sh,
@@ -732,4 +748,29 @@ fn chrono_now() -> String {
         .as_secs();
     // Good enough for a generated timestamp
     format!("unix:{}", now)
+}
+
+/// Find integration test binary names that match the given filter string.
+///
+/// Scans `crates/signal/signal/tests/*.rs` for filenames containing the
+/// filter substring. Returns the file stems (binary names) so we can pass
+/// `--test <name>` to cargo and avoid spawning all 25+ test binaries.
+fn find_matching_test_binaries(filter: &str) -> Vec<String> {
+    let tests_dir = std::path::Path::new("crates/signal/signal/tests");
+    let Ok(entries) = std::fs::read_dir(tests_dir) else {
+        return Vec::new();
+    };
+
+    let mut matches = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().map(|e| e == "rs").unwrap_or(false) {
+            if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                if stem.contains(filter) {
+                    matches.push(stem.to_string());
+                }
+            }
+        }
+    }
+    matches
 }
