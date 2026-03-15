@@ -409,8 +409,22 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
 
             // Step 2: Pre-build test binary (before spawning REAPER so it's ready to run)
+            // When a filter is given, only build matching binaries to save time.
+            let pre_build_bins = filter.as_ref().map(|f| find_matching_test_binaries(f));
             println!("\n>>> Pre-building test binary...");
-            cmd!(sh, "cargo test -p signal --features daw --no-run").run()?;
+            if let Some(ref bins) = pre_build_bins {
+                if !bins.is_empty() {
+                    let mut c = cmd!(sh, "cargo test -p signal --features daw");
+                    for bin in bins {
+                        c = c.arg("--test").arg(bin);
+                    }
+                    c.arg("--no-run").run()?;
+                } else {
+                    cmd!(sh, "cargo test -p signal --features daw --no-run").run()?;
+                }
+            } else {
+                cmd!(sh, "cargo test -p signal --features daw --no-run").run()?;
+            }
 
             // Step 3: Spawn REAPER (empty project, no splash)
             println!("\n>>> Spawning REAPER...");
@@ -478,10 +492,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
             println!("\n>>> Running tests...");
             let test_result = if let Some(ref f) = filter {
-                // When a filter is given, find matching test binaries so we
-                // don't spawn all 25+ integration test binaries just to skip
-                // them.  Each unrelated binary adds ~1-2s of process overhead.
-                let test_bins = find_matching_test_binaries(f);
+                // When a filter is given, use the matching binaries found
+                // during pre-build so we don't spawn all 25+ test binaries.
+                let test_bins = pre_build_bins.as_ref().cloned().unwrap_or_default();
                 if test_bins.is_empty() {
                     // No binary name matched — fall back to running all
                     // binaries (the filter string may match a function name
@@ -752,8 +765,8 @@ fn chrono_now() -> String {
 
 /// Find integration test binary names that match the given filter string.
 ///
-/// Scans `crates/signal/signal/tests/*.rs` for filenames containing the
-/// filter substring. Returns the file stems (binary names) so we can pass
+/// First checks filenames, then searches file contents for the filter as a
+/// function name. Returns the file stems (binary names) so we can pass
 /// `--test <name>` to cargo and avoid spawning all 25+ test binaries.
 fn find_matching_test_binaries(filter: &str) -> Vec<String> {
     let tests_dir = std::path::Path::new("crates/signal/signal/tests");
@@ -765,8 +778,21 @@ fn find_matching_test_binaries(filter: &str) -> Vec<String> {
     for entry in entries.flatten() {
         let path = entry.path();
         if path.extension().map(|e| e == "rs").unwrap_or(false) {
-            if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-                if stem.contains(filter) {
+            let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            // Match against filename first (fast path)
+            if stem.contains(filter) {
+                matches.push(stem.to_string());
+                continue;
+            }
+            // Then search file contents for `fn <filter>` as a function
+            // definition (handles cases where the function name differs
+            // from the file name). We check for `fn {filter}` to avoid
+            // false positives from imports like `use reaper_test::...`.
+            if let Ok(contents) = std::fs::read_to_string(&path) {
+                let pattern = format!("fn {filter}");
+                if contents.contains(&pattern) {
                     matches.push(stem.to_string());
                 }
             }
