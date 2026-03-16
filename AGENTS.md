@@ -2,14 +2,34 @@
 
 This project uses **bd** (beads) for issue tracking. Run `bd onboard` to get started.
 
+## Architecture Guides (READ FIRST)
+
+Before writing code, review the relevant guides in `docs/`:
+
+| Guide | When to Read |
+|-------|-------------|
+| [`docs/crate-facade-pattern.md`](docs/crate-facade-pattern.md) | Adding dependencies, creating new crates, or refactoring modules. Internal crates are private — always use the facade. |
+| [`docs/roam-best-practices.md`](docs/roam-best-practices.md) | Working with RPC services, async patterns, streaming, locks. Based on [bearcove/ship](https://github.com/bearcove/ship) and [bearcove/moire](https://github.com/bearcove/moire). |
+| [`docs/facet-guide.md`](docs/facet-guide.md) | Deriving `Facet`, serialization formats, roam type requirements. Based on [facet-rs/facet](https://github.com/facet-rs/facet). |
+| [`docs/styx-guide.md`](docs/styx-guide.md) | Writing `.styx` config files. Based on [bearcove/styx](https://github.com/bearcove/styx). Use the `/styx` skill for interactive help. |
+| [`docs/tracey-guide.md`](docs/tracey-guide.md) | Adding spec annotations (`r[impl ...]`, `r[verify ...]`), checking requirement coverage. Based on [bearcove/tracey](https://github.com/bearcove/tracey). Use the `/tracey` skill for interactive help. |
+
+### Critical Rules
+
+- **Facade crates only** — apps depend on `signal`, `daw`, `session`, never on internal crates like `signal-proto` or `daw-proto`
+- **moire over tokio** — use `moire::task::spawn`, `moire::sync::Mutex`, etc. for instrumentation
+- **No `Result<T,E>` in `#[roam::service]` traits** — use response enums
+- **Never hold std locks across `.await`** — clone data out first
+- **Name everything** — spawned tasks, channels, locks all need names for dashboard visibility
+
 ## Quick Reference
 
 ```bash
 bd ready              # Find available work
 bd show <id>          # View issue details
-bd update <id> --status in_progress  # Claim work
+bd update <id> --claim  # Claim work
 bd close <id>         # Complete work
-bd sync               # Sync with git
+bd dolt push          # Sync beads to remote
 ```
 
 ## Landing the Plane (Session Completion)
