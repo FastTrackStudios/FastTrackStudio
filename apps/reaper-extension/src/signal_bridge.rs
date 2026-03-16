@@ -5,7 +5,7 @@
 //! the controller globally so action handlers and RPC services can access it.
 
 use crate::routed_handler::RoutedHandler;
-use signal::{DawPatchApplier, RigSceneApplier, SignalController};
+use signal::{ActiveContext, DawPatchApplier, RigSceneApplier, SignalController};
 use std::sync::{Arc, OnceLock};
 use tracing::{info, warn};
 
@@ -84,6 +84,99 @@ pub fn add_signal_services(handler: RoutedHandler, ctrl: &SignalController) -> R
         .with(resolve_service_service_descriptor(), ResolveServiceDispatcher::new(svc.clone()))
         .with(scene_template_service_service_descriptor(), SceneTemplateServiceDispatcher::new(svc.clone()))
         .with(rack_service_service_descriptor(), RackServiceDispatcher::new(svc))
+}
+
+/// Wire up the signal appliers for the current REAPER session.
+///
+/// Creates `ReaperPatchApplier` and `RigSceneManager`, attaches them to the
+/// global `SignalController`, and sets the initial `ActiveContext` based on
+/// available profiles/rigs.
+///
+/// Must be called AFTER both `signal_bridge::init()` and `Daw::init()` complete.
+pub async fn wire_appliers() {
+    let Some(ctrl) = controller() else {
+        warn!("Cannot wire signal appliers: controller not initialized");
+        return;
+    };
+
+    // Get the rig name from environment or default
+    let rig_name = match std::env::var("FTS_RIG_TYPE").as_deref() {
+        Ok("guitar") => "Guitar Rig".to_string(),
+        Ok("bass") => "Bass Rig".to_string(),
+        Ok("keys") => "Keys Rig".to_string(),
+        Ok("vocals") => "Vocals Rig".to_string(),
+        Ok("drums") => "Drums Rig".to_string(),
+        Ok(other) => other.to_string(),
+        Err(_) => "Guitar Rig".to_string(),
+    };
+
+    // Get a DAW project handle via the in-process loopback
+    let daw_handle = daw::Daw::get();
+    let project = match daw_handle.projects().await {
+        Ok(projects) => {
+            if let Some(p) = projects.into_iter().next() {
+                p
+            } else {
+                warn!("No REAPER projects found, cannot wire signal appliers");
+                return;
+            }
+        }
+        Err(e) => {
+            warn!("Failed to list projects for signal applier: {e}");
+            return;
+        }
+    };
+
+    // Create and attach the ReaperPatchApplier
+    let applier = Arc::new(signal::reaper_applier::ReaperPatchApplier::new());
+    if let Err(e) = applier.set_target(project.clone(), &rig_name).await {
+        warn!("Failed to set patch applier target '{}': {:?}", rig_name, e);
+    } else {
+        ctrl.set_daw_applier(applier);
+        info!("Patch applier wired to '{}'", rig_name);
+    }
+
+    // Create and attach the RigSceneManager for preloaded scene switching
+    let signal_live = ctrl.service().clone();
+    let manager = Arc::new(signal::rig_scene_manager::RigSceneManager::new(signal_live));
+    if let Err(e) = manager.set_target(&rig_name, project).await {
+        warn!("Failed to set rig scene manager target: {e}");
+    } else {
+        ctrl.set_rig_scene_applier(manager);
+        info!("Rig scene manager wired for '{}'", rig_name);
+    }
+
+    // Set default ActiveContext — try to find a profile, fall back to rig
+    set_default_active_context(ctrl).await;
+}
+
+/// Set the initial ActiveContext by loading the first available profile or rig.
+async fn set_default_active_context(ctrl: &SignalController) {
+    // Try profiles first (via controller ops)
+    if let Ok(profiles) = ctrl.profiles().list().await {
+        if let Some(profile) = profiles.first() {
+            ctrl.active_context().set(ActiveContext::Profile {
+                id: profile.id.clone(),
+                active_index: 0,
+            });
+            info!("Active context set to profile '{}' ({})", profile.name, profile.id);
+            return;
+        }
+    }
+
+    // Fall back to rigs
+    if let Ok(rigs) = ctrl.rigs().list().await {
+        if let Some(rig) = rigs.first() {
+            ctrl.active_context().set(ActiveContext::Rig {
+                id: rig.id.clone(),
+                active_index: 0,
+            });
+            info!("Active context set to rig '{}' ({})", rig.name, rig.id);
+            return;
+        }
+    }
+
+    info!("No profiles or rigs found — active context remains empty");
 }
 
 /// Attach the DAW patch applier to the signal controller.

@@ -330,6 +330,13 @@ async fn register_daw_dispatcher() {
         warn!("Unix socket not started (session init failed)");
     }
 
+    // Wire signal appliers (ReaperPatchApplier + RigSceneManager) and set
+    // the initial ActiveContext. This requires both signal_bridge::init() and
+    // Daw::init() to have completed (the DAW loopback provides Project handles).
+    if std::env::var("FTS_DAW_ROLE").as_deref() == Ok("signal") {
+        signal_bridge::wire_appliers().await;
+    }
+
     // Write FTS_DAW_ROLE env var to ExtState so fts-control can classify this instance.
     // Uses persist=false — the role only exists while REAPER is running.
     if let Ok(role) = std::env::var("FTS_DAW_ROLE") {
