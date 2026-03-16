@@ -3,8 +3,12 @@
 //! Knows about the REAPER configurations on this machine and can spawn them
 //! with fire-and-forget semantics — the `Child` handle is dropped immediately
 //! so REAPER survives even if fts-control crashes or exits.
+//!
+//! For Signal instances, pre-built wrapper `.app` bundles (created by
+//! `cargo xtask setup-rigs`) give each rig type its own dock name and icon.
 
 use std::os::unix::process::CommandExt;
+use std::path::Path;
 use std::process::{Command, Stdio};
 use tracing::info;
 
@@ -36,13 +40,16 @@ pub const REAPER_CONFIGS: &[ReaperConfig] = &[
         role: "session",
     },
     ReaperConfig {
-        id: "fts-guitar",
-        label: "FTS-GUITAR (Signal)",
+        id: "fts-signal",
+        label: "FTS-SIGNAL (Signal)",
         executable: "/Users/codywright/Music/FastTrackStudio/Reaper/FTS-TRACKS/FTS-LIVE.app/Contents/MacOS/REAPER",
         resources: "/Users/codywright/Music/FastTrackStudio/Reaper/FTS-TRACKS/FTS-LIVE.app/Contents/Resources",
         role: "signal",
     },
 ];
+
+/// Base directory where wrapper .app bundles live alongside FTS-LIVE.app.
+const WRAPPER_BASE_DIR: &str = "/Users/codywright/Music/FastTrackStudio/Reaper/FTS-TRACKS";
 
 /// Find a REAPER config by its id.
 pub fn config_by_id(id: &str) -> Option<&'static ReaperConfig> {
@@ -51,14 +58,36 @@ pub fn config_by_id(id: &str) -> Option<&'static ReaperConfig> {
 
 /// Spawn a REAPER instance with optional project files.
 ///
+/// For Signal instances with a `rig_type`, a pre-built wrapper `.app` bundle
+/// is used so macOS shows the rig-specific name in the dock (e.g., "FTS-GUITAR").
+/// These bundles are created by `cargo xtask setup-rigs`.
+///
 /// Returns the PID of the spawned process. The `Child` handle is intentionally
 /// dropped without calling `kill()` — REAPER continues running independently
 /// of fts-control's lifecycle. The discovery loop in `daw_registry` will find
 /// the new instance via its `/tmp/fts-daw-{pid}.sock` socket.
-pub fn spawn_reaper(config: &ReaperConfig, project_paths: &[&str]) -> eyre::Result<u32> {
-    let mut cmd = Command::new(config.executable);
+pub fn spawn_reaper(
+    config: &ReaperConfig,
+    project_paths: &[&str],
+    rig_type: Option<&str>,
+) -> eyre::Result<u32> {
+    // For signal instances with a rig type, use the wrapper .app bundle
+    // so macOS shows the right name and icon in the dock.
+    let executable = if let Some(rt) = rig_type {
+        wrapper_executable_for_rig(rt, config.executable)
+    } else {
+        config.executable.to_string()
+    };
+
+    let mut cmd = Command::new(&executable);
     cmd.current_dir(config.resources)
-        .env("FTS_DAW_ROLE", config.role)
+        .env("FTS_DAW_ROLE", config.role);
+
+    if let Some(rt) = rig_type {
+        cmd.env("FTS_RIG_TYPE", rt);
+    }
+
+    cmd
         // Put REAPER in its own process group so it survives when
         // fts-control exits (prevents SIGHUP from killing it).
         .process_group(0)
@@ -86,9 +115,12 @@ pub fn spawn_reaper(config: &ReaperConfig, project_paths: &[&str]) -> eyre::Resu
     // releases our handle. REAPER continues running independently.
     drop(child);
 
+    let label = rig_type
+        .map(|rt| format!("FTS-{}", rt.to_uppercase()))
+        .unwrap_or_else(|| config.label.to_string());
     info!(
         "Launched {} (PID {}), discovery loop will connect via /tmp/fts-daw-{}.sock",
-        config.label, pid, pid
+        label, pid, pid
     );
 
     Ok(pid)
@@ -113,4 +145,48 @@ pub fn kill_reaper(pid: u32) -> bool {
         tracing::warn!("Failed to kill REAPER PID {pid}");
     }
     ok
+}
+
+// ============================================================================
+// Wrapper .app bundle lookup
+// ============================================================================
+
+/// Map rig type to the dock-friendly app bundle name.
+fn app_name_for_rig(rig_type: &str) -> String {
+    match rig_type {
+        "guitar" => "FTS-GUITAR".to_string(),
+        "bass" => "FTS-BASS".to_string(),
+        "keys" => "FTS-KEYS".to_string(),
+        "drums" => "FTS-DRUMS".to_string(),
+        "drum-enhancement" => "FTS-DRUM-ENHANCEMENT".to_string(),
+        "vocals" => "FTS-VOCALS".to_string(),
+        other => format!("FTS-{}", other.to_uppercase()),
+    }
+}
+
+/// Look up the wrapper `.app` bundle for the given rig type.
+///
+/// Wrapper bundles are created by `cargo xtask setup-rigs` during install.
+/// Each has a unique CFBundleName and code signature so macOS shows distinct
+/// dock tiles per rig type (e.g., "FTS-GUITAR", "FTS-VOCALS").
+///
+/// Returns the wrapper executable path, or falls back to the real executable
+/// if the wrapper doesn't exist yet.
+fn wrapper_executable_for_rig(rig_type: &str, fallback: &str) -> String {
+    let app_name = app_name_for_rig(rig_type);
+    let wrapper = Path::new(WRAPPER_BASE_DIR)
+        .join(format!("{app_name}.app"))
+        .join("Contents/MacOS/REAPER");
+
+    if wrapper.exists() {
+        info!("Using wrapper bundle {}.app for rig '{}'", app_name, rig_type);
+        wrapper.to_string_lossy().to_string()
+    } else {
+        tracing::warn!(
+            "Wrapper bundle {}.app not found — run `cargo xtask setup-rigs` to create it. \
+             Falling back to FTS-LIVE.",
+            app_name
+        );
+        fallback.to_string()
+    }
 }

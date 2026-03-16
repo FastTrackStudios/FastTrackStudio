@@ -78,13 +78,11 @@ shm-primitives = { git = "https://github.com/bearcove/roam.git", branch = "main"
 # Instrumentation
 moire = { git = "https://github.com/bearcove/peeps", branch = "main", features = ["diagnostics"] }
 
-# Keyflow/Engraver crates (sibling repo — local paths)
+# Keyflow/Engraver crates (sibling repo — facade pattern)
+# NOTE: keyflow-proto, keyflow-text, keyflow-midi, engraver-proto are INTERNAL.
+# Access them through the `keyflow` or `engraver` facade crates.
 keyflow = { path = "../keyflow/crates/keyflow" }
-keyflow-proto = { path = "../keyflow/crates/keyflow-proto" }
-keyflow-text = { path = "../keyflow/crates/keyflow-text" }
-keyflow-midi = { path = "../keyflow/crates/keyflow-midi" }
 engraver = { path = "../keyflow/crates/engraver" }
-engraver-proto = { path = "../keyflow/crates/engraver-proto" }
 keyflow-ui = { path = "../keyflow/crates/keyflow-ui" }
 
 # DAW facade crate (sibling repo — single public API surface)

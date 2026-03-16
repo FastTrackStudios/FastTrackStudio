@@ -6,8 +6,10 @@ use std::process::ExitCode;
 
 use facet::Facet;
 use figue as args;
-use signal_proto::catalog;
+use signal::catalog;
 use xshell::{Shell, cmd};
+
+mod icon_gen;
 
 /// Development tasks for FastTrackStudio
 #[derive(Facet)]
@@ -82,6 +84,12 @@ enum Commands {
         /// Output directory for the catalogue (default: ~/Music/FastTrackStudio/Presets)
         #[facet(args::positional, default)]
         output: Option<String>,
+    },
+    /// Create wrapper .app bundles for each signal rig type (dock names + icons)
+    SetupRigs {
+        /// Force re-creation of all bundles even if they already exist
+        #[facet(args::named, default)]
+        force: bool,
     },
 }
 
@@ -585,6 +593,366 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         Commands::Catalog { output } => {
             run_catalog(output)?;
         }
+        Commands::SetupRigs { force } => {
+            run_setup_rigs(force)?;
+        }
+    }
+
+    Ok(())
+}
+
+// ============================================================================
+// setup-rigs: Create wrapper .app bundles for each signal rig type
+// ============================================================================
+
+/// Default config path.
+const DEFAULT_RIGS_CONFIG: &str =
+    "/Users/codywright/Music/FastTrackStudio/Reaper/FTS-TRACKS/fts-rigs.json";
+
+/// JSON-serializable rig configuration (lives in fts-rigs.json).
+#[derive(serde::Deserialize)]
+#[serde(crate = "serde")]
+struct RigsConfig {
+    /// Base directory where wrapper .app bundles and reaper.ini live.
+    base_dir: String,
+    /// Name of the real REAPER .app bundle (e.g., "FTS-LIVE.app").
+    reaper_app: String,
+    /// Path to the base .icns icon used for tinting.
+    base_icon: String,
+    /// Directories to place Finder aliases in.
+    alias_dirs: Vec<String>,
+    /// Wrapper app definitions.
+    wrappers: Vec<WrapperAppConfig>,
+}
+
+#[derive(serde::Deserialize)]
+struct WrapperAppConfig {
+    app_name: String,
+    role: String,
+    #[serde(default)]
+    rig_type: Option<String>,
+    /// Theme path relative to base_dir (e.g., "ColorThemes/MyDaw").
+    theme: String,
+    #[serde(default = "default_true")]
+    icon: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl RigsConfig {
+    fn reaper_executable(&self) -> std::path::PathBuf {
+        std::path::PathBuf::from(&self.base_dir)
+            .join(&self.reaper_app)
+            .join("Contents/MacOS/REAPER")
+    }
+
+    fn resources_dir(&self) -> String {
+        std::path::PathBuf::from(&self.base_dir)
+            .join(&self.reaper_app)
+            .join("Contents/Resources")
+            .to_string_lossy()
+            .to_string()
+    }
+
+    fn ini_path(&self) -> String {
+        std::path::PathBuf::from(&self.base_dir)
+            .join("reaper.ini")
+            .to_string_lossy()
+            .to_string()
+    }
+
+    /// Resolve a theme path (relative to base_dir or absolute).
+    fn resolve_theme(&self, theme: &str) -> String {
+        let p = std::path::Path::new(theme);
+        if p.is_absolute() {
+            theme.to_string()
+        } else {
+            std::path::PathBuf::from(&self.base_dir)
+                .join(theme)
+                .to_string_lossy()
+                .to_string()
+        }
+    }
+
+    /// Resolve an alias dir (expands ~).
+    fn resolve_alias_dir(dir: &str) -> std::path::PathBuf {
+        if let Some(rest) = dir.strip_prefix("~/") {
+            let home = std::env::var("HOME").unwrap_or_default();
+            std::path::PathBuf::from(home).join(rest)
+        } else {
+            std::path::PathBuf::from(dir)
+        }
+    }
+}
+
+fn run_setup_rigs(force: bool) -> Result<(), Box<dyn std::error::Error>> {
+    println!("=== Setting up wrapper .app bundles ===");
+
+    // Load config
+    let config_path = std::path::Path::new(DEFAULT_RIGS_CONFIG);
+    if !config_path.exists() {
+        return Err(format!(
+            "Rigs config not found: {}\nCreate it or run from the FTS-TRACKS directory.",
+            DEFAULT_RIGS_CONFIG
+        )
+        .into());
+    }
+    let config_str = std::fs::read_to_string(config_path)?;
+    let config: RigsConfig = serde_json::from_str(&config_str)
+        .map_err(|e| format!("Failed to parse {}: {e}", DEFAULT_RIGS_CONFIG))?;
+
+    println!("  Config: {}", DEFAULT_RIGS_CONFIG);
+
+    let base_dir = &config.base_dir;
+    let base_icon = std::path::Path::new(&config.base_icon);
+    if !base_icon.exists() {
+        return Err(format!("Base icon not found: {}", config.base_icon).into());
+    }
+
+    let reaper_exe = config.reaper_executable();
+    if !reaper_exe.exists() {
+        return Err(format!("REAPER binary not found: {}", reaper_exe.display()).into());
+    }
+
+    // Build the reaper-launcher binary (release for small size)
+    print!("  Building reaper-launcher...");
+    let build_status = std::process::Command::new("cargo")
+        .args(["build", "-p", "reaper-launcher", "--release", "--bin", "reaper-launcher"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .status()?;
+    if !build_status.success() {
+        return Err("Failed to build reaper-launcher".into());
+    }
+    println!(" OK");
+
+    // Find the built binary
+    let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+    let launcher_bin = workspace_root.join("target/release/reaper-launcher");
+    if !launcher_bin.exists() {
+        return Err(format!("Launcher binary not found: {}", launcher_bin.display()).into());
+    }
+
+    // Timestamp-based version busts macOS icon cache on each run
+    let version = format!(
+        "1.0.{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+    );
+
+    let resources_dir_live = config.resources_dir();
+    let ini_path = config.ini_path();
+
+    for wrapper in &config.wrappers {
+        let app_name = &wrapper.app_name;
+        let bundle_dir =
+            std::path::PathBuf::from(base_dir).join(format!("{app_name}.app"));
+        let contents_dir = bundle_dir.join("Contents");
+        let macos_dir = contents_dir.join("MacOS");
+        let resources_dir = contents_dir.join("Resources");
+        let wrapper_exe = macos_dir.join("REAPER");
+        let plist_path = contents_dir.join("Info.plist");
+
+        // Skip if already set up (unless --force)
+        if !force && wrapper_exe.exists() && plist_path.exists() {
+            println!("  SKIP {}.app (already exists, use --force to recreate)", app_name);
+            continue;
+        }
+
+        print!("  {}.app ...", app_name);
+
+        // Clean up existing bundle if forcing
+        if force && bundle_dir.exists() {
+            std::fs::remove_dir_all(&bundle_dir)?;
+        }
+
+        // Create directory structure
+        std::fs::create_dir_all(&macos_dir)?;
+        std::fs::create_dir_all(&resources_dir)?;
+
+        // Write launch.json — fully editable without recompiling
+        let theme_full_path = config.resolve_theme(&wrapper.theme);
+        let is_live_instance = wrapper.role != "testing";
+        let launch_config = reaper_launcher::LaunchConfig {
+            role: wrapper.role.clone(),
+            rig_type: wrapper.rig_type.clone(),
+            reaper_executable: reaper_exe.to_string_lossy().to_string(),
+            resources_dir: resources_dir_live.clone(),
+            ini_path: ini_path.clone(),
+            ini_overrides: reaper_launcher::ReaperIniConfig {
+                undo_max_mem: if is_live_instance { Some(0) } else { None },
+                theme: Some(theme_full_path),
+            },
+            restore_ini_after_launch: is_live_instance,
+        };
+        launch_config
+            .save(&contents_dir.join("launch.json"))
+            .map_err(|e| format!("Failed to write launch.json: {e}"))?;
+
+        // Copy the pre-built reaper-launcher binary as the bundle executable
+        std::fs::copy(&launcher_bin, &wrapper_exe).map_err(|e| {
+            format!("Failed to copy launcher binary into {}.app: {e}", app_name)
+        })?;
+
+        // Write Info.plist
+        let bundle_id_suffix = wrapper.rig_type.as_deref()
+            .unwrap_or(&wrapper.role)
+            .replace('-', "");
+        let bundle_id = format!("com.fasttrackstudio.{}", bundle_id_suffix);
+        let plist_content = format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>{app_name}</string>
+    <key>CFBundleDisplayName</key>
+    <string>{app_name}</string>
+    <key>CFBundleIdentifier</key>
+    <string>{bundle_id}</string>
+    <key>CFBundleExecutable</key>
+    <string>REAPER</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleVersion</key>
+    <string>{version}</string>
+    <key>CFBundleShortVersionString</key>
+    <string>{version}</string>
+    <key>LSUIElement</key>
+    <false/>
+    <key>CFBundleIconFile</key>
+    <string>main-mac</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+</dict>
+</plist>"#
+        );
+        std::fs::write(&plist_path, plist_content)?;
+
+        // Generate tinted + badged icon
+        if wrapper.icon {
+            let icon_key = wrapper.rig_type.as_deref().unwrap_or(&wrapper.role);
+            let icon_path = resources_dir.join("main-mac.icns");
+            match icon_gen::generate_rig_icon(base_icon, &icon_path, icon_key) {
+                Ok(()) => {}
+                Err(e) => {
+                    println!(" icon failed: {e}");
+                }
+            }
+        }
+
+        // Ad-hoc sign the launcher binary so macOS doesn't block it
+        let _ = std::process::Command::new("codesign")
+            .args(["--force", "--sign", "-"])
+            .arg(&bundle_dir)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+
+        // Force LaunchServices to re-register this bundle so the new icon
+        // and bundle identity take effect without a reboot.
+        let _ = std::process::Command::new(
+            "/System/Library/Frameworks/CoreServices.framework/\
+             Frameworks/LaunchServices.framework/Support/lsregister",
+        )
+        .args(["-f"])
+        .arg(&bundle_dir)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+
+        println!(" OK");
+    }
+
+    // Create macOS Finder aliases in configured directories
+    let alias_dirs: Vec<std::path::PathBuf> = config
+        .alias_dirs
+        .iter()
+        .map(|d| RigsConfig::resolve_alias_dir(d))
+        .collect();
+    for dir in &alias_dirs {
+        std::fs::create_dir_all(dir)?;
+    }
+
+    // Clean alias dirs of any previous FTS aliases before recreating
+    for dir in &alias_dirs {
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name.starts_with("FTS-") {
+                    let _ = std::fs::remove_file(entry.path());
+                    let _ = std::fs::remove_dir_all(entry.path());
+                }
+            }
+        }
+    }
+
+    print!("  Creating aliases...");
+    for wrapper in &config.wrappers {
+        let app_name = &wrapper.app_name;
+        let bundle_dir =
+            std::path::PathBuf::from(base_dir).join(format!("{app_name}.app"));
+
+        for dir in &alias_dirs {
+            // Use osascript to create a Finder alias
+            let _ = std::process::Command::new("osascript")
+                .args([
+                    "-e",
+                    &format!(
+                        r#"tell application "Finder" to make alias file to POSIX file "{}" at POSIX file "{}""#,
+                        bundle_dir.display(),
+                        dir.display(),
+                    ),
+                ])
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status();
+        }
+    }
+    println!(" OK");
+
+    // Generate and apply a custom icon to each alias folder
+    for dir in &alias_dirs {
+        print!("  Setting folder icon for {}...", dir.display());
+        let folder_icns = dir.join(".fts-folder-icon.icns");
+        match icon_gen::generate_rig_icon(base_icon, &folder_icns, "fts-folder") {
+            Ok(()) => {
+                let _ = std::process::Command::new("osascript")
+                    .args([
+                        "-e",
+                        &format!(
+                            r#"use framework "AppKit"
+set iconImage to current application's NSImage's alloc()'s initWithContentsOfFile:"{}"
+current application's NSWorkspace's sharedWorkspace()'s setIcon:iconImage forFile:"{}" options:0"#,
+                            folder_icns.display(),
+                            dir.display(),
+                        ),
+                    ])
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .status();
+                println!(" OK");
+            }
+            Err(e) => println!(" failed: {e}"),
+        }
+    }
+
+    // Restart Dock and Finder so updated icons appear immediately
+    let _ = std::process::Command::new("killall")
+        .arg("Dock")
+        .status();
+    let _ = std::process::Command::new("killall")
+        .arg("Finder")
+        .status();
+
+    println!("\n=== Setup complete ===");
+    println!("Wrapper bundles: {}", base_dir);
+    for dir in &alias_dirs {
+        println!("Aliases: {}", dir.display());
     }
 
     Ok(())
