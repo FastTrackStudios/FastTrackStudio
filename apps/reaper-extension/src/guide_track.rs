@@ -17,10 +17,8 @@ use daw::reaper::tempo_map::{
     get_tempo_and_time_sig_at_on_main_thread, qn_to_time_on_main_thread, time_to_qn_on_main_thread,
 };
 use daw::reaper::track::{add_track_on_main_thread, set_folder_depth_on_main_thread};
-use keyflow_midi::guide::GuideGenerator;
-use keyflow_proto::{
-    ClickConfig, CountInConfig, GuideConfig, GuideEvent, SectionType, TimeSignature,
-};
+use keyflow::midi::guide::GuideGenerator;
+use keyflow::{ClickConfig, CountInConfig, GuideConfig, GuideEvent, SectionType, TimeSignature};
 use reaper_high::Reaper;
 use tracing::info;
 
