@@ -25,7 +25,7 @@ use roam_websocket::WsTransport;
 #[cfg(target_arch = "wasm32")]
 use serde::Serialize;
 #[cfg(target_arch = "wasm32")]
-use session_proto::SetlistServiceClient;
+use session::SetlistServiceClient;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 

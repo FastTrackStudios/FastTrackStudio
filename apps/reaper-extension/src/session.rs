@@ -23,8 +23,7 @@
 use actions_proto::ActionResult;
 use daw::Daw;
 use daw::sync::LocalCaller;
-use session::{SetlistServiceImpl, SongServiceImpl};
-use session_proto::{SetlistServiceDispatcher, SongServiceDispatcher};
+use session::{SetlistServiceDispatcher, SetlistServiceImpl, SongServiceDispatcher, SongServiceImpl};
 use std::sync::OnceLock;
 use tracing::info;
 
@@ -66,7 +65,7 @@ impl SessionManager {
 
     /// Create a combined DAW + session handler for the Unix socket.
     pub fn create_handler(&self) -> RoutedHandler {
-        use session_proto::{
+        use session::{
             setlist_service_service_descriptor, song_service_service_descriptor,
         };
 
@@ -136,7 +135,7 @@ pub fn handle_build_setlist() -> ActionResult {
     // Dispatch to the tokio runtime via a spawned task.
     let setlist_svc = session.setlist_service().clone();
     moire::task::spawn(async move {
-        session_proto::SetlistService::build_from_open_projects(&setlist_svc).await;
+        session::SetlistService::build_from_open_projects(&setlist_svc).await;
         info!("Setlist built from open projects");
     });
 
@@ -150,7 +149,7 @@ pub fn handle_next_song() -> ActionResult {
     };
     let setlist_svc = session.setlist_service().clone();
     moire::task::spawn(async move {
-        session_proto::SetlistService::next_song(&setlist_svc).await;
+        session::SetlistService::next_song(&setlist_svc).await;
     });
     ActionResult::success()
 }
@@ -162,7 +161,7 @@ pub fn handle_previous_song() -> ActionResult {
     };
     let setlist_svc = session.setlist_service().clone();
     moire::task::spawn(async move {
-        session_proto::SetlistService::previous_song(&setlist_svc).await;
+        session::SetlistService::previous_song(&setlist_svc).await;
     });
     ActionResult::success()
 }
@@ -174,7 +173,7 @@ pub fn handle_next_section() -> ActionResult {
     };
     let setlist_svc = session.setlist_service().clone();
     moire::task::spawn(async move {
-        session_proto::SetlistService::next_section(&setlist_svc).await;
+        session::SetlistService::next_section(&setlist_svc).await;
     });
     ActionResult::success()
 }
@@ -186,7 +185,7 @@ pub fn handle_previous_section() -> ActionResult {
     };
     let setlist_svc = session.setlist_service().clone();
     moire::task::spawn(async move {
-        session_proto::SetlistService::previous_section(&setlist_svc).await;
+        session::SetlistService::previous_section(&setlist_svc).await;
     });
     ActionResult::success()
 }
@@ -198,7 +197,7 @@ pub fn handle_toggle_playback() -> ActionResult {
     };
     let setlist_svc = session.setlist_service().clone();
     moire::task::spawn(async move {
-        session_proto::SetlistService::toggle_playback(&setlist_svc).await;
+        session::SetlistService::toggle_playback(&setlist_svc).await;
     });
     ActionResult::success()
 }
@@ -210,7 +209,7 @@ pub fn handle_toggle_song_loop() -> ActionResult {
     };
     let setlist_svc = session.setlist_service().clone();
     moire::task::spawn(async move {
-        session_proto::SetlistService::toggle_song_loop(&setlist_svc).await;
+        session::SetlistService::toggle_song_loop(&setlist_svc).await;
     });
     ActionResult::success()
 }
@@ -222,7 +221,7 @@ pub fn handle_log_status() -> ActionResult {
     };
     let setlist_svc = session.setlist_service().clone();
     moire::task::spawn(async move {
-        let setlist = session_proto::SetlistService::get_setlist(&setlist_svc).await;
+        let setlist = session::SetlistService::get_setlist(&setlist_svc).await;
         match setlist {
             Ok(sl) => info!(
                 "Session status: {} songs in setlist '{}'",

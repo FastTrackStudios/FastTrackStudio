@@ -18,7 +18,7 @@ use std::time::Duration;
 use dioxus::prelude::*;
 use roam_session::{HandshakeConfig, NoDispatcher};
 use roam_websocket::WsTransport;
-use session_proto::{SetlistServiceClient, Song};
+use session::{SetlistServiceClient, Song};
 use session_ui::{
     ConnectionState, LatencyInfo, Session, TransportState, ACTIVE_INDICES,
     ACTIVE_PLAYBACK_IS_PLAYING, ACTIVE_PLAYBACK_MUSICAL, AUDIO_LATENCY_SECONDS, LATENCY_INFO,
@@ -393,7 +393,7 @@ fn start_transport_sync_task(connection_lost: Rc<Cell<bool>>) {
         });
 
         // Create a channel for receiving setlist events
-        let (tx, mut rx) = roam::channel::<session_proto::SetlistEvent>();
+        let (tx, mut rx) = roam::channel::<session::SetlistEvent>();
 
         // Subscribe to setlist events from the Session service
         // This gives us transport state for ALL songs, plus active song/section changes
@@ -403,7 +403,7 @@ fn start_transport_sync_task(connection_lost: Rc<Cell<bool>>) {
 
                 while let Ok(Some(event)) = rx.recv().await {
                     match event {
-                        session_proto::SetlistEvent::SetlistChanged(setlist) => {
+                        session::SetlistEvent::SetlistChanged(setlist) => {
                             log(&format!(
                                 "[fts-control] Setlist changed: {} songs",
                                 setlist.songs.len()
@@ -418,19 +418,19 @@ fn start_transport_sync_task(connection_lost: Rc<Cell<bool>>) {
                                 .retain(|guid, _| valid_guids.contains(guid));
                             *SETLIST_STRUCTURE.write() = setlist;
                         }
-                        session_proto::SetlistEvent::SongHydrated { index, song } => {
+                        session::SetlistEvent::SongHydrated { index, song } => {
                             let mut setlist = SETLIST_STRUCTURE.write();
                             if index < setlist.songs.len() {
                                 setlist.songs[index] = song;
                             }
                         }
-                        session_proto::SetlistEvent::SongChartHydrated { chart, .. } => {
+                        session::SetlistEvent::SongChartHydrated { chart, .. } => {
                             SONG_CHARTS
                                 .write()
                                 .insert(chart.project_guid.clone(), chart);
                         }
 
-                        session_proto::SetlistEvent::ActiveIndicesChanged(indices) => {
+                        session::SetlistEvent::ActiveIndicesChanged(indices) => {
                             // Update ACTIVE_INDICES
                             *ACTIVE_INDICES.write() = indices.clone();
 
@@ -442,7 +442,7 @@ fn start_transport_sync_task(connection_lost: Rc<Cell<bool>>) {
                             }
                         }
 
-                        session_proto::SetlistEvent::TransportUpdate(transports) => {
+                        session::SetlistEvent::TransportUpdate(transports) => {
                             // Get current active song index
                             let active_song_index = ACTIVE_INDICES.read().song_index;
 
@@ -600,18 +600,18 @@ fn start_transport_sync_task(connection_lost: Rc<Cell<bool>>) {
                             }
                         }
 
-                        session_proto::SetlistEvent::SongEntered { index, song } => {
+                        session::SetlistEvent::SongEntered { index, song } => {
                             log(&format!(
                                 "[fts-control] Entered song {}: {}",
                                 index, song.name
                             ));
                         }
 
-                        session_proto::SetlistEvent::SongExited { index } => {
+                        session::SetlistEvent::SongExited { index } => {
                             log(&format!("[fts-control] Exited song {}", index));
                         }
 
-                        session_proto::SetlistEvent::SectionEntered {
+                        session::SetlistEvent::SectionEntered {
                             song_index,
                             section_index,
                             section,
@@ -622,7 +622,7 @@ fn start_transport_sync_task(connection_lost: Rc<Cell<bool>>) {
                             ));
                         }
 
-                        session_proto::SetlistEvent::SectionExited {
+                        session::SetlistEvent::SectionExited {
                             song_index,
                             section_index,
                         } => {
@@ -632,7 +632,7 @@ fn start_transport_sync_task(connection_lost: Rc<Cell<bool>>) {
                             ));
                         }
 
-                        session_proto::SetlistEvent::PositionChanged { .. } => {
+                        session::SetlistEvent::PositionChanged { .. } => {
                             // Legacy event, ignored - we use TransportUpdate now
                         }
                     }

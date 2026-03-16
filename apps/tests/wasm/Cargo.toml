@@ -15,8 +15,8 @@ roam-websocket.workspace = true
 # DAW API (same as web app uses)
 daw.workspace = true
 
-# Session API (setlist navigation, song control)
-session-proto.workspace = true
+# Session API (setlist navigation, song control) - via facade
+session.workspace = true
 
 # WASM bindings
 wasm-bindgen = "0.2"

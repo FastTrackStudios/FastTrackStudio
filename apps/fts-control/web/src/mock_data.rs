@@ -1,8 +1,8 @@
 //! Mock data for testing the performance view without a real DAW connection
 
 use daw::service::{MusicalPosition, Position, PositionInSeconds};
-use session_proto::setlist::{ActiveIndices, Setlist};
-use session_proto::song::{Section, SectionType, Song};
+use session::setlist::{ActiveIndices, Setlist};
+use session::song::{Section, SectionType, Song};
 use session_ui::components::{MeasureIndicator, TempoMarkerData};
 use session_ui::TransportState;
 use std::collections::HashMap;

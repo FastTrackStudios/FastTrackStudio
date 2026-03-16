@@ -25,9 +25,8 @@ input-reaper.workspace = true
 # DAW facade (reaper impl + sync wrapper)
 daw = { workspace = true, features = ["reaper", "sync"] }
 
-# Keyflow guide generation
-keyflow-proto.workspace = true
-keyflow-midi.workspace = true
+# Keyflow guide generation (through facade)
+keyflow = { workspace = true, features = ["midi"] }
 
 # Dynamic template (sorting items into track hierarchies)
 dynamic-template-proto.workspace = true

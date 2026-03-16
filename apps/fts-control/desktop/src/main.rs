@@ -519,7 +519,7 @@ fn App() -> Element {
 
         // Subscribe to setlist events (transport updates, active song changes, etc.)
         debug!("Subscribing to setlist events...");
-        let (tx, mut rx) = roam::channel::<session_proto::SetlistEvent>();
+        let (tx, mut rx) = roam::channel::<session::SetlistEvent>();
 
         match setlist_client.subscribe(tx).await {
             Ok(()) => {
@@ -528,7 +528,7 @@ fn App() -> Element {
                 // Process events continuously
                 while let Ok(Some(event_ref)) = rx.recv().await {
                     match &*event_ref {
-                        session_proto::SetlistEvent::SetlistChanged(setlist) => {
+                        session::SetlistEvent::SetlistChanged(setlist) => {
                             debug!("Setlist changed: {} songs", setlist.songs.len());
                             let valid_guids: std::collections::HashSet<String> = setlist
                                 .songs
@@ -541,7 +541,7 @@ fn App() -> Element {
                             *SETLIST_STRUCTURE.write() = setlist.clone();
                             refresh_session_chart_source();
                         }
-                        session_proto::SetlistEvent::SongHydrated { index, song, .. } => {
+                        session::SetlistEvent::SongHydrated { index, song, .. } => {
                             let index = *index;
                             let is_active_song = ACTIVE_INDICES.peek().song_index == Some(index);
                             let mut setlist = SETLIST_STRUCTURE.write();
@@ -554,7 +554,7 @@ fn App() -> Element {
                             }
                         }
 
-                        session_proto::SetlistEvent::ActiveIndicesChanged(indices) => {
+                        session::SetlistEvent::ActiveIndicesChanged(indices) => {
                             let prev_song_index = ACTIVE_INDICES.peek().song_index;
                             *ACTIVE_INDICES.write() = indices.clone();
                             *PLAYBACK_STATE.write() = if indices.is_playing {
@@ -567,7 +567,7 @@ fn App() -> Element {
                             }
                         }
 
-                        session_proto::SetlistEvent::TransportUpdate(transports) => { let transports = transports.clone();
+                        session::SetlistEvent::TransportUpdate(transports) => { let transports = transports.clone();
                             // PERFORMANCE: Only write to signals if values actually changed.
                             // Each .write() triggers re-renders for all subscribers.
 
@@ -681,15 +681,15 @@ fn App() -> Element {
                             }
                         }
 
-                        session_proto::SetlistEvent::SongEntered { index, song, .. } => {
+                        session::SetlistEvent::SongEntered { index, song, .. } => {
                             debug!("Entered song {}: {}", index, song.name);
                         }
 
-                        session_proto::SetlistEvent::SongExited { index, .. } => {
+                        session::SetlistEvent::SongExited { index, .. } => {
                             debug!("Exited song {}", index);
                         }
 
-                        session_proto::SetlistEvent::SectionEntered {
+                        session::SetlistEvent::SectionEntered {
                             song_index,
                             section_index,
                             section,
@@ -701,7 +701,7 @@ fn App() -> Element {
                             );
                         }
 
-                        session_proto::SetlistEvent::SectionExited {
+                        session::SetlistEvent::SectionExited {
                             song_index,
                             section_index,
                             ..
@@ -709,7 +709,7 @@ fn App() -> Element {
                             debug!("Exited section {}.{}", song_index, section_index);
                         }
 
-                        session_proto::SetlistEvent::SongChartHydrated { index, chart, .. } => {
+                        session::SetlistEvent::SongChartHydrated { index, chart, .. } => {
                             let index = *index;
                             let chart = chart.clone();
                             SONG_CHARTS
@@ -721,7 +721,7 @@ fn App() -> Element {
                             }
                         }
 
-                        session_proto::SetlistEvent::PositionChanged { indices, .. } => {
+                        session::SetlistEvent::PositionChanged { indices, .. } => {
                             // High-frequency position update - update active indices
                             *ACTIVE_INDICES.write() = indices.clone();
                         }

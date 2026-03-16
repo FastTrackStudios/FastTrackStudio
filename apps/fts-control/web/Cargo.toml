@@ -15,8 +15,8 @@ roam-websocket.workspace = true
 # DAW control API - same API works on desktop and web
 daw.workspace = true
 
-# Session control - setlist and song navigation
-session-proto.workspace = true
+# Session control - setlist and song navigation (via facade)
+session.workspace = true
 
 # Session UI components
 session-ui.workspace = true

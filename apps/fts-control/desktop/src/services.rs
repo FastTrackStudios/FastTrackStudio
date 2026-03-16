@@ -29,10 +29,9 @@
 use crate::routed_handler::RoutedHandler;
 use daw::sync::LocalCaller;
 use roam::ErasedCaller;
-use session::{SetlistServiceImpl, SongServiceImpl};
-use session_proto::{
-    SetlistServiceClient, SetlistServiceDispatcher, SongServiceDispatcher,
-    setlist_service_service_descriptor, song_service_service_descriptor,
+use session::{
+    SetlistServiceClient, SetlistServiceDispatcher, SetlistServiceImpl, SongServiceDispatcher,
+    SongServiceImpl, setlist_service_service_descriptor, song_service_service_descriptor,
 };
 
 /// Local session services running in-process.
