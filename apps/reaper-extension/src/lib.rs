@@ -21,6 +21,8 @@ mod routed_handler;
 mod session;
 mod signal_actions;
 pub(crate) mod signal_bridge;
+mod signal_save;
+mod sync_bridge;
 mod toolbar_manager;
 mod visibility;
 
@@ -138,10 +140,11 @@ fn eagerly_load_fts_plugins(context: PluginContext) {
 // Service dispatchers for method ID routing
 use daw::service::{
     AudioEngineServiceDispatcher, ExtStateServiceDispatcher, FxServiceDispatcher,
-    HealthServiceDispatcher, LiveMidiServiceDispatcher, MarkerServiceDispatcher,
-    MidiAnalysisServiceDispatcher, MidiServiceDispatcher, ProjectServiceDispatcher,
-    RegionServiceDispatcher, RoutingServiceDispatcher, TempoMapServiceDispatcher,
-    TrackServiceDispatcher, TransportServiceDispatcher,
+    HealthServiceDispatcher, ItemServiceDispatcher, LiveMidiServiceDispatcher,
+    MarkerServiceDispatcher, MidiAnalysisServiceDispatcher, MidiServiceDispatcher,
+    ProjectServiceDispatcher, RegionServiceDispatcher, RoutingServiceDispatcher,
+    TakeServiceDispatcher, TempoMapServiceDispatcher, TrackServiceDispatcher,
+    TransportServiceDispatcher,
 };
 
 // ============================================================================
@@ -265,6 +268,8 @@ async fn register_daw_dispatcher() {
     let routing = daw::reaper::ReaperRouting::new();
     let live_midi = daw::reaper::ReaperLiveMidi::new();
     let ext_state = daw::reaper::ReaperExtState::new();
+    let item = daw::reaper::ReaperItem::new();
+    let take = daw::reaper::ReaperTake::new();
     let health = daw::reaper::ReaperHealth::new();
 
     // Import service descriptor functions for method_id routing.
@@ -273,10 +278,11 @@ async fn register_daw_dispatcher() {
     use daw::service::{
         audio_engine_service_service_descriptor, ext_state_service_service_descriptor,
         fx_service_service_descriptor, health_service_service_descriptor,
-        live_midi_service_service_descriptor, marker_service_service_descriptor,
-        midi_analysis_service_service_descriptor, midi_service_service_descriptor,
-        project_service_service_descriptor, region_service_service_descriptor,
-        routing_service_service_descriptor, tempo_map_service_service_descriptor,
+        item_service_service_descriptor, live_midi_service_service_descriptor,
+        marker_service_service_descriptor, midi_analysis_service_service_descriptor,
+        midi_service_service_descriptor, project_service_service_descriptor,
+        region_service_service_descriptor, routing_service_service_descriptor,
+        take_service_service_descriptor, tempo_map_service_service_descriptor,
         track_service_service_descriptor, transport_service_service_descriptor,
     };
 
@@ -295,7 +301,9 @@ async fn register_daw_dispatcher() {
         .with(routing_service_service_descriptor(), RoutingServiceDispatcher::new(routing))
         .with(live_midi_service_service_descriptor(), LiveMidiServiceDispatcher::new(live_midi))
         .with(ext_state_service_service_descriptor(), ExtStateServiceDispatcher::new(ext_state))
-        .with(health_service_service_descriptor(), HealthServiceDispatcher::new(health));
+        .with(health_service_service_descriptor(), HealthServiceDispatcher::new(health))
+        .with(item_service_service_descriptor(), ItemServiceDispatcher::new(item))
+        .with(take_service_service_descriptor(), TakeServiceDispatcher::new(take));
 
     // Initialize the session subsystem with an in-process loopback to the DAW handler.
     // This sets up Daw::init() so the session crate can call daw-control methods locally,
@@ -365,8 +373,12 @@ async fn register_daw_dispatcher() {
         dock_icon::set_theme_for_role(&role);
     }
 
+    // Initialize the sync bridge (Ableton Link engine).
+    // The timer callback will call sync_bridge::tick() to drive transport sync.
+    sync_bridge::init();
+
     info!(
-        "DAW dispatcher registered (Transport, Project, Marker, Region, TempoMap, Midi, MidiAnalysis, AudioEngine, Fx, Track, Routing, LiveMidi, ExtState, Session, Signal)"
+        "DAW dispatcher registered (Transport, Project, Marker, Region, TempoMap, Midi, MidiAnalysis, AudioEngine, Fx, Track, Routing, LiveMidi, ExtState, Session, Signal, Sync)"
     );
 }
 
@@ -561,8 +573,10 @@ extern "C" fn timer_callback() {
         daw::reaper::poll_and_broadcast_routing();
         daw::reaper::poll_and_broadcast_tempo_map();
 
-        // Re-apply auto-color when track names change (throttled ~1s)
-        crate::auto_color::poll_and_recolor();
+        // Tick the Ableton Link engine for transport sync
+        crate::sync_bridge::tick();
+
+        // Auto-color is now event-driven via CSurf callbacks (no polling needed).
 
         // Apply deferred toolbar operations from workflow/input systems.
         toolbar_manager::process_deferred_ops();
@@ -654,9 +668,14 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
 
     // Register timer callback for periodic updates
     let app = APP_INSTANCE.get().expect("App should be initialized").get();
-    app.session
-        .borrow_mut()
-        .plugin_register_add_timer(timer_callback)?;
+    let mut session = app.session.borrow_mut();
+    session.plugin_register_add_timer(timer_callback)?;
+
+    // Register hidden control surface for event-driven auto-color.
+    // REAPER calls our CSurf callbacks when tracks change (name, FX, routing, etc.)
+    // instead of us polling on a timer.
+    session.plugin_register_add_csurf_inst(Box::new(auto_color::AutoColorSurface))?;
+    drop(session);
 
     info!("FastTrackStudio REAPER Extension initialized successfully");
     Ok(())
