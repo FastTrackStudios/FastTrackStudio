@@ -52,7 +52,7 @@ async fn infer_track_chain(guid: &str) -> Option<Vec<EngineFlowData>> {
     let project = daw.current_project().await.ok()?;
     let handle = project.tracks().by_guid(guid).await.ok()??;
     let tree = handle.fx_chain().tree().await.ok()?;
-    let chain = signal_daw_bridge::infer_chain_from_fx_tree(&tree);
+    let chain = signal::signal_daw_bridge::infer_chain_from_fx_tree(&tree);
     let engine = signal_ui::infer_adapter::inferred_chain_to_engine_flow(&chain, "FX Chain");
     Some(vec![engine])
 }

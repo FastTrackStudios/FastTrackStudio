@@ -15,7 +15,7 @@
 //! # Example
 //!
 //! ```ignore
-//! let recorder = signal_live::MacroRecorder::new();
+//! let recorder = signal::MacroRecorder::new();
 //! let on_macro_change = create_macro_change_handler(recorder.clone());
 //!
 //! // Wire to UI callback
@@ -24,7 +24,7 @@
 
 use crate::daw_registry;
 use dioxus::prelude::*;
-use signal_live::macro_registry;
+use signal::macro_registry;
 
 /// Create a macro knob change handler that drives DAW parameters and records changes.
 ///
@@ -46,7 +46,7 @@ use signal_live::macro_registry;
 ///
 /// Silently skips missing targets or DAW connection issues. Logs warnings for debugging.
 pub fn create_macro_change_handler(
-    recorder: Signal<signal_live::MacroRecorder>,
+    recorder: Signal<signal::MacroRecorder>,
     is_recording: Signal<bool>,
 ) -> impl Fn((String, f32)) {
     move |(knob_id, new_val): (String, f32)| {
@@ -108,12 +108,12 @@ pub struct RecordingManager {
     /// Whether recording is currently active
     pub is_recording: Signal<bool>,
     /// The macro recorder instance
-    pub recorder: Signal<signal_live::MacroRecorder>,
+    pub recorder: Signal<signal::MacroRecorder>,
 }
 
 impl RecordingManager {
     /// Create a new recording manager.
-    pub fn new(recorder: Signal<signal_live::MacroRecorder>) -> Self {
+    pub fn new(recorder: Signal<signal::MacroRecorder>) -> Self {
         Self {
             is_recording: use_signal(|| false),
             recorder,
@@ -128,7 +128,7 @@ impl RecordingManager {
     }
 
     /// Stop recording and return the captured sequence.
-    pub fn stop(&mut self) -> Vec<signal_live::MacroRecord> {
+    pub fn stop(&mut self) -> Vec<signal::MacroRecord> {
         let records = self.recorder.read().stop();
         self.is_recording.set(false);
         let count = records.len();

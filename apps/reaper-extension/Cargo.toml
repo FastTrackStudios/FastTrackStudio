@@ -34,7 +34,6 @@ dynamic-template-proto.workspace = true
 dynamic-template.workspace = true
 
 # Session (setlist management, navigation, auto-advance)
-session-proto.workspace = true
 session.workspace = true
 
 # Signal (rig/profile/preset management)

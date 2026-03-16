@@ -5,7 +5,7 @@ use input::InputCommand;
 use input_dioxus::ACTION_CONTEXT;
 use session::session_actions;
 use session_ui::Session;
-use signal_proto::actions::signal_actions;
+use signal::actions::signal_actions;
 
 use crate::signal_views::{SignalMode, SIGNAL_MODE};
 use crate::{COMMAND_PALETTE_OPEN, COMMAND_PALETTE_QUERY, DOCK_MODE, TOP_PAGE};
@@ -105,10 +105,10 @@ pub(crate) fn handle_signal_patch_shortcut(e: &KeyboardEvent) -> bool {
 /// Activate a block preset by its ID (used in Preset mode).
 /// Finds the matching preset from all block types and activates its default snapshot.
 async fn activate_preset_by_id(signal: &signal::Signal, preset_id_str: &str) {
-    let preset_id: signal_proto::PresetId = preset_id_str.to_string().into();
+    let preset_id: signal::PresetId = preset_id_str.to_string().into();
 
     // Search all block types for the matching preset
-    for &bt in signal_proto::ALL_BLOCK_TYPES {
+    for &bt in signal::ALL_BLOCK_TYPES {
         if let Ok(presets) = signal.block_presets().list(bt).await {
             if let Some(preset) = presets.iter().find(|p| *p.id() == preset_id) {
                 let snap_id = preset.default_snapshot().id().clone();

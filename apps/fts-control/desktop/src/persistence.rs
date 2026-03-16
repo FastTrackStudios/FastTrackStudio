@@ -344,7 +344,7 @@ pub struct MidiConfig {
     /// Name of the MIDI port to auto-connect on startup.
     pub selected_port_name: Option<String>,
     /// MIDI message → action ID mapping.
-    pub action_map: signal_proto::midi_actions::MidiActionMap,
+    pub action_map: signal::midi_actions::MidiActionMap,
     /// Whether the MIDI service is enabled.
     pub enabled: bool,
 }
@@ -353,7 +353,7 @@ impl Default for MidiConfig {
     fn default() -> Self {
         Self {
             selected_port_name: None,
-            action_map: signal_proto::midi_actions::MidiActionMap::with_defaults(),
+            action_map: signal::midi_actions::MidiActionMap::with_defaults(),
             enabled: true,
         }
     }

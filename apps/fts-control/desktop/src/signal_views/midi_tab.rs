@@ -140,7 +140,7 @@ pub(crate) fn SignalMidiTab() -> Element {
                             variant: ButtonVariant::Ghost,
                             size: ButtonSize::Small,
                             on_click: move |_| {
-                                let default_map = signal_proto::midi_actions::MidiActionMap::with_defaults();
+                                let default_map = signal::midi_actions::MidiActionMap::with_defaults();
                                 update_action_map(default_map.clone());
                                 let mut cfg = config();
                                 cfg.action_map = default_map;
@@ -232,8 +232,8 @@ pub(crate) fn SignalMidiTab() -> Element {
 }
 
 /// Format a `MidiActionTrigger` for display.
-fn format_trigger(trigger: &signal_proto::midi_actions::MidiActionTrigger) -> String {
-    use signal_proto::midi_actions::{CcThreshold, MidiActionTrigger};
+fn format_trigger(trigger: &signal::midi_actions::MidiActionTrigger) -> String {
+    use signal::midi_actions::{CcThreshold, MidiActionTrigger};
 
     match trigger {
         MidiActionTrigger::NoteOn { channel, note } => {

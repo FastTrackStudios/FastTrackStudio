@@ -22,7 +22,7 @@ pub(crate) fn SignalPerformanceTab() -> Element {
     let bypass_rules = use_signal(build_bypass_rules);
 
     // Macro recording state
-    let recorder = use_signal(signal_live::MacroRecorder::new);
+    let recorder = use_signal(signal::MacroRecorder::new);
     let mut is_recording = use_signal(|| false);
 
     // Discover the first profile and first song IDs on mount.
@@ -131,7 +131,7 @@ pub(crate) fn SignalPerformanceTab() -> Element {
                                             // Optimistic highlight
                                             *SIGNAL_ACTIVE_PATCH_ID.write() = Some(patch_id.clone());
                                             // Clear stale macro bindings from previous patch
-                                            signal_live::macro_registry::clear();
+                                            signal::macro_registry::clear();
                                             spawn(async move {
                                                 let patch_id_typed: signal::profile::PatchId = patch_id.clone().into();
                                                 match signal.profiles().activate(profile_id, Some(patch_id_typed)).await {
@@ -167,9 +167,9 @@ pub(crate) fn SignalPerformanceTab() -> Element {
                                             // Optimistic highlight
                                             *SIGNAL_ACTIVE_PATCH_ID.write() = Some(section_id_str.clone());
                                             // Clear stale macro bindings from previous section
-                                            signal_live::macro_registry::clear();
+                                            signal::macro_registry::clear();
                                             spawn(async move {
-                                                let target = signal_proto::resolve::ResolveTarget::SongSection {
+                                                let target = signal::resolve::ResolveTarget::SongSection {
                                                     song_id: song_id_str.into(),
                                                     section_id: section_id_str.clone().into(),
                                                 };

@@ -117,6 +117,8 @@ dynamic-template = { path = "../dynamic-template/crates/dynamic-template" }
 
 # Local crates
 macromod = { path = "crates/macromod/macromod" }
+# NOTE: session-proto is listed here for use by session-ui (internal domain crate only).
+# App crates must NOT depend on session-proto directly — use the `session` facade instead.
 session-proto = { path = "crates/session/session-proto" }
 session = { path = "crates/session/session" }
 session-ui = { path = "crates/session/session-ui" }
@@ -185,4 +187,7 @@ color = "0.3"
 wgpu = "27"
 pollster = "0.4"
 
-
+# WASM dev profile: opt-level 1 avoids "too many locals" error in walrus
+[profile.wasm-dev]
+inherits = "dev"
+opt-level = 1

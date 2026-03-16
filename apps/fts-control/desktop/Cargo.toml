@@ -13,7 +13,6 @@ session-ui = { workspace = true, default-features = false }
 
 # Services (run in-process)
 session.workspace = true
-session-proto.workspace = true
 
 # Roam - for connecting to host and service dispatch
 roam.workspace = true

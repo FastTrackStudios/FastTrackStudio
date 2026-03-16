@@ -10,7 +10,7 @@ use std::sync::Mutex;
 use dioxus::prelude::*;
 use helgoboss_midi::{RawShortMessage, ShortMessage, ShortMessageFactory, StructuredShortMessage, U7};
 use midir::{MidiInput, MidiInputConnection};
-use signal_proto::midi_actions::{CcThreshold, MidiActionMap, MidiActionTrigger};
+use signal::midi_actions::{CcThreshold, MidiActionMap, MidiActionTrigger};
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 

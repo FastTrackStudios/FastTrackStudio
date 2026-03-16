@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use signal_proto::{BlockType, PresetId, SnapshotId, ALL_BLOCK_TYPES};
+use signal::{BlockType, PresetId, SnapshotId, ALL_BLOCK_TYPES};
 
 use crate::actions::{SIGNAL_ACTIVE_PATCH_ID, SIGNAL_PATCH_IDS};
 
@@ -150,7 +150,7 @@ pub(crate) fn SignalPresetTab() -> Element {
                                             activating.set(Some(pid_str.clone()));
                                             *SIGNAL_ACTIVE_PATCH_ID.write() = Some(pid_str);
                                             // Clear stale macro bindings from previous preset
-                                            signal_live::macro_registry::clear();
+                                            signal::macro_registry::clear();
 
                                             spawn(async move {
                                                 match signal.block_presets().activate(bt, pid, sid).await {
