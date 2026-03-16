@@ -38,6 +38,9 @@ session.workspace = true
 # Signal (rig/profile/preset management)
 signal = { workspace = true, features = ["daw"] }
 
+# RT-aware allocator and task dispatch
+daw-allocator.workspace = true
+
 # Runtime
 roam.workspace = true
 roam-stream.workspace = true

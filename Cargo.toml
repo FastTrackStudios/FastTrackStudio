@@ -113,6 +113,9 @@ color-palette = { path = "../dynamic-template/crates/color-palette" }
 dynamic-template-proto = { path = "../dynamic-template/crates/dynamic-template-proto" }
 dynamic-template = { path = "../dynamic-template/crates/dynamic-template" }
 
+# Shared infrastructure
+daw-allocator = { path = "crates/shared/daw-allocator" }
+
 # Local crates
 macromod = { path = "crates/macromod/macromod" }
 # NOTE: session-proto is listed here for use by session-ui (internal domain crate only).
@@ -137,8 +140,8 @@ reaper-common-types = { git = "https://github.com/helgoboss/reaper-rs.git", bran
 # FTS REAPER crates (in-workspace)
 swell-ui = { path = "crates/reaper/swell-ui" }
 reaper-embed = { path = "crates/reaper/reaper-embed" }
-reaper-test = { path = "crates/reaper/reaper-test" }
-reaper-test-macro = { path = "crates/reaper/reaper-test-macro" }
+reaper-test = { path = "../daw/crates/reaper-test" }
+reaper-test-macro = { path = "../daw/crates/reaper-test-macro" }
 reaper-extension = { path = "apps/reaper-extension" }
 fragile = "2.0.1"
 crossbeam-channel = "0.5"

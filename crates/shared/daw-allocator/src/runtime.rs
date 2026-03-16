@@ -119,6 +119,11 @@ impl FtsRuntime {
             .expect("FtsRuntime not initialized — call FtsRuntime::init() first")
     }
 
+    /// Get the runtime instance if initialized, or `None`.
+    pub fn try_get() -> Option<&'static FtsRuntime> {
+        RUNTIME.get()
+    }
+
     /// Get the main-thread dispatcher. Clone it to send from any thread.
     pub fn dispatcher(&self) -> &MainThreadDispatcher {
         &self.dispatcher

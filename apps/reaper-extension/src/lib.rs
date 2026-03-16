@@ -37,6 +37,17 @@ use tracing::{debug, info, warn};
 
 use global::Global;
 use routed_handler::RoutedHandler;
+
+// ============================================================================
+// RT-Aware Global Allocator (Helgobox pattern)
+// ============================================================================
+
+/// Global allocator that offloads deallocations from REAPER's real-time audio
+/// thread to a background "daw-deallocator" thread.
+///
+/// Inspired by Helgobox (https://github.com/helgoboss/helgobox).
+#[global_allocator]
+static ALLOCATOR: daw_allocator::FtsAllocator = daw_allocator::FtsAllocator::new();
 use std::path::PathBuf;
 use tokio::net::UnixListener;
 
@@ -231,6 +242,14 @@ async fn register_daw_dispatcher() {
     // The timer callback will call poll_and_broadcast_fx() to push FX events
     daw::reaper::init_fx_broadcaster();
     info!("FX event broadcaster initialized for reactive observation");
+
+    // Initialize track, item, routing, and tempo map broadcasters
+    // The timer callback will call poll_and_broadcast_*() to push state updates
+    daw::reaper::init_track_broadcaster();
+    daw::reaper::init_item_broadcaster();
+    daw::reaper::init_routing_broadcaster();
+    daw::reaper::init_tempo_map_broadcaster();
+    info!("Track, item, routing, and tempo map broadcasters initialized");
 
     // Create REAPER implementations (they use TaskSupport for main thread dispatch)
     let transport = daw::reaper::ReaperTransport::new();
@@ -508,6 +527,11 @@ extern "C" fn timer_callback() {
         // Process pending main thread tasks via TaskSupport middleware
         app.process_tasks();
 
+        // Process daw-allocator main-thread tasks (if runtime initialized)
+        if let Some(runtime) = daw_allocator::FtsRuntime::try_get() {
+            runtime.process_main_thread_tasks();
+        }
+
         // Keep input mouse hooks attached to newly opened windows (MIDI editors).
         input_reaper::check_and_hook_windows();
 
@@ -523,6 +547,12 @@ extern "C" fn timer_callback() {
 
         // Poll FX chain state and broadcast events for monitored chains
         daw::reaper::poll_and_broadcast_fx();
+
+        // Poll track, item, routing, and tempo map state and broadcast to subscribers
+        daw::reaper::poll_and_broadcast_tracks();
+        daw::reaper::poll_and_broadcast_items();
+        daw::reaper::poll_and_broadcast_routing();
+        daw::reaper::poll_and_broadcast_tempo_map();
 
         // Re-apply auto-color when track names change (throttled ~1s)
         crate::auto_color::poll_and_recolor();
@@ -558,6 +588,35 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
         }
         Err(_) => {
             debug!("REAPER high-level API already initialized");
+        }
+    }
+
+    // Initialize the RT-aware allocator runtime.
+    // Uses REAPER's IsInRealTimeAudio() to detect audio threads — deallocations
+    // on those threads are offloaded to the "daw-deallocator" background thread.
+    {
+        let low = HighReaper::get().medium_reaper().low();
+        if let Some(is_in_rt_audio) = low.pointers().IsInRealTimeAudio {
+            struct ReaperRtDetector(unsafe extern "C" fn() -> i32);
+            impl daw_allocator::RtDetector for ReaperRtDetector {
+                fn is_rt_thread(&self) -> bool {
+                    unsafe { (self.0)() != 0 }
+                }
+            }
+            // Safety: function pointer is valid for the lifetime of the REAPER process.
+            unsafe impl Send for ReaperRtDetector {}
+            unsafe impl Sync for ReaperRtDetector {}
+
+            daw_allocator::FtsRuntime::init(
+                &ALLOCATOR,
+                daw_allocator::FtsRuntimeConfig {
+                    dealloc_channel_capacity: 10_000,
+                    rt_detector: Box::new(ReaperRtDetector(is_in_rt_audio)),
+                },
+            );
+            info!("DAW allocator initialized (RT-safe deallocation active)");
+        } else {
+            warn!("IsInRealTimeAudio not available — RT deallocation offloading disabled");
         }
     }
 
