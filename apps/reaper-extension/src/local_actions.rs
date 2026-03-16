@@ -146,6 +146,86 @@ actions_proto::define_actions! {
             group: "Keyflow",
             implementation: supported(super::handle_export_keyflow_chart_to_midi),
         }
+        // ── Session / Setlist ─────────────────────────────────────────
+        GENERATE_COMBINED_SETLIST = "generate_combined_setlist" {
+            name: "Generate Combined Setlist from Open Projects",
+            description: "Combines all open song projects into a single setlist project (2 measure gap)",
+            category: Dev,
+            group: "Session",
+            implementation: supported(super::handle_generate_combined_setlist),
+        }
+        GENERATE_RULER_LANES = "generate_ruler_lanes" {
+            name: "Generate Ruler Lanes",
+            description: "Create the standard FTS ruler lane layout (SECTIONS, MARKS, SONG, START/END, KEY, MODE, CHORDS, NOTES)",
+            category: Dev,
+            group: "Ruler Manager",
+            implementation: supported(super::handle_generate_ruler_lanes),
+        }
+        ORGANIZE_RULER_LANES = "organize_ruler_lanes" {
+            name: "Organize Regions/Markers into Ruler Lanes",
+            description: "Sort existing markers and regions into the correct FTS ruler lanes based on their names",
+            category: Dev,
+            group: "Ruler Manager",
+            implementation: supported(super::handle_organize_ruler_lanes),
+        }
+        // ── Sync / Ableton Link ──────────────────────────────────────
+        SYNC_TOGGLE_LINK = "sync_toggle_link" {
+            name: "Toggle Ableton Link",
+            description: "Enable/disable Ableton Link sync (toggles between Puppet and Off)",
+            category: Dev,
+            group: "Sync",
+            implementation: supported(super::handle_sync_toggle_link),
+        }
+        SYNC_LINK_PUPPET = "sync_link_puppet" {
+            name: "Link Puppet Mode",
+            description: "Enable Ableton Link in Puppet mode (follow Link session)",
+            category: Dev,
+            group: "Sync",
+            implementation: supported(super::handle_sync_link_puppet),
+        }
+        SYNC_LINK_MASTER = "sync_link_master" {
+            name: "Link Master Mode",
+            description: "Enable Ableton Link in Master mode (drive Link session)",
+            category: Dev,
+            group: "Sync",
+            implementation: supported(super::handle_sync_link_master),
+        }
+        SYNC_LINK_OFF = "sync_link_off" {
+            name: "Link Off",
+            description: "Disable Ableton Link sync",
+            category: Dev,
+            group: "Sync",
+            implementation: supported(super::handle_sync_link_off),
+        }
+        // ── Signal Save ─────────────────────────────────────────────
+        SAVE_BLOCK = "save_block" {
+            name: "Signal - Save Block",
+            description: "Save selected FX as a Block preset (.RfxChain)",
+            category: Dev,
+            group: "Signal",
+            implementation: supported(super::handle_save_block),
+        }
+        SAVE_MODULE = "save_module" {
+            name: "Signal - Save Module",
+            description: "Save selected track's FX chain as a Module preset (.RfxChain)",
+            category: Dev,
+            group: "Signal",
+            implementation: supported(super::handle_save_module),
+        }
+        SAVE_LAYER = "save_layer" {
+            name: "Signal - Save Layer",
+            description: "Save selected track as a Layer preset (.RTrackTemplate)",
+            category: Dev,
+            group: "Signal",
+            implementation: supported(super::handle_save_layer),
+        }
+        SAVE_RIG = "save_rig" {
+            name: "Signal - Save Rig",
+            description: "Save selected folder + children as a Rig preset (.RTrackTemplate)",
+            category: Dev,
+            group: "Signal",
+            implementation: supported(super::handle_save_rig),
+        }
     }
 }
 
@@ -1228,4 +1308,173 @@ unsafe fn add_separator(menu: raw::HMENU) {
     unsafe {
         swell.InsertMenuItem(menu, -1, 1, &mut sep_info);
     }
+}
+
+
+// ── Sync / Ableton Link Action Handlers ──────────────────────────────────────
+
+fn handle_sync_toggle_link() -> ActionResult {
+    use sync::link::Mode;
+    if crate::sync_bridge::is_link_enabled() {
+        crate::sync_bridge::disable_link();
+        ActionResult::success_with_message("Ableton Link disabled")
+    } else {
+        crate::sync_bridge::enable_link(Mode::Puppet);
+        ActionResult::success_with_message("Ableton Link enabled (Puppet mode)")
+    }
+}
+
+fn handle_sync_link_puppet() -> ActionResult {
+    crate::sync_bridge::enable_link(sync::link::Mode::Puppet);
+    ActionResult::success_with_message("Ableton Link: Puppet mode")
+}
+
+fn handle_sync_link_master() -> ActionResult {
+    crate::sync_bridge::enable_link(sync::link::Mode::Master);
+    ActionResult::success_with_message("Ableton Link: Master mode")
+}
+
+fn handle_sync_link_off() -> ActionResult {
+    crate::sync_bridge::disable_link();
+    ActionResult::success_with_message("Ableton Link: Off")
+}
+
+// ============================================================================
+// Signal Save Actions
+// ============================================================================
+
+fn handle_save_block() -> ActionResult {
+    tokio::task::spawn_local(crate::signal_save::save_block());
+    ActionResult::success()
+}
+
+fn handle_save_module() -> ActionResult {
+    tokio::task::spawn_local(crate::signal_save::save_module());
+    ActionResult::success()
+}
+
+fn handle_save_layer() -> ActionResult {
+    tokio::task::spawn_local(crate::signal_save::save_layer());
+    ActionResult::success()
+}
+
+fn handle_save_rig() -> ActionResult {
+    tokio::task::spawn_local(crate::signal_save::save_rig());
+    ActionResult::success()
+}
+
+// ── Session / Setlist Action Handlers ────────────────────────────────────────
+
+fn handle_generate_combined_setlist() -> ActionResult {
+    use session::SetlistService;
+
+    moire::task::spawn(async {
+        if let Some(session) = crate::session::SessionManager::try_get() {
+            match session.setlist_service().generate_combined_setlist(2).await {
+                Ok(result) => {
+                    info!("Combined setlist generated: {}", result);
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to generate combined setlist: {}", e);
+                }
+            }
+        } else {
+            tracing::warn!("Session manager not initialized");
+        }
+    })
+    .named("generate_combined_setlist");
+    ActionResult::success_with_message("Generating combined setlist...")
+}
+
+// ── Ruler Manager Action Handlers ────────────────────────────────────────────
+
+fn handle_generate_ruler_lanes() -> ActionResult {
+    use session::ruler_lanes::CoreLane;
+
+    moire::task::spawn(async {
+        let daw = daw::Daw::get();
+        match daw.current_project().await {
+            Ok(project) => {
+                for lane in CoreLane::all() {
+                    if let Err(e) = project
+                        .set_ruler_lane_name(lane.lane_index(), lane.display_name())
+                        .await
+                    {
+                        tracing::warn!("Failed to set ruler lane {}: {e}", lane.display_name());
+                    }
+                }
+                info!("Generated {} FTS ruler lanes", CoreLane::all().len());
+            }
+            Err(e) => tracing::warn!("Failed to get current project: {e}"),
+        }
+    })
+    .named("generate_ruler_lanes");
+    ActionResult::success_with_message("Generating FTS ruler lanes...")
+}
+
+fn handle_organize_ruler_lanes() -> ActionResult {
+    use session::ruler_lanes::{
+        classify_marker_lane, classify_region_lane, CoreLane,
+    };
+
+    moire::task::spawn(async {
+        let daw = daw::Daw::get();
+        let project = match daw.current_project().await {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::warn!("Failed to get current project: {e}");
+                return;
+            }
+        };
+
+        // Step 1: Ensure ruler lanes exist
+        for lane in CoreLane::all() {
+            let _ = project
+                .set_ruler_lane_name(lane.lane_index(), lane.display_name())
+                .await;
+        }
+
+        // Step 2: Classify and move all markers
+        let markers = match project.markers().all().await {
+            Ok(m) => m,
+            Err(e) => {
+                tracing::warn!("Failed to get markers: {e}");
+                return;
+            }
+        };
+
+        let mut marker_count = 0;
+        for marker in &markers {
+            let lane = classify_marker_lane(&marker.name);
+            if let Some(id) = marker.id {
+                let _ = project.markers().set_lane(id, Some(lane.lane_index())).await;
+                marker_count += 1;
+            }
+        }
+
+        // Step 3: Classify and move all regions
+        let regions = match project.regions().all().await {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!("Failed to get regions: {e}");
+                return;
+            }
+        };
+
+        let mut region_count = 0;
+        for region in &regions {
+            let lane = classify_region_lane(&region.name);
+            if let Some(id) = region.id {
+                let _ = project.regions().set_lane(id, Some(lane.lane_index())).await;
+                region_count += 1;
+            }
+        }
+
+        info!(
+            "Organized {} markers and {} regions into ruler lanes",
+            marker_count, region_count
+        );
+    })
+    .named("organize_ruler_lanes");
+    ActionResult::success_with_message("Organizing markers/regions into ruler lanes...")
 }

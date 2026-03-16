@@ -1,19 +1,41 @@
-//! Sync Cell — OAuth2 authentication and cloud sync services
+//! Sync engine — DAW-to-DAW real-time synchronization.
 //!
-//! This crate provides:
-//! - OAuth2 login flows for GitHub and Google (`oauth` module)
-//! - Secure token storage via system keychain (`token_store` module)
-//! - `AuthServiceImpl` implementing the `AuthService` trait
-//! - `SyncStatusServiceImpl` implementing the `SyncStatusService` trait
-//! - Users table DDL for cloud database schema
+//! Subscribes to all local DAW change streams, wraps each event in a
+//! [`SyncEvent`] envelope with origin peer + sequence number, and forwards
+//! to all connected peers via roam. Receives remote events and applies them
+//! through the DAW mutation API, with echo suppression to prevent infinite
+//! bounce loops.
+//!
+//! # Architecture
+//!
+//! ```text
+//! Local DAW (poll ~30Hz)
+//!   ├─ TrackEvent ──┐
+//!   ├─ Transport ───┤
+//!   ├─ FxEvent ─────┤
+//!   └─ ... ─────────┤
+//!                    ▼
+//!              Engine::run()
+//!                ├─ wrap in SyncEvent { origin: self, seq: N }
+//!                ├─ check suppression (skip if echo)
+//!                └─ send to peers via roam
+//!
+//! Remote SyncEvent arrives
+//!   ├─ filter: origin == self → skip
+//!   ├─ record in suppression set
+//!   └─ apply via daw mutation API
+//! ```
 
-pub mod error;
-pub mod oauth;
-pub mod schema;
-pub mod service;
-pub mod token_store;
+mod apply;
+mod engine;
+#[cfg(feature = "link")]
+pub mod link;
+mod subscriptions;
+mod suppression;
 
-pub use error::{AuthError, AuthResult};
-pub use service::auth::AuthServiceImpl;
-pub use service::sync_status::SyncStatusServiceImpl;
-pub use token_store::{MockTokenStore, TokenStore};
+pub use engine::Engine;
+pub use subscriptions::ProjectSubscriptions;
+pub use sync_proto::{
+    ConflictPolicy, SyncConfig, SyncDomain, SyncEvent, SyncPeer, SyncService, SyncSession,
+    SyncStatus,
+};

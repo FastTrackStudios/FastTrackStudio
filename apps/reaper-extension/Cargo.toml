@@ -25,6 +25,10 @@ input-reaper.workspace = true
 # DAW facade (reaper impl + sync wrapper)
 daw = { workspace = true, features = ["reaper", "sync"] }
 
+# Sync engine (DAW-to-DAW sync + Ableton Link)
+sync.workspace = true
+sync-proto.workspace = true
+
 # Keyflow guide generation (through facade)
 keyflow = { workspace = true, features = ["midi"] }
 
@@ -49,6 +53,7 @@ tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 fragile.workspace = true
+uuid.workspace = true
 anyhow = "1.0"
 eyre = "0.6"
 libloading = "0.8"

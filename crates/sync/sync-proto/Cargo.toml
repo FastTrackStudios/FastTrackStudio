@@ -1,13 +1,13 @@
 [package]
 name = "sync-proto"
-description = "Sync protocol — auth types and service definitions for cloud sync"
+description = "Sync protocol — types and service definitions for DAW-to-DAW real-time synchronization"
 version.workspace = true
 edition = "2024"
 
 [dependencies]
-async-trait = "0.1"
-uuid = { version = "1", features = ["v4"] }
-chrono = { version = "0.4", features = ["serde"] }
+daw-proto = { path = "../../../../daw/crates/daw-proto" }
+facet.workspace = true
+roam.workspace = true
 
 [lints]
 workspace = true
