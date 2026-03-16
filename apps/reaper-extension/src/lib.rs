@@ -290,13 +290,22 @@ async fn register_daw_dispatcher() {
         }
     }
 
-    // Start the Unix socket server with the combined handler.
-    // Note: session::init() already stored the handler in the SessionManager.
-    // For the socket server, we rebuild the handler including session services.
+    // Initialize the signal subsystem (rig/profile/preset management).
+    // Must happen before the socket server starts so signal services are available.
+    signal_bridge::init().await;
+
+    // Start the Unix socket server with DAW + Session + Signal services.
     if let Some(session_mgr) = session::SessionManager::try_get() {
-        let session_handler = session_mgr.create_handler();
-        start_unix_socket_server(session_handler);
-        info!("Unix socket serves DAW + Session services");
+        let mut handler = session_mgr.create_handler();
+
+        // Add signal services if the controller is ready
+        if let Some(ctrl) = signal_bridge::controller() {
+            handler = signal_bridge::add_signal_services(handler, ctrl);
+            info!("Signal services added to Unix socket handler");
+        }
+
+        start_unix_socket_server(handler);
+        info!("Unix socket serves DAW + Session + Signal services");
     } else {
         // Session init failed — can't serve without handler (it was moved)
         warn!("Unix socket not started (session init failed)");
@@ -331,12 +340,8 @@ async fn register_daw_dispatcher() {
     }
 
     info!(
-        "DAW dispatcher registered (Transport, Project, Marker, Region, TempoMap, Midi, MidiAnalysis, AudioEngine, Fx, Track, Routing, LiveMidi, ExtState, Session)"
+        "DAW dispatcher registered (Transport, Project, Marker, Region, TempoMap, Midi, MidiAnalysis, AudioEngine, Fx, Track, Routing, LiveMidi, ExtState, Session, Signal)"
     );
-
-    // Initialize the signal subsystem (rig/profile/preset management).
-    // Creates a file-backed SignalController accessible via signal_bridge::controller().
-    signal_bridge::init().await;
 }
 
 // ============================================================================
