@@ -2,6 +2,13 @@
 //!
 //! Provides a unified interface for building FTS audio plugins with
 //! consistent UI, state management, and plugin configuration.
+//!
+//! # Usage
+//!
+//! ```ignore
+//! use fts_plugin_core::prelude::*;  // nih_plug + nih_plug_dioxus re-exports
+//! use fts_plugin_core::ui::prelude::*;  // FTS UI components (Toggle, Section, etc.)
+//! ```
 
 // Re-export core dependencies
 pub use nih_plug;
@@ -11,6 +18,9 @@ pub use nih_plug::prelude::*;
 pub use nih_plug_dioxus;
 #[cfg(feature = "gui")]
 pub use nih_plug_dioxus::prelude::*;
+
+#[cfg(feature = "gui")]
+pub mod ui;
 
 /// Prelude for convenient imports.
 pub mod prelude {
