@@ -1,7 +1,7 @@
 //! AuthService implementation with OAuth2 and token storage
 
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use moire::sync::Mutex;
 
 use sync_proto::{AuthProvider, AuthState, OAuthCallbackParams, User};
 
@@ -31,9 +31,9 @@ impl<T: TokenStore> AuthServiceImpl<T> {
     pub fn new(token_store: Arc<T>) -> Self {
         Self {
             token_store,
-            state: Mutex::new(AuthState::Unauthenticated),
-            current_user: Mutex::new(None),
-            pending_auth: Mutex::new(None),
+            state: Mutex::new("sync.auth.state", AuthState::Unauthenticated),
+            current_user: Mutex::new("sync.auth.current_user", None),
+            pending_auth: Mutex::new("sync.auth.pending_auth", None),
             github_config: None,
             google_config: None,
         }

@@ -9,7 +9,7 @@ use std::sync::Arc;
 use chrono::Utc;
 use sea_orm::entity::prelude::*;
 use sea_orm::{ActiveValue, ColumnTrait, Condition, EntityTrait, QueryFilter};
-use tokio::sync::Mutex;
+use moire::sync::Mutex;
 use uuid::Uuid;
 
 use signal_storage::entities::{preset, sync_metadata};
@@ -45,10 +45,10 @@ impl SyncEngine {
     pub fn new(local_db: DatabaseConnection) -> Self {
         Self {
             local_db: Arc::new(local_db),
-            cloud_db: Arc::new(Mutex::new(None)),
-            default_strategy: Mutex::new(ConflictStrategy::default()),
-            offline_queue: Mutex::new(Vec::new()),
-            last_progress: Mutex::new(None),
+            cloud_db: Arc::new(Mutex::new("sync.engine.cloud_db", None)),
+            default_strategy: Mutex::new("sync.engine.strategy", ConflictStrategy::default()),
+            offline_queue: Mutex::new("sync.engine.offline_queue", Vec::new()),
+            last_progress: Mutex::new("sync.engine.progress", None),
         }
     }
 

@@ -1,7 +1,7 @@
 //! SyncStatusService implementation
 
 use sync_proto::{SyncState, SyncStatusService};
-use tokio::sync::Mutex;
+use moire::sync::Mutex;
 
 /// Tracks the current sync state
 pub struct SyncStatusServiceImpl {
@@ -12,8 +12,8 @@ pub struct SyncStatusServiceImpl {
 impl SyncStatusServiceImpl {
     pub fn new() -> Self {
         Self {
-            state: Mutex::new(SyncState::default()),
-            last_sync: Mutex::new(None),
+            state: Mutex::new("sync.status.state", SyncState::default()),
+            last_sync: Mutex::new("sync.status.last_sync", None),
         }
     }
 
