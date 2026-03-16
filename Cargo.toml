@@ -39,6 +39,7 @@ facet-pretty = { version = "0.44" }
 facet-toml = { version = "0.44" }
 facet-value = { version = "0.44" }
 facet-yaml = { version = "0.44" }
+facet-styx = { version = "2.0" }
 
 # Common dependencies
 serde = { version = "1.0", features = ["derive"] }
