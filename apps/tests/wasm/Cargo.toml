@@ -13,8 +13,7 @@ roam.workspace = true
 roam-websocket.workspace = true
 
 # DAW API (same as web app uses)
-daw-control.workspace = true
-daw-proto.workspace = true
+daw.workspace = true
 
 # Session API (setlist navigation, song control)
 session-proto.workspace = true

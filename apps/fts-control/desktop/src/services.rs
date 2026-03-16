@@ -27,7 +27,7 @@
 //! ```
 
 use crate::routed_handler::RoutedHandler;
-use daw_control_sync::LocalCaller;
+use daw::sync::LocalCaller;
 use roam::ErasedCaller;
 use session::{SetlistServiceImpl, SongServiceImpl};
 use session_proto::{

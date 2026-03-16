@@ -436,9 +436,9 @@ fn start_transport_sync_task(connection_lost: Rc<Cell<bool>>) {
 
                             // Update PLAYBACK_STATE based on active song
                             if indices.is_playing {
-                                *PLAYBACK_STATE.write() = daw_proto::PlayState::Playing;
+                                *PLAYBACK_STATE.write() = daw::service::PlayState::Playing;
                             } else {
-                                *PLAYBACK_STATE.write() = daw_proto::PlayState::Stopped;
+                                *PLAYBACK_STATE.write() = daw::service::PlayState::Stopped;
                             }
                         }
 
@@ -456,7 +456,7 @@ fn start_transport_sync_task(connection_lost: Rc<Cell<bool>>) {
                                 Option<usize>,
                                 bool,
                                 bool,
-                                Option<daw_proto::MusicalPosition>,
+                                Option<daw::service::MusicalPosition>,
                             )> = None;
 
                             {
@@ -471,11 +471,11 @@ fn start_transport_sync_task(connection_lost: Rc<Cell<bool>>) {
                                     {
                                         // Create a new Position with compensated time
                                         let compensated_time = transport.position.time.map(|t| {
-                                            daw_proto::TimePosition::from_seconds(
+                                            daw::service::TimePosition::from_seconds(
                                                 t.as_seconds() + audio_latency,
                                             )
                                         });
-                                        daw_proto::Position::new(
+                                        daw::service::Position::new(
                                             transport.position.musical.clone(),
                                             compensated_time,
                                             transport.position.midi.clone(),
@@ -561,9 +561,9 @@ fn start_transport_sync_task(connection_lost: Rc<Cell<bool>>) {
 
                                 let old_playing = *PLAYBACK_STATE.read();
                                 let new_playing = if is_playing {
-                                    daw_proto::PlayState::Playing
+                                    daw::service::PlayState::Playing
                                 } else {
-                                    daw_proto::PlayState::Stopped
+                                    daw::service::PlayState::Stopped
                                 };
 
                                 if old_playing != new_playing {

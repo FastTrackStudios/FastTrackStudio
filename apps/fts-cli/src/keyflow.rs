@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use daw_proto::routing::{MidiChannelMapping, MidiDestinationChannel, MidiSourceChannel};
-use dawfile_reaper::types::item::Take;
-use dawfile_reaper::{
+use daw::service::routing::{MidiChannelMapping, MidiDestinationChannel, MidiSourceChannel};
+use daw::file::types::item::Take;
+use daw::file::{
     read_project, MidiEvent, MidiEventType, MidiSource, MidiSourceEvent, ReaperProject, SourceType,
     TempoTimeEnvelope, Track,
 };

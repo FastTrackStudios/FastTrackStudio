@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use clap::{Args, Subcommand};
-use daw_control::Daw;
+use daw::Daw;
 use eyre::Result;
 use serde_json::json;
 
@@ -490,7 +490,7 @@ async fn cmd_track_remove(daw: &Daw, track_arg: &str, as_json: bool) -> Result<(
     let project = daw.current_project().await?;
     project
         .tracks()
-        .remove(daw_proto::TrackRef::Guid(guid))
+        .remove(daw::service::TrackRef::Guid(guid))
         .await?;
 
     if as_json {
@@ -640,7 +640,7 @@ async fn resolve_param_handle(
     track_arg: &str,
     fx_arg: &str,
     param_arg: &str,
-) -> Result<(String, String, daw_control::FxParamHandle)> {
+) -> Result<(String, String, daw::FxParamHandle)> {
     let (_, track_name) = daw_cli::resolve_track(daw, track_arg).await?;
     let handle = daw_cli::resolve_track_handle(daw, track_arg).await?;
     let fx_chain = handle.fx_chain();

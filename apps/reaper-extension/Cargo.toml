@@ -20,11 +20,10 @@ swell-ui.workspace = true
 # Protocols
 actions-proto.workspace = true
 actions-registry.workspace = true
-daw-proto.workspace = true
 input-reaper.workspace = true
 
-# DAW REAPER implementation (in-process, not a cell)
-daw-reaper.workspace = true
+# DAW facade (reaper impl + sync wrapper)
+daw = { workspace = true, features = ["reaper", "sync"] }
 
 # Keyflow guide generation
 keyflow-proto.workspace = true
@@ -37,8 +36,9 @@ dynamic-template.workspace = true
 # Session (setlist management, navigation, auto-advance)
 session-proto.workspace = true
 session.workspace = true
-daw-control.workspace = true
-daw-control-sync.workspace = true
+
+# Signal (rig/profile/preset management)
+signal = { workspace = true, features = ["daw"] }
 
 # Runtime
 roam.workspace = true

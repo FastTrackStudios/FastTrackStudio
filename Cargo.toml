@@ -87,16 +87,13 @@ engraver = { path = "../keyflow/crates/engraver" }
 engraver-proto = { path = "../keyflow/crates/engraver-proto" }
 keyflow-ui = { path = "../keyflow/crates/keyflow-ui" }
 
-# DAW crates (sibling repo — local paths)
-dawfile-reaper = { path = "../daw/crates/dawfile-reaper" }
+# DAW facade crate (sibling repo — single public API surface)
 daw = { path = "../daw/crates/daw" }
-daw-proto = { path = "../daw/crates/daw-proto" }
-daw-control = { path = "../daw/crates/daw-control" }
-daw-control-sync = { path = "../daw/crates/daw-control-sync" }
-daw-standalone = { path = "../daw/crates/daw-standalone" }
-daw-reaper = { path = "../daw/crates/daw-reaper" }
 daw-ui = { path = "../daw/crates/daw-ui" }
 daw-cli = { path = "../daw/apps/daw" }
+# NOTE: daw-proto, daw-control, daw-control-sync, daw-reaper, daw-standalone,
+# dawfile-reaper are INTERNAL. Access them through the `daw` facade crate.
+# Use features: sync, reaper, standalone, file
 signal-cli = { path = "apps/signal-cli" }
 session-cli = { path = "apps/session-cli" }
 
@@ -125,15 +122,8 @@ session = { path = "crates/session/session" }
 session-ui = { path = "crates/session/session-ui" }
 audio-controls = { path = "../daw/crates/audio-controls" }
 signal = { path = "crates/signal/signal" }
-signal-proto = { path = "crates/signal/signal-proto" }
-signal-storage = { path = "crates/signal/signal-storage" }
-signal-live = { path = "crates/signal/signal-live" }
-signal-controller = { path = "crates/signal/signal-controller" }
 signal-ui = { path = "crates/signal/signal-ui", default-features = false }
-signal-import = { path = "crates/signal/signal-import" }
 utils = { path = "crates/shared/utils" }
-signal-daw-bridge = { path = "crates/signal/signal-daw-bridge" }
-nam-manager = { path = "crates/signal/nam-manager" }
 sync-proto = { path = "crates/sync/sync-proto" }
 sync = { path = "crates/sync/sync" }
 sync-ui = { path = "crates/sync/sync-ui" }
@@ -177,6 +167,8 @@ winapi = { version = "0.3", features = ["winuser", "uxtheme"] }
 libloading = "0.9"
 
 image = "0.25"
+ab_glyph = "0.2"
+imageproc = "0.25"
 
 # Anyrender - 2D rendering abstraction (WGPU/Vello backend)
 anyrender = { git = "https://github.com/DioxusLabs/anyrender.git", branch = "main" }

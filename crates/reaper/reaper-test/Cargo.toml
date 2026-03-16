@@ -5,7 +5,7 @@ edition = "2021"
 description = "Runtime library for REAPER integration tests"
 
 [dependencies]
-daw-control = { workspace = true }
+daw = { workspace = true }
 roam = { workspace = true }
 roam-stream = { workspace = true }
 eyre = "0.6"

@@ -12,12 +12,12 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use daw_control::Daw;
-use daw_proto::{Fx, FxParameter, FxType};
+use daw::Daw;
+use daw::service::{Fx, FxParameter, FxType};
 use eyre::Result;
 use macromod::MacroBank;
 use serde::{Deserialize, Serialize};
-use signal_proto::plugin_block::PluginBlockDef;
+use signal::plugin_block::PluginBlockDef;
 
 // ============================================================================
 // Types — raw.json
@@ -437,7 +437,7 @@ fn infer_block_type(track_name: &str) -> String {
         .trim();
 
     // Try exact match against BlockType display names and kebab-case names
-    if let Some(bt) = signal_proto::BlockType::from_str(stripped) {
+    if let Some(bt) = signal::BlockType::from_str(stripped) {
         return bt.as_str().to_string();
     }
 

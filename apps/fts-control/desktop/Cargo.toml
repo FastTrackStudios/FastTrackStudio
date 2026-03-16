@@ -29,10 +29,8 @@ tower-http = { version = "0.6", features = ["fs", "cors"] }
 futures-util = "0.3"
 facet-postcard.workspace = true
 
-# Protocols
-daw-proto.workspace = true
-daw-control.workspace = true
-daw-control-sync.workspace = true
+# DAW facade (sync wrapper for desktop)
+daw = { workspace = true, features = ["sync"] }
 
 # Async
 tokio = { workspace = true, features = ["full"] }
@@ -50,8 +48,6 @@ rfd = "0.15"
 midir = "0.10"
 helgoboss-midi = "0.4"
 
-# Signal proto (for MIDI action types)
-signal-proto.workspace = true
 
 # Chart rendering via anyrender (WGPU/Vello backend)
 anyrender.workspace = true
@@ -66,9 +62,7 @@ keyflow = { workspace = true, features = ["text"] }
 
 # Signal — storage-backed rig control
 signal = { workspace = true, features = ["daw"] }
-signal-live.workspace = true
 signal-ui = { workspace = true, default-features = false }
-signal-daw-bridge.workspace = true
 
 # Macro system (for macro bar in performance view)
 macromod.workspace = true

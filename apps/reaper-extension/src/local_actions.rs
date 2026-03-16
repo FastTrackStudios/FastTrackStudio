@@ -1,8 +1,8 @@
 //! Local actions owned by reaper-extension itself (not provided by cells).
 
 use actions_proto::{ActionId, ActionResult};
-use daw_proto::markers_regions::fts_markers_regions_actions;
-use daw_proto::transport::fts_transport_actions;
+use daw::service::markers_regions::fts_markers_regions_actions;
+use daw::service::transport::fts_transport_actions;
 use dynamic_template_proto::actions::dynamic_template_actions;
 use dynamic_template_proto::auto_color::actions::auto_color_actions;
 use dynamic_template_proto::visibility_manager::actions::visibility_manager_actions;
@@ -1106,6 +1106,8 @@ pub fn builtin_local_actions() -> Vec<actions_proto::LocalActionRegistration> {
     ));
     // Session actions (setlist navigation, build, playback control)
     actions.extend(crate::session::session_action_registrations());
+    // Signal actions (variation switching 1-24, next/previous section)
+    actions.extend(crate::signal_actions::signal_action_registrations());
     actions
         .into_iter()
         .map(|mut entry| {

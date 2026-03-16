@@ -7,7 +7,7 @@
 //! - [`connect_daw`] — connection + polling logic
 //! - Re-exports `#[reaper_test]` from `reaper-test-macro`
 
-use daw_control::{Daw, Project, TrackHandle};
+use daw::{Daw, Project, TrackHandle};
 use eyre::Result;
 use std::{
     fs::{self, File},

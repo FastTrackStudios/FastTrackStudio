@@ -1,10 +1,10 @@
 use actions_proto::ActionResult;
-use daw_proto::routing::{MidiChannelMapping, MidiDestinationChannel, MidiSourceChannel};
-use daw_reaper::safe_wrappers::{
+use daw::service::routing::{MidiChannelMapping, MidiDestinationChannel, MidiSourceChannel};
+use daw::reaper::safe_wrappers::{
     item as item_sw, markers as markers_sw, midi as midi_sw, routing as routing_sw,
     tempo as tempo_sw, time_map as time_map_sw, ReaperLow,
 };
-use daw_reaper::track::{add_track_on_main_thread, set_folder_depth_on_main_thread};
+use daw::reaper::track::{add_track_on_main_thread, set_folder_depth_on_main_thread};
 use midly::{
     num::{u15, u24, u28, u4, u7},
     Format, Header, MetaMessage, MidiMessage, Smf, Timing, TrackEvent, TrackEventKind,
@@ -161,10 +161,10 @@ fn build_keyflow_midi_bytes(
     parent: &Track,
     bounds: &ExportBounds,
 ) -> Result<Vec<u8>, String> {
-    let song_start_tick = qn_to_tick(daw_reaper::tempo_map::time_to_qn_on_main_thread(
+    let song_start_tick = qn_to_tick(daw::reaper::tempo_map::time_to_qn_on_main_thread(
         bounds.start_seconds,
     ));
-    let song_end_tick = qn_to_tick(daw_reaper::tempo_map::time_to_qn_on_main_thread(
+    let song_end_tick = qn_to_tick(daw::reaper::tempo_map::time_to_qn_on_main_thread(
         bounds.end_seconds,
     ));
 
@@ -245,8 +245,8 @@ fn gather_note_events(
             }
 
             let item_start_tick =
-                qn_to_tick(daw_reaper::tempo_map::time_to_qn_on_main_thread(item_start));
-            let item_end_tick = qn_to_tick(daw_reaper::tempo_map::time_to_qn_on_main_thread(
+                qn_to_tick(daw::reaper::tempo_map::time_to_qn_on_main_thread(item_start));
+            let item_end_tick = qn_to_tick(daw::reaper::tempo_map::time_to_qn_on_main_thread(
                 item_start + item_len,
             ));
             if item_end_tick <= song_start_tick || item_start_tick >= song_end_tick {
@@ -330,7 +330,7 @@ fn gather_marker_events(bounds: &ExportBounds, song_start_tick: u32) -> Vec<Abso
         if marker.pos < bounds.start_seconds || marker.pos > bounds.end_seconds {
             continue;
         }
-        let tick = qn_to_tick(daw_reaper::tempo_map::time_to_qn_on_main_thread(marker.pos))
+        let tick = qn_to_tick(daw::reaper::tempo_map::time_to_qn_on_main_thread(marker.pos))
             .saturating_sub(song_start_tick);
         result.push(AbsoluteEvent {
             tick,
@@ -346,14 +346,14 @@ fn gather_region_events(bounds: &ExportBounds, song_start_tick: u32) -> Vec<Abso
     let low = reaper.medium_reaper().low();
     let project = std::ptr::null_mut();
     let mut result = Vec::new();
-    for region in daw_reaper::region::get_regions_on_main_thread() {
+    for region in daw::reaper::region::get_regions_on_main_thread() {
         if region.name.is_empty()
             || region.start_seconds() < bounds.start_seconds
             || region.start_seconds() > bounds.end_seconds
         {
             continue;
         }
-        let tick = qn_to_tick(daw_reaper::tempo_map::time_to_qn_on_main_thread(
+        let tick = qn_to_tick(daw::reaper::tempo_map::time_to_qn_on_main_thread(
             region.start_seconds(),
         ))
         .saturating_sub(song_start_tick);
@@ -390,7 +390,7 @@ fn gather_tempo_events(bounds: &ExportBounds, song_start_tick: u32) -> Vec<Absol
             continue;
         }
 
-        let tick = qn_to_tick(daw_reaper::tempo_map::time_to_qn_on_main_thread(
+        let tick = qn_to_tick(daw::reaper::tempo_map::time_to_qn_on_main_thread(
             point.timepos,
         ))
         .saturating_sub(song_start_tick);
@@ -418,7 +418,7 @@ fn gather_tempo_events(bounds: &ExportBounds, song_start_tick: u32) -> Vec<Absol
 
     if result.is_empty() {
         let (tempo, num, denom) =
-            daw_reaper::tempo_map::get_tempo_and_time_sig_at_on_main_thread(bounds.start_seconds);
+            daw::reaper::tempo_map::get_tempo_and_time_sig_at_on_main_thread(bounds.start_seconds);
         let micros = ((60_000_000.0 / tempo).round() as u32).clamp(1, 0x00ff_ffff);
         result.push(AbsoluteEvent {
             tick: 0,
@@ -795,8 +795,8 @@ fn encode_keyflow_section_metadata(
         return None;
     }
 
-    let start_qn = daw_reaper::tempo_map::time_to_qn_on_main_thread(start_seconds);
-    let end_qn = daw_reaper::tempo_map::time_to_qn_on_main_thread(end_seconds);
+    let start_qn = daw::reaper::tempo_map::time_to_qn_on_main_thread(start_seconds);
+    let end_qn = daw::reaper::tempo_map::time_to_qn_on_main_thread(end_seconds);
     let start_measure = time_map_sw::qn_to_measures(low, project, start_qn).measure_index + 1;
     let end_measure = time_map_sw::qn_to_measures(low, project, end_qn).measure_index + 1;
     let length = (end_measure - start_measure).max(1);

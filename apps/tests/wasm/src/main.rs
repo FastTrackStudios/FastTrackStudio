@@ -13,7 +13,7 @@
 #![cfg_attr(not(target_arch = "wasm32"), allow(unused))]
 
 #[cfg(target_arch = "wasm32")]
-use daw_control::Daw;
+use daw::Daw;
 #[cfg(target_arch = "wasm32")]
 use dioxus::prelude::*;
 #[cfg(target_arch = "wasm32")]

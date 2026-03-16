@@ -1,6 +1,6 @@
 //! Mock data for testing the performance view without a real DAW connection
 
-use daw_proto::{MusicalPosition, Position, PositionInSeconds};
+use daw::service::{MusicalPosition, Position, PositionInSeconds};
 use session_proto::setlist::{ActiveIndices, Setlist};
 use session_proto::song::{Section, SectionType, Song};
 use session_ui::components::{MeasureIndicator, TempoMarkerData};
@@ -38,9 +38,9 @@ pub fn create_mock_transport_states() -> HashMap<usize, TransportState> {
     map.insert(
         0,
         TransportState {
-            position: daw_proto::Position::new(
-                Some(daw_proto::MusicalPosition::new(20, 1, 0)), // Measure 20
-                Some(daw_proto::TimePosition::from_seconds(78.0)), // In Chorus section (60-105)
+            position: daw::service::Position::new(
+                Some(daw::service::MusicalPosition::new(20, 1, 0)), // Measure 20
+                Some(daw::service::TimePosition::from_seconds(78.0)), // In Chorus section (60-105)
                 None,
             ),
             bpm: 120.0,
@@ -233,7 +233,7 @@ fn create_song_1() -> Song {
             },
         ],
         tempo: Some(120.0),
-        time_signature: Some(daw_proto::TimeSignature::new(4, 4)),
+        time_signature: Some(daw::service::TimeSignature::new(4, 4)),
         measure_positions,
     }
 }
@@ -304,7 +304,7 @@ fn create_song_2() -> Song {
             },
         ],
         tempo: Some(95.0),
-        time_signature: Some(daw_proto::TimeSignature::new(3, 4)),
+        time_signature: Some(daw::service::TimeSignature::new(3, 4)),
         measure_positions,
     }
 }
@@ -393,7 +393,7 @@ fn create_song_3() -> Song {
             },
         ],
         tempo: Some(80.0),
-        time_signature: Some(daw_proto::TimeSignature::new(3, 4)),
+        time_signature: Some(daw::service::TimeSignature::new(3, 4)),
         measure_positions,
     }
 }

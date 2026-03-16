@@ -21,8 +21,8 @@
 //! ```
 
 use actions_proto::ActionResult;
-use daw_control::Daw;
-use daw_control_sync::LocalCaller;
+use daw::Daw;
+use daw::sync::LocalCaller;
 use session::{SetlistServiceImpl, SongServiceImpl};
 use session_proto::{SetlistServiceDispatcher, SongServiceDispatcher};
 use std::sync::OnceLock;

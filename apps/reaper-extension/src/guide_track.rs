@@ -10,13 +10,13 @@
 //! the main thread, matching this action handler's execution context).
 
 use actions_proto::ActionResult;
-use daw_proto::MidiNoteCreate;
-use daw_reaper::midi::{add_notes_to_take_on_main_thread, create_midi_item_on_main_thread};
-use daw_reaper::region::get_regions_on_main_thread;
-use daw_reaper::tempo_map::{
+use daw::service::MidiNoteCreate;
+use daw::reaper::midi::{add_notes_to_take_on_main_thread, create_midi_item_on_main_thread};
+use daw::reaper::region::get_regions_on_main_thread;
+use daw::reaper::tempo_map::{
     get_tempo_and_time_sig_at_on_main_thread, qn_to_time_on_main_thread, time_to_qn_on_main_thread,
 };
-use daw_reaper::track::{add_track_on_main_thread, set_folder_depth_on_main_thread};
+use daw::reaper::track::{add_track_on_main_thread, set_folder_depth_on_main_thread};
 use keyflow_midi::guide::GuideGenerator;
 use keyflow_proto::{
     ClickConfig, CountInConfig, GuideConfig, GuideEvent, SectionType, TimeSignature,

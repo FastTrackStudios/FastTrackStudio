@@ -12,13 +12,13 @@
 //! If found, the existing preset is shown instead of a new-capture form.
 
 use dioxus::prelude::*;
-use daw_control::FxParameter;
+use daw::FxParameter;
 use signal::block::BlockType;
-use signal_proto::easing::EasingCurve;
-use signal_proto::macro_bank::{GroupSelector, MacroBank, MacroGroup, MacroKnob};
-use signal_proto::{MacroBinding, ResponseCurve};
-use signal_proto::metadata::Metadata;
-use signal_proto::param_curation::ParamCuration;
+use signal::easing::EasingCurve;
+use signal::macro_bank::{GroupSelector, MacroBank, MacroGroup, MacroKnob};
+use signal::{MacroBinding, ResponseCurve};
+use signal::metadata::Metadata;
+use signal::param_curation::ParamCuration;
 use signal_ui::components::{Dialog, DialogClose, DialogFooter, DialogHeader, DialogTitle};
 use signal_ui::views::MiniKnob;
 use tracing::warn;
@@ -1580,12 +1580,12 @@ pub(crate) fn SignalCaptureTab() -> Element {
                         &raw_plugin_name, &parsed, paid, activation, mac, win, lin, lin_yb,
                     );
 
-                    let preset = signal_proto::Preset::with_default_snapshot(
-                        signal_proto::PresetId::new(),
+                    let preset = signal::Preset::with_default_snapshot(
+                        signal::PresetId::new(),
                         capture_name.clone(),
                         bt,
-                        signal_proto::Snapshot::new(
-                            signal_proto::SnapshotId::new(),
+                        signal::Snapshot::new(
+                            signal::SnapshotId::new(),
                             "Default",
                             block,
                         ),

@@ -144,7 +144,7 @@ fn main() {
                 .add_directive("fts_control_desktop=info".parse().unwrap())
                 .add_directive("session=info".parse().unwrap())
                 .add_directive("signal_ui=info".parse().unwrap())
-                .add_directive("daw_control::fx=debug".parse().unwrap()),
+                .add_directive("daw::fx=debug".parse().unwrap()),
         )
         .init();
 
@@ -406,7 +406,7 @@ fn App() -> Element {
 
         loop {
             // Fetch full audio latency info from DAW
-            match daw_control::Daw::get().audio_engine().get_state().await {
+            match daw::Daw::get().audio_engine().get_state().await {
                 Ok(state) => {
                     // Calculate latencies in milliseconds
                     let output_ms = state.latency.output_seconds * 1000.0;
@@ -558,9 +558,9 @@ fn App() -> Element {
                             let prev_song_index = ACTIVE_INDICES.peek().song_index;
                             *ACTIVE_INDICES.write() = indices.clone();
                             *PLAYBACK_STATE.write() = if indices.is_playing {
-                                daw_proto::PlayState::Playing
+                                daw::service::PlayState::Playing
                             } else {
-                                daw_proto::PlayState::Stopped
+                                daw::service::PlayState::Stopped
                             };
                             if prev_song_index != indices.song_index {
                                 refresh_session_chart_source();
@@ -576,7 +576,7 @@ fn App() -> Element {
                             let mut transport_updates: Vec<(usize, TransportState)> =
                                 Vec::with_capacity(transports.len());
                             let mut active_playback_update: Option<(
-                                Option<daw_proto::MusicalPosition>,
+                                Option<daw::service::MusicalPosition>,
                                 bool,
                             )> = None;
 
@@ -589,11 +589,11 @@ fn App() -> Element {
                                         && audio_latency > 0.0
                                     {
                                         let compensated_time = transport.position.time.map(|t| {
-                                            daw_proto::TimePosition::from_seconds(
+                                            daw::service::TimePosition::from_seconds(
                                                 t.as_seconds() + audio_latency,
                                             )
                                         });
-                                        daw_proto::Position::new(
+                                        daw::service::Position::new(
                                             transport.position.musical.clone(),
                                             compensated_time,
                                             transport.position.midi.clone(),
@@ -664,9 +664,9 @@ fn App() -> Element {
                                 }
 
                                 let new_state = if is_playing {
-                                    daw_proto::PlayState::Playing
+                                    daw::service::PlayState::Playing
                                 } else {
-                                    daw_proto::PlayState::Stopped
+                                    daw::service::PlayState::Stopped
                                 };
                                 if *PLAYBACK_STATE.peek() != new_state {
                                     *PLAYBACK_STATE.write() = new_state;

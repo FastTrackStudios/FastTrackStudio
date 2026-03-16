@@ -22,13 +22,13 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock, RwLock};
 use std::time::Duration;
 
-use daw_control::Daw;
-use daw_proto::ProjectInfo;
+use daw::Daw;
+use daw::service::ProjectInfo;
 use roam::ErasedCaller;
 use signal::reaper_applier::ReaperPatchApplier;
 use signal::rig_scene_manager::RigSceneManager;
-use signal_live::engine::DawPatchApplier;
-use signal_live::engine::RigSceneApplier;
+use signal::DawPatchApplier;
+use signal::RigSceneApplier;
 use tracing::{debug, info, warn};
 
 use crate::persistence;
@@ -43,7 +43,14 @@ const SOCKET_SUFFIX: &str = ".sock";
 const DISCOVERY_INTERVAL: Duration = Duration::from_secs(2);
 
 /// Project titles that identify a REAPER instance as a Signal DAW.
-const SIGNAL_PROJECT_TITLES: &[&str] = &["FTS-GUITAR", "FTS-KEYS", "FTS-BASS", "FTS-VOCALS"];
+const SIGNAL_PROJECT_TITLES: &[&str] = &[
+    "FTS-GUITAR",
+    "FTS-KEYS",
+    "FTS-BASS",
+    "FTS-VOCALS",
+    "FTS-DRUMS",
+    "FTS-DRUM-ENHANCEMENT",
+];
 
 // ============================================================================
 // Types
@@ -71,6 +78,8 @@ pub struct DawEntry {
     pub projects: Vec<ProjectInfo>,
     /// Classified role.
     pub role: DawRole,
+    /// Rig type for Signal DAWs (e.g., "guitar", "vocals", "drums").
+    pub rig_type: Option<String>,
 }
 
 /// Serializable connection info for UI display.
@@ -78,6 +87,8 @@ pub struct DawEntry {
 pub struct DawConnectionInfo {
     pub pid: u32,
     pub role: DawRole,
+    /// Rig type for Signal DAWs (e.g., "guitar", "vocals", "drums").
+    pub rig_type: Option<String>,
     pub project_names: Vec<String>,
 }
 
@@ -86,6 +97,7 @@ impl From<&DawEntry> for DawConnectionInfo {
         Self {
             pid: entry.pid,
             role: entry.role,
+            rig_type: entry.rig_type.clone(),
             project_names: entry.projects.iter().map(|p| p.name.clone()).collect(),
         }
     }
@@ -327,6 +339,7 @@ async fn connect_to_daw(path: &Path) -> eyre::Result<ErasedCaller> {
 /// ExtState section/key used to declare a DAW's role at startup.
 const EXT_STATE_SECTION: &str = "FTS";
 const EXT_STATE_ROLE_KEY: &str = "role";
+const EXT_STATE_RIG_TYPE_KEY: &str = "rig_type";
 
 /// Classify a DAW by querying ExtState `FTS/role` first, falling back to
 /// project name heuristics for backwards compatibility.
@@ -350,6 +363,17 @@ pub async fn classify_daw(daw: &Daw, projects: &[ProjectInfo]) -> DawRole {
 
     // Fallback: classify by project name heuristics
     classify_by_project_names(projects)
+}
+
+/// Read the rig type from ExtState `FTS/rig_type`.
+///
+/// Returns `None` for Session DAWs or Signal DAWs launched without a rig type.
+pub async fn read_rig_type(daw: &Daw) -> Option<String> {
+    daw.ext_state()
+        .get(EXT_STATE_SECTION, EXT_STATE_RIG_TYPE_KEY)
+        .await
+        .ok()
+        .flatten()
 }
 
 /// Classify a DAW based on project name heuristics (fallback path).
@@ -449,6 +473,7 @@ fn spawn_daw_connection(pid: u32, path: PathBuf) {
         // Classify by ExtState role (primary) or project names (fallback)
         let projects = fetch_projects(&daw).await;
         let role = classify_daw(&daw, &projects).await;
+        let rig_type = read_rig_type(&daw).await;
 
         match role {
             DawRole::Session => {
@@ -493,6 +518,7 @@ fn spawn_daw_connection(pid: u32, path: PathBuf) {
             socket_path: path,
             projects,
             role,
+            rig_type,
         };
 
         DawRegistry::global().register(entry);
