@@ -13,6 +13,8 @@
 #[cfg(target_arch = "wasm32")]
 mod actions;
 #[cfg(target_arch = "wasm32")]
+mod chart_canvas;
+#[cfg(target_arch = "wasm32")]
 mod connection;
 
 #[cfg(target_arch = "wasm32")]
@@ -79,6 +81,9 @@ fn App() -> Element {
                 match active_tab().as_str() {
                     "performance" => rsx! {
                         PerformanceLayout {}
+                    },
+                    "chart" => rsx! {
+                        chart_canvas::ChartCanvas {}
                     },
                     "setlist" => rsx! {
                         SetlistView {}

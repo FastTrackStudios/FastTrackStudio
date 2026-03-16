@@ -20,8 +20,9 @@ use roam_session::{HandshakeConfig, NoDispatcher};
 use roam_websocket::WsTransport;
 use session_proto::{SetlistServiceClient, Song};
 use session_ui::{
-    ConnectionState, LatencyInfo, Session, TransportState, ACTIVE_INDICES, AUDIO_LATENCY_SECONDS,
-    LATENCY_INFO, LATENCY_TRACKER, PLAYBACK_STATE, SETLIST_STRUCTURE, SONG_CHARTS, SONG_TRANSPORT,
+    ConnectionState, LatencyInfo, Session, TransportState, ACTIVE_INDICES,
+    ACTIVE_PLAYBACK_IS_PLAYING, ACTIVE_PLAYBACK_MUSICAL, AUDIO_LATENCY_SECONDS, LATENCY_INFO,
+    LATENCY_TRACKER, PLAYBACK_STATE, SETLIST_STRUCTURE, SONG_CHARTS, SONG_TRANSPORT,
 };
 use wasm_bindgen::prelude::*;
 
@@ -455,6 +456,7 @@ fn start_transport_sync_task(connection_lost: Rc<Cell<bool>>) {
                                 Option<usize>,
                                 bool,
                                 bool,
+                                Option<daw_proto::MusicalPosition>,
                             )> = None;
 
                             {
@@ -527,6 +529,7 @@ fn start_transport_sync_task(connection_lost: Rc<Cell<bool>>) {
                                             transport.section_index,
                                             transport.is_playing,
                                             transport.is_looping,
+                                            transport.position.musical.clone(),
                                         ));
                                     }
                                 }
@@ -545,8 +548,17 @@ fn start_transport_sync_task(connection_lost: Rc<Cell<bool>>) {
                                 section_index,
                                 is_playing,
                                 is_looping,
+                                musical,
                             )) = active_transport_update
                             {
+                                // Update playback musical position for chart cursor rendering
+                                if *ACTIVE_PLAYBACK_MUSICAL.peek() != musical {
+                                    *ACTIVE_PLAYBACK_MUSICAL.write() = musical;
+                                }
+                                if *ACTIVE_PLAYBACK_IS_PLAYING.peek() != is_playing {
+                                    *ACTIVE_PLAYBACK_IS_PLAYING.write() = is_playing;
+                                }
+
                                 let old_playing = *PLAYBACK_STATE.read();
                                 let new_playing = if is_playing {
                                     daw_proto::PlayState::Playing
