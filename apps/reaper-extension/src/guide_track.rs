@@ -54,7 +54,7 @@ fn parse_section_name(name: &str) -> (SectionType, Option<u32>) {
 
 // ─── Track creation ──────────────────────────────────────────────────────────
 
-/// GUID-based references to the 3 guide tracks.
+/// GUID-based references to the guide tracks.
 struct GuideTracks {
     click: String,
     count: String,
@@ -62,11 +62,12 @@ struct GuideTracks {
 }
 
 fn create_guide_tracks() -> Option<GuideTracks> {
-    // Create 4 tracks: folder parent + 3 children
-    let folder_guid = add_track_on_main_thread("FTS Guide Tracks", None)?;
-    let click_guid = add_track_on_main_thread("FTS Click", None)?;
-    let count_guid = add_track_on_main_thread("FTS Count", None)?;
-    let guide_guid = add_track_on_main_thread("FTS Guide", None)?;
+    // Create 5 tracks: folder + Click + Loop + Count + Guide
+    let folder_guid = add_track_on_main_thread("Click + Guide", None)?;
+    let click_guid = add_track_on_main_thread("Click", None)?;
+    let _loop_guid = add_track_on_main_thread("Loop", None)?;
+    let count_guid = add_track_on_main_thread("Count", None)?;
+    let guide_guid = add_track_on_main_thread("Guide", None)?;
 
     // Set folder structure: parent = +1, last child = -1
     set_folder_depth_on_main_thread(&folder_guid, 1).ok()?;
@@ -94,11 +95,11 @@ fn create_midi_item_with_notes(
         .tracks()
         .find(|t| t.guid().to_string_without_braces() == track_guid);
     let Some(track) = track else { return };
-    let Ok(raw_track) = track.raw().map(|t| t.as_ptr()) else {
+    let Ok(media_track) = track.raw() else {
         return;
     };
 
-    let Some(take) = create_midi_item_on_main_thread(raw_track, start_seconds, end_seconds) else {
+    let Some(take) = create_midi_item_on_main_thread(media_track, start_seconds, end_seconds) else {
         return;
     };
 
