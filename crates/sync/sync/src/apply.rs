@@ -9,6 +9,7 @@ use daw::service::{
     FxEvent, ItemEvent, MarkerEvent, ProjectContext, RegionEvent, RoutingEvent, TakeEvent,
     TempoMapEvent, TrackEvent, TrackRef, Transport,
 };
+use session::offset_map::SetlistOffsetMap;
 use sync_proto::SyncDomain;
 use tracing::{debug, warn};
 
@@ -306,8 +307,8 @@ async fn apply_fx(
 // ── Item ─────────────────────────────────────────────────────────────────────
 
 async fn apply_item(
-    _daw: &Daw,
-    _ctx: &ProjectContext,
+    daw: &Daw,
+    ctx: &ProjectContext,
     event: &ItemEvent,
     suppression: &mut SuppressionSet,
 ) {
@@ -318,8 +319,12 @@ async fn apply_item(
             ..
         } => {
             suppression.suppress(SuppressionKey::item(item_guid, "position"));
-            debug!("Item {item_guid} position → {new_position} (apply TBD)");
-            // TODO: daw.project().items().by_guid().set_position()
+            apply_item_mutation(daw, ctx, item_guid, |handle| {
+                let pos = *new_position;
+                Box::pin(async move {
+                    handle.set_position(daw::service::primitives::PositionInSeconds::from_seconds(pos)).await
+                })
+            }).await;
         }
         ItemEvent::LengthChanged {
             item_guid,
@@ -327,23 +332,87 @@ async fn apply_item(
             ..
         } => {
             suppression.suppress(SuppressionKey::item(item_guid, "length"));
-            debug!("Item {item_guid} length → {new_length} (apply TBD)");
+            apply_item_mutation(daw, ctx, item_guid, |handle| {
+                let len = *new_length;
+                Box::pin(async move {
+                    handle.set_length(daw::service::primitives::Duration::from_seconds(len)).await
+                })
+            }).await;
         }
         ItemEvent::MuteChanged {
             item_guid, muted, ..
         } => {
             suppression.suppress(SuppressionKey::item(item_guid, "muted"));
-            debug!("Item {item_guid} mute → {muted} (apply TBD)");
+            let muted = *muted;
+            apply_item_mutation(daw, ctx, item_guid, move |handle| {
+                Box::pin(async move {
+                    if muted { handle.mute().await } else { handle.unmute().await }
+                })
+            }).await;
         }
         ItemEvent::VolumeChanged {
             item_guid, volume, ..
         } => {
             suppression.suppress(SuppressionKey::item(item_guid, "volume"));
-            debug!("Item {item_guid} volume → {volume} (apply TBD)");
+            let volume = *volume;
+            apply_item_mutation(daw, ctx, item_guid, move |handle| {
+                Box::pin(async move { handle.set_volume(volume).await })
+            }).await;
+        }
+        ItemEvent::Created {
+            track_guid,
+            item,
+            ..
+        } => {
+            suppression.suppress(SuppressionKey::item(&item.guid, "created"));
+            if let Some(project) = resolve_project(daw, ctx).await {
+                if let Ok(Some(track)) = project.tracks().by_guid(track_guid).await {
+                    let pos = daw::service::primitives::PositionInSeconds::from_seconds(item.position.as_seconds());
+                    let len = daw::service::primitives::Duration::from_seconds(item.length.as_seconds());
+                    if let Err(e) = track.items().add(pos, len).await {
+                        warn!("Failed to add item on track {track_guid}: {e}");
+                    }
+                }
+            }
+        }
+        ItemEvent::Deleted { item_guid, .. } => {
+            suppression.suppress(SuppressionKey::item(item_guid, "deleted"));
+            apply_item_mutation(daw, ctx, item_guid, |handle| {
+                Box::pin(async move { handle.delete().await })
+            }).await;
         }
         _ => {
             debug!("Item event not yet handled for sync apply: {event:?}");
         }
+    }
+}
+
+/// Helper to resolve a project and item by GUID, then apply a mutation.
+async fn apply_item_mutation<F>(
+    daw: &Daw,
+    ctx: &ProjectContext,
+    item_guid: &str,
+    mutation: F,
+) where
+    F: FnOnce(daw::ItemHandle) -> std::pin::Pin<Box<dyn std::future::Future<Output = daw::Result<()>> + Send>>,
+{
+    let project = match resolve_project(daw, ctx).await {
+        Some(p) => p,
+        None => return,
+    };
+    let handle = match project.items().by_guid(item_guid).await {
+        Ok(Some(h)) => h,
+        Ok(None) => {
+            debug!("Item {item_guid} not found, skipping mutation");
+            return;
+        }
+        Err(e) => {
+            warn!("Failed to resolve item {item_guid}: {e}");
+            return;
+        }
+    };
+    if let Err(e) = mutation(handle).await {
+        warn!("Item mutation failed for {item_guid}: {e}");
     }
 }
 
@@ -416,64 +485,90 @@ async fn apply_tempo_map(
 // ── Marker ───────────────────────────────────────────────────────────────────
 
 async fn apply_marker(
-    _daw: &Daw,
+    daw: &Daw,
     _ctx: &ProjectContext,
     project_guid: &str,
     event: &MarkerEvent,
     suppression: &mut SuppressionSet,
 ) {
+    let project = match daw.project(project_guid).await {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+    let markers = project.markers();
+
     match event {
-        MarkerEvent::Changed(marker) => {
-            if let Some(id) = marker.id {
-                suppression.suppress(SuppressionKey::marker(project_guid, id));
-            }
-            debug!("Marker changed: {:?} (apply TBD)", marker.name);
-        }
         MarkerEvent::Added(marker) => {
             if let Some(id) = marker.id {
                 suppression.suppress(SuppressionKey::marker(project_guid, id));
             }
-            debug!("Marker added: {:?} (apply TBD)", marker.name);
+            let pos = marker.position.time.as_ref().map(|t| t.as_seconds()).unwrap_or(0.0);
+            if let Err(e) = markers.add(pos, &marker.name).await {
+                warn!("Failed to add marker '{}': {e}", marker.name);
+            }
+        }
+        MarkerEvent::Changed(marker) => {
+            if let Some(id) = marker.id {
+                suppression.suppress(SuppressionKey::marker(project_guid, id));
+                let pos = marker.position.time.as_ref().map(|t| t.as_seconds()).unwrap_or(0.0);
+                let _ = markers.move_to(id, pos).await;
+                let _ = markers.rename(id, &marker.name).await;
+                if let Some(color) = marker.color {
+                    let _ = markers.set_color(id, color).await;
+                }
+            }
         }
         MarkerEvent::Removed(id) => {
             suppression.suppress(SuppressionKey::marker(project_guid, *id));
-            debug!("Marker removed: {id} (apply TBD)");
+            let _ = markers.remove(*id).await;
         }
-        _ => {
-            debug!("Marker event not yet handled: {event:?}");
-        }
+        _ => {}
     }
 }
 
 // ── Region ───────────────────────────────────────────────────────────────────
 
 async fn apply_region(
-    _daw: &Daw,
+    daw: &Daw,
     _ctx: &ProjectContext,
     project_guid: &str,
     event: &RegionEvent,
     suppression: &mut SuppressionSet,
 ) {
+    let project = match daw.project(project_guid).await {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+    let regions = project.regions();
+
     match event {
-        RegionEvent::Changed(region) => {
-            if let Some(id) = region.id {
-                suppression.suppress(SuppressionKey::region(project_guid, id));
-            }
-            debug!("Region changed: {:?} (apply TBD)", region.name);
-        }
         RegionEvent::Added(region) => {
             if let Some(id) = region.id {
                 suppression.suppress(SuppressionKey::region(project_guid, id));
             }
-            debug!("Region added: {:?} (apply TBD)", region.name);
+            let start = region.time_range.start_seconds();
+            let end = region.time_range.end_seconds();
+            if let Err(e) = regions.add(start, end, &region.name).await {
+                warn!("Failed to add region '{}': {e}", region.name);
+            }
+        }
+        RegionEvent::Changed(region) => {
+            if let Some(id) = region.id {
+                suppression.suppress(SuppressionKey::region(project_guid, id));
+                let start = region.time_range.start_seconds();
+                let end = region.time_range.end_seconds();
+                let _ = regions.set_bounds(id, start, end).await;
+                let _ = regions.rename(id, &region.name).await;
+                if let Some(color) = region.color {
+                    let _ = regions.set_color(id, color).await;
+                }
+            }
         }
         RegionEvent::Removed(id) => {
             suppression.suppress(SuppressionKey::region(project_guid, *id));
-            debug!("Region removed: {id} (apply TBD)");
+            let _ = regions.remove(*id).await;
         }
-        _ => {
-            debug!("Region event not yet handled: {event:?}");
-        }
+        _ => {}
     }
 }
 
