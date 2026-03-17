@@ -132,6 +132,13 @@ actions_proto::define_actions! {
             group: "Guide",
             implementation: supported(super::handle_generate_guide_track),
         }
+        FILL_GUIDE_MIDI = "fill_guide_midi" {
+            name: "Fill Missing Guide MIDI",
+            description: "Generate guide MIDI only for sections that don't already have it (setlist-safe)",
+            category: Dev,
+            group: "Guide",
+            implementation: supported(super::handle_fill_guide_midi),
+        }
         GENERATE_KEYFLOW_TRACKS = "generate_keyflow_tracks" {
             name: "Generate Keyflow Tracks",
             description: "Create/configure the Keyflow folder and child MIDI sends",
@@ -728,6 +735,25 @@ fn handle_workflow_deactivate() -> ActionResult {
 
 fn handle_generate_guide_track() -> ActionResult {
     crate::guide_track::generate_guide_tracks()
+}
+
+fn handle_fill_guide_midi() -> ActionResult {
+    // Use the session crate's guide generation (Daw facade, not raw REAPER API)
+    moire::task::spawn(async {
+        match session::guide_gen::fill_guide_midi().await {
+            Ok((generated, skipped)) => {
+                info!(
+                    "Fill Guide MIDI: {} generated, {} skipped",
+                    generated, skipped
+                );
+            }
+            Err(e) => {
+                tracing::warn!("Fill Guide MIDI failed: {e}");
+            }
+        }
+    })
+    .named("fill_guide_midi");
+    ActionResult::success_with_message("Filling missing guide MIDI...")
 }
 
 fn handle_generate_keyflow_tracks() -> ActionResult {

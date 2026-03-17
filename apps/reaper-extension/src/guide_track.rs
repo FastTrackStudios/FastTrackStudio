@@ -205,9 +205,16 @@ pub fn generate_guide_tracks() -> ActionResult {
     // Wrap everything in an undo block
     let reaper = Reaper::get();
     let project = reaper.current_project();
+
+    reaper.show_console_msg(format!("Guide: {} regions found\n", regions.len()));
+
     let result: Option<String> = project.undoable("Generate Guide Tracks", || {
         // Find existing guide tracks or create new ones
         let tracks = find_or_create_guide_tracks()?;
+        reaper.show_console_msg(format!(
+            "Guide tracks: click={}, count={}, guide={}\n",
+            tracks.click, tracks.count, tracks.guide
+        ));
 
         // Get existing item coverage on each guide track so we skip regions
         // that already have guide items (supports partial generation for setlists)
@@ -234,10 +241,19 @@ pub fn generate_guide_tracks() -> ActionResult {
 
             if has_click && has_count && has_guide {
                 // All tracks covered for this region — skip
+                reaper.show_console_msg(format!(
+                    "  SKIP: {} ({:.1}..{:.1}s) — already covered\n",
+                    region.name, region_start, region_end
+                ));
                 prev_region_end_seconds = Some(region_end);
                 skipped_count += 1;
                 continue;
             }
+
+            reaper.show_console_msg(format!(
+                "  FILL: {} ({:.1}..{:.1}s) click={} count={} guide={}\n",
+                region.name, region_start, region_end, !has_click, !has_count, !has_guide
+            ));
 
             let (section_type, section_number) = parse_section_name(&region.name);
             let (tempo, num, denom) =
