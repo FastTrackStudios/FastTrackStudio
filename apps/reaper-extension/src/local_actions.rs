@@ -278,16 +278,30 @@ actions_proto::define_actions! {
             group: "Setlist",
             implementation: supported(super::handle_setlist_prev_song),
         }
+        SETLIST_NEXT_SECTION = "setlist_next_section" {
+            name: "Setlist - Next Section",
+            description: "Advance to the next section (follows song section order, wraps to next song)",
+            category: Dev,
+            group: "Setlist",
+            implementation: supported(super::handle_setlist_next_section),
+        }
+        SETLIST_PREV_SECTION = "setlist_prev_section" {
+            name: "Setlist - Previous Section",
+            description: "Go back to the previous section (wraps to previous song)",
+            category: Dev,
+            group: "Setlist",
+            implementation: supported(super::handle_setlist_prev_section),
+        }
         SETLIST_NEXT_VARIATION = "setlist_next_variation" {
             name: "Setlist - Next Variation",
-            description: "Switch to the next variation within the current song",
+            description: "Cycle to the next variation track (ignores section order)",
             category: Dev,
             group: "Setlist",
             implementation: supported(super::handle_setlist_next_variation),
         }
         SETLIST_PREV_VARIATION = "setlist_prev_variation" {
             name: "Setlist - Previous Variation",
-            description: "Switch to the previous variation within the current song",
+            description: "Cycle to the previous variation track",
             category: Dev,
             group: "Setlist",
             implementation: supported(super::handle_setlist_prev_variation),
@@ -1478,6 +1492,16 @@ fn handle_setlist_next_song() -> ActionResult {
 
 fn handle_setlist_prev_song() -> ActionResult {
     tokio::task::spawn_local(crate::setlist_nav::prev_song());
+    ActionResult::success()
+}
+
+fn handle_setlist_next_section() -> ActionResult {
+    tokio::task::spawn_local(crate::setlist_nav::next_section());
+    ActionResult::success()
+}
+
+fn handle_setlist_prev_section() -> ActionResult {
+    tokio::task::spawn_local(crate::setlist_nav::prev_section());
     ActionResult::success()
 }
 

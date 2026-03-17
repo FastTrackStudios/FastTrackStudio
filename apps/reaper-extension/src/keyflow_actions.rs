@@ -383,7 +383,7 @@ fn gather_tempo_events(bounds: &ExportBounds, song_start_tick: u32) -> Vec<Absol
     let mut result = Vec::new();
 
     for i in 0..count {
-        let Some(point) = tempo_sw::get_tempo_marker(low, std::ptr::null_mut(), i as i32) else {
+        let Some(point) = tempo_sw::get_tempo_marker(low, reaper_medium::ProjectContext::CurrentProject, i as i32) else {
             continue;
         };
         if point.timepos < bounds.start_seconds || point.timepos > bounds.end_seconds {
@@ -795,10 +795,13 @@ fn encode_keyflow_section_metadata(
         return None;
     }
 
+    let proj_ctx = reaper_medium::ReaProject::new(project)
+        .map(reaper_medium::ProjectContext::Proj)
+        .unwrap_or(reaper_medium::ProjectContext::CurrentProject);
     let start_qn = daw::reaper::tempo_map::time_to_qn_on_main_thread(start_seconds);
     let end_qn = daw::reaper::tempo_map::time_to_qn_on_main_thread(end_seconds);
-    let start_measure = time_map_sw::qn_to_measures(low, project, start_qn).measure_index + 1;
-    let end_measure = time_map_sw::qn_to_measures(low, project, end_qn).measure_index + 1;
+    let start_measure = time_map_sw::qn_to_measures(low, proj_ctx, start_qn).measure_index + 1;
+    let end_measure = time_map_sw::qn_to_measures(low, proj_ctx, end_qn).measure_index + 1;
     let length = (end_measure - start_measure).max(1);
 
     Some(format!("KFSECTION\t{}\t{}\t{}", name, start_measure, length))

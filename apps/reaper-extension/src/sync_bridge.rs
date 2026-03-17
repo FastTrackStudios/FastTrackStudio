@@ -50,8 +50,11 @@ fn with_engine<R>(f: impl FnOnce(&mut sync::link::Engine) -> R) -> Option<R> {
 /// Also checks for ExtState-based control:
 /// - `FTS_SYNC/link_mode` = "puppet" | "master" | "off"
 pub fn tick() {
-    // Check for ExtState-based Link control (allows tests and UI to enable/disable)
-    check_ext_state_control();
+    // Check for ExtState-based Link control (throttled to ~1Hz, not every tick)
+    static EXT_CHECK_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    if EXT_CHECK_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % 30 == 0 {
+        check_ext_state_control();
+    }
 
     if let Some(engine_mutex) = LINK_ENGINE.get() {
         if let Ok(mut engine) = engine_mutex.lock() {
