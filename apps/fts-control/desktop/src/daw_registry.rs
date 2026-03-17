@@ -325,7 +325,7 @@ impl DawRegistry {
 async fn connect_to_daw(path: &Path) -> eyre::Result<ErasedCaller> {
     let stream = tokio::net::UnixStream::connect(path).await?;
     let link = roam_stream::StreamLink::unix(stream);
-    let (caller, _session_handle) = roam::initiator(link)
+    let (caller, _session_handle) = roam::initiator_conduit(roam::BareConduit::new(link))
         .max_concurrent_requests(64)
         .establish::<roam::DriverCaller>(())
         .await?;

@@ -25,7 +25,7 @@ async fn memory_channel_loopback() {
 
     // Server side
     let server = tokio::spawn(async move {
-        let result = roam::acceptor(server_link)
+        let result = roam::acceptor(roam::BareConduit::new(server_link))
             .establish::<DriverCaller>(NoopHandler)
             .await;
         match &result {
@@ -36,7 +36,7 @@ async fn memory_channel_loopback() {
     });
 
     // Client side
-    let (caller, _session) = roam::initiator(client_link)
+    let (caller, _session) = roam::initiator_conduit(roam::BareConduit::new(client_link))
         .establish::<DriverCaller>(())
         .await
         .expect("memory initiator should succeed");
@@ -74,7 +74,7 @@ async fn unix_socket_loopback() {
         println!("[unix] server accepted connection");
 
         let link = roam_stream::StreamLink::unix(stream);
-        let result = roam::acceptor(link)
+        let result = roam::acceptor(roam::BareConduit::new(link))
             .establish::<DriverCaller>(NoopHandler)
             .await;
         match &result {
@@ -91,7 +91,7 @@ async fn unix_socket_loopback() {
     println!("[unix] client connected");
 
     let link = roam_stream::StreamLink::unix(stream);
-    let (caller, _session) = roam::initiator(link)
+    let (caller, _session) = roam::initiator_conduit(roam::BareConduit::new(link))
         .max_concurrent_requests(64)
         .establish::<DriverCaller>(())
         .await
@@ -134,7 +134,7 @@ async fn connect_session_handle_dropped() {
             .await
             .expect("connect failed");
         let link = roam_stream::StreamLink::unix(stream);
-        let (caller, _session) = roam::initiator(link)
+        let (caller, _session) = roam::initiator_conduit(roam::BareConduit::new(link))
             .establish::<DriverCaller>(())
             .await
             .expect("establish failed");
@@ -188,7 +188,7 @@ async fn connect_to_live_reaper() {
 
     match tokio::time::timeout(
         std::time::Duration::from_secs(5),
-        roam::initiator(link)
+        roam::initiator_conduit(roam::BareConduit::new(link))
             .max_concurrent_requests(64)
             .establish::<DriverCaller>(()),
     )

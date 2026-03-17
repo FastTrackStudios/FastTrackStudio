@@ -78,7 +78,7 @@ ur-taking-me-with-you = { git = "https://github.com/bearcove/roam.git", branch =
 shm-primitives = { git = "https://github.com/bearcove/roam.git", branch = "main" }
 
 # Instrumentation
-moire = { git = "https://github.com/bearcove/peeps", branch = "main", features = ["diagnostics"] }
+moire = { version = "1.0", features = ["diagnostics"] }
 
 # Keyflow/Engraver crates (sibling repo — facade pattern)
 # NOTE: keyflow-proto, keyflow-text, keyflow-midi, engraver-proto are INTERNAL.

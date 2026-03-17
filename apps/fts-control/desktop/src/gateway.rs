@@ -360,7 +360,7 @@ async fn handle_socket<H: Handler<DriverReplySink> + Clone + Send + Sync + 'stat
     }
 
     let link = AxumWsLink::new(socket);
-    match roam::acceptor(link)
+    match roam::acceptor(roam::BareConduit::new(link))
         .max_concurrent_requests(64)
         .establish::<DriverCaller>(gateway.handler.clone())
         .await

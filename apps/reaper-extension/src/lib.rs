@@ -440,7 +440,7 @@ async fn register_daw_dispatcher() {
                                         Ok(stream) => {
                                             info!("Connected to peer {} at {}", instance_name, addr);
                                             let link = roam_stream::StreamLink::tcp(stream);
-                                            match roam::initiator(link)
+                                            match roam::initiator_conduit(roam::BareConduit::new(link))
                                                 .max_concurrent_requests(64)
                                                 .establish::<roam::DriverCaller>(())
                                                 .await
@@ -556,7 +556,7 @@ fn start_unix_socket_server(handler: RoutedHandler) {
                     let handler = handler.clone();
                     moire::task::spawn(async move {
                         let link = roam_stream::StreamLink::unix(stream);
-                        match roam::acceptor(link)
+                        match roam::acceptor(roam::BareConduit::new(link))
                             .establish::<roam::DriverCaller>(handler.as_ref().clone())
                             .await
                         {
@@ -667,7 +667,7 @@ fn start_network_server(handler: RoutedHandler) {
                     let handler = handler.clone();
                     moire::task::spawn(async move {
                         let link = roam_stream::StreamLink::tcp(stream);
-                        match roam::acceptor(link)
+                        match roam::acceptor(roam::BareConduit::new(link))
                             .establish::<roam::DriverCaller>(handler.as_ref().clone())
                             .await
                         {

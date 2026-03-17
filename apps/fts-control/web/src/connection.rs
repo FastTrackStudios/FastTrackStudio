@@ -128,7 +128,7 @@ async fn try_connect_and_run(
     // Use the new roam initiator builder API for the handshake.
     // Register WebClientServiceDispatcher so the desktop can push events to us.
     let handler = WebClientServiceDispatcher::new(WebClientHandler);
-    let (caller, _session_handle) = roam::initiator(link)
+    let (caller, _session_handle) = roam::initiator_conduit(roam::BareConduit::new(link))
         .spawn_fn(|fut| {
             wasm_bindgen_futures::spawn_local(async move {
                 fut.await;
