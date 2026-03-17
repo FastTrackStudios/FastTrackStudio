@@ -22,6 +22,8 @@ pub use crate::components::{
     SegmentedControl, SegmentedControlSize,
     StatusBadge, StatusBadgeVariant,
     StatusDot, StatusDotColor, StatusDotSize,
+    NavTab,
+    ProgressBar, ProgressBarOrientation,
 };
 
 // Re-exported component modules (used via fts_ui::prelude::checkbox::Checkbox etc.)

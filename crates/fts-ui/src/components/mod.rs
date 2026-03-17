@@ -25,6 +25,12 @@ pub use dialog::*;
 pub use tabs::*;
 
 // --- New FTS components ---
+mod nav_tab;
+mod progress_bar;
+
+pub use nav_tab::*;
+pub use progress_bar::*;
+
 mod badge;
 mod card;
 mod empty_state;
