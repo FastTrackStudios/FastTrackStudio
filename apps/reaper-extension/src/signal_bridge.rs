@@ -24,16 +24,15 @@ pub fn controller() -> Option<&'static SignalController> {
 /// Appliers (ReaperPatchApplier, RigSceneManager) are attached later
 /// when a DAW role is detected.
 pub async fn init() {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-    let db_dir = format!("{}/Music/FastTrackStudio/Library", home);
+    let db_dir = utils::paths::library_dir();
 
     // Ensure the directory exists
     if let Err(e) = std::fs::create_dir_all(&db_dir) {
-        warn!("Failed to create signal library directory {}: {}", db_dir, e);
+        warn!("Failed to create signal library directory {}: {}", db_dir.display(), e);
         return;
     }
 
-    let db_path = format!("{}/signal.db", db_dir);
+    let db_path = utils::paths::signal_db().to_string_lossy().to_string();
     info!("Initializing signal controller with DB: {}", db_path);
 
     match signal::connect_db_seeded(&db_path).await {

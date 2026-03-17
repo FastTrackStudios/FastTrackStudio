@@ -15,6 +15,7 @@ signal.workspace = true
 signal-storage = { path = "../crates/signal/signal-storage" }
 tokio.workspace = true
 uuid.workspace = true
+utils.workspace = true
 xshell = "0.2"
 
 

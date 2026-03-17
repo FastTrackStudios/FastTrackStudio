@@ -22,7 +22,7 @@ struct Cli {
     #[arg(long, global = true)]
     socket: Option<PathBuf>,
 
-    /// Signal DB path (defaults to ~/Music/FastTrackStudio/Library/signal.db)
+    /// Signal DB path (defaults to $FTS_HOME/Library/signal.db)
     #[arg(long, global = true)]
     db: Option<PathBuf>,
 

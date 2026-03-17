@@ -159,6 +159,9 @@ fn AudioPanel() -> Element {
     let mut duration = use_signal(|| 0.0f64);
     let mut loading = use_signal(|| false);
     let mut status_msg: Signal<Option<String>> = use_signal(|| None);
+    // Staged RPP text — set when user picks an RPP, audio files loaded separately
+    let mut staged_rpp: Signal<Option<String>> = use_signal(|| None);
+    let mut needed_files: Signal<Vec<String>> = use_signal(Vec::new);
 
     // Poll position
     let engine_poll = engine.read().clone();
@@ -198,122 +201,145 @@ fn AudioPanel() -> Element {
         eng.play();
     };
 
-    // Load RPP project + audio files
-    let on_project_selected = move |_evt: Event<FormData>| {
+    // Open entire project folder via File System Access API
+    let on_open_folder = move |_| {
         #[cfg(target_arch = "wasm32")]
         {
+            use wasm_bindgen::JsCast;
+
             loading.set(true);
-            status_msg.set(Some("Reading files...".to_string()));
+            status_msg.set(Some("Opening folder...".to_string()));
 
             wasm_bindgen_futures::spawn_local(async move {
-                let files = read_files_from_element("project-file-input").await;
-                if files.is_empty() {
-                    loading.set(false);
-                    status_msg.set(None);
-                    return;
-                }
+                use wasm_bindgen::JsCast;
 
-                // Separate RPP from audio files
-                let mut rpp_text: Option<String> = None;
-                let mut audio_files: std::collections::HashMap<String, Vec<u8>> =
-                    std::collections::HashMap::new();
+                // Use JS to open a directory picker and read all files
+                let result = wasm_bindgen_futures::JsFuture::from(js_sys::eval(
+                    r#"(async () => {
+                        const dirHandle = await window.showDirectoryPicker();
+                        const files = {};
 
-                for (name, bytes) in &files {
-                    let lower = name.to_lowercase();
-                    if lower.ends_with(".rpp") {
-                        match String::from_utf8(bytes.clone()) {
-                            Ok(text) => {
-                                status_msg.set(Some(format!("Parsing {name}...")));
-                                rpp_text = Some(text);
-                            }
-                            Err(_) => {
-                                error_msg.set(Some(format!("{name} is not valid UTF-8")));
+                        async function readDir(handle, prefix) {
+                            for await (const entry of handle.values()) {
+                                const path = prefix ? prefix + '/' + entry.name : entry.name;
+                                if (entry.kind === 'file') {
+                                    const file = await entry.getFile();
+                                    const buffer = await file.arrayBuffer();
+                                    files[path] = new Uint8Array(buffer);
+                                } else if (entry.kind === 'directory') {
+                                    await readDir(entry, path);
+                                }
                             }
                         }
-                    } else {
-                        // Store audio file by its filename (for matching against RPP paths)
-                        audio_files.insert(name.clone(), bytes.clone());
-                    }
-                }
 
-                let Some(rpp) = rpp_text else {
-                    error_msg.set(Some("No .RPP file found in selection".to_string()));
-                    loading.set(false);
-                    status_msg.set(None);
-                    return;
-                };
+                        await readDir(dirHandle, '');
+                        return files;
+                    })()"#,
+                ).unwrap().unchecked_into::<js_sys::Promise>()).await;
 
-                // Show what audio files the RPP needs
-                match rpp_loader::list_audio_files(&rpp) {
-                    Ok(needed) => {
-                        status_msg.set(Some(format!(
-                            "RPP needs {} audio files, {} provided",
-                            needed.len(),
-                            audio_files.len()
-                        )));
-                    }
-                    Err(e) => {
-                        error_msg.set(Some(format!("RPP parse error: {e}")));
-                        loading.set(false);
-                        status_msg.set(None);
-                        return;
-                    }
-                }
+                match result {
+                    Ok(js_files) => {
+                        // Convert JS object to Rust HashMap
+                        let mut rpp_text: Option<String> = None;
+                        let mut audio_files: std::collections::HashMap<String, Vec<u8>> =
+                            std::collections::HashMap::new();
 
-                let Some(eng) = ensure_engine(&mut engine, &mut error_msg) else {
-                    loading.set(false);
-                    status_msg.set(None);
-                    return;
-                };
+                        let entries = js_sys::Object::entries(&js_files.unchecked_into());
+                        for i in 0..entries.length() {
+                            let entry = js_sys::Array::from(&entries.get(i));
+                            let path: String = entry.get(0).as_string().unwrap_or_default();
+                            let data = js_sys::Uint8Array::new(&entry.get(1));
+                            let bytes = data.to_vec();
 
-                eng.stop();
-                eng.clear_tracks();
-                audio_tracks.write().clear();
-
-                status_msg.set(Some("Decoding audio...".to_string()));
-
-                // Load RPP with the uploaded audio files
-                match rpp_loader::load_rpp(&eng, &rpp, |file_path| {
-                    // Try exact path match first
-                    if let Some(bytes) = audio_files.get(file_path) {
-                        return Some(bytes.clone());
-                    }
-                    // Try matching just the filename (RPP may have relative paths like "Media/foo.wav")
-                    let filename = file_path.rsplit(['/', '\\']).next().unwrap_or(file_path);
-                    audio_files.get(filename).cloned()
-                }) {
-                    Ok(project) => {
-                        let mut states = Vec::new();
-                        for track in &project.tracks {
-                            states.push(AudioTrackState {
-                                handle: track.handle,
-                                name: track.track_name.clone(),
-                                gain: 1.0,
-                                muted: false,
-                                soloed: false,
-                                duration: track.audio_duration,
-                            });
+                            let lower = path.to_lowercase();
+                            if lower.ends_with(".rpp") {
+                                tracing::info!("Found RPP: {} ({} bytes)", path, bytes.len());
+                                if let Ok(text) = String::from_utf8(bytes) {
+                                    rpp_text = Some(text);
+                                }
+                            } else if lower.ends_with(".wav") || lower.ends_with(".mp3")
+                                || lower.ends_with(".ogg") || lower.ends_with(".flac")
+                                || lower.ends_with(".aac") || lower.ends_with(".m4a")
+                            {
+                                tracing::info!("Found audio: {} ({} bytes)", path, bytes.len());
+                                audio_files.insert(path, bytes);
+                            }
                         }
-                        audio_tracks.set(states);
-                        duration.set(project.duration);
 
-                        let msg = if project.failed.is_empty() {
-                            format!("Loaded {} tracks ({:.0}s)", project.tracks.len(), project.duration)
-                        } else {
-                            format!(
-                                "Loaded {} tracks, {} failed: {}",
-                                project.tracks.len(),
-                                project.failed.len(),
-                                project.failed.iter().map(|(f, _)| f.as_str()).collect::<Vec<_>>().join(", ")
-                            )
+                        let Some(rpp) = rpp_text else {
+                            error_msg.set(Some("No .RPP file found in folder".to_string()));
+                            loading.set(false);
+                            status_msg.set(None);
+                            return;
                         };
-                        status_msg.set(Some(msg));
-                        error_msg.set(None);
-                        eng.play();
+
+                        status_msg.set(Some(format!("Parsed RPP, decoding {} audio files...", audio_files.len())));
+
+                        let Some(eng) = ensure_engine(&mut engine, &mut error_msg) else {
+                            loading.set(false);
+                            return;
+                        };
+
+                        eng.stop();
+                        eng.clear_tracks();
+                        audio_tracks.write().clear();
+
+                        match rpp_loader::load_rpp(&eng, &rpp, |file_path| {
+                            // Try exact path match (e.g., "Media/bass.wav")
+                            if let Some(bytes) = audio_files.get(file_path) {
+                                return Some(bytes.clone());
+                            }
+                            // Try filename only
+                            let filename = file_path.rsplit(['/', '\\']).next().unwrap_or(file_path);
+                            let filename_lower = filename.to_lowercase();
+                            for (key, val) in &audio_files {
+                                let key_base = key.rsplit(['/', '\\']).next().unwrap_or(key);
+                                if key_base.to_lowercase() == filename_lower {
+                                    return Some(val.clone());
+                                }
+                            }
+                            None
+                        }) {
+                            Ok(project) => {
+                                let mut states = Vec::new();
+                                for track in &project.tracks {
+                                    states.push(AudioTrackState {
+                                        handle: track.handle,
+                                        name: track.track_name.clone(),
+                                        gain: 1.0,
+                                        muted: false,
+                                        soloed: false,
+                                        duration: track.audio_duration,
+                                    });
+                                }
+                                audio_tracks.set(states);
+                                duration.set(project.duration);
+
+                                let msg = if project.failed.is_empty() {
+                                    format!("Loaded {} tracks ({:.0}s)", project.tracks.len(), project.duration)
+                                } else {
+                                    format!(
+                                        "Loaded {} tracks, {} failed: {}",
+                                        project.tracks.len(),
+                                        project.failed.len(),
+                                        project.failed.iter().map(|(f, _)| f.as_str()).collect::<Vec<_>>().join(", ")
+                                    )
+                                };
+                                status_msg.set(Some(msg));
+                                error_msg.set(None);
+                                eng.play();
+                            }
+                            Err(e) => {
+                                error_msg.set(Some(format!("Failed to load: {e}")));
+                            }
+                        }
                     }
                     Err(e) => {
-                        error_msg.set(Some(format!("Failed to load project: {e}")));
-                        status_msg.set(None);
+                        // User cancelled or API not supported
+                        let msg = format!("{:?}", e);
+                        if !msg.contains("AbortError") {
+                            error_msg.set(Some(format!("Folder access failed: {msg}")));
+                        }
                     }
                 }
 
@@ -343,17 +369,106 @@ fn AudioPanel() -> Element {
 
             // File loading controls
             div { style: "display: flex; gap: 8px; align-items: center; margin-bottom: 12px; flex-wrap: wrap;",
-                // RPP + Audio file picker
+                // Open project folder (Chrome/Edge — File System Access API)
+                button {
+                    style: "padding: 10px 20px; border-radius: 4px; border: 2px dashed #00d4ff; cursor: pointer; font-weight: bold; color: #00d4ff; background: #0a2040;",
+                    onclick: on_open_folder,
+                    if is_loading { "Loading..." } else { "Open Project Folder" }
+                }
+                // Fallback: select all files at once (RPP + audio in one dialog)
                 label {
-                    style: "padding: 10px 20px; border-radius: 4px; border: 2px dashed #00d4ff; cursor: pointer; font-weight: bold; color: #00d4ff; background: #0a2040; display: inline-flex; align-items: center; gap: 6px;",
-                    if is_loading { "Loading..." } else { "Open RPP + Audio Files" }
+                    style: "padding: 10px 16px; border-radius: 4px; border: 1px solid #444; cursor: pointer; background: #2a2a4a; color: #e0e0e0; font-size: 0.9em;",
+                    "or Select Files"
                     input {
-                        id: "project-file-input",
                         r#type: "file",
                         accept: ".rpp,.wav,.mp3,.ogg,.flac,.aac,.m4a,audio/*",
                         multiple: true,
                         style: "display: none;",
-                        onchange: on_project_selected,
+                        onchange: move |evt: Event<FormData>| {
+                            #[cfg(target_arch = "wasm32")]
+                            {
+                                let file_data_list = evt.files();
+                                if file_data_list.is_empty() { return; }
+                                loading.set(true);
+                                status_msg.set(Some("Reading files...".to_string()));
+
+                                wasm_bindgen_futures::spawn_local(async move {
+                                    let mut rpp_text: Option<String> = None;
+                                    let mut audio_files: std::collections::HashMap<String, Vec<u8>> =
+                                        std::collections::HashMap::new();
+
+                                    for file_data in &file_data_list {
+                                        let name = file_data.name();
+                                        if name.to_lowercase().ends_with(".rpp") {
+                                            if let Ok(text) = file_data.read_string().await {
+                                                tracing::info!("RPP: {} ({} bytes)", name, text.len());
+                                                rpp_text = Some(text);
+                                            }
+                                        } else {
+                                            if let Ok(bytes) = file_data.read_bytes().await {
+                                                tracing::info!("Audio: {} ({} bytes)", name, bytes.len());
+                                                audio_files.insert(name, bytes.to_vec());
+                                            }
+                                        }
+                                    }
+
+                                    let Some(rpp) = rpp_text else {
+                                        error_msg.set(Some("No .RPP file in selection".to_string()));
+                                        loading.set(false);
+                                        return;
+                                    };
+
+                                    let Some(eng) = ensure_engine(&mut engine, &mut error_msg) else {
+                                        loading.set(false);
+                                        return;
+                                    };
+
+                                    eng.stop();
+                                    eng.clear_tracks();
+                                    audio_tracks.write().clear();
+                                    status_msg.set(Some("Decoding...".to_string()));
+
+                                    match rpp_loader::load_rpp(&eng, &rpp, |file_path| {
+                                        if let Some(bytes) = audio_files.get(file_path) {
+                                            return Some(bytes.clone());
+                                        }
+                                        let filename = file_path.rsplit(['/', '\\']).next().unwrap_or(file_path);
+                                        let filename_lower = filename.to_lowercase();
+                                        for (key, val) in &audio_files {
+                                            let key_base = key.rsplit(['/', '\\']).next().unwrap_or(key);
+                                            if key_base.to_lowercase() == filename_lower {
+                                                return Some(val.clone());
+                                            }
+                                        }
+                                        None
+                                    }) {
+                                        Ok(project) => {
+                                            let mut states = Vec::new();
+                                            for track in &project.tracks {
+                                                states.push(AudioTrackState {
+                                                    handle: track.handle,
+                                                    name: track.track_name.clone(),
+                                                    gain: 1.0, muted: false, soloed: false,
+                                                    duration: track.audio_duration,
+                                                });
+                                            }
+                                            audio_tracks.set(states);
+                                            duration.set(project.duration);
+                                            let msg = if project.failed.is_empty() {
+                                                format!("Loaded {} tracks ({:.0}s)", project.tracks.len(), project.duration)
+                                            } else {
+                                                format!("Loaded {} tracks, {} failed", project.tracks.len(), project.failed.len())
+                                            };
+                                            status_msg.set(Some(msg));
+                                            error_msg.set(None);
+                                            eng.play();
+                                        }
+                                        Err(e) => error_msg.set(Some(format!("Failed: {e}"))),
+                                    }
+                                    loading.set(false);
+                                });
+                            }
+                        },
                     }
                 }
                 button {
@@ -373,6 +488,19 @@ fn AudioPanel() -> Element {
                             status_msg.set(None);
                         },
                         "Clear All"
+                    }
+                }
+            }
+
+            // Show needed files
+            if !needed_files.read().is_empty() && track_count == 0 {
+                div { style: "margin-bottom: 12px; padding: 8px; background: #0d1117; border-radius: 4px; font-size: 0.85em;",
+                    p { style: "color: #888; margin: 0 0 4px 0;", "Audio files needed:" }
+                    for f in needed_files.read().iter() {
+                        {
+                            let basename = f.rsplit(['/', '\\']).next().unwrap_or(f);
+                            rsx! { div { style: "color: #aaa; padding: 1px 0;", "{basename}" } }
+                        }
                     }
                 }
             }

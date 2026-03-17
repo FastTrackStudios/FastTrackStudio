@@ -11,7 +11,9 @@
 //! - Icons:  `Library/assets/icons/reaper/mac/`
 //! - Themes: `Library/assets/themes/`
 
-const ASSETS_DIR: &str = "/Users/codywright/Music/FastTrackStudio/Library/assets";
+fn assets_dir() -> std::path::PathBuf {
+    utils::paths::assets_dir()
+}
 
 /// Base icon used for session instances.
 const SESSION_ICON: &str = "REAPER-Icon-04.icns";
@@ -90,7 +92,8 @@ pub fn set_dock_icon_for_role(role: &str) {
         _ => return,
     };
 
-    let icon_path = format!("{}/icons/reaper/mac/{}", ASSETS_DIR, icon_filename);
+    let icon_path = assets_dir().join("icons/reaper/mac").join(icon_filename);
+    let icon_path = icon_path.to_string_lossy().to_string();
 
     if !std::path::Path::new(&icon_path).exists() {
         tracing::warn!("Dock icon not found: {}", icon_path);

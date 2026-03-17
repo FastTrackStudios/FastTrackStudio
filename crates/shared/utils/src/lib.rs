@@ -5,6 +5,8 @@
 //! (`typed_uuid_id!`, `typed_string_id!`) used by both `signal-proto` and
 //! `session-proto` without introducing a dependency between them.
 
+pub mod paths;
+
 /// Creates a branded string ID type with Display, From, and AsRef impls.
 /// Used for categorical IDs like `RigTypeId` that remain human-readable strings.
 #[macro_export]

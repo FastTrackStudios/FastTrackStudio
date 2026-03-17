@@ -81,7 +81,7 @@ enum Commands {
     },
     /// Scan all Neural DSP preset libraries and write a structured catalogue
     Catalog {
-        /// Output directory for the catalogue (default: ~/Music/FastTrackStudio/Presets)
+        /// Output directory for the catalogue (default: $FTS_HOME/Library)
         #[facet(args::positional, default)]
         output: Option<String>,
     },
@@ -90,6 +90,18 @@ enum Commands {
         /// Force re-creation of all bundles even if they already exist
         #[facet(args::named, default)]
         force: bool,
+    },
+    /// Migrate signal.db presets to REAPER-native FXChains/TrackTemplates directories
+    Migrate {
+        /// Dry-run mode: show what would be done without writing files
+        #[facet(args::named, default)]
+        dry_run: bool,
+    },
+    /// Package the FTS library into a .tar.gz for the installer
+    PackageLibrary {
+        /// Output file path (default: fts-library.tar.gz)
+        #[facet(args::positional, default)]
+        output: Option<String>,
     },
 }
 
@@ -331,10 +343,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             // Platform-aware defaults
             let (default_reaper_path, default_reaper_exe, default_reaper_resources, ext_filename) =
                 if cfg!(target_os = "macos") {
+                    let reaper = utils::paths::reaper_dir();
+                    let live_app = reaper.join("FTS-LIVE.app");
                     (
-                        "/Users/codywright/Music/FastTrackStudio/Reaper/FTS-TRACKS/".to_string(),
-                        "/Users/codywright/Music/FastTrackStudio/Reaper/FTS-TRACKS/FTS-LIVE.app/Contents/MacOS/REAPER".to_string(),
-                        "/Users/codywright/Music/FastTrackStudio/Reaper/FTS-TRACKS/FTS-LIVE.app/Contents/Resources".to_string(),
+                        reaper.to_string_lossy().to_string(),
+                        live_app.join("Contents/MacOS/REAPER").to_string_lossy().to_string(),
+                        live_app.join("Contents/Resources").to_string_lossy().to_string(),
                         "libreaper_fts.dylib",
                     )
                 } else {
@@ -434,6 +448,25 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 cmd!(sh, "cargo test -p signal --features daw --no-run").run()?;
             }
 
+            // Clean up stale sockets from crashed/killed sessions.
+            // Try connecting to each socket — if nothing is listening, it's stale.
+            if let Ok(entries) = std::fs::read_dir("/tmp") {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                        if name.starts_with("fts-daw-") && name.ends_with(".sock") {
+                            match std::os::unix::net::UnixStream::connect(&path) {
+                                Ok(_) => {} // Something is listening — leave it alone
+                                Err(_) => {
+                                    println!("  Removing stale socket: {name}");
+                                    let _ = std::fs::remove_file(&path);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             // Step 3: Spawn REAPER (empty project, no splash)
             println!("\n>>> Spawning REAPER...");
             let reaper_exe = std::env::var("REAPER_EXECUTABLE")
@@ -441,16 +474,24 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             let reaper_resources = std::env::var("REAPER_RESOURCES")
                 .unwrap_or(default_reaper_resources);
 
+            // Use a session-specific socket path so multiple xtask runs don't collide.
+            // We use the xtask PID (guaranteed unique while we're running) rather than
+            // REAPER's PID, because REAPER with -newinst may re-exec with a new PID on
+            // macOS, causing a mismatch between what xtask expects and what the extension
+            // creates.
+            let session_id = std::process::id();
+            let socket_path = format!("/tmp/fts-daw-{session_id}.sock");
+            let _ = std::fs::remove_file(&socket_path);
+
             let mut reaper_child = std::process::Command::new(&reaper_exe)
                 .current_dir(&reaper_resources)
+                .env("FTS_SOCKET", &socket_path)
                 .arg("-newinst")
                 .arg("-nosplash")
                 .arg("-ignoreerrors")
                 .spawn()
                 .map_err(|e| format!("Failed to spawn REAPER at {reaper_exe}: {e}"))?;
             let reaper_pid = reaper_child.id();
-            let socket_path = format!("/tmp/fts-daw-{reaper_pid}.sock");
-            let _ = std::fs::remove_file(&socket_path);
             println!("  Spawned REAPER (PID {reaper_pid}), socket: {socket_path}");
             println!("  Extension log: /tmp/fts-reaper.log");
 
@@ -596,7 +637,75 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         Commands::SetupRigs { force } => {
             run_setup_rigs(force)?;
         }
+        Commands::Migrate { dry_run } => {
+            run_migrate(dry_run)?;
+        }
+        Commands::PackageLibrary { output } => {
+            run_package_library(output)?;
+        }
     }
+
+    Ok(())
+}
+
+// ============================================================================
+// package-library: Create a .tar.gz of the FTS library for the installer
+// ============================================================================
+
+fn run_package_library(output: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
+    let fts_home = utils::paths::fts_home();
+    let output_path = output.unwrap_or_else(|| "fts-library.tar.gz".to_string());
+
+    println!("=== Packaging FTS Library ===");
+    println!("  Source: {}", fts_home.display());
+    println!("  Output: {output_path}");
+
+    // Collect the directories to include (relative to fts_home)
+    let includes = [
+        "Library/blocks",
+        "Library/presets",
+        "Library/profiles",
+        "Library/FTS",
+        "Library/FTS-GUIDE",
+        "Library/catalog.json",
+        "Reaper/FXChains",
+        "Reaper/TrackTemplates",
+    ];
+
+    // Build tar arguments — only include paths that exist
+    let mut args = vec!["czf".to_string(), output_path.clone()];
+    args.push("-C".to_string());
+    args.push(fts_home.to_string_lossy().to_string());
+
+    let mut included = 0;
+    for path in &includes {
+        let full = fts_home.join(path);
+        if full.exists() {
+            args.push(path.to_string());
+            included += 1;
+            println!("  + {path}");
+        } else {
+            println!("  - {path} (not found, skipping)");
+        }
+    }
+
+    if included == 0 {
+        return Err("No library files found to package".into());
+    }
+
+    let status = std::process::Command::new("tar")
+        .args(&args)
+        .status()?;
+
+    if !status.success() {
+        return Err(format!("tar failed with status {status}").into());
+    }
+
+    // Show size
+    let meta = std::fs::metadata(&output_path)?;
+    let size_mb = meta.len() as f64 / 1_048_576.0;
+    println!("\nCreated {output_path} ({size_mb:.1} MB, {included} entries)");
+    println!("Upload with: gh release create library-v1 {output_path} --repo FastTrackStudios/fts-library");
 
     Ok(())
 }
@@ -606,8 +715,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 // ============================================================================
 
 /// Default config path.
-const DEFAULT_RIGS_CONFIG: &str =
-    "/Users/codywright/Music/FastTrackStudio/Reaper/FTS-TRACKS/fts-rigs.json";
+fn default_rigs_config() -> String {
+    utils::paths::reaper_dir()
+        .join("fts-rigs.json")
+        .to_string_lossy()
+        .to_string()
+}
 
 /// JSON-serializable rig configuration (lives in fts-rigs.json).
 #[derive(serde::Deserialize)]
@@ -691,19 +804,20 @@ fn run_setup_rigs(force: bool) -> Result<(), Box<dyn std::error::Error>> {
     println!("=== Setting up wrapper .app bundles ===");
 
     // Load config
-    let config_path = std::path::Path::new(DEFAULT_RIGS_CONFIG);
+    let rigs_config_path = default_rigs_config();
+    let config_path = std::path::Path::new(&rigs_config_path);
     if !config_path.exists() {
         return Err(format!(
-            "Rigs config not found: {}\nCreate it or run from the FTS-TRACKS directory.",
-            DEFAULT_RIGS_CONFIG
+            "Rigs config not found: {}\nCreate it or run from the Reaper directory.",
+            rigs_config_path
         )
         .into());
     }
     let config_str = std::fs::read_to_string(config_path)?;
     let config: RigsConfig = serde_json::from_str(&config_str)
-        .map_err(|e| format!("Failed to parse {}: {e}", DEFAULT_RIGS_CONFIG))?;
+        .map_err(|e| format!("Failed to parse {}: {e}", rigs_config_path))?;
 
-    println!("  Config: {}", DEFAULT_RIGS_CONFIG);
+    println!("  Config: {}", rigs_config_path);
 
     let base_dir = &config.base_dir;
     let base_icon = std::path::Path::new(&config.base_icon);
@@ -961,10 +1075,7 @@ current application's NSWorkspace's sharedWorkspace()'s setIcon:iconImage forFil
 fn run_catalog(output: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
     let library_dir = match output {
         Some(dir) => std::path::PathBuf::from(dir),
-        None => {
-            let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-            std::path::PathBuf::from(home).join("Music/FastTrackStudio/Library")
-        }
+        None => utils::paths::library_dir(),
     };
 
     println!("=== Neural DSP Block Catalogue ===");
@@ -1167,4 +1278,388 @@ fn find_matching_test_binaries(filter: &str) -> Vec<String> {
         }
     }
     matches
+}
+
+// ============================================================================
+// migrate: Export signal.db to REAPER-native FXChains/TrackTemplates
+// ============================================================================
+
+fn run_migrate(dry_run: bool) -> Result<(), Box<dyn std::error::Error>> {
+    use signal::{BlockRepo, ModuleRepo};
+    use signal_storage::sidecar::{self, PresetKind, SidecarParam, SignalSidecar};
+
+    let library_path = utils::paths::library_dir();
+    let reaper = utils::paths::reaper_dir();
+    let fxchains_root = utils::paths::reaper_fxchains().join("FTS-Signal");
+    let blocks_dir = fxchains_root.join("01-Blocks");
+    let modules_dir = fxchains_root.join("02-Modules");
+
+    let db_path = library_path.join("signal.db");
+    if !db_path.exists() {
+        return Err(format!("signal.db not found at {}", db_path.display()).into());
+    }
+
+    println!("=== Signal → REAPER-Native Migration ===");
+    println!("  Source DB:    {}", db_path.display());
+    println!("  FXChains:    {}", fxchains_root.display());
+    if dry_run {
+        println!("  Mode:        DRY RUN (no files will be written)");
+    }
+    println!();
+
+    // Connect to the DB and read all presets
+    let runtime = tokio::runtime::Runtime::new()?;
+    let db_url = format!("sqlite:{}?mode=ro", db_path.display());
+    let db = runtime.block_on(signal_storage::Database::connect(&db_url))?;
+
+    // ── Phase 1: Block presets → FXChains/FTS-Signal/01-Blocks/ ──
+
+    println!("--- Block Presets ---");
+    let block_repo = signal_storage::BlockRepoLive::new(db.clone());
+    runtime.block_on(block_repo.init_schema())?;
+
+    let mut block_count = 0usize;
+    let mut snapshot_count = 0usize;
+
+    for &block_type in signal::ALL_BLOCK_TYPES {
+        let collections = runtime.block_on(block_repo.list_block_collections(block_type))?;
+        if collections.is_empty() {
+            continue;
+        }
+
+        // Map block type to folder name
+        let category_folder = block_type_to_folder(block_type);
+        let category_dir = blocks_dir.join(&category_folder);
+
+        for collection in &collections {
+            let metadata = collection.metadata();
+
+            // Determine vendor subfolder from tags
+            let vendor = extract_vendor(metadata);
+            let collection_name = sanitize_filename(collection.name());
+
+            // Build path: category/vendor/collection/ to avoid name collisions
+            let collection_dir = if let Some(vendor) = &vendor {
+                category_dir.join(vendor).join(&collection_name)
+            } else {
+                category_dir.join(&collection_name)
+            };
+
+            for snapshot in collection.snapshots() {
+                let file_name = sanitize_filename(snapshot.name());
+                let rfx_path = collection_dir.join(format!("{file_name}.RfxChain"));
+
+                // Check if we have state_data (raw REAPER chunk)
+                let has_state = snapshot.state_data().is_some();
+
+                // Also check if there's an existing .RfxChain on disk in the old library
+                let existing_rfx = find_existing_rfxchain(
+                    &library_path,
+                    collection.name(),
+                    snapshot.name(),
+                );
+
+                if dry_run {
+                    let source = if has_state {
+                        "db:state_data"
+                    } else if existing_rfx.is_some() {
+                        "file:copy"
+                    } else {
+                        "skip:no-data"
+                    };
+                    let vendor_part = vendor.as_deref().map(|v| format!("{v}/")).unwrap_or_default();
+                    println!(
+                        "  [{source}] {category_folder}/{vendor_part}{collection_name}/{file_name}.RfxChain",
+                    );
+                } else {
+                    std::fs::create_dir_all(&collection_dir)?;
+
+                    // Write the .RfxChain file
+                    let wrote = if let Some(data) = snapshot.state_data() {
+                        std::fs::write(&rfx_path, data)?;
+                        true
+                    } else if let Some(existing) = &existing_rfx {
+                        std::fs::copy(existing, &rfx_path)?;
+                        true
+                    } else {
+                        false
+                    };
+
+                    if wrote {
+                        // Write .signal.styx sidecar
+                        let sc = SignalSidecar {
+                            version: 1,
+                            id: snapshot.id().to_string(),
+                            kind: PresetKind::Block {
+                                block_type: block_type.as_str().to_string(),
+                            },
+                            tags: metadata.tags.as_slice().to_vec(),
+                            description: metadata.description.clone(),
+                            parameters: snapshot
+                                .block()
+                                .parameters()
+                                .iter()
+                                .map(|p| SidecarParam {
+                                    id: p.id().to_string(),
+                                    name: p.name().to_string(),
+                                    value: p.value().get() as f64,
+                                })
+                                .collect(),
+                        };
+                        sidecar::write_sidecar(&rfx_path, &sc)?;
+                        snapshot_count += 1;
+                    }
+                }
+            }
+            block_count += 1;
+        }
+    }
+
+    println!("  Exported: {block_count} collections, {snapshot_count} snapshots\n");
+
+    // ── Phase 2: Module presets → FXChains/FTS-Signal/02-Modules/ ──
+
+    println!("--- Module Presets ---");
+    let module_repo = signal_storage::ModuleRepoLive::new(db.clone());
+    runtime.block_on(module_repo.init_schema())?;
+
+    let module_collections = runtime.block_on(module_repo.list_module_collections())?;
+    let mut module_count = 0usize;
+
+    for collection in &module_collections {
+        let file_name = sanitize_filename(collection.name());
+        let rfx_path = modules_dir.join(format!("{file_name}.RfxChain"));
+
+        if dry_run {
+            println!("  02-Modules/{file_name}.RfxChain  (sidecar only — no rfxchain data in DB)");
+        } else {
+            std::fs::create_dir_all(&modules_dir)?;
+
+            // Modules in the DB don't have rfxchain state data, but we write the sidecar
+            // so the scanner knows about them when rfxchain files are added later.
+            let metadata = collection.metadata();
+            let sc = SignalSidecar {
+                version: 1,
+                id: collection.id().to_string(),
+                kind: PresetKind::Module,
+                tags: metadata.tags.as_slice().to_vec(),
+                description: metadata.description.clone(),
+                parameters: vec![],
+            };
+
+            // Only write sidecar (no rfxchain file — modules need to be re-captured from REAPER)
+            let sidecar_path = sidecar::sidecar_path(&rfx_path);
+            let content = format!(
+                "// Module preset: {} — re-capture from REAPER to create .RfxChain\n{}",
+                collection.name(),
+                render_sidecar_inline(&sc),
+            );
+            std::fs::write(&sidecar_path, content)?;
+        }
+        module_count += 1;
+    }
+
+    println!("  Exported: {module_count} module sidecars\n");
+
+    // ── Phase 3: Copy existing .RfxChain files from Library/presets/ ──
+
+    println!("--- Existing RfxChain Presets ---");
+    let presets_dir = library_path.join("presets");
+    let mut preset_rfx_count = 0usize;
+
+    if presets_dir.is_dir() {
+        for entry in std::fs::read_dir(&presets_dir)?.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let preset_name = path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
+            let target_dir = blocks_dir.join("Custom").join(&preset_name);
+
+            for rfx_entry in std::fs::read_dir(&path)?.flatten() {
+                let rfx_path = rfx_entry.path();
+                if rfx_path
+                    .extension()
+                    .map_or(true, |e| !e.eq_ignore_ascii_case("rfxchain"))
+                {
+                    continue;
+                }
+
+                let file_name = rfx_path.file_name().unwrap().to_string_lossy().to_string();
+                let target_path = target_dir.join(&file_name);
+
+                if dry_run {
+                    println!("  [copy] Custom/{preset_name}/{file_name}");
+                } else {
+                    std::fs::create_dir_all(&target_dir)?;
+                    std::fs::copy(&rfx_path, &target_path)?;
+
+                    // Write a basic sidecar
+                    let stem = rfx_path
+                        .file_stem()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .to_string();
+                    let sc = SignalSidecar {
+                        version: 1,
+                        id: signal::seed_id(&format!("preset-{}-{}", preset_name, stem))
+                            .to_string(),
+                        kind: PresetKind::Block {
+                            block_type: "custom".to_string(),
+                        },
+                        tags: vec![preset_name.clone()],
+                        description: None,
+                        parameters: vec![],
+                    };
+                    sidecar::write_sidecar(&target_path, &sc)?;
+                }
+                preset_rfx_count += 1;
+            }
+        }
+    }
+
+    println!("  Exported: {preset_rfx_count} preset rfxchain files\n");
+
+    // ── Summary ──
+
+    println!("=== Migration {} ===",
+        if dry_run { "dry run complete" } else { "complete" }
+    );
+    println!("  FXChains root: {}", fxchains_root.display());
+    println!("  Block presets: {block_count} ({snapshot_count} snapshots)");
+    println!("  Module presets: {module_count}");
+    println!("  Preset rfxchains: {preset_rfx_count}");
+
+    if !dry_run {
+        // Verify the scanner can read what we wrote
+        println!("\n--- Verifying scanner ---");
+        let scanned_blocks = signal_storage::seed_data::fxchains_scan::scan_blocks(&fxchains_root);
+        let scanned_modules = signal_storage::seed_data::fxchains_scan::scan_modules(&fxchains_root);
+        println!("  Scanner found: {} block presets, {} module presets",
+            scanned_blocks.len(), scanned_modules.len());
+    }
+
+    Ok(())
+}
+
+/// Map BlockType to a human-readable folder name for the 01-Blocks/ tree.
+fn block_type_to_folder(bt: signal::block::BlockType) -> String {
+    match bt {
+        signal::block::BlockType::Amp => "Amps".to_string(),
+        signal::block::BlockType::Cabinet => "Cabinets".to_string(),
+        signal::block::BlockType::Drive => "Drives".to_string(),
+        signal::block::BlockType::Saturator => "Drives".to_string(),
+        signal::block::BlockType::Boost => "Drives".to_string(),
+        signal::block::BlockType::Reverb => "Reverbs".to_string(),
+        signal::block::BlockType::Delay => "Delays".to_string(),
+        signal::block::BlockType::Eq => "EQ".to_string(),
+        signal::block::BlockType::Compressor => "Compression".to_string(),
+        signal::block::BlockType::Gate => "Compression".to_string(),
+        signal::block::BlockType::Limiter => "Compression".to_string(),
+        signal::block::BlockType::Modulation => "Modulation".to_string(),
+        signal::block::BlockType::Chorus => "Modulation".to_string(),
+        signal::block::BlockType::Flanger => "Modulation".to_string(),
+        signal::block::BlockType::Phaser => "Modulation".to_string(),
+        signal::block::BlockType::Trem => "Motion".to_string(),
+        signal::block::BlockType::Panner => "Motion".to_string(),
+        signal::block::BlockType::Vibrato => "Motion".to_string(),
+        signal::block::BlockType::Rotary => "Motion".to_string(),
+        signal::block::BlockType::Filter => "Filters".to_string(),
+        signal::block::BlockType::Wah => "Filters".to_string(),
+        _ => "Custom".to_string(),
+    }
+}
+
+/// Extract a vendor name from metadata tags (e.g., "Neural DSP", "FabFilter").
+fn extract_vendor(metadata: &signal::metadata::Metadata) -> Option<String> {
+    for tag in metadata.tags.as_slice() {
+        if tag == "Neural DSP" {
+            return Some("Neural DSP".to_string());
+        }
+        if tag.starts_with("vendor:") {
+            let vendor = &tag["vendor:".len()..];
+            // Capitalize first letter
+            let mut chars = vendor.chars();
+            return Some(match chars.next() {
+                Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
+                None => vendor.to_string(),
+            });
+        }
+    }
+    None
+}
+
+/// Try to find an existing .RfxChain file in the old library structure.
+fn find_existing_rfxchain(
+    library_path: &std::path::Path,
+    collection_name: &str,
+    snapshot_name: &str,
+) -> Option<std::path::PathBuf> {
+    // Check blocks/plugin/neural-dsp/<collection>/<snapshot>.RfxChain
+    let ndsp_path = library_path
+        .join("blocks/plugin/neural-dsp")
+        .join(collection_name)
+        .join(format!("{snapshot_name}.RfxChain"));
+    if ndsp_path.exists() {
+        return Some(ndsp_path);
+    }
+
+    // Check presets/<collection>/<snapshot>.RfxChain
+    let preset_path = library_path
+        .join("presets")
+        .join(collection_name)
+        .join(format!("{snapshot_name}.RfxChain"));
+    if preset_path.exists() {
+        return Some(preset_path);
+    }
+
+    None
+}
+
+/// Sanitize a name for use as a filename (replace invalid chars).
+fn sanitize_filename(name: &str) -> String {
+    name.replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_")
+}
+
+/// Simple inline sidecar renderer (same as sidecar::render_sidecar_styx but accessible here).
+fn render_sidecar_inline(s: &signal_storage::sidecar::SignalSidecar) -> String {
+    use signal_storage::sidecar::PresetKind;
+
+    let mut out = String::new();
+    out.push_str(&format!("version {}\n", s.version));
+    out.push_str(&format!("id \"{}\"\n", s.id));
+
+    match &s.kind {
+        PresetKind::Block { block_type } => {
+            out.push_str(&format!("kind @Block{{block_type {block_type}}}\n"));
+        }
+        PresetKind::Module => out.push_str("kind @Module@\n"),
+        PresetKind::Layer => out.push_str("kind @Layer@\n"),
+        PresetKind::Engine => out.push_str("kind @Engine@\n"),
+        PresetKind::Rig => out.push_str("kind @Rig@\n"),
+        PresetKind::Profile => out.push_str("kind @Profile@\n"),
+        PresetKind::Song => out.push_str("kind @Song@\n"),
+        PresetKind::Rack => out.push_str("kind @Rack@\n"),
+    }
+
+    if !s.tags.is_empty() {
+        let tags: Vec<_> = s.tags.iter().map(|t| {
+            if t.contains(char::is_whitespace) || t.is_empty() {
+                format!("\"{}\"", t.replace('"', "\\\""))
+            } else {
+                t.clone()
+            }
+        }).collect();
+        out.push_str(&format!("tags ({})\n", tags.join(" ")));
+    }
+
+    if let Some(desc) = &s.description {
+        out.push_str(&format!("description \"{}\"\n", desc.replace('"', "\\\"")));
+    }
+
+    out
 }
