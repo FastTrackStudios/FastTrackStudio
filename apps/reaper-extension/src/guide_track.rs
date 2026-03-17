@@ -206,25 +206,47 @@ pub fn generate_guide_tracks() -> ActionResult {
     let reaper = Reaper::get();
     let project = reaper.current_project();
     let result: Option<String> = project.undoable("Generate Guide Tracks", || {
-        let tracks = create_guide_tracks()?;
+        // Find existing guide tracks or create new ones
+        let tracks = find_or_create_guide_tracks()?;
+
+        // Get existing item coverage on each guide track so we skip regions
+        // that already have guide items (supports partial generation for setlists)
+        let click_coverage = get_item_coverage(&tracks.click);
+        let count_coverage = get_item_coverage(&tracks.count);
+        let guide_coverage = get_item_coverage(&tracks.guide);
 
         let click_config = ClickConfig::default();
         let count_in_config = CountInConfig::default();
         let guide_config = GuideConfig::default();
 
         let mut prev_region_end_seconds: Option<f64> = None;
+        let mut generated_count = 0u32;
+        let mut skipped_count = 0u32;
 
         for region in &regions {
+            let region_start = region.start_seconds();
+            let region_end = region.end_seconds();
+
+            // Check if this region already has guide coverage on ALL three tracks
+            let has_click = is_covered(region_start, region_end, &click_coverage);
+            let has_count = is_covered(region_start, region_end, &count_coverage);
+            let has_guide = is_covered(region_start, region_end, &guide_coverage);
+
+            if has_click && has_count && has_guide {
+                // All tracks covered for this region — skip
+                prev_region_end_seconds = Some(region_end);
+                skipped_count += 1;
+                continue;
+            }
+
             let (section_type, section_number) = parse_section_name(&region.name);
             let (tempo, num, denom) =
-                get_tempo_and_time_sig_at_on_main_thread(region.start_seconds());
+                get_tempo_and_time_sig_at_on_main_thread(region_start);
             let time_sig = TimeSignature::new(num as u32, denom as u32);
 
-            let section_start_qn = time_to_qn_on_main_thread(region.start_seconds());
-            let section_end_qn = time_to_qn_on_main_thread(region.end_seconds());
+            let section_start_qn = time_to_qn_on_main_thread(region_start);
+            let section_end_qn = time_to_qn_on_main_thread(region_end);
 
-            // Compute count-in: one measure before the section start,
-            // clamped so it doesn't overlap the previous region
             let beat_unit = 4.0 / time_sig.denominator as f64;
             let measure_length_qn = beat_unit * time_sig.numerator as f64;
             let mut count_in_start_qn = section_start_qn - measure_length_qn;
@@ -236,9 +258,8 @@ pub fn generate_guide_tracks() -> ActionResult {
                 }
             }
 
-            let events = GuideGenerator::generate_section(
+            let events = GuideGenerator::generate(
                 section_start_qn,
-                section_end_qn,
                 count_in_start_qn,
                 &time_sig,
                 tempo,
@@ -249,7 +270,6 @@ pub fn generate_guide_tracks() -> ActionResult {
                 &guide_config,
             );
 
-            // Partition events by type
             let mut click_notes: Vec<(f64, u8, u8)> = Vec::new();
             let mut count_notes: Vec<(f64, u8, u8)> = Vec::new();
             let mut guide_notes: Vec<(f64, u8, u8)> = Vec::new();
@@ -270,35 +290,41 @@ pub fn generate_guide_tracks() -> ActionResult {
 
             let count_in_start_seconds = qn_to_time_on_main_thread(count_in_start_qn);
 
-            // Click MIDI: full-section item on the Click folder track
-            let click_item_start = count_in_start_seconds.max(0.0);
-            let click_item_end = region.end_seconds();
-            if click_item_end > click_item_start && !click_notes.is_empty() {
-                create_midi_item_with_notes(&tracks.click, click_item_start, click_item_end, &click_notes);
+            // Only create items on tracks that don't have coverage
+            if !has_click {
+                let click_item_start = count_in_start_seconds.max(0.0);
+                let click_item_end = region_end;
+                if click_item_end > click_item_start && !click_notes.is_empty() {
+                    create_midi_item_with_notes(&tracks.click, click_item_start, click_item_end, &click_notes);
+                }
             }
 
-            // Count/Guide: short MIDI items (1 measure each)
-            create_short_count_items(
-                &tracks.count,
-                count_in_start_qn,
-                section_start_qn,
-                measure_length_qn,
-                &count_notes,
-            );
+            if !has_count {
+                create_short_count_items(
+                    &tracks.count,
+                    count_in_start_qn,
+                    section_start_qn,
+                    measure_length_qn,
+                    &count_notes,
+                );
+            }
 
-            create_short_guide_items(
-                &tracks.guide,
-                count_in_start_qn,
-                measure_length_qn,
-                &guide_notes,
-            );
+            if !has_guide {
+                create_short_guide_items(
+                    &tracks.guide,
+                    count_in_start_qn,
+                    measure_length_qn,
+                    &guide_notes,
+                );
+            }
 
-            prev_region_end_seconds = Some(region.end_seconds());
+            prev_region_end_seconds = Some(region_end);
+            generated_count += 1;
         }
 
         Some(format!(
-            "Generated guide tracks for {} regions",
-            regions.len()
+            "Generated guide tracks for {} regions ({} skipped, already covered)",
+            generated_count, skipped_count
         ))
     });
 
@@ -309,6 +335,108 @@ pub fn generate_guide_tracks() -> ActionResult {
         }
         None => ActionResult::failure("Failed to create guide tracks"),
     }
+}
+
+/// Find existing Click+Guide tracks by name, or create new ones.
+fn find_or_create_guide_tracks() -> Option<GuideTracks> {
+    let reaper = Reaper::get();
+    let proj = reaper.current_project();
+
+    // Search for existing tracks by name
+    let mut click_guid = None;
+    let mut count_guid = None;
+    let mut guide_guid = None;
+
+    for track in proj.tracks() {
+        let name = track.name().expect(Default::default()).into_string();
+        match name.as_str() {
+            "Click" if click_guid.is_none() => {
+                click_guid = Some(track.guid().to_string_without_braces());
+            }
+            "Count" if count_guid.is_none() => {
+                count_guid = Some(track.guid().to_string_without_braces());
+            }
+            "Guide" if guide_guid.is_none() => {
+                guide_guid = Some(track.guid().to_string_without_braces());
+            }
+            _ => {}
+        }
+    }
+
+    // If all three exist, reuse them
+    if let (Some(click), Some(count), Some(guide)) = (click_guid, count_guid, guide_guid) {
+        return Some(GuideTracks {
+            click,
+            count,
+            guide,
+        });
+    }
+
+    // Otherwise create the full structure
+    create_guide_tracks()
+}
+
+/// Get the time ranges covered by items on a track.
+/// Returns a sorted list of (start, end) intervals.
+fn get_item_coverage(track_guid: &str) -> Vec<(f64, f64)> {
+    let reaper = Reaper::get();
+    let low = reaper.medium_reaper().low();
+    let proj = reaper.current_project();
+
+    let track = proj
+        .tracks()
+        .find(|t| t.guid().to_string_without_braces() == track_guid);
+    let Some(track) = track else {
+        return Vec::new();
+    };
+    let Some(index) = track.index() else {
+        return Vec::new();
+    };
+    let raw_track = unsafe { low.GetTrack(std::ptr::null_mut(), index as i32) };
+    if raw_track.is_null() {
+        return Vec::new();
+    }
+
+    let mut coverage = Vec::new();
+    unsafe {
+        let item_count = low.CountTrackMediaItems(raw_track);
+        for i in 0..item_count {
+            let item = low.GetTrackMediaItem(raw_track, i);
+            if item.is_null() {
+                continue;
+            }
+            let pos_param = std::ffi::CString::new("D_POSITION").unwrap();
+            let len_param = std::ffi::CString::new("D_LENGTH").unwrap();
+            let pos = low.GetMediaItemInfo_Value(item, pos_param.as_ptr());
+            let len = low.GetMediaItemInfo_Value(item, len_param.as_ptr());
+            coverage.push((pos, pos + len));
+        }
+    }
+
+    coverage.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+    coverage
+}
+
+/// Check if a time range is already covered by existing items.
+/// Returns true if any item overlaps the range by at least 50%.
+fn is_covered(start: f64, end: f64, coverage: &[(f64, f64)]) -> bool {
+    let range_len = end - start;
+    if range_len <= 0.0 {
+        return false;
+    }
+
+    for &(item_start, item_end) in coverage {
+        // Calculate overlap
+        let overlap_start = start.max(item_start);
+        let overlap_end = end.min(item_end);
+        let overlap = (overlap_end - overlap_start).max(0.0);
+
+        // If an item covers at least 50% of the region, consider it covered
+        if overlap > range_len * 0.5 {
+            return true;
+        }
+    }
+    false
 }
 
 /// Create short (1-measure) MIDI items on the Count track for each count-in measure.
