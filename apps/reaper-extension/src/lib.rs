@@ -445,12 +445,33 @@ async fn register_daw_dispatcher() {
                                                 .establish::<roam::DriverCaller>(())
                                                 .await
                                             {
-                                                Ok((_caller, _session)) => {
+                                                Ok((caller, _session)) => {
                                                     info!("Roam session established with {}", instance_name);
-                                                    // _caller is an ErasedCaller that can call
-                                                    // remote DAW services on the peer.
-                                                    // TODO: register this peer in the sync engine
-                                                    std::future::pending::<()>().await;
+
+                                                    // Create a Daw handle pointing at the remote peer
+                                                    let remote_daw = daw::Daw::new(roam::ErasedCaller::new(caller));
+
+                                                    // Start a sync engine for this peer
+                                                    let sync_session = sync_proto::SyncSession {
+                                                        session_id: format!("network-{}", instance_name),
+                                                        peer_id: format!("local-{}", std::process::id()),
+                                                        display_name: instance_name.clone(),
+                                                    };
+                                                    let engine = sync::Engine::new(
+                                                        remote_daw,
+                                                        sync_session,
+                                                        sync_proto::SyncConfig::transport_only(),
+                                                    );
+                                                    match engine.start().await {
+                                                        Ok(()) => {
+                                                            info!("Sync engine started for peer {}", instance_name);
+                                                            // Keep alive — engine runs via spawned subscription tasks
+                                                            std::future::pending::<()>().await;
+                                                        }
+                                                        Err(e) => {
+                                                            warn!("Sync engine start failed for {}: {e}", instance_name);
+                                                        }
+                                                    }
                                                 }
                                                 Err(e) => {
                                                     warn!("Roam handshake failed with {}: {:?}", instance_name, e);
