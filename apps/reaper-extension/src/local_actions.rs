@@ -734,25 +734,42 @@ fn handle_workflow_deactivate() -> ActionResult {
 // ============================================================================
 
 fn handle_generate_guide_track() -> ActionResult {
-    crate::guide_track::generate_guide_tracks()
+    // Both actions now use the session crate's fill_guide_midi via Daw facade
+    handle_fill_guide_midi()
 }
 
 fn handle_fill_guide_midi() -> ActionResult {
-    // Use the session crate's guide generation (Daw facade, not raw REAPER API)
-    moire::task::spawn(async {
+    info!("Fill Guide MIDI action triggered");
+
+    // Check if Daw is initialized
+    let is_init = daw::Daw::is_initialized();
+    info!("Fill Guide MIDI: Daw initialized = {}", is_init);
+    if !is_init {
+        return ActionResult::failure("Daw not initialized");
+    }
+
+    // Use tokio::task::spawn_local since we need the async task to actually
+    // execute (moire::task::spawn may not be polled by the action handler context)
+    tokio::task::spawn_local(async {
+        info!("Fill Guide MIDI: async task starting");
+
         match session::guide_gen::fill_guide_midi().await {
             Ok((generated, skipped)) => {
                 info!(
-                    "Fill Guide MIDI: {} generated, {} skipped",
+                    "Guide MIDI: {} regions filled, {} skipped",
                     generated, skipped
                 );
+                Reaper::get().show_console_msg(format!(
+                    "Guide MIDI: {} regions filled, {} skipped\n",
+                    generated, skipped
+                ));
             }
             Err(e) => {
-                tracing::warn!("Fill Guide MIDI failed: {e}");
+                tracing::warn!("Fill Guide MIDI error: {e}");
+                Reaper::get().show_console_msg(format!("Fill Guide MIDI error: {e}\n"));
             }
         }
-    })
-    .named("fill_guide_midi");
+    });
     ActionResult::success_with_message("Filling missing guide MIDI...")
 }
 
