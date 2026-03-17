@@ -9,7 +9,7 @@ use crate::signals::*;
 use dock_proto::*;
 use tokio::time::{sleep, Duration};
 
-#[cfg(all(feature = "web", not(target_arch = "wasm32")))]
+#[cfg(feature = "native")]
 use dioxus::desktop::{
     tao::{
         dpi::{LogicalPosition, LogicalSize},
@@ -69,7 +69,7 @@ fn current_window_hint(workspace: &DockWorkspace) -> WindowId {
     workspace.main_window
 }
 
-#[cfg(all(feature = "web", not(target_arch = "wasm32")))]
+#[cfg(feature = "native")]
 #[component]
 fn FloatingWindowRoot(window_id: WindowId) -> Element {
     dioxus::desktop::use_wry_event_handler(move |event, _| {
@@ -110,7 +110,7 @@ fn FloatingWindowRoot(window_id: WindowId) -> Element {
     }
 }
 
-#[cfg(all(feature = "web", not(target_arch = "wasm32")))]
+#[cfg(feature = "native")]
 fn open_floating_window(window: DockWindow) {
     if window.is_main {
         return;
@@ -141,7 +141,7 @@ fn open_floating_window(window: DockWindow) {
     });
 }
 
-#[cfg(not(all(feature = "web", not(target_arch = "wasm32"))))]
+#[cfg(not(feature = "native"))]
 fn open_floating_window(_window: DockWindow) {}
 
 fn ensure_floating_windows_open() {
