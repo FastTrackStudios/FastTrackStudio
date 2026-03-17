@@ -334,8 +334,11 @@ async fn register_daw_dispatcher() {
             info!("Signal services added to Unix socket handler");
         }
 
-        start_unix_socket_server(handler);
+        start_unix_socket_server(handler.clone());
         info!("Unix socket serves DAW + Session + Signal services");
+
+        // Start the TCP server + mDNS advertisement for network sync.
+        start_network_server(handler);
     } else {
         // Session init failed — can't serve without handler (it was moved)
         warn!("Unix socket not started (session init failed)");
@@ -379,6 +382,27 @@ async fn register_daw_dispatcher() {
     // Initialize the sync bridge (Ableton Link engine).
     // The timer callback will call sync_bridge::tick() to drive transport sync.
     sync_bridge::init();
+
+    // Start discovering other FTS instances on the network via mDNS.
+    // When peers appear, they're logged and can be connected for sync.
+    moire::task::spawn(async move {
+        let mut rx = roam_discover::discover("fts-daw").await;
+        while let Some(event) = rx.recv().await {
+            match event {
+                roam_discover::PeerEvent::Found(peer) => {
+                    let role = peer.get_meta("role").unwrap_or("?");
+                    info!(
+                        "Network peer found: {} (role={}, {}:{})",
+                        peer.instance_name, role, peer.host, peer.port
+                    );
+                    // TODO: auto-connect to peers sharing the same session
+                }
+                roam_discover::PeerEvent::Lost(name) => {
+                    debug!("Network peer lost: {}", name);
+                }
+            }
+        }
+    });
 
     info!(
         "DAW dispatcher registered (Transport, Project, Marker, Region, TempoMap, Midi, MidiAnalysis, AudioEngine, Fx, Track, Routing, LiveMidi, ExtState, Session, Signal, Sync)"
@@ -462,6 +486,90 @@ fn start_unix_socket_server(handler: RoutedHandler) {
                 }
                 Err(e) => {
                     warn!("Unix socket accept error: {}", e);
+                }
+            }
+        }
+    });
+}
+
+/// Start a TCP server for network-accessible roam RPC and advertise via mDNS.
+///
+/// This enables cross-machine DAW sync: other FTS instances on the local network
+/// discover this one via mDNS (`_fts-daw._tcp.local.`) and connect over TCP.
+fn start_network_server(handler: RoutedHandler) {
+    use tokio::net::TcpListener;
+
+    let handler = std::sync::Arc::new(handler);
+
+    moire::task::spawn(async move {
+        // Bind to any available port
+        let listener = match TcpListener::bind("0.0.0.0:0").await {
+            Ok(l) => l,
+            Err(e) => {
+                warn!("Failed to bind TCP server: {}", e);
+                return;
+            }
+        };
+
+        let port = match listener.local_addr() {
+            Ok(addr) => addr.port(),
+            Err(e) => {
+                warn!("Failed to get TCP server address: {}", e);
+                return;
+            }
+        };
+
+        info!("TCP server listening on port {}", port);
+
+        // Advertise via mDNS
+        let role = std::env::var("FTS_DAW_ROLE").unwrap_or_else(|_| "unknown".into());
+        let pid = std::process::id();
+
+        let _mdns_guard = match roam_discover::advertise(roam_discover::ServiceInfo {
+            service_type: "fts-daw",
+            instance_name: format!("FTS-{}-{}", role.to_uppercase(), pid),
+            port,
+            metadata: vec![
+                ("role".into(), role),
+                ("pid".into(), pid.to_string()),
+                ("version".into(), env!("CARGO_PKG_VERSION").into()),
+            ],
+        }) {
+            Ok(guard) => {
+                info!("mDNS: advertised as _fts-daw._tcp on port {}", port);
+                guard
+            }
+            Err(e) => {
+                warn!("mDNS advertisement failed: {}", e);
+                // Continue without mDNS — TCP server still works for direct connections
+                return;
+            }
+        };
+
+        // Accept TCP connections (same pattern as Unix socket)
+        loop {
+            match listener.accept().await {
+                Ok((stream, addr)) => {
+                    info!("Network peer connected from {}", addr);
+                    let handler = handler.clone();
+                    moire::task::spawn(async move {
+                        let link = roam_stream::StreamLink::tcp(stream);
+                        match roam::acceptor(link)
+                            .establish::<roam::DriverCaller>(handler.as_ref().clone())
+                            .await
+                        {
+                            Ok((_caller, _session_handle)) => {
+                                debug!("TCP session established with {}", addr);
+                                std::future::pending::<()>().await;
+                            }
+                            Err(e) => {
+                                warn!("TCP handshake failed with {}: {:?}", addr, e);
+                            }
+                        }
+                    });
+                }
+                Err(e) => {
+                    warn!("TCP accept error: {}", e);
                 }
             }
         }

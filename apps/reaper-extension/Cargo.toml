@@ -48,6 +48,7 @@ daw-allocator.workspace = true
 # Runtime
 roam.workspace = true
 roam-stream.workspace = true
+roam-discover.workspace = true
 moire.workspace = true
 tokio.workspace = true
 tracing.workspace = true
