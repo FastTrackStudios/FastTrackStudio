@@ -13,9 +13,14 @@ license = "MIT OR Apache-2.0"
 dock-proto = { path = "crates/dock-proto" }
 dock-dioxus = { path = "crates/dock-dioxus" }
 
-# Facet reflection framework
-facet = { git = "https://github.com/facet-rs/facet", branch = "main" }
-facet-json = { git = "https://github.com/facet-rs/facet", branch = "main" }
+# Facet reflection framework - use crates.io 0.43.x to match roam's constraint
+facet = { version = "0.44" }
+facet-core = { version = "0.44" }
+facet-json = { version = "0.44" }
+facet-postcard = { version = "0.44" }
+facet-pretty = { version = "0.44" }
+facet-value = { version = "0.44" }
+facet-yaml = { version = "0.44" }
 
 # UI framework
 dioxus = "0.7.2"
