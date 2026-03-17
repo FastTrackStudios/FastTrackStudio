@@ -8,7 +8,7 @@ use dioxus::prelude::*;
 use session_ui::Session;
 
 use crate::daw_registry::{DawConnectionInfo, DawRole};
-use crate::launcher::{self, REAPER_CONFIGS};
+use crate::launcher::{self, reaper_configs};
 use crate::persistence::{self, RecentProject, SetlistDefinition};
 use crate::TOP_PAGE;
 
@@ -119,6 +119,8 @@ struct LaunchCard {
     color: &'static str,
     icon: LaunchIcon,
     config_id: Option<&'static str>,
+    /// Rig type identifier — used to differentiate signal instances.
+    rig_type: Option<&'static str>,
     navigate_to: Option<&'static str>,
 }
 
@@ -129,7 +131,7 @@ enum LaunchIcon {
     Keys,
     Bass,
     Drums,
-    DrumReplacement,
+    DrumEnhancement,
     Vocals,
     Mixer,
 }
@@ -141,6 +143,7 @@ const LAUNCH_CARDS: &[LaunchCard] = &[
         color: "#d4d4d8",
         icon: LaunchIcon::Tracks,
         config_id: Some("fts-tracks"),
+        rig_type: None,
         navigate_to: Some("main"),
     },
     LaunchCard {
@@ -148,7 +151,8 @@ const LAUNCH_CARDS: &[LaunchCard] = &[
         subtitle: "Signal rig",
         color: "#3b82f6",
         icon: LaunchIcon::Guitar,
-        config_id: Some("fts-guitar"),
+        config_id: Some("fts-signal"),
+        rig_type: Some("guitar"),
         navigate_to: Some("rig"),
     },
     LaunchCard {
@@ -156,39 +160,44 @@ const LAUNCH_CARDS: &[LaunchCard] = &[
         subtitle: "Keyboard stack",
         color: "#22c55e",
         icon: LaunchIcon::Keys,
-        config_id: None,
-        navigate_to: None,
+        config_id: Some("fts-signal"),
+        rig_type: Some("keys"),
+        navigate_to: Some("rig"),
     },
     LaunchCard {
         label: "Bass",
         subtitle: "Low-end chain",
         color: "#eab308",
         icon: LaunchIcon::Bass,
-        config_id: None,
-        navigate_to: None,
+        config_id: Some("fts-signal"),
+        rig_type: Some("bass"),
+        navigate_to: Some("rig"),
     },
     LaunchCard {
         label: "Drums",
         subtitle: "Kit processing",
         color: "#ef4444",
         icon: LaunchIcon::Drums,
-        config_id: None,
-        navigate_to: None,
+        config_id: Some("fts-signal"),
+        rig_type: Some("drums"),
+        navigate_to: Some("rig"),
     },
     LaunchCard {
-        label: "Drum Replacement",
-        subtitle: "Sample layering",
+        label: "Drum Enhancement",
+        subtitle: "Trigger + process",
         color: "#f97316",
-        icon: LaunchIcon::DrumReplacement,
-        config_id: None,
-        navigate_to: None,
+        icon: LaunchIcon::DrumEnhancement,
+        config_id: Some("fts-signal"),
+        rig_type: Some("drum-enhancement"),
+        navigate_to: Some("rig"),
     },
     LaunchCard {
         label: "Vocals",
         subtitle: "Voice FX",
         color: "#ec4899",
         icon: LaunchIcon::Vocals,
-        config_id: Some("fts-guitar"),
+        config_id: Some("fts-signal"),
+        rig_type: Some("vocals"),
         navigate_to: Some("rig"),
     },
     LaunchCard {
@@ -197,6 +206,7 @@ const LAUNCH_CARDS: &[LaunchCard] = &[
         color: "#71717a",
         icon: LaunchIcon::Mixer,
         config_id: None,
+        rig_type: None,
         navigate_to: None,
     },
 ];
@@ -228,7 +238,7 @@ fn LaunchCardIcon(icon: LaunchIcon) -> Element {
                 line { x1: "15", y1: "6", x2: "15", y2: "13" }
             }
         },
-        LaunchIcon::Drums | LaunchIcon::DrumReplacement => rsx! {
+        LaunchIcon::Drums | LaunchIcon::DrumEnhancement => rsx! {
             svg { view_box: "0 0 24 24", class: "w-7 h-7", fill: "none", stroke: "currentColor", stroke_width: "1.8",
                 ellipse { cx: "12", cy: "14", rx: "6.5", ry: "3.5" }
                 line { x1: "5.5", y1: "14", x2: "5.5", y2: "18" }
@@ -271,10 +281,16 @@ fn QuickLaunchGrid() -> Element {
                         let enabled = card.config_id.is_some();
                         let is_running = card.config_id.map_or(false, |id| {
                             connections.iter().any(|c| {
-                                match (id, c.role) {
+                                let role_match = match (id, c.role) {
                                     ("fts-tracks", DawRole::Session) => true,
-                                    ("fts-guitar", DawRole::Signal) => true,
+                                    ("fts-signal", DawRole::Signal) => true,
                                     _ => false,
+                                };
+                                // For signal cards, also match on rig_type
+                                if role_match && card.rig_type.is_some() {
+                                    c.rig_type.as_deref() == card.rig_type
+                                } else {
+                                    role_match
                                 }
                             })
                         });
@@ -289,6 +305,7 @@ fn QuickLaunchGrid() -> Element {
                                 enabled: enabled,
                                 is_running: is_running,
                                 config_id: card.config_id,
+                                rig_type: card.rig_type,
                                 navigate_to: card.navigate_to,
                             }
                         }
@@ -313,6 +330,7 @@ fn LaunchCardView(
     enabled: bool,
     is_running: bool,
     config_id: Option<&'static str>,
+    rig_type: Option<&'static str>,
     navigate_to: Option<&'static str>,
 ) -> Element {
     let panel_open = *OPEN_CARD_MENU.read() == Some(card_index);
@@ -365,11 +383,11 @@ fn LaunchCardView(
                     return;
                 }
                 if let Some(id) = config_id {
-                    if let Some(config) = launcher::config_by_id(id) {
-                        match launcher::spawn_reaper(config, &[]) {
+                    if let Some(ref config) = launcher::config_by_id(id) {
+                        match launcher::spawn_reaper(config, &[], rig_type) {
                             Ok(pid) => {
                                 tracing::info!("Launched {} (PID {pid})", config.label);
-                                if id == "fts-guitar" {
+                                if id == "fts-signal" {
                                     *SIGNAL_LAUNCHING.write() = true;
                                 }
                             }
@@ -485,11 +503,19 @@ fn CardDetailPanel() -> Element {
     };
 
     let connections = DASHBOARD_CONNECTIONS.read();
+    let card_rig_type = card.rig_type;
     let is_running = card.config_id.map_or(false, |id| {
-        connections.iter().any(|c| matches!(
-            (id, c.role),
-            ("fts-tracks", DawRole::Session) | ("fts-guitar", DawRole::Signal)
-        ))
+        connections.iter().any(|c| {
+            let role_match = matches!(
+                (id, c.role),
+                ("fts-tracks", DawRole::Session) | ("fts-signal", DawRole::Signal)
+            );
+            if role_match && card_rig_type.is_some() {
+                c.rig_type.as_deref() == card_rig_type
+            } else {
+                role_match
+            }
+        })
     });
     let is_tracks = card.config_id == Some("fts-tracks");
     let config_id = card.config_id;
@@ -519,10 +545,17 @@ fn CardDetailPanel() -> Element {
                                     let connections = DASHBOARD_CONNECTIONS.read();
                                     let pids: Vec<u32> = connections
                                         .iter()
-                                        .filter(|c| matches!(
-                                            (id, c.role),
-                                            ("fts-tracks", DawRole::Session) | ("fts-guitar", DawRole::Signal)
-                                        ))
+                                        .filter(|c| {
+                                            let role_match = matches!(
+                                                (id, c.role),
+                                                ("fts-tracks", DawRole::Session) | ("fts-signal", DawRole::Signal)
+                                            );
+                                            if role_match && card_rig_type.is_some() {
+                                                c.rig_type.as_deref() == card_rig_type
+                                            } else {
+                                                role_match
+                                            }
+                                        })
                                         .map(|c| c.pid)
                                         .collect();
                                     for pid in pids {
@@ -691,7 +724,8 @@ fn TracksDetailBody() -> Element {
 fn StatusBar() -> Element {
     let connections = DASHBOARD_CONNECTIONS.read();
 
-    let config_statuses: Vec<(&str, Vec<u32>)> = REAPER_CONFIGS
+    let configs = reaper_configs();
+    let config_statuses: Vec<(&str, Vec<u32>)> = configs
         .iter()
         .map(|config| {
             let pids: Vec<u32> = connections
@@ -793,7 +827,7 @@ pub(crate) async fn launch_setlist_async(setlist: SetlistDefinition) {
         return;
     };
 
-    let pid = match launcher::spawn_reaper(config, &[]) {
+    let pid = match launcher::spawn_reaper(&config, &[], None) {
         Ok(pid) => {
             tracing::info!(
                 "Launched REAPER for setlist '{}' (PID {pid}), waiting for connection...",

@@ -318,13 +318,13 @@ fn App() -> Element {
     use_effect(move || {
         spawn(async move {
             // Use the user's Music folder for the signal database
-            let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-            let db_path = format!("{}/Music/FastTrackStudio/Library/signal.db", home);
+            let db_path = utils::paths::signal_db();
 
             // Create parent directory if it doesn't exist
-            if let Some(parent) = std::path::Path::new(&db_path).parent() {
+            if let Some(parent) = db_path.parent() {
                 let _ = std::fs::create_dir_all(parent);
             }
+            let db_path = db_path.to_string_lossy().to_string();
 
             match connect_db_seeded(&db_path).await {
                 Ok(ctrl) => {
@@ -526,7 +526,12 @@ fn App() -> Element {
                 debug!("Subscribed to SetlistService events (60Hz transport updates)");
 
                 // Process events continuously
+                let web_registry = gateway::web_client_registry();
+
                 while let Ok(Some(event_ref)) = rx.recv().await {
+                    // Push event to connected web clients
+                    web_registry.broadcast(&event_ref).await;
+
                     match &*event_ref {
                         session::SetlistEvent::SetlistChanged(setlist) => {
                             debug!("Setlist changed: {} songs", setlist.songs.len());
@@ -1179,7 +1184,7 @@ pub fn is_daw_connected() -> bool {
 
 /// Run background services (session services, gateway, DAW discovery)
 async fn run_services() {
-    use gateway::{start_gateway, GatewayConfig};
+    use gateway::{start_gateway, web_client_registry, GatewayConfig};
     use services::LocalServices;
     use session_ui::Session;
 
@@ -1224,7 +1229,8 @@ async fn run_services() {
     let config = GatewayConfig::default();
     debug!("Starting gateway on {}", config.bind_addr);
 
-    if let Err(e) = start_gateway(dispatcher, &config.bind_addr, config.static_dir.as_deref()).await
+    let registry = web_client_registry().clone();
+    if let Err(e) = start_gateway(dispatcher, &config.bind_addr, config.static_dir.as_deref(), registry).await
     {
         tracing::error!("Gateway error: {}", e);
     }

@@ -18,12 +18,22 @@ use axum::extract::ws::{Message, WebSocket};
 use axum::extract::{State, WebSocketUpgrade};
 use axum::response::IntoResponse;
 use axum::routing::get;
-use roam::{Backing, DriverCaller, DriverReplySink, Handler, Link, LinkRx, LinkTx, LinkTxPermit, WriteSlot};
+use roam::{Backing, DriverCaller, DriverReplySink, ErasedCaller, Handler, Link, LinkRx, LinkTx, LinkTxPermit, WriteSlot};
+use session::{SetlistEvent, WebClientServiceClient};
 use tokio::net::TcpListener;
 use tokio::sync::{RwLock, mpsc};
 use tokio::task::JoinHandle;
+use std::sync::OnceLock;
 use tower_http::services::ServeDir;
 use tracing::{debug, info, warn};
+
+/// Global web client registry, accessible from both the gateway and sync tasks.
+static WEB_CLIENT_REGISTRY: OnceLock<WebClientRegistry> = OnceLock::new();
+
+/// Get or create the global web client registry.
+pub fn web_client_registry() -> &'static WebClientRegistry {
+    WEB_CLIENT_REGISTRY.get_or_init(WebClientRegistry::new)
+}
 
 // ============================================================================
 // AxumWsLink — implements roam's Link trait for axum WebSocket
@@ -227,6 +237,65 @@ impl LinkRx for AxumWsLinkRx {
 }
 
 // ============================================================================
+// Web Client Registry — tracks connected browser clients for push notifications
+// ============================================================================
+
+/// Registry of connected web clients that the desktop can push events to.
+#[derive(Clone)]
+pub struct WebClientRegistry {
+    clients: Arc<tokio::sync::Mutex<Vec<WebClientServiceClient>>>,
+}
+
+impl WebClientRegistry {
+    pub fn new() -> Self {
+        Self {
+            clients: Arc::new(tokio::sync::Mutex::new(Vec::new())),
+        }
+    }
+
+    /// Register a newly connected web client.
+    pub async fn register(&self, client: WebClientServiceClient) {
+        self.clients.lock().await.push(client);
+        debug!("Web client registered ({} total)", self.clients.lock().await.len());
+    }
+
+    /// Broadcast a SetlistEvent to all connected web clients.
+    /// Dead clients are automatically pruned.
+    pub async fn broadcast(&self, event: &SetlistEvent) {
+        let clients = {
+            let guard = self.clients.lock().await;
+            if guard.is_empty() {
+                return;
+            }
+            guard.clone()
+        };
+
+        let mut failed_indices = Vec::new();
+        for (i, client) in clients.iter().enumerate() {
+            if client.push_event(event.clone()).await.is_err() {
+                failed_indices.push(i);
+            }
+        }
+
+        if !failed_indices.is_empty() {
+            let mut guard = self.clients.lock().await;
+            // Remove in reverse to preserve indices
+            for &i in failed_indices.iter().rev() {
+                if i < guard.len() {
+                    guard.swap_remove(i);
+                }
+            }
+            debug!("Pruned {} dead web clients ({} remaining)", failed_indices.len(), guard.len());
+        }
+    }
+
+    /// Number of connected clients.
+    pub async fn client_count(&self) -> usize {
+        self.clients.lock().await.len()
+    }
+}
+
+// ============================================================================
 // StandaloneGateway
 // ============================================================================
 
@@ -240,12 +309,13 @@ struct StandaloneGateway<H: Handler<DriverReplySink> + Clone + Send + Sync + 'st
     handler: H,
     state: Arc<RwLock<GatewayState>>,
     static_dir: Option<String>,
+    registry: WebClientRegistry,
 }
 
 impl<H: Handler<DriverReplySink> + Clone + Send + Sync + 'static> StandaloneGateway<H> {
-    fn new(handler: H) -> Self {
+    fn new(handler: H, registry: WebClientRegistry) -> Self {
         let static_dir = std::env::var("GATEWAY_WS_STATIC_DIR").ok();
-        Self { handler, state: Arc::new(RwLock::new(GatewayState::Active)), static_dir }
+        Self { handler, state: Arc::new(RwLock::new(GatewayState::Active)), static_dir, registry }
     }
 
     fn with_static_dir(mut self, dir: impl Into<String>) -> Self {
@@ -295,10 +365,13 @@ async fn handle_socket<H: Handler<DriverReplySink> + Clone + Send + Sync + 'stat
         .establish::<DriverCaller>(gateway.handler.clone())
         .await
     {
-        Ok((_caller, _session_handle)) => {
+        Ok((caller, session_handle)) => {
             debug!("WebSocket client connected, session established");
-            // Session runs in background (spawned by establish).
-            // Keep the handler alive until the connection drops.
+            // Wrap DriverCaller in ErasedCaller → WebClientServiceClient for push events
+            let client = WebClientServiceClient::new(ErasedCaller::new(caller));
+            gateway.registry.register(client).await;
+            // Keep session alive until connection drops
+            drop(session_handle);
         }
         Err(e) => warn!("WebSocket handshake failed: {:?}", e),
     }
@@ -313,12 +386,13 @@ pub async fn start_gateway<H>(
     handler: H,
     bind_addr: &str,
     static_dir: Option<&str>,
+    registry: WebClientRegistry,
 ) -> eyre::Result<()>
 where
     H: Handler<DriverReplySink> + Clone + Send + Sync + 'static,
 {
     debug!("Starting WebSocket gateway on {}", bind_addr);
-    let mut gateway = StandaloneGateway::new(handler);
+    let mut gateway = StandaloneGateway::new(handler, registry);
     if let Some(dir) = static_dir {
         gateway = gateway.with_static_dir(dir);
     }

@@ -86,6 +86,7 @@ actions-standalone.workspace = true
 input-dioxus.workspace = true
 input.workspace = true
 
+utils.workspace = true
 mimalloc = "0.1"
 
 [features]

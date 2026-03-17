@@ -13,7 +13,7 @@ use actions_proto::{
 use actions_standalone::StandaloneActions;
 
 use dioxus::prelude::*;
-use roam::session::ConnectionHandle;
+use roam::ErasedCaller;
 use std::sync::Arc;
 
 /// Represents a host that provides actions
@@ -74,7 +74,7 @@ impl ActionManager {
         &mut self,
         name: String,
         address: String,
-        handle: ConnectionHandle,
+        handle: ErasedCaller,
     ) {
         let client = ActionsServiceClient::new(handle);
 
@@ -85,7 +85,7 @@ impl ActionManager {
                 actions
             }
             Err(e) => {
-                tracing::warn!(host = %name, error = %e, "Failed to get actions from remote host");
+                tracing::warn!(host = %name, error = ?e, "Failed to get actions from remote host");
                 Vec::new()
             }
         };
@@ -169,7 +169,7 @@ impl ActionManager {
                         if addr == address {
                             return match host.client.execute(action_id.clone()).await {
                                 Ok(result) => result,
-                                Err(e) => ActionResult::failure(format!("RPC error: {}", e)),
+                                Err(e) => ActionResult::failure(format!("RPC error: {e:?}")),
                             };
                         }
                     }
@@ -189,7 +189,7 @@ impl ActionManager {
                             host.cached_actions = actions;
                         }
                         Err(e) => {
-                            tracing::warn!(address = %addr, error = %e, "Failed to refresh actions");
+                            tracing::warn!(address = %addr, error = ?e, "Failed to refresh actions");
                         }
                     }
                     break;

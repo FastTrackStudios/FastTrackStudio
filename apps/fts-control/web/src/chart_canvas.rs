@@ -75,7 +75,8 @@ pub fn ChartCanvas() -> Element {
             if let Some(song_index) = indices.song_index {
                 // Find chart for active song by index in the charts map
                 if let Some((_guid, hydration)) = charts.iter().nth(song_index as usize) {
-                    if let Some(ref text) = hydration.chart_text {
+                    let text = &hydration.chart_text;
+                    if !text.is_empty() {
                         let current = SESSION_CHART_SOURCE.peek();
                         if current.as_deref() != Some(text.as_str()) {
                             *SESSION_CHART_SOURCE.write() = Some(text.clone());
@@ -118,7 +119,8 @@ pub fn ChartCanvas() -> Element {
                         keyflow_ui::chart_renderer::A4_WIDTH,
                         false,
                     );
-                    layout_gen.set(layout_gen.peek() + 1);
+                    let next = *layout_gen.peek() + 1;
+                    layout_gen.set(next);
                 }
             }
 

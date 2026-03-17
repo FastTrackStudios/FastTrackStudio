@@ -19,41 +19,45 @@ pub struct ReaperConfig {
     /// Human-readable label for the UI.
     pub label: &'static str,
     /// Path to the REAPER binary inside the .app bundle.
-    pub executable: &'static str,
+    pub executable: String,
     /// Path to the Resources directory (REAPER's working directory).
-    pub resources: &'static str,
+    pub resources: String,
     /// Role: "session" or "signal". Sets the `FTS_DAW_ROLE` env var.
     pub role: &'static str,
 }
 
-/// All known REAPER configurations.
+/// Build the REAPER configs dynamically from the FTS home directory.
 ///
 /// Both use the same FTS-LIVE.app binary — they differ only in their role
 /// (`FTS_DAW_ROLE` env var). Each launch uses `-newinst` so multiple
 /// instances coexist, each getting its own PID-based socket.
-pub const REAPER_CONFIGS: &[ReaperConfig] = &[
-    ReaperConfig {
-        id: "fts-tracks",
-        label: "FTS-TRACKS (Session)",
-        executable: "/Users/codywright/Music/FastTrackStudio/Reaper/FTS-TRACKS/FTS-LIVE.app/Contents/MacOS/REAPER",
-        resources: "/Users/codywright/Music/FastTrackStudio/Reaper/FTS-TRACKS/FTS-LIVE.app/Contents/Resources",
-        role: "session",
-    },
-    ReaperConfig {
-        id: "fts-signal",
-        label: "FTS-SIGNAL (Signal)",
-        executable: "/Users/codywright/Music/FastTrackStudio/Reaper/FTS-TRACKS/FTS-LIVE.app/Contents/MacOS/REAPER",
-        resources: "/Users/codywright/Music/FastTrackStudio/Reaper/FTS-TRACKS/FTS-LIVE.app/Contents/Resources",
-        role: "signal",
-    },
-];
+pub fn reaper_configs() -> Vec<ReaperConfig> {
+    let reaper = utils::paths::reaper_dir();
+    let live_app = reaper.join("FTS-LIVE.app");
+    let executable = live_app.join("Contents/MacOS/REAPER").to_string_lossy().to_string();
+    let resources = live_app.join("Contents/Resources").to_string_lossy().to_string();
 
-/// Base directory where wrapper .app bundles live alongside FTS-LIVE.app.
-const WRAPPER_BASE_DIR: &str = "/Users/codywright/Music/FastTrackStudio/Reaper/FTS-TRACKS";
+    vec![
+        ReaperConfig {
+            id: "fts-tracks",
+            label: "FTS-TRACKS (Session)",
+            executable: executable.clone(),
+            resources: resources.clone(),
+            role: "session",
+        },
+        ReaperConfig {
+            id: "fts-signal",
+            label: "FTS-SIGNAL (Signal)",
+            executable,
+            resources,
+            role: "signal",
+        },
+    ]
+}
 
 /// Find a REAPER config by its id.
-pub fn config_by_id(id: &str) -> Option<&'static ReaperConfig> {
-    REAPER_CONFIGS.iter().find(|c| c.id == id)
+pub fn config_by_id(id: &str) -> Option<ReaperConfig> {
+    reaper_configs().into_iter().find(|c| c.id == id)
 }
 
 /// Spawn a REAPER instance with optional project files.
@@ -74,13 +78,13 @@ pub fn spawn_reaper(
     // For signal instances with a rig type, use the wrapper .app bundle
     // so macOS shows the right name and icon in the dock.
     let executable = if let Some(rt) = rig_type {
-        wrapper_executable_for_rig(rt, config.executable)
+        wrapper_executable_for_rig(rt, &config.executable)
     } else {
-        config.executable.to_string()
+        config.executable.clone()
     };
 
     let mut cmd = Command::new(&executable);
-    cmd.current_dir(config.resources)
+    cmd.current_dir(&config.resources)
         .env("FTS_DAW_ROLE", config.role);
 
     if let Some(rt) = rig_type {
@@ -174,7 +178,7 @@ fn app_name_for_rig(rig_type: &str) -> String {
 /// if the wrapper doesn't exist yet.
 fn wrapper_executable_for_rig(rig_type: &str, fallback: &str) -> String {
     let app_name = app_name_for_rig(rig_type);
-    let wrapper = Path::new(WRAPPER_BASE_DIR)
+    let wrapper = utils::paths::reaper_dir()
         .join(format!("{app_name}.app"))
         .join("Contents/MacOS/REAPER");
 

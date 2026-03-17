@@ -16,9 +16,10 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use dioxus::prelude::*;
-use roam_session::{HandshakeConfig, NoDispatcher};
-use roam_websocket::WsTransport;
-use session::{SetlistServiceClient, Song};
+use roam_websocket::WsLink;
+use session::{SetlistServiceClient, Song, WebClientServiceDispatcher};
+
+use crate::web_client_handler::WebClientHandler;
 use session_ui::{
     ConnectionState, LatencyInfo, Session, TransportState, ACTIVE_INDICES,
     ACTIVE_PLAYBACK_IS_PLAYING, ACTIVE_PLAYBACK_MUSICAL, AUDIO_LATENCY_SECONDS, LATENCY_INFO,
@@ -118,52 +119,41 @@ async fn try_connect_and_run(
     state_signal: &mut Signal<ConnectionState>,
 ) -> Result<(), String> {
     // Create WebSocket transport
-    let transport = WsTransport::connect(ws_url)
+    let link = WsLink::connect(ws_url)
         .await
         .map_err(|e| format!("WebSocket connect failed: {e}"))?;
 
     log("[fts-control] WebSocket connected, initiating roam handshake...");
 
-    // Use roam's initiate_framed for the handshake
-    // Use higher credit for 60Hz streaming updates
-    let config = HandshakeConfig {
-        max_payload_size: 1024 * 1024,            // 1 MiB
-        initial_channel_credit: 16 * 1024 * 1024, // 16 MiB for high-frequency streaming
-        max_concurrent_requests: 64,
-    };
-    let (handle, _incoming, driver) =
-        roam_session::initiate_framed(transport, config, NoDispatcher)
-            .await
-            .map_err(|e| format!("Handshake failed: {e}"))?;
+    // Use the new roam initiator builder API for the handshake.
+    // Register WebClientServiceDispatcher so the desktop can push events to us.
+    let handler = WebClientServiceDispatcher::new(WebClientHandler);
+    let (caller, _session_handle) = roam::initiator(link)
+        .spawn_fn(|fut| {
+            wasm_bindgen_futures::spawn_local(async move {
+                fut.await;
+            });
+        })
+        .max_concurrent_requests(64)
+        .establish::<roam::DriverCaller>(handler)
+        .await
+        .map_err(|e| format!("Handshake failed: {e:?}"))?;
 
     log("[fts-control] Connection established!");
     state_signal.set(ConnectionState::Connected);
 
-    // IMPORTANT: Spawn the driver FIRST, before making any RPC calls!
-    // The driver processes incoming responses - without it running, RPC calls will hang.
-    let driver_done = Rc::new(Cell::new(false));
-    let driver_done_clone = driver_done.clone();
-
-    wasm_bindgen_futures::spawn_local(async move {
-        if let Err(e) = driver.run().await {
-            log(&format!("[fts-control] Driver ended: {e}"));
-        } else {
-            log("[fts-control] Driver ended normally");
-        }
-        driver_done_clone.set(true);
-    });
-
-    log("[fts-control] Driver spawned");
+    log("[fts-control] Session task spawned");
 
     // Create SetlistServiceClient and initialize Session singleton
-    let setlist_client = SetlistServiceClient::new(handle.clone());
+    let handle = roam::ErasedCaller::new(caller);
+    let setlist_client = SetlistServiceClient::new(handle);
 
     // Re-initialize Session (it may have been initialized before a disconnect)
     reinit_session(setlist_client);
 
     log("[fts-control] Session initialized with SetlistServiceClient");
 
-    // Fetch initial setlist (driver is now running, so RPC calls will work)
+    // Fetch initial setlist (session is now running, so RPC calls will work)
     if let Err(e) = fetch_setlist().await {
         log(&format!("[fts-control] Failed to fetch setlist: {e}"));
         // Continue anyway - we'll get updates from the stream
@@ -176,11 +166,11 @@ async fn try_connect_and_run(
     // Start transport sync - it will set the flag when connection is lost
     start_transport_sync_task(connection_lost_clone);
 
-    // Poll until either driver or sync task signals connection loss
+    // Poll until sync task signals connection loss
     loop {
         gloo_timers::future::TimeoutFuture::new(100).await;
 
-        if driver_done.get() || connection_lost.get() {
+        if connection_lost.get() {
             log("[fts-control] Connection lost detected");
             break;
         }
@@ -208,68 +198,60 @@ pub async fn fetch_setlist() -> Result<(), String> {
     setlist_client
         .build_from_open_projects()
         .await
-        .map_err(|e| format!("Failed to build setlist: {e}"))?;
+        .map_err(|e| format!("Failed to build setlist: {e:?}"))?;
 
     log("[fts-control] Setlist built, fetching structure...");
 
-    // Get the full setlist (now returns complete Setlist with all songs and sections)
+    // Get the full setlist (now returns Setlist directly, not Option<Setlist>)
     let setlist = setlist_client
         .get_setlist()
         .await
-        .map_err(|e| format!("Failed to get setlist: {e}"))?;
+        .map_err(|e| format!("Failed to get setlist: {e:?}"))?;
 
-    match setlist {
-        Some(setlist) => {
-            log(&format!(
-                "[fts-control] Got setlist '{}' with {} songs from server",
-                setlist.name,
-                setlist.songs.len()
-            ));
+    log(&format!(
+        "[fts-control] Got setlist '{}' with {} songs from server",
+        setlist.name,
+        setlist.songs.len()
+    ));
 
-            // Store the songs for later index lookup
-            let songs: Vec<Song> = setlist.songs.clone();
+    // Store the songs for later index lookup
+    let songs: Vec<Song> = setlist.songs.clone();
 
-            // Update SETLIST_STRUCTURE directly with the full setlist
-            *SETLIST_STRUCTURE.write() = setlist;
+    // Update SETLIST_STRUCTURE directly with the full setlist
+    *SETLIST_STRUCTURE.write() = setlist;
 
-            // Get active song to set initial indices
-            match setlist_client.get_active_song().await {
-                Ok(Some(active_song)) => {
-                    // Find the song index by matching project_guid
-                    let song_idx = songs
-                        .iter()
-                        .position(|s| s.project_guid == active_song.project_guid);
+    // Get active song to set initial indices
+    match setlist_client.get_active_song().await {
+        Ok(active_song) => {
+            // Find the song index by matching project_guid
+            let song_idx = songs
+                .iter()
+                .position(|s| s.project_guid == active_song.project_guid);
 
-                    if let Some(idx) = song_idx {
-                        let mut indices = ACTIVE_INDICES.write();
-                        indices.song_index = Some(idx);
-                        indices.section_index = Some(0); // Start at first section
-                        log(&format!(
-                            "[fts-control] Active song set to index {idx}: {}",
-                            active_song.name
-                        ));
-                    }
-                }
-                Ok(None) => {
-                    // No active song, set to first song if available
-                    if !songs.is_empty() {
-                        let mut indices = ACTIVE_INDICES.write();
-                        indices.song_index = Some(0);
-                        indices.section_index = Some(0);
-                        log("[fts-control] No active song, defaulting to first song");
-                    }
-                }
-                Err(e) => {
-                    log(&format!("[fts-control] Failed to get active song: {e}"));
-                }
+            if let Some(idx) = song_idx {
+                let mut indices = ACTIVE_INDICES.write();
+                indices.song_index = Some(idx);
+                indices.section_index = Some(0); // Start at first section
+                log(&format!(
+                    "[fts-control] Active song set to index {idx}: {}",
+                    active_song.name
+                ));
             }
-
-            log("[fts-control] Setlist loaded successfully");
         }
-        None => {
-            log("[fts-control] No setlist available from server");
+        Err(e) => {
+            // No active song or error, set to first song if available
+            if !songs.is_empty() {
+                let mut indices = ACTIVE_INDICES.write();
+                indices.song_index = Some(0);
+                indices.section_index = Some(0);
+                log(&format!(
+                    "[fts-control] No active song ({e:?}), defaulting to first song"
+                ));
+            }
         }
     }
+
+    log("[fts-control] Setlist loaded successfully");
 
     Ok(())
 }
@@ -308,7 +290,9 @@ fn start_transport_sync_task(connection_lost: Rc<Cell<bool>>) {
                 ));
             }
             Err(e) => {
-                log(&format!("[fts-control] Failed to get audio latency: {}", e));
+                log(&format!(
+                    "[fts-control] Failed to get audio latency: {e:?}"
+                ));
             }
         }
 
@@ -392,258 +376,19 @@ fn start_transport_sync_task(connection_lost: Rc<Cell<bool>>) {
             }
         });
 
-        // Create a channel for receiving setlist events
-        let (tx, mut rx) = roam::channel::<session::SetlistEvent>();
+        // Events are now pushed from the desktop via WebClientService.push_event().
+        // The WebClientHandler (registered during handshake) writes directly to GlobalSignals.
+        // We just need to keep this task alive to detect connection loss.
+        log("[fts-control] Waiting for push events from desktop...");
 
-        // Subscribe to setlist events from the Session service
-        // This gives us transport state for ALL songs, plus active song/section changes
-        match setlist_client.subscribe(tx).await {
-            Ok(()) => {
-                log("[fts-control] Subscribed to SetlistService events");
+        loop {
+            // Periodically check connection health via a lightweight RPC call
+            gloo_timers::future::TimeoutFuture::new(5000).await;
 
-                while let Ok(Some(event)) = rx.recv().await {
-                    match event {
-                        session::SetlistEvent::SetlistChanged(setlist) => {
-                            log(&format!(
-                                "[fts-control] Setlist changed: {} songs",
-                                setlist.songs.len()
-                            ));
-                            let valid_guids: std::collections::HashSet<String> = setlist
-                                .songs
-                                .iter()
-                                .map(|song| song.project_guid.clone())
-                                .collect();
-                            SONG_CHARTS
-                                .write()
-                                .retain(|guid, _| valid_guids.contains(guid));
-                            *SETLIST_STRUCTURE.write() = setlist;
-                        }
-                        session::SetlistEvent::SongHydrated { index, song } => {
-                            let mut setlist = SETLIST_STRUCTURE.write();
-                            if index < setlist.songs.len() {
-                                setlist.songs[index] = song;
-                            }
-                        }
-                        session::SetlistEvent::SongChartHydrated { chart, .. } => {
-                            SONG_CHARTS
-                                .write()
-                                .insert(chart.project_guid.clone(), chart);
-                        }
-
-                        session::SetlistEvent::ActiveIndicesChanged(indices) => {
-                            // Update ACTIVE_INDICES
-                            *ACTIVE_INDICES.write() = indices.clone();
-
-                            // Update PLAYBACK_STATE based on active song
-                            if indices.is_playing {
-                                *PLAYBACK_STATE.write() = daw::service::PlayState::Playing;
-                            } else {
-                                *PLAYBACK_STATE.write() = daw::service::PlayState::Stopped;
-                            }
-                        }
-
-                        session::SetlistEvent::TransportUpdate(transports) => {
-                            // Get current active song index
-                            let active_song_index = ACTIVE_INDICES.read().song_index;
-
-                            // Get audio latency for compensation (only applied during playback)
-                            let audio_latency = *AUDIO_LATENCY_SECONDS.read();
-                            let mut transport_updates: Vec<(usize, TransportState)> =
-                                Vec::with_capacity(transports.len());
-                            let mut active_transport_update: Option<(
-                                f64,
-                                Option<f64>,
-                                Option<usize>,
-                                bool,
-                                bool,
-                                Option<daw::service::MusicalPosition>,
-                            )> = None;
-
-                            {
-                                let setlist = SETLIST_STRUCTURE.read();
-                                let existing_transports = SONG_TRANSPORT.read();
-                                for transport in transports {
-                                    // Apply latency compensation to time position during playback
-                                    // This shifts the visual position ahead to match audio output
-                                    // Note: We only compensate the time portion, not the musical position
-                                    let compensated_position = if transport.is_playing
-                                        && audio_latency > 0.0
-                                    {
-                                        // Create a new Position with compensated time
-                                        let compensated_time = transport.position.time.map(|t| {
-                                            daw::service::TimePosition::from_seconds(
-                                                t.as_seconds() + audio_latency,
-                                            )
-                                        });
-                                        daw::service::Position::new(
-                                            transport.position.musical.clone(),
-                                            compensated_time,
-                                            transport.position.midi.clone(),
-                                        )
-                                    } else {
-                                        transport.position.clone()
-                                    };
-
-                                    // Convert loop region from seconds to percentages (0.0-1.0)
-                                    // The loop_region in SongTransportState is already relative to song start
-                                    let loop_region_percent =
-                                        transport.loop_region.as_ref().and_then(|region| {
-                                            setlist.songs.get(transport.song_index).map(|song| {
-                                                let song_duration = song.duration();
-                                                if song_duration > 0.0 {
-                                                    (
-                                                        (region.start_seconds / song_duration)
-                                                            .clamp(0.0, 1.0),
-                                                        (region.end_seconds / song_duration)
-                                                            .clamp(0.0, 1.0),
-                                                    )
-                                                } else {
-                                                    (0.0, 1.0)
-                                                }
-                                            })
-                                        });
-
-                                    let next_state = TransportState {
-                                        position: compensated_position,
-                                        bpm: transport.bpm,
-                                        time_sig_num: transport.time_sig_num as i32,
-                                        time_sig_denom: transport.time_sig_denom as i32,
-                                        is_playing: transport.is_playing,
-                                        is_looping: transport.is_looping,
-                                        loop_region: loop_region_percent,
-                                    };
-
-                                    let changed = existing_transports
-                                        .get(&transport.song_index)
-                                        .map(|existing| *existing != next_state)
-                                        .unwrap_or(true);
-
-                                    if changed {
-                                        transport_updates.push((transport.song_index, next_state));
-                                    }
-
-                                    if Some(transport.song_index) == active_song_index {
-                                        active_transport_update = Some((
-                                            transport.progress,
-                                            transport.section_progress,
-                                            transport.section_index,
-                                            transport.is_playing,
-                                            transport.is_looping,
-                                            transport.position.musical.clone(),
-                                        ));
-                                    }
-                                }
-                            }
-
-                            if !transport_updates.is_empty() {
-                                let mut song_transport = SONG_TRANSPORT.write();
-                                for (song_index, state) in transport_updates {
-                                    song_transport.insert(song_index, state);
-                                }
-                            }
-
-                            if let Some((
-                                song_progress,
-                                section_progress,
-                                section_index,
-                                is_playing,
-                                is_looping,
-                                musical,
-                            )) = active_transport_update
-                            {
-                                // Update playback musical position for chart cursor rendering
-                                if *ACTIVE_PLAYBACK_MUSICAL.peek() != musical {
-                                    *ACTIVE_PLAYBACK_MUSICAL.write() = musical;
-                                }
-                                if *ACTIVE_PLAYBACK_IS_PLAYING.peek() != is_playing {
-                                    *ACTIVE_PLAYBACK_IS_PLAYING.write() = is_playing;
-                                }
-
-                                let old_playing = *PLAYBACK_STATE.read();
-                                let new_playing = if is_playing {
-                                    daw::service::PlayState::Playing
-                                } else {
-                                    daw::service::PlayState::Stopped
-                                };
-
-                                if old_playing != new_playing {
-                                    *PLAYBACK_STATE.write() = new_playing;
-
-                                    // Complete latency measurement if we were tracking
-                                    if let Some(latency) =
-                                        LATENCY_TRACKER.write().complete_play_toggle()
-                                    {
-                                        log(&format!(
-                                            "[fts-control] Play toggle latency: {:.1}ms",
-                                            latency
-                                        ));
-                                    }
-                                }
-
-                                let indices_changed = {
-                                    let current = ACTIVE_INDICES.read();
-                                    current.song_progress != Some(song_progress)
-                                        || current.section_progress != section_progress
-                                        || current.section_index != section_index
-                                        || current.is_playing != is_playing
-                                        || current.looping != is_looping
-                                };
-
-                                if indices_changed {
-                                    let mut indices = ACTIVE_INDICES.write();
-                                    indices.song_progress = Some(song_progress);
-                                    indices.section_progress = section_progress;
-                                    indices.section_index = section_index;
-                                    indices.is_playing = is_playing;
-                                    indices.looping = is_looping;
-                                }
-                            }
-                        }
-
-                        session::SetlistEvent::SongEntered { index, song } => {
-                            log(&format!(
-                                "[fts-control] Entered song {}: {}",
-                                index, song.name
-                            ));
-                        }
-
-                        session::SetlistEvent::SongExited { index } => {
-                            log(&format!("[fts-control] Exited song {}", index));
-                        }
-
-                        session::SetlistEvent::SectionEntered {
-                            song_index,
-                            section_index,
-                            section,
-                        } => {
-                            log(&format!(
-                                "[fts-control] Entered section {}.{}: {}",
-                                song_index, section_index, section.name
-                            ));
-                        }
-
-                        session::SetlistEvent::SectionExited {
-                            song_index,
-                            section_index,
-                        } => {
-                            log(&format!(
-                                "[fts-control] Exited section {}.{}",
-                                song_index, section_index
-                            ));
-                        }
-
-                        session::SetlistEvent::PositionChanged { .. } => {
-                            // Legacy event, ignored - we use TransportUpdate now
-                        }
-                    }
-                }
-
-                log("[fts-control] Setlist event stream ended (connection lost)");
-            }
-            Err(e) => {
-                log(&format!(
-                    "[fts-control] Failed to subscribe to setlist events: {e}"
-                ));
+            // Use the latency ping as a connection health check
+            if setlist_client.get_audio_latency_info().await.is_err() {
+                log("[fts-control] Connection health check failed");
+                break;
             }
         }
 

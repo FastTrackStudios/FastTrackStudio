@@ -1,14 +1,12 @@
 //! Persistence for Dashboard state.
 //!
 //! Stores recent projects and setlist definitions as JSON files in
-//! `~/Music/FastTrackStudio/Library/`. This is the same directory
-//! used by the signal database (`signal.db`).
+//! the FTS Library directory. This is the same directory used by the
+//! signal database (`signal.db`).
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tracing::{debug, warn};
-
-const LIBRARY_DIR: &str = "Music/FastTrackStudio/Library";
 const RECENT_PROJECTS_FILE: &str = "recent-projects.json";
 const SETLISTS_FILE: &str = "setlists.json";
 const MAX_RECENT_PROJECTS: usize = 50;
@@ -45,11 +43,9 @@ pub struct SetlistDefinition {
 // Path helpers
 // ============================================================================
 
-/// Get the Library directory path: `~/Music/FastTrackStudio/Library/`.
+/// Get the Library directory path.
 fn library_path() -> Option<PathBuf> {
-    std::env::var("HOME")
-        .ok()
-        .map(|home| PathBuf::from(home).join(LIBRARY_DIR))
+    Some(utils::paths::library_dir())
 }
 
 fn recent_projects_path() -> Option<PathBuf> {
