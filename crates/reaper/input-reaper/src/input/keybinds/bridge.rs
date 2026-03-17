@@ -35,7 +35,7 @@ pub fn vk_to_input_event(
         16 | 160 | 161 => return None, // VK_SHIFT, VK_LSHIFT, VK_RSHIFT
         17 | 162 | 163 => return None, // VK_CONTROL, VK_LCONTROL, VK_RCONTROL
         18 | 164 | 165 => return None, // VK_MENU (Alt), VK_LMENU, VK_RMENU
-        91 | 92 => return None,         // VK_LWIN, VK_RWIN
+        91 | 92 => return None,        // VK_LWIN, VK_RWIN
         _ => {}
     }
 
@@ -85,15 +85,9 @@ pub fn vk_to_input_event(
 
     // Rebuild modifiers with possibly updated shift.
     #[cfg(target_os = "macos")]
-    let modifiers = Modifiers {
-        shift,
-        ..modifiers
-    };
+    let modifiers = Modifiers { shift, ..modifiers };
 
-    Some(InputEvent::Key(KeyEvent {
-        key,
-        modifiers,
-    }))
+    Some(InputEvent::Key(KeyEvent { key, modifiers }))
 }
 
 /// Map a Windows VK code to an `input::KeyCode`.
@@ -165,17 +159,17 @@ fn mac_ascii_normalize(key_code: u32) -> Option<(&'static str, bool)> {
         92 => Some(("\\", false)),
         96 => Some(("`", false)),
         // Shifted symbols → base key + shift=true
-        60 => Some((",", true)),  // '<'
-        62 => Some((".", true)),  // '>'
-        63 => Some(("/", true)),  // '?'
-        58 => Some((";", true)),  // ':'
-        34 => Some(("'", true)),  // '"'
-        95 => Some(("-", true)),  // '_'
-        43 => Some(("=", true)),  // '+'
-        123 => Some(("[", true)), // '{'
-        125 => Some(("]", true)), // '}'
+        60 => Some((",", true)),   // '<'
+        62 => Some((".", true)),   // '>'
+        63 => Some(("/", true)),   // '?'
+        58 => Some((";", true)),   // ':'
+        34 => Some(("'", true)),   // '"'
+        95 => Some(("-", true)),   // '_'
+        43 => Some(("=", true)),   // '+'
+        123 => Some(("[", true)),  // '{'
+        125 => Some(("]", true)),  // '}'
         124 => Some(("\\", true)), // '|'
-        126 => Some(("`", true)), // '~'
+        126 => Some(("`", true)),  // '~'
         _ => None,
     }
 }
@@ -291,9 +285,7 @@ fn flatten_which_key_entries(
                 let seq = format!("{} {}", prefix, key);
                 out.insert(seq, action.clone());
             }
-            WhichKeyEntry::Branch {
-                key, children, ..
-            } => {
+            WhichKeyEntry::Branch { key, children, .. } => {
                 let new_prefix = format!("{} {}", prefix, key);
                 flatten_which_key_entries(out, &new_prefix, children);
             }
@@ -370,9 +362,7 @@ fn translate_bracketed(content: &str) -> String {
                 if i == parts.len() - 1 {
                     // Last part is the key
                     let lower_part = part.to_lowercase();
-                    key_part = Some(
-                        translate_special_key(&lower_part).unwrap_or(lower_part),
-                    );
+                    key_part = Some(translate_special_key(&lower_part).unwrap_or(lower_part));
                 }
             }
         }
@@ -406,8 +396,9 @@ fn translate_special_key(name: &str) -> Option<String> {
         "pageup" | "pgup" => Some("pageup".to_string()),
         "pagedown" | "pgdn" => Some("pagedown".to_string()),
         "insert" | "ins" => Some("insert".to_string()),
-        "f1" | "f2" | "f3" | "f4" | "f5" | "f6" | "f7" | "f8" | "f9" | "f10" | "f11"
-        | "f12" => Some(name.to_string()),
+        "f1" | "f2" | "f3" | "f4" | "f5" | "f6" | "f7" | "f8" | "f9" | "f10" | "f11" | "f12" => {
+            Some(name.to_string())
+        }
         _ => None,
     }
 }
@@ -432,9 +423,7 @@ fn context_to_when_expr(ctx: KeybindContext) -> String {
 // ---------------------------------------------------------------------------
 
 /// Convert wheel bindings from a preset into scroll config entries.
-fn convert_wheel_bindings(
-    preset: &KeybindPreset,
-) -> HashMap<String, HashMap<String, String>> {
+fn convert_wheel_bindings(preset: &KeybindPreset) -> HashMap<String, HashMap<String, String>> {
     if preset.wheel_bindings.is_empty() {
         return HashMap::new();
     }
@@ -678,12 +667,11 @@ mod tests {
 
     #[test]
     fn test_preset_to_keymap_config_basic() {
-        let preset = KeybindPreset::new("test", "Test")
-            .with_bindings(vec![
-                Keybind::new("a", "action_a"),
-                Keybind::new("<C-s>", "save"),
-                Keybind::new("gg", "goto_top"),
-            ]);
+        let preset = KeybindPreset::new("test", "Test").with_bindings(vec![
+            Keybind::new("a", "action_a"),
+            Keybind::new("<C-s>", "save"),
+            Keybind::new("gg", "goto_top"),
+        ]);
 
         let config = preset_to_keymap_config(&preset, &[]);
 
@@ -695,11 +683,10 @@ mod tests {
 
     #[test]
     fn test_preset_with_context_bindings() {
-        let preset = KeybindPreset::new("test", "Test")
-            .with_bindings(vec![
-                Keybind::new("j", "nav_down").with_context(KeybindContext::Main),
-                Keybind::new("k", "nav_up"),
-            ]);
+        let preset = KeybindPreset::new("test", "Test").with_bindings(vec![
+            Keybind::new("j", "nav_down").with_context(KeybindContext::Main),
+            Keybind::new("k", "nav_up"),
+        ]);
 
         let config = preset_to_keymap_config(&preset, &[]);
 
@@ -712,9 +699,6 @@ mod tests {
         let layers = config.keymap_context.get("normal").unwrap();
         assert_eq!(layers.len(), 1);
         assert_eq!(layers[0].when, "context:main");
-        assert_eq!(
-            layers[0].bindings.get("j"),
-            Some(&"nav_down".to_string())
-        );
+        assert_eq!(layers[0].bindings.get("j"), Some(&"nav_down".to_string()));
     }
 }

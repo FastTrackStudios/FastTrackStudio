@@ -13,17 +13,20 @@ use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use axum::Router;
 use axum::extract::ws::{Message, WebSocket};
 use axum::extract::{State, WebSocketUpgrade};
 use axum::response::IntoResponse;
 use axum::routing::get;
-use roam::{Backing, DriverCaller, DriverReplySink, ErasedCaller, Handler, Link, LinkRx, LinkTx, LinkTxPermit, WriteSlot};
+use axum::Router;
+use roam::{
+    Backing, DriverCaller, DriverReplySink, ErasedCaller, Handler, Link, LinkRx, LinkTx,
+    LinkTxPermit, WriteSlot,
+};
 use session::{SetlistEvent, WebClientServiceClient};
-use tokio::net::TcpListener;
-use tokio::sync::{RwLock, mpsc};
-use tokio::task::JoinHandle;
 use std::sync::OnceLock;
+use tokio::net::TcpListener;
+use tokio::sync::{mpsc, RwLock};
+use tokio::task::JoinHandle;
 use tower_http::services::ServeDir;
 use tracing::{debug, info, warn};
 
@@ -256,7 +259,10 @@ impl WebClientRegistry {
     /// Register a newly connected web client.
     pub async fn register(&self, client: WebClientServiceClient) {
         self.clients.lock().await.push(client);
-        debug!("Web client registered ({} total)", self.clients.lock().await.len());
+        debug!(
+            "Web client registered ({} total)",
+            self.clients.lock().await.len()
+        );
     }
 
     /// Broadcast a SetlistEvent to all connected web clients.
@@ -285,7 +291,11 @@ impl WebClientRegistry {
                     guard.swap_remove(i);
                 }
             }
-            debug!("Pruned {} dead web clients ({} remaining)", failed_indices.len(), guard.len());
+            debug!(
+                "Pruned {} dead web clients ({} remaining)",
+                failed_indices.len(),
+                guard.len()
+            );
         }
     }
 
@@ -315,7 +325,12 @@ struct StandaloneGateway<H: Handler<DriverReplySink> + Clone + Send + Sync + 'st
 impl<H: Handler<DriverReplySink> + Clone + Send + Sync + 'static> StandaloneGateway<H> {
     fn new(handler: H, registry: WebClientRegistry) -> Self {
         let static_dir = std::env::var("GATEWAY_WS_STATIC_DIR").ok();
-        Self { handler, state: Arc::new(RwLock::new(GatewayState::Active)), static_dir, registry }
+        Self {
+            handler,
+            state: Arc::new(RwLock::new(GatewayState::Active)),
+            static_dir,
+            registry,
+        }
     }
 
     fn with_static_dir(mut self, dir: impl Into<String>) -> Self {

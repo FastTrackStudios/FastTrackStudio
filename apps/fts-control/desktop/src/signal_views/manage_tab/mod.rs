@@ -484,7 +484,9 @@ pub(crate) fn SignalManageTab() -> Element {
                         let scene_id = first_scene.id.to_string();
                         active_scene_id.set(Some(scene_id.clone()));
                         selected_sub_id.set(Some(scene_id.clone()));
-                        let init_result = signal_ui::views::resolve_scene_engines(&signal, &first_id, &scene_id).await;
+                        let init_result =
+                            signal_ui::views::resolve_scene_engines(&signal, &first_id, &scene_id)
+                                .await;
                         match &init_result {
                             Some((engines, _)) => tracing::info!("init resolve_scene_engines: {} engines for rig={first_id}, scene={scene_id}", engines.len()),
                             None => tracing::warn!("init resolve_scene_engines: returned None for rig={first_id}, scene={scene_id}"),
@@ -1465,9 +1467,7 @@ pub(crate) fn SignalManageTab() -> Element {
                         let engine = match signal.engines().save(engine).await {
                             Ok(e) => e,
                             Err(err) => {
-                                tracing::warn!(
-                                    "NDSP auto-engine save failed, falling back: {err}"
-                                );
+                                tracing::warn!("NDSP auto-engine save failed, falling back: {err}");
                                 let rig = signal::rig::Rig::new(
                                     signal::rig::RigId::new(),
                                     "New Rig",
@@ -1484,11 +1484,9 @@ pub(crate) fn SignalManageTab() -> Element {
                             }
                         };
 
-                        let rig_scene = signal::rig::RigScene::new(
-                            signal::rig::RigSceneId::new(),
-                            "Default",
-                        )
-                        .with_engine(signal::rig::EngineSelection::new(
+                        let rig_scene =
+                            signal::rig::RigScene::new(signal::rig::RigSceneId::new(), "Default")
+                                .with_engine(signal::rig::EngineSelection::new(
                                     engine.id.clone(),
                                     engine.default_variant_id.clone(),
                                 ));

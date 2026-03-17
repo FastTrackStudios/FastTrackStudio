@@ -18,13 +18,13 @@
 //! the main thread, matching this action handler's execution context).
 
 use actions_proto::ActionResult;
-use daw::service::MidiNoteCreate;
 use daw::reaper::midi::{add_notes_to_take_on_main_thread, create_midi_item_on_main_thread};
 use daw::reaper::region::get_regions_on_main_thread;
 use daw::reaper::tempo_map::{
     get_tempo_and_time_sig_at_on_main_thread, qn_to_time_on_main_thread, time_to_qn_on_main_thread,
 };
 use daw::reaper::track::{add_track_on_main_thread, set_folder_depth_on_main_thread};
+use daw::service::MidiNoteCreate;
 use keyflow::midi::guide::GuideGenerator;
 use keyflow::{ClickConfig, CountInConfig, GuideConfig, GuideEvent, SectionType, TimeSignature};
 use reaper_high::Reaper;
@@ -173,7 +173,8 @@ fn create_midi_item_with_notes(
         return;
     };
 
-    let Some(take) = create_midi_item_on_main_thread(media_track, start_seconds, end_seconds) else {
+    let Some(take) = create_midi_item_on_main_thread(media_track, start_seconds, end_seconds)
+    else {
         return;
     };
 
@@ -274,7 +275,12 @@ pub fn generate_guide_tracks() -> ActionResult {
             let click_item_start = count_in_start_seconds.max(0.0);
             let click_item_end = region.end_seconds();
             if click_item_end > click_item_start && !click_notes.is_empty() {
-                create_midi_item_with_notes(&tracks.click, click_item_start, click_item_end, &click_notes);
+                create_midi_item_with_notes(
+                    &tracks.click,
+                    click_item_start,
+                    click_item_end,
+                    &click_notes,
+                );
             }
 
             // Count/Guide: short MIDI items (1 measure each)

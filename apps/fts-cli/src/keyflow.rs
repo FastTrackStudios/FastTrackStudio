@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use daw::service::routing::{MidiChannelMapping, MidiDestinationChannel, MidiSourceChannel};
 use daw::file::types::item::Take;
 use daw::file::{
     read_project, MidiEvent, MidiEventType, MidiSource, MidiSourceEvent, ReaperProject, SourceType,
     TempoTimeEnvelope, Track,
 };
+use daw::service::routing::{MidiChannelMapping, MidiDestinationChannel, MidiSourceChannel};
 use eyre::{eyre, Result};
 use midly::{
     num::{u15, u24, u28, u4, u7},
@@ -165,7 +165,10 @@ pub fn analyze_rpp_keyflow_chart(
     } else {
         println!("RPP: {}", rpp_path.display());
         println!("Parent track: {}", analysis.parent_track);
-        println!("Project measure offset: {}", analysis.project_measure_offset);
+        println!(
+            "Project measure offset: {}",
+            analysis.project_measure_offset
+        );
         println!(
             "Resolved start: {}",
             format_resolved_bound(
@@ -325,7 +328,11 @@ fn analyze_keyflow_project(
     parent_track_name: &str,
 ) -> Result<KeyflowAnalysis> {
     let parent = find_parent_track(project, parent_track_name)?;
-    let project_measure_offset = project.properties.proj_offs.map(|(_, measure, _)| measure).unwrap_or(0);
+    let project_measure_offset = project
+        .properties
+        .proj_offs
+        .map(|(_, measure, _)| measure)
+        .unwrap_or(0);
     let source_tracks = analyze_source_tracks(project, parent);
     let song_start = find_named_marker(project, |name| {
         is_songstart_marker(name) || name.starts_with("=SONGSTART")
@@ -949,7 +956,8 @@ fn encode_keyflow_section_metadata(
         return None;
     }
 
-    let start_measure = seconds_to_measure_index(project, region.start_seconds) + project_measure_offset;
+    let start_measure =
+        seconds_to_measure_index(project, region.start_seconds) + project_measure_offset;
     let end_measure = seconds_to_measure_index(project, end_seconds) + project_measure_offset;
     let length = (end_measure - start_measure).max(1);
     Some(format!(

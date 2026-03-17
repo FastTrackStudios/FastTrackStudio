@@ -80,7 +80,11 @@ async fn scan_setlist() -> Vec<SongEntry> {
                 if child.name.starts_with("[L] ") {
                     variation_guids.push(child.guid.clone());
                     // Strip [L] prefix for matching
-                    let var_name = child.name.strip_prefix("[L] ").unwrap_or(&child.name).to_string();
+                    let var_name = child
+                        .name
+                        .strip_prefix("[L] ")
+                        .unwrap_or(&child.name)
+                        .to_string();
                     variation_names.push(var_name);
                 }
                 depth += child.folder_depth;
@@ -88,12 +92,7 @@ async fn scan_setlist() -> Vec<SongEntry> {
             }
 
             // Read section mapping from ExtState on the folder track
-            let sections = read_section_mapping(
-                &track_svc,
-                &folder_guid,
-                &variation_names,
-            )
-            .await;
+            let sections = read_section_mapping(&track_svc, &folder_guid, &variation_names).await;
 
             songs.push(SongEntry {
                 name: song_name,
@@ -305,7 +304,11 @@ pub async fn prev_song() {
             console_msg("[Setlist] Not initialized");
             return;
         };
-        s.song_idx = if s.song_idx == 0 { s.songs.len() - 1 } else { s.song_idx - 1 };
+        s.song_idx = if s.song_idx == 0 {
+            s.songs.len() - 1
+        } else {
+            s.song_idx - 1
+        };
         s.section_idx = 0;
         (s.song_idx, s.songs.clone())
     };
@@ -348,7 +351,11 @@ pub async fn prev_section() {
             s.section_idx -= 1;
         } else {
             // Wrap to previous song, last section
-            s.song_idx = if s.song_idx == 0 { s.songs.len() - 1 } else { s.song_idx - 1 };
+            s.song_idx = if s.song_idx == 0 {
+                s.songs.len() - 1
+            } else {
+                s.song_idx - 1
+            };
             s.section_idx = s.songs[s.song_idx].sections.len().saturating_sub(1);
         }
         (s.song_idx, s.section_idx, s.songs.clone())
@@ -366,17 +373,24 @@ pub async fn next_variation() {
         };
         let song = &s.songs[s.song_idx];
         let var_count = song.variation_guids.len();
-        if var_count == 0 { return; }
+        if var_count == 0 {
+            return;
+        }
 
         // Find current variation index from current section
-        let current_var = song.sections
+        let current_var = song
+            .sections
             .get(s.section_idx)
             .map(|sec| sec.variation_idx)
             .unwrap_or(0);
         let next_var = (current_var + 1) % var_count;
 
         // Find any section that uses this variation (or create a synthetic one)
-        if let Some(sec_idx) = song.sections.iter().position(|sec| sec.variation_idx == next_var) {
+        if let Some(sec_idx) = song
+            .sections
+            .iter()
+            .position(|sec| sec.variation_idx == next_var)
+        {
             s.section_idx = sec_idx;
         }
         (s.song_idx, s.section_idx, s.songs.clone())
@@ -394,15 +408,26 @@ pub async fn prev_variation() {
         };
         let song = &s.songs[s.song_idx];
         let var_count = song.variation_guids.len();
-        if var_count == 0 { return; }
+        if var_count == 0 {
+            return;
+        }
 
-        let current_var = song.sections
+        let current_var = song
+            .sections
             .get(s.section_idx)
             .map(|sec| sec.variation_idx)
             .unwrap_or(0);
-        let prev_var = if current_var == 0 { var_count - 1 } else { current_var - 1 };
+        let prev_var = if current_var == 0 {
+            var_count - 1
+        } else {
+            current_var - 1
+        };
 
-        if let Some(sec_idx) = song.sections.iter().position(|sec| sec.variation_idx == prev_var) {
+        if let Some(sec_idx) = song
+            .sections
+            .iter()
+            .position(|sec| sec.variation_idx == prev_var)
+        {
             s.section_idx = sec_idx;
         }
         (s.song_idx, s.section_idx, s.songs.clone())

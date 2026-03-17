@@ -90,8 +90,8 @@ pub fn generate_rig_icon(
     output_icns: &Path,
     rig_type: &str,
 ) -> Result<(), String> {
-    let appearance = rig_appearance(rig_type)
-        .ok_or_else(|| format!("Unknown rig type: {rig_type}"))?;
+    let appearance =
+        rig_appearance(rig_type).ok_or_else(|| format!("Unknown rig type: {rig_type}"))?;
 
     let swift_source = build_swift_source(
         base_icns,

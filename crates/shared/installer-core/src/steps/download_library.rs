@@ -38,27 +38,34 @@ pub async fn download_library(
         let local = std::path::PathBuf::from(&local_path);
         if local.exists() {
             info!("Using local library archive: {local_path}");
-            let _ = tx.send(InstallEvent::StepProgress {
-                step: InstallStep::DownloadLibrary,
-                fraction: 0.5,
-                message: format!("Extracting local archive: {local_path}"),
-            }).await;
+            let _ = tx
+                .send(InstallEvent::StepProgress {
+                    step: InstallStep::DownloadLibrary,
+                    fraction: 0.5,
+                    message: format!("Extracting local archive: {local_path}"),
+                })
+                .await;
             return extract_archive(&local, install_root, tx).await;
         } else {
             tracing::warn!("FTS_LIBRARY_ARCHIVE set to {local_path} but file not found, falling back to download");
         }
     }
 
-    let _ = tx.send(InstallEvent::StepProgress {
-        step: InstallStep::DownloadLibrary,
-        fraction: 0.0,
-        message: "Downloading library...".into(),
-    }).await;
+    let _ = tx
+        .send(InstallEvent::StepProgress {
+            step: InstallStep::DownloadLibrary,
+            fraction: 0.0,
+            message: "Downloading library...".into(),
+        })
+        .await;
 
     info!("Downloading library from {url}");
 
     let client = reqwest::Client::new();
-    let response = client.get(url).send().await
+    let response = client
+        .get(url)
+        .send()
+        .await
         .wrap_err("Failed to connect to library download URL")?;
 
     if !response.status().is_success() {
@@ -84,7 +91,8 @@ pub async fn download_library(
     };
 
     if need_download {
-        let mut file = tokio::fs::File::create(&archive_path).await
+        let mut file = tokio::fs::File::create(&archive_path)
+            .await
             .wrap_err("Failed to create temp archive file")?;
 
         let mut stream = response.bytes_stream();
@@ -100,23 +108,30 @@ pub async fn download_library(
                 let fraction = (downloaded as f32 / total_size as f32) * 0.7; // 70% for download
                 let mb = downloaded as f32 / 1_048_576.0;
                 let total_mb = total_size as f32 / 1_048_576.0;
-                let _ = tx.send(InstallEvent::StepProgress {
-                    step: InstallStep::DownloadLibrary,
-                    fraction,
-                    message: format!("Downloading... {mb:.1} / {total_mb:.1} MB"),
-                }).await;
+                let _ = tx
+                    .send(InstallEvent::StepProgress {
+                        step: InstallStep::DownloadLibrary,
+                        fraction,
+                        message: format!("Downloading... {mb:.1} / {total_mb:.1} MB"),
+                    })
+                    .await;
             }
         }
 
         file.flush().await?;
         info!("Downloaded library archive ({downloaded} bytes)");
     } else {
-        info!("Library archive already cached at {}", archive_path.display());
-        let _ = tx.send(InstallEvent::StepProgress {
-            step: InstallStep::DownloadLibrary,
-            fraction: 0.7,
-            message: "Using cached download...".into(),
-        }).await;
+        info!(
+            "Library archive already cached at {}",
+            archive_path.display()
+        );
+        let _ = tx
+            .send(InstallEvent::StepProgress {
+                step: InstallStep::DownloadLibrary,
+                fraction: 0.7,
+                message: "Using cached download...".into(),
+            })
+            .await;
     }
 
     extract_archive(&archive_path, install_root, tx).await
@@ -128,11 +143,13 @@ async fn extract_archive(
     install_root: &Path,
     tx: &EventSender,
 ) -> eyre::Result<()> {
-    let _ = tx.send(InstallEvent::StepProgress {
-        step: InstallStep::DownloadLibrary,
-        fraction: 0.75,
-        message: "Extracting library...".into(),
-    }).await;
+    let _ = tx
+        .send(InstallEvent::StepProgress {
+            step: InstallStep::DownloadLibrary,
+            fraction: 0.75,
+            message: "Extracting library...".into(),
+        })
+        .await;
 
     tokio::fs::create_dir_all(install_root).await?;
 
@@ -149,11 +166,13 @@ async fn extract_archive(
         eyre::bail!("tar extraction failed with status {status}");
     }
 
-    let _ = tx.send(InstallEvent::StepProgress {
-        step: InstallStep::DownloadLibrary,
-        fraction: 1.0,
-        message: "Library installed".into(),
-    }).await;
+    let _ = tx
+        .send(InstallEvent::StepProgress {
+            step: InstallStep::DownloadLibrary,
+            fraction: 1.0,
+            message: "Library installed".into(),
+        })
+        .await;
 
     info!("Extracted library to {}", install_root.display());
     Ok(())

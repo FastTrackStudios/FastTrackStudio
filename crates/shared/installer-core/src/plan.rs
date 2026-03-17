@@ -36,18 +36,30 @@ impl InstallPlan {
 
         // Check parent directory is writable
         if let Some(parent) = self.install_root.parent() {
-            if parent.exists() && std::fs::metadata(parent).map(|m| m.permissions().readonly()).unwrap_or(true) {
+            if parent.exists()
+                && std::fs::metadata(parent)
+                    .map(|m| m.permissions().readonly())
+                    .unwrap_or(true)
+            {
                 errors.push(format!("Directory {} is not writable", parent.display()));
             }
         }
 
-        if errors.is_empty() { Ok(()) } else { Err(errors) }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
     }
 
     /// URL for downloading REAPER for this platform/arch.
     pub fn reaper_download_url(&self) -> String {
         let version_slug = REAPER_VERSION.replace('.', "");
-        let arch = if cfg!(target_arch = "aarch64") { "arm64" } else { "x86_64" };
+        let arch = if cfg!(target_arch = "aarch64") {
+            "arm64"
+        } else {
+            "x86_64"
+        };
 
         if cfg!(target_os = "macos") {
             format!("https://www.reaper.fm/files/7.x/reaper{version_slug}_macos_{arch}.dmg")

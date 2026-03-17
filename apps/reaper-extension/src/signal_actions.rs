@@ -24,7 +24,10 @@ fn variation_handler(n: usize) -> LocalActionImplementation {
                 signal::SwitchResult::NoContext => {
                     tracing::debug!("No active context for variation switch");
                 }
-                signal::SwitchResult::OutOfBounds { requested, available } => {
+                signal::SwitchResult::OutOfBounds {
+                    requested,
+                    available,
+                } => {
                     tracing::debug!("Variation {requested} out of bounds ({available} available)");
                 }
                 signal::SwitchResult::LoadError(e) => {

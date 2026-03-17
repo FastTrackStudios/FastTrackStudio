@@ -49,7 +49,10 @@ impl<T> SenderToRt<T> {
             }
             Err(TrySendError::Full(_)) => {
                 if !self.complained.swap(true, Ordering::Relaxed) {
-                    eprintln!("[daw-allocator] channel '{}' full, dropping message", self.name);
+                    eprintln!(
+                        "[daw-allocator] channel '{}' full, dropping message",
+                        self.name
+                    );
                 }
                 false
             }
@@ -131,8 +134,6 @@ impl<T> ImportantReceiver<T> {
 
     /// Iterate over all available messages (primary first, then emergency).
     pub fn drain(&self) -> impl Iterator<Item = T> + '_ {
-        self.primary
-            .try_iter()
-            .chain(self.emergency.try_iter())
+        self.primary.try_iter().chain(self.emergency.try_iter())
     }
 }

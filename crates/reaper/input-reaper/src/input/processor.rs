@@ -17,9 +17,9 @@ use reaper_medium::{AcceleratorBehavior, AcceleratorKeyCode};
 use tracing::{debug, info};
 
 use super::keybinds::bridge;
+use super::keybinds::defaults::{ALL_OVERRIDES, ALL_PRESETS};
 use super::keybinds::which_key::WhichKeyEntry;
 use super::keybinds::{KeybindContext, KeybindOverride, KeybindPreset};
-use super::keybinds::defaults::{ALL_OVERRIDES, ALL_PRESETS};
 
 // ---------------------------------------------------------------------------
 // ReaperInputProcessor
@@ -54,16 +54,12 @@ pub struct ReaperInputProcessor {
 
 impl ReaperInputProcessor {
     /// Create from a preset and its which-key trees.
-    pub fn new(
-        preset: &KeybindPreset,
-        trees: &[(String, String, Vec<WhichKeyEntry>)],
-    ) -> Self {
+    pub fn new(preset: &KeybindPreset, trees: &[(String, String, Vec<WhichKeyEntry>)]) -> Self {
         let config = bridge::preset_to_keymap_config(preset, trees);
-        let processor = InputProcessor::from_config(config.clone())
-            .unwrap_or_else(|e| {
-                tracing::error!("Failed to build InputProcessor from config: {}", e);
-                InputProcessor::new()
-            });
+        let processor = InputProcessor::from_config(config.clone()).unwrap_or_else(|e| {
+            tracing::error!("Failed to build InputProcessor from config: {}", e);
+            InputProcessor::new()
+        });
 
         Self {
             processor,
@@ -154,8 +150,7 @@ impl ReaperInputProcessor {
         };
 
         let config = bridge::override_to_keymap_config(overlay);
-        self.active_overrides
-            .push((name.to_string(), config));
+        self.active_overrides.push((name.to_string(), config));
 
         // Sort by priority (highest last so they override)
         self.active_overrides.sort_by(|a, b| {
@@ -266,14 +261,15 @@ impl ReaperInputProcessor {
 
     /// Get the names of currently active override layers.
     pub fn active_override_names(&self) -> Vec<&str> {
-        self.active_overrides.iter().map(|(n, _)| n.as_str()).collect()
+        self.active_overrides
+            .iter()
+            .map(|(n, _)| n.as_str())
+            .collect()
     }
 
     /// Get the keytrie for the normal mode (for which-key introspection).
     pub fn normal_keytrie(&self) -> Option<&KeyTrie> {
-        self.processor
-            .keymaps()
-            .get(&input::mode::ModeId::normal())
+        self.processor.keymaps().get(&input::mode::ModeId::normal())
     }
 
     /// Get continuations at a given prefix path (for which-key overlay).
@@ -338,8 +334,8 @@ pub fn get_processor() -> &'static RwLock<ReaperInputProcessor> {
 
 /// Create the initial processor from the default FTS preset.
 fn init_processor() -> ReaperInputProcessor {
-    use super::keybinds::sections::which_key_fts::fts_which_key_trees;
     use super::keybinds::defaults::fastrackstudio_preset;
+    use super::keybinds::sections::which_key_fts::fts_which_key_trees;
 
     let preset = fastrackstudio_preset();
     let trees = fts_which_key_trees();

@@ -1,6 +1,5 @@
 //! Cursor Handle mouse modifier behaviors
 
-
 /// Cursor Handle behaviors
 #[allow(unused_imports)]
 use crate::define_behavior_enum;

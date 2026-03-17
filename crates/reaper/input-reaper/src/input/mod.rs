@@ -43,9 +43,8 @@ pub use continuous_action::{
 };
 pub use handler::InputHandler;
 pub use keybinds::{
-    ActionSet, BindingConflict, ConflictType, Keybind, KeybindContext,
-    KeybindOverride, KeybindPreset, MouseModifier, MouseModifierContext,
-    PresetBuilder, WheelBind, WheelDirection,
+    ActionSet, BindingConflict, ConflictType, Keybind, KeybindContext, KeybindOverride,
+    KeybindPreset, MouseModifier, MouseModifierContext, PresetBuilder, WheelBind, WheelDirection,
 };
 pub use state::{CommandState, Context, Mode};
 pub use tempo::{MoveGridVariant, register_move_grid_actions};

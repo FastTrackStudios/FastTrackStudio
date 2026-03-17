@@ -53,7 +53,11 @@ impl SuppressionKey {
 
     /// Create a suppression key for an FX parameter change.
     pub fn fx_param(chain_key: &str, fx_guid: &str, param_index: u32) -> Self {
-        Self::new("fx", format!("{chain_key}:{fx_guid}"), param_index.to_string())
+        Self::new(
+            "fx",
+            format!("{chain_key}:{fx_guid}"),
+            param_index.to_string(),
+        )
     }
 
     /// Create a suppression key for an item field change.

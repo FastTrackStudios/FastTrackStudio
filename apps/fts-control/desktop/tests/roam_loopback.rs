@@ -52,14 +52,10 @@ async fn memory_channel_loopback() {
 #[tokio::test]
 async fn unix_socket_loopback() {
     // Use a unique temp path
-    let sock_path = PathBuf::from(format!(
-        "/tmp/fts-roam-test-{}.sock",
-        std::process::id()
-    ));
+    let sock_path = PathBuf::from(format!("/tmp/fts-roam-test-{}.sock", std::process::id()));
     let _ = std::fs::remove_file(&sock_path);
 
-    let listener = tokio::net::UnixListener::bind(&sock_path)
-        .expect("failed to bind test socket");
+    let listener = tokio::net::UnixListener::bind(&sock_path).expect("failed to bind test socket");
 
     println!("[unix] listening on {}", sock_path.display());
 
@@ -67,10 +63,7 @@ async fn unix_socket_loopback() {
 
     // Server: accept one connection
     let server = tokio::spawn(async move {
-        let (stream, _addr) = listener
-            .accept()
-            .await
-            .expect("accept failed");
+        let (stream, _addr) = listener.accept().await.expect("accept failed");
         println!("[unix] server accepted connection");
 
         let link = roam_stream::StreamLink::unix(stream);

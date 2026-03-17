@@ -730,10 +730,12 @@ fn StatusBar() -> Element {
         .map(|config| {
             let pids: Vec<u32> = connections
                 .iter()
-                .filter(|c| matches!(
-                    (config.role, c.role),
-                    ("session", DawRole::Session) | ("signal", DawRole::Signal)
-                ))
+                .filter(|c| {
+                    matches!(
+                        (config.role, c.role),
+                        ("session", DawRole::Session) | ("signal", DawRole::Signal)
+                    )
+                })
                 .map(|c| c.pid)
                 .collect();
             (config.label, pids)

@@ -7,7 +7,7 @@ use wasm_bindgen_test::*;
 
 wasm_bindgen_test_configure!(run_in_browser);
 
-use daw::standalone::audio_engine::{AudioEngine, rpp_loader, test_tone, DecodedAudio};
+use daw::standalone::audio_engine::{AudioEngine, DecodedAudio, rpp_loader, test_tone};
 
 /// Create a minimal WAV file from a DecodedAudio buffer.
 fn encode_wav(audio: &DecodedAudio) -> Vec<u8> {
@@ -106,15 +106,28 @@ fn full_rpp_load_with_synthetic_audio() {
     let project = result.unwrap();
 
     assert_eq!(project.tracks.len(), 2, "Should load 2 tracks");
-    assert_eq!(project.failed.len(), 0, "No files should fail: {:?}", project.failed);
+    assert_eq!(
+        project.failed.len(),
+        0,
+        "No files should fail: {:?}",
+        project.failed
+    );
     assert_eq!(project.sample_rate, 44100);
 
     // Verify track details
-    let sine_track = project.tracks.iter().find(|t| t.track_name == "Sine").unwrap();
+    let sine_track = project
+        .tracks
+        .iter()
+        .find(|t| t.track_name == "Sine")
+        .unwrap();
     assert!((sine_track.position - 0.0).abs() < 0.01);
     assert!((sine_track.length - 1.0).abs() < 0.01);
 
-    let chord_track = project.tracks.iter().find(|t| t.track_name == "Chord").unwrap();
+    let chord_track = project
+        .tracks
+        .iter()
+        .find(|t| t.track_name == "Chord")
+        .unwrap();
     assert!((chord_track.position - 0.5).abs() < 0.01);
     assert!((chord_track.length - 1.0).abs() < 0.01);
 

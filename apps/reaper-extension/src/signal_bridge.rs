@@ -28,7 +28,11 @@ pub async fn init() {
 
     // Ensure the directory exists
     if let Err(e) = std::fs::create_dir_all(&db_dir) {
-        warn!("Failed to create signal library directory {}: {}", db_dir.display(), e);
+        warn!(
+            "Failed to create signal library directory {}: {}",
+            db_dir.display(),
+            e
+        );
         return;
     }
 
@@ -72,17 +76,50 @@ pub fn add_signal_services(handler: RoutedHandler, ctrl: &SignalController) -> R
     let svc: signal::SignalLive = (**ctrl.service()).clone();
 
     handler
-        .with(block_service_service_descriptor(), BlockServiceDispatcher::new(svc.clone()))
-        .with(layer_service_service_descriptor(), LayerServiceDispatcher::new(svc.clone()))
-        .with(engine_service_service_descriptor(), EngineServiceDispatcher::new(svc.clone()))
-        .with(rig_service_service_descriptor(), RigServiceDispatcher::new(svc.clone()))
-        .with(profile_service_service_descriptor(), ProfileServiceDispatcher::new(svc.clone()))
-        .with(song_service_service_descriptor(), SongServiceDispatcher::new(svc.clone()))
-        .with(setlist_service_service_descriptor(), SetlistServiceDispatcher::new(svc.clone()))
-        .with(browser_service_service_descriptor(), BrowserServiceDispatcher::new(svc.clone()))
-        .with(resolve_service_service_descriptor(), ResolveServiceDispatcher::new(svc.clone()))
-        .with(scene_template_service_service_descriptor(), SceneTemplateServiceDispatcher::new(svc.clone()))
-        .with(rack_service_service_descriptor(), RackServiceDispatcher::new(svc))
+        .with(
+            block_service_service_descriptor(),
+            BlockServiceDispatcher::new(svc.clone()),
+        )
+        .with(
+            layer_service_service_descriptor(),
+            LayerServiceDispatcher::new(svc.clone()),
+        )
+        .with(
+            engine_service_service_descriptor(),
+            EngineServiceDispatcher::new(svc.clone()),
+        )
+        .with(
+            rig_service_service_descriptor(),
+            RigServiceDispatcher::new(svc.clone()),
+        )
+        .with(
+            profile_service_service_descriptor(),
+            ProfileServiceDispatcher::new(svc.clone()),
+        )
+        .with(
+            song_service_service_descriptor(),
+            SongServiceDispatcher::new(svc.clone()),
+        )
+        .with(
+            setlist_service_service_descriptor(),
+            SetlistServiceDispatcher::new(svc.clone()),
+        )
+        .with(
+            browser_service_service_descriptor(),
+            BrowserServiceDispatcher::new(svc.clone()),
+        )
+        .with(
+            resolve_service_service_descriptor(),
+            ResolveServiceDispatcher::new(svc.clone()),
+        )
+        .with(
+            scene_template_service_service_descriptor(),
+            SceneTemplateServiceDispatcher::new(svc.clone()),
+        )
+        .with(
+            rack_service_service_descriptor(),
+            RackServiceDispatcher::new(svc),
+        )
 }
 
 /// Wire up the signal appliers for the current REAPER session.
@@ -158,7 +195,10 @@ async fn set_default_active_context(ctrl: &SignalController) {
                 id: profile.id.clone(),
                 active_index: 0,
             });
-            info!("Active context set to profile '{}' ({})", profile.name, profile.id);
+            info!(
+                "Active context set to profile '{}' ({})",
+                profile.name, profile.id
+            );
             return;
         }
     }

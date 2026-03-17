@@ -14,11 +14,8 @@ pub fn advertise(info: ServiceInfo) -> Result<AdvertiseGuard> {
     let service_type = to_dns_sd_type(info.service_type);
 
     // Build TXT record properties as HashMap
-    let properties: std::collections::HashMap<String, String> = info
-        .metadata
-        .iter()
-        .cloned()
-        .collect();
+    let properties: std::collections::HashMap<String, String> =
+        info.metadata.iter().cloned().collect();
 
     let mdns_info = MdnsServiceInfo::new(
         &service_type,
@@ -27,7 +24,8 @@ pub fn advertise(info: ServiceInfo) -> Result<AdvertiseGuard> {
         "",                  // empty = auto-detect IP
         info.port,
         properties,
-    ).map_err(Error::Mdns)?;
+    )
+    .map_err(Error::Mdns)?;
 
     let daemon = ServiceDaemon::new().map_err(Error::Mdns)?;
     let fullname = mdns_info.get_fullname().to_string();

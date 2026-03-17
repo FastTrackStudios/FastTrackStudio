@@ -1390,7 +1390,6 @@ unsafe fn add_separator(menu: raw::HMENU) {
     }
 }
 
-
 // ── Sync / Ableton Link Action Handlers ──────────────────────────────────────
 
 fn handle_sync_toggle_link() -> ActionResult {
@@ -1565,9 +1564,7 @@ fn handle_generate_ruler_lanes() -> ActionResult {
 }
 
 fn handle_organize_ruler_lanes() -> ActionResult {
-    use session::ruler_lanes::{
-        classify_marker_lane, classify_region_lane, CoreLane,
-    };
+    use session::ruler_lanes::{classify_marker_lane, classify_region_lane, CoreLane};
 
     moire::task::spawn(async {
         let daw = daw::Daw::get();
@@ -1599,7 +1596,10 @@ fn handle_organize_ruler_lanes() -> ActionResult {
         for marker in &markers {
             let lane = classify_marker_lane(&marker.name);
             if let Some(id) = marker.id {
-                let _ = project.markers().set_lane(id, Some(lane.lane_index())).await;
+                let _ = project
+                    .markers()
+                    .set_lane(id, Some(lane.lane_index()))
+                    .await;
                 marker_count += 1;
             }
         }
@@ -1617,7 +1617,10 @@ fn handle_organize_ruler_lanes() -> ActionResult {
         for region in &regions {
             let lane = classify_region_lane(&region.name);
             if let Some(id) = region.id {
-                let _ = project.regions().set_lane(id, Some(lane.lane_index())).await;
+                let _ = project
+                    .regions()
+                    .set_lane(id, Some(lane.lane_index()))
+                    .await;
                 region_count += 1;
             }
         }
@@ -1706,8 +1709,7 @@ fn handle_organize_tracks() -> ActionResult {
         let original_count = rpp_project.tracks.len();
 
         // Reorganize tracks into FTS hierarchy
-        rpp_project.tracks =
-            daw::file::types::organize_into_fts_hierarchy(rpp_project.tracks);
+        rpp_project.tracks = daw::file::types::organize_into_fts_hierarchy(rpp_project.tracks);
 
         // Organize ruler lanes
         daw::file::setlist_rpp::organize_ruler_lanes(&mut rpp_project);
@@ -1724,10 +1726,7 @@ fn handle_organize_tracks() -> ActionResult {
         let guid = project.guid().to_string();
         let _ = daw.close_project(&guid).await;
         match daw.open_project(path.to_string_lossy().as_ref()).await {
-            Ok(_) => info!(
-                "Organized {} tracks into FTS hierarchy",
-                original_count
-            ),
+            Ok(_) => info!("Organized {} tracks into FTS hierarchy", original_count),
             Err(e) => tracing::warn!("Failed to reopen organized project: {e}"),
         }
     })

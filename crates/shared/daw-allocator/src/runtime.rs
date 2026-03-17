@@ -81,10 +81,8 @@ impl FtsRuntime {
             let (dispatcher, receiver) = MainThreadDispatcher::new();
 
             // Initialize the allocator's async deallocation with the RT detector
-            let dealloc_rx = allocator.init_async(
-                config.dealloc_channel_capacity,
-                config.rt_detector,
-            );
+            let dealloc_rx =
+                allocator.init_async(config.dealloc_channel_capacity, config.rt_detector);
 
             // Spawn the deallocation thread (Helgobox: "Helgobox deallocator")
             let dealloc_thread = thread::Builder::new()

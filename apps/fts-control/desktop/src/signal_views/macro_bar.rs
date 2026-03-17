@@ -33,7 +33,10 @@ pub(crate) fn apply_bypass_rules(bank: &mut MacroBank, rules: &BypassRules) {
             let v = parent_knob.value;
             for rule in parent_rules {
                 let active = rule.active_ranges.iter().any(|&(lo, hi)| v >= lo && v < hi);
-                if let Some(child) = parent_knob.children.iter_mut().find(|c| c.id == rule.child_id)
+                if let Some(child) = parent_knob
+                    .children
+                    .iter_mut()
+                    .find(|c| c.id == rule.child_id)
                 {
                     child.bypassed = !active;
                 }
@@ -47,7 +50,13 @@ pub(crate) fn apply_bypass_rules(bank: &mut MacroBank, rules: &BypassRules) {
 // ============================================================================
 
 /// Helper: create a knob with bindings to block parameters.
-fn knob(id: &str, label: &str, value: f32, color: &str, bindings: Vec<(&str, &str, f32, f32)>) -> MacroKnob {
+fn knob(
+    id: &str,
+    label: &str,
+    value: f32,
+    color: &str,
+    bindings: Vec<(&str, &str, f32, f32)>,
+) -> MacroKnob {
     let mut k = MacroKnob::new(id, label);
     k.set_value(value);
     k.color = Some(color.into());
@@ -107,44 +116,228 @@ pub(crate) fn mock_preset_macro_bar() -> MacroBank {
     let mut bank = MacroBank::new();
     let rules = build_bypass_rules();
 
-    bank.add(knob("input", "Input", 0.75, "#6B7280", vec![("input", "gain", 0.0, 1.0)]));
+    bank.add(knob(
+        "input",
+        "Input",
+        0.75,
+        "#6B7280",
+        vec![("input", "gain", 0.0, 1.0)],
+    ));
     bank.add(parent_knob(
-        "gate", "Gate", 0.3, "#EF4444",
+        "gate",
+        "Gate",
+        0.3,
+        "#EF4444",
         vec![
-            (knob("gate-threshold", "Threshold", 0.4, "#F87171", vec![("gate", "threshold", 0.0, 1.0)]), 0.0, 0.8),
-            (knob("gate-ratio", "Ratio", 0.5, "#FCA5A5", vec![("gate", "ratio", 0.0, 1.0)]), 0.0, 0.7),
-            (knob("gate-range", "Range", 0.6, "#FECACA", vec![("gate", "range", 0.0, 1.0)]), 0.0, 0.9),
-            (knob("gate-attack", "Attack", 0.2, "#FEE2E2", vec![("gate", "attack", 0.0, 1.0)]), 0.0, 0.5),
-            (knob("gate-release", "Release", 0.4, "#F87171", vec![("gate", "release", 0.0, 1.0)]), 0.1, 0.8),
-            (knob("gate-hold", "Hold", 0.3, "#FCA5A5", vec![("gate", "hold", 0.0, 1.0)]), 0.0, 0.6),
+            (
+                knob(
+                    "gate-threshold",
+                    "Threshold",
+                    0.4,
+                    "#F87171",
+                    vec![("gate", "threshold", 0.0, 1.0)],
+                ),
+                0.0,
+                0.8,
+            ),
+            (
+                knob(
+                    "gate-ratio",
+                    "Ratio",
+                    0.5,
+                    "#FCA5A5",
+                    vec![("gate", "ratio", 0.0, 1.0)],
+                ),
+                0.0,
+                0.7,
+            ),
+            (
+                knob(
+                    "gate-range",
+                    "Range",
+                    0.6,
+                    "#FECACA",
+                    vec![("gate", "range", 0.0, 1.0)],
+                ),
+                0.0,
+                0.9,
+            ),
+            (
+                knob(
+                    "gate-attack",
+                    "Attack",
+                    0.2,
+                    "#FEE2E2",
+                    vec![("gate", "attack", 0.0, 1.0)],
+                ),
+                0.0,
+                0.5,
+            ),
+            (
+                knob(
+                    "gate-release",
+                    "Release",
+                    0.4,
+                    "#F87171",
+                    vec![("gate", "release", 0.0, 1.0)],
+                ),
+                0.1,
+                0.8,
+            ),
+            (
+                knob(
+                    "gate-hold",
+                    "Hold",
+                    0.3,
+                    "#FCA5A5",
+                    vec![("gate", "hold", 0.0, 1.0)],
+                ),
+                0.0,
+                0.6,
+            ),
         ],
     ));
     bank.add(parent_knob(
-        "pre-comp", "Pre-Comp", 0.5, "#3B82F6",
+        "pre-comp",
+        "Pre-Comp",
+        0.5,
+        "#3B82F6",
         vec![
-            (knob("pre-comp-threshold", "Threshold", 0.5, "#60A5FA", vec![("pre-comp", "threshold", 0.0, 1.0)]), 0.0, 0.8),
-            (knob("pre-comp-attack", "Attack", 0.3, "#93C5FD", vec![("pre-comp", "attack", 0.0, 1.0)]), 0.0, 0.6),
-            (knob("pre-comp-release", "Release", 0.5, "#BFDBFE", vec![("pre-comp", "release", 0.0, 1.0)]), 0.1, 0.8),
-            (knob("pre-comp-makeup", "Makeup", 0.4, "#DBEAFE", vec![("pre-comp", "makeup", 0.0, 1.0)]), 0.0, 0.7),
+            (
+                knob(
+                    "pre-comp-threshold",
+                    "Threshold",
+                    0.5,
+                    "#60A5FA",
+                    vec![("pre-comp", "threshold", 0.0, 1.0)],
+                ),
+                0.0,
+                0.8,
+            ),
+            (
+                knob(
+                    "pre-comp-attack",
+                    "Attack",
+                    0.3,
+                    "#93C5FD",
+                    vec![("pre-comp", "attack", 0.0, 1.0)],
+                ),
+                0.0,
+                0.6,
+            ),
+            (
+                knob(
+                    "pre-comp-release",
+                    "Release",
+                    0.5,
+                    "#BFDBFE",
+                    vec![("pre-comp", "release", 0.0, 1.0)],
+                ),
+                0.1,
+                0.8,
+            ),
+            (
+                knob(
+                    "pre-comp-makeup",
+                    "Makeup",
+                    0.4,
+                    "#DBEAFE",
+                    vec![("pre-comp", "makeup", 0.0, 1.0)],
+                ),
+                0.0,
+                0.7,
+            ),
         ],
     ));
     bank.add(parent_knob(
-        "drive", "Drive", 0.6, "#F97316",
+        "drive",
+        "Drive",
+        0.6,
+        "#F97316",
         vec![
-            (knob("drive-1", "Drive 1", 0.7, "#FB923C", vec![("drive", "stage1", 0.0, 1.0)]), 0.0, 0.8),
-            (knob("drive-2", "Drive 2", 0.4, "#FDBA74", vec![("drive", "stage2", 0.0, 1.0)]), 0.1, 0.6),
-            (knob("drive-3", "Drive 3", 0.2, "#FED7AA", vec![("drive", "stage3", 0.0, 1.0)]), 0.0, 0.4),
+            (
+                knob(
+                    "drive-1",
+                    "Drive 1",
+                    0.7,
+                    "#FB923C",
+                    vec![("drive", "stage1", 0.0, 1.0)],
+                ),
+                0.0,
+                0.8,
+            ),
+            (
+                knob(
+                    "drive-2",
+                    "Drive 2",
+                    0.4,
+                    "#FDBA74",
+                    vec![("drive", "stage2", 0.0, 1.0)],
+                ),
+                0.1,
+                0.6,
+            ),
+            (
+                knob(
+                    "drive-3",
+                    "Drive 3",
+                    0.2,
+                    "#FED7AA",
+                    vec![("drive", "stage3", 0.0, 1.0)],
+                ),
+                0.0,
+                0.4,
+            ),
         ],
     ));
-    bank.add(knob("gain", "Gain", 0.5, "#EAB308", vec![("amp", "gain", 0.0, 1.0)]));
+    bank.add(knob(
+        "gain",
+        "Gain",
+        0.5,
+        "#EAB308",
+        vec![("amp", "gain", 0.0, 1.0)],
+    ));
 
     {
         let mut shape = parent_knob(
-            "shape", "Shape", 0.5, "#22C55E",
+            "shape",
+            "Shape",
+            0.5,
+            "#22C55E",
             vec![
-                (knob("shape-low", "Low", 0.5, "#4ADE80", vec![("eq", "low", 0.0, 1.0)]), 0.9, 0.1),
-                (knob("shape-mid", "Mid", 0.5, "#86EFAC", vec![("eq", "mid", 0.0, 1.0)]), 0.35, 0.35),
-                (knob("shape-high", "High", 0.5, "#BBF7D0", vec![("eq", "high", 0.0, 1.0)]), 0.1, 0.9),
+                (
+                    knob(
+                        "shape-low",
+                        "Low",
+                        0.5,
+                        "#4ADE80",
+                        vec![("eq", "low", 0.0, 1.0)],
+                    ),
+                    0.9,
+                    0.1,
+                ),
+                (
+                    knob(
+                        "shape-mid",
+                        "Mid",
+                        0.5,
+                        "#86EFAC",
+                        vec![("eq", "mid", 0.0, 1.0)],
+                    ),
+                    0.35,
+                    0.35,
+                ),
+                (
+                    knob(
+                        "shape-high",
+                        "High",
+                        0.5,
+                        "#BBF7D0",
+                        vec![("eq", "high", 0.0, 1.0)],
+                    ),
+                    0.1,
+                    0.9,
+                ),
             ],
         );
         shape.bipolar = true;
@@ -152,57 +345,327 @@ pub(crate) fn mock_preset_macro_bar() -> MacroBank {
     }
 
     bank.add(parent_knob(
-        "comp", "Comp", 0.4, "#60A5FA",
+        "comp",
+        "Comp",
+        0.4,
+        "#60A5FA",
         vec![
-            (knob("comp-threshold", "Threshold", 0.4, "#93C5FD", vec![("comp", "threshold", 0.0, 1.0)]), 0.0, 0.8),
-            (knob("comp-attack", "Attack", 0.3, "#BFDBFE", vec![("comp", "attack", 0.0, 1.0)]), 0.0, 0.6),
-            (knob("comp-release", "Release", 0.5, "#DBEAFE", vec![("comp", "release", 0.0, 1.0)]), 0.1, 0.8),
-            (knob("comp-makeup", "Makeup", 0.4, "#EFF6FF", vec![("comp", "makeup", 0.0, 1.0)]), 0.0, 0.7),
+            (
+                knob(
+                    "comp-threshold",
+                    "Threshold",
+                    0.4,
+                    "#93C5FD",
+                    vec![("comp", "threshold", 0.0, 1.0)],
+                ),
+                0.0,
+                0.8,
+            ),
+            (
+                knob(
+                    "comp-attack",
+                    "Attack",
+                    0.3,
+                    "#BFDBFE",
+                    vec![("comp", "attack", 0.0, 1.0)],
+                ),
+                0.0,
+                0.6,
+            ),
+            (
+                knob(
+                    "comp-release",
+                    "Release",
+                    0.5,
+                    "#DBEAFE",
+                    vec![("comp", "release", 0.0, 1.0)],
+                ),
+                0.1,
+                0.8,
+            ),
+            (
+                knob(
+                    "comp-makeup",
+                    "Makeup",
+                    0.4,
+                    "#EFF6FF",
+                    vec![("comp", "makeup", 0.0, 1.0)],
+                ),
+                0.0,
+                0.7,
+            ),
         ],
     ));
 
     // Beyond MAX_KNOBS — push directly
-    bank.knobs.push(knob("mod", "Mod", 0.35, "#A855F7", vec![
-        ("mod", "rate", 0.0, 1.0),
-        ("mod", "depth", 0.0, 1.0),
-    ]));
-    bank.knobs.push(knob("boost", "Boost", 0.45, "#EC4899", vec![("boost", "level", 0.0, 1.0)]));
+    bank.knobs.push(knob(
+        "mod",
+        "Mod",
+        0.35,
+        "#A855F7",
+        vec![("mod", "rate", 0.0, 1.0), ("mod", "depth", 0.0, 1.0)],
+    ));
+    bank.knobs.push(knob(
+        "boost",
+        "Boost",
+        0.45,
+        "#EC4899",
+        vec![("boost", "level", 0.0, 1.0)],
+    ));
     bank.knobs.push(parent_knob(
-        "delay", "Delay", 0.5, "#06B6D4",
+        "delay",
+        "Delay",
+        0.5,
+        "#06B6D4",
         vec![
             // Row 1: Delay 1
-            (knob("delay-type1", "Type 1", 0.3, "#22D3EE", vec![("delay1", "type", 0.0, 1.0)]), 0.0, 0.5),
-            (knob("delay-time1", "Time 1", 0.5, "#67E8F9", vec![("delay1", "time", 0.0, 1.0)]), 0.1, 0.8),
-            (knob("delay-fb1", "FB 1", 0.4, "#A5F3FC", vec![("delay1", "feedback", 0.0, 1.0)]), 0.0, 0.65),
-            (knob("delay-hipass", "HiPass", 0.2, "#CFFAFE", vec![("delay", "hipass", 0.0, 1.0)]), 0.0, 0.5),
-            (knob("delay-mix", "Mix", 0.5, "#67E8F9", vec![("delay", "mix", 0.0, 1.0)]), 0.0, 0.7),
+            (
+                knob(
+                    "delay-type1",
+                    "Type 1",
+                    0.3,
+                    "#22D3EE",
+                    vec![("delay1", "type", 0.0, 1.0)],
+                ),
+                0.0,
+                0.5,
+            ),
+            (
+                knob(
+                    "delay-time1",
+                    "Time 1",
+                    0.5,
+                    "#67E8F9",
+                    vec![("delay1", "time", 0.0, 1.0)],
+                ),
+                0.1,
+                0.8,
+            ),
+            (
+                knob(
+                    "delay-fb1",
+                    "FB 1",
+                    0.4,
+                    "#A5F3FC",
+                    vec![("delay1", "feedback", 0.0, 1.0)],
+                ),
+                0.0,
+                0.65,
+            ),
+            (
+                knob(
+                    "delay-hipass",
+                    "HiPass",
+                    0.2,
+                    "#CFFAFE",
+                    vec![("delay", "hipass", 0.0, 1.0)],
+                ),
+                0.0,
+                0.5,
+            ),
+            (
+                knob(
+                    "delay-mix",
+                    "Mix",
+                    0.5,
+                    "#67E8F9",
+                    vec![("delay", "mix", 0.0, 1.0)],
+                ),
+                0.0,
+                0.7,
+            ),
             // Row 2: Delay 2
-            (knob("delay-type2", "Type 2", 0.3, "#22D3EE", vec![("delay2", "type", 0.0, 1.0)]), 0.0, 0.5),
-            (knob("delay-time2", "Time 2", 0.5, "#67E8F9", vec![("delay2", "time", 0.0, 1.0)]), 0.1, 0.8),
-            (knob("delay-fb2", "FB 2", 0.4, "#A5F3FC", vec![("delay2", "feedback", 0.0, 1.0)]), 0.0, 0.65),
-            (knob("delay-lopass", "LoPass", 0.8, "#CFFAFE", vec![("delay", "lopass", 0.0, 1.0)]), 0.0, 0.5),
-            (knob("delay-ducking", "Ducking", 0.3, "#67E8F9", vec![("delay", "ducking", 0.0, 1.0)]), 0.0, 0.6),
+            (
+                knob(
+                    "delay-type2",
+                    "Type 2",
+                    0.3,
+                    "#22D3EE",
+                    vec![("delay2", "type", 0.0, 1.0)],
+                ),
+                0.0,
+                0.5,
+            ),
+            (
+                knob(
+                    "delay-time2",
+                    "Time 2",
+                    0.5,
+                    "#67E8F9",
+                    vec![("delay2", "time", 0.0, 1.0)],
+                ),
+                0.1,
+                0.8,
+            ),
+            (
+                knob(
+                    "delay-fb2",
+                    "FB 2",
+                    0.4,
+                    "#A5F3FC",
+                    vec![("delay2", "feedback", 0.0, 1.0)],
+                ),
+                0.0,
+                0.65,
+            ),
+            (
+                knob(
+                    "delay-lopass",
+                    "LoPass",
+                    0.8,
+                    "#CFFAFE",
+                    vec![("delay", "lopass", 0.0, 1.0)],
+                ),
+                0.0,
+                0.5,
+            ),
+            (
+                knob(
+                    "delay-ducking",
+                    "Ducking",
+                    0.3,
+                    "#67E8F9",
+                    vec![("delay", "ducking", 0.0, 1.0)],
+                ),
+                0.0,
+                0.6,
+            ),
         ],
     ));
     bank.knobs.push(parent_knob(
-        "reverb", "Reverb", 0.4, "#0EA5E9",
+        "reverb",
+        "Reverb",
+        0.4,
+        "#0EA5E9",
         vec![
             // Row 1: Reverb 1
-            (knob("reverb-type1", "Type 1", 0.2, "#38BDF8", vec![("reverb1", "type", 0.0, 1.0)]), 0.0, 0.5),
-            (knob("reverb-time1", "Time 1", 0.6, "#7DD3FC", vec![("reverb1", "time", 0.0, 1.0)]), 0.1, 0.9),
-            (knob("reverb-predelay1", "Pre-Dly 1", 0.3, "#BAE6FD", vec![("reverb1", "predelay", 0.0, 1.0)]), 0.0, 0.5),
-            (knob("reverb-character1", "Char 1", 0.5, "#E0F2FE", vec![("reverb1", "character", 0.0, 1.0)]), 0.0, 0.8),
-            (knob("reverb-mix", "Mix", 0.45, "#7DD3FC", vec![("reverb", "mix", 0.0, 1.0)]), 0.0, 0.7),
+            (
+                knob(
+                    "reverb-type1",
+                    "Type 1",
+                    0.2,
+                    "#38BDF8",
+                    vec![("reverb1", "type", 0.0, 1.0)],
+                ),
+                0.0,
+                0.5,
+            ),
+            (
+                knob(
+                    "reverb-time1",
+                    "Time 1",
+                    0.6,
+                    "#7DD3FC",
+                    vec![("reverb1", "time", 0.0, 1.0)],
+                ),
+                0.1,
+                0.9,
+            ),
+            (
+                knob(
+                    "reverb-predelay1",
+                    "Pre-Dly 1",
+                    0.3,
+                    "#BAE6FD",
+                    vec![("reverb1", "predelay", 0.0, 1.0)],
+                ),
+                0.0,
+                0.5,
+            ),
+            (
+                knob(
+                    "reverb-character1",
+                    "Char 1",
+                    0.5,
+                    "#E0F2FE",
+                    vec![("reverb1", "character", 0.0, 1.0)],
+                ),
+                0.0,
+                0.8,
+            ),
+            (
+                knob(
+                    "reverb-mix",
+                    "Mix",
+                    0.45,
+                    "#7DD3FC",
+                    vec![("reverb", "mix", 0.0, 1.0)],
+                ),
+                0.0,
+                0.7,
+            ),
             // Row 2: Reverb 2
-            (knob("reverb-type2", "Type 2", 0.2, "#38BDF8", vec![("reverb2", "type", 0.0, 1.0)]), 0.0, 0.5),
-            (knob("reverb-time2", "Time 2", 0.6, "#7DD3FC", vec![("reverb2", "time", 0.0, 1.0)]), 0.1, 0.9),
-            (knob("reverb-predelay2", "Pre-Dly 2", 0.3, "#BAE6FD", vec![("reverb2", "predelay", 0.0, 1.0)]), 0.0, 0.5),
-            (knob("reverb-character2", "Char 2", 0.5, "#E0F2FE", vec![("reverb2", "character", 0.0, 1.0)]), 0.0, 0.8),
-            (knob("reverb-ducking", "Ducking", 0.3, "#7DD3FC", vec![("reverb", "ducking", 0.0, 1.0)]), 0.0, 0.6),
+            (
+                knob(
+                    "reverb-type2",
+                    "Type 2",
+                    0.2,
+                    "#38BDF8",
+                    vec![("reverb2", "type", 0.0, 1.0)],
+                ),
+                0.0,
+                0.5,
+            ),
+            (
+                knob(
+                    "reverb-time2",
+                    "Time 2",
+                    0.6,
+                    "#7DD3FC",
+                    vec![("reverb2", "time", 0.0, 1.0)],
+                ),
+                0.1,
+                0.9,
+            ),
+            (
+                knob(
+                    "reverb-predelay2",
+                    "Pre-Dly 2",
+                    0.3,
+                    "#BAE6FD",
+                    vec![("reverb2", "predelay", 0.0, 1.0)],
+                ),
+                0.0,
+                0.5,
+            ),
+            (
+                knob(
+                    "reverb-character2",
+                    "Char 2",
+                    0.5,
+                    "#E0F2FE",
+                    vec![("reverb2", "character", 0.0, 1.0)],
+                ),
+                0.0,
+                0.8,
+            ),
+            (
+                knob(
+                    "reverb-ducking",
+                    "Ducking",
+                    0.3,
+                    "#7DD3FC",
+                    vec![("reverb", "ducking", 0.0, 1.0)],
+                ),
+                0.0,
+                0.6,
+            ),
         ],
     ));
-    bank.knobs.push(knob("motion", "Motion", 0.2, "#8B5CF6", vec![("motion", "amount", 0.0, 1.0)]));
-    bank.knobs.push(knob("output", "Output", 0.8, "#6B7280", vec![("output", "level", 0.0, 1.0)]));
+    bank.knobs.push(knob(
+        "motion",
+        "Motion",
+        0.2,
+        "#8B5CF6",
+        vec![("motion", "amount", 0.0, 1.0)],
+    ));
+    bank.knobs.push(knob(
+        "output",
+        "Output",
+        0.8,
+        "#6B7280",
+        vec![("output", "level", 0.0, 1.0)],
+    ));
 
     apply_bypass_rules(&mut bank, &rules);
     bank
@@ -720,14 +1183,22 @@ fn linked_mirror(id: &str, prefix: &str, type_linked: bool, time_linked: bool) -
     if type_linked {
         let t1 = format!("{prefix}-type1");
         let t2 = format!("{prefix}-type2");
-        if id == t1 { return Some(t2); }
-        if id == t2 { return Some(t1); }
+        if id == t1 {
+            return Some(t2);
+        }
+        if id == t2 {
+            return Some(t1);
+        }
     }
     if time_linked {
         let t1 = format!("{prefix}-time1");
         let t2 = format!("{prefix}-time2");
-        if id == t1 { return Some(t2); }
-        if id == t2 { return Some(t1); }
+        if id == t1 {
+            return Some(t2);
+        }
+        if id == t2 {
+            return Some(t1);
+        }
     }
     None
 }

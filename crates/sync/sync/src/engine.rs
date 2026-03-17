@@ -4,8 +4,8 @@
 //! envelopes, and forwards them to connected peers. It also receives remote events
 //! and applies them via the [`apply`] module, with echo suppression.
 
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use daw::Daw;
 use sync_proto::{SyncConfig, SyncDomain, SyncEvent, SyncPeer, SyncSession, SyncStatus};
@@ -54,7 +54,10 @@ impl Engine {
             config,
             sequence: Arc::new(AtomicU64::new(0)),
             event_tx,
-            suppression: Arc::new(moire::sync::Mutex::new("sync.suppression", SuppressionSet::new())),
+            suppression: Arc::new(moire::sync::Mutex::new(
+                "sync.suppression",
+                SuppressionSet::new(),
+            )),
             status: moire::sync::Mutex::new("sync.status", SyncStatus::Disconnected),
             peers: moire::sync::Mutex::new("sync.peers", Vec::new()),
             project_subs: Arc::new(moire::sync::Mutex::new("sync.project_subs", Vec::new())),
@@ -225,8 +228,13 @@ impl Engine {
 
         // Apply with suppression
         let mut suppression = self.suppression.lock().await;
-        apply::apply_remote_event(&self.daw, &event.project_guid, &event.domain, &mut suppression)
-            .await;
+        apply::apply_remote_event(
+            &self.daw,
+            &event.project_guid,
+            &event.domain,
+            &mut suppression,
+        )
+        .await;
     }
 
     /// Subscribe to outgoing sync events (for forwarding to remote peers).
@@ -307,8 +315,11 @@ fn is_event_suppressed(suppression: &SuppressionSet, event: &SyncEvent) -> bool 
             } = fe
             {
                 let context_key = format!("{context:?}");
-                suppression
-                    .is_suppressed(&SuppressionKey::fx_param(&context_key, fx_guid, *param_index))
+                suppression.is_suppressed(&SuppressionKey::fx_param(
+                    &context_key,
+                    fx_guid,
+                    *param_index,
+                ))
             } else {
                 false
             }

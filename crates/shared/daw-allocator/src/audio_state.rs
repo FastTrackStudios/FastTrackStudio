@@ -58,6 +58,10 @@ impl AudioState {
     pub fn latency_secs(&self) -> f64 {
         let bs = self.block_size() as f64;
         let sr = self.sample_rate() as f64;
-        if sr > 0.0 { bs / sr } else { 0.0 }
+        if sr > 0.0 {
+            bs / sr
+        } else {
+            0.0
+        }
     }
 }

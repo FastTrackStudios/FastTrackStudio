@@ -216,13 +216,7 @@ pub trait LinkCallbacks {
     fn remove_project_marker(&self, marker_id: i32);
 
     /// Set a tempo/time-signature marker at the given position.
-    fn set_tempo_at_position(
-        &self,
-        position: f64,
-        bpm: f64,
-        timesig_num: i32,
-        timesig_denom: i32,
-    );
+    fn set_tempo_at_position(&self, position: f64, bpm: f64, timesig_num: i32, timesig_denom: i32);
 
     /// Get the time position of the next full measure boundary (seconds).
     fn get_next_measure_position(&self) -> f64;
@@ -322,7 +316,8 @@ impl Engine {
     pub fn set_enabled(&self, enabled: bool) {
         self.link.enable(enabled);
         if enabled {
-            self.link.enable_start_stop_sync(self.config.start_stop_sync);
+            self.link
+                .enable_start_stop_sync(self.config.start_stop_sync);
             info!("Ableton Link enabled");
         } else {
             info!("Ableton Link disabled");
@@ -341,7 +336,8 @@ impl Engine {
 
     /// Get the current Link session tempo.
     pub fn session_tempo(&self) -> f64 {
-        self.link.capture_app_session_state(&mut SessionState::new());
+        self.link
+            .capture_app_session_state(&mut SessionState::new());
         // Need to capture into our session state to read tempo
         let mut ss = SessionState::new();
         self.link.capture_app_session_state(&mut ss);
@@ -468,17 +464,15 @@ impl Engine {
 
     // ── Puppet Mode ──────────────────────────────────────────────────────
 
-    fn tick_puppet(
-        &mut self,
-        host: &dyn LinkCallbacks,
-        state: &LinkState,
-        host_time: i64,
-    ) {
+    fn tick_puppet(&mut self, host: &dyn LinkCallbacks, state: &LinkState, host_time: i64) {
         let link_playing = self.session_state.is_playing();
 
         // Handle transport start
         if !self.was_playing && link_playing {
-            debug!("Link: transport started — starting REAPER (peers={})", self.link.num_peers());
+            debug!(
+                "Link: transport started — starting REAPER (peers={})",
+                self.link.num_peers()
+            );
             self.prev_qn = 0.0;
             self.frame_count = 0;
 
@@ -692,28 +686,20 @@ impl Engine {
     ///   re-synchronize the beat/time mapping with peers.
     ///
     /// Mirrors ReaBlink audioCallback lines 454-474.
-    fn detect_jumps(
-        &mut self,
-        state: &LinkState,
-        host_time: i64,
-    ) {
+    fn detect_jumps(&mut self, state: &LinkState, host_time: i64) {
         let qn_delta = (state.qn_position - self.prev_qn).abs();
 
         // Only trigger on significant jumps, and only after the session has
         // been playing long enough (beat > 1.0) to avoid false positives on
         // the initial start.
-        if qn_delta > 0.5
-            && self.session_state.beat_at_time(host_time, self.quantum) > 1.0
-        {
+        if qn_delta > 0.5 && self.session_state.beat_at_time(host_time, self.quantum) > 1.0 {
             if state.is_looping {
                 // Loop jump: accumulate beat offsets at loop boundaries so
                 // phase correction remains coherent across loop iterations.
                 // jump_offset tracks where we left off (loop end beat),
                 // land_offset tracks where we landed (loop start beat).
                 if let Some((loop_start, loop_end)) = state.loop_range {
-                    if state.position_seconds > loop_start
-                        && state.position_seconds < loop_end
-                    {
+                    if state.position_seconds > loop_start && state.position_seconds < loop_end {
                         if let Some((start_beat, end_beat)) = state.loop_range_beats {
                             self.jump_offset = fmod(self.jump_offset + end_beat, 1.0);
                             self.land_offset = fmod(self.land_offset + start_beat, 1.0);
@@ -740,12 +726,7 @@ impl Engine {
 
     // ── Master Mode ──────────────────────────────────────────────────────
 
-    fn tick_master(
-        &mut self,
-        host: &dyn LinkCallbacks,
-        state: &LinkState,
-        host_time: i64,
-    ) {
+    fn tick_master(&mut self, host: &dyn LinkCallbacks, state: &LinkState, host_time: i64) {
         // In master mode, force REAPER's beat position onto the Link session
         if state.is_playing {
             // Detect large position jumps (seeks while playing) —
@@ -778,7 +759,10 @@ impl Engine {
                 .force_beat_at_time(0.0, host_time, self.quantum);
             self.session_state.set_is_playing(true, host_time);
             self.was_playing = true;
-            debug!("Link master: started at pos={:.3}s, forced beat=0", state.position_seconds);
+            debug!(
+                "Link master: started at pos={:.3}s, forced beat=0",
+                state.position_seconds
+            );
         } else if !state.is_playing && self.was_playing {
             self.session_state.set_is_playing(false, host_time);
             self.was_playing = false;
@@ -804,10 +788,7 @@ impl Engine {
             (state.loop_range, state.loop_range_beats)
         {
             let pos = state.position_seconds;
-            if pos > loop_start
-                && pos < loop_end
-                && (state.beat_position - end_beat).abs() < 1.0
-            {
+            if pos > loop_start && pos < loop_end && (state.beat_position - end_beat).abs() < 1.0 {
                 debug!(
                     "Link: suppressing tempo change near loop end (beat {:.2}, loop end beat {:.2})",
                     state.beat_position, end_beat
@@ -821,20 +802,12 @@ impl Engine {
 
     // ── Phase Drift Correction ───────────────────────────────────────────
 
-    fn correct_phase_drift(
-        &mut self,
-        host: &dyn LinkCallbacks,
-        state: &LinkState,
-        host_time: i64,
-    ) {
+    fn correct_phase_drift(&mut self, host: &dyn LinkCallbacks, state: &LinkState, host_time: i64) {
         let denom = state.timesig_denom as f64;
         let beat_unit = 4.0 / denom;
 
         // Calculate phase in the current beat unit
-        let link_phase = self
-            .session_state
-            .phase_at_time(host_time, beat_unit)
-            * (denom / 4.0);
+        let link_phase = self.session_state.phase_at_time(host_time, beat_unit) * (denom / 4.0);
 
         // Factor in loop/jump offsets for REAPER phase calculation.
         // This keeps phase coherent across loop iterations and user seeks.
@@ -870,9 +843,7 @@ impl Engine {
             let frame_time = self.frame_time_avg.average();
             let buf_len_time = self.audio_buf_duration();
 
-            let limit_denom = if buf_len_time > 0.0
-                && state.output_latency / buf_len_time > 3.0
-            {
+            let limit_denom = if buf_len_time > 0.0 && state.output_latency / buf_len_time > 3.0 {
                 1.0
             } else {
                 8.0

@@ -9,22 +9,16 @@
 //! All functions are designed to be called from `tokio::task::spawn_local`
 //! inside action handlers (main thread, async context).
 
-use daw::service::{
-    FxChainContext, FxService, ProjectContext, TrackRef, TrackService, UiService,
-};
+use daw::service::{FxChainContext, FxService, ProjectContext, TrackRef, TrackService, UiService};
 use signal::plugin_block::{FxRole, TrackRole};
-use signal::sidecar::{PresetKind, SignalSidecar, write_sidecar};
+use signal::sidecar::{write_sidecar, PresetKind, SignalSidecar};
 use signal::track_template::{self, Instrument, TemplateTier};
 use tracing::{info, warn};
 
 // ─── Shared helpers ──────────────────────────────────────────
 
 /// Show a REAPER GetUserInputs dialog. Returns field values if OK, None if cancelled.
-async fn show_save_dialog(
-    title: &str,
-    prompts: &[&str],
-    defaults: &[&str],
-) -> Option<Vec<String>> {
+async fn show_save_dialog(title: &str, prompts: &[&str], defaults: &[&str]) -> Option<Vec<String>> {
     let ui = daw::reaper::ui::ReaperUi::new();
     let result = ui
         .get_user_inputs(
@@ -44,9 +38,7 @@ async fn show_save_dialog(
 /// Get info for the first selected track. Returns (Track, TrackRef).
 async fn selected_track() -> Option<(daw::Track, TrackRef)> {
     let track_svc = daw::reaper::ReaperTrack::new();
-    let tracks = track_svc
-        .get_selected_tracks(ProjectContext::Current)
-        .await;
+    let tracks = track_svc.get_selected_tracks(ProjectContext::Current).await;
     let track = tracks.into_iter().next()?;
     let guid = track.guid.clone();
     Some((track, TrackRef::Guid(guid)))
@@ -158,12 +150,13 @@ pub async fn save_block() {
             FxChainContext::Track(track.guid.clone()),
         )
         .await;
-    let first_fx_name = fx_list.first().map(|fx| fx.name.clone()).unwrap_or_default();
+    let first_fx_name = fx_list
+        .first()
+        .map(|fx| fx.name.clone())
+        .unwrap_or_default();
     let role = FxRole::parse(&first_fx_name);
     let (default_name, default_type) = match &role {
-        FxRole::Block { block_type, name } => {
-            (name.clone(), block_type.as_str().to_string())
-        }
+        FxRole::Block { block_type, name } => (name.clone(), block_type.as_str().to_string()),
         FxRole::Module { name, .. } => (name.clone(), "module".to_string()),
         FxRole::GenericModule { name } => (name.clone(), "custom".to_string()),
         FxRole::Unknown { name } => (name.clone(), "custom".to_string()),
@@ -369,7 +362,12 @@ pub async fn save_layer() {
     ) {
         Ok(path) => {
             console_msg(&format!("[Signal Save] Layer saved: {}", path.display()));
-            info!("Saved layer preset: {} / {} → {}", preset_name, variation, path.display());
+            info!(
+                "Saved layer preset: {} / {} → {}",
+                preset_name,
+                variation,
+                path.display()
+            );
         }
         Err(e) => {
             console_msg(&format!("[Signal Save] Failed to save layer: {e}"));
@@ -410,9 +408,7 @@ pub async fn save_rig() {
         if depth <= 0 {
             break; // Exited the folder
         }
-        if let Some(child_chunk) =
-            get_chunk(&TrackRef::Guid(child.guid.clone())).await
-        {
+        if let Some(child_chunk) = get_chunk(&TrackRef::Guid(child.guid.clone())).await {
             chunks.push(child_chunk);
         }
         // folder_depth > 0 means this track opens a sub-folder,
@@ -600,11 +596,7 @@ pub async fn load_profile() {
 
     // Create a folder track for the profile
     let folder_guid = track_svc
-        .add_track(
-            ProjectContext::Current,
-            format!("[R] {profile_name}"),
-            None,
-        )
+        .add_track(ProjectContext::Current, format!("[R] {profile_name}"), None)
         .await;
     if folder_guid.is_empty() {
         console_msg("[Signal Load] Failed to create folder track");
@@ -653,11 +645,7 @@ pub async fn load_profile() {
         // Close the folder on the last track
         if i == total - 1 {
             track_svc
-                .set_folder_depth(
-                    ProjectContext::Current,
-                    TrackRef::Guid(track_guid),
-                    -1,
-                )
+                .set_folder_depth(ProjectContext::Current, TrackRef::Guid(track_guid), -1)
                 .await;
         }
     }

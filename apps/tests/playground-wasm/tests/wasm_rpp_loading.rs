@@ -57,8 +57,16 @@ fn load_rpp_with_no_audio_reports_failures() {
     });
 
     let project = result.unwrap();
-    assert_eq!(project.tracks.len(), 0, "No tracks should load without audio files");
-    assert_eq!(project.failed.len(), 2, "Both files should be in failed list");
+    assert_eq!(
+        project.tracks.len(),
+        0,
+        "No tracks should load without audio files"
+    );
+    assert_eq!(
+        project.failed.len(),
+        2,
+        "Both files should be in failed list"
+    );
 }
 
 #[wasm_bindgen_test]
@@ -94,11 +102,15 @@ fn load_rpp_filename_matching() {
 
     // "vocals.wav" should match exactly, "Media/bass.wav" should match via filename
     assert!(
-        resolved.iter().any(|(path, how)| path == "vocals.wav" && how == "exact"),
+        resolved
+            .iter()
+            .any(|(path, how)| path == "vocals.wav" && how == "exact"),
         "vocals.wav should exact-match. Got: {resolved:?}"
     );
     assert!(
-        resolved.iter().any(|(path, how)| path == "Media/bass.wav" && how.starts_with("filename")),
+        resolved
+            .iter()
+            .any(|(path, how)| path == "Media/bass.wav" && how.starts_with("filename")),
         "Media/bass.wav should match via filename stripping. Got: {resolved:?}"
     );
 }
@@ -107,7 +119,9 @@ fn load_rpp_filename_matching() {
 #[wasm_bindgen_test]
 fn parse_vienna_rpp_in_wasm() {
     // Include the RPP at compile time so it's available in WASM
-    let rpp_text = include_str!("/Users/codywright/Music/Projects/Live Tracks/Just Friends/Vienna - Couch/Vienna - Couch.RPP");
+    let rpp_text = include_str!(
+        "/Users/codywright/Music/Projects/Live Tracks/Just Friends/Vienna - Couch/Vienna - Couch.RPP"
+    );
 
     let files = rpp_loader::list_audio_files(rpp_text).unwrap();
     assert!(!files.is_empty(), "Vienna RPP should reference audio files");

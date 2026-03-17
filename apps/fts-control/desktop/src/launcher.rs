@@ -34,8 +34,14 @@ pub struct ReaperConfig {
 pub fn reaper_configs() -> Vec<ReaperConfig> {
     let reaper = utils::paths::reaper_dir();
     let live_app = reaper.join("FTS-LIVE.app");
-    let executable = live_app.join("Contents/MacOS/REAPER").to_string_lossy().to_string();
-    let resources = live_app.join("Contents/Resources").to_string_lossy().to_string();
+    let executable = live_app
+        .join("Contents/MacOS/REAPER")
+        .to_string_lossy()
+        .to_string();
+    let resources = live_app
+        .join("Contents/Resources")
+        .to_string_lossy()
+        .to_string();
 
     vec![
         ReaperConfig {
@@ -183,7 +189,10 @@ fn wrapper_executable_for_rig(rig_type: &str, fallback: &str) -> String {
         .join("Contents/MacOS/REAPER");
 
     if wrapper.exists() {
-        info!("Using wrapper bundle {}.app for rig '{}'", app_name, rig_type);
+        info!(
+            "Using wrapper bundle {}.app for rig '{}'",
+            app_name, rig_type
+        );
         wrapper.to_string_lossy().to_string()
     } else {
         tracing::warn!(

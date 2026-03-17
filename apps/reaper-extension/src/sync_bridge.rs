@@ -40,7 +40,10 @@ pub fn init() {
 
 /// Get a lock on the Link engine. Returns None if not initialized.
 fn with_engine<R>(f: impl FnOnce(&mut sync::link::Engine) -> R) -> Option<R> {
-    LINK_ENGINE.get().and_then(|m| m.lock().ok()).map(|mut e| f(&mut e))
+    LINK_ENGINE
+        .get()
+        .and_then(|m| m.lock().ok())
+        .map(|mut e| f(&mut e))
 }
 
 // ── Public API (called from timer_callback, actions, etc.) ───────────────────
@@ -60,7 +63,8 @@ pub fn tick() {
         if let Ok(mut engine) = engine_mutex.lock() {
             if engine.mode() != Mode::Off {
                 // Log peer count periodically (every ~5s = 150 ticks at 30Hz)
-                static TICK_COUNT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+                static TICK_COUNT: std::sync::atomic::AtomicU64 =
+                    std::sync::atomic::AtomicU64::new(0);
                 let count = TICK_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 if count % 150 == 0 {
                     info!(
@@ -214,13 +218,7 @@ impl LinkCallbacks for ReaperLinkCallbacks {
             // Loop range
             let mut loop_start: f64 = 0.0;
             let mut loop_end: f64 = 0.0;
-            low.GetSet_LoopTimeRange(
-                false,
-                false,
-                &mut loop_start,
-                &mut loop_end,
-                false,
-            );
+            low.GetSet_LoopTimeRange(false, false, &mut loop_start, &mut loop_end, false);
             let loop_range = if is_looping && loop_end > loop_start {
                 Some((loop_start, loop_end))
             } else {
@@ -328,7 +326,9 @@ impl LinkCallbacks for ReaperLinkCallbacks {
         unsafe {
             let mut start: f64 = 0.0;
             let mut end: f64 = 0.0;
-            reaper.low().GetSet_LoopTimeRange(false, false, &mut start, &mut end, false);
+            reaper
+                .low()
+                .GetSet_LoopTimeRange(false, false, &mut start, &mut end, false);
             if end > start {
                 Some((start, end))
             } else {
@@ -358,7 +358,9 @@ impl LinkCallbacks for ReaperLinkCallbacks {
     fn go_to_region(&self, region_id: i32) {
         let reaper = Reaper::get().medium_reaper();
         unsafe {
-            reaper.low().GoToRegion(std::ptr::null_mut(), region_id, false);
+            reaper
+                .low()
+                .GoToRegion(std::ptr::null_mut(), region_id, false);
         }
     }
 
@@ -381,17 +383,13 @@ impl LinkCallbacks for ReaperLinkCallbacks {
     fn remove_project_marker(&self, marker_id: i32) {
         let reaper = Reaper::get().medium_reaper();
         unsafe {
-            reaper.low().DeleteProjectMarkerByIndex(std::ptr::null_mut(), marker_id);
+            reaper
+                .low()
+                .DeleteProjectMarkerByIndex(std::ptr::null_mut(), marker_id);
         }
     }
 
-    fn set_tempo_at_position(
-        &self,
-        position: f64,
-        bpm: f64,
-        timesig_num: i32,
-        timesig_denom: i32,
-    ) {
+    fn set_tempo_at_position(&self, position: f64, bpm: f64, timesig_num: i32, timesig_denom: i32) {
         let reaper = Reaper::get().medium_reaper();
         unsafe {
             reaper.low().SetTempoTimeSigMarker(
@@ -431,9 +429,13 @@ impl LinkCallbacks for ReaperLinkCallbacks {
     fn create_midi_item(&self, track_index: usize, start: f64, end: f64) {
         let reaper = Reaper::get().medium_reaper();
         unsafe {
-            let track = reaper.low().GetTrack(std::ptr::null_mut(), track_index as i32);
+            let track = reaper
+                .low()
+                .GetTrack(std::ptr::null_mut(), track_index as i32);
             if !track.is_null() {
-                reaper.low().CreateNewMIDIItemInProj(track, start, end, std::ptr::null_mut());
+                reaper
+                    .low()
+                    .CreateNewMIDIItemInProj(track, start, end, std::ptr::null_mut());
             }
         }
     }
@@ -463,7 +465,9 @@ impl LinkCallbacks for ReaperLinkCallbacks {
         let reaper = Reaper::get().medium_reaper();
         unsafe {
             let mut m = measure;
-            reaper.low().TimeMap2_beatsToTime(std::ptr::null_mut(), beat, &mut m)
+            reaper
+                .low()
+                .TimeMap2_beatsToTime(std::ptr::null_mut(), beat, &mut m)
         }
     }
 
@@ -473,7 +477,11 @@ impl LinkCallbacks for ReaperLinkCallbacks {
         let reaper = Reaper::get().medium_reaper();
         let low = reaper.low();
         unsafe {
-            let count = low.CountProjectMarkers(std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut());
+            let count = low.CountProjectMarkers(
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            );
             // Iterate in reverse to avoid index shifting
             for i in (0..count).rev() {
                 let mut is_region = false;

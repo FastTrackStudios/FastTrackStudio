@@ -1,10 +1,10 @@
 use actions_proto::ActionResult;
-use daw::service::routing::{MidiChannelMapping, MidiDestinationChannel, MidiSourceChannel};
 use daw::reaper::safe_wrappers::{
     item as item_sw, markers as markers_sw, midi as midi_sw, routing as routing_sw,
     tempo as tempo_sw, time_map as time_map_sw, ReaperLow,
 };
 use daw::reaper::track::{add_track_on_main_thread, set_folder_depth_on_main_thread};
+use daw::service::routing::{MidiChannelMapping, MidiDestinationChannel, MidiSourceChannel};
 use midly::{
     num::{u15, u24, u28, u4, u7},
     Format, Header, MetaMessage, MidiMessage, Smf, Timing, TrackEvent, TrackEventKind,
@@ -244,8 +244,9 @@ fn gather_note_events(
                 continue;
             }
 
-            let item_start_tick =
-                qn_to_tick(daw::reaper::tempo_map::time_to_qn_on_main_thread(item_start));
+            let item_start_tick = qn_to_tick(daw::reaper::tempo_map::time_to_qn_on_main_thread(
+                item_start,
+            ));
             let item_end_tick = qn_to_tick(daw::reaper::tempo_map::time_to_qn_on_main_thread(
                 item_start + item_len,
             ));
@@ -330,8 +331,10 @@ fn gather_marker_events(bounds: &ExportBounds, song_start_tick: u32) -> Vec<Abso
         if marker.pos < bounds.start_seconds || marker.pos > bounds.end_seconds {
             continue;
         }
-        let tick = qn_to_tick(daw::reaper::tempo_map::time_to_qn_on_main_thread(marker.pos))
-            .saturating_sub(song_start_tick);
+        let tick = qn_to_tick(daw::reaper::tempo_map::time_to_qn_on_main_thread(
+            marker.pos,
+        ))
+        .saturating_sub(song_start_tick);
         result.push(AbsoluteEvent {
             tick,
             priority: 5,
@@ -362,9 +365,13 @@ fn gather_region_events(bounds: &ExportBounds, song_start_tick: u32) -> Vec<Abso
             priority: 6,
             kind: TrackEventKind::Meta(MetaMessage::Marker(leak_bytes(region.name.clone()))),
         });
-        if let Some(metadata) =
-            encode_keyflow_section_metadata(low, project, &region.name, region.start_seconds(), region.end_seconds())
-        {
+        if let Some(metadata) = encode_keyflow_section_metadata(
+            low,
+            project,
+            &region.name,
+            region.start_seconds(),
+            region.end_seconds(),
+        ) {
             result.push(AbsoluteEvent {
                 tick,
                 priority: 7,
@@ -383,7 +390,11 @@ fn gather_tempo_events(bounds: &ExportBounds, song_start_tick: u32) -> Vec<Absol
     let mut result = Vec::new();
 
     for i in 0..count {
-        let Some(point) = tempo_sw::get_tempo_marker(low, reaper_medium::ProjectContext::CurrentProject, i as i32) else {
+        let Some(point) = tempo_sw::get_tempo_marker(
+            low,
+            reaper_medium::ProjectContext::CurrentProject,
+            i as i32,
+        ) else {
             continue;
         };
         if point.timepos < bounds.start_seconds || point.timepos > bounds.end_seconds {
@@ -804,7 +815,10 @@ fn encode_keyflow_section_metadata(
     let end_measure = time_map_sw::qn_to_measures(low, proj_ctx, end_qn).measure_index + 1;
     let length = (end_measure - start_measure).max(1);
 
-    Some(format!("KFSECTION\t{}\t{}\t{}", name, start_measure, length))
+    Some(format!(
+        "KFSECTION\t{}\t{}\t{}",
+        name, start_measure, length
+    ))
 }
 
 fn track_name(track: &Track) -> String {

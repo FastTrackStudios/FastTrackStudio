@@ -10,7 +10,9 @@ use dioxus::prelude::*;
 use keyflow_ui::{
     ChartGraphics, ChartLayoutManager, CHART_CURSOR_TICK, CHART_SOURCE, SESSION_CHART_SOURCE,
 };
-use session_ui::{ACTIVE_INDICES, ACTIVE_PLAYBACK_IS_PLAYING, ACTIVE_PLAYBACK_MUSICAL, SONG_CHARTS};
+use session_ui::{
+    ACTIVE_INDICES, ACTIVE_PLAYBACK_IS_PLAYING, ACTIVE_PLAYBACK_MUSICAL, SONG_CHARTS,
+};
 use wasm_bindgen::JsCast;
 use web_sys::HtmlCanvasElement;
 

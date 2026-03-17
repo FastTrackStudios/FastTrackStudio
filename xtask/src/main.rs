@@ -337,7 +337,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
             println!("\n=== Playwright tests completed ===");
         }
-        Commands::ReaperTest { filter, no_build, keep_open } => {
+        Commands::ReaperTest {
+            filter,
+            no_build,
+            keep_open,
+        } => {
             println!("=== Running REAPER integration tests ===");
 
             // Platform-aware defaults
@@ -347,8 +351,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     let live_app = reaper.join("FTS-LIVE.app");
                     (
                         reaper.to_string_lossy().to_string(),
-                        live_app.join("Contents/MacOS/REAPER").to_string_lossy().to_string(),
-                        live_app.join("Contents/Resources").to_string_lossy().to_string(),
+                        live_app
+                            .join("Contents/MacOS/REAPER")
+                            .to_string_lossy()
+                            .to_string(),
+                        live_app
+                            .join("Contents/Resources")
+                            .to_string_lossy()
+                            .to_string(),
                         "libreaper_fts.dylib",
                     )
                 } else {
@@ -369,8 +379,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 cmd!(sh, "cargo build -p reaper-extension").run()?;
 
                 // Copy dylib/so to REAPER's UserPlugins
-                let reaper_path = std::env::var("REAPER_PATH")
-                    .unwrap_or_else(|_| default_reaper_path.clone());
+                let reaper_path =
+                    std::env::var("REAPER_PATH").unwrap_or_else(|_| default_reaper_path.clone());
                 let plugins_dir = std::path::PathBuf::from(&reaper_path).join("UserPlugins");
                 std::fs::create_dir_all(&plugins_dir)?;
 
@@ -402,8 +412,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     println!("\n>>> Building fts-macros CLAP plugin...");
                     let sh_plugins = Shell::new()?;
                     sh_plugins.change_dir(&fts_plugins_dir);
-                    cmd!(sh_plugins, "cargo run --package xtask -- bundle fts-macros --release")
-                        .run()?;
+                    cmd!(
+                        sh_plugins,
+                        "cargo run --package xtask -- bundle fts-macros --release"
+                    )
+                    .run()?;
 
                     // Install .clap bundle to REAPER's FX directory
                     let fx_dir = plugins_dir.join("FX");
@@ -469,10 +482,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
             // Step 3: Spawn REAPER (empty project, no splash)
             println!("\n>>> Spawning REAPER...");
-            let reaper_exe = std::env::var("REAPER_EXECUTABLE")
-                .unwrap_or(default_reaper_exe);
-            let reaper_resources = std::env::var("REAPER_RESOURCES")
-                .unwrap_or(default_reaper_resources);
+            let reaper_exe = std::env::var("REAPER_EXECUTABLE").unwrap_or(default_reaper_exe);
+            let reaper_resources =
+                std::env::var("REAPER_RESOURCES").unwrap_or(default_reaper_resources);
 
             // Use a session-specific socket path so multiple xtask runs don't collide.
             // We use the xtask PID (guaranteed unique while we're running) rather than
@@ -558,7 +570,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     for bin in &test_bins {
                         c = c.arg("--test").arg(bin);
                     }
-                    c = c.arg("--").arg("--ignored").arg("--nocapture").arg("--test-threads=4").arg(f);
+                    c = c
+                        .arg("--")
+                        .arg("--ignored")
+                        .arg("--nocapture")
+                        .arg("--test-threads=4")
+                        .arg(f);
                     c.run()
                 }
             } else {
@@ -693,9 +710,7 @@ fn run_package_library(output: Option<String>) -> Result<(), Box<dyn std::error:
         return Err("No library files found to package".into());
     }
 
-    let status = std::process::Command::new("tar")
-        .args(&args)
-        .status()?;
+    let status = std::process::Command::new("tar").args(&args).status()?;
 
     if !status.success() {
         return Err(format!("tar failed with status {status}").into());
@@ -705,7 +720,9 @@ fn run_package_library(output: Option<String>) -> Result<(), Box<dyn std::error:
     let meta = std::fs::metadata(&output_path)?;
     let size_mb = meta.len() as f64 / 1_048_576.0;
     println!("\nCreated {output_path} ({size_mb:.1} MB, {included} entries)");
-    println!("Upload with: gh release create library-v1 {output_path} --repo FastTrackStudios/fts-library");
+    println!(
+        "Upload with: gh release create library-v1 {output_path} --repo FastTrackStudios/fts-library"
+    );
 
     Ok(())
 }
@@ -833,7 +850,14 @@ fn run_setup_rigs(force: bool) -> Result<(), Box<dyn std::error::Error>> {
     // Build the reaper-launcher binary (release for small size)
     print!("  Building reaper-launcher...");
     let build_status = std::process::Command::new("cargo")
-        .args(["build", "-p", "reaper-launcher", "--release", "--bin", "reaper-launcher"])
+        .args([
+            "build",
+            "-p",
+            "reaper-launcher",
+            "--release",
+            "--bin",
+            "reaper-launcher",
+        ])
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped())
         .status()?;
@@ -843,7 +867,9 @@ fn run_setup_rigs(force: bool) -> Result<(), Box<dyn std::error::Error>> {
     println!(" OK");
 
     // Find the built binary
-    let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+    let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap();
     let launcher_bin = workspace_root.join("target/release/reaper-launcher");
     if !launcher_bin.exists() {
         return Err(format!("Launcher binary not found: {}", launcher_bin.display()).into());
@@ -863,8 +889,7 @@ fn run_setup_rigs(force: bool) -> Result<(), Box<dyn std::error::Error>> {
 
     for wrapper in &config.wrappers {
         let app_name = &wrapper.app_name;
-        let bundle_dir =
-            std::path::PathBuf::from(base_dir).join(format!("{app_name}.app"));
+        let bundle_dir = std::path::PathBuf::from(base_dir).join(format!("{app_name}.app"));
         let contents_dir = bundle_dir.join("Contents");
         let macos_dir = contents_dir.join("MacOS");
         let resources_dir = contents_dir.join("Resources");
@@ -873,7 +898,10 @@ fn run_setup_rigs(force: bool) -> Result<(), Box<dyn std::error::Error>> {
 
         // Skip if already set up (unless --force)
         if !force && wrapper_exe.exists() && plist_path.exists() {
-            println!("  SKIP {}.app (already exists, use --force to recreate)", app_name);
+            println!(
+                "  SKIP {}.app (already exists, use --force to recreate)",
+                app_name
+            );
             continue;
         }
 
@@ -908,12 +936,13 @@ fn run_setup_rigs(force: bool) -> Result<(), Box<dyn std::error::Error>> {
             .map_err(|e| format!("Failed to write launch.json: {e}"))?;
 
         // Copy the pre-built reaper-launcher binary as the bundle executable
-        std::fs::copy(&launcher_bin, &wrapper_exe).map_err(|e| {
-            format!("Failed to copy launcher binary into {}.app: {e}", app_name)
-        })?;
+        std::fs::copy(&launcher_bin, &wrapper_exe)
+            .map_err(|e| format!("Failed to copy launcher binary into {}.app: {e}", app_name))?;
 
         // Write Info.plist
-        let bundle_id_suffix = wrapper.rig_type.as_deref()
+        let bundle_id_suffix = wrapper
+            .rig_type
+            .as_deref()
             .unwrap_or(&wrapper.role)
             .replace('-', "");
         let bundle_id = format!("com.fasttrackstudio.{}", bundle_id_suffix);
@@ -1008,8 +1037,7 @@ fn run_setup_rigs(force: bool) -> Result<(), Box<dyn std::error::Error>> {
     print!("  Creating aliases...");
     for wrapper in &config.wrappers {
         let app_name = &wrapper.app_name;
-        let bundle_dir =
-            std::path::PathBuf::from(base_dir).join(format!("{app_name}.app"));
+        let bundle_dir = std::path::PathBuf::from(base_dir).join(format!("{app_name}.app"));
 
         for dir in &alias_dirs {
             // Use osascript to create a Finder alias
@@ -1056,12 +1084,8 @@ current application's NSWorkspace's sharedWorkspace()'s setIcon:iconImage forFil
     }
 
     // Restart Dock and Finder so updated icons appear immediately
-    let _ = std::process::Command::new("killall")
-        .arg("Dock")
-        .status();
-    let _ = std::process::Command::new("killall")
-        .arg("Finder")
-        .status();
+    let _ = std::process::Command::new("killall").arg("Dock").status();
+    let _ = std::process::Command::new("killall").arg("Finder").status();
 
     println!("\n=== Setup complete ===");
     println!("Wrapper bundles: {}", base_dir);
@@ -1353,11 +1377,8 @@ fn run_migrate(dry_run: bool) -> Result<(), Box<dyn std::error::Error>> {
                 let has_state = snapshot.state_data().is_some();
 
                 // Also check if there's an existing .RfxChain on disk in the old library
-                let existing_rfx = find_existing_rfxchain(
-                    &library_path,
-                    collection.name(),
-                    snapshot.name(),
-                );
+                let existing_rfx =
+                    find_existing_rfxchain(&library_path, collection.name(), snapshot.name());
 
                 if dry_run {
                     let source = if has_state {
@@ -1367,7 +1388,10 @@ fn run_migrate(dry_run: bool) -> Result<(), Box<dyn std::error::Error>> {
                     } else {
                         "skip:no-data"
                     };
-                    let vendor_part = vendor.as_deref().map(|v| format!("{v}/")).unwrap_or_default();
+                    let vendor_part = vendor
+                        .as_deref()
+                        .map(|v| format!("{v}/"))
+                        .unwrap_or_default();
                     println!(
                         "  [{source}] {category_folder}/{vendor_part}{collection_name}/{file_name}.RfxChain",
                     );
@@ -1526,8 +1550,13 @@ fn run_migrate(dry_run: bool) -> Result<(), Box<dyn std::error::Error>> {
 
     // ── Summary ──
 
-    println!("=== Migration {} ===",
-        if dry_run { "dry run complete" } else { "complete" }
+    println!(
+        "=== Migration {} ===",
+        if dry_run {
+            "dry run complete"
+        } else {
+            "complete"
+        }
     );
     println!("  FXChains root: {}", fxchains_root.display());
     println!("  Block presets: {block_count} ({snapshot_count} snapshots)");
@@ -1538,9 +1567,13 @@ fn run_migrate(dry_run: bool) -> Result<(), Box<dyn std::error::Error>> {
         // Verify the scanner can read what we wrote
         println!("\n--- Verifying scanner ---");
         let scanned_blocks = signal_storage::seed_data::fxchains_scan::scan_blocks(&fxchains_root);
-        let scanned_modules = signal_storage::seed_data::fxchains_scan::scan_modules(&fxchains_root);
-        println!("  Scanner found: {} block presets, {} module presets",
-            scanned_blocks.len(), scanned_modules.len());
+        let scanned_modules =
+            signal_storage::seed_data::fxchains_scan::scan_modules(&fxchains_root);
+        println!(
+            "  Scanner found: {} block presets, {} module presets",
+            scanned_blocks.len(),
+            scanned_modules.len()
+        );
     }
 
     Ok(())
@@ -1647,13 +1680,17 @@ fn render_sidecar_inline(s: &signal_storage::sidecar::SignalSidecar) -> String {
     }
 
     if !s.tags.is_empty() {
-        let tags: Vec<_> = s.tags.iter().map(|t| {
-            if t.contains(char::is_whitespace) || t.is_empty() {
-                format!("\"{}\"", t.replace('"', "\\\""))
-            } else {
-                t.clone()
-            }
-        }).collect();
+        let tags: Vec<_> = s
+            .tags
+            .iter()
+            .map(|t| {
+                if t.contains(char::is_whitespace) || t.is_empty() {
+                    format!("\"{}\"", t.replace('"', "\\\""))
+                } else {
+                    t.clone()
+                }
+            })
+            .collect();
         out.push_str(&format!("tags ({})\n", tags.join(" ")));
     }
 

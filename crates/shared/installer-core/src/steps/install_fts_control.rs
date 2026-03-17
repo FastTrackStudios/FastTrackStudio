@@ -15,15 +15,18 @@ pub async fn install_fts_control(
 ) -> eyre::Result<()> {
     let dest = install_root.join("FTS-Control.app");
 
-    let _ = tx.send(InstallEvent::StepProgress {
-        step: InstallStep::InstallFtsControl,
-        fraction: 0.3,
-        message: "Copying FTS Control...".into(),
-    }).await;
+    let _ = tx
+        .send(InstallEvent::StepProgress {
+            step: InstallStep::InstallFtsControl,
+            fraction: 0.3,
+            message: "Copying FTS Control...".into(),
+        })
+        .await;
 
     // Remove existing
     if dest.exists() {
-        tokio::fs::remove_dir_all(&dest).await
+        tokio::fs::remove_dir_all(&dest)
+            .await
             .wrap_err("Failed to remove existing FTS-Control.app")?;
     }
 

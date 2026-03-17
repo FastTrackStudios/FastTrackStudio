@@ -193,7 +193,10 @@ impl WebClientService for WebClientHandler {
             }
 
             SetlistEvent::SongEntered { index, song, .. } => {
-                log(&format!("[fts-control] Entered song {}: {}", index, song.name));
+                log(&format!(
+                    "[fts-control] Entered song {}: {}",
+                    index, song.name
+                ));
             }
 
             SetlistEvent::SongExited { index, .. } => {

@@ -8,30 +8,21 @@ use tracing::info;
 use crate::progress::{EventSender, InstallEvent, InstallStep};
 
 /// Mount the DMG, copy REAPER.app to the install dir, then detach.
-pub async fn extract_dmg(
-    dmg_path: &Path,
-    reaper_dir: &Path,
-    tx: &EventSender,
-) -> eyre::Result<()> {
-    let mount_point = tempfile::tempdir()
-        .wrap_err("Failed to create temp mount point")?;
+pub async fn extract_dmg(dmg_path: &Path, reaper_dir: &Path, tx: &EventSender) -> eyre::Result<()> {
+    let mount_point = tempfile::tempdir().wrap_err("Failed to create temp mount point")?;
     let mount_path = mount_point.path();
 
-    let _ = tx.send(InstallEvent::StepProgress {
-        step: InstallStep::ExtractDmg,
-        fraction: 0.1,
-        message: "Mounting disk image...".into(),
-    }).await;
+    let _ = tx
+        .send(InstallEvent::StepProgress {
+            step: InstallStep::ExtractDmg,
+            fraction: 0.1,
+            message: "Mounting disk image...".into(),
+        })
+        .await;
 
     // Mount DMG
     let status = tokio::process::Command::new("hdiutil")
-        .args([
-            "attach",
-            "-nobrowse",
-            "-noverify",
-            "-quiet",
-            "-mountpoint",
-        ])
+        .args(["attach", "-nobrowse", "-noverify", "-quiet", "-mountpoint"])
         .arg(mount_path)
         .arg(dmg_path)
         .status()
@@ -43,18 +34,21 @@ pub async fn extract_dmg(
     }
 
     // Find REAPER.app in the mounted volume
-    let _ = tx.send(InstallEvent::StepProgress {
-        step: InstallStep::ExtractDmg,
-        fraction: 0.4,
-        message: "Copying REAPER.app...".into(),
-    }).await;
+    let _ = tx
+        .send(InstallEvent::StepProgress {
+            step: InstallStep::ExtractDmg,
+            fraction: 0.4,
+            message: "Copying REAPER.app...".into(),
+        })
+        .await;
 
     let reaper_app_src = find_reaper_app(mount_path).await?;
     let reaper_app_dst = reaper_dir.join("REAPER.app");
 
     // Remove existing if present
     if reaper_app_dst.exists() {
-        tokio::fs::remove_dir_all(&reaper_app_dst).await
+        tokio::fs::remove_dir_all(&reaper_app_dst)
+            .await
             .wrap_err("Failed to remove existing REAPER.app")?;
     }
 
@@ -76,11 +70,13 @@ pub async fn extract_dmg(
     info!("Copied REAPER.app to {}", reaper_app_dst.display());
 
     // Detach DMG
-    let _ = tx.send(InstallEvent::StepProgress {
-        step: InstallStep::ExtractDmg,
-        fraction: 0.9,
-        message: "Unmounting disk image...".into(),
-    }).await;
+    let _ = tx
+        .send(InstallEvent::StepProgress {
+            step: InstallStep::ExtractDmg,
+            fraction: 0.9,
+            message: "Unmounting disk image...".into(),
+        })
+        .await;
 
     let _ = tokio::process::Command::new("hdiutil")
         .args(["detach", "-quiet"])
@@ -101,5 +97,8 @@ async fn find_reaper_app(mount_path: &Path) -> eyre::Result<PathBuf> {
             return Ok(entry.path());
         }
     }
-    eyre::bail!("REAPER.app not found in mounted DMG at {}", mount_path.display())
+    eyre::bail!(
+        "REAPER.app not found in mounted DMG at {}",
+        mount_path.display()
+    )
 }

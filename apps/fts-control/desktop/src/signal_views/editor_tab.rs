@@ -87,7 +87,6 @@ pub(crate) fn SignalEditorTab() -> Element {
     // Block detail panel expanded state
     let mut detail_expanded = use_signal(|| false);
 
-
     // Load presets when rig_type changes
     {
         let signal = signal.clone();

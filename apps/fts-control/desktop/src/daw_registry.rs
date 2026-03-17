@@ -22,8 +22,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock, RwLock};
 use std::time::Duration;
 
-use daw::Daw;
 use daw::service::ProjectInfo;
+use daw::Daw;
 use roam::ErasedCaller;
 use signal::reaper_applier::ReaperPatchApplier;
 use signal::rig_scene_manager::RigSceneManager;
@@ -150,7 +150,10 @@ pub fn signal_daw() -> Option<Daw> {
 
 /// Get the rig scene manager if a Signal DAW has been discovered and wired.
 pub fn signal_rig_scene_manager() -> Option<Arc<RigSceneManager>> {
-    SIGNAL_RIG_SCENE_MANAGER.read().expect("lock poisoned").clone()
+    SIGNAL_RIG_SCENE_MANAGER
+        .read()
+        .expect("lock poisoned")
+        .clone()
 }
 
 /// Register a preset_id → FX GUID mapping (called after FX capture).
@@ -452,7 +455,10 @@ fn spawn_daw_connection(pid: u32, path: PathBuf) {
                 Err(e) => {
                     attempt += 1;
                     if attempt >= max_attempts {
-                        warn!(pid, "Failed to connect to DAW after {} attempts: {}", attempt, e);
+                        warn!(
+                            pid,
+                            "Failed to connect to DAW after {} attempts: {}", attempt, e
+                        );
                         DawRegistry::global()
                             .connecting
                             .write()
@@ -460,7 +466,13 @@ fn spawn_daw_connection(pid: u32, path: PathBuf) {
                             .remove(&pid);
                         return;
                     }
-                    debug!(pid, attempt, delay_ms = delay.as_millis(), "Connection attempt failed, retrying: {}", e);
+                    debug!(
+                        pid,
+                        attempt,
+                        delay_ms = delay.as_millis(),
+                        "Connection attempt failed, retrying: {}",
+                        e
+                    );
                     tokio::time::sleep(delay).await;
                     delay *= 2;
                 }
@@ -622,13 +634,19 @@ async fn wire_rig_scene_manager(daw: &Daw, project_name: &str, rig_name: &str) {
             match found {
                 Some(p) => p,
                 None => {
-                    warn!("Cannot wire rig scene manager: project '{}' not found", project_name);
+                    warn!(
+                        "Cannot wire rig scene manager: project '{}' not found",
+                        project_name
+                    );
                     return;
                 }
             }
         }
         Err(e) => {
-            warn!("Cannot wire rig scene manager: failed to list projects: {}", e);
+            warn!(
+                "Cannot wire rig scene manager: failed to list projects: {}",
+                e
+            );
             return;
         }
     };

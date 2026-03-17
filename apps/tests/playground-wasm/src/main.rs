@@ -10,9 +10,8 @@ use daw::service::{
     track::{TrackRef, TrackService},
 };
 use daw::standalone::{
-    StandaloneMarker, StandaloneProject, StandaloneRegion, StandaloneTrack,
-    StandaloneTransport,
-    audio_engine::{AudioEngine, TrackHandle, decode_audio_with_extension, test_tone, rpp_loader},
+    StandaloneMarker, StandaloneProject, StandaloneRegion, StandaloneTrack, StandaloneTransport,
+    audio_engine::{AudioEngine, TrackHandle, decode_audio_with_extension, rpp_loader, test_tone},
 };
 use dioxus::prelude::*;
 use std::sync::Arc;
@@ -184,7 +183,9 @@ fn AudioPanel() -> Element {
 
     // Load demo tones
     let load_demo = move |_| {
-        let Some(eng) = ensure_engine(&mut engine, &mut error_msg) else { return };
+        let Some(eng) = ensure_engine(&mut engine, &mut error_msg) else {
+            return;
+        };
         eng.clear_tracks();
         let sample_rate = eng.sample_rate();
         let demo = test_tone::demo_tracks(10.0, sample_rate);
@@ -193,7 +194,12 @@ fn AudioPanel() -> Element {
             let dur = audio.duration_seconds();
             let handle = eng.add_track(audio);
             states.push(AudioTrackState {
-                handle, name: name.to_string(), gain: 1.0, muted: false, soloed: false, duration: dur,
+                handle,
+                name: name.to_string(),
+                gain: 1.0,
+                muted: false,
+                soloed: false,
+                duration: dur,
             });
         }
         audio_tracks.set(states);
@@ -206,7 +212,9 @@ fn AudioPanel() -> Element {
         #[cfg(target_arch = "wasm32")]
         {
             let file_data_list = evt.files();
-            if file_data_list.is_empty() { return; }
+            if file_data_list.is_empty() {
+                return;
+            }
 
             tracing::info!("Folder selected: {} files", file_data_list.len());
             loading.set(true);
@@ -230,9 +238,12 @@ fn AudioPanel() -> Element {
                             }
                             Err(e) => tracing::warn!("Failed to read RPP {}: {:?}", name, e),
                         }
-                    } else if lower.ends_with(".wav") || lower.ends_with(".mp3")
-                        || lower.ends_with(".ogg") || lower.ends_with(".flac")
-                        || lower.ends_with(".aac") || lower.ends_with(".m4a")
+                    } else if lower.ends_with(".wav")
+                        || lower.ends_with(".mp3")
+                        || lower.ends_with(".ogg")
+                        || lower.ends_with(".flac")
+                        || lower.ends_with(".aac")
+                        || lower.ends_with(".m4a")
                     {
                         match file_data.read_bytes().await {
                             Ok(bytes) => {
@@ -251,7 +262,10 @@ fn AudioPanel() -> Element {
                     return;
                 };
 
-                status_msg.set(Some(format!("Decoding {} audio files...", audio_files.len())));
+                status_msg.set(Some(format!(
+                    "Decoding {} audio files...",
+                    audio_files.len()
+                )));
 
                 let Some(eng) = ensure_engine(&mut engine, &mut error_msg) else {
                     loading.set(false);
@@ -294,13 +308,22 @@ fn AudioPanel() -> Element {
                         duration.set(project.duration);
 
                         let msg = if project.failed.is_empty() {
-                            format!("Loaded {} tracks ({:.0}s)", project.tracks.len(), project.duration)
+                            format!(
+                                "Loaded {} tracks ({:.0}s)",
+                                project.tracks.len(),
+                                project.duration
+                            )
                         } else {
                             format!(
                                 "Loaded {} tracks, {} failed: {}",
                                 project.tracks.len(),
                                 project.failed.len(),
-                                project.failed.iter().map(|(f, _)| f.as_str()).collect::<Vec<_>>().join(", ")
+                                project
+                                    .failed
+                                    .iter()
+                                    .map(|(f, _)| f.as_str())
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
                             )
                         };
                         status_msg.set(Some(msg));

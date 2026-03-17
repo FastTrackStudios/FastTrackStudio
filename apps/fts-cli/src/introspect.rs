@@ -12,8 +12,8 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use daw::Daw;
 use daw::service::{Fx, FxParameter, FxType};
+use daw::Daw;
 use eyre::Result;
 use macromod::MacroBank;
 use serde::{Deserialize, Serialize};

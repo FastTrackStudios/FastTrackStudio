@@ -4,8 +4,7 @@
 //! Provides utilities for working with tracks, items, takes, and windows.
 
 use crate::input::constants::{
-    TAKE_MIN_HEIGHT_COUNT, TAKE_MIN_HEIGHT_HIGH,
-    TAKE_MIN_HEIGHT_LOW, TCP_MASTER_GAP,
+    TAKE_MIN_HEIGHT_COUNT, TAKE_MIN_HEIGHT_HIGH, TAKE_MIN_HEIGHT_LOW, TCP_MASTER_GAP,
 };
 use reaper_low::raw::*;
 use reaper_medium::Reaper as MediumReaper;
@@ -548,7 +547,7 @@ pub fn is_point_in_arrange(
     medium_reaper: &MediumReaper,
 ) -> (bool, Option<HWND>) {
     use reaper_low::Swell;
-    
+
     use reaper_low::raw::RECT;
 
     let arrange_hwnd = match crate::input::reaper_windows::get_arrange_wnd(medium_reaper) {
@@ -617,7 +616,7 @@ pub fn is_point_in_arrange(
 /// Returns (position, arrange_start, arrange_end, h_zoom)
 pub fn position_at_arrange_point(p: POINT, medium_reaper: &MediumReaper) -> (f64, f64, f64, f64) {
     use reaper_low::Swell;
-    
+
     use reaper_low::raw::RECT;
 
     let arrange_hwnd = match crate::input::reaper_windows::get_arrange_wnd(medium_reaper) {

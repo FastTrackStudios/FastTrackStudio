@@ -290,9 +290,7 @@ fn start_transport_sync_task(connection_lost: Rc<Cell<bool>>) {
                 ));
             }
             Err(e) => {
-                log(&format!(
-                    "[fts-control] Failed to get audio latency: {e:?}"
-                ));
+                log(&format!("[fts-control] Failed to get audio latency: {e:?}"));
             }
         }
 

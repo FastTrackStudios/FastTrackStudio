@@ -48,8 +48,7 @@ pub(crate) fn SignalPerformanceTab() -> Element {
                         // Set default active patch if none set
                         if SIGNAL_ACTIVE_PATCH_ID.peek().is_none() {
                             if let Some(first_patch) = first.patches.first() {
-                                *SIGNAL_ACTIVE_PATCH_ID.write() =
-                                    Some(first_patch.id.to_string());
+                                *SIGNAL_ACTIVE_PATCH_ID.write() = Some(first_patch.id.to_string());
                             }
                         }
 
@@ -68,8 +67,7 @@ pub(crate) fn SignalPerformanceTab() -> Element {
     }
 
     // Handler for macro knob changes — drives DAW FX parameters directly
-    let on_macro_change =
-        macro_handler::create_macro_change_handler(recorder, is_recording);
+    let on_macro_change = macro_handler::create_macro_change_handler(recorder, is_recording);
 
     rsx! {
         div { class: "flex flex-col h-full w-full overflow-hidden",

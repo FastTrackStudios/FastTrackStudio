@@ -42,7 +42,11 @@ pub fn ProgressStep(plan: InstallPlan, on_done: EventHandler<bool>) -> Element {
                         current_message.set(label.clone());
                         log_lines.write().push(format!(">> {label}"));
                     }
-                    InstallEvent::StepProgress { step: _, fraction: _, message } => {
+                    InstallEvent::StepProgress {
+                        step: _,
+                        fraction: _,
+                        message,
+                    } => {
                         current_message.set(message.clone());
                     }
                     InstallEvent::StepCompleted(step) => {

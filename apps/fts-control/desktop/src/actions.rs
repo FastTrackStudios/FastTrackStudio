@@ -311,8 +311,7 @@ pub(crate) fn dispatch_action(action_id: &str) {
                     let patch_ids = SIGNAL_PATCH_IDS.peek();
                     if let Some(patch_id_str) = patch_ids.get(idx).cloned() {
                         // Skip if already active
-                        if SIGNAL_ACTIVE_PATCH_ID.peek().as_deref() != Some(patch_id_str.as_str())
-                        {
+                        if SIGNAL_ACTIVE_PATCH_ID.peek().as_deref() != Some(patch_id_str.as_str()) {
                             let gen = PATCH_SWITCH_GEN
                                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
                                 + 1;
@@ -321,10 +320,8 @@ pub(crate) fn dispatch_action(action_id: &str) {
                             let mode = *SIGNAL_MODE.peek();
                             if let Some(signal) = try_consume_context::<signal::Signal>() {
                                 spawn(async move {
-                                    tokio::time::sleep(std::time::Duration::from_millis(50))
-                                        .await;
-                                    if PATCH_SWITCH_GEN
-                                        .load(std::sync::atomic::Ordering::Relaxed)
+                                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                                    if PATCH_SWITCH_GEN.load(std::sync::atomic::Ordering::Relaxed)
                                         != gen
                                     {
                                         return;

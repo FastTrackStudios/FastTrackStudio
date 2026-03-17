@@ -4,8 +4,8 @@
 //! wrap incoming events as [`SyncEvent`]s, and broadcast them through the engine.
 //! Also manages project-level subscriptions to detect new/closed projects.
 
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use daw::service::{
     ItemEvent, MarkerEvent, ProjectEvent, RegionEvent, TakeEvent, TempoMapEvent, TrackEvent,
@@ -109,7 +109,8 @@ pub async fn subscribe_project(
                     }
                 }
             }
-        }).named(&name);
+        })
+        .named(&name);
     }
 
     if config.tracks {
@@ -132,7 +133,8 @@ pub async fn subscribe_project(
                     }
                 }
             }
-        }).named(&name);
+        })
+        .named(&name);
     }
 
     if config.items {
@@ -155,7 +157,8 @@ pub async fn subscribe_project(
                     }
                 }
             }
-        }).named(&name);
+        })
+        .named(&name);
 
         let mut rx = project.items().subscribe_takes().await?;
         let ctx = ctx.clone();
@@ -176,7 +179,8 @@ pub async fn subscribe_project(
                     }
                 }
             }
-        }).named(&name);
+        })
+        .named(&name);
     }
 
     if config.tempo_map {
@@ -199,7 +203,8 @@ pub async fn subscribe_project(
                     }
                 }
             }
-        }).named(&name);
+        })
+        .named(&name);
     }
 
     if config.markers {
@@ -222,7 +227,8 @@ pub async fn subscribe_project(
                     }
                 }
             }
-        }).named(&name);
+        })
+        .named(&name);
     }
 
     if config.regions {
@@ -245,7 +251,8 @@ pub async fn subscribe_project(
                     }
                 }
             }
-        }).named(&name);
+        })
+        .named(&name);
     }
 
     // Note: FX subscriptions are per-chain (per track), not per-project.

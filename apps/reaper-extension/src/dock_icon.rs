@@ -207,8 +207,10 @@ fn set_tinted_dock_icon(base_icon_path: &str, rig_type: &str) -> bool {
         let badge_x = (size.width - badge_w) / 2.0;
         // Inset from bottom edge to stay within the icon's rounded squircle
         let badge_y = size.height * 0.12;
-        let badge_rect =
-            NSRect::new(NSPoint::new(badge_x, badge_y), NSSize::new(badge_w, badge_h));
+        let badge_rect = NSRect::new(
+            NSPoint::new(badge_x, badge_y),
+            NSSize::new(badge_w, badge_h),
+        );
         let badge_radius = if is_multiline {
             badge_h * 0.25
         } else {
@@ -221,8 +223,7 @@ fn set_tinted_dock_icon(base_icon_path: &str, rig_type: &str) -> bool {
         let shadow_offset = NSSize::new(0.0, -1.0);
         let _: () = msg_send![shadow, setShadowOffset: shadow_offset];
         let _: () = msg_send![shadow, setShadowBlurRadius: 4.0f64];
-        let shadow_color: id =
-            msg_send![class!(NSColor), colorWithWhite: 0.0f64 alpha: 0.6f64];
+        let shadow_color: id = msg_send![class!(NSColor), colorWithWhite: 0.0f64 alpha: 0.6f64];
         let _: () = msg_send![shadow, setShadowColor: shadow_color];
 
         let _: () = msg_send![class!(NSGraphicsContext), saveGraphicsState];

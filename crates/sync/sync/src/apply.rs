@@ -175,7 +175,11 @@ async fn apply_track(
             let muted = *muted;
             apply_track_mutation(daw, ctx, guid, move |handle| {
                 Box::pin(async move {
-                    if muted { handle.mute().await } else { handle.unmute().await }
+                    if muted {
+                        handle.mute().await
+                    } else {
+                        handle.unmute().await
+                    }
                 })
             })
             .await;
@@ -185,7 +189,11 @@ async fn apply_track(
             let soloed = *soloed;
             apply_track_mutation(daw, ctx, guid, move |handle| {
                 Box::pin(async move {
-                    if soloed { handle.solo().await } else { handle.unsolo().await }
+                    if soloed {
+                        handle.solo().await
+                    } else {
+                        handle.unsolo().await
+                    }
                 })
             })
             .await;
@@ -195,7 +203,11 @@ async fn apply_track(
             let armed = *armed;
             apply_track_mutation(daw, ctx, guid, move |handle| {
                 Box::pin(async move {
-                    if armed { handle.arm().await } else { handle.disarm().await }
+                    if armed {
+                        handle.arm().await
+                    } else {
+                        handle.disarm().await
+                    }
                 })
             })
             .await;
@@ -221,7 +233,11 @@ async fn apply_track(
             let selected = *selected;
             apply_track_mutation(daw, ctx, guid, move |handle| {
                 Box::pin(async move {
-                    if selected { handle.select().await } else { handle.deselect().await }
+                    if selected {
+                        handle.select().await
+                    } else {
+                        handle.deselect().await
+                    }
                 })
             })
             .await;
@@ -265,7 +281,9 @@ async fn apply_track(
                 warn!("Failed to remove track {guid}: {e}");
             }
         }
-        TrackEvent::Moved { guid, new_index, .. } => {
+        TrackEvent::Moved {
+            guid, new_index, ..
+        } => {
             // Track reordering is complex — log for now, implement later
             debug!("Track {guid} moved to index {new_index} (reordering not yet applied)");
         }
@@ -273,13 +291,11 @@ async fn apply_track(
 }
 
 /// Helper to resolve a project and track, then apply a mutation.
-async fn apply_track_mutation<F>(
-    daw: &Daw,
-    ctx: &ProjectContext,
-    guid: &str,
-    mutation: F,
-) where
-    F: FnOnce(daw::TrackHandle) -> std::pin::Pin<Box<dyn std::future::Future<Output = daw::Result<()>> + Send>>,
+async fn apply_track_mutation<F>(daw: &Daw, ctx: &ProjectContext, guid: &str, mutation: F)
+where
+    F: FnOnce(
+        daw::TrackHandle,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = daw::Result<()>> + Send>>,
 {
     let project = match resolve_project(daw, ctx).await {
         Some(p) => p,
@@ -319,7 +335,11 @@ async fn apply_fx(
             value,
         } => {
             let context_key = format!("{context:?}");
-            suppression.suppress(SuppressionKey::fx_param(&context_key, fx_guid, *param_index));
+            suppression.suppress(SuppressionKey::fx_param(
+                &context_key,
+                fx_guid,
+                *param_index,
+            ));
             debug!(
                 "FX param change: context={context:?} fx={fx_guid} param={param_index} value={value} (apply TBD)"
             );
@@ -351,9 +371,14 @@ async fn apply_item(
             apply_item_mutation(daw, ctx, item_guid, |handle| {
                 let pos = *new_position;
                 Box::pin(async move {
-                    handle.set_position(daw::service::primitives::PositionInSeconds::from_seconds(pos)).await
+                    handle
+                        .set_position(daw::service::primitives::PositionInSeconds::from_seconds(
+                            pos,
+                        ))
+                        .await
                 })
-            }).await;
+            })
+            .await;
         }
         ItemEvent::LengthChanged {
             item_guid,
@@ -364,9 +389,12 @@ async fn apply_item(
             apply_item_mutation(daw, ctx, item_guid, |handle| {
                 let len = *new_length;
                 Box::pin(async move {
-                    handle.set_length(daw::service::primitives::Duration::from_seconds(len)).await
+                    handle
+                        .set_length(daw::service::primitives::Duration::from_seconds(len))
+                        .await
                 })
-            }).await;
+            })
+            .await;
         }
         ItemEvent::MuteChanged {
             item_guid, muted, ..
@@ -375,9 +403,14 @@ async fn apply_item(
             let muted = *muted;
             apply_item_mutation(daw, ctx, item_guid, move |handle| {
                 Box::pin(async move {
-                    if muted { handle.mute().await } else { handle.unmute().await }
+                    if muted {
+                        handle.mute().await
+                    } else {
+                        handle.unmute().await
+                    }
                 })
-            }).await;
+            })
+            .await;
         }
         ItemEvent::VolumeChanged {
             item_guid, volume, ..
@@ -386,18 +419,20 @@ async fn apply_item(
             let volume = *volume;
             apply_item_mutation(daw, ctx, item_guid, move |handle| {
                 Box::pin(async move { handle.set_volume(volume).await })
-            }).await;
+            })
+            .await;
         }
         ItemEvent::Created {
-            track_guid,
-            item,
-            ..
+            track_guid, item, ..
         } => {
             suppression.suppress(SuppressionKey::item(&item.guid, "created"));
             if let Some(project) = resolve_project(daw, ctx).await {
                 if let Ok(Some(track)) = project.tracks().by_guid(track_guid).await {
-                    let pos = daw::service::primitives::PositionInSeconds::from_seconds(item.position.as_seconds());
-                    let len = daw::service::primitives::Duration::from_seconds(item.length.as_seconds());
+                    let pos = daw::service::primitives::PositionInSeconds::from_seconds(
+                        item.position.as_seconds(),
+                    );
+                    let len =
+                        daw::service::primitives::Duration::from_seconds(item.length.as_seconds());
                     if let Err(e) = track.items().add(pos, len).await {
                         warn!("Failed to add item on track {track_guid}: {e}");
                     }
@@ -408,7 +443,8 @@ async fn apply_item(
             suppression.suppress(SuppressionKey::item(item_guid, "deleted"));
             apply_item_mutation(daw, ctx, item_guid, |handle| {
                 Box::pin(async move { handle.delete().await })
-            }).await;
+            })
+            .await;
         }
         _ => {
             debug!("Item event not yet handled for sync apply: {event:?}");
@@ -417,13 +453,11 @@ async fn apply_item(
 }
 
 /// Helper to resolve a project and item by GUID, then apply a mutation.
-async fn apply_item_mutation<F>(
-    daw: &Daw,
-    ctx: &ProjectContext,
-    item_guid: &str,
-    mutation: F,
-) where
-    F: FnOnce(daw::ItemHandle) -> std::pin::Pin<Box<dyn std::future::Future<Output = daw::Result<()>> + Send>>,
+async fn apply_item_mutation<F>(daw: &Daw, ctx: &ProjectContext, item_guid: &str, mutation: F)
+where
+    F: FnOnce(
+        daw::ItemHandle,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = daw::Result<()>> + Send>>,
 {
     let project = match resolve_project(daw, ctx).await {
         Some(p) => p,
@@ -475,7 +509,9 @@ async fn apply_routing(
                 source_track_guid,
                 &format!("volume:{route_index}"),
             ));
-            debug!("Routing volume change on {source_track_guid}[{route_index}] → {volume} (apply TBD)");
+            debug!(
+                "Routing volume change on {source_track_guid}[{route_index}] → {volume} (apply TBD)"
+            );
         }
         _ => {
             debug!("Routing event not yet handled for sync apply: {event:?}");
@@ -499,7 +535,10 @@ async fn apply_tempo_map(
             // PointChanged carries the full TempoPoint but not an index.
             // We'd need to match by position to find the right index to update.
             // For now, log it — full tempo map sync will use MapChanged.
-            debug!("Tempo point changed at {:?} → {:.1} BPM (positional matching TBD)", point.position, point.bpm);
+            debug!(
+                "Tempo point changed at {:?} → {:.1} BPM (positional matching TBD)",
+                point.position, point.bpm
+            );
         }
         TempoMapEvent::MapChanged(_points) => {
             // Full map replacement — complex, defer
@@ -531,7 +570,12 @@ async fn apply_marker(
             if let Some(id) = marker.id {
                 suppression.suppress(SuppressionKey::marker(project_guid, id));
             }
-            let pos = marker.position.time.as_ref().map(|t| t.as_seconds()).unwrap_or(0.0);
+            let pos = marker
+                .position
+                .time
+                .as_ref()
+                .map(|t| t.as_seconds())
+                .unwrap_or(0.0);
             if let Err(e) = markers.add(pos, &marker.name).await {
                 warn!("Failed to add marker '{}': {e}", marker.name);
             }
@@ -539,7 +583,12 @@ async fn apply_marker(
         MarkerEvent::Changed(marker) => {
             if let Some(id) = marker.id {
                 suppression.suppress(SuppressionKey::marker(project_guid, id));
-                let pos = marker.position.time.as_ref().map(|t| t.as_seconds()).unwrap_or(0.0);
+                let pos = marker
+                    .position
+                    .time
+                    .as_ref()
+                    .map(|t| t.as_seconds())
+                    .unwrap_or(0.0);
                 let _ = markers.move_to(id, pos).await;
                 let _ = markers.rename(id, &marker.name).await;
                 if let Some(color) = marker.color {

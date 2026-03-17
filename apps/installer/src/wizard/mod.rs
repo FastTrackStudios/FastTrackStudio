@@ -1,11 +1,11 @@
 //! Wizard step components.
 
-mod welcome;
+mod done;
 mod location;
 mod progress;
-mod done;
+mod welcome;
 
-pub use welcome::WelcomeStep;
+pub use done::DoneStep;
 pub use location::LocationStep;
 pub use progress::ProgressStep;
-pub use done::DoneStep;
+pub use welcome::WelcomeStep;

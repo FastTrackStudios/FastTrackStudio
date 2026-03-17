@@ -91,7 +91,10 @@ async fn transport_play_pause_preserves_position() {
     transport.pause(ProjectContext::Current).await;
 
     let pos = transport.get_position(ProjectContext::Current).await;
-    assert!(pos >= 10.0, "Position should be >= 10.0 after play+pause, got {pos}");
+    assert!(
+        pos >= 10.0,
+        "Position should be >= 10.0 after play+pause, got {pos}"
+    );
 }
 
 #[wasm_bindgen_test]
@@ -101,7 +104,10 @@ async fn transport_tempo_get_set() {
 
     transport.set_tempo(ProjectContext::Current, 140.0).await;
     let tempo = transport.get_tempo(ProjectContext::Current).await;
-    assert!((tempo - 140.0).abs() < 0.01, "Expected 140 BPM, got {tempo}");
+    assert!(
+        (tempo - 140.0).abs() < 0.01,
+        "Expected 140 BPM, got {tempo}"
+    );
 }
 
 #[wasm_bindgen_test]
@@ -111,7 +117,10 @@ async fn transport_playrate() {
 
     transport.set_playrate(ProjectContext::Current, 2.0).await;
     let rate = transport.get_playrate(ProjectContext::Current).await;
-    assert!((rate - 2.0).abs() < 0.01, "Expected playrate 2.0, got {rate}");
+    assert!(
+        (rate - 2.0).abs() < 0.01,
+        "Expected playrate 2.0, got {rate}"
+    );
 }
 
 #[wasm_bindgen_test]
@@ -255,9 +264,7 @@ async fn region_at_position() {
 #[wasm_bindgen_test]
 async fn tempo_map_get_points() {
     let tempo_map = StandaloneTempoMap::new();
-    let points = tempo_map
-        .get_tempo_points(ProjectContext::Current)
-        .await;
+    let points = tempo_map.get_tempo_points(ProjectContext::Current).await;
     assert!(!points.is_empty(), "Should have tempo points");
 }
 
@@ -265,10 +272,11 @@ async fn tempo_map_get_points() {
 async fn tempo_map_get_tempo_at() {
     let tempo_map = StandaloneTempoMap::new();
     // At time 0, default mock data is 120 BPM
-    let bpm = tempo_map
-        .get_tempo_at(ProjectContext::Current, 0.0)
-        .await;
-    assert!((bpm - 120.0).abs() < 0.01, "Expected 120 BPM at t=0, got {bpm}");
+    let bpm = tempo_map.get_tempo_at(ProjectContext::Current, 0.0).await;
+    assert!(
+        (bpm - 120.0).abs() < 0.01,
+        "Expected 120 BPM at t=0, got {bpm}"
+    );
 }
 
 #[wasm_bindgen_test]
@@ -298,16 +306,26 @@ async fn transport_works_across_project_switch() {
 
     // New current project should not be playing
     let state = transport.get_play_state(ProjectContext::Current).await;
-    assert_eq!(state, PlayState::Stopped, "New project should start stopped");
+    assert_eq!(
+        state,
+        PlayState::Stopped,
+        "New project should start stopped"
+    );
 
     // Original project should still be playing (independent transport)
     let state = transport
         .get_play_state(ProjectContext::Project(list[0].guid.clone()))
         .await;
-    assert_eq!(state, PlayState::Playing, "Original project should still be playing");
+    assert_eq!(
+        state,
+        PlayState::Playing,
+        "Original project should still be playing"
+    );
 
     // Clean up
-    transport.stop(ProjectContext::Project(list[0].guid.clone())).await;
+    transport
+        .stop(ProjectContext::Project(list[0].guid.clone()))
+        .await;
 }
 
 // ─── Audio Engine Tests ──────────────────────────────────────────────────────
@@ -339,7 +357,10 @@ fn test_tone_chord() {
     assert_eq!(audio.frame_count(), 44100);
     // Verify samples are non-zero (actually has audio content)
     let max_abs = audio.samples.iter().map(|s| s.abs()).fold(0.0f32, f32::max);
-    assert!(max_abs > 0.1, "Chord should produce audible samples, max={max_abs}");
+    assert!(
+        max_abs > 0.1,
+        "Chord should produce audible samples, max={max_abs}"
+    );
 }
 
 #[wasm_bindgen_test]
@@ -408,7 +429,10 @@ fn audio_engine_creates_in_browser() {
             // Expected in headless mode — autoplay policy blocks AudioContext creation
             // This is not a test failure, just a browser limitation
             assert!(
-                e.contains("audio") || e.contains("Audio") || e.contains("device") || e.contains("NotAllowed"),
+                e.contains("audio")
+                    || e.contains("Audio")
+                    || e.contains("device")
+                    || e.contains("NotAllowed"),
                 "Unexpected error: {e}"
             );
         }

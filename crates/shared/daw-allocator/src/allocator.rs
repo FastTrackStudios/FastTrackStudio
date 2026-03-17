@@ -67,7 +67,10 @@ impl FtsAllocator {
         rt_detector: Box<dyn RtDetector>,
     ) -> std::sync::mpsc::Receiver<DeallocCommand> {
         let (sender, receiver) = std::sync::mpsc::sync_channel(capacity);
-        let state = AsyncDeallocState { sender, rt_detector };
+        let state = AsyncDeallocState {
+            sender,
+            rt_detector,
+        };
         if self.async_state.set(state).is_err() {
             panic!("FtsAllocator::init_async called more than once");
         }

@@ -70,12 +70,7 @@ impl ActionManager {
     }
 
     /// Add a remote host connection
-    pub async fn add_remote_host(
-        &mut self,
-        name: String,
-        address: String,
-        handle: ErasedCaller,
-    ) {
+    pub async fn add_remote_host(&mut self, name: String, address: String, handle: ErasedCaller) {
         let client = ActionsServiceClient::new(handle);
 
         // Query actions from the remote host

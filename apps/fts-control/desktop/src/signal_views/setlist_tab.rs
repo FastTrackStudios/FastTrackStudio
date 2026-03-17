@@ -180,7 +180,9 @@ pub(crate) fn SignalSetlistTab() -> Element {
                         .map(|(idx, id)| (id.clone(), idx))
                         .collect();
                     setlist.entries.sort_by_key(|entry| {
-                        pos.get(&entry.id.to_string()).copied().unwrap_or(usize::MAX)
+                        pos.get(&entry.id.to_string())
+                            .copied()
+                            .unwrap_or(usize::MAX)
                     });
                     let _ = signal.setlists().save(setlist).await;
                 }

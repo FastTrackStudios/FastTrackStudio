@@ -36,7 +36,10 @@ pub async fn discover(service_type: &str) -> mpsc::Receiver<PeerEvent> {
             let browse_rx = match daemon.browse(&dns_sd_type_clone) {
                 Ok(rx) => rx,
                 Err(e) => {
-                    warn!("Failed to start mDNS browse for {}: {}", dns_sd_type_clone, e);
+                    warn!(
+                        "Failed to start mDNS browse for {}: {}",
+                        dns_sd_type_clone, e
+                    );
                     return;
                 }
             };

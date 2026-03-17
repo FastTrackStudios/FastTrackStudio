@@ -21,9 +21,11 @@
 //! ```
 
 use actions_proto::ActionResult;
-use daw::Daw;
 use daw::sync::LocalCaller;
-use session::{SetlistServiceDispatcher, SetlistServiceImpl, SongServiceDispatcher, SongServiceImpl};
+use daw::Daw;
+use session::{
+    SetlistServiceDispatcher, SetlistServiceImpl, SongServiceDispatcher, SongServiceImpl,
+};
 use std::sync::OnceLock;
 use tracing::info;
 
@@ -65,19 +67,14 @@ impl SessionManager {
 
     /// Create a combined DAW + session handler for the Unix socket.
     pub fn create_handler(&self) -> RoutedHandler {
-        use session::{
-            setlist_service_service_descriptor, song_service_service_descriptor,
-        };
+        use session::{setlist_service_service_descriptor, song_service_service_descriptor};
 
         let setlist_dispatcher = SetlistServiceDispatcher::new(self.setlist_service.clone());
         let song_dispatcher = SongServiceDispatcher::new(self.song_service.clone());
 
         self.daw_handler
             .clone()
-            .with(
-                setlist_service_service_descriptor(),
-                setlist_dispatcher,
-            )
+            .with(setlist_service_service_descriptor(), setlist_dispatcher)
             .with(song_service_service_descriptor(), song_dispatcher)
     }
 }

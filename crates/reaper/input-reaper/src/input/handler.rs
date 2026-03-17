@@ -14,8 +14,8 @@ use input::command::InputCommand;
 use reaper_high::Reaper;
 use reaper_low::raw;
 use reaper_medium::{
-    AccelMsgKind, AcceleratorBehavior, AcceleratorKeyCode, AcceleratorPosition,
-    TranslateAccel, TranslateAccelArgs, TranslateAccelResult,
+    AccelMsgKind, AcceleratorBehavior, AcceleratorKeyCode, AcceleratorPosition, TranslateAccel,
+    TranslateAccelArgs, TranslateAccelResult,
 };
 use swell_ui::Window;
 use tracing::{debug, info};
@@ -383,16 +383,17 @@ impl TranslateAccel for InputHandler {
                     }
                     handled = true;
                 }
-                InputCommand::Pending { display: pending_display } => {
+                InputCommand::Pending {
+                    display: pending_display,
+                } => {
                     // Show which-key overlay with continuations from the trie
                     let proc = crate::input::processor::get_processor().read().unwrap();
                     if let Some(trie) = proc.normal_keytrie() {
                         let pending_chords = pending_display_to_chords(pending_display);
-                        let continuations =
-                            crate::input::keybinds::bridge::trie_continuations_at(
-                                trie,
-                                &pending_chords,
-                            );
+                        let continuations = crate::input::keybinds::bridge::trie_continuations_at(
+                            trie,
+                            &pending_chords,
+                        );
                         if !continuations.is_empty() {
                             crate::input::which_key_overlay::show(pending_display, &continuations);
                         }
@@ -430,7 +431,10 @@ impl TranslateAccel for InputHandler {
 
         if handled {
             // Hide overlay if action was executed (not pending)
-            if !commands.iter().any(|c| matches!(c, InputCommand::Pending { .. })) {
+            if !commands
+                .iter()
+                .any(|c| matches!(c, InputCommand::Pending { .. }))
+            {
                 if crate::input::which_key_overlay::is_visible() {
                     crate::input::which_key_overlay::hide();
                 }

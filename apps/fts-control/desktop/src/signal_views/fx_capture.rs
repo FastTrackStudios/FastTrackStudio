@@ -11,14 +11,14 @@
 //! existing preset with a matching `source:` tag (the raw REAPER plugin name).
 //! If found, the existing preset is shown instead of a new-capture form.
 
-use dioxus::prelude::*;
 use daw::FxParameter;
+use dioxus::prelude::*;
 use signal::block::BlockType;
 use signal::easing::EasingCurve;
 use signal::macro_bank::{GroupSelector, MacroBank, MacroGroup, MacroKnob};
-use signal::{MacroBinding, ResponseCurve};
 use signal::metadata::Metadata;
 use signal::param_curation::ParamCuration;
+use signal::{MacroBinding, ResponseCurve};
 use signal_ui::components::{Dialog, DialogClose, DialogFooter, DialogHeader, DialogTitle};
 use signal_ui::views::MiniKnob;
 use tracing::warn;
@@ -314,12 +314,12 @@ async fn fetch_library(signal: &signal::Signal) -> Vec<LibraryItem> {
             for p in presets {
                 let all_tags: Vec<String> = p.metadata().tags.as_slice().to_vec();
                 let source_tag = all_tags.iter().find(|t| t.starts_with("source:")).cloned();
-                let vendor = all_tags.iter().find_map(|t| {
-                    t.strip_prefix("vendor:").map(|v| v.to_string())
-                });
-                let format = all_tags.iter().find_map(|t| {
-                    t.strip_prefix("plugin:").map(|v| v.to_string())
-                });
+                let vendor = all_tags
+                    .iter()
+                    .find_map(|t| t.strip_prefix("vendor:").map(|v| v.to_string()));
+                let format = all_tags
+                    .iter()
+                    .find_map(|t| t.strip_prefix("plugin:").map(|v| v.to_string()));
                 let has_workflow_imported = all_tags.iter().any(|t| t == "workflow:imported");
                 let is_template = source_tag.is_none() && !has_workflow_imported;
                 let default_snapshot_id = p.default_snapshot().id().to_string();
@@ -373,15 +373,30 @@ fn parse_plugin_name(raw: &str) -> ParsedPluginName {
 
     // 1. Detect and strip format prefix
     let (format_tag, after_prefix) = if lower.starts_with("vst3:") || lower.starts_with("vst3i:") {
-        (Some("plugin:vst3"), raw.split_once(':').map(|(_, r)| r.trim()).unwrap_or(raw))
+        (
+            Some("plugin:vst3"),
+            raw.split_once(':').map(|(_, r)| r.trim()).unwrap_or(raw),
+        )
     } else if lower.starts_with("vst:") || lower.starts_with("vsti:") {
-        (Some("plugin:vst2"), raw.split_once(':').map(|(_, r)| r.trim()).unwrap_or(raw))
+        (
+            Some("plugin:vst2"),
+            raw.split_once(':').map(|(_, r)| r.trim()).unwrap_or(raw),
+        )
     } else if lower.starts_with("au:") || lower.starts_with("aui:") {
-        (Some("plugin:au"), raw.split_once(':').map(|(_, r)| r.trim()).unwrap_or(raw))
+        (
+            Some("plugin:au"),
+            raw.split_once(':').map(|(_, r)| r.trim()).unwrap_or(raw),
+        )
     } else if lower.starts_with("clap:") {
-        (Some("plugin:clap"), raw.split_once(':').map(|(_, r)| r.trim()).unwrap_or(raw))
+        (
+            Some("plugin:clap"),
+            raw.split_once(':').map(|(_, r)| r.trim()).unwrap_or(raw),
+        )
     } else if lower.starts_with("js:") {
-        (Some("plugin:jsfx"), raw.split_once(':').map(|(_, r)| r.trim()).unwrap_or(raw))
+        (
+            Some("plugin:jsfx"),
+            raw.split_once(':').map(|(_, r)| r.trim()).unwrap_or(raw),
+        )
     } else {
         (None, raw)
     };
@@ -389,9 +404,7 @@ fn parse_plugin_name(raw: &str) -> ParsedPluginName {
     // 2. Extract vendor from trailing parentheses: "BigSky (Strymon)" → ("BigSky", "Strymon")
     let (clean_name, vendor) = if let Some(paren_start) = after_prefix.rfind('(') {
         let before = after_prefix[..paren_start].trim();
-        let inside = after_prefix[paren_start + 1..]
-            .trim_end_matches(')')
-            .trim();
+        let inside = after_prefix[paren_start + 1..].trim_end_matches(')').trim();
         if !inside.is_empty() && !before.is_empty() {
             (before.to_string(), Some(inside.to_string()))
         } else {
@@ -635,7 +648,11 @@ fn build_capture_metadata(
     meta = meta.with_tag(source_tag(raw_plugin_name));
 
     // Pricing
-    meta = meta.with_tag(if is_paid { "workflow:paid" } else { "workflow:free" });
+    meta = meta.with_tag(if is_paid {
+        "workflow:paid"
+    } else {
+        "workflow:free"
+    });
 
     // Activation requirement
     meta = meta.with_tag(if requires_activation {
@@ -706,12 +723,7 @@ fn MacroEditorDialog(
     let mut show_add_picker = use_signal(|| false);
 
     // Derive bank data from local block
-    let bank_data = use_memo(move || {
-        local_block()
-            .macro_bank
-            .clone()
-            .unwrap_or_default()
-    });
+    let bank_data = use_memo(move || local_block().macro_bank.clone().unwrap_or_default());
 
     let bank = bank_data();
     let has_groups = bank.has_groups();
@@ -729,8 +741,14 @@ fn MacroEditorDialog(
 
     // Unbound parameters for "Add Assignment" picker
     let unbound_params: Vec<(String, String)> = {
-        let bound_ids: Vec<String> = selected_knob.as_ref()
-            .map(|k| k.bindings.iter().map(|b| b.target.param_id.clone()).collect())
+        let bound_ids: Vec<String> = selected_knob
+            .as_ref()
+            .map(|k| {
+                k.bindings
+                    .iter()
+                    .map(|b| b.target.param_id.clone())
+                    .collect()
+            })
             .unwrap_or_default();
         local_block()
             .parameters()
@@ -1295,7 +1313,8 @@ pub(crate) fn SignalCaptureTab() -> Element {
     let mut matched_block = use_signal(|| None::<signal::Block>);
     // Per-FX-instance block cache: keyed by FX GUID so each instance keeps
     // its own macro/curation state independently of the shared preset.
-    let mut instance_block_cache = use_signal(std::collections::HashMap::<String, signal::Block>::new);
+    let mut instance_block_cache =
+        use_signal(std::collections::HashMap::<String, signal::Block>::new);
     // Editing state for macros and curation
     let mut selected_macro_id = use_signal(|| None::<String>);
     let mut editing_macros = use_signal(|| false);
@@ -1361,7 +1380,12 @@ pub(crate) fn SignalCaptureTab() -> Element {
                         return true;
                     }
                 }
-                if item.block_type.display_name().to_lowercase().contains(query) {
+                if item
+                    .block_type
+                    .display_name()
+                    .to_lowercase()
+                    .contains(query)
+                {
                     return true;
                 }
                 // Search raw tags (e.g., "free", "paid", "mac", "licensed")
@@ -1424,20 +1448,25 @@ pub(crate) fn SignalCaptureTab() -> Element {
                     fx_list.set(fxs);
                 }
 
-                let Some(daw) = daw_registry::signal_daw() else { return };
-                let Ok(project) = daw.current_project().await else { return };
-                let Ok(Some(track)) = project.tracks().by_guid(&guid).await else { return };
-                let Ok(mut rx) = track.fx_chain().subscribe_events().await else { return };
+                let Some(daw) = daw_registry::signal_daw() else {
+                    return;
+                };
+                let Ok(project) = daw.current_project().await else {
+                    return;
+                };
+                let Ok(Some(track)) = project.tracks().by_guid(&guid).await else {
+                    return;
+                };
+                let Ok(mut rx) = track.fx_chain().subscribe_events().await else {
+                    return;
+                };
 
                 loop {
                     if FX_SUB_GEN.load(std::sync::atomic::Ordering::Relaxed) != gen {
                         break;
                     }
-                    match tokio::time::timeout(
-                        std::time::Duration::from_millis(500),
-                        rx.recv(),
-                    )
-                    .await
+                    match tokio::time::timeout(std::time::Duration::from_millis(500), rx.recv())
+                        .await
                     {
                         Ok(Ok(Some(_event))) => {
                             if let Some(fxs) = fetch_track_fx(&guid).await {
@@ -1458,9 +1487,10 @@ pub(crate) fn SignalCaptureTab() -> Element {
         let fx = selected_fx.read();
         let Some(ref fx) = *fx else { return None };
         let tag = source_tag(&fx.plugin_name);
-        library().iter().find(|item| {
-            item.source_tag.as_deref() == Some(tag.as_str())
-        }).cloned()
+        library()
+            .iter()
+            .find(|item| item.source_tag.as_deref() == Some(tag.as_str()))
+            .cloned()
     });
 
     // Load Block from per-instance cache (keyed by FX GUID) or fall back to
@@ -1489,7 +1519,9 @@ pub(crate) fn SignalCaptureTab() -> Element {
                             let block = preset.default_snapshot().block();
                             // Cache for this instance
                             if let Some(ref guid) = fx_guid {
-                                instance_block_cache.write().insert(guid.clone(), block.clone());
+                                instance_block_cache
+                                    .write()
+                                    .insert(guid.clone(), block.clone());
                             }
                             matched_block.set(Some(block));
                             return;
@@ -1551,7 +1583,9 @@ pub(crate) fn SignalCaptureTab() -> Element {
     let capture_signal = signal.clone();
     let on_capture = move |_| {
         let track_guid = selected_track_guid().unwrap_or_default();
-        let Some(ref fx) = *selected_fx.read() else { return };
+        let Some(ref fx) = *selected_fx.read() else {
+            return;
+        };
         let fx_guid = fx.guid.clone();
         let raw_plugin_name = fx.plugin_name.clone();
         let parsed = parse_plugin_name(&raw_plugin_name);
@@ -1577,18 +1611,21 @@ pub(crate) fn SignalCaptureTab() -> Element {
             match capture_fx_as_block(&track_guid, &fx_guid).await {
                 Ok((block, _state_data)) => {
                     let metadata = build_capture_metadata(
-                        &raw_plugin_name, &parsed, paid, activation, mac, win, lin, lin_yb,
+                        &raw_plugin_name,
+                        &parsed,
+                        paid,
+                        activation,
+                        mac,
+                        win,
+                        lin,
+                        lin_yb,
                     );
 
                     let preset = signal::Preset::with_default_snapshot(
                         signal::PresetId::new(),
                         capture_name.clone(),
                         bt,
-                        signal::Snapshot::new(
-                            signal::SnapshotId::new(),
-                            "Default",
-                            block,
-                        ),
+                        signal::Snapshot::new(signal::SnapshotId::new(), "Default", block),
                     )
                     .with_metadata(metadata);
 

@@ -33,7 +33,9 @@ impl MainThreadDispatcher {
         let (sender, receiver) = mpsc::channel();
         (
             Self { sender },
-            MainThreadReceiver { receiver: std::sync::Mutex::new(receiver) },
+            MainThreadReceiver {
+                receiver: std::sync::Mutex::new(receiver),
+            },
         )
     }
 

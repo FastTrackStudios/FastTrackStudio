@@ -88,11 +88,7 @@ pub fn create_macro_change_handler(
                 };
 
                 if let Err(e) = fx.param(target.param_index).set(param_val).await {
-                    tracing::warn!(
-                        "Failed to set FX param {}: {}",
-                        target.param_index,
-                        e
-                    );
+                    tracing::warn!("Failed to set FX param {}: {}", target.param_index, e);
                 }
             }
         });

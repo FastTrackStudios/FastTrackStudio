@@ -216,9 +216,8 @@ fn parent_knob(
     k.color = Some(color.into());
     let mut children = Vec::new();
     for (child, min, max) in child_ranges {
-        k.bindings.push(
-            MacroBinding::from_ids("self", &child.id, min, max),
-        );
+        k.bindings
+            .push(MacroBinding::from_ids("self", &child.id, min, max));
         children.push(child);
     }
     k.children = children;
@@ -251,7 +250,11 @@ fn apply_bypass_rules(bank: &mut MacroBank, rules: &BypassRules) {
             let v = parent_knob.value;
             for rule in parent_rules {
                 let active = rule.active_ranges.iter().any(|&(lo, hi)| v >= lo && v < hi);
-                if let Some(child) = parent_knob.children.iter_mut().find(|c| c.id == rule.child_id) {
+                if let Some(child) = parent_knob
+                    .children
+                    .iter_mut()
+                    .find(|c| c.id == rule.child_id)
+                {
                     child.bypassed = !active;
                 }
             }
@@ -269,15 +272,15 @@ fn drive_bypass_rules() -> Vec<BypassRule> {
     vec![
         BypassRule {
             child_id: "drive-1".into(),
-            active_ranges: vec![(0.01, 1.01)],               // on from 1% to 100%
+            active_ranges: vec![(0.01, 1.01)], // on from 1% to 100%
         },
         BypassRule {
             child_id: "drive-2".into(),
-            active_ranges: vec![(0.3, 0.6), (0.9, 1.01)],   // on at 30–60% and 90–100%
+            active_ranges: vec![(0.3, 0.6), (0.9, 1.01)], // on at 30–60% and 90–100%
         },
         BypassRule {
             child_id: "drive-3".into(),
-            active_ranges: vec![(0.6, 1.01)],                // on from 60% to 100%
+            active_ranges: vec![(0.6, 1.01)], // on from 60% to 100%
         },
     ]
 }
@@ -298,35 +301,89 @@ fn mock_preset_macro_bar() -> MacroBank {
     let rules = build_bypass_rules();
 
     // Input — no children
-    bank.add(knob("input", "Input", 0.75, "#6B7280", vec![("input", "gain", 0.0, 1.0)]));
+    bank.add(knob(
+        "input",
+        "Input",
+        0.75,
+        "#6B7280",
+        vec![("input", "gain", 0.0, 1.0)],
+    ));
 
     // Gate — no children
-    bank.add(knob("gate", "Gate", 0.3, "#EF4444", vec![
-        ("gate", "threshold", 0.0, 1.0),
-        ("gate", "release", 0.0, 1.0),
-    ]));
+    bank.add(knob(
+        "gate",
+        "Gate",
+        0.3,
+        "#EF4444",
+        vec![
+            ("gate", "threshold", 0.0, 1.0),
+            ("gate", "release", 0.0, 1.0),
+        ],
+    ));
 
     // Compression — no children
-    bank.add(knob("comp", "Comp", 0.5, "#3B82F6", vec![
-        ("comp", "ratio", 0.0, 1.0),
-        ("comp", "makeup", 0.0, 1.0),
-    ]));
+    bank.add(knob(
+        "comp",
+        "Comp",
+        0.5,
+        "#3B82F6",
+        vec![("comp", "ratio", 0.0, 1.0), ("comp", "makeup", 0.0, 1.0)],
+    ));
 
     // Drive — parent moves 3 sub-drive knobs AND toggles their bypass:
     //   0–30%:  Drive 1 only        (light breakup)
     //   30–60%: Drive 1 + 2         (crunch)
     //   60–100%: Drive 1 + 2 + 3    (full saturation)
     bank.add(parent_knob(
-        "drive", "Drive", 0.6, "#F97316",
+        "drive",
+        "Drive",
+        0.6,
+        "#F97316",
         vec![
-            (knob("drive-1", "Drive 1", 0.7, "#FB923C", vec![("drive", "stage1", 0.0, 1.0)]), 0.0, 0.8),
-            (knob("drive-2", "Drive 2", 0.4, "#FDBA74", vec![("drive", "stage2", 0.0, 1.0)]), 0.1, 0.6),
-            (knob("drive-3", "Drive 3", 0.2, "#FED7AA", vec![("drive", "stage3", 0.0, 1.0)]), 0.0, 0.4),
+            (
+                knob(
+                    "drive-1",
+                    "Drive 1",
+                    0.7,
+                    "#FB923C",
+                    vec![("drive", "stage1", 0.0, 1.0)],
+                ),
+                0.0,
+                0.8,
+            ),
+            (
+                knob(
+                    "drive-2",
+                    "Drive 2",
+                    0.4,
+                    "#FDBA74",
+                    vec![("drive", "stage2", 0.0, 1.0)],
+                ),
+                0.1,
+                0.6,
+            ),
+            (
+                knob(
+                    "drive-3",
+                    "Drive 3",
+                    0.2,
+                    "#FED7AA",
+                    vec![("drive", "stage3", 0.0, 1.0)],
+                ),
+                0.0,
+                0.4,
+            ),
         ],
     ));
 
     // Gain — no children
-    bank.add(knob("gain", "Gain", 0.5, "#EAB308", vec![("amp", "gain", 0.0, 1.0)]));
+    bank.add(knob(
+        "gain",
+        "Gain",
+        0.5,
+        "#EAB308",
+        vec![("amp", "gain", 0.0, 1.0)],
+    ));
 
     // Shape — bipolar tilt EQ (-100% to +100%, center = flat)
     //   Internal 0.0 = -100% (bass heavy): Low=0.9, Mid=0.35, High=0.1
@@ -341,11 +398,44 @@ fn mock_preset_macro_bar() -> MacroBank {
     //   High: 0.1 → 0.9  (normal — boosts as shape goes positive)
     {
         let mut shape = parent_knob(
-            "shape", "Shape", 0.5, "#22C55E",
+            "shape",
+            "Shape",
+            0.5,
+            "#22C55E",
             vec![
-                (knob("shape-low", "Low", 0.5, "#4ADE80", vec![("eq", "low", 0.0, 1.0)]), 0.9, 0.1),
-                (knob("shape-mid", "Mid", 0.5, "#86EFAC", vec![("eq", "mid", 0.0, 1.0)]), 0.35, 0.35),
-                (knob("shape-high", "High", 0.5, "#BBF7D0", vec![("eq", "high", 0.0, 1.0)]), 0.1, 0.9),
+                (
+                    knob(
+                        "shape-low",
+                        "Low",
+                        0.5,
+                        "#4ADE80",
+                        vec![("eq", "low", 0.0, 1.0)],
+                    ),
+                    0.9,
+                    0.1,
+                ),
+                (
+                    knob(
+                        "shape-mid",
+                        "Mid",
+                        0.5,
+                        "#86EFAC",
+                        vec![("eq", "mid", 0.0, 1.0)],
+                    ),
+                    0.35,
+                    0.35,
+                ),
+                (
+                    knob(
+                        "shape-high",
+                        "High",
+                        0.5,
+                        "#BBF7D0",
+                        vec![("eq", "high", 0.0, 1.0)],
+                    ),
+                    0.1,
+                    0.9,
+                ),
             ],
         );
         shape.bipolar = true;
@@ -353,46 +443,173 @@ fn mock_preset_macro_bar() -> MacroBank {
     }
 
     // Modulation — no children
-    bank.add(knob("mod", "Mod", 0.35, "#A855F7", vec![
-        ("mod", "rate", 0.0, 1.0),
-        ("mod", "depth", 0.0, 1.0),
-    ]));
+    bank.add(knob(
+        "mod",
+        "Mod",
+        0.35,
+        "#A855F7",
+        vec![("mod", "rate", 0.0, 1.0), ("mod", "depth", 0.0, 1.0)],
+    ));
 
     // Boost — no children
-    bank.add(knob("boost", "Boost", 0.45, "#EC4899", vec![("boost", "level", 0.0, 1.0)]));
+    bank.add(knob(
+        "boost",
+        "Boost",
+        0.45,
+        "#EC4899",
+        vec![("boost", "level", 0.0, 1.0)],
+    ));
 
     // NOTE: MacroBank::MAX_KNOBS is 8 and we already have 8.
     // For the preset bar we bypass the add() limit and push directly.
 
     // Delay — parent drives all delay sub-knobs
     bank.knobs.push(parent_knob(
-        "delay", "Delay", 0.5, "#06B6D4",
+        "delay",
+        "Delay",
+        0.5,
+        "#06B6D4",
         vec![
-            (knob("delay-type", "Type", 0.3, "#22D3EE", vec![("delay", "type", 0.0, 1.0)]), 0.0, 0.5),
-            (knob("delay-time", "Time", 0.5, "#67E8F9", vec![("delay", "time", 0.0, 1.0)]), 0.1, 0.8),
-            (knob("delay-fb", "Feedback", 0.4, "#A5F3FC", vec![("delay", "feedback", 0.0, 1.0)]), 0.0, 0.65),
-            (knob("delay-mix", "Mix", 0.5, "#CFFAFE", vec![("delay", "mix", 0.0, 1.0)]), 0.0, 0.7),
-            (knob("delay-level", "Level", 0.7, "#67E8F9", vec![("delay", "level", 0.0, 1.0)]), 0.3, 1.0),
+            (
+                knob(
+                    "delay-type",
+                    "Type",
+                    0.3,
+                    "#22D3EE",
+                    vec![("delay", "type", 0.0, 1.0)],
+                ),
+                0.0,
+                0.5,
+            ),
+            (
+                knob(
+                    "delay-time",
+                    "Time",
+                    0.5,
+                    "#67E8F9",
+                    vec![("delay", "time", 0.0, 1.0)],
+                ),
+                0.1,
+                0.8,
+            ),
+            (
+                knob(
+                    "delay-fb",
+                    "Feedback",
+                    0.4,
+                    "#A5F3FC",
+                    vec![("delay", "feedback", 0.0, 1.0)],
+                ),
+                0.0,
+                0.65,
+            ),
+            (
+                knob(
+                    "delay-mix",
+                    "Mix",
+                    0.5,
+                    "#CFFAFE",
+                    vec![("delay", "mix", 0.0, 1.0)],
+                ),
+                0.0,
+                0.7,
+            ),
+            (
+                knob(
+                    "delay-level",
+                    "Level",
+                    0.7,
+                    "#67E8F9",
+                    vec![("delay", "level", 0.0, 1.0)],
+                ),
+                0.3,
+                1.0,
+            ),
         ],
     ));
 
     // Reverb — parent drives all reverb sub-knobs
     bank.knobs.push(parent_knob(
-        "reverb", "Reverb", 0.4, "#0EA5E9",
+        "reverb",
+        "Reverb",
+        0.4,
+        "#0EA5E9",
         vec![
-            (knob("reverb-type", "Type", 0.2, "#38BDF8", vec![("reverb", "type", 0.0, 1.0)]), 0.0, 0.5),
-            (knob("reverb-time", "Time", 0.6, "#7DD3FC", vec![("reverb", "time", 0.0, 1.0)]), 0.1, 0.9),
-            (knob("reverb-fb", "Feedback", 0.3, "#BAE6FD", vec![("reverb", "feedback", 0.0, 1.0)]), 0.0, 0.5),
-            (knob("reverb-mix", "Mix", 0.45, "#E0F2FE", vec![("reverb", "mix", 0.0, 1.0)]), 0.0, 0.7),
-            (knob("reverb-level", "Level", 0.65, "#7DD3FC", vec![("reverb", "level", 0.0, 1.0)]), 0.3, 1.0),
+            (
+                knob(
+                    "reverb-type",
+                    "Type",
+                    0.2,
+                    "#38BDF8",
+                    vec![("reverb", "type", 0.0, 1.0)],
+                ),
+                0.0,
+                0.5,
+            ),
+            (
+                knob(
+                    "reverb-time",
+                    "Time",
+                    0.6,
+                    "#7DD3FC",
+                    vec![("reverb", "time", 0.0, 1.0)],
+                ),
+                0.1,
+                0.9,
+            ),
+            (
+                knob(
+                    "reverb-fb",
+                    "Feedback",
+                    0.3,
+                    "#BAE6FD",
+                    vec![("reverb", "feedback", 0.0, 1.0)],
+                ),
+                0.0,
+                0.5,
+            ),
+            (
+                knob(
+                    "reverb-mix",
+                    "Mix",
+                    0.45,
+                    "#E0F2FE",
+                    vec![("reverb", "mix", 0.0, 1.0)],
+                ),
+                0.0,
+                0.7,
+            ),
+            (
+                knob(
+                    "reverb-level",
+                    "Level",
+                    0.65,
+                    "#7DD3FC",
+                    vec![("reverb", "level", 0.0, 1.0)],
+                ),
+                0.3,
+                1.0,
+            ),
         ],
     ));
 
     // Motion — no children
-    bank.knobs.push(knob("motion", "Motion", 0.2, "#8B5CF6", vec![("motion", "amount", 0.0, 1.0)]));
+    bank.knobs.push(knob(
+        "motion",
+        "Motion",
+        0.2,
+        "#8B5CF6",
+        vec![("motion", "amount", 0.0, 1.0)],
+    ));
 
     // Output — no children
-    bank.knobs.push(knob("output", "Output", 0.8, "#6B7280", vec![("output", "level", 0.0, 1.0)]));
+    bank.knobs.push(knob(
+        "output",
+        "Output",
+        0.8,
+        "#6B7280",
+        vec![("output", "level", 0.0, 1.0)],
+    ));
 
     // Apply initial bypass states based on current parent values
     apply_bypass_rules(&mut bank, &rules);
@@ -495,10 +712,7 @@ fn MacroBar(
     selected_macro_id: Signal<Option<String>>,
     bypass_rules: Signal<BypassRules>,
 ) -> Element {
-    let bank = block()
-        .macro_bank
-        .clone()
-        .unwrap_or_default();
+    let bank = block().macro_bank.clone().unwrap_or_default();
 
     rsx! {
         div { class: "shrink-0 px-6 py-4 border-b border-zinc-800/50 bg-zinc-950/30 overflow-visible",
@@ -880,13 +1094,9 @@ fn AssignmentPanel(
     block: Signal<signal::Block>,
     selected_macro_id: Signal<Option<String>>,
 ) -> Element {
-    let bank = block()
-        .macro_bank
-        .clone()
-        .unwrap_or_default();
+    let bank = block().macro_bank.clone().unwrap_or_default();
 
-    let selected_knob = selected_macro_id()
-        .and_then(|id| bank.get_knob(&id).cloned());
+    let selected_knob = selected_macro_id().and_then(|id| bank.get_knob(&id).cloned());
 
     let unbound_params: Vec<(String, String)> = {
         let bound_ids: Vec<String> = selected_knob

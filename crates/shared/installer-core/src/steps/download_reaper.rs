@@ -6,8 +6,8 @@ use eyre::Context;
 use futures::StreamExt;
 use tracing::info;
 
-use crate::progress::{EventSender, InstallEvent, InstallStep};
 use crate::plan::InstallPlan;
+use crate::progress::{EventSender, InstallEvent, InstallStep};
 
 /// Download REAPER to a temp directory. Returns the path to the downloaded DMG.
 ///
@@ -21,14 +21,19 @@ pub async fn download_reaper(plan: &InstallPlan, tx: &EventSender) -> eyre::Resu
     let dest = download_dir.join(filename);
 
     info!("Downloading REAPER from {url}");
-    let _ = tx.send(InstallEvent::StepProgress {
-        step: InstallStep::DownloadReaper,
-        fraction: 0.0,
-        message: format!("Downloading {filename}..."),
-    }).await;
+    let _ = tx
+        .send(InstallEvent::StepProgress {
+            step: InstallStep::DownloadReaper,
+            fraction: 0.0,
+            message: format!("Downloading {filename}..."),
+        })
+        .await;
 
     let client = reqwest::Client::new();
-    let response = client.get(&url).send().await
+    let response = client
+        .get(&url)
+        .send()
+        .await
         .wrap_err("Failed to connect to reaper.fm")?;
 
     if !response.status().is_success() {
@@ -42,17 +47,20 @@ pub async fn download_reaper(plan: &InstallPlan, tx: &EventSender) -> eyre::Resu
         if let Ok(meta) = tokio::fs::metadata(&dest).await {
             if total_size > 0 && meta.len() == total_size {
                 info!("REAPER already downloaded at {}", dest.display());
-                let _ = tx.send(InstallEvent::StepProgress {
-                    step: InstallStep::DownloadReaper,
-                    fraction: 1.0,
-                    message: "Already downloaded".into(),
-                }).await;
+                let _ = tx
+                    .send(InstallEvent::StepProgress {
+                        step: InstallStep::DownloadReaper,
+                        fraction: 1.0,
+                        message: "Already downloaded".into(),
+                    })
+                    .await;
                 return Ok(dest);
             }
         }
     }
 
-    let mut file = tokio::fs::File::create(&dest).await
+    let mut file = tokio::fs::File::create(&dest)
+        .await
         .wrap_err_with(|| format!("Failed to create {}", dest.display()))?;
 
     let mut stream = response.bytes_stream();
@@ -68,11 +76,13 @@ pub async fn download_reaper(plan: &InstallPlan, tx: &EventSender) -> eyre::Resu
             let fraction = downloaded as f32 / total_size as f32;
             let mb = downloaded as f32 / 1_048_576.0;
             let total_mb = total_size as f32 / 1_048_576.0;
-            let _ = tx.send(InstallEvent::StepProgress {
-                step: InstallStep::DownloadReaper,
-                fraction,
-                message: format!("{mb:.1} / {total_mb:.1} MB"),
-            }).await;
+            let _ = tx
+                .send(InstallEvent::StepProgress {
+                    step: InstallStep::DownloadReaper,
+                    fraction,
+                    message: format!("{mb:.1} / {total_mb:.1} MB"),
+                })
+                .await;
         }
     }
 

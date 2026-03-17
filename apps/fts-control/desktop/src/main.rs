@@ -572,7 +572,8 @@ fn App() -> Element {
                             }
                         }
 
-                        session::SetlistEvent::TransportUpdate(transports) => { let transports = transports.clone();
+                        session::SetlistEvent::TransportUpdate(transports) => {
+                            let transports = transports.clone();
                             // PERFORMANCE: Only write to signals if values actually changed.
                             // Each .write() triggers re-renders for all subscribers.
 
@@ -1230,7 +1231,13 @@ async fn run_services() {
     debug!("Starting gateway on {}", config.bind_addr);
 
     let registry = web_client_registry().clone();
-    if let Err(e) = start_gateway(dispatcher, &config.bind_addr, config.static_dir.as_deref(), registry).await
+    if let Err(e) = start_gateway(
+        dispatcher,
+        &config.bind_addr,
+        config.static_dir.as_deref(),
+        registry,
+    )
+    .await
     {
         tracing::error!("Gateway error: {}", e);
     }

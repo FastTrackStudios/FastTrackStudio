@@ -17,8 +17,8 @@ pub(crate) use browser_dialog::SignalBrowserDialog;
 pub(crate) use editor_tab::SignalEditorTab;
 pub(crate) use fx_capture::SignalCaptureTab;
 pub(crate) use manage_tab::SignalManageTab;
-pub(crate) use performance_tab::SignalPerformanceTab;
 pub(crate) use midi_tab::SignalMidiTab;
+pub(crate) use performance_tab::SignalPerformanceTab;
 pub(crate) use preset_tab::SignalPresetTab;
 pub(crate) use setlist_tab::SignalSetlistTab;
 

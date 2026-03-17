@@ -20,8 +20,8 @@ use dynamic_template::colors;
 use reaper_high::Reaper;
 use reaper_low::raw;
 use reaper_medium::{
-    ControlSurface, ExtSetFxChangeArgs, ExtSetInputMonitorArgs,
-    ExtSetProjectMarkerChangeArgs, SetTrackTitleArgs,
+    ControlSurface, ExtSetFxChangeArgs, ExtSetInputMonitorArgs, ExtSetProjectMarkerChangeArgs,
+    SetTrackTitleArgs,
 };
 use std::ffi::{CStr, CString};
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
@@ -79,7 +79,9 @@ impl ControlSurface for AutoColorSurface {
 
     /// Track list changed (tracks added, removed, or reordered).
     fn set_track_list_change(&self) {
-        if APPLYING_COLORS.load(Ordering::Relaxed) { return; }
+        if APPLYING_COLORS.load(Ordering::Relaxed) {
+            return;
+        }
         if AUTO_COLOR_ENABLED.load(Ordering::Relaxed) {
             mark_tracks_dirty();
             // REAPER will call set_track_title for every track after this.
@@ -93,7 +95,9 @@ impl ControlSurface for AutoColorSurface {
     /// Track renamed. Only triggers recolor if this isn't a redundant call
     /// following a SetTrackListChange.
     fn set_track_title(&self, _args: SetTrackTitleArgs) {
-        if APPLYING_COLORS.load(Ordering::Relaxed) { return; }
+        if APPLYING_COLORS.load(Ordering::Relaxed) {
+            return;
+        }
         if AUTO_COLOR_ENABLED.load(Ordering::Relaxed) {
             let prev = TITLE_IGNORE_COUNT.load(Ordering::Relaxed);
             if prev > 0 {
@@ -106,7 +110,9 @@ impl ControlSurface for AutoColorSurface {
 
     /// FX chain changed (FX added/removed/reordered).
     fn ext_set_fx_change(&self, _args: ExtSetFxChangeArgs) -> i32 {
-        if APPLYING_COLORS.load(Ordering::Relaxed) { return 0; }
+        if APPLYING_COLORS.load(Ordering::Relaxed) {
+            return 0;
+        }
         if AUTO_COLOR_ENABLED.load(Ordering::Relaxed) {
             mark_tracks_dirty();
         }
@@ -115,7 +121,9 @@ impl ControlSurface for AutoColorSurface {
 
     /// Input monitoring / routing changed.
     fn ext_set_input_monitor(&self, _args: ExtSetInputMonitorArgs) -> i32 {
-        if APPLYING_COLORS.load(Ordering::Relaxed) { return 0; }
+        if APPLYING_COLORS.load(Ordering::Relaxed) {
+            return 0;
+        }
         if AUTO_COLOR_ENABLED.load(Ordering::Relaxed) {
             mark_tracks_dirty();
         }
@@ -124,7 +132,9 @@ impl ControlSurface for AutoColorSurface {
 
     /// Marker or region added, removed, renamed, moved, or color changed.
     fn ext_set_project_marker_change(&self, _args: ExtSetProjectMarkerChangeArgs) -> i32 {
-        if APPLYING_COLORS.load(Ordering::Relaxed) { return 0; }
+        if APPLYING_COLORS.load(Ordering::Relaxed) {
+            return 0;
+        }
         if AUTO_COLOR_ENABLED.load(Ordering::Relaxed) {
             mark_markers_dirty();
         }
@@ -305,7 +315,11 @@ pub fn clear_all_marker_colors() {
     let low = Reaper::get().medium_reaper().low();
 
     let total = unsafe {
-        low.CountProjectMarkers(std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut())
+        low.CountProjectMarkers(
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+        )
     };
     if total == 0 {
         return;
@@ -407,9 +421,7 @@ unsafe fn get_track_name(low: &reaper_low::Reaper, track: *mut raw::MediaTrack) 
     let mut buf = [0i8; 512];
     let param = CString::new("P_NAME").unwrap();
     low.GetSetMediaTrackInfo_String(track, param.as_ptr(), buf.as_mut_ptr(), false);
-    CStr::from_ptr(buf.as_ptr())
-        .to_string_lossy()
-        .into_owned()
+    CStr::from_ptr(buf.as_ptr()).to_string_lossy().into_owned()
 }
 
 /// Core logic: classify track names via dynamic-template, then apply colors to REAPER tracks.
@@ -433,9 +445,14 @@ fn apply_colors_to_tracks(low: &reaper_low::Reaper, tracks: &[TrackInfo]) {
         for track_info in tracks {
             if let Some(color) = color_map.get(&track_info.name) {
                 let native = colors::to_reaper_color(*color);
-                let current = low.GetMediaTrackInfo_Value(track_info.ptr, color_param.as_ptr()) as i32;
+                let current =
+                    low.GetMediaTrackInfo_Value(track_info.ptr, color_param.as_ptr()) as i32;
                 if current != native as i32 {
-                    low.SetMediaTrackInfo_Value(track_info.ptr, color_param.as_ptr(), native as f64);
+                    low.SetMediaTrackInfo_Value(
+                        track_info.ptr,
+                        color_param.as_ptr(),
+                        native as f64,
+                    );
                     colored += 1;
                 }
             }

@@ -11,10 +11,7 @@ const GUARD_START: &str = "# >>> FastTrackStudio FTS CLI >>>";
 const GUARD_END: &str = "# <<< FastTrackStudio FTS CLI <<<";
 
 /// Append PATH export to shell rc files (~/.zshrc, ~/.bash_profile).
-pub async fn setup_shell(
-    install_root: &Path,
-    tx: &EventSender,
-) -> eyre::Result<()> {
+pub async fn setup_shell(install_root: &Path, tx: &EventSender) -> eyre::Result<()> {
     let bin_dir = install_root.join("bin");
     let export_block = format!(
         "{GUARD_START}\nexport PATH=\"{}:$PATH\"\n{GUARD_END}\n",
@@ -28,11 +25,16 @@ pub async fn setup_shell(
     ];
 
     for rc in &rc_files {
-        let _ = tx.send(InstallEvent::StepProgress {
-            step: InstallStep::SetupShell,
-            fraction: 0.5,
-            message: format!("Updating {}...", rc.file_name().unwrap_or_default().to_string_lossy()),
-        }).await;
+        let _ = tx
+            .send(InstallEvent::StepProgress {
+                step: InstallStep::SetupShell,
+                fraction: 0.5,
+                message: format!(
+                    "Updating {}...",
+                    rc.file_name().unwrap_or_default().to_string_lossy()
+                ),
+            })
+            .await;
 
         if let Err(e) = append_if_absent(rc, &export_block).await {
             // Non-fatal — user might not have this shell

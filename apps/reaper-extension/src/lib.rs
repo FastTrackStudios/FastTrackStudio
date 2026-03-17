@@ -19,9 +19,9 @@ mod local_actions;
 mod menu;
 mod routed_handler;
 mod session;
+mod setlist_nav;
 mod signal_actions;
 pub(crate) mod signal_bridge;
-mod setlist_nav;
 mod signal_save;
 mod sync_bridge;
 mod toolbar_manager;
@@ -89,9 +89,13 @@ fn eagerly_load_fts_plugins(context: PluginContext) {
     let home = std::env::var("HOME").unwrap_or_default();
     let candidates: Vec<PathBuf> = vec![
         // REAPER resource path (portable install)
-        resource_path.join("UserPlugins/FX/fts-macros.clap/Contents/MacOS/fts-macros").into(),
+        resource_path
+            .join("UserPlugins/FX/fts-macros.clap/Contents/MacOS/fts-macros")
+            .into(),
         // Alternate: underscore variant (cdylib naming)
-        resource_path.join("UserPlugins/FX/fts-macros.clap/Contents/MacOS/fts_macros").into(),
+        resource_path
+            .join("UserPlugins/FX/fts-macros.clap/Contents/MacOS/fts_macros")
+            .into(),
         // Standard system CLAP directory (macOS)
         PathBuf::from(&home)
             .join("Library/Audio/Plug-Ins/CLAP/fts-macros.clap/Contents/MacOS/fts-macros"),
@@ -114,20 +118,19 @@ fn eagerly_load_fts_plugins(context: PluginContext) {
 
                 match unsafe { lib.get::<EntryFn>(b"ReaperPluginEntry\0") } {
                     Ok(entry_fn) => {
-                        let result =
-                            unsafe { entry_fn(h_instance, &mut raw_info as *mut _) };
+                        let result = unsafe { entry_fn(h_instance, &mut raw_info as *mut _) };
                         if result != 0 {
-                            info!("FTS Macros: ReaperPluginEntry succeeded (result={})", result);
+                            info!(
+                                "FTS Macros: ReaperPluginEntry succeeded (result={})",
+                                result
+                            );
                             loaded.push(lib);
                         } else {
                             warn!("FTS Macros: ReaperPluginEntry returned 0 (init failed)");
                         }
                     }
                     Err(e) => {
-                        warn!(
-                            "FTS Macros: ReaperPluginEntry symbol not found: {}",
-                            e
-                        );
+                        warn!("FTS Macros: ReaperPluginEntry symbol not found: {}", e);
                     }
                 }
                 break; // Found the plugin, stop searching
@@ -292,22 +295,70 @@ async fn register_daw_dispatcher() {
 
     // Create dispatchers and compose them via RoutedHandler (method_id routing)
     let daw_handler = RoutedHandler::new()
-        .with(transport_service_service_descriptor(), TransportServiceDispatcher::new(transport))
-        .with(project_service_service_descriptor(), ProjectServiceDispatcher::new(project))
-        .with(marker_service_service_descriptor(), MarkerServiceDispatcher::new(marker))
-        .with(region_service_service_descriptor(), RegionServiceDispatcher::new(region))
-        .with(tempo_map_service_service_descriptor(), TempoMapServiceDispatcher::new(tempo_map))
-        .with(audio_engine_service_service_descriptor(), AudioEngineServiceDispatcher::new(audio_engine))
-        .with(midi_service_service_descriptor(), MidiServiceDispatcher::new(midi))
-        .with(midi_analysis_service_service_descriptor(), MidiAnalysisServiceDispatcher::new(midi_analysis))
-        .with(fx_service_service_descriptor(), FxServiceDispatcher::new(fx))
-        .with(track_service_service_descriptor(), TrackServiceDispatcher::new(track))
-        .with(routing_service_service_descriptor(), RoutingServiceDispatcher::new(routing))
-        .with(live_midi_service_service_descriptor(), LiveMidiServiceDispatcher::new(live_midi))
-        .with(ext_state_service_service_descriptor(), ExtStateServiceDispatcher::new(ext_state))
-        .with(health_service_service_descriptor(), HealthServiceDispatcher::new(health))
-        .with(item_service_service_descriptor(), ItemServiceDispatcher::new(item))
-        .with(take_service_service_descriptor(), TakeServiceDispatcher::new(take));
+        .with(
+            transport_service_service_descriptor(),
+            TransportServiceDispatcher::new(transport),
+        )
+        .with(
+            project_service_service_descriptor(),
+            ProjectServiceDispatcher::new(project),
+        )
+        .with(
+            marker_service_service_descriptor(),
+            MarkerServiceDispatcher::new(marker),
+        )
+        .with(
+            region_service_service_descriptor(),
+            RegionServiceDispatcher::new(region),
+        )
+        .with(
+            tempo_map_service_service_descriptor(),
+            TempoMapServiceDispatcher::new(tempo_map),
+        )
+        .with(
+            audio_engine_service_service_descriptor(),
+            AudioEngineServiceDispatcher::new(audio_engine),
+        )
+        .with(
+            midi_service_service_descriptor(),
+            MidiServiceDispatcher::new(midi),
+        )
+        .with(
+            midi_analysis_service_service_descriptor(),
+            MidiAnalysisServiceDispatcher::new(midi_analysis),
+        )
+        .with(
+            fx_service_service_descriptor(),
+            FxServiceDispatcher::new(fx),
+        )
+        .with(
+            track_service_service_descriptor(),
+            TrackServiceDispatcher::new(track),
+        )
+        .with(
+            routing_service_service_descriptor(),
+            RoutingServiceDispatcher::new(routing),
+        )
+        .with(
+            live_midi_service_service_descriptor(),
+            LiveMidiServiceDispatcher::new(live_midi),
+        )
+        .with(
+            ext_state_service_service_descriptor(),
+            ExtStateServiceDispatcher::new(ext_state),
+        )
+        .with(
+            health_service_service_descriptor(),
+            HealthServiceDispatcher::new(health),
+        )
+        .with(
+            item_service_service_descriptor(),
+            ItemServiceDispatcher::new(item),
+        )
+        .with(
+            take_service_service_descriptor(),
+            TakeServiceDispatcher::new(take),
+        );
 
     // Initialize the session subsystem with an in-process loopback to the DAW handler.
     // This sets up Daw::init() so the session crate can call daw-control methods locally,
@@ -372,7 +423,10 @@ async fn register_daw_dispatcher() {
             unsafe {
                 low.SetExtState(section.as_ptr(), rt_key.as_ptr(), rt_value.as_ptr(), false);
             }
-            info!("FTS_RIG_TYPE='{}' written to ExtState FTS/rig_type", rig_type);
+            info!(
+                "FTS_RIG_TYPE='{}' written to ExtState FTS/rig_type",
+                rig_type
+            );
         }
 
         // Set a distinct dock icon and color theme per role.
@@ -390,9 +444,17 @@ async fn register_daw_dispatcher() {
         let group_value = std::env::var("FTS_SYNC_GROUP").unwrap_or_else(|_| "default".into());
         let group_cstr = CString::new(group_value.clone()).expect("valid CString");
         unsafe {
-            low.SetExtState(section.as_ptr(), group_key.as_ptr(), group_cstr.as_ptr(), true);
+            low.SetExtState(
+                section.as_ptr(),
+                group_key.as_ptr(),
+                group_cstr.as_ptr(),
+                true,
+            );
         }
-        info!("Sync group '{}' written to ExtState FTS_SYNC/group", group_value);
+        info!(
+            "Sync group '{}' written to ExtState FTS_SYNC/group",
+            group_value
+        );
     }
 
     // Initialize the sync bridge (Ableton Link engine).
@@ -422,9 +484,16 @@ async fn register_daw_dispatcher() {
 
                         info!(
                             "Network peer found: {} (role={}, group={}, setlist={}, {}:{})",
-                            peer.instance_name, role, group,
-                            if peer_setlist.is_empty() { "none" } else { peer_setlist },
-                            peer.host, peer.port
+                            peer.instance_name,
+                            role,
+                            group,
+                            if peer_setlist.is_empty() {
+                                "none"
+                            } else {
+                                peer_setlist
+                            },
+                            peer.host,
+                            peer.port
                         );
 
                         // Auto-connect if same sync group
@@ -438,23 +507,39 @@ async fn register_daw_dispatcher() {
                                 moire::task::spawn(async move {
                                     match tokio::net::TcpStream::connect(addr).await {
                                         Ok(stream) => {
-                                            info!("Connected to peer {} at {}", instance_name, addr);
+                                            info!(
+                                                "Connected to peer {} at {}",
+                                                instance_name, addr
+                                            );
                                             let link = roam_stream::StreamLink::tcp(stream);
-                                            match roam::initiator_conduit(roam::BareConduit::new(link))
-                                                .max_concurrent_requests(64)
-                                                .establish::<roam::DriverCaller>(())
-                                                .await
+                                            match roam::initiator_conduit(roam::BareConduit::new(
+                                                link,
+                                            ))
+                                            .max_concurrent_requests(64)
+                                            .establish::<roam::DriverCaller>(())
+                                            .await
                                             {
                                                 Ok((caller, _session)) => {
-                                                    info!("Roam session established with {}", instance_name);
+                                                    info!(
+                                                        "Roam session established with {}",
+                                                        instance_name
+                                                    );
 
                                                     // Create a Daw handle pointing at the remote peer
-                                                    let remote_daw = daw::Daw::new(roam::ErasedCaller::new(caller));
+                                                    let remote_daw = daw::Daw::new(
+                                                        roam::ErasedCaller::new(caller),
+                                                    );
 
                                                     // Start a sync engine for this peer
                                                     let sync_session = sync_proto::SyncSession {
-                                                        session_id: format!("network-{}", instance_name),
-                                                        peer_id: format!("local-{}", std::process::id()),
+                                                        session_id: format!(
+                                                            "network-{}",
+                                                            instance_name
+                                                        ),
+                                                        peer_id: format!(
+                                                            "local-{}",
+                                                            std::process::id()
+                                                        ),
                                                         display_name: instance_name.clone(),
                                                     };
                                                     let engine = sync::Engine::new(
@@ -464,7 +549,10 @@ async fn register_daw_dispatcher() {
                                                     );
                                                     match engine.start().await {
                                                         Ok(()) => {
-                                                            info!("Sync engine started for peer {}", instance_name);
+                                                            info!(
+                                                                "Sync engine started for peer {}",
+                                                                instance_name
+                                                            );
                                                             // Keep alive — engine runs via spawned subscription tasks
                                                             std::future::pending::<()>().await;
                                                         }
@@ -474,12 +562,18 @@ async fn register_daw_dispatcher() {
                                                     }
                                                 }
                                                 Err(e) => {
-                                                    warn!("Roam handshake failed with {}: {:?}", instance_name, e);
+                                                    warn!(
+                                                        "Roam handshake failed with {}: {:?}",
+                                                        instance_name, e
+                                                    );
                                                 }
                                             }
                                         }
                                         Err(e) => {
-                                            warn!("TCP connect to {} ({}) failed: {}", instance_name, addr, e);
+                                            warn!(
+                                                "TCP connect to {} ({}) failed: {}",
+                                                instance_name, addr, e
+                                            );
                                         }
                                     }
                                 });

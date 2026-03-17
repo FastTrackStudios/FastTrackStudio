@@ -17,12 +17,7 @@ pub(crate) fn SignalMidiTab() -> Element {
     let mut config = use_signal(|| load_midi_config());
 
     // Track which device is selected in the dropdown (may differ from connected)
-    let mut selected_port = use_signal(|| {
-        MIDI_CONNECTED_PORT
-            .peek()
-            .clone()
-            .unwrap_or_default()
-    });
+    let mut selected_port = use_signal(|| MIDI_CONNECTED_PORT.peek().clone().unwrap_or_default());
 
     // Reload config when learn completes (action map may have changed)
     let learn_target = MIDI_LEARN_TARGET.read().clone();
@@ -237,15 +232,25 @@ fn format_trigger(trigger: &signal::midi_actions::MidiActionTrigger) -> String {
 
     match trigger {
         MidiActionTrigger::NoteOn { channel, note } => {
-            let ch = channel.map(|c| format!("ch{}", c + 1)).unwrap_or_else(|| "any".into());
+            let ch = channel
+                .map(|c| format!("ch{}", c + 1))
+                .unwrap_or_else(|| "any".into());
             format!("NoteOn {} ({})", note, ch)
         }
         MidiActionTrigger::NoteOff { channel, note } => {
-            let ch = channel.map(|c| format!("ch{}", c + 1)).unwrap_or_else(|| "any".into());
+            let ch = channel
+                .map(|c| format!("ch{}", c + 1))
+                .unwrap_or_else(|| "any".into());
             format!("NoteOff {} ({})", note, ch)
         }
-        MidiActionTrigger::ControlChange { channel, cc, threshold } => {
-            let ch = channel.map(|c| format!("ch{}", c + 1)).unwrap_or_else(|| "any".into());
+        MidiActionTrigger::ControlChange {
+            channel,
+            cc,
+            threshold,
+        } => {
+            let ch = channel
+                .map(|c| format!("ch{}", c + 1))
+                .unwrap_or_else(|| "any".into());
             let thresh = match threshold {
                 CcThreshold::ButtonHigh => ">=64",
                 CcThreshold::ButtonAny => ">0",
@@ -253,7 +258,9 @@ fn format_trigger(trigger: &signal::midi_actions::MidiActionTrigger) -> String {
             format!("CC {} ({}) {}", cc, ch, thresh)
         }
         MidiActionTrigger::ProgramChange { channel, program } => {
-            let ch = channel.map(|c| format!("ch{}", c + 1)).unwrap_or_else(|| "any".into());
+            let ch = channel
+                .map(|c| format!("ch{}", c + 1))
+                .unwrap_or_else(|| "any".into());
             format!("PC {} ({})", program, ch)
         }
     }

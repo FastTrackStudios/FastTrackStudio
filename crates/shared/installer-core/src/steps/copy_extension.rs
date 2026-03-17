@@ -27,13 +27,16 @@ pub async fn copy_extension(
 
     let dest = plugins_dir.join(ext_name);
 
-    let _ = tx.send(InstallEvent::StepProgress {
-        step: InstallStep::CopyExtension,
-        fraction: 0.5,
-        message: format!("Writing {ext_name}..."),
-    }).await;
+    let _ = tx
+        .send(InstallEvent::StepProgress {
+            step: InstallStep::CopyExtension,
+            fraction: 0.5,
+            message: format!("Writing {ext_name}..."),
+        })
+        .await;
 
-    tokio::fs::write(&dest, extension_bytes).await
+    tokio::fs::write(&dest, extension_bytes)
+        .await
         .wrap_err_with(|| format!("Failed to write {}", dest.display()))?;
 
     info!("Installed extension to {}", dest.display());

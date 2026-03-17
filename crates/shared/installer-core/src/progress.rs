@@ -2,10 +2,20 @@
 
 #[derive(Debug, Clone)]
 pub enum InstallEvent {
-    StepStarted { step: InstallStep, label: String },
-    StepProgress { step: InstallStep, fraction: f32, message: String },
+    StepStarted {
+        step: InstallStep,
+        label: String,
+    },
+    StepProgress {
+        step: InstallStep,
+        fraction: f32,
+        message: String,
+    },
     StepCompleted(InstallStep),
-    StepFailed { step: InstallStep, error: String },
+    StepFailed {
+        step: InstallStep,
+        error: String,
+    },
     AllCompleted,
 }
 

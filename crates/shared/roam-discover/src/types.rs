@@ -53,7 +53,9 @@ impl Peer {
     /// Get the first usable socket address (prefers IPv4).
     pub fn addr(&self) -> Option<std::net::SocketAddr> {
         // Prefer IPv4
-        let ip = self.addresses.iter()
+        let ip = self
+            .addresses
+            .iter()
             .find(|a| a.is_ipv4())
             .or_else(|| self.addresses.first())?;
         Some(std::net::SocketAddr::new(*ip, self.port))
