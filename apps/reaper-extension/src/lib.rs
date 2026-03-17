@@ -13,6 +13,7 @@ mod action_registry;
 mod auto_color;
 mod dock_icon;
 mod global;
+mod guide_midi;
 mod keyflow_actions;
 mod local_actions;
 mod menu;

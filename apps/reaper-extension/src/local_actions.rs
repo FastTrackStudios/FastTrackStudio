@@ -734,31 +734,40 @@ fn handle_workflow_deactivate() -> ActionResult {
 // ============================================================================
 
 fn handle_generate_guide_track() -> ActionResult {
-    // Both actions now use the session crate's fill_guide_midi via Daw facade
     handle_fill_guide_midi()
 }
 
 fn handle_fill_guide_midi() -> ActionResult {
     info!("Fill Guide MIDI action triggered");
 
-    if !daw::Daw::is_initialized() {
-        return ActionResult::failure("Daw not initialized");
-    }
+    // Use direct REAPER services (not Daw RPC facade — that deadlocks
+    // because RPC dispatch needs the main thread, but we ARE on it).
+    // Same pattern as signal_save which also uses daw::reaper::* directly.
+    let region_svc = daw::reaper::ReaperRegion::new();
+    let track_svc = daw::reaper::ReaperTrack::new();
+    let item_svc = daw::reaper::ReaperItem::new();
+    let midi_svc = daw::reaper::ReaperMidi::new();
+    let tempo_svc = daw::reaper::ReaperTempoMap::new();
 
-    // Spawn on the moire runtime — the timer callback in lib.rs calls
-    // process_tasks() which polls moire spawned tasks.
-    moire::task::spawn(async {
-        info!("Fill Guide MIDI: task starting");
-        match session::guide_gen::fill_guide_midi().await {
+    tokio::task::spawn_local(async move {
+        match crate::guide_midi::fill_guide_midi_direct(
+            &region_svc, &track_svc, &item_svc, &midi_svc, &tempo_svc,
+        )
+        .await
+        {
             Ok((generated, skipped)) => {
                 info!("Guide MIDI: {} filled, {} skipped", generated, skipped);
+                Reaper::get().show_console_msg(format!(
+                    "Guide MIDI: {} filled, {} skipped\n",
+                    generated, skipped
+                ));
             }
             Err(e) => {
                 tracing::warn!("Fill Guide MIDI error: {e}");
+                Reaper::get().show_console_msg(format!("Fill Guide MIDI error: {e}\n"));
             }
         }
-    })
-    .named("fill_guide_midi");
+    });
 
     ActionResult::success_with_message("Filling missing guide MIDI...")
 }
