@@ -7,6 +7,7 @@ edition = "2024"
 [dependencies]
 sync-proto = { path = "../sync-proto" }
 daw = { workspace = true }
+session.workspace = true
 roam.workspace = true
 moire.workspace = true
 tracing.workspace = true
