@@ -168,6 +168,22 @@ actions_proto::define_actions! {
             group: "Ruler Manager",
             implementation: supported(super::handle_organize_ruler_lanes),
         }
+        // ── Routing Project ────────────────────────────────────────────
+        OPEN_ROUTING_PROJECT = "open_routing_project" {
+            name: "Open/Create FTS Routing Project",
+            description: "Open existing or create new FTS routing project with loopback stem channels",
+            category: Dev,
+            group: "Session",
+            implementation: supported(super::handle_open_routing_project),
+        }
+        // ── Organize ──────────────────────────────────────────────────
+        ORGANIZE_TRACKS = "organize_tracks" {
+            name: "Organize Tracks into FTS Hierarchy",
+            description: "Sort tracks into canonical FTS hierarchy (Click+Guide, TRACKS, Reference/Stem Split) with ruler lanes and fixed lanes",
+            category: Dev,
+            group: "Dynamic Template",
+            implementation: supported(super::handle_organize_tracks),
+        }
         // ── Sync / Ableton Link ──────────────────────────────────────
         SYNC_TOGGLE_LINK = "sync_toggle_link" {
             name: "Toggle Ableton Link",
@@ -197,6 +213,13 @@ actions_proto::define_actions! {
             group: "Sync",
             implementation: supported(super::handle_sync_link_off),
         }
+        SYNC_SETLIST_TOGGLE = "sync_setlist_toggle" {
+            name: "Toggle Setlist Sync",
+            description: "Enable/disable live sync between song tabs and the combined setlist",
+            category: Dev,
+            group: "Sync",
+            implementation: supported(super::handle_sync_setlist_toggle),
+        }
         // ── Signal Save ─────────────────────────────────────────────
         SAVE_BLOCK = "save_block" {
             name: "Signal - Save Block",
@@ -225,6 +248,49 @@ actions_proto::define_actions! {
             category: Dev,
             group: "Signal",
             implementation: supported(super::handle_save_rig),
+        }
+        LOAD_PROFILE = "load_profile" {
+            name: "Signal - Load Profile",
+            description: "Load a profile (all variations as tracks from .RTrackTemplate files)",
+            category: Dev,
+            group: "Signal",
+            implementation: supported(super::handle_load_profile),
+        }
+        // ── Setlist Navigation ──────────────────────────────────────
+        SETLIST_INIT = "setlist_init" {
+            name: "Setlist - Init Navigation",
+            description: "Scan [S] song folders and activate the first song",
+            category: Dev,
+            group: "Setlist",
+            implementation: supported(super::handle_setlist_init),
+        }
+        SETLIST_NEXT_SONG = "setlist_next_song" {
+            name: "Setlist - Next Song",
+            description: "Switch to the next song (mute current, unmute next)",
+            category: Dev,
+            group: "Setlist",
+            implementation: supported(super::handle_setlist_next_song),
+        }
+        SETLIST_PREV_SONG = "setlist_prev_song" {
+            name: "Setlist - Previous Song",
+            description: "Switch to the previous song",
+            category: Dev,
+            group: "Setlist",
+            implementation: supported(super::handle_setlist_prev_song),
+        }
+        SETLIST_NEXT_VARIATION = "setlist_next_variation" {
+            name: "Setlist - Next Variation",
+            description: "Switch to the next variation within the current song",
+            category: Dev,
+            group: "Setlist",
+            implementation: supported(super::handle_setlist_next_variation),
+        }
+        SETLIST_PREV_VARIATION = "setlist_prev_variation" {
+            name: "Setlist - Previous Variation",
+            description: "Switch to the previous variation within the current song",
+            category: Dev,
+            group: "Setlist",
+            implementation: supported(super::handle_setlist_prev_variation),
         }
     }
 }
@@ -1339,6 +1405,34 @@ fn handle_sync_link_off() -> ActionResult {
     ActionResult::success_with_message("Ableton Link: Off")
 }
 
+fn handle_sync_setlist_toggle() -> ActionResult {
+    let low = reaper_high::Reaper::get().medium_reaper().low();
+    let section = std::ffi::CString::new("FTS_SYNC").unwrap();
+    let key = std::ffi::CString::new("setlist_sync_enabled").unwrap();
+
+    // Read current state
+    let currently_enabled = unsafe {
+        let ptr = low.GetExtState(section.as_ptr(), key.as_ptr());
+        if ptr.is_null() {
+            true // Default: enabled
+        } else {
+            std::ffi::CStr::from_ptr(ptr).to_string_lossy() != "0"
+        }
+    };
+
+    let new_state = !currently_enabled;
+    let value = std::ffi::CString::new(if new_state { "1" } else { "0" }).unwrap();
+    unsafe {
+        low.SetExtState(section.as_ptr(), key.as_ptr(), value.as_ptr(), false);
+    }
+
+    if new_state {
+        ActionResult::success_with_message("Setlist sync enabled")
+    } else {
+        ActionResult::success_with_message("Setlist sync disabled")
+    }
+}
+
 // ============================================================================
 // Signal Save Actions
 // ============================================================================
@@ -1360,6 +1454,40 @@ fn handle_save_layer() -> ActionResult {
 
 fn handle_save_rig() -> ActionResult {
     tokio::task::spawn_local(crate::signal_save::save_rig());
+    ActionResult::success()
+}
+
+fn handle_load_profile() -> ActionResult {
+    tokio::task::spawn_local(crate::signal_save::load_profile());
+    ActionResult::success()
+}
+
+// ============================================================================
+// Setlist Navigation Actions
+// ============================================================================
+
+fn handle_setlist_init() -> ActionResult {
+    tokio::task::spawn_local(crate::setlist_nav::init_setlist());
+    ActionResult::success()
+}
+
+fn handle_setlist_next_song() -> ActionResult {
+    tokio::task::spawn_local(crate::setlist_nav::next_song());
+    ActionResult::success()
+}
+
+fn handle_setlist_prev_song() -> ActionResult {
+    tokio::task::spawn_local(crate::setlist_nav::prev_song());
+    ActionResult::success()
+}
+
+fn handle_setlist_next_variation() -> ActionResult {
+    tokio::task::spawn_local(crate::setlist_nav::next_variation());
+    ActionResult::success()
+}
+
+fn handle_setlist_prev_variation() -> ActionResult {
+    tokio::task::spawn_local(crate::setlist_nav::prev_variation());
     ActionResult::success()
 }
 
@@ -1477,4 +1605,109 @@ fn handle_organize_ruler_lanes() -> ActionResult {
     })
     .named("organize_ruler_lanes");
     ActionResult::success_with_message("Organizing markers/regions into ruler lanes...")
+}
+
+fn handle_open_routing_project() -> ActionResult {
+    use session::routing_project::ensure_routing_project;
+    use session::LoopbackConfig;
+
+    moire::task::spawn(async {
+        let config = LoopbackConfig::default();
+        match ensure_routing_project(&config).await {
+            Ok(guid) => {
+                info!("Routing project ready: {guid}");
+            }
+            Err(e) => {
+                tracing::warn!("Failed to open/create routing project: {e}");
+            }
+        }
+    })
+    .named("open_routing_project");
+    ActionResult::success_with_message("Opening/creating FTS routing project...")
+}
+
+fn handle_organize_tracks() -> ActionResult {
+    // Save the current project, run the offline FTS organizer on the RPP file,
+    // then reopen. This uses the same organize_into_fts_hierarchy function as
+    // the session CLI, ensuring consistent behavior.
+    moire::task::spawn(async {
+        let daw = daw::Daw::get();
+        let project = match daw.current_project().await {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::warn!("Failed to get current project: {e}");
+                return;
+            }
+        };
+
+        // Save first so RPP file is current
+        if let Err(e) = project.save().await {
+            tracing::warn!("Failed to save project: {e}");
+            return;
+        }
+
+        // Get the project file path
+        let info = match project.info().await {
+            Ok(i) => i,
+            Err(e) => {
+                tracing::warn!("Failed to get project info: {e}");
+                return;
+            }
+        };
+
+        if info.path.is_empty() {
+            tracing::warn!("Project has no file path — save it first");
+            return;
+        }
+
+        let path = std::path::PathBuf::from(&info.path);
+
+        // Run offline organizer on the RPP file
+        let content = match std::fs::read_to_string(&path) {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!("Failed to read RPP file: {e}");
+                return;
+            }
+        };
+
+        let mut rpp_project = match daw::file::parse_project_text(&content) {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::warn!("Failed to parse RPP: {e}");
+                return;
+            }
+        };
+
+        let original_count = rpp_project.tracks.len();
+
+        // Reorganize tracks into FTS hierarchy
+        rpp_project.tracks =
+            daw::file::types::organize_into_fts_hierarchy(rpp_project.tracks);
+
+        // Organize ruler lanes
+        daw::file::setlist_rpp::organize_ruler_lanes(&mut rpp_project);
+
+        // Write back
+        let organized = daw::file::setlist_rpp::project_to_rpp_text(&rpp_project);
+        if let Err(e) = std::fs::write(&path, &organized) {
+            tracing::warn!("Failed to write organized RPP: {e}");
+            return;
+        }
+
+        // Reopen the project to pick up changes
+        // Close current and reopen from file
+        let guid = project.guid().to_string();
+        let _ = daw.close_project(&guid).await;
+        match daw.open_project(path.to_string_lossy().as_ref()).await {
+            Ok(_) => info!(
+                "Organized {} tracks into FTS hierarchy",
+                original_count
+            ),
+            Err(e) => tracing::warn!("Failed to reopen organized project: {e}"),
+        }
+    })
+    .named("organize_tracks_fts");
+
+    ActionResult::success_with_message("Organizing tracks into FTS hierarchy...")
 }
