@@ -12,7 +12,7 @@ use daw::service::{
 use daw::standalone::{
     StandaloneMarker, StandaloneProject, StandaloneRegion, StandaloneTrack,
     StandaloneTransport,
-    audio_engine::{AudioEngine, TrackHandle, decode_audio_with_extension, test_tone},
+    audio_engine::{AudioEngine, TrackHandle, decode_audio_with_extension, test_tone, rpp_loader},
 };
 use dioxus::prelude::*;
 use std::sync::Arc;
@@ -110,13 +110,26 @@ fn ensure_engine(
     }
 }
 
-/// Read files from a browser file input and decode them as audio tracks.
+/// Read files from a browser file input element by ID.
 #[cfg(target_arch = "wasm32")]
-async fn read_files_from_input(
-    file_list: web_sys::FileList,
-) -> Vec<(String, Vec<u8>)> {
+async fn read_files_from_element(element_id: &str) -> Vec<(String, Vec<u8>)> {
     use wasm_bindgen::JsCast;
     use wasm_bindgen_futures::JsFuture;
+
+    let window = web_sys::window().unwrap();
+    let document = window.document().unwrap();
+    let input: web_sys::HtmlInputElement = match document.get_element_by_id(element_id) {
+        Some(el) => match el.dyn_into() {
+            Ok(input) => input,
+            Err(_) => return Vec::new(),
+        },
+        None => return Vec::new(),
+    };
+
+    let file_list = match input.files() {
+        Some(fl) => fl,
+        None => return Vec::new(),
+    };
 
     let mut results = Vec::new();
     for i in 0..file_list.length() {
@@ -145,6 +158,7 @@ fn AudioPanel() -> Element {
     let mut error_msg: Signal<Option<String>> = use_signal(|| None);
     let mut duration = use_signal(|| 0.0f64);
     let mut loading = use_signal(|| false);
+    let mut status_msg: Signal<Option<String>> = use_signal(|| None);
 
     // Poll position
     let engine_poll = engine.read().clone();
@@ -176,12 +190,7 @@ fn AudioPanel() -> Element {
             let dur = audio.duration_seconds();
             let handle = eng.add_track(audio);
             states.push(AudioTrackState {
-                handle,
-                name: name.to_string(),
-                gain: 1.0,
-                muted: false,
-                soloed: false,
-                duration: dur,
+                handle, name: name.to_string(), gain: 1.0, muted: false, soloed: false, duration: dur,
             });
         }
         audio_tracks.set(states);
@@ -189,65 +198,125 @@ fn AudioPanel() -> Element {
         eng.play();
     };
 
-    // Handle file input change
-    let on_files_selected = move |_evt: Event<FormData>| {
+    // Load RPP project + audio files
+    let on_project_selected = move |_evt: Event<FormData>| {
         #[cfg(target_arch = "wasm32")]
         {
-            use wasm_bindgen::JsCast;
-
             loading.set(true);
+            status_msg.set(Some("Reading files...".to_string()));
 
-            // Get files from the input element via web-sys
-            let window = web_sys::window().unwrap();
-            let document = window.document().unwrap();
-            let input: web_sys::HtmlInputElement = document
-                .get_element_by_id("audio-file-input")
-                .unwrap()
-                .dyn_into()
-                .unwrap();
-
-            let file_list = match input.files() {
-                Some(fl) => fl,
-                None => {
+            wasm_bindgen_futures::spawn_local(async move {
+                let files = read_files_from_element("project-file-input").await;
+                if files.is_empty() {
                     loading.set(false);
+                    status_msg.set(None);
                     return;
                 }
-            };
 
-            let Some(eng) = ensure_engine(&mut engine, &mut error_msg) else {
-                loading.set(false);
-                return;
-            };
+                // Separate RPP from audio files
+                let mut rpp_text: Option<String> = None;
+                let mut audio_files: std::collections::HashMap<String, Vec<u8>> =
+                    std::collections::HashMap::new();
 
-            // Spawn async file reading
-            wasm_bindgen_futures::spawn_local(async move {
-                let files = read_files_from_input(file_list).await;
-
-                for (name, bytes) in files {
-                    let ext = name.rsplit('.').next().unwrap_or("").to_lowercase();
-
-                    match decode_audio_with_extension(&bytes, &ext) {
-                        Some(audio) => {
-                            let dur = audio.duration_seconds();
-                            let handle = eng.add_track(audio);
-                            audio_tracks.write().push(AudioTrackState {
-                                handle,
-                                name: name.clone(),
-                                gain: 1.0,
-                                muted: false,
-                                soloed: false,
-                                duration: dur,
-                            });
-                            tracing::info!("Loaded: {name} ({dur:.1}s)");
+                for (name, bytes) in &files {
+                    let lower = name.to_lowercase();
+                    if lower.ends_with(".rpp") {
+                        match String::from_utf8(bytes.clone()) {
+                            Ok(text) => {
+                                status_msg.set(Some(format!("Parsing {name}...")));
+                                rpp_text = Some(text);
+                            }
+                            Err(_) => {
+                                error_msg.set(Some(format!("{name} is not valid UTF-8")));
+                            }
                         }
-                        None => {
-                            tracing::warn!("Failed to decode: {name}");
-                            error_msg.set(Some(format!("Failed to decode: {name}")));
-                        }
+                    } else {
+                        // Store audio file by its filename (for matching against RPP paths)
+                        audio_files.insert(name.clone(), bytes.clone());
                     }
                 }
 
-                duration.set(eng.duration_seconds());
+                let Some(rpp) = rpp_text else {
+                    error_msg.set(Some("No .RPP file found in selection".to_string()));
+                    loading.set(false);
+                    status_msg.set(None);
+                    return;
+                };
+
+                // Show what audio files the RPP needs
+                match rpp_loader::list_audio_files(&rpp) {
+                    Ok(needed) => {
+                        status_msg.set(Some(format!(
+                            "RPP needs {} audio files, {} provided",
+                            needed.len(),
+                            audio_files.len()
+                        )));
+                    }
+                    Err(e) => {
+                        error_msg.set(Some(format!("RPP parse error: {e}")));
+                        loading.set(false);
+                        status_msg.set(None);
+                        return;
+                    }
+                }
+
+                let Some(eng) = ensure_engine(&mut engine, &mut error_msg) else {
+                    loading.set(false);
+                    status_msg.set(None);
+                    return;
+                };
+
+                eng.stop();
+                eng.clear_tracks();
+                audio_tracks.write().clear();
+
+                status_msg.set(Some("Decoding audio...".to_string()));
+
+                // Load RPP with the uploaded audio files
+                match rpp_loader::load_rpp(&eng, &rpp, |file_path| {
+                    // Try exact path match first
+                    if let Some(bytes) = audio_files.get(file_path) {
+                        return Some(bytes.clone());
+                    }
+                    // Try matching just the filename (RPP may have relative paths like "Media/foo.wav")
+                    let filename = file_path.rsplit(['/', '\\']).next().unwrap_or(file_path);
+                    audio_files.get(filename).cloned()
+                }) {
+                    Ok(project) => {
+                        let mut states = Vec::new();
+                        for track in &project.tracks {
+                            states.push(AudioTrackState {
+                                handle: track.handle,
+                                name: track.track_name.clone(),
+                                gain: 1.0,
+                                muted: false,
+                                soloed: false,
+                                duration: track.audio_duration,
+                            });
+                        }
+                        audio_tracks.set(states);
+                        duration.set(project.duration);
+
+                        let msg = if project.failed.is_empty() {
+                            format!("Loaded {} tracks ({:.0}s)", project.tracks.len(), project.duration)
+                        } else {
+                            format!(
+                                "Loaded {} tracks, {} failed: {}",
+                                project.tracks.len(),
+                                project.failed.len(),
+                                project.failed.iter().map(|(f, _)| f.as_str()).collect::<Vec<_>>().join(", ")
+                            )
+                        };
+                        status_msg.set(Some(msg));
+                        error_msg.set(None);
+                        eng.play();
+                    }
+                    Err(e) => {
+                        error_msg.set(Some(format!("Failed to load project: {e}")));
+                        status_msg.set(None);
+                    }
+                }
+
                 loading.set(false);
             });
         }
@@ -268,27 +337,29 @@ fn AudioPanel() -> Element {
             if let Some(ref err) = *error_msg.read() {
                 p { style: "color: #ff4444; background: #2a1010; padding: 8px; border-radius: 4px; margin: 8px 0;", "{err}" }
             }
+            if let Some(ref msg) = *status_msg.read() {
+                p { style: "color: #88ccff; background: #0a2040; padding: 8px; border-radius: 4px; margin: 8px 0; font-size: 0.9em;", "{msg}" }
+            }
 
             // File loading controls
             div { style: "display: flex; gap: 8px; align-items: center; margin-bottom: 12px; flex-wrap: wrap;",
-                // File picker
+                // RPP + Audio file picker
                 label {
                     style: "padding: 10px 20px; border-radius: 4px; border: 2px dashed #00d4ff; cursor: pointer; font-weight: bold; color: #00d4ff; background: #0a2040; display: inline-flex; align-items: center; gap: 6px;",
-                    if is_loading { "Decoding..." } else { "Load Audio Files" }
+                    if is_loading { "Loading..." } else { "Open RPP + Audio Files" }
                     input {
-                        id: "audio-file-input",
+                        id: "project-file-input",
                         r#type: "file",
-                        accept: "audio/*,.wav,.mp3,.ogg,.flac,.aac,.m4a",
+                        accept: ".rpp,.wav,.mp3,.ogg,.flac,.aac,.m4a,audio/*",
                         multiple: true,
                         style: "display: none;",
-                        onchange: on_files_selected,
+                        onchange: on_project_selected,
                     }
                 }
-                // Demo button
                 button {
                     style: "padding: 10px 16px; border-radius: 4px; border: 1px solid #444; cursor: pointer; background: #2a2a4a; color: #e0e0e0;",
                     onclick: load_demo,
-                    "Load Demo Tones"
+                    "Demo Tones"
                 }
                 if has_engine {
                     button {
@@ -299,6 +370,7 @@ fn AudioPanel() -> Element {
                                 eng.clear_tracks();
                             }
                             audio_tracks.write().clear();
+                            status_msg.set(None);
                         },
                         "Clear All"
                     }
@@ -418,7 +490,7 @@ fn AudioPanel() -> Element {
                 }
             } else if !has_engine {
                 p { style: "color: #666; font-style: italic;",
-                    "Load audio files or demo tones to start. Supports WAV, MP3, OGG, FLAC, AAC."
+                    "Select an .RPP file + its audio files (WAV/MP3/OGG/FLAC), or try demo tones."
                 }
             }
         }
