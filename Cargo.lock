@@ -8455,6 +8455,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "reaper-guide-test"
+version = "0.1.0"
+dependencies = [
+ "daw",
+ "eyre",
+ "reaper-test",
+ "session 0.1.0",
+ "tokio",
+]
+
+[[package]]
 name = "reaper-high"
 version = "0.1.0"
 source = "git+https://github.com/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes#fc79668ffe86fbd8b6ba3e6db513d58e9b6717b0"

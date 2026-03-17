@@ -1,0 +1,16 @@
+[package]
+name = "reaper-guide-test"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+name = "reaper_guide_test"
+path = "src/lib.rs"
+
+[dev-dependencies]
+session.workspace = true
+daw = { workspace = true, features = ["reaper"] }
+reaper-test = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
+eyre.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

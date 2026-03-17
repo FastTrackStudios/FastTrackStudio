@@ -59,7 +59,7 @@ pub fn get_registry() -> Option<Arc<ActionsRegistry>> {
 }
 
 /// Get the tokio runtime for async operations
-fn get_runtime() -> &'static tokio::runtime::Runtime {
+pub(crate) fn get_runtime() -> &'static tokio::runtime::Runtime {
     TOKIO_RUNTIME.get_or_init(|| {
         tokio::runtime::Builder::new_multi_thread()
             .worker_threads(1)
