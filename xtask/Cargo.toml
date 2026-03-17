@@ -8,7 +8,7 @@ anyhow = "1.0"
 clap = { version = "4.5", features = ["derive"] }
 facet.workspace = true
 figue = "2.0"
-reaper-launcher = { path = "../../daw/crates/reaper-launcher" }
+reaper-launcher.workspace = true
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 signal.workspace = true

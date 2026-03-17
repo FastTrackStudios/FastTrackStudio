@@ -8,7 +8,7 @@
 //! - [`SyncPeer`] — connected peer state
 //! - [`SyncService`] — join/leave/configure session, subscribe to sync events
 
-use daw_proto::{
+use daw::service::{
     FxEvent, ItemEvent, MarkerEvent, ProjectEvent, RegionEvent, RoutingEvent, TakeEvent,
     TempoMapEvent, TrackEvent, Transport,
 };

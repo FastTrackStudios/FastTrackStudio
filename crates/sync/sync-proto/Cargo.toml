@@ -5,7 +5,7 @@ version.workspace = true
 edition = "2024"
 
 [dependencies]
-daw-proto = { path = "../../../../daw/crates/daw-proto" }
+daw.workspace = true
 facet.workspace = true
 roam.workspace = true
 

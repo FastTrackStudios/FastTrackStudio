@@ -147,6 +147,7 @@ swell-ui = { path = "crates/reaper/swell-ui" }
 reaper-embed = { path = "crates/reaper/reaper-embed" }
 reaper-test = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
 reaper-test-macro = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
+reaper-launcher = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
 reaper-extension = { path = "apps/reaper-extension" }
 fragile = "2.0.1"
 crossbeam-channel = "0.5"
@@ -209,6 +210,7 @@ pollster = "0.4"
 # audio-controls = { path = "../daw/crates/audio-controls" }
 # reaper-test = { path = "../daw/crates/reaper-test" }
 # reaper-test-macro = { path = "../daw/crates/reaper-test-macro" }
+# reaper-launcher = { path = "../daw/crates/reaper-launcher" }
 #
 # [patch."https://github.com/FastTrackStudios/dock-dioxus.git"]
 # dock-proto = { path = "../dock-dioxus/crates/dock-proto" }
