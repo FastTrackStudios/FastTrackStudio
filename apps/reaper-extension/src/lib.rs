@@ -379,30 +379,95 @@ async fn register_daw_dispatcher() {
         dock_icon::set_theme_for_role(&role);
     }
 
+    // Write sync group to ExtState. Instances with the same sync_group auto-pair
+    // when sync is enabled. Default: from FTS_SYNC_GROUP env, or "default".
+    // Can be changed at runtime via ExtState (FTS_SYNC/group).
+    {
+        let low = reaper_high::Reaper::get().medium_reaper().low();
+        let section = CString::new("FTS_SYNC").expect("valid CString");
+        let group_key = CString::new("group").expect("valid CString");
+        let group_value = std::env::var("FTS_SYNC_GROUP").unwrap_or_else(|_| "default".into());
+        let group_cstr = CString::new(group_value.clone()).expect("valid CString");
+        unsafe {
+            low.SetExtState(section.as_ptr(), group_key.as_ptr(), group_cstr.as_ptr(), true);
+        }
+        info!("Sync group '{}' written to ExtState FTS_SYNC/group", group_value);
+    }
+
     // Initialize the sync bridge (Ableton Link engine).
     // The timer callback will call sync_bridge::tick() to drive transport sync.
     sync_bridge::init();
 
     // Start discovering other FTS instances on the network via mDNS.
-    // When peers appear, they're logged and can be connected for sync.
-    moire::task::spawn(async move {
-        let mut rx = roam_discover::discover("fts-daw").await;
-        while let Some(event) = rx.recv().await {
-            match event {
-                roam_discover::PeerEvent::Found(peer) => {
-                    let role = peer.get_meta("role").unwrap_or("?");
-                    info!(
-                        "Network peer found: {} (role={}, {}:{})",
-                        peer.instance_name, role, peer.host, peer.port
-                    );
-                    // TODO: auto-connect to peers sharing the same session
-                }
-                roam_discover::PeerEvent::Lost(name) => {
-                    debug!("Network peer lost: {}", name);
+    // Auto-connect to peers in the same sync group.
+    {
+        let our_sync_group = std::env::var("FTS_SYNC_GROUP").unwrap_or_else(|_| "default".into());
+        let our_pid = std::process::id().to_string();
+
+        moire::task::spawn(async move {
+            let mut rx = roam_discover::discover("fts-daw").await;
+            while let Some(event) = rx.recv().await {
+                match event {
+                    roam_discover::PeerEvent::Found(peer) => {
+                        let role = peer.get_meta("role").unwrap_or("?");
+                        let group = peer.get_meta("sync_group").unwrap_or("?");
+                        let peer_pid = peer.get_meta("pid").unwrap_or("");
+
+                        // Skip ourselves
+                        if peer_pid == our_pid {
+                            continue;
+                        }
+
+                        info!(
+                            "Network peer found: {} (role={}, group={}, {}:{})",
+                            peer.instance_name, role, group, peer.host, peer.port
+                        );
+
+                        // Auto-connect if same sync group
+                        if group == our_sync_group {
+                            info!(
+                                "Peer {} is in our sync group '{}' — connecting...",
+                                peer.instance_name, group
+                            );
+                            if let Some(addr) = peer.addr() {
+                                let instance_name = peer.instance_name.clone();
+                                moire::task::spawn(async move {
+                                    match tokio::net::TcpStream::connect(addr).await {
+                                        Ok(stream) => {
+                                            info!("Connected to peer {} at {}", instance_name, addr);
+                                            let link = roam_stream::StreamLink::tcp(stream);
+                                            match roam::initiator(link)
+                                                .max_concurrent_requests(64)
+                                                .establish::<roam::DriverCaller>(())
+                                                .await
+                                            {
+                                                Ok((_caller, _session)) => {
+                                                    info!("Roam session established with {}", instance_name);
+                                                    // _caller is an ErasedCaller that can call
+                                                    // remote DAW services on the peer.
+                                                    // TODO: register this peer in the sync engine
+                                                    std::future::pending::<()>().await;
+                                                }
+                                                Err(e) => {
+                                                    warn!("Roam handshake failed with {}: {:?}", instance_name, e);
+                                                }
+                                            }
+                                        }
+                                        Err(e) => {
+                                            warn!("TCP connect to {} ({}) failed: {}", instance_name, addr, e);
+                                        }
+                                    }
+                                });
+                            }
+                        }
+                    }
+                    roam_discover::PeerEvent::Lost(name) => {
+                        debug!("Network peer lost: {}", name);
+                    }
                 }
             }
-        }
-    });
+        });
+    }
 
     info!(
         "DAW dispatcher registered (Transport, Project, Marker, Region, TempoMap, Midi, MidiAnalysis, AudioEngine, Fx, Track, Routing, LiveMidi, ExtState, Session, Signal, Sync)"
@@ -521,8 +586,9 @@ fn start_network_server(handler: RoutedHandler) {
 
         info!("TCP server listening on port {}", port);
 
-        // Advertise via mDNS
+        // Advertise via mDNS with role + sync group metadata
         let role = std::env::var("FTS_DAW_ROLE").unwrap_or_else(|_| "unknown".into());
+        let sync_group = std::env::var("FTS_SYNC_GROUP").unwrap_or_else(|_| "default".into());
         let pid = std::process::id();
 
         let _mdns_guard = match roam_discover::advertise(roam_discover::ServiceInfo {
@@ -531,6 +597,7 @@ fn start_network_server(handler: RoutedHandler) {
             port,
             metadata: vec![
                 ("role".into(), role),
+                ("sync_group".into(), sync_group),
                 ("pid".into(), pid.to_string()),
                 ("version".into(), env!("CARGO_PKG_VERSION").into()),
             ],
