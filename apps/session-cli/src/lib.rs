@@ -298,15 +298,17 @@ pub fn cmd_organize(input: &str, output: Option<&str>, generate_guide: bool) -> 
     // Reorganize tracks into FTS hierarchy
     project.tracks = daw::file::types::organize_into_fts_hierarchy(project.tracks);
 
-    // Generate guide MIDI items if requested
+    // Generate guide MIDI items if requested.
+    // Only adds items to tracks that don't already have any (avoids duplicates
+    // if organize --guide is run multiple times on the same project).
     if generate_guide {
         let (click, count, guide) = daw::file::guide_gen::generate_guide_items(&project);
         for track in &mut project.tracks {
             let lower = track.name.to_lowercase();
             match lower.as_str() {
-                "click" => track.items.extend(click.clone()),
-                "count" => track.items.extend(count.clone()),
-                "guide" => track.items.extend(guide.clone()),
+                "click" if track.items.is_empty() => track.items.extend(click.clone()),
+                "count" if track.items.is_empty() => track.items.extend(count.clone()),
+                "guide" if track.items.is_empty() => track.items.extend(guide.clone()),
                 _ => {}
             }
         }
