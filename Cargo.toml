@@ -193,6 +193,44 @@ color = "0.3"
 wgpu = "27"
 pollster = "0.4"
 
+# ── Local development overrides ──────────────────────────────────────
+# Uncomment the sections below to use local checkouts instead of GitHub.
+# This gives you instant rebuilds when iterating across repos.
+#
+# [patch."https://github.com/FastTrackStudios/keyflow.git"]
+# keyflow = { path = "../keyflow/crates/keyflow" }
+# engraver = { path = "../keyflow/crates/engraver" }
+# keyflow-ui = { path = "../keyflow/crates/keyflow-ui" }
+#
+# [patch."https://github.com/FastTrackStudios/daw.git"]
+# daw = { path = "../daw/crates/daw" }
+# daw-ui = { path = "../daw/crates/daw-ui" }
+# daw-cli = { path = "../daw/apps/daw" }
+# audio-controls = { path = "../daw/crates/audio-controls" }
+# reaper-test = { path = "../daw/crates/reaper-test" }
+# reaper-test-macro = { path = "../daw/crates/reaper-test-macro" }
+#
+# [patch."https://github.com/FastTrackStudios/dock-dioxus.git"]
+# dock-proto = { path = "../dock-dioxus/crates/dock-proto" }
+# dock-dioxus = { path = "../dock-dioxus/crates/dock-dioxus" }
+#
+# [patch."https://github.com/FastTrackStudios/input_actions.git"]
+# actions-proto = { path = "../input_actions/crates/actions-proto" }
+# actions-registry = { path = "../input_actions/crates/actions-registry" }
+# actions-standalone = { path = "../input_actions/crates/actions-standalone" }
+# actions-keybindings = { path = "../input_actions/crates/actions-keybindings" }
+# input-dioxus = { path = "../input_actions/crates/input-dioxus" }
+# input = { path = "../input_actions/crates/input" }
+#
+# [patch."https://github.com/FastTrackStudios/dynamic-template.git"]
+# color-palette = { path = "../dynamic-template/crates/color-palette" }
+# music-catalog = { path = "../dynamic-template/crates/music-catalog" }
+# dynamic-template-proto = { path = "../dynamic-template/crates/dynamic-template-proto" }
+# dynamic-template = { path = "../dynamic-template/crates/dynamic-template" }
+#
+# [patch."https://github.com/FastTrackStudios/fts-ui.git"]
+# fts-ui = { path = "../../fts-ui/crates/fts-ui" }
+
 # WASM dev profile: opt-level 1 avoids "too many locals" error in walrus
 [profile.wasm-dev]
 inherits = "dev"
