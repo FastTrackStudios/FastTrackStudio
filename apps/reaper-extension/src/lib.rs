@@ -21,6 +21,7 @@ mod routed_handler;
 mod session;
 mod signal_actions;
 pub(crate) mod signal_bridge;
+mod setlist_nav;
 mod signal_save;
 mod sync_bridge;
 mod toolbar_manager;
@@ -412,6 +413,7 @@ async fn register_daw_dispatcher() {
                         let role = peer.get_meta("role").unwrap_or("?");
                         let group = peer.get_meta("sync_group").unwrap_or("?");
                         let peer_pid = peer.get_meta("pid").unwrap_or("");
+                        let peer_setlist = peer.get_meta("setlist_id").unwrap_or("");
 
                         // Skip ourselves
                         if peer_pid == our_pid {
@@ -419,8 +421,10 @@ async fn register_daw_dispatcher() {
                         }
 
                         info!(
-                            "Network peer found: {} (role={}, group={}, {}:{})",
-                            peer.instance_name, role, group, peer.host, peer.port
+                            "Network peer found: {} (role={}, group={}, setlist={}, {}:{})",
+                            peer.instance_name, role, group,
+                            if peer_setlist.is_empty() { "none" } else { peer_setlist },
+                            peer.host, peer.port
                         );
 
                         // Auto-connect if same sync group
@@ -586,21 +590,42 @@ fn start_network_server(handler: RoutedHandler) {
 
         info!("TCP server listening on port {}", port);
 
-        // Advertise via mDNS with role + sync group metadata
+        // Advertise via mDNS with role + sync group + setlist_id metadata
         let role = std::env::var("FTS_DAW_ROLE").unwrap_or_else(|_| "unknown".into());
         let sync_group = std::env::var("FTS_SYNC_GROUP").unwrap_or_else(|_| "default".into());
         let pid = std::process::id();
 
+        // Read setlist_id from ExtState (persisted from last setlist generation)
+        let setlist_id = {
+            let low = reaper_high::Reaper::get().medium_reaper().low();
+            let section = CString::new("FTS_SYNC").unwrap();
+            let key = CString::new("setlist_id").unwrap();
+            unsafe {
+                let ptr = low.GetExtState(section.as_ptr(), key.as_ptr());
+                if ptr.is_null() {
+                    String::new()
+                } else {
+                    std::ffi::CStr::from_ptr(ptr).to_string_lossy().to_string()
+                }
+            }
+        };
+
+        let instance_name = format!("FTS-{}-{}", role.to_uppercase(), pid);
+        let mut metadata = vec![
+            ("role".into(), role),
+            ("sync_group".into(), sync_group),
+            ("pid".into(), pid.to_string()),
+            ("version".into(), env!("CARGO_PKG_VERSION").into()),
+        ];
+        if !setlist_id.is_empty() {
+            metadata.push(("setlist_id".into(), setlist_id));
+        }
+
         let _mdns_guard = match roam_discover::advertise(roam_discover::ServiceInfo {
             service_type: "fts-daw",
-            instance_name: format!("FTS-{}-{}", role.to_uppercase(), pid),
+            instance_name,
             port,
-            metadata: vec![
-                ("role".into(), role),
-                ("sync_group".into(), sync_group),
-                ("pid".into(), pid.to_string()),
-                ("version".into(), env!("CARGO_PKG_VERSION").into()),
-            ],
+            metadata,
         }) {
             Ok(guard) => {
                 info!("mDNS: advertised as _fts-daw._tcp on port {}", port);
