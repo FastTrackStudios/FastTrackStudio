@@ -19,6 +19,12 @@ use tracing::{debug, info};
 /// Returns the number of regions generated and skipped.
 pub async fn fill_guide_midi() -> Result<(u32, u32), SessionServiceError> {
     let daw = Daw::get();
+    fill_guide_midi_with_daw(daw).await
+}
+
+/// Fill guide MIDI using a provided Daw instance.
+/// Use this from tests where the static Daw singleton isn't available.
+pub async fn fill_guide_midi_with_daw(daw: &Daw) -> Result<(u32, u32), SessionServiceError> {
     let project = daw.current_project().await.map_err(map_daw)?;
 
     // Get all regions (section markers)

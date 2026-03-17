@@ -3,7 +3,7 @@
 //! Runs inside a REAPER instance via the reaper-test framework.
 //! Creates regions and guide tracks, then verifies fill_guide_midi works.
 //!
-//! Run: cargo test -p reaper-guide-test --test guide_midi -- --ignored --nocapture
+//! Run: cargo xtask reaper-test fill_guide
 
 use reaper_test::reaper_test;
 
@@ -12,6 +12,7 @@ async fn fill_guide_creates_midi_items(
     ctx: &reaper_test::ReaperTestContext,
 ) -> eyre::Result<()> {
     let project = ctx.project().clone();
+    let daw = &ctx.daw;
 
     // Step 1: Create section regions
     ctx.log("Creating test regions...");
@@ -35,8 +36,8 @@ async fn fill_guide_creates_midi_items(
     assert_eq!(guide.items().count().await?, 0);
 
     // Step 3: Run fill_guide_midi
-    ctx.log("Running fill_guide_midi...");
-    let (generated, skipped) = session::guide_gen::fill_guide_midi()
+    ctx.log("Running fill_guide_midi_with_daw...");
+    let (generated, skipped) = session::guide_gen::fill_guide_midi_with_daw(daw)
         .await
         .map_err(|e| eyre::eyre!("fill_guide_midi failed: {e}"))?;
 
@@ -58,7 +59,7 @@ async fn fill_guide_creates_midi_items(
 
     // Step 5: Run again — should skip all (idempotent)
     ctx.log("Running fill_guide_midi again...");
-    let (gen2, skip2) = session::guide_gen::fill_guide_midi()
+    let (gen2, skip2) = session::guide_gen::fill_guide_midi_with_daw(daw)
         .await
         .map_err(|e| eyre::eyre!("second fill_guide_midi failed: {e}"))?;
 
@@ -77,11 +78,12 @@ async fn fill_guide_errors_without_tracks(
     ctx: &reaper_test::ReaperTestContext,
 ) -> eyre::Result<()> {
     let project = ctx.project().clone();
+    let daw = &ctx.daw;
 
     // Create regions but NO guide tracks
     project.regions().add(10.0, 30.0, "Verse").await?;
 
-    let result = session::guide_gen::fill_guide_midi().await;
+    let result = session::guide_gen::fill_guide_midi_with_daw(daw).await;
     assert!(result.is_err(), "Should fail without guide tracks");
     ctx.log(&format!("Expected error: {}", result.unwrap_err()));
 
