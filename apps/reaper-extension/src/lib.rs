@@ -48,7 +48,10 @@ use routed_handler::RoutedHandler;
 /// thread to a background "daw-deallocator" thread.
 ///
 /// Inspired by Helgobox (https://github.com/helgoboss/helgobox).
+#[cfg(feature = "rt-allocator")]
 #[global_allocator]
+static ALLOCATOR: daw_allocator::FtsAllocator = daw_allocator::FtsAllocator::new();
+#[cfg(not(feature = "rt-allocator"))]
 static ALLOCATOR: daw_allocator::FtsAllocator = daw_allocator::FtsAllocator::new();
 use std::path::PathBuf;
 use tokio::net::UnixListener;
@@ -539,47 +542,70 @@ fn get_app() -> Option<&'static Fragile<App>> {
 
 /// Timer callback for periodic updates (runs on main thread)
 extern "C" fn timer_callback() {
-    // Process any pending async tasks
     if let Some(app_fragile) = get_app() {
         let app = app_fragile.get();
 
-        // Process pending main thread tasks via TaskSupport middleware
-        app.process_tasks();
+        // Periodic profiling — accumulate per-section times, log every ~5s
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static TICK_COUNT: AtomicU64 = AtomicU64::new(0);
+        static TOTAL_US: AtomicU64 = AtomicU64::new(0);
+        static TASKS_US: AtomicU64 = AtomicU64::new(0);
+        static ALLOC_US: AtomicU64 = AtomicU64::new(0);
+        static INPUT_US: AtomicU64 = AtomicU64::new(0);
+        static TRANSPORT_US: AtomicU64 = AtomicU64::new(0);
+        static FX_US: AtomicU64 = AtomicU64::new(0);
+        static MAX_TICK_US: AtomicU64 = AtomicU64::new(0);
 
-        // Process daw-allocator main-thread tasks (if runtime initialized)
-        if let Some(runtime) = daw_allocator::FtsRuntime::try_get() {
-            runtime.process_main_thread_tasks();
+        let timer_start = std::time::Instant::now();
+
+        macro_rules! timed {
+            ($accum:expr, $body:expr) => {{
+                let s = std::time::Instant::now();
+                $body;
+                let us = s.elapsed().as_micros() as u64;
+                $accum.fetch_add(us, Ordering::Relaxed);
+            }};
         }
 
-        // Keep input mouse hooks attached to newly opened windows (MIDI editors).
-        input_reaper::check_and_hook_windows();
+        timed!(TASKS_US, app.process_tasks());
+        timed!(ALLOC_US, {
+            if let Some(runtime) = daw_allocator::FtsRuntime::try_get() {
+                runtime.process_main_thread_tasks();
+            }
+        });
+        timed!(INPUT_US, {
+            #[cfg(feature = "input-hook")]
+            {
+                input_reaper::check_and_hook_windows();
+                input_reaper::check_which_key_timeout();
+                input_reaper::refresh_which_key_overlay();
+            }
+        });
+        timed!(TRANSPORT_US, daw::reaper::poll_and_broadcast());
+        timed!(FX_US, daw::reaper::poll_and_broadcast_fx());
 
-        // Check for which-key sequence timeout (~1s idle = reset + hide overlay)
-        input_reaper::check_which_key_timeout();
-
-        // Refresh which-key overlay position (tracks arrange view movement)
-        input_reaper::refresh_which_key_overlay();
-
-        // Poll transport state and broadcast to subscribers
-        // This runs directly on main thread, avoiding async round-trip latency
-        daw::reaper::poll_and_broadcast();
-
-        // Poll FX chain state and broadcast events for monitored chains
-        daw::reaper::poll_and_broadcast_fx();
-
-        // Poll track, item, routing, and tempo map state and broadcast to subscribers
-        daw::reaper::poll_and_broadcast_tracks();
-        daw::reaper::poll_and_broadcast_items();
-        daw::reaper::poll_and_broadcast_routing();
-        daw::reaper::poll_and_broadcast_tempo_map();
-
-        // Tick the Ableton Link engine for transport sync
-        crate::sync_bridge::tick();
-
-        // Auto-color is now event-driven via CSurf callbacks (no polling needed).
-
-        // Apply deferred toolbar operations from workflow/input systems.
         toolbar_manager::process_deferred_ops();
+
+        let total_us = timer_start.elapsed().as_micros() as u64;
+        TOTAL_US.fetch_add(total_us, Ordering::Relaxed);
+        MAX_TICK_US.fetch_max(total_us, Ordering::Relaxed);
+
+        let n = TICK_COUNT.fetch_add(1, Ordering::Relaxed) + 1;
+        if n % 150 == 0 {
+            // Log every ~5 seconds (at 30Hz)
+            let avg = |acc: &AtomicU64| acc.swap(0, Ordering::Relaxed) / 150;
+            let max = MAX_TICK_US.swap(0, Ordering::Relaxed);
+            info!(
+                "Timer profile (150 ticks): avg={:.1}ms max={:.1}ms | tasks={:.1}ms alloc={:.1}ms input={:.1}ms transport={:.1}ms fx={:.1}ms",
+                avg(&TOTAL_US) as f64 / 1000.0,
+                max as f64 / 1000.0,
+                avg(&TASKS_US) as f64 / 1000.0,
+                avg(&ALLOC_US) as f64 / 1000.0,
+                avg(&INPUT_US) as f64 / 1000.0,
+                avg(&TRANSPORT_US) as f64 / 1000.0,
+                avg(&FX_US) as f64 / 1000.0,
+            );
+        }
     }
 }
 
@@ -615,6 +641,7 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     // Initialize the RT-aware allocator runtime.
     // Uses REAPER's IsInRealTimeAudio() to detect audio threads — deallocations
     // on those threads are offloaded to the "daw-deallocator" background thread.
+    #[cfg(feature = "rt-allocator")]
     {
         let low = HighReaper::get().medium_reaper().low();
         if let Some(is_in_rt_audio) = low.pointers().IsInRealTimeAudio {
@@ -640,6 +667,8 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
             warn!("IsInRealTimeAudio not available — RT deallocation offloading disabled");
         }
     }
+    #[cfg(not(feature = "rt-allocator"))]
+    info!("RT allocator DISABLED (diagnostic mode)");
 
     // Create a medium-level API session
     let session = ReaperSession::load(context);
@@ -651,15 +680,21 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     app.initialize()?;
 
     // Register REAPER input bridge on top of the shared input core.
+    #[cfg(feature = "input-hook")]
     if let Err(error) =
         input_reaper::register_with_default_keymap(input_reaper::InputRuntimeConfig::default())
     {
         warn!(%error, "Failed to register input-reaper runtime");
     }
+    #[cfg(not(feature = "input-hook"))]
+    info!("Input hooks DISABLED (diagnostic mode)");
 
     // Eagerly load FTS CLAP plugins (Helgobox pattern)
     // Must happen after initialize() so TaskSupport is ready
+    #[cfg(feature = "eager-plugins")]
     eagerly_load_fts_plugins(context);
+    #[cfg(not(feature = "eager-plugins"))]
+    info!("Eager plugin loading DISABLED (diagnostic mode)");
 
     // Store app globally
     APP_INSTANCE
@@ -674,7 +709,10 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     // Register hidden control surface for event-driven auto-color.
     // REAPER calls our CSurf callbacks when tracks change (name, FX, routing, etc.)
     // instead of us polling on a timer.
+    #[cfg(feature = "auto-color")]
     session.plugin_register_add_csurf_inst(Box::new(auto_color::AutoColorSurface))?;
+    #[cfg(not(feature = "auto-color"))]
+    info!("Auto-color surface DISABLED (diagnostic mode)");
     drop(session);
 
     info!("FastTrackStudio REAPER Extension initialized successfully");

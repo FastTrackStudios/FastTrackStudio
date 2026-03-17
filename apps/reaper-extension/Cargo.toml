@@ -60,6 +60,17 @@ libloading = "0.8"
 crossbeam-channel.workspace = true
 camino = "1.1"
 midly = "0.5.3"
+utils.workspace = true
+
+[features]
+default = ["rt-allocator", "eager-plugins", "auto-color", "input-hook"]
+# Diagnostic feature flags — disable individually to isolate performance issues.
+# Build without a feature to skip that subsystem entirely:
+#   cargo build -p reaper-extension --no-default-features --features "eager-plugins,auto-color,input-hook"
+rt-allocator = []       # RT-safe deallocation offloading (global allocator wrapping)
+eager-plugins = []      # Eagerly load fts-macros CLAP plugin at startup
+auto-color = []         # Register AutoColorSurface control surface
+input-hook = []         # Register input-reaper keyboard/mouse hooks
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc = "0.2.7"
