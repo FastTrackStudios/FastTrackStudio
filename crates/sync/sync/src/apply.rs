@@ -17,8 +17,10 @@ use crate::suppression::{SuppressionKey, SuppressionSet};
 
 /// Apply a remote sync domain event to the local DAW.
 ///
-/// Returns suppression keys that should be recorded to prevent echo.
-/// The caller is responsible for inserting these into the suppression set.
+/// Wraps mutations in a REAPER undo block so Ctrl+Z undoes the entire sync
+/// operation as a single step (not individual API calls).
+///
+/// The caller is responsible for inserting suppression keys into the suppression set.
 pub async fn apply_remote_event(
     daw: &Daw,
     project_guid: &str,
@@ -26,6 +28,12 @@ pub async fn apply_remote_event(
     suppression: &mut SuppressionSet,
 ) {
     let ctx = ProjectContext::Project(project_guid.to_string());
+
+    // Wrap in an undo block (best-effort — if project isn't found, skip)
+    let label = format!("FTS Sync: {:?}", domain_label(domain));
+    if let Ok(project) = daw.project(project_guid).await {
+        let _ = project.begin_undo_block(&label).await;
+    }
 
     match domain {
         SyncDomain::Transport(transport) => {
@@ -60,6 +68,27 @@ pub async fn apply_remote_event(
             // automatically open/close projects on remote peers.
             debug!("Received project event from remote peer (informational only)");
         }
+    }
+
+    // Close the undo block
+    if let Ok(project) = daw.project(project_guid).await {
+        let _ = project.end_undo_block(&label).await;
+    }
+}
+
+/// Short label for undo block display.
+fn domain_label(domain: &SyncDomain) -> &'static str {
+    match domain {
+        SyncDomain::Transport(_) => "Transport",
+        SyncDomain::Track(_) => "Track",
+        SyncDomain::Fx(_) => "FX",
+        SyncDomain::Item(_) => "Item",
+        SyncDomain::Take(_) => "Take",
+        SyncDomain::Routing(_) => "Routing",
+        SyncDomain::TempoMap(_) => "Tempo",
+        SyncDomain::Marker(_) => "Marker",
+        SyncDomain::Region(_) => "Region",
+        SyncDomain::Project(_) => "Project",
     }
 }
 
