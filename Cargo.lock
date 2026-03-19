@@ -2205,7 +2205,6 @@ dependencies = [
 [[package]]
 name = "daw-extension-runtime"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/daw.git?branch=main#088556713ebbe21e74aa59db01e37811649cf68a"
 dependencies = [
  "daw",
  "eyre",
@@ -5324,6 +5323,19 @@ dependencies = [
  "dioxus",
  "input",
  "tokio",
+]
+
+[[package]]
+name = "input-extension"
+version = "0.1.0"
+dependencies = [
+ "daw",
+ "daw-extension-runtime",
+ "eyre",
+ "input",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

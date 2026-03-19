@@ -207,6 +207,7 @@ pollster = "0.4"
 [patch."https://github.com/FastTrackStudios/daw.git"]
 daw = { path = "../daw/crates/daw" }
 daw-proto = { path = "../daw/crates/daw-proto" }
+daw-extension-runtime = { path = "../daw/crates/daw-extension-runtime" }
 daw-ui = { path = "../daw/crates/daw-ui" }
 daw-cli = { path = "../daw/apps/daw" }
 audio-controls = { path = "../daw/crates/audio-controls" }
