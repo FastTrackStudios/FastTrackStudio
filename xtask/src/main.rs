@@ -290,7 +290,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             cmd!(sh, "cargo build -p session").run()?;
             cmd!(sh, "cargo build -p host-runtime").run()?;
             cmd!(sh, "cargo build -p test-extension").run()?;
-            cmd!(sh, "cargo build -p reaper-extension").run()?;
+            cmd!(sh, "cargo build -p signal-extension").run()?;
+            cmd!(sh, "cargo build -p session-extension").run()?;
+            cmd!(sh, "cargo build -p sync-extension").run()?;
             println!("\n=== All cells and extensions built successfully ===");
         }
         Commands::Run => {
@@ -355,33 +357,56 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
             let test_runner = TestRunner {
                 resources_dir: resources_dir.clone(),
-                extension_log: std::path::PathBuf::from("/tmp/fts-reaper.log"),
+                extension_log: std::path::PathBuf::from("/tmp/daw-bridge.log"),
                 timeout_secs,
                 keep_open,
                 ci,
             };
 
-            // Step 1: Build extension + CLAP plugin (unless --no-build)
+            // Step 1: Build daw-bridge host + CLAP plugin + guest extensions (unless --no-build)
             if !no_build {
-                let ext_filename = if cfg!(target_os = "macos") {
-                    "libreaper_fts.dylib"
-                } else {
-                    "libreaper_fts.so"
-                };
+                // Build daw-bridge from the daw repo (sibling directory)
+                let daw_dir = workspace_root
+                    .parent()
+                    .map(|p| p.join("daw"))
+                    .unwrap_or_else(|| workspace_root.join("../daw"));
 
-                runner::section(ci, "reaper-test: build extension");
-                cmd!(sh, "cargo build -p reaper-extension").run()?;
+                runner::section(ci, "reaper-test: build daw-bridge");
+                if !daw_dir.exists() {
+                    return Err(format!(
+                        "daw repo not found at {} — clone it as a sibling",
+                        daw_dir.display()
+                    )
+                    .into());
+                }
+                let sh_daw = Shell::new()?;
+                sh_daw.change_dir(&daw_dir);
+                cmd!(sh_daw, "cargo build -p daw-bridge").run()?;
 
                 let user_plugins_dir = resources_dir.join("UserPlugins");
                 std::fs::create_dir_all(&user_plugins_dir)?;
 
-                let dylib_src = workspace_root.join(format!("target/debug/{ext_filename}"));
-                if dylib_src.exists() {
-                    runner::install_plugin(&dylib_src, ext_filename, &user_plugins_dir)?;
+                // Remove old reaper_fts extension if present (replaced by daw-bridge)
+                for old in &["libreaper_fts.so", "libreaper_fts.dylib"] {
+                    let old_path = user_plugins_dir.join(old);
+                    if old_path.exists() {
+                        std::fs::remove_file(&old_path)?;
+                        println!("  Removed old {old} from UserPlugins");
+                    }
+                }
+
+                // Install daw-bridge as a REAPER plugin
+                let (so_src_name, so_dst_name) = if cfg!(target_os = "macos") {
+                    ("libreaper_daw_bridge.dylib", "reaper_daw_bridge.dylib")
                 } else {
-                    println!(
-                        "  Warning: {} not found, skipping copy",
-                        dylib_src.display()
+                    ("libreaper_daw_bridge.so", "reaper_daw_bridge.so")
+                };
+                let so_src = daw_dir.join(format!("target/debug/{so_src_name}"));
+                if so_src.exists() {
+                    runner::install_plugin(&so_src, so_dst_name, &user_plugins_dir)?;
+                } else {
+                    return Err(
+                        format!("daw-bridge library not found at {}", so_src.display()).into(),
                     );
                 }
                 runner::end_section(ci);

@@ -1229,10 +1229,9 @@ pub fn builtin_local_actions() -> Vec<actions_proto::LocalActionRegistration> {
     actions.extend(visibility_manager_actions::definitions_with_binder(
         &VisibilityManagerActionBinder,
     ));
-    // Session actions (setlist navigation, build, playback control)
-    actions.extend(crate::session::session_action_registrations());
-    // Signal actions (variation switching 1-24, next/previous section)
-    actions.extend(crate::signal_actions::signal_action_registrations());
+    // Session and signal actions moved to their respective SHM extensions
+    // (session-extension, signal-extension). They register via ActionRegistryService
+    // RPC and handle triggers via subscribe_actions stream.
     actions
         .into_iter()
         .map(|mut entry| {
