@@ -68,16 +68,15 @@ async fn run() -> Result<()> {
 
     // Subscribe to action trigger events and handle them concurrently
     // with the Link engine loop.
-    let mut rx = registry.subscribe_actions().await?;
+    let mut action_rx = registry.subscribe_actions().await?;
     info!("[sync:{pid}] Subscribed to action events");
 
-    let daw_for_actions = daw.clone();
-    tokio::task::spawn_local(async move {
-        handle_actions(&daw_for_actions, &mut rx).await;
-    });
-
-    // Run the Link engine — this loop runs forever at ~30Hz
-    link_bridge::run_link_engine(&daw).await
+    // Run the Link engine and action handler concurrently.
+    // Both loops run forever; if either ends we exit.
+    tokio::select! {
+        result = link_bridge::run_link_engine(&daw) => result,
+        _ = handle_actions(&daw, &mut action_rx) => Ok(()),
+    }
 }
 
 /// Listen for action triggers from REAPER and dispatch them.
