@@ -5,6 +5,7 @@
 //! that float above REAPER's arrange view.
 
 #![allow(dead_code)]
+#![allow(clippy::not_unsafe_ptr_arg_deref)]
 
 pub mod gpu;
 pub mod platform;

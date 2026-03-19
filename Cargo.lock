@@ -2148,7 +2148,7 @@ version = "0.1.0"
 dependencies = [
  "daw-control",
  "daw-control-sync",
- "daw-proto 0.1.0",
+ "daw-proto",
  "daw-reaper",
  "daw-standalone",
  "dawfile-reaper",
@@ -2180,7 +2180,7 @@ dependencies = [
 name = "daw-control"
 version = "0.1.0"
 dependencies = [
- "daw-proto 0.1.0",
+ "daw-proto",
  "eyre",
  "facet",
  "futures",
@@ -2228,22 +2228,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "daw-proto"
-version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/daw.git?branch=main#088556713ebbe21e74aa59db01e37811649cf68a"
-dependencies = [
- "actions-proto",
- "facet",
- "roam",
- "thiserror 2.0.18",
-]
-
-[[package]]
 name = "daw-reaper"
 version = "0.1.0"
 dependencies = [
  "camino",
- "daw-proto 0.1.0",
+ "daw-proto",
  "dawfile-reaper",
  "enumflags2",
  "keyflow",
@@ -2262,7 +2251,7 @@ version = "0.1.0"
 dependencies = [
  "async-lock",
  "cpal",
- "daw-proto 0.1.0",
+ "daw-proto",
  "dawfile-reaper",
  "gloo-timers",
  "keyflow",
@@ -2280,7 +2269,7 @@ name = "daw-ui"
 version = "0.1.0"
 dependencies = [
  "daw-control",
- "daw-proto 0.1.0",
+ "daw-proto",
  "dioxus",
  "dock-dioxus",
  "dock-proto",
@@ -2295,7 +2284,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
- "daw-proto 0.1.0",
+ "daw-proto",
  "libc",
  "nom 8.0.0",
  "rayon",
@@ -3159,7 +3148,7 @@ source = "git+https://github.com/FastTrackStudios/dynamic-template.git?branch=ma
 dependencies = [
  "anyhow",
  "color-palette",
- "daw-proto 0.1.0 (git+https://github.com/FastTrackStudios/daw.git?branch=main)",
+ "daw-proto",
  "dynamic-template-proto",
  "facet",
  "monarchy",
@@ -3176,7 +3165,7 @@ version = "0.1.0"
 source = "git+https://github.com/FastTrackStudios/dynamic-template.git?branch=main#3942238eeaa6532d43cf59686540c743c7d0c855"
 dependencies = [
  "actions-proto",
- "daw-proto 0.1.0 (git+https://github.com/FastTrackStudios/daw.git?branch=main)",
+ "daw-proto",
  "facet",
  "roam",
  "thiserror 2.0.18",
@@ -5612,7 +5601,7 @@ source = "git+https://github.com/FastTrackStudios/keyflow.git?branch=main#00c81a
 dependencies = [
  "color-eyre",
  "colored",
- "daw-proto 0.1.0 (git+https://github.com/FastTrackStudios/daw.git?branch=main)",
+ "daw-proto",
  "derive_more 1.0.0",
  "engraver",
  "facet",
@@ -5642,7 +5631,7 @@ version = "0.1.0"
 source = "git+https://github.com/FastTrackStudios/keyflow.git?branch=main#00c81abf2a8488273b28857e7d6b8c748cec49aa"
 dependencies = [
  "color-palette",
- "daw-proto 0.1.0 (git+https://github.com/FastTrackStudios/daw.git?branch=main)",
+ "daw-proto",
  "facet",
  "helgoboss-midi",
  "music-catalog",
@@ -5670,7 +5659,7 @@ dependencies = [
  "anyrender",
  "anyrender_vello",
  "anyrender_vello_hybrid",
- "daw-proto 0.1.0 (git+https://github.com/FastTrackStudios/daw.git?branch=main)",
+ "daw-proto",
  "dioxus",
  "dock-dioxus",
  "dock-proto",

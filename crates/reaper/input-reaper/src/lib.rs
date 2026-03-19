@@ -3,6 +3,11 @@
 //! This wraps the reference `input/*` implementation and keeps a stable API
 //! for extension local actions.
 
+// This crate is an FFI bridge to REAPER's C API — raw pointers are pervasive
+// and making every function `unsafe` would be impractical. The pointers come
+// from REAPER callbacks and are valid for the duration of each call.
+#![allow(clippy::not_unsafe_ptr_arg_deref)]
+
 pub mod infrastructure;
 pub mod input;
 

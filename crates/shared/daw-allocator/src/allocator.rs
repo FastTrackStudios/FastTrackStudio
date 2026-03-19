@@ -81,7 +81,11 @@ impl FtsAllocator {
     ///
     /// If on an RT thread, sent to the background deallocator thread.
     /// Otherwise executed immediately.
-    pub fn dealloc_foreign(
+    ///
+    /// # Safety
+    ///
+    /// `value` must be a valid pointer that `deallocate` can free.
+    pub unsafe fn dealloc_foreign(
         &self,
         deallocate: unsafe extern "C" fn(value: *mut c_void),
         value: *mut c_void,
