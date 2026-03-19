@@ -10,7 +10,6 @@ members = [
     "apps/fts-cli",
     "apps/signal-cli",
     "apps/session-cli",
-    "apps/reaper-extension",
     "apps/installer",
     "xtask",
 ]
@@ -149,7 +148,6 @@ reaper-embed = { path = "crates/reaper/reaper-embed" }
 reaper-test = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
 reaper-test-macro = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
 reaper-launcher = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
-reaper-extension = { path = "apps/reaper-extension" }
 fragile = "2.0.1"
 crossbeam-channel = "0.5"
 scopeguard = "1.1.0"

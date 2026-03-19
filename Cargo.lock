@@ -20,16 +20,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "actions-registry"
-version = "0.1.0"
-dependencies = [
- "actions-proto",
- "roam",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "actions-standalone"
 version = "0.1.0"
 dependencies = [
@@ -1360,7 +1350,7 @@ dependencies = [
  "anstream",
  "anstyle",
  "clap_lex",
- "strsim 0.11.1",
+ "strsim",
 ]
 
 [[package]]
@@ -2053,36 +2043,12 @@ checksum = "b365fabc795046672053e29c954733ec3b05e4be654ab130fe8f1f94d7051f35"
 
 [[package]]
 name = "darling"
-version = "0.10.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d706e75d87e35569db781a9b5e2416cff1236a47ed380831f959382ccd5f858"
-dependencies = [
- "darling_core 0.10.2",
- "darling_macro 0.10.2",
-]
-
-[[package]]
-name = "darling"
 version = "0.21.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9cdf337090841a411e2a7f3deb9187445851f91b309c0c0a29e05f74a00a48c0"
 dependencies = [
- "darling_core 0.21.3",
- "darling_macro 0.21.3",
-]
-
-[[package]]
-name = "darling_core"
-version = "0.10.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f0c960ae2da4de88a91b2d920c2a7233b400bc33cb28453a2987822d8392519b"
-dependencies = [
- "fnv",
- "ident_case",
- "proc-macro2",
- "quote",
- "strsim 0.9.3",
- "syn 1.0.109",
+ "darling_core",
+ "darling_macro",
 ]
 
 [[package]]
@@ -2100,22 +2066,11 @@ dependencies = [
 
 [[package]]
 name = "darling_macro"
-version = "0.10.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d9b5a2f4ac4969822c62224815d069952656cadc7084fdca9751e6d959189b72"
-dependencies = [
- "darling_core 0.10.2",
- "quote",
- "syn 1.0.109",
-]
-
-[[package]]
-name = "darling_macro"
 version = "0.21.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d38308df82d1080de0afee5d069fa14b0326a88c14f15c5ccda35b4a6c414c81"
 dependencies = [
- "darling_core 0.21.3",
+ "darling_core",
  "quote",
  "syn 2.0.117",
 ]
@@ -2145,14 +2100,9 @@ dependencies = [
  "daw-control",
  "daw-control-sync",
  "daw-proto",
- "daw-reaper",
  "daw-standalone",
  "dawfile-reaper",
 ]
-
-[[package]]
-name = "daw-allocator"
-version = "0.1.0"
 
 [[package]]
 name = "daw-cli"
@@ -2220,24 +2170,6 @@ dependencies = [
  "facet",
  "roam",
  "thiserror 2.0.18",
-]
-
-[[package]]
-name = "daw-reaper"
-version = "0.1.0"
-dependencies = [
- "camino",
- "daw-proto",
- "dawfile-reaper",
- "enumflags2",
- "keyflow",
- "moire 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "reaper-high",
- "reaper-low",
- "reaper-medium",
- "roam",
- "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -3276,7 +3208,7 @@ version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f43e744e4ea338060faee68ed933e46e722fb7f3617e722a5772d7e856d8b3ce"
 dependencies = [
- "darling 0.21.3",
+ "darling",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -3490,7 +3422,7 @@ dependencies = [
  "facet-macro-types",
  "proc-macro2",
  "quote",
- "strsim 0.11.1",
+ "strsim",
  "unsynn",
 ]
 
@@ -3724,7 +3656,7 @@ dependencies = [
  "indexmap",
  "owo-colors",
  "strip-ansi-escapes",
- "strsim 0.11.1",
+ "strsim",
  "supports-color 3.0.2",
  "tracing",
  "unicode-width",
@@ -8525,36 +8457,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "reaper-extension"
-version = "0.1.0"
-dependencies = [
- "actions-proto",
- "actions-registry",
- "anyhow",
- "camino",
- "cocoa",
- "crossbeam-channel",
- "daw",
- "daw-allocator",
- "eyre",
- "fragile",
- "libloading 0.8.9",
- "moire 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "objc",
- "reaper-high",
- "reaper-low",
- "reaper-macros",
- "reaper-medium",
- "roam",
- "roam-stream",
- "swell-ui",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "utils 0.1.0",
-]
-
-[[package]]
 name = "reaper-high"
 version = "0.1.0"
 source = "git+https://github.com/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes#fc79668ffe86fbd8b6ba3e6db513d58e9b6717b0"
@@ -8604,16 +8506,6 @@ dependencies = [
  "tracing",
  "vst",
  "winapi",
-]
-
-[[package]]
-name = "reaper-macros"
-version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes#fc79668ffe86fbd8b6ba3e6db513d58e9b6717b0"
-dependencies = [
- "darling 0.10.2",
- "quote",
- "syn 1.0.109",
 ]
 
 [[package]]
@@ -10501,12 +10393,6 @@ checksum = "2a8f8038e7e7969abb3f1b7c2a811225e9296da208539e0f79c5251d6cac0025"
 dependencies = [
  "vte",
 ]
-
-[[package]]
-name = "strsim"
-version = "0.9.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6446ced80d6c486436db5c078dde11a9f73d42b57fb273121e160b84f63d894c"
 
 [[package]]
 name = "strsim"
@@ -13838,3 +13724,11 @@ dependencies = [
  "syn 2.0.117",
  "winnow 0.7.15",
 ]
+
+[[patch.unused]]
+name = "daw-allocator"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "actions-registry"
+version = "0.1.0"
