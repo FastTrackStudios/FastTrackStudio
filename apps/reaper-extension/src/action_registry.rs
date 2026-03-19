@@ -295,17 +295,6 @@ pub fn register_action_with_reaper(action: &ActionDefinition) -> Result<(), Stri
         storage.push(registered_action);
     }
 
-    // Mirror command ID mapping into input-reaper workflow infrastructure.
-    if let Ok(cmd_id) = Reaper::get()
-        .action_by_command_name(action_id_static)
-        .command_id()
-    {
-        input_reaper::infrastructure::action_registry::remember_command_id(
-            action_id.clone(),
-            cmd_id,
-        );
-    }
-
     // Store action def for menu building
     if let Ok(mut defs_storage) = get_action_defs_storage().lock() {
         defs_storage.push(MenuActionDef {

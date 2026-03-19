@@ -10,22 +10,12 @@
 //! (like the fts-control desktop app) via roam over a Unix socket.
 
 mod action_registry;
-mod auto_color;
 mod dock_icon;
 mod global;
-mod guide_track;
-mod keyflow_actions;
 mod local_actions;
 mod menu;
 mod routed_handler;
-mod session;
-mod setlist_nav;
-mod signal_actions;
-pub(crate) mod signal_bridge;
-mod signal_save;
-// sync_bridge removed — Link engine now lives in sync-extension (SHM guest)
 mod toolbar_manager;
-mod visibility;
 
 use fragile::Fragile;
 use reaper_high::{MainTaskMiddleware, Reaper as HighReaper};
@@ -360,48 +350,9 @@ async fn register_daw_dispatcher() {
             TakeServiceDispatcher::new(take),
         );
 
-    // Initialize the session subsystem with an in-process loopback to the DAW handler.
-    // This sets up Daw::init() so the session crate can call daw-control methods locally,
-    // and creates SetlistServiceImpl + SongServiceImpl.
-    match session::init(daw_handler).await {
-        Ok(()) => {
-            info!("Session subsystem initialized with in-process DAW loopback");
-        }
-        Err(e) => {
-            warn!("Failed to initialize session subsystem: {}", e);
-        }
-    }
-
-    // Initialize the signal subsystem (rig/profile/preset management).
-    // Must happen before the socket server starts so signal services are available.
-    signal_bridge::init().await;
-
-    // Start the Unix socket server with DAW + Session + Signal services.
-    if let Some(session_mgr) = session::SessionManager::try_get() {
-        let mut handler = session_mgr.create_handler();
-
-        // Add signal services if the controller is ready
-        if let Some(ctrl) = signal_bridge::controller() {
-            handler = signal_bridge::add_signal_services(handler, ctrl);
-            info!("Signal services added to Unix socket handler");
-        }
-
-        start_unix_socket_server(handler.clone());
-        info!("Unix socket serves DAW + Session + Signal services");
-
-        // Start the TCP server + mDNS advertisement for network sync.
-        start_network_server(handler);
-    } else {
-        // Session init failed — can't serve without handler (it was moved)
-        warn!("Unix socket not started (session init failed)");
-    }
-
-    // Wire signal appliers (ReaperPatchApplier + RigSceneManager) and set
-    // the initial ActiveContext. This requires both signal_bridge::init() and
-    // Daw::init() to have completed (the DAW loopback provides Project handles).
-    if std::env::var("FTS_DAW_ROLE").as_deref() == Ok("signal") {
-        signal_bridge::wire_appliers().await;
-    }
+    // Start the Unix socket server with DAW services.
+    start_unix_socket_server(daw_handler.clone());
+    info!("Unix socket serves DAW services");
 
     // Write FTS_DAW_ROLE env var to ExtState so fts-control can classify this instance.
     // Uses persist=false — the role only exists while REAPER is running.
@@ -434,158 +385,8 @@ async fn register_daw_dispatcher() {
         dock_icon::set_theme_for_role(&role);
     }
 
-    // Write sync group to ExtState. Instances with the same sync_group auto-pair
-    // when sync is enabled. Default: from FTS_SYNC_GROUP env, or "default".
-    // Can be changed at runtime via ExtState (FTS_SYNC/group).
-    {
-        let low = reaper_high::Reaper::get().medium_reaper().low();
-        let section = CString::new("FTS_SYNC").expect("valid CString");
-        let group_key = CString::new("group").expect("valid CString");
-        let group_value = std::env::var("FTS_SYNC_GROUP").unwrap_or_else(|_| "default".into());
-        let group_cstr = CString::new(group_value.clone()).expect("valid CString");
-        unsafe {
-            low.SetExtState(
-                section.as_ptr(),
-                group_key.as_ptr(),
-                group_cstr.as_ptr(),
-                true,
-            );
-        }
-        info!(
-            "Sync group '{}' written to ExtState FTS_SYNC/group",
-            group_value
-        );
-    }
-
-    // Start discovering other FTS instances on the network via mDNS.
-    // Auto-connect to peers in the same sync group.
-    {
-        let our_sync_group = std::env::var("FTS_SYNC_GROUP").unwrap_or_else(|_| "default".into());
-        let our_pid = std::process::id().to_string();
-
-        moire::task::spawn(async move {
-            let mut rx = roam_discover::discover("fts-daw").await;
-            while let Some(event) = rx.recv().await {
-                match event {
-                    roam_discover::PeerEvent::Found(peer) => {
-                        let role = peer.get_meta("role").unwrap_or("?");
-                        let group = peer.get_meta("sync_group").unwrap_or("?");
-                        let peer_pid = peer.get_meta("pid").unwrap_or("");
-                        let peer_setlist = peer.get_meta("setlist_id").unwrap_or("");
-
-                        // Skip ourselves
-                        if peer_pid == our_pid {
-                            continue;
-                        }
-
-                        info!(
-                            "Network peer found: {} (role={}, group={}, setlist={}, {}:{})",
-                            peer.instance_name,
-                            role,
-                            group,
-                            if peer_setlist.is_empty() {
-                                "none"
-                            } else {
-                                peer_setlist
-                            },
-                            peer.host,
-                            peer.port
-                        );
-
-                        // Auto-connect if same sync group
-                        if group == our_sync_group {
-                            info!(
-                                "Peer {} is in our sync group '{}' — connecting...",
-                                peer.instance_name, group
-                            );
-                            if let Some(addr) = peer.addr() {
-                                let instance_name = peer.instance_name.clone();
-                                moire::task::spawn(async move {
-                                    match tokio::net::TcpStream::connect(addr).await {
-                                        Ok(stream) => {
-                                            info!(
-                                                "Connected to peer {} at {}",
-                                                instance_name, addr
-                                            );
-                                            let link = roam_stream::StreamLink::tcp(stream);
-                                            match roam::initiator_conduit(roam::BareConduit::new(
-                                                link,
-                                            ))
-                                            .max_concurrent_requests(64)
-                                            .establish::<roam::DriverCaller>(())
-                                            .await
-                                            {
-                                                Ok((caller, _session)) => {
-                                                    info!(
-                                                        "Roam session established with {}",
-                                                        instance_name
-                                                    );
-
-                                                    // Create a Daw handle pointing at the remote peer
-                                                    let remote_daw = daw::Daw::new(
-                                                        roam::ErasedCaller::new(caller),
-                                                    );
-
-                                                    // Start a sync engine for this peer
-                                                    let sync_session = sync_proto::SyncSession {
-                                                        session_id: format!(
-                                                            "network-{}",
-                                                            instance_name
-                                                        ),
-                                                        peer_id: format!(
-                                                            "local-{}",
-                                                            std::process::id()
-                                                        ),
-                                                        display_name: instance_name.clone(),
-                                                    };
-                                                    let engine = sync::Engine::new(
-                                                        remote_daw,
-                                                        sync_session,
-                                                        sync_proto::SyncConfig::transport_only(),
-                                                    );
-                                                    match engine.start().await {
-                                                        Ok(()) => {
-                                                            info!(
-                                                                "Sync engine started for peer {}",
-                                                                instance_name
-                                                            );
-                                                            // Keep alive — engine runs via spawned subscription tasks
-                                                            std::future::pending::<()>().await;
-                                                        }
-                                                        Err(e) => {
-                                                            warn!("Sync engine start failed for {}: {e}", instance_name);
-                                                        }
-                                                    }
-                                                }
-                                                Err(e) => {
-                                                    warn!(
-                                                        "Roam handshake failed with {}: {:?}",
-                                                        instance_name, e
-                                                    );
-                                                }
-                                            }
-                                        }
-                                        Err(e) => {
-                                            warn!(
-                                                "TCP connect to {} ({}) failed: {}",
-                                                instance_name, addr, e
-                                            );
-                                        }
-                                    }
-                                });
-                            }
-                        }
-                    }
-                    roam_discover::PeerEvent::Lost(name) => {
-                        debug!("Network peer lost: {}", name);
-                    }
-                }
-            }
-        });
-    }
-
     info!(
-        "DAW dispatcher registered (Transport, Project, Marker, Region, TempoMap, Midi, MidiAnalysis, AudioEngine, Fx, Track, Routing, LiveMidi, ExtState, Session, Signal, Sync)"
+        "DAW dispatcher registered (Transport, Project, Marker, Region, TempoMap, Midi, MidiAnalysis, AudioEngine, Fx, Track, Routing, LiveMidi, ExtState)"
     );
 }
 
@@ -672,113 +473,6 @@ fn start_unix_socket_server(handler: RoutedHandler) {
     });
 }
 
-/// Start a TCP server for network-accessible roam RPC and advertise via mDNS.
-///
-/// This enables cross-machine DAW sync: other FTS instances on the local network
-/// discover this one via mDNS (`_fts-daw._tcp.local.`) and connect over TCP.
-fn start_network_server(handler: RoutedHandler) {
-    use tokio::net::TcpListener;
-
-    let handler = std::sync::Arc::new(handler);
-
-    moire::task::spawn(async move {
-        // Bind to any available port
-        let listener = match TcpListener::bind("0.0.0.0:0").await {
-            Ok(l) => l,
-            Err(e) => {
-                warn!("Failed to bind TCP server: {}", e);
-                return;
-            }
-        };
-
-        let port = match listener.local_addr() {
-            Ok(addr) => addr.port(),
-            Err(e) => {
-                warn!("Failed to get TCP server address: {}", e);
-                return;
-            }
-        };
-
-        info!("TCP server listening on port {}", port);
-
-        // Advertise via mDNS with role + sync group + setlist_id metadata
-        let role = std::env::var("FTS_DAW_ROLE").unwrap_or_else(|_| "unknown".into());
-        let sync_group = std::env::var("FTS_SYNC_GROUP").unwrap_or_else(|_| "default".into());
-        let pid = std::process::id();
-
-        // Read setlist_id from ExtState (persisted from last setlist generation)
-        let setlist_id = {
-            let low = reaper_high::Reaper::get().medium_reaper().low();
-            let section = CString::new("FTS_SYNC").unwrap();
-            let key = CString::new("setlist_id").unwrap();
-            unsafe {
-                let ptr = low.GetExtState(section.as_ptr(), key.as_ptr());
-                if ptr.is_null() {
-                    String::new()
-                } else {
-                    std::ffi::CStr::from_ptr(ptr).to_string_lossy().to_string()
-                }
-            }
-        };
-
-        let instance_name = format!("FTS-{}-{}", role.to_uppercase(), pid);
-        let mut metadata = vec![
-            ("role".into(), role),
-            ("sync_group".into(), sync_group),
-            ("pid".into(), pid.to_string()),
-            ("version".into(), env!("CARGO_PKG_VERSION").into()),
-        ];
-        if !setlist_id.is_empty() {
-            metadata.push(("setlist_id".into(), setlist_id));
-        }
-
-        let _mdns_guard = match roam_discover::advertise(roam_discover::ServiceInfo {
-            service_type: "fts-daw",
-            instance_name,
-            port,
-            metadata,
-        }) {
-            Ok(guard) => {
-                info!("mDNS: advertised as _fts-daw._tcp on port {}", port);
-                guard
-            }
-            Err(e) => {
-                warn!("mDNS advertisement failed: {}", e);
-                // Continue without mDNS — TCP server still works for direct connections
-                return;
-            }
-        };
-
-        // Accept TCP connections (same pattern as Unix socket)
-        loop {
-            match listener.accept().await {
-                Ok((stream, addr)) => {
-                    info!("Network peer connected from {}", addr);
-                    let handler = handler.clone();
-                    moire::task::spawn(async move {
-                        let link = roam_stream::StreamLink::tcp(stream);
-                        match roam::acceptor(roam::BareConduit::new(link))
-                            .establish::<roam::DriverCaller>(handler.as_ref().clone())
-                            .await
-                        {
-                            Ok((_caller, _session_handle)) => {
-                                debug!("TCP session established with {}", addr);
-                                std::future::pending::<()>().await;
-                            }
-                            Err(e) => {
-                                warn!("TCP handshake failed with {}: {:?}", addr, e);
-                            }
-                        }
-                    });
-                }
-                Err(e) => {
-                    warn!("TCP accept error: {}", e);
-                }
-            }
-        }
-    });
-}
-
 async fn register_actions() {
     local_actions::register_toggle_states();
 
@@ -792,55 +486,7 @@ async fn register_actions() {
         return;
     }
 
-    // Add quick input validation buttons to the default FTS floating toolbar.
-    let add_toggle = toolbar_manager::add_button(
-        &toolbar_manager::ToolbarButton::new("FTS_INPUT_TOGGLE_INPUT_RUNTIME", "Toggle Input")
-            .on_toolbar(toolbar_manager::ToolbarTarget::Floating(32)),
-        "__input_runtime__",
-    );
-    if let Err(error) = add_toggle {
-        warn!(%error, "Failed to queue Toggle Input toolbar button");
-    }
-
-    let add_log = toolbar_manager::add_button(
-        &toolbar_manager::ToolbarButton::new("FTS_INPUT_LOG_INPUT_RUNTIME_STATE", "Log Input")
-            .on_toolbar(toolbar_manager::ToolbarTarget::Floating(32)),
-        "__input_runtime__",
-    );
-    if let Err(error) = add_log {
-        warn!(%error, "Failed to queue Log Input toolbar button");
-    }
-
-    let add_intercept = toolbar_manager::add_button(
-        &toolbar_manager::ToolbarButton::new("FTS_INPUT_TOGGLE_INPUT_INTERCEPT", "Intercept")
-            .on_toolbar(toolbar_manager::ToolbarTarget::Floating(32)),
-        "__input_runtime__",
-    );
-    if let Err(error) = add_intercept {
-        warn!(%error, "Failed to queue Intercept toolbar button");
-    }
-
-    let add_menu = toolbar_manager::add_button(
-        &toolbar_manager::ToolbarButton::new("FTS_INPUT_INPUT_MENU", "Input Menu")
-            .on_toolbar(toolbar_manager::ToolbarTarget::Floating(32))
-            .double_wide(),
-        "__input_runtime__",
-    );
-    if let Err(error) = add_menu {
-        warn!(%error, "Failed to queue Input Menu toolbar button");
-    }
-
-    let add_reset_mouse = toolbar_manager::add_button(
-        &toolbar_manager::ToolbarButton::new(
-            "FTS_INPUT_RESET_MOUSE_MODIFIERS",
-            "Reset Mouse Modifiers",
-        )
-        .on_toolbar(toolbar_manager::ToolbarTarget::Floating(32)),
-        "__input_runtime__",
-    );
-    if let Err(error) = add_reset_mouse {
-        warn!(%error, "Failed to queue Reset Mouse Modifiers toolbar button");
-    }
+    // REMOVED: Input toolbar buttons moved to input-hook extension
 }
 
 /// Global App instance (wrapped in Fragile to ensure main-thread-only access)
@@ -862,7 +508,6 @@ extern "C" fn timer_callback() {
         static TOTAL_US: AtomicU64 = AtomicU64::new(0);
         static TASKS_US: AtomicU64 = AtomicU64::new(0);
         static ALLOC_US: AtomicU64 = AtomicU64::new(0);
-        static INPUT_US: AtomicU64 = AtomicU64::new(0);
         static TRANSPORT_US: AtomicU64 = AtomicU64::new(0);
         static FX_US: AtomicU64 = AtomicU64::new(0);
         static MAX_TICK_US: AtomicU64 = AtomicU64::new(0);
@@ -884,14 +529,7 @@ extern "C" fn timer_callback() {
                 runtime.process_main_thread_tasks();
             }
         });
-        timed!(INPUT_US, {
-            #[cfg(feature = "input-hook")]
-            {
-                input_reaper::check_and_hook_windows();
-                input_reaper::check_which_key_timeout();
-                input_reaper::refresh_which_key_overlay();
-            }
-        });
+        // REMOVED: input-hook timer calls moved to input-hook extension
         timed!(TRANSPORT_US, daw::reaper::poll_and_broadcast());
         timed!(FX_US, daw::reaper::poll_and_broadcast_fx());
 
@@ -907,12 +545,11 @@ extern "C" fn timer_callback() {
             let avg = |acc: &AtomicU64| acc.swap(0, Ordering::Relaxed) / 150;
             let max = MAX_TICK_US.swap(0, Ordering::Relaxed);
             info!(
-                "Timer profile (150 ticks): avg={:.1}ms max={:.1}ms | tasks={:.1}ms alloc={:.1}ms input={:.1}ms transport={:.1}ms fx={:.1}ms",
+                "Timer profile (150 ticks): avg={:.1}ms max={:.1}ms | tasks={:.1}ms alloc={:.1}ms transport={:.1}ms fx={:.1}ms",
                 avg(&TOTAL_US) as f64 / 1000.0,
                 max as f64 / 1000.0,
                 avg(&TASKS_US) as f64 / 1000.0,
                 avg(&ALLOC_US) as f64 / 1000.0,
-                avg(&INPUT_US) as f64 / 1000.0,
                 avg(&TRANSPORT_US) as f64 / 1000.0,
                 avg(&FX_US) as f64 / 1000.0,
             );
@@ -990,16 +627,6 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     // Initialize the extension (mut needed to store SHM temp dir)
     app.initialize()?;
 
-    // Register REAPER input bridge on top of the shared input core.
-    #[cfg(feature = "input-hook")]
-    if let Err(error) =
-        input_reaper::register_with_default_keymap(input_reaper::InputRuntimeConfig::default())
-    {
-        warn!(%error, "Failed to register input-reaper runtime");
-    }
-    #[cfg(not(feature = "input-hook"))]
-    info!("Input hooks DISABLED (diagnostic mode)");
-
     // Eagerly load FTS CLAP plugins (Helgobox pattern)
     // Must happen after initialize() so TaskSupport is ready
     #[cfg(feature = "eager-plugins")]
@@ -1017,13 +644,6 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     let mut session = app.session.borrow_mut();
     session.plugin_register_add_timer(timer_callback)?;
 
-    // Register hidden control surface for event-driven auto-color.
-    // REAPER calls our CSurf callbacks when tracks change (name, FX, routing, etc.)
-    // instead of us polling on a timer.
-    #[cfg(feature = "auto-color")]
-    session.plugin_register_add_csurf_inst(Box::new(auto_color::AutoColorSurface))?;
-    #[cfg(not(feature = "auto-color"))]
-    info!("Auto-color surface DISABLED (diagnostic mode)");
     drop(session);
 
     info!("FastTrackStudio REAPER Extension initialized successfully");

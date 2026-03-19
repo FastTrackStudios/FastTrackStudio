@@ -20,27 +20,9 @@ swell-ui.workspace = true
 # Protocols
 actions-proto.workspace = true
 actions-registry.workspace = true
-input-reaper.workspace = true
 
 # DAW facade (reaper impl + sync wrapper)
 daw = { workspace = true, features = ["reaper", "sync"] }
-
-# Sync engine (DAW-to-DAW sync + Ableton Link)
-sync.workspace = true
-sync-proto.workspace = true
-
-# Keyflow guide generation (through facade)
-keyflow = { workspace = true, features = ["midi"] }
-
-# Dynamic template (sorting items into track hierarchies)
-dynamic-template-proto.workspace = true
-dynamic-template.workspace = true
-
-# Session (setlist management, navigation, auto-advance)
-session.workspace = true
-
-# Signal (rig/profile/preset management)
-signal = { workspace = true, features = ["daw"] }
 
 # RT-aware allocator and task dispatch
 daw-allocator.workspace = true
@@ -48,30 +30,23 @@ daw-allocator.workspace = true
 # Runtime
 roam.workspace = true
 roam-stream.workspace = true
-roam-discover.workspace = true
 moire.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 fragile.workspace = true
-uuid.workspace = true
 anyhow = "1.0"
 eyre = "0.6"
 libloading = "0.8"
 crossbeam-channel.workspace = true
 camino = "1.1"
-midly = "0.5.3"
 utils.workspace = true
 
 [features]
-default = ["rt-allocator", "eager-plugins", "auto-color", "input-hook"]
+default = ["rt-allocator", "eager-plugins"]
 # Diagnostic feature flags — disable individually to isolate performance issues.
-# Build without a feature to skip that subsystem entirely:
-#   cargo build -p reaper-extension --no-default-features --features "eager-plugins,auto-color,input-hook"
 rt-allocator = []       # RT-safe deallocation offloading (global allocator wrapping)
 eager-plugins = []      # Eagerly load fts-macros CLAP plugin at startup
-auto-color = []         # Register AutoColorSurface control surface
-input-hook = []         # Register input-reaper keyboard/mouse hooks
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc = "0.2.7"

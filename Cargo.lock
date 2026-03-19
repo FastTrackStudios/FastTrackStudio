@@ -3141,24 +3141,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92773504d58c093f6de2459af4af33faa518c13451eb8f2b5698ed3d36e7c813"
 
 [[package]]
-name = "dynamic-template"
-version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/dynamic-template.git?branch=main#3942238eeaa6532d43cf59686540c743c7d0c855"
-dependencies = [
- "anyhow",
- "color-palette",
- "daw-proto",
- "dynamic-template-proto",
- "facet",
- "monarchy",
- "music-catalog",
- "roam",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
-]
-
-[[package]]
 name = "dynamic-template-extension"
 version = "0.1.0"
 dependencies = [
@@ -6748,32 +6730,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "monarchy"
-version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/monarchy.git?branch=main#183959be7223bb735c2adfac17e8da6c5acdd79b"
-dependencies = [
- "facet",
- "facet-json",
- "facet-toml",
- "monarchy_derive",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "toml",
-]
-
-[[package]]
-name = "monarchy_derive"
-version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/monarchy.git?branch=main#183959be7223bb735c2adfac17e8da6c5acdd79b"
-dependencies = [
- "convert_case 0.6.0",
- "proc-macro2",
- "quote",
- "syn 2.0.117",
-]
-
-[[package]]
 name = "moxcms"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8586,14 +8542,9 @@ dependencies = [
  "crossbeam-channel",
  "daw",
  "daw-allocator",
- "dynamic-template",
- "dynamic-template-proto",
  "eyre",
  "fragile",
- "input-reaper",
- "keyflow",
  "libloading 0.8.9",
- "midly",
  "moire 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "objc",
  "reaper-high",
@@ -8601,18 +8552,12 @@ dependencies = [
  "reaper-macros",
  "reaper-medium",
  "roam",
- "roam-discover",
  "roam-stream",
- "session 0.1.0",
- "signal",
  "swell-ui",
- "sync",
- "sync-proto",
  "tokio",
  "tracing",
  "tracing-subscriber",
  "utils 0.1.0",
- "uuid",
 ]
 
 [[package]]
