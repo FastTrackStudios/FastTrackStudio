@@ -10941,6 +10941,7 @@ dependencies = [
  "daw",
  "daw-extension-runtime",
  "eyre",
+ "roam",
  "sync",
  "tokio",
  "tracing",

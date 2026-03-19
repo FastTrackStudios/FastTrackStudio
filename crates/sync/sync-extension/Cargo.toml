@@ -11,6 +11,7 @@ path = "src/main.rs"
 [dependencies]
 daw.workspace = true
 daw-extension-runtime.workspace = true
+roam.workspace = true
 sync = { workspace = true, features = ["link"] }
 tokio = { workspace = true, features = ["time", "net", "rt"] }
 eyre.workspace = true
