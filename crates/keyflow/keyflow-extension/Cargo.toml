@@ -1,0 +1,18 @@
+[package]
+name = "keyflow-extension"
+version.workspace = true
+edition.workspace = true
+description = "Keyflow domain SHM guest — connects to REAPER via daw-bridge"
+
+[[bin]]
+name = "keyflow-extension"
+path = "src/main.rs"
+
+[dependencies]
+daw.workspace = true
+daw-extension-runtime.workspace = true
+keyflow = { workspace = true, features = ["midi"] }
+tokio = { workspace = true, features = ["time", "net", "rt"] }
+eyre.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

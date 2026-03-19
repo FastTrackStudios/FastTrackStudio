@@ -3159,6 +3159,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "dynamic-template-extension"
+version = "0.1.0"
+dependencies = [
+ "daw",
+ "daw-extension-runtime",
+ "dynamic-template-proto",
+ "eyre",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "dynamic-template-proto"
 version = "0.1.0"
 source = "git+https://github.com/FastTrackStudios/dynamic-template.git?branch=main#3942238eeaa6532d43cf59686540c743c7d0c855"
@@ -5625,6 +5638,19 @@ dependencies = [
  "regex",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "keyflow-extension"
+version = "0.1.0"
+dependencies = [
+ "daw",
+ "daw-extension-runtime",
+ "eyre",
+ "keyflow",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
