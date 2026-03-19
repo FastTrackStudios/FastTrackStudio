@@ -8,6 +8,8 @@
 //! - [`SyncPeer`] — connected peer state
 //! - [`SyncService`] — join/leave/configure session, subscribe to sync events
 
+pub mod actions;
+
 use daw::service::{
     FxEvent, ItemEvent, MarkerEvent, ProjectEvent, RegionEvent, RoutingEvent, TakeEvent,
     TempoMapEvent, TrackEvent, Transport,

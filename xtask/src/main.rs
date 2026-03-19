@@ -342,74 +342,57 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             no_build,
             keep_open,
         } => {
+            use reaper_test::runner::{self, TestPackage, TestRunner};
+
             println!("=== Running REAPER integration tests ===");
 
-            // Platform-aware defaults
-            let (default_reaper_path, default_reaper_exe, default_reaper_resources, ext_filename) =
-                if cfg!(target_os = "macos") {
-                    let reaper = utils::paths::reaper_dir();
-                    let live_app = reaper.join("FTS-LIVE.app");
-                    (
-                        reaper.to_string_lossy().to_string(),
-                        live_app
-                            .join("Contents/MacOS/REAPER")
-                            .to_string_lossy()
-                            .to_string(),
-                        live_app
-                            .join("Contents/Resources")
-                            .to_string_lossy()
-                            .to_string(),
-                        "libreaper_fts.dylib",
-                    )
+            let ci = std::env::var("CI").is_ok();
+            let timeout_secs: u64 = std::env::var("REAPER_TEST_TIMEOUT_SECS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(60);
+            let resources_dir = runner::fts_reaper_resources();
+
+            let test_runner = TestRunner {
+                resources_dir: resources_dir.clone(),
+                extension_log: std::path::PathBuf::from("/tmp/fts-reaper.log"),
+                timeout_secs,
+                keep_open,
+                ci,
+            };
+
+            // Step 1: Build extension + CLAP plugin (unless --no-build)
+            if !no_build {
+                let ext_filename = if cfg!(target_os = "macos") {
+                    "libreaper_fts.dylib"
                 } else {
-                    // Linux: REAPER config in ~/.config/REAPER, executable on PATH
-                    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-                    let config_dir = format!("{home}/.config/REAPER/");
-                    (
-                        config_dir.clone(),
-                        "reaper".to_string(),
-                        config_dir,
-                        "libreaper_fts.so",
-                    )
+                    "libreaper_fts.so"
                 };
 
-            // Step 1: Build extension (unless --no-build)
-            if !no_build {
-                println!("\n>>> Building REAPER extension...");
+                runner::section(ci, "reaper-test: build extension");
                 cmd!(sh, "cargo build -p reaper-extension").run()?;
 
-                // Copy dylib/so to REAPER's UserPlugins
-                let reaper_path =
-                    std::env::var("REAPER_PATH").unwrap_or_else(|_| default_reaper_path.clone());
-                let plugins_dir = std::path::PathBuf::from(&reaper_path).join("UserPlugins");
-                std::fs::create_dir_all(&plugins_dir)?;
+                let user_plugins_dir = resources_dir.join("UserPlugins");
+                std::fs::create_dir_all(&user_plugins_dir)?;
 
                 let dylib_src = workspace_root.join(format!("target/debug/{ext_filename}"));
-                let dylib_dst = plugins_dir.join(ext_filename);
                 if dylib_src.exists() {
-                    // Use symlink if not already linked
-                    if dylib_dst.exists() || dylib_dst.is_symlink() {
-                        std::fs::remove_file(&dylib_dst)?;
-                    }
-                    #[cfg(unix)]
-                    std::os::unix::fs::symlink(&dylib_src, &dylib_dst)?;
-                    println!("  Linked extension to {}", dylib_dst.display());
+                    runner::install_plugin(&dylib_src, ext_filename, &user_plugins_dir)?;
                 } else {
                     println!(
                         "  Warning: {} not found, skipping copy",
                         dylib_src.display()
                     );
                 }
+                runner::end_section(ci);
 
-                // Step 1b: Build and install fts-macros CLAP plugin.
-                // The extension eagerly loads fts-macros.clap on startup,
-                // so it must be present before REAPER launches.
+                // Build and install fts-macros CLAP plugin
                 let fts_plugins_dir = workspace_root
                     .parent()
                     .map(|p| p.join("fts-plugins"))
                     .unwrap_or_else(|| workspace_root.join("../fts-plugins"));
                 if fts_plugins_dir.exists() {
-                    println!("\n>>> Building fts-macros CLAP plugin...");
+                    runner::section(ci, "reaper-test: build fts-macros");
                     let sh_plugins = Shell::new()?;
                     sh_plugins.change_dir(&fts_plugins_dir);
                     cmd!(
@@ -418,8 +401,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     )
                     .run()?;
 
-                    // Install .clap bundle to REAPER's FX directory
-                    let fx_dir = plugins_dir.join("FX");
+                    let fx_dir = user_plugins_dir.join("FX");
                     std::fs::create_dir_all(&fx_dir)?;
                     let clap_src = fts_plugins_dir.join("target/bundled/fts-macros.clap");
                     let clap_dst = fx_dir.join("fts-macros.clap");
@@ -435,192 +417,141 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                             clap_src.display()
                         );
                     }
-                } else {
-                    println!(
-                        "\n>>> Skipping fts-macros (fts-plugins not found at {})",
-                        fts_plugins_dir.display()
-                    );
+                    runner::end_section(ci);
                 }
+
+                // Build and install SHM guest extensions
+                runner::section(ci, "reaper-test: build guest extensions");
+                let guest_extensions = ["signal-extension", "session-extension", "sync-extension"];
+                for ext in &guest_extensions {
+                    cmd!(sh, "cargo build -p {ext}").run()?;
+                }
+
+                let fts_ext_dir = user_plugins_dir.join("fts-extensions");
+                std::fs::create_dir_all(&fts_ext_dir)?;
+                for ext in &guest_extensions {
+                    let src = workspace_root.join(format!("target/debug/{ext}"));
+                    if src.exists() {
+                        runner::install_plugin(&src, ext, &fts_ext_dir)?;
+                    } else {
+                        println!("  Warning: {ext} binary not found at {}", src.display());
+                    }
+                }
+                runner::end_section(ci);
             }
 
-            // Step 2: Pre-build test binary (before spawning REAPER so it's ready to run)
-            // When a filter is given, only build matching binaries to save time.
-            let pre_build_bins = filter.as_ref().map(|f| find_matching_test_binaries(f));
-            println!("\n>>> Pre-building test binary...");
-            if let Some(ref bins) = pre_build_bins {
-                if !bins.is_empty() {
-                    let mut c = cmd!(sh, "cargo test -p signal --features daw");
+            // Step 2: Pre-build test binaries for each package
+            runner::section(ci, "reaper-test: build test binaries");
+            struct TestCrate<'a> {
+                package: &'a str,
+                features: &'a [&'a str],
+                test_dir: &'a std::path::Path,
+            }
+            let test_crates = [
+                TestCrate {
+                    package: "signal",
+                    features: &["daw"],
+                    test_dir: std::path::Path::new("crates/signal/signal/tests"),
+                },
+                TestCrate {
+                    package: "session",
+                    features: &[],
+                    test_dir: std::path::Path::new("crates/session/session/tests"),
+                },
+                TestCrate {
+                    package: "sync",
+                    features: &[],
+                    test_dir: std::path::Path::new("crates/sync/sync/tests"),
+                },
+            ];
+            for tc in &test_crates {
+                let matched_bins = filter
+                    .as_ref()
+                    .map(|f| runner::find_matching_test_binaries(f, &[tc.test_dir]));
+                // Skip this package if filter matched nothing in it
+                if let Some(ref bins) = matched_bins {
+                    if bins.is_empty() {
+                        continue;
+                    }
+                }
+                let pkg = tc.package;
+                let features = tc.features.join(",");
+                let mut c = if features.is_empty() {
+                    cmd!(sh, "cargo test -p {pkg}")
+                } else {
+                    cmd!(sh, "cargo test -p {pkg} --features {features}")
+                };
+                if let Some(ref bins) = matched_bins {
                     for bin in bins {
                         c = c.arg("--test").arg(bin);
                     }
-                    c.arg("--no-run").run()?;
-                } else {
-                    cmd!(sh, "cargo test -p signal --features daw --no-run").run()?;
                 }
-            } else {
-                cmd!(sh, "cargo test -p signal --features daw --no-run").run()?;
+                c.arg("--no-run").run()?;
             }
+            runner::end_section(ci);
 
-            // Clean up stale sockets from crashed/killed sessions.
-            // Try connecting to each socket — if nothing is listening, it's stale.
-            if let Ok(entries) = std::fs::read_dir("/tmp") {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                        if name.starts_with("fts-daw-") && name.ends_with(".sock") {
-                            match std::os::unix::net::UnixStream::connect(&path) {
-                                Ok(_) => {} // Something is listening — leave it alone
-                                Err(_) => {
-                                    println!("  Removing stale socket: {name}");
-                                    let _ = std::fs::remove_file(&path);
-                                }
-                            }
+            // Step 3: Clean, pre-warm, patch INI, spawn REAPER
+            test_runner.clean_stale_sockets();
+            test_runner.prewarm_reaper();
+            test_runner.patch_ini();
+
+            let mut reaper = test_runner.spawn_reaper()?;
+            reaper.wait_for_socket(&test_runner)?;
+
+            // Step 4: Run tests — only include packages that have matching tests
+            let all_packages: Vec<(TestPackage, &std::path::Path)> = vec![
+                (
+                    TestPackage {
+                        package: "signal".into(),
+                        features: vec!["daw".into()],
+                        test_threads: 4,
+                        default_skips: vec![],
+                    },
+                    std::path::Path::new("crates/signal/signal/tests"),
+                ),
+                (
+                    TestPackage {
+                        package: "session".into(),
+                        features: vec![],
+                        test_threads: 4,
+                        default_skips: vec![],
+                    },
+                    std::path::Path::new("crates/session/session/tests"),
+                ),
+                (
+                    TestPackage {
+                        package: "sync".into(),
+                        features: vec![],
+                        test_threads: 4,
+                        default_skips: vec![],
+                    },
+                    std::path::Path::new("crates/sync/sync/tests"),
+                ),
+            ];
+            let packages: Vec<TestPackage> = all_packages
+                .into_iter()
+                .filter_map(|(pkg, test_dir)| {
+                    if let Some(ref f) = filter {
+                        let bins = runner::find_matching_test_binaries(f, &[test_dir]);
+                        if bins.is_empty() {
+                            println!("  Skipping {} (no tests match filter)", pkg.package);
+                            return None;
                         }
                     }
-                }
+                    Some(pkg)
+                })
+                .collect();
+
+            let tests_passed = test_runner.run_tests(&mut reaper, &packages, filter.as_deref())?;
+
+            // Step 5: Cleanup and report
+            if !tests_passed {
+                reaper.report_failure(&test_runner);
+                reaper.stop(&test_runner);
+                return Err("Some tests failed".into());
             }
 
-            // Step 3: Spawn REAPER (empty project, no splash)
-            println!("\n>>> Spawning REAPER...");
-            let reaper_exe = std::env::var("REAPER_EXECUTABLE").unwrap_or(default_reaper_exe);
-            let reaper_resources =
-                std::env::var("REAPER_RESOURCES").unwrap_or(default_reaper_resources);
-
-            // Use a session-specific socket path so multiple xtask runs don't collide.
-            // We use the xtask PID (guaranteed unique while we're running) rather than
-            // REAPER's PID, because REAPER with -newinst may re-exec with a new PID on
-            // macOS, causing a mismatch between what xtask expects and what the extension
-            // creates.
-            let session_id = std::process::id();
-            let socket_path = format!("/tmp/fts-daw-{session_id}.sock");
-            let _ = std::fs::remove_file(&socket_path);
-
-            let mut reaper_child = std::process::Command::new(&reaper_exe)
-                .current_dir(&reaper_resources)
-                .env("FTS_SOCKET", &socket_path)
-                .arg("-newinst")
-                .arg("-nosplash")
-                .arg("-ignoreerrors")
-                .spawn()
-                .map_err(|e| format!("Failed to spawn REAPER at {reaper_exe}: {e}"))?;
-            let reaper_pid = reaper_child.id();
-            println!("  Spawned REAPER (PID {reaper_pid}), socket: {socket_path}");
-            println!("  Extension log: /tmp/fts-reaper.log");
-
-            // Wait for socket
-            let socket = std::path::Path::new(&socket_path);
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-            print!("  Waiting for socket");
-            while !socket.exists() {
-                if std::time::Instant::now() > deadline {
-                    println!();
-                    // Dump extension log if available
-                    if let Ok(log) = std::fs::read_to_string("/tmp/fts-reaper.log") {
-                        let lines: Vec<&str> = log.lines().collect();
-                        if !lines.is_empty() {
-                            println!("\n>>> Extension log (last 20 lines):");
-                            for line in lines.iter().rev().take(20).rev() {
-                                println!("  {line}");
-                            }
-                        }
-                    }
-                    let _ = reaper_child.kill();
-                    let _ = reaper_child.wait();
-                    return Err("Timed out waiting for REAPER socket".into());
-                }
-                std::thread::sleep(std::time::Duration::from_millis(500));
-                print!(".");
-            }
-            println!("\n  Socket ready");
-
-            // Step 4: Prepare per-test log directory
-            let log_dir = std::path::PathBuf::from("/tmp/reaper-tests");
-            if log_dir.exists() {
-                let _ = std::fs::remove_dir_all(&log_dir);
-            }
-            std::fs::create_dir_all(&log_dir)?;
-            println!("  Log directory: {}", log_dir.display());
-
-            // Step 5: Run REAPER tests (parallel with limited concurrency)
-            // Each test gets its own project tab; limit threads to avoid overwhelming
-            // REAPER's main thread with too many concurrent plugin loads.
-            // Set FTS_SOCKET so tests connect to the right REAPER instance
-            sh.set_var("FTS_SOCKET", &socket_path);
-            // Tell reaper-test to skip project tab cleanup when --keep-open
-            if keep_open {
-                sh.set_var("FTS_KEEP_OPEN", "1");
-            }
-
-            println!("\n>>> Running tests...");
-            let test_result = if let Some(ref f) = filter {
-                // When a filter is given, use the matching binaries found
-                // during pre-build so we don't spawn all 25+ test binaries.
-                let test_bins = pre_build_bins.as_ref().cloned().unwrap_or_default();
-                if test_bins.is_empty() {
-                    // No binary name matched — fall back to running all
-                    // binaries (the filter string may match a function name
-                    // inside a differently-named file).
-                    cmd!(
-                        sh,
-                        "cargo test -p signal --features daw -- --ignored --nocapture --test-threads=4 {f}"
-                    )
-                    .run()
-                } else {
-                    let mut c = cmd!(sh, "cargo test -p signal --features daw");
-                    for bin in &test_bins {
-                        c = c.arg("--test").arg(bin);
-                    }
-                    c = c
-                        .arg("--")
-                        .arg("--ignored")
-                        .arg("--nocapture")
-                        .arg("--test-threads=4")
-                        .arg(f);
-                    c.run()
-                }
-            } else {
-                cmd!(
-                    sh,
-                    "cargo test -p signal --features daw -- --ignored --nocapture --test-threads=4"
-                )
-                .run()
-            };
-
-            // Step 6: Kill REAPER (unless --keep-open)
-            if keep_open {
-                println!("\n>>> Keeping REAPER open (PID {reaper_pid})");
-                println!("  Socket: {socket_path}");
-                println!("  Kill manually with: kill {reaper_pid}");
-            } else {
-                println!("\n>>> Stopping REAPER (PID {reaper_pid})...");
-                let _ = reaper_child.kill();
-                let _ = reaper_child.wait();
-                let _ = std::fs::remove_file(socket_path);
-            }
-
-            // Step 7: On failure, summarize per-test log files
-            if test_result.is_err() {
-                println!("\n>>> Test logs (non-empty):");
-                if let Ok(entries) = std::fs::read_dir(&log_dir) {
-                    let mut found_logs = false;
-                    for entry in entries.flatten() {
-                        let path = entry.path();
-                        if path.extension().map(|e| e == "log").unwrap_or(false) {
-                            if let Ok(meta) = path.metadata() {
-                                if meta.len() > 0 {
-                                    found_logs = true;
-                                    println!("  {} ({} bytes)", path.display(), meta.len());
-                                }
-                            }
-                        }
-                    }
-                    if !found_logs {
-                        println!("  (no log files found)");
-                    }
-                }
-            }
-
-            test_result?;
+            reaper.stop(&test_runner);
             println!("\n=== REAPER integration tests passed ===");
         }
         Commands::Integration => {
@@ -930,6 +861,7 @@ fn run_setup_rigs(force: bool) -> Result<(), Box<dyn std::error::Error>> {
                 theme: Some(theme_full_path),
             },
             restore_ini_after_launch: is_live_instance,
+            reaper_args: reaper_launcher::LaunchConfig::standard_reaper_args(),
         };
         launch_config
             .save(&contents_dir.join("launch.json"))
@@ -1268,42 +1200,6 @@ fn chrono_now() -> String {
 
 /// Find integration test binary names that match the given filter string.
 ///
-/// First checks filenames, then searches file contents for the filter as a
-/// function name. Returns the file stems (binary names) so we can pass
-/// `--test <name>` to cargo and avoid spawning all 25+ test binaries.
-fn find_matching_test_binaries(filter: &str) -> Vec<String> {
-    let tests_dir = std::path::Path::new("crates/signal/signal/tests");
-    let Ok(entries) = std::fs::read_dir(tests_dir) else {
-        return Vec::new();
-    };
-
-    let mut matches = Vec::new();
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().map(|e| e == "rs").unwrap_or(false) {
-            let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
-                continue;
-            };
-            // Match against filename first (fast path)
-            if stem.contains(filter) {
-                matches.push(stem.to_string());
-                continue;
-            }
-            // Then search file contents for `fn <filter>` as a function
-            // definition (handles cases where the function name differs
-            // from the file name). We check for `fn {filter}` to avoid
-            // false positives from imports like `use reaper_test::...`.
-            if let Ok(contents) = std::fs::read_to_string(&path) {
-                let pattern = format!("fn {filter}");
-                if contents.contains(&pattern) {
-                    matches.push(stem.to_string());
-                }
-            }
-        }
-    }
-    matches
-}
-
 // ============================================================================
 // migrate: Export signal.db to REAPER-native FXChains/TrackTemplates
 // ============================================================================

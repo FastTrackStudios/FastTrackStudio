@@ -91,6 +91,7 @@ keyflow-ui = { git = "https://github.com/FastTrackStudios/keyflow.git", branch =
 daw = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
 daw-ui = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
 daw-cli = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
+daw-extension-runtime = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
 # NOTE: daw-proto, daw-control, daw-control-sync, daw-reaper, daw-standalone,
 # dawfile-reaper are INTERNAL. Access them through the `daw` facade crate.
 # Use features: sync, reaper, standalone, file
@@ -203,14 +204,14 @@ pollster = "0.4"
 # engraver = { path = "../keyflow/crates/engraver" }
 # keyflow-ui = { path = "../keyflow/crates/keyflow-ui" }
 #
-# [patch."https://github.com/FastTrackStudios/daw.git"]
-# daw = { path = "../daw/crates/daw" }
-# daw-ui = { path = "../daw/crates/daw-ui" }
-# daw-cli = { path = "../daw/apps/daw" }
-# audio-controls = { path = "../daw/crates/audio-controls" }
-# reaper-test = { path = "../daw/crates/reaper-test" }
-# reaper-test-macro = { path = "../daw/crates/reaper-test-macro" }
-# reaper-launcher = { path = "../daw/crates/reaper-launcher" }
+[patch."https://github.com/FastTrackStudios/daw.git"]
+daw = { path = "../daw/crates/daw" }
+daw-ui = { path = "../daw/crates/daw-ui" }
+daw-cli = { path = "../daw/apps/daw" }
+audio-controls = { path = "../daw/crates/audio-controls" }
+reaper-test = { path = "../daw/crates/reaper-test" }
+reaper-test-macro = { path = "../daw/crates/reaper-test-macro" }
+reaper-launcher = { path = "../daw/crates/reaper-launcher" }
 #
 # [patch."https://github.com/FastTrackStudios/dock-dioxus.git"]
 # dock-proto = { path = "../dock-dioxus/crates/dock-proto" }

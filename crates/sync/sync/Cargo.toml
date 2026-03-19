@@ -4,6 +4,14 @@ description = "Sync engine — DAW-to-DAW real-time synchronization via roam"
 version.workspace = true
 edition = "2024"
 
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "fts-sync"
+path = "src/main.rs"
+required-features = ["guest"]
+
 [dependencies]
 sync-proto = { path = "../sync-proto" }
 daw = { workspace = true }
@@ -16,9 +24,20 @@ tokio-util = "0.7"
 facet.workspace = true
 rusty_link = { version = "0.4", optional = true }
 
+# Guest mode dependencies (SHM extension runtime)
+daw-extension-runtime = { workspace = true, optional = true }
+eyre = { version = "0.6", optional = true }
+tracing-subscriber = { workspace = true, optional = true }
+
 [features]
 default = ["link"]
 link = ["dep:rusty_link"]
+guest = ["dep:daw-extension-runtime", "dep:eyre", "dep:tracing-subscriber", "link"]
+
+[dev-dependencies]
+eyre.workspace = true
+reaper-test.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [lints]
 workspace = true

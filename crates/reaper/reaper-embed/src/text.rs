@@ -13,8 +13,9 @@ const SYSTEM_FONT: &[u8] = include_bytes!("/System/Library/Fonts/Supplemental/Ar
 #[cfg(target_os = "windows")]
 const SYSTEM_FONT: &[u8] = include_bytes!("C:/Windows/Fonts/arial.ttf");
 
+// Bundled DejaVuSans — works on any Linux (NixOS, Debian, Fedora, etc.)
 #[cfg(target_os = "linux")]
-const SYSTEM_FONT: &[u8] = include_bytes!("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf");
+const SYSTEM_FONT: &[u8] = include_bytes!("../fonts/DejaVuSans.ttf");
 
 /// Text renderer that uses Vello's `draw_glyphs` API with skrifa font metrics.
 pub struct VelloTextRenderer {

@@ -37,5 +37,5 @@ pub use engine::Engine;
 pub use subscriptions::ProjectSubscriptions;
 pub use sync_proto::{
     ConflictPolicy, SyncConfig, SyncDomain, SyncEvent, SyncPeer, SyncService, SyncSession,
-    SyncStatus,
+    SyncStatus, actions,
 };

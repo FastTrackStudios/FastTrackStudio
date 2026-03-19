@@ -23,7 +23,7 @@ mod setlist_nav;
 mod signal_actions;
 pub(crate) mod signal_bridge;
 mod signal_save;
-mod sync_bridge;
+// sync_bridge removed — Link engine now lives in sync-extension (SHM guest)
 mod toolbar_manager;
 mod visibility;
 
@@ -456,10 +456,6 @@ async fn register_daw_dispatcher() {
             group_value
         );
     }
-
-    // Initialize the sync bridge (Ableton Link engine).
-    // The timer callback will call sync_bridge::tick() to drive transport sync.
-    sync_bridge::init();
 
     // Start discovering other FTS instances on the network via mDNS.
     // Auto-connect to peers in the same sync group.

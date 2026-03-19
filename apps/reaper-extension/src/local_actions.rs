@@ -184,42 +184,7 @@ actions_proto::define_actions! {
             group: "Dynamic Template",
             implementation: supported(super::handle_organize_tracks),
         }
-        // ── Sync / Ableton Link ──────────────────────────────────────
-        SYNC_TOGGLE_LINK = "sync_toggle_link" {
-            name: "Toggle Ableton Link",
-            description: "Enable/disable Ableton Link sync (toggles between Puppet and Off)",
-            category: Dev,
-            group: "Sync",
-            implementation: supported(super::handle_sync_toggle_link),
-        }
-        SYNC_LINK_PUPPET = "sync_link_puppet" {
-            name: "Link Puppet Mode",
-            description: "Enable Ableton Link in Puppet mode (follow Link session)",
-            category: Dev,
-            group: "Sync",
-            implementation: supported(super::handle_sync_link_puppet),
-        }
-        SYNC_LINK_MASTER = "sync_link_master" {
-            name: "Link Master Mode",
-            description: "Enable Ableton Link in Master mode (drive Link session)",
-            category: Dev,
-            group: "Sync",
-            implementation: supported(super::handle_sync_link_master),
-        }
-        SYNC_LINK_OFF = "sync_link_off" {
-            name: "Link Off",
-            description: "Disable Ableton Link sync",
-            category: Dev,
-            group: "Sync",
-            implementation: supported(super::handle_sync_link_off),
-        }
-        SYNC_SETLIST_TOGGLE = "sync_setlist_toggle" {
-            name: "Toggle Setlist Sync",
-            description: "Enable/disable live sync between song tabs and the combined setlist",
-            category: Dev,
-            group: "Sync",
-            implementation: supported(super::handle_sync_setlist_toggle),
-        }
+        // Sync actions moved to sync-extension (registered via ActionRegistryService RPC)
         // ── Signal Save ─────────────────────────────────────────────
         SAVE_BLOCK = "save_block" {
             name: "Signal - Save Block",
@@ -1390,61 +1355,7 @@ unsafe fn add_separator(menu: raw::HMENU) {
     }
 }
 
-// ── Sync / Ableton Link Action Handlers ──────────────────────────────────────
-
-fn handle_sync_toggle_link() -> ActionResult {
-    use sync::link::Mode;
-    if crate::sync_bridge::is_link_enabled() {
-        crate::sync_bridge::disable_link();
-        ActionResult::success_with_message("Ableton Link disabled")
-    } else {
-        crate::sync_bridge::enable_link(Mode::Puppet);
-        ActionResult::success_with_message("Ableton Link enabled (Puppet mode)")
-    }
-}
-
-fn handle_sync_link_puppet() -> ActionResult {
-    crate::sync_bridge::enable_link(sync::link::Mode::Puppet);
-    ActionResult::success_with_message("Ableton Link: Puppet mode")
-}
-
-fn handle_sync_link_master() -> ActionResult {
-    crate::sync_bridge::enable_link(sync::link::Mode::Master);
-    ActionResult::success_with_message("Ableton Link: Master mode")
-}
-
-fn handle_sync_link_off() -> ActionResult {
-    crate::sync_bridge::disable_link();
-    ActionResult::success_with_message("Ableton Link: Off")
-}
-
-fn handle_sync_setlist_toggle() -> ActionResult {
-    let low = reaper_high::Reaper::get().medium_reaper().low();
-    let section = std::ffi::CString::new("FTS_SYNC").unwrap();
-    let key = std::ffi::CString::new("setlist_sync_enabled").unwrap();
-
-    // Read current state
-    let currently_enabled = unsafe {
-        let ptr = low.GetExtState(section.as_ptr(), key.as_ptr());
-        if ptr.is_null() {
-            true // Default: enabled
-        } else {
-            std::ffi::CStr::from_ptr(ptr).to_string_lossy() != "0"
-        }
-    };
-
-    let new_state = !currently_enabled;
-    let value = std::ffi::CString::new(if new_state { "1" } else { "0" }).unwrap();
-    unsafe {
-        low.SetExtState(section.as_ptr(), key.as_ptr(), value.as_ptr(), false);
-    }
-
-    if new_state {
-        ActionResult::success_with_message("Setlist sync enabled")
-    } else {
-        ActionResult::success_with_message("Setlist sync disabled")
-    }
-}
+// Sync action handlers moved to sync-extension
 
 // ============================================================================
 // Signal Save Actions
