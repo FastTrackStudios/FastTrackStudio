@@ -220,13 +220,13 @@ daw-allocator = { path = "../daw/crates/daw-allocator" }
 # dock-proto = { path = "../dock-dioxus/crates/dock-proto" }
 # dock-dioxus = { path = "../dock-dioxus/crates/dock-dioxus" }
 #
-# [patch."https://github.com/FastTrackStudios/input_actions.git"]
-# actions-proto = { path = "../input_actions/crates/actions-proto" }
-# actions-registry = { path = "../input_actions/crates/actions-registry" }
-# actions-standalone = { path = "../input_actions/crates/actions-standalone" }
-# actions-keybindings = { path = "../input_actions/crates/actions-keybindings" }
-# input-dioxus = { path = "../input_actions/crates/input-dioxus" }
-# input = { path = "../input_actions/crates/input" }
+[patch."https://github.com/FastTrackStudios/input_actions.git"]
+actions-proto = { path = "../input_actions/crates/actions-proto" }
+actions-registry = { path = "../input_actions/crates/actions-registry" }
+actions-standalone = { path = "../input_actions/crates/actions-standalone" }
+actions-keybindings = { path = "../input_actions/crates/actions-keybindings" }
+input-dioxus = { path = "../input_actions/crates/input-dioxus" }
+input = { path = "../input_actions/crates/input" }
 #
 # [patch."https://github.com/FastTrackStudios/dynamic-template.git"]
 # color-palette = { path = "../dynamic-template/crates/color-palette" }

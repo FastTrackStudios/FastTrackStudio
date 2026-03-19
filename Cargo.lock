@@ -5,7 +5,6 @@ version = 4
 [[package]]
 name = "actions-keybindings"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/input_actions.git?branch=main#df9b403073844e8ec03ddca964eb88ca1aef0435"
 dependencies = [
  "actions-proto",
  "tracing",
@@ -14,7 +13,6 @@ dependencies = [
 [[package]]
 name = "actions-proto"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/input_actions.git?branch=main#df9b403073844e8ec03ddca964eb88ca1aef0435"
 dependencies = [
  "convert_case 0.6.0",
  "facet",
@@ -24,7 +22,6 @@ dependencies = [
 [[package]]
 name = "actions-registry"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/input_actions.git?branch=main#df9b403073844e8ec03ddca964eb88ca1aef0435"
 dependencies = [
  "actions-proto",
  "roam",
@@ -35,7 +32,6 @@ dependencies = [
 [[package]]
 name = "actions-standalone"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/input_actions.git?branch=main#df9b403073844e8ec03ddca964eb88ca1aef0435"
 dependencies = [
  "actions-proto",
  "async-lock",
@@ -5301,7 +5297,6 @@ dependencies = [
 [[package]]
 name = "input"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/input_actions.git?branch=main#df9b403073844e8ec03ddca964eb88ca1aef0435"
 dependencies = [
  "serde",
  "serde_json",
@@ -5312,7 +5307,6 @@ dependencies = [
 [[package]]
 name = "input-dioxus"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/input_actions.git?branch=main#df9b403073844e8ec03ddca964eb88ca1aef0435"
 dependencies = [
  "actions-keybindings",
  "dioxus",
