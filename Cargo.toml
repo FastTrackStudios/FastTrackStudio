@@ -118,7 +118,7 @@ dynamic-template-proto = { git = "https://github.com/FastTrackStudios/dynamic-te
 dynamic-template = { git = "https://github.com/FastTrackStudios/dynamic-template.git", branch = "main" }
 
 # Shared infrastructure
-daw-allocator = { path = "crates/shared/daw-allocator" }
+daw-allocator = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
 roam-discover = { path = "crates/shared/roam-discover" }
 installer-core = { path = "crates/shared/installer-core" }
 
@@ -214,6 +214,7 @@ audio-controls = { path = "../daw/crates/audio-controls" }
 reaper-test = { path = "../daw/crates/reaper-test" }
 reaper-test-macro = { path = "../daw/crates/reaper-test-macro" }
 reaper-launcher = { path = "../daw/crates/reaper-launcher" }
+daw-allocator = { path = "../daw/crates/daw-allocator" }
 #
 # [patch."https://github.com/FastTrackStudios/dock-dioxus.git"]
 # dock-proto = { path = "../dock-dioxus/crates/dock-proto" }
