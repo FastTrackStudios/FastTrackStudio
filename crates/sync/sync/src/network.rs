@@ -485,6 +485,7 @@ mod tests {
             sequence: seq,
             project_guid: "proj-1".to_string(),
             domain: SyncDomain::Transport(Transport::default()),
+            created_at_ms: SyncEvent::now_ms(),
         }
     }
 

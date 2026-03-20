@@ -136,7 +136,11 @@ impl DriftCorrector {
     pub fn new() -> Self {
         Self {
             tolerance: 0.01,
-            hard_seek_threshold: 5.0,
+            // Hard-seek when drift exceeds 1s. Proportional control converges
+            // drifts up to ~0.5s in a few ticks. Above 1s, something is
+            // fundamentally wrong (seek, tempo change, etc.) and a hard seek
+            // is more efficient than gradual convergence.
+            hard_seek_threshold: 1.0,
         }
     }
 
@@ -296,7 +300,9 @@ mod tests {
 
     #[test]
     fn rate_clamped_on_large_drift() {
-        let mut dc = DriftCorrector::new();
+        // Use custom thresholds so 0.15s drift is within hard-seek but large
+        // enough that gain * drift exceeds MAX_RATE_CORRECTION.
+        let mut dc = DriftCorrector::with_thresholds(0.01, 5.0);
         let action = dc.correct(3.0, 1.0); // 3s behind, 3.0*2.0=6.0 but clamped to 0.5
         match action {
             DriftAction::SetRate { new_playrate } => {
@@ -321,7 +327,7 @@ mod tests {
     #[test]
     fn hard_seek_on_large_drift() {
         let mut dc = DriftCorrector::new();
-        let action = dc.correct(6.0, 1.0); // 6 seconds off (threshold is 5s)
+        let action = dc.correct(1.5, 1.0); // 1.5s off (threshold is 1.0s)
         assert_eq!(action, DriftAction::HardSeek);
     }
 
@@ -331,7 +337,7 @@ mod tests {
         // Proportional control should converge smoothly without oscillation.
         let mut dc = DriftCorrector::new();
         let mut local_pos = 0.0;
-        let mut master_pos = 0.5; // 500ms ahead
+        let mut master_pos = 0.5; // 500ms ahead (under 1.0s hard-seek threshold)
         let mut playrate = 1.0;
         let tick_interval = 0.033; // 33ms heartbeat (30Hz)
 

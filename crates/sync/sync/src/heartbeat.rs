@@ -58,6 +58,10 @@ pub fn spawn(
                 Ok(t) => t,
                 Err(_) => continue,
             };
+            // Timestamp when the master position was actually read (right after
+            // get_state returns), so followers can measure the exact time gap
+            // between the two position samples.
+            let position_read_at = SyncEvent::now_ms();
 
             // Only send heartbeats while playing
             if transport.play_state != daw::service::PlayState::Playing {
@@ -75,6 +79,7 @@ pub fn spawn(
                 sequence: seq,
                 project_guid,
                 domain: SyncDomain::Transport(transport),
+                created_at_ms: position_read_at,
             };
 
             match event_tx.send(event) {

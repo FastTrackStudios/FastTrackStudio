@@ -10,7 +10,7 @@ use daw::service::{
     TempoMapEvent, TrackEvent, TrackRef, Transport,
 };
 use session::offset_map::SetlistOffsetMap;
-use sync_proto::SyncDomain;
+use sync_proto::{SyncDomain, SyncEvent};
 use tracing::{debug, info, warn};
 
 use crate::drift::{DriftAction, DriftCorrector};
@@ -29,6 +29,7 @@ pub async fn apply_remote_event(
     suppression: &mut SuppressionSet,
     drift_corrector: &mut DriftCorrector,
     link_active: bool,
+    event_created_at_ms: u64,
 ) {
     // Remote project GUIDs are process-local (e.g., REAPER pointer-based).
     // If the exact GUID isn't found locally, fall back to the current project.
@@ -53,7 +54,7 @@ pub async fn apply_remote_event(
 
     match domain {
         SyncDomain::Transport(transport) => {
-            apply_transport(daw, &ctx, project_guid, transport, suppression, drift_corrector, link_active).await;
+            apply_transport(daw, &ctx, project_guid, transport, suppression, drift_corrector, link_active, event_created_at_ms).await;
         }
         SyncDomain::Track(event) => {
             apply_track(daw, &ctx, event, suppression).await;
@@ -118,6 +119,7 @@ async fn apply_transport(
     suppression: &mut SuppressionSet,
     drift_corrector: &mut DriftCorrector,
     link_active: bool,
+    event_created_at_ms: u64,
 ) {
     let project = match daw.project(project_guid).await {
         Ok(p) => p,
@@ -142,11 +144,26 @@ async fn apply_transport(
                 }
 
                 // Both playing — drift correct via DriftCorrector (fallback when Link is off)
+                //
+                // Compensate for the time gap between reading the two positions:
+                // - Master position was read at `event_created_at_ms`
+                // - Local position was just read (via get_state above)
+                // Both positions are stale, but the local position is more recent.
+                // Adding the time gap to the master position aligns both to the
+                // same effective timestamp.
+                let local_read_at = SyncEvent::now_ms();
                 if let (Some(ref remote_pos), Some(ref local_pos)) = (
                     transport.playhead_position.time.as_ref(),
                     local.playhead_position.time.as_ref(),
                 ) {
-                    let drift = remote_pos.as_seconds() - local_pos.as_seconds();
+                    let latency_compensation = if event_created_at_ms > 0 {
+                        let elapsed_ms = local_read_at.saturating_sub(event_created_at_ms);
+                        (elapsed_ms as f64) / 1000.0
+                    } else {
+                        0.0
+                    };
+                    let estimated_remote = remote_pos.as_seconds() + latency_compensation;
+                    let drift = estimated_remote - local_pos.as_seconds();
 
                     match drift_corrector.correct(drift, local.playrate) {
                         DriftAction::SetRate { new_playrate } => {
@@ -161,10 +178,9 @@ async fn apply_transport(
                         }
                         DriftAction::HardSeek => {
                             info!(
-                                "Hard seek to master position {:.3}s (drift={drift:.3}s)",
-                                remote_pos.as_seconds()
+                                "Hard seek to estimated position {estimated_remote:.3}s (drift={drift:.3}s)"
                             );
-                            let _ = t.set_position(remote_pos.as_seconds()).await;
+                            let _ = t.set_position(estimated_remote).await;
                             let _ = t.set_playrate(1.0).await;
                         }
                         DriftAction::None => {}
@@ -172,6 +188,10 @@ async fn apply_transport(
                 }
                 // Also sync tempo if it drifted
                 if (transport.tempo.bpm - local.tempo.bpm).abs() > 0.001 {
+                    info!(
+                        "Syncing tempo: remote={:.1} local={:.1}",
+                        transport.tempo.bpm, local.tempo.bpm
+                    );
                     let _ = t.set_tempo(transport.tempo.bpm).await;
                 }
                 return;
@@ -219,7 +239,14 @@ async fn apply_transport(
     match transport.play_state {
         PlayState::Playing => {
             info!("Applying remote play command (pos={pos_secs:?})");
-            let _ = t.play().await;
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                t.play(),
+            ).await {
+                Ok(Ok(_)) => info!("Play command completed successfully"),
+                Ok(Err(e)) => warn!("Play command returned error: {e}"),
+                Err(_) => warn!("Play command TIMED OUT after 5s"),
+            }
         }
         PlayState::Paused => {
             info!("Applying remote pause command");

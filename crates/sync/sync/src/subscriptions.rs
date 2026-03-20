@@ -64,6 +64,7 @@ impl ForwarderCtx {
             sequence: self.next_sequence(),
             project_guid: self.project_guid.clone(),
             domain,
+            created_at_ms: SyncEvent::now_ms(),
         };
 
         // Check echo suppression before broadcasting
@@ -384,6 +385,7 @@ pub fn watch_projects(
                                 sequence: sequence.fetch_add(1, Ordering::Relaxed),
                                 project_guid: String::new(), // project events are global
                                 domain: SyncDomain::Project(event),
+                                created_at_ms: SyncEvent::now_ms(),
                             };
                             let _ = event_tx.send(sync_event);
                         }

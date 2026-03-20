@@ -161,6 +161,22 @@ pub struct SyncEvent {
     pub project_guid: String,
     /// The domain-specific event payload
     pub domain: SyncDomain,
+    /// Wall-clock timestamp (ms since Unix epoch) when this event was created.
+    ///
+    /// Used by the drift corrector to estimate the master's current position
+    /// at the time the follower processes a heartbeat, compensating for
+    /// network + RPC latency.
+    pub created_at_ms: u64,
+}
+
+impl SyncEvent {
+    /// Current wall-clock time in milliseconds since Unix epoch.
+    pub fn now_ms() -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64
+    }
 }
 
 // ── Sync Status ─────────────────────────────────────────────────────────────

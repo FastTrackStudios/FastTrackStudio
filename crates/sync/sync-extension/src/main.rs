@@ -145,32 +145,50 @@ async fn run() -> Result<()> {
         .set("FTS_SYNC_EXT", "peer_id", &session.peer_id, false)
         .await?;
 
-    // ── mDNS Advertisement ──────────────────────────────────────────────
-    let _advert_guard = roam_discover::advertise(roam_discover::ServiceInfo {
-        service_type: "fts-sync",
-        instance_name: format!("fts-sync-{pid}"),
-        port: mesh_port,
-        metadata: vec![
-            ("peer_id".into(), session.peer_id.clone()),
-            ("session_id".into(), session.session_id.clone()),
-            ("pid".into(), pid.to_string()),
-        ],
-    })?;
-    info!("[sync:{pid}] mDNS service advertised as fts-sync");
+    // ── mDNS (disabled when FTS_SYNC_NO_MDNS is set, e.g. in tests) ────
+    let no_mdns = std::env::var("FTS_SYNC_NO_MDNS").is_ok();
+    let _advert_guard = if no_mdns {
+        info!("[sync:{pid}] mDNS disabled (FTS_SYNC_NO_MDNS set)");
+        None
+    } else {
+        let guard = roam_discover::advertise(roam_discover::ServiceInfo {
+            service_type: "fts-sync",
+            instance_name: format!("fts-sync-{pid}"),
+            port: mesh_port,
+            metadata: vec![
+                ("peer_id".into(), session.peer_id.clone()),
+                ("session_id".into(), session.session_id.clone()),
+                ("pid".into(), pid.to_string()),
+            ],
+        })?;
+        info!("[sync:{pid}] mDNS service advertised as fts-sync");
+        Some(guard)
+    };
 
-    // ── mDNS Discovery ──────────────────────────────────────────────────
-    let mut discover_rx = roam_discover::discover("fts-sync").await;
     let local_peer_id = session.peer_id.clone();
 
     // ── Run all loops concurrently ──────────────────────────────────────
-    tokio::select! {
-        result = link_bridge::run_link_engine(&daw) => result,
-        _ = handle_actions(&daw, action_rx) => Ok(()),
-        _ = handle_incoming_events(&engine, &mut incoming_rx) => Ok(()),
-        _ = handle_peer_events(&daw, &engine, &mut peer_event_rx) => Ok(()),
-        _ = handle_discovery(&mesh, &mut discover_rx, &local_peer_id) => Ok(()),
-        _ = poll_connect_peers(&daw, &mesh, &session.peer_id) => Ok(()),
-        _ = report_peer_count(&daw, &mesh) => Ok(()),
+    if no_mdns {
+        // No mDNS — rely on connect_peers ExtState for peer discovery
+        tokio::select! {
+            result = link_bridge::run_link_engine(&daw) => result,
+            _ = handle_actions(&daw, action_rx) => Ok(()),
+            _ = handle_incoming_events(&engine, &mut incoming_rx) => Ok(()),
+            _ = handle_peer_events(&daw, &engine, &mut peer_event_rx) => Ok(()),
+            _ = poll_connect_peers(&daw, &mesh, &local_peer_id) => Ok(()),
+            _ = report_peer_count(&daw, &mesh) => Ok(()),
+        }
+    } else {
+        let mut discover_rx = roam_discover::discover("fts-sync").await;
+        tokio::select! {
+            result = link_bridge::run_link_engine(&daw) => result,
+            _ = handle_actions(&daw, action_rx) => Ok(()),
+            _ = handle_incoming_events(&engine, &mut incoming_rx) => Ok(()),
+            _ = handle_peer_events(&daw, &engine, &mut peer_event_rx) => Ok(()),
+            _ = handle_discovery(&mesh, &mut discover_rx, &local_peer_id) => Ok(()),
+            _ = poll_connect_peers(&daw, &mesh, &local_peer_id) => Ok(()),
+            _ = report_peer_count(&daw, &mesh) => Ok(()),
+        }
     }
 }
 
@@ -332,16 +350,45 @@ async fn dispatch_toggle_setlist(daw: &Daw) {
 }
 
 /// Apply incoming remote SyncEvents to the local DAW.
+///
+/// When processing is slower than the event rate (due to RPC latency),
+/// events queue up and the follower falls behind. To prevent this,
+/// we drain all pending events after processing each one and only
+/// apply the latest event per origin peer. This ensures the follower
+/// always processes the most recent state rather than replaying stale
+/// heartbeats.
 async fn handle_incoming_events(
     engine: &Engine,
     rx: &mut tokio::sync::mpsc::Receiver<sync::SyncEvent>,
 ) {
     let pid = std::process::id();
-    while let Some(event) = rx.recv().await {
-        debug!(
-            "[sync:{pid}] Received remote event from {} (seq={})",
-            event.origin_peer, event.sequence
-        );
+    while let Some(mut event) = rx.recv().await {
+        // Drain any queued events — keep the latest per origin
+        let mut drained = 0u32;
+        while let Ok(newer) = rx.try_recv() {
+            // For transport heartbeats, only the latest matters.
+            // For non-transport events (track/fx/etc.), we'd ideally
+            // process them all, but transport heartbeats dominate the
+            // event stream during playback.
+            if newer.origin_peer == event.origin_peer {
+                drained += 1;
+                event = newer;
+            } else {
+                // Different peer — apply immediately
+                engine.apply_remote(&newer).await;
+            }
+        }
+        if drained > 0 {
+            debug!(
+                "[sync:{pid}] Skipped {drained} stale events, applying seq={}",
+                event.sequence
+            );
+        } else {
+            debug!(
+                "[sync:{pid}] Received remote event from {} (seq={})",
+                event.origin_peer, event.sequence
+            );
+        }
         engine.apply_remote(&event).await;
     }
     info!("[sync:{pid}] Incoming event stream ended");
@@ -376,14 +423,24 @@ async fn handle_peer_events(
 
         // Auto-enable Link based on master election.
         // PeerMesh handles play/stop/seek; Link handles tempo + phase correction.
+        //
+        // FTS_SYNC_NO_LINK=1 suppresses Link auto-enable. Used in tests where
+        // multiple instances share the same machine (and thus the same Link
+        // multicast session), which causes puppet mode to race with PeerMesh
+        // transport sync.
+        let no_link = std::env::var("FTS_SYNC_NO_LINK").map_or(false, |v| v == "1");
         let has_peers = engine.peer_count().await > 1; // includes self
-        if has_peers {
+        if has_peers && !no_link {
             let mode = if engine.is_master() { "master" } else { "puppet" };
             info!("[sync:{pid}] Auto-enabling Link in {mode} mode");
             let _ = daw.ext_state().set("FTS_SYNC", "link_mode", mode, false).await;
             engine.set_link_active(true);
         } else {
-            info!("[sync:{pid}] No peers — disabling Link");
+            if no_link && has_peers {
+                info!("[sync:{pid}] Link suppressed (FTS_SYNC_NO_LINK=1)");
+            } else {
+                info!("[sync:{pid}] No peers — disabling Link");
+            }
             let _ = daw.ext_state().set("FTS_SYNC", "link_mode", "off", false).await;
             engine.set_link_active(false);
         }

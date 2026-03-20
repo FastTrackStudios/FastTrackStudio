@@ -199,6 +199,7 @@ impl Engine {
             sequence: self.next_sequence(),
             project_guid,
             domain,
+            created_at_ms: SyncEvent::now_ms(),
         }
     }
 
@@ -260,6 +261,7 @@ impl Engine {
             &mut suppression,
             &mut drift,
             link_active,
+            event.created_at_ms,
         )
         .await;
     }
