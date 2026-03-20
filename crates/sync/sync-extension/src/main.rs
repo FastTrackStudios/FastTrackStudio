@@ -20,11 +20,27 @@ use sync::{Engine, SyncConfig, SyncSession};
 use tracing::{debug, info};
 
 fn main() -> Result<()> {
-    tracing_subscriber::fmt()
+    let pid = std::process::id();
+
+    // Write per-instance log file for debugging multi-instance sync
+    let log_path = std::path::PathBuf::from(format!("/tmp/fts-sync-{pid}.log"));
+    let log_file = std::fs::File::create(&log_path).ok();
+
+    let subscriber = tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
-        )
-        .init();
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "info,sync=debug,sync_extension=debug,roam_discover=debug".into()),
+        );
+
+    if let Some(file) = log_file {
+        use tracing_subscriber::fmt::writer::MakeWriterExt;
+        // Write to both stderr and the log file
+        let writer = std::io::stderr.and(file);
+        subscriber.with_writer(writer).init();
+        eprintln!("[sync:{pid}] Logging to {}", log_path.display());
+    } else {
+        subscriber.init();
+    }
 
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
