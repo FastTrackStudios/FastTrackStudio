@@ -12,6 +12,7 @@ path = "src/main.rs"
 daw.workspace = true
 daw-extension-runtime.workspace = true
 roam.workspace = true
+roam-discover = { workspace = true }
 sync = { workspace = true, features = ["link"] }
 tokio = { workspace = true, features = ["time", "net", "rt", "macros"] }
 eyre.workspace = true

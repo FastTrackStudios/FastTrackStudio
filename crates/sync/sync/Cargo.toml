@@ -17,11 +17,13 @@ sync-proto = { path = "../sync-proto" }
 daw = { workspace = true }
 session.workspace = true
 roam.workspace = true
+roam-discover = { workspace = true }
 moire.workspace = true
 tracing.workspace = true
-tokio = { workspace = true, features = ["sync", "time"] }
+tokio = { workspace = true, features = ["sync", "time", "net"] }
 tokio-util = "0.7"
 facet.workspace = true
+facet-postcard.workspace = true
 rusty_link = { version = "0.4", optional = true }
 
 # Guest mode dependencies (SHM extension runtime)

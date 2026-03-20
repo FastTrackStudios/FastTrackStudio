@@ -17,11 +17,13 @@ pub fn advertise(info: ServiceInfo) -> Result<AdvertiseGuard> {
     let properties: std::collections::HashMap<String, String> =
         info.metadata.iter().cloned().collect();
 
+    // mdns-sd requires hostnames to end with ".local."
+    let hostname = format!("{}.local.", info.instance_name);
     let mdns_info = MdnsServiceInfo::new(
         &service_type,
         &info.instance_name,
-        &info.instance_name, // hostname = instance name
-        "",                  // empty = auto-detect IP
+        &hostname,
+        "",  // empty = auto-detect IP
         info.port,
         properties,
     )
