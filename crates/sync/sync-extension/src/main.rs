@@ -62,7 +62,7 @@ async fn run() -> Result<()> {
         .into_iter()
         .map(|def| ActionDef {
             command_name: Box::leak(def.id.to_command_id().into_boxed_str()),
-            description: Box::leak(def.description.clone().into_boxed_str()),
+            description: Box::leak(def.display_name().into_boxed_str()),
         })
         .collect();
 
