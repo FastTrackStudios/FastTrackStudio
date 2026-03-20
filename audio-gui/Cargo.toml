@@ -1,0 +1,11 @@
+[package]
+name = "audio-gui"
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+description = "Shared Dioxus audio GUI components for FTS plugins — Blitz-compatible, inline-styled"
+
+[dependencies]
+nih_plug = { workspace = true }
+nih_plug_dioxus = { workspace = true }

@@ -6,12 +6,21 @@
 //! ```ignore
 //! use fts_plugin_core::ui::prelude::*;
 //! ```
+//!
+//! The shared component library lives in the `audio-gui` crate.
+//! This module re-exports it alongside legacy components for convenience.
 
 pub mod components;
-pub mod theme;
+
+/// Theme re-exported from `audio-gui`.
+pub use audio_gui::theme;
 
 /// UI prelude — import this for all FTS plugin UI building blocks.
+///
+/// Includes everything from `audio_gui::prelude` (Knob, ParamSlider,
+/// LevelMeter, TransferCurve, etc.) plus legacy components (Toggle,
+/// Section, etc.) that haven't been moved yet.
 pub mod prelude {
     pub use super::components::*;
-    pub use super::theme;
+    pub use audio_gui::prelude::*;
 }

@@ -22,6 +22,10 @@ pub use nih_plug_dioxus::prelude::*;
 #[cfg(feature = "gui")]
 pub mod ui;
 
+/// Re-export audio-gui crate for shared audio UI components.
+#[cfg(feature = "gui")]
+pub use audio_gui;
+
 /// Prelude for convenient imports.
 pub mod prelude {
     pub use nih_plug::prelude::*;

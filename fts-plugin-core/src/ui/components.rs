@@ -1,163 +1,123 @@
-//! Reusable Blitz-compatible UI components for FTS plugins.
+//! Legacy UI components — most have moved to the `audio-gui` crate.
 //!
-//! All components use inline styles — Blitz doesn't have full Tailwind CSS
-//! coverage for external component libraries, so inline styles are the
-//! reliable path for plugin GUIs.
+//! This module retains `CompSlider` as a deprecated alias for
+//! `audio_gui::controls::ParamSlider`. All other components
+//! (Toggle, Section, SegmentButton, etc.) are now in `audio-gui`.
 
-use super::theme::*;
+use audio_gui::theme::*;
 use nih_plug::prelude::ParamPtr;
 use nih_plug_dioxus::prelude::*;
 
-/// Toggle switch bound to a BoolParam via ParamPtr.
+/// Inline-styled parameter slider for Blitz compatibility.
 ///
-/// Uses a local revision signal to force Dioxus re-renders on click,
-/// since `param_ptr.modulated_normalized_value()` is not reactive.
+/// **Deprecated**: use `audio_gui::controls::ParamSlider` instead.
+/// This is kept for backward compatibility with existing `comp-ui` code.
 #[component]
-pub fn Toggle(param_ptr: ParamPtr, label: Option<&'static str>) -> Element {
+pub fn CompSlider(param_ptr: ParamPtr, #[props(default = "")] label: &'static str) -> Element {
     let ctx = use_param_context();
     let mut revision = use_signal(|| 0u32);
+    let mut is_dragging = use_signal(|| false);
+    let mut drag_start_value = use_signal(|| 0.0f32);
+    let mut drag_start_y = use_signal(|| 0.0f64);
     let _ = *revision.read();
 
     let normalized = unsafe { param_ptr.modulated_normalized_value() };
-    let on = normalized > 0.5;
+    let display_value = unsafe { param_ptr.normalized_value_to_string(normalized, true) };
+    let name = if label.is_empty() {
+        unsafe { param_ptr.name() }.to_string()
+    } else {
+        label.to_string()
+    };
 
-    let track_bg = if on { ACCENT } else { TOGGLE_OFF };
-    let thumb_x = if on { "18px" } else { "2px" };
+    let fill_width = format!("{}%", normalized * 100.0);
 
     rsx! {
         div {
-            style: "display:flex; align-items:center; gap:6px; cursor:pointer;",
-            onclick: {
-                let ctx = ctx.clone();
-                move |_| {
-                    ctx.begin_set_raw(param_ptr);
-                    ctx.set_normalized_raw(param_ptr, if on { 0.0 } else { 1.0 });
-                    ctx.end_set_raw(param_ptr);
-                    revision += 1;
-                }
-            },
+            style: "display:flex; flex-direction:column; gap:2px; min-width:80px; flex:1;",
+
             div {
                 style: format!(
-                    "width:36px; height:20px; border-radius:10px; position:relative; \
-                     background:{track_bg}; transition:background 0.15s;"
+                    "font-size:10px; color:{TEXT_DIM}; text-transform:uppercase; \
+                     letter-spacing:0.3px;"
                 ),
+                "{name}"
+            }
+
+            div {
+                style: format!(
+                    "height:24px; background:{SURFACE}; border-radius:4px; position:relative; \
+                     overflow:hidden; cursor:ns-resize; border:1px solid {BORDER}; \
+                     user-select:none;"
+                ),
+                onmousedown: {
+                    let ctx = ctx.clone();
+                    move |evt: MouseEvent| {
+                        is_dragging.set(true);
+                        drag_start_value.set(normalized);
+                        drag_start_y.set(evt.client_coordinates().y);
+                        ctx.begin_set_raw(param_ptr);
+                        revision += 1;
+                    }
+                },
+                onmousemove: {
+                    let ctx = ctx.clone();
+                    move |evt: MouseEvent| {
+                        if *is_dragging.read() {
+                            let delta =
+                                (drag_start_y() - evt.client_coordinates().y) as f32 / 150.0;
+                            let new_val = (drag_start_value() + delta).clamp(0.0, 1.0);
+                            ctx.set_normalized_raw(param_ptr, new_val);
+                            revision += 1;
+                        }
+                    }
+                },
+                onmouseup: {
+                    let ctx = ctx.clone();
+                    move |_| {
+                        if *is_dragging.read() {
+                            is_dragging.set(false);
+                            ctx.end_set_raw(param_ptr);
+                            revision += 1;
+                        }
+                    }
+                },
+                onmouseleave: {
+                    let ctx = ctx.clone();
+                    move |_| {
+                        if *is_dragging.read() {
+                            is_dragging.set(false);
+                            ctx.end_set_raw(param_ptr);
+                            revision += 1;
+                        }
+                    }
+                },
+                ondoubleclick: {
+                    let ctx = ctx.clone();
+                    move |_| {
+                        let default = unsafe { param_ptr.default_normalized_value() };
+                        ctx.begin_set_raw(param_ptr);
+                        ctx.set_normalized_raw(param_ptr, default);
+                        ctx.end_set_raw(param_ptr);
+                        revision += 1;
+                    }
+                },
+
                 div {
                     style: format!(
-                        "width:16px; height:16px; border-radius:8px; background:#fff; \
-                         position:absolute; top:2px; left:{thumb_x}; \
-                         transition:left 0.15s;"
+                        "position:absolute; left:0; top:0; bottom:0; width:{fill_width}; \
+                         background:{ACCENT}; opacity:0.6; pointer-events:none;"
                     ),
                 }
-            }
-            if let Some(lbl) = label {
-                span {
-                    style: format!("font-size:12px; color:{};", if on { TEXT } else { TEXT_DIM }),
-                    "{lbl}"
+
+                div {
+                    style: format!(
+                        "position:absolute; left:0; right:0; top:0; bottom:0; \
+                         display:flex; align-items:center; justify-content:center; \
+                         font-size:11px; color:{TEXT}; pointer-events:none; \
+                         font-variant-numeric:tabular-nums;"
+                    ),
+                    "{display_value}"
                 }
-            }
-        }
-    }
-}
-
-/// Card-style section wrapper with uppercase title.
-#[component]
-pub fn Section(title: &'static str, children: Element) -> Element {
-    rsx! {
-        div {
-            style: "background:{CARD_BG}; border-radius:6px; padding:10px 12px; margin-bottom:8px;",
-            div {
-                style: "font-size:11px; font-weight:600; text-transform:uppercase; \
-                        letter-spacing:0.5px; color:{TEXT_DIM}; margin-bottom:6px;",
-                "{title}"
-            }
-            {children}
-        }
-    }
-}
-
-/// Pill-style segment button for mutually exclusive selections.
-///
-/// Typically used in a row for enum params (click sounds, modes, etc.).
-/// The parent is responsible for tracking the selected index and calling
-/// `ParamContext` to set the param value.
-#[component]
-pub fn SegmentButton(label: &'static str, selected: bool, on_click: EventHandler<()>) -> Element {
-    let bg = if selected { ACCENT } else { "transparent" };
-    let border = if selected { ACCENT } else { BORDER };
-    let color = if selected { "#fff" } else { TEXT_DIM };
-
-    rsx! {
-        div {
-            style: format!(
-                "padding:4px 8px; border-radius:4px; font-size:11px; font-weight:500; \
-                 cursor:pointer; border:1px solid {border}; background:{bg}; color:{color};"
-            ),
-            onclick: move |_| on_click.call(()),
-            "{label}"
-        }
-    }
-}
-
-/// Full-width action button (e.g., "Generate Guide MIDI").
-#[component]
-pub fn ActionButton(label: &'static str, on_click: EventHandler<()>) -> Element {
-    rsx! {
-        div {
-            style: format!(
-                "padding:8px 0; cursor:pointer; text-align:center; \
-                 background:{ACCENT}; color:#fff; border-radius:6px; \
-                 font-size:13px; font-weight:600; margin-top:4px;"
-            ),
-            onclick: move |_| on_click.call(()),
-            "{label}"
-        }
-    }
-}
-
-/// Header bar with plugin title + transport info.
-#[component]
-pub fn Header(
-    title: &'static str,
-    tempo: f32,
-    time_sig_num: i32,
-    time_sig_den: i32,
-    is_playing: bool,
-) -> Element {
-    rsx! {
-        div {
-            style: "display:flex; justify-content:space-between; align-items:center; \
-                    margin-bottom:10px; padding-bottom:8px; border-bottom:1px solid {BORDER};",
-            div { style: "font-size:18px; font-weight:700;", "{title}" }
-            div {
-                style: "display:flex; gap:12px; align-items:center; font-size:12px; color:{TEXT_DIM};",
-                span { "{tempo:.0} BPM" }
-                span { "{time_sig_num}/{time_sig_den}" }
-                span {
-                    style: format!("padding:2px 8px; border-radius:4px; font-size:11px; \
-                                   background:{}; color:#fff;",
-                                   if is_playing { GREEN } else { "#555" }),
-                    if is_playing { "PLAY" } else { "STOP" }
-                }
-            }
-        }
-    }
-}
-
-/// Status bar showing beat position and optional window size.
-#[component]
-pub fn StatusBar(beat_position: f32) -> Element {
-    rsx! {
-        div {
-            style: "padding-top:6px; margin-top:8px; border-top:1px solid {BORDER}; \
-                    font-size:11px; color:{TEXT_DIM};",
-            {
-                let size_info = if let Some(state) = try_use_context::<std::sync::Arc<DioxusState>>() {
-                    let (w, h) = state.size();
-                    format!("Beat: {beat_position:.2} | {w}x{h}")
-                } else {
-                    format!("Beat: {beat_position:.2}")
-                };
-                rsx! { "{size_info}" }
             }
         }
     }
