@@ -5,7 +5,7 @@
 //! and applies them via the [`apply`] module, with echo suppression.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use daw::Daw;
 use sync_proto::{SyncConfig, SyncDomain, SyncEvent, SyncPeer, SyncSession, SyncStatus};
@@ -13,6 +13,7 @@ use tokio::sync::broadcast;
 use tracing::{debug, info, warn};
 
 use crate::apply;
+use crate::drift::DriftCorrector;
 use crate::subscriptions::{self, ProjectSubscriptions};
 use crate::suppression::SuppressionSet;
 
@@ -38,6 +39,15 @@ pub struct Engine {
     project_subs: Arc<moire::sync::Mutex<Vec<ProjectSubscriptions>>>,
     /// Cancellation token for the project watcher task.
     project_watcher: moire::sync::Mutex<Option<tokio_util::sync::CancellationToken>>,
+    /// Set of connected peer IDs (including self). Master = lexicographically lowest.
+    connected_peer_ids: moire::sync::Mutex<Vec<String>>,
+    /// Whether this peer is currently the transport master.
+    is_master: Arc<AtomicBool>,
+    /// Whether Ableton Link is handling continuous sync (tempo + phase).
+    /// When true, the heartbeat and drift corrector are disabled — Link handles it.
+    link_active: Arc<AtomicBool>,
+    /// Drift corrector for follower transport sync (used when Link is not active).
+    drift_corrector: moire::sync::Mutex<DriftCorrector>,
 }
 
 impl Engine {
@@ -47,6 +57,7 @@ impl Engine {
     /// subscribe to all DAW streams and begin syncing.
     pub fn new(daw: Daw, session: SyncSession, config: SyncConfig) -> Self {
         let (event_tx, _) = broadcast::channel(4096);
+        let local_peer_id = session.peer_id.clone();
 
         Self {
             daw,
@@ -62,6 +73,16 @@ impl Engine {
             peers: moire::sync::Mutex::new("sync.peers", Vec::new()),
             project_subs: Arc::new(moire::sync::Mutex::new("sync.project_subs", Vec::new())),
             project_watcher: moire::sync::Mutex::new("sync.project_watcher", None),
+            connected_peer_ids: moire::sync::Mutex::new(
+                "sync.connected_peers",
+                vec![local_peer_id],
+            ),
+            is_master: Arc::new(AtomicBool::new(true)), // master until peers join
+            link_active: Arc::new(AtomicBool::new(false)),
+            drift_corrector: moire::sync::Mutex::new(
+                "sync.drift_corrector",
+                DriftCorrector::new(),
+            ),
         }
     }
 
@@ -83,6 +104,7 @@ impl Engine {
                 self.session.peer_id.clone(),
                 self.sequence.clone(),
                 self.event_tx.clone(),
+                Arc::clone(&self.suppression),
                 &self.config,
             )
             .await
@@ -102,6 +124,7 @@ impl Engine {
             self.session.peer_id.clone(),
             self.sequence.clone(),
             self.event_tx.clone(),
+            Arc::clone(&self.suppression),
             self.config.clone(),
             self.project_subs.clone(),
         );
@@ -226,13 +249,17 @@ impl Engine {
             return;
         }
 
-        // Apply with suppression
+        // Apply with suppression and drift correction
         let mut suppression = self.suppression.lock().await;
+        let mut drift = self.drift_corrector.lock().await;
+        let link_active = self.link_active.load(Ordering::Relaxed);
         apply::apply_remote_event(
             &self.daw,
             &event.project_guid,
             &event.domain,
             &mut suppression,
+            &mut drift,
+            link_active,
         )
         .await;
     }
@@ -245,6 +272,89 @@ impl Engine {
     /// Get the DAW connection (for full-state snapshot requests).
     pub fn daw(&self) -> &Daw {
         &self.daw
+    }
+
+    /// Get a reference to the suppression set (for outbound echo filtering).
+    pub fn suppression(&self) -> &Arc<moire::sync::Mutex<SuppressionSet>> {
+        &self.suppression
+    }
+
+    /// Notify the engine that a mesh peer connected.
+    ///
+    /// Recalculates master status (lowest peer_id = master).
+    pub async fn add_peer(&self, peer_id: String) {
+        let mut peers = self.connected_peer_ids.lock().await;
+        if !peers.contains(&peer_id) {
+            peers.push(peer_id);
+            peers.sort();
+        }
+        let master = peers.first().map(|s| s.as_str()) == Some(&self.session.peer_id);
+        self.is_master.store(master, Ordering::Relaxed);
+        info!(
+            "Peer set updated ({} peers), master={}",
+            peers.len(),
+            if master { "self" } else { peers.first().map(|s| s.as_str()).unwrap_or("?") }
+        );
+    }
+
+    /// Notify the engine that a mesh peer disconnected.
+    pub async fn remove_peer(&self, peer_id: &str) {
+        let mut peers = self.connected_peer_ids.lock().await;
+        peers.retain(|p| p != peer_id);
+        let master = peers.first().map(|s| s.as_str()) == Some(&self.session.peer_id);
+        self.is_master.store(master, Ordering::Relaxed);
+        info!(
+            "Peer set updated ({} peers), master={}",
+            peers.len(),
+            if master { "self" } else { peers.first().map(|s| s.as_str()).unwrap_or("?") }
+        );
+    }
+
+    /// Get an atomic flag indicating whether this peer is the transport master.
+    ///
+    /// The heartbeat task reads this without async to decide whether to send position updates.
+    pub fn is_master_flag(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.is_master)
+    }
+
+    /// Check if this peer is currently the transport master.
+    pub fn is_master(&self) -> bool {
+        self.is_master.load(Ordering::Relaxed)
+    }
+
+    /// Set whether Ableton Link is handling continuous sync.
+    ///
+    /// When active, the heartbeat task stops sending position updates and
+    /// the drift corrector in apply_transport is bypassed — Link handles
+    /// tempo and phase alignment instead.
+    pub fn set_link_active(&self, active: bool) {
+        self.link_active.store(active, Ordering::Relaxed);
+        info!("Link active: {active}");
+    }
+
+    /// Get an atomic flag indicating whether Link is active.
+    pub fn link_active_flag(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.link_active)
+    }
+
+    /// Check if Link is currently handling sync.
+    pub fn is_link_active(&self) -> bool {
+        self.link_active.load(Ordering::Relaxed)
+    }
+
+    /// Number of peers in the connected set (including self).
+    pub async fn peer_count(&self) -> usize {
+        self.connected_peer_ids.lock().await.len()
+    }
+
+    /// Get the sequence counter (for the heartbeat task to generate events).
+    pub fn sequence(&self) -> Arc<AtomicU64> {
+        Arc::clone(&self.sequence)
+    }
+
+    /// Get the broadcast sender (for the heartbeat task to emit events).
+    pub fn event_sender(&self) -> broadcast::Sender<SyncEvent> {
+        self.event_tx.clone()
     }
 }
 
@@ -265,7 +375,7 @@ fn is_domain_enabled(config: &SyncConfig, domain: &SyncDomain) -> bool {
 }
 
 /// Check if a sync event should be suppressed based on the suppression set.
-fn is_event_suppressed(suppression: &SuppressionSet, event: &SyncEvent) -> bool {
+pub(crate) fn is_event_suppressed(suppression: &SuppressionSet, event: &SyncEvent) -> bool {
     use crate::suppression::SuppressionKey;
     use daw::service::{FxEvent, ItemEvent, TrackEvent};
 

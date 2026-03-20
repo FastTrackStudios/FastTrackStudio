@@ -13,7 +13,9 @@ use daw::service::{
 use daw::{Daw, Project, TransportState};
 use sync_proto::{SyncConfig, SyncDomain, SyncEvent};
 use tokio::sync::broadcast;
-use tracing::{debug, info, warn};
+use tracing::{debug, info, trace, warn};
+
+use crate::suppression::SuppressionSet;
 
 /// Handle to a set of subscriptions for a single project.
 ///
@@ -47,6 +49,7 @@ struct ForwarderCtx {
     peer_id: String,
     sequence: Arc<AtomicU64>,
     event_tx: broadcast::Sender<SyncEvent>,
+    suppression: Arc<moire::sync::Mutex<SuppressionSet>>,
     cancel: tokio_util::sync::CancellationToken,
 }
 
@@ -55,13 +58,26 @@ impl ForwarderCtx {
         self.sequence.fetch_add(1, Ordering::Relaxed)
     }
 
-    fn send(&self, domain: SyncDomain) {
+    async fn send(&self, domain: SyncDomain) {
         let event = SyncEvent {
             origin_peer: self.peer_id.clone(),
             sequence: self.next_sequence(),
             project_guid: self.project_guid.clone(),
             domain,
         };
+
+        // Check echo suppression before broadcasting
+        {
+            let sup = self.suppression.lock().await;
+            if crate::engine::is_event_suppressed(&sup, &event) {
+                trace!(
+                    "Suppressed echo at subscription for {:?}",
+                    std::mem::discriminant(&event.domain),
+                );
+                return;
+            }
+        }
+
         let _ = self.event_tx.send(event);
     }
 }
@@ -76,6 +92,7 @@ pub async fn subscribe_project(
     peer_id: String,
     sequence: Arc<AtomicU64>,
     event_tx: broadcast::Sender<SyncEvent>,
+    suppression: Arc<moire::sync::Mutex<SuppressionSet>>,
     config: &SyncConfig,
 ) -> Result<ProjectSubscriptions, daw::Error> {
     let cancel = tokio_util::sync::CancellationToken::new();
@@ -86,6 +103,7 @@ pub async fn subscribe_project(
         peer_id,
         sequence,
         event_tx,
+        suppression,
         cancel: cancel.clone(),
     });
 
@@ -94,6 +112,14 @@ pub async fn subscribe_project(
         let ctx = ctx.clone();
         let name = format!("sync.sub.transport.{short_guid}");
         moire::task::spawn(async move {
+            // Track previous control state to avoid flooding on position-only changes.
+            // During playback, position changes every poll tick — we only sync transitions
+            // in play_state, tempo, looping, record_mode, time_signature, or loop_region.
+            let mut prev_play_state = None;
+            let mut prev_tempo_bpm = None;
+            let mut prev_looping = None;
+            let mut prev_record_mode = None;
+
             loop {
                 tokio::select! {
                     _ = ctx.cancel.cancelled() => break,
@@ -101,7 +127,22 @@ pub async fn subscribe_project(
                         match result {
                             Ok(Some(state)) => {
                                 let transport: TransportState = (*state).clone();
-                                ctx.send(SyncDomain::Transport(transport));
+
+                                // Check if any control field actually changed
+                                let control_changed =
+                                    prev_play_state != Some(transport.play_state)
+                                    || prev_tempo_bpm != Some(transport.tempo.bpm)
+                                    || prev_looping != Some(transport.looping)
+                                    || prev_record_mode != Some(transport.record_mode);
+
+                                if control_changed {
+                                    prev_play_state = Some(transport.play_state);
+                                    prev_tempo_bpm = Some(transport.tempo.bpm);
+                                    prev_looping = Some(transport.looping);
+                                    prev_record_mode = Some(transport.record_mode);
+
+                                    ctx.send(SyncDomain::Transport(transport)).await;
+                                }
                             }
                             Ok(None) => { debug!("transport stream ended"); break; }
                             Err(e) => { warn!("transport recv error: {e}"); break; }
@@ -125,7 +166,7 @@ pub async fn subscribe_project(
                         match result {
                             Ok(Some(event)) => {
                                 let event: TrackEvent = (*event).clone();
-                                ctx.send(SyncDomain::Track(event));
+                                ctx.send(SyncDomain::Track(event)).await;
                             }
                             Ok(None) => { debug!("track stream ended"); break; }
                             Err(e) => { warn!("track recv error: {e}"); break; }
@@ -149,7 +190,7 @@ pub async fn subscribe_project(
                         match result {
                             Ok(Some(event)) => {
                                 let event: ItemEvent = (*event).clone();
-                                ctx_items.send(SyncDomain::Item(event));
+                                ctx_items.send(SyncDomain::Item(event)).await;
                             }
                             Ok(None) => { debug!("item stream ended"); break; }
                             Err(e) => { warn!("item recv error: {e}"); break; }
@@ -171,7 +212,7 @@ pub async fn subscribe_project(
                         match result {
                             Ok(Some(event)) => {
                                 let event: TakeEvent = (*event).clone();
-                                ctx.send(SyncDomain::Take(event));
+                                ctx.send(SyncDomain::Take(event)).await;
                             }
                             Ok(None) => { debug!("take stream ended"); break; }
                             Err(e) => { warn!("take recv error: {e}"); break; }
@@ -195,7 +236,7 @@ pub async fn subscribe_project(
                         match result {
                             Ok(Some(event)) => {
                                 let event: TempoMapEvent = (*event).clone();
-                                ctx.send(SyncDomain::TempoMap(event));
+                                ctx.send(SyncDomain::TempoMap(event)).await;
                             }
                             Ok(None) => { debug!("tempo map stream ended"); break; }
                             Err(e) => { warn!("tempo map recv error: {e}"); break; }
@@ -219,7 +260,7 @@ pub async fn subscribe_project(
                         match result {
                             Ok(Some(event)) => {
                                 let event: MarkerEvent = (*event).clone();
-                                ctx.send(SyncDomain::Marker(event));
+                                ctx.send(SyncDomain::Marker(event)).await;
                             }
                             Ok(None) => { debug!("marker stream ended"); break; }
                             Err(e) => { warn!("marker recv error: {e}"); break; }
@@ -243,7 +284,7 @@ pub async fn subscribe_project(
                         match result {
                             Ok(Some(event)) => {
                                 let event: RegionEvent = (*event).clone();
-                                ctx.send(SyncDomain::Region(event));
+                                ctx.send(SyncDomain::Region(event)).await;
                             }
                             Ok(None) => { debug!("region stream ended"); break; }
                             Err(e) => { warn!("region recv error: {e}"); break; }
@@ -274,6 +315,7 @@ pub fn watch_projects(
     peer_id: String,
     sequence: Arc<AtomicU64>,
     event_tx: broadcast::Sender<SyncEvent>,
+    suppression: Arc<moire::sync::Mutex<SuppressionSet>>,
     config: SyncConfig,
     project_subs: Arc<moire::sync::Mutex<Vec<ProjectSubscriptions>>>,
 ) -> tokio_util::sync::CancellationToken {
@@ -312,6 +354,7 @@ pub fn watch_projects(
                                                 peer_id.clone(),
                                                 sequence.clone(),
                                                 event_tx.clone(),
+                                                suppression.clone(),
                                                 &config,
                                             ).await {
                                                 Ok(sub) => {

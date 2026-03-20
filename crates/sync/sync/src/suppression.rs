@@ -15,8 +15,9 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-/// Default suppression window — 150ms covers ~4-5 poll cycles at 30Hz.
-const DEFAULT_WINDOW: Duration = Duration::from_millis(150);
+/// Default suppression window — 500ms covers network round-trip + poll cycles.
+/// Needs to be generous enough to catch echoes bouncing through TCP peers.
+const DEFAULT_WINDOW: Duration = Duration::from_millis(500);
 
 /// A key identifying a specific domain + entity for suppression matching.
 ///

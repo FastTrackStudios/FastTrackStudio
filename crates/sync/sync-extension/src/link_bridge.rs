@@ -293,7 +293,10 @@ pub async fn run_link_engine(daw: &Daw) -> eyre::Result<()> {
     let config = EngineConfig {
         mode: Mode::Off,
         push_local_tempo: true,
-        start_stop_sync: true,
+        // start_stop_sync is disabled — PeerMesh handles play/stop transport
+        // events (which include position sync before playback begins).
+        // Link only handles continuous tempo + phase correction.
+        start_stop_sync: false,
         phase_tolerance: None,
     };
 

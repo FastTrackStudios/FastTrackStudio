@@ -21,7 +21,9 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{broadcast, mpsc};
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, info, warn};
+use tracing::{debug, info, trace, warn};
+
+use crate::suppression::SuppressionSet;
 
 /// Configuration for the peer mesh.
 #[derive(Clone, Debug)]
@@ -39,6 +41,15 @@ pub struct Handshake {
     pub session_id: String,
 }
 
+/// Peer lifecycle event emitted by the mesh.
+#[derive(Clone, Debug)]
+pub enum MeshPeerEvent {
+    /// A new peer completed the handshake and is connected.
+    Connected(String),
+    /// A peer disconnected.
+    Disconnected(String),
+}
+
 /// A connected peer's write channel and cancellation token.
 struct PeerConnection {
     write_tx: mpsc::Sender<Vec<u8>>,
@@ -51,6 +62,7 @@ pub struct PeerMesh {
     listener_port: u16,
     peers: Arc<moire::sync::Mutex<HashMap<String, PeerConnection>>>,
     incoming_tx: mpsc::Sender<SyncEvent>,
+    peer_event_tx: mpsc::Sender<MeshPeerEvent>,
     cancel: CancellationToken,
 }
 
@@ -62,12 +74,14 @@ impl PeerMesh {
     pub async fn bind(
         config: MeshConfig,
         event_rx: broadcast::Receiver<SyncEvent>,
-    ) -> io::Result<(Self, mpsc::Receiver<SyncEvent>)> {
+        suppression: Arc<moire::sync::Mutex<SuppressionSet>>,
+    ) -> io::Result<(Self, mpsc::Receiver<SyncEvent>, mpsc::Receiver<MeshPeerEvent>)> {
         let listener = TcpListener::bind("0.0.0.0:0").await?;
         let port = listener.local_addr()?.port();
         info!(port, peer_id = %config.peer_id, "PeerMesh bound");
 
         let (incoming_tx, incoming_rx) = mpsc::channel(4096);
+        let (peer_event_tx, peer_event_rx) = mpsc::channel(64);
         let peers: Arc<moire::sync::Mutex<HashMap<String, PeerConnection>>> =
             Arc::new(moire::sync::Mutex::new("mesh.peers", HashMap::new()));
         let cancel = CancellationToken::new();
@@ -77,6 +91,7 @@ impl PeerMesh {
             listener_port: port,
             peers: Arc::clone(&peers),
             incoming_tx: incoming_tx.clone(),
+            peer_event_tx: peer_event_tx.clone(),
             cancel: cancel.clone(),
         };
 
@@ -85,8 +100,9 @@ impl PeerMesh {
         let accept_peers = Arc::clone(&peers);
         let accept_tx = incoming_tx.clone();
         let accept_cancel = cancel.clone();
+        let accept_peer_tx = peer_event_tx.clone();
         moire::task::spawn(async move {
-            accept_loop(listener, accept_config, accept_peers, accept_tx, accept_cancel).await;
+            accept_loop(listener, accept_config, accept_peers, accept_tx, accept_peer_tx, accept_cancel).await;
         })
         .named("mesh.accept");
 
@@ -94,11 +110,11 @@ impl PeerMesh {
         let fwd_peers = Arc::clone(&peers);
         let fwd_cancel = cancel.clone();
         moire::task::spawn(async move {
-            broadcast_forwarder(event_rx, fwd_peers, fwd_cancel).await;
+            broadcast_forwarder(event_rx, fwd_peers, fwd_cancel, suppression).await;
         })
         .named("mesh.forwarder");
 
-        Ok((mesh, incoming_rx))
+        Ok((mesh, incoming_rx, peer_event_rx))
     }
 
     /// The TCP port this mesh is listening on.
@@ -126,6 +142,7 @@ impl PeerMesh {
         let config = self.config.clone();
         let peers = Arc::clone(&self.peers);
         let incoming_tx = self.incoming_tx.clone();
+        let peer_event_tx = self.peer_event_tx.clone();
         let cancel = self.cancel.clone();
 
         moire::task::spawn(async move {
@@ -133,7 +150,7 @@ impl PeerMesh {
                 Ok(stream) => {
                     info!(addr = %addr, remote = %remote_peer_id, "Outbound connection established");
                     if let Err(e) =
-                        handle_connection(stream, config, peers, incoming_tx, cancel, true).await
+                        handle_connection(stream, config, peers, incoming_tx, peer_event_tx, cancel, true).await
                     {
                         warn!(addr = %addr, "Outbound connection failed: {e}");
                     }
@@ -206,6 +223,7 @@ async fn accept_loop(
     config: MeshConfig,
     peers: Arc<moire::sync::Mutex<HashMap<String, PeerConnection>>>,
     incoming_tx: mpsc::Sender<SyncEvent>,
+    peer_event_tx: mpsc::Sender<MeshPeerEvent>,
     cancel: CancellationToken,
 ) {
     loop {
@@ -218,9 +236,10 @@ async fn accept_loop(
                         let config = config.clone();
                         let peers = Arc::clone(&peers);
                         let tx = incoming_tx.clone();
+                        let ptx = peer_event_tx.clone();
                         let cancel = cancel.clone();
                         moire::task::spawn(async move {
-                            if let Err(e) = handle_connection(stream, config, peers, tx, cancel, false).await {
+                            if let Err(e) = handle_connection(stream, config, peers, tx, ptx, cancel, false).await {
                                 debug!(addr = %addr, "Inbound connection ended: {e}");
                             }
                         }).named("mesh.inbound");
@@ -241,6 +260,7 @@ async fn handle_connection(
     config: MeshConfig,
     peers: Arc<moire::sync::Mutex<HashMap<String, PeerConnection>>>,
     incoming_tx: mpsc::Sender<SyncEvent>,
+    peer_event_tx: mpsc::Sender<MeshPeerEvent>,
     mesh_cancel: CancellationToken,
     is_outbound: bool,
 ) -> io::Result<()> {
@@ -305,6 +325,7 @@ async fn handle_connection(
             },
         );
     }
+    let _ = peer_event_tx.send(MeshPeerEvent::Connected(remote_peer_id.clone())).await;
 
     // Spawn writer task
     let writer_cancel = peer_cancel.clone();
@@ -363,6 +384,7 @@ async fn handle_connection(
     // Cleanup
     peer_cancel.cancel();
     peers.lock().await.remove(&remote_peer_id);
+    let _ = peer_event_tx.send(MeshPeerEvent::Disconnected(remote_peer_id.clone())).await;
     info!(remote = %remote_peer_id, "Peer disconnected");
 
     reader_result
@@ -396,6 +418,7 @@ async fn broadcast_forwarder(
     mut event_rx: broadcast::Receiver<SyncEvent>,
     peers: Arc<moire::sync::Mutex<HashMap<String, PeerConnection>>>,
     cancel: CancellationToken,
+    suppression: Arc<moire::sync::Mutex<SuppressionSet>>,
 ) {
     loop {
         tokio::select! {
@@ -403,6 +426,19 @@ async fn broadcast_forwarder(
             result = event_rx.recv() => {
                 match result {
                     Ok(event) => {
+                        // Check if this event was recently applied from a remote peer
+                        // (echo suppression — prevents infinite feedback loops)
+                        {
+                            let sup = suppression.lock().await;
+                            if crate::engine::is_event_suppressed(&sup, &event) {
+                                trace!(
+                                    "Suppressed outbound echo for {:?}",
+                                    std::mem::discriminant(&event.domain),
+                                );
+                                continue;
+                            }
+                        }
+
                         let payload = match facet_postcard::to_vec(&event) {
                             Ok(p) => p,
                             Err(e) => {
@@ -438,6 +474,10 @@ mod tests {
     use sync_proto::SyncDomain;
     use tokio::sync::broadcast;
 
+    fn empty_suppression() -> Arc<moire::sync::Mutex<SuppressionSet>> {
+        Arc::new(moire::sync::Mutex::new("test.suppression", SuppressionSet::new()))
+    }
+
     fn make_event(origin: &str, seq: u64) -> SyncEvent {
         use daw::service::Transport;
         SyncEvent {
@@ -462,8 +502,8 @@ mod tests {
             session_id: "test-session".to_string(),
         };
 
-        let (mesh_a, mut rx_a) = PeerMesh::bind(config_a, tx_a.subscribe()).await.unwrap();
-        let (mesh_b, mut rx_b) = PeerMesh::bind(config_b, tx_b.subscribe()).await.unwrap();
+        let (mesh_a, mut rx_a, _pe_a) = PeerMesh::bind(config_a, tx_a.subscribe(), empty_suppression()).await.unwrap();
+        let (mesh_b, mut rx_b, _pe_b) = PeerMesh::bind(config_b, tx_b.subscribe(), empty_suppression()).await.unwrap();
 
         // Connect alpha → beta (alpha < beta, so alpha initiates)
         let addr_b = SocketAddr::from(([127, 0, 0, 1], mesh_b.local_port()));
@@ -505,32 +545,35 @@ mod tests {
         let (tx_b, _) = broadcast::channel(64);
         let (tx_c, _) = broadcast::channel(64);
 
-        let (mesh_a, mut _rx_a) = PeerMesh::bind(
+        let (mesh_a, mut _rx_a, _pe_a) = PeerMesh::bind(
             MeshConfig {
                 peer_id: "a".to_string(),
                 session_id: "s".to_string(),
             },
             tx_a.subscribe(),
+            empty_suppression(),
         )
         .await
         .unwrap();
 
-        let (mesh_b, mut rx_b) = PeerMesh::bind(
+        let (mesh_b, mut rx_b, _pe_b) = PeerMesh::bind(
             MeshConfig {
                 peer_id: "b".to_string(),
                 session_id: "s".to_string(),
             },
             tx_b.subscribe(),
+            empty_suppression(),
         )
         .await
         .unwrap();
 
-        let (mesh_c, mut rx_c) = PeerMesh::bind(
+        let (mesh_c, mut rx_c, _pe_c) = PeerMesh::bind(
             MeshConfig {
                 peer_id: "c".to_string(),
                 session_id: "s".to_string(),
             },
             tx_c.subscribe(),
+            empty_suppression(),
         )
         .await
         .unwrap();
@@ -570,22 +613,24 @@ mod tests {
         let (tx_a, _) = broadcast::channel(64);
         let (tx_b, _) = broadcast::channel(64);
 
-        let (mesh_a, _rx_a) = PeerMesh::bind(
+        let (mesh_a, _rx_a, _pe_a) = PeerMesh::bind(
             MeshConfig {
                 peer_id: "alpha".to_string(),
                 session_id: "session-1".to_string(),
             },
             tx_a.subscribe(),
+            empty_suppression(),
         )
         .await
         .unwrap();
 
-        let (mesh_b, _rx_b) = PeerMesh::bind(
+        let (mesh_b, _rx_b, _pe_b) = PeerMesh::bind(
             MeshConfig {
                 peer_id: "beta".to_string(),
                 session_id: "session-2".to_string(),
             },
             tx_b.subscribe(),
+            empty_suppression(),
         )
         .await
         .unwrap();

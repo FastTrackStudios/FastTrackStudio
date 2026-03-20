@@ -11,8 +11,9 @@ use daw::service::{
 };
 use session::offset_map::SetlistOffsetMap;
 use sync_proto::SyncDomain;
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
+use crate::drift::{DriftAction, DriftCorrector};
 use crate::suppression::{SuppressionKey, SuppressionSet};
 
 /// Apply a remote sync domain event to the local DAW.
@@ -26,8 +27,23 @@ pub async fn apply_remote_event(
     project_guid: &str,
     domain: &SyncDomain,
     suppression: &mut SuppressionSet,
+    drift_corrector: &mut DriftCorrector,
+    link_active: bool,
 ) {
-    let ctx = ProjectContext::Project(project_guid.to_string());
+    // Remote project GUIDs are process-local (e.g., REAPER pointer-based).
+    // If the exact GUID isn't found locally, fall back to the current project.
+    let (resolved_guid, ctx) = if daw.project(project_guid).await.is_ok() {
+        (project_guid.to_string(), ProjectContext::Project(project_guid.to_string()))
+    } else {
+        match daw.current_project().await {
+            Ok(p) => match p.info().await {
+                Ok(info) => (info.guid.clone(), ProjectContext::Project(info.guid)),
+                Err(_) => (project_guid.to_string(), ProjectContext::Current),
+            },
+            Err(_) => (project_guid.to_string(), ProjectContext::Current),
+        }
+    };
+    let project_guid = &resolved_guid;
 
     // Wrap in an undo block (best-effort — if project isn't found, skip)
     let label = format!("FTS Sync: {:?}", domain_label(domain));
@@ -37,7 +53,7 @@ pub async fn apply_remote_event(
 
     match domain {
         SyncDomain::Transport(transport) => {
-            apply_transport(daw, &ctx, project_guid, transport, suppression).await;
+            apply_transport(daw, &ctx, project_guid, transport, suppression, drift_corrector, link_active).await;
         }
         SyncDomain::Track(event) => {
             apply_track(daw, &ctx, event, suppression).await;
@@ -100,9 +116,9 @@ async fn apply_transport(
     project_guid: &str,
     transport: &Transport,
     suppression: &mut SuppressionSet,
+    drift_corrector: &mut DriftCorrector,
+    link_active: bool,
 ) {
-    suppression.suppress(SuppressionKey::transport(project_guid));
-
     let project = match daw.project(project_guid).await {
         Ok(p) => p,
         Err(e) => {
@@ -112,13 +128,80 @@ async fn apply_transport(
     };
     let t = project.transport();
 
-    // Apply play state
-    // Note: we apply position first, then play state, so the playhead
-    // is at the right position when playback starts
-    if let Some(ref pos) = transport.playhead_position.time {
-        if let Err(e) = t.set_position(pos.as_seconds()).await {
+    use daw::service::PlayState;
+
+    // Check if this is a drift-correction heartbeat (both sides playing).
+    // When Link is active, skip drift correction entirely — Link handles
+    // tempo and phase sync via its own playrate nudging mechanism.
+    if transport.play_state == PlayState::Playing {
+        if let Ok(local) = t.get_state().await {
+            if local.play_state == PlayState::Playing {
+                if link_active {
+                    // Link is handling continuous sync — skip heartbeat drift correction
+                    return;
+                }
+
+                // Both playing — drift correct via DriftCorrector (fallback when Link is off)
+                if let (Some(ref remote_pos), Some(ref local_pos)) = (
+                    transport.playhead_position.time.as_ref(),
+                    local.playhead_position.time.as_ref(),
+                ) {
+                    let drift = remote_pos.as_seconds() - local_pos.as_seconds();
+
+                    match drift_corrector.correct(drift, local.playrate) {
+                        DriftAction::SetRate { new_playrate } => {
+                            debug!(
+                                "Drift correction: drift={drift:.4}s, playrate → {new_playrate:.4}"
+                            );
+                            let _ = t.set_playrate(new_playrate).await;
+                        }
+                        DriftAction::Reset => {
+                            debug!("Drift within tolerance, resetting playrate");
+                            let _ = t.set_playrate(1.0).await;
+                        }
+                        DriftAction::HardSeek => {
+                            info!(
+                                "Hard seek to master position {:.3}s (drift={drift:.3}s)",
+                                remote_pos.as_seconds()
+                            );
+                            let _ = t.set_position(remote_pos.as_seconds()).await;
+                            let _ = t.set_playrate(1.0).await;
+                        }
+                        DriftAction::None => {}
+                    }
+                }
+                // Also sync tempo if it drifted
+                if (transport.tempo.bpm - local.tempo.bpm).abs() > 0.001 {
+                    let _ = t.set_tempo(transport.tempo.bpm).await;
+                }
+                return;
+            }
+        }
+    }
+
+    // Full transport state transition (play/stop/pause) — suppress echo so
+    // our subscription forwarder doesn't re-broadcast this change.
+    suppression.suppress(SuppressionKey::transport(project_guid));
+
+    // Reset drift corrector on transport state changes.
+    drift_corrector.reset();
+
+    // Apply position first, then play state, so the playhead is at the
+    // right position when playback starts.
+    let pos_secs = transport.playhead_position.time.as_ref().map(|t| t.as_seconds());
+    if let Some(pos) = pos_secs {
+        info!(
+            "Transport state transition: setting position to {pos:.3}s before {:?}",
+            transport.play_state
+        );
+        if let Err(e) = t.set_position(pos).await {
             warn!("Failed to set transport position: {e}");
         }
+    } else {
+        info!(
+            "Transport state transition: no position in event, applying {:?}",
+            transport.play_state
+        );
     }
 
     if let Err(e) = t.set_tempo(transport.tempo.bpm).await {
@@ -129,16 +212,21 @@ async fn apply_transport(
         warn!("Failed to set loop state: {e}");
     }
 
+    // Reset playrate on transport state transitions
+    let _ = t.set_playrate(1.0).await;
+
     // Play state is applied last to avoid race conditions
-    use daw::service::PlayState;
     match transport.play_state {
         PlayState::Playing => {
+            info!("Applying remote play command (pos={pos_secs:?})");
             let _ = t.play().await;
         }
         PlayState::Paused => {
+            info!("Applying remote pause command");
             let _ = t.pause().await;
         }
         PlayState::Stopped => {
+            info!("Applying remote stop command");
             let _ = t.stop().await;
         }
         _ => {}

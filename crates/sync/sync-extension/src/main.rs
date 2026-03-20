@@ -116,9 +116,26 @@ async fn run() -> Result<()> {
         peer_id: session.peer_id.clone(),
         session_id: session.session_id.clone(),
     };
-    let (mesh, mut incoming_rx) = PeerMesh::bind(mesh_config, engine.subscribe()).await?;
+    let (mesh, mut incoming_rx, mut peer_event_rx) = PeerMesh::bind(
+        mesh_config,
+        engine.subscribe(),
+        engine.suppression().clone(),
+    ).await?;
     let mesh_port = mesh.local_port();
     info!("[sync:{pid}] PeerMesh listening on port {mesh_port}");
+
+    // ── Master Heartbeat ─────────────────────────────────────────────
+    // The heartbeat is a fallback for when Link is not active. When Link
+    // handles sync (link_active=true), the heartbeat skips sending.
+    sync::heartbeat::spawn(
+        daw.clone(),
+        session.peer_id.clone(),
+        engine.sequence(),
+        engine.event_sender(),
+        engine.is_master_flag(),
+        engine.link_active_flag(),
+    );
+    info!("[sync:{pid}] Heartbeat task spawned");
 
     // Write mesh port + peer_id to ExtState for test orchestration
     daw.ext_state()
@@ -150,6 +167,7 @@ async fn run() -> Result<()> {
         result = link_bridge::run_link_engine(&daw) => result,
         _ = handle_actions(&daw, action_rx) => Ok(()),
         _ = handle_incoming_events(&engine, &mut incoming_rx) => Ok(()),
+        _ = handle_peer_events(&daw, &engine, &mut peer_event_rx) => Ok(()),
         _ = handle_discovery(&mesh, &mut discover_rx, &local_peer_id) => Ok(()),
         _ = poll_connect_peers(&daw, &mesh, &session.peer_id) => Ok(()),
         _ = report_peer_count(&daw, &mesh) => Ok(()),
@@ -327,6 +345,50 @@ async fn handle_incoming_events(
         engine.apply_remote(&event).await;
     }
     info!("[sync:{pid}] Incoming event stream ended");
+}
+
+/// Track mesh peer connect/disconnect for master election.
+///
+/// When peers connect, auto-enables Ableton Link for continuous sync:
+/// - Master peer → Link Master mode (pushes tempo/beat to Link session)
+/// - Follower peer → Link Puppet mode (follows Link session)
+///
+/// PeerMesh continues handling play/stop/seek events and non-transport domains.
+/// Link's start_stop_sync is disabled so PeerMesh controls transport start/stop
+/// (which allows position sync before playback begins).
+async fn handle_peer_events(
+    daw: &Daw,
+    engine: &Engine,
+    rx: &mut tokio::sync::mpsc::Receiver<sync::network::MeshPeerEvent>,
+) {
+    let pid = std::process::id();
+    while let Some(event) = rx.recv().await {
+        match event {
+            sync::network::MeshPeerEvent::Connected(peer_id) => {
+                info!("[sync:{pid}] Mesh peer connected: {peer_id}");
+                engine.add_peer(peer_id).await;
+            }
+            sync::network::MeshPeerEvent::Disconnected(peer_id) => {
+                info!("[sync:{pid}] Mesh peer disconnected: {peer_id}");
+                engine.remove_peer(&peer_id).await;
+            }
+        }
+
+        // Auto-enable Link based on master election.
+        // PeerMesh handles play/stop/seek; Link handles tempo + phase correction.
+        let has_peers = engine.peer_count().await > 1; // includes self
+        if has_peers {
+            let mode = if engine.is_master() { "master" } else { "puppet" };
+            info!("[sync:{pid}] Auto-enabling Link in {mode} mode");
+            let _ = daw.ext_state().set("FTS_SYNC", "link_mode", mode, false).await;
+            engine.set_link_active(true);
+        } else {
+            info!("[sync:{pid}] No peers — disabling Link");
+            let _ = daw.ext_state().set("FTS_SYNC", "link_mode", "off", false).await;
+            engine.set_link_active(false);
+        }
+    }
+    info!("[sync:{pid}] Peer event stream ended");
 }
 
 /// Handle mDNS discovery events — connect to newly found peers, remove lost ones.

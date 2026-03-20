@@ -27,7 +27,9 @@
 //! ```
 
 mod apply;
+pub mod drift;
 mod engine;
+pub mod heartbeat;
 #[cfg(feature = "link")]
 pub mod link;
 pub mod network;
