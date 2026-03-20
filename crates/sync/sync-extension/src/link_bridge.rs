@@ -291,18 +291,18 @@ pub async fn run_link_engine(daw: &Daw) -> eyre::Result<()> {
     let initial_tempo = transport.get_tempo().await.unwrap_or(120.0);
 
     let config = EngineConfig {
-        mode: Mode::Off,
+        mode: Mode::Puppet,
         push_local_tempo: true,
         start_stop_sync: true,
         phase_tolerance: None,
     };
 
     let mut engine = Engine::new(initial_tempo, config);
-    info!("Link engine initialized (tempo={initial_tempo:.1} BPM, mode=Off)");
+    info!("Link engine initialized (tempo={initial_tempo:.1} BPM, mode=Puppet)");
 
     // Write initial link mode to ExtState
     daw.ext_state()
-        .set("FTS_SYNC", "link_mode", "off", false)
+        .set("FTS_SYNC", "link_mode", "puppet", false)
         .await?;
 
     let mut interval = tokio::time::interval(std::time::Duration::from_millis(33));

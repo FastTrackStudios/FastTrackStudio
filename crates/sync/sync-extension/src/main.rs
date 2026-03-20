@@ -75,6 +75,16 @@ async fn run() -> Result<()> {
             action_rx = Some(reg.rx);
             info!("[sync:{pid}] Action registration complete ({} registered, {} failed)",
                 reg.registered, reg.failed);
+
+            // Link starts enabled (Puppet mode) — set toggle state to on
+            let toggle_cmd = sync_actions::TOGGLE_LINK.to_command_id();
+            if let Err(e) = daw
+                .action_registry()
+                .set_toggle_state(&toggle_cmd, true)
+                .await
+            {
+                debug!("[sync:{pid}] Failed to set initial toggle state: {e}");
+            }
         }
         Err(e) => {
             tracing::warn!("[sync:{pid}] Action registration failed (non-fatal): {e}");
