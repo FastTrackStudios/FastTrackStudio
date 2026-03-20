@@ -58,11 +58,14 @@ async fn run() -> Result<()> {
     // Action definitions live in sync-proto — single source of truth.
     // Action registration is best-effort — the extension can still sync transport
     // even if the bridge doesn't support action_registry (e.g. version mismatch).
+    // Actions whose name starts with "Toggle" are registered as toggleable
+    // so REAPER shows their on/off state in the action list.
     let action_defs: Vec<ActionDef> = sync_actions::definitions()
         .into_iter()
         .map(|def| ActionDef {
             command_name: Box::leak(def.id.to_command_id().into_boxed_str()),
             description: Box::leak(def.display_name().into_boxed_str()),
+            toggleable: def.name.starts_with("Toggle"),
         })
         .collect();
 
@@ -145,6 +148,13 @@ async fn handle_actions(
         std::future::pending::<()>().await;
         return;
     };
+
+    let toggle_link_cmd = sync_actions::TOGGLE_LINK.to_command_id();
+    let link_puppet_cmd = sync_actions::LINK_PUPPET.to_command_id();
+    let link_master_cmd = sync_actions::LINK_MASTER.to_command_id();
+    let link_off_cmd = sync_actions::LINK_OFF.to_command_id();
+    let setlist_toggle_cmd = sync_actions::SETLIST_TOGGLE.to_command_id();
+
     while let Ok(Some(event)) = rx.recv().await {
         match &*event {
             daw::service::ActionEvent::Triggered { command_name } => {
@@ -159,11 +169,129 @@ async fn handle_actions(
                     debug!("[sync:{pid}] Failed to write last_action: {e}");
                 }
 
-                // TODO: Dispatch to actual sync handlers (toggle_link, etc.)
+                // Dispatch to sync handlers
+                if *command_name == toggle_link_cmd {
+                    dispatch_toggle_link(daw).await;
+                } else if *command_name == link_puppet_cmd {
+                    dispatch_set_link_mode(daw, "puppet").await;
+                } else if *command_name == link_master_cmd {
+                    dispatch_set_link_mode(daw, "master").await;
+                } else if *command_name == link_off_cmd {
+                    dispatch_set_link_mode(daw, "off").await;
+                } else if *command_name == setlist_toggle_cmd {
+                    dispatch_toggle_setlist(daw).await;
+                }
             }
         }
     }
     info!("[sync:{pid}] Action event stream ended");
+}
+
+/// Toggle Ableton Link between Puppet and Off.
+///
+/// Reads the current link_mode from ExtState, flips it, writes it back,
+/// and updates the REAPER toggle state so the action list shows on/off.
+async fn dispatch_toggle_link(daw: &Daw) {
+    let pid = std::process::id();
+    let current = daw
+        .ext_state()
+        .get("FTS_SYNC", "link_mode")
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+
+    let (new_mode, is_on) = if current == "off" || current.is_empty() {
+        ("puppet", true)
+    } else {
+        ("off", false)
+    };
+
+    if let Err(e) = daw
+        .ext_state()
+        .set("FTS_SYNC", "link_mode", new_mode, false)
+        .await
+    {
+        tracing::warn!("[sync:{pid}] Failed to set link_mode: {e}");
+        return;
+    }
+
+    // Update toggle state in REAPER's action list
+    let toggle_cmd = sync_actions::TOGGLE_LINK.to_command_id();
+    if let Err(e) = daw
+        .action_registry()
+        .set_toggle_state(&toggle_cmd, is_on)
+        .await
+    {
+        debug!("[sync:{pid}] Failed to set toggle state: {e}");
+    }
+
+    info!("[sync:{pid}] Link toggled → {new_mode}");
+}
+
+/// Set Ableton Link to a specific mode (puppet/master/off).
+async fn dispatch_set_link_mode(daw: &Daw, mode: &str) {
+    let pid = std::process::id();
+
+    if let Err(e) = daw
+        .ext_state()
+        .set("FTS_SYNC", "link_mode", mode, false)
+        .await
+    {
+        tracing::warn!("[sync:{pid}] Failed to set link_mode: {e}");
+        return;
+    }
+
+    // Update toggle states: TOGGLE_LINK reflects whether link is active at all
+    let is_on = mode != "off";
+    let toggle_cmd = sync_actions::TOGGLE_LINK.to_command_id();
+    if let Err(e) = daw
+        .action_registry()
+        .set_toggle_state(&toggle_cmd, is_on)
+        .await
+    {
+        debug!("[sync:{pid}] Failed to set toggle state: {e}");
+    }
+
+    info!("[sync:{pid}] Link mode set → {mode}");
+}
+
+/// Toggle setlist sync on/off.
+async fn dispatch_toggle_setlist(daw: &Daw) {
+    let pid = std::process::id();
+    let current = daw
+        .ext_state()
+        .get("FTS_SYNC", "setlist_sync")
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+
+    let (new_val, is_on) = if current == "on" {
+        ("off", false)
+    } else {
+        ("on", true)
+    };
+
+    if let Err(e) = daw
+        .ext_state()
+        .set("FTS_SYNC", "setlist_sync", new_val, false)
+        .await
+    {
+        tracing::warn!("[sync:{pid}] Failed to set setlist_sync: {e}");
+        return;
+    }
+
+    let setlist_cmd = sync_actions::SETLIST_TOGGLE.to_command_id();
+    if let Err(e) = daw
+        .action_registry()
+        .set_toggle_state(&setlist_cmd, is_on)
+        .await
+    {
+        debug!("[sync:{pid}] Failed to set toggle state: {e}");
+    }
+
+    info!("[sync:{pid}] Setlist sync toggled → {new_val}");
 }
 
 /// Apply incoming remote SyncEvents to the local DAW.
