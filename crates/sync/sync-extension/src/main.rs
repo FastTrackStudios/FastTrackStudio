@@ -76,15 +76,8 @@ async fn run() -> Result<()> {
             info!("[sync:{pid}] Action registration complete ({} registered, {} failed)",
                 reg.registered, reg.failed);
 
-            // Link starts enabled (Puppet mode) — set toggle state to on
-            let toggle_cmd = sync_actions::TOGGLE_LINK.to_command_id();
-            if let Err(e) = daw
-                .action_registry()
-                .set_toggle_state(&toggle_cmd, true)
-                .await
-            {
-                debug!("[sync:{pid}] Failed to set initial toggle state: {e}");
-            }
+            // Link starts off — transport sync uses PeerMesh (TCP), not Link.
+            // Toggle state defaults to off (set by the host on registration).
         }
         Err(e) => {
             tracing::warn!("[sync:{pid}] Action registration failed (non-fatal): {e}");
