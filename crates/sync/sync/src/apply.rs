@@ -425,8 +425,11 @@ async fn apply_track(
             guid, new_index, ..
         } => {
             suppression.suppress(SuppressionKey::track(guid, "moved"));
-            // Track reordering requires a dedicated API (not yet available in daw-control)
-            debug!("Track {guid} moved to index {new_index} (reordering not yet wired)");
+            apply_track_mutation(daw, ctx, guid, |handle| {
+                let new_index = *new_index;
+                Box::pin(async move { handle.move_to_index(new_index).await })
+            })
+            .await;
         }
     }
 }
@@ -777,11 +780,11 @@ async fn apply_item(
             ..
         } => {
             suppression.suppress(SuppressionKey::item(item_guid, "moved_to_track"));
-            // move_to_track exists in the service layer but not exposed through ItemHandle.
-            // Log for now — this is a rare operation.
-            debug!(
-                "Item {item_guid} moved to track {new_track_guid} (cross-track move not yet wired)"
-            );
+            apply_item_mutation(daw, ctx, item_guid, |handle| {
+                let track = TrackRef::Guid(new_track_guid.clone());
+                Box::pin(async move { handle.move_to_track(track).await })
+            })
+            .await;
         }
         ItemEvent::SelectionChanged {
             item_guid,
