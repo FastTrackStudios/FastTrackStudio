@@ -41,6 +41,37 @@ pub struct Handshake {
     pub session_id: String,
 }
 
+// ── Clock calibration frames ────────────────────────────────────────────────
+
+/// Number of clock probes during calibration.
+const CLOCK_PROBE_COUNT: u8 = 5;
+
+/// Clock probe sent by the outbound peer to measure clock offset.
+#[derive(Clone, Debug, Facet)]
+struct ClockProbe {
+    probe_index: u8,
+    /// Prober's wall-clock time when this probe was sent (ms since epoch).
+    send_time_ms: u64,
+}
+
+/// Clock probe response sent back by the inbound peer.
+#[derive(Clone, Debug, Facet)]
+struct ClockProbeResponse {
+    probe_index: u8,
+    /// Echoed send_time_ms from the probe.
+    prober_send_time_ms: u64,
+    /// Responder's wall-clock time when it received the probe (ms since epoch).
+    responder_time_ms: u64,
+}
+
+/// Final calibration result sent by the prober after computing offset.
+#[derive(Clone, Debug, Facet)]
+struct CalibrationResult {
+    /// Estimated clock offset in milliseconds.
+    /// Positive means remote clock is ahead of prober's clock.
+    offset_ms: i64,
+}
+
 /// Peer lifecycle event emitted by the mesh.
 #[derive(Clone, Debug)]
 pub enum MeshPeerEvent {
@@ -54,6 +85,10 @@ pub enum MeshPeerEvent {
 struct PeerConnection {
     write_tx: mpsc::Sender<Vec<u8>>,
     cancel: CancellationToken,
+    /// Estimated clock offset for this peer in milliseconds.
+    /// `offset = remote_clock - local_clock`. Subtract from received
+    /// `created_at_ms` to translate remote timestamps to local time.
+    clock_offset_ms: i64,
 }
 
 /// TCP peer mesh for forwarding SyncEvents between instances.
@@ -253,6 +288,101 @@ async fn accept_loop(
     }
 }
 
+// ── Clock calibration ────────────────────────────────────────────────────────
+
+/// Run clock calibration as the prober (outbound side).
+/// Returns estimated offset: `remote_clock - local_clock` in ms.
+async fn calibrate_as_prober(stream: &mut TcpStream) -> io::Result<i64> {
+    let mut offsets = Vec::with_capacity(CLOCK_PROBE_COUNT as usize);
+
+    for i in 0..CLOCK_PROBE_COUNT {
+        let send_time = SyncEvent::now_ms();
+        let probe = ClockProbe {
+            probe_index: i,
+            send_time_ms: send_time,
+        };
+        let bytes = facet_postcard::to_vec(&probe).map_err(|e| {
+            io::Error::new(io::ErrorKind::InvalidData, format!("probe serialize: {e}"))
+        })?;
+        write_frame(stream, &bytes).await?;
+
+        let resp_bytes = read_frame(stream).await?;
+        let recv_time = SyncEvent::now_ms();
+        let resp: ClockProbeResponse = facet_postcard::from_slice(&resp_bytes).map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("probe response deserialize: {e}"),
+            )
+        })?;
+
+        let rtt = recv_time.saturating_sub(send_time);
+        // NTP offset formula: offset = remote_time - (send_time + RTT/2)
+        let offset =
+            resp.responder_time_ms as i64 - (send_time as i64 + rtt as i64 / 2);
+        offsets.push(offset);
+    }
+
+    // Median for robustness against outlier probes
+    offsets.sort();
+    let median_offset = offsets[offsets.len() / 2];
+
+    // Send result to responder so it can compute its own (negated) offset
+    let result = CalibrationResult {
+        offset_ms: median_offset,
+    };
+    let result_bytes = facet_postcard::to_vec(&result).map_err(|e| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("calibration result serialize: {e}"),
+        )
+    })?;
+    write_frame(stream, &result_bytes).await?;
+
+    Ok(median_offset)
+}
+
+/// Run clock calibration as the responder (inbound side).
+/// Returns the negated offset (from the responder's perspective).
+async fn calibrate_as_responder(stream: &mut TcpStream) -> io::Result<i64> {
+    for _ in 0..CLOCK_PROBE_COUNT {
+        let probe_bytes = read_frame(stream).await?;
+        let now = SyncEvent::now_ms();
+        let probe: ClockProbe = facet_postcard::from_slice(&probe_bytes).map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("probe deserialize: {e}"),
+            )
+        })?;
+
+        let resp = ClockProbeResponse {
+            probe_index: probe.probe_index,
+            prober_send_time_ms: probe.send_time_ms,
+            responder_time_ms: now,
+        };
+        let resp_bytes = facet_postcard::to_vec(&resp).map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("probe response serialize: {e}"),
+            )
+        })?;
+        write_frame(stream, &resp_bytes).await?;
+    }
+
+    // Read calibration result from prober
+    let result_bytes = read_frame(stream).await?;
+    let result: CalibrationResult =
+        facet_postcard::from_slice(&result_bytes).map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("calibration result deserialize: {e}"),
+            )
+        })?;
+
+    // Negate: if prober says we're +50ms ahead, then from our perspective
+    // the prober is -50ms (behind us)
+    Ok(-result.offset_ms)
+}
+
 // ── Connection handler (used for both inbound and outbound) ─────────────────
 
 async fn handle_connection(
@@ -307,6 +437,18 @@ async fn handle_connection(
 
     info!(remote = %remote_peer_id, is_outbound, "Peer connected");
 
+    // Clock calibration — measure clock offset before splitting the stream
+    let clock_offset_ms = if is_outbound {
+        calibrate_as_prober(&mut stream).await?
+    } else {
+        calibrate_as_responder(&mut stream).await?
+    };
+    info!(
+        remote = %remote_peer_id,
+        clock_offset_ms,
+        "Clock calibration complete"
+    );
+
     // Split the stream
     let (read_half, mut write_half) = stream.into_split();
 
@@ -322,6 +464,7 @@ async fn handle_connection(
             PeerConnection {
                 write_tx,
                 cancel: peer_cancel.clone(),
+                clock_offset_ms,
             },
         );
     }
@@ -362,7 +505,14 @@ async fn handle_connection(
                     match result {
                         Ok(payload) => {
                             match facet_postcard::from_slice::<SyncEvent>(&payload) {
-                                Ok(event) => {
+                                Ok(mut event) => {
+                                    // Adjust timestamp from remote clock to local clock.
+                                    // offset = remote - local, so local_time = remote_time - offset
+                                    if clock_offset_ms != 0 {
+                                        event.created_at_ms = (event.created_at_ms as i64
+                                            - clock_offset_ms)
+                                            as u64;
+                                    }
                                     if incoming_tx.send(event).await.is_err() {
                                         break;
                                     }
@@ -644,5 +794,106 @@ mod tests {
         // Connection should have been dropped due to session mismatch
         assert_eq!(mesh_a.peer_count().await, 0);
         assert_eq!(mesh_b.peer_count().await, 0);
+    }
+
+    #[tokio::test]
+    async fn clock_calibration_near_zero_on_localhost() {
+        // On the same machine, clock offset should be ~0ms
+        let (tx_a, _) = broadcast::channel(64);
+        let (tx_b, _) = broadcast::channel(64);
+
+        let (mesh_a, _rx_a, _pe_a) = PeerMesh::bind(
+            MeshConfig {
+                peer_id: "cal-a".to_string(),
+                session_id: "cal-session".to_string(),
+            },
+            tx_a.subscribe(),
+            empty_suppression(),
+        )
+        .await
+        .unwrap();
+
+        let (_mesh_b, _rx_b, _pe_b) = PeerMesh::bind(
+            MeshConfig {
+                peer_id: "cal-b".to_string(),
+                session_id: "cal-session".to_string(),
+            },
+            tx_b.subscribe(),
+            empty_suppression(),
+        )
+        .await
+        .unwrap();
+
+        let addr_b = SocketAddr::from(([127, 0, 0, 1], _mesh_b.local_port()));
+        mesh_a.connect_peer(addr_b, "cal-b".to_string()).await;
+
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+        assert_eq!(mesh_a.peer_count().await, 1);
+
+        // Verify offset is stored and near zero (same machine)
+        let peers_lock = mesh_a.peers.lock().await;
+        let peer = peers_lock.get("cal-b").expect("peer should be connected");
+        assert!(
+            peer.clock_offset_ms.abs() < 5,
+            "on localhost, clock offset should be <5ms, got {}ms",
+            peer.clock_offset_ms
+        );
+    }
+
+    #[tokio::test]
+    async fn clock_offset_adjusts_event_timestamp() {
+        // Verify that received events have adjusted created_at_ms
+        let (tx_a, _) = broadcast::channel(64);
+        let (tx_b, _) = broadcast::channel(64);
+
+        let (mesh_a, _rx_a, _pe_a) = PeerMesh::bind(
+            MeshConfig {
+                peer_id: "adj-a".to_string(),
+                session_id: "adj-session".to_string(),
+            },
+            tx_a.subscribe(),
+            empty_suppression(),
+        )
+        .await
+        .unwrap();
+
+        let (_mesh_b, mut rx_b, _pe_b) = PeerMesh::bind(
+            MeshConfig {
+                peer_id: "adj-b".to_string(),
+                session_id: "adj-session".to_string(),
+            },
+            tx_b.subscribe(),
+            empty_suppression(),
+        )
+        .await
+        .unwrap();
+
+        let addr_b = SocketAddr::from(([127, 0, 0, 1], _mesh_b.local_port()));
+        mesh_a.connect_peer(addr_b, "adj-b".to_string()).await;
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+        // Send event from A → B
+        let before = SyncEvent::now_ms();
+        tx_a.send(make_event("adj-a", 1)).unwrap();
+
+        let received = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            rx_b.recv(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        let after = SyncEvent::now_ms();
+
+        // After clock adjustment, the created_at_ms should still be
+        // reasonable (between before and after on the local clock)
+        assert!(
+            received.created_at_ms >= before - 10 && received.created_at_ms <= after + 10,
+            "adjusted timestamp {} should be between {} and {} (±10ms)",
+            received.created_at_ms,
+            before,
+            after
+        );
     }
 }
