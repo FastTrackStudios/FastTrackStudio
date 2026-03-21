@@ -303,9 +303,10 @@ pub fn EqGraph(
     /// Additional CSS class (kept for API compat, not functional in Blitz).
     #[props(default)]
     class: String,
-    /// Callback when the focused band changes (for external detail panels).
+    /// Optional external signal to sync focused band state (for detail panels).
+    /// EqGraph writes the focused band index to this signal from event handlers.
     #[props(default)]
-    on_focus_change: Option<EventHandler<Option<usize>>>,
+    focused_band_out: Option<Signal<Option<usize>>>,
     /// Optional spectrum analyzer data (dB values for logarithmically-spaced bins).
     #[props(default)]
     spectrum_db: Option<Vec<f32>>,
@@ -327,6 +328,13 @@ pub fn EqGraph(
     let mut hovered_band = use_signal(|| None::<usize>);
     // Focused band shows the info popup (only one at a time)
     let mut focused_band: Signal<Option<usize>> = use_signal(|| None);
+    // Helper: set focused_band and sync to external signal
+    let mut set_focused = move |val: Option<usize>| {
+        focused_band.set(val);
+        if let Some(mut ext) = focused_band_out {
+            ext.set(val);
+        }
+    };
     // Selected bands for multi-selection (can be multiple)
     let mut selected_bands: Signal<Vec<usize>> = use_signal(Vec::new);
     // Selection rectangle state: (start_x, start_y, current_x, current_y)
@@ -479,19 +487,6 @@ pub fn EqGraph(
 
     // Clone bands for the read in the iterator
     let bands_snapshot: Vec<EqBand> = bands.read().clone();
-
-    // Fire on_focus_change callback when focused band changes
-    let mut prev_focus: Signal<Option<usize>> = use_signal(|| None);
-    {
-        let current = *focused_band.peek();
-        let previous = *prev_focus.peek();
-        if current != previous {
-            *prev_focus.write() = current;
-            if let Some(ref cb) = on_focus_change {
-                cb.call(current);
-            }
-        }
-    }
 
     // Pre-compute spectrum analyzer SVG paths (outside rsx! for complex logic)
     let spectrum_svg = spectrum_db.as_ref().and_then(|spectrum| {
@@ -683,7 +678,7 @@ pub fn EqGraph(
                 match (current_focus, new_focus) {
                     (Some(old_idx), Some(new_idx)) if old_idx != new_idx => {
                         // Switching to a different band - instant switch, no fade
-                        focused_band.set(Some(new_idx));
+                        set_focused(Some(new_idx));
                         focus_leave_time.set(None);
                         show_shape_dropdown.set(false);
                         show_more_dropdown.set(false);
@@ -694,7 +689,7 @@ pub fn EqGraph(
                     }
                     (None, Some(new_idx)) => {
                         // Newly focusing on a band
-                        focused_band.set(Some(new_idx));
+                        set_focused(Some(new_idx));
                         focus_leave_time.set(None);
                         show_shape_dropdown.set(false);
                         show_more_dropdown.set(false);
@@ -710,7 +705,7 @@ pub fn EqGraph(
                                 // Check if timeout has elapsed
                                 if now - leave_ts > popup_fade_timeout_ms {
                                     // Timeout elapsed - clear focus
-                                    focused_band.set(None);
+                                    set_focused(None);
                                     focus_leave_time.set(None);
                                     show_shape_dropdown.set(false);
                                     show_more_dropdown.set(false);
@@ -1466,7 +1461,7 @@ pub fn EqGraph(
                                             if let Some(cb) = &on_band_remove {
                                                 cb.call(band_idx);
                                             }
-                                            focused_band.set(None);
+                                            set_focused(None);
                                         }
                                     },
                                     style: "cursor: pointer;",
