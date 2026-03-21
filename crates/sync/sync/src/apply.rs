@@ -132,6 +132,31 @@ async fn apply_transport(
 
     use daw::service::PlayState;
 
+    // If both sides are stopped, sync edit cursor position changes without
+    // triggering a full state transition (no suppression, no play state change).
+    if transport.play_state == PlayState::Stopped {
+        if let Ok(local) = t.get_state().await {
+            if local.play_state == PlayState::Stopped {
+                if let Some(ref edit_pos) = transport.edit_position.time {
+                    let local_edit = local.edit_position.time
+                        .as_ref()
+                        .map(|t| t.as_seconds())
+                        .unwrap_or(0.0);
+                    let remote_edit = edit_pos.as_seconds();
+                    if (remote_edit - local_edit).abs() > 0.001 {
+                        debug!("Syncing edit cursor: {local_edit:.3}s → {remote_edit:.3}s");
+                        let _ = t.set_position(remote_edit).await;
+                    }
+                }
+                // Also sync tempo if changed
+                if (transport.tempo.bpm - local.tempo.bpm).abs() > 0.001 {
+                    let _ = t.set_tempo(transport.tempo.bpm).await;
+                }
+                return;
+            }
+        }
+    }
+
     // Check if this is a drift-correction heartbeat (both sides playing).
     // When Link is active, skip drift correction entirely — Link handles
     // tempo and phase sync via its own playrate nudging mechanism.

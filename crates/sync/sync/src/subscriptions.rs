@@ -116,10 +116,15 @@ pub async fn subscribe_project(
             // Track previous control state to avoid flooding on position-only changes.
             // During playback, position changes every poll tick — we only sync transitions
             // in play_state, tempo, looping, record_mode, time_signature, or loop_region.
+            // When stopped, we also sync edit cursor position changes (>1ms threshold).
             let mut prev_play_state = None;
             let mut prev_tempo_bpm = None;
             let mut prev_looping = None;
             let mut prev_record_mode = None;
+            let mut prev_edit_pos_secs: Option<f64> = None;
+
+            /// Minimum edit cursor movement to trigger a sync event (seconds).
+            const EDIT_POS_THRESHOLD: f64 = 0.001;
 
             loop {
                 tokio::select! {
@@ -136,11 +141,28 @@ pub async fn subscribe_project(
                                     || prev_looping != Some(transport.looping)
                                     || prev_record_mode != Some(transport.record_mode);
 
-                                if control_changed {
+                                // When stopped, also detect edit cursor position changes
+                                let edit_pos_changed = if transport.play_state == daw::service::PlayState::Stopped {
+                                    let cur = transport.edit_position.time
+                                        .as_ref()
+                                        .map(|t| t.as_seconds())
+                                        .unwrap_or(0.0);
+                                    match prev_edit_pos_secs {
+                                        Some(prev) => (cur - prev).abs() > EDIT_POS_THRESHOLD,
+                                        None => true,
+                                    }
+                                } else {
+                                    false
+                                };
+
+                                if control_changed || edit_pos_changed {
                                     prev_play_state = Some(transport.play_state);
                                     prev_tempo_bpm = Some(transport.tempo.bpm);
                                     prev_looping = Some(transport.looping);
                                     prev_record_mode = Some(transport.record_mode);
+                                    prev_edit_pos_secs = transport.edit_position.time
+                                        .as_ref()
+                                        .map(|t| t.as_seconds());
 
                                     ctx.send(SyncDomain::Transport(transport)).await;
                                 }
