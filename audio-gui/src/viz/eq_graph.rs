@@ -311,13 +311,19 @@ pub fn EqGraph(
     #[props(default)]
     spectrum_db: Option<Vec<f32>>,
     /// Actual rendered width of the SVG container in pixels.
-    /// Required for accurate mouse coordinate mapping from element space to viewBox space.
-    /// If not provided, falls back to viewBox dimensions (may cause misalignment).
+    /// Required for accurate mouse coordinate mapping.
     #[props(default = 0.0)]
     rendered_width: f64,
     /// Actual rendered height of the SVG container in pixels.
     #[props(default = 0.0)]
     rendered_height: f64,
+    /// X offset of the SVG element from the window's left edge (in pixels).
+    /// Needed because Blitz's element_coordinates() returns window-relative coords.
+    #[props(default = 0.0)]
+    offset_x: f64,
+    /// Y offset of the SVG element from the window's top edge (in pixels).
+    #[props(default = 0.0)]
+    offset_y: f64,
     /// Whether the control is disabled.
     #[props(default = false)]
     disabled: bool,
@@ -393,15 +399,18 @@ pub fn EqGraph(
         (0.5 - normalized) * 2.0 * db_range
     };
 
-    // Transform element-relative pixel coordinates to SVG viewBox coordinates.
-    // With preserveAspectRatio="none", the viewBox stretches to fill the element,
-    // so the mapping is a simple ratio.
+    // Transform window-relative pixel coordinates to SVG viewBox coordinates.
+    // Blitz's element_coordinates() actually returns window/client coords (not
+    // element-relative), so we subtract the element's position first, then scale
+    // from rendered pixel size to viewBox coordinates.
     let actual_w = if rendered_width > 0.0 { rendered_width } else { vb_width };
     let actual_h = if rendered_height > 0.0 { rendered_height } else { vb_height };
 
-    let transform_coords = move |elem_x: f64, elem_y: f64| -> (f64, f64) {
-        let vb_x = elem_x * vb_width / actual_w;
-        let vb_y = elem_y * vb_height / actual_h;
+    let transform_coords = move |win_x: f64, win_y: f64| -> (f64, f64) {
+        let rel_x = win_x - offset_x;
+        let rel_y = win_y - offset_y;
+        let vb_x = rel_x * vb_width / actual_w;
+        let vb_y = rel_y * vb_height / actual_h;
         (vb_x, vb_y)
     };
 
