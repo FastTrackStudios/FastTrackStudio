@@ -1,4 +1,4 @@
-//! Layout components — section cards, action buttons.
+//! Layout components — section cards, action buttons, control groups.
 
 use crate::theme::*;
 use nih_plug_dioxus::prelude::*;
@@ -36,6 +36,61 @@ pub fn ActionButton(label: &'static str, on_click: EventHandler<()>) -> Element 
             ),
             onclick: move |_| on_click.call(()),
             "{label}"
+        }
+    }
+}
+
+/// A labeled group of controls with a sub-heading.
+///
+/// Renders a column with a tiny uppercase label and a horizontal row
+/// of child controls. Used across plugin editors for grouping related
+/// knobs/sliders (e.g. "Detection", "Sidechain", "Output").
+#[component]
+pub fn ControlGroup(label: &'static str, children: Element) -> Element {
+    rsx! {
+        div {
+            style: "display:flex; flex-direction:column; align-items:center; gap:6px;",
+            div {
+                style: format!(
+                    "font-size:9px; color:{TEXT_DIM}; text-transform:uppercase; \
+                     letter-spacing:0.6px; font-weight:600;",
+                ),
+                "{label}"
+            }
+            div {
+                style: "display:flex; gap:14px; align-items:flex-end;",
+                {children}
+            }
+        }
+    }
+}
+
+/// Vertical divider line between control groups or UI sections.
+#[component]
+pub fn Divider() -> Element {
+    rsx! {
+        div {
+            style: format!(
+                "width:1px; background:{}; align-self:stretch;",
+                BORDER,
+            ),
+        }
+    }
+}
+
+/// Tiny uppercase section label for annotating UI regions.
+///
+/// Smaller and lighter than `Section` — used inline above knob rows
+/// or visualization areas.
+#[component]
+pub fn SectionLabel(text: &'static str) -> Element {
+    rsx! {
+        div {
+            style: format!(
+                "font-size:10px; color:{TEXT_DIM}; text-transform:uppercase; \
+                 letter-spacing:0.4px;",
+            ),
+            "{text}"
         }
     }
 }
