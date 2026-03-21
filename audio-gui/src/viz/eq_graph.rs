@@ -303,6 +303,12 @@ pub fn EqGraph(
     /// Additional CSS class (kept for API compat, not functional in Blitz).
     #[props(default)]
     class: String,
+    /// Callback when the focused band changes (for external detail panels).
+    #[props(default)]
+    on_focus_change: Option<EventHandler<Option<usize>>>,
+    /// Optional spectrum analyzer data (dB values for logarithmically-spaced bins).
+    #[props(default)]
+    spectrum_db: Option<Vec<f32>>,
     /// Whether the control is disabled.
     #[props(default = false)]
     disabled: bool,
@@ -473,6 +479,50 @@ pub fn EqGraph(
 
     // Clone bands for the read in the iterator
     let bands_snapshot: Vec<EqBand> = bands.read().clone();
+
+    // Fire on_focus_change callback when focused band changes
+    let mut prev_focus: Signal<Option<usize>> = use_signal(|| None);
+    {
+        let current = *focused_band.peek();
+        let previous = *prev_focus.peek();
+        if current != previous {
+            *prev_focus.write() = current;
+            if let Some(ref cb) = on_focus_change {
+                cb.call(current);
+            }
+        }
+    }
+
+    // Pre-compute spectrum analyzer SVG paths (outside rsx! for complex logic)
+    let spectrum_svg = spectrum_db.as_ref().and_then(|spectrum| {
+        if spectrum.len() < 2 {
+            return None;
+        }
+        let num_bins = spectrum.len();
+        let mut stroke_path = String::with_capacity(num_bins * 16);
+        for (i, &db_val) in spectrum.iter().enumerate() {
+            let t = i as f64 / (num_bins - 1) as f64;
+            let freq = 10.0_f64.powf(log_min + t * (log_max - log_min));
+            let x = freq_to_x(freq);
+            let clamped_db = (db_val as f64).clamp(-db_range, db_range);
+            let y = db_to_y(clamped_db);
+            if i == 0 {
+                stroke_path.push_str(&format!("M{x:.1},{y:.1}"));
+            } else {
+                stroke_path.push_str(&format!(" L{x:.1},{y:.1}"));
+            }
+        }
+        let zero_y = db_to_y(-db_range);
+        let first_x = freq_to_x(10.0_f64.powf(log_min));
+        let last_x = freq_to_x(10.0_f64.powf(log_max));
+        let fill_path = format!(
+            "{stroke_path} L{last_x:.1},{zero_y:.1} L{first_x:.1},{zero_y:.1} Z"
+        );
+        Some((stroke_path, fill_path))
+    });
+    let has_spectrum = spectrum_svg.is_some();
+    let sp_stroke = spectrum_svg.as_ref().map(|(s, _)| s.clone()).unwrap_or_default();
+    let sp_fill = spectrum_svg.as_ref().map(|(_, f)| f.clone()).unwrap_or_default();
 
     rsx! {
         svg {
@@ -920,6 +970,22 @@ pub fn EqGraph(
                     text_anchor: "end",
                     dominant_baseline: "middle",
                     "{label.2}"
+                }
+            }
+
+            // Spectrum analyzer overlay (rendered behind EQ curves)
+            if has_spectrum {
+                path {
+                    d: "{sp_fill}",
+                    fill: "rgba(100, 180, 255, 0.08)",
+                    stroke: "none",
+                }
+                path {
+                    d: "{sp_stroke}",
+                    fill: "none",
+                    stroke: "rgba(100, 180, 255, 0.35)",
+                    stroke_width: "1",
+                    stroke_linejoin: "round",
                 }
             }
 
