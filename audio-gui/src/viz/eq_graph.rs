@@ -310,6 +310,14 @@ pub fn EqGraph(
     /// Optional spectrum analyzer data (dB values for logarithmically-spaced bins).
     #[props(default)]
     spectrum_db: Option<Vec<f32>>,
+    /// Actual rendered width of the SVG container in pixels.
+    /// Required for accurate mouse coordinate mapping from element space to viewBox space.
+    /// If not provided, falls back to viewBox dimensions (may cause misalignment).
+    #[props(default = 0.0)]
+    rendered_width: f64,
+    /// Actual rendered height of the SVG container in pixels.
+    #[props(default = 0.0)]
+    rendered_height: f64,
     /// Whether the control is disabled.
     #[props(default = false)]
     disabled: bool,
@@ -385,26 +393,15 @@ pub fn EqGraph(
         (0.5 - normalized) * 2.0 * db_range
     };
 
-    // Transform element coordinates to viewBox coordinates.
-    // Blitz does not support get_client_rect(), so we assume the SVG
-    // occupies its full viewBox dimensions (1:1 mapping after
-    // preserveAspectRatio scaling).
+    // Transform element-relative pixel coordinates to SVG viewBox coordinates.
+    // With preserveAspectRatio="none", the viewBox stretches to fill the element,
+    // so the mapping is a simple ratio.
+    let actual_w = if rendered_width > 0.0 { rendered_width } else { vb_width };
+    let actual_h = if rendered_height > 0.0 { rendered_height } else { vb_height };
+
     let transform_coords = move |elem_x: f64, elem_y: f64| -> (f64, f64) {
-        // Calculate the scale factor (preserveAspectRatio: xMidYMid meet)
-        let scale_x = vb_width / vb_width;
-        let scale_y = vb_height / vb_height;
-        let scale = scale_x.min(scale_y); // always 1.0
-
-        // Calculate offset due to centering (xMidYMid)
-        let scaled_width = vb_width * scale;
-        let scaled_height = vb_height * scale;
-        let offset_x = (vb_width - scaled_width) / 2.0;
-        let offset_y = (vb_height - scaled_height) / 2.0;
-
-        // Transform element coords to viewBox coords
-        let vb_x = (elem_x - offset_x) / scale;
-        let vb_y = (elem_y - offset_y) / scale;
-
+        let vb_x = elem_x * vb_width / actual_w;
+        let vb_y = elem_y * vb_height / actual_h;
         (vb_x, vb_y)
     };
 
@@ -526,7 +523,7 @@ pub fn EqGraph(
             // Make it responsive
             width: "100%",
             height: "100%",
-            preserve_aspect_ratio: "xMidYMid meet",
+            preserve_aspect_ratio: "none",
             class: "eq-graph {class}",
             style: "background: {bg_color}; user-select: none; display: block;",
 
