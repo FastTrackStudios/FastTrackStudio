@@ -1,1 +1,0 @@
-//! Sync UI components (placeholder)

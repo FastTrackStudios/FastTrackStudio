@@ -8,8 +8,6 @@ members = [
     "apps/fts-control/*",
     "apps/fasttrackstudio/*",
     "apps/fts-cli",
-    "apps/signal-cli",
-    "apps/session-cli",
     "apps/installer",
     "xtask",
 ]
@@ -94,8 +92,6 @@ daw-extension-runtime = { git = "https://github.com/FastTrackStudios/daw.git", b
 # NOTE: daw-proto, daw-control, daw-control-sync, daw-reaper, daw-standalone,
 # dawfile-reaper are INTERNAL. Access them through the `daw` facade crate.
 # Use features: sync, reaper, standalone, file
-signal-cli = { path = "apps/signal-cli" }
-session-cli = { path = "apps/session-cli" }
 
 # Dock UI (sibling repo)
 dock-proto = { git = "https://github.com/FastTrackStudios/dock-dioxus.git", branch = "main" }
@@ -117,24 +113,31 @@ dynamic-template-proto = { git = "https://github.com/FastTrackStudios/dynamic-te
 dynamic-template = { git = "https://github.com/FastTrackStudios/dynamic-template.git", branch = "main" }
 
 # Shared infrastructure
+audio-controls = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
 daw-allocator = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
 roam-discover = { path = "crates/shared/roam-discover" }
 installer-core = { path = "crates/shared/installer-core" }
 
-# Local crates
-macromod = { path = "crates/macromod/macromod" }
+# Signal (sibling repo)
+signal = { path = "../signal/crates/signal" }
+signal-ui = { path = "../signal/crates/signal-ui", default-features = false }
+signal-cli = { path = "../signal/apps/signal-cli" }
+macromod = { path = "../signal/crates/macromod" }
+
+# Session (sibling repo)
 # NOTE: session-proto is listed here for use by session-ui (internal domain crate only).
 # App crates must NOT depend on session-proto directly — use the `session` facade instead.
-session-proto = { path = "crates/session/session-proto" }
-session = { path = "crates/session/session" }
-session-ui = { path = "crates/session/session-ui" }
-audio-controls = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
-signal = { path = "crates/signal/signal" }
-signal-ui = { path = "crates/signal/signal-ui", default-features = false }
+session = { path = "../session/crates/session" }
+session-proto = { path = "../session/crates/session-proto" }
+session-ui = { path = "../session/crates/session-ui" }
+session-cli = { path = "../session/apps/session-cli" }
+
+# Sync (sibling repo)
+sync = { path = "../sync/crates/sync" }
+sync-proto = { path = "../sync/crates/sync-proto" }
+sync-ui = { path = "../sync/crates/sync-ui" }
+
 utils = { path = "crates/shared/utils" }
-sync-proto = { path = "crates/sync/sync-proto" }
-sync = { path = "crates/sync/sync" }
-sync-ui = { path = "crates/sync/sync-ui" }
 
 # REAPER extension dependencies (FTS fork with v7.63 ruler lane APIs)
 reaper-low = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
@@ -197,26 +200,29 @@ pollster = "0.4"
 # Uncomment the sections below to use local checkouts instead of GitHub.
 # This gives you instant rebuilds when iterating across repos.
 #
-# [patch."https://github.com/FastTrackStudios/keyflow.git"]
-# keyflow = { path = "../keyflow/crates/keyflow" }
-# engraver = { path = "../keyflow/crates/engraver" }
-# keyflow-ui = { path = "../keyflow/crates/keyflow-ui" }
+[patch."https://github.com/FastTrackStudios/keyflow.git"]
+keyflow = { path = "../keyflow/crates/keyflow" }
+engraver = { path = "../keyflow/crates/engraver" }
+keyflow-ui = { path = "../keyflow/crates/keyflow-ui" }
 #
 [patch."https://github.com/FastTrackStudios/daw.git"]
 daw = { path = "../daw/crates/daw" }
 daw-proto = { path = "../daw/crates/daw-proto" }
+daw-control = { path = "../daw/crates/daw-control" }
+daw-control-sync = { path = "../daw/crates/daw-control-sync" }
 daw-extension-runtime = { path = "../daw/crates/daw-extension-runtime" }
 daw-ui = { path = "../daw/crates/daw-ui" }
 daw-cli = { path = "../daw/apps/daw" }
 audio-controls = { path = "../daw/crates/audio-controls" }
+dawfile-reaper = { path = "../daw/crates/dawfile-reaper" }
 reaper-test = { path = "../daw/crates/reaper-test" }
 reaper-test-macro = { path = "../daw/crates/reaper-test-macro" }
 reaper-launcher = { path = "../daw/crates/reaper-launcher" }
 daw-allocator = { path = "../daw/crates/daw-allocator" }
 #
-# [patch."https://github.com/FastTrackStudios/dock-dioxus.git"]
-# dock-proto = { path = "../dock-dioxus/crates/dock-proto" }
-# dock-dioxus = { path = "../dock-dioxus/crates/dock-dioxus" }
+[patch."https://github.com/FastTrackStudios/dock-dioxus.git"]
+dock-proto = { path = "../dock-dioxus/crates/dock-proto" }
+dock-dioxus = { path = "../dock-dioxus/crates/dock-dioxus" }
 #
 [patch."https://github.com/FastTrackStudios/input_actions.git"]
 actions-proto = { path = "../input_actions/crates/actions-proto" }
@@ -226,11 +232,19 @@ actions-keybindings = { path = "../input_actions/crates/actions-keybindings" }
 input-dioxus = { path = "../input_actions/crates/input-dioxus" }
 input = { path = "../input_actions/crates/input" }
 #
-# [patch."https://github.com/FastTrackStudios/dynamic-template.git"]
-# color-palette = { path = "../dynamic-template/crates/color-palette" }
-# music-catalog = { path = "../dynamic-template/crates/music-catalog" }
-# dynamic-template-proto = { path = "../dynamic-template/crates/dynamic-template-proto" }
-# dynamic-template = { path = "../dynamic-template/crates/dynamic-template" }
+[patch."https://github.com/FastTrackStudios/dynamic-template.git"]
+color-palette = { path = "../dynamic-template/crates/color-palette" }
+music-catalog = { path = "../dynamic-template/crates/music-catalog" }
+dynamic-template-proto = { path = "../dynamic-template/crates/dynamic-template-proto" }
+dynamic-template = { path = "../dynamic-template/crates/dynamic-template" }
+
+# Keyflow references session from session.git.
+# Patches from keyflow's own Cargo.toml are ignored when consumed as a dependency,
+# so we must patch them here in the root workspace.
+[patch."https://github.com/FastTrackStudios/session.git"]
+session = { path = "../session/crates/session" }
+session-ui = { path = "../session/crates/session-ui" }
+
 #
 # [patch."https://github.com/FastTrackStudios/fts-ui.git"]
 # fts-ui = { path = "../../fts-ui/crates/fts-ui" }

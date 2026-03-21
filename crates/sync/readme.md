@@ -1,1 +1,0 @@
-sync leverages things like peer-to-peer networking and websockets to enable real-time collaboration and synchronization between multiple users. Listening for changes and updating those changes for all connected.

@@ -250,7 +250,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -261,7 +261,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -471,8 +471,8 @@ dependencies = [
  "futures-io",
  "futures-lite",
  "parking",
- "polling 3.11.0",
- "rustix",
+ "polling",
+ "rustix 1.1.4",
  "slab",
  "windows-sys 0.61.2",
 ]
@@ -514,7 +514,7 @@ dependencies = [
  "cfg-if",
  "event-listener 5.4.1",
  "futures-lite",
- "rustix",
+ "rustix 1.1.4",
 ]
 
 [[package]]
@@ -540,7 +540,7 @@ dependencies = [
  "cfg-if",
  "futures-core",
  "futures-io",
- "rustix",
+ "rustix 1.1.4",
  "signal-hook-registry",
  "slab",
  "windows-sys 0.61.2",
@@ -681,6 +681,16 @@ name = "autocfg"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
+
+[[package]]
+name = "avahi-sys"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "70e00c83b3887835fd326daae1b2c4e7a435405033331a876ae1dd03f77b8274"
+dependencies = [
+ "bindgen 0.69.5",
+ "libc",
+]
 
 [[package]]
 name = "axum"
@@ -841,22 +851,48 @@ dependencies = [
 
 [[package]]
 name = "bindgen"
-version = "0.72.1"
+version = "0.68.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "993776b509cfb49c750f11b8f07a46fa23e0a1386ffc01fb1e7d343efc387895"
+checksum = "726e4313eb6ec35d2730258ad4e15b547ee75d6afaa1361a922e78e59b7d8078"
+dependencies = [
+ "bitflags 2.11.0",
+ "cexpr",
+ "clang-sys",
+ "lazy_static",
+ "lazycell",
+ "log",
+ "peeking_take_while",
+ "prettyplease",
+ "proc-macro2",
+ "quote",
+ "regex",
+ "rustc-hash 1.1.0",
+ "shlex",
+ "syn 2.0.117",
+ "which",
+]
+
+[[package]]
+name = "bindgen"
+version = "0.69.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "271383c67ccabffb7381723dea0672a673f292304fcb45c01cc648c7a8d58088"
 dependencies = [
  "bitflags 2.11.0",
  "cexpr",
  "clang-sys",
  "itertools",
+ "lazy_static",
+ "lazycell",
  "log",
  "prettyplease",
  "proc-macro2",
  "quote",
  "regex",
- "rustc-hash 2.1.1",
+ "rustc-hash 1.1.0",
  "shlex",
  "syn 2.0.117",
+ "which",
 ]
 
 [[package]]
@@ -996,6 +1032,16 @@ dependencies = [
  "futures-io",
  "futures-lite",
  "piper",
+]
+
+[[package]]
+name = "bonjour-sys"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "be8655c4daf1447c831970e4134e8312a15c63fbff109b353cfe934c22f2b61a"
+dependencies = [
+ "bindgen 0.68.1",
+ "libc",
 ]
 
 [[package]]
@@ -1350,7 +1396,7 @@ dependencies = [
  "anstream",
  "anstyle",
  "clap_lex",
- "strsim",
+ "strsim 0.11.1",
 ]
 
 [[package]]
@@ -1370,15 +1416,6 @@ name = "clap_lex"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
-
-[[package]]
-name = "cmake"
-version = "0.1.57"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "75443c44cd6b379beb8c5b45d85d0773baf31cce901fe7bb252f4eff3008ef7d"
-dependencies = [
- "cc",
-]
 
 [[package]]
 name = "cocoa"
@@ -1458,7 +1495,6 @@ dependencies = [
 [[package]]
 name = "color-palette"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/dynamic-template.git?branch=main#3942238eeaa6532d43cf59686540c743c7d0c855"
 dependencies = [
  "facet",
  "thiserror 2.0.18",
@@ -2043,12 +2079,36 @@ checksum = "b365fabc795046672053e29c954733ec3b05e4be654ab130fe8f1f94d7051f35"
 
 [[package]]
 name = "darling"
+version = "0.10.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0d706e75d87e35569db781a9b5e2416cff1236a47ed380831f959382ccd5f858"
+dependencies = [
+ "darling_core 0.10.2",
+ "darling_macro 0.10.2",
+]
+
+[[package]]
+name = "darling"
 version = "0.21.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9cdf337090841a411e2a7f3deb9187445851f91b309c0c0a29e05f74a00a48c0"
 dependencies = [
- "darling_core",
- "darling_macro",
+ "darling_core 0.21.3",
+ "darling_macro 0.21.3",
+]
+
+[[package]]
+name = "darling_core"
+version = "0.10.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f0c960ae2da4de88a91b2d920c2a7233b400bc33cb28453a2987822d8392519b"
+dependencies = [
+ "fnv",
+ "ident_case",
+ "proc-macro2",
+ "quote",
+ "strsim 0.9.3",
+ "syn 1.0.109",
 ]
 
 [[package]]
@@ -2066,11 +2126,22 @@ dependencies = [
 
 [[package]]
 name = "darling_macro"
+version = "0.10.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d9b5a2f4ac4969822c62224815d069952656cadc7084fdca9751e6d959189b72"
+dependencies = [
+ "darling_core 0.10.2",
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
+name = "darling_macro"
 version = "0.21.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d38308df82d1080de0afee5d069fa14b0326a88c14f15c5ccda35b4a6c414c81"
 dependencies = [
- "darling_core",
+ "darling_core 0.21.3",
  "quote",
  "syn 2.0.117",
 ]
@@ -2264,6 +2335,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "derive-getters"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7a2c35ab6e03642397cdda1dd58abbc05d418aef8e36297f336d5aba060fe8df"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
+name = "derive-new"
+version = "0.5.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3418329ca0ad70234b9735dc4ceed10af4df60eff9c8e7b06cb5e520d92c3535"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
 name = "derive_arbitrary"
 version = "1.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2272,6 +2365,31 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "derive_builder"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a2658621297f2cf68762a6f7dc0bb7e1ff2cfd6583daef8ee0fed6f7ec468ec0"
+dependencies = [
+ "darling 0.10.2",
+ "derive_builder_core",
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
+name = "derive_builder_core"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2791ea3e372c8495c0bc2033991d76b512cd799d07491fbd6890124db9458bef"
+dependencies = [
+ "darling 0.10.2",
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
 ]
 
 [[package]]
@@ -2932,7 +3050,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2999,7 +3117,6 @@ checksum = "780955b8b195a21ab8e4ac6b60dd1dbdcec1dc6c51c0617964b08c81785e12c9"
 [[package]]
 name = "dock-dioxus"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/dock-dioxus.git?branch=main#1216192edbf039bc5a9b70b02ceda2e293255a9a"
 dependencies = [
  "dioxus",
  "dock-proto",
@@ -3013,7 +3130,6 @@ dependencies = [
 [[package]]
 name = "dock-proto"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/dock-dioxus.git?branch=main#1216192edbf039bc5a9b70b02ceda2e293255a9a"
 dependencies = [
  "facet",
  "facet-json",
@@ -3069,11 +3185,29 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92773504d58c093f6de2459af4af33faa518c13451eb8f2b5698ed3d36e7c813"
 
 [[package]]
+name = "dynamic-template"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "color-palette",
+ "daw-proto",
+ "dynamic-template-proto",
+ "facet",
+ "monarchy",
+ "music-catalog",
+ "roam",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "dynamic-template-extension"
 version = "0.1.0"
 dependencies = [
  "daw",
  "daw-extension-runtime",
+ "dynamic-template",
  "dynamic-template-proto",
  "eyre",
  "tokio",
@@ -3084,7 +3218,6 @@ dependencies = [
 [[package]]
 name = "dynamic-template-proto"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/dynamic-template.git?branch=main#3942238eeaa6532d43cf59686540c743c7d0c855"
 dependencies = [
  "actions-proto",
  "daw-proto",
@@ -3129,7 +3262,6 @@ checksum = "66b7e2430c6dff6a955451e2cfc438f09cea1965a9d6f87f7e3b90decc014099"
 [[package]]
 name = "engraver"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/keyflow.git?branch=main#00c81abf2a8488273b28857e7d6b8c748cec49aa"
 dependencies = [
  "engraver-proto",
 ]
@@ -3137,7 +3269,6 @@ dependencies = [
 [[package]]
 name = "engraver-proto"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/keyflow.git?branch=main#00c81abf2a8488273b28857e7d6b8c748cec49aa"
 dependencies = [
  "anyrender",
  "bitflags 2.11.0",
@@ -3208,7 +3339,7 @@ version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f43e744e4ea338060faee68ed933e46e722fb7f3617e722a5772d7e856d8b3ce"
 dependencies = [
- "darling",
+ "darling 0.21.3",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -3227,7 +3358,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3319,6 +3450,16 @@ dependencies = [
  "facet-reflect",
  "facet-toml",
  "facet-value",
+]
+
+[[package]]
+name = "facet-cbor"
+version = "7.3.0"
+source = "git+https://github.com/bearcove/roam.git?branch=main#6d9ea5a5e29d86c596bbb13e86ec92c88751b458"
+dependencies = [
+ "facet",
+ "facet-core",
+ "facet-reflect",
 ]
 
 [[package]]
@@ -3422,7 +3563,7 @@ dependencies = [
  "facet-macro-types",
  "proc-macro2",
  "quote",
- "strsim",
+ "strsim 0.11.1",
  "unsynn",
 ]
 
@@ -3656,7 +3797,7 @@ dependencies = [
  "indexmap",
  "owo-colors",
  "strip-ansi-escapes",
- "strsim",
+ "strsim 0.11.1",
  "supports-color 3.0.2",
  "tracing",
  "unicode-width",
@@ -3934,8 +4075,8 @@ dependencies = [
  "roam-stream",
  "serde",
  "serde_json",
- "session 0.1.0",
- "session-ui 0.1.0",
+ "session",
+ "session-ui",
  "signal",
  "signal-ui",
  "tokio",
@@ -3973,8 +4114,8 @@ dependencies = [
  "peniko 0.6.0",
  "roam",
  "roam-websocket",
- "session 0.1.0",
- "session-ui 0.1.0",
+ "session",
+ "session-ui",
  "tracing",
  "tracing-wasm",
  "wasm-bindgen",
@@ -4270,7 +4411,7 @@ version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1bd49230192a3797a9a4d6abe9b3eed6f7fa4c8a8a4947977c6f80025f92cbd8"
 dependencies = [
- "rustix",
+ "rustix 1.1.4",
  "windows-link 0.2.1",
 ]
 
@@ -4582,7 +4723,7 @@ dependencies = [
  "log",
  "presser",
  "thiserror 1.0.69",
- "windows 0.56.0",
+ "windows 0.58.0",
 ]
 
 [[package]]
@@ -4960,7 +5101,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.5.10",
+ "socket2",
  "tokio",
  "tower-service",
  "tracing",
@@ -5127,16 +5268,6 @@ checksum = "3acae9609540aa318d1bc588455225fb2085b9ed0c4f6bd0d9d5bcd86f1a0344"
 dependencies = [
  "icu_normalizer",
  "icu_properties",
-]
-
-[[package]]
-name = "if-addrs"
-version = "0.13.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "69b2eeee38fef3aa9b4cc5f1beea8a2444fc00e7377cafae396de3f5c2065e24"
-dependencies = [
- "libc",
- "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5325,7 +5456,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5396,7 +5527,7 @@ dependencies = [
  "portable-atomic",
  "portable-atomic-util",
  "serde_core",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5530,7 +5661,6 @@ dependencies = [
 [[package]]
 name = "keyflow"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/keyflow.git?branch=main#00c81abf2a8488273b28857e7d6b8c748cec49aa"
 dependencies = [
  "color-eyre",
  "colored",
@@ -5564,7 +5694,6 @@ dependencies = [
 [[package]]
 name = "keyflow-midi"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/keyflow.git?branch=main#00c81abf2a8488273b28857e7d6b8c748cec49aa"
 dependencies = [
  "engraver",
  "keyflow-proto",
@@ -5574,7 +5703,6 @@ dependencies = [
 [[package]]
 name = "keyflow-proto"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/keyflow.git?branch=main#00c81abf2a8488273b28857e7d6b8c748cec49aa"
 dependencies = [
  "color-palette",
  "daw-proto",
@@ -5591,7 +5719,6 @@ dependencies = [
 [[package]]
 name = "keyflow-text"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/keyflow.git?branch=main#00c81abf2a8488273b28857e7d6b8c748cec49aa"
 dependencies = [
  "keyflow-proto",
  "tracing",
@@ -5600,7 +5727,6 @@ dependencies = [
 [[package]]
 name = "keyflow-ui"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/keyflow.git?branch=main#00c81abf2a8488273b28857e7d6b8c748cec49aa"
 dependencies = [
  "anyrender",
  "anyrender_vello",
@@ -5615,8 +5741,8 @@ dependencies = [
  "peniko 0.6.0",
  "rustc-hash 2.1.1",
  "serde_json",
- "session 0.1.0 (git+https://github.com/FastTrackStudios/FastTrackStudio.git?branch=main)",
- "session-ui 0.1.0 (git+https://github.com/FastTrackStudios/FastTrackStudio.git?branch=main)",
+ "session",
+ "session-ui",
  "tokio",
  "tracing",
  "vello",
@@ -5752,6 +5878,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "lazycell"
+version = "1.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "830d08ce1d1d941e6b30645f1a0eb5643013d835ce3779a5fc208261dbe10f55"
+
+[[package]]
 name = "leb128fmt"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5880,6 +6012,12 @@ name = "linebender_resource_handle"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d4a5ff6bcca6c4867b1c4fd4ef63e4db7436ef363e0ad7531d1558856bae64f4"
+
+[[package]]
+name = "linux-raw-sys"
+version = "0.4.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d26c52dbd32dccf2d10cac7725f8eae5296885fb5703b261f7d0a0739ec807ab"
 
 [[package]]
 name = "linux-raw-sys"
@@ -6274,19 +6412,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mdns-sd"
-version = "0.11.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8fe7c11a1eb3cfbfcf702d1601c1f5f4c102cdc8665b8a557783ef634741676e"
-dependencies = [
- "flume",
- "if-addrs",
- "log",
- "polling 2.8.0",
- "socket2 0.5.10",
-]
-
-[[package]]
 name = "memchr"
 version = "2.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6298,7 +6423,7 @@ version = "0.6.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ad38eb12aea514a0466ea40a80fd8cc83637065948eb4a426e4aa46261175227"
 dependencies = [
- "rustix",
+ "rustix 1.1.4",
 ]
 
 [[package]]
@@ -6438,7 +6563,7 @@ version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ac52dcc0ff5b4710a66626370b1bf85ba3d924fd8019e8cfa100e8dafffda4ad"
 dependencies = [
- "moire-macros 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "moire-macros",
  "moire-macros-noop 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "moire-tokio 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "moire-wasm 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -6447,12 +6572,11 @@ dependencies = [
 [[package]]
 name = "moire"
 version = "1.0.0"
-source = "git+https://github.com/bearcove/peeps?branch=main#13eac79c1b128282dd792a611319d0a1016ad15d"
+source = "git+https://github.com/bearcove/moire?rev=13eac79#13eac79c1b128282dd792a611319d0a1016ad15d"
 dependencies = [
- "moire-macros 1.0.0 (git+https://github.com/bearcove/peeps?branch=main)",
- "moire-macros-noop 1.0.0 (git+https://github.com/bearcove/peeps?branch=main)",
- "moire-tokio 1.0.0 (git+https://github.com/bearcove/peeps?branch=main)",
- "moire-wasm 1.0.0 (git+https://github.com/bearcove/peeps?branch=main)",
+ "moire-macros-noop 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79)",
+ "moire-tokio 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79)",
+ "moire-wasm 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79)",
 ]
 
 [[package]]
@@ -6460,16 +6584,6 @@ name = "moire-macros"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c494331faed7953b795b7769a84e9272e6f59e34ddceebadba4715b245957bc2"
-dependencies = [
- "proc-macro2",
- "quote",
- "unsynn",
-]
-
-[[package]]
-name = "moire-macros"
-version = "1.0.0"
-source = "git+https://github.com/bearcove/peeps?branch=main#13eac79c1b128282dd792a611319d0a1016ad15d"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6485,7 +6599,7 @@ checksum = "92ccdc0bf403f5ecf29c09e8e9f178caed89a914ea032e0c2d99d3824b78892d"
 [[package]]
 name = "moire-macros-noop"
 version = "1.0.0"
-source = "git+https://github.com/bearcove/peeps?branch=main#13eac79c1b128282dd792a611319d0a1016ad15d"
+source = "git+https://github.com/bearcove/moire?rev=13eac79#13eac79c1b128282dd792a611319d0a1016ad15d"
 
 [[package]]
 name = "moire-runtime"
@@ -6507,16 +6621,16 @@ dependencies = [
 [[package]]
 name = "moire-runtime"
 version = "1.0.0"
-source = "git+https://github.com/bearcove/peeps?branch=main#13eac79c1b128282dd792a611319d0a1016ad15d"
+source = "git+https://github.com/bearcove/moire?rev=13eac79#13eac79c1b128282dd792a611319d0a1016ad15d"
 dependencies = [
  "ctor",
  "facet",
  "facet-json",
  "facet-value",
- "moire-trace-capture 1.0.0 (git+https://github.com/bearcove/peeps?branch=main)",
- "moire-trace-types 1.0.0 (git+https://github.com/bearcove/peeps?branch=main)",
- "moire-types 1.0.0 (git+https://github.com/bearcove/peeps?branch=main)",
- "moire-wire 1.0.0 (git+https://github.com/bearcove/peeps?branch=main)",
+ "moire-trace-capture 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79)",
+ "moire-trace-types 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79)",
+ "moire-types 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79)",
+ "moire-wire 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79)",
  "tokio",
 ]
 
@@ -6536,10 +6650,10 @@ dependencies = [
 [[package]]
 name = "moire-tokio"
 version = "1.0.0"
-source = "git+https://github.com/bearcove/peeps?branch=main#13eac79c1b128282dd792a611319d0a1016ad15d"
+source = "git+https://github.com/bearcove/moire?rev=13eac79#13eac79c1b128282dd792a611319d0a1016ad15d"
 dependencies = [
- "moire-runtime 1.0.0 (git+https://github.com/bearcove/peeps?branch=main)",
- "moire-types 1.0.0 (git+https://github.com/bearcove/peeps?branch=main)",
+ "moire-runtime 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79)",
+ "moire-types 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79)",
  "parking_lot",
  "tokio",
 ]
@@ -6557,10 +6671,10 @@ dependencies = [
 [[package]]
 name = "moire-trace-capture"
 version = "1.0.0"
-source = "git+https://github.com/bearcove/peeps?branch=main#13eac79c1b128282dd792a611319d0a1016ad15d"
+source = "git+https://github.com/bearcove/moire?rev=13eac79#13eac79c1b128282dd792a611319d0a1016ad15d"
 dependencies = [
  "libc",
- "moire-trace-types 1.0.0 (git+https://github.com/bearcove/peeps?branch=main)",
+ "moire-trace-types 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79)",
 ]
 
 [[package]]
@@ -6575,7 +6689,7 @@ dependencies = [
 [[package]]
 name = "moire-trace-types"
 version = "1.0.0"
-source = "git+https://github.com/bearcove/peeps?branch=main#13eac79c1b128282dd792a611319d0a1016ad15d"
+source = "git+https://github.com/bearcove/moire?rev=13eac79#13eac79c1b128282dd792a611319d0a1016ad15d"
 dependencies = [
  "facet",
 ]
@@ -6594,11 +6708,11 @@ dependencies = [
 [[package]]
 name = "moire-types"
 version = "1.0.0"
-source = "git+https://github.com/bearcove/peeps?branch=main#13eac79c1b128282dd792a611319d0a1016ad15d"
+source = "git+https://github.com/bearcove/moire?rev=13eac79#13eac79c1b128282dd792a611319d0a1016ad15d"
 dependencies = [
  "facet",
  "facet-value",
- "moire-trace-types 1.0.0 (git+https://github.com/bearcove/peeps?branch=main)",
+ "moire-trace-types 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79)",
 ]
 
 [[package]]
@@ -6620,7 +6734,7 @@ dependencies = [
 [[package]]
 name = "moire-wasm"
 version = "1.0.0"
-source = "git+https://github.com/bearcove/peeps?branch=main#13eac79c1b128282dd792a611319d0a1016ad15d"
+source = "git+https://github.com/bearcove/moire?rev=13eac79#13eac79c1b128282dd792a611319d0a1016ad15d"
 dependencies = [
  "async-channel 2.5.0",
  "async-lock",
@@ -6628,7 +6742,7 @@ dependencies = [
  "futures-channel",
  "futures-util",
  "gloo-timers",
- "moire-types 1.0.0 (git+https://github.com/bearcove/peeps?branch=main)",
+ "moire-types 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79)",
  "wasm-bindgen-futures",
 ]
 
@@ -6647,12 +6761,38 @@ dependencies = [
 [[package]]
 name = "moire-wire"
 version = "1.0.0"
-source = "git+https://github.com/bearcove/peeps?branch=main#13eac79c1b128282dd792a611319d0a1016ad15d"
+source = "git+https://github.com/bearcove/moire?rev=13eac79#13eac79c1b128282dd792a611319d0a1016ad15d"
 dependencies = [
  "facet",
  "facet-json",
- "moire-trace-types 1.0.0 (git+https://github.com/bearcove/peeps?branch=main)",
- "moire-types 1.0.0 (git+https://github.com/bearcove/peeps?branch=main)",
+ "moire-trace-types 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79)",
+ "moire-types 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79)",
+]
+
+[[package]]
+name = "monarchy"
+version = "0.1.0"
+source = "git+https://github.com/FastTrackStudios/monarchy.git?branch=main#183959be7223bb735c2adfac17e8da6c5acdd79b"
+dependencies = [
+ "facet",
+ "facet-json",
+ "facet-toml",
+ "monarchy_derive",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "toml",
+]
+
+[[package]]
+name = "monarchy_derive"
+version = "0.1.0"
+source = "git+https://github.com/FastTrackStudios/monarchy.git?branch=main#183959be7223bb735c2adfac17e8da6c5acdd79b"
+dependencies = [
+ "convert_case 0.6.0",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
 ]
 
 [[package]]
@@ -6706,7 +6846,6 @@ dependencies = [
 [[package]]
 name = "music-catalog"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/dynamic-template.git?branch=main#3942238eeaa6532d43cf59686540c743c7d0c855"
 dependencies = [
  "color-palette",
 ]
@@ -6753,7 +6892,6 @@ dependencies = [
  "serde_json",
  "sha2",
  "signal-proto",
- "tempfile",
  "thiserror 2.0.18",
  "walkdir",
 ]
@@ -6864,7 +7002,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -7522,6 +7660,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "peeking_take_while"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "19b17cddbe7ec3f8bc800887bab5e717348c95ea2ca0b1bf0837fb964dc67099"
+
+[[package]]
 name = "pem-rfc7468"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7858,22 +8002,6 @@ dependencies = [
 
 [[package]]
 name = "polling"
-version = "2.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4b2d323e8ca7996b3e23126511a523f7e62924d93ecd5ae73b333815b0eb3dce"
-dependencies = [
- "autocfg",
- "bitflags 1.3.2",
- "cfg-if",
- "concurrent-queue",
- "libc",
- "log",
- "pin-project-lite",
- "windows-sys 0.48.0",
-]
-
-[[package]]
-name = "polling"
 version = "3.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5d0e4f59085d47d8241c88ead0f274e8a0cb551f3625263c05eb8dd897c34218"
@@ -7882,7 +8010,7 @@ dependencies = [
  "concurrent-queue",
  "hermit-abi",
  "pin-project-lite",
- "rustix",
+ "rustix 1.1.4",
  "windows-sys 0.61.2",
 ]
 
@@ -8159,7 +8287,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash 2.1.1",
  "rustls",
- "socket2 0.5.10",
+ "socket2",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -8196,7 +8324,7 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.5.10",
+ "socket2",
  "tracing",
  "windows-sys 0.60.2",
 ]
@@ -8807,12 +8935,11 @@ dependencies = [
 [[package]]
 name = "roam"
 version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#2f624f146c89fafe139770f5c2a6203a3a37e33e"
+source = "git+https://github.com/bearcove/roam.git?branch=main#6d9ea5a5e29d86c596bbb13e86ec92c88751b458"
 dependencies = [
  "facet",
- "facet-postcard",
  "roam-core",
- "roam-hash",
+ "roam-postcard",
  "roam-service-macros",
  "roam-types",
  "tracing",
@@ -8821,16 +8948,16 @@ dependencies = [
 [[package]]
 name = "roam-core"
 version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#2f624f146c89fafe139770f5c2a6203a3a37e33e"
+source = "git+https://github.com/bearcove/roam.git?branch=main#6d9ea5a5e29d86c596bbb13e86ec92c88751b458"
 dependencies = [
  "facet",
+ "facet-cbor",
  "facet-core",
  "facet-error",
- "facet-format",
- "facet-postcard",
  "facet-reflect",
  "getrandom 0.3.4",
- "moire 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "moire 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79)",
+ "roam-postcard",
  "roam-types",
  "smallvec 1.15.1",
  "tokio",
@@ -8843,36 +8970,25 @@ dependencies = [
 name = "roam-discover"
 version = "0.1.0"
 dependencies = [
- "mdns-sd",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
-]
-
-[[package]]
-name = "roam-hash"
-version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#2f624f146c89fafe139770f5c2a6203a3a37e33e"
-dependencies = [
- "blake3",
- "facet-core",
- "heck 0.5.0",
- "roam-types",
+ "zeroconf",
 ]
 
 [[package]]
 name = "roam-local"
 version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#2f624f146c89fafe139770f5c2a6203a3a37e33e"
+source = "git+https://github.com/bearcove/roam.git?branch=main#6d9ea5a5e29d86c596bbb13e86ec92c88751b458"
 dependencies = [
- "moire 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "moire 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79)",
  "tokio",
 ]
 
 [[package]]
 name = "roam-macros-core"
 version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#2f624f146c89fafe139770f5c2a6203a3a37e33e"
+source = "git+https://github.com/bearcove/roam.git?branch=main#6d9ea5a5e29d86c596bbb13e86ec92c88751b458"
 dependencies = [
  "facet-cargo-toml",
  "heck 0.5.0",
@@ -8884,16 +9000,27 @@ dependencies = [
 [[package]]
 name = "roam-macros-parse"
 version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#2f624f146c89fafe139770f5c2a6203a3a37e33e"
+source = "git+https://github.com/bearcove/roam.git?branch=main#6d9ea5a5e29d86c596bbb13e86ec92c88751b458"
 dependencies = [
  "proc-macro2",
  "unsynn",
 ]
 
 [[package]]
+name = "roam-postcard"
+version = "7.3.0"
+source = "git+https://github.com/bearcove/roam.git?branch=main#6d9ea5a5e29d86c596bbb13e86ec92c88751b458"
+dependencies = [
+ "facet",
+ "facet-core",
+ "facet-reflect",
+ "roam-types",
+]
+
+[[package]]
 name = "roam-service-macros"
 version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#2f624f146c89fafe139770f5c2a6203a3a37e33e"
+source = "git+https://github.com/bearcove/roam.git?branch=main#6d9ea5a5e29d86c596bbb13e86ec92c88751b458"
 dependencies = [
  "proc-macro2",
  "roam-macros-core",
@@ -8902,11 +9029,11 @@ dependencies = [
 [[package]]
 name = "roam-shm"
 version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#2f624f146c89fafe139770f5c2a6203a3a37e33e"
+source = "git+https://github.com/bearcove/roam.git?branch=main#6d9ea5a5e29d86c596bbb13e86ec92c88751b458"
 dependencies = [
- "facet-postcard",
  "libc",
  "loom",
+ "roam-postcard",
  "roam-types",
  "shm-primitives",
  "shm-primitives-async",
@@ -8918,9 +9045,9 @@ dependencies = [
 [[package]]
 name = "roam-stream"
 version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#2f624f146c89fafe139770f5c2a6203a3a37e33e"
+source = "git+https://github.com/bearcove/roam.git?branch=main#6d9ea5a5e29d86c596bbb13e86ec92c88751b458"
 dependencies = [
- "moire 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "moire 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79)",
  "roam-core",
  "roam-types",
  "tokio",
@@ -8929,14 +9056,17 @@ dependencies = [
 [[package]]
 name = "roam-types"
 version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#2f624f146c89fafe139770f5c2a6203a3a37e33e"
+source = "git+https://github.com/bearcove/roam.git?branch=main#6d9ea5a5e29d86c596bbb13e86ec92c88751b458"
 dependencies = [
  "bitflags 2.11.0",
+ "blake3",
  "facet",
+ "facet-cbor",
  "facet-core",
  "facet-path",
  "facet-postcard",
  "futures-channel",
+ "heck 0.5.0",
  "smallvec 1.15.1",
  "structstruck",
  "tokio",
@@ -8945,7 +9075,7 @@ dependencies = [
 [[package]]
 name = "roam-websocket"
 version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#2f624f146c89fafe139770f5c2a6203a3a37e33e"
+source = "git+https://github.com/bearcove/roam.git?branch=main#6d9ea5a5e29d86c596bbb13e86ec92c88751b458"
 dependencies = [
  "futures-channel",
  "futures-util",
@@ -9068,6 +9198,19 @@ dependencies = [
 
 [[package]]
 name = "rustix"
+version = "0.38.44"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fdb5bc1ae2baa591800df16c9ca78619bf65c0488b41b96ccec5d11220d8c154"
+dependencies = [
+ "bitflags 2.11.0",
+ "errno",
+ "libc",
+ "linux-raw-sys 0.4.15",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "rustix"
 version = "1.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6fe4565b9518b83ef4f91bb47ce29620ca828bd32cb7e408f0062e9930ba190"
@@ -9075,8 +9218,8 @@ dependencies = [
  "bitflags 2.11.0",
  "errno",
  "libc",
- "linux-raw-sys",
- "windows-sys 0.52.0",
+ "linux-raw-sys 0.12.1",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -9119,16 +9262,6 @@ name = "rustversion"
 version = "1.0.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b39cdef0fa800fc44525c84ccb54a029961a8215f9619753635a9c0d2538d46d"
-
-[[package]]
-name = "rusty_link"
-version = "0.4.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "431fec7d301f2c3668244fe013938073ef33eb39615696bfd659111d4b4d1089"
-dependencies = [
- "bindgen",
- "cmake",
-]
 
 [[package]]
 name = "rustybuzz"
@@ -9504,32 +9637,9 @@ dependencies = [
  "keyflow",
  "moire 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "rayon",
- "reaper-test",
  "roam",
  "rustc-hash 2.1.1",
- "session-proto 0.1.0",
- "smallvec 1.15.1",
- "tokio",
- "tracing",
- "utils 0.1.0",
- "uuid",
-]
-
-[[package]]
-name = "session"
-version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/FastTrackStudio.git?branch=main#c155e4e06a2e13af63dfe01a2d550de9c53a3a4a"
-dependencies = [
- "actions-proto",
- "chrono",
- "daw",
- "eyre",
- "keyflow",
- "moire 1.0.0 (git+https://github.com/bearcove/peeps?branch=main)",
- "rayon",
- "roam",
- "rustc-hash 2.1.1",
- "session-proto 0.1.0 (git+https://github.com/FastTrackStudios/FastTrackStudio.git?branch=main)",
+ "session-proto",
  "smallvec 1.15.1",
  "tokio",
  "tracing",
@@ -9551,42 +9661,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "session-extension"
-version = "0.1.0"
-dependencies = [
- "daw",
- "daw-extension-runtime",
- "eyre",
- "session 0.1.0",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "session-proto"
 version = "0.1.0"
-dependencies = [
- "actions-proto",
- "daw",
- "eyre",
- "facet",
- "futures",
- "gloo-timers",
- "keyflow",
- "roam",
- "serde",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "utils 0.1.0",
- "uuid",
-]
-
-[[package]]
-name = "session-proto"
-version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/FastTrackStudio.git?branch=main#c155e4e06a2e13af63dfe01a2d550de9c53a3a4a"
 dependencies = [
  "actions-proto",
  "daw",
@@ -9615,24 +9691,7 @@ dependencies = [
  "eyre",
  "fts-ui",
  "lucide-dioxus 2.577.0",
- "session-proto 0.1.0",
- "tracing",
- "web-sys",
-]
-
-[[package]]
-name = "session-ui"
-version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/FastTrackStudio.git?branch=main#c155e4e06a2e13af63dfe01a2d550de9c53a3a4a"
-dependencies = [
- "daw",
- "dioxus",
- "dock-dioxus",
- "dock-proto",
- "eyre",
- "fts-ui",
- "lucide-dioxus 2.577.0",
- "session-proto 0.1.0 (git+https://github.com/FastTrackStudios/FastTrackStudio.git?branch=main)",
+ "session-proto",
  "tracing",
  "web-sys",
 ]
@@ -9683,7 +9742,7 @@ checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 [[package]]
 name = "shm-primitives"
 version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#2f624f146c89fafe139770f5c2a6203a3a37e33e"
+source = "git+https://github.com/bearcove/roam.git?branch=main#6d9ea5a5e29d86c596bbb13e86ec92c88751b458"
 dependencies = [
  "libc",
  "loom",
@@ -9693,7 +9752,7 @@ dependencies = [
 [[package]]
 name = "shm-primitives-async"
 version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#2f624f146c89fafe139770f5c2a6203a3a37e33e"
+source = "git+https://github.com/bearcove/roam.git?branch=main#6d9ea5a5e29d86c596bbb13e86ec92c88751b458"
 dependencies = [
  "libc",
  "tokio",
@@ -9705,14 +9764,9 @@ dependencies = [
 name = "signal"
 version = "0.1.0"
 dependencies = [
- "base64 0.22.1",
  "daw",
- "eyre",
- "futures",
  "moire 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "nam-manager",
- "reaper-test",
- "serde_json",
  "signal-controller",
  "signal-daw-bridge",
  "signal-import",
@@ -9720,8 +9774,7 @@ dependencies = [
  "signal-proto",
  "signal-storage",
  "tokio",
- "utils 0.1.0",
- "uuid",
+ "utils 0.1.0 (git+https://github.com/FastTrackStudios/FastTrackStudio.git?branch=main)",
 ]
 
 [[package]]
@@ -9737,7 +9790,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
- "utils 0.1.0",
+ "utils 0.1.0 (git+https://github.com/FastTrackStudios/FastTrackStudio.git?branch=main)",
  "uuid",
 ]
 
@@ -9761,19 +9814,6 @@ dependencies = [
  "serde",
  "signal-import",
  "signal-proto",
-]
-
-[[package]]
-name = "signal-extension"
-version = "0.1.0"
-dependencies = [
- "daw",
- "daw-extension-runtime",
- "eyre",
- "signal",
- "tokio",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -9838,9 +9878,8 @@ dependencies = [
  "macromod",
  "roam",
  "serde",
- "serde_json",
  "thiserror 2.0.18",
- "utils 0.1.0",
+ "utils 0.1.0 (git+https://github.com/FastTrackStudios/FastTrackStudio.git?branch=main)",
  "uuid",
 ]
 
@@ -9857,8 +9896,7 @@ dependencies = [
  "serde_json",
  "signal-proto",
  "thiserror 2.0.18",
- "tokio",
- "utils 0.1.0",
+ "utils 0.1.0 (git+https://github.com/FastTrackStudios/FastTrackStudio.git?branch=main)",
  "uuid",
 ]
 
@@ -10047,22 +10085,12 @@ dependencies = [
 
 [[package]]
 name = "socket2"
-version = "0.5.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e22376abed350d73dd1cd119b57ffccad95b4e585a7cda43e286245ce23c0678"
-dependencies = [
- "libc",
- "windows-sys 0.52.0",
-]
-
-[[package]]
-name = "socket2"
 version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a766e1110788c36f4fa1c2b71b387a7815aa65f88ce0229841826633d93723e"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -10393,6 +10421,12 @@ checksum = "2a8f8038e7e7969abb3f1b7c2a811225e9296da208539e0f79c5251d6cac0025"
 dependencies = [
  "vte",
 ]
+
+[[package]]
+name = "strsim"
+version = "0.9.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6446ced80d6c486436db5c078dde11a9f73d42b57fb273121e160b84f63d894c"
 
 [[package]]
 name = "strsim"
@@ -10778,63 +10812,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sync"
-version = "0.1.0"
-dependencies = [
- "daw",
- "daw-extension-runtime",
- "eyre",
- "facet",
- "facet-postcard",
- "moire 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "reaper-test",
- "roam",
- "roam-discover",
- "rusty_link",
- "session 0.1.0",
- "sync-proto",
- "tokio",
- "tokio-util",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "sync-extension"
-version = "0.1.0"
-dependencies = [
- "daw",
- "daw-extension-runtime",
- "eyre",
- "roam",
- "roam-discover",
- "sync",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "sync-proto"
-version = "0.1.0"
-dependencies = [
- "actions-proto",
- "daw",
- "facet",
- "roam",
-]
-
-[[package]]
-name = "sync-ui"
-version = "0.1.0"
-dependencies = [
- "dioxus",
- "sync-proto",
- "tracing",
- "uuid",
-]
-
-[[package]]
 name = "sync_wrapper"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10938,8 +10915,8 @@ dependencies = [
  "fastrand",
  "getrandom 0.4.2",
  "once_cell",
- "rustix",
- "windows-sys 0.52.0",
+ "rustix 1.1.4",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -11126,7 +11103,7 @@ dependencies = [
  "parking_lot",
  "pin-project-lite",
  "signal-hook-registry",
- "socket2 0.6.3",
+ "socket2",
  "tokio-macros",
  "windows-sys 0.61.2",
 ]
@@ -11530,7 +11507,7 @@ checksum = "51b70b87d15e91f553711b40df3048faf27a7a04e01e0ddc0cf9309f0af7c2ca"
 dependencies = [
  "memoffset",
  "tempfile",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -11737,7 +11714,7 @@ dependencies = [
 [[package]]
 name = "utils"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/FastTrackStudio.git?branch=main#c155e4e06a2e13af63dfe01a2d550de9c53a3a4a"
+source = "git+https://github.com/FastTrackStudios/FastTrackStudio.git?branch=main#5a6d0d9f21853e098491db6157dc28f9e6b16d73"
 dependencies = [
  "facet",
  "serde",
@@ -12131,7 +12108,7 @@ dependencies = [
  "roam-websocket",
  "serde",
  "serde_json",
- "session 0.1.0",
+ "session",
  "tracing",
  "tracing-wasm",
  "wasm-bindgen",
@@ -12159,7 +12136,7 @@ checksum = "aa75f400b7f719bcd68b3f47cd939ba654cedeef690f486db71331eec4c6a406"
 dependencies = [
  "cc",
  "downcast-rs",
- "rustix",
+ "rustix 1.1.4",
  "scoped-tls",
  "smallvec 1.15.1",
  "wayland-sys",
@@ -12172,7 +12149,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ab51d9f7c071abeee76007e2b742499e535148035bb835f97aaed1338cf516c3"
 dependencies = [
  "bitflags 2.11.0",
- "rustix",
+ "rustix 1.1.4",
  "wayland-backend",
  "wayland-scanner",
 ]
@@ -12519,6 +12496,18 @@ source = "git+https://github.com/DioxusLabs/anyrender.git?branch=main#0691c2d416
 dependencies = [
  "futures-intrusive",
  "wgpu",
+]
+
+[[package]]
+name = "which"
+version = "4.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "87ba24419a2078cd2b0f2ede2691b6c66d8e47836da3b6db8265ebad47afbfc7"
+dependencies = [
+ "either",
+ "home",
+ "once_cell",
+ "rustix 0.38.44",
 ]
 
 [[package]]
@@ -13313,7 +13302,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9993aa5be5a26815fe2c3eacfc1fde061fc1a1f094bf1ad2a18bf9c495dd7414"
 dependencies = [
  "gethostname",
- "rustix",
+ "rustix 1.1.4",
  "x11rb-protocol",
 ]
 
@@ -13448,7 +13437,7 @@ dependencies = [
  "hex",
  "libc",
  "ordered-stream",
- "rustix",
+ "rustix 1.1.4",
  "serde",
  "serde_repr",
  "tracing",
@@ -13485,6 +13474,32 @@ dependencies = [
  "serde",
  "winnow 0.7.15",
  "zvariant",
+]
+
+[[package]]
+name = "zeroconf"
+version = "0.15.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2148fa97456fc28b093c3548897b0684b0c3f5ad6aaca51531d125942cedaefb"
+dependencies = [
+ "avahi-sys",
+ "bonjour-sys",
+ "derive-getters",
+ "derive-new",
+ "derive_builder",
+ "libc",
+ "log",
+ "zeroconf-macros",
+]
+
+[[package]]
+name = "zeroconf-macros"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e324c4824e4e9db1f2aeeb83dfa1ab57dbe30c2105eb4b5dcd58fc080b4adcdb"
+dependencies = [
+ "quote",
+ "syn 2.0.117",
 ]
 
 [[package]]
@@ -13729,9 +13744,9 @@ dependencies = [
 ]
 
 [[patch.unused]]
-name = "daw-allocator"
+name = "actions-registry"
 version = "0.1.0"
 
 [[patch.unused]]
-name = "actions-registry"
+name = "daw-allocator"
 version = "0.1.0"
