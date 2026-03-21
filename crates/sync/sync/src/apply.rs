@@ -6,10 +6,10 @@
 
 use daw::Daw;
 use daw::service::{
-    FxEvent, ItemEvent, MarkerEvent, ProjectContext, RegionEvent, RoutingEvent, TakeEvent,
-    TempoMapEvent, TrackEvent, TrackRef, Transport,
+    FxChainContext, FxEvent, ItemEvent, MarkerEvent, ProjectContext, RegionEvent, RoutingEvent,
+    TakeEvent, TempoMapEvent, TrackEvent, TrackRef, Transport,
+    routing::RouteType,
 };
-use session::offset_map::SetlistOffsetMap;
 use sync_proto::{SyncDomain, SyncEvent};
 use tracing::{debug, info, warn};
 
@@ -424,8 +424,9 @@ async fn apply_track(
         TrackEvent::Moved {
             guid, new_index, ..
         } => {
-            // Track reordering is complex — log for now, implement later
-            debug!("Track {guid} moved to index {new_index} (reordering not yet applied)");
+            suppression.suppress(SuppressionKey::track(guid, "moved"));
+            // Track reordering requires a dedicated API (not yet available in daw-control)
+            debug!("Track {guid} moved to index {new_index} (reordering not yet wired)");
         }
     }
 }
@@ -460,13 +461,11 @@ where
 // ── FX ───────────────────────────────────────────────────────────────────────
 
 async fn apply_fx(
-    _daw: &Daw,
-    _ctx: &ProjectContext,
+    daw: &Daw,
+    ctx: &ProjectContext,
     event: &FxEvent,
     suppression: &mut SuppressionSet,
 ) {
-    // FX events are complex — parameter changes, enable/disable, add/remove, presets.
-    // Initial implementation handles the most common case: parameter changes.
     match event {
         FxEvent::ParameterChanged {
             context,
@@ -480,15 +479,201 @@ async fn apply_fx(
                 fx_guid,
                 *param_index,
             ));
-            debug!(
-                "FX param change: context={context:?} fx={fx_guid} param={param_index} value={value} (apply TBD)"
-            );
-            // TODO: Resolve fx chain context → fx handle → set_parameter
-            // This requires matching FxChainContext to get track GUID + chain type,
-            // then resolving through daw-control's FxChain API.
+            if let Some(chain) = resolve_fx_chain(daw, ctx, context).await {
+                if let Ok(Some(fx)) = chain.by_guid(fx_guid).await {
+                    if let Err(e) = fx.param(*param_index).set(*value).await {
+                        warn!("Failed to set FX param {param_index} on {fx_guid}: {e}");
+                    }
+                } else {
+                    debug!("FX {fx_guid} not found in chain");
+                }
+            }
         }
-        _ => {
-            debug!("FX event not yet handled for sync apply: {event:?}");
+        FxEvent::Added { context, fx } => {
+            let context_key = format!("{context:?}");
+            suppression.suppress(SuppressionKey::fx_param(&context_key, &fx.guid, 0));
+            if let Some(chain) = resolve_fx_chain(daw, ctx, context).await {
+                match chain.add(&fx.name).await {
+                    Ok(handle) => {
+                        if !fx.enabled {
+                            let _ = handle.disable().await;
+                        }
+                    }
+                    Err(e) => warn!("Failed to add FX '{}': {e}", fx.name),
+                }
+            }
+        }
+        FxEvent::Removed { context, fx_guid } => {
+            let context_key = format!("{context:?}");
+            suppression.suppress(SuppressionKey::fx_param(&context_key, fx_guid, 0));
+            if let Some(chain) = resolve_fx_chain(daw, ctx, context).await {
+                if let Ok(Some(fx)) = chain.by_guid(fx_guid).await {
+                    if let Err(e) = fx.remove().await {
+                        warn!("Failed to remove FX {fx_guid}: {e}");
+                    }
+                }
+            }
+        }
+        FxEvent::EnabledChanged {
+            context,
+            fx_guid,
+            enabled,
+        } => {
+            let context_key = format!("{context:?}");
+            suppression.suppress(SuppressionKey::fx_param(&context_key, fx_guid, 0));
+            if let Some(chain) = resolve_fx_chain(daw, ctx, context).await {
+                if let Ok(Some(fx)) = chain.by_guid(fx_guid).await {
+                    let result = if *enabled {
+                        fx.enable().await
+                    } else {
+                        fx.disable().await
+                    };
+                    if let Err(e) = result {
+                        warn!("Failed to set FX enabled={enabled} on {fx_guid}: {e}");
+                    }
+                }
+            }
+        }
+        FxEvent::Moved {
+            context,
+            fx_guid,
+            new_index,
+            ..
+        } => {
+            let context_key = format!("{context:?}");
+            suppression.suppress(SuppressionKey::fx_param(&context_key, fx_guid, 0));
+            if let Some(chain) = resolve_fx_chain(daw, ctx, context).await {
+                if let Ok(Some(fx)) = chain.by_guid(fx_guid).await {
+                    if let Err(e) = fx.move_to(*new_index).await {
+                        warn!("Failed to move FX {fx_guid} to index {new_index}: {e}");
+                    }
+                }
+            }
+        }
+        FxEvent::PresetChanged {
+            context,
+            fx_guid,
+            preset_name,
+        } => {
+            let context_key = format!("{context:?}");
+            suppression.suppress(SuppressionKey::fx_param(&context_key, fx_guid, 0));
+            debug!(
+                "FX preset changed: {fx_guid} → {:?} (preset sync requires index)",
+                preset_name
+            );
+        }
+        FxEvent::WindowChanged {
+            context,
+            fx_guid,
+            open,
+        } => {
+            let context_key = format!("{context:?}");
+            suppression.suppress(SuppressionKey::fx_param(&context_key, fx_guid, 0));
+            if let Some(chain) = resolve_fx_chain(daw, ctx, context).await {
+                if let Ok(Some(fx)) = chain.by_guid(fx_guid).await {
+                    let result = if *open {
+                        fx.open_ui().await
+                    } else {
+                        fx.close_ui().await
+                    };
+                    if let Err(e) = result {
+                        warn!("Failed to set FX window open={open} on {fx_guid}: {e}");
+                    }
+                }
+            }
+        }
+        FxEvent::ContainerCreated {
+            context,
+            name,
+            ..
+        } => {
+            if let Some(chain) = resolve_fx_chain(daw, ctx, context).await {
+                let count = chain.count().await.unwrap_or(0);
+                if let Err(e) = chain.create_container(name, count).await {
+                    warn!("Failed to create FX container '{name}': {e}");
+                }
+            }
+        }
+        FxEvent::ContainerRemoved {
+            context,
+            container_id,
+        } => {
+            if let Some(chain) = resolve_fx_chain(daw, ctx, context).await {
+                if let Err(e) = chain.explode_container(container_id).await {
+                    warn!("Failed to remove FX container: {e}");
+                }
+            }
+        }
+        FxEvent::RoutingModeChanged {
+            context,
+            container_id,
+            mode,
+        } => {
+            if let Some(chain) = resolve_fx_chain(daw, ctx, context).await {
+                if let Err(e) = chain.set_routing_mode(container_id, mode.clone()).await {
+                    warn!("Failed to set container routing mode: {e}");
+                }
+            }
+        }
+        FxEvent::MovedToContainer {
+            context,
+            node_id,
+            dest_container,
+            ..
+        } => {
+            if let Some(chain) = resolve_fx_chain(daw, ctx, context).await {
+                if let Err(e) = chain.move_to_container(node_id, dest_container, 0).await {
+                    warn!("Failed to move FX to container: {e}");
+                }
+            }
+        }
+        FxEvent::ContainerRenamed {
+            context,
+            container_id,
+            name,
+        } => {
+            if let Some(chain) = resolve_fx_chain(daw, ctx, context).await {
+                if let Err(e) = chain.rename_container(container_id, name).await {
+                    warn!("Failed to rename FX container: {e}");
+                }
+            }
+        }
+        FxEvent::TreeStructureChanged { context } => {
+            debug!("FX tree structure changed for {context:?} (no automatic sync for bulk changes)");
+        }
+    }
+}
+
+/// Resolve an FxChainContext to an FxChain handle.
+async fn resolve_fx_chain(
+    daw: &Daw,
+    ctx: &ProjectContext,
+    fx_ctx: &FxChainContext,
+) -> Option<daw::FxChain> {
+    let project = resolve_project(daw, ctx).await?;
+    let track_guid = match fx_ctx {
+        FxChainContext::Track(guid) | FxChainContext::Input(guid) => guid,
+        FxChainContext::Monitoring => {
+            debug!("Monitoring FX chain sync not yet supported");
+            return None;
+        }
+    };
+    match project.tracks().by_guid(track_guid).await {
+        Ok(Some(track)) => {
+            let chain = match fx_ctx {
+                FxChainContext::Track(_) => track.fx_chain(),
+                FxChainContext::Input(_) => track.input_fx_chain(),
+                _ => unreachable!(),
+            };
+            Some(chain)
+        }
+        Ok(None) => {
+            debug!("Track {track_guid} not found for FX chain resolution");
+            None
+        }
+        Err(e) => {
+            warn!("Failed to resolve track {track_guid} for FX chain: {e}");
+            None
         }
     }
 }
@@ -586,8 +771,52 @@ async fn apply_item(
             })
             .await;
         }
-        _ => {
-            debug!("Item event not yet handled for sync apply: {event:?}");
+        ItemEvent::MovedToTrack {
+            item_guid,
+            new_track_guid,
+            ..
+        } => {
+            suppression.suppress(SuppressionKey::item(item_guid, "moved_to_track"));
+            // move_to_track exists in the service layer but not exposed through ItemHandle.
+            // Log for now — this is a rare operation.
+            debug!(
+                "Item {item_guid} moved to track {new_track_guid} (cross-track move not yet wired)"
+            );
+        }
+        ItemEvent::SelectionChanged {
+            item_guid,
+            selected,
+            ..
+        } => {
+            suppression.suppress(SuppressionKey::item(item_guid, "selected"));
+            let selected = *selected;
+            apply_item_mutation(daw, ctx, item_guid, move |handle| {
+                Box::pin(async move {
+                    if selected {
+                        handle.select().await
+                    } else {
+                        handle.deselect().await
+                    }
+                })
+            })
+            .await;
+        }
+        ItemEvent::ActiveTakeChanged {
+            item_guid,
+            new_take_index,
+            ..
+        } => {
+            suppression.suppress(SuppressionKey::item(item_guid, "active_take"));
+            let idx = *new_take_index;
+            if let Some(project) = resolve_project(daw, ctx).await {
+                if let Ok(Some(item)) = project.items().by_guid(item_guid).await {
+                    if let Ok(Some(take)) = item.takes().by_index(idx).await {
+                        if let Err(e) = take.make_active().await {
+                            warn!("Failed to set active take {idx} on item {item_guid}: {e}");
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -622,25 +851,173 @@ where
 // ── Take ─────────────────────────────────────────────────────────────────────
 
 async fn apply_take(
-    _daw: &Daw,
-    _ctx: &ProjectContext,
+    daw: &Daw,
+    ctx: &ProjectContext,
     event: &TakeEvent,
-    _suppression: &mut SuppressionSet,
+    suppression: &mut SuppressionSet,
 ) {
-    debug!("Take event not yet handled for sync apply: {event:?}");
+    match event {
+        TakeEvent::NameChanged {
+            item_guid,
+            take_guid,
+            name,
+            ..
+        } => {
+            suppression.suppress(SuppressionKey::item(item_guid, "take_name"));
+            apply_take_mutation(daw, ctx, item_guid, take_guid, |handle| {
+                let name = name.clone();
+                Box::pin(async move { handle.set_name(&name).await })
+            })
+            .await;
+        }
+        TakeEvent::PitchChanged {
+            item_guid,
+            take_guid,
+            pitch,
+            ..
+        } => {
+            suppression.suppress(SuppressionKey::item(item_guid, "take_pitch"));
+            let pitch = *pitch;
+            apply_take_mutation(daw, ctx, item_guid, take_guid, move |handle| {
+                Box::pin(async move { handle.set_pitch(pitch).await })
+            })
+            .await;
+        }
+        TakeEvent::PlayRateChanged {
+            item_guid,
+            take_guid,
+            play_rate,
+            ..
+        } => {
+            suppression.suppress(SuppressionKey::item(item_guid, "take_play_rate"));
+            let rate = *play_rate;
+            apply_take_mutation(daw, ctx, item_guid, take_guid, move |handle| {
+                Box::pin(async move { handle.set_play_rate(rate).await })
+            })
+            .await;
+        }
+        TakeEvent::VolumeChanged {
+            item_guid,
+            take_guid,
+            volume,
+            ..
+        } => {
+            suppression.suppress(SuppressionKey::item(item_guid, "take_volume"));
+            let volume = *volume;
+            apply_take_mutation(daw, ctx, item_guid, take_guid, move |handle| {
+                Box::pin(async move { handle.set_volume(volume).await })
+            })
+            .await;
+        }
+        TakeEvent::SourceChanged {
+            item_guid,
+            take_guid,
+            source_path,
+            ..
+        } => {
+            suppression.suppress(SuppressionKey::item(item_guid, "take_source"));
+            if let Some(path) = source_path {
+                let path = path.clone();
+                apply_take_mutation(daw, ctx, item_guid, take_guid, move |handle| {
+                    Box::pin(async move { handle.set_source_file(&path).await })
+                })
+                .await;
+            }
+        }
+        TakeEvent::Created {
+            item_guid, ..
+        } => {
+            suppression.suppress(SuppressionKey::item(item_guid, "take_created"));
+            if let Some(project) = resolve_project(daw, ctx).await {
+                if let Ok(Some(item)) = project.items().by_guid(item_guid).await {
+                    if let Err(e) = item.takes().add().await {
+                        warn!("Failed to add take to item {item_guid}: {e}");
+                    }
+                }
+            }
+        }
+        TakeEvent::Deleted {
+            item_guid,
+            take_guid,
+            ..
+        } => {
+            suppression.suppress(SuppressionKey::item(item_guid, "take_deleted"));
+            apply_take_mutation(daw, ctx, item_guid, take_guid, |handle| {
+                Box::pin(async move { handle.delete().await })
+            })
+            .await;
+        }
+    }
+}
+
+/// Helper to resolve a project, item, and take by GUIDs, then apply a mutation.
+async fn apply_take_mutation<F>(
+    daw: &Daw,
+    ctx: &ProjectContext,
+    item_guid: &str,
+    take_guid: &str,
+    mutation: F,
+) where
+    F: FnOnce(
+        daw::TakeHandle,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = daw::Result<()>> + Send>>,
+{
+    let project = match resolve_project(daw, ctx).await {
+        Some(p) => p,
+        None => return,
+    };
+    let item = match project.items().by_guid(item_guid).await {
+        Ok(Some(i)) => i,
+        Ok(None) => {
+            debug!("Item {item_guid} not found for take mutation");
+            return;
+        }
+        Err(e) => {
+            warn!("Failed to resolve item {item_guid}: {e}");
+            return;
+        }
+    };
+    // Find the take by GUID — iterate all takes and match by index
+    let takes = match item.takes().all().await {
+        Ok(t) => t,
+        Err(e) => {
+            warn!("Failed to get takes for item {item_guid}: {e}");
+            return;
+        }
+    };
+    let take_index = takes
+        .iter()
+        .enumerate()
+        .find(|(_, t)| t.guid == take_guid)
+        .map(|(i, _)| i as u32);
+    let Some(idx) = take_index else {
+        debug!("Take {take_guid} not found in item {item_guid}");
+        return;
+    };
+    let take_handle = match item.takes().by_index(idx).await {
+        Ok(Some(h)) => h,
+        _ => {
+            debug!("Take at index {idx} not found for item {item_guid}");
+            return;
+        }
+    };
+    if let Err(e) = mutation(take_handle).await {
+        warn!("Take mutation failed for {take_guid} on item {item_guid}: {e}");
+    }
 }
 
 // ── Routing ──────────────────────────────────────────────────────────────────
 
 async fn apply_routing(
-    _daw: &Daw,
-    _ctx: &ProjectContext,
+    daw: &Daw,
+    ctx: &ProjectContext,
     event: &RoutingEvent,
     suppression: &mut SuppressionSet,
 ) {
     match event {
         RoutingEvent::VolumeChanged {
             source_track_guid,
+            route_type,
             route_index,
             volume,
             ..
@@ -649,12 +1026,163 @@ async fn apply_routing(
                 source_track_guid,
                 &format!("volume:{route_index}"),
             ));
-            debug!(
-                "Routing volume change on {source_track_guid}[{route_index}] → {volume} (apply TBD)"
-            );
+            apply_route_mutation(daw, ctx, source_track_guid, *route_type, *route_index, |handle| {
+                let volume = *volume;
+                Box::pin(async move { handle.set_volume(volume).await })
+            })
+            .await;
         }
-        _ => {
-            debug!("Routing event not yet handled for sync apply: {event:?}");
+        RoutingEvent::PanChanged {
+            source_track_guid,
+            route_type,
+            route_index,
+            pan,
+            ..
+        } => {
+            suppression.suppress(SuppressionKey::routing(
+                source_track_guid,
+                &format!("pan:{route_index}"),
+            ));
+            apply_route_mutation(daw, ctx, source_track_guid, *route_type, *route_index, |handle| {
+                let pan = *pan;
+                Box::pin(async move { handle.set_pan(pan).await })
+            })
+            .await;
+        }
+        RoutingEvent::MuteChanged {
+            source_track_guid,
+            route_type,
+            route_index,
+            muted,
+            ..
+        } => {
+            suppression.suppress(SuppressionKey::routing(
+                source_track_guid,
+                &format!("mute:{route_index}"),
+            ));
+            let muted = *muted;
+            apply_route_mutation(daw, ctx, source_track_guid, *route_type, *route_index, move |handle| {
+                Box::pin(async move {
+                    if muted {
+                        handle.mute().await
+                    } else {
+                        handle.unmute().await
+                    }
+                })
+            })
+            .await;
+        }
+        RoutingEvent::RouteCreated {
+            source_track_guid,
+            route,
+            ..
+        } => {
+            suppression.suppress(SuppressionKey::routing(
+                source_track_guid,
+                &format!("created:{}", route.index),
+            ));
+            if let Some(project) = resolve_project(daw, ctx).await {
+                if let Ok(Some(track)) = project.tracks().by_guid(source_track_guid).await {
+                    match route.route_type {
+                        RouteType::Send => {
+                            if let Some(ref dest_guid) = route.dest_track_guid {
+                                if let Err(e) = track.sends().add_to(dest_guid).await {
+                                    warn!("Failed to create send from {source_track_guid} to {dest_guid}: {e}");
+                                }
+                            }
+                        }
+                        RouteType::HardwareOutput => {
+                            if let Some(hw_idx) = route.hw_output_index {
+                                if let Err(e) = track.hardware_outputs().add(hw_idx).await {
+                                    warn!("Failed to add hardware output {hw_idx}: {e}");
+                                }
+                            }
+                        }
+                        RouteType::Receive => {
+                            // Receives are the inverse of sends — creating a receive on track A
+                            // from track B is the same as creating a send on track B to track A.
+                            debug!("Receive creation not directly supported — handled via send creation on source");
+                        }
+                    }
+                }
+            }
+        }
+        RoutingEvent::RouteDeleted {
+            source_track_guid,
+            route_type,
+            route_index,
+            ..
+        } => {
+            suppression.suppress(SuppressionKey::routing(
+                source_track_guid,
+                &format!("deleted:{route_index}"),
+            ));
+            apply_route_mutation(daw, ctx, source_track_guid, *route_type, *route_index, |handle| {
+                Box::pin(async move { handle.remove().await })
+            })
+            .await;
+        }
+        RoutingEvent::ParentSendChanged {
+            track_guid,
+            enabled,
+            ..
+        } => {
+            suppression.suppress(SuppressionKey::routing(track_guid, "parent_send"));
+            if let Some(project) = resolve_project(daw, ctx).await {
+                if let Ok(Some(track)) = project.tracks().by_guid(track_guid).await {
+                    if let Err(e) = track.set_parent_send(*enabled).await {
+                        warn!("Failed to set parent send on {track_guid}: {e}");
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Helper to resolve a route handle and apply a mutation.
+async fn apply_route_mutation<F>(
+    daw: &Daw,
+    ctx: &ProjectContext,
+    track_guid: &str,
+    route_type: RouteType,
+    route_index: u32,
+    mutation: F,
+) where
+    F: FnOnce(
+        daw::RouteHandle,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = daw::Result<()>> + Send>>,
+{
+    let project = match resolve_project(daw, ctx).await {
+        Some(p) => p,
+        None => return,
+    };
+    let track = match project.tracks().by_guid(track_guid).await {
+        Ok(Some(t)) => t,
+        Ok(None) => {
+            debug!("Track {track_guid} not found for route mutation");
+            return;
+        }
+        Err(e) => {
+            warn!("Failed to resolve track {track_guid} for route: {e}");
+            return;
+        }
+    };
+    let route_handle = match route_type {
+        RouteType::Send => track.sends().by_index(route_index).await,
+        RouteType::Receive => track.receives().by_index(route_index).await,
+        RouteType::HardwareOutput => track.hardware_outputs().by_index(route_index).await,
+    };
+    match route_handle {
+        Ok(Some(handle)) => {
+            if let Err(e) = mutation(handle).await {
+                warn!("Route mutation failed on {track_guid}[{route_index}]: {e}");
+            }
+        }
+        Ok(None) => {
+            debug!("Route {route_type:?}[{route_index}] not found on track {track_guid}");
+        }
+        Err(e) => {
+            warn!("Failed to resolve route {route_type:?}[{route_index}] on {track_guid}: {e}");
         }
     }
 }
@@ -662,7 +1190,7 @@ async fn apply_routing(
 // ── Tempo Map ────────────────────────────────────────────────────────────────
 
 async fn apply_tempo_map(
-    _daw: &Daw,
+    daw: &Daw,
     _ctx: &ProjectContext,
     project_guid: &str,
     event: &TempoMapEvent,
@@ -670,22 +1198,101 @@ async fn apply_tempo_map(
 ) {
     suppression.suppress(SuppressionKey::tempo_map(project_guid));
 
+    let project = match daw.project(project_guid).await {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+    let tempo_map = project.tempo_map();
+
     match event {
+        TempoMapEvent::PointAdded(point) => {
+            let pos_secs = point
+                .position
+                .time
+                .as_ref()
+                .map(|t| t.as_seconds())
+                .unwrap_or(0.0);
+            match tempo_map.add_point(pos_secs, point.bpm).await {
+                Ok(idx) => {
+                    if let Some(ref ts) = point.time_signature {
+                        let _ = tempo_map
+                            .set_time_signature_at(idx, ts.numerator as i32, ts.denominator as i32)
+                            .await;
+                    }
+                }
+                Err(e) => warn!("Failed to add tempo point at {pos_secs:.1}s: {e}"),
+            }
+        }
+        TempoMapEvent::PointRemoved(index) => {
+            if let Err(e) = tempo_map.remove_point(*index).await {
+                warn!("Failed to remove tempo point at index {index}: {e}");
+            }
+        }
         TempoMapEvent::PointChanged(point) => {
-            // PointChanged carries the full TempoPoint but not an index.
-            // We'd need to match by position to find the right index to update.
-            // For now, log it — full tempo map sync will use MapChanged.
-            debug!(
-                "Tempo point changed at {:?} → {:.1} BPM (positional matching TBD)",
-                point.position, point.bpm
-            );
+            // Match by position — find the closest existing point
+            let pos_secs = point
+                .position
+                .time
+                .as_ref()
+                .map(|t| t.as_seconds())
+                .unwrap_or(0.0);
+            if let Ok(points) = tempo_map.points().await {
+                let closest = points
+                    .iter()
+                    .enumerate()
+                    .min_by(|(_, a), (_, b)| {
+                        let a_pos = a.position.time.as_ref().map(|t| t.as_seconds()).unwrap_or(0.0);
+                        let b_pos = b.position.time.as_ref().map(|t| t.as_seconds()).unwrap_or(0.0);
+                        (a_pos - pos_secs)
+                            .abs()
+                            .partial_cmp(&(b_pos - pos_secs).abs())
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    })
+                    .map(|(i, _)| i as u32);
+                if let Some(idx) = closest {
+                    let _ = tempo_map.set_tempo_at(idx, point.bpm).await;
+                    if let Some(ref ts) = point.time_signature {
+                        let _ = tempo_map
+                            .set_time_signature_at(idx, ts.numerator as i32, ts.denominator as i32)
+                            .await;
+                    }
+                }
+            }
         }
-        TempoMapEvent::MapChanged(_points) => {
-            // Full map replacement — complex, defer
-            debug!("Tempo map full replacement not yet implemented");
-        }
-        _ => {
-            debug!("Tempo map event not yet handled: {event:?}");
+        TempoMapEvent::MapChanged(points) => {
+            // Full map replacement — remove all existing points, then add new ones.
+            // Keep point 0 (default tempo) and update it, then add the rest.
+            if let Ok(existing) = tempo_map.points().await {
+                // Remove from end to avoid index shifting
+                for i in (1..existing.len()).rev() {
+                    let _ = tempo_map.remove_point(i as u32).await;
+                }
+            }
+            // Update point 0 if it exists in the new map
+            if let Some(first) = points.first() {
+                let _ = tempo_map.set_default_tempo(first.bpm).await;
+                if let Some(ref ts) = first.time_signature {
+                    let _ = tempo_map
+                        .set_default_time_signature(ts.numerator as i32, ts.denominator as i32)
+                        .await;
+                }
+            }
+            // Add remaining points
+            for point in points.iter().skip(1) {
+                let pos_secs = point
+                    .position
+                    .time
+                    .as_ref()
+                    .map(|t| t.as_seconds())
+                    .unwrap_or(0.0);
+                if let Ok(idx) = tempo_map.add_point(pos_secs, point.bpm).await {
+                    if let Some(ref ts) = point.time_signature {
+                        let _ = tempo_map
+                            .set_time_signature_at(idx, ts.numerator as i32, ts.denominator as i32)
+                            .await;
+                    }
+                }
+            }
         }
     }
 }
@@ -740,7 +1347,26 @@ async fn apply_marker(
             suppression.suppress(SuppressionKey::marker(project_guid, *id));
             let _ = markers.remove(*id).await;
         }
-        _ => {}
+        MarkerEvent::MarkersChanged(new_markers) => {
+            // Bulk marker replacement — remove all existing, then add new ones
+            if let Ok(existing) = markers.all().await {
+                for m in existing.iter().rev() {
+                    if let Some(id) = m.id {
+                        suppression.suppress(SuppressionKey::marker(project_guid, id));
+                        let _ = markers.remove(id).await;
+                    }
+                }
+            }
+            for marker in new_markers {
+                let pos = marker
+                    .position
+                    .time
+                    .as_ref()
+                    .map(|t| t.as_seconds())
+                    .unwrap_or(0.0);
+                let _ = markers.add(pos, &marker.name).await;
+            }
+        }
     }
 }
 
@@ -786,7 +1412,22 @@ async fn apply_region(
             suppression.suppress(SuppressionKey::region(project_guid, *id));
             let _ = regions.remove(*id).await;
         }
-        _ => {}
+        RegionEvent::RegionsChanged(new_regions) => {
+            // Bulk region replacement — remove all existing, then add new ones
+            if let Ok(existing) = regions.all().await {
+                for r in existing.iter().rev() {
+                    if let Some(id) = r.id {
+                        suppression.suppress(SuppressionKey::region(project_guid, id));
+                        let _ = regions.remove(id).await;
+                    }
+                }
+            }
+            for region in new_regions {
+                let start = region.time_range.start_seconds();
+                let end = region.time_range.end_seconds();
+                let _ = regions.add(start, end, &region.name).await;
+            }
+        }
     }
 }
 

@@ -8,7 +8,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use daw::service::{
-    ItemEvent, MarkerEvent, ProjectEvent, RegionEvent, TakeEvent, TempoMapEvent, TrackEvent,
+    FxEvent, ItemEvent, MarkerEvent, ProjectEvent, RegionEvent, TakeEvent, TempoMapEvent,
+    TrackEvent,
 };
 use daw::{Daw, Project, TransportState};
 use sync_proto::{SyncConfig, SyncDomain, SyncEvent};
@@ -319,8 +320,77 @@ pub async fn subscribe_project(
         .named(&name);
     }
 
-    // Note: FX subscriptions are per-chain (per track), not per-project.
-    // They'll be set up when we receive TrackEvent::Added or during initial sync.
+    // FX subscriptions are per-chain (per track). Subscribe to all existing tracks.
+    if config.fx {
+        if let Ok(tracks) = project.tracks().all().await {
+            for track in &tracks {
+                let chain = project
+                    .tracks()
+                    .by_guid(&track.guid)
+                    .await
+                    .ok()
+                    .flatten();
+                if let Some(track_handle) = chain {
+                    let fx_chain = track_handle.fx_chain();
+                    if let Ok(mut rx) = fx_chain.subscribe_events().await {
+                        let ctx = ctx.clone();
+                        let name = format!("sync.sub.fx.{}.{short_guid}", &track.guid[..8.min(track.guid.len())]);
+                        moire::task::spawn(async move {
+                            loop {
+                                tokio::select! {
+                                    _ = ctx.cancel.cancelled() => break,
+                                    result = rx.recv() => {
+                                        match result {
+                                            Ok(Some(event)) => {
+                                                let event: FxEvent = (*event).clone();
+                                                ctx.send(SyncDomain::Fx(event)).await;
+                                            }
+                                            Ok(None) => { debug!("fx stream ended"); break; }
+                                            Err(e) => { warn!("fx recv error: {e}"); break; }
+                                        }
+                                    }
+                                }
+                            }
+                        })
+                        .named(&name);
+                    }
+                }
+            }
+        }
+    }
+
+    // Routing subscriptions are project-level (not per-track).
+    // We subscribe via any track's Sends handle since the underlying service is project-scoped.
+    if config.routing {
+        if let Ok(tracks) = project.tracks().all().await {
+            if let Some(first_track) = tracks.first() {
+                if let Ok(Some(track_handle)) = project.tracks().by_guid(&first_track.guid).await {
+                    if let Ok(mut rx) = track_handle.sends().subscribe().await {
+                        let ctx = ctx.clone();
+                        let name = format!("sync.sub.routing.{short_guid}");
+                        moire::task::spawn(async move {
+                            loop {
+                                tokio::select! {
+                                    _ = ctx.cancel.cancelled() => break,
+                                    result = rx.recv() => {
+                                        match result {
+                                            Ok(Some(event)) => {
+                                                let event: daw::service::RoutingEvent = (*event).clone();
+                                                ctx.send(SyncDomain::Routing(event)).await;
+                                            }
+                                            Ok(None) => { debug!("routing stream ended"); break; }
+                                            Err(e) => { warn!("routing recv error: {e}"); break; }
+                                        }
+                                    }
+                                }
+                            }
+                        })
+                        .named(&name);
+                    }
+                }
+            }
+        }
+    }
 
     info!("Subscribed to all enabled domains for project {short_guid}");
 
