@@ -92,6 +92,7 @@ pub fn Knob(
     let ctx = use_param_context();
     let mut drag: Signal<DragState> = use_context();
     let mut revision = use_signal(|| 0u32);
+    let mut editing = use_signal(|| false);
     let _ = *revision.read();
 
     // Also re-render when drag is active (so value display updates)
@@ -100,6 +101,7 @@ pub fn Knob(
     let normalized = unsafe { param_ptr.modulated_normalized_value() } as f64;
     let display_value = unsafe { param_ptr.normalized_value_to_string(normalized as f32, true) };
     let param_name = label.unwrap_or_else(|| unsafe { param_ptr.name() }.to_string());
+    let is_editing = *editing.read();
 
     let d = size.diameter();
     let df = d as f64;
@@ -213,26 +215,72 @@ pub fn Knob(
                         }
                     },
                     ondoubleclick: {
-                        let ctx = ctx.clone();
                         move |_| {
-                            let default =
-                                unsafe { param_ptr.default_normalized_value() };
-                            ctx.begin_set_raw(param_ptr);
-                            ctx.set_normalized_raw(param_ptr, default);
-                            ctx.end_set_raw(param_ptr);
-                            revision += 1;
+                            editing.set(true);
                         }
                     },
                 }
             }
 
-            // Display value
-            span {
-                style: format!(
-                    "font-size:10px; color:{TEXT_DIM}; font-variant-numeric:tabular-nums; \
-                     min-width:48px; text-align:center;"
-                ),
-                "{display_value}"
+            // Display value (or text input when editing)
+            if is_editing {
+                input {
+                    r#type: "text",
+                    style: format!(
+                        "font-size:10px; color:{TEXT}; background:{SURFACE}; \
+                         border:1px solid {ACCENT}; border-radius:3px; \
+                         min-width:48px; width:56px; text-align:center; \
+                         padding:1px 2px; outline:none;"
+                    ),
+                    value: "{display_value}",
+                    onkeydown: {
+                        let ctx = ctx.clone();
+                        move |evt: KeyboardEvent| {
+                            if evt.key() == Key::Enter {
+                                // Try to parse whatever the user typed
+                                // Note: In Dioxus/Blitz, we read the value from
+                                // the input via a separate event. For now, we
+                                // commit on Enter via onchange/oninput.
+                                editing.set(false);
+                            } else if evt.key() == Key::Escape {
+                                editing.set(false);
+                            }
+                        }
+                    },
+                    onchange: {
+                        let ctx = ctx.clone();
+                        move |evt: FormEvent| {
+                            let text = evt.value();
+                            if let Some(normalized) =
+                                unsafe { param_ptr.string_to_normalized_value(&text) }
+                            {
+                                ctx.begin_set_raw(param_ptr);
+                                ctx.set_normalized_raw(param_ptr, normalized);
+                                ctx.end_set_raw(param_ptr);
+                            }
+                            editing.set(false);
+                            revision += 1;
+                        }
+                    },
+                    onfocusout: {
+                        move |_| {
+                            editing.set(false);
+                        }
+                    },
+                }
+            } else {
+                span {
+                    style: format!(
+                        "font-size:10px; color:{TEXT_DIM}; font-variant-numeric:tabular-nums; \
+                         min-width:48px; text-align:center; cursor:text;"
+                    ),
+                    ondoubleclick: move |_| {
+                        if !disabled {
+                            editing.set(true);
+                        }
+                    },
+                    "{display_value}"
+                }
             }
 
             // Label
