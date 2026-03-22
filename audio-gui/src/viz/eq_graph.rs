@@ -403,8 +403,16 @@ pub fn EqGraph(
     // Blitz's element_coordinates() actually returns window/client coords (not
     // element-relative), so we subtract the element's position first, then scale
     // from rendered pixel size to viewBox coordinates.
-    let actual_w = if rendered_width > 0.0 { rendered_width } else { vb_width };
-    let actual_h = if rendered_height > 0.0 { rendered_height } else { vb_height };
+    let actual_w = if rendered_width > 0.0 {
+        rendered_width
+    } else {
+        vb_width
+    };
+    let actual_h = if rendered_height > 0.0 {
+        rendered_height
+    } else {
+        vb_height
+    };
 
     let transform_coords = move |win_x: f64, win_y: f64| -> (f64, f64) {
         let rel_x = win_x - offset_x;
@@ -516,16 +524,62 @@ pub fn EqGraph(
         let zero_y = db_to_y(-db_range);
         let first_x = freq_to_x(10.0_f64.powf(log_min));
         let last_x = freq_to_x(10.0_f64.powf(log_max));
-        let fill_path = format!(
-            "{stroke_path} L{last_x:.1},{zero_y:.1} L{first_x:.1},{zero_y:.1} Z"
-        );
+        let fill_path =
+            format!("{stroke_path} L{last_x:.1},{zero_y:.1} L{first_x:.1},{zero_y:.1} Z");
         Some((stroke_path, fill_path))
     });
     let has_spectrum = spectrum_svg.is_some();
-    let sp_stroke = spectrum_svg.as_ref().map(|(s, _)| s.clone()).unwrap_or_default();
-    let sp_fill = spectrum_svg.as_ref().map(|(_, f)| f.clone()).unwrap_or_default();
+    let sp_stroke = spectrum_svg
+        .as_ref()
+        .map(|(s, _)| s.clone())
+        .unwrap_or_default();
+    let sp_fill = spectrum_svg
+        .as_ref()
+        .map(|(_, f)| f.clone())
+        .unwrap_or_default();
 
     rsx! {
+        // Wrapper div — Blitz doesn't deliver onwheel to SVG elements,
+        // so we handle it on this div instead.
+        div {
+            style: "width:100%; height:100%;",
+
+            // Handle mouse wheel for Q adjustment (on div because Blitz
+            // doesn't fire onwheel on SVG elements)
+            onwheel: move |evt: WheelEvent| {
+                evt.prevent_default();
+
+                if disabled {
+                    return;
+                }
+
+                let dragging = { *dragging_band.read() };
+                let focused = { *focused_band.read() };
+                let hovered = { *hovered_band.read() };
+                let target_band = dragging.or(focused).or(hovered);
+
+                if let Some(band_idx) = target_band {
+                    let delta_vec = evt.delta().strip_units();
+                    let delta = delta_vec.y;
+                    let q_multiplier = if delta < 0.0 { 1.15 } else { 0.87 };
+
+                    let updated_band = {
+                        let mut bands_vec = bands.write();
+                        if band_idx < bands_vec.len() {
+                            let new_q = (bands_vec[band_idx].q * q_multiplier).clamp(0.1, 18.0);
+                            bands_vec[band_idx].q = new_q;
+                            Some(bands_vec[band_idx].clone())
+                        } else {
+                            None
+                        }
+                    };
+
+                    if let (Some(band), Some(cb)) = (updated_band, &on_band_change) {
+                        cb.call((band_idx, band));
+                    }
+                }
+            },
+
         svg {
             // Use viewBox for proper scaling - SVG will scale to fit container
             view_box: "0 0 {vb_width} {vb_height}",
@@ -555,7 +609,6 @@ pub fn EqGraph(
                     return;
                 }
 
-                // Get element-relative coordinates and transform to viewBox space
                 let coords = evt.element_coordinates();
                 let (x, y) = transform_coords(coords.x, coords.y);
 
@@ -784,46 +837,7 @@ pub fn EqGraph(
                 }
             },
 
-            // Handle mouse wheel for Q adjustment
-            onwheel: move |evt: WheelEvent| {
-                // Always prevent default to stop page scrolling when over the EQ graph
-                evt.prevent_default();
-
-                if disabled {
-                    return;
-                }
-
-                // Adjust Q for dragging, focused, or hovered band - copy values first
-                let dragging = { *dragging_band.read() };
-                let focused = { *focused_band.read() };
-                let hovered = { *hovered_band.read() };
-                let target_band = dragging.or(focused).or(hovered);
-
-                if let Some(band_idx) = target_band {
-                    // Get the Y delta from wheel event (strip units to get raw value)
-                    let delta_vec = evt.delta().strip_units();
-                    let delta = delta_vec.y;
-                    // Wheel up = increase Q, wheel down = decrease Q
-                    let q_multiplier = if delta < 0.0 { 1.15 } else { 0.87 };
-
-                    let updated_band = {
-                        let mut bands_vec = bands.write();
-                        if band_idx < bands_vec.len() {
-                            let new_q = (bands_vec[band_idx].q * q_multiplier).clamp(0.1, 18.0);
-                            bands_vec[band_idx].q = new_q;
-                            Some(bands_vec[band_idx].clone())
-                        } else {
-                            None
-                        }
-                    };
-
-                    if let (Some(band), Some(cb)) = (updated_band, &on_band_change) {
-                        cb.call((band_idx, band));
-                    }
-                }
-            },
-
-            // Handle mousedown on empty area - detect double-click to add new band
+            // Handle mousedown - detect double-click to add new band, or click on band to drag
             // Using mousedown instead of ondoubleclick so user can immediately drag the new node
             onmousedown: move |evt: MouseEvent| {
                 if disabled {
@@ -839,20 +853,97 @@ pub fn EqGraph(
                     return;
                 }
 
-                // Check if clicking on an existing band (those have their own handlers)
-                let clicking_on_band = {
+                // Check if clicking on an existing band.
+                // Blitz doesn't deliver mouse events to SVG child elements,
+                // so we handle band clicks at the SVG level.
+                let clicked_band: Option<usize> = {
                     let bands_vec = bands.read();
-                    bands_vec.iter().any(|band| {
-                        if !band.used { return false; }
+                    let mut closest: Option<(usize, f64)> = None;
+                    for (idx, band) in bands_vec.iter().enumerate() {
+                        if !band.used { continue; }
                         let bx = freq_to_x(band.frequency as f64);
                         let by = db_to_y(band.gain as f64);
                         let dist = ((x - bx).powi(2) + (y - by).powi(2)).sqrt();
-                        dist < 15.0
-                    })
+                        if dist < 15.0 {
+                            if closest.is_none() || dist < closest.unwrap().1 {
+                                closest = Some((idx, dist));
+                            }
+                        }
+                    }
+                    closest.map(|(idx, _)| idx)
                 };
 
-                if clicking_on_band {
-                    last_click.set(None);
+                if let Some(idx) = clicked_band {
+                    // Check for double-click on this band (reset gain to 0)
+                    let now = now_ms();
+                    let last_click_val = { *last_click.read() };
+                    let is_double = if let Some((last_time, last_x, last_y)) = last_click_val {
+                        let time_diff = now - last_time;
+                        let distance = ((x - last_x).powi(2) + (y - last_y).powi(2)).sqrt();
+                        time_diff < double_click_threshold_ms && distance < double_click_distance
+                    } else {
+                        false
+                    };
+
+                    if is_double {
+                        last_click.set(None);
+                        let updated_band = {
+                            let mut bands_vec = bands.write();
+                            if idx < bands_vec.len() {
+                                bands_vec[idx].gain = 0.0;
+                                Some(bands_vec[idx].clone())
+                            } else {
+                                None
+                            }
+                        };
+                        if let (Some(band), Some(cb)) = (updated_band, &on_band_change) {
+                            cb.call((idx, band));
+                        }
+                        evt.stop_propagation();
+                        return;
+                    }
+
+                    // Single click — start dragging this band
+                    last_click.set(Some((now, x, y)));
+
+                    let is_shift = evt.modifiers().shift();
+                    let current_selected = { selected_bands.read().clone() };
+                    let new_selected = if is_shift {
+                        let mut sel = current_selected.clone();
+                        if sel.contains(&idx) {
+                            sel.retain(|&i| i != idx);
+                        } else {
+                            sel.push(idx);
+                        }
+                        sel
+                    } else if !current_selected.contains(&idx) {
+                        vec![idx]
+                    } else {
+                        current_selected.clone()
+                    };
+                    selected_bands.set(new_selected.clone());
+
+                    drag_start.set(Some((x, y)));
+                    let start_bands: Vec<(usize, f32, f32)> = {
+                        let bands_vec = bands.read();
+                        new_selected
+                            .iter()
+                            .filter_map(|&i| {
+                                bands_vec.get(i).map(|b| (i, b.frequency, b.gain))
+                            })
+                            .collect()
+                    };
+                    drag_start_bands.set(start_bands);
+                    selection_rect.set(None);
+
+                    dragging_band.set(Some(idx));
+                    set_focused(Some(idx));
+                    if let Some(cb) = &on_begin {
+                        cb.call(idx);
+                    }
+
+                    evt.stop_propagation();
+                    evt.prevent_default();
                     return;
                 }
 
@@ -1565,7 +1656,8 @@ pub fn EqGraph(
                     rsx! {}
                 }
             }
-        }
+        } // svg
+        } // wrapper div
     }
 }
 

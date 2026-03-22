@@ -46,7 +46,11 @@ pub fn pick_file(title: &str, extensions: &[&str]) -> Option<PathBuf> {
 #[cfg(target_os = "linux")]
 fn pick_file_zenity(title: &str, extensions: &[&str]) -> Option<PathBuf> {
     // Build filter string for zenity: "*.wav *.flac *.mp3 ..."
-    let filter_pattern: String = extensions.iter().map(|e| format!("*.{e}")).collect::<Vec<_>>().join(" ");
+    let filter_pattern: String = extensions
+        .iter()
+        .map(|e| format!("*.{e}"))
+        .collect::<Vec<_>>()
+        .join(" ");
     let filter = format!("Audio Files | {filter_pattern}");
 
     let output = Command::new("zenity")
