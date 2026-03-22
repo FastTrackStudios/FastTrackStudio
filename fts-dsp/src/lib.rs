@@ -14,6 +14,7 @@ pub mod dither;
 pub mod envelope;
 pub mod gain_curve;
 pub mod loudness;
+pub mod note_sync;
 pub mod oversampling;
 pub mod prng;
 pub mod slew;
