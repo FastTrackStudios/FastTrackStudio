@@ -2,7 +2,7 @@
 //!
 //! Raised panels with depth shadows and consistent spacing tokens.
 
-use crate::theme;
+use crate::theme::use_theme;
 use nih_plug_dioxus::prelude::*;
 
 /// Card-style section wrapper with uppercase title.
@@ -10,17 +10,19 @@ use nih_plug_dioxus::prelude::*;
 /// Raised panel with subtle top-edge highlight and drop shadow.
 #[component]
 pub fn Section(title: &'static str, children: Element) -> Element {
+    let t = use_theme();
+    let t = *t.read();
     rsx! {
         div {
             style: format!(
                 "{CARD} padding:{PAD}; margin-bottom:8px;",
-                CARD = theme::STYLE_CARD,
-                PAD = theme::SPACING_CARD,
+                CARD = t.style_card(),
+                PAD = t.spacing_card,
             ),
             div {
                 style: format!(
                     "{LABEL} margin-bottom:6px;",
-                    LABEL = theme::STYLE_LABEL,
+                    LABEL = t.style_label(),
                 ),
                 "{title}"
             }
@@ -34,6 +36,8 @@ pub fn Section(title: &'static str, children: Element) -> Element {
 /// Raised with accent background and subtle glow.
 #[component]
 pub fn ActionButton(label: &'static str, on_click: EventHandler<()>) -> Element {
+    let t = use_theme();
+    let t = *t.read();
     rsx! {
         div {
             style: format!(
@@ -42,11 +46,11 @@ pub fn ActionButton(label: &'static str, on_click: EventHandler<()>) -> Element 
                  font-size:13px; font-weight:600; margin-top:4px; \
                  box-shadow:{SHADOW}, 0 0 8px {GLOW}; \
                  transition:{TRANS};",
-                ACCENT = theme::ACCENT,
-                RADIUS = theme::RADIUS_CARD,
-                SHADOW = theme::SHADOW_SUBTLE,
-                GLOW = theme::ACCENT_GLOW,
-                TRANS = theme::TRANSITION_FAST,
+                ACCENT = t.accent,
+                RADIUS = t.radius_card,
+                SHADOW = t.shadow_subtle,
+                GLOW = t.accent_glow,
+                TRANS = t.transition_fast,
             ),
             onclick: move |_| on_click.call(()),
             "{label}"
@@ -60,17 +64,19 @@ pub fn ActionButton(label: &'static str, on_click: EventHandler<()>) -> Element 
 /// of child controls.
 #[component]
 pub fn ControlGroup(label: &'static str, children: Element) -> Element {
+    let t = use_theme();
+    let t = *t.read();
     rsx! {
         div {
             style: "display:flex; flex-direction:column; align-items:center; gap:6px;",
             div {
-                style: format!("{LABEL}", LABEL = theme::STYLE_LABEL),
+                style: format!("{LABEL}", LABEL = t.style_label()),
                 "{label}"
             }
             div {
                 style: format!(
                     "display:flex; gap:{GAP}; align-items:flex-end;",
-                    GAP = theme::SPACING_CONTROL,
+                    GAP = t.spacing_control,
                 ),
                 {children}
             }
@@ -83,12 +89,14 @@ pub fn ControlGroup(label: &'static str, children: Element) -> Element {
 /// Subtle border with slight depth.
 #[component]
 pub fn Divider() -> Element {
+    let t = use_theme();
+    let t = *t.read();
     rsx! {
         div {
             style: format!(
                 "width:1px; background:{BORDER}; align-self:stretch; \
                  box-shadow:1px 0 0 rgba(255,255,255,0.03);",
-                BORDER = theme::BORDER,
+                BORDER = t.border,
             ),
         }
     }
@@ -100,9 +108,11 @@ pub fn Divider() -> Element {
 /// or visualization areas.
 #[component]
 pub fn SectionLabel(text: &'static str) -> Element {
+    let t = use_theme();
+    let t = *t.read();
     rsx! {
         div {
-            style: format!("{LABEL}", LABEL = theme::STYLE_LABEL),
+            style: format!("{LABEL}", LABEL = t.style_label()),
             "{text}"
         }
     }

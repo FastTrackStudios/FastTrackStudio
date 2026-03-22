@@ -7,7 +7,7 @@
 //! Redesigned with recessed track, illuminated fill bar, and 3D thumb.
 
 use crate::drag::{begin_drag, DragState};
-use crate::theme;
+use crate::theme::use_theme;
 use nih_plug::prelude::ParamPtr;
 use nih_plug_dioxus::prelude::*;
 
@@ -34,6 +34,9 @@ pub fn ParamSlider(
     #[props(default = 24.0)]
     height: f32,
 ) -> Element {
+    let t = use_theme();
+    let t = *t.read();
+
     let ctx = use_param_context();
     let mut drag: Signal<DragState> = use_context();
     let mut revision = use_signal(|| 0u32);
@@ -55,12 +58,12 @@ pub fn ParamSlider(
         div {
             style: format!(
                 "display:flex; flex-direction:column; gap:{TIGHT}; min-width:80px; flex:1;",
-                TIGHT = theme::SPACING_TIGHT,
+                TIGHT = t.spacing_tight,
             ),
 
             // Label
             div {
-                style: format!("{LABEL}", LABEL = theme::STYLE_LABEL),
+                style: format!("{LABEL}", LABEL = t.style_label()),
                 "{name}"
             }
 
@@ -70,7 +73,7 @@ pub fn ParamSlider(
                     "height:{height}px; {INSET} \
                      position:relative; overflow:hidden; cursor:ns-resize; \
                      user-select:none;",
-                    INSET = theme::STYLE_INSET,
+                    INSET = t.style_inset(),
                 ),
                 onmousedown: {
                     let ctx = ctx.clone();
@@ -101,7 +104,7 @@ pub fn ParamSlider(
                     style: format!(
                         "position:absolute; left:0; top:0; bottom:0; width:{fill_width}; \
                          background:{ACCENT}; opacity:0.7; pointer-events:none;",
-                        ACCENT = theme::ACCENT,
+                        ACCENT = t.accent,
                     ),
                 }
 
@@ -111,7 +114,7 @@ pub fn ParamSlider(
                         "position:absolute; left:0; right:0; top:0; bottom:0; \
                          display:flex; align-items:center; justify-content:center; \
                          {VALUE} pointer-events:none;",
-                        VALUE = theme::STYLE_VALUE,
+                        VALUE = t.style_value(),
                     ),
                     "{display_value}"
                 }
@@ -147,6 +150,9 @@ pub fn Slider(
     #[props(default)]
     on_change: Option<Callback<f64>>,
 ) -> Element {
+    let t = use_theme();
+    let t = *t.read();
+
     let range = max - min;
     let pct = if range > 0.0 {
         ((value - min) / range * 100.0).clamp(0.0, 100.0)
@@ -174,20 +180,20 @@ pub fn Slider(
             "position:relative; width:8px; flex:1; overflow:hidden; \
              border-radius:{RADIUS}; background:{SURFACE}; \
              box-shadow:{INSET_SHADOW}; border:1px solid {BORDER_S};",
-            RADIUS = theme::RADIUS_BUTTON,
-            SURFACE = theme::SURFACE,
-            INSET_SHADOW = theme::SHADOW_INSET,
-            BORDER_S = theme::BORDER_SUBTLE,
+            RADIUS = t.radius_button,
+            SURFACE = t.surface,
+            INSET_SHADOW = t.shadow_inset,
+            BORDER_S = t.border_subtle,
         )
     } else {
         format!(
             "position:relative; height:8px; width:100%; flex:1; overflow:hidden; \
              border-radius:{RADIUS}; background:{SURFACE}; \
              box-shadow:{INSET_SHADOW}; border:1px solid {BORDER_S};",
-            RADIUS = theme::RADIUS_BUTTON,
-            SURFACE = theme::SURFACE,
-            INSET_SHADOW = theme::SHADOW_INSET,
-            BORDER_S = theme::BORDER_SUBTLE,
+            RADIUS = t.radius_button,
+            SURFACE = t.surface,
+            INSET_SHADOW = t.shadow_inset,
+            BORDER_S = t.border_subtle,
         )
     };
 
@@ -195,12 +201,12 @@ pub fn Slider(
         format!(
             "height:{pct}%; width:100%; position:absolute; bottom:0; \
              background:{ACCENT};",
-            ACCENT = theme::ACCENT,
+            ACCENT = t.accent,
         )
     } else {
         format!(
             "width:{pct}%; height:100%; background:{ACCENT};",
-            ACCENT = theme::ACCENT,
+            ACCENT = t.accent,
         )
     };
 
@@ -211,9 +217,9 @@ pub fn Slider(
              border-radius:7px; border:2px solid {ACCENT}; \
              background:{BG}; \
              box-shadow:{SHADOW};",
-            ACCENT = theme::ACCENT,
-            BG = theme::BG,
-            SHADOW = theme::SHADOW_SUBTLE,
+            ACCENT = t.accent,
+            BG = t.bg,
+            SHADOW = t.shadow_subtle,
         )
     } else {
         format!(
@@ -222,9 +228,9 @@ pub fn Slider(
              border-radius:7px; border:2px solid {ACCENT}; \
              background:{BG}; \
              box-shadow:{SHADOW};",
-            ACCENT = theme::ACCENT,
-            BG = theme::BG,
-            SHADOW = theme::SHADOW_SUBTLE,
+            ACCENT = t.accent,
+            BG = t.bg,
+            SHADOW = t.shadow_subtle,
         )
     };
 

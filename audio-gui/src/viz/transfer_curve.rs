@@ -3,7 +3,7 @@
 //! Used by compressor, limiter, gate, and expander plugins to
 //! display their gain transfer function.
 
-use crate::theme::*;
+use crate::theme::use_theme;
 use nih_plug_dioxus::prelude::*;
 
 /// Compute gain reduction for a given input level using soft-knee compression.
@@ -59,6 +59,9 @@ pub fn TransferCurve(
     #[props(default = 60.0)]
     range_db: f32,
 ) -> Element {
+    let t = use_theme();
+    let t = *t.read();
+
     let min_db = -range_db;
     let num_points: usize = 80;
 
@@ -80,8 +83,9 @@ pub fn TransferCurve(
         div {
             style: format!(
                 "position:relative; width:{width}px; height:{height}px; \
-                 background:{SURFACE}; border-radius:6px; overflow:hidden; \
-                 border:1px solid {BORDER};"
+                 background:{}; border-radius:6px; overflow:hidden; \
+                 border:1px solid {};",
+                t.surface, t.border
             ),
 
             // Grid lines (every 12 dB)
@@ -93,13 +97,15 @@ pub fn TransferCurve(
                         div {
                             style: format!(
                                 "position:absolute; left:{x}px; top:0; width:1px; \
-                                 height:100%; background:{GRID_LINE};"
+                                 height:100%; background:{};",
+                                t.grid_line
                             ),
                         }
                         div {
                             style: format!(
                                 "position:absolute; left:0; top:{y}px; width:100%; \
-                                 height:1px; background:{GRID_LINE};"
+                                 height:1px; background:{};",
+                                t.grid_line
                             ),
                         }
                     }
@@ -118,7 +124,8 @@ pub fn TransferCurve(
                             style: format!(
                                 "position:absolute; left:{x}px; top:{y}px; \
                                  width:2px; height:2px; border-radius:1px; \
-                                 background:{REFERENCE_DOT};"
+                                 background:{};",
+                                t.reference_dot
                             ),
                         }
                     }
@@ -139,9 +146,10 @@ pub fn TransferCurve(
                             style: format!(
                                 "position:absolute; left:{x1}px; top:{y1}px; \
                                  width:{len}px; height:2px; \
-                                 background:{ACCENT}; \
+                                 background:{}; \
                                  transform-origin:0 0; \
-                                 transform:rotate({angle}deg);"
+                                 transform:rotate({angle}deg);",
+                                t.accent
                             ),
                         }
                     }
@@ -152,13 +160,15 @@ pub fn TransferCurve(
             div {
                 style: format!(
                     "position:absolute; left:{thresh_x}px; top:0; width:1px; \
-                     height:100%; background:{CROSSHAIR};"
+                     height:100%; background:{};",
+                    t.crosshair
                 ),
             }
             div {
                 style: format!(
                     "position:absolute; left:0; top:{thresh_y}px; width:100%; \
-                     height:1px; background:{CROSSHAIR};"
+                     height:1px; background:{};",
+                    t.crosshair
                 ),
             }
 
@@ -183,13 +193,15 @@ pub fn TransferCurve(
             // Corner labels
             div {
                 style: format!(
-                    "position:absolute; left:4px; bottom:2px; font-size:9px; color:{TEXT_DIM};"
+                    "position:absolute; left:4px; bottom:2px; font-size:9px; color:{};",
+                    t.text_dim
                 ),
                 "{min_db:.0}"
             }
             div {
                 style: format!(
-                    "position:absolute; right:4px; bottom:2px; font-size:9px; color:{TEXT_DIM};"
+                    "position:absolute; right:4px; bottom:2px; font-size:9px; color:{};",
+                    t.text_dim
                 ),
                 "0 dB"
             }

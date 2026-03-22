@@ -2,7 +2,7 @@
 //!
 //! Ported from FastTrackStudio signal-ui, adapted for Blitz inline styles.
 
-use crate::theme::*;
+use crate::theme::use_theme;
 use nih_plug_dioxus::prelude::*;
 
 /// A frequency spectrum bar graph.
@@ -24,6 +24,9 @@ pub fn SpectrumAnalyzer(
     #[props(default = 1)]
     gap: u32,
 ) -> Element {
+    let t = use_theme();
+    let t = *t.read();
+
     let w = width;
     let h = height;
     let hf = h as f64;
@@ -44,11 +47,11 @@ pub fn SpectrumAnalyzer(
                     let mag = bin.clamp(0.0, 1.0);
                     let bar_h = (mag * hf).max(1.0);
                     let color = if mag > 0.85 {
-                        SIGNAL_DANGER
+                        t.signal_danger
                     } else if mag > 0.6 {
-                        SIGNAL_WARN
+                        t.signal_warn
                     } else {
-                        SIGNAL_SAFE
+                        t.signal_safe
                     };
                     rsx! {
                         div {

@@ -4,7 +4,7 @@
 //! `audio_gui::controls::ParamSlider`. All other components
 //! (Toggle, Section, SegmentButton, etc.) are now in `audio-gui`.
 
-use audio_gui::theme::*;
+use audio_gui::theme::use_theme;
 use nih_plug::prelude::ParamPtr;
 use nih_plug_dioxus::prelude::*;
 
@@ -14,6 +14,8 @@ use nih_plug_dioxus::prelude::*;
 /// This is kept for backward compatibility with existing `comp-ui` code.
 #[component]
 pub fn CompSlider(param_ptr: ParamPtr, #[props(default = "")] label: &'static str) -> Element {
+    let t = use_theme();
+    let t = *t.read();
     let ctx = use_param_context();
     let mut revision = use_signal(|| 0u32);
     let mut is_dragging = use_signal(|| false);
@@ -37,17 +39,19 @@ pub fn CompSlider(param_ptr: ParamPtr, #[props(default = "")] label: &'static st
 
             div {
                 style: format!(
-                    "font-size:10px; color:{TEXT_DIM}; text-transform:uppercase; \
-                     letter-spacing:0.3px;"
+                    "font-size:10px; color:{}; text-transform:uppercase; \
+                     letter-spacing:0.3px;",
+                    t.text_dim,
                 ),
                 "{name}"
             }
 
             div {
                 style: format!(
-                    "height:24px; background:{SURFACE}; border-radius:4px; position:relative; \
-                     overflow:hidden; cursor:ns-resize; border:1px solid {BORDER}; \
-                     user-select:none;"
+                    "height:24px; background:{}; border-radius:4px; position:relative; \
+                     overflow:hidden; cursor:ns-resize; border:1px solid {}; \
+                     user-select:none;",
+                    t.surface, t.border,
                 ),
                 onmousedown: {
                     let ctx = ctx.clone();
@@ -105,7 +109,8 @@ pub fn CompSlider(param_ptr: ParamPtr, #[props(default = "")] label: &'static st
                 div {
                     style: format!(
                         "position:absolute; left:0; top:0; bottom:0; width:{fill_width}; \
-                         background:{ACCENT}; opacity:0.6; pointer-events:none;"
+                         background:{}; opacity:0.6; pointer-events:none;",
+                        t.accent,
                     ),
                 }
 
@@ -113,8 +118,9 @@ pub fn CompSlider(param_ptr: ParamPtr, #[props(default = "")] label: &'static st
                     style: format!(
                         "position:absolute; left:0; right:0; top:0; bottom:0; \
                          display:flex; align-items:center; justify-content:center; \
-                         font-size:11px; color:{TEXT}; pointer-events:none; \
-                         font-variant-numeric:tabular-nums;"
+                         font-size:11px; color:{}; pointer-events:none; \
+                         font-variant-numeric:tabular-nums;",
+                        t.text,
                     ),
                     "{display_value}"
                 }

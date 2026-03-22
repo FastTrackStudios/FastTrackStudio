@@ -1,7 +1,7 @@
 //! Waveform display — renders audio sample data as a centered waveform
 //! or a scrolling peak level history.
 
-use crate::theme::*;
+use crate::theme::use_theme;
 use nih_plug_dioxus::prelude::*;
 
 /// Centered bipolar waveform display.
@@ -20,9 +20,13 @@ pub fn WaveformDisplay(
     #[props(default = 64)]
     height: u32,
     /// Bar color.
-    #[props(default = ACCENT.to_string())]
-    color: String,
+    #[props(default)]
+    color: Option<String>,
 ) -> Element {
+    let t = use_theme();
+    let t = *t.read();
+    let color = color.as_deref().unwrap_or(t.accent);
+
     let w = width;
     let h = height;
     let hf = h as f64;
@@ -86,6 +90,9 @@ pub fn PeakWaveform(
     #[props(default = 80.0)]
     height: f32,
 ) -> Element {
+    let t = use_theme();
+    let t = *t.read();
+
     let num_bars = levels.len().max(1);
     let bar_width = width / num_bars as f32;
 
@@ -94,7 +101,8 @@ pub fn PeakWaveform(
             style: format!(
                 "position:relative; width:{width}px; height:{height}px; \
                  background:#0a0a14; border-radius:4px; overflow:hidden; \
-                 border:1px solid {BORDER}; display:flex; align-items:flex-end;"
+                 border:1px solid {border}; display:flex; align-items:flex-end;",
+                border = t.border,
             ),
 
             // Level bars
@@ -102,12 +110,13 @@ pub fn PeakWaveform(
                 {
                     let bar_h = (level.clamp(0.0, 1.0) * height).max(0.0);
                     let x = i as f32 * bar_width;
+                    let accent_dim = t.accent_dim;
                     rsx! {
                         div {
                             style: format!(
                                 "position:absolute; left:{x}px; bottom:0; \
                                  width:{bar_width}px; height:{bar_h}px; \
-                                 background:{ACCENT_DIM};"
+                                 background:{accent_dim};"
                             ),
                         }
                     }

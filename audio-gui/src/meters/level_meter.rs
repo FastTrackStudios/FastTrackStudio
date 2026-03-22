@@ -2,8 +2,7 @@
 //!
 //! Recessed trough with glowing fill segments and peak hold indicator.
 
-use crate::theme;
-use crate::theme::*;
+use crate::theme::use_theme;
 use nih_plug_dioxus::prelude::*;
 
 /// Meter orientation.
@@ -42,6 +41,9 @@ pub fn LevelMeter(
     #[props(default)]
     label: Option<String>,
 ) -> Element {
+    let t = use_theme();
+    let t = *t.read();
+
     let level = level.clamp(0.0, 1.0);
     let pct = level * 100.0;
     let is_clip = level >= 0.99;
@@ -49,11 +51,11 @@ pub fn LevelMeter(
     let is_vertical = orientation == LevelMeterOrientation::Vertical;
 
     let (bar_color, glow_color) = if level > 0.9 {
-        (SIGNAL_DANGER, theme::SIGNAL_DANGER_GLOW)
+        (t.signal_danger, t.signal_danger_glow)
     } else if level > 0.75 {
-        (SIGNAL_WARN, theme::SIGNAL_WARN_GLOW)
+        (t.signal_warn, t.signal_warn_glow)
     } else {
-        (SIGNAL_SAFE, theme::SIGNAL_SAFE_GLOW)
+        (t.signal_safe, t.signal_safe_glow)
     };
 
     let container_style = if is_vertical {
@@ -66,13 +68,13 @@ pub fn LevelMeter(
         format!(
             "position:relative; width:{thickness}px; height:{length}px; \
              {INSET} overflow:hidden;",
-            INSET = theme::STYLE_INSET,
+            INSET = t.style_inset(),
         )
     } else {
         format!(
             "position:relative; height:{thickness}px; width:{length}px; \
              {INSET} overflow:hidden;",
-            INSET = theme::STYLE_INSET,
+            INSET = t.style_inset(),
         )
     };
 
@@ -95,7 +97,7 @@ pub fn LevelMeter(
 
             if let Some(label) = &label {
                 div {
-                    style: format!("{LABEL}", LABEL = theme::STYLE_LABEL),
+                    style: format!("{LABEL}", LABEL = t.style_label()),
                     "{label}"
                 }
             }
@@ -111,9 +113,9 @@ pub fn LevelMeter(
                     {
                         let peak_pct = peak.clamp(0.0, 1.0) * 100.0;
                         let peak_color = if peak > 0.9 {
-                            theme::SIGNAL_DANGER
+                            t.signal_danger
                         } else {
-                            theme::TEXT_BRIGHT
+                            t.text_bright
                         };
                         let peak_style = if is_vertical {
                             format!(
@@ -138,7 +140,7 @@ pub fn LevelMeter(
                         style: format!(
                             "position:absolute; inset:0; \
                              background:{DANGER_GLOW};",
-                            DANGER_GLOW = theme::SIGNAL_DANGER_GLOW,
+                            DANGER_GLOW = t.signal_danger_glow,
                         ),
                     }
                 }
@@ -167,6 +169,9 @@ pub fn LevelMeterDb(
     #[props(default = 10.0)]
     width: f32,
 ) -> Element {
+    let t = use_theme();
+    let t = *t.read();
+
     let range = 0.0 - min_db;
     let normalized = ((level_db - min_db) / range).clamp(0.0, 1.0) as f64;
     let level_text = format!("{:.1}", level_db);
@@ -187,8 +192,8 @@ pub fn LevelMeterDb(
             div {
                 style: format!(
                     "{VALUE} color:{DIM}; min-width:36px; text-align:center;",
-                    VALUE = theme::STYLE_VALUE,
-                    DIM = theme::TEXT_DIM,
+                    VALUE = t.style_value(),
+                    DIM = t.text_dim,
                 ),
                 "{level_text}"
             }

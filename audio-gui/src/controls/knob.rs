@@ -8,8 +8,7 @@
 //! The knob only fires `onmousedown` to start a drag.
 
 use crate::drag::{begin_drag, DragState};
-use crate::theme;
-use crate::theme::*;
+use crate::theme::use_theme;
 use nih_plug::prelude::ParamPtr;
 use nih_plug_dioxus::prelude::*;
 use std::f64::consts::PI;
@@ -127,6 +126,9 @@ pub fn Knob(
     #[props(default)]
     disabled: bool,
 ) -> Element {
+    let t = use_theme();
+    let t = *t.read();
+
     let ctx = use_param_context();
     let mut drag: Signal<DragState> = use_context();
     let mut revision = use_signal(|| 0u32);
@@ -177,7 +179,7 @@ pub fn Knob(
     let (ix1, iy1) = arc_point(cx, cy, ind_inner, end_angle);
     let (ix2, iy2) = arc_point(cx, cy, ind_outer, end_angle);
 
-    let accent = color.as_deref().unwrap_or(ACCENT);
+    let accent = color.as_deref().unwrap_or(t.accent);
     let opacity = if disabled { "0.5" } else { "1.0" };
     let cursor = if disabled { "not-allowed" } else { "pointer" };
 
@@ -189,7 +191,7 @@ pub fn Knob(
             style: format!(
                 "display:inline-flex; flex-direction:column; align-items:center; \
                  gap:{SPACING_LABEL}; opacity:{opacity}; cursor:{cursor}; position:relative;",
-                SPACING_LABEL = theme::SPACING_LABEL,
+                SPACING_LABEL = t.spacing_label,
             ),
 
             // Knob area — body + arcs layered
@@ -209,9 +211,9 @@ pub fn Knob(
                            inset 0 -1px 1px rgba(0,0,0,0.25); \
                          border: 1px solid rgba(255,255,255,0.04); \
                          position:absolute; z-index:1;",
-                        LIGHT = theme::KNOB_BODY_LIGHT,
-                        DARK = theme::KNOB_BODY_DARK,
-                        SHADOW = theme::SHADOW_KNOB,
+                        LIGHT = t.knob_body_light,
+                        DARK = t.knob_body_dark,
+                        SHADOW = t.shadow_knob,
                     ),
                 }
 
@@ -226,7 +228,7 @@ pub fn Knob(
                     path {
                         d: "{track_path}",
                         fill: "none",
-                        stroke: "{KNOB_TRACK}",
+                        stroke: "{t.knob_track}",
                         stroke_width: "{track_stroke}",
                         stroke_linecap: "round",
                     }
@@ -247,7 +249,7 @@ pub fn Knob(
                         path {
                             d: "{mod_path}",
                             fill: "none",
-                            stroke: "{SIGNAL_MOD}",
+                            stroke: "{t.signal_mod}",
                             stroke_width: "2",
                             stroke_linecap: "round",
                             opacity: "0.6",
@@ -260,7 +262,7 @@ pub fn Knob(
                         y1: "{iy1:.1}",
                         x2: "{ix2:.1}",
                         y2: "{iy2:.1}",
-                        stroke: "{KNOB_INDICATOR}",
+                        stroke: "{t.knob_indicator}",
                         stroke_width: "2",
                         stroke_linecap: "round",
                     }
@@ -304,11 +306,11 @@ pub fn Knob(
                          min-width:48px; width:56px; text-align:center; \
                          padding:1px 2px; outline:none; \
                          box-shadow: 0 0 6px {GLOW};",
-                        VALUE_STYLE = theme::STYLE_VALUE,
-                        SURFACE = theme::SURFACE,
-                        ACCENT = theme::ACCENT,
-                        RADIUS = theme::RADIUS_SMALL,
-                        GLOW = theme::ACCENT_GLOW,
+                        VALUE_STYLE = t.style_value(),
+                        SURFACE = t.surface,
+                        ACCENT = t.accent,
+                        RADIUS = t.radius_small,
+                        GLOW = t.accent_glow,
                     ),
                     value: "{display_value}",
                     onkeydown: {
@@ -347,8 +349,8 @@ pub fn Knob(
                     style: format!(
                         "{VALUE_STYLE} color:{TEXT_DIM}; \
                          min-width:48px; text-align:center; cursor:text;",
-                        VALUE_STYLE = theme::STYLE_VALUE,
-                        TEXT_DIM = theme::TEXT_DIM,
+                        VALUE_STYLE = t.style_value(),
+                        TEXT_DIM = t.text_dim,
                     ),
                     ondoubleclick: move |_| {
                         if !disabled {
@@ -363,7 +365,7 @@ pub fn Knob(
             span {
                 style: format!(
                     "{LABEL_STYLE} min-width:48px; text-align:center;",
-                    LABEL_STYLE = theme::STYLE_LABEL,
+                    LABEL_STYLE = t.style_label(),
                 ),
                 "{param_name}"
             }
@@ -404,6 +406,9 @@ pub fn RawKnob(
     #[props(default)]
     disabled: bool,
 ) -> Element {
+    let t = use_theme();
+    let t = *t.read();
+
     let d = size.diameter();
     let df = d as f64;
     let body_d = size.body_diameter();
@@ -436,7 +441,7 @@ pub fn RawKnob(
     let (ix1, iy1) = arc_point(cx, cy, ind_inner, end_angle);
     let (ix2, iy2) = arc_point(cx, cy, ind_outer, end_angle);
 
-    let accent = color.as_deref().unwrap_or(ACCENT);
+    let accent = color.as_deref().unwrap_or(t.accent);
     let opacity = if disabled { "0.5" } else { "1.0" };
     let cursor = if disabled { "not-allowed" } else { "pointer" };
 
@@ -448,7 +453,7 @@ pub fn RawKnob(
             style: format!(
                 "display:inline-flex; flex-direction:column; align-items:center; \
                  gap:{SPACING_LABEL}; opacity:{opacity}; cursor:{cursor};",
-                SPACING_LABEL = theme::SPACING_LABEL,
+                SPACING_LABEL = t.spacing_label,
             ),
 
             // Knob area — body + arcs layered
@@ -468,9 +473,9 @@ pub fn RawKnob(
                            inset 0 -1px 1px rgba(0,0,0,0.25); \
                          border: 1px solid rgba(255,255,255,0.04); \
                          position:absolute; z-index:1;",
-                        LIGHT = theme::KNOB_BODY_LIGHT,
-                        DARK = theme::KNOB_BODY_DARK,
-                        SHADOW = theme::SHADOW_KNOB,
+                        LIGHT = t.knob_body_light,
+                        DARK = t.knob_body_dark,
+                        SHADOW = t.shadow_knob,
                     ),
                 }
 
@@ -484,7 +489,7 @@ pub fn RawKnob(
                     path {
                         d: "{track_path}",
                         fill: "none",
-                        stroke: "{KNOB_TRACK}",
+                        stroke: "{t.knob_track}",
                         stroke_width: "{track_stroke}",
                         stroke_linecap: "round",
                     }
@@ -503,7 +508,7 @@ pub fn RawKnob(
                         path {
                             d: "{mod_path}",
                             fill: "none",
-                            stroke: "{SIGNAL_MOD}",
+                            stroke: "{t.signal_mod}",
                             stroke_width: "2",
                             stroke_linecap: "round",
                             opacity: "0.6",
@@ -516,7 +521,7 @@ pub fn RawKnob(
                         y1: "{iy1:.1}",
                         x2: "{ix2:.1}",
                         y2: "{iy2:.1}",
-                        stroke: "{KNOB_INDICATOR}",
+                        stroke: "{t.knob_indicator}",
                         stroke_width: "2",
                         stroke_linecap: "round",
                     }
@@ -547,8 +552,8 @@ pub fn RawKnob(
                 span {
                     style: format!(
                         "{VALUE_STYLE} color:{TEXT_DIM};",
-                        VALUE_STYLE = theme::STYLE_VALUE,
-                        TEXT_DIM = theme::TEXT_DIM,
+                        VALUE_STYLE = t.style_value(),
+                        TEXT_DIM = t.text_dim,
                     ),
                     "{display}"
                 }
@@ -556,7 +561,7 @@ pub fn RawKnob(
 
             if let Some(label) = &label {
                 span {
-                    style: format!("{LABEL_STYLE}", LABEL_STYLE = theme::STYLE_LABEL),
+                    style: format!("{LABEL_STYLE}", LABEL_STYLE = t.style_label()),
                     "{label}"
                 }
             }

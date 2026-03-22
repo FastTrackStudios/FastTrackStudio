@@ -29,5 +29,6 @@ pub mod prelude {
     pub use crate::layout::*;
     pub use crate::meters::*;
     pub use crate::theme;
+    pub use crate::theme::{use_init_theme, use_theme, Theme, ThemeProvider, ThemeVariant};
     pub use crate::viz::*;
 }
