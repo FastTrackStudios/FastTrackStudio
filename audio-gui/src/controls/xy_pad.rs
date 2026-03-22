@@ -1,8 +1,8 @@
 //! XY Pad — 2D parameter control surface.
 //!
-//! Ported from FastTrackStudio signal-ui, adapted for Blitz inline styles.
+//! Backlit grid with glowing crosshair cursor and recessed background.
 
-use crate::theme::*;
+use crate::theme;
 use nih_plug_dioxus::prelude::*;
 
 /// 2D control output.
@@ -57,32 +57,87 @@ pub fn XYPad(
 
             div {
                 style: format!(
-                    "position:relative; border-radius:4px; border:1px solid {BORDER}; \
-                     background:rgba(34,34,64,0.3); overflow:hidden; cursor:{cursor}; \
-                     width:{s}px; height:{s}px;"
+                    "position:relative; {INSET} overflow:hidden; cursor:{cursor}; \
+                     width:{s}px; height:{s}px; \
+                     background:linear-gradient(180deg, rgba(20,20,35,0.8), rgba(10,10,20,0.9));",
+                    INSET = theme::STYLE_INSET,
                 ),
 
-                // Crosshair lines
+                // Grid lines — subtle backlit grid
+                div {
+                    style: format!(
+                        "position:absolute; left:25%; top:0; width:1px; height:100%; \
+                         background:{GRID};",
+                        GRID = theme::GRID_LINE,
+                    ),
+                }
+                div {
+                    style: format!(
+                        "position:absolute; left:50%; top:0; width:1px; height:100%; \
+                         background:{GRID};",
+                        GRID = theme::GRID_LINE,
+                    ),
+                }
+                div {
+                    style: format!(
+                        "position:absolute; left:75%; top:0; width:1px; height:100%; \
+                         background:{GRID};",
+                        GRID = theme::GRID_LINE,
+                    ),
+                }
+                div {
+                    style: format!(
+                        "position:absolute; left:0; top:25%; width:100%; height:1px; \
+                         background:{GRID};",
+                        GRID = theme::GRID_LINE,
+                    ),
+                }
+                div {
+                    style: format!(
+                        "position:absolute; left:0; top:50%; width:100%; height:1px; \
+                         background:{GRID};",
+                        GRID = theme::GRID_LINE,
+                    ),
+                }
+                div {
+                    style: format!(
+                        "position:absolute; left:0; top:75%; width:100%; height:1px; \
+                         background:{GRID};",
+                        GRID = theme::GRID_LINE,
+                    ),
+                }
+
+                // Crosshair lines — glowing
                 div {
                     style: format!(
                         "position:absolute; left:{px}px; top:0; width:1px; height:100%; \
-                         background:rgba(136,136,136,0.3);"
+                         background:{ACCENT}; opacity:0.3; \
+                         box-shadow:0 0 4px {GLOW};",
+                        ACCENT = theme::ACCENT,
+                        GLOW = theme::ACCENT_GLOW,
                     ),
                 }
                 div {
                     style: format!(
                         "position:absolute; left:0; top:{py}px; width:100%; height:1px; \
-                         background:rgba(136,136,136,0.3);"
+                         background:{ACCENT}; opacity:0.3; \
+                         box-shadow:0 0 4px {GLOW};",
+                        ACCENT = theme::ACCENT,
+                        GLOW = theme::ACCENT_GLOW,
                     ),
                 }
 
-                // Dot indicator
+                // Dot indicator — glowing cursor
                 div {
                     style: format!(
                         "position:absolute; left:{px}px; top:{py}px; \
                          width:12px; height:12px; border-radius:6px; \
                          background:{ACCENT}; border:2px solid {BG}; \
-                         transform:translate(-50%,-50%);"
+                         transform:translate(-50%,-50%); \
+                         box-shadow:0 0 8px {GLOW};",
+                        ACCENT = theme::ACCENT,
+                        BG = theme::BG,
+                        GLOW = theme::ACCENT_GLOW,
                     ),
                 }
             }
@@ -91,7 +146,8 @@ pub fn XYPad(
             div {
                 style: format!(
                     "display:flex; justify-content:space-between; width:{s}px; \
-                     font-size:10px; color:{TEXT_DIM};"
+                     {LABEL}",
+                    LABEL = theme::STYLE_LABEL,
                 ),
                 if let Some(x_label) = &x_label {
                     span { "X: {x_label}" }

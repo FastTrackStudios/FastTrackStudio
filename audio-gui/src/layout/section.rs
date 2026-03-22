@@ -1,21 +1,26 @@
 //! Layout components — section cards, action buttons, control groups.
+//!
+//! Raised panels with depth shadows and consistent spacing tokens.
 
-use crate::theme::*;
+use crate::theme;
 use nih_plug_dioxus::prelude::*;
 
 /// Card-style section wrapper with uppercase title.
+///
+/// Raised panel with subtle top-edge highlight and drop shadow.
 #[component]
 pub fn Section(title: &'static str, children: Element) -> Element {
     rsx! {
         div {
             style: format!(
-                "background:{CARD_BG}; border-radius:6px; padding:10px 12px; \
-                 margin-bottom:8px;"
+                "{CARD} padding:{PAD}; margin-bottom:8px;",
+                CARD = theme::STYLE_CARD,
+                PAD = theme::SPACING_CARD,
             ),
             div {
                 style: format!(
-                    "font-size:11px; font-weight:600; text-transform:uppercase; \
-                     letter-spacing:0.5px; color:{TEXT_DIM}; margin-bottom:6px;"
+                    "{LABEL} margin-bottom:6px;",
+                    LABEL = theme::STYLE_LABEL,
                 ),
                 "{title}"
             }
@@ -25,14 +30,23 @@ pub fn Section(title: &'static str, children: Element) -> Element {
 }
 
 /// Full-width action button.
+///
+/// Raised with accent background and subtle glow.
 #[component]
 pub fn ActionButton(label: &'static str, on_click: EventHandler<()>) -> Element {
     rsx! {
         div {
             style: format!(
                 "padding:8px 0; cursor:pointer; text-align:center; \
-                 background:{ACCENT}; color:#fff; border-radius:6px; \
-                 font-size:13px; font-weight:600; margin-top:4px;"
+                 background:{ACCENT}; color:#fff; border-radius:{RADIUS}; \
+                 font-size:13px; font-weight:600; margin-top:4px; \
+                 box-shadow:{SHADOW}, 0 0 8px {GLOW}; \
+                 transition:{TRANS};",
+                ACCENT = theme::ACCENT,
+                RADIUS = theme::RADIUS_CARD,
+                SHADOW = theme::SHADOW_SUBTLE,
+                GLOW = theme::ACCENT_GLOW,
+                TRANS = theme::TRANSITION_FAST,
             ),
             onclick: move |_| on_click.call(()),
             "{label}"
@@ -43,22 +57,21 @@ pub fn ActionButton(label: &'static str, on_click: EventHandler<()>) -> Element 
 /// A labeled group of controls with a sub-heading.
 ///
 /// Renders a column with a tiny uppercase label and a horizontal row
-/// of child controls. Used across plugin editors for grouping related
-/// knobs/sliders (e.g. "Detection", "Sidechain", "Output").
+/// of child controls.
 #[component]
 pub fn ControlGroup(label: &'static str, children: Element) -> Element {
     rsx! {
         div {
             style: "display:flex; flex-direction:column; align-items:center; gap:6px;",
             div {
-                style: format!(
-                    "font-size:9px; color:{TEXT_DIM}; text-transform:uppercase; \
-                     letter-spacing:0.6px; font-weight:600;",
-                ),
+                style: format!("{LABEL}", LABEL = theme::STYLE_LABEL),
                 "{label}"
             }
             div {
-                style: "display:flex; gap:14px; align-items:flex-end;",
+                style: format!(
+                    "display:flex; gap:{GAP}; align-items:flex-end;",
+                    GAP = theme::SPACING_CONTROL,
+                ),
                 {children}
             }
         }
@@ -66,13 +79,16 @@ pub fn ControlGroup(label: &'static str, children: Element) -> Element {
 }
 
 /// Vertical divider line between control groups or UI sections.
+///
+/// Subtle border with slight depth.
 #[component]
 pub fn Divider() -> Element {
     rsx! {
         div {
             style: format!(
-                "width:1px; background:{}; align-self:stretch;",
-                BORDER,
+                "width:1px; background:{BORDER}; align-self:stretch; \
+                 box-shadow:1px 0 0 rgba(255,255,255,0.03);",
+                BORDER = theme::BORDER,
             ),
         }
     }
@@ -86,10 +102,7 @@ pub fn Divider() -> Element {
 pub fn SectionLabel(text: &'static str) -> Element {
     rsx! {
         div {
-            style: format!(
-                "font-size:10px; color:{TEXT_DIM}; text-transform:uppercase; \
-                 letter-spacing:0.4px;",
-            ),
+            style: format!("{LABEL}", LABEL = theme::STYLE_LABEL),
             "{text}"
         }
     }

@@ -1,5 +1,8 @@
 //! Gain reduction meter — vertical bar with numeric readout.
+//!
+//! Fills from top down with glowing segments and recessed trough.
 
+use crate::theme;
 use crate::theme::*;
 use nih_plug_dioxus::prelude::*;
 
@@ -25,12 +28,12 @@ pub fn GrMeter(
     let fill_pct = (clamped / max_gr_db) * 100.0;
     let gr_text = format!("{:.1}", -gain_reduction_db);
 
-    let color = if clamped < 6.0 {
-        SIGNAL_SAFE
+    let (color, glow) = if clamped < 6.0 {
+        (SIGNAL_SAFE, theme::SIGNAL_SAFE_GLOW)
     } else if clamped < 15.0 {
-        SIGNAL_WARN
+        (SIGNAL_WARN, theme::SIGNAL_WARN_GLOW)
     } else {
-        SIGNAL_DANGER
+        (SIGNAL_DANGER, theme::SIGNAL_DANGER_GLOW)
     };
 
     rsx! {
@@ -40,27 +43,28 @@ pub fn GrMeter(
                  min-width:36px;"
             ),
             div {
-                style: format!("font-size:10px; color:{TEXT_DIM}; text-transform:uppercase;"),
+                style: format!("{LABEL}", LABEL = theme::STYLE_LABEL),
                 "GR"
             }
             div {
                 style: format!(
-                    "width:{width}px; height:{height}px; background:{SURFACE}; \
-                     border-radius:3px; position:relative; overflow:hidden; \
-                     border:1px solid {BORDER};"
+                    "width:{width}px; height:{height}px; \
+                     {INSET} position:relative; overflow:hidden;",
+                    INSET = theme::STYLE_INSET,
                 ),
                 div {
                     style: format!(
                         "position:absolute; top:0; left:0; right:0; \
                          height:{fill_pct}%; background:{color}; \
+                         box-shadow:0 0 6px {glow}; \
                          transition:height 0.05s;"
                     ),
                 }
             }
             div {
                 style: format!(
-                    "font-size:11px; color:{TEXT}; font-variant-numeric:tabular-nums; \
-                     min-width:36px; text-align:center;"
+                    "{VALUE} min-width:36px; text-align:center;",
+                    VALUE = theme::STYLE_VALUE,
                 ),
                 "{gr_text}"
             }

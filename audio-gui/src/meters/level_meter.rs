@@ -1,7 +1,8 @@
 //! Level meter — vertical or horizontal bar with peak hold and color zones.
 //!
-//! Ported from FastTrackStudio signal-ui, adapted for Blitz inline styles.
+//! Recessed trough with glowing fill segments and peak hold indicator.
 
+use crate::theme;
 use crate::theme::*;
 use nih_plug_dioxus::prelude::*;
 
@@ -47,43 +48,44 @@ pub fn LevelMeter(
 
     let is_vertical = orientation == LevelMeterOrientation::Vertical;
 
-    let bar_color = if level > 0.9 {
-        SIGNAL_DANGER
+    let (bar_color, glow_color) = if level > 0.9 {
+        (SIGNAL_DANGER, theme::SIGNAL_DANGER_GLOW)
     } else if level > 0.75 {
-        SIGNAL_WARN
+        (SIGNAL_WARN, theme::SIGNAL_WARN_GLOW)
     } else {
-        SIGNAL_SAFE
+        (SIGNAL_SAFE, theme::SIGNAL_SAFE_GLOW)
     };
 
     let container_style = if is_vertical {
-        format!("display:flex; flex-direction:column; align-items:center; gap:4px;")
+        "display:flex; flex-direction:column; align-items:center; gap:4px;".to_string()
     } else {
-        format!("display:flex; align-items:center; gap:4px;")
+        "display:flex; align-items:center; gap:4px;".to_string()
     };
 
     let meter_style = if is_vertical {
         format!(
             "position:relative; width:{thickness}px; height:{length}px; \
-             background:{SURFACE}; border-radius:3px; overflow:hidden; \
-             border:1px solid {BORDER};"
+             {INSET} overflow:hidden;",
+            INSET = theme::STYLE_INSET,
         )
     } else {
         format!(
             "position:relative; height:{thickness}px; width:{length}px; \
-             background:{SURFACE}; border-radius:3px; overflow:hidden; \
-             border:1px solid {BORDER};"
+             {INSET} overflow:hidden;",
+            INSET = theme::STYLE_INSET,
         )
     };
 
     let bar_style = if is_vertical {
         format!(
             "position:absolute; bottom:0; left:0; right:0; height:{pct}%; \
-             background:{bar_color}; transition:height 0.05s;"
+             background:{bar_color}; box-shadow:0 0 6px {glow_color}; \
+             transition:height 0.05s;"
         )
     } else {
         format!(
             "width:{pct}%; height:100%; background:{bar_color}; \
-             transition:width 0.05s;"
+             box-shadow:0 0 6px {glow_color}; transition:width 0.05s;"
         )
     };
 
@@ -93,9 +95,7 @@ pub fn LevelMeter(
 
             if let Some(label) = &label {
                 div {
-                    style: format!(
-                        "font-size:10px; color:{TEXT_DIM}; text-transform:uppercase;"
-                    ),
+                    style: format!("{LABEL}", LABEL = theme::STYLE_LABEL),
                     "{label}"
                 }
             }
@@ -103,22 +103,29 @@ pub fn LevelMeter(
             div {
                 style: meter_style,
 
-                // Fill bar
+                // Fill bar with glow
                 div { style: bar_style }
 
                 // Peak hold indicator
                 if let Some(peak) = peak {
                     {
                         let peak_pct = peak.clamp(0.0, 1.0) * 100.0;
+                        let peak_color = if peak > 0.9 {
+                            theme::SIGNAL_DANGER
+                        } else {
+                            theme::TEXT_BRIGHT
+                        };
                         let peak_style = if is_vertical {
                             format!(
                                 "position:absolute; bottom:{peak_pct}%; left:0; right:0; \
-                                 height:2px; background:rgba(224,224,224,0.6);"
+                                 height:2px; background:{peak_color}; \
+                                 box-shadow:0 0 4px {peak_color};"
                             )
                         } else {
                             format!(
                                 "position:absolute; left:{peak_pct}%; top:0; bottom:0; \
-                                 width:2px; background:rgba(224,224,224,0.6);"
+                                 width:2px; background:{peak_color}; \
+                                 box-shadow:0 0 4px {peak_color};"
                             )
                         };
                         rsx! { div { style: peak_style } }
@@ -130,7 +137,8 @@ pub fn LevelMeter(
                     div {
                         style: format!(
                             "position:absolute; inset:0; \
-                             background:rgba(248,113,113,0.3);"
+                             background:{DANGER_GLOW};",
+                            DANGER_GLOW = theme::SIGNAL_DANGER_GLOW,
                         ),
                     }
                 }
@@ -178,8 +186,9 @@ pub fn LevelMeterDb(
             }
             div {
                 style: format!(
-                    "font-size:10px; color:{TEXT_DIM}; font-variant-numeric:tabular-nums; \
-                     min-width:36px; text-align:center;"
+                    "{VALUE} color:{DIM}; min-width:36px; text-align:center;",
+                    VALUE = theme::STYLE_VALUE,
+                    DIM = theme::TEXT_DIM,
                 ),
                 "{level_text}"
             }

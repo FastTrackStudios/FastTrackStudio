@@ -3,9 +3,11 @@
 //! Two variants:
 //! - `ParamSlider`: bound to a nih_plug `ParamPtr`, displays name + value
 //! - `Slider`: raw normalized value with callback
+//!
+//! Redesigned with recessed track, illuminated fill bar, and 3D thumb.
 
 use crate::drag::{begin_drag, DragState};
-use crate::theme::*;
+use crate::theme;
 use nih_plug::prelude::ParamPtr;
 use nih_plug_dioxus::prelude::*;
 
@@ -51,21 +53,24 @@ pub fn ParamSlider(
 
     rsx! {
         div {
-            style: "display:flex; flex-direction:column; gap:2px; min-width:80px; flex:1;",
+            style: format!(
+                "display:flex; flex-direction:column; gap:{TIGHT}; min-width:80px; flex:1;",
+                TIGHT = theme::SPACING_TIGHT,
+            ),
 
+            // Label
             div {
-                style: format!(
-                    "font-size:10px; color:{TEXT_DIM}; text-transform:uppercase; \
-                     letter-spacing:0.3px;"
-                ),
+                style: format!("{LABEL}", LABEL = theme::STYLE_LABEL),
                 "{name}"
             }
 
+            // Track (recessed trough)
             div {
                 style: format!(
-                    "height:{height}px; background:{SURFACE}; border-radius:4px; \
+                    "height:{height}px; {INSET} \
                      position:relative; overflow:hidden; cursor:ns-resize; \
-                     border:1px solid {BORDER}; user-select:none;"
+                     user-select:none;",
+                    INSET = theme::STYLE_INSET,
                 ),
                 onmousedown: {
                     let ctx = ctx.clone();
@@ -91,11 +96,12 @@ pub fn ParamSlider(
                     }
                 },
 
-                // Fill bar
+                // Fill bar with accent glow
                 div {
                     style: format!(
                         "position:absolute; left:0; top:0; bottom:0; width:{fill_width}; \
-                         background:{ACCENT}; opacity:0.6; pointer-events:none;"
+                         background:{ACCENT}; opacity:0.7; pointer-events:none;",
+                        ACCENT = theme::ACCENT,
                     ),
                 }
 
@@ -104,8 +110,8 @@ pub fn ParamSlider(
                     style: format!(
                         "position:absolute; left:0; right:0; top:0; bottom:0; \
                          display:flex; align-items:center; justify-content:center; \
-                         font-size:11px; color:{TEXT}; pointer-events:none; \
-                         font-variant-numeric:tabular-nums;"
+                         {VALUE} pointer-events:none;",
+                        VALUE = theme::STYLE_VALUE,
                     ),
                     "{display_value}"
                 }
@@ -166,35 +172,59 @@ pub fn Slider(
     let track_style = if is_vertical {
         format!(
             "position:relative; width:8px; flex:1; overflow:hidden; \
-             border-radius:4px; background:{BORDER};"
+             border-radius:{RADIUS}; background:{SURFACE}; \
+             box-shadow:{INSET_SHADOW}; border:1px solid {BORDER_S};",
+            RADIUS = theme::RADIUS_BUTTON,
+            SURFACE = theme::SURFACE,
+            INSET_SHADOW = theme::SHADOW_INSET,
+            BORDER_S = theme::BORDER_SUBTLE,
         )
     } else {
         format!(
             "position:relative; height:8px; width:100%; flex:1; overflow:hidden; \
-             border-radius:4px; background:{BORDER};"
+             border-radius:{RADIUS}; background:{SURFACE}; \
+             box-shadow:{INSET_SHADOW}; border:1px solid {BORDER_S};",
+            RADIUS = theme::RADIUS_BUTTON,
+            SURFACE = theme::SURFACE,
+            INSET_SHADOW = theme::SHADOW_INSET,
+            BORDER_S = theme::BORDER_SUBTLE,
         )
     };
 
     let fill_style = if is_vertical {
         format!(
             "height:{pct}%; width:100%; position:absolute; bottom:0; \
-             background:{ACCENT};"
+             background:{ACCENT};",
+            ACCENT = theme::ACCENT,
         )
     } else {
-        format!("width:{pct}%; height:100%; background:{ACCENT};")
+        format!(
+            "width:{pct}%; height:100%; background:{ACCENT};",
+            ACCENT = theme::ACCENT,
+        )
     };
 
     let thumb_style = if is_vertical {
         format!(
             "position:absolute; left:50%; bottom:calc({pct}% - 7px); \
              transform:translateX(-50%); width:14px; height:14px; \
-             border-radius:7px; border:2px solid {ACCENT}; background:{BG};"
+             border-radius:7px; border:2px solid {ACCENT}; \
+             background:{BG}; \
+             box-shadow:{SHADOW};",
+            ACCENT = theme::ACCENT,
+            BG = theme::BG,
+            SHADOW = theme::SHADOW_SUBTLE,
         )
     } else {
         format!(
             "position:absolute; top:50%; left:calc({pct}% - 7px); \
              transform:translateY(-50%); width:14px; height:14px; \
-             border-radius:7px; border:2px solid {ACCENT}; background:{BG};"
+             border-radius:7px; border:2px solid {ACCENT}; \
+             background:{BG}; \
+             box-shadow:{SHADOW};",
+            ACCENT = theme::ACCENT,
+            BG = theme::BG,
+            SHADOW = theme::SHADOW_SUBTLE,
         )
     };
 

@@ -1,12 +1,14 @@
-//! Rotary knob widget — SVG arc-style with drag interaction and modulation overlay.
+//! Rotary knob widget — 3D-style with arc indicator, drop shadow, and drag interaction.
 //!
-//! Ported from FastTrackStudio signal-ui, adapted for Blitz inline styles
-//! and nih_plug ParamPtr binding.
+//! Renders a circular knob body with radial lighting, surrounded by a
+//! value arc and optional modulation overlay. The warm hybrid aesthetic
+//! uses shadows and highlights to create depth without photorealism.
 //!
 //! Drag capture is handled by the `DragProvider` wrapper at the editor root.
 //! The knob only fires `onmousedown` to start a drag.
 
 use crate::drag::{begin_drag, DragState};
+use crate::theme;
 use crate::theme::*;
 use nih_plug::prelude::ParamPtr;
 use nih_plug_dioxus::prelude::*;
@@ -33,6 +35,42 @@ impl KnobSize {
             Self::Medium => 48,
             Self::Large => 64,
         }
+    }
+
+    /// Diameter of the inner knob body circle.
+    fn body_diameter(self) -> u32 {
+        match self {
+            Self::Small => 20,
+            Self::Medium => 30,
+            Self::Large => 42,
+        }
+    }
+
+    /// Stroke width for the value arc.
+    fn arc_stroke(self) -> f64 {
+        match self {
+            Self::Small => 3.0,
+            Self::Medium => 3.5,
+            Self::Large => 4.0,
+        }
+    }
+
+    /// Stroke width for the track arc.
+    fn track_stroke(self) -> f64 {
+        match self {
+            Self::Small => 2.5,
+            Self::Medium => 3.0,
+            Self::Large => 3.5,
+        }
+    }
+
+    /// Length of the indicator line from center outward.
+    fn indicator_inner_ratio(self) -> f64 {
+        0.25
+    }
+
+    fn indicator_outer_ratio(self) -> f64 {
+        0.85
     }
 }
 
@@ -105,9 +143,10 @@ pub fn Knob(
 
     let d = size.diameter();
     let df = d as f64;
+    let body_d = size.body_diameter();
     let cx = df / 2.0;
     let cy = df / 2.0;
-    let r = df / 2.0 - 4.0;
+    let r = df / 2.0 - 3.0; // Arc radius — outer ring
     let val = normalized.clamp(0.0, 1.0);
 
     // Track arc (full background)
@@ -131,94 +170,127 @@ pub fn Knob(
         _ => String::new(),
     };
 
-    // Thumb indicator line
-    let (tx, ty) = arc_point(cx, cy, r - 6.0, end_angle);
-    let (tx2, ty2) = arc_point(cx, cy, r + 1.0, end_angle);
+    // Indicator line on the knob body — from inner to outer edge
+    let body_r = body_d as f64 / 2.0;
+    let ind_inner = body_r * size.indicator_inner_ratio();
+    let ind_outer = body_r * size.indicator_outer_ratio();
+    let (ix1, iy1) = arc_point(cx, cy, ind_inner, end_angle);
+    let (ix2, iy2) = arc_point(cx, cy, ind_outer, end_angle);
 
     let accent = color.as_deref().unwrap_or(ACCENT);
     let opacity = if disabled { "0.5" } else { "1.0" };
     let cursor = if disabled { "not-allowed" } else { "pointer" };
 
+    let arc_stroke = size.arc_stroke();
+    let track_stroke = size.track_stroke();
+
     rsx! {
         div {
             style: format!(
-                "display:inline-flex; flex-direction:column; align-items:center; gap:4px; \
-                 opacity:{opacity}; cursor:{cursor}; position:relative;"
+                "display:inline-flex; flex-direction:column; align-items:center; \
+                 gap:{SPACING_LABEL}; opacity:{opacity}; cursor:{cursor}; position:relative;",
+                SPACING_LABEL = theme::SPACING_LABEL,
             ),
 
-            // SVG arc knob
-            svg {
-                width: "{d}",
-                height: "{d}",
-                view_box: "0 0 {df} {df}",
+            // Knob area — body + arcs layered
+            div {
+                style: format!(
+                    "position:relative; width:{d}px; height:{d}px; \
+                     display:flex; align-items:center; justify-content:center;"
+                ),
 
-                // Track arc (background)
-                path {
-                    d: "{track_path}",
-                    fill: "none",
-                    stroke: "{BORDER}",
-                    stroke_width: "3.5",
-                    stroke_linecap: "round",
+                // Knob body — 3D circle with lighting
+                div {
+                    style: format!(
+                        "width:{body_d}px; height:{body_d}px; border-radius:50%; \
+                         background: linear-gradient(145deg, {LIGHT}, {DARK}); \
+                         box-shadow: {SHADOW}, \
+                           inset 0 1px 1px rgba(255,255,255,0.07), \
+                           inset 0 -1px 1px rgba(0,0,0,0.25); \
+                         border: 1px solid rgba(255,255,255,0.04); \
+                         position:absolute; z-index:1;",
+                        LIGHT = theme::KNOB_BODY_LIGHT,
+                        DARK = theme::KNOB_BODY_DARK,
+                        SHADOW = theme::SHADOW_KNOB,
+                    ),
                 }
 
-                // Value arc (filled)
-                if !value_path.is_empty() {
+                // SVG arcs + indicator — overlaid on top
+                svg {
+                    width: "{d}",
+                    height: "{d}",
+                    view_box: "0 0 {df} {df}",
+                    style: "position:absolute; z-index:2;",
+
+                    // Track arc (recessed background ring)
                     path {
-                        d: "{value_path}",
+                        d: "{track_path}",
                         fill: "none",
-                        stroke: "{accent}",
-                        stroke_width: "4",
+                        stroke: "{KNOB_TRACK}",
+                        stroke_width: "{track_stroke}",
                         stroke_linecap: "round",
                     }
-                }
 
-                // Modulation overlay
-                if !mod_path.is_empty() {
-                    path {
-                        d: "{mod_path}",
-                        fill: "none",
-                        stroke: "{SIGNAL_MOD}",
+                    // Value arc (lit portion)
+                    if !value_path.is_empty() {
+                        path {
+                            d: "{value_path}",
+                            fill: "none",
+                            stroke: "{accent}",
+                            stroke_width: "{arc_stroke}",
+                            stroke_linecap: "round",
+                        }
+                    }
+
+                    // Modulation overlay
+                    if !mod_path.is_empty() {
+                        path {
+                            d: "{mod_path}",
+                            fill: "none",
+                            stroke: "{SIGNAL_MOD}",
+                            stroke_width: "2",
+                            stroke_linecap: "round",
+                            opacity: "0.6",
+                        }
+                    }
+
+                    // Indicator line on the knob body
+                    line {
+                        x1: "{ix1:.1}",
+                        y1: "{iy1:.1}",
+                        x2: "{ix2:.1}",
+                        y2: "{iy2:.1}",
+                        stroke: "{KNOB_INDICATOR}",
                         stroke_width: "2",
                         stroke_linecap: "round",
-                        opacity: "0.6",
                     }
                 }
 
-                // Thumb indicator line
-                line {
-                    x1: "{tx:.1}",
-                    y1: "{ty:.1}",
-                    x2: "{tx2:.1}",
-                    y2: "{ty2:.1}",
-                    stroke: "{TEXT}",
-                    stroke_width: "2",
-                    stroke_linecap: "round",
-                }
-            }
-
-            // Invisible drag surface — only handles mousedown and doubleclick.
-            // mousemove / mouseup are handled by the DragProvider at the root.
-            if !disabled {
-                div {
-                    style: "position:absolute; inset:0; cursor:ns-resize; user-select:none;",
-                    onmousedown: {
-                        let ctx = ctx.clone();
-                        move |evt: MouseEvent| {
-                            begin_drag(
-                                &mut drag,
-                                &ctx,
-                                param_ptr,
-                                evt.client_coordinates().y,
-                                SENSITIVITY,
-                            );
-                            revision += 1;
-                        }
-                    },
-                    ondoubleclick: {
-                        move |_| {
-                            editing.set(true);
-                        }
-                    },
+                // Invisible drag surface — only handles mousedown and doubleclick.
+                // mousemove / mouseup are handled by the DragProvider at the root.
+                if !disabled {
+                    div {
+                        style: "position:absolute; inset:0; cursor:ns-resize; \
+                                user-select:none; z-index:3;",
+                        onmousedown: {
+                            let ctx = ctx.clone();
+                            move |evt: MouseEvent| {
+                                begin_drag(
+                                    &mut drag,
+                                    &ctx,
+                                    param_ptr,
+                                    evt.client_coordinates().y,
+                                    SENSITIVITY,
+                                );
+                                revision += 1;
+                            }
+                        },
+                        ondoubleclick: {
+                            move |_| {
+                                editing.set(true);
+                            }
+                        },
+                    }
                 }
             }
 
@@ -227,20 +299,22 @@ pub fn Knob(
                 input {
                     r#type: "text",
                     style: format!(
-                        "font-size:10px; color:{TEXT}; background:{SURFACE}; \
-                         border:1px solid {ACCENT}; border-radius:3px; \
+                        "{VALUE_STYLE} background:{SURFACE}; \
+                         border:1px solid {ACCENT}; border-radius:{RADIUS}; \
                          min-width:48px; width:56px; text-align:center; \
-                         padding:1px 2px; outline:none;"
+                         padding:1px 2px; outline:none; \
+                         box-shadow: 0 0 6px {GLOW};",
+                        VALUE_STYLE = theme::STYLE_VALUE,
+                        SURFACE = theme::SURFACE,
+                        ACCENT = theme::ACCENT,
+                        RADIUS = theme::RADIUS_SMALL,
+                        GLOW = theme::ACCENT_GLOW,
                     ),
                     value: "{display_value}",
                     onkeydown: {
                         let ctx = ctx.clone();
                         move |evt: KeyboardEvent| {
                             if evt.key() == Key::Enter {
-                                // Try to parse whatever the user typed
-                                // Note: In Dioxus/Blitz, we read the value from
-                                // the input via a separate event. For now, we
-                                // commit on Enter via onchange/oninput.
                                 editing.set(false);
                             } else if evt.key() == Key::Escape {
                                 editing.set(false);
@@ -271,8 +345,10 @@ pub fn Knob(
             } else {
                 span {
                     style: format!(
-                        "font-size:10px; color:{TEXT_DIM}; font-variant-numeric:tabular-nums; \
-                         min-width:48px; text-align:center; cursor:text;"
+                        "{VALUE_STYLE} color:{TEXT_DIM}; \
+                         min-width:48px; text-align:center; cursor:text;",
+                        VALUE_STYLE = theme::STYLE_VALUE,
+                        TEXT_DIM = theme::TEXT_DIM,
                     ),
                     ondoubleclick: move |_| {
                         if !disabled {
@@ -286,8 +362,8 @@ pub fn Knob(
             // Label
             span {
                 style: format!(
-                    "font-size:10px; color:{TEXT_DIM}; font-weight:500; \
-                     min-width:48px; text-align:center;"
+                    "{LABEL_STYLE} min-width:48px; text-align:center;",
+                    LABEL_STYLE = theme::STYLE_LABEL,
                 ),
                 "{param_name}"
             }
@@ -330,9 +406,10 @@ pub fn RawKnob(
 ) -> Element {
     let d = size.diameter();
     let df = d as f64;
+    let body_d = size.body_diameter();
     let cx = df / 2.0;
     let cy = df / 2.0;
-    let r = df / 2.0 - 4.0;
+    let r = df / 2.0 - 3.0;
     let val = value.clamp(0.0, 1.0);
 
     let track_path = svg_arc(cx, cy, r, START_ANGLE, START_ANGLE + SWEEP);
@@ -352,88 +429,126 @@ pub fn RawKnob(
         _ => String::new(),
     };
 
-    let (tx, ty) = arc_point(cx, cy, r - 6.0, end_angle);
-    let (tx2, ty2) = arc_point(cx, cy, r + 1.0, end_angle);
+    // Indicator line on the knob body
+    let body_r = body_d as f64 / 2.0;
+    let ind_inner = body_r * size.indicator_inner_ratio();
+    let ind_outer = body_r * size.indicator_outer_ratio();
+    let (ix1, iy1) = arc_point(cx, cy, ind_inner, end_angle);
+    let (ix2, iy2) = arc_point(cx, cy, ind_outer, end_angle);
 
     let accent = color.as_deref().unwrap_or(ACCENT);
     let opacity = if disabled { "0.5" } else { "1.0" };
     let cursor = if disabled { "not-allowed" } else { "pointer" };
 
+    let arc_stroke = size.arc_stroke();
+    let track_stroke = size.track_stroke();
+
     rsx! {
         div {
             style: format!(
-                "display:inline-flex; flex-direction:column; align-items:center; gap:4px; \
-                 opacity:{opacity}; cursor:{cursor};"
+                "display:inline-flex; flex-direction:column; align-items:center; \
+                 gap:{SPACING_LABEL}; opacity:{opacity}; cursor:{cursor};",
+                SPACING_LABEL = theme::SPACING_LABEL,
             ),
 
-            svg {
-                width: "{d}",
-                height: "{d}",
-                view_box: "0 0 {df} {df}",
+            // Knob area — body + arcs layered
+            div {
+                style: format!(
+                    "position:relative; width:{d}px; height:{d}px; \
+                     display:flex; align-items:center; justify-content:center;"
+                ),
 
-                path {
-                    d: "{track_path}",
-                    fill: "none",
-                    stroke: "{BORDER}",
-                    stroke_width: "3.5",
-                    stroke_linecap: "round",
+                // Knob body — 3D circle
+                div {
+                    style: format!(
+                        "width:{body_d}px; height:{body_d}px; border-radius:50%; \
+                         background: linear-gradient(145deg, {LIGHT}, {DARK}); \
+                         box-shadow: {SHADOW}, \
+                           inset 0 1px 1px rgba(255,255,255,0.07), \
+                           inset 0 -1px 1px rgba(0,0,0,0.25); \
+                         border: 1px solid rgba(255,255,255,0.04); \
+                         position:absolute; z-index:1;",
+                        LIGHT = theme::KNOB_BODY_LIGHT,
+                        DARK = theme::KNOB_BODY_DARK,
+                        SHADOW = theme::SHADOW_KNOB,
+                    ),
                 }
 
-                if !value_path.is_empty() {
+                // SVG arcs + indicator
+                svg {
+                    width: "{d}",
+                    height: "{d}",
+                    view_box: "0 0 {df} {df}",
+                    style: "position:absolute; z-index:2;",
+
                     path {
-                        d: "{value_path}",
+                        d: "{track_path}",
                         fill: "none",
-                        stroke: "{accent}",
-                        stroke_width: "4",
+                        stroke: "{KNOB_TRACK}",
+                        stroke_width: "{track_stroke}",
                         stroke_linecap: "round",
                     }
-                }
 
-                if !mod_path.is_empty() {
-                    path {
-                        d: "{mod_path}",
-                        fill: "none",
-                        stroke: "{SIGNAL_MOD}",
+                    if !value_path.is_empty() {
+                        path {
+                            d: "{value_path}",
+                            fill: "none",
+                            stroke: "{accent}",
+                            stroke_width: "{arc_stroke}",
+                            stroke_linecap: "round",
+                        }
+                    }
+
+                    if !mod_path.is_empty() {
+                        path {
+                            d: "{mod_path}",
+                            fill: "none",
+                            stroke: "{SIGNAL_MOD}",
+                            stroke_width: "2",
+                            stroke_linecap: "round",
+                            opacity: "0.6",
+                        }
+                    }
+
+                    // Indicator line on the knob body
+                    line {
+                        x1: "{ix1:.1}",
+                        y1: "{iy1:.1}",
+                        x2: "{ix2:.1}",
+                        y2: "{iy2:.1}",
+                        stroke: "{KNOB_INDICATOR}",
                         stroke_width: "2",
                         stroke_linecap: "round",
-                        opacity: "0.6",
                     }
                 }
 
-                line {
-                    x1: "{tx:.1}",
-                    y1: "{ty:.1}",
-                    x2: "{tx2:.1}",
-                    y2: "{ty2:.1}",
-                    stroke: "{TEXT}",
-                    stroke_width: "2",
-                    stroke_linecap: "round",
-                }
-            }
-
-            // Hidden range input for interaction
-            if !disabled {
-                input {
-                    r#type: "range",
-                    style: "position:absolute; inset:0; opacity:0; cursor:pointer;",
-                    min: "0",
-                    max: "1",
-                    step: "0.005",
-                    value: "{val}",
-                    oninput: move |evt: FormEvent| {
-                        if let Ok(v) = evt.value().parse::<f64>() {
-                            if let Some(cb) = &on_change {
-                                cb.call(v.clamp(0.0, 1.0));
+                // Hidden range input for interaction
+                if !disabled {
+                    input {
+                        r#type: "range",
+                        style: "position:absolute; inset:0; opacity:0; \
+                                cursor:pointer; z-index:3;",
+                        min: "0",
+                        max: "1",
+                        step: "0.005",
+                        value: "{val}",
+                        oninput: move |evt: FormEvent| {
+                            if let Ok(v) = evt.value().parse::<f64>() {
+                                if let Some(cb) = &on_change {
+                                    cb.call(v.clamp(0.0, 1.0));
+                                }
                             }
-                        }
-                    },
+                        },
+                    }
                 }
             }
 
             if let Some(display) = &display_value {
                 span {
                     style: format!(
-                        "font-size:10px; color:{TEXT_DIM}; font-variant-numeric:tabular-nums;"
+                        "{VALUE_STYLE} color:{TEXT_DIM};",
+                        VALUE_STYLE = theme::STYLE_VALUE,
+                        TEXT_DIM = theme::TEXT_DIM,
                     ),
                     "{display}"
                 }
@@ -441,7 +556,7 @@ pub fn RawKnob(
 
             if let Some(label) = &label {
                 span {
-                    style: format!("font-size:10px; color:{TEXT_DIM}; font-weight:500;"),
+                    style: format!("{LABEL_STYLE}", LABEL_STYLE = theme::STYLE_LABEL),
                     "{label}"
                 }
             }
