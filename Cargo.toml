@@ -11,6 +11,9 @@ members = [
     "apps/installer",
     "xtask",
 ]
+exclude = [
+    "apps/tests/playground",
+]
 resolver = "2"
 
 [workspace.lints.rust]
