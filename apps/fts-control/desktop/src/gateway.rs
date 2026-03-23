@@ -375,8 +375,23 @@ async fn handle_socket<H: Handler<DriverReplySink> + Clone + Send + Sync + 'stat
     }
 
     let link = AxumWsLink::new(socket);
-    match roam::acceptor(roam::BareConduit::new(link))
-        .max_concurrent_requests(64)
+    let handshake_result = roam::HandshakeResult {
+        role: roam::SessionRole::Acceptor,
+        our_settings: roam::ConnectionSettings {
+            parity: roam::Parity::Even,
+            max_concurrent_requests: 64,
+        },
+        peer_settings: roam::ConnectionSettings {
+            parity: roam::Parity::Odd,
+            max_concurrent_requests: 64,
+        },
+        peer_supports_retry: true,
+        session_resume_key: None,
+        peer_resume_key: None,
+        our_schema: vec![],
+        peer_schema: vec![],
+    };
+    match roam::acceptor(roam::BareConduit::new(link), handshake_result)
         .establish::<DriverCaller>(gateway.handler.clone())
         .await
     {

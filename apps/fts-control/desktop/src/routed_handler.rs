@@ -16,7 +16,7 @@
 //!     .with(ProjectService::service_descriptor(), ProjectServiceDispatcher::new(project));
 //! ```
 
-use roam::{DriverReplySink, Handler, MethodId, ReplySink, RoamError, SelfRef, ServiceDescriptor};
+use roam::{DriverReplySink, Handler, MethodId, ReplySink, RoamError, SchemaRecvTracker, SelfRef, ServiceDescriptor};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -26,6 +26,7 @@ trait DynHandler: Send + Sync + 'static {
         &self,
         call: SelfRef<roam::RequestCall<'static>>,
         reply: DriverReplySink,
+        schemas: Arc<SchemaRecvTracker>,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + '_>>;
 }
 
@@ -35,8 +36,9 @@ impl<H: Handler<DriverReplySink>> DynHandler for H {
         &self,
         call: SelfRef<roam::RequestCall<'static>>,
         reply: DriverReplySink,
+        schemas: Arc<SchemaRecvTracker>,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + '_>> {
-        Box::pin(Handler::handle(self, call, reply))
+        Box::pin(Handler::handle(self, call, reply, schemas))
     }
 }
 
@@ -73,10 +75,10 @@ impl RoutedHandler {
 }
 
 impl Handler<DriverReplySink> for RoutedHandler {
-    async fn handle(&self, call: SelfRef<roam::RequestCall<'static>>, reply: DriverReplySink) {
+    async fn handle(&self, call: SelfRef<roam::RequestCall<'static>>, reply: DriverReplySink, schemas: Arc<SchemaRecvTracker>) {
         let method_id = call.method_id;
         if let Some(&idx) = self.method_map.get(&method_id) {
-            self.handlers[idx].handle(call, reply).await;
+            self.handlers[idx].handle(call, reply, schemas).await;
         } else {
             reply
                 .send_error(RoamError::<core::convert::Infallible>::UnknownMethod)

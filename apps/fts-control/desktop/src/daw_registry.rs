@@ -328,11 +328,31 @@ impl DawRegistry {
 async fn connect_to_daw(path: &Path) -> eyre::Result<ErasedCaller> {
     let stream = tokio::net::UnixStream::connect(path).await?;
     let link = roam_stream::StreamLink::unix(stream);
-    let (caller, _session_handle) = roam::initiator_conduit(roam::BareConduit::new(link))
-        .max_concurrent_requests(64)
+    let handshake_result = initiator_handshake_result(64);
+    let (caller, _session_handle) = roam::initiator_conduit(roam::BareConduit::new(link), handshake_result)
         .establish::<roam::DriverCaller>(())
         .await?;
     Ok(ErasedCaller::new(caller))
+}
+
+/// Construct a synthetic `HandshakeResult` for initiator connections.
+fn initiator_handshake_result(max_concurrent_requests: u32) -> roam::HandshakeResult {
+    roam::HandshakeResult {
+        role: roam::SessionRole::Initiator,
+        our_settings: roam::ConnectionSettings {
+            parity: roam::Parity::Odd,
+            max_concurrent_requests,
+        },
+        peer_settings: roam::ConnectionSettings {
+            parity: roam::Parity::Even,
+            max_concurrent_requests,
+        },
+        peer_supports_retry: true,
+        session_resume_key: None,
+        peer_resume_key: None,
+        our_schema: vec![],
+        peer_schema: vec![],
+    }
 }
 
 // ============================================================================
