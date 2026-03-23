@@ -4,6 +4,9 @@
 //! Any roam service can advertise itself and discover peers without manual
 //! configuration — just agree on a service type string.
 //!
+//! Uses the system's native mDNS implementation (avahi on Linux, Bonjour on macOS)
+//! via the `zeroconf` crate.
+//!
 //! # Advertising
 //!
 //! ```rust,no_run
@@ -67,8 +70,8 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// Error type for roam-discover operations.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("mDNS error: {0}")]
-    Mdns(#[from] mdns_sd::Error),
+    #[error("zeroconf error: {0}")]
+    Zeroconf(#[from] zeroconf::error::Error),
     #[error("invalid service type: {0}")]
     InvalidServiceType(String),
 }
