@@ -361,6 +361,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 timeout_secs,
                 keep_open,
                 ci,
+                extension_whitelist: vec![],
             };
 
             // Step 1: Build daw-bridge host + CLAP plugin + guest extensions (unless --no-build)
@@ -446,20 +447,26 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
 
                 // Build and install SHM guest extensions
+                // Each entry is (package_name, binary_name)
                 runner::section(ci, "reaper-test: build guest extensions");
-                let guest_extensions = ["signal-extension", "session-extension", "sync-extension"];
-                for ext in &guest_extensions {
-                    cmd!(sh, "cargo build -p {ext}").run()?;
+                let guest_extensions: &[(&str, &str)] = &[
+                    ("signal-extension", "signal"),
+                    ("session-extension", "session"),
+                    ("sync-extension", "sync"),
+                    ("dynamic-template-extension", "dynamic-template"),
+                ];
+                for (pkg, _bin) in guest_extensions {
+                    cmd!(sh, "cargo build -p {pkg}").run()?;
                 }
 
                 let fts_ext_dir = user_plugins_dir.join("fts-extensions");
                 std::fs::create_dir_all(&fts_ext_dir)?;
-                for ext in &guest_extensions {
-                    let src = workspace_root.join(format!("target/debug/{ext}"));
+                for (_pkg, bin) in guest_extensions {
+                    let src = workspace_root.join(format!("target/debug/{bin}"));
                     if src.exists() {
-                        runner::install_plugin(&src, ext, &fts_ext_dir)?;
+                        runner::install_plugin(&src, bin, &fts_ext_dir)?;
                     } else {
-                        println!("  Warning: {ext} binary not found at {}", src.display());
+                        println!("  Warning: {bin} binary not found at {}", src.display());
                     }
                 }
                 runner::end_section(ci);

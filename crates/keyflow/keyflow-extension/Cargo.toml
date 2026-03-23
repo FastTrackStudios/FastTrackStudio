@@ -5,7 +5,7 @@ edition.workspace = true
 description = "Keyflow domain SHM guest — connects to REAPER via daw-bridge"
 
 [[bin]]
-name = "keyflow-extension"
+name = "keyflow"
 path = "src/main.rs"
 
 [dependencies]
