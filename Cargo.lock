@@ -3753,7 +3753,7 @@ dependencies = [
  "daw",
  "daw-cli",
  "eyre",
- "macromod 0.1.0 (git+https://github.com/FastTrackStudios/signal.git?branch=main)",
+ "macromod",
  "midly",
  "serde",
  "serde_json",
@@ -5867,15 +5867,6 @@ checksum = "670fdfda89751bc4a84ac13eaa63e205cf0fd22b4c9a5fbfa085b63c1f1d3a30"
 [[package]]
 name = "macromod"
 version = "0.1.0"
-dependencies = [
- "facet",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "macromod"
-version = "0.1.0"
 source = "git+https://github.com/FastTrackStudios/signal.git?branch=main#07fcc8b8bb55910e406407741adf94327642c0b4"
 dependencies = [
  "facet",
@@ -6352,7 +6343,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
- "signal-proto 0.1.0 (git+https://github.com/FastTrackStudios/signal.git?branch=main)",
+ "signal-proto",
  "thiserror 2.0.18",
  "walkdir",
 ]
@@ -9026,8 +9017,8 @@ dependencies = [
  "signal-daw-bridge",
  "signal-import",
  "signal-live",
- "signal-proto 0.1.0 (git+https://github.com/FastTrackStudios/signal.git?branch=main)",
- "signal-storage 0.1.0 (git+https://github.com/FastTrackStudios/signal.git?branch=main)",
+ "signal-proto",
+ "signal-storage",
  "tokio",
  "utils 0.1.0 (git+https://github.com/FastTrackStudios/FastTrackStudio.git?branch=main)",
 ]
@@ -9056,7 +9047,7 @@ version = "0.1.0"
 source = "git+https://github.com/FastTrackStudios/signal.git?branch=main#07fcc8b8bb55910e406407741adf94327642c0b4"
 dependencies = [
  "signal-live",
- "signal-proto 0.1.0 (git+https://github.com/FastTrackStudios/signal.git?branch=main)",
+ "signal-proto",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -9071,7 +9062,7 @@ dependencies = [
  "daw",
  "serde",
  "signal-import",
- "signal-proto 0.1.0 (git+https://github.com/FastTrackStudios/signal.git?branch=main)",
+ "signal-proto",
 ]
 
 [[package]]
@@ -9103,7 +9094,7 @@ dependencies = [
  "serde",
  "serde_json",
  "signal-controller",
- "signal-proto 0.1.0 (git+https://github.com/FastTrackStudios/signal.git?branch=main)",
+ "signal-proto",
  "tracing",
  "uuid",
 ]
@@ -9117,13 +9108,13 @@ dependencies = [
  "daw",
  "eyre",
  "futures",
- "macromod 0.1.0 (git+https://github.com/FastTrackStudios/signal.git?branch=main)",
+ "macromod",
  "moire",
  "nam-manager",
  "serde",
  "serde_json",
- "signal-proto 0.1.0 (git+https://github.com/FastTrackStudios/signal.git?branch=main)",
- "signal-storage 0.1.0 (git+https://github.com/FastTrackStudios/signal.git?branch=main)",
+ "signal-proto",
+ "signal-storage",
  "tokio",
  "uuid",
  "vox",
@@ -9132,47 +9123,16 @@ dependencies = [
 [[package]]
 name = "signal-proto"
 version = "0.1.0"
-dependencies = [
- "actions-proto",
- "facet",
- "macromod 0.1.0",
- "serde",
- "thiserror 2.0.18",
- "utils 0.1.0 (git+https://github.com/FastTrackStudios/FastTrackStudio.git?branch=main)",
- "uuid",
- "vox",
-]
-
-[[package]]
-name = "signal-proto"
-version = "0.1.0"
 source = "git+https://github.com/FastTrackStudios/signal.git?branch=main#07fcc8b8bb55910e406407741adf94327642c0b4"
 dependencies = [
  "actions-proto",
  "facet",
- "macromod 0.1.0 (git+https://github.com/FastTrackStudios/signal.git?branch=main)",
+ "macromod",
  "serde",
  "thiserror 2.0.18",
  "utils 0.1.0 (git+https://github.com/FastTrackStudios/FastTrackStudio.git?branch=main)",
  "uuid",
  "vox",
-]
-
-[[package]]
-name = "signal-storage"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "base64 0.22.1",
- "facet",
- "facet-styx",
- "sea-orm",
- "serde",
- "serde_json",
- "signal-proto 0.1.0",
- "thiserror 2.0.18",
- "utils 0.1.0 (git+https://github.com/FastTrackStudios/FastTrackStudio.git?branch=main)",
- "uuid",
 ]
 
 [[package]]
@@ -9187,7 +9147,7 @@ dependencies = [
  "sea-orm",
  "serde",
  "serde_json",
- "signal-proto 0.1.0 (git+https://github.com/FastTrackStudios/signal.git?branch=main)",
+ "signal-proto",
  "thiserror 2.0.18",
  "utils 0.1.0 (git+https://github.com/FastTrackStudios/FastTrackStudio.git?branch=main)",
  "uuid",
@@ -10977,7 +10937,7 @@ dependencies = [
 [[package]]
 name = "utils"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/FastTrackStudio.git?branch=main#f375313a6002da9c9722d395c6c44e10acd7e589"
+source = "git+https://github.com/FastTrackStudios/FastTrackStudio.git?branch=main#13cd0dae012eb7d04dba34c50107655f0aefe77a"
 dependencies = [
  "facet",
  "serde",
@@ -12725,7 +12685,7 @@ dependencies = [
  "serde",
  "serde_json",
  "signal",
- "signal-storage 0.1.0",
+ "signal-storage",
  "tokio",
  "utils 0.1.0",
  "uuid",
