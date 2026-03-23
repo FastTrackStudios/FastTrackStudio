@@ -30,6 +30,15 @@ impl InstallPlan {
         }
     }
 
+    /// Create a plan with a custom install directory.
+    pub fn with_install_dir(dir: PathBuf) -> Self {
+        Self {
+            install_root: dir,
+            fts_control_source: find_fts_control_app(),
+            library_url: DEFAULT_LIBRARY_URL.to_string(),
+        }
+    }
+
     /// Validate the plan before starting installation.
     pub fn validate(&self) -> Result<(), Vec<String>> {
         let mut errors = Vec::new();
@@ -83,13 +92,21 @@ fn default_install_root() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("/tmp/FastTrackStudio"))
 }
 
-/// Look for FTS-Control.app adjacent to the running installer binary.
+/// Look for FastTrackStudio.app adjacent to the running installer binary.
 fn find_fts_control_app() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     // Inside FTS Installer.app/Contents/MacOS/fts-installer
     let app_bundle = exe.parent()?.parent()?.parent()?;
-    let sibling = app_bundle.parent()?.join("FTS Control.app");
-    sibling.exists().then_some(sibling)
+    let parent = app_bundle.parent()?;
+
+    // Try the current name first, then the legacy name.
+    for name in ["FastTrackStudio.app", "FTS Control.app"] {
+        let sibling = parent.join(name);
+        if sibling.exists() {
+            return Some(sibling);
+        }
+    }
+    None
 }
 
 fn dirs_home() -> Option<PathBuf> {

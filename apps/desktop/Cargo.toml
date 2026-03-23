@@ -5,90 +5,29 @@ authors = ["Cody Wright <acodywright@gmail.com>"]
 edition = "2021"
 
 [dependencies]
-# UI - Dioxus desktop (Wry/WebView)
-dioxus = { version = "0.7.2", features = ["desktop"], optional = true }
+# UI
+dioxus = { version = "0.7.2", features = ["desktop"] }
 
-# Session UI components - feature selected based on renderer
-session-ui = { workspace = true, default-features = false }
-
-# Services (run in-process)
+# Session
 session.workspace = true
+session-ui = { workspace = true, features = ["web"] }
 
-# Vox - for connecting to host and service dispatch
+# Vox RPC
 vox.workspace = true
 vox-stream.workspace = true
-vox-local.workspace = true
 
-# Instrumentation
-moire.workspace = true
-
-# WebSocket gateway (inlined — replaces gateway-ws crate)
-axum = { version = "0.8", features = ["ws"] }
-tower-http = { version = "0.6", features = ["fs", "cors"] }
-futures-util = "0.3"
-facet-postcard.workspace = true
-
-# DAW facade (sync wrapper for desktop)
+# DAW facade
 daw = { workspace = true, features = ["sync"] }
+
+# WebSocket gateway
+axum = { version = "0.8", features = ["ws"] }
+tower-http = { version = "0.6", features = ["fs"] }
 
 # Async
 tokio = { workspace = true, features = ["full"] }
-futures.workspace = true
+moire.workspace = true
 
 # Utils
 tracing.workspace = true
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 eyre.workspace = true
-serde = { workspace = true, features = ["derive"] }
-serde_json.workspace = true
-rfd = "0.15"
-
-# MIDI I/O
-midir = "0.10"
-helgoboss-midi = "0.4"
-
-
-# Chart rendering via anyrender (WGPU/Vello backend)
-anyrender.workspace = true
-anyrender_vello.workspace = true
-vello = "0.7"
-peniko.workspace = true
-kurbo.workspace = true
-
-# Keyflow chart editor UI
-keyflow-ui = { workspace = true, default-features = false }
-keyflow = { workspace = true, features = ["text", "engraver"] }
-
-# Signal — storage-backed rig control
-signal = { workspace = true, features = ["daw"] }
-signal-ui = { workspace = true, default-features = false }
-
-# Macro system (for macro bar in performance view)
-macromod.workspace = true
-
-# FTS design system (wraps lumen-blocks, layout, typography)
-fts-ui.workspace = true
-
-# Lumen Blocks UI components (dropdown, etc.)
-lumen-blocks.workspace = true
-
-# DAW UI components (mixer, TCP, arrangement, FX browser)
-daw-ui = { workspace = true, default-features = false }
-
-# Dock modular layout system
-dock-dioxus = { workspace = true, default-features = false }
-dock-proto.workspace = true
-
-# Actions system
-actions-proto.workspace = true
-actions-keybindings.workspace = true
-actions-standalone.workspace = true
-input-dioxus.workspace = true
-input.workspace = true
-
-utils.workspace = true
-mimalloc = "0.1"
-
-[features]
-default = ["desktop"]
-desktop = ["dioxus", "session-ui/web", "keyflow-ui/web", "signal-ui/web", "daw-ui/web", "dock-dioxus/web"]

@@ -4,7 +4,7 @@ use dioxus::prelude::*;
 use installer_core::InstallPlan;
 
 use crate::wizard;
-use crate::{MAIN_CSS, TAILWIND_CSS};
+use crate::{INITIAL_PLAN, MAIN_CSS, TAILWIND_CSS};
 
 #[derive(Clone, PartialEq)]
 pub enum WizardStep {
@@ -17,7 +17,11 @@ pub enum WizardStep {
 #[component]
 pub fn App() -> Element {
     let mut step = use_signal(|| WizardStep::Welcome);
-    let install_plan = use_signal(|| InstallPlan::default_for_machine());
+    let install_plan = use_signal(|| {
+        INITIAL_PLAN
+            .with(|p| p.borrow_mut().take())
+            .unwrap_or_else(InstallPlan::default_for_machine)
+    });
 
     rsx! {
         document::Link { rel: "stylesheet", href: MAIN_CSS }

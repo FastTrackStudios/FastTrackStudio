@@ -1,107 +1,217 @@
 //! Local Session Services
 //!
-//! Instantiates session services in-process rather than via separate cell processes.
-//! This provides the same functionality as the session cell but without the SHM
-//! complexity.
-//!
-//! # Architecture
-//!
-//! ```text
-//!                      ┌──────────────────┐
-//!                      │  LocalServices   │
-//!                      │                  │
-//!                      │ ┌──────────────┐ │
-//!                      │ │SetlistService│ │
-//!                      │ └──────────────┘ │
-//!                      │ ┌──────────────┐ │
-//!                      │ │ SongService  │ │
-//!                      │ └──────────────┘ │
-//!                      └────────┬─────────┘
-//!                               │
-//!                               ▼
-//!                      ┌──────────────────┐
-//!                      │  RoutedHandler   │
-//!                      │ (routes by       │
-//!                      │  method ID)      │
-//!                      └──────────────────┘
-//! ```
+//! Discovers a running REAPER instance via its Unix socket, connects via vox,
+//! initializes the DAW singleton, and builds the setlist from open projects.
 
-use crate::routed_handler::RoutedHandler;
+use std::path::{Path, PathBuf};
+
 use daw::sync::LocalCaller;
-use vox::ErasedCaller;
+use daw::{Daw, ErasedCaller};
+use eyre::{bail, Result};
 use session::{
-    setlist_service_service_descriptor, song_service_service_descriptor, SetlistServiceClient,
-    SetlistServiceDispatcher, SetlistServiceImpl, SongServiceDispatcher, SongServiceImpl,
+    SetlistServiceClient, SetlistServiceDispatcher, SetlistServiceImpl,
+    SongServiceDispatcher, SongServiceImpl,
+    setlist_service_service_descriptor, song_service_service_descriptor,
 };
+use session_ui::Session;
 
-/// Local session services running in-process.
-///
-/// Unlike the cell-based approach where services run in separate processes
-/// communicating via SHM, these services run directly in the desktop app process.
-#[allow(dead_code)]
-pub struct LocalServices {
-    /// Setlist management service
-    setlist: SetlistServiceImpl,
-    /// Song management service
-    song: SongServiceImpl,
+use crate::gateway;
+
+const SOCKET_DIR: &str = "/tmp";
+const SOCKET_PREFIX: &str = "fts-daw-";
+const SOCKET_SUFFIX: &str = ".sock";
+
+/// Start the WebSocket gateway immediately (does not require REAPER).
+pub async fn start_gateway() -> Result<gateway::GatewayInfo> {
+    let setlist = SetlistServiceImpl::new();
+    let song = SongServiceImpl::new();
+
+    let handler = gateway::RoutedHandler::new()
+        .with(
+            &setlist_service_service_descriptor(),
+            SetlistServiceDispatcher::new(setlist),
+        )
+        .with(
+            &song_service_service_descriptor(),
+            SongServiceDispatcher::new(song),
+        );
+
+    let bind_addr = std::env::var("GATEWAY_WS_ADDR")
+        .unwrap_or_else(|_| "0.0.0.0:3030".to_string());
+    let static_dir = std::env::var("GATEWAY_WS_STATIC_DIR")
+        .ok()
+        .or_else(discover_web_static_dir);
+    if let Some(ref dir) = static_dir {
+        tracing::info!("Serving web app from: {dir}");
+    }
+
+    let (info_tx, info_rx) = tokio::sync::oneshot::channel();
+    tokio::spawn(async move {
+        if let Err(e) = gateway::start_gateway(
+            handler,
+            &bind_addr,
+            static_dir.as_deref(),
+            info_tx,
+        )
+        .await
+        {
+            tracing::error!("WebSocket gateway error: {e}");
+        }
+    });
+
+    let gw_info = info_rx
+        .await
+        .map_err(|_| eyre::eyre!("Gateway failed to start"))?;
+    Ok(gw_info)
 }
 
-#[allow(dead_code)]
-impl LocalServices {
-    /// Create new local services.
-    pub fn new() -> Self {
-        Self {
-            setlist: SetlistServiceImpl::new(),
-            song: SongServiceImpl::new(),
+/// Connect to REAPER and initialize session services.
+pub async fn connect_to_reaper() -> Result<()> {
+    let caller = discover_and_connect().await?;
+    Daw::init(caller)?;
+    tracing::info!("DAW initialized");
+
+    let setlist = SetlistServiceImpl::new();
+
+    let local = LocalCaller::new(SetlistServiceDispatcher::new(setlist)).await?;
+    let client = SetlistServiceClient::new(local.erased_caller());
+
+    client
+        .build_from_open_projects()
+        .await
+        .map_err(|e| eyre::eyre!("{e:?}"))?;
+    tracing::info!("Setlist built from open projects");
+
+    Session::init(client)?;
+    tracing::info!("Session services initialized");
+    Ok(())
+}
+
+async fn discover_and_connect() -> Result<ErasedCaller> {
+    let sockets = discover_sockets();
+    if sockets.is_empty() {
+        bail!(
+            "No REAPER sockets found in {SOCKET_DIR} — is REAPER running with the FTS extension?"
+        );
+    }
+
+    tracing::info!("Found {} REAPER socket(s)", sockets.len());
+
+    for (pid, path) in &sockets {
+        tracing::debug!("Trying REAPER socket: {} (pid {pid})", path.display());
+        match connect_to_daw(path).await {
+            Ok(caller) => {
+                tracing::info!("Connected to REAPER (pid {pid}) via {}", path.display());
+                return Ok(caller);
+            }
+            Err(e) => {
+                tracing::warn!("Failed to connect to {}: {e}", path.display());
+            }
         }
     }
 
-    /// Get a reference to the setlist service implementation.
-    pub fn setlist(&self) -> &SetlistServiceImpl {
-        &self.setlist
-    }
+    bail!("Could not connect to any REAPER instance")
+}
 
-    /// Get a reference to the song service implementation.
-    pub fn song(&self) -> &SongServiceImpl {
-        &self.song
-    }
+fn discover_sockets() -> Vec<(u32, PathBuf)> {
+    let Ok(entries) = std::fs::read_dir(SOCKET_DIR) else {
+        return Vec::new();
+    };
 
-    /// Create a combined handler for all local services.
-    ///
-    /// The handler routes RPC calls to the appropriate service based on
-    /// method ID. This can be passed to the WebSocket gateway to handle
-    /// incoming browser connections.
-    pub fn create_handler(&self) -> RoutedHandler {
-        let setlist_dispatcher = SetlistServiceDispatcher::new(self.setlist.clone());
-        let song_dispatcher = SongServiceDispatcher::new(self.song.clone());
+    entries
+        .filter_map(|entry| {
+            let entry = entry.ok()?;
+            let path = entry.path();
+            let pid = pid_from_socket_path(&path)?;
+            if !is_process_alive(pid) {
+                return None;
+            }
+            Some((pid, path))
+        })
+        .collect()
+}
 
-        RoutedHandler::new()
-            .with(setlist_service_service_descriptor(), setlist_dispatcher)
-            .with(song_service_service_descriptor(), song_dispatcher)
-    }
+fn pid_from_socket_path(path: &Path) -> Option<u32> {
+    let filename = path.file_name()?.to_str()?;
+    let rest = filename.strip_prefix(SOCKET_PREFIX)?;
+    let pid_str = rest.strip_suffix(SOCKET_SUFFIX)?;
+    pid_str.parse().ok()
+}
 
-    /// Create an in-process loopback connection to the local services.
-    ///
-    /// Uses `LocalCaller` for the memory channel setup. Returns both the
-    /// `ErasedCaller` and the `LocalCaller` (which must be kept alive).
-    pub async fn create_loopback_connection(&self) -> eyre::Result<(ErasedCaller, LocalCaller)> {
-        let handler = self.create_handler();
-        let local = LocalCaller::new(handler).await?;
-        Ok((local.erased_caller(), local))
-    }
+fn is_process_alive(pid: u32) -> bool {
+    std::process::Command::new("kill")
+        .args(["-0", &pid.to_string()])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
 
-    /// Create a SetlistServiceClient connected to the local services.
-    ///
-    /// This is the main entry point for UI code to access session services.
-    /// Returns the client and the `LocalCaller` keep-alive handle.
-    pub async fn create_setlist_client(&self) -> eyre::Result<(SetlistServiceClient, LocalCaller)> {
-        let (caller, local) = self.create_loopback_connection().await?;
-        Ok((SetlistServiceClient::new(caller), local))
+async fn connect_to_daw(path: &Path) -> eyre::Result<ErasedCaller> {
+    let stream = tokio::net::UnixStream::connect(path).await?;
+    let link = vox_stream::StreamLink::unix(stream);
+    let handshake_result = initiator_handshake_result(64);
+    let (_root_caller, session) =
+        vox::initiator_conduit(vox::BareConduit::new(link), handshake_result)
+            .establish::<vox::DriverCaller>(())
+            .await?;
+
+    let conn = session
+        .open_connection(
+            vox::ConnectionSettings {
+                parity: vox::Parity::Odd,
+                max_concurrent_requests: 64,
+            },
+            vec![vox::MetadataEntry {
+                key: "role",
+                value: vox::MetadataValue::String("fasttrackstudio-desktop"),
+                flags: vox::MetadataFlags::NONE,
+            }],
+        )
+        .await?;
+
+    let mut driver = vox::Driver::new(conn, ());
+    let caller = ErasedCaller::new(driver.caller());
+    moire::task::spawn(async move { driver.run().await });
+
+    Ok(caller)
+}
+
+fn initiator_handshake_result(max_concurrent_requests: u32) -> vox::HandshakeResult {
+    vox::HandshakeResult {
+        role: vox::SessionRole::Initiator,
+        our_settings: vox::ConnectionSettings {
+            parity: vox::Parity::Odd,
+            max_concurrent_requests,
+        },
+        peer_settings: vox::ConnectionSettings {
+            parity: vox::Parity::Even,
+            max_concurrent_requests,
+        },
+        peer_supports_retry: true,
+        session_resume_key: None,
+        peer_resume_key: None,
+        our_schema: vec![],
+        peer_schema: vec![],
     }
 }
 
-impl Default for LocalServices {
-    fn default() -> Self {
-        Self::new()
+fn discover_web_static_dir() -> Option<String> {
+    let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()?
+        .parent()?;
+
+    let candidates = [
+        workspace_root.join("target/dx/fasttrackstudio-web/release/web/public"),
+        workspace_root.join("target/dx/fasttrackstudio-web/debug/web/public"),
+    ];
+
+    for candidate in &candidates {
+        if candidate.join("index.html").exists() {
+            return Some(candidate.to_string_lossy().into_owned());
+        }
     }
+
+    None
 }

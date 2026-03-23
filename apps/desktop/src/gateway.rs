@@ -2,12 +2,6 @@
 //!
 //! Runs a WebSocket server in-process, allowing browsers to connect
 //! to the desktop app and access session services via vox binary RPC.
-//!
-//! # Architecture
-//!
-//! ```text
-//!     Browser ──WebSocket──► axum server ──► vox acceptor ──► Handler
-//! ```
 
 use std::io;
 use std::net::SocketAddr;
@@ -18,35 +12,28 @@ use axum::extract::{State, WebSocketUpgrade};
 use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::Router;
-use vox::{
-    Backing, DriverCaller, DriverReplySink, ErasedCaller, Handler, Link, LinkRx, LinkTx,
-    LinkTxPermit, WriteSlot,
-};
 use session::{SetlistEvent, WebClientServiceClient};
 use std::sync::OnceLock;
 use tokio::net::TcpListener;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tower_http::services::ServeDir;
 use tracing::{debug, info, warn};
+use vox::{
+    Backing, DriverCaller, DriverReplySink, ErasedCaller, Handler, Link, LinkRx, LinkTx,
+    LinkTxPermit, ReplySink, WriteSlot,
+};
 
-/// Global web client registry, accessible from both the gateway and sync tasks.
 static WEB_CLIENT_REGISTRY: OnceLock<WebClientRegistry> = OnceLock::new();
 
-/// Get or create the global web client registry.
 pub fn web_client_registry() -> &'static WebClientRegistry {
     WEB_CLIENT_REGISTRY.get_or_init(WebClientRegistry::new)
 }
 
 // ============================================================================
-// AxumWsLink — implements vox's Link trait for axum WebSocket
+// AxumWsLink
 // ============================================================================
 
-/// A [`Link`] implementation over an axum [`WebSocket`] connection.
-///
-/// Each vox payload maps 1:1 to a binary WebSocket frame. The WebSocket
-/// protocol preserves message boundaries natively, so no length-prefix
-/// framing is needed.
 struct AxumWsLink {
     socket: WebSocket,
 }
@@ -64,9 +51,7 @@ impl Link for AxumWsLink {
     fn split(self) -> (Self::Tx, Self::Rx) {
         let (tx_out, rx_out) = mpsc::channel::<Vec<u8>>(1);
         let (tx_in, rx_in) = mpsc::channel::<Result<Message, io::Error>>(1);
-
         let io_task = tokio::spawn(axum_ws_io_loop(self.socket, rx_out, tx_in));
-
         (
             AxumWsLinkTx {
                 tx: tx_out,
@@ -77,10 +62,6 @@ impl Link for AxumWsLink {
     }
 }
 
-/// Background I/O task that owns the axum WebSocket.
-///
-/// Multiplexes outbound writes (from the mpsc channel) with inbound reads
-/// (forwarded to the read channel).
 async fn axum_ws_io_loop(
     mut ws: WebSocket,
     mut rx_out: mpsc::Receiver<Vec<u8>>,
@@ -96,17 +77,13 @@ async fn axum_ws_io_loop(
                             return;
                         }
                     }
-                    None => {
-                        // Write channel closed — drop the WebSocket.
-                        return;
-                    }
+                    None => return,
                 }
             }
             frame = ws.recv() => {
                 match frame {
                     Some(Ok(msg)) => {
                         if tx_in.send(Ok(msg)).await.is_err() {
-                            // Reader dropped — shut down.
                             return;
                         }
                     }
@@ -114,32 +91,24 @@ async fn axum_ws_io_loop(
                         let _ = tx_in.send(Err(io::Error::other(e.to_string()))).await;
                         return;
                     }
-                    None => {
-                        // WebSocket stream ended.
-                        return;
-                    }
+                    None => return,
                 }
             }
         }
     }
 }
 
-// ---------------------------------------------------------------------------
 // Tx
-// ---------------------------------------------------------------------------
 
-/// Sending half of an [`AxumWsLink`].
 struct AxumWsLinkTx {
     tx: mpsc::Sender<Vec<u8>>,
     io_task: JoinHandle<()>,
 }
 
-/// Permit for sending one payload through an [`AxumWsLinkTx`].
 struct AxumWsLinkTxPermit {
     permit: mpsc::OwnedPermit<Vec<u8>>,
 }
 
-/// Write slot for [`AxumWsLinkTx`].
 struct AxumWsWriteSlot {
     buf: Vec<u8>,
     permit: mpsc::OwnedPermit<Vec<u8>>,
@@ -185,16 +154,12 @@ impl WriteSlot for AxumWsWriteSlot {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Rx
-// ---------------------------------------------------------------------------
 
-/// Receiving half of an [`AxumWsLink`].
 struct AxumWsLinkRx {
     rx: mpsc::Receiver<Result<Message, io::Error>>,
 }
 
-/// Error type for [`AxumWsLinkRx`].
 #[derive(Debug)]
 struct AxumWsLinkRxError(io::Error);
 
@@ -240,10 +205,9 @@ impl LinkRx for AxumWsLinkRx {
 }
 
 // ============================================================================
-// Web Client Registry — tracks connected browser clients for push notifications
+// Web Client Registry
 // ============================================================================
 
-/// Registry of connected web clients that the desktop can push events to.
 #[derive(Clone)]
 pub struct WebClientRegistry {
     clients: Arc<tokio::sync::Mutex<Vec<WebClientServiceClient>>>,
@@ -256,7 +220,6 @@ impl WebClientRegistry {
         }
     }
 
-    /// Register a newly connected web client.
     pub async fn register(&self, client: WebClientServiceClient) {
         self.clients.lock().await.push(client);
         debug!(
@@ -265,8 +228,6 @@ impl WebClientRegistry {
         );
     }
 
-    /// Broadcast a SetlistEvent to all connected web clients.
-    /// Dead clients are automatically pruned.
     pub async fn broadcast(&self, event: &SetlistEvent) {
         let clients = {
             let guard = self.clients.lock().await;
@@ -285,10 +246,9 @@ impl WebClientRegistry {
 
         if !failed_indices.is_empty() {
             let mut guard = self.clients.lock().await;
-            // Remove in reverse to preserve indices
             for &i in failed_indices.iter().rev() {
                 if i < guard.len() {
-                    guard.swap_remove(i);
+                    let _ = guard.swap_remove(i);
                 }
             }
             debug!(
@@ -298,82 +258,164 @@ impl WebClientRegistry {
             );
         }
     }
+}
 
-    /// Number of connected clients.
-    pub async fn client_count(&self) -> usize {
-        self.clients.lock().await.len()
+// ============================================================================
+// RoutedHandler
+// ============================================================================
+
+trait DynHandler: Send + Sync + 'static {
+    fn handle(
+        &self,
+        call: vox::SelfRef<vox::RequestCall<'static>>,
+        reply: DriverReplySink,
+        schemas: std::sync::Arc<vox::SchemaRecvTracker>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + '_>>;
+}
+
+impl<H: Handler<DriverReplySink>> DynHandler for H {
+    fn handle(
+        &self,
+        call: vox::SelfRef<vox::RequestCall<'static>>,
+        reply: DriverReplySink,
+        schemas: std::sync::Arc<vox::SchemaRecvTracker>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + '_>> {
+        Box::pin(Handler::handle(self, call, reply, schemas))
     }
 }
 
-// ============================================================================
-// StandaloneGateway
-// ============================================================================
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum GatewayState {
-    Active,
-    Suspended,
+#[derive(Clone)]
+pub struct RoutedHandler {
+    method_map: std::collections::HashMap<vox::MethodId, usize>,
+    handlers: Vec<Arc<dyn DynHandler>>,
 }
 
-struct StandaloneGateway<H: Handler<DriverReplySink> + Clone + Send + Sync + 'static> {
-    handler: H,
-    state: Arc<RwLock<GatewayState>>,
-    static_dir: Option<String>,
-    registry: WebClientRegistry,
-}
-
-impl<H: Handler<DriverReplySink> + Clone + Send + Sync + 'static> StandaloneGateway<H> {
-    fn new(handler: H, registry: WebClientRegistry) -> Self {
-        let static_dir = std::env::var("GATEWAY_WS_STATIC_DIR").ok();
+impl RoutedHandler {
+    pub fn new() -> Self {
         Self {
-            handler,
-            state: Arc::new(RwLock::new(GatewayState::Active)),
-            static_dir,
-            registry,
+            method_map: std::collections::HashMap::new(),
+            handlers: Vec::new(),
         }
     }
 
-    fn with_static_dir(mut self, dir: impl Into<String>) -> Self {
-        self.static_dir = Some(dir.into());
+    pub fn with<H: Handler<DriverReplySink>>(
+        mut self,
+        descriptor: &vox::ServiceDescriptor,
+        handler: H,
+    ) -> Self {
+        let idx = self.handlers.len();
+        self.handlers.push(Arc::new(handler));
+        for method in descriptor.methods {
+            self.method_map.insert(method.id, idx);
+        }
         self
     }
+}
 
-    async fn run(self, bind_addr: &str) -> eyre::Result<()> {
-        let addr: SocketAddr = bind_addr.parse()?;
-        let gateway = Arc::new(self);
-
-        let mut app = Router::new()
-            .route("/ws", get(ws_handler::<H>))
-            .with_state(gateway.clone());
-
-        if let Some(ref static_dir) = gateway.static_dir {
-            info!("Serving static files from: {}", static_dir);
-            app = app.fallback_service(ServeDir::new(static_dir));
+impl Handler<DriverReplySink> for RoutedHandler {
+    async fn handle(
+        &self,
+        call: vox::SelfRef<vox::RequestCall<'static>>,
+        reply: DriverReplySink,
+        schemas: std::sync::Arc<vox::SchemaRecvTracker>,
+    ) {
+        let method_id = call.method_id;
+        if let Some(&idx) = self.method_map.get(&method_id) {
+            self.handlers[idx].handle(call, reply, schemas).await;
+        } else {
+            reply
+                .send_error(vox::VoxError::<core::convert::Infallible>::UnknownMethod)
+                .await;
         }
-
-        let listener = TcpListener::bind(addr).await?;
-        debug!("WebSocket gateway listening on ws://{}", addr);
-        axum::serve(listener, app).await?;
-        Ok(())
     }
 }
 
-async fn ws_handler<H: Handler<DriverReplySink> + Clone + Send + Sync + 'static>(
+// ============================================================================
+// Gateway Server
+// ============================================================================
+
+struct Gateway {
+    handler: RoutedHandler,
+}
+
+#[derive(Clone, Default)]
+pub struct GatewayInfo {
+    pub port: u16,
+    pub lan_ip: Option<String>,
+    pub serving_web_app: bool,
+}
+
+impl GatewayInfo {
+    pub fn local_url(&self) -> String {
+        format!("http://localhost:{}", self.port)
+    }
+
+    pub fn network_url(&self) -> Option<String> {
+        self.lan_ip
+            .as_ref()
+            .map(|ip| format!("http://{}:{}", ip, self.port))
+    }
+}
+
+fn detect_lan_ip() -> Option<String> {
+    let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
+    socket.connect("8.8.8.8:80").ok()?;
+    let addr = socket.local_addr().ok()?;
+    Some(addr.ip().to_string())
+}
+
+pub async fn start_gateway(
+    handler: RoutedHandler,
+    bind_addr: &str,
+    static_dir: Option<&str>,
+    info_tx: tokio::sync::oneshot::Sender<GatewayInfo>,
+) -> eyre::Result<()> {
+    let addr: SocketAddr = bind_addr.parse()?;
+    let gateway = Arc::new(Gateway { handler });
+
+    let mut app = Router::new()
+        .route("/ws", get(ws_handler))
+        .with_state(gateway.clone());
+
+    let serving_web_app = static_dir.is_some();
+    if let Some(dir) = static_dir {
+        info!("Serving static files from: {}", dir);
+        app = app.fallback_service(ServeDir::new(dir));
+    }
+
+    let listener = TcpListener::bind(addr).await?;
+    let local_addr = listener.local_addr()?;
+    let port = local_addr.port();
+    let lan_ip = detect_lan_ip();
+
+    let gw_info = GatewayInfo {
+        port,
+        lan_ip,
+        serving_web_app,
+    };
+    if serving_web_app {
+        info!("Web app available at:");
+        info!("  Local:   {}", gw_info.local_url());
+        if let Some(url) = gw_info.network_url() {
+            info!("  Network: {url}");
+        }
+    }
+    info!("WebSocket gateway listening on ws://{}", local_addr);
+
+    let _ = info_tx.send(gw_info);
+
+    axum::serve(listener, app).await?;
+    Ok(())
+}
+
+async fn ws_handler(
     ws: WebSocketUpgrade,
-    State(gateway): State<Arc<StandaloneGateway<H>>>,
+    State(gateway): State<Arc<Gateway>>,
 ) -> impl IntoResponse {
     ws.on_upgrade(move |socket| handle_socket(socket, gateway))
 }
 
-async fn handle_socket<H: Handler<DriverReplySink> + Clone + Send + Sync + 'static>(
-    socket: WebSocket,
-    gateway: Arc<StandaloneGateway<H>>,
-) {
-    if *gateway.state.read().await == GatewayState::Suspended {
-        warn!("Connection rejected: gateway suspended");
-        return;
-    }
-
+async fn handle_socket(socket: WebSocket, gateway: Arc<Gateway>) {
     let link = AxumWsLink::new(socket);
     let handshake_result = vox::HandshakeResult {
         role: vox::SessionRole::Acceptor,
@@ -391,57 +433,17 @@ async fn handle_socket<H: Handler<DriverReplySink> + Clone + Send + Sync + 'stat
         our_schema: vec![],
         peer_schema: vec![],
     };
-    match vox::acceptor(vox::BareConduit::new(link), handshake_result)
+
+    match vox::acceptor_conduit(vox::BareConduit::new(link), handshake_result)
         .establish::<DriverCaller>(gateway.handler.clone())
         .await
     {
         Ok((caller, session_handle)) => {
-            debug!("WebSocket client connected, session established");
-            // Wrap DriverCaller in ErasedCaller → WebClientServiceClient for push events
+            debug!("WebSocket client connected");
             let client = WebClientServiceClient::new(ErasedCaller::new(caller));
-            gateway.registry.register(client).await;
-            // Keep session alive until connection drops
+            web_client_registry().register(client).await;
             drop(session_handle);
         }
         Err(e) => warn!("WebSocket handshake failed: {:?}", e),
-    }
-}
-
-// ============================================================================
-// Public API
-// ============================================================================
-
-/// Start the WebSocket gateway server.
-pub async fn start_gateway<H>(
-    handler: H,
-    bind_addr: &str,
-    static_dir: Option<&str>,
-    registry: WebClientRegistry,
-) -> eyre::Result<()>
-where
-    H: Handler<DriverReplySink> + Clone + Send + Sync + 'static,
-{
-    debug!("Starting WebSocket gateway on {}", bind_addr);
-    let mut gateway = StandaloneGateway::new(handler, registry);
-    if let Some(dir) = static_dir {
-        gateway = gateway.with_static_dir(dir);
-    }
-    gateway.run(bind_addr).await
-}
-
-/// Gateway configuration for the desktop app.
-#[derive(Clone, Debug)]
-pub struct GatewayConfig {
-    pub bind_addr: String,
-    pub static_dir: Option<String>,
-}
-
-impl Default for GatewayConfig {
-    fn default() -> Self {
-        Self {
-            bind_addr: std::env::var("GATEWAY_WS_ADDR")
-                .unwrap_or_else(|_| "0.0.0.0:3030".to_string()),
-            static_dir: std::env::var("GATEWAY_WS_STATIC_DIR").ok(),
-        }
     }
 }

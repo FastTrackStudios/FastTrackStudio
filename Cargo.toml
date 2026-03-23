@@ -68,24 +68,25 @@ tracing = { version = "0.1", features = ["std"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 eyre = "0.6"
 futures = "0.3"
+clap = { version = "4", features = ["derive"] }
 
-# Vox crates (bearcove upstream — pinned, latest main needs peeps sub-crates not yet published)
-vox = { git = "https://github.com/bearcove/vox.git", rev = "53bff48" }
-vox-codegen = { git = "https://github.com/bearcove/vox.git", rev = "53bff48" }
-vox-core = { git = "https://github.com/bearcove/vox.git", rev = "53bff48" }
-vox-hash = { git = "https://github.com/bearcove/vox.git", rev = "53bff48" }
-vox-schema = { git = "https://github.com/bearcove/vox.git", rev = "53bff48" }
-vox-service-macros = { git = "https://github.com/bearcove/vox.git", rev = "53bff48" }
-vox-inprocess = { git = "https://github.com/bearcove/vox.git", rev = "53bff48" }
-vox-stream = { git = "https://github.com/bearcove/vox.git", rev = "53bff48" }
-vox-task-local = { git = "https://github.com/bearcove/vox.git", rev = "53bff48" }
-vox-tracing = { git = "https://github.com/bearcove/vox.git", rev = "53bff48" }
-vox-websocket = { git = "https://github.com/bearcove/vox.git", rev = "53bff48" }
-vox-local = { git = "https://github.com/bearcove/vox.git", rev = "53bff48" }
-vox-http-bridge = { git = "https://github.com/bearcove/vox.git", rev = "53bff48" }
-subject-rust = { git = "https://github.com/bearcove/vox.git", rev = "53bff48" }
-ur-taking-me-with-you = { git = "https://github.com/bearcove/vox.git", rev = "53bff48", features = ["tokio"] }
-shm-primitives = { git = "https://github.com/bearcove/vox.git", rev = "53bff48" }
+# Vox crates — using FTS fork (fixes wasm32 compilation)
+vox = { git = "https://github.com/Codys-Wright/roam.git", rev = "7657e6e" }
+vox-codegen = { git = "https://github.com/Codys-Wright/roam.git", rev = "7657e6e" }
+vox-core = { git = "https://github.com/Codys-Wright/roam.git", rev = "7657e6e" }
+vox-hash = { git = "https://github.com/Codys-Wright/roam.git", rev = "7657e6e" }
+vox-schema = { git = "https://github.com/Codys-Wright/roam.git", rev = "7657e6e" }
+vox-service-macros = { git = "https://github.com/Codys-Wright/roam.git", rev = "7657e6e" }
+vox-inprocess = { git = "https://github.com/Codys-Wright/roam.git", rev = "7657e6e" }
+vox-stream = { git = "https://github.com/Codys-Wright/roam.git", rev = "7657e6e" }
+vox-task-local = { git = "https://github.com/Codys-Wright/roam.git", rev = "7657e6e" }
+vox-tracing = { git = "https://github.com/Codys-Wright/roam.git", rev = "7657e6e" }
+vox-websocket = { git = "https://github.com/Codys-Wright/roam.git", rev = "7657e6e" }
+vox-local = { git = "https://github.com/Codys-Wright/roam.git", rev = "7657e6e" }
+vox-http-bridge = { git = "https://github.com/Codys-Wright/roam.git", rev = "7657e6e" }
+subject-rust = { git = "https://github.com/Codys-Wright/roam.git", rev = "7657e6e" }
+ur-taking-me-with-you = { git = "https://github.com/Codys-Wright/roam.git", rev = "7657e6e", features = ["tokio"] }
+shm-primitives = { git = "https://github.com/Codys-Wright/roam.git", rev = "7657e6e" }
 
 # Instrumentation
 moire = { version = "1.0", features = ["diagnostics"] }
@@ -134,7 +135,7 @@ installer-core = { path = "crates/shared/installer-core" }
 # Signal (sibling repo)
 signal = { path = "../signal/crates/signal" }
 signal-ui = { path = "../signal/crates/signal-ui", default-features = false }
-signal-cli = { path = "../signal/apps/signal-cli" }
+signal-cli = { path = "../signal/apps/cli" }
 macromod = { path = "../signal/crates/macromod" }
 
 # Session (sibling repo)
@@ -261,6 +262,21 @@ session-ui = { path = "../session/crates/session-ui" }
 #
 # [patch."https://github.com/FastTrackStudios/fts-ui.git"]
 # fts-ui = { path = "../../fts-ui/crates/fts-ui" }
+
+# Redirect any transitive bearcove/vox deps to the FTS fork (fixes wasm32 compilation).
+[patch."https://github.com/bearcove/vox.git"]
+vox = { git = "https://github.com/Codys-Wright/roam.git", rev = "7657e6e" }
+vox-core = { git = "https://github.com/Codys-Wright/roam.git", rev = "7657e6e" }
+vox-types = { git = "https://github.com/Codys-Wright/roam.git", rev = "7657e6e" }
+vox-postcard = { git = "https://github.com/Codys-Wright/roam.git", rev = "7657e6e" }
+vox-stream = { git = "https://github.com/Codys-Wright/roam.git", rev = "7657e6e" }
+vox-websocket = { git = "https://github.com/Codys-Wright/roam.git", rev = "7657e6e" }
+vox-shm = { git = "https://github.com/Codys-Wright/roam.git", rev = "7657e6e" }
+vox-schema = { git = "https://github.com/Codys-Wright/roam.git", rev = "7657e6e" }
+vox-service-macros = { git = "https://github.com/Codys-Wright/roam.git", rev = "7657e6e" }
+vox-codegen = { git = "https://github.com/Codys-Wright/roam.git", rev = "7657e6e" }
+vox-inprocess = { git = "https://github.com/Codys-Wright/roam.git", rev = "7657e6e" }
+shm-primitives = { git = "https://github.com/Codys-Wright/roam.git", rev = "7657e6e" }
 
 # ── Vendored patches ──────────────────────────────────────────────────
 # moire: unify crates.io moire with the git rev that vox pulls in,
