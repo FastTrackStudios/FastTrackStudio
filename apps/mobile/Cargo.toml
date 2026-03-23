@@ -1,5 +1,5 @@
 [package]
-name = "fts-control-mobile"
+name = "fasttrackstudio-mobile"
 version = "0.1.0"
 authors = ["Cody Wright <acodywright@gmail.com>"]
 edition = "2021"

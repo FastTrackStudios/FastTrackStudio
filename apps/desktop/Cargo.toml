@@ -1,5 +1,5 @@
 [package]
-name = "fts-control-desktop"
+name = "fasttrackstudio-desktop"
 version = "0.1.0"
 authors = ["Cody Wright <acodywright@gmail.com>"]
 edition = "2021"

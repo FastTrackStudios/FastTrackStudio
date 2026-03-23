@@ -1,13 +1,13 @@
 [application]
-name = "FTS Control"
+name = "FastTrackStudio"
 
 [desktop]
-title = "FTS Control"
+title = "FastTrackStudio"
 
 [web.app]
 
 # HTML title tag content
-title = "FTS Control"
+title = "FastTrackStudio"
 
 # include `assets` in web platform
 [web.resource]
@@ -25,10 +25,10 @@ script = []
 script = []
 
 [bundle]
-identifier = "com.fasttrackstudio.fts-control"
+identifier = "com.fasttrackstudio.desktop"
 publisher = "FastTrack Studio"
 icon = ["./assets/favicon.ico"]
-name = "FTS Control"
+name = "FastTrackStudio"
 
 [bundle.macos]
 minimum_system_version = "13.0"

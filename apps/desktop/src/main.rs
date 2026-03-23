@@ -141,7 +141,7 @@ fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive("fts_control_desktop=info".parse().unwrap())
+                .add_directive("fasttrackstudio_desktop=info".parse().unwrap())
                 .add_directive("session=info".parse().unwrap())
                 .add_directive("signal_ui=info".parse().unwrap())
                 .add_directive("daw::fx=debug".parse().unwrap()),
