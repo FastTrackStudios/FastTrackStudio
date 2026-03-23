@@ -249,6 +249,23 @@ session-ui = { path = "../session/crates/session-ui" }
 # [patch."https://github.com/FastTrackStudios/fts-ui.git"]
 # fts-ui = { path = "../../fts-ui/crates/fts-ui" }
 
+# ── Vendored patches ──────────────────────────────────────────────────
+# moire: unify crates.io moire with the git rev that roam pulls in,
+# avoiding duplicate moire-runtime #[ctor] registrations that crash.
+# moire-trace-capture: tolerate broken frame-pointer chains (NixOS glibc).
+[patch."https://github.com/bearcove/moire"]
+moire-trace-capture = { path = "../forks/moire-trace-capture" }
+
+[patch.crates-io]
+moire = { git = "https://github.com/bearcove/moire", rev = "13eac79" }
+moire-macros-noop = { git = "https://github.com/bearcove/moire", rev = "13eac79" }
+moire-runtime = { git = "https://github.com/bearcove/moire", rev = "13eac79" }
+moire-tokio = { git = "https://github.com/bearcove/moire", rev = "13eac79" }
+moire-trace-types = { git = "https://github.com/bearcove/moire", rev = "13eac79" }
+moire-types = { git = "https://github.com/bearcove/moire", rev = "13eac79" }
+moire-wasm = { git = "https://github.com/bearcove/moire", rev = "13eac79" }
+moire-wire = { git = "https://github.com/bearcove/moire", rev = "13eac79" }
+
 # WASM dev profile: opt-level 1 avoids "too many locals" error in walrus
 [profile.wasm-dev]
 inherits = "dev"
