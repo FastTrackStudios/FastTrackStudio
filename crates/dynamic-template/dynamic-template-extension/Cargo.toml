@@ -5,12 +5,13 @@ edition.workspace = true
 description = "Dynamic Template domain SHM guest — connects to REAPER via daw-bridge"
 
 [[bin]]
-name = "dynamic-template-extension"
+name = "dynamic-template"
 path = "src/main.rs"
 
 [dependencies]
 daw.workspace = true
 daw-extension-runtime.workspace = true
+dynamic-template.workspace = true
 dynamic-template-proto.workspace = true
 tokio = { workspace = true, features = ["time", "net", "rt"] }
 eyre.workspace = true
