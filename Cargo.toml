@@ -3,16 +3,26 @@ name = "fasttrackstudio"
 
 [workspace]
 members = [
-    "crates/*/*",
-    "apps/tests/*",
-    "apps/fts-control/*",
-    "apps/fasttrackstudio/*",
+    # Crates
+    "crates/dynamic-template/dynamic-template-extension",
+    "crates/input/input-extension",
+    "crates/keyflow/keyflow-extension",
+    "crates/reaper/input-reaper",
+    "crates/reaper/reaper-embed",
+    "crates/reaper/swell-ui",
+    "crates/shared/installer-core",
+    "crates/shared/utils",
+    "crates/shared/vox-discover",
+    # Apps
+    "apps/desktop",
+    "apps/web",
+    "apps/mobile",
     "apps/fts-cli",
     "apps/installer",
+    "apps/tests/playground-wasm",
+    "apps/tests/wasm",
+    # Tools
     "xtask",
-]
-exclude = [
-    "apps/tests/playground",
 ]
 resolver = "2"
 
