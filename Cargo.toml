@@ -56,23 +56,23 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 eyre = "0.6"
 futures = "0.3"
 
-# Roam crates (bearcove upstream — pinned, latest main needs peeps sub-crates not yet published)
-roam = { git = "https://github.com/bearcove/roam.git", branch = "main" }
-roam-codegen = { git = "https://github.com/bearcove/roam.git", branch = "main" }
-roam-frame = { git = "https://github.com/bearcove/roam.git", branch = "main" }
-roam-hash = { git = "https://github.com/bearcove/roam.git", branch = "main" }
-roam-schema = { git = "https://github.com/bearcove/roam.git", branch = "main" }
-roam-service-macros = { git = "https://github.com/bearcove/roam.git", branch = "main" }
-roam-inprocess = { git = "https://github.com/bearcove/roam.git", branch = "main" }
-roam-stream = { git = "https://github.com/bearcove/roam.git", branch = "main" }
-roam-task-local = { git = "https://github.com/bearcove/roam.git", branch = "main" }
-roam-tracing = { git = "https://github.com/bearcove/roam.git", branch = "main" }
-roam-websocket = { git = "https://github.com/bearcove/roam.git", branch = "main" }
-roam-local = { git = "https://github.com/bearcove/roam.git", branch = "main" }
-roam-http-bridge = { git = "https://github.com/bearcove/roam.git", branch = "main" }
-subject-rust = { git = "https://github.com/bearcove/roam.git", branch = "main" }
-ur-taking-me-with-you = { git = "https://github.com/bearcove/roam.git", branch = "main", features = ["tokio"] }
-shm-primitives = { git = "https://github.com/bearcove/roam.git", branch = "main" }
+# Vox crates (bearcove upstream — pinned, latest main needs peeps sub-crates not yet published)
+vox = { git = "https://github.com/bearcove/vox.git", rev = "53bff48" }
+vox-codegen = { git = "https://github.com/bearcove/vox.git", rev = "53bff48" }
+vox-core = { git = "https://github.com/bearcove/vox.git", rev = "53bff48" }
+vox-hash = { git = "https://github.com/bearcove/vox.git", rev = "53bff48" }
+vox-schema = { git = "https://github.com/bearcove/vox.git", rev = "53bff48" }
+vox-service-macros = { git = "https://github.com/bearcove/vox.git", rev = "53bff48" }
+vox-inprocess = { git = "https://github.com/bearcove/vox.git", rev = "53bff48" }
+vox-stream = { git = "https://github.com/bearcove/vox.git", rev = "53bff48" }
+vox-task-local = { git = "https://github.com/bearcove/vox.git", rev = "53bff48" }
+vox-tracing = { git = "https://github.com/bearcove/vox.git", rev = "53bff48" }
+vox-websocket = { git = "https://github.com/bearcove/vox.git", rev = "53bff48" }
+vox-local = { git = "https://github.com/bearcove/vox.git", rev = "53bff48" }
+vox-http-bridge = { git = "https://github.com/bearcove/vox.git", rev = "53bff48" }
+subject-rust = { git = "https://github.com/bearcove/vox.git", rev = "53bff48" }
+ur-taking-me-with-you = { git = "https://github.com/bearcove/vox.git", rev = "53bff48", features = ["tokio"] }
+shm-primitives = { git = "https://github.com/bearcove/vox.git", rev = "53bff48" }
 
 # Instrumentation
 moire = { version = "1.0", features = ["diagnostics"] }
@@ -115,7 +115,7 @@ dynamic-template = { git = "https://github.com/FastTrackStudios/dynamic-template
 # Shared infrastructure
 audio-controls = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
 daw-allocator = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
-roam-discover = { path = "crates/shared/roam-discover" }
+vox-discover = { path = "crates/shared/vox-discover" }
 installer-core = { path = "crates/shared/installer-core" }
 
 # Signal (sibling repo)
@@ -130,7 +130,7 @@ macromod = { path = "../signal/crates/macromod" }
 session = { path = "../session/crates/session" }
 session-proto = { path = "../session/crates/session-proto" }
 session-ui = { path = "../session/crates/session-ui" }
-session-cli = { path = "../session/apps/session-cli" }
+session-cli = { path = "../session/apps/cli" }
 
 # Sync (sibling repo)
 sync = { path = "../sync/crates/sync" }
@@ -250,7 +250,7 @@ session-ui = { path = "../session/crates/session-ui" }
 # fts-ui = { path = "../../fts-ui/crates/fts-ui" }
 
 # ── Vendored patches ──────────────────────────────────────────────────
-# moire: unify crates.io moire with the git rev that roam pulls in,
+# moire: unify crates.io moire with the git rev that vox pulls in,
 # avoiding duplicate moire-runtime #[ctor] registrations that crash.
 # moire-trace-capture: tolerate broken frame-pointer chains (NixOS glibc).
 [patch."https://github.com/bearcove/moire"]

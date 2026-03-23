@@ -8,9 +8,9 @@ description = "WASM integration tests using Dioxus - tests browser client connec
 # Dioxus UI framework (for rendering test results)
 dioxus = { version = "0.7.1" }
 
-# Roam RPC
-roam.workspace = true
-roam-websocket.workspace = true
+# Vox RPC
+vox.workspace = true
+vox-websocket.workspace = true
 
 # DAW API (same as web app uses)
 daw.workspace = true

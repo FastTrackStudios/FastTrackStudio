@@ -1,7 +1,7 @@
 //! Web client handler — receives pushed events from the desktop app.
 //!
 //! Implements `WebClientService` so the desktop gateway can call `push_event()`
-//! on this handler via roam RPC. Events are written into the same `GlobalSignal`s
+//! on this handler via vox RPC. Events are written into the same `GlobalSignal`s
 //! that the UI components read from.
 
 use dioxus::prelude::*;

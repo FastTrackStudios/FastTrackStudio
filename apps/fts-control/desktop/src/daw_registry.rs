@@ -24,7 +24,7 @@ use std::time::Duration;
 
 use daw::service::ProjectInfo;
 use daw::Daw;
-use roam::ErasedCaller;
+use vox::ErasedCaller;
 use signal::reaper_applier::ReaperPatchApplier;
 use signal::rig_scene_manager::RigSceneManager;
 use signal::DawPatchApplier;
@@ -322,29 +322,29 @@ impl DawRegistry {
 // Connection Helper
 // ============================================================================
 
-/// Connect to a REAPER socket and establish a roam session.
+/// Connect to a REAPER socket and establish a vox session.
 ///
 /// Returns an `ErasedCaller` suitable for `Daw::new()` / `Daw::init()`.
 async fn connect_to_daw(path: &Path) -> eyre::Result<ErasedCaller> {
     let stream = tokio::net::UnixStream::connect(path).await?;
-    let link = roam_stream::StreamLink::unix(stream);
+    let link = vox_stream::StreamLink::unix(stream);
     let handshake_result = initiator_handshake_result(64);
-    let (caller, _session_handle) = roam::initiator_conduit(roam::BareConduit::new(link), handshake_result)
-        .establish::<roam::DriverCaller>(())
+    let (caller, _session_handle) = vox::initiator_conduit(vox::BareConduit::new(link), handshake_result)
+        .establish::<vox::DriverCaller>(())
         .await?;
     Ok(ErasedCaller::new(caller))
 }
 
 /// Construct a synthetic `HandshakeResult` for initiator connections.
-fn initiator_handshake_result(max_concurrent_requests: u32) -> roam::HandshakeResult {
-    roam::HandshakeResult {
-        role: roam::SessionRole::Initiator,
-        our_settings: roam::ConnectionSettings {
-            parity: roam::Parity::Odd,
+fn initiator_handshake_result(max_concurrent_requests: u32) -> vox::HandshakeResult {
+    vox::HandshakeResult {
+        role: vox::SessionRole::Initiator,
+        our_settings: vox::ConnectionSettings {
+            parity: vox::Parity::Odd,
             max_concurrent_requests,
         },
-        peer_settings: roam::ConnectionSettings {
-            parity: roam::Parity::Even,
+        peer_settings: vox::ConnectionSettings {
+            parity: vox::Parity::Even,
             max_concurrent_requests,
         },
         peer_supports_retry: true,

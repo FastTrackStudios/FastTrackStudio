@@ -1,8 +1,8 @@
 [package]
-name = "roam-discover"
+name = "vox-discover"
 version = "0.1.0"
 edition = "2021"
-description = "mDNS service discovery for roam RPC services"
+description = "mDNS service discovery for vox RPC services"
 
 [dependencies]
 thiserror = "2"

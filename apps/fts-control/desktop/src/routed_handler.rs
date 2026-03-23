@@ -1,6 +1,6 @@
-//! Handler composition for roam v7.
+//! Handler composition for vox v7.
 //!
-//! In roam v7, the old `RoutedDispatcher` / `ServiceDispatcher` chaining
+//! In vox v7, the old `RoutedDispatcher` / `ServiceDispatcher` chaining
 //! was removed. Each generated `*Dispatcher<H>` implements `Handler<R>`.
 //! This module provides a `RoutedHandler` that routes incoming calls to
 //! the correct dispatcher by matching `method_id` against each service's
@@ -16,7 +16,7 @@
 //!     .with(ProjectService::service_descriptor(), ProjectServiceDispatcher::new(project));
 //! ```
 
-use roam::{DriverReplySink, Handler, MethodId, ReplySink, RoamError, SchemaRecvTracker, SelfRef, ServiceDescriptor};
+use vox::{DriverReplySink, Handler, MethodId, ReplySink, VoxError, SchemaRecvTracker, SelfRef, ServiceDescriptor};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -24,7 +24,7 @@ use std::sync::Arc;
 trait DynHandler: Send + Sync + 'static {
     fn handle(
         &self,
-        call: SelfRef<roam::RequestCall<'static>>,
+        call: SelfRef<vox::RequestCall<'static>>,
         reply: DriverReplySink,
         schemas: Arc<SchemaRecvTracker>,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + '_>>;
@@ -34,7 +34,7 @@ trait DynHandler: Send + Sync + 'static {
 impl<H: Handler<DriverReplySink>> DynHandler for H {
     fn handle(
         &self,
-        call: SelfRef<roam::RequestCall<'static>>,
+        call: SelfRef<vox::RequestCall<'static>>,
         reply: DriverReplySink,
         schemas: Arc<SchemaRecvTracker>,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + '_>> {
@@ -75,13 +75,13 @@ impl RoutedHandler {
 }
 
 impl Handler<DriverReplySink> for RoutedHandler {
-    async fn handle(&self, call: SelfRef<roam::RequestCall<'static>>, reply: DriverReplySink, schemas: Arc<SchemaRecvTracker>) {
+    async fn handle(&self, call: SelfRef<vox::RequestCall<'static>>, reply: DriverReplySink, schemas: Arc<SchemaRecvTracker>) {
         let method_id = call.method_id;
         if let Some(&idx) = self.method_map.get(&method_id) {
             self.handlers[idx].handle(call, reply, schemas).await;
         } else {
             reply
-                .send_error(RoamError::<core::convert::Infallible>::UnknownMethod)
+                .send_error(VoxError::<core::convert::Infallible>::UnknownMethod)
                 .await;
         }
     }

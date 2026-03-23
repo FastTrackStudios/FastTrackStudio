@@ -1,31 +1,31 @@
-//! Roam loopback connection test.
+//! Vox loopback connection test.
 //!
-//! Verifies that a roam session can be established via both in-memory channels
+//! Verifies that a vox session can be established via both in-memory channels
 //! and Unix sockets. This isolates protocol/version issues from REAPER.
 
-use roam::{DriverCaller, DriverReplySink, ErasedCaller, Handler, ReplySink, RoamError, SelfRef};
+use vox::{DriverCaller, DriverReplySink, ErasedCaller, Handler, ReplySink, VoxError, SelfRef};
 use std::path::PathBuf;
 
 /// A no-op handler that rejects all calls with `UnknownMethod`.
-/// Good enough to test that the roam handshake + session setup works.
+/// Good enough to test that the vox handshake + session setup works.
 #[derive(Clone)]
 struct NoopHandler;
 
 impl Handler<DriverReplySink> for NoopHandler {
-    async fn handle(&self, _call: SelfRef<roam::RequestCall<'static>>, reply: DriverReplySink) {
+    async fn handle(&self, _call: SelfRef<vox::RequestCall<'static>>, reply: DriverReplySink) {
         reply
-            .send_error(RoamError::<core::convert::Infallible>::UnknownMethod)
+            .send_error(VoxError::<core::convert::Infallible>::UnknownMethod)
             .await;
     }
 }
 
 #[tokio::test]
 async fn memory_channel_loopback() {
-    let (client_link, server_link) = roam::memory_link_pair(64);
+    let (client_link, server_link) = vox::memory_link_pair(64);
 
     // Server side
     let server = tokio::spawn(async move {
-        let result = roam::acceptor(roam::BareConduit::new(server_link))
+        let result = vox::acceptor(vox::BareConduit::new(server_link))
             .establish::<DriverCaller>(NoopHandler)
             .await;
         match &result {
@@ -36,7 +36,7 @@ async fn memory_channel_loopback() {
     });
 
     // Client side
-    let (caller, _session) = roam::initiator_conduit(roam::BareConduit::new(client_link))
+    let (caller, _session) = vox::initiator_conduit(vox::BareConduit::new(client_link))
         .establish::<DriverCaller>(())
         .await
         .expect("memory initiator should succeed");
@@ -52,7 +52,7 @@ async fn memory_channel_loopback() {
 #[tokio::test]
 async fn unix_socket_loopback() {
     // Use a unique temp path
-    let sock_path = PathBuf::from(format!("/tmp/fts-roam-test-{}.sock", std::process::id()));
+    let sock_path = PathBuf::from(format!("/tmp/fts-vox-test-{}.sock", std::process::id()));
     let _ = std::fs::remove_file(&sock_path);
 
     let listener = tokio::net::UnixListener::bind(&sock_path).expect("failed to bind test socket");
@@ -66,8 +66,8 @@ async fn unix_socket_loopback() {
         let (stream, _addr) = listener.accept().await.expect("accept failed");
         println!("[unix] server accepted connection");
 
-        let link = roam_stream::StreamLink::unix(stream);
-        let result = roam::acceptor(roam::BareConduit::new(link))
+        let link = vox_stream::StreamLink::unix(stream);
+        let result = vox::acceptor(vox::BareConduit::new(link))
             .establish::<DriverCaller>(NoopHandler)
             .await;
         match &result {
@@ -83,8 +83,8 @@ async fn unix_socket_loopback() {
         .expect("failed to connect to test socket");
     println!("[unix] client connected");
 
-    let link = roam_stream::StreamLink::unix(stream);
-    let (caller, _session) = roam::initiator_conduit(roam::BareConduit::new(link))
+    let link = vox_stream::StreamLink::unix(stream);
+    let (caller, _session) = vox::initiator_conduit(vox::BareConduit::new(link))
         .max_concurrent_requests(64)
         .establish::<DriverCaller>(())
         .await
@@ -126,8 +126,8 @@ async fn connect_session_handle_dropped() {
         let stream = tokio::net::UnixStream::connect(&sock_path)
             .await
             .expect("connect failed");
-        let link = roam_stream::StreamLink::unix(stream);
-        let (caller, _session) = roam::initiator_conduit(roam::BareConduit::new(link))
+        let link = vox_stream::StreamLink::unix(stream);
+        let (caller, _session) = vox::initiator_conduit(vox::BareConduit::new(link))
             .establish::<DriverCaller>(())
             .await
             .expect("establish failed");
@@ -176,12 +176,12 @@ async fn connect_to_live_reaper() {
         }
     };
 
-    let link = roam_stream::StreamLink::unix(stream);
-    println!("[reaper] Starting roam initiator handshake...");
+    let link = vox_stream::StreamLink::unix(stream);
+    println!("[reaper] Starting vox initiator handshake...");
 
     match tokio::time::timeout(
         std::time::Duration::from_secs(5),
-        roam::initiator_conduit(roam::BareConduit::new(link))
+        vox::initiator_conduit(vox::BareConduit::new(link))
             .max_concurrent_requests(64)
             .establish::<DriverCaller>(()),
     )
@@ -189,7 +189,7 @@ async fn connect_to_live_reaper() {
     {
         Ok(Ok((caller, _session))) => {
             let erased = ErasedCaller::new(caller);
-            println!("[reaper] SUCCESS: roam session established!");
+            println!("[reaper] SUCCESS: vox session established!");
 
             // Try a simple DAW call
             let daw = daw_control::Daw::new(erased);
@@ -197,12 +197,12 @@ async fn connect_to_live_reaper() {
             println!("[reaper] healthcheck = {alive}");
         }
         Ok(Err(e)) => {
-            println!("[reaper] FAIL: roam handshake error: {e:?}");
-            panic!("Roam handshake failed: {e:?}");
+            println!("[reaper] FAIL: vox handshake error: {e:?}");
+            panic!("Vox handshake failed: {e:?}");
         }
         Err(_) => {
-            println!("[reaper] FAIL: roam handshake timed out (5s)");
-            panic!("Roam handshake timed out");
+            println!("[reaper] FAIL: vox handshake timed out (5s)");
+            panic!("Vox handshake timed out");
         }
     }
 }

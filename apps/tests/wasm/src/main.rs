@@ -17,11 +17,11 @@ use daw::Daw;
 #[cfg(target_arch = "wasm32")]
 use dioxus::prelude::*;
 #[cfg(target_arch = "wasm32")]
-use roam::session::ConnectionHandle;
+use vox::session::ConnectionHandle;
 #[cfg(target_arch = "wasm32")]
-use roam_session::{initiate_framed, HandshakeConfig, NoDispatcher};
+use vox_session::{initiate_framed, HandshakeConfig, NoDispatcher};
 #[cfg(target_arch = "wasm32")]
-use roam_websocket::WsTransport;
+use vox_websocket::WsTransport;
 #[cfg(target_arch = "wasm32")]
 use serde::Serialize;
 #[cfg(target_arch = "wasm32")]
@@ -170,7 +170,7 @@ mod wasm {
             .await
             .map_err(|e| format!("WebSocket connect failed: {e}"))?;
 
-        log("[test] WebSocket connected, initiating roam handshake...");
+        log("[test] WebSocket connected, initiating vox handshake...");
 
         let (handle, _incoming, driver) =
             initiate_framed(transport, HandshakeConfig::default(), NoDispatcher)

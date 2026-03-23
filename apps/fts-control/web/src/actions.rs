@@ -13,7 +13,7 @@ use actions_proto::{
 use actions_standalone::StandaloneActions;
 
 use dioxus::prelude::*;
-use roam::ErasedCaller;
+use vox::ErasedCaller;
 use std::sync::Arc;
 
 /// Represents a host that provides actions

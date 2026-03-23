@@ -2,7 +2,7 @@
 
 use crate::example::auth::proto::SessionToken;
 use facet::Facet;
-use roam::Tx;
+use vox::Tx;
 
 #[derive(Debug, Clone, PartialEq, Facet)]
 pub struct ItemInfo {
@@ -17,7 +17,7 @@ pub enum ItemEvent {
     ListChanged { items: Vec<ItemInfo> },
 }
 
-#[roam::service]
+#[vox::service]
 pub trait ItemService {
     async fn list_items(&self, token: SessionToken) -> Vec<ItemInfo>;
     async fn create_item(&self, token: SessionToken, name: String) -> String;

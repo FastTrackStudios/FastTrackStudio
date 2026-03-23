@@ -11,7 +11,7 @@ use zeroconf::ServiceType;
 
 use crate::types::{Peer, PeerEvent};
 
-/// Start discovering roam services of the given type on the local network.
+/// Start discovering vox services of the given type on the local network.
 ///
 /// Returns a receiver that yields [`PeerEvent`]s as peers appear and disappear.
 /// Discovery runs in a background thread and forwards events through a tokio channel.

@@ -1,8 +1,8 @@
 //! Integration test: verify two services can discover each other via mDNS.
 //!
-//! Run with: cargo test -p roam-discover --test discovery_test -- --nocapture
+//! Run with: cargo test -p vox-discover --test discovery_test -- --nocapture
 
-use roam_discover::{advertise, discover, PeerEvent, ServiceInfo};
+use vox_discover::{advertise, discover, PeerEvent, ServiceInfo};
 use std::time::Duration;
 
 #[tokio::test]

@@ -139,7 +139,7 @@ where
 mod tests {
     use super::*;
     use crate::example::context::ContextFactory;
-    use roam::Context;
+    use vox::Context;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Mutex;
 
@@ -160,7 +160,7 @@ mod tests {
     }
 
     impl ContextFactory for CountingContextFactory {
-        fn make_context(&self) -> roam::Context {
+        fn make_context(&self) -> vox::Context {
             self.calls.fetch_add(1, Ordering::SeqCst);
             Context::new(
                 Default::default(),

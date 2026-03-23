@@ -17,7 +17,7 @@ pub enum AuthResult {
     Failed { message: String } = 1,
 }
 
-#[roam::service]
+#[vox::service]
 pub trait AuthService {
     async fn sign_up(&self, email: String, password: String, name: String) -> AuthResult;
     async fn sign_in(&self, email: String, password: String) -> AuthResult;

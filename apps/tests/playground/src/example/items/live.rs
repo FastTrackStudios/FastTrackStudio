@@ -7,7 +7,7 @@ use super::repo::ItemRepo;
 use crate::example::auth::live::Auth;
 use crate::example::auth::proto::SessionToken;
 use better_auth_core::types::{AuthRequest, HttpMethod};
-use roam::Tx;
+use vox::Tx;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 

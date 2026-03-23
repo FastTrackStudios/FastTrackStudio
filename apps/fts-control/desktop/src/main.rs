@@ -519,7 +519,7 @@ fn App() -> Element {
 
         // Subscribe to setlist events (transport updates, active song changes, etc.)
         debug!("Subscribing to setlist events...");
-        let (tx, mut rx) = roam::channel::<session::SetlistEvent>();
+        let (tx, mut rx) = vox::channel::<session::SetlistEvent>();
 
         match setlist_client.subscribe(tx).await {
             Ok(()) => {

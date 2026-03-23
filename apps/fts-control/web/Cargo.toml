@@ -8,9 +8,9 @@ edition = "2021"
 # Dioxus UI framework
 dioxus = { version = "0.7.2", features = ["router"] }
 
-# Roam RPC over WebSocket (WASM-compatible)
-roam.workspace = true
-roam-websocket.workspace = true
+# Vox RPC over WebSocket (WASM-compatible)
+vox.workspace = true
+vox-websocket.workspace = true
 
 # DAW control API - same API works on desktop and web
 daw.workspace = true

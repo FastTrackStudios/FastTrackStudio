@@ -28,7 +28,7 @@
 
 use crate::routed_handler::RoutedHandler;
 use daw::sync::LocalCaller;
-use roam::ErasedCaller;
+use vox::ErasedCaller;
 use session::{
     setlist_service_service_descriptor, song_service_service_descriptor, SetlistServiceClient,
     SetlistServiceDispatcher, SetlistServiceImpl, SongServiceDispatcher, SongServiceImpl,

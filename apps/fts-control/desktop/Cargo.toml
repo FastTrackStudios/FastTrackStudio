@@ -14,10 +14,10 @@ session-ui = { workspace = true, default-features = false }
 # Services (run in-process)
 session.workspace = true
 
-# Roam - for connecting to host and service dispatch
-roam.workspace = true
-roam-stream.workspace = true
-roam-local.workspace = true
+# Vox - for connecting to host and service dispatch
+vox.workspace = true
+vox-stream.workspace = true
+vox-local.workspace = true
 
 # Instrumentation
 moire.workspace = true

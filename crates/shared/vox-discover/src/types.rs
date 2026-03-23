@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::net::IpAddr;
 
-/// Information needed to advertise a roam service on the network.
+/// Information needed to advertise a vox service on the network.
 #[derive(Debug, Clone)]
 pub struct ServiceInfo {
     /// Short service type name (e.g., "fts-daw", "fts-control").
@@ -14,7 +14,7 @@ pub struct ServiceInfo {
     /// Must be unique on the local network.
     pub instance_name: String,
 
-    /// TCP port the roam service is listening on.
+    /// TCP port the vox service is listening on.
     pub port: u16,
 
     /// Key-value metadata stored as DNS-SD TXT records.

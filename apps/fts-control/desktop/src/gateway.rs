@@ -1,12 +1,12 @@
 //! In-Process WebSocket Gateway
 //!
 //! Runs a WebSocket server in-process, allowing browsers to connect
-//! to the desktop app and access session services via roam binary RPC.
+//! to the desktop app and access session services via vox binary RPC.
 //!
 //! # Architecture
 //!
 //! ```text
-//!     Browser ──WebSocket──► axum server ──► roam acceptor ──► Handler
+//!     Browser ──WebSocket──► axum server ──► vox acceptor ──► Handler
 //! ```
 
 use std::io;
@@ -18,7 +18,7 @@ use axum::extract::{State, WebSocketUpgrade};
 use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::Router;
-use roam::{
+use vox::{
     Backing, DriverCaller, DriverReplySink, ErasedCaller, Handler, Link, LinkRx, LinkTx,
     LinkTxPermit, WriteSlot,
 };
@@ -39,12 +39,12 @@ pub fn web_client_registry() -> &'static WebClientRegistry {
 }
 
 // ============================================================================
-// AxumWsLink — implements roam's Link trait for axum WebSocket
+// AxumWsLink — implements vox's Link trait for axum WebSocket
 // ============================================================================
 
 /// A [`Link`] implementation over an axum [`WebSocket`] connection.
 ///
-/// Each roam payload maps 1:1 to a binary WebSocket frame. The WebSocket
+/// Each vox payload maps 1:1 to a binary WebSocket frame. The WebSocket
 /// protocol preserves message boundaries natively, so no length-prefix
 /// framing is needed.
 struct AxumWsLink {
@@ -228,7 +228,7 @@ impl LinkRx for AxumWsLinkRx {
                 Some(Ok(Message::Text(_))) => {
                     return Err(AxumWsLinkRxError(io::Error::new(
                         io::ErrorKind::InvalidData,
-                        "text frames not allowed on roam websocket link",
+                        "text frames not allowed on vox websocket link",
                     )));
                 }
                 Some(Err(e)) => {
@@ -375,14 +375,14 @@ async fn handle_socket<H: Handler<DriverReplySink> + Clone + Send + Sync + 'stat
     }
 
     let link = AxumWsLink::new(socket);
-    let handshake_result = roam::HandshakeResult {
-        role: roam::SessionRole::Acceptor,
-        our_settings: roam::ConnectionSettings {
-            parity: roam::Parity::Even,
+    let handshake_result = vox::HandshakeResult {
+        role: vox::SessionRole::Acceptor,
+        our_settings: vox::ConnectionSettings {
+            parity: vox::Parity::Even,
             max_concurrent_requests: 64,
         },
-        peer_settings: roam::ConnectionSettings {
-            parity: roam::Parity::Odd,
+        peer_settings: vox::ConnectionSettings {
+            parity: vox::Parity::Odd,
             max_concurrent_requests: 64,
         },
         peer_supports_retry: true,
@@ -391,7 +391,7 @@ async fn handle_socket<H: Handler<DriverReplySink> + Clone + Send + Sync + 'stat
         our_schema: vec![],
         peer_schema: vec![],
     };
-    match roam::acceptor(roam::BareConduit::new(link), handshake_result)
+    match vox::acceptor(vox::BareConduit::new(link), handshake_result)
         .establish::<DriverCaller>(gateway.handler.clone())
         .await
     {

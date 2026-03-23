@@ -1,9 +1,9 @@
-//! Shared ROAM context factory used by controls.
+//! Shared VOX context factory used by controls.
 
 use std::sync::Arc;
 
 pub trait ContextFactory: Send + Sync {
-    fn make_context(&self) -> roam::Context;
+    fn make_context(&self) -> vox::Context;
 }
 
 pub type SharedContextFactory = Arc<dyn ContextFactory>;
@@ -12,8 +12,8 @@ pub type SharedContextFactory = Arc<dyn ContextFactory>;
 pub struct DefaultContextFactory;
 
 impl ContextFactory for DefaultContextFactory {
-    fn make_context(&self) -> roam::Context {
-        roam::Context::new(
+    fn make_context(&self) -> vox::Context {
+        vox::Context::new(
             Default::default(),
             Default::default(),
             Default::default(),

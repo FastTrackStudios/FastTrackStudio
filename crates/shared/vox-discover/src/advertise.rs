@@ -11,7 +11,7 @@ use zeroconf::{MdnsService, ServiceType, TxtRecord};
 use crate::types::ServiceInfo;
 use crate::Result;
 
-/// Advertise a roam service on the local network via mDNS.
+/// Advertise a vox service on the local network via mDNS.
 ///
 /// Returns an [`AdvertiseGuard`] that keeps the advertisement alive.
 /// When dropped, the service is unregistered from the network.

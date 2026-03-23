@@ -16,7 +16,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use dioxus::prelude::*;
-use roam_websocket::WsLink;
+use vox_websocket::WsLink;
 use session::{SetlistServiceClient, Song, WebClientServiceDispatcher};
 
 use crate::web_client_handler::WebClientHandler;
@@ -123,19 +123,19 @@ async fn try_connect_and_run(
         .await
         .map_err(|e| format!("WebSocket connect failed: {e}"))?;
 
-    log("[fts-control] WebSocket connected, initiating roam handshake...");
+    log("[fts-control] WebSocket connected, initiating vox handshake...");
 
-    // Use the new roam initiator builder API for the handshake.
+    // Use the new vox initiator builder API for the handshake.
     // Register WebClientServiceDispatcher so the desktop can push events to us.
     let handler = WebClientServiceDispatcher::new(WebClientHandler);
-    let (caller, _session_handle) = roam::initiator_conduit(roam::BareConduit::new(link))
+    let (caller, _session_handle) = vox::initiator_conduit(vox::BareConduit::new(link))
         .spawn_fn(|fut| {
             wasm_bindgen_futures::spawn_local(async move {
                 fut.await;
             });
         })
         .max_concurrent_requests(64)
-        .establish::<roam::DriverCaller>(handler)
+        .establish::<vox::DriverCaller>(handler)
         .await
         .map_err(|e| format!("Handshake failed: {e:?}"))?;
 
@@ -145,7 +145,7 @@ async fn try_connect_and_run(
     log("[fts-control] Session task spawned");
 
     // Create SetlistServiceClient and initialize Session singleton
-    let handle = roam::ErasedCaller::new(caller);
+    let handle = vox::ErasedCaller::new(caller);
     let setlist_client = SetlistServiceClient::new(handle);
 
     // Re-initialize Session (it may have been initialized before a disconnect)

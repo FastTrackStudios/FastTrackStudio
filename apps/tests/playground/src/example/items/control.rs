@@ -118,9 +118,9 @@ where
             .await;
     }
 
-    pub async fn subscribe(&self, token: &SessionToken) -> eyre::Result<roam::Rx<ItemEvent>> {
+    pub async fn subscribe(&self, token: &SessionToken) -> eyre::Result<vox::Rx<ItemEvent>> {
         let cx = self.context_factory.make_context();
-        let (tx, rx) = roam::channel::<ItemEvent>();
+        let (tx, rx) = vox::channel::<ItemEvent>();
         self.service.subscribe(token.clone(), tx).await;
         Ok(rx)
     }
@@ -130,7 +130,7 @@ where
 mod tests {
     use super::*;
     use crate::example::context::ContextFactory;
-    use roam::Tx;
+    use vox::Tx;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Mutex;
 
@@ -151,7 +151,7 @@ mod tests {
     }
 
     impl ContextFactory for CountingContextFactory {
-        fn make_context(&self) -> roam::Context {
+        fn make_context(&self) -> vox::Context {
             self.calls.fetch_add(1, Ordering::SeqCst);
             Context::new(
                 Default::default(),
