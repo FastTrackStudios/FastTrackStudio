@@ -6196,7 +6196,7 @@ dependencies = [
 [[package]]
 name = "monarchy"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/monarchy.git?branch=main#183959be7223bb735c2adfac17e8da6c5acdd79b"
+source = "git+https://github.com/FastTrackStudios/monarchy.git?branch=main#b5efa6bce31cfd009f9f042403a034f89dabd2ab"
 dependencies = [
  "facet",
  "facet-json",
@@ -6211,7 +6211,7 @@ dependencies = [
 [[package]]
 name = "monarchy_derive"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/monarchy.git?branch=main#183959be7223bb735c2adfac17e8da6c5acdd79b"
+source = "git+https://github.com/FastTrackStudios/monarchy.git?branch=main#b5efa6bce31cfd009f9f042403a034f89dabd2ab"
 dependencies = [
  "convert_case 0.6.0",
  "proc-macro2",
@@ -10105,7 +10105,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.2",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix 1.1.4",
  "windows-sys 0.61.2",
