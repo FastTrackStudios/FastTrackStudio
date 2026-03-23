@@ -4,7 +4,6 @@ version.workspace = true
 edition = "2024"
 authors.workspace = true
 license.workspace = true
-readme = "README.md"
 description = "A metadata-based hierarchical organization system for Rust"
 keywords = ["hierarchy", "organization", "metadata", "sorting", "categorization"]
 categories = ["data-structures", "algorithms"]
