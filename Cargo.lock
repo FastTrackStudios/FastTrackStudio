@@ -260,7 +260,7 @@ checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 [[package]]
 name = "anyrender"
 version = "0.7.0"
-source = "git+https://github.com/DioxusLabs/anyrender.git?branch=main#df7d0948b5f13fad52f2012b6b67f6e0d35e7b0a"
+source = "git+https://github.com/DioxusLabs/anyrender.git?branch=main#5f9acd2a1a5363f4bdd3dea0565ef56f092e4b30"
 dependencies = [
  "kurbo 0.13.0",
  "peniko 0.6.0",
@@ -2005,7 +2005,7 @@ checksum = "be1e0bca6c3637f992fc1cc7cbc52a78c1ef6db076dbf1059c4323d6a2048376"
 [[package]]
 name = "daw"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/daw.git?branch=main#c2dde15d92f48e0b14dafd5c7849e2e9c49f26ce"
+source = "git+https://github.com/FastTrackStudios/daw.git?branch=main#88069fe16b4642b226de2d7562d5b37835708641"
 dependencies = [
  "daw-control",
  "daw-control-sync",
@@ -2018,7 +2018,7 @@ dependencies = [
 [[package]]
 name = "daw-cli"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/daw.git?branch=main#c2dde15d92f48e0b14dafd5c7849e2e9c49f26ce"
+source = "git+https://github.com/FastTrackStudios/daw.git?branch=main#88069fe16b4642b226de2d7562d5b37835708641"
 dependencies = [
  "clap",
  "daw",
@@ -2037,7 +2037,7 @@ dependencies = [
 [[package]]
 name = "daw-control"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/daw.git?branch=main#c2dde15d92f48e0b14dafd5c7849e2e9c49f26ce"
+source = "git+https://github.com/FastTrackStudios/daw.git?branch=main#88069fe16b4642b226de2d7562d5b37835708641"
 dependencies = [
  "daw-proto",
  "eyre",
@@ -2051,7 +2051,7 @@ dependencies = [
 [[package]]
 name = "daw-control-sync"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/daw.git?branch=main#c2dde15d92f48e0b14dafd5c7849e2e9c49f26ce"
+source = "git+https://github.com/FastTrackStudios/daw.git?branch=main#88069fe16b4642b226de2d7562d5b37835708641"
 dependencies = [
  "daw-control",
  "eyre",
@@ -2065,7 +2065,7 @@ dependencies = [
 [[package]]
 name = "daw-extension-runtime"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/daw.git?branch=main#c2dde15d92f48e0b14dafd5c7849e2e9c49f26ce"
+source = "git+https://github.com/FastTrackStudios/daw.git?branch=main#88069fe16b4642b226de2d7562d5b37835708641"
 dependencies = [
  "daw",
  "eyre",
@@ -2080,7 +2080,7 @@ dependencies = [
 [[package]]
 name = "daw-proto"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/daw.git?branch=main#c2dde15d92f48e0b14dafd5c7849e2e9c49f26ce"
+source = "git+https://github.com/FastTrackStudios/daw.git?branch=main#88069fe16b4642b226de2d7562d5b37835708641"
 dependencies = [
  "actions-proto",
  "facet",
@@ -2091,7 +2091,7 @@ dependencies = [
 [[package]]
 name = "daw-standalone"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/daw.git?branch=main#c2dde15d92f48e0b14dafd5c7849e2e9c49f26ce"
+source = "git+https://github.com/FastTrackStudios/daw.git?branch=main#88069fe16b4642b226de2d7562d5b37835708641"
 dependencies = [
  "async-lock",
  "cpal",
@@ -2111,7 +2111,7 @@ dependencies = [
 [[package]]
 name = "dawfile-reaper"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/daw.git?branch=main#c2dde15d92f48e0b14dafd5c7849e2e9c49f26ce"
+source = "git+https://github.com/FastTrackStudios/daw.git?branch=main#88069fe16b4642b226de2d7562d5b37835708641"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -5158,12 +5158,17 @@ dependencies = [
 name = "installer-core"
 version = "0.1.0"
 dependencies = [
+ "ab_glyph",
  "dpp",
  "eyre",
  "futures",
+ "icns",
+ "image",
  "libc",
  "reqwest",
+ "serde_json",
  "tempfile",
+ "tiny-skia",
  "tokio",
  "tracing",
  "utils 0.1.0",
@@ -6008,7 +6013,7 @@ checksum = "670fdfda89751bc4a84ac13eaa63e205cf0fd22b4c9a5fbfa085b63c1f1d3a30"
 [[package]]
 name = "macromod"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/signal.git?branch=main#8782845d3fe1953cb7468da318b25a6d9f7e1fa5"
+source = "git+https://github.com/FastTrackStudios/signal.git?branch=main#5e3860cead2bbe4009b1fbee18fc0a63665f1b59"
 dependencies = [
  "facet",
  "serde",
@@ -6477,7 +6482,7 @@ dependencies = [
 [[package]]
 name = "nam-manager"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/signal.git?branch=main#8782845d3fe1953cb7468da318b25a6d9f7e1fa5"
+source = "git+https://github.com/FastTrackStudios/signal.git?branch=main#5e3860cead2bbe4009b1fbee18fc0a63665f1b59"
 dependencies = [
  "base64 0.22.1",
  "regex",
@@ -8234,7 +8239,7 @@ dependencies = [
 [[package]]
 name = "reaper-launcher"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/daw.git?branch=main#c2dde15d92f48e0b14dafd5c7849e2e9c49f26ce"
+source = "git+https://github.com/FastTrackStudios/daw.git?branch=main#88069fe16b4642b226de2d7562d5b37835708641"
 dependencies = [
  "libc",
  "serde",
@@ -8278,7 +8283,7 @@ dependencies = [
 [[package]]
 name = "reaper-test"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/daw.git?branch=main#c2dde15d92f48e0b14dafd5c7849e2e9c49f26ce"
+source = "git+https://github.com/FastTrackStudios/daw.git?branch=main#88069fe16b4642b226de2d7562d5b37835708641"
 dependencies = [
  "daw",
  "eyre",
@@ -8294,7 +8299,7 @@ dependencies = [
 [[package]]
 name = "reaper-test-macro"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/daw.git?branch=main#c2dde15d92f48e0b14dafd5c7849e2e9c49f26ce"
+source = "git+https://github.com/FastTrackStudios/daw.git?branch=main#88069fe16b4642b226de2d7562d5b37835708641"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -9213,7 +9218,7 @@ dependencies = [
 [[package]]
 name = "signal"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/signal.git?branch=main#8782845d3fe1953cb7468da318b25a6d9f7e1fa5"
+source = "git+https://github.com/FastTrackStudios/signal.git?branch=main#5e3860cead2bbe4009b1fbee18fc0a63665f1b59"
 dependencies = [
  "moire",
  "nam-manager",
@@ -9230,7 +9235,7 @@ dependencies = [
 [[package]]
 name = "signal-cli"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/signal.git?branch=main#8782845d3fe1953cb7468da318b25a6d9f7e1fa5"
+source = "git+https://github.com/FastTrackStudios/signal.git?branch=main#5e3860cead2bbe4009b1fbee18fc0a63665f1b59"
 dependencies = [
  "clap",
  "daw",
@@ -9248,7 +9253,7 @@ dependencies = [
 [[package]]
 name = "signal-controller"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/signal.git?branch=main#8782845d3fe1953cb7468da318b25a6d9f7e1fa5"
+source = "git+https://github.com/FastTrackStudios/signal.git?branch=main#5e3860cead2bbe4009b1fbee18fc0a63665f1b59"
 dependencies = [
  "signal-live",
  "signal-proto",
@@ -9261,7 +9266,7 @@ dependencies = [
 [[package]]
 name = "signal-daw-bridge"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/signal.git?branch=main#8782845d3fe1953cb7468da318b25a6d9f7e1fa5"
+source = "git+https://github.com/FastTrackStudios/signal.git?branch=main#5e3860cead2bbe4009b1fbee18fc0a63665f1b59"
 dependencies = [
  "daw",
  "serde",
@@ -9292,7 +9297,7 @@ dependencies = [
 [[package]]
 name = "signal-import"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/signal.git?branch=main#8782845d3fe1953cb7468da318b25a6d9f7e1fa5"
+source = "git+https://github.com/FastTrackStudios/signal.git?branch=main#5e3860cead2bbe4009b1fbee18fc0a63665f1b59"
 dependencies = [
  "eyre",
  "serde",
@@ -9306,7 +9311,7 @@ dependencies = [
 [[package]]
 name = "signal-live"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/signal.git?branch=main#8782845d3fe1953cb7468da318b25a6d9f7e1fa5"
+source = "git+https://github.com/FastTrackStudios/signal.git?branch=main#5e3860cead2bbe4009b1fbee18fc0a63665f1b59"
 dependencies = [
  "base64 0.22.1",
  "daw",
@@ -9327,7 +9332,7 @@ dependencies = [
 [[package]]
 name = "signal-proto"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/signal.git?branch=main#8782845d3fe1953cb7468da318b25a6d9f7e1fa5"
+source = "git+https://github.com/FastTrackStudios/signal.git?branch=main#5e3860cead2bbe4009b1fbee18fc0a63665f1b59"
 dependencies = [
  "actions-proto",
  "facet",
@@ -9342,7 +9347,7 @@ dependencies = [
 [[package]]
 name = "signal-storage"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/signal.git?branch=main#8782845d3fe1953cb7468da318b25a6d9f7e1fa5"
+source = "git+https://github.com/FastTrackStudios/signal.git?branch=main#5e3860cead2bbe4009b1fbee18fc0a63665f1b59"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -11045,9 +11050,9 @@ checksum = "383ad40bb927465ec0ce7720e033cb4ca06912855fc35db31b5755d0de75b1ee"
 
 [[package]]
 name = "unicode-segmentation"
-version = "1.13.0"
+version = "1.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a559e63b5d8004e12f9bce88af5c6d939c58de839b7532cfe9653846cedd2a9e"
+checksum = "da36089a805484bcccfffe0739803392c8298778a2d2f09febf76fac5ad9025b"
 
 [[package]]
 name = "unicode-vo"
@@ -11159,7 +11164,7 @@ dependencies = [
 [[package]]
 name = "utils"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/FastTrackStudio.git?branch=main#46ec2fa55073125ae59ab2ce64b2d9613631a44c"
+source = "git+https://github.com/FastTrackStudios/FastTrackStudio.git?branch=main#dfcdbf2a099d311e23e1a31494f4397a65de4590"
 dependencies = [
  "facet",
  "serde",
