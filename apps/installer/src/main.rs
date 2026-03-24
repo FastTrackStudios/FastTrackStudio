@@ -19,6 +19,7 @@ use dioxus::desktop::tao::dpi::LogicalSize;
 use dioxus::desktop::{Config, WindowBuilder};
 use dioxus::prelude::*;
 use installer_core::{InstallContext, InstallEvent, InstallPlan};
+use tracing_subscriber::prelude::*;
 
 const MAIN_CSS: Asset = asset!("/assets/main.css");
 const TAILWIND_CSS: Asset = asset!("/assets/tailwind.css");
@@ -35,12 +36,44 @@ struct Cli {
     install_dir: Option<PathBuf>,
 }
 
+/// Log file location: ~/Library/Logs/FastTrackStudio/installer.log (macOS)
+/// or ~/.local/share/FastTrackStudio/installer.log (Linux).
+fn log_path() -> Option<PathBuf> {
+    let home = std::env::var_os("HOME").map(PathBuf::from)?;
+    if cfg!(target_os = "macos") {
+        Some(home.join("Library/Logs/FastTrackStudio/installer.log"))
+    } else {
+        Some(home.join(".local/share/FastTrackStudio/installer.log"))
+    }
+}
+
 fn main() {
     let cli = Cli::parse();
 
-    tracing_subscriber::fmt()
-        .with_env_filter("info,installer_core=debug")
-        .init();
+    // Log to stderr + file (if writable).
+    let stderr_layer = tracing_subscriber::fmt::layer()
+        .with_writer(std::io::stderr)
+        .with_filter(tracing_subscriber::EnvFilter::new("info,installer_core=debug"));
+
+    let registry = tracing_subscriber::registry().with(stderr_layer);
+
+    if let Some(path) = log_path() {
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Ok(file) = std::fs::File::create(&path) {
+            let file_layer = tracing_subscriber::fmt::layer()
+                .with_ansi(false)
+                .with_writer(file)
+                .with_filter(tracing_subscriber::EnvFilter::new("debug"));
+            registry.with(file_layer).init();
+            eprintln!("Logging to {}", path.display());
+        } else {
+            registry.init();
+        }
+    } else {
+        registry.init();
+    };
 
     let plan = match &cli.install_dir {
         Some(dir) => InstallPlan::with_install_dir(dir.clone()),
@@ -89,6 +122,10 @@ fn run_silent(plan: InstallPlan) {
         let ctx = InstallContext {
             plan,
             extension_bytes: vec![],
+            selected_profiles: installer_core::profiles::ALL_PROFILES
+                .iter()
+                .map(|p| p.id.to_string())
+                .collect(),
         };
 
         let handle = tokio::spawn(async move {

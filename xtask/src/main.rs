@@ -10,6 +10,7 @@ use signal::catalog;
 use xshell::{Shell, cmd};
 
 mod icon_gen;
+mod icon_gen_rs;
 
 /// Development tasks for FastTrackStudio
 #[derive(Facet)]
@@ -100,6 +101,12 @@ enum Commands {
     /// Package the FTS library into a .tar.gz for the installer
     PackageLibrary {
         /// Output file path (default: fts-library.tar.gz)
+        #[facet(args::positional, default)]
+        output: Option<String>,
+    },
+    /// Generate rig type icons as PNGs (pure Rust, no Swift)
+    GenIcons {
+        /// Output directory (default: apps/installer/assets/icons)
         #[facet(args::positional, default)]
         output: Option<String>,
     },
@@ -538,6 +545,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         features: vec!["daw".into()],
                         test_threads: 4,
                         default_skips: vec![],
+                        test_binary: None,
                     },
                     std::path::Path::new("crates/signal/signal/tests"),
                 ),
@@ -547,6 +555,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         features: vec![],
                         test_threads: 4,
                         default_skips: vec![],
+                        test_binary: None,
                     },
                     std::path::Path::new("crates/session/session/tests"),
                 ),
@@ -556,6 +565,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         features: vec![],
                         test_threads: 4,
                         default_skips: vec![],
+                        test_binary: None,
                     },
                     std::path::Path::new("crates/sync/sync/tests"),
                 ),
@@ -622,6 +632,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
         Commands::PackageLibrary { output } => {
             run_package_library(output)?;
+        }
+        Commands::GenIcons { output } => {
+            let output_dir = output.unwrap_or_else(|| "apps/installer/assets/icons".to_string());
+            println!("=== Generating rig type icons ===");
+            println!("  Output: {output_dir}");
+            icon_gen_rs::generate_all_icons(std::path::Path::new(&output_dir), &[128])?;
+            println!("=== Done ===");
         }
     }
 

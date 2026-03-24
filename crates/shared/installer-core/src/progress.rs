@@ -21,6 +21,7 @@ pub enum InstallEvent {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum InstallStep {
+    Preflight,
     DownloadReaper,
     ExtractDmg,
     CopyExtension,
@@ -33,6 +34,7 @@ pub enum InstallStep {
 impl InstallStep {
     pub fn label(&self) -> &'static str {
         match self {
+            Self::Preflight => "Pre-flight checks",
             Self::DownloadReaper => "Download REAPER",
             Self::ExtractDmg => "Extract REAPER",
             Self::CopyExtension => "Install extension",
@@ -45,6 +47,7 @@ impl InstallStep {
 
     pub fn all() -> &'static [InstallStep] {
         &[
+            Self::Preflight,
             Self::DownloadReaper,
             Self::ExtractDmg,
             Self::CopyExtension,

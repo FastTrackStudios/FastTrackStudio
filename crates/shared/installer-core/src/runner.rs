@@ -2,7 +2,7 @@
 
 use tracing::info;
 
-use crate::plan::InstallPlan;
+use crate::plan::{self, InstallPlan};
 use crate::progress::{EventSender, InstallEvent, InstallStep};
 use crate::steps;
 
@@ -13,19 +13,42 @@ pub struct InstallContext {
     /// FTS REAPER extension bytes (e.g. from `include_bytes!`).
     /// Empty if not bundled (extension step will be skipped).
     pub extension_bytes: Vec<u8>,
+    /// Which rig profiles to install (by id). Empty = skip rig setup.
+    pub selected_profiles: Vec<String>,
 }
 
 /// Run every installation step in order. Sends progress events via `tx`.
 /// Stops on the first error.
 pub async fn run_all_steps(ctx: InstallContext, tx: EventSender) -> eyre::Result<()> {
-    let plan = &ctx.plan;
+    let mut plan = ctx.plan;
+
+    // 0. Pre-flight checks
+    send_started(&tx, InstallStep::Preflight).await;
+    match steps::preflight::run_preflight(&plan, &tx).await {
+        Ok(()) => send_completed(&tx, InstallStep::Preflight).await,
+        Err(e) => {
+            send_failed(&tx, InstallStep::Preflight, &e).await;
+            return Err(e);
+        }
+    }
+
+    // Resolve latest REAPER version (non-fatal — falls back to hardcoded)
+    if let Some(version) = plan::fetch_latest_reaper_version().await {
+        if version != plan.reaper_version {
+            info!(
+                "Using latest REAPER version {version} (was {})",
+                plan.reaper_version
+            );
+            plan.reaper_version = version;
+        }
+    }
 
     info!("Starting installation to {}", plan.install_root.display());
     tokio::fs::create_dir_all(&plan.install_root).await?;
 
     // 1. Download REAPER
     send_started(&tx, InstallStep::DownloadReaper).await;
-    let dmg_path = match steps::download_reaper::download_reaper(plan, &tx).await {
+    let dmg_path = match steps::download_reaper::download_reaper(&plan, &tx).await {
         Ok(p) => {
             send_completed(&tx, InstallStep::DownloadReaper).await;
             p
@@ -76,8 +99,15 @@ pub async fn run_all_steps(ctx: InstallContext, tx: EventSender) -> eyre::Result
     {
         Ok(()) => send_completed(&tx, InstallStep::DownloadLibrary).await,
         Err(e) => {
-            send_failed(&tx, InstallStep::DownloadLibrary, &e).await;
-            return Err(e);
+            tracing::warn!("Library download failed (non-fatal): {e:#}");
+            let _ = tx
+                .send(InstallEvent::StepProgress {
+                    step: InstallStep::DownloadLibrary,
+                    fraction: 1.0,
+                    message: "Library not available yet, skipping".into(),
+                })
+                .await;
+            send_completed(&tx, InstallStep::DownloadLibrary).await;
         }
     }
 

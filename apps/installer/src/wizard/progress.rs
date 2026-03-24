@@ -4,7 +4,7 @@ use dioxus::prelude::*;
 use installer_core::{InstallContext, InstallEvent, InstallPlan, InstallStep};
 
 #[component]
-pub fn ProgressStep(plan: InstallPlan, on_done: EventHandler<bool>) -> Element {
+pub fn ProgressStep(plan: InstallPlan, selected_profiles: Vec<String>, on_done: EventHandler<bool>) -> Element {
     let mut step_states = use_signal(|| {
         InstallStep::all()
             .iter()
@@ -18,12 +18,14 @@ pub fn ProgressStep(plan: InstallPlan, on_done: EventHandler<bool>) -> Element {
     // Run installation once on mount
     use_future(move || {
         let plan = plan.clone();
+        let profiles = selected_profiles.clone();
         async move {
             let (tx, mut rx) = tokio::sync::mpsc::channel::<InstallEvent>(64);
 
             let ctx = InstallContext {
                 plan,
                 extension_bytes: Vec::new(), // TODO: embed via include_bytes! or rust-embed
+                selected_profiles: profiles,
             };
 
             tokio::spawn(async move {

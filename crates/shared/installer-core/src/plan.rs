@@ -1,9 +1,12 @@
 //! Installation plan — validated configuration for the install process.
 
 use std::path::PathBuf;
+use std::time::Duration;
 
-/// Pinned REAPER version for this release of the installer.
-pub const REAPER_VERSION: &str = "7.30";
+use tracing::{info, warn};
+
+/// Fallback REAPER version if we can't fetch the latest.
+pub const FALLBACK_REAPER_VERSION: &str = "7.30";
 
 /// Default library download URL — points to the latest GitHub Release asset.
 /// Update this when cutting a new library release.
@@ -18,6 +21,8 @@ pub struct InstallPlan {
     pub fts_control_source: Option<PathBuf>,
     /// URL to download the library archive (presets, FXChains, etc.).
     pub library_url: String,
+    /// REAPER version to download. Resolved dynamically at install time.
+    pub reaper_version: String,
 }
 
 impl InstallPlan {
@@ -27,6 +32,7 @@ impl InstallPlan {
             install_root: default_install_root(),
             fts_control_source: find_fts_control_app(),
             library_url: DEFAULT_LIBRARY_URL.to_string(),
+            reaper_version: FALLBACK_REAPER_VERSION.to_string(),
         }
     }
 
@@ -36,6 +42,7 @@ impl InstallPlan {
             install_root: dir,
             fts_control_source: find_fts_control_app(),
             library_url: DEFAULT_LIBRARY_URL.to_string(),
+            reaper_version: FALLBACK_REAPER_VERSION.to_string(),
         }
     }
 
@@ -63,16 +70,17 @@ impl InstallPlan {
 
     /// URL for downloading REAPER for this platform/arch.
     pub fn reaper_download_url(&self) -> String {
-        let version_slug = REAPER_VERSION.replace('.', "");
-        let arch = if cfg!(target_arch = "aarch64") {
-            "arm64"
-        } else {
-            "x86_64"
-        };
+        let version_slug = self.reaper_version.replace('.', "");
 
         if cfg!(target_os = "macos") {
-            format!("https://www.reaper.fm/files/7.x/reaper{version_slug}_macos_{arch}.dmg")
+            // Universal build recommended for all modern macOS (10.15+).
+            format!("https://www.reaper.fm/files/7.x/reaper{version_slug}_universal.dmg")
         } else {
+            let arch = if cfg!(target_arch = "aarch64") {
+                "aarch64"
+            } else {
+                "x86_64"
+            };
             format!("https://www.reaper.fm/files/7.x/reaper{version_slug}_linux_{arch}.tar.xz")
         }
     }
@@ -86,9 +94,48 @@ impl InstallPlan {
     }
 }
 
+/// Fetch the latest stable REAPER version from cockos.com.
+///
+/// Returns `None` on any error (timeout, parse failure, network).
+/// Uses a short timeout so it doesn't block the installer.
+pub async fn fetch_latest_reaper_version() -> Option<String> {
+    let client = reqwest::Client::builder()
+        .user_agent("FastTrackStudio-Installer/0.1")
+        .timeout(Duration::from_secs(5))
+        .build()
+        .ok()?;
+
+    let response = client
+        .get("https://www.cockos.com/reaper/latestversion/")
+        .send()
+        .await
+        .ok()?;
+
+    if !response.status().is_success() {
+        return None;
+    }
+
+    let text = response.text().await.ok()?;
+    // The endpoint returns the version on the first line, followed by
+    // a URL and changelog. We only need the version number.
+    let version = text.lines().next()?.trim().to_string();
+
+    // Sanity check: should look like "7.30" or "7.66"
+    if version.starts_with(|c: char| c.is_ascii_digit())
+        && version.contains('.')
+        && version.len() <= 10
+    {
+        info!("Resolved latest REAPER version: {version}");
+        Some(version)
+    } else {
+        warn!("Unexpected version format from cockos.com: {version:?}");
+        None
+    }
+}
+
 fn default_install_root() -> PathBuf {
     dirs_home()
-        .map(|h| h.join("Music/FastTrackStudio"))
+        .map(|h| h.join("Music/Dev/FastTrackStudio"))
         .unwrap_or_else(|| PathBuf::from("/tmp/FastTrackStudio"))
 }
 

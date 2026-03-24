@@ -1,5 +1,7 @@
 //! Done step — success or failure with action buttons.
 
+use std::path::PathBuf;
+
 use dioxus::prelude::*;
 
 fn quit(code: i32) {
@@ -7,9 +9,8 @@ fn quit(code: i32) {
 }
 
 #[component]
-pub fn DoneStep(success: bool) -> Element {
-    let install_root = utils::paths::fts_home();
-    let fts_control = install_root.join("FTS-Control.app");
+pub fn DoneStep(success: bool, install_root: PathBuf) -> Element {
+    let reaper_app = install_root.join("Reaper/REAPER.app");
 
     rsx! {
         div {
@@ -19,7 +20,7 @@ pub fn DoneStep(success: bool) -> Element {
                 div { class: "text-center",
                     h2 { class: "text-2xl font-bold mb-2", "Installation Complete" }
                     p { class: "text-sm text-white/50 max-w-sm",
-                        "FastTrackStudio is ready. Launch FTS Control to get started."
+                        "FastTrackStudio is ready."
                     }
                 }
 
@@ -28,7 +29,7 @@ pub fn DoneStep(success: bool) -> Element {
                         class: "px-6 py-2.5 bg-white text-black rounded-lg font-medium \
                                 hover:bg-white/90 transition-colors cursor-pointer",
                         onclick: {
-                            let path = fts_control.clone();
+                            let path = reaper_app.clone();
                             move |_: MouseEvent| {
                                 if path.exists() {
                                     let _ = std::process::Command::new("open")
@@ -38,7 +39,7 @@ pub fn DoneStep(success: bool) -> Element {
                                 }
                             }
                         },
-                        "Launch FTS Control"
+                        "Launch REAPER"
                     }
                     button {
                         class: "px-4 py-2.5 rounded-lg border border-white/10 text-sm \

@@ -5,7 +5,7 @@ use installer_core::InstallPlan;
 
 #[component]
 pub fn LocationStep(
-    plan: Signal<InstallPlan>,
+    mut plan: Signal<InstallPlan>,
     on_next: EventHandler,
     on_back: EventHandler,
 ) -> Element {
@@ -33,7 +33,13 @@ pub fn LocationStep(
                     class: "px-4 py-2.5 rounded-lg border border-white/10 \
                             bg-white/5 text-sm hover:bg-white/10 transition-colors cursor-pointer",
                     onclick: move |_| {
-                        // TODO: rfd folder picker
+                        let current = plan.read().install_root.clone();
+                        if let Some(folder) = rfd::FileDialog::new()
+                            .set_directory(&current)
+                            .pick_folder()
+                        {
+                            plan.write().install_root = folder;
+                        }
                     },
                     "Browse..."
                 }
