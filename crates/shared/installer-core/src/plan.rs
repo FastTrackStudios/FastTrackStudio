@@ -134,9 +134,21 @@ pub async fn fetch_latest_reaper_version() -> Option<String> {
 }
 
 fn default_install_root() -> PathBuf {
-    dirs_home()
+    let base = dirs_home()
         .map(|h| h.join("Music/Dev/FastTrackStudio"))
-        .unwrap_or_else(|| PathBuf::from("/tmp/FastTrackStudio"))
+        .unwrap_or_else(|| PathBuf::from("/tmp/FastTrackStudio"));
+
+    // Don't overwrite an existing install — find a free name.
+    if !base.exists() {
+        return base;
+    }
+    for i in 2..100 {
+        let candidate = base.with_file_name(format!("FastTrackStudio-{i}"));
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+    base // fall back if somehow 99 installs exist
 }
 
 /// Look for FastTrackStudio.app adjacent to the running installer binary.
