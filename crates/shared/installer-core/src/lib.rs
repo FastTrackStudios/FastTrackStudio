@@ -3,6 +3,7 @@
 //! Handles downloading REAPER, extracting DMGs, copying extensions and presets,
 //! writing portable `reaper.ini`, and setting up shell PATH.
 
+pub mod icon_gen;
 pub mod plan;
 pub mod profiles;
 pub mod progress;

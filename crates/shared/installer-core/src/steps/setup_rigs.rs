@@ -155,11 +155,17 @@ pub async fn setup_rigs(
         );
         tokio::fs::write(contents_dir.join("Info.plist"), &plist).await?;
 
-        // Copy the REAPER base icon as fallback (will be replaced by tinted icon later)
+        // Generate tinted + badged icon from the REAPER base icon
         let base_icon = reaper_dir.join("REAPER.app/Contents/Resources/main-mac.icns");
         let dest_icon = resources_app_dir.join("main-mac.icns");
         if base_icon.exists() {
-            tokio::fs::copy(&base_icon, &dest_icon).await?;
+            match crate::icon_gen::generate_rig_icns(&base_icon, &dest_icon, profile.id) {
+                Ok(()) => info!("Generated icon for {app_name}"),
+                Err(e) => {
+                    tracing::warn!("Icon generation failed for {app_name}: {e:#}, using base icon");
+                    tokio::fs::copy(&base_icon, &dest_icon).await?;
+                }
+            }
         }
 
         // Ad-hoc codesign so macOS doesn't block it
