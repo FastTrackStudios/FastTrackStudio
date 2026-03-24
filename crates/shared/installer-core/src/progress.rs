@@ -30,6 +30,7 @@ pub enum InstallStep {
     InstallFtsExtensions,
     DownloadLibrary,
     WriteReaperIni,
+    SetupRigs,
     InstallFtsControl,
     SetupShell,
 }
@@ -46,6 +47,7 @@ impl InstallStep {
             Self::InstallFtsExtensions => "Install FTS extensions",
             Self::DownloadLibrary => "Download library",
             Self::WriteReaperIni => "Configure REAPER",
+            Self::SetupRigs => "Set up rig apps",
             Self::InstallFtsControl => "Install FTS Control",
             Self::SetupShell => "Set up PATH",
         }
@@ -62,6 +64,7 @@ impl InstallStep {
             Self::InstallFtsExtensions,
             Self::DownloadLibrary,
             Self::WriteReaperIni,
+            Self::SetupRigs,
             Self::InstallFtsControl,
             Self::SetupShell,
         ]

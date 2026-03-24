@@ -123,6 +123,7 @@ fn run_silent(plan: InstallPlan) {
             plan,
             extension_bytes: vec![],
             fts_extensions: crate::bundled_extensions(),
+            launcher_bin: crate::find_launcher_bin(),
             selected_profiles: installer_core::profiles::ALL_PROFILES
                 .iter()
                 .map(|p| p.id.to_string())
@@ -166,13 +167,123 @@ fn run_silent(plan: InstallPlan) {
     });
 }
 
-/// Return FTS extensions bundled into this build.
+/// Find the fts-bundle directory inside the installer .app bundle.
 ///
-/// In Nix/release builds, the build system generates a file with include_bytes!
-/// for each extension. In dev/cargo builds this returns an empty list and the
-/// install step is gracefully skipped.
+/// Layout: FtsInstaller.app/Contents/Resources/fts-bundle/
+///   ├── reaper-launcher
+///   ├── extensions/
+///   │   ├── sync-extension
+///   │   └── signal-extension
+///   ├── fx/
+///   │   └── FTS Signal Controller.clap
+///   └── daw-bridge/
+///       └── libreaper_daw_bridge.dylib
+fn fts_bundle_dir() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    // Inside .app/Contents/MacOS/fts-installer
+    let resources = exe.parent()?.parent()?.join("Resources/fts-bundle");
+    if resources.exists() {
+        return Some(resources);
+    }
+    // Dev builds: check cargo workspace
+    for candidate in ["target/release", "../target/release", "../../target/release"] {
+        let p = PathBuf::from(candidate);
+        if p.join("reaper-launcher").exists() {
+            return Some(p);
+        }
+    }
+    None
+}
+
+/// Find the reaper-launcher binary.
+pub fn find_launcher_bin() -> Option<PathBuf> {
+    let bundle = fts_bundle_dir()?;
+    let launcher = bundle.join("reaper-launcher");
+    if launcher.exists() {
+        Some(launcher)
+    } else {
+        None
+    }
+}
+
+/// Discover FTS extensions bundled in the installer .app.
 pub fn bundled_extensions() -> Vec<installer_core::steps::install_fts_extensions::BundledExtension> {
-    // TODO: In Nix builds, include bundled extension binaries here.
-    // For now, return empty — the step will skip gracefully.
-    vec![]
+    // We can't use include_bytes! for runtime-discovered files, so we read them
+    // from disk and leak the memory (installer is short-lived, this is fine).
+    let bundle = match fts_bundle_dir() {
+        Some(b) => b,
+        None => return vec![],
+    };
+
+    let mut exts = Vec::new();
+
+    // FTS extensions → UserPlugins/fts-extensions/
+    let ext_dir = bundle.join("extensions");
+    if ext_dir.exists() {
+        if let Ok(entries) = std::fs::read_dir(&ext_dir) {
+            for entry in entries.flatten() {
+                if entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    if let Ok(data) = std::fs::read(entry.path()) {
+                        let rel_path = format!("UserPlugins/fts-extensions/{name}");
+                        // Leak the strings/data so they have 'static lifetime
+                        let rel: &'static str = Box::leak(rel_path.into_boxed_str());
+                        let bytes: &'static [u8] = Box::leak(data.into_boxed_slice());
+                        exts.push(installer_core::BundledExtension {
+                            rel_path: rel,
+                            data: bytes,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    // CLAP plugins → UserPlugins/FX/FTS/
+    let fx_dir = bundle.join("fx");
+    if fx_dir.exists() {
+        if let Ok(entries) = std::fs::read_dir(&fx_dir) {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name.ends_with(".clap") {
+                    // CLAP plugins are directories — copy as a single file marker for now
+                    // TODO: handle .clap bundle directories properly
+                }
+                if entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+                    if let Ok(data) = std::fs::read(entry.path()) {
+                        let rel_path = format!("UserPlugins/FX/FTS/{name}");
+                        let rel: &'static str = Box::leak(rel_path.into_boxed_str());
+                        let bytes: &'static [u8] = Box::leak(data.into_boxed_slice());
+                        exts.push(installer_core::BundledExtension {
+                            rel_path: rel,
+                            data: bytes,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    // daw-bridge → UserPlugins/daw-bridge/
+    let bridge_dir = bundle.join("daw-bridge");
+    if bridge_dir.exists() {
+        if let Ok(entries) = std::fs::read_dir(&bridge_dir) {
+            for entry in entries.flatten() {
+                if entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    if let Ok(data) = std::fs::read(entry.path()) {
+                        let rel_path = format!("UserPlugins/daw-bridge/{name}");
+                        let rel: &'static str = Box::leak(rel_path.into_boxed_str());
+                        let bytes: &'static [u8] = Box::leak(data.into_boxed_slice());
+                        exts.push(installer_core::BundledExtension {
+                            rel_path: rel,
+                            data: bytes,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    exts
 }

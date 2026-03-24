@@ -17,6 +17,9 @@ pub struct InstallContext {
     /// FTS extensions to install (sync, signal, daw-bridge, CLAP plugins).
     /// Bundled at build time; empty in dev/cargo builds.
     pub fts_extensions: Vec<BundledExtension>,
+    /// Path to a reaper-launcher binary for creating rig .app wrappers.
+    /// None in dev builds (step skipped).
+    pub launcher_bin: Option<std::path::PathBuf>,
     /// Which rig profiles to install (by id). Empty = skip rig setup.
     pub selected_profiles: Vec<String>,
 }
@@ -161,7 +164,25 @@ pub async fn run_all_steps(ctx: InstallContext, tx: EventSender) -> eyre::Result
         }
     }
 
-    // 6. Install FTS-Control.app
+    // Setup rig wrapper apps
+    send_started(&tx, InstallStep::SetupRigs).await;
+    match steps::setup_rigs::setup_rigs(
+        &plan.install_root,
+        &plan.reaper_dir(),
+        ctx.launcher_bin.as_deref(),
+        &ctx.selected_profiles,
+        &tx,
+    )
+    .await
+    {
+        Ok(()) => send_completed(&tx, InstallStep::SetupRigs).await,
+        Err(e) => {
+            send_failed(&tx, InstallStep::SetupRigs, &e).await;
+            return Err(e);
+        }
+    }
+
+    // Install FTS-Control.app
     send_started(&tx, InstallStep::InstallFtsControl).await;
     if let Some(ref source) = plan.fts_control_source {
         match steps::install_fts_control::install_fts_control(source, &plan.install_root, &tx).await

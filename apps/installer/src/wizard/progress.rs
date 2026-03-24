@@ -26,6 +26,7 @@ pub fn ProgressStep(plan: InstallPlan, selected_profiles: Vec<String>, on_done: 
                 plan,
                 extension_bytes: Vec::new(),
                 fts_extensions: crate::bundled_extensions(),
+                launcher_bin: crate::find_launcher_bin(),
                 selected_profiles: profiles,
             };
 

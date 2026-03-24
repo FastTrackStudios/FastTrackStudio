@@ -10,5 +10,6 @@ pub mod install_fts_extensions;
 pub mod install_reapack;
 pub mod install_sws;
 pub mod preflight;
+pub mod setup_rigs;
 pub mod setup_shell;
 pub mod write_reaper_ini;
