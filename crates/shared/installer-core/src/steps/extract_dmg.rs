@@ -123,20 +123,30 @@ async fn extract_with_hdiutil(
         })
         .await;
 
-    let status = tokio::process::Command::new("hdiutil")
+    // Pipe "Y" to stdin to auto-accept REAPER's license agreement in the DMG.
+    let mut child = tokio::process::Command::new("hdiutil")
         .args([
             "attach",
             "-nobrowse",
             "-noverify",
             "-noautoopen",
-            "-quiet",
             "-mountpoint",
         ])
         .arg(mount_path)
         .arg(dmg_path)
-        .status()
-        .await
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
         .wrap_err("Failed to run hdiutil")?;
+
+    // Write "Y\n" to accept the license, then wait
+    if let Some(mut stdin) = child.stdin.take() {
+        use tokio::io::AsyncWriteExt;
+        let _ = stdin.write_all(b"Y\n").await;
+        drop(stdin);
+    }
+    let status = child.wait().await.wrap_err("hdiutil failed")?;
 
     if !status.success() {
         eyre::bail!("hdiutil attach failed with status {status}");

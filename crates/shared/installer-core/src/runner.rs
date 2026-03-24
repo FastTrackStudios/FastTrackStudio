@@ -92,7 +92,27 @@ pub async fn run_all_steps(ctx: InstallContext, tx: EventSender) -> eyre::Result
         }
     }
 
-    // 4. Download & extract library (presets, FXChains, TrackTemplates)
+    // 4. Install SWS extension
+    send_started(&tx, InstallStep::InstallSws).await;
+    match steps::install_sws::install_sws(&plan.reaper_dir(), &tx).await {
+        Ok(()) => send_completed(&tx, InstallStep::InstallSws).await,
+        Err(e) => {
+            send_failed(&tx, InstallStep::InstallSws, &e).await;
+            return Err(e);
+        }
+    }
+
+    // 5. Install ReaPack
+    send_started(&tx, InstallStep::InstallReaPack).await;
+    match steps::install_reapack::install_reapack(&plan.reaper_dir(), &tx).await {
+        Ok(()) => send_completed(&tx, InstallStep::InstallReaPack).await,
+        Err(e) => {
+            send_failed(&tx, InstallStep::InstallReaPack, &e).await;
+            return Err(e);
+        }
+    }
+
+    // 6. Download & extract library (presets, FXChains, TrackTemplates)
     send_started(&tx, InstallStep::DownloadLibrary).await;
     match steps::download_library::download_library(&plan.library_url, &plan.install_root, &tx)
         .await
