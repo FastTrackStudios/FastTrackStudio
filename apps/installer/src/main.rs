@@ -264,7 +264,7 @@ pub fn bundled_extensions() -> Vec<installer_core::steps::install_fts_extensions
         }
     }
 
-    // daw-bridge → UserPlugins/daw-bridge/
+    // daw-bridge → UserPlugins/ (directly, not in a subfolder)
     let bridge_dir = bundle.join("daw-bridge");
     if bridge_dir.exists() {
         if let Ok(entries) = std::fs::read_dir(&bridge_dir) {
@@ -272,7 +272,7 @@ pub fn bundled_extensions() -> Vec<installer_core::steps::install_fts_extensions
                 if entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
                     let name = entry.file_name().to_string_lossy().to_string();
                     if let Ok(data) = std::fs::read(entry.path()) {
-                        let rel_path = format!("UserPlugins/daw-bridge/{name}");
+                        let rel_path = format!("UserPlugins/{name}");
                         let rel: &'static str = Box::leak(rel_path.into_boxed_str());
                         let bytes: &'static [u8] = Box::leak(data.into_boxed_slice());
                         exts.push(installer_core::BundledExtension {
