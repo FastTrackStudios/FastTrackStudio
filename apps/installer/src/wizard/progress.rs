@@ -24,7 +24,8 @@ pub fn ProgressStep(plan: InstallPlan, selected_profiles: Vec<String>, on_done: 
 
             let ctx = InstallContext {
                 plan,
-                extension_bytes: Vec::new(), // TODO: embed via include_bytes! or rust-embed
+                extension_bytes: Vec::new(),
+                fts_extensions: crate::bundled_extensions(),
                 selected_profiles: profiles,
             };
 

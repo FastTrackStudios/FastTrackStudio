@@ -5,6 +5,7 @@ use tracing::info;
 use crate::plan::{self, InstallPlan};
 use crate::progress::{EventSender, InstallEvent, InstallStep};
 use crate::steps;
+use crate::steps::install_fts_extensions::BundledExtension;
 
 /// Context for a running installation. The installer app populates this
 /// with the extension binary before calling `run_all_steps`.
@@ -13,6 +14,9 @@ pub struct InstallContext {
     /// FTS REAPER extension bytes (e.g. from `include_bytes!`).
     /// Empty if not bundled (extension step will be skipped).
     pub extension_bytes: Vec<u8>,
+    /// FTS extensions to install (sync, signal, daw-bridge, CLAP plugins).
+    /// Bundled at build time; empty in dev/cargo builds.
+    pub fts_extensions: Vec<BundledExtension>,
     /// Which rig profiles to install (by id). Empty = skip rig setup.
     pub selected_profiles: Vec<String>,
 }
@@ -112,7 +116,23 @@ pub async fn run_all_steps(ctx: InstallContext, tx: EventSender) -> eyre::Result
         }
     }
 
-    // 6. Download & extract library (presets, FXChains, TrackTemplates)
+    // 6. Install FTS extensions (sync, signal, daw-bridge, CLAP plugins)
+    send_started(&tx, InstallStep::InstallFtsExtensions).await;
+    match steps::install_fts_extensions::install_fts_extensions(
+        &ctx.fts_extensions,
+        &plan.reaper_dir(),
+        &tx,
+    )
+    .await
+    {
+        Ok(()) => send_completed(&tx, InstallStep::InstallFtsExtensions).await,
+        Err(e) => {
+            send_failed(&tx, InstallStep::InstallFtsExtensions, &e).await;
+            return Err(e);
+        }
+    }
+
+    // 7. Download & extract library (presets, FXChains, TrackTemplates)
     send_started(&tx, InstallStep::DownloadLibrary).await;
     match steps::download_library::download_library(&plan.library_url, &plan.install_root, &tx)
         .await

@@ -122,6 +122,7 @@ fn run_silent(plan: InstallPlan) {
         let ctx = InstallContext {
             plan,
             extension_bytes: vec![],
+            fts_extensions: crate::bundled_extensions(),
             selected_profiles: installer_core::profiles::ALL_PROFILES
                 .iter()
                 .map(|p| p.id.to_string())
@@ -163,4 +164,15 @@ fn run_silent(plan: InstallPlan) {
             }
         }
     });
+}
+
+/// Return FTS extensions bundled into this build.
+///
+/// In Nix/release builds, the build system generates a file with include_bytes!
+/// for each extension. In dev/cargo builds this returns an empty list and the
+/// install step is gracefully skipped.
+pub fn bundled_extensions() -> Vec<installer_core::steps::install_fts_extensions::BundledExtension> {
+    // TODO: In Nix builds, include bundled extension binaries here.
+    // For now, return empty — the step will skip gracefully.
+    vec![]
 }
