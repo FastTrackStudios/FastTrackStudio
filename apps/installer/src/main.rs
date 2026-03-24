@@ -264,13 +264,19 @@ pub fn bundled_extensions() -> Vec<installer_core::steps::install_fts_extensions
         }
     }
 
-    // daw-bridge → UserPlugins/ (directly, not in a subfolder)
+    // daw-bridge → UserPlugins/ (directly, rename lib prefix to reaper_ for REAPER to load it)
     let bridge_dir = bundle.join("daw-bridge");
     if bridge_dir.exists() {
         if let Ok(entries) = std::fs::read_dir(&bridge_dir) {
             for entry in entries.flatten() {
                 if entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
                     let name = entry.file_name().to_string_lossy().to_string();
+                    // Rename libreaper_* → reaper_* (REAPER expects reaper_ prefix)
+                    let name = if let Some(rest) = name.strip_prefix("lib") {
+                        rest.to_string()
+                    } else {
+                        name
+                    };
                     if let Ok(data) = std::fs::read(entry.path()) {
                         let rel_path = format!("UserPlugins/{name}");
                         let rel: &'static str = Box::leak(rel_path.into_boxed_str());
