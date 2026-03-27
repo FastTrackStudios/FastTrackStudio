@@ -12,6 +12,7 @@
 //! Uses SVG rendering for cross-platform compatibility.
 //! Ported from the legacy `audio-controls` crate for the nih_plug_dioxus Blitz renderer.
 
+use dioxus_elements::input_data::MouseButton;
 use nih_plug_dioxus::prelude::*;
 
 /// Get current timestamp in milliseconds.
@@ -363,6 +364,8 @@ pub fn EqGraph(
                                                                                      // Dropdown states for the popup
     let mut show_shape_dropdown: Signal<bool> = use_signal(|| false);
     let mut show_more_dropdown: Signal<bool> = use_signal(|| false);
+    // Right-click context menu state: (band_idx, viewBox_x, viewBox_y)
+    let mut context_menu: Signal<Option<(usize, f64, f64)>> = use_signal(|| None);
     // Track when mouse left the focused band area (for fade timeout)
     // Stores (timestamp_ms, band_idx) when mouse leaves focus area
     let mut focus_leave_time: Signal<Option<(f64, usize)>> = use_signal(|| None);
@@ -872,6 +875,20 @@ pub fn EqGraph(
                     }
                     closest.map(|(idx, _)| idx)
                 };
+
+                // Dismiss context menu on any click
+                context_menu.set(None);
+
+                // Right-click: show context menu for band
+                if evt.trigger_button() == Some(MouseButton::Secondary) {
+                    if let Some(idx) = clicked_band {
+                        context_menu.set(Some((idx, x, y)));
+                        set_focused(Some(idx));
+                    }
+                    evt.stop_propagation();
+                    evt.prevent_default();
+                    return;
+                }
 
                 if let Some(idx) = clicked_band {
                     // Check for double-click on this band (reset gain to 0)
@@ -1689,6 +1706,317 @@ pub fn EqGraph(
                     }
                 } else {
                     rsx! {}
+                }
+            }
+            // Right-click context menu overlay
+            if let Some((ctx_band_idx, ctx_x, ctx_y)) = *context_menu.read() {
+                {
+                    let menu_width = 130.0;
+                    let item_height = 18.0;
+                    let items_count = 7.0; // bypass, solo, separator, reset gain, shapes header, delete, separator
+                    let shapes = EqBandShape::all();
+                    let total_items = items_count + shapes.len() as f64;
+                    let menu_height = total_items * item_height + 8.0;
+
+                    // Clamp menu position to stay within graph
+                    let menu_x = ctx_x.min(padding + graph_width - menu_width);
+                    let menu_y = ctx_y.min(padding + graph_height - menu_height);
+
+                    // Read band state
+                    let ctx_band = bands.read().get(ctx_band_idx).cloned();
+
+                    if let Some(band) = ctx_band {
+                        let band_color = get_band_color(ctx_band_idx);
+                        let is_enabled = band.enabled;
+                        let is_solo = band.solo;
+                        let current_shape = band.shape;
+
+                        rsx! {
+                            // Click-outside dismiss overlay (transparent rect covering the whole SVG)
+                            rect {
+                                x: "0",
+                                y: "0",
+                                width: "{vb_width}",
+                                height: "{vb_height}",
+                                fill: "transparent",
+                                onclick: move |_| {
+                                    context_menu.set(None);
+                                },
+                            }
+
+                            // Menu background
+                            rect {
+                                x: "{menu_x}",
+                                y: "{menu_y}",
+                                width: "{menu_width}",
+                                height: "{menu_height}",
+                                rx: "4",
+                                fill: "rgba(15, 15, 18, 0.96)",
+                                stroke: "rgba(80, 80, 85, 0.6)",
+                                stroke_width: "1",
+                            }
+
+                            // Band header
+                            text {
+                                x: "{menu_x + 10.0}",
+                                y: "{menu_y + 12.0}",
+                                fill: "{band_color}",
+                                font_size: "9",
+                                font_weight: "700",
+                                dominant_baseline: "middle",
+                                "Band {ctx_band_idx + 1}"
+                            }
+
+                            // Bypass toggle
+                            g {
+                                onclick: {
+                                    let on_band_change = on_band_change.clone();
+                                    move |evt: MouseEvent| {
+                                        evt.stop_propagation();
+                                        let updated = {
+                                            let mut bv = bands.write();
+                                            if ctx_band_idx < bv.len() {
+                                                bv[ctx_band_idx].enabled = !bv[ctx_band_idx].enabled;
+                                                Some(bv[ctx_band_idx].clone())
+                                            } else { None }
+                                        };
+                                        if let (Some(b), Some(cb)) = (updated, &on_band_change) {
+                                            cb.call((ctx_band_idx, b));
+                                        }
+                                        context_menu.set(None);
+                                    }
+                                },
+                                style: "cursor: pointer;",
+                                rect {
+                                    x: "{menu_x + 2.0}",
+                                    y: "{menu_y + item_height}",
+                                    width: "{menu_width - 4.0}",
+                                    height: "{item_height}",
+                                    rx: "2",
+                                    fill: "transparent",
+                                }
+                                text {
+                                    x: "{menu_x + 10.0}",
+                                    y: "{menu_y + item_height + item_height / 2.0}",
+                                    fill: if is_enabled { "#aaa" } else { "#f66" },
+                                    font_size: "9",
+                                    dominant_baseline: "middle",
+                                    if is_enabled { "Bypass" } else { "Enable" }
+                                }
+                            }
+
+                            // Solo toggle
+                            g {
+                                onclick: {
+                                    let on_band_change = on_band_change.clone();
+                                    move |evt: MouseEvent| {
+                                        evt.stop_propagation();
+                                        let updated = {
+                                            let mut bv = bands.write();
+                                            if ctx_band_idx < bv.len() {
+                                                bv[ctx_band_idx].solo = !bv[ctx_band_idx].solo;
+                                                Some(bv[ctx_band_idx].clone())
+                                            } else { None }
+                                        };
+                                        if let (Some(b), Some(cb)) = (updated, &on_band_change) {
+                                            cb.call((ctx_band_idx, b));
+                                        }
+                                        context_menu.set(None);
+                                    }
+                                },
+                                style: "cursor: pointer;",
+                                rect {
+                                    x: "{menu_x + 2.0}",
+                                    y: "{menu_y + item_height * 2.0}",
+                                    width: "{menu_width - 4.0}",
+                                    height: "{item_height}",
+                                    rx: "2",
+                                    fill: "transparent",
+                                }
+                                text {
+                                    x: "{menu_x + 10.0}",
+                                    y: "{menu_y + item_height * 2.0 + item_height / 2.0}",
+                                    fill: if is_solo { "#fc0" } else { "#aaa" },
+                                    font_size: "9",
+                                    dominant_baseline: "middle",
+                                    if is_solo { "Unsolo" } else { "Solo" }
+                                }
+                            }
+
+                            // Separator
+                            line {
+                                x1: "{menu_x + 6.0}",
+                                y1: "{menu_y + item_height * 3.0 + 2.0}",
+                                x2: "{menu_x + menu_width - 6.0}",
+                                y2: "{menu_y + item_height * 3.0 + 2.0}",
+                                stroke: "rgba(80, 80, 85, 0.5)",
+                                stroke_width: "1",
+                            }
+
+                            // Reset gain
+                            g {
+                                onclick: {
+                                    let on_band_change = on_band_change.clone();
+                                    move |evt: MouseEvent| {
+                                        evt.stop_propagation();
+                                        let updated = {
+                                            let mut bv = bands.write();
+                                            if ctx_band_idx < bv.len() {
+                                                bv[ctx_band_idx].gain = 0.0;
+                                                Some(bv[ctx_band_idx].clone())
+                                            } else { None }
+                                        };
+                                        if let (Some(b), Some(cb)) = (updated, &on_band_change) {
+                                            cb.call((ctx_band_idx, b));
+                                        }
+                                        context_menu.set(None);
+                                    }
+                                },
+                                style: "cursor: pointer;",
+                                rect {
+                                    x: "{menu_x + 2.0}",
+                                    y: "{menu_y + item_height * 3.0 + 4.0}",
+                                    width: "{menu_width - 4.0}",
+                                    height: "{item_height}",
+                                    rx: "2",
+                                    fill: "transparent",
+                                }
+                                text {
+                                    x: "{menu_x + 10.0}",
+                                    y: "{menu_y + item_height * 3.0 + 4.0 + item_height / 2.0}",
+                                    fill: "#aaa",
+                                    font_size: "9",
+                                    dominant_baseline: "middle",
+                                    "Reset Gain"
+                                }
+                            }
+
+                            // Separator
+                            line {
+                                x1: "{menu_x + 6.0}",
+                                y1: "{menu_y + item_height * 4.0 + 6.0}",
+                                x2: "{menu_x + menu_width - 6.0}",
+                                y2: "{menu_y + item_height * 4.0 + 6.0}",
+                                stroke: "rgba(80, 80, 85, 0.5)",
+                                stroke_width: "1",
+                            }
+
+                            // Filter type label
+                            text {
+                                x: "{menu_x + 10.0}",
+                                y: "{menu_y + item_height * 4.0 + 8.0 + item_height / 2.0}",
+                                fill: "#666",
+                                font_size: "8",
+                                dominant_baseline: "middle",
+                                "Filter Type"
+                            }
+
+                            // Filter type options
+                            for (si, shape) in shapes.iter().enumerate() {
+                                {
+                                    let shape_clone = *shape;
+                                    let is_current = shape_clone == current_shape;
+                                    let item_y = menu_y + item_height * 5.0 + 8.0 + si as f64 * item_height;
+
+                                    rsx! {
+                                        g {
+                                            onclick: {
+                                                let on_band_change = on_band_change.clone();
+                                                move |evt: MouseEvent| {
+                                                    evt.stop_propagation();
+                                                    let updated = {
+                                                        let mut bv = bands.write();
+                                                        if ctx_band_idx < bv.len() {
+                                                            bv[ctx_band_idx].shape = shape_clone;
+                                                            if shape_clone.uses_slope() {
+                                                                bv[ctx_band_idx].q = 1.0;
+                                                            }
+                                                            Some(bv[ctx_band_idx].clone())
+                                                        } else { None }
+                                                    };
+                                                    if let (Some(b), Some(cb)) = (updated, &on_band_change) {
+                                                        cb.call((ctx_band_idx, b));
+                                                    }
+                                                    context_menu.set(None);
+                                                }
+                                            },
+                                            style: "cursor: pointer;",
+                                            rect {
+                                                x: "{menu_x + 2.0}",
+                                                y: "{item_y}",
+                                                width: "{menu_width - 4.0}",
+                                                height: "{item_height}",
+                                                rx: "2",
+                                                fill: if is_current { "rgba(100,150,255,0.2)" } else { "transparent" },
+                                            }
+                                            text {
+                                                x: "{menu_x + 18.0}",
+                                                y: "{item_y + item_height / 2.0}",
+                                                fill: if is_current { "#fff" } else { "#bbb" },
+                                                font_size: "9",
+                                                dominant_baseline: "middle",
+                                                "{shape.label()}"
+                                            }
+                                            if is_current {
+                                                text {
+                                                    x: "{menu_x + 10.0}",
+                                                    y: "{item_y + item_height / 2.0}",
+                                                    fill: "#fff",
+                                                    font_size: "8",
+                                                    dominant_baseline: "middle",
+                                                    "●"
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Separator before delete
+                            line {
+                                x1: "{menu_x + 6.0}",
+                                y1: "{menu_y + item_height * 5.0 + 8.0 + shapes.len() as f64 * item_height + 2.0}",
+                                x2: "{menu_x + menu_width - 6.0}",
+                                y2: "{menu_y + item_height * 5.0 + 8.0 + shapes.len() as f64 * item_height + 2.0}",
+                                stroke: "rgba(80, 80, 85, 0.5)",
+                                stroke_width: "1",
+                            }
+
+                            // Delete band
+                            g {
+                                onclick: {
+                                    let on_band_remove = on_band_remove.clone();
+                                    move |evt: MouseEvent| {
+                                        evt.stop_propagation();
+                                        if let Some(cb) = &on_band_remove {
+                                            cb.call(ctx_band_idx);
+                                        }
+                                        context_menu.set(None);
+                                        set_focused(None);
+                                    }
+                                },
+                                style: "cursor: pointer;",
+                                rect {
+                                    x: "{menu_x + 2.0}",
+                                    y: "{menu_y + item_height * 5.0 + 10.0 + shapes.len() as f64 * item_height}",
+                                    width: "{menu_width - 4.0}",
+                                    height: "{item_height}",
+                                    rx: "2",
+                                    fill: "transparent",
+                                }
+                                text {
+                                    x: "{menu_x + 10.0}",
+                                    y: "{menu_y + item_height * 5.0 + 10.0 + shapes.len() as f64 * item_height + item_height / 2.0}",
+                                    fill: "rgba(255, 80, 80, 0.8)",
+                                    font_size: "9",
+                                    dominant_baseline: "middle",
+                                    "Delete Band"
+                                }
+                            }
+                        }
+                    } else {
+                        rsx! {}
+                    }
                 }
             }
         } // svg
