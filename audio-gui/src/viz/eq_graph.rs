@@ -205,9 +205,9 @@ pub fn get_band_fill_color(index: usize) -> String {
         u8::from_str_radix(&hex[3..5], 16),
         u8::from_str_radix(&hex[5..7], 16),
     ) {
-        format!("rgba({r}, {g}, {b}, 0.15)")
+        format!("rgba({r}, {g}, {b}, 0.30)")
     } else {
-        "rgba(100, 100, 100, 0.15)".to_string()
+        "rgba(100, 100, 100, 0.30)".to_string()
     }
 }
 
@@ -1082,13 +1082,13 @@ pub fn EqGraph(
             }
 
             // Per-band influence curves (rendered behind main curve)
-            for (band_idx, (stroke_path, fill_path)) in curve_paths.band_curves.iter().enumerate() {
-                // Band fill
+            for (band_idx, stroke_path, fill_path) in curve_paths.band_curves.iter() {
+                // Band fill (higher opacity for visibility like ReEQ)
                 if fill_curve {
                     path {
                         key: "band-fill-{band_idx}",
                         d: "{fill_path}",
-                        fill: "{get_band_fill_color(band_idx)}",
+                        fill: "{get_band_fill_color(*band_idx)}",
                         stroke: "none",
                     }
                 }
@@ -1096,11 +1096,46 @@ pub fn EqGraph(
                 path {
                     d: "{stroke_path}",
                     fill: "none",
-                    stroke: "{get_band_color(band_idx)}",
+                    stroke: "{get_band_color(*band_idx)}",
                     stroke_width: "1.5",
                     stroke_linecap: "round",
                     stroke_linejoin: "round",
                     opacity: "0.6",
+                }
+            }
+
+            // Connecting lines from band nodes to 0dB line (shows each band's contribution)
+            {
+                let zero_line_y = db_to_y(0.0);
+                let connecting_lines: Vec<(f64, f64, f64, &str)> = bands_snapshot.iter()
+                    .filter(|b| b.used && b.enabled)
+                    .filter_map(|band| {
+                        let curve_db = calculate_band_response(band, band.frequency as f64, sample_rate);
+                        if curve_db.abs() <= 0.1 {
+                            return None;
+                        }
+                        let bx = freq_to_x(band.frequency as f64);
+                        let node_y = db_to_y(band.gain as f64);
+                        let node_radius = 7.0;
+                        let start_y = if node_y < zero_line_y { node_y + node_radius } else { node_y - node_radius };
+                        Some((bx, start_y, zero_line_y, get_band_color(band.index)))
+                    })
+                    .collect();
+
+                rsx! {
+                    for (i, (lx, ly1, ly2, color)) in connecting_lines.iter().enumerate() {
+                        line {
+                            key: "conn-{i}",
+                            x1: "{lx}",
+                            y1: "{ly1}",
+                            x2: "{lx}",
+                            y2: "{ly2}",
+                            stroke: "{color}",
+                            stroke_width: "1.5",
+                            stroke_opacity: "0.5",
+                            pointer_events: "none",
+                        }
+                    }
                 }
             }
 
@@ -1668,8 +1703,8 @@ struct AllEqCurves {
     combined_stroke: String,
     /// Combined curve fill path.
     combined_fill: String,
-    /// Per-band curves: Vec of (stroke_path, fill_path) for each active band.
-    band_curves: Vec<(String, String)>,
+    /// Per-band curves: Vec of (band_index, stroke_path, fill_path) for each active band.
+    band_curves: Vec<(usize, String, String)>,
 }
 
 /// Generate all EQ curves (combined and per-band).
@@ -1721,9 +1756,9 @@ fn generate_all_eq_curves(
         zero_y,
     );
 
-    // Generate per-band curves
+    // Generate per-band curves (with band index for color mapping)
     let mut band_curves = Vec::new();
-    for band in bands {
+    for (idx, band) in bands.iter().enumerate() {
         if !band.used || !band.enabled {
             continue;
         }
@@ -1735,7 +1770,7 @@ fn generate_all_eq_curves(
 
         let (stroke, fill) =
             build_curve_paths(&frequencies, &band_response, &freq_to_x, &db_to_y, zero_y);
-        band_curves.push((stroke, fill));
+        band_curves.push((idx, stroke, fill));
     }
 
     AllEqCurves {
