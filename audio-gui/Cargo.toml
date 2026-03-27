@@ -9,3 +9,4 @@ description = "Shared Dioxus audio GUI components for FTS plugins — Blitz-comp
 [dependencies]
 nih_plug = { workspace = true }
 nih_plug_dioxus = { workspace = true }
+parking_lot = "0.12"

@@ -15,6 +15,8 @@
 use dioxus_elements::input_data::MouseButton;
 use nih_plug_dioxus::prelude::*;
 
+use super::eq_graph_painter::{EqGraphPainter, EqGraphRenderState};
+
 /// Get current timestamp in milliseconds.
 fn now_ms() -> f64 {
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -165,7 +167,7 @@ pub fn slope_db_to_q(slope_db: f32) -> f32 {
 
 /// Band colors matching Pro-Q / ZL Equalizer style.
 /// Colors cycle through for bands 0-23, matching the screenshot reference.
-const BAND_COLORS: &[&str] = &[
+pub const BAND_COLORS: &[&str] = &[
     "#4ade80", // 1: Green
     "#60a5fa", // 2: Blue
     "#c084fc", // 3: Purple
@@ -378,6 +380,47 @@ pub fn EqGraph(
     // Focus detection radius (larger so popup is easier to interact with)
     let focus_radius = 50.0;
 
+    // ── GPU-accelerated graph rendering via vello SceneOverlay ──────────
+    // Create shared render state (persists across renders via use_hook)
+    let render_state = use_hook(|| EqGraphRenderState::new());
+
+    // Register the vello painter overlay (once, on mount; auto-unregisters on unmount)
+    let overlay_handle = {
+        let state = render_state.clone();
+        use_scene_overlay(move || EqGraphPainter::new(state))
+    };
+
+    // Position the overlay at this element's location in the window.
+    // The component receives offset_x/y and rendered width/height from the editor.
+    // When rendered_width == 0 (not set), the overlay won't paint (rect is too small).
+    overlay_handle.set_rect(offset_x, offset_y, rendered_width, rendered_height);
+
+    // Sync component state → painter each render
+    {
+        *render_state.bands.write() = bands.read().clone();
+        let mut cfg = render_state.config.write();
+        cfg.db_range = db_range;
+        cfg.min_freq = min_freq;
+        cfg.max_freq = max_freq;
+        cfg.sample_rate = sample_rate;
+        cfg.show_grid = show_grid;
+        cfg.fill_curve = fill_curve;
+        cfg.rect_w = rendered_width;
+        cfg.rect_h = rendered_height;
+        drop(cfg);
+
+        let mut interaction = render_state.interaction.write();
+        interaction.hovered_band = *hovered_band.read();
+        interaction.dragging_band = *dragging_band.read();
+        interaction.focused_band = *focused_band.read();
+        interaction.selected_bands = selected_bands.read().clone();
+        drop(interaction);
+
+        if let Some(spectrum) = &spectrum_db {
+            *render_state.spectrum_db.write() = spectrum.clone();
+        }
+    }
+
     // Coordinate conversions
     let log_min = min_freq.log10();
     let log_max = max_freq.log10();
@@ -447,99 +490,8 @@ pub fn EqGraph(
         }
     };
 
-    // Generate SVG paths for the EQ curves (combined + per-band).
-    // Computed directly in the render function (no use_memo in Blitz).
-    let curve_paths = {
-        let bands_vec = bands.read();
-        generate_all_eq_curves(
-            &bands_vec,
-            sample_rate,
-            min_freq,
-            max_freq,
-            db_range,
-            padding,
-            graph_width,
-            graph_height,
-            400,
-        )
-    };
-
-    // Generate grid lines
-    let grid_elements = if show_grid {
-        generate_grid_elements(
-            padding,
-            graph_width,
-            graph_height,
-            min_freq,
-            max_freq,
-            db_range,
-        )
-    } else {
-        Vec::new()
-    };
-
-    // Generate frequency labels
-    let freq_labels = if show_freq_labels {
-        generate_freq_labels(padding, graph_width, vb_height, min_freq, max_freq)
-    } else {
-        Vec::new()
-    };
-
-    // Generate dB labels
-    let db_labels = if show_db_labels {
-        generate_db_labels(padding, graph_height, db_range)
-    } else {
-        Vec::new()
-    };
-
-    // Colors - Pro-Q inspired dark theme
-    let bg_color = "#0a0a0a"; // Very dark, almost black
-    let grid_color = "rgba(60, 60, 65, 0.4)";
-    let grid_major_color = "rgba(80, 80, 85, 0.5)";
-    let curve_stroke = "#d4a932"; // Golden/yellow combined curve like Pro-Q
-    let curve_fill_color = "rgba(212, 169, 50, 0.08)";
-    let band_inactive_color = "#555555";
-    let text_color = "#666666";
-    let _remove_zone_color = "rgba(255, 60, 60, 0.12)";
-
     // Clone bands for the read in the iterator
     let bands_snapshot: Vec<EqBand> = bands.read().clone();
-
-    // Pre-compute spectrum analyzer SVG paths (outside rsx! for complex logic)
-    let spectrum_svg = spectrum_db.as_ref().and_then(|spectrum| {
-        if spectrum.len() < 2 {
-            return None;
-        }
-        let num_bins = spectrum.len();
-        let mut stroke_path = String::with_capacity(num_bins * 16);
-        for (i, &db_val) in spectrum.iter().enumerate() {
-            let t = i as f64 / (num_bins - 1) as f64;
-            let freq = 10.0_f64.powf(log_min + t * (log_max - log_min));
-            let x = freq_to_x(freq);
-            let clamped_db = (db_val as f64).clamp(-db_range, db_range);
-            let y = db_to_y(clamped_db);
-            if i == 0 {
-                stroke_path.push_str(&format!("M{x:.1},{y:.1}"));
-            } else {
-                stroke_path.push_str(&format!(" L{x:.1},{y:.1}"));
-            }
-        }
-        let zero_y = db_to_y(-db_range);
-        let first_x = freq_to_x(10.0_f64.powf(log_min));
-        let last_x = freq_to_x(10.0_f64.powf(log_max));
-        let fill_path =
-            format!("{stroke_path} L{last_x:.1},{zero_y:.1} L{first_x:.1},{zero_y:.1} Z");
-        Some((stroke_path, fill_path))
-    });
-    let has_spectrum = spectrum_svg.is_some();
-    let sp_stroke = spectrum_svg
-        .as_ref()
-        .map(|(s, _)| s.clone())
-        .unwrap_or_default();
-    let sp_fill = spectrum_svg
-        .as_ref()
-        .map(|(_, f)| f.clone())
-        .unwrap_or_default();
 
     rsx! {
         // Wrapper div — Blitz doesn't deliver onwheel to SVG elements,
@@ -591,7 +543,8 @@ pub fn EqGraph(
             height: "100%",
             preserve_aspect_ratio: "none",
             class: "eq-graph {class}",
-            style: "background: {bg_color}; user-select: none; display: block;",
+            // Transparent — vello SceneOverlay paints the graph visuals underneath
+            style: "background: transparent; user-select: none; display: block;",
 
             // Handle mouse leave - end drag
             onmouseleave: move |_| {
@@ -1041,219 +994,25 @@ pub fn EqGraph(
                 }
             },
 
-            // Grid lines
-            for (i, grid_line) in grid_elements.iter().enumerate() {
-                line {
-                    key: "{i}",
-                    x1: "{grid_line.0}",
-                    y1: "{grid_line.1}",
-                    x2: "{grid_line.2}",
-                    y2: "{grid_line.3}",
-                    stroke: if grid_line.4 { grid_major_color } else { grid_color },
-                    stroke_width: if grid_line.4 { "1" } else { "0.5" },
-                }
-            }
+            // Visual elements (grid, curves, spectrum, nodes) are now rendered
+            // by the vello SceneOverlay painter (EqGraphPainter).
+            // The SVG remains as an invisible interaction layer.
 
-            // Frequency labels
-            for (i, label) in freq_labels.iter().enumerate() {
-                text {
-                    key: "{i}",
-                    x: "{label.0}",
-                    y: "{label.1}",
-                    fill: text_color,
-                    font_size: "11",
-                    text_anchor: "middle",
-                    dominant_baseline: "hanging",
-                    "{label.2}"
-                }
-            }
-
-            // dB labels
-            for (i, label) in db_labels.iter().enumerate() {
-                text {
-                    key: "{i}",
-                    x: "{label.0}",
-                    y: "{label.1}",
-                    fill: text_color,
-                    font_size: "11",
-                    text_anchor: "end",
-                    dominant_baseline: "middle",
-                    "{label.2}"
-                }
-            }
-
-            // Spectrum analyzer overlay (rendered behind EQ curves)
-            if has_spectrum {
-                path {
-                    d: "{sp_fill}",
-                    fill: "rgba(100, 180, 255, 0.08)",
-                    stroke: "none",
-                }
-                path {
-                    d: "{sp_stroke}",
-                    fill: "none",
-                    stroke: "rgba(100, 180, 255, 0.35)",
-                    stroke_width: "1",
-                    stroke_linejoin: "round",
-                }
-            }
-
-            // Per-band influence curves (rendered behind main curve)
-            for (band_idx, stroke_path, fill_path) in curve_paths.band_curves.iter() {
-                // Band fill (higher opacity for visibility like ReEQ)
-                if fill_curve {
-                    path {
-                        key: "band-fill-{band_idx}",
-                        d: "{fill_path}",
-                        fill: "{get_band_fill_color(*band_idx)}",
-                        stroke: "none",
-                    }
-                }
-                // Band stroke
-                path {
-                    d: "{stroke_path}",
-                    fill: "none",
-                    stroke: "{get_band_color(*band_idx)}",
-                    stroke_width: "1.5",
-                    stroke_linecap: "round",
-                    stroke_linejoin: "round",
-                    opacity: "0.6",
-                }
-            }
-
-            // Connecting lines from band nodes to 0dB line (shows each band's contribution)
-            {
-                let zero_line_y = db_to_y(0.0);
-                let connecting_lines: Vec<(f64, f64, f64, &str)> = bands_snapshot.iter()
-                    .filter(|b| b.used && b.enabled)
-                    .filter_map(|band| {
-                        let curve_db = calculate_band_response(band, band.frequency as f64, sample_rate);
-                        if curve_db.abs() <= 0.1 {
-                            return None;
-                        }
-                        let bx = freq_to_x(band.frequency as f64);
-                        let node_y = db_to_y(band.gain as f64);
-                        let node_radius = 7.0;
-                        let start_y = if node_y < zero_line_y { node_y + node_radius } else { node_y - node_radius };
-                        Some((bx, start_y, zero_line_y, get_band_color(band.index)))
-                    })
-                    .collect();
-
-                rsx! {
-                    for (i, (lx, ly1, ly2, color)) in connecting_lines.iter().enumerate() {
-                        line {
-                            key: "conn-{i}",
-                            x1: "{lx}",
-                            y1: "{ly1}",
-                            x2: "{lx}",
-                            y2: "{ly2}",
-                            stroke: "{color}",
-                            stroke_width: "1.5",
-                            stroke_opacity: "0.5",
-                            pointer_events: "none",
-                        }
-                    }
-                }
-            }
-
-            // Main combined curve fill
-            if fill_curve {
-                path {
-                    d: "{curve_paths.combined_fill}",
-                    fill: curve_fill_color,
-                    stroke: "none",
-                }
-            }
-
-            // Main combined curve stroke
-            path {
-                d: "{curve_paths.combined_stroke}",
-                fill: "none",
-                stroke: curve_stroke,
-                stroke_width: "2",
-                stroke_linecap: "round",
-                stroke_linejoin: "round",
-            }
-
-            // SVG filter definitions for glow effect
-            defs {
-                // Subtle white glow filter for band nodes
-                filter {
-                    id: "glow",
-                    x: "-50%",
-                    y: "-50%",
-                    width: "200%",
-                    height: "200%",
-                    // Gaussian blur for glow
-                    feGaussianBlur {
-                        _in: "SourceGraphic",
-                        std_deviation: "2",
-                        result: "blur",
-                    }
-                    // Merge blur with original
-                    feMerge {
-                        feMergeNode {
-                            _in: "blur",
-                        }
-                        feMergeNode {
-                            _in: "SourceGraphic",
-                        }
-                    }
-                }
-            }
-
-            // Band control points - main circles with glow
+            // Invisible band hit-test circles for interaction
+            // (visual rendering done by vello EqGraphPainter overlay)
             for (idx, band) in bands_snapshot.iter().enumerate() {
                 if band.used {
                     {
                         let x = freq_to_x(band.frequency as f64);
                         let y = db_to_y(band.gain as f64);
-                        let is_dragging = *dragging_band.read() == Some(idx);
-                        let is_hovered = *hovered_band.read() == Some(idx);
-
-                        let band_color_str = get_band_color(idx);
-
-                        // Solid fill with the band color
-                        let fill_color = if band.enabled {
-                            band_color_str.to_string()
-                        } else {
-                            band_inactive_color.to_string()
-                        };
-
-                        // Subtle white glow outline - more visible when hovered/dragging
-                        let glow_opacity = if !band.enabled {
-                            0.0
-                        } else if is_dragging {
-                            0.9
-                        } else if is_hovered {
-                            0.7
-                        } else {
-                            0.4 // Subtle glow at rest
-                        };
-
-                        let radius = if is_dragging { 10 } else if is_hovered { 9 } else { 7 };
-
                         rsx! {
-                            // Outer glow ring (subtle white)
-                            circle {
-                                key: "{idx}",
-                                cx: "{x}",
-                                cy: "{y}",
-                                r: "{radius + 3}",
-                                fill: "none",
-                                stroke: "rgba(255, 255, 255, {glow_opacity * 0.3})",
-                                stroke_width: "2",
-                                pointer_events: "none",
-                                filter: "url(#glow)",
-                            }
-                            // Main filled circle
+                            // Invisible hit-test circle (visual rendering by vello overlay)
                             circle {
                                 cx: "{x}",
                                 cy: "{y}",
-                                r: "{radius}",
-                                fill: "{fill_color}",
-                                stroke: "rgba(255, 255, 255, {glow_opacity})",
-                                stroke_width: "1.5",
+                                r: "12",
+                                fill: "transparent",
+                                stroke: "none",
                                 style: if disabled { "cursor: not-allowed;" } else { "cursor: grab;" },
 
                                 onmouseenter: move |_| {
@@ -1361,37 +1120,6 @@ pub fn EqGraph(
                 }
             }
 
-            // Band number labels (dark text for contrast on bright colored nodes)
-            for (idx, band) in bands_snapshot.iter().enumerate() {
-                if band.used {
-                    {
-                        let x = freq_to_x(band.frequency as f64);
-                        let y = db_to_y(band.gain as f64);
-
-                        // Use dark text for readability on colored background
-                        let text_fill = if band.enabled {
-                            "rgba(0, 0, 0, 0.7)"
-                        } else {
-                            "rgba(255, 255, 255, 0.5)"
-                        };
-
-                        rsx! {
-                            text {
-                                key: "{idx}",
-                                x: "{x}",
-                                y: "{y + 0.5}",
-                                fill: text_fill,
-                                font_size: "9",
-                                font_weight: "600",
-                                text_anchor: "middle",
-                                dominant_baseline: "middle",
-                                pointer_events: "none",
-                                "{idx + 1}"
-                            }
-                        }
-                    }
-                }
-            }
 
             // Selection rectangle (when dragging to select multiple bands)
             if let Some((start_x, start_y, curr_x, curr_y)) = *selection_rect.read() {
@@ -2025,6 +1753,8 @@ pub fn EqGraph(
 }
 
 /// All EQ curve paths (combined and per-band).
+/// Used by SVG rendering path (kept for tests; vello painter has replaced runtime use).
+#[allow(dead_code)]
 #[derive(Clone, Default, PartialEq)]
 struct AllEqCurves {
     /// Combined curve stroke path.
@@ -2035,7 +1765,7 @@ struct AllEqCurves {
     band_curves: Vec<(usize, String, String)>,
 }
 
-/// Generate all EQ curves (combined and per-band).
+#[allow(dead_code)]
 fn generate_all_eq_curves(
     bands: &[EqBand],
     sample_rate: f64,
@@ -2108,7 +1838,7 @@ fn generate_all_eq_curves(
     }
 }
 
-/// Build stroke and fill paths from frequency/response data.
+#[allow(dead_code)]
 fn build_curve_paths<F, G>(
     frequencies: &[f64],
     response_db: &[f64],
@@ -2219,7 +1949,7 @@ fn generate_eq_curve_path(
     (stroke_path, fill_path)
 }
 
-fn calculate_combined_response(bands: &[EqBand], freq: f64, sample_rate: f64) -> f64 {
+pub fn calculate_combined_response(bands: &[EqBand], freq: f64, sample_rate: f64) -> f64 {
     let mut total_db = 0.0;
 
     for band in bands {
@@ -2436,7 +2166,7 @@ fn cascaded_magnitude_db(freq: f64, f0: f64, order: usize, filter_type: &EqBandS
     10.0 * total_mag_sq.max(1e-30).log10()
 }
 
-fn calculate_band_response(band: &EqBand, freq: f64, _sample_rate: f64) -> f64 {
+pub fn calculate_band_response(band: &EqBand, freq: f64, _sample_rate: f64) -> f64 {
     let f0 = band.frequency as f64;
     let gain = band.gain as f64;
     let q = band.q as f64;
@@ -2505,6 +2235,7 @@ fn calculate_band_response(band: &EqBand, freq: f64, _sample_rate: f64) -> f64 {
     }
 }
 
+#[allow(dead_code)]
 fn generate_grid_elements(
     padding: f64,
     graph_width: f64,
@@ -2562,6 +2293,7 @@ fn generate_grid_elements(
     lines
 }
 
+#[allow(dead_code)]
 fn generate_freq_labels(
     padding: f64,
     graph_width: f64,
@@ -2601,6 +2333,7 @@ fn generate_freq_labels(
     labels
 }
 
+#[allow(dead_code)]
 fn generate_db_labels(padding: f64, graph_height: f64, db_range: f64) -> Vec<(f64, f64, String)> {
     let mut labels = Vec::new();
     let x = padding - 10.0;
