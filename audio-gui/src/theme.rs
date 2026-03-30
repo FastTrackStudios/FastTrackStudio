@@ -328,9 +328,11 @@ impl Theme {
     }
 
     /// Style for numeric value readouts.
+    /// Includes min-width and text-align to prevent layout jitter as values change.
     pub fn style_value(&self) -> String {
         format!(
-            "font-family: {}; font-size: {}; font-variant-numeric: tabular-nums; color: {};",
+            "font-family: {}; font-size: {}; font-variant-numeric: tabular-nums; \
+             min-width:36px; text-align:center; color: {};",
             self.font_mono, self.font_size_value, self.text,
         )
     }
