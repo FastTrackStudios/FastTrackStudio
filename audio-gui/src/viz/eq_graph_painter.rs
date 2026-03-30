@@ -146,7 +146,14 @@ impl EqGraphPainter {
 }
 
 impl SceneOverlay for EqGraphPainter {
-    fn paint(&mut self, scene: &mut Scene, width: u32, height: u32, _scale: f64) {
+    fn paint(
+        &mut self,
+        scene: &mut Scene,
+        _transform: Affine,
+        width: u32,
+        height: u32,
+        _scale: f64,
+    ) {
         // The OverlayRegistry has already applied the element-position transform and clip.
         // We receive the element's CSS pixel dimensions.
         let elem_w = width as f64;

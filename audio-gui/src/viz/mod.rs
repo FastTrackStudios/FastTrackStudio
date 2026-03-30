@@ -11,4 +11,4 @@ pub use eq_graph::{
 };
 pub use eq_graph_painter::{EqGraphPainter, EqGraphRenderState, GraphConfig, InteractionState};
 pub use transfer_curve::TransferCurve;
-pub use waveform::{PeakWaveform, WaveformDisplay};
+pub use waveform::{CanvasPainter, PeakWaveform, VelloCanvas, WaveformDisplay};
