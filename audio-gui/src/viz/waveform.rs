@@ -199,11 +199,10 @@ pub fn VelloCanvas(props: VelloCanvasProps) -> Element {
 
     let extra_style = style.as_deref().unwrap_or("");
 
-    // In fill mode, the outer style (passed via `style` prop) controls sizing.
-    // The div itself has no intrinsic size — it relies on the parent layout.
-    // In fixed mode, we set explicit width/height.
+    // In fill mode, stretch to fill the parent container.
+    // In fixed mode, set explicit width/height.
     let size_style = if fill {
-        String::new()
+        "width:100%; height:100%;".to_string()
     } else {
         format!("width:{width}px; height:{height}px;")
     };
@@ -220,10 +219,36 @@ pub fn VelloCanvas(props: VelloCanvasProps) -> Element {
 
 // ── Vello-rendered PeakWaveform ─────────────────────────────────────────
 
-/// Painter for the peak waveform visualization.
+use nih_plug_dioxus::prelude::vello::kurbo::{BezPath, Circle, Line, Stroke};
+
+/// Compute gain reduction for a given input level using soft-knee compression.
+fn compress_transfer(input_db: f32, threshold_db: f32, ratio: f32, knee_db: f32) -> f32 {
+    if ratio <= 1.0 {
+        return input_db;
+    }
+    let slope = 1.0 - 1.0 / ratio;
+    let half_knee = knee_db * 0.5;
+    if knee_db > 0.001 && (input_db - threshold_db).abs() < half_knee {
+        let x = input_db - threshold_db + half_knee;
+        input_db - slope * x * x / (2.0 * knee_db)
+    } else if input_db > threshold_db {
+        input_db - slope * (input_db - threshold_db)
+    } else {
+        input_db
+    }
+}
+
+/// Painter for the peak waveform visualization with embedded transfer curve.
 pub struct PeakWaveformPainter {
     levels: Vec<f32>,
     gr_levels: Vec<f32>,
+    // Transfer curve params (drawn as transparent overlay in left region)
+    threshold_db: f32,
+    ratio: f32,
+    knee_db: f32,
+    input_level_db: Option<f32>,
+    range_db: f32,
+    show_transfer: bool,
 }
 
 impl PeakWaveformPainter {
@@ -231,6 +256,12 @@ impl PeakWaveformPainter {
         Self {
             levels: Vec::new(),
             gr_levels: Vec::new(),
+            threshold_db: -18.0,
+            ratio: 4.0,
+            knee_db: 6.0,
+            input_level_db: None,
+            range_db: 60.0,
+            show_transfer: false,
         }
     }
 
@@ -239,6 +270,178 @@ impl PeakWaveformPainter {
         self.levels.extend_from_slice(levels);
         self.gr_levels.clear();
         self.gr_levels.extend_from_slice(gr_levels);
+    }
+
+    pub fn update_transfer(
+        &mut self,
+        threshold_db: f32,
+        ratio: f32,
+        knee_db: f32,
+        input_level_db: Option<f32>,
+    ) {
+        self.threshold_db = threshold_db;
+        self.ratio = ratio;
+        self.knee_db = knee_db;
+        self.input_level_db = input_level_db;
+        self.show_transfer = true;
+    }
+
+    /// Convert a dB value to y position in the waveform display.
+    /// 0 dB = top of display, -range_db = bottom.
+    fn db_to_waveform_y(&self, db: f64, h: f64) -> f64 {
+        let range = self.range_db as f64;
+        // 0 dB at top, -range at bottom
+        (-db / range) * h
+    }
+
+    /// Paint the transfer curve as a transparent overlay in the left portion,
+    /// and the threshold line + dB scale across the full width.
+    fn paint_transfer_overlay(
+        &self,
+        scene: &mut nih_plug_dioxus::prelude::vello::Scene,
+        transform: Affine,
+        w: f64,
+        h: f64,
+    ) {
+        let range = self.range_db as f64;
+        let min_db = -self.range_db;
+        let scale_margin = 28.0; // right margin for dB scale labels
+
+        // ── Threshold line — dotted, spans the FULL width ──────────────
+        let thresh_y = self.db_to_waveform_y(self.threshold_db as f64, h);
+        let thresh_color = Color::from_rgba8(255, 100, 100, 80);
+        let dash_gap = 6.0;
+        let mut x = 0.0;
+        while x < w {
+            let x_end = (x + dash_gap * 0.6).min(w);
+            scene.stroke(
+                &Stroke::new(1.0),
+                transform,
+                &thresh_color,
+                None,
+                &Line::new((x, thresh_y), (x_end, thresh_y)),
+            );
+            x += dash_gap;
+        }
+
+        // ── dB scale ticks + horizontal guide lines on the right ──────
+        let tick_color = Color::from_rgba8(255, 255, 255, 30);
+        let guide_color = Color::from_rgba8(255, 255, 255, 10);
+        let tick_x_start = w - scale_margin;
+        let tick_x_end = w - scale_margin + 4.0;
+        for db_val in [0, -6, -12, -18, -24, -30, -36] {
+            let db = db_val as f64;
+            if db < min_db as f64 {
+                continue;
+            }
+            let y = self.db_to_waveform_y(db, h);
+            // Horizontal guide line
+            scene.stroke(
+                &Stroke::new(0.5),
+                transform,
+                &guide_color,
+                None,
+                &Line::new((0.0, y), (w - scale_margin, y)),
+            );
+            // Tick mark
+            scene.stroke(
+                &Stroke::new(1.0),
+                transform,
+                &tick_color,
+                None,
+                &Line::new((tick_x_start, y), (tick_x_end, y)),
+            );
+        }
+
+        // ── Transfer curve (left ~35% of display) ─────────────────────
+        let curve_w = (w - scale_margin) * 0.35;
+
+        // Subtle background tint for the transfer curve panel (~10% opaque)
+        scene.fill(
+            Fill::NonZero,
+            transform,
+            &Color::from_rgba8(20, 20, 30, 25),
+            None,
+            &Rect::new(0.0, 0.0, curve_w, h),
+        );
+
+        let tc_db_to_x = |db: f64| -> f64 { ((db - min_db as f64) / range) * curve_w };
+        let tc_db_to_y = |db: f64| -> f64 { h - ((db - min_db as f64) / range) * h };
+
+        // Subtle grid lines within transfer curve area
+        let grid_color = Color::from_rgba8(255, 255, 255, 8);
+        for db_val in [-48, -36, -24, -12] {
+            let x = tc_db_to_x(db_val as f64);
+            let y = tc_db_to_y(db_val as f64);
+            scene.stroke(
+                &Stroke::new(0.5),
+                transform,
+                &grid_color,
+                None,
+                &Line::new((x, 0.0), (x, h)),
+            );
+            scene.stroke(
+                &Stroke::new(0.5),
+                transform,
+                &grid_color,
+                None,
+                &Line::new((0.0, y), (curve_w, y)),
+            );
+        }
+
+        // 1:1 reference line (dashed diagonal)
+        let ref_color = Color::from_rgba8(255, 255, 255, 18);
+        let num_dashes = 30;
+        for i in 0..num_dashes {
+            let frac0 = i as f64 / num_dashes as f64;
+            let frac1 = (i as f64 + 0.5) / num_dashes as f64;
+            let db0 = min_db as f64 + frac0 * range;
+            let db1 = min_db as f64 + frac1 * range;
+            scene.stroke(
+                &Stroke::new(1.0),
+                transform,
+                &ref_color,
+                None,
+                &Line::new(
+                    (tc_db_to_x(db0), tc_db_to_y(db0)),
+                    (tc_db_to_x(db1), tc_db_to_y(db1)),
+                ),
+            );
+        }
+
+        // Transfer curve path — yellow-green like Pro-C 3
+        let curve_color = Color::from_rgba8(180, 210, 140, 180);
+        let num_points = 60;
+        let mut path = BezPath::new();
+        for i in 0..=num_points {
+            let input = min_db as f64 + (i as f64 / num_points as f64) * range;
+            let output =
+                compress_transfer(input as f32, self.threshold_db, self.ratio, self.knee_db) as f64;
+            let x = tc_db_to_x(input);
+            let y = tc_db_to_y(output);
+            if i == 0 {
+                path.move_to((x, y));
+            } else {
+                path.line_to((x, y));
+            }
+        }
+        scene.stroke(&Stroke::new(2.0), transform, &curve_color, None, &path);
+
+        // Input level indicator (ball on curve)
+        if let Some(level) = self.input_level_db {
+            let out = compress_transfer(level, self.threshold_db, self.ratio, self.knee_db) as f64;
+            let bx = tc_db_to_x(level as f64);
+            let by = tc_db_to_y(out);
+            if bx >= 0.0 && bx <= curve_w {
+                scene.fill(
+                    Fill::NonZero,
+                    transform,
+                    &Color::from_rgba8(255, 255, 255, 200),
+                    None,
+                    &Circle::new((bx, by), 3.0),
+                );
+            }
+        }
     }
 }
 
@@ -295,6 +498,11 @@ impl CanvasPainter for PeakWaveformPainter {
                 &Rect::new(x, 0.0, x + bar_w, gr_h),
             );
         }
+
+        // Transfer curve + threshold line + dB scale overlay
+        if self.show_transfer {
+            self.paint_transfer_overlay(scene, transform, w, h);
+        }
     }
 }
 
@@ -312,6 +520,18 @@ pub fn PeakWaveform(
     /// Gain reduction levels (0.0–1.0, same length as `levels`).
     #[props(default = Vec::new())]
     gr_levels: Vec<f32>,
+    /// Threshold in dBFS (enables transfer curve overlay when set with `ratio`).
+    #[props(default)]
+    threshold_db: Option<f32>,
+    /// Compression ratio (enables transfer curve overlay when set with `threshold_db`).
+    #[props(default)]
+    ratio: Option<f32>,
+    /// Soft knee width in dB (for transfer curve overlay).
+    #[props(default = 6.0)]
+    knee_db: f32,
+    /// Current input level in dB (for transfer curve ball indicator).
+    #[props(default)]
+    input_level_db: Option<f32>,
     /// Width in CSS pixels (ignored when `fill` is true).
     #[props(default = 400.0)]
     width: f32,
@@ -333,22 +553,63 @@ pub fn PeakWaveform(
         &use_hook(|| Rc::new(RefCell::new(PeakWaveformPainter::new())));
 
     // Update data each render
-    painter.borrow_mut().update(&levels, &gr_levels);
+    {
+        let mut p = painter.borrow_mut();
+        p.update(&levels, &gr_levels);
+        if let (Some(thresh), Some(rat)) = (threshold_db, ratio) {
+            p.update_transfer(thresh, rat, knee_db, input_level_db);
+        }
+    }
 
     // Type-erase to dyn CanvasPainter for VelloCanvas
     let dyn_painter: Rc<RefCell<dyn CanvasPainter>> = painter.clone();
 
     let outer_style = style.as_deref().unwrap_or("");
+    let show_scale = threshold_db.is_some();
+    let range_db_val = 36.0_f32; // matches painter's range_db
+
     rsx! {
-        VelloCanvas {
-            painter: dyn_painter,
-            width: width,
-            height: height,
-            fill: fill,
+        div {
             style: format!(
-                "border-radius:4px; overflow:hidden; border:1px solid {border}; {outer_style}",
+                "position:relative; border-radius:4px; overflow:hidden; \
+                 border:1px solid {border}; {outer_style}",
                 border = t.border,
             ),
+
+            VelloCanvas {
+                painter: dyn_painter,
+                width: width,
+                height: height,
+                fill: fill,
+            }
+
+            // dB scale labels on the right side (positioned over the canvas)
+            if show_scale {
+                for db_val in [0, -6, -12, -18, -24, -30, -36] {
+                    {
+                        let db = db_val as f32;
+                        let pct = (-db / range_db_val) * 100.0;
+                        let label = if db_val == 0 {
+                            "0".to_string()
+                        } else {
+                            format!("{db_val}")
+                        };
+                        rsx! {
+                            span {
+                                style: format!(
+                                    "position:absolute; right:4px; top:{pct:.1}%; \
+                                     transform:translateY(-50%); \
+                                     font-family:{font}; font-size:8px; \
+                                     color:{dim}; pointer-events:none;",
+                                    font = t.font_mono,
+                                    dim = t.text_dim,
+                                ),
+                                "{label}"
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
