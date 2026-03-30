@@ -9,6 +9,9 @@
 use nih_plug::prelude::ParamPtr;
 use nih_plug_dioxus::prelude::*;
 
+/// Fine-adjustment multiplier when Shift is held during drag.
+const FINE_MULTIPLIER: f64 = 5.0;
+
 /// Shared state for a parameter drag in progress.
 #[derive(Clone, Copy, Default)]
 pub struct DragState {
@@ -66,8 +69,14 @@ pub fn DragProvider(children: Element) -> Element {
                     let state = *drag.read();
                     if state.active {
                         if let Some(param_ptr) = state.param_ptr {
-                            let delta = (state.start_y - evt.client_coordinates().y)
-                                / state.sensitivity;
+                            // Shift = fine adjustment (5x slower)
+                            let sens = if evt.modifiers().shift() {
+                                state.sensitivity * FINE_MULTIPLIER
+                            } else {
+                                state.sensitivity
+                            };
+                            let delta =
+                                (state.start_y - evt.client_coordinates().y) / sens;
                             let new_val = (state.start_value + delta).clamp(0.0, 1.0) as f32;
                             ctx.set_normalized_raw(param_ptr, new_val);
                             // Write back to drag signal so knobs re-render

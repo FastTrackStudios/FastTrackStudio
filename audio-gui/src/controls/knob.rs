@@ -277,13 +277,22 @@ pub fn Knob(
                         onmousedown: {
                             let ctx = ctx.clone();
                             move |evt: MouseEvent| {
-                                begin_drag(
-                                    &mut drag,
-                                    &ctx,
-                                    param_ptr,
-                                    evt.client_coordinates().y,
-                                    SENSITIVITY,
-                                );
+                                if evt.modifiers().ctrl() {
+                                    // Ctrl+click → reset to default
+                                    let default =
+                                        unsafe { param_ptr.default_normalized_value() };
+                                    ctx.begin_set_raw(param_ptr);
+                                    ctx.set_normalized_raw(param_ptr, default);
+                                    ctx.end_set_raw(param_ptr);
+                                } else {
+                                    begin_drag(
+                                        &mut drag,
+                                        &ctx,
+                                        param_ptr,
+                                        evt.client_coordinates().y,
+                                        SENSITIVITY,
+                                    );
+                                }
                                 revision += 1;
                             }
                         },
