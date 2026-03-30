@@ -37,6 +37,9 @@ pub fn LevelMeter(
     /// Widget height in pixels (for vertical) or width (for horizontal).
     #[props(default = 200.0)]
     length: f32,
+    /// Fill parent container instead of using fixed dimensions.
+    #[props(default = false)]
+    fill: bool,
     /// Optional label above/beside the meter.
     #[props(default)]
     label: Option<String>,
@@ -59,17 +62,29 @@ pub fn LevelMeter(
     };
 
     let container_style = if is_vertical {
-        "display:flex; flex-direction:column; align-items:center; gap:4px;".to_string()
+        if fill {
+            "display:flex; flex-direction:column; align-items:center; gap:4px; flex:1; min-height:0;".to_string()
+        } else {
+            "display:flex; flex-direction:column; align-items:center; gap:4px;".to_string()
+        }
     } else {
         "display:flex; align-items:center; gap:4px;".to_string()
     };
 
     let meter_style = if is_vertical {
-        format!(
-            "position:relative; width:{thickness}px; height:{length}px; \
-             {INSET} overflow:hidden;",
-            INSET = t.style_inset(),
-        )
+        if fill {
+            format!(
+                "position:relative; width:{thickness}px; flex:1; min-height:0; \
+                 {INSET} overflow:hidden;",
+                INSET = t.style_inset(),
+            )
+        } else {
+            format!(
+                "position:relative; width:{thickness}px; height:{length}px; \
+                 {INSET} overflow:hidden;",
+                INSET = t.style_inset(),
+            )
+        }
     } else {
         format!(
             "position:relative; height:{thickness}px; width:{length}px; \
@@ -162,12 +177,15 @@ pub fn LevelMeterDb(
     /// Floor in dBFS (level at 0.0 normalized).
     #[props(default = -60.0)]
     min_db: f32,
-    /// Height in pixels.
+    /// Height in pixels (ignored when fill=true).
     #[props(default = 200.0)]
     height: f32,
-    /// Width in pixels.
+    /// Width (thickness) in pixels.
     #[props(default = 10.0)]
     width: f32,
+    /// Fill parent container height instead of using fixed height.
+    #[props(default = false)]
+    fill: bool,
 ) -> Element {
     let t = use_theme();
     let t = *t.read();
@@ -178,15 +196,19 @@ pub fn LevelMeterDb(
 
     rsx! {
         div {
-            style: format!(
+            style: if fill {
                 "display:flex; flex-direction:column; align-items:center; gap:4px; \
-                 min-width:36px;"
-            ),
+                 min-width:36px; flex:1; min-height:0;".to_string()
+            } else {
+                "display:flex; flex-direction:column; align-items:center; gap:4px; \
+                 min-width:36px;".to_string()
+            },
             LevelMeter {
                 level: normalized,
                 orientation: LevelMeterOrientation::Vertical,
                 thickness: width,
                 length: height,
+                fill: fill,
                 label,
             }
             div {
