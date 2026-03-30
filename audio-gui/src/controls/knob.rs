@@ -309,6 +309,7 @@ pub fn Knob(
             if is_editing {
                 input {
                     r#type: "text",
+                    autofocus: true,
                     style: format!(
                         "{VALUE_STYLE} background:{SURFACE}; \
                          border:1px solid {ACCENT}; border-radius:{RADIUS}; \
@@ -323,7 +324,6 @@ pub fn Knob(
                     ),
                     value: "{display_value}",
                     onkeydown: {
-                        let ctx = ctx.clone();
                         move |evt: KeyboardEvent| {
                             if evt.key() == Key::Enter {
                                 editing.set(false);
