@@ -12,6 +12,8 @@
 //! Uses SVG rendering for cross-platform compatibility.
 //! Ported from the legacy `audio-controls` crate for the nih_plug_dioxus Blitz renderer.
 
+use std::rc::Rc;
+
 use dioxus_elements::input_data::MouseButton;
 use nih_plug_dioxus::prelude::*;
 
@@ -331,14 +333,13 @@ pub fn EqGraph(
     #[props(default = false)]
     disabled: bool,
 ) -> Element {
-    // Internal dimensions for the SVG viewBox (fixed coordinate system).
-    // In Blitz we use these directly for coordinate transforms (no async
-    // get_client_rect — assume 1:1 mapping with the container).
+    // Fixed viewBox dimensions for the painter (always 800x350).
     let vb_width = 800.0;
     let vb_height = 350.0;
-    let padding = 40.0;
-    let graph_width = vb_width - padding * 2.0;
-    let graph_height = vb_height - padding * 2.0;
+    let padding = 0.0;
+    // SVG interaction layer uses CSS pixel coordinates (no viewBox scaling).
+    // Falls back to vb_width/vb_height before layout is measured.
+    // graph_width/graph_height are the actual CSS pixel dimensions of the element.
 
     // Internal state
     let mut dragging_band = use_signal(|| None::<usize>);
@@ -364,9 +365,7 @@ pub fn EqGraph(
     // Track original band positions for proportional scaling during multi-drag
     let mut drag_start_bands: Signal<Vec<(usize, f32, f32)>> = use_signal(Vec::new); // (idx, freq, gain)
                                                                                      // Dropdown states for the popup
-    let mut show_shape_dropdown: Signal<bool> = use_signal(|| false);
-    let mut show_more_dropdown: Signal<bool> = use_signal(|| false);
-    // Right-click context menu state: (band_idx, viewBox_x, viewBox_y)
+                                                                                     // Right-click context menu state: (band_idx, viewBox_x, viewBox_y)
     let mut context_menu: Signal<Option<(usize, f64, f64)>> = use_signal(|| None);
     // Track when mouse left the focused band area (for fade timeout)
     // Stores (timestamp_ms, band_idx) when mouse leaves focus area
@@ -384,16 +383,53 @@ pub fn EqGraph(
     // Create shared render state (persists across renders via use_hook)
     let render_state = use_hook(|| EqGraphRenderState::new());
 
-    // Register the vello painter overlay (once, on mount; auto-unregisters on unmount)
+    // Register the vello painter overlay as BACKGROUND so it renders behind the DOM.
+    // Popup divs and selection rect overlays then appear on top naturally.
     let overlay_handle = {
         let state = render_state.clone();
-        use_scene_overlay(move || EqGraphPainter::new(state))
+        use_scene_overlay_background(move || EqGraphPainter::new(state))
     };
 
-    // Position the overlay at this element's location in the window.
-    // The component receives offset_x/y and rendered width/height from the editor.
-    // When rendered_width == 0 (not set), the overlay won't paint (rect is too small).
-    overlay_handle.set_rect(offset_x, offset_y, rendered_width, rendered_height);
+    // Self-measure our bounding rect (same pattern as VelloCanvas / PeakWaveform).
+    // Dioxus tracks `mounted` as a dependency so this re-runs when the element mounts.
+    let mut mounted: Signal<Option<Rc<MountedData>>> = use_signal(|| None);
+    let mut layout_rect: Signal<(f64, f64, f64, f64)> = use_signal(|| (0.0, 0.0, 0.0, 0.0));
+    // Window size signal — re-measure on resize (same as VelloCanvas).
+    let window_size: Option<Signal<(u32, u32)>> = try_consume_context();
+    {
+        let overlay = overlay_handle.clone();
+        use_effect(move || {
+            let el = mounted.read().clone();
+            // Subscribe to window size so a resize triggers re-measurement.
+            if let Some(sig) = window_size {
+                let _ = sig.read();
+            }
+            let overlay = overlay.clone();
+            if let Some(el) = el {
+                spawn(async move {
+                    if let Ok(rect) = el.get_client_rect().await {
+                        let ox = rect.origin.x;
+                        let oy = rect.origin.y;
+                        let rw = rect.size.width;
+                        let rh = rect.size.height;
+                        overlay.set_rect(ox, oy, rw, rh);
+                        if *layout_rect.peek() != (ox, oy, rw, rh) {
+                            layout_rect.set((ox, oy, rw, rh));
+                        }
+                    }
+                });
+            }
+        });
+    }
+
+    // Read measured layout rect first so the sync block can use actual dimensions.
+    let (act_ox, act_oy, act_rw, act_rh) = *layout_rect.read();
+    // Always call set_rect — if dimensions are unknown, pass zero so the painter
+    // skips instead of defaulting to full-window paint (which would show as a
+    // black rectangle covering areas outside the EQ graph).
+    overlay_handle.set_rect(act_ox, act_oy, act_rw, act_rh);
+    let graph_width = if act_rw > 0.0 { act_rw } else { vb_width };
+    let graph_height = if act_rh > 0.0 { act_rh } else { vb_height };
 
     // Sync component state → painter each render
     {
@@ -405,8 +441,8 @@ pub fn EqGraph(
         cfg.sample_rate = sample_rate;
         cfg.show_grid = show_grid;
         cfg.fill_curve = fill_curve;
-        cfg.rect_w = rendered_width;
-        cfg.rect_h = rendered_height;
+        cfg.rect_w = act_rw;
+        cfg.rect_h = act_rh;
         drop(cfg);
 
         let mut interaction = render_state.interaction.write();
@@ -421,7 +457,7 @@ pub fn EqGraph(
         }
     }
 
-    // Coordinate conversions
+    // Coordinate conversions (CSS pixels, matching the vello painter)
     let log_min = min_freq.log10();
     let log_max = max_freq.log10();
 
@@ -445,27 +481,11 @@ pub fn EqGraph(
         (0.5 - normalized) * 2.0 * db_range
     };
 
-    // Transform window-relative pixel coordinates to SVG viewBox coordinates.
-    // Blitz's element_coordinates() actually returns window/client coords (not
-    // element-relative), so we subtract the element's position first, then scale
-    // from rendered pixel size to viewBox coordinates.
-    let actual_w = if rendered_width > 0.0 {
-        rendered_width
-    } else {
-        vb_width
-    };
-    let actual_h = if rendered_height > 0.0 {
-        rendered_height
-    } else {
-        vb_height
-    };
-
+    // Transform window-relative pixel coordinates to graph CSS pixel coordinates.
     let transform_coords = move |win_x: f64, win_y: f64| -> (f64, f64) {
-        let rel_x = win_x - offset_x;
-        let rel_y = win_y - offset_y;
-        let vb_x = rel_x * vb_width / actual_w;
-        let vb_y = rel_y * vb_height / actual_h;
-        (vb_x, vb_y)
+        let rel_x = win_x - act_ox;
+        let rel_y = win_y - act_oy;
+        (rel_x, rel_y)
     };
 
     // Check if position is inside the graph area (in viewBox coords)
@@ -490,351 +510,228 @@ pub fn EqGraph(
         }
     };
 
-    // Clone bands for the read in the iterator
-    let bands_snapshot: Vec<EqBand> = bands.read().clone();
-
     rsx! {
-        // Wrapper div — Blitz doesn't deliver onwheel to SVG elements,
-        // so we handle it on this div instead.
         div {
-            style: "width:100%; height:100%;",
+            style: "position:absolute; top:0; left:0; right:0; bottom:0; user-select:none;",
+            onmounted: move |event: MountedEvent| {
+                mounted.set(Some(event.data()));
+            },
 
-            // Handle mouse wheel for Q adjustment (on div because Blitz
-            // doesn't fire onwheel on SVG elements)
+            // Wheel: adjust Q for focused/hovered/dragging band
             onwheel: move |evt: WheelEvent| {
                 evt.prevent_default();
-
-                if disabled {
-                    return;
-                }
-
-                let dragging = { *dragging_band.read() };
-                let focused = { *focused_band.read() };
-                let hovered = { *hovered_band.read() };
-                let target_band = dragging.or(focused).or(hovered);
-
+                if disabled { return; }
+                let target_band = dragging_band.read().or(*focused_band.read()).or(*hovered_band.read());
                 if let Some(band_idx) = target_band {
-                    let delta_vec = evt.delta().strip_units();
-                    let delta = delta_vec.y;
-                    let q_multiplier = if delta < 0.0 { 1.15 } else { 0.87 };
-
-                    let updated_band = {
-                        let mut bands_vec = bands.write();
-                        if band_idx < bands_vec.len() {
-                            let new_q = (bands_vec[band_idx].q * q_multiplier).clamp(0.1, 18.0);
-                            bands_vec[band_idx].q = new_q;
-                            Some(bands_vec[band_idx].clone())
-                        } else {
-                            None
-                        }
+                    let delta = evt.delta().strip_units().y;
+                    let q_mul = if delta < 0.0 { 1.15 } else { 0.87 };
+                    let updated = {
+                        let mut bv = bands.write();
+                        if band_idx < bv.len() {
+                            bv[band_idx].q = (bv[band_idx].q * q_mul).clamp(0.1, 18.0);
+                            Some(bv[band_idx].clone())
+                        } else { None }
                     };
-
-                    if let (Some(band), Some(cb)) = (updated_band, &on_band_change) {
-                        cb.call((band_idx, band));
-                    }
+                    if let (Some(b), Some(cb)) = (updated, &on_band_change) { cb.call((band_idx, b)); }
                 }
             },
 
-        svg {
-            // Use viewBox for proper scaling - SVG will scale to fit container
-            view_box: "0 0 {vb_width} {vb_height}",
-            // Make it responsive
-            width: "100%",
-            height: "100%",
-            preserve_aspect_ratio: "none",
-            class: "eq-graph {class}",
-            // Transparent — vello SceneOverlay paints the graph visuals underneath
-            style: "background: transparent; user-select: none; display: block;",
-
-            // Handle mouse leave - end drag
+            // Mouse leave: end any active drag
             onmouseleave: move |_| {
-                // Copy the value first to avoid borrow conflicts
-                let band_idx_opt = { *dragging_band.read() };
-                if let Some(band_idx) = band_idx_opt {
+                let idx = { *dragging_band.read() };
+                if let Some(i) = idx {
                     dragging_band.set(None);
-                    if let Some(cb) = &on_end {
-                        cb.call(band_idx);
-                    }
+                    if let Some(cb) = &on_end { cb.call(i); }
                 }
                 hovered_band.set(None);
             },
 
-            // Handle mouse move for dragging and focus detection
+            // Mouse move: drag, hover hit-test, focus detection
             onmousemove: move |evt: MouseEvent| {
-                if disabled {
-                    return;
-                }
-
+                if disabled { return; }
                 let coords = evt.element_coordinates();
                 let (x, y) = transform_coords(coords.x, coords.y);
 
-                // Handle selection rectangle drawing - copy value first
-                let sel_rect = { *selection_rect.read() };
-                if let Some((start_x, start_y, _, _)) = sel_rect {
-                    selection_rect.set(Some((start_x, start_y, x, y)));
+                // Update selection rectangle
+                let sel = { *selection_rect.read() };
+                if let Some((sx, sy, _, _)) = sel {
+                    selection_rect.set(Some((sx, sy, x, y)));
                     return;
                 }
 
-                // Copy dragging band value first to avoid borrow conflicts
-                let dragging_band_idx = { *dragging_band.read() };
+                let drag_idx = { *dragging_band.read() };
 
-                // Handle band dragging (single or multi-select)
-                if let Some(band_idx) = dragging_band_idx {
-                    // Copy all needed values upfront
+                // Drag band(s)
+                if let Some(band_idx) = drag_idx {
                     let selected = { selected_bands.read().clone() };
-                    let is_multi_drag = selected.len() > 1 && selected.contains(&band_idx);
+                    let is_multi = selected.len() > 1 && selected.contains(&band_idx);
 
-                    if is_multi_drag {
-                        // Multi-selection proportional scaling - copy values first
-                        let drag_start_pos = { *drag_start.read() };
-                        if let Some((_start_x, _start_y)) = drag_start_pos {
+                    if is_multi {
+                        if let Some((_sx, _sy)) = { *drag_start.read() } {
                             let start_bands = { drag_start_bands.read().clone() };
-
-                            // Find the dragged band's original position
-                            let dragged_orig = start_bands.iter().find(|(idx, _, _)| *idx == band_idx);
-                            if let Some(&(_, orig_freq, orig_gain)) = dragged_orig {
-                                // Calculate delta for the dragged band
+                            if let Some(&(_, orig_freq, orig_gain)) = start_bands.iter().find(|(i, _, _)| *i == band_idx) {
                                 let new_gain = y_to_db(y).clamp(-30.0, 30.0) as f32;
                                 let gain_delta = new_gain - orig_gain;
-
-                                // Calculate proportional scale factor
-                                let scale = if orig_gain.abs() > 0.01 {
-                                    new_gain / orig_gain
-                                } else {
-                                    1.0 + gain_delta / 10.0 // Fallback for bands near 0
-                                };
-
-                                // Update all selected bands with proportional scaling
-                                let mut bands_vec = bands.write();
-                                for &(idx, _, orig_g) in &start_bands {
-                                    if idx < bands_vec.len() {
-                                        // Scale gain proportionally relative to 0
-                                        let scaled_gain = (orig_g * scale).clamp(-30.0, 30.0);
-                                        bands_vec[idx].gain = scaled_gain;
-
-                                        // Also move frequency if dragging horizontally
-                                        let new_freq = x_to_freq(x).clamp(10.0, 30000.0) as f32;
-                                        let freq_ratio = new_freq / orig_freq;
-                                        if let Some(&(_, orig_f, _)) = start_bands.iter().find(|(i, _, _)| *i == idx) {
-                                            bands_vec[idx].frequency = (orig_f * freq_ratio).clamp(10.0, 30000.0);
+                                let scale = if orig_gain.abs() > 0.01 { new_gain / orig_gain } else { 1.0 + gain_delta / 10.0 };
+                                let new_freq = x_to_freq(x).clamp(10.0, 30000.0) as f32;
+                                let freq_ratio = new_freq / orig_freq;
+                                let mut bv = bands.write();
+                                for &(idx, _, og) in &start_bands {
+                                    if idx < bv.len() {
+                                        bv[idx].gain = (og * scale).clamp(-30.0, 30.0);
+                                        if let Some(&(_, of_, _)) = start_bands.iter().find(|(i,_,_)| *i==idx) {
+                                            bv[idx].frequency = (of_ * freq_ratio).clamp(10.0, 30000.0);
                                         }
                                     }
                                 }
-                                // Collect updated bands for notification before dropping write borrow
-                                let updated_bands: Vec<(usize, EqBand)> = start_bands
-                                    .iter()
-                                    .filter_map(|&(idx, _, _)| {
-                                        if idx < bands_vec.len() {
-                                            Some((idx, bands_vec[idx].clone()))
-                                        } else {
-                                            None
-                                        }
-                                    })
+                                let updates: Vec<_> = start_bands.iter()
+                                    .filter_map(|&(i,_,_)| if i < bv.len() { Some((i, bv[i].clone())) } else { None })
                                     .collect();
-                                drop(bands_vec);
-
-                                // Notify about changes (borrow is now released)
+                                drop(bv);
                                 if let Some(cb) = &on_band_change {
-                                    for (idx, band) in updated_bands {
-                                        cb.call((idx, band));
-                                    }
+                                    for (i, b) in updates { cb.call((i, b)); }
                                 }
                             }
                         }
                     } else {
-                        // Single band drag
-                        let new_freq = x_to_freq(x).clamp(10.0, 30000.0) as f32;
-                        let new_gain = y_to_db(y).clamp(-30.0, 30.0) as f32;
-
-                        let updated_band: Option<(usize, EqBand)> = {
-                            let mut bands_vec = bands.write();
-                            if band_idx < bands_vec.len() {
-                                bands_vec[band_idx].frequency = new_freq;
-                                bands_vec[band_idx].gain = new_gain;
-                                Some((band_idx, bands_vec[band_idx].clone()))
-                            } else {
-                                None
-                            }
+                        let nf = x_to_freq(x).clamp(10.0, 30000.0) as f32;
+                        let ng = y_to_db(y).clamp(-30.0, 30.0) as f32;
+                        let updated = {
+                            let mut bv = bands.write();
+                            if band_idx < bv.len() {
+                                bv[band_idx].frequency = nf;
+                                bv[band_idx].gain = ng;
+                                Some((band_idx, bv[band_idx].clone()))
+                            } else { None }
                         };
-
-                        // Call callback after borrow is released
-                        if let (Some((idx, band)), Some(cb)) = (updated_band, &on_band_change) {
-                            cb.call((idx, band));
-                        }
+                        if let (Some((i, b)), Some(cb)) = (updated, &on_band_change) { cb.call((i, b)); }
                     }
                     return;
                 }
 
-                // Find closest band to mouse for focus (within threshold)
-                let closest_band: Option<(usize, f64)> = {
-                    let bands_vec = bands.read();
-                    let mut closest: Option<(usize, f64)> = None;
-                    for (idx, band) in bands_vec.iter().enumerate() {
+                // Hover hit-test (replaces invisible SVG circles)
+                let new_hover = {
+                    let bv = bands.read();
+                    let mut best: Option<(usize, f64)> = None;
+                    for (idx, band) in bv.iter().enumerate() {
                         if band.used {
                             let bx = freq_to_x(band.frequency as f64);
                             let by = db_to_y(band.gain as f64);
-                            let dist = ((x - bx).powi(2) + (y - by).powi(2)).sqrt();
-                            if dist < focus_radius {
-                                if closest.is_none() || dist < closest.unwrap().1 {
-                                    closest = Some((idx, dist));
-                                }
+                            let d = ((x-bx).powi(2) + (y-by).powi(2)).sqrt();
+                            if d < 15.0 && (best.is_none() || d < best.unwrap().1) {
+                                best = Some((idx, d));
                             }
                         }
                     }
-                    closest
+                    best.map(|(i,_)| i)
                 };
+                if *hovered_band.peek() != new_hover { hovered_band.set(new_hover); }
 
-                // Update focused band with timeout logic
-                let new_focus = closest_band.map(|(idx, _)| idx);
-                let current_focus = { *focused_band.read() };
+                // Focus detection (drives popup visibility)
+                let closest_for_focus = {
+                    let bv = bands.read();
+                    let mut best: Option<(usize, f64)> = None;
+                    for (idx, band) in bv.iter().enumerate() {
+                        if band.used {
+                            let bx = freq_to_x(band.frequency as f64);
+                            let by = db_to_y(band.gain as f64);
+                            let d = ((x-bx).powi(2) + (y-by).powi(2)).sqrt();
+                            if d < focus_radius && (best.is_none() || d < best.unwrap().1) {
+                                best = Some((idx, d));
+                            }
+                        }
+                    }
+                    best
+                };
+                let new_focus = closest_for_focus.map(|(i,_)| i);
+                let cur_focus = { *focused_band.read() };
                 let leave_time = { *focus_leave_time.read() };
                 let now = now_ms();
-
-                match (current_focus, new_focus) {
-                    (Some(old_idx), Some(new_idx)) if old_idx != new_idx => {
-                        // Switching to a different band - instant switch, no fade
-                        set_focused(Some(new_idx));
-                        focus_leave_time.set(None);
-                        show_shape_dropdown.set(false);
-                        show_more_dropdown.set(false);
-                    }
-                    (Some(_), Some(_)) => {
-                        // Still on the same band - clear any pending fade
-                        focus_leave_time.set(None);
-                    }
-                    (None, Some(new_idx)) => {
-                        // Newly focusing on a band
-                        set_focused(Some(new_idx));
-                        focus_leave_time.set(None);
-                        show_shape_dropdown.set(false);
-                        show_more_dropdown.set(false);
-                    }
-                    (Some(old_idx), None) => {
-                        // Mouse left the focus area - start fade timeout
+                match (cur_focus, new_focus) {
+                    (Some(old), Some(new)) if old != new => { set_focused(Some(new)); focus_leave_time.set(None); }
+                    (Some(_), Some(_)) => { focus_leave_time.set(None); }
+                    (None, Some(new)) => { set_focused(Some(new)); focus_leave_time.set(None); }
+                    (Some(old), None) => {
                         match leave_time {
-                            None => {
-                                // First time leaving - record the time
-                                focus_leave_time.set(Some((now, old_idx)));
-                            }
-                            Some((leave_ts, leave_idx)) if leave_idx == old_idx => {
-                                // Check if timeout has elapsed
-                                if now - leave_ts > popup_fade_timeout_ms {
-                                    // Timeout elapsed - clear focus
+                            None => { focus_leave_time.set(Some((now, old))); }
+                            Some((ts, idx)) if idx == old => {
+                                if now - ts > popup_fade_timeout_ms {
                                     set_focused(None);
                                     focus_leave_time.set(None);
-                                    show_shape_dropdown.set(false);
-                                    show_more_dropdown.set(false);
                                 }
-                                // Otherwise keep waiting
                             }
-                            _ => {
-                                // Different band was being tracked - reset
-                                focus_leave_time.set(Some((now, old_idx)));
-                            }
+                            _ => { focus_leave_time.set(Some((now, old))); }
                         }
                     }
-                    (None, None) => {
-                        // No focus, nothing to do
-                        focus_leave_time.set(None);
-                    }
+                    (None, None) => { focus_leave_time.set(None); }
                 }
             },
 
-            // Handle mouse up - end drag, complete selection, potentially remove band
+            // Mouse up: complete selection rect or end drag
             onmouseup: move |evt: MouseEvent| {
                 let coords = evt.element_coordinates();
                 let (x, y) = transform_coords(coords.x, coords.y);
 
-                // Complete selection rectangle - copy value first
-                let sel_rect = { *selection_rect.read() };
-                if let Some((start_x, start_y, _, _)) = sel_rect {
-                    let min_x = start_x.min(x);
-                    let max_x = start_x.max(x);
-                    let min_y = start_y.min(y);
-                    let max_y = start_y.max(y);
-
-                    // Find all bands within the selection rectangle
-                    let newly_selected: Vec<usize> = {
-                        let bands_vec = bands.read();
-                        bands_vec.iter().enumerate()
-                            .filter(|(_, band)| {
-                                if !band.used { return false; }
-                                let bx = freq_to_x(band.frequency as f64);
-                                let by = db_to_y(band.gain as f64);
-                                bx >= min_x && bx <= max_x && by >= min_y && by <= max_y
+                let sel = { *selection_rect.read() };
+                if let Some((sx, sy, _, _)) = sel {
+                    let (mnx, mxx) = (sx.min(x), sx.max(x));
+                    let (mny, mxy) = (sy.min(y), sy.max(y));
+                    let newly: Vec<usize> = {
+                        let bv = bands.read();
+                        bv.iter().enumerate()
+                            .filter(|(_, b)| {
+                                if !b.used { return false; }
+                                let bx = freq_to_x(b.frequency as f64);
+                                let by = db_to_y(b.gain as f64);
+                                bx >= mnx && bx <= mxx && by >= mny && by <= mxy
                             })
-                            .map(|(idx, _)| idx)
-                            .collect()
+                            .map(|(i, _)| i).collect()
                     };
-
-                    selected_bands.set(newly_selected);
+                    selected_bands.set(newly);
                     selection_rect.set(None);
                     return;
                 }
 
-                // End band drag - copy value first
                 let band_idx_opt = { *dragging_band.read() };
                 if let Some(band_idx) = band_idx_opt {
-                    let outside = !is_inside_graph(x, y);
-
-                    // If released outside graph area, remove the band
-                    if outside {
-                        if let Some(cb) = &on_band_remove {
-                            cb.call(band_idx);
-                        }
+                    if !is_inside_graph(x, y) {
+                        if let Some(cb) = &on_band_remove { cb.call(band_idx); }
                     }
-
                     dragging_band.set(None);
                     drag_start.set(None);
                     drag_start_bands.set(Vec::new());
-                    if let Some(cb) = &on_end {
-                        cb.call(band_idx);
-                    }
+                    if let Some(cb) = &on_end { cb.call(band_idx); }
                 }
             },
 
-            // Handle mousedown - detect double-click to add new band, or click on band to drag
-            // Using mousedown instead of ondoubleclick so user can immediately drag the new node
+            // Mouse down: click/drag bands, double-click to add, right-click menu
             onmousedown: move |evt: MouseEvent| {
-                if disabled {
-                    return;
-                }
-
+                if disabled { return; }
                 let coords = evt.element_coordinates();
                 let (x, y) = transform_coords(coords.x, coords.y);
+                if !is_inside_graph(x, y) { last_click.set(None); return; }
 
-                // Only handle if inside graph area
-                if !is_inside_graph(x, y) {
-                    last_click.set(None);
-                    return;
-                }
-
-                // Check if clicking on an existing band.
-                // Blitz doesn't deliver mouse events to SVG child elements,
-                // so we handle band clicks at the SVG level.
-                let clicked_band: Option<usize> = {
-                    let bands_vec = bands.read();
-                    let mut closest: Option<(usize, f64)> = None;
-                    for (idx, band) in bands_vec.iter().enumerate() {
+                // Hit-test existing bands
+                let clicked: Option<usize> = {
+                    let bv = bands.read();
+                    let mut best: Option<(usize, f64)> = None;
+                    for (idx, band) in bv.iter().enumerate() {
                         if !band.used { continue; }
                         let bx = freq_to_x(band.frequency as f64);
                         let by = db_to_y(band.gain as f64);
-                        let dist = ((x - bx).powi(2) + (y - by).powi(2)).sqrt();
-                        if dist < 15.0 {
-                            if closest.is_none() || dist < closest.unwrap().1 {
-                                closest = Some((idx, dist));
-                            }
+                        let d = ((x-bx).powi(2) + (y-by).powi(2)).sqrt();
+                        if d < 15.0 && (best.is_none() || d < best.unwrap().1) {
+                            best = Some((idx, d));
                         }
                     }
-                    closest.map(|(idx, _)| idx)
+                    best.map(|(i,_)| i)
                 };
 
-                // Dismiss context menu on any click
                 context_menu.set(None);
 
-                // Right-click: show context menu for band
+                // Right-click: show context menu
                 if evt.trigger_button() == Some(MouseButton::Secondary) {
-                    if let Some(idx) = clicked_band {
+                    if let Some(idx) = clicked {
                         context_menu.set(Some((idx, x, y)));
                         set_focused(Some(idx));
                     }
@@ -843,915 +740,509 @@ pub fn EqGraph(
                     return;
                 }
 
-                if let Some(idx) = clicked_band {
-                    // Check for double-click on this band (reset gain to 0)
+                if let Some(idx) = clicked {
                     let now = now_ms();
-                    let last_click_val = { *last_click.read() };
-                    let is_double = if let Some((last_time, last_x, last_y)) = last_click_val {
-                        let time_diff = now - last_time;
-                        let distance = ((x - last_x).powi(2) + (y - last_y).powi(2)).sqrt();
-                        time_diff < double_click_threshold_ms && distance < double_click_distance
-                    } else {
-                        false
-                    };
-
+                    let is_double = { *last_click.read() }.map_or(false, |(t, lx, ly)| {
+                        now - t < double_click_threshold_ms &&
+                        ((x-lx).powi(2) + (y-ly).powi(2)).sqrt() < double_click_distance
+                    });
                     if is_double {
                         last_click.set(None);
-                        let updated_band = {
-                            let mut bands_vec = bands.write();
-                            if idx < bands_vec.len() {
-                                bands_vec[idx].gain = 0.0;
-                                Some(bands_vec[idx].clone())
-                            } else {
-                                None
-                            }
+                        let updated = {
+                            let mut bv = bands.write();
+                            if idx < bv.len() { bv[idx].gain = 0.0; Some(bv[idx].clone()) } else { None }
                         };
-                        if let (Some(band), Some(cb)) = (updated_band, &on_band_change) {
-                            cb.call((idx, band));
-                        }
+                        if let (Some(b), Some(cb)) = (updated, &on_band_change) { cb.call((idx, b)); }
                         evt.stop_propagation();
                         return;
                     }
-
-                    // Single click — start dragging this band
                     last_click.set(Some((now, x, y)));
 
                     let is_shift = evt.modifiers().shift();
-                    let current_selected = { selected_bands.read().clone() };
-                    let new_selected = if is_shift {
-                        let mut sel = current_selected.clone();
-                        if sel.contains(&idx) {
-                            sel.retain(|&i| i != idx);
-                        } else {
-                            sel.push(idx);
-                        }
-                        sel
-                    } else if !current_selected.contains(&idx) {
+                    let cur_sel = { selected_bands.read().clone() };
+                    let new_sel = if is_shift {
+                        let mut s = cur_sel.clone();
+                        if s.contains(&idx) { s.retain(|&i| i != idx); } else { s.push(idx); }
+                        s
+                    } else if !cur_sel.contains(&idx) {
                         vec![idx]
                     } else {
-                        current_selected.clone()
+                        cur_sel.clone()
                     };
-                    selected_bands.set(new_selected.clone());
+                    selected_bands.set(new_sel.clone());
 
                     drag_start.set(Some((x, y)));
-                    let start_bands: Vec<(usize, f32, f32)> = {
-                        let bands_vec = bands.read();
-                        new_selected
-                            .iter()
-                            .filter_map(|&i| {
-                                bands_vec.get(i).map(|b| (i, b.frequency, b.gain))
-                            })
-                            .collect()
+                    let start_bands: Vec<_> = {
+                        let bv = bands.read();
+                        new_sel.iter().filter_map(|&i| bv.get(i).map(|b| (i, b.frequency, b.gain))).collect()
                     };
                     drag_start_bands.set(start_bands);
                     selection_rect.set(None);
-
                     dragging_band.set(Some(idx));
                     set_focused(Some(idx));
-                    if let Some(cb) = &on_begin {
-                        cb.call(idx);
-                    }
-
+                    if let Some(cb) = &on_begin { cb.call(idx); }
                     evt.stop_propagation();
                     evt.prevent_default();
                     return;
                 }
 
-                // Get current timestamp
+                // Empty area: double-click to add, single to start selection
                 let now = now_ms();
+                let is_double = { *last_click.read() }.map_or(false, |(t, lx, ly)| {
+                    now - t < double_click_threshold_ms &&
+                    ((x-lx).powi(2) + (y-ly).powi(2)).sqrt() < double_click_distance
+                });
 
-                // Check if this is a double-click (second click within threshold)
-                let last_click_val = { *last_click.read() };
-                let is_double_click = if let Some((last_time, last_x, last_y)) = last_click_val {
-                    let time_diff = now - last_time;
-                    let distance = ((x - last_x).powi(2) + (y - last_y).powi(2)).sqrt();
-                    time_diff < double_click_threshold_ms && distance < double_click_distance
-                } else {
-                    false
-                };
-
-                if is_double_click {
-                    // Double-click detected! Create a new band and start dragging it
+                if is_double {
                     last_click.set(None);
-
-                    // Find first unused band slot or use next index
                     let new_idx = {
-                        let bands_vec = bands.read();
-                        bands_vec.iter().position(|b| !b.used).unwrap_or(bands_vec.len())
+                        let bv = bands.read();
+                        bv.iter().position(|b| !b.used).unwrap_or(bv.len())
                     };
-
-                    if new_idx >= MAX_BANDS {
-                        return; // Max bands reached
-                    }
-
+                    if new_idx >= MAX_BANDS { return; }
                     let freq = x_to_freq(x).clamp(20.0, 20000.0) as f32;
                     let gain = y_to_db(y).clamp(-db_range, db_range) as f32;
                     let shape = get_filter_type_for_position(freq as f64, gain as f64);
-
-                    // For cuts, set gain to 0 (cuts use Q for slope, not gain)
-                    let final_gain: f32 = match shape {
-                        EqBandShape::LowCut | EqBandShape::HighCut => 0.0,
-                        _ => gain,
-                    };
-
-                    let new_band = EqBand {
-                        index: new_idx,
-                        used: true,
-                        enabled: true,
-                        frequency: freq,
-                        gain: final_gain,
-                        q: 1.0,
-                        shape,
-                        solo: false,
-                        stereo_mode: StereoMode::default(),
-                    };
-
-                    // Add the band
-                    if let Some(cb) = &on_band_add {
-                        cb.call(new_band);
-                    }
-
-                    // Start dragging the new band immediately
+                    let final_gain = match shape { EqBandShape::LowCut | EqBandShape::HighCut => 0.0, _ => gain };
+                    let new_band = EqBand { index: new_idx, used: true, enabled: true, frequency: freq,
+                        gain: final_gain, q: 1.0, shape, solo: false, stereo_mode: StereoMode::default() };
+                    if let Some(cb) = &on_band_add { cb.call(new_band); }
                     dragging_band.set(Some(new_idx));
-                    if let Some(cb) = &on_begin {
-                        cb.call(new_idx);
-                    }
-
+                    if let Some(cb) = &on_begin { cb.call(new_idx); }
                     evt.stop_propagation();
                     evt.prevent_default();
                 } else {
-                    // First click - record it for potential double-click
                     last_click.set(Some((now, x, y)));
-
-                    // Also start a potential selection rectangle (will be cancelled if double-click occurs)
-                    // Clear any existing selection if not shift-clicking
-                    if !evt.modifiers().shift() {
-                        selected_bands.set(Vec::new());
-                    }
-                    // Start selection rectangle from this point
+                    if !evt.modifiers().shift() { selected_bands.set(Vec::new()); }
                     selection_rect.set(Some((x, y, x, y)));
                     drag_start.set(Some((x, y)));
                 }
             },
 
-            // Visual elements (grid, curves, spectrum, nodes) are now rendered
-            // by the vello SceneOverlay painter (EqGraphPainter).
-            // The SVG remains as an invisible interaction layer.
-
-            // Invisible band hit-test circles for interaction
-            // (visual rendering done by vello EqGraphPainter overlay)
-            for (idx, band) in bands_snapshot.iter().enumerate() {
-                if band.used {
-                    {
-                        let x = freq_to_x(band.frequency as f64);
-                        let y = db_to_y(band.gain as f64);
-                        rsx! {
-                            // Invisible hit-test circle (visual rendering by vello overlay)
-                            circle {
-                                cx: "{x}",
-                                cy: "{y}",
-                                r: "12",
-                                fill: "transparent",
-                                stroke: "none",
-                                style: if disabled { "cursor: not-allowed;" } else { "cursor: grab;" },
-
-                                onmouseenter: move |_| {
-                                    if dragging_band.read().is_none() {
-                                        hovered_band.set(Some(idx));
-                                    }
-                                },
-                                onmouseleave: move |_| {
-                                    if *hovered_band.read() == Some(idx) {
-                                        hovered_band.set(None);
-                                    }
-                                },
-
-                                onmousedown: {
-                                    let on_begin = on_begin.clone();
-                                    move |evt: MouseEvent| {
-                                        if disabled {
-                                            return;
-                                        }
-                                        evt.stop_propagation();
-                                        evt.prevent_default();
-
-                                        // Handle shift-click for multi-selection
-                                        let is_shift = evt.modifiers().shift();
-
-                                        // Read current selection first, then drop the borrow
-                                        let current_selected = {
-                                            let sel = selected_bands.read();
-                                            sel.clone()
-                                        };
-
-                                        let new_selected = if is_shift {
-                                            // Toggle selection
-                                            let mut sel = current_selected.clone();
-                                            if sel.contains(&idx) {
-                                                sel.retain(|&i| i != idx);
-                                            } else {
-                                                sel.push(idx);
-                                            }
-                                            sel
-                                        } else if !current_selected.contains(&idx) {
-                                            // Click without shift on unselected band - select only this one
-                                            vec![idx]
-                                        } else {
-                                            // Already selected, keep selection
-                                            current_selected.clone()
-                                        };
-
-                                        selected_bands.set(new_selected.clone());
-
-                                        // Store drag start position for multi-drag
-                                        let coords = evt.element_coordinates();
-                                        let (vx, vy) = transform_coords(coords.x, coords.y);
-                                        drag_start.set(Some((vx, vy)));
-
-                                        // Store original band positions for proportional scaling
-                                        let start_bands: Vec<(usize, f32, f32)> = {
-                                            let bands_vec = bands.read();
-                                            new_selected
-                                                .iter()
-                                                .filter_map(|&i| {
-                                                    bands_vec.get(i).map(|b| (i, b.frequency, b.gain))
-                                                })
-                                                .collect()
-                                        };
-                                        drag_start_bands.set(start_bands);
-
-                                        // Clear selection rectangle if any
-                                        selection_rect.set(None);
-
-                                        dragging_band.set(Some(idx));
-                                        if let Some(cb) = &on_begin {
-                                            cb.call(idx);
-                                        }
-                                    }
-                                },
-
-                                // Double-click on band resets gain to 0
-                                ondoubleclick: {
-                                    let on_band_change = on_band_change.clone();
-                                    move |evt: MouseEvent| {
-                                        if disabled {
-                                            return;
-                                        }
-                                        evt.stop_propagation();
-
-                                        let updated_band = {
-                                            let mut bands_vec = bands.write();
-                                            if idx < bands_vec.len() {
-                                                bands_vec[idx].gain = 0.0;
-                                                Some(bands_vec[idx].clone())
-                                            } else {
-                                                None
-                                            }
-                                        };
-
-                                        if let (Some(band), Some(cb)) = (updated_band, &on_band_change) {
-                                            cb.call((idx, band));
-                                        }
-                                    }
-                                },
-                            }
-                        }
-                    }
-                }
-            }
-
-
-            // Selection rectangle (when dragging to select multiple bands)
-            if let Some((start_x, start_y, curr_x, curr_y)) = *selection_rect.read() {
-                {
-                    let min_x = start_x.min(curr_x);
-                    let min_y = start_y.min(curr_y);
-                    let width = (curr_x - start_x).abs();
-                    let height = (curr_y - start_y).abs();
-
-                    // Only show if rectangle is large enough (avoids flicker on click)
-                    if width > 5.0 || height > 5.0 {
-                        rsx! {
-                            rect {
-                                x: "{min_x}",
-                                y: "{min_y}",
-                                width: "{width}",
-                                height: "{height}",
-                                fill: "rgba(100, 150, 255, 0.15)",
-                                stroke: "rgba(100, 150, 255, 0.6)",
-                                stroke_width: "1",
-                                stroke_dasharray: "4,2",
-                            }
-                        }
-                    } else {
-                        rsx! {}
-                    }
-                }
-            }
-
-            // Unified compact overlay for focused/dragging/hovering band
-            // Shows above the node with frequency, gain, Q info and action buttons
+            // Selection rectangle overlay
             {
-                // Determine which band to show overlay for (priority: dragging > focused > hovered)
-                let dragging = *dragging_band.read();
-                let focused = *focused_band.read();
-                let hovered = *hovered_band.read();
-                let overlay_band_idx = dragging.or(focused).or(hovered);
+                let sel = *selection_rect.read();
+                if let Some((sx, sy, cx, cy)) = sel {
+                    let mnx = sx.min(cx); let mny = sy.min(cy);
+                    let w = (cx - sx).abs(); let h = (cy - sy).abs();
+                    if w > 5.0 || h > 5.0 {
+                        rsx! {
+                            div {
+                                style: format!("position:absolute; left:{mnx}px; top:{mny}px;                                     width:{w}px; height:{h}px;                                     border:1px dashed rgba(100,150,255,0.6);                                     background:rgba(100,150,255,0.15);                                     pointer-events:none; box-sizing:border-box;"),
+                            }
+                        }
+                    } else { rsx! {} }
+                } else { rsx! {} }
+            }
 
-                if let Some(band_idx) = overlay_band_idx {
-                    let bands_vec = bands.read();
-                    if let Some(band) = bands_vec.get(band_idx) {
+            // Band info popup
+            {
+                let dragging = *dragging_band.read();
+                let focused  = *focused_band.read();
+                let hovered  = *hovered_band.read();
+                let overlay_idx = dragging.or(focused).or(hovered);
+                if let Some(band_idx) = overlay_idx {
+                    let band_opt = bands.read().get(band_idx).cloned();
+                    if let Some(band) = band_opt {
                         let bx = freq_to_x(band.frequency as f64);
                         let by = db_to_y(band.gain as f64);
-
-                        // Compact popup dimensions
-                        let popup_width = 110.0;
-                        let popup_height = 50.0;
-
-                        // Position popup above the band node, centered horizontally
-                        let popup_x = (bx - popup_width / 2.0).clamp(padding, padding + graph_width - popup_width);
-                        let popup_y = if by - popup_height - 18.0 >= padding {
-                            by - popup_height - 18.0
-                        } else {
-                            by + 18.0
-                        }.clamp(padding, padding + graph_height - popup_height);
-
-                        // Format values
-                        let freq_str = if band.frequency >= 1000.0 {
-                            format!("{:.1}k", band.frequency / 1000.0)
-                        } else {
-                            format!("{:.0}", band.frequency)
-                        };
-
-                        let q_or_slope_str = if band.shape.uses_slope() {
-                            let slope = q_to_slope_db(band.q);
-                            format!("{:.0}dB", slope)
-                        } else {
-                            format!("{:.1}", band.q)
-                        };
-
-                        let band_color = get_band_color(band_idx);
-                        let is_interactive = dragging.is_none(); // Only show buttons when not dragging
-
-                        // Clone band data we need for rendering
-                        let band_enabled = band.enabled;
-                        let band_solo = band.solo;
-                        let band_gain = band.gain;
-                        let band_shape = band.shape;
-                        let _band_stereo_mode = band.stereo_mode;
-                        drop(bands_vec);
-
                         rsx! {
-                            // Popup background
-                            rect {
-                                x: "{popup_x}",
-                                y: "{popup_y}",
-                                width: "{popup_width}",
-                                height: "{popup_height}",
-                                rx: "4",
-                                fill: "rgba(0, 0, 0, 0.9)",
-                                stroke: "{band_color}",
-                                stroke_width: "1",
-                                stroke_opacity: "0.4",
-                            }
-
-                            // Top row: values (freq | gain | Q)
-                            text {
-                                x: "{popup_x + popup_width / 2.0}",
-                                y: "{popup_y + 14.0}",
-                                fill: "#ffffff",
-                                font_size: "10",
-                                text_anchor: "middle",
-                                dominant_baseline: "middle",
-                                "{freq_str}Hz  {band_gain:+.1}dB  Q{q_or_slope_str}"
-                            }
-
-                            // Bottom row: action buttons (only when not dragging)
-                            if is_interactive {
-                                // Bypass button
-                                g {
-                                    onclick: {
-                                        let on_band_change = on_band_change.clone();
-                                        move |evt: MouseEvent| {
-                                            evt.stop_propagation();
-                                            let updated = {
-                                                let mut bv = bands.write();
-                                                if band_idx < bv.len() {
-                                                    bv[band_idx].enabled = !bv[band_idx].enabled;
-                                                    Some(bv[band_idx].clone())
-                                                } else { None }
-                                            };
-                                            if let (Some(b), Some(cb)) = (updated, &on_band_change) {
-                                                cb.call((band_idx, b));
-                                            }
-                                        }
-                                    },
-                                    style: "cursor: pointer;",
-                                    circle {
-                                        cx: "{popup_x + 15.0}",
-                                        cy: "{popup_y + 35.0}",
-                                        r: "8",
-                                        fill: if band_enabled { "transparent" } else { "rgba(255,80,80,0.3)" },
-                                        stroke: if band_enabled { "#666" } else { "#f66" },
-                                        stroke_width: "1",
-                                    }
-                                    path {
-                                        d: "M{popup_x + 15.0} {popup_y + 31.0} v3",
-                                        stroke: if band_enabled { "#666" } else { "#f66" },
-                                        stroke_width: "1",
-                                        fill: "none",
-                                    }
-                                }
-
-                                // Solo button
-                                g {
-                                    onclick: {
-                                        let on_band_change = on_band_change.clone();
-                                        move |evt: MouseEvent| {
-                                            evt.stop_propagation();
-                                            let updated = {
-                                                let mut bv = bands.write();
-                                                if band_idx < bv.len() {
-                                                    bv[band_idx].solo = !bv[band_idx].solo;
-                                                    Some(bv[band_idx].clone())
-                                                } else { None }
-                                            };
-                                            if let (Some(b), Some(cb)) = (updated, &on_band_change) {
-                                                cb.call((band_idx, b));
-                                            }
-                                        }
-                                    },
-                                    style: "cursor: pointer;",
-                                    circle {
-                                        cx: "{popup_x + 37.0}",
-                                        cy: "{popup_y + 35.0}",
-                                        r: "8",
-                                        fill: if band_solo { "rgba(255,200,50,0.3)" } else { "transparent" },
-                                        stroke: if band_solo { "#fc0" } else { "#666" },
-                                        stroke_width: "1",
-                                    }
-                                    text {
-                                        x: "{popup_x + 37.0}",
-                                        y: "{popup_y + 35.5}",
-                                        fill: if band_solo { "#fc0" } else { "#666" },
-                                        font_size: "8",
-                                        text_anchor: "middle",
-                                        dominant_baseline: "middle",
-                                        "S"
-                                    }
-                                }
-
-                                // Shape button
-                                g {
-                                    onclick: move |evt: MouseEvent| {
-                                        evt.stop_propagation();
-                                        let current = *show_shape_dropdown.read();
-                                        show_shape_dropdown.set(!current);
-                                        show_more_dropdown.set(false);
-                                    },
-                                    style: "cursor: pointer;",
-                                    rect {
-                                        x: "{popup_x + 50.0}",
-                                        y: "{popup_y + 28.0}",
-                                        width: "28",
-                                        height: "14",
-                                        rx: "2",
-                                        fill: "rgba(60,60,65,0.8)",
-                                    }
-                                    text {
-                                        x: "{popup_x + 64.0}",
-                                        y: "{popup_y + 35.0}",
-                                        fill: "#999",
-                                        font_size: "7",
-                                        text_anchor: "middle",
-                                        dominant_baseline: "middle",
-                                        "{band_shape.label()}"
-                                    }
-                                }
-
-                                // Delete button
-                                g {
-                                    onclick: {
-                                        let on_band_remove = on_band_remove.clone();
-                                        move |evt: MouseEvent| {
-                                            evt.stop_propagation();
-                                            if let Some(cb) = &on_band_remove {
-                                                cb.call(band_idx);
-                                            }
-                                            set_focused(None);
-                                        }
-                                    },
-                                    style: "cursor: pointer;",
-                                    circle {
-                                        cx: "{popup_x + popup_width - 15.0}",
-                                        cy: "{popup_y + 35.0}",
-                                        r: "8",
-                                        fill: "transparent",
-                                        stroke: "#666",
-                                        stroke_width: "1",
-                                    }
-                                    path {
-                                        d: "M{popup_x + popup_width - 18.0} {popup_y + 32.0} l6,6 M{popup_x + popup_width - 12.0} {popup_y + 32.0} l-6,6",
-                                        stroke: "#666",
-                                        stroke_width: "1",
-                                        fill: "none",
-                                    }
-                                }
-                            }
-
-                            // Shape dropdown (if open and interactive)
-                            if is_interactive && *show_shape_dropdown.read() {
-                                {
-                                    let dropdown_y = popup_y + popup_height + 2.0;
-                                    let shapes = EqBandShape::all();
-
-                                    rsx! {
-                                        rect {
-                                            x: "{popup_x}",
-                                            y: "{dropdown_y}",
-                                            width: "{popup_width}",
-                                            height: "{shapes.len() as f64 * 16.0 + 6.0}",
-                                            rx: "3",
-                                            fill: "rgba(20, 20, 22, 0.98)",
-                                            stroke: "rgba(80, 80, 85, 0.5)",
-                                            stroke_width: "1",
-                                        }
-                                        for (i, shape) in shapes.iter().enumerate() {
-                                            {
-                                                let item_y = dropdown_y + 3.0 + i as f64 * 16.0;
-                                                let is_selected = *shape == band_shape;
-                                                let shape_clone = *shape;
-
-                                                rsx! {
-                                                    g {
-                                                        onclick: {
-                                                            let on_band_change = on_band_change.clone();
-                                                            move |evt: MouseEvent| {
-                                                                evt.stop_propagation();
-                                                                let updated = {
-                                                                    let mut bv = bands.write();
-                                                                    if band_idx < bv.len() {
-                                                                        bv[band_idx].shape = shape_clone;
-                                                                        if shape_clone.uses_slope() {
-                                                                            bv[band_idx].q = 1.0;
-                                                                        }
-                                                                        Some(bv[band_idx].clone())
-                                                                    } else { None }
-                                                                };
-                                                                if let (Some(b), Some(cb)) = (updated, &on_band_change) {
-                                                                    cb.call((band_idx, b));
-                                                                }
-                                                                show_shape_dropdown.set(false);
-                                                            }
-                                                        },
-                                                        style: "cursor: pointer;",
-                                                        rect {
-                                                            x: "{popup_x + 3.0}",
-                                                            y: "{item_y}",
-                                                            width: "{popup_width - 6.0}",
-                                                            height: "14",
-                                                            rx: "2",
-                                                            fill: if is_selected { "rgba(100,150,255,0.3)" } else { "transparent" },
-                                                        }
-                                                        text {
-                                                            x: "{popup_x + 8.0}",
-                                                            y: "{item_y + 7.0}",
-                                                            fill: if is_selected { "#fff" } else { "#ccc" },
-                                                            font_size: "8",
-                                                            dominant_baseline: "middle",
-                                                            "{shape.label()}"
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
+                            BandPopup {
+                                key: "{band_idx}",
+                                band_idx,
+                                bx,
+                                by,
+                                graph_w: graph_width,
+                                graph_h: graph_height,
+                                is_dragging: dragging.is_some(),
+                                bands,
+                                on_band_change: on_band_change.clone(),
+                                on_band_remove: on_band_remove.clone(),
+                                on_dismiss: move |_| { set_focused(None); },
                             }
                         }
-                    } else {
-                        rsx! {}
-                    }
-                } else {
-                    rsx! {}
-                }
+                    } else { rsx! {} }
+                } else { rsx! {} }
             }
-            // Right-click context menu overlay
-            if let Some((ctx_band_idx, ctx_x, ctx_y)) = *context_menu.read() {
-                {
-                    let menu_width = 130.0;
-                    let item_height = 18.0;
-                    let items_count = 7.0; // bypass, solo, separator, reset gain, shapes header, delete, separator
-                    let shapes = EqBandShape::all();
-                    let total_items = items_count + shapes.len() as f64;
-                    let menu_height = total_items * item_height + 8.0;
 
-                    // Clamp menu position to stay within graph
-                    let menu_x = ctx_x.min(padding + graph_width - menu_width);
-                    let menu_y = ctx_y.min(padding + graph_height - menu_height);
-
-                    // Read band state
-                    let ctx_band = bands.read().get(ctx_band_idx).cloned();
-
-                    if let Some(band) = ctx_band {
-                        let band_color = get_band_color(ctx_band_idx);
-                        let is_enabled = band.enabled;
-                        let is_solo = band.solo;
-                        let current_shape = band.shape;
-
-                        rsx! {
-                            // Click-outside dismiss overlay (transparent rect covering the whole SVG)
-                            rect {
-                                x: "0",
-                                y: "0",
-                                width: "{vb_width}",
-                                height: "{vb_height}",
-                                fill: "transparent",
-                                onclick: move |_| {
-                                    context_menu.set(None);
-                                },
-                            }
-
-                            // Menu background
-                            rect {
-                                x: "{menu_x}",
-                                y: "{menu_y}",
-                                width: "{menu_width}",
-                                height: "{menu_height}",
-                                rx: "4",
-                                fill: "rgba(15, 15, 18, 0.96)",
-                                stroke: "rgba(80, 80, 85, 0.6)",
-                                stroke_width: "1",
-                            }
-
-                            // Band header
-                            text {
-                                x: "{menu_x + 10.0}",
-                                y: "{menu_y + 12.0}",
-                                fill: "{band_color}",
-                                font_size: "9",
-                                font_weight: "700",
-                                dominant_baseline: "middle",
-                                "Band {ctx_band_idx + 1}"
-                            }
-
-                            // Bypass toggle
-                            g {
-                                onclick: {
-                                    let on_band_change = on_band_change.clone();
-                                    move |evt: MouseEvent| {
-                                        evt.stop_propagation();
-                                        let updated = {
-                                            let mut bv = bands.write();
-                                            if ctx_band_idx < bv.len() {
-                                                bv[ctx_band_idx].enabled = !bv[ctx_band_idx].enabled;
-                                                Some(bv[ctx_band_idx].clone())
-                                            } else { None }
-                                        };
-                                        if let (Some(b), Some(cb)) = (updated, &on_band_change) {
-                                            cb.call((ctx_band_idx, b));
-                                        }
-                                        context_menu.set(None);
-                                    }
-                                },
-                                style: "cursor: pointer;",
-                                rect {
-                                    x: "{menu_x + 2.0}",
-                                    y: "{menu_y + item_height}",
-                                    width: "{menu_width - 4.0}",
-                                    height: "{item_height}",
-                                    rx: "2",
-                                    fill: "transparent",
-                                }
-                                text {
-                                    x: "{menu_x + 10.0}",
-                                    y: "{menu_y + item_height + item_height / 2.0}",
-                                    fill: if is_enabled { "#aaa" } else { "#f66" },
-                                    font_size: "9",
-                                    dominant_baseline: "middle",
-                                    if is_enabled { "Bypass" } else { "Enable" }
-                                }
-                            }
-
-                            // Solo toggle
-                            g {
-                                onclick: {
-                                    let on_band_change = on_band_change.clone();
-                                    move |evt: MouseEvent| {
-                                        evt.stop_propagation();
-                                        let updated = {
-                                            let mut bv = bands.write();
-                                            if ctx_band_idx < bv.len() {
-                                                bv[ctx_band_idx].solo = !bv[ctx_band_idx].solo;
-                                                Some(bv[ctx_band_idx].clone())
-                                            } else { None }
-                                        };
-                                        if let (Some(b), Some(cb)) = (updated, &on_band_change) {
-                                            cb.call((ctx_band_idx, b));
-                                        }
-                                        context_menu.set(None);
-                                    }
-                                },
-                                style: "cursor: pointer;",
-                                rect {
-                                    x: "{menu_x + 2.0}",
-                                    y: "{menu_y + item_height * 2.0}",
-                                    width: "{menu_width - 4.0}",
-                                    height: "{item_height}",
-                                    rx: "2",
-                                    fill: "transparent",
-                                }
-                                text {
-                                    x: "{menu_x + 10.0}",
-                                    y: "{menu_y + item_height * 2.0 + item_height / 2.0}",
-                                    fill: if is_solo { "#fc0" } else { "#aaa" },
-                                    font_size: "9",
-                                    dominant_baseline: "middle",
-                                    if is_solo { "Unsolo" } else { "Solo" }
-                                }
-                            }
-
-                            // Separator
-                            line {
-                                x1: "{menu_x + 6.0}",
-                                y1: "{menu_y + item_height * 3.0 + 2.0}",
-                                x2: "{menu_x + menu_width - 6.0}",
-                                y2: "{menu_y + item_height * 3.0 + 2.0}",
-                                stroke: "rgba(80, 80, 85, 0.5)",
-                                stroke_width: "1",
-                            }
-
-                            // Reset gain
-                            g {
-                                onclick: {
-                                    let on_band_change = on_band_change.clone();
-                                    move |evt: MouseEvent| {
-                                        evt.stop_propagation();
-                                        let updated = {
-                                            let mut bv = bands.write();
-                                            if ctx_band_idx < bv.len() {
-                                                bv[ctx_band_idx].gain = 0.0;
-                                                Some(bv[ctx_band_idx].clone())
-                                            } else { None }
-                                        };
-                                        if let (Some(b), Some(cb)) = (updated, &on_band_change) {
-                                            cb.call((ctx_band_idx, b));
-                                        }
-                                        context_menu.set(None);
-                                    }
-                                },
-                                style: "cursor: pointer;",
-                                rect {
-                                    x: "{menu_x + 2.0}",
-                                    y: "{menu_y + item_height * 3.0 + 4.0}",
-                                    width: "{menu_width - 4.0}",
-                                    height: "{item_height}",
-                                    rx: "2",
-                                    fill: "transparent",
-                                }
-                                text {
-                                    x: "{menu_x + 10.0}",
-                                    y: "{menu_y + item_height * 3.0 + 4.0 + item_height / 2.0}",
-                                    fill: "#aaa",
-                                    font_size: "9",
-                                    dominant_baseline: "middle",
-                                    "Reset Gain"
-                                }
-                            }
-
-                            // Separator
-                            line {
-                                x1: "{menu_x + 6.0}",
-                                y1: "{menu_y + item_height * 4.0 + 6.0}",
-                                x2: "{menu_x + menu_width - 6.0}",
-                                y2: "{menu_y + item_height * 4.0 + 6.0}",
-                                stroke: "rgba(80, 80, 85, 0.5)",
-                                stroke_width: "1",
-                            }
-
-                            // Filter type label
-                            text {
-                                x: "{menu_x + 10.0}",
-                                y: "{menu_y + item_height * 4.0 + 8.0 + item_height / 2.0}",
-                                fill: "#666",
-                                font_size: "8",
-                                dominant_baseline: "middle",
-                                "Filter Type"
-                            }
-
-                            // Filter type options
-                            for (si, shape) in shapes.iter().enumerate() {
-                                {
-                                    let shape_clone = *shape;
-                                    let is_current = shape_clone == current_shape;
-                                    let item_y = menu_y + item_height * 5.0 + 8.0 + si as f64 * item_height;
-
-                                    rsx! {
-                                        g {
-                                            onclick: {
-                                                let on_band_change = on_band_change.clone();
-                                                move |evt: MouseEvent| {
-                                                    evt.stop_propagation();
-                                                    let updated = {
-                                                        let mut bv = bands.write();
-                                                        if ctx_band_idx < bv.len() {
-                                                            bv[ctx_band_idx].shape = shape_clone;
-                                                            if shape_clone.uses_slope() {
-                                                                bv[ctx_band_idx].q = 1.0;
-                                                            }
-                                                            Some(bv[ctx_band_idx].clone())
-                                                        } else { None }
-                                                    };
-                                                    if let (Some(b), Some(cb)) = (updated, &on_band_change) {
-                                                        cb.call((ctx_band_idx, b));
-                                                    }
-                                                    context_menu.set(None);
-                                                }
-                                            },
-                                            style: "cursor: pointer;",
-                                            rect {
-                                                x: "{menu_x + 2.0}",
-                                                y: "{item_y}",
-                                                width: "{menu_width - 4.0}",
-                                                height: "{item_height}",
-                                                rx: "2",
-                                                fill: if is_current { "rgba(100,150,255,0.2)" } else { "transparent" },
-                                            }
-                                            text {
-                                                x: "{menu_x + 18.0}",
-                                                y: "{item_y + item_height / 2.0}",
-                                                fill: if is_current { "#fff" } else { "#bbb" },
-                                                font_size: "9",
-                                                dominant_baseline: "middle",
-                                                "{shape.label()}"
-                                            }
-                                            if is_current {
-                                                text {
-                                                    x: "{menu_x + 10.0}",
-                                                    y: "{item_y + item_height / 2.0}",
-                                                    fill: "#fff",
-                                                    font_size: "8",
-                                                    dominant_baseline: "middle",
-                                                    "●"
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            // Separator before delete
-                            line {
-                                x1: "{menu_x + 6.0}",
-                                y1: "{menu_y + item_height * 5.0 + 8.0 + shapes.len() as f64 * item_height + 2.0}",
-                                x2: "{menu_x + menu_width - 6.0}",
-                                y2: "{menu_y + item_height * 5.0 + 8.0 + shapes.len() as f64 * item_height + 2.0}",
-                                stroke: "rgba(80, 80, 85, 0.5)",
-                                stroke_width: "1",
-                            }
-
-                            // Delete band
-                            g {
-                                onclick: {
-                                    let on_band_remove = on_band_remove.clone();
-                                    move |evt: MouseEvent| {
-                                        evt.stop_propagation();
-                                        if let Some(cb) = &on_band_remove {
-                                            cb.call(ctx_band_idx);
-                                        }
-                                        context_menu.set(None);
-                                        set_focused(None);
-                                    }
-                                },
-                                style: "cursor: pointer;",
-                                rect {
-                                    x: "{menu_x + 2.0}",
-                                    y: "{menu_y + item_height * 5.0 + 10.0 + shapes.len() as f64 * item_height}",
-                                    width: "{menu_width - 4.0}",
-                                    height: "{item_height}",
-                                    rx: "2",
-                                    fill: "transparent",
-                                }
-                                text {
-                                    x: "{menu_x + 10.0}",
-                                    y: "{menu_y + item_height * 5.0 + 10.0 + shapes.len() as f64 * item_height + item_height / 2.0}",
-                                    fill: "rgba(255, 80, 80, 0.8)",
-                                    font_size: "9",
-                                    dominant_baseline: "middle",
-                                    "Delete Band"
-                                }
-                            }
+            // Right-click context menu
+            {
+                let ctx = *context_menu.read();
+                if let Some((ctx_idx, ctx_x, ctx_y)) = ctx {
+                    rsx! {
+                        BandContextMenu {
+                            band_idx: ctx_idx,
+                            x: ctx_x,
+                            y: ctx_y,
+                            graph_w: graph_width,
+                            graph_h: graph_height,
+                            bands,
+                            on_band_change: on_band_change.clone(),
+                            on_band_remove: on_band_remove.clone(),
+                            on_dismiss: move |_| { context_menu.set(None); },
                         }
-                    } else {
-                        rsx! {}
                     }
-                }
+                } else { rsx! {} }
             }
-        } // svg
-        } // wrapper div
+        }
     }
 }
 
+// ── Band info popup ──────────────────────────────────────────────────────────
+
+#[component]
+fn BandPopup(
+    band_idx: usize,
+    bx: f64,
+    by: f64,
+    graph_w: f64,
+    graph_h: f64,
+    is_dragging: bool,
+    bands: Signal<Vec<EqBand>>,
+    on_band_change: Option<EventHandler<(usize, EqBand)>>,
+    on_band_remove: Option<EventHandler<usize>>,
+    on_dismiss: EventHandler<()>,
+) -> Element {
+    let mut show_shape_dropdown = use_signal(|| false);
+
+    let Some(band) = bands.read().get(band_idx).cloned() else {
+        return rsx! {};
+    };
+
+    let freq_str = if band.frequency >= 1000.0 {
+        format!("{:.1}k", band.frequency / 1000.0)
+    } else {
+        format!("{:.0}", band.frequency)
+    };
+    let q_str = if band.shape.uses_slope() {
+        format!("{:.0}dB/o", q_to_slope_db(band.q))
+    } else {
+        format!("Q{:.1}", band.q)
+    };
+    let band_color = get_band_color(band_idx);
+    let band_enabled = band.enabled;
+    let band_solo = band.solo;
+    let band_gain = band.gain;
+    let band_shape = band.shape;
+
+    // Popup dimensions — taller when showing buttons
+    let popup_w: f64 = 126.0;
+    let popup_h: f64 = if is_dragging { 26.0 } else { 52.0 };
+
+    // Position above band node, clamped to graph area
+    let popup_x = (bx - popup_w / 2.0).clamp(0.0, (graph_w - popup_w).max(0.0));
+    let popup_y = if by - popup_h - 18.0 >= 0.0 {
+        by - popup_h - 18.0
+    } else {
+        by + 18.0
+    }
+    .clamp(0.0, (graph_h - popup_h).max(0.0));
+
+    let bypass_color = if band_enabled { "#666" } else { "#f66" };
+    let bypass_bg = if band_enabled {
+        "transparent"
+    } else {
+        "rgba(255,80,80,0.3)"
+    };
+    let solo_color = if band_solo { "#fc0" } else { "#666" };
+    let solo_bg = if band_solo {
+        "rgba(255,200,50,0.3)"
+    } else {
+        "transparent"
+    };
+
+    rsx! {
+        div {
+            style: format!(
+                "position:absolute; left:{popup_x}px; top:{popup_y}px; width:{popup_w}px;                  background:rgba(10,10,12,0.92); border:1px solid {band_color}66;                  border-radius:4px; font-size:10px; color:#fff;                  pointer-events:auto; z-index:10; box-sizing:border-box;",
+            ),
+            // Prevent clicks from bubbling to the graph's mousedown
+            onmousedown: move |evt| { evt.stop_propagation(); },
+
+            // Top row: freq | gain | Q
+            div {
+                style: "text-align:center; padding:5px 4px 3px; white-space:nowrap;                         font-size:10px; color:#ddd;",
+                "{freq_str}Hz  {band_gain:+.1}dB  {q_str}"
+            }
+
+            // Button row — only when not dragging
+            if !is_dragging {
+                div {
+                    style: "display:flex; justify-content:space-around;                             align-items:center; padding:0 6px 5px;",
+
+                    // Bypass
+                    div {
+                        style: format!(
+                            "cursor:pointer; width:18px; height:18px; border-radius:50%;                              border:1px solid {bypass_color}; background:{bypass_bg};                              display:flex; align-items:center; justify-content:center;                              font-size:9px; color:{bypass_color};",
+                        ),
+                        title: if band_enabled { "Bypass" } else { "Enable" },
+                        onclick: {
+                            let cb = on_band_change.clone();
+                            move |evt: MouseEvent| {
+                                evt.stop_propagation();
+                                let updated = {
+                                    let mut bv = bands.write();
+                                    if band_idx < bv.len() { bv[band_idx].enabled = !bv[band_idx].enabled; Some(bv[band_idx].clone()) } else { None }
+                                };
+                                if let (Some(b), Some(c)) = (updated, &cb) { c.call((band_idx, b)); }
+                            }
+                        },
+                        "⏻"
+                    }
+
+                    // Solo
+                    div {
+                        style: format!(
+                            "cursor:pointer; width:18px; height:18px; border-radius:50%;                              border:1px solid {solo_color}; background:{solo_bg};                              display:flex; align-items:center; justify-content:center;                              font-size:8px; font-weight:700; color:{solo_color};",
+                        ),
+                        title: if band_solo { "Unsolo" } else { "Solo" },
+                        onclick: {
+                            let cb = on_band_change.clone();
+                            move |evt: MouseEvent| {
+                                evt.stop_propagation();
+                                let updated = {
+                                    let mut bv = bands.write();
+                                    if band_idx < bv.len() { bv[band_idx].solo = !bv[band_idx].solo; Some(bv[band_idx].clone()) } else { None }
+                                };
+                                if let (Some(b), Some(c)) = (updated, &cb) { c.call((band_idx, b)); }
+                            }
+                        },
+                        "S"
+                    }
+
+                    // Shape
+                    div {
+                        style: "cursor:pointer; padding:2px 5px;                                 background:rgba(60,60,65,0.9); border-radius:2px;                                 font-size:7px; color:#aaa; white-space:nowrap;",
+                        onclick: move |evt: MouseEvent| {
+                            evt.stop_propagation();
+                            show_shape_dropdown.toggle();
+                        },
+                        "{band_shape.label()}"
+                    }
+
+                    // Delete
+                    div {
+                        style: "cursor:pointer; width:18px; height:18px; border-radius:50%;                                 border:1px solid #666; display:flex; align-items:center;                                 justify-content:center; font-size:14px; color:#888;                                 line-height:1;",
+                        title: "Delete",
+                        onclick: {
+                            let cb = on_band_remove.clone();
+                            move |evt: MouseEvent| {
+                                evt.stop_propagation();
+                                if let Some(c) = &cb { c.call(band_idx); }
+                                on_dismiss.call(());
+                            }
+                        },
+                        "×"
+                    }
+                }
+
+                // Shape dropdown
+                if *show_shape_dropdown.read() {
+                    div {
+                        style: format!(
+                            "position:absolute; left:0; top:{popup_h}px; width:{popup_w}px;                              background:rgba(18,18,22,0.98); border:1px solid rgba(80,80,85,0.5);                              border-radius:3px; z-index:11; box-sizing:border-box;",
+                        ),
+                        for shape in EqBandShape::all() {
+                            {
+                                let shape_c = *shape;
+                                let is_sel = shape_c == band_shape;
+                                rsx! {
+                                    div {
+                                        style: format!(
+                                            "padding:4px 8px; cursor:pointer; font-size:8px;                                              background:{}; color:{};",
+                                            if is_sel { "rgba(100,150,255,0.3)" } else { "transparent" },
+                                            if is_sel { "#fff" } else { "#ccc" },
+                                        ),
+                                        onclick: {
+                                            let cb = on_band_change.clone();
+                                            move |evt: MouseEvent| {
+                                                evt.stop_propagation();
+                                                let updated = {
+                                                    let mut bv = bands.write();
+                                                    if band_idx < bv.len() {
+                                                        bv[band_idx].shape = shape_c;
+                                                        if shape_c.uses_slope() { bv[band_idx].q = 1.0; }
+                                                        Some(bv[band_idx].clone())
+                                                    } else { None }
+                                                };
+                                                if let (Some(b), Some(c)) = (updated, &cb) { c.call((band_idx, b)); }
+                                                show_shape_dropdown.set(false);
+                                            }
+                                        },
+                                        "{shape.label()}"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ── Right-click context menu ─────────────────────────────────────────────────
+
+#[component]
+fn BandContextMenu(
+    band_idx: usize,
+    x: f64,
+    y: f64,
+    graph_w: f64,
+    graph_h: f64,
+    bands: Signal<Vec<EqBand>>,
+    on_band_change: Option<EventHandler<(usize, EqBand)>>,
+    on_band_remove: Option<EventHandler<usize>>,
+    on_dismiss: EventHandler<()>,
+) -> Element {
+    let Some(band) = bands.read().get(band_idx).cloned() else {
+        return rsx! {};
+    };
+
+    let shapes = EqBandShape::all();
+    let menu_w: f64 = 130.0;
+    let item_h: f64 = 20.0;
+    let menu_h = (5.0 + shapes.len() as f64) * item_h + 16.0;
+    let menu_x = x.min((graph_w - menu_w).max(0.0));
+    let menu_y = y.min((graph_h - menu_h).max(0.0));
+
+    let band_color = get_band_color(band_idx);
+    let is_enabled = band.enabled;
+    let is_solo = band.solo;
+    let cur_shape = band.shape;
+
+    rsx! {
+        // Click-outside dismiss
+        div {
+            style: "position:absolute; inset:0; z-index:20;",
+            onmousedown: {
+                let dismiss = on_dismiss.clone();
+                move |evt: MouseEvent| { evt.stop_propagation(); dismiss.call(()); }
+            },
+        }
+
+        // Menu panel
+        div {
+            style: format!(
+                "position:absolute; left:{menu_x}px; top:{menu_y}px; width:{menu_w}px;                  background:rgba(15,15,18,0.97); border:1px solid rgba(80,80,85,0.6);                  border-radius:4px; z-index:21; font-size:9px; color:#aaa;                  box-sizing:border-box;",
+            ),
+            onmousedown: move |evt| { evt.stop_propagation(); },
+
+            // Header
+            div { style: format!("padding:6px 10px 4px; color:{band_color}; font-weight:700;"), "Band {band_idx + 1}" }
+
+            // Bypass / Enable
+            div {
+                style: format!("padding:4px 10px; cursor:pointer; color:{};",
+                    if is_enabled { "#aaa" } else { "#f66" }),
+                onclick: {
+                    let cb = on_band_change.clone();
+                    let dismiss = on_dismiss.clone();
+                    move |evt: MouseEvent| {
+                        evt.stop_propagation();
+                        let upd = { let mut bv = bands.write(); if band_idx < bv.len() { bv[band_idx].enabled = !bv[band_idx].enabled; Some(bv[band_idx].clone()) } else { None } };
+                        if let (Some(b), Some(c)) = (upd, &cb) { c.call((band_idx, b)); }
+                        dismiss.call(());
+                    }
+                },
+                if is_enabled { "Bypass" } else { "Enable" }
+            }
+
+            // Solo
+            div {
+                style: format!("padding:4px 10px; cursor:pointer; color:{};",
+                    if is_solo { "#fc0" } else { "#aaa" }),
+                onclick: {
+                    let cb = on_band_change.clone();
+                    let dismiss = on_dismiss.clone();
+                    move |evt: MouseEvent| {
+                        evt.stop_propagation();
+                        let upd = { let mut bv = bands.write(); if band_idx < bv.len() { bv[band_idx].solo = !bv[band_idx].solo; Some(bv[band_idx].clone()) } else { None } };
+                        if let (Some(b), Some(c)) = (upd, &cb) { c.call((band_idx, b)); }
+                        dismiss.call(());
+                    }
+                },
+                if is_solo { "Unsolo" } else { "Solo" }
+            }
+
+            div { style: "height:1px; background:rgba(80,80,85,0.5); margin:2px 6px;" }
+
+            // Reset Gain
+            div {
+                style: "padding:4px 10px; cursor:pointer;",
+                onclick: {
+                    let cb = on_band_change.clone();
+                    let dismiss = on_dismiss.clone();
+                    move |evt: MouseEvent| {
+                        evt.stop_propagation();
+                        let upd = { let mut bv = bands.write(); if band_idx < bv.len() { bv[band_idx].gain = 0.0; Some(bv[band_idx].clone()) } else { None } };
+                        if let (Some(b), Some(c)) = (upd, &cb) { c.call((band_idx, b)); }
+                        dismiss.call(());
+                    }
+                },
+                "Reset Gain"
+            }
+
+            div { style: "height:1px; background:rgba(80,80,85,0.5); margin:2px 6px;" }
+
+            div { style: "padding:3px 10px 2px; font-size:8px; color:#555;", "Filter Type" }
+
+            // Filter type list
+            for shape in shapes.iter() {
+                {
+                    let sc = *shape;
+                    let is_cur = sc == cur_shape;
+                    rsx! {
+                        div {
+                            style: format!(
+                                "padding:3px 10px 3px {}px; cursor:pointer; color:{}; background:{};",
+                                if is_cur { 18 } else { 10 },
+                                if is_cur { "#fff" } else { "#bbb" },
+                                if is_cur { "rgba(100,150,255,0.2)" } else { "transparent" },
+                            ),
+                            onclick: {
+                                let cb = on_band_change.clone();
+                                let dismiss = on_dismiss.clone();
+                                move |evt: MouseEvent| {
+                                    evt.stop_propagation();
+                                    let upd = {
+                                        let mut bv = bands.write();
+                                        if band_idx < bv.len() {
+                                            bv[band_idx].shape = sc;
+                                            if sc.uses_slope() { bv[band_idx].q = 1.0; }
+                                            Some(bv[band_idx].clone())
+                                        } else { None }
+                                    };
+                                    if let (Some(b), Some(c)) = (upd, &cb) { c.call((band_idx, b)); }
+                                    dismiss.call(());
+                                }
+                            },
+                            if is_cur { "● " }
+                            "{sc.label()}"
+                        }
+                    }
+                }
+            }
+
+            div { style: "height:1px; background:rgba(80,80,85,0.5); margin:2px 6px;" }
+
+            // Delete
+            div {
+                style: "padding:4px 10px; cursor:pointer; color:rgba(255,80,80,0.8);",
+                onclick: {
+                    let cb = on_band_remove.clone();
+                    let dismiss = on_dismiss.clone();
+                    move |evt: MouseEvent| {
+                        evt.stop_propagation();
+                        if let Some(c) = &cb { c.call(band_idx); }
+                        dismiss.call(());
+                    }
+                },
+                "Delete Band"
+            }
+        }
+    }
+}
 /// All EQ curve paths (combined and per-band).
 /// Used by SVG rendering path (kept for tests; vello painter has replaced runtime use).
 #[allow(dead_code)]

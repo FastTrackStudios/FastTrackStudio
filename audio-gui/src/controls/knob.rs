@@ -7,7 +7,7 @@
 //! Drag capture is handled by the `DragProvider` wrapper at the editor root.
 //! The knob only fires `onmousedown` to start a drag.
 
-use crate::drag::{begin_drag, DragState};
+use crate::drag::{begin_drag, DragState, TextEditState};
 use crate::theme::use_theme;
 use nih_plug::prelude::ParamPtr;
 use nih_plug_dioxus::prelude::*;
@@ -131,8 +131,8 @@ pub fn Knob(
 
     let ctx = use_param_context();
     let mut drag: Signal<DragState> = use_context();
+    let mut text_edit: Signal<TextEditState> = use_context();
     let mut revision = use_signal(|| 0u32);
-    let mut editing = use_signal(|| false);
     let _ = *revision.read();
 
     // Also re-render when drag is active (so value display updates)
@@ -141,7 +141,16 @@ pub fn Knob(
     let normalized = unsafe { param_ptr.modulated_normalized_value() } as f64;
     let display_value = unsafe { param_ptr.normalized_value_to_string(normalized as f32, true) };
     let param_name = label.unwrap_or_else(|| unsafe { param_ptr.name() }.to_string());
-    let is_editing = *editing.read();
+
+    // Check if THIS knob is being text-edited
+    let edit_state = text_edit.read();
+    let is_editing = edit_state.active && edit_state.param_ptr == Some(param_ptr);
+    let edit_text_display = if is_editing {
+        edit_state.text.clone()
+    } else {
+        String::new()
+    };
+    drop(edit_state);
 
     let d = size.diameter();
     let df = d as f64;
@@ -298,82 +307,73 @@ pub fn Knob(
                         },
                         ondoubleclick: {
                             move |_| {
-                                editing.set(true);
+                                text_edit.set(TextEditState {
+                                    active: true,
+                                    param_ptr: Some(param_ptr),
+                                    text: String::new(),
+                                });
                             }
                         },
                     }
                 }
             }
 
-            // Display value (or text input when editing)
+            // Value row — fixed height so editing mode never shifts the label
             if is_editing {
-                input {
-                    r#type: "text",
-                    autofocus: true,
-                    style: format!(
-                        "{VALUE_STYLE} background:{SURFACE}; \
-                         border:1px solid {ACCENT}; border-radius:{RADIUS}; \
-                         min-width:48px; width:56px; text-align:center; \
-                         padding:1px 2px; outline:none; \
-                         box-shadow: 0 0 6px {GLOW};",
-                        VALUE_STYLE = t.style_value(),
-                        SURFACE = t.surface,
-                        ACCENT = t.accent,
-                        RADIUS = t.radius_small,
-                        GLOW = t.accent_glow,
-                    ),
-                    value: "{display_value}",
-                    onkeydown: {
-                        move |evt: KeyboardEvent| {
-                            if evt.key() == Key::Enter {
-                                editing.set(false);
-                            } else if evt.key() == Key::Escape {
-                                editing.set(false);
-                            }
+                {
+                    let cursor_char = "|";
+                    let shown = if edit_text_display.is_empty() {
+                        cursor_char.to_string()
+                    } else {
+                        format!("{edit_text_display}{cursor_char}")
+                    };
+                    rsx! {
+                        div {
+                            style: format!(
+                                "{VALUE_STYLE} background:{SURFACE}; \
+                                 border:1px solid {ACCENT}; border-radius:{RADIUS}; \
+                                 box-sizing:border-box; \
+                                 min-width:48px; width:56px; height:18px; \
+                                 display:flex; align-items:center; justify-content:center; \
+                                 box-shadow: 0 0 6px {GLOW}; cursor:text;",
+                                VALUE_STYLE = t.style_value(),
+                                SURFACE = t.surface,
+                                ACCENT = t.accent,
+                                RADIUS = t.radius_small,
+                                GLOW = t.accent_glow,
+                            ),
+                            "{shown}"
                         }
-                    },
-                    onchange: {
-                        let ctx = ctx.clone();
-                        move |evt: FormEvent| {
-                            let text = evt.value();
-                            if let Some(normalized) =
-                                unsafe { param_ptr.string_to_normalized_value(&text) }
-                            {
-                                ctx.begin_set_raw(param_ptr);
-                                ctx.set_normalized_raw(param_ptr, normalized);
-                                ctx.end_set_raw(param_ptr);
-                            }
-                            editing.set(false);
-                            revision += 1;
-                        }
-                    },
-                    onfocusout: {
-                        move |_| {
-                            editing.set(false);
-                        }
-                    },
+                    }
                 }
             } else {
                 span {
                     style: format!(
                         "{VALUE_STYLE} color:{TEXT_DIM}; \
-                         min-width:48px; text-align:center; cursor:text;",
+                         min-width:48px; height:18px; \
+                         display:flex; align-items:center; justify-content:center; \
+                         cursor:text;",
                         VALUE_STYLE = t.style_value(),
                         TEXT_DIM = t.text_dim,
                     ),
                     ondoubleclick: move |_| {
                         if !disabled {
-                            editing.set(true);
+                            text_edit.set(TextEditState {
+                                active: true,
+                                param_ptr: Some(param_ptr),
+                                text: String::new(),
+                            });
                         }
                     },
                     "{display_value}"
                 }
             }
 
-            // Label
+            // Label — fixed height so it never moves
             span {
                 style: format!(
-                    "{LABEL_STYLE} min-width:48px; text-align:center;",
+                    "{LABEL_STYLE} min-width:48px; height:14px; \
+                     display:flex; align-items:center; justify-content:center;",
                     LABEL_STYLE = t.style_label(),
                 ),
                 "{param_name}"

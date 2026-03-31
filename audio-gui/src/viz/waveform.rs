@@ -136,6 +136,9 @@ pub struct VelloCanvasProps {
     /// and reads its actual dimensions from the bounding rect.
     #[props(default = false)]
     fill: bool,
+    /// When true, paint behind the DOM (background layer).
+    #[props(default = false)]
+    background: bool,
     /// Optional inline style to merge onto the placeholder div.
     #[props(default)]
     style: Option<String>,
@@ -161,39 +164,56 @@ pub fn VelloCanvas(props: VelloCanvasProps) -> Element {
         width,
         height,
         fill,
+        background,
         style,
     } = props;
 
     let painter_clone = painter.clone();
-    let overlay = use_scene_overlay(move || CanvasOverlay {
-        painter: painter_clone,
-    });
+    let layer = if background {
+        OverlayLayer::Background
+    } else {
+        OverlayLayer::Foreground
+    };
+    let overlay = use_scene_overlay_on_layer(
+        move || CanvasOverlay {
+            painter: painter_clone,
+        },
+        layer,
+    );
 
-    // Store MountedData so we can re-query position on every render
+    // Store MountedData so we can re-query position on mount and resize
     let mut mounted: Signal<Option<Rc<MountedData>>> = use_signal(|| None);
 
-    // Re-query the element rect every render and update the overlay position.
+    // Window size signal — provided by the window handler, updated on resize.
+    // Optional: falls back gracefully if not in context (e.g. screenshot path).
+    let window_size: Option<Signal<(u32, u32)>> = try_consume_context();
+
+    // Re-query the element rect when the element mounts OR the window is resized.
+    // Reading both signals synchronously registers them as reactive dependencies.
     let w = width;
     let h = height;
     {
         let overlay = overlay.clone();
         use_effect(move || {
+            let el = mounted.read().clone();
+            // Track window size as a dependency so resize triggers re-query
+            if let Some(sig) = window_size {
+                let _ = sig.read();
+            }
             let overlay = overlay.clone();
-            spawn(async move {
-                if let Some(ref el) = *mounted.read() {
+            if let Some(el) = el {
+                spawn(async move {
                     if let Ok(rect) = el.get_client_rect().await {
                         let origin = rect.origin;
                         let size = rect.size;
                         if fill {
-                            // Fill mode: use actual rendered size from bounding rect
                             overlay.set_rect(origin.x, origin.y, size.width, size.height);
                         } else {
-                            // Fixed size mode: use props for dimensions
                             overlay.set_rect(origin.x, origin.y, w as f64, h as f64);
                         }
                     }
-                }
-            });
+                });
+            }
         });
     }
 
@@ -242,6 +262,10 @@ fn compress_transfer(input_db: f32, threshold_db: f32, ratio: f32, knee_db: f32)
 pub struct PeakWaveformPainter {
     levels: Vec<f32>,
     gr_levels: Vec<f32>,
+    /// Fractional scroll phase (0.0–1.0): how far into the current data interval
+    /// we are. Used to offset x-positions sub-pixel for smooth scrolling at any
+    /// refresh rate — the waveform glides continuously rather than jumping.
+    scroll_phase: f32,
     // Transfer curve params (drawn as transparent overlay in left region)
     threshold_db: f32,
     ratio: f32,
@@ -256,6 +280,7 @@ impl PeakWaveformPainter {
         Self {
             levels: Vec::new(),
             gr_levels: Vec::new(),
+            scroll_phase: 0.0,
             threshold_db: -18.0,
             ratio: 4.0,
             knee_db: 6.0,
@@ -265,7 +290,8 @@ impl PeakWaveformPainter {
         }
     }
 
-    pub fn update(&mut self, levels: &[f32], gr_levels: &[f32]) {
+    pub fn update(&mut self, levels: &[f32], gr_levels: &[f32], scroll_phase: f32) {
+        self.scroll_phase = scroll_phase;
         self.levels.clear();
         self.levels.extend_from_slice(levels);
         self.gr_levels.clear();
@@ -356,11 +382,11 @@ impl PeakWaveformPainter {
         // ── Transfer curve (left ~35% of display) ─────────────────────
         let curve_w = (w - scale_margin) * 0.35;
 
-        // Subtle background tint for the transfer curve panel (~10% opaque)
+        // Subtle background tint for the transfer curve panel — neutral dark
         scene.fill(
             Fill::NonZero,
             transform,
-            &Color::from_rgba8(20, 20, 30, 25),
+            &Color::from_rgba8(255, 255, 255, 10),
             None,
             &Rect::new(0.0, 0.0, curve_w, h),
         );
@@ -445,6 +471,115 @@ impl PeakWaveformPainter {
     }
 }
 
+impl PeakWaveformPainter {
+    /// Build a smooth filled BezPath from sample data.
+    /// Uses Catmull-Rom → cubic Bézier conversion for smooth interpolation.
+    ///
+    /// `x_offset`: shift all x-positions left by this amount (for phase scrolling).
+    /// The caller should clip the resulting path to [0, w] to hide the overshoot.
+    fn build_smooth_path(
+        samples: &[f32],
+        w: f64,
+        h: f64,
+        from_bottom: bool,
+        x_offset: f64,
+    ) -> BezPath {
+        let n = samples.len();
+        if n == 0 {
+            return BezPath::new();
+        }
+
+        // Step is one sample wider than the display so the scroll has room to slide
+        let step = w / n as f64;
+
+        // Convert samples to y-coordinates
+        let ys: Vec<f64> = samples
+            .iter()
+            .map(|&s| {
+                let amp = s.clamp(0.0, 1.0) as f64;
+                if from_bottom {
+                    h - amp * h
+                } else {
+                    amp * h
+                }
+            })
+            .collect();
+
+        let baseline = if from_bottom { h } else { 0.0 };
+        let mut path = BezPath::new();
+        path.move_to((-x_offset, baseline));
+        path.line_to((-x_offset, ys[0]));
+
+        for i in 0..n - 1 {
+            let x0 = i as f64 * step - x_offset;
+            let x1 = (i + 1) as f64 * step - x_offset;
+
+            let y_prev = if i > 0 { ys[i - 1] } else { ys[0] };
+            let y_curr = ys[i];
+            let y_next = ys[i + 1];
+            let y_next2 = if i + 2 < n { ys[i + 2] } else { ys[n - 1] };
+
+            let t1_y = (y_next - y_prev) / 2.0;
+            let t2_y = (y_next2 - y_curr) / 2.0;
+
+            path.curve_to(
+                (x0 + step / 3.0, y_curr + t1_y / 3.0),
+                (x1 - step / 3.0, y_next - t2_y / 3.0),
+                (x1, y_next),
+            );
+        }
+
+        path.line_to((n as f64 * step - x_offset, baseline));
+        path.close_path();
+        path
+    }
+
+    /// Build just the top edge as a BezPath (no fill close), with x_offset.
+    fn build_edge_path(
+        samples: &[f32],
+        w: f64,
+        h: f64,
+        from_bottom: bool,
+        x_offset: f64,
+    ) -> BezPath {
+        let n = samples.len();
+        if n == 0 {
+            return BezPath::new();
+        }
+        let step = w / n as f64;
+        let ys: Vec<f64> = samples
+            .iter()
+            .map(|&s| {
+                let amp = s.clamp(0.0, 1.0) as f64;
+                if from_bottom {
+                    h - amp * h
+                } else {
+                    amp * h
+                }
+            })
+            .collect();
+
+        let mut path = BezPath::new();
+        path.move_to((-x_offset, ys[0]));
+        for i in 0..n - 1 {
+            let x0 = i as f64 * step - x_offset;
+            let x1 = (i + 1) as f64 * step - x_offset;
+            let y_prev = if i > 0 { ys[i - 1] } else { ys[0] };
+            let y_curr = ys[i];
+            let y_next = ys[i + 1];
+            let y_next2 = if i + 2 < n { ys[i + 2] } else { ys[n - 1] };
+            let t1_y = (y_next - y_prev) / 2.0;
+            let t2_y = (y_next2 - y_curr) / 2.0;
+            path.curve_to(
+                (x0 + step / 3.0, y_curr + t1_y / 3.0),
+                (x1 - step / 3.0, y_next - t2_y / 3.0),
+                (x1, y_next),
+            );
+        }
+        path
+    }
+}
+
 impl CanvasPainter for PeakWaveformPainter {
     fn paint(
         &self,
@@ -453,51 +588,103 @@ impl CanvasPainter for PeakWaveformPainter {
         w: f64,
         h: f64,
     ) {
-        // Background
+        use nih_plug_dioxus::prelude::vello::peniko::Gradient;
+
+        // Background — pure near-black, neutral (no color cast)
         scene.fill(
             Fill::NonZero,
             transform,
-            &Color::from_rgba8(10, 10, 20, 255),
+            &Color::from_rgba8(8, 8, 8, 255),
             None,
             &Rect::new(0.0, 0.0, w, h),
         );
 
-        let num_bars = self.levels.len().max(1);
-        let bar_w = w / num_bars as f64;
+        // Subtle vertical vignette: slightly brighter mid band, darker edges
+        let vignette = Gradient::new_linear((0.0, 0.0), (0.0, h)).with_stops([
+            (0.0f32, Color::from_rgba8(0, 0, 0, 40)),
+            (0.25f32, Color::from_rgba8(0, 0, 0, 0)),
+            (0.75f32, Color::from_rgba8(0, 0, 0, 0)),
+            (1.0f32, Color::from_rgba8(0, 0, 0, 50)),
+        ]);
+        scene.fill(
+            Fill::NonZero,
+            transform,
+            &vignette,
+            None,
+            &Rect::new(0.0, 0.0, w, h),
+        );
 
-        // Level bars (from bottom) — accent dim blue
-        let level_color = Color::from_rgba8(100, 140, 200, 160);
-        for (i, &level) in self.levels.iter().enumerate() {
-            let bar_h = (level.clamp(0.0, 1.0) as f64 * h).max(0.0);
-            if bar_h < 0.5 {
-                continue;
-            }
-            let x = i as f64 * bar_w;
-            scene.fill(
-                Fill::NonZero,
+        // Phase offset: shift waveform left by `phase * step` pixels so it
+        // glides continuously rather than jumping one step at a time.
+        let x_offset = if !self.levels.is_empty() {
+            self.scroll_phase as f64 * (w / self.levels.len() as f64)
+        } else {
+            0.0
+        };
+
+        // Clip to [0, w] so the phase-shifted overshoot doesn't bleed out
+        scene.push_clip_layer(transform, &Rect::new(0.0, 0.0, w, h));
+
+        // ── Input level — teal/cyan gradient fill ──
+        if !self.levels.is_empty() {
+            let path = Self::build_smooth_path(&self.levels, w, h, true, x_offset);
+            // Dark teal fill: readable but not overwhelming
+            let level_gradient = Gradient::new_linear((0.0, 0.0), (0.0, h)).with_stops([
+                (0.0f32, Color::from_rgba8(20, 110, 115, 210)),
+                (0.45f32, Color::from_rgba8(14, 80, 85, 130)),
+                (0.80f32, Color::from_rgba8(8, 50, 55, 55)),
+                (1.0f32, Color::from_rgba8(4, 25, 28, 15)),
+            ]);
+            scene.fill(Fill::NonZero, transform, &level_gradient, None, &path);
+
+            // Bright cyan edge with soft glow halo
+            let edge = Self::build_edge_path(&self.levels, w, h, true, x_offset);
+            scene.stroke(
+                &Stroke::new(4.0),
                 transform,
-                &level_color,
+                &Color::from_rgba8(0, 200, 210, 30),
                 None,
-                &Rect::new(x, h - bar_h, x + bar_w, h),
+                &edge,
+            );
+            scene.stroke(
+                &Stroke::new(1.5),
+                transform,
+                &Color::from_rgba8(60, 210, 220, 200),
+                None,
+                &edge,
             );
         }
 
-        // GR overlay bars (from top) — red tint
-        let gr_color = Color::from_rgba8(248, 113, 113, 77);
-        for (i, &gr) in self.gr_levels.iter().enumerate() {
-            let gr_h = (gr.clamp(0.0, 1.0) as f64 * h).max(0.0);
-            if gr_h < 0.5 {
-                continue;
-            }
-            let x = i as f64 * bar_w;
-            scene.fill(
-                Fill::NonZero,
+        // ── Gain reduction — red fill from top (Pro-C 3 style) ──
+        if !self.gr_levels.is_empty() {
+            let path = Self::build_smooth_path(&self.gr_levels, w, h, false, x_offset);
+            let gr_gradient = Gradient::new_linear((0.0, 0.0), (0.0, h)).with_stops([
+                (0.0f32, Color::from_rgba8(220, 40, 40, 210)),
+                (0.35f32, Color::from_rgba8(200, 30, 30, 130)),
+                (0.70f32, Color::from_rgba8(175, 25, 25, 55)),
+                (1.0f32, Color::from_rgba8(150, 20, 20, 15)),
+            ]);
+            scene.fill(Fill::NonZero, transform, &gr_gradient, None, &path);
+
+            // Bright red edge with soft glow
+            let edge = Self::build_edge_path(&self.gr_levels, w, h, false, x_offset);
+            scene.stroke(
+                &Stroke::new(4.0),
                 transform,
-                &gr_color,
+                &Color::from_rgba8(255, 60, 60, 30),
                 None,
-                &Rect::new(x, 0.0, x + bar_w, gr_h),
+                &edge,
+            );
+            scene.stroke(
+                &Stroke::new(1.5),
+                transform,
+                &Color::from_rgba8(255, 80, 80, 210),
+                None,
+                &edge,
             );
         }
+
+        scene.pop_layer();
 
         // Transfer curve + threshold line + dB scale overlay
         if self.show_transfer {
@@ -544,6 +731,9 @@ pub fn PeakWaveform(
     /// Optional inline style to merge onto the outer element.
     #[props(default)]
     style: Option<String>,
+    /// Scroll phase (0.0–1.0) for sub-pixel smooth scrolling at high refresh rates.
+    #[props(default = 0.0)]
+    scroll_phase: f32,
 ) -> Element {
     let t = use_theme();
     let t = *t.read();
@@ -555,7 +745,7 @@ pub fn PeakWaveform(
     // Update data each render
     {
         let mut p = painter.borrow_mut();
-        p.update(&levels, &gr_levels);
+        p.update(&levels, &gr_levels, scroll_phase);
         if let (Some(thresh), Some(rat)) = (threshold_db, ratio) {
             p.update_transfer(thresh, rat, knee_db, input_level_db);
         }
@@ -568,11 +758,13 @@ pub fn PeakWaveform(
     let show_scale = threshold_db.is_some();
     let range_db_val = 36.0_f32; // matches painter's range_db
 
+    let fill_style = if fill { "width:100%; height:100%;" } else { "" };
+
     rsx! {
         div {
             style: format!(
                 "position:relative; border-radius:4px; overflow:hidden; \
-                 border:1px solid {border}; {outer_style}",
+                 border:1px solid {border}; {fill_style} {outer_style}",
                 border = t.border,
             ),
 
@@ -581,6 +773,7 @@ pub fn PeakWaveform(
                 width: width,
                 height: height,
                 fill: fill,
+                background: true,
             }
 
             // dB scale labels on the right side (positioned over the canvas)

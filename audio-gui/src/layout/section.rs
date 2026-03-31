@@ -63,12 +63,18 @@ pub fn ActionButton(label: &'static str, on_click: EventHandler<()>) -> Element 
 /// Renders a column with a tiny uppercase label and a horizontal row
 /// of child controls.
 #[component]
-pub fn ControlGroup(label: &'static str, children: Element) -> Element {
+pub fn ControlGroup(
+    label: &'static str,
+    children: Element,
+    /// Gap between controls inside the group. Defaults to 8px.
+    #[props(default = "8px")]
+    gap: &'static str,
+) -> Element {
     let t = use_theme();
     let t = *t.read();
     rsx! {
         div {
-            style: "display:flex; flex-direction:column; align-items:center; gap:6px;",
+            style: "display:flex; flex-direction:column; align-items:center; gap:5px;",
             div {
                 style: format!("{LABEL}", LABEL = t.style_label()),
                 "{label}"
@@ -76,7 +82,7 @@ pub fn ControlGroup(label: &'static str, children: Element) -> Element {
             div {
                 style: format!(
                     "display:flex; gap:{GAP}; align-items:flex-end;",
-                    GAP = t.spacing_control,
+                    GAP = gap,
                 ),
                 {children}
             }

@@ -7,7 +7,7 @@
 use std::sync::Arc;
 
 use nih_plug_dioxus::prelude::vello::kurbo::{Affine, BezPath, Circle, Line, Rect, Stroke};
-use nih_plug_dioxus::prelude::vello::peniko::{Color, Fill, Mix};
+use nih_plug_dioxus::prelude::vello::peniko::{Color, Fill};
 use nih_plug_dioxus::prelude::vello::Scene;
 use nih_plug_dioxus::prelude::SceneOverlay;
 use parking_lot::RwLock;
@@ -149,13 +149,11 @@ impl SceneOverlay for EqGraphPainter {
     fn paint(
         &mut self,
         scene: &mut Scene,
-        _transform: Affine,
+        transform: Affine,
         width: u32,
         height: u32,
         _scale: f64,
     ) {
-        // The OverlayRegistry has already applied the element-position transform and clip.
-        // We receive the element's CSS pixel dimensions.
         let elem_w = width as f64;
         let elem_h = height as f64;
         if elem_w < 1.0 || elem_h < 1.0 {
@@ -167,39 +165,32 @@ impl SceneOverlay for EqGraphPainter {
         let spectrum = self.state.spectrum_db.read().clone();
         let interaction = self.state.interaction.read().clone();
 
-        // Paint in SVG viewBox coordinates (800x350) to match the Dioxus interaction layer.
-        // The OverlayRegistry clips to elem_w x elem_h; we scale our 800x350 content to fill it.
-        let vb_w = 800.0;
-        let vb_h = 350.0;
+        // Use CSS pixel coordinates directly — same as PeakWaveformPainter.
+        // CoordMapper uses elem_w x elem_h so all coordinates are in CSS pixels.
+        // `transform` handles positioning (translate + uniform scale), no aspect-ratio distortion.
         let cfg = GraphConfig {
-            rect_w: vb_w,
-            rect_h: vb_h,
+            rect_w: elem_w,
+            rect_h: elem_h,
             ..cfg
         };
 
-        // Scale from viewBox coords to element pixel coords
-        let vb_transform = Affine::scale_non_uniform(elem_w / vb_w, elem_h / vb_h);
-
-        let padding = 40.0;
+        let padding = 0.0;
         let cm = CoordMapper::new(&cfg, padding);
 
-        // Push a transform layer so all painting happens in viewBox (800x350) coords,
-        // then gets scaled to fill the element's actual pixel size.
-        let area = Rect::new(0.0, 0.0, vb_w, vb_h);
-        scene.push_layer(Mix::Normal, 1.0, vb_transform, &area);
+        let area = Rect::new(0.0, 0.0, elem_w, elem_h);
 
         // Background
         let bg = Color::from_rgb8(10, 10, 10);
-        scene.fill(Fill::NonZero, Affine::IDENTITY, bg, None, &area);
+        scene.fill(Fill::NonZero, transform, bg, None, &area);
 
         // Grid
         if cfg.show_grid {
-            paint_grid(scene, &cm, &cfg);
+            paint_grid(scene, &cm, &cfg, transform);
         }
 
         // Spectrum analyzer
         if spectrum.len() >= 2 {
-            paint_spectrum(scene, &cm, &cfg, &spectrum);
+            paint_spectrum(scene, &cm, &cfg, &spectrum, transform);
         }
 
         // Per-band curves
@@ -210,14 +201,14 @@ impl SceneOverlay for EqGraphPainter {
             if !band.used || !band.enabled {
                 continue;
             }
-            paint_band_curve(scene, &cm, &cfg, band, &frequencies);
+            paint_band_curve(scene, &cm, &cfg, band, &frequencies, transform);
         }
 
         // Connecting lines
-        paint_connecting_lines(scene, &cm, &cfg, &bands);
+        paint_connecting_lines(scene, &cm, &cfg, &bands, transform);
 
         // Combined curve
-        paint_combined_curve(scene, &cm, &cfg, &bands, &frequencies);
+        paint_combined_curve(scene, &cm, &cfg, &bands, &frequencies, transform);
 
         // Band nodes
         for band in &bands {
@@ -227,10 +218,16 @@ impl SceneOverlay for EqGraphPainter {
             let is_hovered = interaction.hovered_band == Some(band.index);
             let is_dragging = interaction.dragging_band == Some(band.index);
             let is_focused = interaction.focused_band == Some(band.index);
-            paint_band_node(scene, &cm, band, is_hovered, is_dragging, is_focused);
+            paint_band_node(
+                scene,
+                &cm,
+                band,
+                is_hovered,
+                is_dragging,
+                is_focused,
+                transform,
+            );
         }
-
-        scene.pop_layer();
     }
 }
 
@@ -247,26 +244,46 @@ fn generate_frequencies(cfg: &GraphConfig, num_points: usize) -> Vec<f64> {
         .collect()
 }
 
-fn paint_grid(scene: &mut Scene, cm: &CoordMapper, cfg: &GraphConfig) {
-    let grid_color = Color::from_rgba8(60, 60, 65, 100);
-    let grid_major = Color::from_rgba8(80, 80, 85, 128);
+fn paint_grid(scene: &mut Scene, cm: &CoordMapper, cfg: &GraphConfig, transform: Affine) {
+    let grid_minor = Color::from_rgba8(55, 55, 60, 90);
+    let grid_mid = Color::from_rgba8(70, 70, 75, 110);
+    let grid_major = Color::from_rgba8(90, 90, 95, 140);
     let thin = Stroke::new(0.5);
-    let thick = Stroke::new(1.0);
+    let mid = Stroke::new(0.75);
+    let thick = Stroke::new(1.25);
 
-    // Frequency grid lines
-    let freq_lines = [
-        20.0, 50.0, 100.0, 200.0, 500.0, 1000.0, 2000.0, 5000.0, 10000.0, 20000.0,
+    // Full logarithmic frequency grid.
+    // tier 2 = decade boundary (100, 1k, 10k) — thickest
+    // tier 1 = mid-decade anchor (20, 50, 200, 500, …) — medium
+    // tier 0 = subdivision — thin
+    #[rustfmt::skip]
+    let freq_lines: &[(f64, u8)] = &[
+        (15.0,    0), (20.0,    1),
+        (30.0,    0), (40.0,    0), (50.0,    1),
+        (60.0,    0), (70.0,    0), (80.0,    0), (90.0,    0),
+        (100.0,   2),
+        (200.0,   1), (300.0,   0), (400.0,   0), (500.0,   1),
+        (600.0,   0), (700.0,   0), (800.0,   0), (900.0,   0),
+        (1000.0,  2),
+        (2000.0,  1), (3000.0,  0), (4000.0,  0), (5000.0,  1),
+        (6000.0,  0), (7000.0,  0), (8000.0,  0), (9000.0,  0),
+        (10000.0, 2),
+        (20000.0, 1),
     ];
-    let major_freqs = [100.0, 1000.0, 10000.0];
 
-    for &freq in &freq_lines {
+    let top_y = cm.padding;
+    let bot_y = cm.padding + cm.graph_h;
+
+    for &(freq, tier) in freq_lines {
+        if freq < cfg.min_freq || freq > cfg.max_freq {
+            continue;
+        }
         let x = cm.freq_to_x(freq);
-        let is_major = major_freqs.contains(&(freq as i64 as f64));
-        let line = Line::new((x, cm.padding), (x, cm.padding + cm.graph_h));
-        if is_major {
-            scene.stroke(&thick, Affine::IDENTITY, grid_major, None, &line);
-        } else {
-            scene.stroke(&thin, Affine::IDENTITY, grid_color, None, &line);
+        let line = Line::new((x, top_y), (x, bot_y));
+        match tier {
+            2 => scene.stroke(&thick, transform, grid_major, None, &line),
+            1 => scene.stroke(&mid, transform, grid_mid, None, &line),
+            _ => scene.stroke(&thin, transform, grid_minor, None, &line),
         }
     }
 
@@ -275,8 +292,6 @@ fn paint_grid(scene: &mut Scene, cm: &CoordMapper, cfg: &GraphConfig) {
         2.0
     } else if cfg.db_range <= 12.0 {
         3.0
-    } else if cfg.db_range <= 18.0 {
-        6.0
     } else {
         6.0
     };
@@ -287,15 +302,21 @@ fn paint_grid(scene: &mut Scene, cm: &CoordMapper, cfg: &GraphConfig) {
         let line = Line::new((cm.padding, y), (cm.padding + cm.graph_w, y));
         let is_zero = db.abs() < 0.01;
         if is_zero {
-            scene.stroke(&thick, Affine::IDENTITY, grid_major, None, &line);
+            scene.stroke(&thick, transform, grid_major, None, &line);
         } else {
-            scene.stroke(&thin, Affine::IDENTITY, grid_color, None, &line);
+            scene.stroke(&thin, transform, grid_minor, None, &line);
         }
         db += db_step;
     }
 }
 
-fn paint_spectrum(scene: &mut Scene, cm: &CoordMapper, cfg: &GraphConfig, spectrum: &[f32]) {
+fn paint_spectrum(
+    scene: &mut Scene,
+    cm: &CoordMapper,
+    cfg: &GraphConfig,
+    spectrum: &[f32],
+    transform: Affine,
+) {
     let num_bins = spectrum.len();
     let log_min = cfg.min_freq.log10();
     let log_max = cfg.max_freq.log10();
@@ -316,13 +337,7 @@ fn paint_spectrum(scene: &mut Scene, cm: &CoordMapper, cfg: &GraphConfig, spectr
 
     // Stroke
     let stroke_color = Color::from_rgba8(100, 180, 255, 90);
-    scene.stroke(
-        &Stroke::new(1.0),
-        Affine::IDENTITY,
-        stroke_color,
-        None,
-        &path,
-    );
+    scene.stroke(&Stroke::new(1.0), transform, stroke_color, None, &path);
 
     // Fill down to bottom
     let mut fill_path = path.clone();
@@ -334,13 +349,7 @@ fn paint_spectrum(scene: &mut Scene, cm: &CoordMapper, cfg: &GraphConfig, spectr
     fill_path.close_path();
 
     let fill_color = Color::from_rgba8(100, 180, 255, 20);
-    scene.fill(
-        Fill::NonZero,
-        Affine::IDENTITY,
-        fill_color,
-        None,
-        &fill_path,
-    );
+    scene.fill(Fill::NonZero, transform, fill_color, None, &fill_path);
 }
 
 fn paint_band_curve(
@@ -349,6 +358,7 @@ fn paint_band_curve(
     cfg: &GraphConfig,
     band: &EqBand,
     frequencies: &[f64],
+    transform: Affine,
 ) {
     let band_color = hex_to_color(get_band_color(band.index));
     let fill_color = hex_to_color_alpha(get_band_color(band.index), 0.25);
@@ -379,19 +389,13 @@ fn paint_band_curve(
 
     // Fill
     if cfg.fill_curve {
-        scene.fill(
-            Fill::NonZero,
-            Affine::IDENTITY,
-            fill_color,
-            None,
-            &fill_path,
-        );
+        scene.fill(Fill::NonZero, transform, fill_color, None, &fill_path);
     }
 
     // Stroke
     scene.stroke(
         &Stroke::new(1.5),
-        Affine::IDENTITY,
+        transform,
         band_color.with_alpha(0.6),
         None,
         &stroke_path,
@@ -403,6 +407,7 @@ fn paint_connecting_lines(
     cm: &CoordMapper,
     cfg: &GraphConfig,
     bands: &[EqBand],
+    transform: Affine,
 ) {
     let zero_y = cm.db_to_y(0.0);
     let node_r = 7.0;
@@ -425,7 +430,7 @@ fn paint_connecting_lines(
 
         let line = Line::new((bx, start_y), (bx, zero_y));
         let color = hex_to_color_alpha(get_band_color(band.index), 0.5);
-        scene.stroke(&Stroke::new(1.5), Affine::IDENTITY, color, None, &line);
+        scene.stroke(&Stroke::new(1.5), transform, color, None, &line);
     }
 }
 
@@ -435,6 +440,7 @@ fn paint_combined_curve(
     cfg: &GraphConfig,
     bands: &[EqBand],
     frequencies: &[f64],
+    transform: Affine,
 ) {
     let golden = Color::from_rgb8(212, 169, 50);
     let fill_color = Color::from_rgba8(212, 169, 50, 20);
@@ -460,22 +466,10 @@ fn paint_combined_curve(
     fill_path.close_path();
 
     if cfg.fill_curve {
-        scene.fill(
-            Fill::NonZero,
-            Affine::IDENTITY,
-            fill_color,
-            None,
-            &fill_path,
-        );
+        scene.fill(Fill::NonZero, transform, fill_color, None, &fill_path);
     }
 
-    scene.stroke(
-        &Stroke::new(2.0),
-        Affine::IDENTITY,
-        golden,
-        None,
-        &stroke_path,
-    );
+    scene.stroke(&Stroke::new(2.0), transform, golden, None, &stroke_path);
 }
 
 fn paint_band_node(
@@ -485,6 +479,7 @@ fn paint_band_node(
     is_hovered: bool,
     is_dragging: bool,
     is_focused: bool,
+    transform: Affine,
 ) {
     let x = cm.freq_to_x(band.frequency as f64);
     let y = cm.db_to_y(band.gain as f64);
@@ -516,13 +511,7 @@ fn paint_band_node(
         };
         let glow_color = Color::from_rgba8(255, 255, 255, (glow_alpha * 255.0) as u8);
         let glow_circle = Circle::new((x, y), radius + 4.0);
-        scene.stroke(
-            &Stroke::new(3.0),
-            Affine::IDENTITY,
-            glow_color,
-            None,
-            &glow_circle,
-        );
+        scene.stroke(&Stroke::new(3.0), transform, glow_color, None, &glow_circle);
     }
 
     // White outline
@@ -538,12 +527,6 @@ fn paint_band_node(
     let outline_color = Color::from_rgba8(255, 255, 255, (outline_alpha * 255.0) as u8);
 
     let node = Circle::new((x, y), radius);
-    scene.fill(Fill::NonZero, Affine::IDENTITY, fill, None, &node);
-    scene.stroke(
-        &Stroke::new(1.5),
-        Affine::IDENTITY,
-        outline_color,
-        None,
-        &node,
-    );
+    scene.fill(Fill::NonZero, transform, fill, None, &node);
+    scene.stroke(&Stroke::new(1.5), transform, outline_color, None, &node);
 }
