@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use sc_player::{PlayerPatch, SampleEngine};
+use crate::{PlayerPatch, SampleEngine};
 
 use crate::InstrumentId;
 
@@ -48,7 +48,7 @@ impl SamplerBank {
         let patch = match samples_root {
             Some(root) => PlayerPatch::load(spec_path, root)?,
             None => {
-                let spec = sc_player::LibrarySpec::from_file(spec_path)?;
+                let spec = crate::LibrarySpec::from_file(spec_path)?;
                 PlayerPatch::from_spec(spec)
             }
         };

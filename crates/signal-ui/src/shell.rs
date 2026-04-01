@@ -12,7 +12,9 @@ use dioxus::prelude::*;
 use dock_dioxus::{DockProvider, DockRoot, PanelRenderer, PanelRendererRegistry};
 use signal::Signal;
 
+use audio_gui::theme::use_init_theme;
 use crate::register_panels;
+use crate::views::FxView;
 
 /// Signal view mode — determines which top-level browser/editor is shown.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -20,6 +22,7 @@ pub enum Mode {
     Preset,
     Profile,
     Song,
+    Fx,
 }
 
 /// Top-level Signal UI component.
@@ -37,6 +40,7 @@ pub enum Mode {
 #[component]
 pub fn SignalRoot(controller: Signal) -> Element {
     provide_context(controller);
+    use_init_theme();
 
     rsx! { SignalShell {} }
 }
@@ -61,11 +65,19 @@ fn SignalShell() -> Element {
                 ModeButton { label: "Preset", active: mode() == Mode::Preset, onclick: move |_| mode.set(Mode::Preset) }
                 ModeButton { label: "Profile", active: mode() == Mode::Profile, onclick: move |_| mode.set(Mode::Profile) }
                 ModeButton { label: "Song", active: mode() == Mode::Song, onclick: move |_| mode.set(Mode::Song) }
+                ModeButton { label: "FX", active: mode() == Mode::Fx, onclick: move |_| mode.set(Mode::Fx) }
             }
-            // Content area — delegate to the dock system
-            div { class: "flex-1 overflow-hidden",
-                DockProvider { render_panel: render_panel.clone(),
-                    DockRoot {}
+            if mode() == Mode::Fx {
+                // FX mode — EQ + Compressor panels
+                div { class: "flex-1 overflow-hidden p-4",
+                    FxView {}
+                }
+            } else {
+                // Default — delegate to the dock system
+                div { class: "flex-1 overflow-hidden",
+                    DockProvider { render_panel: render_panel.clone(),
+                        DockRoot {}
+                    }
                 }
             }
         }

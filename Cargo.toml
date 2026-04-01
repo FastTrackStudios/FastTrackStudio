@@ -47,9 +47,6 @@ macromod       = { path = "crates/macromod" }
 signal-audio   = { path = "crates/signal-audio" }
 signal-sampler = { path = "crates/signal-sampler" }
 
-# ── Sample libraries (sample-collector repo) ──────────────────────────
-sc-player = { git = "https://github.com/FastTrackStudios/sample-collector.git", branch = "main" }
-
 # ── DSP crates (FTS-Plugins) ─────────────────────────────────────────
 # Using local paths directly (same as [patch] overrides) to avoid
 # git submodule fetch issues with stale nih-plug submodule rev.

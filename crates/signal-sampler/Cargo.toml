@@ -7,8 +7,18 @@ license.workspace = true
 description = "Sample library playback engine for Signal — loads and plays orchestral, drum, and instrument libraries"
 
 [dependencies]
-sc-player   = { git = "https://github.com/FastTrackStudios/sample-collector.git", branch = "main" }
+# Spec loading — facet-styx for .styx files, toml for .toml files (migration)
+facet       = { workspace = true }
+facet-styx  = { workspace = true }
+toml        = { version = "0.8", features = ["parse"] }
+
+# Audio I/O
 cpal        = { workspace = true }
-tracing     = { workspace = true }
+hound       = "3.5"
+
+# Error handling
 thiserror   = { workspace = true }
 eyre        = { workspace = true }
+tracing     = { workspace = true }
+serde       = { version = "1.0", features = ["derive"] }
+serde_json  = "1.0"

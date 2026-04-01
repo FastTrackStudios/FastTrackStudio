@@ -10,6 +10,7 @@ dioxus.workspace = true
 fts-ui.workspace = true
 lumen-blocks.workspace = true
 signal = { path = "../signal" }
+signal-audio.workspace = true
 signal-controller = { path = "../signal-controller" }
 signal-daw-bridge = { path = "../signal-daw-bridge" }
 uuid = { version = "1", features = ["v4"] }
@@ -18,6 +19,10 @@ tracing.workspace = true
 audio-controls.workspace = true
 dock-dioxus = { workspace = true, default-features = false }
 dock-proto.workspace = true
+audio-gui.workspace = true
+eq-dsp.workspace = true
+comp-dsp.workspace = true
+nih_plug_dioxus.workspace = true
 
 [features]
 default = ["web"]

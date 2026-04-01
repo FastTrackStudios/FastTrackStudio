@@ -14,6 +14,10 @@ mod scene_grid;
 mod signal_chain_layout;
 mod signal_slider;
 
+// FX panel (EQ + Compressor)
+mod fx_panel;
+pub use fx_panel::FxView;
+
 // New views
 mod ab_comparison;
 mod automation_lane;

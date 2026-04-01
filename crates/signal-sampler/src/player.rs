@@ -9,14 +9,13 @@ use crate::{InstrumentId, SamplerBank};
 
 /// Live sample player with cpal audio output.
 ///
-/// Owns the audio stream — drop to stop playback.
-///
-/// The `SamplerBank` inside is `Arc<Mutex<_>>` so callers can hold a clone
-/// for MIDI routing from another thread (e.g. a midir callback).
+/// Cheap to clone — all clones share the same underlying audio stream and bank.
+/// Drop the last clone to stop playback.
+#[derive(Clone)]
 pub struct SamplerPlayer {
     /// Shared bank — clone this arc to drive MIDI from another thread.
     pub bank: Arc<Mutex<SamplerBank>>,
-    _stream: cpal::Stream,
+    _stream: Arc<cpal::Stream>,
     pub sample_rate: u32,
 }
 
@@ -64,7 +63,7 @@ impl SamplerPlayer {
         stream.play()?;
         tracing::info!("signal-sampler: stream started at {sample_rate} Hz");
 
-        Ok(Self { bank, _stream: stream, sample_rate })
+        Ok(Self { bank, _stream: Arc::new(stream), sample_rate })
     }
 
     // ── Instrument management (convenience pass-throughs) ────────────────────
