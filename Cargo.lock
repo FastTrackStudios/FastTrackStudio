@@ -9766,6 +9766,7 @@ dependencies = [
  "dioxus",
  "signal",
  "signal-audio",
+ "signal-ui",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -9794,11 +9795,9 @@ dependencies = [
  "eyre",
  "facet",
  "facet-styx",
+ "facet-toml",
  "hound",
- "serde",
- "serde_json",
  "thiserror 2.0.18",
- "toml 0.8.2",
  "tracing",
 ]
 

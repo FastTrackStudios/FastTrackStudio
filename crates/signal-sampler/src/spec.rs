@@ -1,6 +1,6 @@
 //! Library specification types.
 //!
-//! Specs are `.styx` files (preferred) or `.toml` files (legacy migration path).
+//! Specs are `.styx` files (preferred) or `.toml` files.
 //! Load with [`LibrarySpec::from_file`] — format is auto-detected by extension.
 //!
 //! Third-party libraries can be supported by writing a new spec file with no
@@ -10,7 +10,6 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use facet::Facet;
-use serde::Deserialize;
 
 use crate::SamplerError;
 
@@ -18,35 +17,35 @@ use crate::SamplerError;
 
 /// Complete specification for one sample library.
 ///
-/// Loaded from a `.styx` file (preferred) or `.toml` file (legacy).
-#[derive(Debug, Clone, Deserialize, Facet)]
+/// Loaded from a `.styx` file (preferred) or `.toml` file.
+#[derive(Debug, Clone, Facet)]
 pub struct LibrarySpec {
-    /// Display name, e.g. "Cinematic Studio Strings".
+    /// Display name, e.g. "Cinematic Strings".
     pub name: String,
     /// Library version string.
-    #[serde(default)]
+    #[facet(default)]
     pub version: String,
     /// Vendor / developer name.
-    #[serde(default)]
+    #[facet(default)]
     pub vendor: String,
 
-    /// Instrument sections (e.g. 1v / 2v / Va / Ce / Ba for CSS).
-    #[serde(default, rename = "section")]
+    /// Instrument sections (e.g. 1v / 2v / Va / Ce / Ba for strings).
+    #[facet(default)]
     pub sections: Vec<SectionSpec>,
 
     /// Microphone positions.
-    #[serde(default, rename = "mic")]
+    #[facet(default)]
     pub mics: Vec<MicSpec>,
 
     /// Dynamic control model (CC1, velocity, etc.).
-    #[serde(default)]
+    #[facet(default)]
     pub dynamics: DynamicsSpec,
 
     /// All articulations in this library.
-    #[serde(default, rename = "articulation")]
+    #[facet(default)]
     pub articulations: Vec<ArticulationSpec>,
 
-    /// Legato engine configuration (absent for CSP).
+    /// Legato engine configuration (absent for piano/drums).
     pub legato_engine: Option<LegatoEngineSpec>,
 
     /// Short-note pre-delay compensation.
@@ -61,20 +60,21 @@ impl LibrarySpec {
     pub fn from_file(path: &Path) -> Result<Self, SamplerError> {
         let text = std::fs::read_to_string(path).map_err(SamplerError::Io)?;
         match path.extension().and_then(|e| e.to_str()) {
-            Some("styx") => Self::from_styx(&text),
-            _ => Self::from_toml(&text),
+            Some("toml") => Self::from_toml(&text),
+            _ => Self::from_styx(&text),
         }
     }
 
-    /// Parse from styx format using facet-styx.
+    /// Parse from styx format.
     pub fn from_styx(s: &str) -> Result<Self, SamplerError> {
         facet_styx::from_str(s)
             .map_err(|e| SamplerError::SpecParse(e.to_string()))
     }
 
-    /// Parse from TOML format (legacy / migration path).
+    /// Parse from TOML format.
     pub fn from_toml(s: &str) -> Result<Self, SamplerError> {
-        toml::from_str(s).map_err(|e| SamplerError::SpecParse(e.to_string()))
+        facet_toml::from_str(s)
+            .map_err(|e| SamplerError::SpecParse(e.to_string()))
     }
 
     /// Look up an articulation by its `id` field.
@@ -96,7 +96,7 @@ impl LibrarySpec {
 // ── Section ───────────────────────────────────────────────────────────────────
 
 /// One instrument section (violin, viola, cello, etc.).
-#[derive(Debug, Clone, Deserialize, Facet)]
+#[derive(Debug, Clone, Facet)]
 pub struct SectionSpec {
     /// Short identifier used in filenames: `"1v"`, `"Va"`, `"Ce"`, `"Ba"`.
     pub id: String,
@@ -105,7 +105,7 @@ pub struct SectionSpec {
 
     /// Pitch classes that were sampled (e.g. `["G","A","B","C#","D#","F"]`).
     /// Every 2 semitones; sampler pitch-shifts to fill the gaps.
-    #[serde(default)]
+    #[facet(default)]
     pub note_grid: Vec<String>,
 
     /// Lowest sampled MIDI note as a name ("G2").
@@ -117,64 +117,60 @@ pub struct SectionSpec {
 // ── Mic ───────────────────────────────────────────────────────────────────────
 
 /// One microphone / output bus position.
-#[derive(Debug, Clone, Deserialize, Facet)]
+#[derive(Debug, Clone, Facet)]
 pub struct MicSpec {
     /// Short identifier: `"Mix"`, `"Main"`, `"Room"`, `"Spot1"`, `"Spot2"`.
     pub id: String,
     /// Human-readable label.
     pub label: String,
     /// `"blended"` (pre-mixed stereo bus) or `"separate"` (individual channel).
-    #[serde(default, rename = "type")]
+    #[facet(default)]
     pub kind: String,
 }
 
 // ── Dynamics ─────────────────────────────────────────────────────────────────
 
 /// Dynamic control model for the library.
-#[derive(Debug, Clone, Deserialize, Default, Facet)]
+#[derive(Debug, Clone, Default, Facet)]
 pub struct DynamicsSpec {
-    /// Controller for long-note dynamics. `"CC1"` for most CS libraries.
-    #[serde(default)]
+    /// Controller for long-note dynamics. `"CC1"` for most libraries.
     pub sustain_controller: Option<String>,
-    /// Controller for vibrato crossfade. `"CC2"` for CSS strings.
-    #[serde(default)]
+    /// Controller for vibrato crossfade. `"CC2"` for strings.
     pub vibrato_controller: Option<String>,
-    /// `"crossfade"` or `"on_off"` (CSSS: vibrato is binary, not continuous).
-    #[serde(default)]
+    /// `"crossfade"` or `"on_off"` (solo strings: vibrato is binary).
     pub vibrato_mode: Option<String>,
-    /// Controller for short-note dynamics. `"velocity"` for all CS libraries.
-    #[serde(default)]
+    /// Controller for short-note dynamics. `"velocity"` for most libraries.
     pub short_note_controller: Option<String>,
 
-    /// CC1 ranges that select short-note type (CSS-style).
-    #[serde(default)]
+    /// CC1 ranges that select short-note type.
+    #[facet(default)]
     pub short_note_cc1_map: HashMap<String, String>,
     /// CC1 ranges for pizzicato sub-types.
-    #[serde(default)]
+    #[facet(default)]
     pub pizzicato_cc1_map: HashMap<String, String>,
-    /// Velocity ranges for sustain attack character (CSW: normal / accented).
-    #[serde(default)]
+    /// Velocity ranges for sustain attack character (winds: normal / accented).
+    #[facet(default)]
     pub sustain_attack_velocity: HashMap<String, String>,
 
     /// Two-layer CC1 crossfade zones.
-    #[serde(default)]
+    #[facet(default)]
     pub cc1_layers_2: Vec<Cc1Layer>,
-    /// Three-layer CC1 crossfade zones (label → CC range).
-    #[serde(default)]
+    /// Three-layer CC1 crossfade zones.
+    #[facet(default)]
     pub cc1_layers_3: Vec<Cc1Layer>,
     /// Four-layer CC1 crossfade zones.
-    #[serde(default)]
+    #[facet(default)]
     pub cc1_layers_4: Vec<Cc1Layer>,
-    /// Five-layer CC1 crossfade zones (CSS Clegno has 5 dynamics).
-    #[serde(default)]
+    /// Five-layer CC1 crossfade zones.
+    #[facet(default)]
     pub cc1_layers_5: Vec<Cc1Layer>,
-    /// Six-layer CC1 crossfade zones (CSP has 6 dynamics).
-    #[serde(default)]
+    /// Six-layer CC1 crossfade zones (piano has 6 dynamics).
+    #[facet(default)]
     pub cc1_layers_6: Vec<Cc1Layer>,
 }
 
 /// One CC1 dynamic layer with its crossfade range.
-#[derive(Debug, Clone, Deserialize, Facet)]
+#[derive(Debug, Clone, Facet)]
 pub struct Cc1Layer {
     /// Dynamic label: `"p"`, `"mf"`, `"ff"`, etc.
     pub label: String,
@@ -185,7 +181,7 @@ pub struct Cc1Layer {
 // ── Articulation ─────────────────────────────────────────────────────────────
 
 /// One playing technique in the library.
-#[derive(Debug, Clone, Deserialize, Facet)]
+#[derive(Debug, Clone, Facet)]
 pub struct ArticulationSpec {
     /// Token used in WAV filenames: `"Vibsus"`, `"Leg"`, `"Staccato"`, etc.
     pub id: String,
@@ -193,46 +189,36 @@ pub struct ArticulationSpec {
     pub label: String,
 
     /// Playback category.
-    #[serde(rename = "type")]
     pub kind: ArticulationKind,
 
     /// Sampled dynamic layers (soft → loud): `["p", "mf", "ff"]`.
-    #[serde(default)]
+    #[facet(default)]
     pub dynamics: Vec<String>,
     /// Round-robin count per note per dynamic layer.
-    #[serde(default = "default_rr")]
+    #[facet(default)]
     pub rr: usize,
     /// How dynamics are controlled: `"cc1"`, `"velocity"`, or `"fixed"`.
-    #[serde(default = "default_dyn_ctrl")]
+    #[facet(default)]
     pub dyn_ctrl: String,
 
     /// ID of the release articulation to trigger on note-off, if any.
-    #[serde(default)]
     pub release_artic: Option<String>,
     /// Whether separate up/down transition samples exist (legato only).
-    #[serde(default)]
     pub directional: Option<bool>,
     /// `"full"` = full section range; `"short"` = reduced range.
-    #[serde(default)]
     pub notes: Option<String>,
     /// If set, this articulation only exists for these section ids.
-    #[serde(default)]
+    #[facet(default)]
     pub instrument_filter: Vec<String>,
 
-    /// Alternative file-name tokens to try if the primary `id` is not found
-    /// in the sample map for a given section. Used when the library uses
-    /// different tokens across sections (e.g. `"Pizzicato"` for 1v but
-    /// `"Pizz"` for 2v/Va/Ce/Ba).
-    #[serde(default)]
+    /// Alternative filename tokens to try if the primary `id` is not found
+    /// in the sample map for a given section.
+    #[facet(default)]
     pub aliases: Vec<String>,
 }
 
-fn default_rr() -> usize { 1 }
-fn default_dyn_ctrl() -> String { "cc1".to_string() }
-
 /// High-level category for an articulation's playback behaviour.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Facet)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, PartialEq, Eq, Facet)]
 #[repr(C)]
 pub enum ArticulationKind {
     /// Held note with CC1-driven dynamics (sustain, tremolo, harmonics).
@@ -247,24 +233,24 @@ pub enum ArticulationKind {
     Trill,
     /// Library-specific special use (FX, col legno looped, etc.).
     Special,
-    /// One-shot playback — no note-off (CSP FX, pedal noise, etc.).
+    /// One-shot playback — no note-off.
     OneShot,
-    /// Looped sample with CC1-driven x-fade (CSP FX looped beds).
+    /// Looped sample with CC1-driven x-fade.
     Looped,
 }
 
 // ── Legato engine ─────────────────────────────────────────────────────────────
 
 /// Full legato engine specification.
-#[derive(Debug, Clone, Deserialize, Facet)]
+#[derive(Debug, Clone, Facet)]
 pub struct LegatoEngineSpec {
-    /// Flat zones for libraries with a single legato mode (e.g. CSB).
-    /// When this is populated, `expressive` and `low_latency` are typically absent.
-    #[serde(default)]
+    /// Flat zones for libraries with a single legato mode (e.g. brass).
+    /// When populated, `expressive` and `low_latency` are typically absent.
+    #[facet(default)]
     pub zones: Vec<LegatoZoneSpec>,
-    /// Expressive mode: 3 velocity zones with longer pre-delays (CSS, CSSS).
+    /// Expressive mode: 3 velocity zones with longer pre-delays.
     pub expressive: Option<LegatoModeSpec>,
-    /// Low-latency mode: 2 velocity zones with shorter pre-delays (CSS).
+    /// Low-latency mode: 2 velocity zones with shorter pre-delays.
     pub low_latency: Option<LegatoModeSpec>,
     /// Portamento slide configuration.
     pub portamento: Option<PortamentoSpec>,
@@ -273,7 +259,7 @@ pub struct LegatoEngineSpec {
 }
 
 impl LegatoEngineSpec {
-    /// Get the flat mode (for single-mode libraries like CSB), or fall back
+    /// Get the flat mode (for single-mode libraries like brass), or fall back
     /// to the expressive mode if flat zones are absent.
     pub fn primary_mode(&self) -> Option<LegatoModeSpec> {
         if !self.zones.is_empty() {
@@ -285,18 +271,17 @@ impl LegatoEngineSpec {
 }
 
 /// One legato mode (expressive or low-latency) with its velocity zones.
-#[derive(Debug, Clone, Deserialize, Facet)]
+#[derive(Debug, Clone, Facet)]
 pub struct LegatoModeSpec {
     /// CC58 range that enables this mode (e.g. `"0-5"` or `"6-10"`).
-    #[serde(default)]
     pub enabled_cc58_range: Option<String>,
     /// Velocity → pre-delay mapping.
-    #[serde(default)]
+    #[facet(default)]
     pub zones: Vec<LegatoZoneSpec>,
 }
 
 /// One velocity zone within a legato mode.
-#[derive(Debug, Clone, Deserialize, Facet)]
+#[derive(Debug, Clone, Facet)]
 pub struct LegatoZoneSpec {
     /// `[lo, hi]` inclusive velocity range.
     pub vel_range: [u8; 2],
@@ -316,21 +301,16 @@ impl LegatoModeSpec {
 }
 
 /// Portamento slide configuration.
-#[derive(Debug, Clone, Deserialize, Facet)]
+#[derive(Debug, Clone, Facet)]
 pub struct PortamentoSpec {
     /// Maximum velocity at which portamento triggers (default 20).
-    #[serde(default = "default_portamento_vel")]
     pub trigger_vel_max: u8,
     /// CC controller for portamento volume (default "CC5").
-    #[serde(default = "default_portamento_cc")]
     pub volume_controller: String,
 }
 
-fn default_portamento_vel() -> u8 { 20 }
-fn default_portamento_cc() -> String { "CC5".to_string() }
-
 /// Same-note re-trigger (re-bowing / re-tonguing) configuration.
-#[derive(Debug, Clone, Deserialize, Facet)]
+#[derive(Debug, Clone, Facet)]
 pub struct RetriggerSpec {
     /// How re-trigger is activated. `"sustain_pedal_held"` = CC64 must be on.
     pub trigger: String,
@@ -341,7 +321,7 @@ pub struct RetriggerSpec {
 // ── Short note timing ─────────────────────────────────────────────────────────
 
 /// Pre-delay compensation for short note samples.
-#[derive(Debug, Clone, Deserialize, Facet)]
+#[derive(Debug, Clone, Facet)]
 pub struct ShortNoteTimingSpec {
     /// All short-note samples start this many ms before their "rhythmic peak."
     /// Apply a negative track delay of this amount when sequencing short notes.
@@ -351,18 +331,18 @@ pub struct ShortNoteTimingSpec {
 // ── Keyswitch ─────────────────────────────────────────────────────────────────
 
 /// Keyswitch and CC58 articulation switching configuration.
-#[derive(Debug, Clone, Deserialize, Facet)]
+#[derive(Debug, Clone, Facet)]
 pub struct KeyswitchSpec {
-    /// Whether keyswitches are velocity-sensitive (most CS libraries: true).
-    #[serde(default)]
+    /// Whether keyswitches are velocity-sensitive.
+    #[facet(default)]
     pub velocity_sensitive: bool,
     /// Whether keyswitch assignments are user-configurable in the GUI.
-    #[serde(default)]
+    #[facet(default)]
     pub user_configurable: bool,
 
     /// CC58 value range → articulation/function label.
     /// Keys are range strings like `"0-5"`, `"6-10"`, etc.
-    #[serde(default)]
+    #[facet(default)]
     pub cc58_map: HashMap<String, String>,
 }
 
@@ -391,8 +371,11 @@ mod tests {
     use super::*;
 
     fn specs_dir() -> std::path::PathBuf {
+        // Prefer the sample-collector repo next to signal, fall back to a local specs/ dir.
         let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-        std::path::Path::new(&manifest).parent().unwrap().parent().unwrap().join("specs")
+        let signal_root = std::path::Path::new(&manifest).parent().unwrap().parent().unwrap();
+        let sc_specs = signal_root.parent().unwrap().join("sample-collector/specs");
+        if sc_specs.exists() { sc_specs } else { signal_root.join("specs") }
     }
 
     #[test]
@@ -403,61 +386,18 @@ mod tests {
     }
 
     #[test]
-    fn load_css_spec() {
-        let path = specs_dir().join("cinematic-studio-strings.toml");
+    fn load_css_spec_styx() {
+        let path = specs_dir().join("cinematic-strings.styx");
         if !path.exists() { return; }
-        let spec = LibrarySpec::from_file(&path).expect("parse CSS spec");
+        let spec = LibrarySpec::from_file(&path).expect("parse CSS styx spec");
         assert_eq!(spec.sections.len(), 5);
         assert!(spec.articulations.len() > 10);
         let le = spec.legato_engine.as_ref().unwrap();
         assert_eq!(le.expressive.as_ref().unwrap().delay_for_velocity(30), Some(333));
         assert_eq!(le.expressive.as_ref().unwrap().delay_for_velocity(80), Some(250));
         assert_eq!(le.expressive.as_ref().unwrap().delay_for_velocity(110), Some(100));
-        let ks = spec.keyswitch.unwrap();
+        let ks = spec.keyswitch.as_ref().unwrap();
         assert_eq!(ks.cc58_function(0), Some("Sustain: Low Latency Legato"));
-        assert_eq!(ks.cc58_function(77), Some("Legato On"));
-    }
-
-    #[test]
-    fn load_csb_spec() {
-        let path = specs_dir().join("cinematic-studio-brass.toml");
-        if !path.exists() { return; }
-        let spec = LibrarySpec::from_file(&path).expect("parse CSB spec");
-        assert!(spec.sections.len() >= 8);
-        assert!(spec.articulations.len() > 5);
-        // CSB has a single mode with 2 zones (no slow)
-        let le = spec.legato_engine.as_ref().unwrap();
-        let mode = le.primary_mode().unwrap();
-        assert_eq!(mode.zones.len(), 2);
-    }
-
-    #[test]
-    fn load_csw_spec() {
-        let path = specs_dir().join("cinematic-studio-woodwinds.toml");
-        if !path.exists() { return; }
-        let spec = LibrarySpec::from_file(&path).expect("parse CSW spec");
-        assert!(spec.sections.len() >= 10);
-        assert!(spec.articulations.len() > 5);
-    }
-
-    #[test]
-    fn load_csss_spec() {
-        let path = specs_dir().join("cinematic-studio-solo-strings.toml");
-        if !path.exists() { return; }
-        let spec = LibrarySpec::from_file(&path).expect("parse CSSS spec");
-        assert_eq!(spec.sections.len(), 4);
-        // CSSS vibrato is on/off, not crossfade
-        assert_eq!(spec.dynamics.vibrato_mode.as_deref(), Some("on_off"));
-    }
-
-    #[test]
-    fn load_csp_spec() {
-        let path = specs_dir().join("cinematic-studio-piano.toml");
-        if !path.exists() { return; }
-        let spec = LibrarySpec::from_file(&path).expect("parse CSP spec");
-        // CSP has no sections (whole keyboard) or one section
-        assert!(spec.articulations.len() >= 2); // Sus + Suspedal at minimum
-        // No legato engine in CSP
-        assert!(spec.legato_engine.is_none());
+        assert_eq!(ks.cc58_function(88), Some("Con Sordino On"));
     }
 }

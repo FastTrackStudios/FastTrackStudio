@@ -7,10 +7,10 @@ license.workspace = true
 description = "Sample library playback engine for Signal — loads and plays orchestral, drum, and instrument libraries"
 
 [dependencies]
-# Spec loading — facet-styx for .styx files, toml for .toml files (migration)
+# Spec loading
 facet       = { workspace = true }
 facet-styx  = { workspace = true }
-toml        = { version = "0.8", features = ["parse"] }
+facet-toml  = { workspace = true }
 
 # Audio I/O
 cpal        = { workspace = true }
@@ -20,5 +20,3 @@ hound       = "3.5"
 thiserror   = { workspace = true }
 eyre        = { workspace = true }
 tracing     = { workspace = true }
-serde       = { version = "1.0", features = ["derive"] }
-serde_json  = "1.0"

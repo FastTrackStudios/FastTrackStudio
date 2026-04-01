@@ -58,6 +58,7 @@ cpal = "0.17"
 # ── Facet reflection ─────────────────────────────────────────────────
 facet = { version = "0.44" }
 facet-styx = { version = "2.0" }
+facet-toml = { version = "0.44" }
 
 # ── ROAM service framework (latest main) ─────────────────────────────
 vox = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
