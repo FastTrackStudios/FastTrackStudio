@@ -1,0 +1,14 @@
+[package]
+name        = "signal-sampler"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Sample library playback engine for Signal — loads and plays orchestral, drum, and instrument libraries"
+
+[dependencies]
+sc-player   = { git = "https://github.com/FastTrackStudios/sample-collector.git", branch = "main" }
+cpal        = { workspace = true }
+tracing     = { workspace = true }
+thiserror   = { workspace = true }
+eyre        = { workspace = true }

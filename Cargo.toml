@@ -2,9 +2,11 @@
 members = [
     "apps/cli",
     "apps/desktop",
+    "apps/mobile",
     "crates/macromod",
     "crates/nam-manager",
     "crates/signal",
+    "crates/signal-audio",
     "crates/signal-controller",
     "crates/signal-daw-bridge",
     "crates/signal-extension",
@@ -12,6 +14,7 @@ members = [
     "crates/signal-import",
     "crates/signal-live",
     "crates/signal-proto",
+    "crates/signal-sampler",
     "crates/signal-storage",
     "crates/signal-ui",
     "xtask",
@@ -32,6 +35,7 @@ signal = { path = "crates/signal" }
 # App crate (binary + lib)
 signal-cli = { path = "apps/cli" }
 signal-desktop = { path = "apps/desktop" }
+signal-mobile = { path = "apps/mobile" }
 # UI crate (Dioxus components with feature flags)
 signal-ui = { path = "crates/signal-ui", default-features = false }
 # NOTE: signal-proto, signal-controller, signal-live, signal-storage,
@@ -39,7 +43,20 @@ signal-ui = { path = "crates/signal-ui", default-features = false }
 # Access them through the `signal` facade crate.
 
 # ── Local utility crates ─────────────────────────────────────────────
-macromod = { path = "crates/macromod" }
+macromod       = { path = "crates/macromod" }
+signal-audio   = { path = "crates/signal-audio" }
+signal-sampler = { path = "crates/signal-sampler" }
+
+# ── Sample libraries (sample-collector repo) ──────────────────────────
+sc-player = { git = "https://github.com/FastTrackStudios/sample-collector.git", branch = "main" }
+
+# ── DSP crates (FTS-Plugins) ─────────────────────────────────────────
+# Using local paths directly (same as [patch] overrides) to avoid
+# git submodule fetch issues with stale nih-plug submodule rev.
+eq-dsp = { path = "../FTS-Plugins/crates/fts-eq/eq-dsp" }
+comp-dsp = { path = "../FTS-Plugins/crates/fts-comp/comp-dsp" }
+fts-dsp = { path = "../FTS-Plugins/crates/fts-dsp" }
+cpal = "0.17"
 
 # ── Facet reflection ─────────────────────────────────────────────────
 facet = { version = "0.44" }
@@ -70,13 +87,18 @@ utils = { git = "https://github.com/FastTrackStudios/FastTrackStudio.git", branc
 
 # ── Plugin framework ───────────────────────────────────────────────────
 nih_plug = { git = "https://github.com/FastTrackStudios/nih-plug.git", branch = "reaper-embed-ui" }
-fts-plugin-core = { git = "https://github.com/FastTrackStudios/FTS-Plugins.git", branch = "main", default-features = false }
-audio-gui = { git = "https://github.com/FastTrackStudios/FTS-Plugins.git", branch = "main" }
+# Blitz-based Dioxus renderer — used by ALL GUI contexts (desktop standalone,
+# REAPER embedded, VST3/CLAP plugin). Guarantees the same rendering pipeline
+# everywhere. Use open_standalone_with_state() in signal-desktop and
+# create_dioxus_editor_with_state() in fts-signal-plugin.
+nih_plug_dioxus = { git = "https://github.com/FastTrackStudios/nih-plug.git", branch = "reaper-embed-ui" }
+fts-plugin-core = { path = "../FTS-Plugins/crates/fts-plugin-core", default-features = false }
+audio-gui = { path = "../FTS-Plugins/crates/audio-gui" }
 atomic_float = "1"
 crossbeam-channel = "0.5"
 
 # ── UI ────────────────────────────────────────────────────────────────
-dioxus = "0.7.2"
+dioxus = "=0.7.3"
 fts-ui = { git = "https://github.com/FastTrackStudios/fts-ui.git", branch = "main" }
 lumen-blocks = { git = "https://github.com/Leaf-Computer/lumen-blocks.git", tag = "v0.2.0" }
 
@@ -124,10 +146,18 @@ clap = { version = "4", features = ["derive"] }
 # [patch."https://github.com/FastTrackStudios/fts-ui.git"]
 # fts-ui = { path = "../fts-ui/crates/fts-ui" }
 #
+# ── FTS-Plugins local overrides ─────────────────────────────────────────
+[patch."https://github.com/FastTrackStudios/FTS-Plugins.git"]
+eq-dsp = { path = "../FTS-Plugins/crates/fts-eq/eq-dsp" }
+comp-dsp = { path = "../FTS-Plugins/crates/fts-comp/comp-dsp" }
+fts-dsp = { path = "../FTS-Plugins/crates/fts-dsp" }
+audio-gui = { path = "../FTS-Plugins/crates/audio-gui" }
+fts-plugin-core = { path = "../FTS-Plugins/crates/fts-plugin-core" }
+
 # ── nih-plug unification ────────────────────────────────────────────────
-# [patch."https://github.com/FastTrackStudios/nih-plug.git"]
-# nih_plug = { path = "../FTS-Plugins/forks/nih-plug" }
-# nih_plug_dioxus = { path = "../FTS-Plugins/forks/nih-plug/nih_plug_dioxus" }
+[patch."https://github.com/FastTrackStudios/nih-plug.git"]
+nih_plug = { path = "../FTS-Plugins/forks/nih-plug" }
+nih_plug_dioxus = { path = "../FTS-Plugins/forks/nih-plug/nih_plug_dioxus" }
 
 # ── Blitz patches (FTS fork with post-processing support) ──────────────
 # Required by nih_plug_dioxus / audio-gui for embedded plugin UIs.
@@ -139,6 +169,24 @@ blitz-html = { git = "https://github.com/FastTrackStudios/blitz.git", rev = "a72
 blitz-net = { git = "https://github.com/FastTrackStudios/blitz.git", rev = "a72a6bd" }
 blitz-paint = { git = "https://github.com/FastTrackStudios/blitz.git", rev = "a72a6bd" }
 blitz-traits = { git = "https://github.com/FastTrackStudios/blitz.git", rev = "a72a6bd" }
+
+# Redirect bearcove/vox.git transitive deps to the FTS fork (fixes noisy eprintln! debug logs).
+[patch."https://github.com/bearcove/vox.git"]
+vox = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
+vox-core = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
+vox-types = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
+vox-postcard = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
+vox-stream = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
+vox-websocket = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
+vox-shm = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
+vox-schema = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
+vox-service-macros = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
+vox-macros-core = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
+vox-macros-parse = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
+vox-codegen = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
+vox-inprocess = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
+shm-primitives = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
+facet-cbor = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
 
 # ── Vendored patches ──────────────────────────────────────────────────
 # moire: FTS fork — tolerates broken frame-pointer chains on NixOS glibc.
