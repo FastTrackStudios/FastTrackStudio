@@ -1,0 +1,13 @@
+[package]
+name = "meter-ui"
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+description = "Vello scene overlay painters for audio metering — spectrum, LUFS, K-meter, goniometer, phase"
+
+[dependencies]
+meter-dsp = { path = "../meter-dsp" }
+nih_plug = { workspace = true }
+nih_plug_dioxus = { workspace = true }
+parking_lot = "0.12"
