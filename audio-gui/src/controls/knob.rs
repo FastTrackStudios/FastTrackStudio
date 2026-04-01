@@ -10,6 +10,7 @@
 use crate::drag::{begin_drag, DragState, TextEditState};
 use crate::theme::use_theme;
 use nih_plug::prelude::ParamPtr;
+use nih_plug_dioxus::prelude::dioxus_elements::geometry::WheelDelta;
 use nih_plug_dioxus::prelude::*;
 use std::f64::consts::PI;
 
@@ -277,12 +278,29 @@ pub fn Knob(
                     }
                 }
 
-                // Invisible drag surface — only handles mousedown and doubleclick.
+                // Invisible drag surface — only handles mousedown, doubleclick, and scroll.
                 // mousemove / mouseup are handled by the DragProvider at the root.
                 if !disabled {
                     div {
                         style: "position:absolute; inset:0; cursor:ns-resize; \
                                 user-select:none; z-index:3;",
+                        onwheel: {
+                            let ctx = ctx.clone();
+                            move |evt: WheelEvent| {
+                                evt.stop_propagation();
+                                let delta_lines = match evt.delta() {
+                                    WheelDelta::Lines(d) => d.y,
+                                    WheelDelta::Pixels(d) => d.y / 16.0,
+                                    WheelDelta::Pages(d) => d.y * 10.0,
+                                };
+                                let step = if evt.modifiers().shift() { 0.002 } else { 0.01 };
+                                let current = unsafe { param_ptr.modulated_normalized_value() };
+                                let new_val = (current + (delta_lines as f32 * step)).clamp(0.0, 1.0);
+                                ctx.begin_set_raw(param_ptr);
+                                ctx.set_normalized_raw(param_ptr, new_val);
+                                ctx.end_set_raw(param_ptr);
+                            }
+                        },
                         onmousedown: {
                             let ctx = ctx.clone();
                             move |evt: MouseEvent| {
