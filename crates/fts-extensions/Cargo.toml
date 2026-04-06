@@ -1,0 +1,30 @@
+[package]
+name = "fts-extensions"
+version.workspace = true
+edition.workspace = true
+description = "FTS Extensions — standalone REAPER extension providing utility actions (cdylib)"
+
+[lib]
+crate-type = ["cdylib"]
+name = "reaper_fts_extensions"
+path = "src/lib.rs"
+
+[dependencies]
+# DAW API — in-process via LocalCaller
+daw = { workspace = true, features = ["reaper", "sync"] }
+
+# REAPER entry point machinery
+reaper-low.workspace = true
+reaper-medium.workspace = true
+reaper-high.workspace = true
+reaper-macros.workspace = true
+
+# Async runtime + task dispatch
+tokio.workspace = true
+crossbeam-channel.workspace = true
+fragile.workspace = true
+eyre.workspace = true
+
+# Observability
+tracing.workspace = true
+tracing-subscriber.workspace = true
