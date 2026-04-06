@@ -21,3 +21,17 @@ daw = { path = "../daw/crates/daw" }
 tokio = { version = "1.48", features = ["rt-multi-thread", "net", "sync"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[patch."https://github.com/bearcove/moire"]
+moire = { git = "https://github.com/FastTrackStudios/moire.git", rev = "6d856f2" }
+moire-macros-noop = { git = "https://github.com/FastTrackStudios/moire.git", rev = "6d856f2" }
+moire-runtime = { git = "https://github.com/FastTrackStudios/moire.git", rev = "6d856f2" }
+moire-tokio = { git = "https://github.com/FastTrackStudios/moire.git", rev = "6d856f2" }
+moire-trace-capture = { git = "https://github.com/FastTrackStudios/moire.git", rev = "6d856f2" }
+
+[patch.crates-io]
+moire = { git = "https://github.com/FastTrackStudios/moire.git", rev = "6d856f2" }
+moire-macros-noop = { git = "https://github.com/FastTrackStudios/moire.git", rev = "6d856f2" }
+moire-runtime = { git = "https://github.com/FastTrackStudios/moire.git", rev = "6d856f2" }
+moire-tokio = { git = "https://github.com/FastTrackStudios/moire.git", rev = "6d856f2" }
+moire-trace-capture = { git = "https://github.com/FastTrackStudios/moire.git", rev = "6d856f2" }
