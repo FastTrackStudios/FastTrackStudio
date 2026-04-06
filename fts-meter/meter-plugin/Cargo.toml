@@ -13,7 +13,7 @@ crate-type = ["cdylib", "lib"]
 meter-dsp = { workspace = true }
 meter-ui = { workspace = true }
 audio-gui = { workspace = true }
-fts-plugin-core = { path = "../../fts-plugin-core" }
+fts-plugin-core = { workspace = true }
 nih_plug = { workspace = true }
 nih_plug_dioxus = { workspace = true }
 atomic_float = { workspace = true }
