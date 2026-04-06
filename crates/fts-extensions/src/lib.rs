@@ -68,9 +68,14 @@ impl App {
 
 static APP: OnceLock<Fragile<App>> = OnceLock::new();
 
-// ── Action definitions ────────────────────────────────────────────────────────
+// ── Modules ───────────────────────────────────────────────────────────────────
 
 mod actions;
+mod continuous_action;
+mod error;
+mod item_actions;
+mod reaper_utils;
+mod tempo;
 
 // ── Timer callback ───────────────────────────────────────────────────────────
 
