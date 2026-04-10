@@ -30,7 +30,8 @@ pub fn build_action_defs() -> ActionDefs {
     // Register continuous actions with the continuous-action timer system.
     register_move_grid_actions();
 
-    vec![
+    let mut defs = vec![
+        // ── Launcher ─────────────────────────────────────────────────────
         // ── Tempo grid — move ────────────────────────────────────────────────
         action(
             "FTS_TEMPO_MOVE_MEASURE_GRID_TO_MOUSE",
@@ -106,7 +107,12 @@ pub fn build_action_defs() -> ActionDefs {
             "Split selected items at cursor with crossfade on left",
             || item_actions::split_items_with_crossfade_left(),
         ),
-    ]
+    ];
+
+    // Add launcher actions
+    defs.extend(fts_launcher::LauncherEngine::action_defs());
+
+    defs
 }
 
 /// Convenience constructor for a single action entry.

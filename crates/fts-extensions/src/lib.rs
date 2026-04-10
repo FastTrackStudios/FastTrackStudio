@@ -74,6 +74,7 @@ mod actions;
 mod continuous_action;
 mod error;
 mod item_actions;
+mod launcher;
 mod reaper_utils;
 mod tempo;
 
@@ -221,6 +222,9 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     daw::reaper::set_task_support(&g.task_support);
 
     let task_middleware = MainTaskMiddleware::new(g.task_sender.clone(), g.task_receiver.clone());
+
+    // Initialize the launcher engine (loads packs, extensions, providers)
+    launcher::init();
 
     let defs = actions::build_action_defs();
     let action_handlers: HashMap<String, Arc<dyn Fn() + Send + Sync>> = defs

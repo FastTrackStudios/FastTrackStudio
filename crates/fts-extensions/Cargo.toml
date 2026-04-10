@@ -10,6 +10,9 @@ name = "reaper_fts_extensions"
 path = "src/lib.rs"
 
 [dependencies]
+# FTS Launcher — search/workflow engine
+fts-launcher = { workspace = true }
+
 # DAW API — in-process via LocalCaller
 daw = { workspace = true, features = ["reaper", "sync"] }
 
