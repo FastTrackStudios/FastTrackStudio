@@ -201,8 +201,9 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
 
     info!("FTS Extensions starting…");
 
-    // SWELL must be available globally before any Swell::get() calls
-    // (needed for menu hook InsertMenuItem, CreatePopupMenu, etc.)
+    // Low-level REAPER and SWELL APIs must be available globally before
+    // any Reaper::get() / Swell::get() calls (needed for menus, panels, etc.)
+    let _ = reaper_low::Reaper::make_available_globally(reaper_low::Reaper::load(context));
     let _ = reaper_low::Swell::make_available_globally(reaper_low::Swell::load(context));
 
     daw::reaper::set_plugin_context(context);
