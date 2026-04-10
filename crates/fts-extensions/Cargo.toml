@@ -25,6 +25,9 @@ keyflow = { workspace = true }
 # DAW API — in-process via LocalCaller
 daw = { workspace = true, features = ["reaper", "sync"] }
 
+# Dioxus panel rendering for REAPER dock windows
+reaper-dioxus = { workspace = true }
+
 # REAPER entry point machinery
 reaper-low.workspace = true
 reaper-medium.workspace = true
@@ -40,3 +43,9 @@ eyre.workspace = true
 # Observability
 tracing.workspace = true
 tracing-subscriber.workspace = true
+tracing-appender.workspace = true
+
+[dev-dependencies]
+reaper-test = { workspace = true }
+eyre.workspace = true
+tokio = { workspace = true, features = ["macros"] }

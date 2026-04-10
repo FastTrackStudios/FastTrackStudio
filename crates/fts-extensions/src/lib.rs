@@ -101,6 +101,7 @@ extern "C" fn timer_callback() {
         catch_panic("poll_and_broadcast", daw::reaper::poll_and_broadcast);
         catch_panic("poll_and_broadcast_tracks", daw::reaper::poll_and_broadcast_tracks);
         catch_panic("process_pending_actions", std::panic::AssertUnwindSafe(|| process_pending_actions(app)));
+        catch_panic("update_panels", reaper_dioxus::update_panels);
     }
 }
 
@@ -325,9 +326,19 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
         Err(e) => warn!("Extensions menu hook registration FAILED: {:?}", e),
     }
 
+    // ── Dioxus panel rendering ────────────────────────────────────────
+    reaper_dioxus::service::init();
+    let panels = module::collect_panels(&modules);
+    info!(panels = panels.len(), "Panel definitions collected");
+    for panel in &panels {
+        reaper_dioxus::dock::register_panel_from_service(panel);
+    }
+    reaper_dioxus::restore_dock_state();
+
     info!(
         modules = modules.len(),
         actions = all_defs.len(),
+        panels = panels.len(),
         "FTS Extensions ready"
     );
     Ok(())

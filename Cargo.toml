@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "crates/fts-extensions",
+    "xtask",
 ]
 resolver = "2"
 
@@ -15,7 +16,7 @@ dynamic-template-proto = { path = "../dynamic-template/crates/dynamic-template-p
 session = { path = "../session/crates/session" }
 sync = { path = "../sync/crates/sync" }
 sync-proto = { path = "../sync/crates/sync-proto" }
-reaper-input = { path = "../fts-reaper-input/crates/reaper-input" }
+reaper-input = { path = "../input/crates/reaper-input" }
 keyflow = { path = "../keyflow/crates/keyflow", default-features = false }
 crossbeam-channel = "0.5"
 once_cell = "1"
@@ -26,9 +27,12 @@ reaper-low  = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branc
 reaper-macros = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
 reaper-medium = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
 daw = { path = "../daw/crates/daw" }
+reaper-dioxus = { path = "../reaper-lib/crates/reaper-dioxus" }
 tokio = { version = "1.48", features = ["rt-multi-thread", "net", "sync"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
+reaper-test = { path = "../daw/crates/reaper-test" }
 
 # Patch dynamic-template's git deps to use local paths
 [patch."https://github.com/FastTrackStudios/daw.git"]
@@ -50,6 +54,30 @@ actions-proto = { path = "../input_actions/crates/actions-proto" }
 
 [patch."https://github.com/Codys-Wright/vox.git"]
 vox = { path = "../vox/rust/vox" }
+vox-core = { path = "../vox/rust/vox-core" }
+vox-types = { path = "../vox/rust/vox-types" }
+vox-postcard = { path = "../vox/rust/vox-postcard" }
+vox-stream = { path = "../vox/rust/vox-stream" }
+vox-websocket = { path = "../vox/rust/vox-websocket" }
+vox-shm = { path = "../vox/rust/vox-shm" }
+vox-schema = { path = "../vox/rust/vox-schema" }
+vox-macros-core = { path = "../vox/rust/vox-macros-core" }
+vox-macros-parse = { path = "../vox/rust/vox-macros-parse" }
+shm-primitives = { path = "../vox/rust/shm-primitives" }
+shm-primitives-async = { path = "../vox/rust/shm-primitives-async" }
+ur-taking-me-with-you = { path = "../vox/rust/ur-taking-me-with-you" }
+
+[patch."https://github.com/bearcove/vox.git"]
+vox = { path = "../vox/rust/vox" }
+vox-core = { path = "../vox/rust/vox-core" }
+vox-types = { path = "../vox/rust/vox-types" }
+vox-postcard = { path = "../vox/rust/vox-postcard" }
+vox-stream = { path = "../vox/rust/vox-stream" }
+vox-websocket = { path = "../vox/rust/vox-websocket" }
+vox-shm = { path = "../vox/rust/vox-shm" }
+vox-schema = { path = "../vox/rust/vox-schema" }
+vox-macros-core = { path = "../vox/rust/vox-macros-core" }
+vox-macros-parse = { path = "../vox/rust/vox-macros-parse" }
 
 [patch."https://github.com/FastTrackStudios/dynamic-template.git"]
 color-palette = { path = "../dynamic-template/crates/color-palette" }
@@ -61,16 +89,28 @@ session = { path = "../session/crates/session" }
 
 # Unify Blitz: upstream DioxusLabs/blitz → FastTrackStudios/blitz fork
 [patch."https://github.com/DioxusLabs/blitz.git"]
-dioxus-native = { git = "https://github.com/FastTrackStudios/blitz" }
-dioxus-native-dom = { git = "https://github.com/FastTrackStudios/blitz" }
-blitz = { git = "https://github.com/FastTrackStudios/blitz" }
-blitz-dom = { git = "https://github.com/FastTrackStudios/blitz" }
-blitz-html = { git = "https://github.com/FastTrackStudios/blitz" }
-blitz-net = { git = "https://github.com/FastTrackStudios/blitz" }
-blitz-paint = { git = "https://github.com/FastTrackStudios/blitz" }
-blitz-shell = { git = "https://github.com/FastTrackStudios/blitz" }
-blitz-traits = { git = "https://github.com/FastTrackStudios/blitz" }
-stylo_taffy = { git = "https://github.com/FastTrackStudios/blitz" }
+dioxus-native = { path = "../blitz/packages/dioxus-native" }
+dioxus-native-dom = { path = "../blitz/packages/dioxus-native-dom" }
+blitz = { path = "../blitz/packages/blitz" }
+blitz-dom = { path = "../blitz/packages/blitz-dom" }
+blitz-html = { path = "../blitz/packages/blitz-html" }
+blitz-net = { path = "../blitz/packages/blitz-net" }
+blitz-paint = { path = "../blitz/packages/blitz-paint" }
+blitz-shell = { path = "../blitz/packages/blitz-shell" }
+blitz-traits = { path = "../blitz/packages/blitz-traits" }
+stylo_taffy = { path = "../blitz/packages/stylo_taffy" }
+
+[patch."https://github.com/FastTrackStudios/blitz"]
+dioxus-native = { path = "../blitz/packages/dioxus-native" }
+dioxus-native-dom = { path = "../blitz/packages/dioxus-native-dom" }
+blitz = { path = "../blitz/packages/blitz" }
+blitz-dom = { path = "../blitz/packages/blitz-dom" }
+blitz-html = { path = "../blitz/packages/blitz-html" }
+blitz-net = { path = "../blitz/packages/blitz-net" }
+blitz-paint = { path = "../blitz/packages/blitz-paint" }
+blitz-shell = { path = "../blitz/packages/blitz-shell" }
+blitz-traits = { path = "../blitz/packages/blitz-traits" }
+stylo_taffy = { path = "../blitz/packages/stylo_taffy" }
 
 [patch."https://github.com/bearcove/moire"]
 moire = { git = "https://github.com/FastTrackStudios/moire.git", rev = "6d856f2" }
@@ -85,3 +125,9 @@ moire-macros-noop = { git = "https://github.com/FastTrackStudios/moire.git", rev
 moire-runtime = { git = "https://github.com/FastTrackStudios/moire.git", rev = "6d856f2" }
 moire-tokio = { git = "https://github.com/FastTrackStudios/moire.git", rev = "6d856f2" }
 moire-trace-capture = { git = "https://github.com/FastTrackStudios/moire.git", rev = "6d856f2" }
+anyrender = { git = "https://github.com/FastTrackStudios/anyrender.git", rev = "422b5d0" }
+anyrender_vello = { git = "https://github.com/FastTrackStudios/anyrender.git", rev = "422b5d0" }
+anyrender_vello_cpu = { git = "https://github.com/FastTrackStudios/anyrender.git", rev = "422b5d0" }
+anyrender_vello_hybrid = { git = "https://github.com/FastTrackStudios/anyrender.git", rev = "422b5d0" }
+anyrender_svg = { git = "https://github.com/FastTrackStudios/anyrender.git", rev = "422b5d0" }
+wgpu_context = { git = "https://github.com/FastTrackStudios/anyrender.git", rev = "422b5d0" }
