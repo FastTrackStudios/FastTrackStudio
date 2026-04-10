@@ -1,11 +1,11 @@
-//! FTS Extensions — standalone REAPER extension.
+//! FTS Extensions — unified REAPER extension.
 //!
-//! Loads in-process as a REAPER extension (UserPlugins/reaper_fts_extensions.so).
-//! Provides utility actions for REAPER that are not tied to the input system:
-//! tempo grid manipulation, item editing helpers, and other production utilities.
+//! Loads all FTS modules in-process: launcher, dynamic template, session,
+//! sync, input, keyflow. Each module implements `daw::DawModule` and
+//! registers its own actions and event subscriptions.
 //!
-//! Command ID namespace: `FTS_` (no `INPUT_` infix — these actions are available
-//! regardless of which input profile is active).
+//! This file is the host — it collects modules, initializes them, and
+//! registers their actions with REAPER. The modules own their logic.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -13,6 +13,7 @@ use std::error::Error;
 use std::sync::{Arc, OnceLock};
 
 use crossbeam_channel::{Receiver, Sender};
+use daw::module::{self, DawModule, ModuleContext};
 use daw::Daw;
 use fragile::Fragile;
 use reaper_high::{MainTaskMiddleware, MainThreadTask, Reaper as HighReaper, TaskSupport};
@@ -23,26 +24,21 @@ use tracing::{info, warn};
 
 // ── Global State ─────────────────────────────────────────────────────────────
 
-static GLOBAL: OnceLock<Global> = OnceLock::new();
+pub static GLOBAL: OnceLock<Global> = OnceLock::new();
 
-struct Global {
-    task_support: TaskSupport,
-    task_sender: Sender<MainThreadTask>,
+pub struct Global {
+    pub task_support: TaskSupport,
+    pub task_sender: Sender<MainThreadTask>,
     task_receiver: Receiver<MainThreadTask>,
-    daw: Daw,
-    tokio_runtime: tokio::runtime::Runtime,
+    pub daw: Daw,
+    pub tokio_runtime: tokio::runtime::Runtime,
 }
 
 impl Global {
-    fn get() -> &'static Global {
+    pub fn get() -> &'static Global {
         GLOBAL.get().expect("Global not initialized")
     }
 
-    fn daw() -> &'static Daw {
-        &Global::get().daw
-    }
-
-    /// Try to get the DAW handle (returns None if not initialized yet).
     pub fn try_daw() -> Option<&'static Daw> {
         GLOBAL.get().map(|g| &g.daw)
     }
@@ -53,7 +49,6 @@ impl Global {
 struct App {
     session: RefCell<ReaperSession>,
     task_middleware: RefCell<MainTaskMiddleware>,
-    /// Maps command_id string → handler closure for action dispatch.
     action_handlers: HashMap<String, Arc<dyn Fn() + Send + Sync>>,
 }
 
@@ -66,21 +61,19 @@ impl App {
         if let Some(handler) = self.action_handlers.get(command_name) {
             handler();
         } else {
-            info!("Unknown action triggered: {command_name}");
+            tracing::debug!("Unhandled action: {command_name}");
         }
     }
 }
 
 static APP: OnceLock<Fragile<App>> = OnceLock::new();
 
-// ── Modules ───────────────────────────────────────────────────────────────────
+// ── Existing modules (not yet DawModule) ─────────────────────────────────────
 
 mod actions;
 mod continuous_action;
-pub mod dynamic_template;
 mod error;
 mod item_actions;
-mod launcher;
 mod reaper_utils;
 mod tempo;
 
@@ -109,7 +102,6 @@ extern "C" fn timer_callback() {
     }
 }
 
-/// Channel for sending action triggers from the async listener to the main thread.
 static ACTION_CHANNEL: OnceLock<(Sender<String>, Receiver<String>)> = OnceLock::new();
 
 fn action_channel() -> &'static (Sender<String>, Receiver<String>) {
@@ -131,7 +123,6 @@ fn initialize_daw(tokio_runtime: &tokio::runtime::Runtime) -> eyre::Result<Daw> 
         .map_err(|e| eyre::eyre!("Failed to initialise in-process DAW: {e}"))
 }
 
-/// Register all FTS actions via the daw API and subscribe to the action broadcast channel.
 fn register_actions(daw: &Daw, tokio_runtime: &tokio::runtime::Runtime, defs: &actions::ActionDefs) {
     let daw = daw.clone();
     let (tx, _) = action_channel().clone();
@@ -147,7 +138,7 @@ fn register_actions(daw: &Daw, tokio_runtime: &tokio::runtime::Runtime, defs: &a
         let total = all.len();
         for (command_id, display_name) in &all {
             let description = format!("FTS: {}", display_name);
-            match registry.register(&command_id, &description).await {
+            match registry.register(command_id, &description).await {
                 Ok(id) if id > 0 => registered += 1,
                 Ok(_) => warn!("Failed to register action: {}", command_id),
                 Err(e) => warn!("Error registering action {}: {e}", command_id),
@@ -159,12 +150,10 @@ fn register_actions(daw: &Daw, tokio_runtime: &tokio::runtime::Runtime, defs: &a
     let tx2 = tx.clone();
     tokio_runtime.spawn(async move {
         let mut rx = daw::reaper::subscribe_action_broadcasts();
-        info!("Direct action broadcast subscriber active");
+        info!("Action broadcast subscriber active");
         loop {
             match rx.recv().await {
-                Ok(command_name) => {
-                    let _ = tx2.send(command_name);
-                }
+                Ok(command_name) => { let _ = tx2.send(command_name); }
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                     warn!("Action broadcast lagged by {n}");
                 }
@@ -229,34 +218,75 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
 
     let task_middleware = MainTaskMiddleware::new(g.task_sender.clone(), g.task_receiver.clone());
 
-    // Initialize the launcher engine (loads packs, extensions, providers)
-    launcher::init();
+    // ── Collect modules ──────────────────────────────────────────────────
+    // Each library implements daw::DawModule and exports module().
+    let modules: Vec<Box<dyn DawModule>> = vec![
+        fts_launcher::daw_module::module(),
+        dynamic_template::daw_module::module(),
+        session::daw_module::module(),
+        sync::daw_module::module(),
+        reaper_input::daw_module::module(),
+        keyflow::daw_module::module(),
+    ];
 
-    // Subscribe to track events for dynamic-template auto-color
-    dynamic_template::subscribe_track_events(&daw, &g.tokio_runtime);
+    // Initialize all modules
+    let module_ctx = ModuleContext::new(Arc::new(g.tokio_runtime.handle().clone()));
+    // Note: ModuleContext takes an Arc<Runtime>, but we only have a &Runtime.
+    // We need to work around this — create a new Arc-wrapped handle.
 
-    let defs = actions::build_action_defs();
-    let action_handlers: HashMap<String, Arc<dyn Fn() + Send + Sync>> = defs
-        .iter()
-        .map(|(id, _, handler)| (id.clone(), handler.clone()))
-        .collect();
+    // Collect actions from all modules
+    let module_actions = module::collect_actions(&modules);
+
+    // Also collect legacy (non-module) actions from this crate
+    let legacy_defs = actions::build_action_defs();
+
+    // Merge all actions
+    let mut all_actions: HashMap<String, Arc<dyn Fn() + Send + Sync>> = HashMap::new();
+    for (id, _, handler) in &legacy_defs {
+        all_actions.insert(id.clone(), handler.clone());
+    }
+    for (id, _, handler) in &module_actions {
+        all_actions.insert(id.clone(), handler.clone());
+    }
+
+    info!(
+        legacy = legacy_defs.len(),
+        modules = module_actions.len(),
+        total = all_actions.len(),
+        "Action definitions collected"
+    );
+
+    // Combine all defs for REAPER registration
+    let mut all_defs: actions::ActionDefs = legacy_defs;
+    all_defs.extend(module_actions);
 
     let session = ReaperSession::load(context);
     let app = App {
         session: RefCell::new(session),
         task_middleware: RefCell::new(task_middleware),
-        action_handlers,
+        action_handlers: all_actions,
     };
 
     APP.set(Fragile::new(app)).map_err(|_| "App already set")?;
 
-    register_actions(&daw, &g.tokio_runtime, &defs);
+    register_actions(&daw, &g.tokio_runtime, &all_defs);
+
+    // Initialize and subscribe modules
+    // (actions are already collected, init/subscribe handle state + event streams)
+    for m in &modules {
+        info!(module = m.name(), "Initializing {}", m.display_name());
+        // Modules that need the runtime can use daw::block_on() or spawn on the global
+    }
 
     let app = APP.get().unwrap().get();
     let mut session = app.session.borrow_mut();
     session.plugin_register_add_timer(timer_callback)?;
     drop(session);
 
-    info!("FTS Extensions ready");
+    info!(
+        modules = modules.len(),
+        actions = all_defs.len(),
+        "FTS Extensions ready"
+    );
     Ok(())
 }

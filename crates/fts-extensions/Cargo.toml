@@ -13,9 +13,14 @@ path = "src/lib.rs"
 # FTS Launcher — search/workflow engine
 fts-launcher = { workspace = true }
 
-# Dynamic Template — track organization, auto-color, visibility manager
+# Modules — each implements daw::DawModule
 dynamic-template = { workspace = true }
 dynamic-template-proto = { workspace = true }
+session = { workspace = true }
+sync = { workspace = true }
+sync-proto = { workspace = true }
+reaper-input = { workspace = true }
+keyflow = { workspace = true }
 
 # DAW API — in-process via LocalCaller
 daw = { workspace = true, features = ["reaper", "sync"] }

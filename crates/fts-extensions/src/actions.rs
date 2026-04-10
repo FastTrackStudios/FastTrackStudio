@@ -10,6 +10,7 @@ use reaper_high::Reaper;
 use tracing::info;
 
 use crate::continuous_action::start_continuous_action;
+#[allow(unused_imports)]
 use crate::item_actions;
 use crate::tempo::{
     MoveGridVariant, register_move_grid_actions, set_move_grid_variant,
@@ -109,11 +110,8 @@ pub fn build_action_defs() -> ActionDefs {
         ),
     ];
 
-    // Add launcher actions
-    defs.extend(fts_launcher::LauncherEngine::action_defs());
-
-    // Add dynamic-template actions (sort, auto-color, visibility)
-    defs.extend(crate::dynamic_template::build_action_defs());
+    // Module actions (launcher, dynamic-template, session, sync, input, keyflow)
+    // are collected via daw::module::collect_actions() in lib.rs — not here.
 
     defs
 }
