@@ -90,7 +90,6 @@ dependencies = [
 [[package]]
 name = "actions-proto"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/input_actions.git?branch=main#51791370fec083ffe1f66c42a821e8262c157a60"
 dependencies = [
  "convert_case 0.6.0",
  "facet",
@@ -1034,6 +1033,14 @@ dependencies = [
 [[package]]
 name = "color-palette"
 version = "0.1.0"
+dependencies = [
+ "facet",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "color-palette"
+version = "0.1.0"
 source = "git+https://github.com/FastTrackStudios/dynamic-template.git?branch=main#ecc186fd5ae934e5e05ff52d1cbf9c1c9d4cbfe6"
 dependencies = [
  "facet",
@@ -1064,7 +1071,7 @@ version = "3.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "faf9468729b8cbcea668e36183cb69d317348c2e08e994829fb56ebfdfbaac34"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1590,7 +1597,7 @@ version = "0.1.0"
 dependencies = [
  "daw-control",
  "daw-control-sync",
- "daw-proto 0.1.0",
+ "daw-proto",
  "daw-reaper",
  "tokio",
 ]
@@ -1599,7 +1606,7 @@ dependencies = [
 name = "daw-control"
 version = "0.1.0"
 dependencies = [
- "daw-proto 0.1.0",
+ "daw-proto",
  "eyre",
  "facet",
  "futures",
@@ -1632,17 +1639,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "daw-proto"
-version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/daw.git?branch=main#e69f764b69d2869b46b0dae821eb8c8175f35769"
-dependencies = [
- "actions-proto",
- "facet",
- "thiserror 2.0.18",
- "vox",
-]
-
-[[package]]
 name = "daw-reaper"
 version = "0.1.0"
 dependencies = [
@@ -1650,7 +1646,7 @@ dependencies = [
  "crossbeam-channel",
  "daw-control",
  "daw-control-sync",
- "daw-proto 0.1.0",
+ "daw-proto",
  "dawfile-reaper",
  "enumflags2",
  "eyre",
@@ -1671,7 +1667,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
- "daw-proto 0.1.0",
+ "daw-proto",
  "libc",
  "nom 8.0.0",
  "rayon",
@@ -2138,6 +2134,34 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92773504d58c093f6de2459af4af33faa518c13451eb8f2b5698ed3d36e7c813"
 
 [[package]]
+name = "dynamic-template"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "color-palette 0.1.0",
+ "daw-proto",
+ "dynamic-template-proto",
+ "facet",
+ "monarchy",
+ "music-catalog 0.1.0",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "vox",
+]
+
+[[package]]
+name = "dynamic-template-proto"
+version = "0.1.0"
+dependencies = [
+ "actions-proto",
+ "daw-proto",
+ "facet",
+ "thiserror 2.0.18",
+ "vox",
+]
+
+[[package]]
 name = "ecb"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2262,7 +2286,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2782,6 +2806,8 @@ version = "0.1.0"
 dependencies = [
  "crossbeam-channel",
  "daw",
+ "dynamic-template",
+ "dynamic-template-proto",
  "eyre",
  "fragile",
  "fts-launcher",
@@ -3801,7 +3827,7 @@ dependencies = [
  "portable-atomic",
  "portable-atomic-util",
  "serde_core",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3954,7 +3980,7 @@ source = "git+https://github.com/FastTrackStudios/keyflow.git?branch=main#635a59
 dependencies = [
  "color-eyre",
  "colored",
- "daw-proto 0.1.0 (git+https://github.com/FastTrackStudios/daw.git?branch=main)",
+ "daw-proto",
  "derive_more 1.0.0",
  "engraver",
  "facet",
@@ -3972,11 +3998,11 @@ name = "keyflow-proto"
 version = "0.1.0"
 source = "git+https://github.com/FastTrackStudios/keyflow.git?branch=main#635a59814d88e14000553e78e76771519e1b9191"
 dependencies = [
- "color-palette",
- "daw-proto 0.1.0 (git+https://github.com/FastTrackStudios/daw.git?branch=main)",
+ "color-palette 0.1.0 (git+https://github.com/FastTrackStudios/dynamic-template.git?branch=main)",
+ "daw-proto",
  "facet",
  "helgoboss-midi",
- "music-catalog",
+ "music-catalog 0.1.0 (git+https://github.com/FastTrackStudios/dynamic-template.git?branch=main)",
  "serde",
  "thiserror 2.0.18",
  "tracing",
@@ -4672,11 +4698,42 @@ dependencies = [
 ]
 
 [[package]]
+name = "monarchy"
+version = "0.1.0"
+dependencies = [
+ "facet",
+ "facet-json",
+ "facet-toml",
+ "monarchy_derive",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "toml",
+]
+
+[[package]]
+name = "monarchy_derive"
+version = "0.1.0"
+dependencies = [
+ "convert_case 0.6.0",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
+name = "music-catalog"
+version = "0.1.0"
+dependencies = [
+ "color-palette 0.1.0",
+]
+
+[[package]]
 name = "music-catalog"
 version = "0.1.0"
 source = "git+https://github.com/FastTrackStudios/dynamic-template.git?branch=main#ecc186fd5ae934e5e05ff52d1cbf9c1c9d4cbfe6"
 dependencies = [
- "color-palette",
+ "color-palette 0.1.0 (git+https://github.com/FastTrackStudios/dynamic-template.git?branch=main)",
 ]
 
 [[package]]
@@ -4829,7 +4886,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -6412,7 +6469,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -6885,7 +6942,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a766e1110788c36f4fa1c2b71b387a7815aa65f88ce0229841826633d93723e"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -9045,7 +9102,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -10071,3 +10128,7 @@ checksum = "29ce2c8a9384ad323cf564b67da86e21d3cfdff87908bc1223ed5c99bc792713"
 dependencies = [
  "zune-core",
 ]
+
+[[patch.unused]]
+name = "daw-extension-runtime"
+version = "0.1.0"

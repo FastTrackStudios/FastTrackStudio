@@ -41,6 +41,11 @@ impl Global {
     fn daw() -> &'static Daw {
         &Global::get().daw
     }
+
+    /// Try to get the DAW handle (returns None if not initialized yet).
+    pub fn try_daw() -> Option<&'static Daw> {
+        GLOBAL.get().map(|g| &g.daw)
+    }
 }
 
 // ── App ──────────────────────────────────────────────────────────────────────
@@ -72,6 +77,7 @@ static APP: OnceLock<Fragile<App>> = OnceLock::new();
 
 mod actions;
 mod continuous_action;
+pub mod dynamic_template;
 mod error;
 mod item_actions;
 mod launcher;
@@ -225,6 +231,9 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
 
     // Initialize the launcher engine (loads packs, extensions, providers)
     launcher::init();
+
+    // Subscribe to track events for dynamic-template auto-color
+    dynamic_template::subscribe_track_events(&daw, &g.tokio_runtime);
 
     let defs = actions::build_action_defs();
     let action_handlers: HashMap<String, Arc<dyn Fn() + Send + Sync>> = defs

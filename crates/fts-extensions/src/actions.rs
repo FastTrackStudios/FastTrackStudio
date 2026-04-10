@@ -112,6 +112,9 @@ pub fn build_action_defs() -> ActionDefs {
     // Add launcher actions
     defs.extend(fts_launcher::LauncherEngine::action_defs());
 
+    // Add dynamic-template actions (sort, auto-color, visibility)
+    defs.extend(crate::dynamic_template::build_action_defs());
+
     defs
 }
 
