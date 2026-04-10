@@ -295,12 +295,8 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
 
     register_actions_sync(&all_defs);
 
-    // Initialize and subscribe modules
-    // (actions are already collected, init/subscribe handle state + event streams)
-    for m in &modules {
-        info!(module = m.name(), "Initializing {}", m.display_name());
-        // Modules that need the runtime can use daw::block_on() or spawn on the global
-    }
+    // Initialize all modules and subscribe to events
+    module::init_all(&modules, &module_ctx);
 
     let app = APP.get().unwrap().get();
     let mut session = app.session.borrow_mut();
