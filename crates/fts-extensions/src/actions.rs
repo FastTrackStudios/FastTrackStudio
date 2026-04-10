@@ -7,8 +7,6 @@
 use std::sync::Arc;
 
 use reaper_high::Reaper;
-use tracing::info;
-
 use crate::continuous_action::start_continuous_action;
 #[allow(unused_imports)]
 use crate::item_actions;
@@ -18,7 +16,7 @@ use crate::tempo::{
     snap_grid_to_transient_handler,
 };
 
-pub type ActionDefs = Vec<(String, String, Arc<dyn Fn() + Send + Sync>)>;
+pub type ActionDefs = Vec<(String, String, Arc<dyn Fn() + Send + Sync>, bool)>;
 
 fn show(msg: impl Into<String>) {
     Reaper::get().show_console_msg(msg.into());
@@ -31,7 +29,7 @@ pub fn build_action_defs() -> ActionDefs {
     // Register continuous actions with the continuous-action timer system.
     register_move_grid_actions();
 
-    let mut defs = vec![
+    let defs = vec![
         // ── Launcher ─────────────────────────────────────────────────────
         // ── Tempo grid — move ────────────────────────────────────────────────
         action(
@@ -108,6 +106,18 @@ pub fn build_action_defs() -> ActionDefs {
             "Split selected items at cursor with crossfade on left",
             || item_actions::split_items_with_crossfade_left(),
         ),
+        // ── Info ─────────────────────────────────────────────────────────────
+        menu_action(
+            "FTS_INFO",
+            "FastTrackStudio Info",
+            || {
+                let version = env!("CARGO_PKG_VERSION");
+                Reaper::get().show_console_msg(format!(
+                    "FastTrackStudio Extensions v{version}\n\
+                     https://github.com/FastTrackStudios\n"
+                ));
+            },
+        ),
     ];
 
     // Module actions (launcher, dynamic-template, session, sync, input, keyflow)
@@ -116,11 +126,20 @@ pub fn build_action_defs() -> ActionDefs {
     defs
 }
 
-/// Convenience constructor for a single action entry.
+/// Convenience constructor for a single action entry (not shown in menu).
 fn action(
     id: &str,
     display_name: &str,
     handler: impl Fn() + Send + Sync + 'static,
-) -> (String, String, Arc<dyn Fn() + Send + Sync>) {
-    (id.to_string(), display_name.to_string(), Arc::new(handler))
+) -> (String, String, Arc<dyn Fn() + Send + Sync>, bool) {
+    (id.to_string(), format!("FTS: {display_name}"), Arc::new(handler), false)
+}
+
+/// Convenience constructor for a single action entry shown in the Extensions menu.
+fn menu_action(
+    id: &str,
+    display_name: &str,
+    handler: impl Fn() + Send + Sync + 'static,
+) -> (String, String, Arc<dyn Fn() + Send + Sync>, bool) {
+    (id.to_string(), format!("FTS: {display_name}"), Arc::new(handler), true)
 }

@@ -31,7 +31,8 @@ pub struct Global {
     pub task_sender: Sender<MainThreadTask>,
     task_receiver: Receiver<MainThreadTask>,
     pub daw: Daw,
-    pub tokio_runtime: tokio::runtime::Runtime,
+    pub tokio_runtime: Arc<tokio::runtime::Runtime>,
+    _log_guard: tracing_appender::non_blocking::WorkerGuard,
 }
 
 impl Global {
@@ -74,6 +75,7 @@ mod actions;
 mod continuous_action;
 mod error;
 mod item_actions;
+mod menu;
 mod reaper_utils;
 mod tempo;
 
@@ -123,63 +125,84 @@ fn initialize_daw(tokio_runtime: &tokio::runtime::Runtime) -> eyre::Result<Daw> 
         .map_err(|e| eyre::eyre!("Failed to initialise in-process DAW: {e}"))
 }
 
-fn register_actions(daw: &Daw, tokio_runtime: &tokio::runtime::Runtime, defs: &actions::ActionDefs) {
-    let daw = daw.clone();
-    let (tx, _) = action_channel().clone();
+/// Register all actions synchronously on the main thread (like helgobox).
+///
+/// This ensures command IDs are available immediately for the menu hook
+/// and action list. Actions are registered via `reaper_high::Reaper::register_action`,
+/// and gaccels are added manually so they appear in REAPER's action list even
+/// after `wake_up()` has already run.
+fn register_actions_sync(defs: &actions::ActionDefs) {
+    let reaper = HighReaper::get();
+    let (tx, _) = action_channel();
 
-    let all: Vec<(String, String)> = defs
-        .iter()
-        .map(|(id, display_name, _)| (id.clone(), display_name.clone()))
-        .collect();
+    for (command_id, display_name, handler, _show_in_menu) in defs {
+        let handler = handler.clone();
+        let tx = tx.clone();
+        let cmd_name_for_broadcast = command_id.clone();
 
-    tokio_runtime.spawn(async move {
-        let registry = daw.action_registry();
-        let mut registered = 0usize;
-        let total = all.len();
-        for (command_id, display_name) in &all {
-            let description = format!("FTS: {}", display_name);
-            match registry.register(command_id, &description).await {
-                Ok(id) if id > 0 => registered += 1,
-                Ok(_) => warn!("Failed to register action: {}", command_id),
-                Err(e) => warn!("Error registering action {}: {e}", command_id),
+        // Leak strings for 'static lifetime — actions live for the process lifetime.
+        let cmd_name: &'static str = Box::leak(command_id.clone().into_boxed_str());
+        let desc: &'static str = Box::leak(display_name.clone().into_boxed_str());
+
+        let action = reaper.register_action(
+            cmd_name,
+            desc,
+            None,
+            move || {
+                handler();
+                // Also forward to the action channel so App::dispatch_action
+                // can handle it (for modules that use the broadcast path).
+                let _ = tx.send(cmd_name_for_broadcast.clone());
+            },
+            reaper_high::ActionKind::NotToggleable,
+        );
+
+        // Register gaccel so the action appears in REAPER's action list
+        // (register_action doesn't do this after wake_up has already run).
+        let cmd_id = action.command_id();
+        {
+            let gaccel = reaper_medium::OwnedGaccelRegister::without_key_binding(cmd_id, desc);
+            let mut session = reaper.medium_session();
+            if let Err(e) = session.plugin_register_add_gaccel(gaccel) {
+                warn!("Failed to register gaccel for '{}': {:?}", command_id, e);
             }
         }
-        info!("Registered {registered}/{total} FTS actions");
-    });
 
-    let tx2 = tx.clone();
-    tokio_runtime.spawn(async move {
-        let mut rx = daw::reaper::subscribe_action_broadcasts();
-        info!("Action broadcast subscriber active");
-        loop {
-            match rx.recv().await {
-                Ok(command_name) => { let _ = tx2.send(command_name); }
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                    warn!("Action broadcast lagged by {n}");
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                    info!("Action broadcast channel closed");
-                    break;
-                }
-            }
-        }
-    });
+        // Leak the RegisteredAction so it stays alive (action stays registered).
+        std::mem::forget(action);
+    }
+
+    info!("Registered {} FTS actions (synchronous)", defs.len());
 }
 
 // ── Entry point ──────────────────────────────────────────────────────────────
 
 #[reaper_extension_plugin]
 fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
-    let log_file = std::fs::File::create("/tmp/reaper-fts-extensions.log")?;
+    // Tracing -> rolling daily log file in $XDG_STATE_HOME/fasttrackstudio/
+    let log_dir = std::env::var("XDG_STATE_HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| {
+            std::path::PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| "/tmp".into()))
+                .join(".local/state")
+        })
+        .join("fasttrackstudio");
+    std::fs::create_dir_all(&log_dir).ok();
+    let file_appender = tracing_appender::rolling::daily(&log_dir, "reaper-fts-extensions.log");
+    let (non_blocking, log_guard) = tracing_appender::non_blocking(file_appender);
     tracing_subscriber::fmt()
-        .with_writer(std::sync::Mutex::new(log_file))
+        .with_writer(non_blocking)
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive(tracing::Level::DEBUG.into()),
+                .add_directive(tracing::Level::INFO.into()),
         )
         .init();
 
     info!("FTS Extensions starting…");
+
+    // SWELL must be available globally before any Swell::get() calls
+    // (needed for menu hook InsertMenuItem, CreatePopupMenu, etc.)
+    let _ = reaper_low::Swell::make_available_globally(reaper_low::Swell::load(context));
 
     daw::reaper::set_plugin_context(context);
 
@@ -193,10 +216,12 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
         Err(_) => tracing::debug!("REAPER high-level API already loaded"),
     }
 
-    let tokio_runtime = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(2)
-        .enable_all()
-        .build()?;
+    let tokio_runtime = Arc::new(
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()?,
+    );
 
     let (task_sender, task_receiver) = crossbeam_channel::unbounded();
     let task_support = TaskSupport::new(task_sender.clone());
@@ -210,6 +235,7 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
             task_receiver: task_receiver.clone(),
             daw: daw.clone(),
             tokio_runtime,
+            _log_guard: log_guard,
         })
         .map_err(|_| "Global already set")?;
 
@@ -230,9 +256,7 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     ];
 
     // Initialize all modules
-    let module_ctx = ModuleContext::new(Arc::new(g.tokio_runtime.handle().clone()));
-    // Note: ModuleContext takes an Arc<Runtime>, but we only have a &Runtime.
-    // We need to work around this — create a new Arc-wrapped handle.
+    let module_ctx = ModuleContext::new(g.tokio_runtime.clone());
 
     // Collect actions from all modules
     let module_actions = module::collect_actions(&modules);
@@ -242,10 +266,10 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
 
     // Merge all actions
     let mut all_actions: HashMap<String, Arc<dyn Fn() + Send + Sync>> = HashMap::new();
-    for (id, _, handler) in &legacy_defs {
+    for (id, _, handler, _) in &legacy_defs {
         all_actions.insert(id.clone(), handler.clone());
     }
-    for (id, _, handler) in &module_actions {
+    for (id, _, handler, _) in &module_actions {
         all_actions.insert(id.clone(), handler.clone());
     }
 
@@ -269,7 +293,7 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
 
     APP.set(Fragile::new(app)).map_err(|_| "App already set")?;
 
-    register_actions(&daw, &g.tokio_runtime, &all_defs);
+    register_actions_sync(&all_defs);
 
     // Initialize and subscribe modules
     // (actions are already collected, init/subscribe handle state + event streams)
@@ -281,7 +305,29 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     let app = APP.get().unwrap().get();
     let mut session = app.session.borrow_mut();
     session.plugin_register_add_timer(timer_callback)?;
+
     drop(session);
+
+    // ── Extensions → FastTrackStudio menu ────────────────────────────────
+    // Collect menu entries from all action defs that have show_in_menu=true.
+    let menu_entries: Vec<(String, String)> = all_defs
+        .iter()
+        .filter(|(_, _, _, show_in_menu)| *show_in_menu)
+        .map(|(id, display_name, _, _)| (id.clone(), display_name.clone()))
+        .collect();
+    info!(menu_entries = menu_entries.len(), "Menu entries collected");
+    menu::set_menu_entries(menu_entries);
+
+    // Register the menu hook using the high-level Reaper session (like helgobox).
+    info!("Registering Extensions menu hook...");
+    HighReaper::get().medium_reaper().add_extensions_main_menu();
+    match HighReaper::get()
+        .medium_session()
+        .plugin_register_add_hook_custom_menu::<menu::FtsMenuHook>()
+    {
+        Ok(()) => info!("Extensions menu hook registered successfully"),
+        Err(e) => warn!("Extensions menu hook registration FAILED: {:?}", e),
+    }
 
     info!(
         modules = modules.len(),
