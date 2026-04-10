@@ -328,6 +328,7 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
 
     // ── Dioxus panel rendering ────────────────────────────────────────
     reaper_dioxus::service::init();
+    reaper_dioxus::dock::init(reaper_low::Reaper::get(), reaper_low::Swell::get());
     let panels = module::collect_panels(&modules);
     info!(panels = panels.len(), "Panel definitions collected");
     for panel in &panels {
