@@ -42,5 +42,9 @@
 //! ```
 
 pub mod event;
+pub mod output;
+pub mod external;
 
 pub use event::*;
+pub use output::*;
+pub use external::*;
