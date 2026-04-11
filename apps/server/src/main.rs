@@ -192,16 +192,33 @@ async fn main() -> eyre::Result<()> {
         .route("/api/sync/status", get(sync_status))
         .route("/api/sync/trigger", post(trigger_sync))
         .route("/api/health", get(health))
-        .layer(CorsLayer::permissive())
-        .with_state(state);
+        .layer(CorsLayer::permissive());
 
-    // ── HTTP + WebSocket server ──────────────────────────────────
+    // Clone svc for Vox before state is consumed by axum
+    let vox_port: u16 = std::env::var("VOX_PORT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(3457);
+    let vox_svc = state.svc.clone();
+
+    let app = app.with_state(state);
+
+    tokio::spawn(async move {
+        let dispatcher = vault_core::VaultServiceDispatcher::new((*vox_svc).clone());
+        info!(port = vox_port, "Vox WebSocket RPC server starting");
+        if let Err(e) = vox::serve(format!("ws://0.0.0.0:{vox_port}"), dispatcher).await {
+            warn!(error = %e, "Vox server error");
+        }
+    });
+
+    // ── HTTP + JSON-RPC WebSocket server ─────────────────────────
     let bind = std::env::var("BIND_ADDR").unwrap_or_else(|_| "0.0.0.0:3456".to_string());
     let listener = tokio::net::TcpListener::bind(&bind).await?;
     info!("HTTP server listening on {}", bind);
     info!("Endpoints:");
-    info!("  REST API:     http://{bind}/api/*");
-    info!("  WebSocket:    ws://{bind}/vox");
+    info!("  REST API:      http://{bind}/api/*");
+    info!("  JSON-RPC WS:   ws://{bind}/vox");
+    info!("  Vox RPC:       ws://0.0.0.0:{vox_port}");
     axum::serve(listener, app).await?;
     Ok(())
 }

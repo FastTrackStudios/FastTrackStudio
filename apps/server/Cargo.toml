@@ -11,7 +11,7 @@ serde_json.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 eyre.workspace = true
-vox.workspace = true
+vox = { workspace = true, features = ["transport-websocket"] }
 vox-core.workspace = true
 vox-websocket.workspace = true
 moire.workspace = true

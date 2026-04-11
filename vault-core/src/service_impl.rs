@@ -282,3 +282,26 @@ impl VaultServiceImpl {
         None
     }
 }
+
+// ── VaultService trait implementation ────────────────────────────────────────
+// Formally implements the #[vox::service] trait so that VaultServiceDispatcher
+// can wrap VaultServiceImpl for Vox RPC serving.
+
+impl crate::service::VaultService for VaultServiceImpl {
+    async fn list_tasks(&self) -> Vec<Task> { self.list_tasks().await }
+    async fn execute_query(&self, query: Query) -> Vec<Task> { self.execute_query(query).await }
+    async fn urgency_score(&self, task: Task) -> i32 { self.urgency_score(task).await }
+    async fn create_task(&self, task: Task) -> Result<Task, VaultError> { self.create_task(task).await }
+    async fn update_task(&self, task: Task) -> Result<Task, VaultError> { self.update_task(task).await }
+    async fn complete_task(&self, title: String) -> Result<Task, VaultError> { self.complete_task(title).await }
+    async fn delete_task(&self, title: String) -> Result<(), VaultError> { self.delete_task(title).await }
+    async fn search_tasks(&self, query: String) -> Vec<Task> { self.search_tasks(query).await }
+    async fn tasks_for_user(&self, username: String) -> Vec<Task> { self.tasks_for_user(username).await }
+    async fn tasks_due_by(&self, date: String) -> Vec<Task> { self.tasks_due_by(date).await }
+    async fn list_projects(&self) -> Vec<Project> { self.list_projects().await }
+    async fn project_stats(&self, project_title: String) -> ProjectStats { self.project_stats(project_title).await }
+    async fn next_task(&self, project_title: String) -> Option<Task> { self.next_task(project_title).await }
+    async fn tasks_for_project(&self, project_title: String) -> Vec<Task> { self.tasks_for_project(project_title).await }
+    async fn trigger_sync(&self) -> Result<crate::service::SyncStats, VaultError> { self.trigger_sync().await }
+    async fn sync_status(&self) -> Option<crate::service::SyncStats> { self.sync_status().await }
+}
