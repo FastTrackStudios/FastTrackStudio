@@ -37,7 +37,7 @@ pub use query::{Filter, Group, GroupedTasks, TaskGroup, Query, Sort};
 pub use capture::{CaptureInput, parse_capture};
 
 #[cfg(feature = "server")]
-pub use service::{VaultError, VaultService, vault_service_service_descriptor};
+pub use service::{VaultError, VaultService, VaultServiceDispatcher, SyncStats, vault_service_service_descriptor};
 #[cfg(feature = "server")]
 pub use vault::Vault;
 #[cfg(feature = "server")]
