@@ -31,6 +31,7 @@ mod s3;
 mod webdav;
 mod nextcloud;
 pub mod nextcloud_sync;
+pub mod github;
 
 pub use traits::*;
 pub use local::LocalProvider;
@@ -41,3 +42,4 @@ pub use webdav::{WebDavProvider, WebDavConfig};
 pub mod mock;
 pub use mock::MockProvider;
 pub use nextcloud::{NextcloudProvider, NextcloudConfig};
+pub use github::{GitHubSync, GitHubConfig, GitHubSyncResult};
