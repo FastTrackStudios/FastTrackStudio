@@ -1,50 +1,80 @@
 # Task — Vision
 
+**A local-first, real-time collaborative production workflow management platform — backed by markdown files you own.**
+
 ## The Problem
 
-Task and project management is fragmented. Your tasks live in one app, your files in another, your kanban boards in a third, and your calendar in a fourth. None of them talk to each other. You lose context switching between tools, and nothing is self-contained.
-
-For teams, it's worse — project files are scattered across drives, cloud storage, and collaboration tools. There's no single source of truth that ties a project's tasks, files, and communication together.
+Production work — music, video, events, software, creative projects — involves tasks, schedules, file delivery, team coordination, budgets, and client communication. These are fragmented across dozens of tools that don't talk to each other. Nothing is self-contained, nothing works offline, and you don't own your data.
 
 ## The Solution
 
-**Task** is an open, file-based task and project management system that works everywhere:
+**Task** is an open platform that manages the full lifecycle of production work:
 
-- **Markdown files are the source of truth** — plain `.md` files with YAML frontmatter, readable by any text editor
-- **Obsidian-compatible** — works as an Obsidian vault for personal tasks
-- **Nextcloud-native** — full integration with Nextcloud Tasks, Deck, WebDAV, and user management for team collaboration
-- **Self-contained project folders** — each project is a folder with everything: `project.md`, `tasks/*.md`, session files, media, deliverables
-- **Multiple views, same data** — desktop app, CLI, Obsidian, Nextcloud Deck (kanban), Nextcloud Tasks (list), CalDAV clients (Apple Reminders, Thunderbird, GNOME To Do)
+- **Local-first** — every client has a full copy of the data. Works offline. Syncs when connected. No server dependency for core operations.
+- **Real-time collaborative** — multiple people edit the same project simultaneously. Changes propagate instantly via WebSocket. Conflicts are detected and resolved.
+- **File-based source of truth** — plain `.md` files with YAML properties and structured markdown body. Readable by any text editor, portable to any system.
+- **Self-contained project folders** — a project is a folder. Tasks, schedules, deliverables, session files, media — everything together. Copy the folder and you have everything.
+- **Obsidian-compatible** — works as an Obsidian vault. Properties panel, Dataview, checkboxes, wikilinks — all native.
+- **Nextcloud-native** — full integration with Nextcloud Tasks (CalDAV), Deck (kanban), WebDAV (files), and user management for team collaboration.
+- **Multiple views, same data** — desktop app, web app, mobile app, CLI, Obsidian, Nextcloud Deck, Nextcloud Tasks, Apple Reminders, any CalDAV client.
+- **Events as first-class entities** — concerts, services, recording sessions, shoots. Recurring events with templates and per-instance overrides. Not everything is a project.
+- **Download portals** — role-based file distribution. One link for the orchestra, each person picks their part.
+- **Self-hosted, privacy-first** — your infrastructure, your data, no cloud dependency.
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                         Clients                              │
-│  Desktop App · Mobile App · Web App · CLI · Obsidian Plugin  │
-└────────────────────────────┬────────────────────────────────┘
-                             │
-                    ┌────────▼────────┐
-                    │   task-server   │  HTTP API + sync loop
-                    └────────┬────────┘
-                             │
-              ┌──────────────┼──────────────┐
-              │              │              │
-     ┌────────▼──────┐ ┌────▼─────┐ ┌──────▼───────┐
-     │ vault-core    │ │ CalDAV   │ │ Nextcloud    │
-     │ (Rust engine) │ │ (VTODO)  │ │ (Deck/WebDAV)│
-     └────────┬──────┘ └────┬─────┘ └──────┬───────┘
-              │              │              │
-     ┌────────▼──────────────▼──────────────▼───────┐
-     │              Storage Providers                │
-     │  Local · NFS · Nextcloud · S3 · WebDAV · Git  │
-     └──────────────────────┬───────────────────────┘
-                            │
-              ┌─────────────▼─────────────┐
-              │    Project Folders (.md)    │
-              │  project.md + tasks/*.md   │
-              │  + sessions/ audio/ video/ │
-              └───────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                          Clients                                 │
+│   Desktop · Web · Mobile · CLI · Obsidian · Nextcloud Deck       │
+│                                                                  │
+│   Each client has a FULL LOCAL COPY of project data (.md files)  │
+│   All operations work offline. Sync is eventual.                 │
+└────────────────────────┬────────────────────────────────────────┘
+                         │  WebSocket (real-time ops)
+                         │  REST API (CRUD)
+                ┌────────▼────────┐
+                │   task-server   │
+                │  ┌────────────┐ │
+                │  │ Real-time  │ │  WebSocket hub — broadcasts field-level
+                │  │ sync layer │ │  operations to all connected clients
+                │  └─────┬──────┘ │
+                │  ┌─────▼──────┐ │
+                │  │  In-memory │ │  Merged state from all clients
+                │  │   state    │ │  Debounced writes to .md files
+                │  └─────┬──────┘ │
+                │  ┌─────▼──────┐ │
+                │  │   Index    │ │  SQLite (queries) + Redis (hot cache)
+                │  │   cache    │ │  Rebuilt from files at any time
+                │  └─────┬──────┘ │
+                │  ┌─────▼──────┐ │
+                │  │ Sync loop  │ │  Nextcloud CalDAV + Deck + WebDAV
+                │  └────────────┘ │
+                └────────┬────────┘
+                         │
+          ┌──────────────┼──────────────┐
+          │              │              │
+ ┌────────▼──────┐ ┌────▼─────┐ ┌──────▼───────┐
+ │    Local      │ │ CalDAV   │ │  Nextcloud   │
+ │  Filesystem   │ │ (VTODO)  │ │ (Deck/WebDAV)│
+ └────────┬──────┘ └────┬─────┘ └──────┬───────┘
+          │              │              │
+ ┌────────▼──────────────▼──────────────▼───────┐
+ │              Storage Providers                │
+ │  Local · NFS · Nextcloud · S3 · WebDAV · Git  │
+ └──────────────────────┬───────────────────────┘
+                        │
+          ┌─────────────▼─────────────┐
+          │   Projects & Events (.md)  │
+          │                            │
+          │  project.md · tasks/*.md   │
+          │  event.md · setlist.md     │
+          │  outputs/ · downloads/     │
+          │  sessions/ · audio/ video/ │
+          └───────────────────────────┘
+              ↑ source of truth
+              Files are always portable.
+              Delete the server, keep the folders.
 ```
 
 ## Core Principles
@@ -292,9 +322,24 @@ All sharing the same Dioxus components and fts-ui design system:
 
 ## Design Philosophy
 
-- **Generic core, specific edges** — the engine is universal; domain knowledge lives in workflows and integrations
-- **Files are forever** — markdown outlasts any app or service
-- **Open by default** — schema, protocols, and standards are open
-- **Self-hosted first** — your data on your hardware
-- **Multiple views, one truth** — every tool sees the same data
-- **Incremental adoption** — start with Obsidian, add Nextcloud when you need teams, add the server when you need APIs
+- **Local-first** — every client works fully offline. Sync is eventual, not required. Your laptop has the data, not just a cache of it.
+- **Files are forever** — markdown outlasts any app, service, or company. No proprietary format, no database migration, no export needed.
+- **Real-time when connected** — field-level operations over WebSocket. See changes as they happen. But never block on connectivity.
+- **Events ≠ Projects** — a weekly church service is an event that recurs, not a new project every week. Events have templates with per-instance overrides.
+- **Properties are simple, body is rich** — YAML frontmatter for key/value metadata (like Obsidian properties). Structured markdown (tables, checklists) in the body for complex data (setlists, input lists).
+- **Generic core, specific edges** — the engine is universal. Domain knowledge (music events, video shoots, software releases) lives in workflow schemas.
+- **Open standards** — CalDAV/VTODO, WebDAV, Markdown, YAML. Not "compatible with" — actually IS these standards.
+- **Self-hosted, privacy-first** — your infrastructure, your data. No cloud dependency, no telemetry, no lock-in.
+- **Multiple views, one truth** — desktop, web, mobile, CLI, Obsidian, Nextcloud Deck, Apple Reminders. Same files underneath.
+- **Incremental adoption** — start with Obsidian and markdown files. Add Nextcloud when you need teams. Add the server when you need real-time and portals. Each layer is optional.
+
+## Known Limitations & Trade-offs
+
+- **Rename/move breaks links** — file paths are the identifiers. Renaming a project folder breaks references from other projects. Mitigation: UUID-based linking with path as cached lookup.
+- **File-level conflict resolution** — two offline edits to the same `.md` file produce a conflict. Mitigation: field-level CRDT operations in the real-time layer; file sync is the fallback.
+- **Performance at scale** — scanning thousands of `.md` files for queries is slow without an index. Mitigation: SQLite + Redis cache layer, rebuilt from files on demand.
+- **No atomic multi-file transactions** — completing a task and updating project progress touches two files. Mitigation: write-ahead log or accept eventual consistency.
+- **Permissions are folder-level** — Nextcloud sharing is by folder, not by field. Mitigation: structure folders to match permission boundaries.
+- **Not Google Docs** — real-time collaboration is field-level operations, not character-level co-editing of prose. The body of a `.md` file is not collaboratively editable in real-time (yet).
+
+These trade-offs are intentional. We optimize for **data ownership, portability, and offline capability** over **consistency guarantees and real-time text co-editing**. For production workflow management — where the work products are files (audio, video, documents) and the metadata is structured — this is the right trade.
