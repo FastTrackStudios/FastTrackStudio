@@ -224,4 +224,61 @@ impl VaultServiceImpl {
         let tasks = self.vault.read().await.load_tasks();
         find_next_task(&project_title, &tasks).cloned()
     }
+
+    pub async fn delete_task(&self, title: String) -> Result<(), VaultError> {
+        let path = self.root.join(format!("{}.md", title));
+        if path.exists() {
+            std::fs::remove_file(&path).map_err(|e| VaultError::IoError(e.to_string()))?;
+            Ok(())
+        } else {
+            Err(VaultError::NotFound(title))
+        }
+    }
+
+    pub async fn search_tasks(&self, _query: String) -> Vec<Task> {
+        // TODO: wire to SQLite FTS5 index when index is integrated into service
+        let tasks = self.vault.read().await.load_tasks();
+        let q = _query.to_lowercase();
+        tasks.into_iter()
+            .filter(|t| t.title.to_lowercase().contains(&q) || t.body.to_lowercase().contains(&q))
+            .collect()
+    }
+
+    pub async fn tasks_for_user(&self, username: String) -> Vec<Task> {
+        let tasks = self.vault.read().await.load_tasks();
+        tasks.into_iter()
+            .filter(|t| t.assignee.as_deref() == Some(&username))
+            .collect()
+    }
+
+    pub async fn tasks_due_by(&self, date: String) -> Vec<Task> {
+        let due_date = match chrono::NaiveDate::parse_from_str(&date, "%Y-%m-%d") {
+            Ok(d) => d,
+            Err(_) => return vec![],
+        };
+        let tasks = self.vault.read().await.load_tasks();
+        tasks.into_iter()
+            .filter(|t| {
+                t.due.map(|d| d <= due_date).unwrap_or(false)
+                    && !t.is_complete()
+            })
+            .collect()
+    }
+
+    pub async fn tasks_for_project(&self, project_title: String) -> Vec<Task> {
+        let tasks = self.vault.read().await.load_tasks();
+        tasks.into_iter()
+            .filter(|t| t.projects.iter().any(|p| p.0 == project_title))
+            .collect()
+    }
+
+    pub async fn trigger_sync(&self) -> Result<crate::service::SyncStats, VaultError> {
+        // Sync is handled by the server's sync loop — this is a no-op at the service level.
+        // The server calls this endpoint to trigger an immediate cycle.
+        Ok(crate::service::SyncStats::default())
+    }
+
+    pub async fn sync_status(&self) -> Option<crate::service::SyncStats> {
+        None
+    }
 }

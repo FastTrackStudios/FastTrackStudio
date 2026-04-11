@@ -11,8 +11,13 @@ serde_json.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 eyre.workspace = true
+vox.workspace = true
+vox-core.workspace = true
+vox-websocket.workspace = true
+moire.workspace = true
 
-axum = "0.8"
+axum = { version = "0.8", features = ["ws"] }
 chrono.workspace = true
 hostname = "0.4"
+futures.workspace = true
 tower-http = { version = "0.6", features = ["cors"] }
