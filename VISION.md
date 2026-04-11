@@ -280,13 +280,13 @@ All sharing the same Dioxus components and fts-ui design system:
 - [ ] Nextcloud share creation for bundles
 
 ### Phase 4: Local-First & Real-Time
-- [ ] Automerge CRDT for metadata (task/event fields — concurrent edits merge automatically)
-- [ ] Yrs CRDT for body text (markdown body — collaborative subtask/note editing)
-- [ ] WebSocket sync via yrs-axum (field-level ops broadcast to all clients)
-- [ ] Offline operation queue (CRDT ops queue locally, merge on reconnect)
-- [ ] SQLite index with rusqlite (fast queries over frontmatter, rebuilt from files)
+- [x] Automerge CRDT for metadata (task/event fields — concurrent edits merge automatically)
+- [x] Yrs CRDT for body text (markdown body — collaborative subtask/note editing)
+- [x] WebSocket sync via Vox WebSocket (field-level ops broadcast to all clients)
+- [x] Offline operation queue (CRDT ops queue locally, merge on reconnect)
+- [x] SQLite index with rusqlite (fast queries over frontmatter, rebuilt from files)
 - [ ] cr-sqlite for CRDT-enabled index sync between devices
-- [ ] Entity change log (Trilium pattern — track who changed what, when)
+- [x] Entity change log (implemented in SQLite index changes table)
 - [ ] Conflict UI (show both versions when CRDTs can't auto-merge)
 
 ### Phase 5: Web App & Portal

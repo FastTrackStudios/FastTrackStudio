@@ -270,4 +270,80 @@ impl Task {
         }
         Some(self.total_time_logged() as f32 / estimate)
     }
+
+    /// Parse subtasks from the body text.
+    /// Looks for lines matching `- [ ] text` or `- [x] text`.
+    pub fn subtasks(&self) -> Vec<Subtask> {
+        self.body
+            .lines()
+            .filter_map(|line| {
+                let trimmed = line.trim_start();
+                if let Some(rest) = trimmed.strip_prefix("- [ ] ") {
+                    Some(Subtask {
+                        title: rest.to_string(),
+                        done: false,
+                    })
+                } else if let Some(rest) = trimmed.strip_prefix("- [x] ") {
+                    Some(Subtask {
+                        title: rest.to_string(),
+                        done: true,
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    /// Count of completed subtasks.
+    pub fn subtasks_done(&self) -> usize {
+        self.subtasks().iter().filter(|s| s.done).count()
+    }
+
+    /// Total subtask count.
+    pub fn subtask_count(&self) -> usize {
+        self.subtasks().len()
+    }
+
+    /// Subtask progress as a fraction (0.0 to 1.0). None if no subtasks.
+    pub fn subtask_progress(&self) -> Option<f32> {
+        let total = self.subtask_count();
+        if total == 0 {
+            return None;
+        }
+        Some(self.subtasks_done() as f32 / total as f32)
+    }
+}
+
+/// A parsed subtask from the markdown body.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Subtask {
+    pub title: String,
+    pub done: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn subtask_parsing() {
+        let task = Task {
+            body: "## Checklist\n- [x] Done thing\n- [ ] Not done\n- [x] Also done\nSome other text\n- [ ] Another".into(),
+            ..Default::default()
+        };
+        assert_eq!(task.subtask_count(), 4);
+        assert_eq!(task.subtasks_done(), 2);
+        assert_eq!(task.subtask_progress(), Some(0.5));
+    }
+
+    #[test]
+    fn no_subtasks() {
+        let task = Task {
+            body: "Just some notes".into(),
+            ..Default::default()
+        };
+        assert_eq!(task.subtask_count(), 0);
+        assert_eq!(task.subtask_progress(), None);
+    }
 }
