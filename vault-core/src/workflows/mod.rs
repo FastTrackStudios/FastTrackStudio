@@ -45,10 +45,14 @@ pub mod event;
 pub mod output;
 pub mod external;
 pub mod download;
+pub mod bundle;
+pub mod finance;
 pub mod io;
 
 pub use event::*;
 pub use output::*;
 pub use external::*;
 pub use download::*;
+pub use bundle::*;
+pub use finance::*;
 pub use io::*;

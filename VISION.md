@@ -276,8 +276,8 @@ All sharing the same Dioxus components and fts-ui design system:
 - [x] Download portal schema (role selector, cross-role browsing, recipient tracking)
 - [x] Workflow file I/O (generic parse_frontmatter/render_frontmatter for all types)
 - [ ] Download portal Dioxus page (role selector UI)
-- [ ] Bundle generation (collect files into role-specific folders)
-- [ ] Nextcloud share creation for bundles
+- [x] Bundle generation (collect files into role-specific folders)
+- [x] Nextcloud share creation for bundles (OCS sharing API)
 
 ### Phase 4: Local-First & Real-Time
 - [x] Automerge CRDT for metadata (task/event fields — concurrent edits merge automatically)
@@ -298,7 +298,7 @@ All sharing the same Dioxus components and fts-ui design system:
 - [ ] Push notifications (Nextcloud + APNs)
 
 ### Phase 5.5: Scale & Search
-- [ ] Full-text search (SQLite FTS5 or Tantivy)
+- [x] Full-text search (SQLite FTS5 in TaskIndex)
 - [x] S3 provider implementation (MinIO/R2 compatible, full CRUD)
 - [x] Subtask progress tracking (parse `- [x]` lines, subtask_progress())
 - [x] Comment sync between Deck cards and .md files (## Comments section)
@@ -313,14 +313,14 @@ All sharing the same Dioxus components and fts-ui design system:
 - [ ] Drag-and-drop task reordering
 
 ### Phase 7: Finance & Business
-- [ ] Firefly III integration (budget sync, transaction linking)
-- [ ] Invoice Ninja integration (invoice generation, payment tracking)
+- [x] Firefly III integration (budget sync, transaction linking)
+- [x] Invoice Ninja integration (invoice generation, payment tracking)
 - [ ] Client portal (scoped Nextcloud shares for client review/approval)
 - [ ] Expense tracking per project
 - [ ] Revenue attribution per deliverable
 
 ### Phase 8: Ecosystem
-- [ ] GitHub Issues bidirectional sync
+- [x] GitHub Issues bidirectional sync (pull/push/create)
 - [x] Webhook API (POST /api/tasks, POST /api/tasks/:title/complete)
 - [ ] REAPER integration (session markers → tasks, region → song)
 - [ ] Custom workflow definitions (user-defined schemas)
