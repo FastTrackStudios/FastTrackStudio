@@ -1,0 +1,160 @@
+[workspace]
+members = [
+    "apps/desktop",
+    "apps/mobile",
+    "apps/server",
+    "apps/web",
+    "obsidian-plugin",
+    "task-cli",
+    "task-ui",
+    "vault-core",
+    "xtask",
+]
+resolver = "2"
+
+[workspace.metadata.crane]
+name = "task"
+
+[workspace.package]
+version = "0.1.0"
+authors = ["Cody Wright"]
+edition = "2021"
+
+[workspace.dependencies]
+chrono = "0.4"
+dioxus = "0.7.2"
+eyre = "0.6"
+futures = "0.3"
+rrule = "0.11"
+thiserror = "2.0"
+tracing = "0.1"
+
+[workspace.dependencies.facet]
+version = "0.44.1"
+features = [
+    "reflect",
+    "chrono",
+]
+
+[workspace.dependencies.facet-core]
+version = "0.44.1"
+
+[workspace.dependencies.facet-json]
+version = "0.44.1"
+
+[workspace.dependencies.facet-pretty]
+version = "0.44.1"
+
+[workspace.dependencies.facet-reflect]
+version = "0.44.1"
+
+[workspace.dependencies.facet-yaml]
+version = "0.44.1"
+
+[workspace.dependencies.fts-ui]
+path = "../FastTrackStudio/Plugins/fts-ui/crates/fts-ui"
+
+[workspace.dependencies.lucide-dioxus]
+git = "https://github.com/Leaf-Computer/lucide.git"
+rev = "e3e509d5855324e893aef838747cccb2d115dc15"
+features = ["all-icons"]
+
+[workspace.dependencies.lumen-blocks]
+git = "https://github.com/Leaf-Computer/lumen-blocks.git"
+tag = "v0.2.0"
+
+[workspace.dependencies.moire]
+version = "1.0.0"
+git = "https://github.com/bearcove/moire"
+rev = "13eac79"
+
+[workspace.dependencies.serde]
+version = "1"
+features = ["derive"]
+
+[workspace.dependencies.serde_json]
+version = "1"
+
+[workspace.dependencies.shm-primitives]
+path = "../FastTrackStudio/vox/rust/shm-primitives"
+
+[workspace.dependencies.task-ui]
+path = "task-ui"
+
+[workspace.dependencies.tokio]
+version = "1"
+features = ["full"]
+
+[workspace.dependencies.tracing-subscriber]
+version = "0.3"
+features = ["env-filter"]
+
+[workspace.dependencies.uuid]
+version = "1"
+features = [
+    "v4",
+    "v7",
+]
+
+[workspace.dependencies.vault-core]
+path = "vault-core"
+
+[workspace.dependencies.vox]
+path = "../FastTrackStudio/vox/rust/vox"
+
+[workspace.dependencies.vox-core]
+path = "../FastTrackStudio/vox/rust/vox-core"
+
+[workspace.dependencies.vox-inprocess]
+path = "../FastTrackStudio/vox/rust/vox-inprocess"
+
+[workspace.dependencies.vox-local]
+path = "../FastTrackStudio/vox/rust/vox-local"
+
+[workspace.dependencies.vox-schema]
+path = "../FastTrackStudio/vox/rust/vox-schema"
+
+[workspace.dependencies.vox-stream]
+path = "../FastTrackStudio/vox/rust/vox-stream"
+
+[workspace.dependencies.vox-types]
+path = "../FastTrackStudio/vox/rust/vox-types"
+
+[workspace.dependencies.vox-websocket]
+path = "../FastTrackStudio/vox/rust/vox-websocket"
+
+[profile.wasm-dev]
+opt-level = 1
+inherits = "dev"
+
+[patch.crates-io.moire]
+git = "https://github.com/bearcove/moire"
+rev = "13eac79"
+
+[patch.crates-io.moire-macros-noop]
+git = "https://github.com/bearcove/moire"
+rev = "13eac79"
+
+[patch.crates-io.moire-runtime]
+git = "https://github.com/bearcove/moire"
+rev = "13eac79"
+
+[patch.crates-io.moire-tokio]
+git = "https://github.com/bearcove/moire"
+rev = "13eac79"
+
+[patch.crates-io.moire-trace-types]
+git = "https://github.com/bearcove/moire"
+rev = "13eac79"
+
+[patch.crates-io.moire-types]
+git = "https://github.com/bearcove/moire"
+rev = "13eac79"
+
+[patch.crates-io.moire-wasm]
+git = "https://github.com/bearcove/moire"
+rev = "13eac79"
+
+[patch.crates-io.moire-wire]
+git = "https://github.com/bearcove/moire"
+rev = "13eac79"
