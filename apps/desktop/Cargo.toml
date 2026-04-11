@@ -1,0 +1,25 @@
+[package]
+name = "task-desktop"
+version.workspace = true
+edition.workspace = true
+authors = ["Cody Wright"]
+
+[features]
+# `dev` enables WebKit/WRY via `dioxus/desktop` for hot-reload with `dx serve`.
+# Default so plain `dx serve` works without extra flags.
+default = ["dev"]
+dev = ["dioxus/desktop"]
+
+[dependencies]
+dioxus            = { version = "0.7.2", features = ["router"] }
+vault-core.workspace = true
+task-ui.workspace    = true
+fts-ui.workspace     = true
+vox.workspace        = true
+vox-inprocess.workspace = true
+tokio             = { version = "1", features = ["full"] }
+moire.workspace      = true
+tracing.workspace    = true
+tracing-subscriber   = { version = "0.3", features = ["env-filter"] }
+eyre.workspace       = true
+chrono.workspace     = true

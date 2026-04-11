@@ -1,0 +1,19 @@
+@import "tailwindcss";
+@import "./assets/fts-theme.css";
+
+/* App + shared UI crate */
+@source "./src/**/*.{rs,html,css}";
+@source "../../task-ui/src/**/*.{rs,html,css}";
+
+/* fts-ui components (local path dep) */
+@source "../../../FastTrackStudio/Plugins/fts-ui/crates/fts-ui/src/**/*.rs";
+
+/* Safelist for dynamically constructed classes */
+@source "./safelist.txt";
+
+/* Force dark color scheme for native form elements */
+@layer base {
+    html {
+        color-scheme: dark;
+    }
+}

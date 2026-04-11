@@ -1,0 +1,19 @@
+[package]
+name = "task-mobile"
+version.workspace = true
+edition.workspace = true
+authors = ["Cody Wright"]
+
+[dependencies]
+dioxus = { version = "0.7.2", features = ["router"] }
+vault-core.workspace = true
+task-ui.workspace = true
+fts-ui.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[features]
+default = ["mobile"]
+web     = ["dioxus/web"]
+desktop = ["dioxus/desktop"]
+mobile  = ["dioxus/mobile"]

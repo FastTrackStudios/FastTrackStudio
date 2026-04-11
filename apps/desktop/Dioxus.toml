@@ -1,0 +1,16 @@
+[application]
+name = "Task"
+default_platform = "desktop"
+# `dev` feature switches the entry point to WebKit/WRY so `dx serve` works.
+features = ["dev"]
+
+[desktop]
+title = "Task (dev)"
+
+[bundle]
+identifier = "com.codyswright.task.desktop"
+publisher  = "Cody Wright"
+name       = "Task"
+
+[bundle.macos]
+minimum_system_version = "13.0"
