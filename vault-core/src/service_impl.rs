@@ -6,6 +6,7 @@ use chrono::Utc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
+use crate::index::TaskIndex;
 use crate::project::{next_task as find_next_task, Project, ProjectStats};
 use crate::query::Query;
 use crate::rrule;
@@ -36,6 +37,8 @@ pub struct VaultServiceImpl {
     /// The primary vault root (personal or first-registered vault).
     root: std::path::PathBuf,
     vault: Arc<RwLock<Vault>>,
+    /// SQLite index for fast queries; `None` when unavailable (e.g. WASM).
+    index: Arc<std::sync::Mutex<Option<TaskIndex>>>,
     /// Additional vault sources beyond the primary.
     extra_vaults: Arc<RwLock<Vec<VaultSource>>>,
     change_tx: Arc<tokio::sync::watch::Sender<u64>>,
@@ -47,9 +50,29 @@ impl VaultServiceImpl {
     pub fn new(vault_root: impl AsRef<Path>) -> Self {
         let root = vault_root.as_ref().to_path_buf();
         let (tx, rx) = tokio::sync::watch::channel(0u64);
+
+        // Create SQLite index in a .task-index.db file next to the vault
+        let index = {
+            let index_path = root.join(".task-index.db");
+            match TaskIndex::open(&index_path) {
+                Ok(idx) => {
+                    // Rebuild index from files on startup
+                    if let Ok(stats) = idx.rebuild_from_dir(&root) {
+                        tracing::info!(tasks = stats.tasks, files = stats.files_scanned, "Index rebuilt");
+                    }
+                    Some(idx)
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "Failed to open index, queries will scan files");
+                    None
+                }
+            }
+        };
+
         Self {
             vault: Arc::new(RwLock::new(Vault::new(&root))),
             root,
+            index: Arc::new(std::sync::Mutex::new(index)),
             extra_vaults: Arc::new(RwLock::new(Vec::new())),
             change_tx: Arc::new(tx),
             _change_rx: rx,
@@ -114,6 +137,11 @@ impl VaultServiceImpl {
         task.date_created = Some(now);
         task.date_modified = Some(now);
         self.vault.read().await.save_task(&task)?;
+        if let Ok(guard) = self.index.lock() {
+            if let Some(ref index) = *guard {
+                let _ = index.index_task(&task, &format!("{}.md", task.title));
+            }
+        }
         Ok(task)
     }
 
@@ -121,6 +149,11 @@ impl VaultServiceImpl {
     pub async fn update_task(&self, mut task: Task) -> Result<Task, VaultError> {
         task.date_modified = Some(Utc::now());
         self.vault.read().await.save_task(&task)?;
+        if let Ok(guard) = self.index.lock() {
+            if let Some(ref index) = *guard {
+                let _ = index.index_task(&task, &format!("{}.md", task.title));
+            }
+        }
         Ok(task)
     }
 
@@ -155,6 +188,12 @@ impl VaultServiceImpl {
         }
 
         vault.save_task(&task)?;
+        if let Ok(guard) = self.index.lock() {
+            if let Some(ref index) = *guard {
+                let _ = index.index_task(&task, &format!("{}.md", task.title));
+                let _ = index.record_change("task", &task.title, Some("status"), Some("Open"), Some("Done"), None, None);
+            }
+        }
         Ok(task)
     }
 
@@ -229,16 +268,42 @@ impl VaultServiceImpl {
         let path = self.root.join(format!("{}.md", title));
         if path.exists() {
             std::fs::remove_file(&path).map_err(|e| VaultError::IoError(e.to_string()))?;
+            if let Ok(guard) = self.index.lock() {
+                if let Some(ref index) = *guard {
+                    let _ = index.record_change("task", &title, None, None, None, None, None);
+                }
+            }
             Ok(())
         } else {
             Err(VaultError::NotFound(title))
         }
     }
 
-    pub async fn search_tasks(&self, _query: String) -> Vec<Task> {
-        // TODO: wire to SQLite FTS5 index when index is integrated into service
+    pub async fn search_tasks(&self, query: String) -> Vec<Task> {
+        // Try index first — extract matching titles under the mutex, then drop it
+        // before hitting any .await so the MutexGuard doesn't cross an await point.
+        let index_titles: Option<std::collections::HashSet<String>> = self
+            .index
+            .lock()
+            .ok()
+            .and_then(|guard| {
+                guard.as_ref().and_then(|index| {
+                    index.search(&query).ok().map(|rows| {
+                        rows.iter().map(|r| r.title.clone()).collect()
+                    })
+                })
+            });
+
+        if let Some(matching_titles) = index_titles {
+            let all_tasks = self.vault.read().await.load_tasks();
+            return all_tasks.into_iter()
+                .filter(|t| matching_titles.contains(&t.title))
+                .collect();
+        }
+
+        // Fallback: scan all tasks
         let tasks = self.vault.read().await.load_tasks();
-        let q = _query.to_lowercase();
+        let q = query.to_lowercase();
         tasks.into_iter()
             .filter(|t| t.title.to_lowercase().contains(&q) || t.body.to_lowercase().contains(&q))
             .collect()
