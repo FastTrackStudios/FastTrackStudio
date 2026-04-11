@@ -3,6 +3,7 @@ pub mod project;
 pub mod query;
 pub mod rrule;
 pub mod capture;
+pub mod workflows;
 
 #[cfg(feature = "server")]
 pub mod service;
