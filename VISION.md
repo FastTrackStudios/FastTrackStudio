@@ -279,23 +279,30 @@ All sharing the same Dioxus components and fts-ui design system:
 - [ ] Bundle generation (collect files into role-specific folders)
 - [ ] Nextcloud share creation for bundles
 
-### Phase 4: Polish & Scale
-- [ ] Real-time sync (webhooks/push instead of polling)
-- [ ] Conflict resolution (three-way merge)
-- [ ] Full-text search across all tasks and projects
+### Phase 4: Local-First & Real-Time
+- [ ] Automerge CRDT for metadata (task/event fields — concurrent edits merge automatically)
+- [ ] Yrs CRDT for body text (markdown body — collaborative subtask/note editing)
+- [ ] WebSocket sync via yrs-axum (field-level ops broadcast to all clients)
+- [ ] Offline operation queue (CRDT ops queue locally, merge on reconnect)
+- [ ] SQLite index with rusqlite (fast queries over frontmatter, rebuilt from files)
+- [ ] cr-sqlite for CRDT-enabled index sync between devices
+- [ ] Entity change log (Trilium pattern — track who changed what, when)
+- [ ] Conflict UI (show both versions when CRDTs can't auto-merge)
+
+### Phase 5: Web App & Portal
+- [ ] Dioxus web app served by task-server (SSR)
+- [ ] Download portal route (`/portal/:slug`) with role selector
+- [ ] Audio preview/streaming in portal
+- [ ] Mobile app (Dioxus native, Swift client via Vox)
+- [ ] iOS widgets (WidgetKit + Vox Swift bindings)
+- [ ] Push notifications (Nextcloud + APNs)
+
+### Phase 5.5: Scale & Search
+- [ ] Full-text search (SQLite FTS5 or Tantivy)
 - [ ] S3 provider implementation
 - [ ] Subtask progress tracking (parse `- [x]` lines)
 - [ ] Comment sync between Deck cards and .md files
 - [ ] Activity feed / audit trail
-
-### Phase 5: Web App & Portal
-- [ ] Dioxus web app served by task-server (SSR)
-- [ ] Download portal route (`/portal/:slug`)
-- [ ] Audio preview/streaming in portal
-- [ ] Mobile app (Dioxus native)
-- [ ] iOS widgets (WidgetKit)
-- [ ] Push notifications (Nextcloud + APNs)
-- [ ] Offline-first with sync queue
 
 ### Phase 6: Views & UX
 - [ ] Kanban board view in the app
