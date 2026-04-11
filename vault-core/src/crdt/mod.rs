@@ -16,5 +16,9 @@
 pub mod metadata;
 pub mod body;
 pub mod document;
+pub mod sync;
+pub mod offline;
 
 pub use document::CrdtDocument;
+pub use sync::{CrdtSyncEngine, SyncOp};
+pub use offline::{OfflineQueue, QueuedOp, QueuedOpType};

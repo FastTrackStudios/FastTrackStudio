@@ -3,6 +3,10 @@ name = "task-server"
 version.workspace = true
 edition.workspace = true
 
+[features]
+default = ["realtime"]
+realtime = ["vault-core/realtime"]
+
 [dependencies]
 vault-core.workspace = true
 tokio.workspace = true
