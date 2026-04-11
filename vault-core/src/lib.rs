@@ -19,6 +19,8 @@ pub mod integration;
 pub mod project_vault;
 #[cfg(feature = "server")]
 pub mod provider;
+#[cfg(feature = "server")]
+pub mod index;
 
 #[cfg(feature = "caldav")]
 pub mod caldav;

@@ -7,9 +7,11 @@ edition.workspace = true
 # "server" enables the async vault, service trait, and service implementation.
 # Disable it for wasm32 builds (obsidian-plugin) to avoid tokio/mio.
 default = ["server"]
-server = ["dep:tokio", "dep:walkdir", "dep:vox", "dep:vox-core", "dep:uuid", "dep:notify", "dep:toml", "dep:serde", "dep:serde_json", "dep:async-trait", "dep:tracing", "dep:reqwest"]
+server = ["dep:tokio", "dep:walkdir", "dep:vox", "dep:vox-core", "dep:uuid", "dep:notify", "dep:toml", "dep:serde", "dep:serde_json", "dep:async-trait", "dep:tracing", "dep:reqwest", "dep:rusqlite"]
 # "caldav" enables CalDAV sync and VTODO conversion.
 caldav = ["server", "dep:icalendar", "dep:libdav", "dep:reqwest"]
+# "realtime" enables CRDT-based real-time collaboration.
+realtime = ["server", "dep:automerge", "dep:yrs"]
 
 [dependencies]
 # Facet — replaces serde for all data types (wasm-safe)
@@ -40,6 +42,7 @@ tracing = { workspace = true, optional = true }
 notify  = { version = "7", optional = true }
 toml    = { version = "0.8", optional = true }
 serde   = { workspace = true, optional = true }
+rusqlite = { version = "0.33", optional = true, features = ["bundled"] }
 
 # CalDAV sync (optional)
 icalendar = { version = "0.17", optional = true }
@@ -49,3 +52,7 @@ serde_json = { workspace = true, optional = true }
 
 # Async trait (server-side)
 async-trait = { version = "0.1", optional = true }
+
+# Real-time collaboration (optional)
+automerge = { version = "0.8", optional = true }
+yrs = { version = "0.21", optional = true }
