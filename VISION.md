@@ -167,16 +167,56 @@ HTTP API + sync engine:
 - `cn()` utility for Tailwind class merging
 - Component showcase for visual verification
 
-### Layer 6: Integrations
+### Layer 6: Workflow System
 
-Domain-specific workflow integrations that create tasks and projects:
+Domain-specific project structures that extend the generic model:
 
-- **Fast Track Studio** — music production lifecycle (tracking → mixing → mastering → release)
-- **Fitness** — training plans, workout sessions, progressive overload
-- **Music Practice** — practice sessions, repertoire tracking, streaks
-- **Learning** — courses, study sessions, spaced repetition
-- **GitHub** — issues ↔ tasks, PR status tracking
-- **REAPER** — DAW session markers → tasks
+- **Event workflow** — concerts, recording sessions, festivals, multi-act events
+  - Setlists with Song objects (key, tempo, duration, takes)
+  - Stage plots with positions, backline, power requirements
+  - Input lists with per-channel mic/DI/phantom details
+  - Personnel roles with acceptance status (Accepted/Unconfirmed/Declined)
+  - Run of show with timed cues
+  - Changeover plans between acts
+  - Venue advance (PA, console, load-in, parking, green room)
+  - Budget with line items and payment tracking
+  - Deliverables with status lifecycle
+
+- **Output system** — versioned deliverables with feedback and approval
+  - Semantic versioning (v1 rough mix → v2 with fixes → v3 approved)
+  - Approval workflow (Draft → Review → ChangesRequested → Approved)
+  - Timestamped feedback with timecode references for audio
+  - ProjectLink for referencing outputs across projects (setlist → song output)
+  - Release metadata (ISRC, UPC, credits, splits, distributor)
+
+- **Download portal** — role-based file distribution
+  - Portal page with role selector (violinist picks "Violin 1", sees their sheet music)
+  - Cross-role browsing (peek at woodwind parts from the violin view)
+  - Direct role links for one-click download
+  - Shared files (schedule, venue info) auto-included in every bundle
+  - Recipient tracking (sent, accessed, downloaded)
+  - Nextcloud share integration with password and expiry
+
+### Layer 7: External Integrations
+
+Connect projects to external services — we store references, they own the data:
+
+- **Firefly III** — budgets, transactions, accounts → `firefly_transaction_id`
+- **Invoice Ninja** — invoices, quotes, payments → `invoice_ninja_id`
+- **GitHub** — issues, PRs, releases → `github_issue`
+- **REAPER/DAW** — session files, markers, regions → `daw_session` path link
+- **CalDAV** — calendar events, scheduling → native VTODO sync
+- **Nextcloud** — files, versions, sharing → native WebDAV
+
+### Layer 8: Client Apps
+
+All sharing the same Dioxus components and fts-ui design system:
+
+- **Desktop** (Dioxus/WebKit) — full app with sidebar, project dashboard, task detail sheet
+- **Web** (Dioxus SSR) — same app served by task-server, plus download portal routes
+- **Mobile** (Dioxus native) — today view, quick capture, offline-first
+- **CLI** — list, add, complete, show, project commands
+- **Obsidian plugin** — WASM-powered validation, sorting, querying inside Obsidian
 
 ## Roadmap
 
@@ -199,7 +239,17 @@ Domain-specific workflow integrations that create tasks and projects:
 - [x] task-server with sync loop
 - [x] NixOS module for deployment
 
-### Phase 3: Polish & Scale
+### Phase 3: Workflows & Outputs ✅ (schema)
+- [x] Event workflow schema (setlists, stage plots, input lists, personnel, schedule)
+- [x] Output system (versioned deliverables, feedback, approval)
+- [x] External integration references (Firefly III, Invoice Ninja, GitHub, DAW)
+- [x] Download portal schema (role selector, cross-role browsing, recipient tracking)
+- [ ] Workflow file I/O (read/write event.md, setlist.md, etc.)
+- [ ] Download portal Dioxus page (role selector UI)
+- [ ] Bundle generation (collect files into role-specific folders)
+- [ ] Nextcloud share creation for bundles
+
+### Phase 4: Polish & Scale
 - [ ] Real-time sync (webhooks/push instead of polling)
 - [ ] Conflict resolution (three-way merge)
 - [ ] Full-text search across all tasks and projects
@@ -208,14 +258,16 @@ Domain-specific workflow integrations that create tasks and projects:
 - [ ] Comment sync between Deck cards and .md files
 - [ ] Activity feed / audit trail
 
-### Phase 4: Mobile & Web
+### Phase 5: Web App & Portal
+- [ ] Dioxus web app served by task-server (SSR)
+- [ ] Download portal route (`/portal/:slug`)
+- [ ] Audio preview/streaming in portal
 - [ ] Mobile app (Dioxus native)
-- [ ] Web app deployment
 - [ ] iOS widgets (WidgetKit)
 - [ ] Push notifications (Nextcloud + APNs)
 - [ ] Offline-first with sync queue
 
-### Phase 5: Views & UX
+### Phase 6: Views & UX
 - [ ] Kanban board view in the app
 - [ ] Calendar view (month/week)
 - [ ] Gantt / timeline view
@@ -223,12 +275,19 @@ Domain-specific workflow integrations that create tasks and projects:
 - [ ] Keyboard shortcuts
 - [ ] Drag-and-drop task reordering
 
-### Phase 6: Integrations & Ecosystem
-- [ ] GitHub Issues sync
+### Phase 7: Finance & Business
+- [ ] Firefly III integration (budget sync, transaction linking)
+- [ ] Invoice Ninja integration (invoice generation, payment tracking)
+- [ ] Client portal (scoped Nextcloud shares for client review/approval)
+- [ ] Expense tracking per project
+- [ ] Revenue attribution per deliverable
+
+### Phase 8: Ecosystem
+- [ ] GitHub Issues bidirectional sync
 - [ ] Webhook API for external tools
-- [ ] REAPER integration (session markers → tasks)
-- [ ] Custom workflow definitions
-- [ ] Community workflow marketplace
+- [ ] REAPER integration (session markers → tasks, region → song)
+- [ ] Custom workflow definitions (user-defined schemas)
+- [ ] Community workflow templates
 - [ ] "Task Compatible" certification standard
 
 ## Design Philosophy
