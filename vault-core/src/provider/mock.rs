@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use tokio::sync::RwLock;
+use tokio::sync::Mutex;
 
 use crate::project::Project;
 use crate::service::VaultError;
@@ -16,16 +16,16 @@ use super::traits::*;
 
 /// In-memory project provider for testing.
 ///
-/// All data lives in memory. Supports concurrent access via RwLock.
+/// All data lives in memory. Supports concurrent access via Mutex.
 /// Can inject latency and errors for testing edge cases.
 pub struct MockProvider {
     info: ProviderInfo,
-    projects: Arc<RwLock<HashMap<String, Project>>>,
-    tasks: Arc<RwLock<HashMap<String, Vec<Task>>>>,
+    projects: Arc<Mutex<HashMap<String, Project>>>,
+    tasks: Arc<Mutex<HashMap<String, Vec<Task>>>>,
     /// Optional latency to simulate network delay (milliseconds).
     latency_ms: Option<u64>,
     /// If set, all writes will fail with this error.
-    fail_writes: Arc<RwLock<Option<String>>>,
+    fail_writes: Arc<Mutex<Option<String>>>,
     /// Change event sender.
     event_tx: tokio::sync::mpsc::Sender<ProviderEvent>,
     event_rx: Arc<tokio::sync::Mutex<tokio::sync::mpsc::Receiver<ProviderEvent>>>,
@@ -41,10 +41,10 @@ impl MockProvider {
                 kind: "mock".to_string(),
                 writable: true,
             },
-            projects: Arc::new(RwLock::new(HashMap::new())),
-            tasks: Arc::new(RwLock::new(HashMap::new())),
+            projects: Arc::new(Mutex::new(HashMap::new())),
+            tasks: Arc::new(Mutex::new(HashMap::new())),
             latency_ms: None,
-            fail_writes: Arc::new(RwLock::new(None)),
+            fail_writes: Arc::new(Mutex::new(None)),
             event_tx,
             event_rx: Arc::new(tokio::sync::Mutex::new(event_rx)),
         }
@@ -58,24 +58,24 @@ impl MockProvider {
 
     /// Make all writes fail with an error message.
     pub async fn set_fail_writes(&self, msg: Option<String>) {
-        *self.fail_writes.write().await = msg;
+        *self.fail_writes.lock().await = msg;
     }
 
     /// Seed with test data.
     pub async fn seed_project(&self, project: Project, tasks: Vec<Task>) {
         let title = project.title.clone();
-        self.projects.write().await.insert(title.clone(), project);
-        self.tasks.write().await.insert(title, tasks);
+        self.projects.lock().await.insert(title.clone(), project);
+        self.tasks.lock().await.insert(title, tasks);
     }
 
     /// Get raw task count (for test assertions).
     pub async fn task_count(&self) -> usize {
-        self.tasks.read().await.values().map(|v| v.len()).sum()
+        self.tasks.lock().await.values().map(|v| v.len()).sum()
     }
 
     /// Get raw project count.
     pub async fn project_count(&self) -> usize {
-        self.projects.read().await.len()
+        self.projects.lock().await.len()
     }
 
     async fn maybe_delay(&self) {
@@ -85,7 +85,7 @@ impl MockProvider {
     }
 
     async fn check_write_allowed(&self) -> Result<(), VaultError> {
-        if let Some(ref msg) = *self.fail_writes.read().await {
+        if let Some(ref msg) = *self.fail_writes.lock().await {
             Err(VaultError::IoError(msg.clone()))
         } else {
             Ok(())
@@ -101,13 +101,13 @@ impl ProjectProvider for MockProvider {
 
     async fn list_projects(&self) -> Result<Vec<Project>, VaultError> {
         self.maybe_delay().await;
-        Ok(self.projects.read().await.values().cloned().collect())
+        Ok(self.projects.lock().await.values().cloned().collect())
     }
 
     async fn get_project(&self, title: &str) -> Result<Option<ProjectBundle>, VaultError> {
         self.maybe_delay().await;
-        let projects = self.projects.read().await;
-        let tasks = self.tasks.read().await;
+        let projects = self.projects.lock().await;
+        let tasks = self.tasks.lock().await;
 
         let Some(project) = projects.get(title) else {
             return Ok(None);
@@ -125,8 +125,8 @@ impl ProjectProvider for MockProvider {
 
     async fn list_all(&self) -> Result<Vec<ProjectBundle>, VaultError> {
         self.maybe_delay().await;
-        let projects = self.projects.read().await;
-        let tasks = self.tasks.read().await;
+        let projects = self.projects.lock().await;
+        let tasks = self.tasks.lock().await;
 
         Ok(projects
             .values()
@@ -147,11 +147,11 @@ impl ProjectProvider for MockProvider {
         self.check_write_allowed().await?;
 
         self.projects
-            .write()
+            .lock()
             .await
             .insert(project.title.clone(), project.clone());
         self.tasks
-            .write()
+            .lock()
             .await
             .insert(project.title.clone(), Vec::new());
 
@@ -167,7 +167,7 @@ impl ProjectProvider for MockProvider {
         self.check_write_allowed().await?;
 
         self.projects
-            .write()
+            .lock()
             .await
             .insert(project.title.clone(), project.clone());
 
@@ -178,7 +178,7 @@ impl ProjectProvider for MockProvider {
         self.maybe_delay().await;
         self.check_write_allowed().await?;
 
-        let mut tasks = self.tasks.write().await;
+        let mut tasks = self.tasks.lock().await;
         let project_tasks = tasks.entry(project_title.to_string()).or_default();
 
         // Update or insert
@@ -200,7 +200,7 @@ impl ProjectProvider for MockProvider {
         self.maybe_delay().await;
         self.check_write_allowed().await?;
 
-        let mut tasks = self.tasks.write().await;
+        let mut tasks = self.tasks.lock().await;
         if let Some(project_tasks) = tasks.get_mut(project_title) {
             project_tasks.retain(|t| t.title != task_title);
         }
