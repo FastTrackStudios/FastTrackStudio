@@ -1,0 +1,837 @@
+//! Nextcloud Tasks + Deck bidirectional sync.
+//!
+//! Syncs vault-core tasks with:
+//! - **Nextcloud Tasks** via CalDAV/VTODO
+//! - **Nextcloud Deck** via REST API (boards→projects, cards→tasks)
+
+use chrono::Utc;
+
+use crate::project::Project;
+use crate::service::VaultError;
+use crate::task::{Task, Status, Priority, WikiLink};
+// Deck API response types use serde for JSON deserialization (complex nested structures).
+// Domain types (Task, Project) use facet throughout.
+use serde::Deserialize;
+
+// ── Inline ICS generation (no icalendar crate dependency) ────────────────────
+
+/// Generate a VTODO .ics string from a Task.
+fn task_to_ics_inline(task: &Task) -> String {
+    let uid = task.id.as_deref().unwrap_or(&task.title);
+    let safe_uid = uid.replace(' ', "-").replace('/', "-");
+    let now = Utc::now().format("%Y%m%dT%H%M%SZ");
+    let status_str = match task.status {
+        Status::None | Status::Open | Status::Planned => "NEEDS-ACTION",
+        Status::InProgress | Status::OnHold => "IN-PROCESS",
+        Status::Done | Status::Archived => "COMPLETED",
+        Status::Cancelled => "CANCELLED",
+    };
+    let priority_num = match task.priority {
+        Priority::Urgent => 1,
+        Priority::High => 3,
+        Priority::Normal => 5,
+        Priority::Low => 9,
+        Priority::None => 0,
+    };
+
+    let mut lines = vec![
+        "BEGIN:VCALENDAR".to_string(),
+        "VERSION:2.0".to_string(),
+        "PRODID:-//Task//vault-core//EN".to_string(),
+        "BEGIN:VTODO".to_string(),
+        format!("UID:{safe_uid}"),
+        format!("DTSTAMP:{now}"),
+        format!("SUMMARY:{}", task.title),
+        format!("STATUS:{status_str}"),
+    ];
+
+    if priority_num > 0 {
+        lines.push(format!("PRIORITY:{priority_num}"));
+    }
+    if let Some(due) = task.due {
+        lines.push(format!("DUE;VALUE=DATE:{}", due.format("%Y%m%d")));
+    }
+    if let Some(scheduled) = task.scheduled {
+        lines.push(format!("DTSTART;VALUE=DATE:{}", scheduled.format("%Y%m%d")));
+    }
+    if let Some(ref completed) = task.completed_date {
+        lines.push(format!("COMPLETED:{}T000000Z", completed.format("%Y%m%d")));
+    }
+    if task.status == Status::Done {
+        lines.push("PERCENT-COMPLETE:100".to_string());
+    }
+    if !task.tags.is_empty() {
+        lines.push(format!("CATEGORIES:{}", task.tags.join(",")));
+    }
+    if let Some(ref assignee) = task.assignee {
+        lines.push(format!("ATTENDEE;CN={assignee}:mailto:{assignee}@local"));
+    }
+    if let Some(ref rrule) = task.recurrence {
+        lines.push(format!("RRULE:{rrule}"));
+    }
+    // Description: encode projects + contexts
+    let mut desc_parts = Vec::new();
+    for p in &task.projects {
+        desc_parts.push(format!("Project: {}", p.0));
+    }
+    for c in &task.contexts {
+        desc_parts.push(format!("Context: @{c}"));
+    }
+    if let Some(est) = task.time_estimate {
+        desc_parts.push(format!("Estimate: {est} min"));
+    }
+    if !desc_parts.is_empty() {
+        lines.push(format!("DESCRIPTION:{}", desc_parts.join("\\n")));
+    }
+
+    lines.push("END:VTODO".to_string());
+    lines.push("END:VCALENDAR".to_string());
+    lines.join("\r\n")
+}
+
+/// Parse a VTODO .ics string into a Task.
+fn ics_to_task_inline(ics: &str) -> Option<Task> {
+    if !ics.contains("VTODO") {
+        return None;
+    }
+
+    let mut task = Task::default();
+
+    for line in ics.lines() {
+        let line = line.trim_end_matches('\r');
+        if let Some(val) = line.strip_prefix("UID:") {
+            task.id = Some(val.to_string());
+        } else if let Some(val) = line.strip_prefix("SUMMARY:") {
+            task.title = val.to_string();
+        } else if let Some(val) = line.strip_prefix("STATUS:") {
+            task.status = match val {
+                "NEEDS-ACTION" => Status::Open,
+                "IN-PROCESS" => Status::InProgress,
+                "COMPLETED" => Status::Done,
+                "CANCELLED" => Status::Cancelled,
+                _ => Status::Open,
+            };
+        } else if let Some(val) = line.strip_prefix("PRIORITY:") {
+            task.priority = match val.parse::<u8>().unwrap_or(0) {
+                1..=2 => Priority::Urgent,
+                3..=4 => Priority::High,
+                5..=6 => Priority::Normal,
+                7..=9 => Priority::Low,
+                _ => Priority::None,
+            };
+        } else if line.starts_with("DUE") {
+            // Handle DUE;VALUE=DATE:20260415 or DUE:20260415T000000Z
+            if let Some(date_str) = line.rsplit(':').next() {
+                let date_str = &date_str[..8.min(date_str.len())];
+                task.due = chrono::NaiveDate::parse_from_str(date_str, "%Y%m%d").ok();
+            }
+        } else if line.starts_with("DTSTART") {
+            if let Some(date_str) = line.rsplit(':').next() {
+                let date_str = &date_str[..8.min(date_str.len())];
+                task.scheduled = chrono::NaiveDate::parse_from_str(date_str, "%Y%m%d").ok();
+            }
+        } else if let Some(val) = line.strip_prefix("CATEGORIES:") {
+            task.tags = val.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+        } else if line.starts_with("ATTENDEE") {
+            // Extract CN= value as assignee
+            if let Some(cn_start) = line.find("CN=") {
+                let rest = &line[cn_start + 3..];
+                let cn = rest.split(|c: char| c == ':' || c == ';').next().unwrap_or("");
+                if !cn.is_empty() {
+                    task.assignee = Some(cn.to_string());
+                }
+            }
+        } else if let Some(val) = line.strip_prefix("RRULE:") {
+            task.recurrence = Some(val.to_string());
+        } else if let Some(val) = line.strip_prefix("COMPLETED:") {
+            let date_str = &val[..8.min(val.len())];
+            task.completed_date = chrono::NaiveDate::parse_from_str(date_str, "%Y%m%d").ok();
+        } else if let Some(val) = line.strip_prefix("DESCRIPTION:") {
+            for part in val.split("\\n") {
+                if let Some(proj) = part.strip_prefix("Project: ") {
+                    task.projects.push(WikiLink(proj.trim().to_string()));
+                } else if let Some(ctx) = part.strip_prefix("Context: @") {
+                    task.contexts.push(ctx.trim().to_string());
+                } else if let Some(est) = part.strip_prefix("Estimate: ") {
+                    task.time_estimate = est.strip_suffix(" min").and_then(|s| s.parse().ok());
+                }
+            }
+        }
+    }
+
+    if task.title.is_empty() {
+        return None;
+    }
+
+    Some(task)
+}
+
+/// Nextcloud sync client — handles CalDAV + Deck API interactions.
+pub struct NextcloudSync {
+    base_url: String,
+    username: String,
+    password: String,
+    http: reqwest::Client,
+}
+
+impl NextcloudSync {
+    pub fn new(base_url: &str, username: &str, password: &str) -> Self {
+        Self {
+            base_url: base_url.trim_end_matches('/').to_string(),
+            username: username.to_string(),
+            password: password.to_string(),
+            http: reqwest::Client::new(),
+        }
+    }
+
+    fn auth(&self, req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        req.basic_auth(&self.username, Some(&self.password))
+    }
+
+    // ── CalDAV / Nextcloud Tasks ─────────────────────────────────────
+
+    /// Push a task to the Nextcloud Tasks app as a VTODO on the given calendar.
+    pub async fn push_task_to_calendar(
+        &self,
+        calendar: &str,
+        task: &Task,
+    ) -> Result<(), VaultError> {
+        let uid = task.id.as_deref().unwrap_or(&task.title);
+        let safe_uid = uid.replace(' ', "-").replace('/', "-");
+        let url = format!(
+            "{}/remote.php/dav/calendars/{}/{}/{}.ics",
+            self.base_url, self.username, calendar, safe_uid
+        );
+
+        let ics = task_to_ics_inline(task);
+
+        let resp = self.auth(self.http.put(&url))
+            .header("Content-Type", "text/calendar; charset=utf-8")
+            .body(ics)
+            .send()
+            .await
+            .map_err(|e| VaultError::IoError(format!("CalDAV PUT: {e}")))?;
+
+        if !resp.status().is_success() {
+            return Err(VaultError::IoError(format!(
+                "CalDAV PUT {}: {}",
+                safe_uid,
+                resp.status()
+            )));
+        }
+
+        Ok(())
+    }
+
+    /// Pull all tasks from a Nextcloud Tasks calendar.
+    pub async fn pull_tasks_from_calendar(
+        &self,
+        calendar: &str,
+    ) -> Result<Vec<Task>, VaultError> {
+        let url = format!(
+            "{}/remote.php/dav/calendars/{}/{}/",
+            self.base_url, self.username, calendar
+        );
+
+        let body = r#"<?xml version="1.0" encoding="utf-8"?>
+<c:calendar-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+  <d:prop>
+    <d:getetag/>
+    <c:calendar-data/>
+  </d:prop>
+  <c:filter>
+    <c:comp-filter name="VCALENDAR">
+      <c:comp-filter name="VTODO"/>
+    </c:comp-filter>
+  </c:filter>
+</c:calendar-query>"#;
+
+        let resp = self.auth(
+            self.http
+                .request(reqwest::Method::from_bytes(b"REPORT").unwrap(), &url)
+                .header("Content-Type", "application/xml; charset=utf-8")
+                .header("Depth", "1")
+        )
+            .body(body)
+            .send()
+            .await
+            .map_err(|e| VaultError::IoError(format!("CalDAV REPORT: {e}")))?;
+
+        let xml = resp.text().await
+            .map_err(|e| VaultError::IoError(e.to_string()))?;
+
+        // Extract VCALENDAR blocks and parse VTODOs
+        let mut tasks = Vec::new();
+        for chunk in xml.split("BEGIN:VCALENDAR") {
+            if chunk.contains("BEGIN:VTODO") {
+                let ics = format!(
+                    "BEGIN:VCALENDAR{}END:VCALENDAR",
+                    chunk.split("END:VCALENDAR").next().unwrap_or("")
+                );
+                if let Some(task) = ics_to_task_inline(&ics) {
+                    tasks.push(task);
+                }
+            }
+        }
+
+        Ok(tasks)
+    }
+
+    /// Delete a task from the calendar.
+    pub async fn delete_task_from_calendar(
+        &self,
+        calendar: &str,
+        uid: &str,
+    ) -> Result<(), VaultError> {
+        let safe_uid = uid.replace(' ', "-").replace('/', "-");
+        let url = format!(
+            "{}/remote.php/dav/calendars/{}/{}/{}.ics",
+            self.base_url, self.username, calendar, safe_uid
+        );
+
+        self.auth(self.http.delete(&url))
+            .send()
+            .await
+            .map_err(|e| VaultError::IoError(format!("CalDAV DELETE: {e}")))?;
+
+        Ok(())
+    }
+
+    /// Sync local tasks with Nextcloud Tasks calendar.
+    /// Pushes all local tasks, pulls remote-only tasks.
+    pub async fn sync_calendar(
+        &self,
+        calendar: &str,
+        local_tasks: &[Task],
+    ) -> Result<Vec<Task>, VaultError> {
+        // Push all local tasks to calendar
+        for task in local_tasks {
+            self.push_task_to_calendar(calendar, task).await?;
+        }
+
+        // Pull all remote tasks
+        let remote_tasks = self.pull_tasks_from_calendar(calendar).await?;
+
+        // Merge: start with local, add remote-only tasks
+        let mut merged = local_tasks.to_vec();
+        for remote in remote_tasks {
+            let exists = merged.iter().any(|t| {
+                t.id == remote.id || t.title == remote.title
+            });
+            if !exists {
+                merged.push(remote);
+            }
+        }
+
+        Ok(merged)
+    }
+
+    // ── Deck API ─────────────────────────────────────────────────────
+
+    /// List all Deck boards.
+    pub async fn list_boards(&self) -> Result<Vec<DeckBoard>, VaultError> {
+        let url = format!(
+            "{}/index.php/apps/deck/api/v1.0/boards",
+            self.base_url
+        );
+
+        let resp = self.auth(self.http.get(&url))
+            .header("OCS-APIRequest", "true")
+            .send()
+            .await
+            .map_err(|e| VaultError::IoError(format!("Deck API: {e}")))?;
+
+        let text = resp.text().await
+            .map_err(|e| VaultError::IoError(e.to_string()))?;
+
+        Ok(parse_deck_boards_json(&text))
+    }
+
+    /// List stacks (columns) in a board.
+    pub async fn list_stacks(&self, board_id: u64) -> Result<Vec<DeckStack>, VaultError> {
+        let url = format!(
+            "{}/index.php/apps/deck/api/v1.0/boards/{}/stacks",
+            self.base_url, board_id
+        );
+
+        let resp = self.auth(self.http.get(&url))
+            .header("OCS-APIRequest", "true")
+            .send()
+            .await
+            .map_err(|e| VaultError::IoError(format!("Deck API: {e}")))?;
+
+        let text = resp.text().await
+            .map_err(|e| VaultError::IoError(e.to_string()))?;
+
+        Ok(parse_deck_stacks_json(&text))
+    }
+
+    /// Create a card in a Deck board stack.
+    pub async fn create_card(
+        &self,
+        board_id: u64,
+        stack_id: u64,
+        title: &str,
+        description: &str,
+        due_date: Option<&str>,
+    ) -> Result<u64, VaultError> {
+        let url = format!(
+            "{}/index.php/apps/deck/api/v1.0/boards/{}/stacks/{}/cards",
+            self.base_url, board_id, stack_id
+        );
+
+        let mut body = format!(r#"{{"title":"{}","type":"plain","order":999"#, escape_json(title));
+        if !description.is_empty() {
+            body.push_str(&format!(r#","description":"{}""#, escape_json(description)));
+        }
+        if let Some(due) = due_date {
+            body.push_str(&format!(r#","duedate":"{}T00:00:00+00:00""#, due));
+        }
+        body.push('}');
+
+        let resp = self.auth(self.http.post(&url))
+            .header("OCS-APIRequest", "true")
+            .header("Content-Type", "application/json")
+            .body(body)
+            .send()
+            .await
+            .map_err(|e| VaultError::IoError(format!("Deck API create card: {e}")))?;
+
+        let text = resp.text().await
+            .map_err(|e| VaultError::IoError(e.to_string()))?;
+
+        // Extract card ID from response
+        extract_json_id(&text).ok_or_else(|| VaultError::ParseError("No card ID in response".into()))
+    }
+
+    /// Assign a user to a Deck card.
+    pub async fn assign_card(
+        &self,
+        board_id: u64,
+        stack_id: u64,
+        card_id: u64,
+        user_id: &str,
+    ) -> Result<(), VaultError> {
+        let assign_url = format!(
+            "{}/index.php/apps/deck/api/v1.0/boards/{}/stacks/{}/cards/{}/assignUser",
+            self.base_url, board_id, stack_id, card_id
+        );
+
+        let body = format!(r#"{{"userId":"{}"}}"#, user_id);
+
+        self.auth(self.http.put(&assign_url))
+            .header("OCS-APIRequest", "true")
+            .header("Content-Type", "application/json")
+            .body(body)
+            .send()
+            .await
+            .map_err(|e| VaultError::IoError(format!("Deck assign: {e}")))?;
+
+        Ok(())
+    }
+
+    /// Convert Deck board stacks + cards to vault-core tasks.
+    /// Card descriptions are stored in `task.body`.
+    pub async fn deck_board_to_tasks(
+        &self,
+        board_id: u64,
+    ) -> Result<(Project, Vec<Task>), VaultError> {
+        let boards = self.list_boards().await?;
+        let board = boards.iter().find(|b| b.id == board_id)
+            .ok_or_else(|| VaultError::NotFound(format!("Board {board_id}")))?;
+
+        let project = Project {
+            title: board.title.clone(),
+            ..Default::default()
+        };
+
+        let stacks = self.list_stacks(board_id).await?;
+        let mut tasks = Vec::new();
+
+        for stack in &stacks {
+            let status = match stack.title.to_lowercase().as_str() {
+                "to do" | "todo" | "backlog" => Status::Open,
+                "doing" | "in progress" | "active" => Status::InProgress,
+                "done" | "completed" | "finished" => Status::Done,
+                "on hold" | "waiting" | "blocked" => Status::OnHold,
+                _ => Status::Open,
+            };
+
+            for card in &stack.cards {
+                let mut task = Task {
+                    title: card.title.clone(),
+                    status: status.clone(),
+                    ..Default::default()
+                };
+                task.projects.push(WikiLink(board.title.clone()));
+
+                if let Some(ref assignee) = card.assigned_user {
+                    task.assignee = Some(assignee.clone());
+                }
+
+                if let Some(ref due) = card.due_date {
+                    if let Ok(d) = chrono::NaiveDate::parse_from_str(due, "%Y-%m-%dT%H:%M:%S%z") {
+                        task.due = Some(d);
+                    } else if let Ok(d) = chrono::NaiveDate::parse_from_str(&due[..10], "%Y-%m-%d") {
+                        task.due = Some(d);
+                    }
+                }
+
+                // Parse tags from description (lines starting with #)
+                if !card.description.is_empty() {
+                    for word in card.description.split_whitespace() {
+                        if word.starts_with('#') && word.len() > 1 {
+                            let tag = word.trim_start_matches('#').to_string();
+                            if !tag.is_empty() && !task.tags.contains(&tag) {
+                                task.tags.push(tag);
+                            }
+                        }
+                    }
+                }
+
+                task.external_source = Some("deck".to_string());
+                task.external_id = Some(card.id.to_string());
+
+                // Store card description as task body (strip tag-only lines)
+                task.body = card.description.lines()
+                    .filter(|line| {
+                        let trimmed = line.trim();
+                        !trimmed.split_whitespace().all(|w| w.starts_with('#') && w.len() > 1)
+                            || trimmed.is_empty()
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+                    .trim()
+                    .to_string();
+
+                tasks.push(task);
+            }
+        }
+
+        Ok((project, tasks))
+    }
+
+    /// Push a task to Deck as a card. Creates in the appropriate stack based on status.
+    /// The card description includes the full markdown body (with subtask checkboxes).
+    /// Pass an empty string for `body` if there is no body content.
+    pub async fn push_task_to_deck(
+        &self,
+        board_id: u64,
+        task: &Task,
+        body: &str,
+    ) -> Result<(), VaultError> {
+        let stacks = self.list_stacks(board_id).await?;
+
+        // Find the right stack based on task status
+        let target_stack_title = match task.status {
+            Status::Done => "Done",
+            Status::InProgress => "In Progress",
+            Status::OnHold => "On Hold",
+            _ => "To Do",
+        };
+
+        let stack = stacks.iter()
+            .find(|s| s.title.to_lowercase() == target_stack_title.to_lowercase())
+            .or_else(|| stacks.first())
+            .ok_or_else(|| VaultError::NotFound("No stacks in board".into()))?;
+
+        let due_str = task.due.map(|d| d.to_string());
+
+        // Build description: markdown body first, then tags
+        let mut desc_parts = Vec::new();
+        if !body.trim().is_empty() {
+            desc_parts.push(body.trim().to_string());
+        }
+        if !task.tags.is_empty() {
+            let tags_line = task.tags.iter().map(|t| format!("#{t}")).collect::<Vec<_>>().join(" ");
+            desc_parts.push(tags_line);
+        }
+        let description = desc_parts.join("\n\n");
+
+        let card_id = self.create_card(
+            board_id,
+            stack.id,
+            &task.title,
+            &description,
+            due_str.as_deref(),
+        ).await?;
+
+        // Assign user if set
+        if let Some(ref assignee) = task.assignee {
+            let _ = self.assign_card(board_id, stack.id, card_id, assignee).await;
+        }
+
+        Ok(())
+    }
+
+    /// Bidirectional sync between local `.md` files and Nextcloud (CalDAV + Deck).
+    ///
+    /// 1. Push local tasks → CalDAV + Deck
+    /// 2. Pull Deck cards → create/update `.md` files for new/changed tasks
+    /// 3. Pull CalDAV VTODOs → create `.md` files for tasks created in Nextcloud Tasks
+    ///
+    /// `webdav_base` is the WebDAV URL for the project's tasks/ directory
+    /// (e.g. "Projects/Montreal Album/tasks/").
+    pub async fn full_sync(
+        &self,
+        calendar: &str,
+        deck_board_id: Option<u64>,
+        local_tasks: &[Task],
+        webdav_tasks_path: Option<&str>,
+    ) -> Result<SyncResult, VaultError> {
+        let mut result = SyncResult::default();
+
+        // ── Phase 1: Push local → remote ─────────────────────────────
+
+        for task in local_tasks {
+            match self.push_task_to_calendar(calendar, task).await {
+                Ok(_) => result.calendar_pushed += 1,
+                Err(e) => result.errors.push(format!("CalDAV push '{}': {}", task.title, e)),
+            }
+        }
+
+        if let Some(board_id) = deck_board_id {
+            for task in local_tasks {
+                match self.push_task_to_deck(board_id, task, "").await {
+                    Ok(_) => result.deck_pushed += 1,
+                    Err(e) => result.errors.push(format!("Deck push '{}': {}", task.title, e)),
+                }
+            }
+        }
+
+        // ── Phase 2: Pull remote → local (reverse sync) ─────────────
+
+        let local_titles: std::collections::HashSet<String> =
+            local_tasks.iter().map(|t| t.title.clone()).collect();
+
+        // Pull from Deck (richer data: assignees, stack=status, description=body)
+        if let Some(board_id) = deck_board_id {
+            match self.deck_board_to_tasks(board_id).await {
+                Ok((project, remote_tasks)) => {
+                    result.deck_pulled = remote_tasks.len();
+
+                    for remote_task in &remote_tasks {
+                        if !local_titles.contains(&remote_task.title) {
+                            // New task from Deck — write .md file (body is in task.body)
+                            if let Some(tasks_path) = webdav_tasks_path {
+                                match self.write_task_to_webdav(
+                                    tasks_path, remote_task, &project.title, &remote_task.body,
+                                ).await {
+                                    Ok(_) => result.files_created += 1,
+                                    Err(e) => result.errors.push(
+                                        format!("Write '{}': {}", remote_task.title, e)
+                                    ),
+                                }
+                            }
+                        } else {
+                            // Exists locally — check if Deck version has updates
+                            if let Some(local) = local_tasks.iter().find(|t| t.title == remote_task.title) {
+                                if local.status != remote_task.status
+                                    || local.assignee != remote_task.assignee
+                                {
+                                    let mut updated = local.clone();
+                                    updated.status = remote_task.status.clone();
+                                    if remote_task.assignee.is_some() {
+                                        updated.assignee = remote_task.assignee.clone();
+                                    }
+                                    if let Some(tasks_path) = webdav_tasks_path {
+                                        // Preserve existing body when updating status/assignee
+                                        match self.write_task_to_webdav(tasks_path, &updated, &project.title, "").await {
+                                            Ok(_) => result.files_updated += 1,
+                                            Err(e) => result.errors.push(
+                                                format!("Update '{}': {}", updated.title, e)
+                                            ),
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(e) => result.errors.push(format!("Deck pull: {e}")),
+            }
+        }
+
+        // Pull from CalDAV (catches tasks created in Nextcloud Tasks app)
+        match self.pull_tasks_from_calendar(calendar).await {
+            Ok(remote_tasks) => {
+                result.calendar_pulled = remote_tasks.len();
+
+                for remote_task in &remote_tasks {
+                    if !local_titles.contains(&remote_task.title) {
+                        // Check if it was already created from Deck above
+                        if result.files_created > 0 {
+                            // Skip if we might have already written it
+                            continue;
+                        }
+                        if let Some(tasks_path) = webdav_tasks_path {
+                            match self.write_task_to_webdav(tasks_path, remote_task, "", "").await {
+                                Ok(_) => result.files_created += 1,
+                                Err(e) => result.errors.push(
+                                    format!("Write CalDAV '{}': {}", remote_task.title, e)
+                                ),
+                            }
+                        }
+                    }
+                }
+            }
+            Err(e) => result.errors.push(format!("CalDAV pull: {e}")),
+        }
+
+        Ok(result)
+    }
+
+    /// Write a task as a `.md` file to WebDAV with markdown body content.
+    /// Pass an empty string for `body` if there is no body content.
+    async fn write_task_to_webdav(
+        &self,
+        tasks_path: &str,
+        task: &Task,
+        project_title: &str,
+        body: &str,
+    ) -> Result<(), VaultError> {
+        let url = format!(
+            "{}/remote.php/dav/files/{}/{}",
+            self.base_url, self.username,
+            tasks_path.trim_start_matches('/')
+        );
+
+        // Ensure directory exists
+        let _ = self.auth(
+            self.http.request(reqwest::Method::from_bytes(b"MKCOL").unwrap(), &url)
+        ).send().await;
+
+        // Build the task — ensure it has the project link
+        let mut task = task.clone();
+        if !project_title.is_empty() {
+            let link = WikiLink(project_title.to_string());
+            if !task.projects.contains(&link) {
+                task.projects.push(link);
+            }
+        }
+
+        // Render to markdown with body (subtask checkboxes, notes, etc.)
+        let content = crate::vault::Vault::render_task_file(&task, body)?;
+
+        // Write via WebDAV PUT
+        let encoded_title = task.title.replace(' ', "%20").replace('/', "-");
+        let file_url = format!(
+            "{}/remote.php/dav/files/{}/{}/{}.md",
+            self.base_url,
+            self.username,
+            tasks_path.trim_start_matches('/').trim_end_matches('/'),
+            encoded_title,
+        );
+
+        self.auth(
+            self.http.put(&file_url)
+                .header("Content-Type", "text/markdown; charset=utf-8")
+                .body(content)
+        )
+            .send()
+            .await
+            .map_err(|e| VaultError::IoError(format!("WebDAV PUT: {e}")))?;
+
+        Ok(())
+    }
+}
+
+// ── Data types ───────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Default)]
+pub struct SyncResult {
+    /// Tasks pushed to CalDAV.
+    pub calendar_pushed: usize,
+    /// Tasks found in CalDAV.
+    pub calendar_pulled: usize,
+    /// Tasks pushed to Deck.
+    pub deck_pushed: usize,
+    /// Cards found in Deck.
+    pub deck_pulled: usize,
+    /// New .md files created from remote tasks.
+    pub files_created: usize,
+    /// Existing .md files updated from remote changes.
+    pub files_updated: usize,
+    /// Errors encountered (non-fatal, sync continues).
+    pub errors: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct DeckBoard {
+    pub id: u64,
+    pub title: String,
+    #[serde(default)]
+    pub archived: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct DeckStack {
+    pub id: u64,
+    pub title: String,
+    #[serde(default)]
+    pub cards: Vec<DeckCard>,
+}
+
+/// Helper to extract the first assigned user's uid from the `assignedUsers` array.
+/// Deck returns `[{"participant": {"uid": "..."}, ...}]`.
+#[derive(Debug, Clone, Deserialize)]
+struct AssignedUser {
+    participant: AssignedUserParticipant,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct AssignedUserParticipant {
+    uid: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct DeckCard {
+    pub id: u64,
+    pub title: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(
+        rename = "assignedUsers",
+        default,
+        deserialize_with = "deserialize_assigned_user"
+    )]
+    pub assigned_user: Option<String>,
+    #[serde(rename = "duedate", default)]
+    pub due_date: Option<String>,
+    #[serde(default)]
+    pub order: i64,
+}
+
+fn deserialize_assigned_user<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let users: Vec<AssignedUser> = Vec::deserialize(deserializer).unwrap_or_default();
+    Ok(users.into_iter().next().map(|u| u.participant.uid))
+}
+
+/// Response from creating a card -- we only need the id.
+#[derive(Debug, Deserialize)]
+struct CardCreateResponse {
+    id: u64,
+}
+
+// ── JSON parsing via serde_json ─────────────────────────────────────────────
+
+fn parse_deck_boards_json(json: &str) -> Vec<DeckBoard> {
+    serde_json::from_str(json).unwrap_or_default()
+}
+
+fn parse_deck_stacks_json(json: &str) -> Vec<DeckStack> {
+    serde_json::from_str(json).unwrap_or_default()
+}
+
+fn extract_json_id(json: &str) -> Option<u64> {
+    serde_json::from_str::<CardCreateResponse>(json).ok().map(|r| r.id)
+}
+
+fn escape_json(s: &str) -> String {
+    // Use serde_json to properly escape, then strip the surrounding quotes
+    let escaped = serde_json::to_string(s).unwrap_or_else(|_| format!("\"{}\"", s));
+    escaped[1..escaped.len() - 1].to_string()
+}
