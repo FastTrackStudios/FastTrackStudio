@@ -243,6 +243,11 @@ async fn main() -> eyre::Result<()> {
         .route("/api/tasks", get(list_tasks))
         .route("/api/sync/status", get(sync_status))
         .route("/api/sync/trigger", post(trigger_sync))
+        .route("/api/activity", get(activity_feed))
+        .route("/api/tasks", post(create_task_api))
+        .route("/api/tasks/:title", get(get_task))
+        .route("/api/tasks/:title/complete", post(complete_task_api))
+        .route("/api/tasks/user/:username", get(tasks_by_user))
         .route("/api/health", get(health))
         .layer(CorsLayer::permissive());
 
@@ -509,6 +514,80 @@ async fn health() -> &'static str {
     "ok"
 }
 
+// ── Webhook endpoints ───────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct CreateTaskRequest {
+    title: String,
+    #[serde(default)]
+    status: Option<String>,
+    #[serde(default)]
+    priority: Option<String>,
+    #[serde(default)]
+    assignee: Option<String>,
+    #[serde(default)]
+    due: Option<String>,
+    #[serde(default)]
+    project: Option<String>,
+    #[serde(default)]
+    tags: Vec<String>,
+    #[serde(default)]
+    body: String,
+}
+
+async fn create_task_api(
+    State(state): State<AppState>,
+    Json(req): Json<CreateTaskRequest>,
+) -> impl IntoResponse {
+    let mut task = vault_core::Task::default();
+    task.title = req.title;
+    task.body = req.body;
+    if let Some(assignee) = req.assignee {
+        task.assignee = Some(assignee);
+    }
+    if let Some(due) = req.due {
+        task.due = chrono::NaiveDate::parse_from_str(&due, "%Y-%m-%d").ok();
+    }
+    if let Some(ref status) = req.status {
+        task.status = match status.as_str() {
+            "Open" => vault_core::Status::Open,
+            "InProgress" => vault_core::Status::InProgress,
+            "Done" => vault_core::Status::Done,
+            "OnHold" => vault_core::Status::OnHold,
+            "Planned" => vault_core::Status::Planned,
+            _ => vault_core::Status::Open,
+        };
+    }
+    if let Some(ref priority) = req.priority {
+        task.priority = match priority.as_str() {
+            "Urgent" => vault_core::Priority::Urgent,
+            "High" => vault_core::Priority::High,
+            "Normal" => vault_core::Priority::Normal,
+            "Low" => vault_core::Priority::Low,
+            _ => vault_core::Priority::None,
+        };
+    }
+    task.tags = req.tags;
+    if let Some(project) = req.project {
+        task.projects.push(vault_core::WikiLink(project));
+    }
+
+    match state.svc.create_task(task).await {
+        Ok(created) => Json(serde_json::json!({"task": task_to_json(&created)})),
+        Err(e) => Json(serde_json::json!({"error": e.to_string()})),
+    }
+}
+
+async fn complete_task_api(
+    State(state): State<AppState>,
+    axum::extract::Path(title): axum::extract::Path<String>,
+) -> impl IntoResponse {
+    match state.svc.complete_task(title).await {
+        Ok(task) => Json(serde_json::json!({"task": task_to_json(&task)})),
+        Err(e) => Json(serde_json::json!({"error": e.to_string()})),
+    }
+}
+
 async fn server_info(State(state): State<AppState>) -> impl IntoResponse {
     Json(state.info)
 }
@@ -635,4 +714,58 @@ async fn list_tasks(State(state): State<AppState>) -> impl IntoResponse {
         })
         .collect();
     Json(items)
+}
+
+#[derive(Deserialize)]
+struct ActivityFilter {
+    limit: Option<u32>,
+    entity_type: Option<String>,
+    entity_id: Option<String>,
+}
+
+async fn activity_feed(
+    State(state): State<AppState>,
+    AxumQuery(filter): AxumQuery<ActivityFilter>,
+) -> impl IntoResponse {
+    let limit = filter.limit.unwrap_or(50);
+
+    // Query the SQLite index's changes table
+    let index = state.svc.index.lock().unwrap();
+    if let Some(ref idx) = *index {
+        let changes = idx.recent_changes(limit).unwrap_or_default();
+        let items: Vec<serde_json::Value> = changes.iter().map(|c| {
+            serde_json::json!({
+                "entity_type": c.entity_type,
+                "entity_id": c.entity_id,
+                "field": c.field,
+                "old_value": c.old_value,
+                "new_value": c.new_value,
+                "changed_by": c.changed_by,
+                "changed_at": c.changed_at,
+                "file_path": c.file_path,
+            })
+        }).collect();
+        Json(serde_json::json!({"changes": items}))
+    } else {
+        Json(serde_json::json!({"changes": [], "error": "Index not available"}))
+    }
+}
+
+async fn get_task(
+    State(state): State<AppState>,
+    axum::extract::Path(title): axum::extract::Path<String>,
+) -> impl IntoResponse {
+    let tasks = state.svc.list_tasks().await;
+    match tasks.into_iter().find(|t| t.title == title) {
+        Some(t) => Json(serde_json::json!({"task": task_to_json(&t)})),
+        None => Json(serde_json::json!({"error": "not found"})),
+    }
+}
+
+async fn tasks_by_user(
+    State(state): State<AppState>,
+    axum::extract::Path(username): axum::extract::Path<String>,
+) -> impl IntoResponse {
+    let tasks = state.svc.tasks_for_user(username).await;
+    Json(serde_json::json!({"tasks": tasks_to_json(&tasks)}))
 }

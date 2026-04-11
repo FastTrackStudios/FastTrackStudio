@@ -38,7 +38,7 @@ pub struct VaultServiceImpl {
     root: std::path::PathBuf,
     vault: Arc<RwLock<Vault>>,
     /// SQLite index for fast queries; `None` when unavailable (e.g. WASM).
-    index: Arc<std::sync::Mutex<Option<TaskIndex>>>,
+    pub index: Arc<std::sync::Mutex<Option<TaskIndex>>>,
     /// Additional vault sources beyond the primary.
     extra_vaults: Arc<RwLock<Vec<VaultSource>>>,
     change_tx: Arc<tokio::sync::watch::Sender<u64>>,
