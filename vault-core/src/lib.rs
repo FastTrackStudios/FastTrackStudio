@@ -25,6 +25,9 @@ pub mod index;
 #[cfg(feature = "caldav")]
 pub mod caldav;
 
+#[cfg(feature = "realtime")]
+pub mod crdt;
+
 pub use task::{
     DependencyRelType, Priority, RecurrenceAnchor, Reminder, ReminderAnchor, Status, Task,
     TaskDependency, TimeEntry, WikiLink,
@@ -60,6 +63,8 @@ pub use provider::{
 };
 
 #[cfg(feature = "caldav")]
+
+#[cfg(feature = "realtime")]
 pub use caldav::{
     task_to_vtodo, vtodo_to_task, task_to_ics, ics_to_task,
     CalDavClient, CalDavConfig,
