@@ -1,0 +1,11 @@
+[package]
+name = "task-ui"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+dioxus = { version = "0.7.2", features = ["router"] }
+vault-core.workspace = true
+fts-ui.workspace = true
+lucide-dioxus.workspace = true
+chrono.workspace = true
