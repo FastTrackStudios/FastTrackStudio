@@ -274,7 +274,7 @@ All sharing the same Dioxus components and fts-ui design system:
 - [x] Output system (versioned deliverables, feedback, approval)
 - [x] External integration references (Firefly III, Invoice Ninja, GitHub, DAW)
 - [x] Download portal schema (role selector, cross-role browsing, recipient tracking)
-- [ ] Workflow file I/O (read/write event.md, setlist.md, etc.)
+- [x] Workflow file I/O (generic parse_frontmatter/render_frontmatter for all types)
 - [ ] Download portal Dioxus page (role selector UI)
 - [ ] Bundle generation (collect files into role-specific folders)
 - [ ] Nextcloud share creation for bundles
@@ -299,10 +299,10 @@ All sharing the same Dioxus components and fts-ui design system:
 
 ### Phase 5.5: Scale & Search
 - [ ] Full-text search (SQLite FTS5 or Tantivy)
-- [ ] S3 provider implementation
-- [ ] Subtask progress tracking (parse `- [x]` lines)
-- [ ] Comment sync between Deck cards and .md files
-- [ ] Activity feed / audit trail
+- [x] S3 provider implementation (MinIO/R2 compatible, full CRUD)
+- [x] Subtask progress tracking (parse `- [x]` lines, subtask_progress())
+- [x] Comment sync between Deck cards and .md files (## Comments section)
+- [x] Activity feed / audit trail (SQLite changes table + /api/activity)
 
 ### Phase 6: Views & UX
 - [ ] Kanban board view in the app
@@ -321,7 +321,7 @@ All sharing the same Dioxus components and fts-ui design system:
 
 ### Phase 8: Ecosystem
 - [ ] GitHub Issues bidirectional sync
-- [ ] Webhook API for external tools
+- [x] Webhook API (POST /api/tasks, POST /api/tasks/:title/complete)
 - [ ] REAPER integration (session markers → tasks, region → song)
 - [ ] Custom workflow definitions (user-defined schemas)
 - [ ] Community workflow templates
