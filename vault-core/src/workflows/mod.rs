@@ -44,7 +44,9 @@
 pub mod event;
 pub mod output;
 pub mod external;
+pub mod download;
 
 pub use event::*;
 pub use output::*;
 pub use external::*;
+pub use download::*;
