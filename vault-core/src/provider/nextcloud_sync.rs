@@ -734,9 +734,124 @@ impl NextcloudSync {
 
         Ok(())
     }
+
+    // ── Deck Comments ───────────────────────────────────────────────
+
+    /// List all comments on a Deck card.
+    pub async fn list_card_comments(
+        &self,
+        board_id: u64,
+        stack_id: u64,
+        card_id: u64,
+    ) -> Result<Vec<DeckComment>, VaultError> {
+        let url = format!(
+            "{}/index.php/apps/deck/api/v1.0/boards/{}/stacks/{}/cards/{}/comments",
+            self.base_url, board_id, stack_id, card_id
+        );
+
+        let resp = self.auth(self.http.get(&url))
+            .header("OCS-APIRequest", "true")
+            .send()
+            .await
+            .map_err(|e| VaultError::IoError(format!("Deck comments GET: {e}")))?;
+
+        let text = resp.text().await
+            .map_err(|e| VaultError::IoError(e.to_string()))?;
+
+        let comments = parse_deck_comments_json(&text);
+        Ok(comments)
+    }
+
+    /// Add a comment to a Deck card.
+    pub async fn add_card_comment(
+        &self,
+        board_id: u64,
+        stack_id: u64,
+        card_id: u64,
+        message: &str,
+    ) -> Result<(), VaultError> {
+        let url = format!(
+            "{}/index.php/apps/deck/api/v1.0/boards/{}/stacks/{}/cards/{}/comments",
+            self.base_url, board_id, stack_id, card_id
+        );
+
+        let body = format!(r#"{{"message":"{}"}}"#, escape_json(message));
+
+        let resp = self.auth(self.http.post(&url))
+            .header("OCS-APIRequest", "true")
+            .header("Content-Type", "application/json")
+            .body(body)
+            .send()
+            .await
+            .map_err(|e| VaultError::IoError(format!("Deck comment POST: {e}")))?;
+
+        if !resp.status().is_success() {
+            return Err(VaultError::IoError(format!(
+                "Deck comment POST failed: {}",
+                resp.status()
+            )));
+        }
+
+        Ok(())
+    }
+
+    /// Pull comments from a Deck card and append them to the task body as a
+    /// `## Comments` section. Existing comments in the body are replaced.
+    pub async fn sync_comments_to_body(
+        &self,
+        board_id: u64,
+        stack_id: u64,
+        card_id: u64,
+        task: &mut Task,
+    ) -> Result<(), VaultError> {
+        let comments = self.list_card_comments(board_id, stack_id, card_id).await?;
+
+        if comments.is_empty() {
+            return Ok(());
+        }
+
+        // Build the comments section
+        let mut section = String::from("## Comments");
+        for c in &comments {
+            // Extract just the date portion (YYYY-MM-DD) from the datetime string
+            let date = if c.created_at.len() >= 10 {
+                &c.created_at[..10]
+            } else {
+                &c.created_at
+            };
+            section.push_str(&format!(
+                "\n> **{}** ({}): {}",
+                c.author, date, c.message
+            ));
+        }
+
+        // Strip any existing ## Comments section from the body
+        let body_without_comments = if let Some(idx) = task.body.find("## Comments") {
+            task.body[..idx].trim_end().to_string()
+        } else {
+            task.body.trim_end().to_string()
+        };
+
+        // Append the new comments section
+        if body_without_comments.is_empty() {
+            task.body = section;
+        } else {
+            task.body = format!("{}\n\n{}", body_without_comments, section);
+        }
+
+        Ok(())
+    }
 }
 
 // ── Data types ───────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct DeckComment {
+    pub id: u64,
+    pub author: String,
+    pub message: String,
+    pub created_at: String,
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct SyncResult {
@@ -824,6 +939,28 @@ fn parse_deck_boards_json(json: &str) -> Vec<DeckBoard> {
 
 fn parse_deck_stacks_json(json: &str) -> Vec<DeckStack> {
     serde_json::from_str(json).unwrap_or_default()
+}
+
+fn parse_deck_comments_json(json: &str) -> Vec<DeckComment> {
+    #[derive(Deserialize)]
+    struct RawComment {
+        id: u64,
+        #[serde(rename = "actorId")]
+        actor_id: String,
+        message: String,
+        #[serde(rename = "creationDateTime")]
+        creation_date_time: String,
+    }
+
+    let raw: Vec<RawComment> = serde_json::from_str(json).unwrap_or_default();
+    raw.into_iter()
+        .map(|r| DeckComment {
+            id: r.id,
+            author: r.actor_id,
+            message: r.message,
+            created_at: r.creation_date_time,
+        })
+        .collect()
 }
 
 fn extract_json_id(json: &str) -> Option<u64> {
