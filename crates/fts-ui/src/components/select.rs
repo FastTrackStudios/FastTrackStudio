@@ -102,8 +102,8 @@ pub fn SelectTrigger(props: SelectTriggerProps) -> Element {
             r#type: "button",
             disabled: if props.disabled { Some(true) } else { None },
             class: format!(
-                "inline-flex items-center justify-between gap-1.5 h-9 w-full px-3 text-sm rounded-lg border border-input bg-input/30 hover:bg-input/50 transition-colors cursor-pointer select-none disabled:cursor-not-allowed disabled:opacity-50 {} {}",
-                if is_placeholder { "text-muted-foreground" } else { "" },
+                "inline-flex items-center justify-between gap-2 h-9 w-full px-3 text-sm rounded-lg border border-input bg-transparent shadow-xs hover:bg-accent hover:text-accent-foreground transition-colors cursor-pointer select-none disabled:cursor-not-allowed disabled:opacity-50 {} {}",
+                if is_placeholder { "text-muted-foreground" } else { "text-foreground" },
                 props.class
             ),
             onclick: move |_| {
@@ -113,9 +113,9 @@ pub fn SelectTrigger(props: SelectTriggerProps) -> Element {
                 }
             },
             span { class: "truncate", "{display}" }
-            // Chevron-down icon
+            // ChevronsUpDown icon (shadcn v4 style)
             svg {
-                class: "size-4 text-muted-foreground shrink-0",
+                class: "size-4 text-muted-foreground shrink-0 opacity-50",
                 xmlns: "http://www.w3.org/2000/svg",
                 width: "24",
                 height: "24",
@@ -125,7 +125,8 @@ pub fn SelectTrigger(props: SelectTriggerProps) -> Element {
                 stroke_width: "2",
                 stroke_linecap: "round",
                 stroke_linejoin: "round",
-                path { d: "m6 9 6 6 6-6" }
+                path { d: "m7 15 5 5 5-5" }
+                path { d: "m7 9 5-5 5 5" }
             }
         }
     }
