@@ -12,33 +12,11 @@ use fts_ui::prelude::*;
 const TAILWIND_CSS: &str = include_str!("../assets/tailwind.css");
 const FTS_THEME_CSS: &str = include_str!("../assets/fts-theme.css");
 
-// Blitz CSS workarounds:
-// - Force dark mode vars (Blitz has no @media prefers-color-scheme)
-// - Fix disabled cursor applied unconditionally
+// Blitz CSS workarounds
 const BLITZ_FIXES: &str = r#"
-:root {
-    --background: oklch(0.145 0 0);
-    --foreground: oklch(0.985 0 0);
-    --card: oklch(0.145 0 0);
-    --card-foreground: oklch(0.985 0 0);
-    --popover: oklch(0.145 0 0);
-    --popover-foreground: oklch(0.985 0 0);
-    --primary: oklch(0.985 0 0);
-    --primary-foreground: oklch(0.205 0 0);
-    --secondary: oklch(0.269 0 0);
-    --secondary-foreground: oklch(0.985 0 0);
-    --muted: oklch(0.269 0 0);
-    --muted-foreground: oklch(0.708 0 0);
-    --accent: oklch(0.269 0 0);
-    --accent-foreground: oklch(0.985 0 0);
-    --destructive: oklch(0.5058 0.2066 27.85);
-    --border: oklch(0.269 0 0);
-    --input: oklch(0.269 0 0);
-    --ring: oklch(0.439 0 0);
-    color-scheme: dark;
-}
 input, textarea, select, button { cursor: auto !important; }
 input:disabled, textarea:disabled, button:disabled { cursor: not-allowed !important; }
+:root { color-scheme: dark; }
 "#;
 
 /// Root component for the UI test panel.
