@@ -32,13 +32,15 @@ pub fn UiTestPanel() -> Element {
         document::Style { {FTS_THEME_CSS} }
         document::Style { {BLITZ_FIXES} }
 
-        div { class: "dark min-h-full bg-background text-foreground p-4 font-sans",
+        div { class: "dark min-h-full bg-background text-foreground p-6 font-sans flex flex-col items-center",
 
-            Heading { level: HeadingLevel::H2, "FTS UI Component Test" }
+            div { class: "w-full max-w-md",
 
-            div { class: "mt-4",
-                Card {
-                    div { class: "p-6 flex flex-col gap-4",
+                Heading { level: HeadingLevel::H2, "FTS UI Component Test" }
+
+                div { class: "mt-4",
+                    Card {
+                        div { class: "p-6 flex flex-col gap-4",
                         Heading { level: HeadingLevel::H3, "Registration Form" }
 
                         Text { variant: TextVariant::Muted,
@@ -100,19 +102,20 @@ pub fn UiTestPanel() -> Element {
                 }
             }
 
-            div { class: "mt-4 flex gap-2",
-                Button { variant: ButtonVariant::Primary, "Primary" }
-                Button { variant: ButtonVariant::Secondary, "Secondary" }
-                Button { variant: ButtonVariant::Outline, "Outline" }
-                Button { variant: ButtonVariant::Destructive, "Destructive" }
-                Button { variant: ButtonVariant::Ghost, "Ghost" }
-            }
+                div { class: "mt-4 flex gap-2 flex-wrap",
+                    Button { variant: ButtonVariant::Primary, "Primary" }
+                    Button { variant: ButtonVariant::Secondary, "Secondary" }
+                    Button { variant: ButtonVariant::Outline, "Outline" }
+                    Button { variant: ButtonVariant::Destructive, "Destructive" }
+                    Button { variant: ButtonVariant::Ghost, "Ghost" }
+                }
 
-            div { class: "mt-4 flex gap-2 items-center",
-                Badge { variant: BadgeVariant::Default, "Default" }
-                Badge { variant: BadgeVariant::Secondary, "Secondary" }
-                Badge { variant: BadgeVariant::Outline, "Outline" }
-                Badge { variant: BadgeVariant::Destructive, "Error" }
+                div { class: "mt-4 flex gap-2 items-center flex-wrap",
+                    Badge { variant: BadgeVariant::Default, "Default" }
+                    Badge { variant: BadgeVariant::Secondary, "Secondary" }
+                    Badge { variant: BadgeVariant::Outline, "Outline" }
+                    Badge { variant: BadgeVariant::Destructive, "Error" }
+                }
             }
         }
     }
