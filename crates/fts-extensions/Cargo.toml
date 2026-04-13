@@ -28,6 +28,9 @@ daw = { workspace = true, features = ["reaper", "sync"] }
 # Dioxus panel rendering for REAPER dock windows
 reaper-dioxus = { workspace = true }
 
+# FTS design system (shadcn-ui clone for Dioxus)
+fts-ui = { workspace = true }
+
 # REAPER entry point machinery
 reaper-low.workspace = true
 reaper-medium.workspace = true

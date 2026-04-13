@@ -28,6 +28,7 @@ reaper-macros = { git = "https://github.com/FastTrackStudios/reaper-rs.git", bra
 reaper-medium = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
 daw = { path = "../daw/crates/daw" }
 reaper-dioxus = { path = "../reaper-lib/crates/reaper-dioxus" }
+fts-ui = { path = "../Plugins/fts-ui/crates/fts-ui" }
 tokio = { version = "1.48", features = ["rt-multi-thread", "net", "sync"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
@@ -58,13 +59,9 @@ vox-core = { path = "../vox/rust/vox-core" }
 vox-types = { path = "../vox/rust/vox-types" }
 vox-postcard = { path = "../vox/rust/vox-postcard" }
 vox-stream = { path = "../vox/rust/vox-stream" }
-vox-websocket = { path = "../vox/rust/vox-websocket" }
-vox-shm = { path = "../vox/rust/vox-shm" }
 vox-schema = { path = "../vox/rust/vox-schema" }
 vox-macros-core = { path = "../vox/rust/vox-macros-core" }
 vox-macros-parse = { path = "../vox/rust/vox-macros-parse" }
-shm-primitives = { path = "../vox/rust/shm-primitives" }
-shm-primitives-async = { path = "../vox/rust/shm-primitives-async" }
 ur-taking-me-with-you = { path = "../vox/rust/ur-taking-me-with-you" }
 
 [patch."https://github.com/bearcove/vox.git"]
@@ -73,8 +70,6 @@ vox-core = { path = "../vox/rust/vox-core" }
 vox-types = { path = "../vox/rust/vox-types" }
 vox-postcard = { path = "../vox/rust/vox-postcard" }
 vox-stream = { path = "../vox/rust/vox-stream" }
-vox-websocket = { path = "../vox/rust/vox-websocket" }
-vox-shm = { path = "../vox/rust/vox-shm" }
 vox-schema = { path = "../vox/rust/vox-schema" }
 vox-macros-core = { path = "../vox/rust/vox-macros-core" }
 vox-macros-parse = { path = "../vox/rust/vox-macros-parse" }

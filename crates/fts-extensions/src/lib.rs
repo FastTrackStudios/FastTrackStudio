@@ -78,6 +78,7 @@ mod item_actions;
 mod menu;
 mod reaper_utils;
 mod tempo;
+mod ui_test_panel;
 
 // ── Timer callback ───────────────────────────────────────────────────────────
 
@@ -285,6 +286,9 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     // Combine all defs for REAPER registration
     let mut all_defs: actions::ActionDefs = legacy_defs;
     all_defs.extend(module_actions);
+    // Add the UI test panel toggle action
+    let ui_test_action = ui_test_panel::action_def();
+    all_defs.push(ui_test_action.into_tuple());
 
     let session = ReaperSession::load(context);
     let app = App {
@@ -330,7 +334,8 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     // ── Dioxus panel rendering ────────────────────────────────────────
     reaper_dioxus::service::init();
     reaper_dioxus::dock::init(reaper_low::Reaper::get(), reaper_low::Swell::get());
-    let panels = module::collect_panels(&modules);
+    let mut panels = module::collect_panels(&modules);
+    panels.push(ui_test_panel::panel_def());
     info!(panels = panels.len(), "Panel definitions collected");
     for panel in &panels {
         reaper_dioxus::dock::register_panel_from_service(panel);
