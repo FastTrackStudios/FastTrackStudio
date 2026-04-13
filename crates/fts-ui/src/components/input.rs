@@ -1,55 +1,82 @@
-//! Input — wraps lumen-blocks Input with FTS defaults.
+//! Input — shadcn v4 maia style, replaces lumen-blocks wrapper.
 
 use dioxus::prelude::*;
-pub use lumen_blocks::components::input::{InputSize, InputVariant};
 
-/// FTS-styled text input.
+/// Input size variants.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum InputSize {
+    Small,
+    #[default]
+    Medium,
+    Large,
+}
+
+/// Input visual variant.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum InputVariant {
+    #[default]
+    Default,
+    Error,
+}
+
 #[derive(Props, Clone, PartialEq)]
 pub struct InputProps {
     /// Current value (two-way binding).
     pub value: Signal<String>,
 
-    /// Size.
-    #[props(default = InputSize::Medium)]
+    #[props(default)]
     pub size: InputSize,
 
-    /// Variant.
-    #[props(default = InputVariant::Default)]
+    #[props(default)]
     pub variant: InputVariant,
 
-    /// Placeholder text.
     #[props(default)]
     pub placeholder: String,
 
-    /// Disabled state.
     #[props(default = false)]
     pub disabled: bool,
 
-    /// Read-only.
     #[props(default = false)]
     pub readonly: bool,
 
-    /// Change handler (receives the full FormEvent from the underlying input).
     #[props(default)]
     pub on_change: Option<Callback<FormEvent>>,
 
-    /// Extra CSS classes.
     #[props(default)]
     pub class: String,
 }
 
 #[component]
 pub fn Input(props: InputProps) -> Element {
+    // shadcn v4 maia: cn-input
+    let base = "w-full bg-input/30 border-input focus-visible:border-ring focus-visible:ring-ring/50 border px-3 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50 placeholder:text-muted-foreground";
+
+    let size_class = match props.size {
+        InputSize::Small => "h-8 rounded-lg text-xs",
+        InputSize::Medium => "h-9 rounded-lg",
+        InputSize::Large => "h-10 rounded-lg",
+    };
+
+    let variant_class = match props.variant {
+        InputVariant::Default => "",
+        InputVariant::Error => "aria-invalid:ring-destructive/20 aria-invalid:border-destructive border-destructive",
+    };
+
+    let mut value = props.value;
+
     rsx! {
-        lumen_blocks::components::input::Input {
-            value: props.value,
-            size: props.size,
-            variant: props.variant,
-            placeholder: props.placeholder,
-            disabled: props.disabled,
-            readonly: props.readonly,
-            on_change: props.on_change,
-            class: props.class,
+        input {
+            class: "{base} {size_class} {variant_class} {props.class}",
+            value: "{value}",
+            placeholder: "{props.placeholder}",
+            disabled: if props.disabled { Some(true) } else { None },
+            readonly: if props.readonly { Some(true) } else { None },
+            oninput: move |e: FormEvent| {
+                value.set(e.value());
+                if let Some(cb) = &props.on_change {
+                    cb.call(e);
+                }
+            },
         }
     }
 }
