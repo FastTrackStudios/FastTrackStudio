@@ -1,132 +1,118 @@
 //! Reaper-Dioxus UI Component Test Panel
 //!
-//! Stress-tests input handling and fts-ui components in the native
+//! Tests fts-ui components (shadcn-ui clone) in the native
 //! Dioxus/Blitz renderer inside REAPER's docker system.
 
 use daw::module::{ActionDef, DockPosition, PanelComponent, PanelDef};
 use reaper_dioxus::prelude::*;
 
+use fts_ui::prelude::*;
+
 // Embed Tailwind CSS + FTS theme at compile time
 const TAILWIND_CSS: &str = include_str!("../assets/tailwind.css");
 const FTS_THEME_CSS: &str = include_str!("../assets/fts-theme.css");
 
-// Blitz CSS workarounds — nested selectors like `&:disabled` aren't fully supported
+// Blitz CSS workarounds
 const BLITZ_FIXES: &str = r#"
-/* Fix Blitz applying disabled:cursor-not-allowed unconditionally */
-input, textarea, select, button {
-    cursor: auto !important;
-}
-input:disabled, textarea:disabled, button:disabled {
-    cursor: not-allowed !important;
-}
-/* Force dark mode colors (Blitz has no prefers-color-scheme) */
-:root {
-    color-scheme: dark;
-}
+input, textarea, select, button { cursor: auto !important; }
+input:disabled, textarea:disabled, button:disabled { cursor: not-allowed !important; }
+:root { color-scheme: dark; }
 "#;
-
-fn push_log(log: &mut Signal<Vec<String>>, entry: String) {
-    log.write().push(entry);
-    let len = log.read().len();
-    if len > 30 {
-        log.write().drain(0..len - 30);
-    }
-}
 
 /// Root component for the UI test panel.
 #[component]
 pub fn UiTestPanel() -> Element {
-    let mut native_value = use_signal(|| String::new());
-    let mut event_log = use_signal(|| Vec::<String>::new());
+    let name = use_signal(|| String::new());
+    let email = use_signal(|| String::new());
+    let selected_role = use_signal(|| String::new());
+    let mut submitted = use_signal(|| false);
 
     rsx! {
         document::Style { {TAILWIND_CSS} }
         document::Style { {FTS_THEME_CSS} }
         document::Style { {BLITZ_FIXES} }
 
-        div {
-            class: "dark min-h-full bg-background text-foreground p-4 font-sans",
+        div { class: "dark min-h-full bg-background text-foreground p-4 font-sans",
 
-            h2 { class: "text-xl font-bold mb-4", "Input Focus Test" }
+            Heading { level: HeadingLevel::H2, "FTS UI Component Test" }
 
-            div { class: "grid grid-cols-2 gap-4",
+            div { class: "mt-4",
+                Card {
+                    div { class: "p-6 flex flex-col gap-4",
+                        Heading { level: HeadingLevel::H3, "Registration Form" }
 
-                // Left column: inputs
-                div { class: "flex flex-col gap-4",
-
-                    // 1. Raw HTML input
-                    div { class: "flex flex-col gap-1",
-                        label { class: "text-sm font-medium", "Native <input> (raw HTML)" }
-                        input {
-                            class: "h-9 w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1 text-sm text-white",
-                            r#type: "text",
-                            placeholder: "Type here...",
-                            value: "{native_value}",
-                            oninput: move |e: FormEvent| {
-                                let v = e.value();
-                                push_log(&mut event_log, format!("oninput: '{v}'"));
-                                native_value.set(v);
-                            },
-                            onfocus: move |_| push_log(&mut event_log, "input: onfocus".into()),
-                            onblur: move |_| push_log(&mut event_log, "input: onblur".into()),
+                        Text { variant: TextVariant::Muted,
+                            "Test card with form inputs, dropdown, and button."
                         }
-                        p { class: "text-xs text-zinc-400", "Value: \"{native_value}\"" }
-                    }
 
-                    // 2. Raw HTML textarea
-                    div { class: "flex flex-col gap-1",
-                        label { class: "text-sm font-medium", "Native <textarea>" }
-                        textarea {
-                            class: "w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white min-h-[60px]",
-                            placeholder: "Multi-line text...",
-                            onfocus: move |_| push_log(&mut event_log, "textarea: onfocus".into()),
+                        div { class: "flex flex-col gap-2",
+                            Label { "Name" }
+                            Input {
+                                value: name,
+                                placeholder: "Enter your name",
+                            }
                         }
-                    }
 
-                    // 3. fts-ui Input
-                    div { class: "flex flex-col gap-1",
-                        label { class: "text-sm font-medium", "fts-ui Input component" }
-                        {
-                            use fts_ui::prelude::*;
-                            let fts_value = use_signal(|| String::new());
-                            rsx! {
-                                Input {
-                                    value: fts_value,
-                                    placeholder: "fts-ui input...",
+                        div { class: "flex flex-col gap-2",
+                            Label { "Email" }
+                            Input {
+                                value: email,
+                                placeholder: "you@example.com",
+                            }
+                        }
+
+                        div { class: "flex flex-col gap-2",
+                            Label { "Role" }
+                            Select {
+                                value: selected_role,
+                                placeholder: "Select a role...",
+                                SelectTrigger {}
+                                SelectContent {
+                                    SelectItem { value: "engineer", "Engineer" }
+                                    SelectItem { value: "designer", "Designer" }
+                                    SelectItem { value: "producer", "Producer" }
+                                    SelectItem { value: "musician", "Musician" }
                                 }
-                                p { class: "text-xs text-zinc-400", "Value: \"{fts_value}\"" }
+                            }
+                        }
+
+                        Button {
+                            variant: ButtonVariant::Primary,
+                            on_click: move |_| {
+                                tracing::info!(
+                                    name = %name.read(),
+                                    email = %email.read(),
+                                    role = %selected_role.read(),
+                                    "Form submitted"
+                                );
+                                submitted.set(true);
+                            },
+                            "Submit"
+                        }
+
+                        if *submitted.read() {
+                            Alert {
+                                variant: AlertVariant::Default,
+                                "Submitted: {name} ({email}) — Role: {selected_role}"
                             }
                         }
                     }
-
-                    // 4. Button test
-                    div { class: "flex gap-2",
-                        button {
-                            class: "px-4 py-2 bg-white text-black rounded-lg text-sm font-medium",
-                            onclick: move |_| push_log(&mut event_log, "Button clicked!".into()),
-                            "Click Me"
-                        }
-                        button {
-                            class: "px-4 py-2 bg-zinc-700 text-white rounded-lg text-sm font-medium",
-                            onclick: move |_| event_log.write().clear(),
-                            "Clear Log"
-                        }
-                    }
                 }
+            }
 
-                // Right column: event log
-                div { class: "flex flex-col gap-1",
-                    h3 { class: "text-sm font-medium", "Event Log" }
-                    div {
-                        class: "font-mono text-xs bg-black rounded-lg p-3 min-h-[300px] max-h-[500px] overflow-y-auto border border-zinc-800",
-                        if event_log.read().is_empty() {
-                            span { class: "text-zinc-600", "Click inputs and type..." }
-                        }
-                        for (i, entry) in event_log.read().iter().enumerate() {
-                            div { key: "{i}", class: "text-green-400 leading-relaxed", "{entry}" }
-                        }
-                    }
-                }
+            div { class: "mt-4 flex gap-2",
+                Button { variant: ButtonVariant::Primary, "Primary" }
+                Button { variant: ButtonVariant::Secondary, "Secondary" }
+                Button { variant: ButtonVariant::Outline, "Outline" }
+                Button { variant: ButtonVariant::Destructive, "Destructive" }
+                Button { variant: ButtonVariant::Ghost, "Ghost" }
+            }
+
+            div { class: "mt-4 flex gap-2 items-center",
+                Badge { variant: BadgeVariant::Default, "Default" }
+                Badge { variant: BadgeVariant::Secondary, "Secondary" }
+                Badge { variant: BadgeVariant::Outline, "Outline" }
+                Badge { variant: BadgeVariant::Destructive, "Error" }
             }
         }
     }
@@ -139,7 +125,7 @@ pub fn panel_def() -> PanelDef {
         title: "UI Component Test",
         component: PanelComponent::from_fn_ptr(UiTestPanel as fn() -> _ as *const ()),
         default_dock: DockPosition::Floating,
-        default_size: (800.0, 600.0),
+        default_size: (600.0, 600.0),
         toggle_action: Some("FTS_UI_TEST_TOGGLE"),
     }
 }
