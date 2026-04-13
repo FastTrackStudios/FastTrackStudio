@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "crates/fts-extensions",
+    "crates/ui-test-standalone",
     "xtask",
 ]
 resolver = "2"
