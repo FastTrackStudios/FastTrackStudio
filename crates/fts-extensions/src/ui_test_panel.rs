@@ -8,6 +8,10 @@ use reaper_dioxus::prelude::*;
 
 use fts_ui::prelude::*;
 
+// Embed Tailwind CSS + FTS theme at compile time
+const TAILWIND_CSS: &str = include_str!("../assets/tailwind.css");
+const FTS_THEME_CSS: &str = include_str!("../assets/fts-theme.css");
+
 /// Root component for the UI test panel.
 #[component]
 pub fn UiTestPanel() -> Element {
@@ -16,21 +20,24 @@ pub fn UiTestPanel() -> Element {
     let mut submitted = use_signal(|| false);
 
     rsx! {
-        div {
-            style: "padding: 16px; font-family: sans-serif; background: var(--background, #0a0a0a); color: var(--foreground, #fafafa); min-height: 100%;",
+        // Inject Tailwind + FTS theme
+        document::Style { {TAILWIND_CSS} }
+        document::Style { {FTS_THEME_CSS} }
+
+        div { class: "dark min-h-full bg-background text-foreground p-4 font-sans",
 
             Heading { level: HeadingLevel::H2, "FTS UI Component Test" }
 
-            div { style: "margin-top: 16px;",
+            div { class: "mt-4",
                 Card {
-                    div { style: "padding: 24px; display: flex; flex-direction: column; gap: 16px;",
+                    div { class: "p-6 flex flex-col gap-4",
                         Heading { level: HeadingLevel::H3, "Registration Form" }
 
                         Text { variant: TextVariant::Muted,
                             "Test card with form inputs, labels, and button."
                         }
 
-                        div { style: "display: flex; flex-direction: column; gap: 8px;",
+                        div { class: "flex flex-col gap-2",
                             Label { "Name" }
                             Input {
                                 value: name,
@@ -38,7 +45,7 @@ pub fn UiTestPanel() -> Element {
                             }
                         }
 
-                        div { style: "display: flex; flex-direction: column; gap: 8px;",
+                        div { class: "flex flex-col gap-2",
                             Label { "Email" }
                             Input {
                                 value: email,
@@ -65,7 +72,7 @@ pub fn UiTestPanel() -> Element {
                 }
             }
 
-            div { style: "margin-top: 16px; display: flex; gap: 8px;",
+            div { class: "mt-4 flex gap-2",
                 Button { variant: ButtonVariant::Primary, "Primary" }
                 Button { variant: ButtonVariant::Secondary, "Secondary" }
                 Button { variant: ButtonVariant::Outline, "Outline" }
@@ -73,7 +80,7 @@ pub fn UiTestPanel() -> Element {
                 Button { variant: ButtonVariant::Ghost, "Ghost" }
             }
 
-            div { style: "margin-top: 16px; display: flex; gap: 8px; align-items: center;",
+            div { class: "mt-4 flex gap-2 items-center",
                 Badge { variant: BadgeVariant::Default, "Default" }
                 Badge { variant: BadgeVariant::Secondary, "Secondary" }
                 Badge { variant: BadgeVariant::Outline, "Outline" }
