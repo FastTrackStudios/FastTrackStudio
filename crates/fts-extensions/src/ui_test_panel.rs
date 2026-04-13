@@ -10,6 +10,21 @@ use reaper_dioxus::prelude::*;
 const TAILWIND_CSS: &str = include_str!("../assets/tailwind.css");
 const FTS_THEME_CSS: &str = include_str!("../assets/fts-theme.css");
 
+// Blitz CSS workarounds — nested selectors like `&:disabled` aren't fully supported
+const BLITZ_FIXES: &str = r#"
+/* Fix Blitz applying disabled:cursor-not-allowed unconditionally */
+input, textarea, select, button {
+    cursor: auto !important;
+}
+input:disabled, textarea:disabled, button:disabled {
+    cursor: not-allowed !important;
+}
+/* Force dark mode colors (Blitz has no prefers-color-scheme) */
+:root {
+    color-scheme: dark;
+}
+"#;
+
 fn push_log(log: &mut Signal<Vec<String>>, entry: String) {
     log.write().push(entry);
     let len = log.read().len();
@@ -27,6 +42,7 @@ pub fn UiTestPanel() -> Element {
     rsx! {
         document::Style { {TAILWIND_CSS} }
         document::Style { {FTS_THEME_CSS} }
+        document::Style { {BLITZ_FIXES} }
 
         div {
             class: "dark min-h-full bg-background text-foreground p-4 font-sans",

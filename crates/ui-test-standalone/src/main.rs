@@ -7,6 +7,12 @@ use dioxus_native::prelude::*;
 const TAILWIND_CSS: &str = include_str!("../../fts-extensions/assets/tailwind.css");
 const FTS_THEME_CSS: &str = include_str!("../../fts-extensions/assets/fts-theme.css");
 
+const BLITZ_FIXES: &str = r#"
+input, textarea, select, button { cursor: auto !important; }
+input:disabled, textarea:disabled, button:disabled { cursor: not-allowed !important; }
+:root { color-scheme: dark; }
+"#;
+
 fn push_log(log: &mut Signal<Vec<String>>, entry: String) {
     log.write().push(entry);
     let len = log.read().len();
@@ -23,6 +29,7 @@ fn App() -> Element {
     rsx! {
         document::Style { {TAILWIND_CSS} }
         document::Style { {FTS_THEME_CSS} }
+        document::Style { {BLITZ_FIXES} }
 
         div {
             class: "dark min-h-full bg-background text-foreground p-4 font-sans",
