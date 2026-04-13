@@ -1,8 +1,7 @@
-//! Standalone Dioxus-native test — same UI as the REAPER panel
-//! but running in a normal window. Tests if input handling works
-//! outside of REAPER's event system.
+//! Standalone Dioxus-native test — same UI as the REAPER panel.
 
 use dioxus_native::prelude::*;
+use fts_ui::prelude::*;
 
 const TAILWIND_CSS: &str = include_str!("../../fts-extensions/assets/tailwind.css");
 const FTS_THEME_CSS: &str = include_str!("../../fts-extensions/assets/fts-theme.css");
@@ -13,102 +12,95 @@ input:disabled, textarea:disabled, button:disabled { cursor: not-allowed !import
 :root { color-scheme: dark; }
 "#;
 
-fn push_log(log: &mut Signal<Vec<String>>, entry: String) {
-    log.write().push(entry);
-    let len = log.read().len();
-    if len > 30 {
-        log.write().drain(0..len - 30);
-    }
-}
-
 #[component]
 fn App() -> Element {
-    let mut native_value = use_signal(|| String::new());
-    let mut event_log = use_signal(|| Vec::<String>::new());
+    let name = use_signal(|| String::new());
+    let email = use_signal(|| String::new());
+    let selected_role = use_signal(|| String::new());
+    let mut submitted = use_signal(|| false);
 
     rsx! {
         document::Style { {TAILWIND_CSS} }
         document::Style { {FTS_THEME_CSS} }
         document::Style { {BLITZ_FIXES} }
 
-        div {
-            class: "dark min-h-full bg-background text-foreground p-4 font-sans",
+        div { class: "dark min-h-full bg-background text-foreground p-6 font-sans flex flex-col items-center",
 
-            h2 { class: "text-xl font-bold mb-4", "Standalone Input Test (no REAPER)" }
+            div { class: "w-full max-w-md",
 
-            div { class: "grid grid-cols-2 gap-4",
-                div { class: "flex flex-col gap-4",
+                Heading { level: HeadingLevel::H2, "Standalone UI Test" }
 
-                    // Native input
-                    div { class: "flex flex-col gap-1",
-                        label { class: "text-sm font-medium", "Native <input>" }
-                        input {
-                            class: "h-9 w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1 text-sm text-white",
-                            r#type: "text",
-                            placeholder: "Type here...",
-                            value: "{native_value}",
-                            oninput: move |e: FormEvent| {
-                                let v = e.value();
-                                push_log(&mut event_log, format!("oninput: '{v}'"));
-                                native_value.set(v);
-                            },
-                            onfocus: move |_| push_log(&mut event_log, "input: onfocus".into()),
-                            onblur: move |_| push_log(&mut event_log, "input: onblur".into()),
-                        }
-                        p { class: "text-xs text-zinc-400", "Value: \"{native_value}\"" }
-                    }
+                div { class: "mt-4",
+                    Card {
+                        div { class: "p-6 flex flex-col gap-4",
+                            Heading { level: HeadingLevel::H3, "Registration Form" }
 
-                    // Native textarea
-                    div { class: "flex flex-col gap-1",
-                        label { class: "text-sm font-medium", "Native <textarea>" }
-                        textarea {
-                            class: "w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white min-h-[60px]",
-                            placeholder: "Multi-line...",
-                            onfocus: move |_| push_log(&mut event_log, "textarea: onfocus".into()),
-                        }
-                    }
-
-                    // fts-ui Input
-                    div { class: "flex flex-col gap-1",
-                        label { class: "text-sm font-medium", "fts-ui Input" }
-                        {
-                            use fts_ui::prelude::*;
-                            let fts_value = use_signal(|| String::new());
-                            rsx! {
-                                Input {
-                                    value: fts_value,
-                                    placeholder: "fts-ui input...",
-                                }
-                                p { class: "text-xs text-zinc-400", "Value: \"{fts_value}\"" }
+                            Text { variant: TextVariant::Muted,
+                                "Same form as REAPER panel — for comparison."
                             }
-                        }
-                    }
 
-                    div { class: "flex gap-2",
-                        button {
-                            class: "px-4 py-2 bg-white text-black rounded-lg text-sm",
-                            onclick: move |_| push_log(&mut event_log, "Button clicked!".into()),
-                            "Click Me"
-                        }
-                        button {
-                            class: "px-4 py-2 bg-zinc-700 text-white rounded-lg text-sm",
-                            onclick: move |_| event_log.write().clear(),
-                            "Clear Log"
+                            div { class: "flex flex-col gap-2",
+                                Label { "Name" }
+                                Input {
+                                    value: name,
+                                    placeholder: "Enter your name",
+                                }
+                            }
+
+                            div { class: "flex flex-col gap-2",
+                                Label { "Email" }
+                                Input {
+                                    value: email,
+                                    placeholder: "you@example.com",
+                                }
+                            }
+
+                            div { class: "flex flex-col gap-2",
+                                Label { "Role" }
+                                Select {
+                                    value: selected_role,
+                                    placeholder: "Select a role...",
+                                    SelectTrigger {}
+                                    SelectContent {
+                                        SelectItem { value: "engineer", "Engineer" }
+                                        SelectItem { value: "designer", "Designer" }
+                                        SelectItem { value: "producer", "Producer" }
+                                        SelectItem { value: "musician", "Musician" }
+                                    }
+                                }
+                            }
+
+                            Button {
+                                variant: ButtonVariant::Primary,
+                                on_click: move |_| {
+                                    submitted.set(true);
+                                },
+                                "Submit"
+                            }
+
+                            if *submitted.read() {
+                                Alert {
+                                    variant: AlertVariant::Default,
+                                    "Submitted: {name} ({email}) — Role: {selected_role}"
+                                }
+                            }
                         }
                     }
                 }
 
-                div { class: "flex flex-col gap-1",
-                    h3 { class: "text-sm font-medium", "Event Log" }
-                    div {
-                        class: "font-mono text-xs bg-black rounded-lg p-3 min-h-[300px] border border-zinc-800",
-                        if event_log.read().is_empty() {
-                            span { class: "text-zinc-600", "Click inputs and type..." }
-                        }
-                        for (i, entry) in event_log.read().iter().enumerate() {
-                            div { key: "{i}", class: "text-green-400", "{entry}" }
-                        }
-                    }
+                div { class: "mt-4 flex gap-2 flex-wrap",
+                    Button { variant: ButtonVariant::Primary, "Primary" }
+                    Button { variant: ButtonVariant::Secondary, "Secondary" }
+                    Button { variant: ButtonVariant::Outline, "Outline" }
+                    Button { variant: ButtonVariant::Destructive, "Destructive" }
+                    Button { variant: ButtonVariant::Ghost, "Ghost" }
+                }
+
+                div { class: "mt-4 flex gap-2 items-center flex-wrap",
+                    Badge { variant: BadgeVariant::Default, "Default" }
+                    Badge { variant: BadgeVariant::Secondary, "Secondary" }
+                    Badge { variant: BadgeVariant::Outline, "Outline" }
+                    Badge { variant: BadgeVariant::Destructive, "Error" }
                 }
             }
         }
