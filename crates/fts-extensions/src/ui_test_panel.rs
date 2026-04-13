@@ -12,6 +12,32 @@ use fts_ui::prelude::*;
 const TAILWIND_CSS: &str = include_str!("../assets/tailwind.css");
 const FTS_THEME_CSS: &str = include_str!("../assets/fts-theme.css");
 
+// Force dark mode with hex fallbacks for Blitz (no oklch support, no @media prefers-color-scheme)
+const DARK_OVERRIDE_CSS: &str = r#"
+:root {
+    --background: #1a1a1a;
+    --foreground: #fafafa;
+    --card: #1a1a1a;
+    --card-foreground: #fafafa;
+    --popover: #1a1a1a;
+    --popover-foreground: #fafafa;
+    --primary: #fafafa;
+    --primary-foreground: #1a1a1a;
+    --secondary: #2a2a2a;
+    --secondary-foreground: #fafafa;
+    --muted: #2a2a2a;
+    --muted-foreground: #a0a0a0;
+    --accent: #2a2a2a;
+    --accent-foreground: #fafafa;
+    --destructive: #c43030;
+    --destructive-foreground: #fafafa;
+    --border: #2a2a2a;
+    --input: #2a2a2a;
+    --ring: #555555;
+    --radius: 0.5rem;
+}
+"#;
+
 /// Root component for the UI test panel.
 #[component]
 pub fn UiTestPanel() -> Element {
@@ -20,9 +46,10 @@ pub fn UiTestPanel() -> Element {
     let mut submitted = use_signal(|| false);
 
     rsx! {
-        // Inject Tailwind + FTS theme
+        // Inject Tailwind + FTS theme + dark mode hex override for Blitz
         document::Style { {TAILWIND_CSS} }
         document::Style { {FTS_THEME_CSS} }
+        document::Style { {DARK_OVERRIDE_CSS} }
 
         div { class: "dark min-h-full bg-background text-foreground p-4 font-sans",
 
