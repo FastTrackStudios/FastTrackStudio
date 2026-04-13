@@ -15,7 +15,7 @@ const FTS_THEME_CSS: &str = include_str!("../assets/fts-theme.css");
 // Force dark mode with hex fallbacks for Blitz (no oklch support, no @media prefers-color-scheme)
 const DARK_OVERRIDE_CSS: &str = r#"
 :root {
-    --background: #1a1a1a;
+    --background: #000000;
     --foreground: #fafafa;
     --card: #1a1a1a;
     --card-foreground: #fafafa;
