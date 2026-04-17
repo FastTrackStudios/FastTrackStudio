@@ -333,6 +333,41 @@ enum NcCommands {
 
 #[derive(Subcommand)]
 enum EmailCommands {
+    /// List configured Nextcloud Mail accounts
+    Accounts {
+        #[arg(long)]
+        json: bool,
+    },
+    /// List mailboxes (folders) in an account
+    Mailboxes {
+        #[arg(long)]
+        account: i64,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Search / list messages in a mailbox
+    Search {
+        #[arg(long)]
+        mailbox: i64,
+        /// Filter: free-text or `from:`, `to:`, `subject:`, `cc:`, `bcc:` tokens
+        #[arg(long)]
+        filter: Option<String>,
+        #[arg(long, short = 'n', default_value = "25")]
+        limit: u32,
+        #[arg(long)]
+        cursor: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show one message (headers + body)
+    Show {
+        id: i64,
+        /// Also fetch the body
+        #[arg(long)]
+        body: bool,
+        #[arg(long)]
+        json: bool,
+    },
     /// Link an email to a task or project. Bot-friendly — every field that
     /// isn't provided is left as None / empty.
     Link {
@@ -1371,6 +1406,68 @@ async fn main() -> eyre::Result<()> {
         } => {
             let invoice = svc.cancel_invoice(&id, reason, actor.as_deref()).await?;
             println!("Cancelled invoice {}.", invoice.id);
+        }
+
+        Commands::Email {
+            command: EmailCommands::Accounts { json },
+        } => {
+            let client = build_mail_client(actor.as_deref())?;
+            let accounts = client.list_accounts().await?;
+            if json {
+                print_mail_accounts_json(&accounts);
+            } else {
+                print_mail_accounts_table(&accounts);
+            }
+        }
+
+        Commands::Email {
+            command: EmailCommands::Mailboxes { account, json },
+        } => {
+            let client = build_mail_client(actor.as_deref())?;
+            let boxes = client.list_mailboxes(account).await?;
+            if json {
+                print_mailboxes_json(&boxes);
+            } else {
+                print_mailboxes_table(&boxes);
+            }
+        }
+
+        Commands::Email {
+            command:
+                EmailCommands::Search {
+                    mailbox,
+                    filter,
+                    limit,
+                    cursor,
+                    json,
+                },
+        } => {
+            let client = build_mail_client(actor.as_deref())?;
+            let messages = client
+                .list_messages(mailbox, filter.as_deref(), limit, cursor.as_deref())
+                .await?;
+            if json {
+                print_mail_messages_json(&messages);
+            } else {
+                print_mail_messages_table(&messages);
+            }
+        }
+
+        Commands::Email {
+            command: EmailCommands::Show { id, body, json },
+        } => {
+            let client = build_mail_client(actor.as_deref())?;
+            let msg = client.get_message(id).await?;
+            let body_text = if body {
+                client.get_body(id).await.ok()
+            } else {
+                None
+            };
+            if json {
+                print_mail_detail_json(&msg, body_text.as_deref());
+            } else {
+                print_mail_detail(&msg, body_text.as_deref());
+            }
         }
 
         Commands::Email {
@@ -2776,6 +2873,242 @@ fn print_project_detail(p: &task_core::Project) {
     if !p.emails.is_empty() {
         println!("Emails:      {} linked", p.emails.len());
     }
+}
+
+// ── Nextcloud Mail helpers ───────────────────────────────────────────────────
+
+fn build_mail_client(
+    as_user: Option<&str>,
+) -> eyre::Result<task_core::provider::MailClient> {
+    use task_core::provider::{MailClient, MailConfig};
+    let url = std::env::var("NEXTCLOUD_URL")
+        .map_err(|_| eyre::eyre!("Set NEXTCLOUD_URL env var."))?;
+    let env_user = std::env::var("NEXTCLOUD_USER").ok();
+    let username = as_user
+        .map(String::from)
+        .or(env_user)
+        .ok_or_else(|| eyre::eyre!("Set NEXTCLOUD_USER env var or pass --as-user."))?;
+    let password = std::env::var("NEXTCLOUD_PASSWORD")
+        .map_err(|_| eyre::eyre!("Set NEXTCLOUD_PASSWORD env var."))?;
+    Ok(MailClient::new(MailConfig {
+        url,
+        username,
+        password,
+    }))
+}
+
+fn print_mail_accounts_table(accounts: &[task_core::provider::MailAccount]) {
+    if accounts.is_empty() {
+        println!("No mail accounts configured.");
+        return;
+    }
+    println!("{:<6}  {:<30}  NAME", "ID", "EMAIL");
+    println!("{}", "─".repeat(60));
+    for a in accounts {
+        println!(
+            "{:<6}  {:<30}  {}",
+            a.id,
+            truncate(&a.email, 30),
+            a.name.as_deref().unwrap_or("—")
+        );
+    }
+    println!("\n{} account(s)", accounts.len());
+}
+
+fn print_mail_accounts_json(accounts: &[task_core::provider::MailAccount]) {
+    println!("[");
+    for (i, a) in accounts.iter().enumerate() {
+        let comma = if i + 1 < accounts.len() { "," } else { "" };
+        println!(
+            "  {{\"id\":{},\"email\":\"{}\",\"name\":{}}}{comma}",
+            a.id,
+            escape_json(&a.email),
+            opt_json(a.name.as_deref()),
+        );
+    }
+    println!("]");
+}
+
+fn print_mailboxes_table(boxes: &[task_core::provider::Mailbox]) {
+    if boxes.is_empty() {
+        println!("No mailboxes.");
+        return;
+    }
+    println!("{:<6}  {:<6}  {:>6}  NAME", "ID", "ACCT", "UNREAD");
+    println!("{}", "─".repeat(60));
+    for m in boxes {
+        println!(
+            "{:<6}  {:<6}  {:>6}  {}",
+            m.id,
+            m.account_id,
+            m.unread.map(|n| n.to_string()).unwrap_or_else(|| "—".into()),
+            m.name,
+        );
+    }
+    println!("\n{} mailbox(es)", boxes.len());
+}
+
+fn print_mailboxes_json(boxes: &[task_core::provider::Mailbox]) {
+    println!("[");
+    for (i, m) in boxes.iter().enumerate() {
+        let comma = if i + 1 < boxes.len() { "," } else { "" };
+        println!(
+            "  {{\"id\":{},\"account_id\":{},\"name\":\"{}\",\"unread\":{}}}{comma}",
+            m.id,
+            m.account_id,
+            escape_json(&m.name),
+            m.unread
+                .map(|n| n.to_string())
+                .unwrap_or_else(|| "null".into()),
+        );
+    }
+    println!("]");
+}
+
+fn print_mail_messages_table(messages: &[task_core::provider::MailMessage]) {
+    if messages.is_empty() {
+        println!("No messages.");
+        return;
+    }
+    println!(
+        "{:<8}  {:<19}  {:<25}  SUBJECT",
+        "ID", "DATE", "FROM",
+    );
+    println!("{}", "─".repeat(90));
+    for m in messages {
+        let date = chrono::DateTime::<chrono::Utc>::from_timestamp(m.date, 0)
+            .map(|d| d.format("%Y-%m-%d %H:%M:%S").to_string())
+            .unwrap_or_else(|| "—".into());
+        let atts = if m.has_attachments {
+            format!(" 📎{}", m.attachment_count)
+        } else {
+            String::new()
+        };
+        println!(
+            "{:<8}  {:<19}  {:<25}  {}{}",
+            m.id,
+            date,
+            truncate(&m.from, 25),
+            truncate(&m.subject, 50),
+            atts,
+        );
+        if let Some(ref mid) = m.message_id {
+            println!("          id: {mid}");
+        }
+    }
+    println!("\n{} message(s)", messages.len());
+}
+
+fn print_mail_messages_json(messages: &[task_core::provider::MailMessage]) {
+    println!("[");
+    for (i, m) in messages.iter().enumerate() {
+        let comma = if i + 1 < messages.len() { "," } else { "" };
+        let to_json = m
+            .to
+            .iter()
+            .map(|s| format!("\"{}\"", escape_json(s)))
+            .collect::<Vec<_>>()
+            .join(",");
+        println!(
+            "  {{\"id\":{},\"message_id\":{},\"subject\":\"{}\",\"from\":\"{}\",\"to\":[{}],\"date\":{},\"preview\":{},\"mailbox_id\":{},\"account_id\":{},\"imap_uid\":{},\"has_attachments\":{},\"attachment_count\":{}}}{comma}",
+            m.id,
+            opt_json(m.message_id.as_deref()),
+            escape_json(&m.subject),
+            escape_json(&m.from),
+            to_json,
+            m.date,
+            opt_json(m.preview.as_deref()),
+            m.mailbox_id,
+            m.account_id.map(|n| n.to_string()).unwrap_or_else(|| "null".into()),
+            m.imap_uid.map(|n| n.to_string()).unwrap_or_else(|| "null".into()),
+            m.has_attachments,
+            m.attachment_count,
+        );
+    }
+    println!("]");
+}
+
+fn print_mail_detail(
+    msg: &task_core::provider::MailMessageDetail,
+    body: Option<&str>,
+) {
+    println!("ID:        {}", msg.id);
+    if let Some(ref mid) = msg.message_id {
+        println!("MessageID: {mid}");
+    }
+    println!("Subject:   {}", msg.subject);
+    println!("From:      {}", msg.from);
+    if !msg.to.is_empty() {
+        println!("To:        {}", msg.to.join(", "));
+    }
+    if !msg.cc.is_empty() {
+        println!("Cc:        {}", msg.cc.join(", "));
+    }
+    let date = chrono::DateTime::<chrono::Utc>::from_timestamp(msg.date, 0)
+        .map(|d| d.format("%Y-%m-%d %H:%M:%S UTC").to_string())
+        .unwrap_or_else(|| "—".into());
+    println!("Date:      {date}");
+    if let Some(ref r) = msg.in_reply_to {
+        println!("In-Reply:  {r}");
+    }
+    if !msg.attachments.is_empty() {
+        println!("\nAttachments:");
+        for a in &msg.attachments {
+            println!("  [{}] {} ({}, {} bytes)", a.id, a.file_name, a.mime, a.size);
+        }
+    }
+    if let Some(b) = body {
+        println!("\n--- body ---");
+        println!("{b}");
+    } else if let Some(ref b) = msg.body_plain {
+        println!("\n--- body preview ---");
+        println!("{b}");
+    }
+}
+
+fn print_mail_detail_json(
+    msg: &task_core::provider::MailMessageDetail,
+    body: Option<&str>,
+) {
+    let to_json = msg
+        .to
+        .iter()
+        .map(|s| format!("\"{}\"", escape_json(s)))
+        .collect::<Vec<_>>()
+        .join(",");
+    let cc_json = msg
+        .cc
+        .iter()
+        .map(|s| format!("\"{}\"", escape_json(s)))
+        .collect::<Vec<_>>()
+        .join(",");
+    let atts_json = msg
+        .attachments
+        .iter()
+        .map(|a| {
+            format!(
+                "{{\"id\":{},\"file_name\":\"{}\",\"mime\":\"{}\",\"size\":{}}}",
+                a.id,
+                escape_json(&a.file_name),
+                escape_json(&a.mime),
+                a.size,
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    println!(
+        "{{\"id\":{},\"message_id\":{},\"subject\":\"{}\",\"from\":\"{}\",\"to\":[{}],\"cc\":[{}],\"date\":{},\"body\":{},\"in_reply_to\":{},\"attachments\":[{}]}}",
+        msg.id,
+        opt_json(msg.message_id.as_deref()),
+        escape_json(&msg.subject),
+        escape_json(&msg.from),
+        to_json,
+        cc_json,
+        msg.date,
+        opt_json(body.or(msg.body_plain.as_deref())),
+        opt_json(msg.in_reply_to.as_deref()),
+        atts_json,
+    );
 }
 
 // ── Email printing ───────────────────────────────────────────────────────────
