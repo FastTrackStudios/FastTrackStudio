@@ -408,6 +408,32 @@ impl VaultServiceImpl {
         None
     }
 
+    // ── Clients ─────────────────────────────────────────────────────────────
+
+    /// List all clients from the vault's `clients/` directory.
+    pub async fn list_clients(&self) -> Vec<crate::client::Client> {
+        self.vault.read().await.load_clients()
+    }
+
+    /// Create or update a client note.
+    pub async fn save_client(
+        &self,
+        client: crate::client::Client,
+    ) -> Result<crate::client::Client, VaultError> {
+        self.vault.read().await.save_client(&client)?;
+        Ok(client)
+    }
+
+    /// Find a client by case-insensitive name.
+    pub async fn find_client(&self, name: &str) -> Option<crate::client::Client> {
+        self.vault
+            .read()
+            .await
+            .load_clients()
+            .into_iter()
+            .find(|c| c.name.eq_ignore_ascii_case(name))
+    }
+
     // ── Time tracking ───────────────────────────────────────────────────────
 
     /// Start a timer on a task. Returns an error if any task in the vault
@@ -581,13 +607,30 @@ impl VaultServiceImpl {
     /// List time entries across the vault, each attached to its owning task's
     /// title and projects. Pass filters to scope by user, task, project, or
     /// date range. Projects come from the task's frontmatter.
+    ///
+    /// Each returned context carries the cascade inputs (project_rate,
+    /// client_rate) so callers can pick an effective rate without a second
+    /// lookup.
     pub async fn list_time_entries(
         &self,
         filter: TimeEntryFilter,
     ) -> Vec<TimeEntryContext> {
-        let tasks = self.vault.read().await.load_tasks();
+        let vault = self.vault.read().await;
+        let tasks = vault.load_tasks();
+        let projects = vault.load_projects();
+        let clients = vault.load_clients();
+
+        // Index projects by title (case-insensitive) for O(1) lookup.
+        let project_by_title: std::collections::HashMap<String, &crate::project::Project> =
+            projects
+                .iter()
+                .map(|p| (p.title.to_lowercase(), p))
+                .collect();
+        let client_by_name: std::collections::HashMap<String, &crate::client::Client> =
+            clients.iter().map(|c| (c.name.to_lowercase(), c)).collect();
+
         let mut out = Vec::new();
-        for t in tasks {
+        for t in &tasks {
             if let Some(ref r) = filter.task_ref {
                 let matches =
                     t.id.as_deref() == Some(r.as_str()) || t.title.eq_ignore_ascii_case(r);
@@ -602,6 +645,46 @@ impl VaultServiceImpl {
             }
             let task_projects: Vec<String> =
                 t.projects.iter().map(|w| w.0.clone()).collect();
+
+            // Walk linked projects to find the first one carrying a rate and
+            // the first one carrying a client. We intentionally pick the
+            // first match — mixing multiple clients on one task is a data
+            // error the user should fix upstream.
+            let mut project_rate: Option<u32> = None;
+            let mut client_name: Option<String> = None;
+            let mut client_rate: Option<u32> = None;
+            for pname in &task_projects {
+                if let Some(p) = project_by_title.get(&pname.to_lowercase()) {
+                    if project_rate.is_none() {
+                        project_rate = p.default_rate;
+                    }
+                    if client_name.is_none() {
+                        if let Some(cref) = &p.client {
+                            // WikiLinks round-trip as "[[Name]]" in YAML —
+                            // strip the brackets before the lookup.
+                            let raw = strip_wikilink_brackets(&cref.0);
+                            if let Some(c) = client_by_name.get(&raw.to_lowercase()) {
+                                client_name = Some(c.name.clone());
+                                client_rate = c.default_hourly_rate;
+                            } else {
+                                client_name = Some(raw);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Client-name filter: if requested, skip entries whose task
+            // doesn't resolve to that client.
+            if let Some(ref want) = filter.client {
+                let matches = client_name
+                    .as_deref()
+                    .map(|n| n.eq_ignore_ascii_case(want))
+                    .unwrap_or(false);
+                if !matches {
+                    continue;
+                }
+            }
 
             for e in &t.time_entries {
                 if let Some(ref u) = filter.user {
@@ -630,6 +713,9 @@ impl VaultServiceImpl {
                 out.push(TimeEntryContext {
                     task_title: t.title.clone(),
                     task_projects: task_projects.clone(),
+                    client_name: client_name.clone(),
+                    project_rate,
+                    client_rate,
                     entry: e.clone(),
                 });
             }
@@ -870,25 +956,53 @@ pub struct TimeEntryPatch {
     pub tags: Option<Vec<String>>,
 }
 
+/// Strip `[[...]]` if present, otherwise return the string unchanged.
+fn strip_wikilink_brackets(s: &str) -> String {
+    s.strip_prefix("[[")
+        .and_then(|s| s.strip_suffix("]]"))
+        .unwrap_or(s)
+        .to_string()
+}
+
 /// Filter for [`VaultServiceImpl::list_time_entries`].
 #[derive(Debug, Clone, Default)]
 pub struct TimeEntryFilter {
     pub task_ref: Option<String>,
     pub user: Option<String>,
     pub project: Option<String>,
+    pub client: Option<String>,
     pub tag: Option<String>,
     pub from: Option<chrono::DateTime<Utc>>,
     pub to: Option<chrono::DateTime<Utc>>,
     pub billable_only: bool,
 }
 
-/// A time entry joined with its owning task's identity and projects, used for
-/// reporting and invoice aggregation.
-#[derive(Debug, Clone)]
+/// A time entry joined with its owning task's identity, projects, and the
+/// rates that cascade down to it.
+///
+/// `project_rate` and `client_rate` are populated from the projects the task
+/// belongs to (first match wins if there are multiple). Consumers use
+/// [`crate::client::resolve_rate`] to pick the effective per-entry rate.
+#[derive(Debug, Clone, Default)]
 pub struct TimeEntryContext {
     pub task_title: String,
     pub task_projects: Vec<String>,
+    pub client_name: Option<String>,
+    pub project_rate: Option<u32>,
+    pub client_rate: Option<u32>,
     pub entry: crate::task::TimeEntry,
+}
+
+impl TimeEntryContext {
+    /// Effective rate given a caller fallback, using the IN-style cascade.
+    pub fn effective_rate(&self, fallback: Option<u32>) -> u32 {
+        crate::client::resolve_rate(
+            self.entry.billable_rate,
+            self.project_rate,
+            self.client_rate,
+            fallback,
+        )
+    }
 }
 
 // ── VaultService trait implementation ────────────────────────────────────────

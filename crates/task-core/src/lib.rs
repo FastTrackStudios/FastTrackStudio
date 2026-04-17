@@ -1,5 +1,6 @@
 pub mod task;
 pub mod project;
+pub mod client;
 pub mod query;
 pub mod rrule;
 pub mod capture;
@@ -37,6 +38,7 @@ pub use task::{
     TaskDependency, TaskRelation, RelationType, Reaction, TimeEntry, WikiLink,
 };
 pub use project::{next_task, Project, ProjectStatus, ProjectStats};
+pub use client::{resolve_rate, Client};
 pub use views::{SavedView, ViewFilters, ViewDisplay};
 pub use cycle::{Cycle, CycleStatus};
 pub use module::{Module, ModuleStatus};

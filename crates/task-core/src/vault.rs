@@ -2,6 +2,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::client::Client;
 use crate::project::Project;
 use crate::service::VaultError;
 use crate::task::Task;
@@ -149,6 +150,45 @@ impl Vault {
     pub fn parse_project_from_md(content: &str) -> Option<Project> {
         let (frontmatter, _body) = Self::split_frontmatter(content)?;
         facet_yaml::from_str::<Project>(frontmatter).ok()
+    }
+
+    pub fn parse_client_from_md(content: &str) -> Option<Client> {
+        let (frontmatter, _body) = Self::split_frontmatter(content)?;
+        facet_yaml::from_str::<Client>(frontmatter).ok()
+    }
+
+    pub fn render_client_file(client: &Client, body: &str) -> Result<String, VaultError> {
+        let yaml = facet_yaml::to_string(client)
+            .map_err(|e| VaultError::ParseError(e.to_string()))?;
+        let yaml = yaml.strip_prefix("---\n").unwrap_or(&yaml);
+        Ok(format!("---\n{}---\n{}", yaml, body))
+    }
+
+    /// Load all clients from the `clients/` subdirectory.
+    pub fn load_clients(&self) -> Vec<Client> {
+        let dir = self.root.join("clients");
+        if !dir.exists() {
+            return vec![];
+        }
+        Self::walk_md_in(&dir)
+            .filter_map(|content| Self::parse_client_from_md(&content))
+            .collect()
+    }
+
+    /// Save a client to `clients/<name>.md`.
+    pub fn save_client(&self, client: &Client) -> Result<(), VaultError> {
+        let dir = self.root.join("clients");
+        std::fs::create_dir_all(&dir).map_err(|e| VaultError::IoError(e.to_string()))?;
+        let path = dir.join(format!("{}.md", client.name));
+        let body = if path.exists() {
+            let content = fs::read_to_string(&path)
+                .map_err(|e| VaultError::IoError(e.to_string()))?;
+            Self::extract_body(&content).unwrap_or("").to_string()
+        } else {
+            String::new()
+        };
+        let content = Self::render_client_file(client, &body)?;
+        Self::atomic_write(&path, &content)
     }
 
     pub fn render_task_file(task: &Task, body: &str) -> Result<String, VaultError> {

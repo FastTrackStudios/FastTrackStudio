@@ -82,6 +82,20 @@ pub struct Project {
     /// User favorites — who has bookmarked this project.
     #[facet(default)]
     pub favorited_by: Vec<String>,
+
+    // ── Billing ──────────────────────────────────────────────────────
+
+    /// Client this project is billed to (wikilink to a client note).
+    pub client: Option<WikiLink>,
+
+    /// Default billable rate in cents/hour for time entries on this
+    /// project's tasks. Overrides the client's default rate; overridden
+    /// by TimeEntry.billable_rate.
+    pub default_rate: Option<u32>,
+
+    /// Invoice Ninja id of the corresponding IN project (opaque hashed
+    /// string). Set when the project was pushed to IN.
+    pub invoice_ninja_id: Option<String>,
 }
 
 // r[impl project.status]

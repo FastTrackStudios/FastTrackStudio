@@ -219,6 +219,17 @@ pub struct TimeEntry {
     /// Source if imported from another tool (e.g. "toggl", "clockify").
     #[facet(default)]
     pub imported_from: Option<String>,
+
+    // ── Invoicing ─────────────────────────────────────────────────────
+
+    /// When this entry was rolled up into an invoice. Non-None means
+    /// "don't include in future invoice generation runs".
+    #[facet(default)]
+    pub invoiced_at: Option<DateTime<Utc>>,
+
+    /// Hashed Invoice Ninja invoice id this entry was billed on.
+    #[facet(default)]
+    pub invoice_ninja_invoice_id: Option<String>,
 }
 
 impl TimeEntry {

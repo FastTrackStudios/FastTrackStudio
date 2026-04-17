@@ -214,6 +214,11 @@ enum Commands {
         #[command(subcommand)]
         command: TalkCommands,
     },
+    /// Client (billable party) management
+    Client {
+        #[command(subcommand)]
+        command: ClientCommands,
+    },
     /// Start a timer on a task (fails if another is running)
     Start {
         reference: String,
@@ -255,6 +260,43 @@ enum Commands {
     Project {
         #[command(subcommand)]
         command: ProjectCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum ClientCommands {
+    /// Create or update a client note (upserts by name)
+    Add {
+        name: String,
+        /// Default hourly rate in cents (e.g. 12000 = $120/hr)
+        #[arg(long)]
+        rate: Option<u32>,
+        /// ISO 4217 currency code, e.g. "USD", "EUR"
+        #[arg(long)]
+        currency: Option<String>,
+        /// Net payment terms in days
+        #[arg(long)]
+        terms_days: Option<u32>,
+        #[arg(long)]
+        email: Option<String>,
+        #[arg(long)]
+        contact: Option<String>,
+        #[arg(long)]
+        phone: Option<String>,
+        /// Invoice Ninja client hashed id (set after sync)
+        #[arg(long)]
+        invoice_ninja_id: Option<String>,
+    },
+    /// List all clients
+    List {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show a single client
+    Show {
+        name: String,
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -369,6 +411,8 @@ enum TimeCommands {
         #[arg(long)]
         project: Option<String>,
         #[arg(long)]
+        client: Option<String>,
+        #[arg(long)]
         tag: Option<String>,
         /// From date (YYYY-MM-DD, inclusive)
         #[arg(long)]
@@ -385,9 +429,9 @@ enum TimeCommands {
         #[arg(long, conflicts_with = "format")]
         json: bool,
     },
-    /// Aggregate time by task, user, project, or tag
+    /// Aggregate time by task, user, project, client, or tag
     Report {
-        /// task | user | project | tag
+        /// task | user | project | client | tag
         #[arg(long, default_value = "task")]
         group_by: String,
         #[arg(long)]
@@ -396,6 +440,8 @@ enum TimeCommands {
         to: Option<String>,
         #[arg(long)]
         project: Option<String>,
+        #[arg(long)]
+        client: Option<String>,
         #[arg(long)]
         tag: Option<String>,
         #[arg(long)]
@@ -893,6 +939,79 @@ async fn main() -> eyre::Result<()> {
 
         Commands::Talk { .. } => unreachable!("handled above"),
 
+        Commands::Client {
+            command:
+                ClientCommands::Add {
+                    name,
+                    rate,
+                    currency,
+                    terms_days,
+                    email,
+                    contact,
+                    phone,
+                    invoice_ninja_id,
+                },
+        } => {
+            // Upsert: if a client with this name exists, preserve non-touched fields.
+            let existing = svc.find_client(&name).await;
+            let mut client = existing.unwrap_or_else(|| task_core::Client {
+                name: name.clone(),
+                ..Default::default()
+            });
+            if let Some(r) = rate {
+                client.default_hourly_rate = Some(r);
+            }
+            if let Some(c) = currency {
+                client.currency_code = c;
+            }
+            if let Some(d) = terms_days {
+                client.payment_terms_days = Some(d);
+            }
+            if let Some(e) = email {
+                client.email = Some(e);
+            }
+            if let Some(c) = contact {
+                client.contact_name = Some(c);
+            }
+            if let Some(p) = phone {
+                client.phone = Some(p);
+            }
+            if let Some(id) = invoice_ninja_id {
+                client.invoice_ninja_id = Some(id);
+            }
+            let saved = svc.save_client(client).await?;
+            println!(
+                "Saved client '{}' (rate {}¢/hr).",
+                saved.name,
+                saved.default_hourly_rate.unwrap_or(0)
+            );
+        }
+
+        Commands::Client {
+            command: ClientCommands::List { json },
+        } => {
+            let clients = svc.list_clients().await;
+            if json {
+                print_clients_json(&clients);
+            } else {
+                print_clients_table(&clients);
+            }
+        }
+
+        Commands::Client {
+            command: ClientCommands::Show { name, json },
+        } => {
+            let client = svc
+                .find_client(&name)
+                .await
+                .ok_or_else(|| eyre::eyre!("Client not found: {name}"))?;
+            if json {
+                println!("{}", facet_json::to_string(&client).unwrap_or_default());
+            } else {
+                print_client_detail(&client);
+            }
+        }
+
         Commands::Unsubscribe { reference, user } => {
             let who = user.or(actor.clone()).ok_or_else(|| {
                 eyre::eyre!("Specify a user or set --as <user>/TASK_USER.")
@@ -1138,6 +1257,7 @@ async fn main() -> eyre::Result<()> {
                     task,
                     user,
                     project,
+                    client,
                     tag,
                     from,
                     to,
@@ -1151,6 +1271,7 @@ async fn main() -> eyre::Result<()> {
                 task_ref: task,
                 user,
                 project,
+                client,
                 tag,
                 from: from.as_deref().map(parse_date_start).transpose()?,
                 to: to.as_deref().map(parse_date_end).transpose()?,
@@ -1171,6 +1292,7 @@ async fn main() -> eyre::Result<()> {
                     from,
                     to,
                     project,
+                    client,
                     tag,
                     user,
                     billable,
@@ -1184,6 +1306,7 @@ async fn main() -> eyre::Result<()> {
                 task_ref: None,
                 user,
                 project,
+                client,
                 tag,
                 from: from.as_deref().map(parse_date_start).transpose()?,
                 to: to.as_deref().map(parse_date_end).transpose()?,
@@ -1602,7 +1725,7 @@ fn print_time_entries_json(entries: &[task_core::TimeEntryContext]) {
 }
 
 fn print_time_entries_csv(entries: &[task_core::TimeEntryContext]) {
-    println!("entry_id,task,projects,user,start,end,minutes,billable,rate_cents,billable_amount_cents,tags,description");
+    println!("entry_id,task,projects,client,user,start,end,minutes,billable,rate_cents,billable_amount_cents,tags,description,invoiced_at,invoice_ninja_invoice_id");
     for ctx in entries {
         let e = &ctx.entry;
         let end = e
@@ -1610,25 +1733,32 @@ fn print_time_entries_csv(entries: &[task_core::TimeEntryContext]) {
             .map(|t| t.format("%Y-%m-%dT%H:%M:%SZ").to_string())
             .unwrap_or_default();
         let mins = e.duration_minutes();
-        let rate = e.billable_rate.unwrap_or(0);
+        let resolved_rate = ctx.effective_rate(None);
         let amount = if e.billable {
-            e.amount_cents(e.billable_rate.unwrap_or(0))
+            e.amount_cents(resolved_rate)
         } else {
             0
         };
+        let invoiced_at = e
+            .invoiced_at
+            .map(|t| t.format("%Y-%m-%dT%H:%M:%SZ").to_string())
+            .unwrap_or_default();
         let row = [
             e.id.as_str(),
             ctx.task_title.as_str(),
             &ctx.task_projects.join(";"),
+            ctx.client_name.as_deref().unwrap_or(""),
             e.user.as_deref().unwrap_or(""),
             &e.start_time.format("%Y-%m-%dT%H:%M:%SZ").to_string(),
             &end,
             &mins.to_string(),
             if e.billable { "true" } else { "false" },
-            &rate.to_string(),
+            &resolved_rate.to_string(),
             &amount.to_string(),
             &e.tags.join(";"),
             e.description.as_deref().unwrap_or(""),
+            &invoiced_at,
+            e.invoice_ninja_invoice_id.as_deref().unwrap_or(""),
         ];
         println!(
             "{}",
@@ -1688,7 +1818,8 @@ fn aggregate_time(
         let e = &ctx.entry;
         let mins = e.duration_minutes() as u64;
         let cents = if e.billable {
-            let rate = e.billable_rate.or(fallback_rate).unwrap_or(0);
+            // Full cascade: entry → project → client → --rate fallback.
+            let rate = ctx.effective_rate(fallback_rate);
             (mins * rate as u64) / 60
         } else {
             0
@@ -1699,6 +1830,12 @@ fn aggregate_time(
             "user" => bump(
                 &mut acc,
                 e.user.clone().unwrap_or_else(|| "—".into()),
+                mins,
+                cents,
+            ),
+            "client" => bump(
+                &mut acc,
+                ctx.client_name.clone().unwrap_or_else(|| "—".into()),
                 mins,
                 cents,
             ),
@@ -1731,7 +1868,7 @@ fn aggregate_time(
                 }
             }
             other => eyre::bail!(
-                "Unknown group_by: {other}. Use 'task', 'user', 'project', or 'tag'."
+                "Unknown group_by: {other}. Use 'task', 'user', 'project', 'client', or 'tag'."
             ),
         }
     }
@@ -1959,6 +2096,72 @@ fn parse_sort(s: &str) -> Sort {
         "created" => Sort::DateCreated,
         "modified" => Sort::DateModified,
         _ => Sort::Urgency,
+    }
+}
+
+fn print_clients_table(clients: &[task_core::Client]) {
+    if clients.is_empty() {
+        println!("No clients.");
+        return;
+    }
+    let name_w = clients.iter().map(|c| c.name.len()).max().unwrap_or(10).max(10).min(35);
+    println!(
+        "{:<name_w$}  {:>10}  {:<4}  {:<25}  IN ID",
+        "NAME", "RATE/HR", "CCY", "EMAIL",
+    );
+    println!("{}", "─".repeat(name_w + 52));
+    for c in clients {
+        let rate = match c.default_hourly_rate {
+            Some(r) => format!("${:.2}", r as f64 / 100.0),
+            None => "—".into(),
+        };
+        let ccy = if c.currency_code.is_empty() { "—" } else { &c.currency_code };
+        let email = c.email.as_deref().unwrap_or("—");
+        let in_id = c.invoice_ninja_id.as_deref().unwrap_or("—");
+        println!(
+            "{:<name_w$}  {:>10}  {:<4}  {:<25}  {}",
+            truncate(&c.name, name_w),
+            rate,
+            ccy,
+            truncate(email, 25),
+            in_id,
+        );
+    }
+    println!("\n{} client(s)", clients.len());
+}
+
+fn print_clients_json(clients: &[task_core::Client]) {
+    println!("[");
+    for (i, c) in clients.iter().enumerate() {
+        let comma = if i + 1 < clients.len() { "," } else { "" };
+        let json = facet_json::to_string(c).unwrap_or_default();
+        println!("  {json}{comma}");
+    }
+    println!("]");
+}
+
+fn print_client_detail(c: &task_core::Client) {
+    println!("Name:      {}", c.name);
+    if let Some(r) = c.default_hourly_rate {
+        println!("Rate:      ${:.2}/hr", r as f64 / 100.0);
+    }
+    if !c.currency_code.is_empty() {
+        println!("Currency:  {}", c.currency_code);
+    }
+    if let Some(d) = c.payment_terms_days {
+        println!("Terms:     net-{d}");
+    }
+    if let Some(ref e) = c.email {
+        println!("Email:     {e}");
+    }
+    if let Some(ref n) = c.contact_name {
+        println!("Contact:   {n}");
+    }
+    if let Some(ref p) = c.phone {
+        println!("Phone:     {p}");
+    }
+    if let Some(ref id) = c.invoice_ninja_id {
+        println!("IN ID:     {id}");
     }
 }
 
