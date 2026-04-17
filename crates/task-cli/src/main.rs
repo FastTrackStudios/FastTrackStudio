@@ -3,8 +3,8 @@ use chrono::{DateTime, TimeZone, Utc};
 use task_core::index::{ChangeRow, ConflictRow};
 use task_core::workflows::{parse_comments, render_comments, Comment};
 use task_core::{
-    Filter, Priority, Query, RelationType, Sort, Status, Task, TaskRelation, TimeEntry,
-    TimeEntryFilter, VaultServiceImpl, WikiLink,
+    Filter, Priority, Query, RelationType, Sort, Status, Task, TaskRelation, TimeEntryFilter,
+    VaultServiceImpl, WikiLink,
 };
 
 #[derive(Parser)]
@@ -366,6 +366,10 @@ enum TimeCommands {
         task: Option<String>,
         #[arg(long)]
         user: Option<String>,
+        #[arg(long)]
+        project: Option<String>,
+        #[arg(long)]
+        tag: Option<String>,
         /// From date (YYYY-MM-DD, inclusive)
         #[arg(long)]
         from: Option<String>,
@@ -374,12 +378,16 @@ enum TimeCommands {
         to: Option<String>,
         #[arg(long)]
         billable: bool,
-        #[arg(long)]
+        /// Output format: table (default), json, csv
+        #[arg(long, default_value = "table")]
+        format: String,
+        /// Alias for --format json
+        #[arg(long, conflicts_with = "format")]
         json: bool,
     },
-    /// Aggregate time by task or user
+    /// Aggregate time by task, user, project, or tag
     Report {
-        /// task | user
+        /// task | user | project | tag
         #[arg(long, default_value = "task")]
         group_by: String,
         #[arg(long)]
@@ -387,11 +395,21 @@ enum TimeCommands {
         #[arg(long)]
         to: Option<String>,
         #[arg(long)]
+        project: Option<String>,
+        #[arg(long)]
+        tag: Option<String>,
+        #[arg(long)]
+        user: Option<String>,
+        #[arg(long)]
         billable: bool,
         /// Fallback billable rate in cents per hour (used when an entry has no rate override)
         #[arg(long)]
         rate: Option<u32>,
-        #[arg(long)]
+        /// Output format: table (default), json, csv
+        #[arg(long, default_value = "table")]
+        format: String,
+        /// Alias for --format json
+        #[arg(long, conflicts_with = "format")]
         json: bool,
     },
     /// Edit an existing time entry by id
@@ -1119,24 +1137,30 @@ async fn main() -> eyre::Result<()> {
                 TimeCommands::List {
                     task,
                     user,
+                    project,
+                    tag,
                     from,
                     to,
                     billable,
+                    format,
                     json,
                 },
         } => {
+            let fmt = pick_format(&format, json);
             let filter = TimeEntryFilter {
                 task_ref: task,
                 user,
+                project,
+                tag,
                 from: from.as_deref().map(parse_date_start).transpose()?,
                 to: to.as_deref().map(parse_date_end).transpose()?,
                 billable_only: billable,
             };
             let entries = svc.list_time_entries(filter).await;
-            if json {
-                print_time_entries_json(&entries);
-            } else {
-                print_time_entries_table(&entries);
+            match fmt {
+                OutputFormat::Json => print_time_entries_json(&entries),
+                OutputFormat::Csv => print_time_entries_csv(&entries),
+                OutputFormat::Table => print_time_entries_table(&entries),
             }
         }
 
@@ -1146,24 +1170,31 @@ async fn main() -> eyre::Result<()> {
                     group_by,
                     from,
                     to,
+                    project,
+                    tag,
+                    user,
                     billable,
                     rate,
+                    format,
                     json,
                 },
         } => {
+            let fmt = pick_format(&format, json);
             let filter = TimeEntryFilter {
                 task_ref: None,
-                user: None,
+                user,
+                project,
+                tag,
                 from: from.as_deref().map(parse_date_start).transpose()?,
                 to: to.as_deref().map(parse_date_end).transpose()?,
                 billable_only: billable,
             };
             let entries = svc.list_time_entries(filter).await;
             let report = aggregate_time(&entries, &group_by, rate)?;
-            if json {
-                print_report_json(&report);
-            } else {
-                print_report_table(&report);
+            match fmt {
+                OutputFormat::Json => print_report_json(&report),
+                OutputFormat::Csv => print_report_csv(&report, &group_by),
+                OutputFormat::Table => print_report_table(&report),
             }
         }
 
@@ -1498,25 +1529,26 @@ fn escape_json(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
-fn print_time_entries_table(entries: &[(String, TimeEntry)]) {
+fn print_time_entries_table(entries: &[task_core::TimeEntryContext]) {
     if entries.is_empty() {
         println!("No time entries.");
         return;
     }
     let title_w = entries
         .iter()
-        .map(|(t, _)| t.len())
+        .map(|c| c.task_title.len())
         .max()
         .unwrap_or(10)
         .max(5)
         .min(35);
     println!(
-        "{:<title_w$}  {:<19}  {:>6}  {:<8}  {:<12}  ID",
-        "TASK", "START (UTC)", "MIN", "BILLABLE", "USER",
+        "{:<title_w$}  {:<19}  {:>6}  {:<8}  {:<12}  {:<18}  ID",
+        "TASK", "START (UTC)", "MIN", "BILLABLE", "USER", "PROJECTS",
     );
-    println!("{}", "─".repeat(title_w + 55));
-    for (title, e) in entries {
-        let t = truncate(title, title_w);
+    println!("{}", "─".repeat(title_w + 75));
+    for ctx in entries {
+        let e = &ctx.entry;
+        let t = truncate(&ctx.task_title, title_w);
         let start = e.start_time.format("%Y-%m-%d %H:%M:%S").to_string();
         let mins = if e.is_running() {
             format!("▶{}", e.elapsed_minutes(Utc::now()))
@@ -1525,44 +1557,135 @@ fn print_time_entries_table(entries: &[(String, TimeEntry)]) {
         };
         let billable = if e.billable { "yes" } else { "no" };
         let user = e.user.clone().unwrap_or_else(|| "—".into());
+        let projects = if ctx.task_projects.is_empty() {
+            "—".into()
+        } else {
+            ctx.task_projects.join(",")
+        };
         println!(
-            "{:<title_w$}  {:<19}  {:>6}  {:<8}  {:<12}  {}",
-            t, start, mins, billable, user, e.id
+            "{:<title_w$}  {:<19}  {:>6}  {:<8}  {:<12}  {:<18}  {}",
+            t,
+            start,
+            mins,
+            billable,
+            user,
+            truncate(&projects, 18),
+            e.id
         );
     }
-    println!("\n{} entr{}", entries.len(), if entries.len() == 1 { "y" } else { "ies" });
+    println!(
+        "\n{} entr{}",
+        entries.len(),
+        if entries.len() == 1 { "y" } else { "ies" }
+    );
 }
 
-fn print_time_entries_json(entries: &[(String, TimeEntry)]) {
+fn print_time_entries_json(entries: &[task_core::TimeEntryContext]) {
     println!("[");
-    for (i, (title, e)) in entries.iter().enumerate() {
+    for (i, ctx) in entries.iter().enumerate() {
         let comma = if i + 1 < entries.len() { "," } else { "" };
-        let entry_json = facet_json::to_string(e).unwrap_or_default();
+        let entry_json = facet_json::to_string(&ctx.entry).unwrap_or_default();
+        let projects_json = ctx
+            .task_projects
+            .iter()
+            .map(|p| format!("\"{}\"", escape_json(p)))
+            .collect::<Vec<_>>()
+            .join(",");
         println!(
-            "  {{\"task\":\"{}\",\"entry\":{}}}{comma}",
-            escape_json(title),
+            "  {{\"task\":\"{}\",\"projects\":[{}],\"entry\":{}}}{comma}",
+            escape_json(&ctx.task_title),
+            projects_json,
             entry_json
         );
     }
     println!("]");
 }
 
+fn print_time_entries_csv(entries: &[task_core::TimeEntryContext]) {
+    println!("entry_id,task,projects,user,start,end,minutes,billable,rate_cents,billable_amount_cents,tags,description");
+    for ctx in entries {
+        let e = &ctx.entry;
+        let end = e
+            .end_time
+            .map(|t| t.format("%Y-%m-%dT%H:%M:%SZ").to_string())
+            .unwrap_or_default();
+        let mins = e.duration_minutes();
+        let rate = e.billable_rate.unwrap_or(0);
+        let amount = if e.billable {
+            e.amount_cents(e.billable_rate.unwrap_or(0))
+        } else {
+            0
+        };
+        let row = [
+            e.id.as_str(),
+            ctx.task_title.as_str(),
+            &ctx.task_projects.join(";"),
+            e.user.as_deref().unwrap_or(""),
+            &e.start_time.format("%Y-%m-%dT%H:%M:%SZ").to_string(),
+            &end,
+            &mins.to_string(),
+            if e.billable { "true" } else { "false" },
+            &rate.to_string(),
+            &amount.to_string(),
+            &e.tags.join(";"),
+            e.description.as_deref().unwrap_or(""),
+        ];
+        println!(
+            "{}",
+            row.iter().map(|f| csv_escape(f)).collect::<Vec<_>>().join(",")
+        );
+    }
+}
+
+// ── Output format helper ─────────────────────────────────────────────────────
+
+#[derive(Copy, Clone, Debug)]
+enum OutputFormat {
+    Table,
+    Json,
+    Csv,
+}
+
+fn pick_format(s: &str, json_alias: bool) -> OutputFormat {
+    if json_alias {
+        return OutputFormat::Json;
+    }
+    match s.to_lowercase().as_str() {
+        "json" => OutputFormat::Json,
+        "csv" => OutputFormat::Csv,
+        _ => OutputFormat::Table,
+    }
+}
+
+fn csv_escape(s: &str) -> String {
+    if s.chars().any(|c| matches!(c, ',' | '"' | '\n' | '\r')) {
+        format!("\"{}\"", s.replace('"', "\"\""))
+    } else {
+        s.to_string()
+    }
+}
+
 /// ({group_key}, total_minutes, billable_cents, entry_count)
 type ReportRow = (String, u64, u64, usize);
 
 fn aggregate_time(
-    entries: &[(String, TimeEntry)],
+    entries: &[task_core::TimeEntryContext],
     group_by: &str,
     fallback_rate: Option<u32>,
 ) -> eyre::Result<Vec<ReportRow>> {
     use std::collections::BTreeMap;
     let mut acc: BTreeMap<String, (u64, u64, usize)> = BTreeMap::new();
-    for (title, e) in entries {
-        let key = match group_by {
-            "task" => title.clone(),
-            "user" => e.user.clone().unwrap_or_else(|| "—".into()),
-            other => eyre::bail!("Unknown group_by: {other}. Use 'task' or 'user'."),
-        };
+
+    // Helper to bump a slot by minutes and billable cents.
+    let bump = |acc: &mut BTreeMap<String, (u64, u64, usize)>, key: String, mins: u64, cents: u64| {
+        let slot = acc.entry(key).or_insert((0, 0, 0));
+        slot.0 += mins;
+        slot.1 += cents;
+        slot.2 += 1;
+    };
+
+    for ctx in entries {
+        let e = &ctx.entry;
         let mins = e.duration_minutes() as u64;
         let cents = if e.billable {
             let rate = e.billable_rate.or(fallback_rate).unwrap_or(0);
@@ -1570,17 +1693,69 @@ fn aggregate_time(
         } else {
             0
         };
-        let slot = acc.entry(key).or_insert((0, 0, 0));
-        slot.0 += mins;
-        slot.1 += cents;
-        slot.2 += 1;
+
+        match group_by {
+            "task" => bump(&mut acc, ctx.task_title.clone(), mins, cents),
+            "user" => bump(
+                &mut acc,
+                e.user.clone().unwrap_or_else(|| "—".into()),
+                mins,
+                cents,
+            ),
+            "project" => {
+                if ctx.task_projects.is_empty() {
+                    bump(&mut acc, "—".into(), mins, cents);
+                } else {
+                    // Entry counted once per project it belongs to. Minutes
+                    // and billable are split equally across projects so the
+                    // total doesn't double-count.
+                    let n = ctx.task_projects.len() as u64;
+                    let per_project_min = mins / n;
+                    let per_project_cents = cents / n;
+                    for p in &ctx.task_projects {
+                        bump(&mut acc, p.clone(), per_project_min, per_project_cents);
+                    }
+                }
+            }
+            "tag" => {
+                if e.tags.is_empty() {
+                    bump(&mut acc, "—".into(), mins, cents);
+                } else {
+                    // Tags split the same way to avoid double-counting totals.
+                    let n = e.tags.len() as u64;
+                    let per_tag_min = mins / n;
+                    let per_tag_cents = cents / n;
+                    for t in &e.tags {
+                        bump(&mut acc, t.clone(), per_tag_min, per_tag_cents);
+                    }
+                }
+            }
+            other => eyre::bail!(
+                "Unknown group_by: {other}. Use 'task', 'user', 'project', or 'tag'."
+            ),
+        }
     }
-    let mut rows: Vec<ReportRow> = acc
-        .into_iter()
-        .map(|(k, (m, c, n))| (k, m, c, n))
-        .collect();
+
+    let mut rows: Vec<ReportRow> = acc.into_iter().map(|(k, (m, c, n))| (k, m, c, n)).collect();
     rows.sort_by(|a, b| b.1.cmp(&a.1));
     Ok(rows)
+}
+
+fn print_report_csv(rows: &[ReportRow], group_by: &str) {
+    println!("{},minutes,hours,billable_cents,billable_dollars,entries", group_by);
+    for (k, mins, cents, count) in rows {
+        let hours = format!("{:.2}", *mins as f64 / 60.0);
+        let dollars = format!("{:.2}", *cents as f64 / 100.0);
+        println!(
+            "{},{},{},{},{},{}",
+            csv_escape(k),
+            mins,
+            hours,
+            cents,
+            dollars,
+            count
+        );
+    }
 }
 
 fn print_report_table(rows: &[ReportRow]) {

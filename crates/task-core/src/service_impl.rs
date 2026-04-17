@@ -578,12 +578,13 @@ impl VaultServiceImpl {
         None
     }
 
-    /// List time entries across the vault, each tagged with its task title.
-    /// Pass filters to scope by user, task, or date range.
+    /// List time entries across the vault, each attached to its owning task's
+    /// title and projects. Pass filters to scope by user, task, project, or
+    /// date range. Projects come from the task's frontmatter.
     pub async fn list_time_entries(
         &self,
         filter: TimeEntryFilter,
-    ) -> Vec<(String, crate::task::TimeEntry)> {
+    ) -> Vec<TimeEntryContext> {
         let tasks = self.vault.read().await.load_tasks();
         let mut out = Vec::new();
         for t in tasks {
@@ -594,6 +595,14 @@ impl VaultServiceImpl {
                     continue;
                 }
             }
+            if let Some(ref p) = filter.project {
+                if !t.projects.iter().any(|w| w.0.eq_ignore_ascii_case(p)) {
+                    continue;
+                }
+            }
+            let task_projects: Vec<String> =
+                t.projects.iter().map(|w| w.0.clone()).collect();
+
             for e in &t.time_entries {
                 if let Some(ref u) = filter.user {
                     if e.user.as_deref() != Some(u.as_str()) {
@@ -613,7 +622,16 @@ impl VaultServiceImpl {
                 if filter.billable_only && !e.billable {
                     continue;
                 }
-                out.push((t.title.clone(), e.clone()));
+                if let Some(ref tag) = filter.tag {
+                    if !e.tags.iter().any(|t| t.eq_ignore_ascii_case(tag)) {
+                        continue;
+                    }
+                }
+                out.push(TimeEntryContext {
+                    task_title: t.title.clone(),
+                    task_projects: task_projects.clone(),
+                    entry: e.clone(),
+                });
             }
         }
         out
@@ -857,9 +875,20 @@ pub struct TimeEntryPatch {
 pub struct TimeEntryFilter {
     pub task_ref: Option<String>,
     pub user: Option<String>,
+    pub project: Option<String>,
+    pub tag: Option<String>,
     pub from: Option<chrono::DateTime<Utc>>,
     pub to: Option<chrono::DateTime<Utc>>,
     pub billable_only: bool,
+}
+
+/// A time entry joined with its owning task's identity and projects, used for
+/// reporting and invoice aggregation.
+#[derive(Debug, Clone)]
+pub struct TimeEntryContext {
+    pub task_title: String,
+    pub task_projects: Vec<String>,
+    pub entry: crate::task::TimeEntry,
 }
 
 // ── VaultService trait implementation ────────────────────────────────────────
