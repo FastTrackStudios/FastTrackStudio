@@ -219,11 +219,6 @@ enum Commands {
         #[command(subcommand)]
         command: ClientCommands,
     },
-    /// Invoice generation — build drafts from time entries, push to Invoice Ninja
-    Invoice {
-        #[command(subcommand)]
-        command: InvoiceCommands,
-    },
     /// Start a timer on a task (fails if another is running)
     Start {
         reference: String,
@@ -303,38 +298,6 @@ enum ClientCommands {
         #[arg(long)]
         json: bool,
     },
-}
-
-#[derive(Subcommand)]
-enum InvoiceCommands {
-    /// Preview the invoice draft for a client — does NOT touch Invoice Ninja
-    Draft {
-        client: String,
-        #[arg(long)]
-        from: Option<String>,
-        #[arg(long)]
-        to: Option<String>,
-        /// Fallback hourly rate in cents if cascade resolves to 0
-        #[arg(long)]
-        rate: Option<u32>,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Create an invoice in Invoice Ninja from uninvoiced time entries
-    Push {
-        client: String,
-        #[arg(long)]
-        from: Option<String>,
-        #[arg(long)]
-        to: Option<String>,
-        #[arg(long)]
-        rate: Option<u32>,
-        /// Also email the invoice to the client
-        #[arg(long)]
-        send: bool,
-    },
-    /// Pull the client list from Invoice Ninja — upserts local clients
-    SyncClients,
 }
 
 #[derive(Subcommand)]
@@ -1047,84 +1010,6 @@ async fn main() -> eyre::Result<()> {
             } else {
                 print_client_detail(&client);
             }
-        }
-
-        Commands::Invoice {
-            command:
-                InvoiceCommands::Draft {
-                    client,
-                    from,
-                    to,
-                    rate,
-                    json,
-                },
-        } => {
-            let from_dt = from.as_deref().map(parse_date_start).transpose()?;
-            let to_dt = to.as_deref().map(parse_date_end).transpose()?;
-            let (client_rec, draft, entry_ids) = svc
-                .generate_invoice_draft(&client, from_dt, to_dt, rate)
-                .await?;
-            if json {
-                print_invoice_draft_json(&client_rec, &draft, &entry_ids);
-            } else {
-                print_invoice_draft_table(&client_rec, &draft, &entry_ids);
-            }
-        }
-
-        Commands::Invoice {
-            command:
-                InvoiceCommands::Push {
-                    client,
-                    from,
-                    to,
-                    rate,
-                    send,
-                },
-        } => {
-            let from_dt = from.as_deref().map(parse_date_start).transpose()?;
-            let to_dt = to.as_deref().map(parse_date_end).transpose()?;
-            let (_client_rec, draft, entry_ids) = svc
-                .generate_invoice_draft(&client, from_dt, to_dt, rate)
-                .await?;
-            if draft.lines.is_empty() {
-                eyre::bail!("Nothing to invoice — no uninvoiced billable entries in range.");
-            }
-
-            let api = build_invoice_ninja_client()?;
-            let created = api.create_invoice(&draft, send).await?;
-            let marked = svc.mark_entries_invoiced(&entry_ids, &created.id).await?;
-            println!(
-                "Created invoice {} (#{}) for ${:.2} — {} entries marked invoiced.",
-                created.id, created.number, created.amount_dollars, marked
-            );
-        }
-
-        Commands::Invoice {
-            command: InvoiceCommands::SyncClients,
-        } => {
-            let api = build_invoice_ninja_client()?;
-            let remote = api.list_clients().await?;
-            let mut upserted = 0usize;
-            for r in &remote {
-                let existing = svc.find_client(&r.name).await;
-                let mut local = existing.unwrap_or_else(|| task_core::Client {
-                    name: r.name.clone(),
-                    ..Default::default()
-                });
-                local.invoice_ninja_id = Some(r.id.clone());
-                if let Some(cid) = r.currency_id {
-                    local.invoice_ninja_currency_id = Some(cid);
-                }
-                if let Some(ref e) = r.email {
-                    if local.email.is_none() {
-                        local.email = Some(e.clone());
-                    }
-                }
-                local.last_synced_at = Some(chrono::Utc::now());
-                svc.save_client(local).await?;
-                upserted += 1;
-            }
-            println!("Synced {upserted} client(s) from Invoice Ninja.");
         }
 
         Commands::Unsubscribe { reference, user } => {
@@ -2212,94 +2097,6 @@ fn parse_sort(s: &str) -> Sort {
         "modified" => Sort::DateModified,
         _ => Sort::Urgency,
     }
-}
-
-// ── Invoice Ninja helpers ────────────────────────────────────────────────────
-
-fn build_invoice_ninja_client() -> eyre::Result<task_core::provider::InvoiceNinjaClientApi> {
-    use task_core::provider::{InvoiceNinjaClientApi, InvoiceNinjaConfig};
-    let url = std::env::var("INVOICE_NINJA_URL")
-        .map_err(|_| eyre::eyre!("Set INVOICE_NINJA_URL env var."))?;
-    let token = std::env::var("INVOICE_NINJA_TOKEN")
-        .map_err(|_| eyre::eyre!("Set INVOICE_NINJA_TOKEN env var."))?;
-    Ok(InvoiceNinjaClientApi::new(InvoiceNinjaConfig {
-        url,
-        api_token: token,
-    }))
-}
-
-fn print_invoice_draft_table(
-    client: &task_core::Client,
-    draft: &task_core::provider::InvoiceDraft,
-    entry_ids: &[String],
-) {
-    println!("Invoice draft for: {}", client.name);
-    if let Some(ref id) = client.invoice_ninja_id {
-        println!("  IN client id:  {id}");
-    }
-    println!("  entries: {}", entry_ids.len());
-    if draft.lines.is_empty() {
-        println!("  (no billable entries — nothing to invoice)");
-        return;
-    }
-    println!();
-    println!(
-        "  {:<35}  {:>7}  {:>10}  {:>12}",
-        "TASK", "HOURS", "RATE", "AMOUNT",
-    );
-    println!("  {}", "─".repeat(70));
-    for l in &draft.lines {
-        println!(
-            "  {:<35}  {:>7.2}  ${:>9.2}  ${:>11.2}",
-            truncate(&l.product_key, 35),
-            l.hours,
-            l.rate_cents as f64 / 100.0,
-            l.amount_cents() as f64 / 100.0,
-        );
-    }
-    println!("  {}", "─".repeat(70));
-    println!(
-        "  {:<35}  {:>7}  {:>10}  ${:>11.2}",
-        "SUBTOTAL",
-        "",
-        "",
-        draft.subtotal_cents() as f64 / 100.0,
-    );
-}
-
-fn print_invoice_draft_json(
-    client: &task_core::Client,
-    draft: &task_core::provider::InvoiceDraft,
-    entry_ids: &[String],
-) {
-    let lines_json = draft
-        .lines
-        .iter()
-        .map(|l| {
-            format!(
-                "{{\"product_key\":\"{}\",\"notes\":\"{}\",\"hours\":{},\"rate_cents\":{},\"amount_cents\":{}}}",
-                escape_json(&l.product_key),
-                escape_json(&l.notes),
-                l.hours,
-                l.rate_cents,
-                l.amount_cents()
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(",");
-    let ids_json = entry_ids
-        .iter()
-        .map(|id| format!("\"{}\"", escape_json(id)))
-        .collect::<Vec<_>>()
-        .join(",");
-    println!(
-        "{{\"client\":\"{}\",\"invoice_ninja_id\":{},\"entry_ids\":[{}],\"lines\":[{}],\"subtotal_cents\":{}}}",
-        escape_json(&client.name),
-        opt_json(client.invoice_ninja_id.as_deref()),
-        ids_json,
-        lines_json,
-        draft.subtotal_cents()
-    );
 }
 
 fn print_clients_table(clients: &[task_core::Client]) {
