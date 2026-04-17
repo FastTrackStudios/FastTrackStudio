@@ -175,15 +175,26 @@ enum Commands {
         reference: String,
         user: String,
     },
-    /// Add a comment to a task
+    /// Comment on a task. Bare form adds a comment; subcommands manage existing.
     Comment {
+        #[command(subcommand)]
+        command: CommentCommands,
+    },
+    /// React to a task with an emoji (or `clear:<emoji>` to remove)
+    React {
         reference: String,
-        /// Comment body (markdown)
-        #[arg(long)]
-        body: String,
-        /// Timecode like "2:34" or "2:30-2:36" (audio/video)
-        #[arg(long)]
-        timecode: Option<String>,
+        emoji: String,
+    },
+    /// Subscribe to a task (start receiving notifications)
+    Subscribe {
+        reference: String,
+        /// Who to subscribe (defaults to --as-user)
+        user: Option<String>,
+    },
+    /// Unsubscribe from a task
+    Unsubscribe {
+        reference: String,
+        user: Option<String>,
     },
     /// Search tasks by text query (uses FTS5 index)
     Search {
@@ -240,6 +251,36 @@ enum Commands {
         #[command(subcommand)]
         command: ProjectCommands,
     },
+}
+
+#[derive(Subcommand)]
+enum CommentCommands {
+    /// Add a comment to a task
+    Add {
+        reference: String,
+        #[arg(long)]
+        body: String,
+        /// Timecode like "2:34" or "2:30-2:36" (audio/video)
+        #[arg(long)]
+        timecode: Option<String>,
+    },
+    /// List comments on a task
+    List {
+        reference: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Reply to an existing comment by id
+    Reply {
+        reference: String,
+        parent_id: String,
+        #[arg(long)]
+        body: String,
+    },
+    /// Mark a comment resolved (by id)
+    Resolve { reference: String, comment_id: String },
+    /// Unresolve a comment
+    Reopen { reference: String, comment_id: String },
 }
 
 #[derive(Subcommand)]
@@ -614,13 +655,14 @@ async fn main() -> eyre::Result<()> {
         }
 
         Commands::Comment {
-            reference,
-            body,
-            timecode,
+            command:
+                CommentCommands::Add {
+                    reference,
+                    body,
+                    timecode,
+                },
         } => {
-            let author = actor
-                .clone()
-                .ok_or_else(|| eyre::eyre!("No author. Use --as <user> or set TASK_USER."))?;
+            let author = require_actor(&actor)?;
             let mut task = find_task(&svc, &reference).await?;
 
             let time_ref = match timecode.as_deref() {
@@ -649,6 +691,133 @@ async fn main() -> eyre::Result<()> {
 
             svc.update_task_as(task, actor.as_deref()).await?;
             println!("Comment added ({}).", new_comment.id);
+        }
+
+        Commands::Comment {
+            command: CommentCommands::List { reference, json },
+        } => {
+            let task = find_task(&svc, &reference).await?;
+            let comments = parse_comments(&task.body);
+            if json {
+                print_comments_json(&comments);
+            } else {
+                print_comments_table(&comments);
+            }
+        }
+
+        Commands::Comment {
+            command:
+                CommentCommands::Reply {
+                    reference,
+                    parent_id,
+                    body,
+                },
+        } => {
+            let author = require_actor(&actor)?;
+            let mut task = find_task(&svc, &reference).await?;
+            let mut comments = parse_comments(&task.body);
+            if !comments.iter().any(|c| c.id == parent_id) {
+                eyre::bail!("No comment with id {parent_id} on task {reference}");
+            }
+            let now = chrono::Local::now().naive_local();
+            let mentions = Comment::extract_mentions(&body);
+            let new_comment = Comment {
+                id: Comment::generate_id(&author, Some(now), &body),
+                author,
+                body,
+                created_at: Some(now),
+                reply_to: Some(parent_id),
+                mentions,
+                ..Default::default()
+            };
+            comments.push(new_comment.clone());
+            task.body = splice_comments(&task.body, &comments);
+            svc.update_task_as(task, actor.as_deref()).await?;
+            println!("Reply added ({}).", new_comment.id);
+        }
+
+        Commands::Comment {
+            command: CommentCommands::Resolve { reference, comment_id },
+        } => {
+            let resolver = require_actor(&actor)?;
+            let mut task = find_task(&svc, &reference).await?;
+            let mut comments = parse_comments(&task.body);
+            let Some(c) = comments.iter_mut().find(|c| c.id == comment_id) else {
+                eyre::bail!("No comment with id {comment_id}");
+            };
+            c.resolved = true;
+            c.resolved_by = Some(resolver);
+            task.body = splice_comments(&task.body, &comments);
+            svc.update_task_as(task, actor.as_deref()).await?;
+            println!("Resolved comment {comment_id}.");
+        }
+
+        Commands::Comment {
+            command: CommentCommands::Reopen { reference, comment_id },
+        } => {
+            let mut task = find_task(&svc, &reference).await?;
+            let mut comments = parse_comments(&task.body);
+            let Some(c) = comments.iter_mut().find(|c| c.id == comment_id) else {
+                eyre::bail!("No comment with id {comment_id}");
+            };
+            c.resolved = false;
+            c.resolved_by = None;
+            task.body = splice_comments(&task.body, &comments);
+            svc.update_task_as(task, actor.as_deref()).await?;
+            println!("Reopened comment {comment_id}.");
+        }
+
+        Commands::React { reference, emoji } => {
+            let user = require_actor(&actor)?;
+            let mut task = find_task(&svc, &reference).await?;
+            if let Some(e) = emoji.strip_prefix("clear:") {
+                let before = task.reactions.len();
+                task.reactions.retain(|r| !(r.user == user && r.emoji == e));
+                if task.reactions.len() == before {
+                    eyre::bail!("No {e} reaction from @{user} to remove");
+                }
+                svc.update_task_as(task, actor.as_deref()).await?;
+                println!("Removed {e} from @{user}.");
+            } else {
+                // Dedup: one reaction per (user, emoji).
+                if !task
+                    .reactions
+                    .iter()
+                    .any(|r| r.user == user && r.emoji == emoji)
+                {
+                    task.reactions.push(task_core::Reaction {
+                        emoji: emoji.clone(),
+                        user: user.clone(),
+                    });
+                    svc.update_task_as(task, actor.as_deref()).await?;
+                }
+                println!("Reacted {emoji} from @{user}.");
+            }
+        }
+
+        Commands::Subscribe { reference, user } => {
+            let who = user.or(actor.clone()).ok_or_else(|| {
+                eyre::eyre!("Specify a user or set --as <user>/TASK_USER.")
+            })?;
+            let mut task = find_task(&svc, &reference).await?;
+            if !task.subscribers.contains(&who) {
+                task.subscribers.push(who.clone());
+                svc.update_task_as(task, actor.as_deref()).await?;
+            }
+            println!("@{who} subscribed.");
+        }
+
+        Commands::Unsubscribe { reference, user } => {
+            let who = user.or(actor.clone()).ok_or_else(|| {
+                eyre::eyre!("Specify a user or set --as <user>/TASK_USER.")
+            })?;
+            let mut task = find_task(&svc, &reference).await?;
+            let before = task.subscribers.len();
+            task.subscribers.retain(|u| u != &who);
+            if task.subscribers.len() != before {
+                svc.update_task_as(task, actor.as_deref()).await?;
+            }
+            println!("@{who} unsubscribed.");
         }
 
         Commands::Link { from, to, kind } => {
@@ -1354,6 +1523,50 @@ fn parse_sort(s: &str) -> Sort {
         "modified" => Sort::DateModified,
         _ => Sort::Urgency,
     }
+}
+
+fn require_actor(actor: &Option<String>) -> eyre::Result<String> {
+    actor
+        .clone()
+        .ok_or_else(|| eyre::eyre!("No actor. Use --as <user> or set TASK_USER."))
+}
+
+fn print_comments_table(comments: &[Comment]) {
+    if comments.is_empty() {
+        println!("No comments.");
+        return;
+    }
+    for c in comments {
+        let depth = c.depth(comments);
+        let indent = "  ".repeat(depth);
+        let date = c
+            .created_at
+            .map(|d| format!(" ({})", d.format("%Y-%m-%d %H:%M")))
+            .unwrap_or_default();
+        let tc = c
+            .time_ref
+            .as_ref()
+            .map(|t| format!(" [{}]", t.display()))
+            .unwrap_or_default();
+        let resolved = if c.resolved { " ✅" } else { "" };
+        println!(
+            "{indent}@{}{date}{tc}{resolved}",
+            c.author
+        );
+        println!("{indent}  {}", c.body);
+        println!("{indent}  id: {}", c.id);
+    }
+    println!("\n{} comment(s)", comments.len());
+}
+
+fn print_comments_json(comments: &[Comment]) {
+    println!("[");
+    for (i, c) in comments.iter().enumerate() {
+        let comma = if i + 1 < comments.len() { "," } else { "" };
+        let json = facet_json::to_string(c).unwrap_or_default();
+        println!("  {json}{comma}");
+    }
+    println!("]");
 }
 
 fn parse_relation_kind(s: &str) -> eyre::Result<RelationType> {
