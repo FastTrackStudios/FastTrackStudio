@@ -772,6 +772,179 @@ impl VaultServiceImpl {
         Ok(updated)
     }
 
+    // ── Project editing ─────────────────────────────────────────────────────
+
+    /// Find a project by case-insensitive title match.
+    pub async fn find_project(&self, title: &str) -> Option<Project> {
+        self.list_projects()
+            .await
+            .into_iter()
+            .find(|p| p.title.eq_ignore_ascii_case(title))
+    }
+
+    /// Apply a patch to a project. Emits audit rows attributed to `actor`
+    /// for every changed field. Returns the updated project.
+    pub async fn update_project_as(
+        &self,
+        title: &str,
+        patch: ProjectPatch,
+        actor: Option<&str>,
+    ) -> Result<Project, VaultError> {
+        let vault = self.vault.read().await;
+        let mut project = vault
+            .load_projects()
+            .into_iter()
+            .find(|p| p.title.eq_ignore_ascii_case(title))
+            .ok_or_else(|| VaultError::NotFound(title.to_string()))?;
+
+        let mut changes: Vec<(&'static str, Option<String>, Option<String>)> = Vec::new();
+
+        macro_rules! diff_opt_string {
+            ($field:ident, $label:literal) => {
+                if let Some(v) = patch.$field {
+                    let before = project.$field.clone();
+                    let new_val = if v.is_empty() || v == "clear" {
+                        None
+                    } else {
+                        Some(v)
+                    };
+                    if before != new_val {
+                        changes.push(($label, before.clone(), new_val.clone()));
+                    }
+                    project.$field = new_val;
+                }
+            };
+        }
+
+        diff_opt_string!(description, "description");
+        diff_opt_string!(area, "area");
+        diff_opt_string!(organization, "organization");
+        diff_opt_string!(project_type, "type");
+        diff_opt_string!(workflow, "workflow");
+        diff_opt_string!(workflow_stage, "workflow_stage");
+        diff_opt_string!(identifier, "identifier");
+        diff_opt_string!(lead, "lead");
+        diff_opt_string!(default_assignee, "default_assignee");
+        diff_opt_string!(emoji, "emoji");
+        diff_opt_string!(repo, "repo");
+        diff_opt_string!(dev_path, "dev_path");
+
+        if let Some(s) = patch.status {
+            let before = format!("{:?}", project.status);
+            let new_status = parse_project_status(&s).ok_or_else(|| {
+                VaultError::ParseError(format!("unknown project status: {s}"))
+            })?;
+            if format!("{:?}", new_status) != before {
+                changes.push((
+                    "status",
+                    Some(before.clone()),
+                    Some(format!("{:?}", new_status)),
+                ));
+            }
+            project.status = new_status;
+        }
+        if let Some(v) = patch.client {
+            let before = project.client.as_ref().map(|w| w.0.clone());
+            let new_val = if v.is_empty() || v == "clear" {
+                None
+            } else {
+                Some(crate::task::WikiLink(v))
+            };
+            let new_str = new_val.as_ref().map(|w| w.0.clone());
+            if before != new_str {
+                changes.push(("client", before, new_str));
+            }
+            project.client = new_val;
+        }
+        if let Some(r) = patch.default_rate {
+            let before = project.default_rate;
+            let new_val = if r == 0 { None } else { Some(r) };
+            if before != new_val {
+                changes.push((
+                    "default_rate",
+                    before.map(|n| n.to_string()),
+                    new_val.map(|n| n.to_string()),
+                ));
+            }
+            project.default_rate = new_val;
+        }
+        if let Some(d) = patch.due {
+            let before = project.due.map(|d| d.to_string());
+            let new_val = if d.is_empty() || d == "clear" {
+                None
+            } else {
+                Some(
+                    d.parse::<chrono::NaiveDate>()
+                        .map_err(|e| VaultError::ParseError(format!("invalid due: {e}")))?,
+                )
+            };
+            let new_str = new_val.map(|d| d.to_string());
+            if before != new_str {
+                changes.push(("due", before, new_str));
+            }
+            project.due = new_val;
+        }
+        if let Some(d) = patch.start {
+            let before = project.start.map(|d| d.to_string());
+            let new_val = if d.is_empty() || d == "clear" {
+                None
+            } else {
+                Some(
+                    d.parse::<chrono::NaiveDate>()
+                        .map_err(|e| VaultError::ParseError(format!("invalid start: {e}")))?,
+                )
+            };
+            let new_str = new_val.map(|d| d.to_string());
+            if before != new_str {
+                changes.push(("start", before, new_str));
+            }
+            project.start = new_val;
+        }
+
+        // List fields — tags, email_tags, team.
+        apply_list_edit(
+            &mut project.tags,
+            patch.add_tag,
+            patch.remove_tag,
+            "tags",
+            &mut changes,
+        );
+        apply_list_edit(
+            &mut project.email_tags,
+            patch.add_email_tag,
+            patch.remove_email_tag,
+            "email_tags",
+            &mut changes,
+        );
+        apply_list_edit(
+            &mut project.team,
+            patch.add_team,
+            patch.remove_team,
+            "team",
+            &mut changes,
+        );
+
+        vault.save_project(&project)?;
+
+        if let Ok(guard) = self.index.lock() {
+            if let Some(ref idx) = *guard {
+                let file_path = format!("{}/project.md", project.title);
+                for (field, old, new) in changes {
+                    let _ = idx.record_change(
+                        "project",
+                        &project.title,
+                        Some(field),
+                        old.as_deref(),
+                        new.as_deref(),
+                        actor,
+                        Some(&file_path),
+                    );
+                }
+            }
+        }
+        Ok(project)
+    }
+
     // ── Email linking ───────────────────────────────────────────────────────
 
     /// Attach an email to a task. De-duplicates by message_id (case-insensitive
@@ -1510,6 +1683,74 @@ pub struct TimeEntryPatch {
     pub billable_rate: Option<u32>,
     pub user: Option<String>,
     pub tags: Option<Vec<String>>,
+}
+
+/// Patch for [`VaultServiceImpl::update_project_as`]. Only `Some(_)` fields
+/// are applied. For optional string fields, passing `"clear"` or `""`
+/// clears the value.
+#[derive(Debug, Default, Clone)]
+pub struct ProjectPatch {
+    pub status: Option<String>,
+    pub description: Option<String>,
+    pub area: Option<String>,
+    pub organization: Option<String>,
+    pub project_type: Option<String>,
+    pub workflow: Option<String>,
+    pub workflow_stage: Option<String>,
+    pub identifier: Option<String>,
+    pub lead: Option<String>,
+    pub default_assignee: Option<String>,
+    pub emoji: Option<String>,
+    pub repo: Option<String>,
+    pub dev_path: Option<String>,
+    pub client: Option<String>,
+    /// Cents/hr; pass 0 to clear.
+    pub default_rate: Option<u32>,
+    pub due: Option<String>,
+    pub start: Option<String>,
+
+    pub add_tag: Vec<String>,
+    pub remove_tag: Vec<String>,
+    pub add_email_tag: Vec<String>,
+    pub remove_email_tag: Vec<String>,
+    pub add_team: Vec<String>,
+    pub remove_team: Vec<String>,
+}
+
+fn parse_project_status(s: &str) -> Option<crate::project::ProjectStatus> {
+    match s.to_lowercase().replace('-', "").as_str() {
+        "planning" => Some(crate::project::ProjectStatus::Planning),
+        "active" => Some(crate::project::ProjectStatus::Active),
+        "onhold" | "hold" => Some(crate::project::ProjectStatus::OnHold),
+        "completed" | "done" => Some(crate::project::ProjectStatus::Completed),
+        "archived" => Some(crate::project::ProjectStatus::Archived),
+        _ => None,
+    }
+}
+
+fn apply_list_edit(
+    list: &mut Vec<String>,
+    add: Vec<String>,
+    remove: Vec<String>,
+    field: &'static str,
+    changes: &mut Vec<(&'static str, Option<String>, Option<String>)>,
+) {
+    if add.is_empty() && remove.is_empty() {
+        return;
+    }
+    let before = list.join(",");
+    for r in &remove {
+        list.retain(|x| x != r);
+    }
+    for a in add {
+        if !list.contains(&a) {
+            list.push(a);
+        }
+    }
+    let after = list.join(",");
+    if before != after {
+        changes.push((field, Some(before), Some(after)));
+    }
 }
 
 /// Strip `<...>` angle brackets from a Message-Id if present.

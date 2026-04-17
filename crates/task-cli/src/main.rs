@@ -653,6 +653,67 @@ enum ProjectCommands {
         #[arg(long)]
         json: bool,
     },
+    /// Edit project fields — status, client, rate, email_tags, etc.
+    Edit {
+        name: String,
+        #[arg(long)]
+        status: Option<String>,
+        #[arg(long)]
+        description: Option<String>,
+        #[arg(long)]
+        area: Option<String>,
+        #[arg(long)]
+        organization: Option<String>,
+        /// Pass "clear" to remove.
+        #[arg(long)]
+        client: Option<String>,
+        /// Billable rate in cents/hr; 0 clears.
+        #[arg(long)]
+        default_rate: Option<u32>,
+        #[arg(long)]
+        identifier: Option<String>,
+        #[arg(long)]
+        lead: Option<String>,
+        #[arg(long)]
+        default_assignee: Option<String>,
+        #[arg(long)]
+        emoji: Option<String>,
+        #[arg(long)]
+        repo: Option<String>,
+        #[arg(long)]
+        dev_path: Option<String>,
+        #[arg(long)]
+        project_type: Option<String>,
+        #[arg(long)]
+        workflow: Option<String>,
+        #[arg(long)]
+        workflow_stage: Option<String>,
+        /// YYYY-MM-DD or "clear"
+        #[arg(long)]
+        due: Option<String>,
+        #[arg(long)]
+        start: Option<String>,
+        #[arg(long)]
+        add_tag: Vec<String>,
+        #[arg(long)]
+        remove_tag: Vec<String>,
+        #[arg(long)]
+        add_email_tag: Vec<String>,
+        #[arg(long)]
+        remove_email_tag: Vec<String>,
+        #[arg(long)]
+        add_team: Vec<String>,
+        #[arg(long)]
+        remove_team: Vec<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show a single project
+    Show {
+        name: String,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[tokio::main]
@@ -1558,6 +1619,85 @@ async fn main() -> eyre::Result<()> {
                 print_tasks_json(&tasks);
             } else {
                 print_tasks_table(&tasks);
+            }
+        }
+
+        Commands::Project {
+            command:
+                ProjectCommands::Edit {
+                    name,
+                    status,
+                    description,
+                    area,
+                    organization,
+                    client,
+                    default_rate,
+                    identifier,
+                    lead,
+                    default_assignee,
+                    emoji,
+                    repo,
+                    dev_path,
+                    project_type,
+                    workflow,
+                    workflow_stage,
+                    due,
+                    start,
+                    add_tag,
+                    remove_tag,
+                    add_email_tag,
+                    remove_email_tag,
+                    add_team,
+                    remove_team,
+                    json,
+                },
+        } => {
+            let patch = task_core::ProjectPatch {
+                status,
+                description,
+                area,
+                organization,
+                project_type,
+                workflow,
+                workflow_stage,
+                identifier,
+                lead,
+                default_assignee,
+                emoji,
+                repo,
+                dev_path,
+                client,
+                default_rate,
+                due,
+                start,
+                add_tag,
+                remove_tag,
+                add_email_tag,
+                remove_email_tag,
+                add_team,
+                remove_team,
+            };
+            let updated = svc
+                .update_project_as(&name, patch, actor.as_deref())
+                .await?;
+            if json {
+                println!("{}", facet_json::to_string(&updated).unwrap_or_default());
+            } else {
+                println!("Updated project '{}'.", updated.title);
+            }
+        }
+
+        Commands::Project {
+            command: ProjectCommands::Show { name, json },
+        } => {
+            let project = svc
+                .find_project(&name)
+                .await
+                .ok_or_else(|| eyre::eyre!("Project not found: {name}"))?;
+            if json {
+                println!("{}", facet_json::to_string(&project).unwrap_or_default());
+            } else {
+                print_project_detail(&project);
             }
         }
 
@@ -2489,6 +2629,56 @@ fn parse_sort(s: &str) -> Sort {
         "created" => Sort::DateCreated,
         "modified" => Sort::DateModified,
         _ => Sort::Urgency,
+    }
+}
+
+fn print_project_detail(p: &task_core::Project) {
+    println!("Title:       {}", p.title);
+    println!("Status:      {:?}", p.status);
+    if let Some(ref id) = p.identifier {
+        println!("Identifier:  {id}");
+    }
+    if let Some(ref c) = p.client {
+        println!("Client:      {}", c.0);
+    }
+    if let Some(r) = p.default_rate {
+        println!("Rate:        ${:.2}/hr", r as f64 / 100.0);
+    }
+    if let Some(ref d) = p.description {
+        println!("Description: {d}");
+    }
+    if let Some(ref a) = p.area {
+        println!("Area:        {a}");
+    }
+    if let Some(ref o) = p.organization {
+        println!("Org:         {o}");
+    }
+    if let Some(ref l) = p.lead {
+        println!("Lead:        {l}");
+    }
+    if let Some(ref a) = p.default_assignee {
+        println!("Assignee:    {a}");
+    }
+    if let Some(s) = p.start {
+        println!("Start:       {s}");
+    }
+    if let Some(d) = p.due {
+        println!("Due:         {d}");
+    }
+    if !p.tags.is_empty() {
+        println!("Tags:        {}", p.tags.join(", "));
+    }
+    if !p.email_tags.is_empty() {
+        println!("Email tags:  {}", p.email_tags.join(", "));
+    }
+    if !p.team.is_empty() {
+        println!("Team:        {}", p.team.join(", "));
+    }
+    if let Some(ref r) = p.repo {
+        println!("Repo:        {r}");
+    }
+    if !p.emails.is_empty() {
+        println!("Emails:      {} linked", p.emails.len());
     }
 }
 

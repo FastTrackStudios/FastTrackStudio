@@ -55,7 +55,8 @@ pub use service::{VaultError, VaultService, VaultServiceDispatcher, SyncStats, v
 pub use vault::Vault;
 #[cfg(feature = "server")]
 pub use service_impl::{
-    TimeEntryContext, TimeEntryFilter, TimeEntryPatch, VaultServiceImpl, VaultKind, VaultSource,
+    ProjectPatch, TimeEntryContext, TimeEntryFilter, TimeEntryPatch, VaultKind, VaultServiceImpl,
+    VaultSource,
 };
 #[cfg(feature = "server")]
 pub use watch::WatchHandle;
