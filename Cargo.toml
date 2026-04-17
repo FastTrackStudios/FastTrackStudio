@@ -2,6 +2,7 @@
 members = [
     "crates/fts-extensions",
     "crates/ui-test-standalone",
+    "crates/ui-snapshot",
     "xtask",
 ]
 resolver = "2"
