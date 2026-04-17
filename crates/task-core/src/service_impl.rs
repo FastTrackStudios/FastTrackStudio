@@ -531,6 +531,89 @@ impl VaultServiceImpl {
         out
     }
 
+    // ── Conflict log ────────────────────────────────────────────────────────
+
+    /// List conflict rows from the SQLite index. `open_only` filters out
+    /// resolved entries.
+    pub async fn list_conflicts(
+        &self,
+        open_only: bool,
+        limit: u32,
+    ) -> Result<Vec<crate::index::ConflictRow>, VaultError> {
+        let guard = self.index.lock().map_err(|_| {
+            VaultError::IoError("index poisoned".into())
+        })?;
+        match &*guard {
+            Some(idx) => idx.list_conflicts(open_only, limit),
+            None => Ok(Vec::new()),
+        }
+    }
+
+    /// Mark a conflict resolved.
+    pub async fn resolve_conflict(
+        &self,
+        conflict_id: i64,
+        resolver: Option<&str>,
+        how: &str,
+    ) -> Result<(), VaultError> {
+        let guard = self.index.lock().map_err(|_| {
+            VaultError::IoError("index poisoned".into())
+        })?;
+        match &*guard {
+            Some(idx) => idx.resolve_conflict(conflict_id, resolver, how),
+            None => Err(VaultError::IoError("index unavailable".into())),
+        }
+    }
+
+    /// Manually record a conflict (used by agents / the future sync
+    /// subscriber). Returns the new row id.
+    pub async fn record_conflict(
+        &self,
+        entity_type: &str,
+        entity_id: &str,
+        field: &str,
+        winning_value: Option<&str>,
+        losing_value: Option<&str>,
+        winning_actor: Option<&str>,
+        losing_actor: Option<&str>,
+        file_path: Option<&str>,
+        kind: &str,
+    ) -> Result<i64, VaultError> {
+        let guard = self.index.lock().map_err(|_| {
+            VaultError::IoError("index poisoned".into())
+        })?;
+        match &*guard {
+            Some(idx) => idx.record_conflict(
+                entity_type,
+                entity_id,
+                field,
+                winning_value,
+                losing_value,
+                winning_actor,
+                losing_actor,
+                file_path,
+                kind,
+            ),
+            None => Err(VaultError::IoError("index unavailable".into())),
+        }
+    }
+
+    // ── Activity feed ───────────────────────────────────────────────────────
+
+    /// Recent changes across the vault (audit trail).
+    pub async fn recent_activity(
+        &self,
+        limit: u32,
+    ) -> Result<Vec<crate::index::ChangeRow>, VaultError> {
+        let guard = self.index.lock().map_err(|_| {
+            VaultError::IoError("index poisoned".into())
+        })?;
+        match &*guard {
+            Some(idx) => idx.recent_changes(limit),
+            None => Ok(Vec::new()),
+        }
+    }
+
     /// Delete a time entry by id.
     pub async fn delete_time_entry(&self, entry_id: &str) -> Result<(), VaultError> {
         let vault = self.vault.read().await;

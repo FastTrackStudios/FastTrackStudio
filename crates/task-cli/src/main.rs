@@ -1,5 +1,6 @@
 use clap::{Parser, Subcommand};
 use chrono::{DateTime, TimeZone, Utc};
+use task_core::index::{ChangeRow, ConflictRow};
 use task_core::workflows::{parse_comments, render_comments, Comment};
 use task_core::{
     Filter, Priority, Query, Sort, Status, Task, TimeEntry, TimeEntryFilter, VaultServiceImpl,
@@ -188,10 +189,47 @@ enum Commands {
         #[command(subcommand)]
         command: TimeCommands,
     },
+    /// Show recent activity (audit log of changes across the vault)
+    Activity {
+        #[arg(long, short = 'n', default_value = "50")]
+        limit: u32,
+        /// Only show entries with this entity_type (e.g. "task")
+        #[arg(long)]
+        kind: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Conflict log (concurrent edits detected during sync)
+    Conflicts {
+        #[command(subcommand)]
+        command: ConflictCommands,
+    },
     /// Project subcommands
     Project {
         #[command(subcommand)]
         command: ProjectCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum ConflictCommands {
+    /// List conflicts
+    List {
+        /// Include already-resolved conflicts
+        #[arg(long)]
+        all: bool,
+        #[arg(long, short = 'n', default_value = "50")]
+        limit: u32,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Resolve a conflict by id
+    Resolve {
+        conflict_id: i64,
+        /// How it was resolved — free-form tag (e.g. "picked-winning",
+        /// "picked-losing", "merged", "ignored")
+        #[arg(long, default_value = "resolved")]
+        how: String,
     },
 }
 
@@ -817,6 +855,37 @@ async fn main() -> eyre::Result<()> {
             svc.delete_time_entry(&entry_id).await?;
             println!("Deleted entry {entry_id}.");
         }
+
+        Commands::Activity { limit, kind, json } => {
+            let changes = svc.recent_activity(limit).await?;
+            let filtered: Vec<_> = match kind {
+                Some(k) => changes.into_iter().filter(|c| c.entity_type == k).collect(),
+                None => changes,
+            };
+            if json {
+                print_activity_json(&filtered);
+            } else {
+                print_activity_table(&filtered);
+            }
+        }
+
+        Commands::Conflicts {
+            command: ConflictCommands::List { all, limit, json },
+        } => {
+            let rows = svc.list_conflicts(!all, limit).await?;
+            if json {
+                print_conflicts_json(&rows);
+            } else {
+                print_conflicts_table(&rows);
+            }
+        }
+
+        Commands::Conflicts {
+            command: ConflictCommands::Resolve { conflict_id, how },
+        } => {
+            svc.resolve_conflict(conflict_id, actor.as_deref(), &how).await?;
+            println!("Resolved conflict #{conflict_id} ({how}).");
+        }
     }
 
     Ok(())
@@ -1035,6 +1104,123 @@ fn print_report_table(rows: &[ReportRow]) {
         format!("{:.2}", total_min as f64 / 60.0),
         format!("${:.2}", total_cents as f64 / 100.0)
     );
+}
+
+// ── Activity / conflicts ──────────────────────────────────────────────────────
+
+fn print_activity_table(rows: &[ChangeRow]) {
+    if rows.is_empty() {
+        println!("No activity.");
+        return;
+    }
+    let id_w = rows.iter().map(|r| r.entity_id.len()).max().unwrap_or(5).max(5).min(35);
+    println!(
+        "{:<19}  {:<6}  {:<id_w$}  {:<12}  {:<10}  {}",
+        "WHEN (UTC)", "KIND", "ENTITY", "FIELD", "BY", "CHANGE",
+    );
+    println!("{}", "─".repeat(id_w + 62));
+    for r in rows {
+        let field = r.field.clone().unwrap_or_else(|| "—".into());
+        let by = r.changed_by.clone().unwrap_or_else(|| "—".into());
+        let change = match (&r.old_value, &r.new_value) {
+            (Some(o), Some(n)) => format!("{o} → {n}"),
+            (_, Some(n)) => n.clone(),
+            (Some(o), _) => format!("{o} → ∅"),
+            _ => "—".into(),
+        };
+        println!(
+            "{:<19}  {:<6}  {:<id_w$}  {:<12}  {:<10}  {}",
+            r.changed_at,
+            r.entity_type,
+            truncate(&r.entity_id, id_w),
+            truncate(&field, 12),
+            truncate(&by, 10),
+            truncate(&change, 60),
+        );
+    }
+    println!("\n{} change(s)", rows.len());
+}
+
+fn print_activity_json(rows: &[ChangeRow]) {
+    println!("[");
+    for (i, r) in rows.iter().enumerate() {
+        let comma = if i + 1 < rows.len() { "," } else { "" };
+        println!(
+            "  {{\"entity_type\":\"{}\",\"entity_id\":\"{}\",\"field\":{},\"old\":{},\"new\":{},\"by\":{},\"at\":\"{}\"}}{comma}",
+            escape_json(&r.entity_type),
+            escape_json(&r.entity_id),
+            opt_json(r.field.as_deref()),
+            opt_json(r.old_value.as_deref()),
+            opt_json(r.new_value.as_deref()),
+            opt_json(r.changed_by.as_deref()),
+            escape_json(&r.changed_at),
+        );
+    }
+    println!("]");
+}
+
+fn print_conflicts_table(rows: &[ConflictRow]) {
+    if rows.is_empty() {
+        println!("No conflicts.");
+        return;
+    }
+    println!(
+        "{:<4}  {:<12}  {:<20}  {:<10}  {:<20}  {:<20}  STATE",
+        "ID", "FIELD", "ENTITY", "KIND", "WINNING", "LOSING",
+    );
+    println!("{}", "─".repeat(110));
+    for r in rows {
+        let field = r.field.clone().unwrap_or_else(|| "—".into());
+        let winning = r.winning_value.clone().unwrap_or_else(|| "∅".into());
+        let losing = r.losing_value.clone().unwrap_or_else(|| "∅".into());
+        let kind = r.kind.clone().unwrap_or_else(|| "—".into());
+        let state = r
+            .resolved
+            .clone()
+            .unwrap_or_else(|| "open".into());
+        let w_actor = r.winning_actor.as_deref().map(|a| format!("@{a}")).unwrap_or_default();
+        let l_actor = r.losing_actor.as_deref().map(|a| format!("@{a}")).unwrap_or_default();
+        println!(
+            "{:<4}  {:<12}  {:<20}  {:<10}  {:<20}  {:<20}  {state}",
+            r.id,
+            truncate(&field, 12),
+            truncate(&r.entity_id, 20),
+            truncate(&kind, 10),
+            truncate(&format!("{winning} {w_actor}"), 20),
+            truncate(&format!("{losing} {l_actor}"), 20),
+        );
+    }
+    println!("\n{} conflict(s)", rows.len());
+}
+
+fn print_conflicts_json(rows: &[ConflictRow]) {
+    println!("[");
+    for (i, r) in rows.iter().enumerate() {
+        let comma = if i + 1 < rows.len() { "," } else { "" };
+        println!(
+            "  {{\"id\":{},\"entity_type\":\"{}\",\"entity_id\":\"{}\",\"field\":{},\"kind\":{},\"winning_value\":{},\"losing_value\":{},\"winning_actor\":{},\"losing_actor\":{},\"resolved\":{},\"resolved_by\":{},\"at\":\"{}\"}}{comma}",
+            r.id,
+            escape_json(&r.entity_type),
+            escape_json(&r.entity_id),
+            opt_json(r.field.as_deref()),
+            opt_json(r.kind.as_deref()),
+            opt_json(r.winning_value.as_deref()),
+            opt_json(r.losing_value.as_deref()),
+            opt_json(r.winning_actor.as_deref()),
+            opt_json(r.losing_actor.as_deref()),
+            opt_json(r.resolved.as_deref()),
+            opt_json(r.resolved_by.as_deref()),
+            escape_json(&r.changed_at),
+        );
+    }
+    println!("]");
+}
+
+fn opt_json(s: Option<&str>) -> String {
+    match s {
+        Some(v) => format!("\"{}\"", escape_json(v)),
+        None => "null".into(),
+    }
 }
 
 fn print_report_json(rows: &[ReportRow]) {
