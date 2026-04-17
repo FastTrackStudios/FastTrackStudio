@@ -2,7 +2,6 @@
 name = "task-web"
 version.workspace = true
 edition.workspace = true
-authors = ["Cody Wright"]
 
 [[bin]]
 name = "task-web"
@@ -14,5 +13,13 @@ web = ["dioxus/web"]
 
 [dependencies]
 dioxus = { version = "0.7.2", features = ["router"] }
-vault-core.workspace = true
-task-ui.workspace = true
+fts-ui.workspace = true
+chrono = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+gloo-net = { version = "0.6", features = ["http", "json", "websocket"] }
+gloo-timers = "0.3"
+web-sys = { version = "0.3", features = ["Window", "Location"] }
+js-sys = "0.3"
+futures.workspace = true
+slug = "0.1"

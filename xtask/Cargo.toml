@@ -9,7 +9,7 @@ name = "xtask"
 path = "src/main.rs"
 
 [dependencies]
-vault-core.workspace = true
+task-core.workspace = true
 vox-codegen     = { path = "../../FastTrackStudio/vox/rust/vox-codegen" }
 vox-types       = { path = "../../FastTrackStudio/vox/rust/vox-types" }
 xshell          = "0.2"

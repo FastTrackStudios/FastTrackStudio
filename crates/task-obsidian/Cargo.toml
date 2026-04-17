@@ -1,0 +1,14 @@
+[package]
+name = "obsidian-plugin"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wasm-bindgen = "0.2"
+task-core = { path = "../task-core", default-features = false }
+facet.workspace = true
+facet-json.workspace = true
+facet-yaml.workspace = true

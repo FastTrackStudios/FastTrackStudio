@@ -4,10 +4,11 @@ members = [
     "apps/mobile",
     "apps/server",
     "apps/web",
-    "obsidian-plugin",
-    "task-cli",
-    "task-ui",
-    "vault-core",
+    "crates/task-core",
+    "crates/task-cli",
+    "crates/task-db",
+    "crates/task-obsidian",
+    "crates/task-ui",
     "xtask",
 ]
 resolver = "2"
@@ -34,6 +35,7 @@ version = "0.44.1"
 features = [
     "reflect",
     "chrono",
+    "uuid",
 ]
 
 [workspace.dependencies.facet-core]
@@ -79,7 +81,7 @@ version = "1"
 path = "../FastTrackStudio/vox/rust/shm-primitives"
 
 [workspace.dependencies.task-ui]
-path = "task-ui"
+path = "crates/task-ui"
 
 [workspace.dependencies.tokio]
 version = "1"
@@ -96,8 +98,8 @@ features = [
     "v7",
 ]
 
-[workspace.dependencies.vault-core]
-path = "vault-core"
+[workspace.dependencies.task-core]
+path = "crates/task-core"
 
 [workspace.dependencies.vox]
 path = "../FastTrackStudio/vox/rust/vox"
@@ -122,6 +124,17 @@ path = "../FastTrackStudio/vox/rust/vox-types"
 
 [workspace.dependencies.vox-websocket]
 path = "../FastTrackStudio/vox/rust/vox-websocket"
+
+[workspace.dependencies.sea-orm]
+path = "../FastTrackStudio/sea-orm"
+features = ["sqlx-sqlite", "runtime-tokio-rustls", "macros", "with-chrono", "with-uuid", "with-json", "facet"]
+
+[workspace.dependencies.sea-orm-migration]
+path = "../FastTrackStudio/sea-orm/sea-orm-migration"
+
+[workspace.dependencies.crudcrate]
+path = "../FastTrackStudio/crudcrate/crudcrate"
+features = ["derive"]
 
 [profile.wasm-dev]
 opt-level = 1

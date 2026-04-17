@@ -1,0 +1,382 @@
+use sea_orm_migration::prelude::*;
+
+#[derive(DeriveMigrationName)]
+pub struct Migration;
+
+#[async_trait::async_trait]
+impl MigrationTrait for Migration {
+    async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        // ── Projects ────────────────────────────────────────────────
+        manager
+            .create_table(
+                Table::create()
+                    .table(Projects::Table)
+                    .if_not_exists()
+                    .col(ColumnDef::new(Projects::Id).uuid().not_null().primary_key())
+                    .col(ColumnDef::new(Projects::Title).string_len(255).not_null())
+                    .col(ColumnDef::new(Projects::Slug).string_len(255).not_null())
+                    .col(ColumnDef::new(Projects::Status).string_len(50).not_null().default("Active"))
+                    .col(ColumnDef::new(Projects::ProjectType).string_len(100))
+                    .col(ColumnDef::new(Projects::Description).text())
+                    .col(ColumnDef::new(Projects::Area).string_len(100))
+                    .col(ColumnDef::new(Projects::Identifier).string_len(12))
+                    .col(ColumnDef::new(Projects::NextSequence).integer().default(1))
+                    .col(ColumnDef::new(Projects::ParentSlug).string_len(255))
+                    .col(ColumnDef::new(Projects::Lead).string_len(100))
+                    .col(ColumnDef::new(Projects::DefaultAssignee).string_len(100))
+                    .col(ColumnDef::new(Projects::Emoji).string_len(10))
+                    .col(ColumnDef::new(Projects::Organization).string_len(100))
+                    .col(ColumnDef::new(Projects::Team).json().not_null().default("[]"))
+                    .col(ColumnDef::new(Projects::References).json().not_null().default("[]"))
+                    .col(ColumnDef::new(Projects::Due).date())
+                    .col(ColumnDef::new(Projects::Start).date())
+                    .col(ColumnDef::new(Projects::FilePath).text())
+                    .col(ColumnDef::new(Projects::DeletedAt).timestamp_with_time_zone())
+                    .col(ColumnDef::new(Projects::ArchivedAt).timestamp_with_time_zone())
+                    .col(ColumnDef::new(Projects::CreatedAt).timestamp_with_time_zone().not_null())
+                    .col(ColumnDef::new(Projects::UpdatedAt).timestamp_with_time_zone().not_null())
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_projects_slug")
+                    .table(Projects::Table)
+                    .col(Projects::Slug)
+                    .unique()
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_projects_parent")
+                    .table(Projects::Table)
+                    .col(Projects::ParentSlug)
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_projects_organization")
+                    .table(Projects::Table)
+                    .col(Projects::Organization)
+                    .to_owned(),
+            )
+            .await?;
+
+        // ── Tasks ───────────────────────────────────────────────────
+        manager
+            .create_table(
+                Table::create()
+                    .table(Tasks::Table)
+                    .if_not_exists()
+                    .col(ColumnDef::new(Tasks::Id).uuid().not_null().primary_key())
+                    .col(ColumnDef::new(Tasks::SequenceId).integer())
+                    .col(ColumnDef::new(Tasks::Title).string_len(255).not_null())
+                    .col(ColumnDef::new(Tasks::Status).string_len(50).not_null().default("Open"))
+                    .col(ColumnDef::new(Tasks::Priority).string_len(50).not_null().default("Normal"))
+                    .col(ColumnDef::new(Tasks::IssueType).string_len(50))
+                    .col(ColumnDef::new(Tasks::Project).string_len(255))
+                    .col(ColumnDef::new(Tasks::Assignee).string_len(100))
+                    .col(ColumnDef::new(Tasks::Assignees).json().not_null().default("[]"))
+                    .col(ColumnDef::new(Tasks::CreatedBy).string_len(100))
+                    .col(ColumnDef::new(Tasks::Due).date())
+                    .col(ColumnDef::new(Tasks::Scheduled).date())
+                    .col(ColumnDef::new(Tasks::Start).date())
+                    .col(ColumnDef::new(Tasks::CompletedDate).date())
+                    .col(ColumnDef::new(Tasks::Tags).json().not_null().default("[]"))
+                    .col(ColumnDef::new(Tasks::TimeEstimate).integer())
+                    .col(ColumnDef::new(Tasks::SortOrder).double())
+                    .col(ColumnDef::new(Tasks::Body).text())
+                    .col(ColumnDef::new(Tasks::FilePath).text())
+                    .col(ColumnDef::new(Tasks::IsDraft).boolean().not_null().default(false))
+                    .col(ColumnDef::new(Tasks::DeletedAt).timestamp_with_time_zone())
+                    .col(ColumnDef::new(Tasks::CreatedAt).timestamp_with_time_zone().not_null())
+                    .col(ColumnDef::new(Tasks::UpdatedAt).timestamp_with_time_zone().not_null())
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_tasks_project")
+                    .table(Tasks::Table)
+                    .col(Tasks::Project)
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_tasks_status")
+                    .table(Tasks::Table)
+                    .col(Tasks::Status)
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_tasks_assignee")
+                    .table(Tasks::Table)
+                    .col(Tasks::Assignee)
+                    .to_owned(),
+            )
+            .await?;
+
+        // ── Comments ────────────────────────────────────────────────
+        manager
+            .create_table(
+                Table::create()
+                    .table(Comments::Table)
+                    .if_not_exists()
+                    .col(ColumnDef::new(Comments::Id).uuid().not_null().primary_key())
+                    .col(ColumnDef::new(Comments::EntityId).uuid().not_null())
+                    .col(ColumnDef::new(Comments::EntityType).string_len(50).not_null())
+                    .col(ColumnDef::new(Comments::Author).string_len(100).not_null())
+                    .col(ColumnDef::new(Comments::Body).text().not_null())
+                    .col(ColumnDef::new(Comments::TimeStart).double())
+                    .col(ColumnDef::new(Comments::TimeEnd).double())
+                    .col(ColumnDef::new(Comments::ReplyTo).uuid())
+                    .col(ColumnDef::new(Comments::Resolved).boolean().not_null().default(false))
+                    .col(ColumnDef::new(Comments::ResolvedBy).string_len(100))
+                    .col(ColumnDef::new(Comments::Mentions).json().not_null().default("[]"))
+                    .col(ColumnDef::new(Comments::ExternalId).string_len(255))
+                    .col(ColumnDef::new(Comments::DeletedAt).timestamp_with_time_zone())
+                    .col(ColumnDef::new(Comments::CreatedAt).timestamp_with_time_zone().not_null())
+                    .col(ColumnDef::new(Comments::UpdatedAt).timestamp_with_time_zone().not_null())
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_comments_entity")
+                    .table(Comments::Table)
+                    .col(Comments::EntityId)
+                    .col(Comments::EntityType)
+                    .to_owned(),
+            )
+            .await?;
+
+        // ── Task Relations ──────────────────────────────────────────
+        manager
+            .create_table(
+                Table::create()
+                    .table(TaskRelations::Table)
+                    .if_not_exists()
+                    .col(ColumnDef::new(TaskRelations::Id).uuid().not_null().primary_key())
+                    .col(ColumnDef::new(TaskRelations::IssueId).uuid().not_null())
+                    .col(ColumnDef::new(TaskRelations::RelatedIssueId).uuid().not_null())
+                    .col(ColumnDef::new(TaskRelations::RelationType).string_len(50).not_null())
+                    .col(ColumnDef::new(TaskRelations::CreatedAt).timestamp_with_time_zone().not_null())
+                    .to_owned(),
+            )
+            .await?;
+
+        // ── Reactions ───────────────────────────────────────────────
+        manager
+            .create_table(
+                Table::create()
+                    .table(Reactions::Table)
+                    .if_not_exists()
+                    .col(ColumnDef::new(Reactions::Id).uuid().not_null().primary_key())
+                    .col(ColumnDef::new(Reactions::EntityId).uuid().not_null())
+                    .col(ColumnDef::new(Reactions::EntityType).string_len(50).not_null())
+                    .col(ColumnDef::new(Reactions::Emoji).string_len(10).not_null())
+                    .col(ColumnDef::new(Reactions::User).string_len(100).not_null())
+                    .col(ColumnDef::new(Reactions::CreatedAt).timestamp_with_time_zone().not_null())
+                    .to_owned(),
+            )
+            .await?;
+
+        // ── Activities ──────────────────────────────────────────────
+        manager
+            .create_table(
+                Table::create()
+                    .table(Activities::Table)
+                    .if_not_exists()
+                    .col(ColumnDef::new(Activities::Id).uuid().not_null().primary_key())
+                    .col(ColumnDef::new(Activities::EntityId).uuid().not_null())
+                    .col(ColumnDef::new(Activities::EntityType).string_len(50).not_null())
+                    .col(ColumnDef::new(Activities::Verb).string_len(50).not_null())
+                    .col(ColumnDef::new(Activities::Field).string_len(100))
+                    .col(ColumnDef::new(Activities::OldValue).text())
+                    .col(ColumnDef::new(Activities::NewValue).text())
+                    .col(ColumnDef::new(Activities::Actor).string_len(100))
+                    .col(ColumnDef::new(Activities::CreatedAt).timestamp_with_time_zone().not_null())
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_activities_entity")
+                    .table(Activities::Table)
+                    .col(Activities::EntityId)
+                    .col(Activities::EntityType)
+                    .to_owned(),
+            )
+            .await?;
+
+        // ── Notifications ───────────────────────────────────────────
+        manager
+            .create_table(
+                Table::create()
+                    .table(Notifications::Table)
+                    .if_not_exists()
+                    .col(ColumnDef::new(Notifications::Id).uuid().not_null().primary_key())
+                    .col(ColumnDef::new(Notifications::Recipient).string_len(100).not_null())
+                    .col(ColumnDef::new(Notifications::Kind).string_len(50).not_null())
+                    .col(ColumnDef::new(Notifications::Message).text().not_null())
+                    .col(ColumnDef::new(Notifications::Actor).string_len(100))
+                    .col(ColumnDef::new(Notifications::EntityId).uuid())
+                    .col(ColumnDef::new(Notifications::EntityType).string_len(50))
+                    .col(ColumnDef::new(Notifications::Project).string_len(255))
+                    .col(ColumnDef::new(Notifications::ReadAt).timestamp_with_time_zone())
+                    .col(ColumnDef::new(Notifications::SnoozedTill).timestamp_with_time_zone())
+                    .col(ColumnDef::new(Notifications::CreatedAt).timestamp_with_time_zone().not_null())
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_notifications_recipient")
+                    .table(Notifications::Table)
+                    .col(Notifications::Recipient)
+                    .col(Notifications::ReadAt)
+                    .to_owned(),
+            )
+            .await?;
+
+        // ── Saved Views ─────────────────────────────────────────────
+        manager
+            .create_table(
+                Table::create()
+                    .table(SavedViews::Table)
+                    .if_not_exists()
+                    .col(ColumnDef::new(SavedViews::Id).uuid().not_null().primary_key())
+                    .col(ColumnDef::new(SavedViews::Title).string_len(255).not_null())
+                    .col(ColumnDef::new(SavedViews::Description).text())
+                    .col(ColumnDef::new(SavedViews::Project).string_len(255))
+                    .col(ColumnDef::new(SavedViews::Filters).json().not_null().default("{}"))
+                    .col(ColumnDef::new(SavedViews::Display).json().not_null().default("{}"))
+                    .col(ColumnDef::new(SavedViews::CreatedBy).string_len(100))
+                    .col(ColumnDef::new(SavedViews::IsShared).boolean().not_null().default(false))
+                    .col(ColumnDef::new(SavedViews::SortOrder).double())
+                    .col(ColumnDef::new(SavedViews::CreatedAt).timestamp_with_time_zone().not_null())
+                    .col(ColumnDef::new(SavedViews::UpdatedAt).timestamp_with_time_zone().not_null())
+                    .to_owned(),
+            )
+            .await?;
+
+        // ── Cycles ──────────────────────────────────────────────────
+        manager
+            .create_table(
+                Table::create()
+                    .table(Cycles::Table)
+                    .if_not_exists()
+                    .col(ColumnDef::new(Cycles::Id).uuid().not_null().primary_key())
+                    .col(ColumnDef::new(Cycles::Title).string_len(255).not_null())
+                    .col(ColumnDef::new(Cycles::Description).text())
+                    .col(ColumnDef::new(Cycles::Project).string_len(255).not_null())
+                    .col(ColumnDef::new(Cycles::Status).string_len(50).not_null().default("Planned"))
+                    .col(ColumnDef::new(Cycles::OwnedBy).string_len(100))
+                    .col(ColumnDef::new(Cycles::StartDate).date())
+                    .col(ColumnDef::new(Cycles::EndDate).date())
+                    .col(ColumnDef::new(Cycles::Tasks).json().not_null().default("[]"))
+                    .col(ColumnDef::new(Cycles::SortOrder).double())
+                    .col(ColumnDef::new(Cycles::CreatedAt).timestamp_with_time_zone().not_null())
+                    .col(ColumnDef::new(Cycles::UpdatedAt).timestamp_with_time_zone().not_null())
+                    .to_owned(),
+            )
+            .await?;
+
+        Ok(())
+    }
+
+    async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager.drop_table(Table::drop().table(Cycles::Table).to_owned()).await?;
+        manager.drop_table(Table::drop().table(SavedViews::Table).to_owned()).await?;
+        manager.drop_table(Table::drop().table(Notifications::Table).to_owned()).await?;
+        manager.drop_table(Table::drop().table(Activities::Table).to_owned()).await?;
+        manager.drop_table(Table::drop().table(Reactions::Table).to_owned()).await?;
+        manager.drop_table(Table::drop().table(TaskRelations::Table).to_owned()).await?;
+        manager.drop_table(Table::drop().table(Comments::Table).to_owned()).await?;
+        manager.drop_table(Table::drop().table(Tasks::Table).to_owned()).await?;
+        manager.drop_table(Table::drop().table(Projects::Table).to_owned()).await?;
+        Ok(())
+    }
+}
+
+// ── Table identifiers ───────────────────────────────────────────────────────
+
+#[derive(DeriveIden)]
+enum Projects {
+    Table, Id, Title, Slug, Status, ProjectType, Description, Area,
+    Identifier, NextSequence, ParentSlug, Lead, DefaultAssignee, Emoji,
+    Organization, Team, References, Due, Start, FilePath, DeletedAt, ArchivedAt,
+    CreatedAt, UpdatedAt,
+}
+
+#[derive(DeriveIden)]
+enum Tasks {
+    Table, Id, SequenceId, Title, Status, Priority, IssueType, Project,
+    Assignee, Assignees, CreatedBy, Due, Scheduled, Start, CompletedDate,
+    Tags, TimeEstimate, SortOrder, Body, FilePath, IsDraft, DeletedAt,
+    CreatedAt, UpdatedAt,
+}
+
+#[derive(DeriveIden)]
+enum Comments {
+    Table, Id, EntityId, EntityType, Author, Body, TimeStart, TimeEnd,
+    ReplyTo, Resolved, ResolvedBy, Mentions, ExternalId, DeletedAt,
+    CreatedAt, UpdatedAt,
+}
+
+#[derive(DeriveIden)]
+enum TaskRelations {
+    Table, Id, IssueId, RelatedIssueId, RelationType, CreatedAt,
+}
+
+#[derive(DeriveIden)]
+enum Reactions {
+    Table, Id, EntityId, EntityType, Emoji, User, CreatedAt,
+}
+
+#[derive(DeriveIden)]
+enum Activities {
+    Table, Id, EntityId, EntityType, Verb, Field, OldValue, NewValue,
+    Actor, CreatedAt,
+}
+
+#[derive(DeriveIden)]
+enum Notifications {
+    Table, Id, Recipient, Kind, Message, Actor, EntityId, EntityType,
+    Project, ReadAt, SnoozedTill, CreatedAt,
+}
+
+#[derive(DeriveIden)]
+enum SavedViews {
+    Table, Id, Title, Description, Project, Filters, Display, CreatedBy,
+    IsShared, SortOrder, CreatedAt, UpdatedAt,
+}
+
+#[derive(DeriveIden)]
+enum Cycles {
+    Table, Id, Title, Description, Project, Status, OwnedBy, StartDate,
+    EndDate, Tasks, SortOrder, CreatedAt, UpdatedAt,
+}

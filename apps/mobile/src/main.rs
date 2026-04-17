@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use dioxus::prelude::*;
-use vault_core::{parse_capture, Project, Task, VaultServiceImpl};
+use task_core::{parse_capture, Project, Task, VaultServiceImpl};
 use task_ui::{InboxView, ProjectDashboard, TodayView, UpcomingView};
 
 #[derive(Debug, Clone, Routable, PartialEq)]

@@ -1,3 +1,5 @@
 @import "tailwindcss";
+@import "./assets/fts-theme.css";
+
 @source "./src/**/*.{rs,html,css}";
-@source "../../task-ui/src/**/*.{rs,html,css}";
+@source "../../../FastTrackStudio/Plugins/fts-ui/crates/fts-ui/src/**/*.rs";

@@ -1,0 +1,61 @@
+[package]
+name = "task-core"
+version.workspace = true
+edition.workspace = true
+
+[features]
+# "server" enables the async vault, service trait, and service implementation.
+# Disable it for wasm32 builds (obsidian-plugin) to avoid tokio/mio.
+default = ["server"]
+server = ["dep:tokio", "dep:walkdir", "dep:vox", "dep:vox-core", "dep:uuid", "dep:notify", "dep:toml", "dep:serde", "dep:serde_json", "dep:async-trait", "dep:tracing", "dep:reqwest", "dep:rusqlite"]
+# "caldav" enables CalDAV sync and VTODO conversion.
+caldav = ["server", "dep:icalendar", "dep:libdav", "dep:reqwest"]
+# "realtime" enables CRDT-based real-time collaboration.
+realtime = ["server", "dep:automerge", "dep:yrs"]
+
+[dependencies]
+# Facet — replaces serde for all data types (wasm-safe)
+facet.workspace = true
+facet-core.workspace = true
+facet-json.workspace = true
+facet-yaml.workspace = true
+facet-reflect.workspace = true
+
+# Date / recurrence (wasm-safe)
+chrono = "0.4"
+fuzzydate = "0.4"
+rrule.workspace = true
+
+# Slugs (wasm-safe)
+slug = "0.1"
+
+# Error handling (wasm-safe)
+thiserror.workspace = true
+eyre.workspace = true
+
+# IDs — only needed server-side for UUID generation
+uuid = { workspace = true, optional = true }
+
+# Server-only — not compiled for wasm32
+vox     = { workspace = true, optional = true }
+vox-core = { workspace = true, optional = true }
+tokio   = { workspace = true, optional = true }
+walkdir = { version = "2", optional = true }
+tracing = { workspace = true, optional = true }
+notify  = { version = "7", optional = true }
+toml    = { version = "0.8", optional = true }
+serde   = { workspace = true, optional = true }
+rusqlite = { version = "0.32", optional = true, features = ["bundled"] }
+
+# CalDAV sync (optional)
+icalendar = { version = "0.17", optional = true }
+libdav    = { version = "0.10", optional = true }
+reqwest   = { version = "0.12", optional = true, default-features = false, features = ["rustls-tls", "json"] }
+serde_json = { workspace = true, optional = true }
+
+# Async trait (server-side)
+async-trait = { version = "0.1", optional = true }
+
+# Real-time collaboration (optional)
+automerge = { version = "0.8", optional = true }
+yrs = { version = "0.21", optional = true }

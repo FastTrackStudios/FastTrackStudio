@@ -6,7 +6,7 @@ use std::sync::Arc;
 use dioxus::desktop::{tao::window::WindowBuilder, Config};
 use dioxus::prelude::*;
 use fts_ui::prelude::*;
-use vault_core::{parse_capture, Priority, Project, Status, Task, VaultServiceImpl};
+use task_core::{parse_capture, Priority, Project, Status, Task, VaultServiceImpl};
 use task_ui::{InboxView, ProjectDashboard, TaskCard, TaskList, TodayView, UpcomingView};
 
 #[derive(Debug, Clone, Routable, PartialEq)]

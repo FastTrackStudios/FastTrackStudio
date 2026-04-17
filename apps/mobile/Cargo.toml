@@ -6,7 +6,7 @@ authors = ["Cody Wright"]
 
 [dependencies]
 dioxus = { version = "0.7.2", features = ["router"] }
-vault-core.workspace = true
+task-core.workspace = true
 task-ui.workspace = true
 fts-ui.workspace = true
 tokio.workspace = true

@@ -1,0 +1,24 @@
+[package]
+name = "task-db"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+sea-orm.workspace = true
+sea-orm-migration.workspace = true
+crudcrate.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+serde_with = "3"
+vox.workspace = true
+slug = "0.1"
+axum = "0.8"
+utoipa = { version = "5", features = ["chrono", "uuid"] }
+utoipa-axum = "0.2"
+hyper = { version = "1", features = ["full"] }
+tracing.workspace = true
+async-trait = "0.1"
+facet.workspace = true
+better-auth-core = { path = "../../../FastTrackStudio/better-auth/crates/core" }

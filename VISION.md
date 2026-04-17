@@ -147,6 +147,35 @@ Everything runs on your infrastructure:
 - **NFS/local storage** — your drives, your data
 - **No cloud dependency** — works fully offline, syncs when connected
 
+### 7. AI Agents Are First-Class Team Members
+
+The system is designed from the ground up for a world where AI agents work alongside humans. A fleet of AI workers in your Nextcloud organization can read, write, comment, tag, and manipulate project data just like any human team member. This isn't an afterthought API — it's a core architectural principle.
+
+**Why this matters:**
+- AI agents need **structured data** to reason about projects. YAML frontmatter is trivially parseable by any LLM — no scraping, no brittle HTML parsing.
+- AI agents need **the same API** as humans. Vox RPC, WebSocket, REST — bots call the same endpoints, get the same responses.
+- AI agents need **identity**. Each bot is a Nextcloud user with its own name, avatar, and permissions. When a bot leaves a comment, it shows up as `@mixing-assistant` just like `@cody`.
+- AI agents need **context**. The markdown file format means an agent can read an entire project by scanning a folder. Tasks, sessions, comments, approvals — all plain text, all in one place.
+- AI agents need **actions**. Create tasks, complete tasks, leave feedback, approve mixes, tag deliverables, trigger syncs — all through typed RPC calls.
+
+**What this looks like in practice:**
+
+| Agent | What it does | How |
+|-------|-------------|-----|
+| **@mixing-assistant** | Listens for new mix uploads, runs loudness analysis, leaves a comment with LUFS readings at problem spots | Watches file events → analyzes audio → `add_comment` with timecode ranges |
+| **@project-manager** | Checks due dates daily, pings assignees on overdue tasks, generates weekly status summaries | Queries tasks → creates notifications → posts summary to project body |
+| **@transcription-bot** | Transcribes vocal recordings, adds lyrics to the writing workflow | Reads audio files → transcribes → updates `WritingWorkflow.lyric_versions` |
+| **@qc-checker** | Validates deliverables meet spec (sample rate, bit depth, format), flags issues | Reads file metadata → checks against project spec → creates task if non-compliant |
+| **@social-media-bot** | When a master is approved, drafts social posts, creates promo tasks | Watches approval events → generates content → creates tasks in marketing project |
+
+**Design implications:**
+
+- **Comments are typed** — not just free text. An AI can leave a comment with a timecode range, and the UI renders it as a waveform marker. Structured data in, structured UI out.
+- **Actions are idempotent** — bots can retry safely. Completing an already-complete task is a no-op, not an error.
+- **Everything has an API** — if a human can do it in the UI, a bot can do it through RPC. No "admin-only" actions that bypass the API.
+- **Audit trail is universal** — bot actions show up in the activity feed alongside human actions. Full accountability.
+- **@mentions work for bots** — mention `@mixing-assistant` in a comment and the bot gets a notification, just like a human. The notification system doesn't distinguish.
+
 ## Platform Layers
 
 ### Layer 1: Core Engine (`vault-core`)
@@ -327,6 +356,16 @@ All sharing the same Dioxus components and fts-ui design system:
 - [ ] Community workflow templates
 - [ ] "Task Compatible" certification standard
 
+### Phase 9: AI Agent Platform
+- [ ] Bot user accounts in Nextcloud (dedicated identities with avatars)
+- [ ] Agent SDK — typed Rust/Python/TS client for bot development
+- [ ] Agent event bus — subscribe to file changes, comments, approvals, uploads
+- [ ] Agent action permissions — scoped API keys per bot (read-only, comment-only, full)
+- [ ] Built-in agents: loudness analysis, transcription, QC validation, status summarizer
+- [ ] Agent marketplace — community-built agents installable via config
+- [ ] MCP (Model Context Protocol) server — expose project data as MCP resources for LLM tools
+- [ ] Claude Code / Cursor integration — `.claude/` hooks that understand project context
+
 ## Design Philosophy
 
 - **Local-first** — every client works fully offline. Sync is eventual, not required. Your laptop has the data, not just a cache of it.
@@ -339,6 +378,7 @@ All sharing the same Dioxus components and fts-ui design system:
 - **Self-hosted, privacy-first** — your infrastructure, your data. No cloud dependency, no telemetry, no lock-in.
 - **Multiple views, one truth** — desktop, web, mobile, CLI, Obsidian, Nextcloud Deck, Apple Reminders. Same files underneath.
 - **Incremental adoption** — start with Obsidian and markdown files. Add Nextcloud when you need teams. Add the server when you need real-time and portals. Each layer is optional.
+- **AI-native** — structured markdown is the perfect format for AI agents. Every field is parseable, every action is API-callable, every entity is addressable. Bots are team members, not integrations.
 
 ## Known Limitations & Trade-offs
 

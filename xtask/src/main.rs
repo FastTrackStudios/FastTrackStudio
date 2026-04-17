@@ -66,7 +66,7 @@ fn codegen_typescript(workspace_root: &Path) -> Result<(), Box<dyn std::error::E
     let out_dir = workspace_root.join("obsidian-plugin").join("generated");
     std::fs::create_dir_all(&out_dir)?;
 
-    let service = vault_core::vault_service_service_descriptor();
+    let service = task_core::vault_service_service_descriptor();
     let ts = vox_codegen::targets::typescript::generate_service(service);
 
     let filename = format!(
@@ -89,7 +89,7 @@ fn codegen_swift(workspace_root: &Path) -> Result<(), Box<dyn std::error::Error>
         .join("generated");
     std::fs::create_dir_all(&out_dir)?;
 
-    let service = vault_core::vault_service_service_descriptor();
+    let service = task_core::vault_service_service_descriptor();
 
     // Client only (iOS connects to the desktop companion as a client)
     let swift_client = vox_codegen::targets::swift::generate_service_with_bindings(
@@ -123,7 +123,7 @@ fn build_obsidian_plugin(workspace_root: &Path) -> Result<(), Box<dyn std::error
 
     // Step 1: compile Rust → WASM and generate JS bindings via wasm-pack
     eprintln!("==> wasm-pack build --target web");
-    cmd!(sh, "wasm-pack build --target web --out-dir pkg --out-name task_vault_core").run()?;
+    cmd!(sh, "wasm-pack build --target web --out-dir pkg --out-name task_task_core").run()?;
 
     // Step 2: install npm deps if not already present
     if !plugin_dir.join("node_modules").exists() {
