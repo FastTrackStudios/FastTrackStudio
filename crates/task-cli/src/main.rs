@@ -3,8 +3,8 @@ use chrono::{DateTime, TimeZone, Utc};
 use task_core::index::{ChangeRow, ConflictRow};
 use task_core::workflows::{parse_comments, render_comments, Comment};
 use task_core::{
-    Filter, Priority, Query, Sort, Status, Task, TimeEntry, TimeEntryFilter, VaultServiceImpl,
-    WikiLink,
+    Filter, Priority, Query, RelationType, Sort, Status, Task, TaskRelation, TimeEntry,
+    TimeEntryFilter, VaultServiceImpl, WikiLink,
 };
 
 #[derive(Parser)]
@@ -83,6 +83,11 @@ enum Commands {
         context: Option<String>,
         #[arg(long)]
         tag: Option<String>,
+        /// RRULE-style recurrence, e.g. "FREQ=WEEKLY;BYDAY=MO"
+        #[arg(long)]
+        recurrence: Option<String>,
+        #[arg(long)]
+        assignee: Option<String>,
     },
     /// Mark a task as complete
     Complete {
@@ -125,10 +130,36 @@ enum Commands {
         add_context: Vec<String>,
         #[arg(long)]
         remove_context: Vec<String>,
+        /// RRULE-style recurrence — pass "clear" to remove
+        #[arg(long)]
+        recurrence: Option<String>,
         /// Replace the markdown body entirely
         #[arg(long)]
         body: Option<String>,
         /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Link one task to another with a typed relation
+    Link {
+        from: String,
+        to: String,
+        /// Relation type: blocks, blocked-by, relates, duplicate-of,
+        /// implements, implemented-by, start-before, start-after,
+        /// finish-before, finish-after
+        #[arg(long, default_value = "relates")]
+        kind: String,
+    },
+    /// List tasks assigned to a user
+    For {
+        user: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// List tasks due on or before a date
+    DueBy {
+        /// Date (YYYY-MM-DD)
+        date: String,
         #[arg(long)]
         json: bool,
     },
@@ -410,6 +441,8 @@ async fn main() -> eyre::Result<()> {
             project,
             context,
             tag,
+            recurrence,
+            assignee,
         } => {
             let task = Task {
                 title,
@@ -436,6 +469,8 @@ async fn main() -> eyre::Result<()> {
                 projects: project.map(|p| vec![WikiLink(p)]).unwrap_or_default(),
                 contexts: context.map(|c| vec![c]).unwrap_or_default(),
                 tags: tag.map(|t| vec![t]).unwrap_or_default(),
+                recurrence,
+                assignee,
                 created_by: actor.clone(),
                 ..Task::default()
             };
@@ -484,6 +519,7 @@ async fn main() -> eyre::Result<()> {
             remove_project,
             add_context,
             remove_context,
+            recurrence,
             body,
             json,
         } => {
@@ -530,6 +566,13 @@ async fn main() -> eyre::Result<()> {
                 if !task.contexts.contains(&c) {
                     task.contexts.push(c);
                 }
+            }
+            if let Some(r) = recurrence {
+                task.recurrence = if r == "clear" || r.is_empty() {
+                    None
+                } else {
+                    Some(r)
+                };
             }
             if let Some(b) = body {
                 task.body = b;
@@ -606,6 +649,44 @@ async fn main() -> eyre::Result<()> {
 
             svc.update_task_as(task, actor.as_deref()).await?;
             println!("Comment added ({}).", new_comment.id);
+        }
+
+        Commands::Link { from, to, kind } => {
+            let mut source = find_task(&svc, &from).await?;
+            let target = find_task(&svc, &to).await?;
+            let rt = parse_relation_kind(&kind)?;
+            // Dedup: don't add the same (target, kind) twice.
+            let target_ref = target.id.clone().unwrap_or_else(|| target.title.clone());
+            let already = source
+                .relations
+                .iter()
+                .any(|r| r.target == target_ref && r.relation_type == rt);
+            if !already {
+                source.relations.push(TaskRelation {
+                    target: target_ref.clone(),
+                    relation_type: rt,
+                });
+                svc.update_task_as(source, actor.as_deref()).await?;
+            }
+            println!("Linked '{from}' --{kind}--> '{to}'.");
+        }
+
+        Commands::For { user, json } => {
+            let tasks = svc.tasks_for_user(user).await;
+            if json {
+                print_tasks_json(&tasks);
+            } else {
+                print_tasks_table(&tasks);
+            }
+        }
+
+        Commands::DueBy { date, json } => {
+            let tasks = svc.tasks_due_by(date).await;
+            if json {
+                print_tasks_json(&tasks);
+            } else {
+                print_tasks_table(&tasks);
+            }
         }
 
         Commands::Search { query, json, limit } => {
@@ -1273,6 +1354,26 @@ fn parse_sort(s: &str) -> Sort {
         "modified" => Sort::DateModified,
         _ => Sort::Urgency,
     }
+}
+
+fn parse_relation_kind(s: &str) -> eyre::Result<RelationType> {
+    Ok(match s.to_lowercase().replace('_', "-").as_str() {
+        "blocks" | "blocking" => RelationType::Blocking,
+        "blocked-by" | "blockedby" => RelationType::BlockedBy,
+        "relates" | "relates-to" | "relatesto" => RelationType::RelatesTo,
+        "duplicate-of" | "duplicateof" | "duplicate" => RelationType::DuplicateOf,
+        "implements" => RelationType::Implements,
+        "implemented-by" | "implementedby" => RelationType::ImplementedBy,
+        "start-before" | "startbefore" => RelationType::StartBefore,
+        "start-after" | "startafter" => RelationType::StartAfter,
+        "finish-before" | "finishbefore" => RelationType::FinishBefore,
+        "finish-after" | "finishafter" => RelationType::FinishAfter,
+        other => {
+            eyre::bail!(
+                "Unknown relation kind: {other}. Use: blocks, blocked-by, relates, duplicate-of, implements, implemented-by, start-before, start-after, finish-before, finish-after"
+            )
+        }
+    })
 }
 
 // ── Output helpers ────────────────────────────────────────────────────────────
