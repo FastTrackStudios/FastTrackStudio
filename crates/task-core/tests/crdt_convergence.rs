@@ -1,235 +1,198 @@
-//! CRDT convergence tests.
+//! CRDT convergence tests (Loro).
 //!
-//! Verifies that concurrent edits from multiple users converge
-//! to the same state regardless of operation order.
+//! Verifies that concurrent edits from multiple users converge to the same
+//! state regardless of operation order, and that concurrent writes to the
+//! same field surface as detected conflicts.
 
 #[cfg(feature = "realtime")]
 mod crdt_tests {
-    use task_core::crdt::metadata::MetadataDoc;
-    use task_core::crdt::body::BodyDoc;
-    use task_core::crdt::document::CrdtDocument;
-    use task_core::task::{Task, Status, Priority};
+    use task_core::crdt::{CrdtDocument, CONFLICT_FIELDS};
+    use task_core::task::{Priority, Status, Task};
 
-    // ── Metadata: 5 users editing different fields concurrently ───
-
-    #[test]
-    fn five_users_edit_different_fields() {
-        let task = Task {
+    fn base_task() -> Task {
+        Task {
+            id: Some("shared".into()),
             title: "Shared task".into(),
             status: Status::Open,
             priority: Priority::Normal,
+            body: "## Subtasks\n- [ ] One\n- [ ] Two\n- [ ] Three\n- [ ] Four\n- [ ] Five".into(),
             ..Default::default()
-        };
-
-        // Create initial document and save
-        let mut doc_0 = MetadataDoc::new();
-        doc_0.from_task(&task);
-        let initial = doc_0.save();
-
-        // 5 users fork from the same state
-        let mut docs: Vec<MetadataDoc> = (0..5)
-            .map(|_| MetadataDoc::load(&initial).unwrap())
-            .collect();
-
-        // Each user edits a different field
-        docs[0].set_field("status", "InProgress");
-        docs[1].set_field("assignee", "alice");
-        docs[2].set_field("priority", "High");
-        docs[3].set_field("title", "Updated task title");
-        docs[4].set_field("external_source", "deck");
-
-        // Merge all into doc_0 — save each fork, load into doc_0
-        for i in 1..5 {
-            let bytes = docs[i].save();
-            let mut fork = MetadataDoc::load(&bytes).unwrap();
-            docs[0].merge(fork.doc_mut()).unwrap();
         }
-
-        // All changes should be preserved
-        assert_eq!(docs[0].get_field("status").unwrap(), "InProgress");
-        assert_eq!(docs[0].get_field("assignee").unwrap(), "alice");
-        assert_eq!(docs[0].get_field("priority").unwrap(), "High");
-        assert_eq!(docs[0].get_field("title").unwrap(), "Updated task title");
-        assert_eq!(docs[0].get_field("external_source").unwrap(), "deck");
     }
 
-    // ── Metadata: same field edited by 2 users (LWW) ─────────────
-
-    #[test]
-    fn same_field_concurrent_edit() {
-        let mut doc_a = MetadataDoc::new();
-        doc_a.set_field("status", "Open");
-        let saved = doc_a.save();
-
-        let mut doc_b = MetadataDoc::load(&saved).unwrap();
-
-        // Both change status to different values
-        doc_a.set_field("status", "InProgress");
-        doc_b.set_field("status", "Done");
-
-        // Merge — one wins (Automerge uses actor ID ordering)
-        doc_a.merge(doc_b.doc_mut()).unwrap();
-        let status = doc_a.get_field("status").unwrap();
-
-        // Should be one of the two — not corrupted or lost
-        assert!(
-            status == "InProgress" || status == "Done",
-            "Status should be one of the concurrent values, got: {status}"
-        );
-    }
-
-    // ── Body: 5 users checking off different subtasks ────────────
-
-    #[test]
-    fn five_users_check_different_subtasks() {
-        let initial_text = "## Subtasks\n\
-                            - [ ] Task A\n\
-                            - [ ] Task B\n\
-                            - [ ] Task C\n\
-                            - [ ] Task D\n\
-                            - [ ] Task E";
-
-        let doc_0 = BodyDoc::with_text(initial_text);
-        let saved = doc_0.save();
-
-        // 5 users fork from the same state
-        let docs: Vec<BodyDoc> = (0..5).map(|_| BodyDoc::load(&saved).unwrap()).collect();
-
-        // Each user checks off their subtask
-        let replacements = [
-            ("[ ] Task A", "[x] Task A"),
-            ("[ ] Task B", "[x] Task B"),
-            ("[ ] Task C", "[x] Task C"),
-            ("[ ] Task D", "[x] Task D"),
-            ("[ ] Task E", "[x] Task E"),
-        ];
-
-        for (i, (old, new)) in replacements.iter().enumerate() {
-            let text = docs[i].text();
-            if let Some(pos) = text.find(old) {
-                docs[i].delete(pos as u32, old.len() as u32);
-                docs[i].insert(pos as u32, new);
+    /// Broadcast every peer's updates to every other peer.
+    fn all_to_all_sync(docs: &[CrdtDocument]) {
+        for i in 0..docs.len() {
+            for j in 0..docs.len() {
+                if i == j {
+                    continue;
+                }
+                let update = docs[j]
+                    .export_updates_since(&docs[i].version_vector())
+                    .unwrap();
+                docs[i].import(&update).unwrap();
             }
         }
-
-        // Sync all updates into doc_0
-        for i in 1..5 {
-            let sv = docs[0].state_vector();
-            let update = docs[i].encode_update(&sv).unwrap();
-            docs[0].apply_update(&update).unwrap();
-        }
-
-        let final_text = docs[0].text();
-
-        // All 5 subtasks should be checked
-        assert!(final_text.contains("[x] Task A"), "Task A should be checked");
-        assert!(final_text.contains("[x] Task B"), "Task B should be checked");
-        assert!(final_text.contains("[x] Task C"), "Task C should be checked");
-        assert!(final_text.contains("[x] Task D"), "Task D should be checked");
-        assert!(final_text.contains("[x] Task E"), "Task E should be checked");
     }
 
-    // ── Full document: metadata + body concurrent edits ──────────
-
+    /// Five users write to five distinct fields — all peers converge.
     #[test]
-    fn full_document_concurrent_edits() {
-        let task = Task {
-            title: "Concert prep".into(),
-            status: Status::Open,
-            assignee: Some("alice".into()),
-            body: "## Checklist\n- [ ] Book venue\n- [ ] Hire sound\n- [ ] Sell tickets".into(),
-            ..Default::default()
-        };
+    fn five_users_edit_different_fields() {
+        let base = CrdtDocument::from_task(&base_task(), "t.md");
+        let snapshot = base.export_snapshot().unwrap();
 
-        let mut doc_a = CrdtDocument::from_task(&task, "concert.md");
+        let docs: Vec<CrdtDocument> = (0..5)
+            .map(|i| {
+                let d = CrdtDocument::from_snapshot(&snapshot, "t.md").unwrap();
+                d.set_peer_id((i + 1) as u64).unwrap();
+                d
+            })
+            .collect();
 
-        // Save and fork
-        let (meta_bytes, body_bytes) = doc_a.save();
-        let mut meta_b = MetadataDoc::load(&meta_bytes).unwrap();
-        let body_b = BodyDoc::load(&body_bytes).unwrap();
-
-        // User A: changes status
-        doc_a.set_field("status", "InProgress");
-
-        // User B: checks off a subtask
-        let text_b = body_b.text();
-        if let Some(pos) = text_b.find("[ ] Book venue") {
-            body_b.delete(pos as u32, "[ ] Book venue".len() as u32);
-            body_b.insert(pos as u32, "[x] Book venue");
+        docs[0].set_field("status", "InProgress");
+        docs[1].set_field("assignee", "cody");
+        docs[2].set_field("priority", "High");
+        docs[3].set_field("due", "2026-05-01");
+        docs[4].set_field("recurrence", "FREQ=WEEKLY");
+        for d in &docs {
+            d.commit();
         }
 
-        // User B: changes assignee
-        meta_b.set_field("assignee", "bob");
+        all_to_all_sync(&docs);
 
-        // Merge metadata
-        doc_a.merge_metadata(&mut meta_b).unwrap();
-
-        // Merge body
-        let sv_a = doc_a.body.state_vector();
-        let update_b = body_b.encode_update(&sv_a).unwrap();
-        doc_a.apply_body_update(&update_b).unwrap();
-
-        // Verify convergence
-        let result = doc_a.to_task();
-        assert_eq!(result.status, Status::InProgress, "Status should be InProgress (from A)");
-        assert_eq!(result.assignee, Some("bob".into()), "Assignee should be bob (from B)");
-        assert!(result.body.contains("[x] Book venue"), "Book venue should be checked (from B)");
-        assert!(result.body.contains("[ ] Hire sound"), "Hire sound should still be unchecked");
+        for d in &docs {
+            let t = d.to_task();
+            assert_eq!(t.status, Status::InProgress, "peer {}", d.peer_id());
+            assert_eq!(t.assignee.as_deref(), Some("cody"));
+            assert_eq!(t.priority, Priority::High);
+            assert_eq!(t.due, chrono::NaiveDate::from_ymd_opt(2026, 5, 1));
+            assert_eq!(t.recurrence.as_deref(), Some("FREQ=WEEKLY"));
+        }
     }
 
-    // ── Merge order independence ─────────────────────────────────
+    /// Same-field concurrent edit: LWW picks one winner; the loser is
+    /// recoverable via the conflict detector.
+    #[test]
+    fn same_field_concurrent_edit_detected() {
+        use task_core::crdt::sync::detect_field_conflicts;
 
+        let base = CrdtDocument::from_task(&base_task(), "t.md");
+        let snap = base.export_snapshot().unwrap();
+
+        let a = CrdtDocument::from_snapshot(&snap, "t.md").unwrap();
+        a.set_peer_id(1).unwrap();
+        let b = CrdtDocument::from_snapshot(&snap, "t.md").unwrap();
+        b.set_peer_id(2).unwrap();
+
+        a.set_field("status", "Done");
+        a.commit();
+        b.set_field("status", "Cancelled");
+        b.commit();
+
+        let before_a = a.snapshot_fields();
+        let b_update = b.export_updates_since(&a.version_vector()).unwrap();
+        a.import(&b_update).unwrap();
+
+        let conflicts = detect_field_conflicts(&a, &before_a, 1);
+        let status = conflicts.iter().find(|c| c.field == "status");
+        assert!(
+            status.is_some(),
+            "expected status conflict, got {conflicts:?}"
+        );
+        assert_eq!(status.unwrap().losing_value.as_deref(), Some("Done"));
+    }
+
+    /// Concurrent subtask checks in the body text both survive the merge.
+    #[test]
+    fn concurrent_subtask_checks_converge() {
+        let base = CrdtDocument::from_task(&base_task(), "t.md");
+        let snap = base.export_snapshot().unwrap();
+
+        let a = CrdtDocument::from_snapshot(&snap, "t.md").unwrap();
+        a.set_peer_id(1).unwrap();
+        let b = CrdtDocument::from_snapshot(&snap, "t.md").unwrap();
+        b.set_peer_id(2).unwrap();
+
+        let body_a = a.get_body().replace("- [ ] One", "- [x] One");
+        a.set_body(&body_a);
+        a.commit();
+
+        let body_b = b.get_body().replace("- [ ] Three", "- [x] Three");
+        b.set_body(&body_b);
+        b.commit();
+
+        let a_update = a.export_updates_since(&b.version_vector()).unwrap();
+        let b_update = b.export_updates_since(&a.version_vector()).unwrap();
+        b.import(&a_update).unwrap();
+        a.import(&b_update).unwrap();
+
+        for d in [&a, &b] {
+            let body = d.get_body();
+            assert!(
+                body.contains("[x] One"),
+                "peer {} body: {body}",
+                d.peer_id()
+            );
+            assert!(body.contains("[x] Three"));
+            assert!(body.contains("[ ] Two"));
+        }
+    }
+
+    /// Merge order independence — the CRDT guarantee.
     #[test]
     fn merge_order_independent() {
-        let task = Task {
-            title: "Order test".into(),
-            ..Default::default()
-        };
+        let base = CrdtDocument::from_task(&base_task(), "t.md");
+        let snap = base.export_snapshot().unwrap();
 
-        let mut doc_base = MetadataDoc::new();
-        doc_base.from_task(&task);
-        let saved = doc_base.save();
+        let a = CrdtDocument::from_snapshot(&snap, "t.md").unwrap();
+        a.set_peer_id(1).unwrap();
+        let b = CrdtDocument::from_snapshot(&snap, "t.md").unwrap();
+        b.set_peer_id(2).unwrap();
+        let c = CrdtDocument::from_snapshot(&snap, "t.md").unwrap();
+        c.set_peer_id(3).unwrap();
 
-        // Three users make changes
-        let mut doc_a = MetadataDoc::load(&saved).unwrap();
-        let mut doc_b = MetadataDoc::load(&saved).unwrap();
-        let mut doc_c = MetadataDoc::load(&saved).unwrap();
+        a.set_field("status", "InProgress");
+        b.set_field("assignee", "amy");
+        c.set_field("priority", "Urgent");
+        a.commit();
+        b.commit();
+        c.commit();
 
-        doc_a.set_field("assignee", "alice");
-        doc_b.set_field("priority", "Urgent");
-        doc_c.set_field("external_source", "github");
+        let ua = a.export_updates_since(&loro::VersionVector::new()).unwrap();
+        let ub = b.export_updates_since(&loro::VersionVector::new()).unwrap();
+        let uc = c.export_updates_since(&loro::VersionVector::new()).unwrap();
 
-        // Merge in order A, B, C
-        let mut result_abc = MetadataDoc::load(&saved).unwrap();
-        result_abc.merge(doc_a.doc_mut()).unwrap();
-        result_abc.merge(doc_b.doc_mut()).unwrap();
-        result_abc.merge(doc_c.doc_mut()).unwrap();
+        let r1 = CrdtDocument::from_snapshot(&snap, "t.md").unwrap();
+        r1.import(&ua).unwrap();
+        r1.import(&ub).unwrap();
+        r1.import(&uc).unwrap();
 
-        // Merge in order C, A, B
-        let mut doc_a2 = MetadataDoc::load(&saved).unwrap();
-        let mut doc_b2 = MetadataDoc::load(&saved).unwrap();
-        let mut doc_c2 = MetadataDoc::load(&saved).unwrap();
-        doc_a2.set_field("assignee", "alice");
-        doc_b2.set_field("priority", "Urgent");
-        doc_c2.set_field("external_source", "github");
+        let r2 = CrdtDocument::from_snapshot(&snap, "t.md").unwrap();
+        r2.import(&uc).unwrap();
+        r2.import(&ua).unwrap();
+        r2.import(&ub).unwrap();
 
-        let mut result_cab = MetadataDoc::load(&saved).unwrap();
-        result_cab.merge(doc_c2.doc_mut()).unwrap();
-        result_cab.merge(doc_a2.doc_mut()).unwrap();
-        result_cab.merge(doc_b2.doc_mut()).unwrap();
+        let t1 = r1.to_task();
+        let t2 = r2.to_task();
+        assert_eq!(t1.status, t2.status);
+        assert_eq!(t1.assignee, t2.assignee);
+        assert_eq!(t1.priority, t2.priority);
+        assert_eq!(t1.status, Status::InProgress);
+        assert_eq!(t1.assignee.as_deref(), Some("amy"));
+        assert_eq!(t1.priority, Priority::Urgent);
+    }
 
-        // Results should be identical regardless of merge order
-        assert_eq!(
-            result_abc.get_field("assignee"),
-            result_cab.get_field("assignee"),
-        );
-        assert_eq!(
-            result_abc.get_field("priority"),
-            result_cab.get_field("priority"),
-        );
-        assert_eq!(
-            result_abc.get_field("external_source"),
-            result_cab.get_field("external_source"),
-        );
+    /// Every CONFLICT_FIELDS entry is reachable via set_field / get_field.
+    #[test]
+    fn all_conflict_fields_reachable() {
+        let doc = CrdtDocument::from_task(&base_task(), "t.md");
+        doc.set_peer_id(1).unwrap();
+        for f in CONFLICT_FIELDS {
+            doc.set_field(f, "probe");
+        }
+        doc.commit();
+        for f in CONFLICT_FIELDS {
+            assert_eq!(doc.get_field(f).as_deref(), Some("probe"));
+        }
     }
 }

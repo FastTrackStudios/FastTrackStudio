@@ -10,8 +10,8 @@ default = ["server"]
 server = ["dep:tokio", "dep:walkdir", "dep:vox", "dep:vox-core", "dep:uuid", "dep:notify", "dep:toml", "dep:serde", "dep:serde_json", "dep:async-trait", "dep:tracing", "dep:reqwest", "dep:rusqlite"]
 # "caldav" enables CalDAV sync and VTODO conversion.
 caldav = ["server", "dep:icalendar", "dep:libdav", "dep:reqwest"]
-# "realtime" enables CRDT-based real-time collaboration.
-realtime = ["server", "dep:automerge", "dep:yrs"]
+# "realtime" enables CRDT-based real-time collaboration (Loro).
+realtime = ["server", "dep:loro"]
 
 [dependencies]
 # Facet — replaces serde for all data types (wasm-safe)
@@ -56,6 +56,5 @@ serde_json = { workspace = true, optional = true }
 # Async trait (server-side)
 async-trait = { version = "0.1", optional = true }
 
-# Real-time collaboration (optional)
-automerge = { version = "0.8", optional = true }
-yrs = { version = "0.21", optional = true }
+# Real-time collaboration (optional) — Loro replaces Automerge + Yrs.
+loro = { version = "1.10", optional = true }

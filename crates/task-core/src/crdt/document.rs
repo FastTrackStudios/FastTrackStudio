@@ -1,147 +1,447 @@
-//! CrdtDocument — unified metadata + body CRDT for a single .md file.
+//! Loro-backed CRDT document: unified metadata + body for a single .md file.
 //!
-//! Combines an Automerge document (YAML frontmatter fields) with a
-//! Yrs document (markdown body) into a single syncable unit.
+//! One `LoroDoc` holds every piece of state for a task:
+//!
+//! - `meta` ([`LoroMap`]) — scalar frontmatter fields (title, status, priority,
+//!   assignee, due, scheduled, …). LWW semantics.
+//! - `body` ([`LoroText`]) — markdown body after the `---`. Character-level CRDT.
+//! - `tags` / `projects` / `contexts` ([`LoroList`]) — string lists.
+//!
+//! # Why not LoroMap LWW across the board?
+//!
+//! LoroMap silently drops concurrent writes. Our conflict log lives in SQLite
+//! (`record_conflict`) — [`super::sync`] does a **send-time** diff of the local
+//! values before applying a remote update, so we catch concurrent writes
+//! before LWW eats them. The [`DocumentSnapshot`] below is what that layer
+//! diffs against.
 
-use crate::task::Task;
-use crate::vault::Vault;
+use std::collections::BTreeMap;
+
+use loro::{ExportMode, LoroDoc, LoroList, LoroText, LoroValue, PeerID, ValueOrContainer};
+
 use crate::service::VaultError;
+use crate::task::{Priority, Status, Task, WikiLink};
 
-use super::metadata::MetadataDoc;
-use super::body::BodyDoc;
+const META_ID: &str = "meta";
+const BODY_ID: &str = "body";
+const TAGS_ID: &str = "tags";
+const PROJECTS_ID: &str = "projects";
+const CONTEXTS_ID: &str = "contexts";
+
+/// Field keys we care about for conflict detection, defined in one place so
+/// the sync layer and the metadata read path stay in sync.
+pub const CONFLICT_FIELDS: &[&str] = &[
+    "title",
+    "status",
+    "priority",
+    "assignee",
+    "due",
+    "scheduled",
+    "recurrence",
+    "time_estimate",
+    "external_id",
+    "external_source",
+    "created_by",
+];
 
 /// A complete CRDT representation of a `.md` file.
-///
-/// Two CRDT documents working together:
-/// - `metadata` (Automerge) — frontmatter fields, field-level merge
-/// - `body` (Yrs) — markdown content, character-level merge
 pub struct CrdtDocument {
-    pub metadata: MetadataDoc,
-    pub body: BodyDoc,
-    /// File path this document represents.
+    doc: LoroDoc,
     pub file_path: String,
 }
 
+/// Values captured from the document *before* an import, used by the sync
+/// layer to detect concurrent writes after import and log conflict rows.
+#[derive(Debug, Clone, Default)]
+pub struct DocumentSnapshot {
+    pub fields: BTreeMap<String, Option<String>>,
+    pub field_editors: BTreeMap<String, Option<PeerID>>,
+}
+
 impl CrdtDocument {
-    /// Create from a parsed Task (e.g. after reading a .md file).
-    pub fn from_task(task: &Task, file_path: &str) -> Self {
-        let mut metadata = MetadataDoc::new();
-        metadata.from_task(task);
-
-        let body = if task.body.is_empty() {
-            BodyDoc::new()
-        } else {
-            BodyDoc::with_text(&task.body)
-        };
-
+    /// Create an empty doc attached to a file path.
+    pub fn new(file_path: impl Into<String>) -> Self {
         Self {
-            metadata,
-            body,
-            file_path: file_path.to_string(),
+            doc: LoroDoc::new(),
+            file_path: file_path.into(),
         }
     }
 
-    /// Create from a raw .md file content string.
-    pub fn from_md(content: &str, file_path: &str) -> Option<Self> {
-        let task = Vault::parse_task_from_md(content)?;
+    /// Create from a parsed [`Task`]. Commits the population as one transaction.
+    pub fn from_task(task: &Task, file_path: impl Into<String>) -> Self {
+        let me = Self::new(file_path);
+        me.populate_from_task(task);
+        me.doc.commit();
+        me
+    }
+
+    /// Parse raw `.md` content and build a document from the resulting task.
+    pub fn from_md(content: &str, file_path: impl Into<String>) -> Option<Self> {
+        let task = crate::vault::Vault::parse_task_from_md(content)?;
         Some(Self::from_task(&task, file_path))
     }
 
-    /// Convert back to a Task.
+    /// Set the peer ID. Must be unique per device — collisions silently corrupt
+    /// history. Caller is responsible for choosing stable IDs.
+    pub fn set_peer_id(&self, peer: PeerID) -> Result<(), VaultError> {
+        self.doc
+            .set_peer_id(peer)
+            .map_err(|e| VaultError::ParseError(format!("loro set_peer_id: {e}")))
+    }
+
+    pub fn peer_id(&self) -> PeerID {
+        self.doc.peer_id()
+    }
+
+    /// Expose the inner doc for subscribe / advanced sync uses.
+    pub fn inner(&self) -> &LoroDoc {
+        &self.doc
+    }
+
+    // ── Task ↔ document ──────────────────────────────────────────────────────
+
+    fn populate_from_task(&self, task: &Task) {
+        let meta = self.doc.get_map(META_ID);
+        let _ = meta.insert("title", task.title.as_str());
+        let _ = meta.insert("status", format!("{:?}", task.status));
+        let _ = meta.insert("priority", format!("{:?}", task.priority));
+        if let Some(v) = &task.id {
+            let _ = meta.insert("id", v.as_str());
+        }
+        if let Some(v) = &task.assignee {
+            let _ = meta.insert("assignee", v.as_str());
+        }
+        if let Some(v) = task.due {
+            let _ = meta.insert("due", v.to_string());
+        }
+        if let Some(v) = task.scheduled {
+            let _ = meta.insert("scheduled", v.to_string());
+        }
+        if let Some(v) = &task.recurrence {
+            let _ = meta.insert("recurrence", v.as_str());
+        }
+        if let Some(v) = task.time_estimate {
+            let _ = meta.insert("time_estimate", v as i64);
+        }
+        if let Some(v) = &task.external_source {
+            let _ = meta.insert("external_source", v.as_str());
+        }
+        if let Some(v) = &task.external_id {
+            let _ = meta.insert("external_id", v.as_str());
+        }
+        if let Some(v) = &task.created_by {
+            let _ = meta.insert("created_by", v.as_str());
+        }
+
+        let tags = self.doc.get_list(TAGS_ID);
+        for t in &task.tags {
+            let _ = tags.push(t.as_str());
+        }
+        let projects = self.doc.get_list(PROJECTS_ID);
+        for p in &task.projects {
+            let _ = projects.push(p.0.as_str());
+        }
+        let contexts = self.doc.get_list(CONTEXTS_ID);
+        for c in &task.contexts {
+            let _ = contexts.push(c.as_str());
+        }
+
+        let body = self.doc.get_text(BODY_ID);
+        if !task.body.is_empty() {
+            let _ = body.insert(0, &task.body);
+        }
+    }
+
+    /// Build a fresh `Task` from the current doc state.
     pub fn to_task(&self) -> Task {
-        let mut task = self.metadata.to_task();
-        task.body = self.body.text();
+        let meta = self.doc.get_map(META_ID);
+        let mut task = Task::default();
+
+        task.title = get_string(&meta, "title").unwrap_or_default();
+        task.id = get_string(&meta, "id");
+        task.assignee = get_string(&meta, "assignee");
+        task.created_by = get_string(&meta, "created_by");
+        task.external_source = get_string(&meta, "external_source");
+        task.external_id = get_string(&meta, "external_id");
+        task.recurrence = get_string(&meta, "recurrence");
+
+        if let Some(s) = get_string(&meta, "status") {
+            task.status = parse_status(&s);
+        }
+        if let Some(p) = get_string(&meta, "priority") {
+            task.priority = parse_priority(&p);
+        }
+        if let Some(d) = get_string(&meta, "due") {
+            task.due = chrono::NaiveDate::parse_from_str(&d, "%Y-%m-%d").ok();
+        }
+        if let Some(d) = get_string(&meta, "scheduled") {
+            task.scheduled = chrono::NaiveDate::parse_from_str(&d, "%Y-%m-%d").ok();
+        }
+        if let Some(n) = get_i64(&meta, "time_estimate") {
+            task.time_estimate = Some(n as u32);
+        }
+
+        task.tags = read_string_list(&self.doc.get_list(TAGS_ID));
+        task.projects = read_string_list(&self.doc.get_list(PROJECTS_ID))
+            .into_iter()
+            .map(WikiLink)
+            .collect();
+        task.contexts = read_string_list(&self.doc.get_list(CONTEXTS_ID));
+        task.body = self.doc.get_text(BODY_ID).to_string();
+
         task
     }
 
-    /// Render back to a .md file string.
+    /// Render back to `.md` file content.
     pub fn to_md(&self) -> Result<String, VaultError> {
-        let task = self.metadata.to_task();
-        let body = self.body.text();
-        Vault::render_task_file(&task, &body)
+        let task = self.to_task();
+        let body = self.doc.get_text(BODY_ID).to_string();
+        crate::vault::Vault::render_task_file(&task, &body)
     }
 
-    /// Apply a field-level metadata change.
-    pub fn set_field(&mut self, field: &str, value: &str) {
-        self.metadata.set_field(field, value);
+    // ── Field-level edits ────────────────────────────────────────────────────
+
+    /// Set a scalar meta field. Caller must `commit()` to finalize.
+    pub fn set_field(&self, field: &str, value: &str) {
+        let _ = self.doc.get_map(META_ID).insert(field, value);
     }
 
-    /// Get a field value.
     pub fn get_field(&self, field: &str) -> Option<String> {
-        self.metadata.get_field(field)
+        get_string(&self.doc.get_map(META_ID), field)
     }
 
-    /// Update the body text.
+    /// Peer who last wrote this field. Used by the conflict detector after
+    /// importing remote updates.
+    pub fn last_editor(&self, field: &str) -> Option<PeerID> {
+        self.doc.get_map(META_ID).get_last_editor(field)
+    }
+
+    /// Replace the entire body text. Caller must `commit()` to finalize.
     pub fn set_body(&self, text: &str) {
-        self.body.set_text(text);
+        let body = self.doc.get_text(BODY_ID);
+        let len = body.len_unicode();
+        if len > 0 {
+            let _ = body.delete(0, len);
+        }
+        let _ = body.insert(0, text);
     }
 
-    /// Get the current body text.
     pub fn get_body(&self) -> String {
-        self.body.text()
+        self.doc.get_text(BODY_ID).to_string()
     }
 
-    // ── Sync ─────────────────────────────────────────────────────────
-
-    /// Save both CRDT states for persistence.
-    pub fn save(&mut self) -> (Vec<u8>, Vec<u8>) {
-        (self.metadata.save(), self.body.save())
+    /// Commit the current transaction so the edits become visible to
+    /// subscribers / exports.
+    pub fn commit(&self) {
+        self.doc.commit();
     }
 
-    /// Merge another document's metadata into this one.
-    pub fn merge_metadata(&mut self, other: &mut MetadataDoc) -> Result<(), VaultError> {
-        self.metadata.merge(other.doc_mut())
+    // ── Sync primitives ──────────────────────────────────────────────────────
+
+    /// Full snapshot (state + full oplog). Use for persistence and cold start.
+    pub fn export_snapshot(&self) -> Result<Vec<u8>, VaultError> {
+        self.doc
+            .export(ExportMode::Snapshot)
+            .map_err(|e| VaultError::ParseError(format!("loro snapshot: {e}")))
     }
 
-    /// Apply a remote body update.
-    pub fn apply_body_update(&self, update: &[u8]) -> Result<(), VaultError> {
-        self.body.apply_update(update)
+    /// Incremental updates since the peer's version vector.
+    pub fn export_updates_since(&self, from: &loro::VersionVector) -> Result<Vec<u8>, VaultError> {
+        self.doc
+            .export(ExportMode::updates(from))
+            .map_err(|e| VaultError::ParseError(format!("loro updates: {e}")))
+    }
+
+    /// Import bytes (either snapshot or updates — Loro auto-detects).
+    pub fn import(&self, bytes: &[u8]) -> Result<(), VaultError> {
+        self.doc
+            .import(bytes)
+            .map(|_| ())
+            .map_err(|e| VaultError::ParseError(format!("loro import: {e}")))
+    }
+
+    /// Load a doc from a snapshot.
+    pub fn from_snapshot(bytes: &[u8], file_path: impl Into<String>) -> Result<Self, VaultError> {
+        let doc = LoroDoc::from_snapshot(bytes)
+            .map_err(|e| VaultError::ParseError(format!("loro from_snapshot: {e}")))?;
+        Ok(Self {
+            doc,
+            file_path: file_path.into(),
+        })
+    }
+
+    pub fn version_vector(&self) -> loro::VersionVector {
+        self.doc.oplog_vv()
+    }
+
+    pub fn frontiers(&self) -> loro::Frontiers {
+        self.doc.oplog_frontiers()
+    }
+
+    /// Capture every conflict-relevant field value + its last editor. Used by
+    /// the sync layer as the "before" side of an import so it can detect
+    /// concurrent writes post-import.
+    pub fn snapshot_fields(&self) -> DocumentSnapshot {
+        let meta = self.doc.get_map(META_ID);
+        let mut fields = BTreeMap::new();
+        let mut field_editors = BTreeMap::new();
+        for f in CONFLICT_FIELDS {
+            fields.insert((*f).to_string(), get_string(&meta, f));
+            field_editors.insert((*f).to_string(), meta.get_last_editor(f));
+        }
+        DocumentSnapshot {
+            fields,
+            field_editors,
+        }
     }
 }
+
+// ── helpers ──────────────────────────────────────────────────────────────────
+
+fn get_string(map: &loro::LoroMap, key: &str) -> Option<String> {
+    match map.get(key)? {
+        ValueOrContainer::Value(LoroValue::String(s)) => Some((*s).to_string()),
+        _ => None,
+    }
+}
+
+fn get_i64(map: &loro::LoroMap, key: &str) -> Option<i64> {
+    match map.get(key)? {
+        ValueOrContainer::Value(LoroValue::I64(n)) => Some(n),
+        _ => None,
+    }
+}
+
+fn read_string_list(list: &LoroList) -> Vec<String> {
+    let mut out = Vec::new();
+    list.for_each(|v| {
+        if let ValueOrContainer::Value(LoroValue::String(s)) = v {
+            out.push((*s).to_string());
+        }
+    });
+    out
+}
+
+fn parse_status(s: &str) -> Status {
+    match s {
+        "Open" => Status::Open,
+        "InProgress" => Status::InProgress,
+        "Done" => Status::Done,
+        "OnHold" => Status::OnHold,
+        "Planned" => Status::Planned,
+        "Cancelled" => Status::Cancelled,
+        "Archived" => Status::Archived,
+        _ => Status::Open,
+    }
+}
+
+fn parse_priority(s: &str) -> Priority {
+    match s {
+        "Urgent" => Priority::Urgent,
+        "High" => Priority::High,
+        "Normal" => Priority::Normal,
+        "Low" => Priority::Low,
+        _ => Priority::None,
+    }
+}
+
+// ── tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::task::{Task, Status, Priority, WikiLink};
+    use crate::task::{Priority, Status, WikiLink};
 
-    #[test]
-    fn roundtrip_through_crdt() {
-        let task = Task {
-            title: "Test task".into(),
+    fn make_task() -> Task {
+        Task {
+            id: Some("t-1".into()),
+            title: "Mix track".into(),
             status: Status::Open,
             priority: Priority::High,
-            assignee: Some("alice".into()),
-            tags: vec!["urgent".into()],
-            projects: vec![WikiLink("Project X".into())],
-            body: "## Subtasks\n- [ ] First\n- [ ] Second".into(),
+            assignee: Some("cody".into()),
+            tags: vec!["urgent".into(), "audio".into()],
+            projects: vec![WikiLink("Album".into())],
+            contexts: vec!["studio".into()],
+            due: chrono::NaiveDate::from_ymd_opt(2026, 4, 20),
+            body: "## Subtasks\n- [ ] Low end\n- [ ] Vocals".into(),
             ..Default::default()
-        };
-
-        let doc = CrdtDocument::from_task(&task, "test.md");
-
-        let roundtripped = doc.to_task();
-        assert_eq!(roundtripped.title, "Test task");
-        assert_eq!(roundtripped.status, Status::Open);
-        assert_eq!(roundtripped.priority, Priority::High);
-        assert_eq!(roundtripped.assignee, Some("alice".into()));
-        assert_eq!(roundtripped.body, "## Subtasks\n- [ ] First\n- [ ] Second");
+        }
     }
 
     #[test]
-    fn field_level_edit() {
-        let task = Task {
-            title: "Shared task".into(),
-            status: Status::Open,
-            ..Default::default()
-        };
+    fn task_roundtrip() {
+        let doc = CrdtDocument::from_task(&make_task(), "t-1.md");
+        let t = doc.to_task();
+        assert_eq!(t.title, "Mix track");
+        assert_eq!(t.status, Status::Open);
+        assert_eq!(t.priority, Priority::High);
+        assert_eq!(t.assignee.as_deref(), Some("cody"));
+        assert_eq!(t.tags, vec!["urgent".to_string(), "audio".into()]);
+        assert_eq!(t.projects.len(), 1);
+        assert_eq!(t.projects[0].0, "Album");
+        assert_eq!(t.contexts, vec!["studio".to_string()]);
+        assert_eq!(t.due, chrono::NaiveDate::from_ymd_opt(2026, 4, 20));
+        assert!(t.body.contains("Low end"));
+    }
 
-        let mut doc = CrdtDocument::from_task(&task, "test.md");
+    #[test]
+    fn snapshot_export_import() {
+        let doc = CrdtDocument::from_task(&make_task(), "t-1.md");
+        let bytes = doc.export_snapshot().unwrap();
+        let copy = CrdtDocument::from_snapshot(&bytes, "t-1.md").unwrap();
+        assert_eq!(copy.to_task().title, "Mix track");
+    }
+
+    #[test]
+    fn field_edit_and_last_editor() {
+        let doc = CrdtDocument::from_task(&make_task(), "t-1.md");
+        doc.set_peer_id(42).unwrap();
         doc.set_field("status", "Done");
-        doc.set_field("assignee", "bob");
+        doc.commit();
+        assert_eq!(doc.get_field("status").as_deref(), Some("Done"));
+        assert_eq!(doc.last_editor("status"), Some(42));
+    }
 
-        let updated = doc.to_task();
-        assert_eq!(updated.status, Status::Done);
-        assert_eq!(updated.assignee, Some("bob".into()));
-        assert_eq!(updated.title, "Shared task"); // unchanged
+    /// Two peers edit different fields → merge converges on both values.
+    #[test]
+    fn concurrent_disjoint_fields_converge() {
+        let a = CrdtDocument::from_task(&make_task(), "t-1.md");
+        a.set_peer_id(1).unwrap();
+        a.commit();
+        let snap = a.export_snapshot().unwrap();
+
+        let b = CrdtDocument::from_snapshot(&snap, "t-1.md").unwrap();
+        b.set_peer_id(2).unwrap();
+
+        a.set_field("status", "Done");
+        a.commit();
+        b.set_field("assignee", "amy");
+        b.commit();
+
+        let a_updates = a.export_updates_since(&b.version_vector()).unwrap();
+        let b_updates = b.export_updates_since(&a.version_vector()).unwrap();
+        a.import(&b_updates).unwrap();
+        b.import(&a_updates).unwrap();
+
+        let ta = a.to_task();
+        let tb = b.to_task();
+        assert_eq!(ta.status, Status::Done);
+        assert_eq!(ta.assignee.as_deref(), Some("amy"));
+        assert_eq!(tb.status, Status::Done);
+        assert_eq!(tb.assignee.as_deref(), Some("amy"));
+    }
+
+    /// Snapshot captures the pre-import state used for conflict detection.
+    #[test]
+    fn field_snapshot_records_values_and_editors() {
+        let doc = CrdtDocument::from_task(&make_task(), "t-1.md");
+        doc.set_peer_id(7).unwrap();
+        doc.set_field("status", "InProgress");
+        doc.commit();
+
+        let snap = doc.snapshot_fields();
+        assert_eq!(snap.fields.get("status"), Some(&Some("InProgress".into())));
+        assert_eq!(snap.field_editors.get("status"), Some(&Some(7)));
+        assert_eq!(snap.fields.get("priority"), Some(&Some("High".into())));
     }
 }

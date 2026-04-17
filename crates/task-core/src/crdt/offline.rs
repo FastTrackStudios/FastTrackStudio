@@ -1,46 +1,40 @@
 //! Offline operation queue.
 //!
-//! When the client is disconnected from the server, CRDT operations
-//! are stored locally. On reconnect, they're replayed against the
-//! server's state and merged automatically (CRDTs guarantee convergence).
+//! When the client is disconnected, CRDT operations are staged locally. On
+//! reconnect, they replay against the server's state. Loro guarantees
+//! convergence — out-of-order imports are fine.
 //!
-//! The queue is persisted to a file so operations survive app restarts.
+//! The queue persists to a flat file so it survives restarts.
 
 use std::path::Path;
 
 use crate::service::VaultError;
 
-/// A queued operation waiting to be synced.
 #[derive(Debug, Clone)]
 pub struct QueuedOp {
-    /// When the operation was created.
     pub timestamp: String,
-    /// Which file this operation applies to.
     pub file_path: String,
-    /// The operation type.
     pub op: QueuedOpType,
 }
 
+/// Operation kinds the queue persists.
 #[derive(Debug, Clone)]
 pub enum QueuedOpType {
-    /// Metadata field change.
+    /// Metadata field assignment.
     FieldChange { field: String, value: String },
-    /// Body text update (Yrs binary).
-    BodyUpdate { update: Vec<u8> },
-    /// Full task save (Automerge binary).
-    MetadataSnapshot { data: Vec<u8> },
+    /// Raw Loro update bytes (body edits, list ops, etc.).
+    LoroUpdate { update: Vec<u8> },
+    /// Loro full snapshot (for cold-start / big catchup).
+    Snapshot { data: Vec<u8> },
 }
 
-/// Manages the offline operation queue.
+/// A file-backed queue of pending operations.
 pub struct OfflineQueue {
-    /// Queued operations not yet synced.
     ops: Vec<QueuedOp>,
-    /// Path to the queue persistence file.
     persist_path: Option<std::path::PathBuf>,
 }
 
 impl OfflineQueue {
-    /// Create a new in-memory queue (no persistence).
     pub fn new() -> Self {
         Self {
             ops: Vec::new(),
@@ -48,7 +42,6 @@ impl OfflineQueue {
         }
     }
 
-    /// Create a queue with file persistence.
     pub fn with_persistence(path: &Path) -> Self {
         let mut queue = Self {
             ops: Vec::new(),
@@ -58,30 +51,26 @@ impl OfflineQueue {
         queue
     }
 
-    /// Enqueue an operation.
     pub fn push(&mut self, op: QueuedOp) {
         self.ops.push(op);
         self.save();
     }
 
-    /// Get the count of pending operations.
     pub fn len(&self) -> usize {
         self.ops.len()
     }
 
-    /// Check if the queue is empty.
     pub fn is_empty(&self) -> bool {
         self.ops.is_empty()
     }
 
-    /// Drain all pending operations for replay.
     pub fn drain(&mut self) -> Vec<QueuedOp> {
         let ops = std::mem::take(&mut self.ops);
         self.save();
         ops
     }
 
-    /// Replay all queued operations against the sync engine.
+    /// Replay every queued op against the sync engine.
     pub async fn replay(
         &mut self,
         engine: &super::sync::CrdtSyncEngine,
@@ -92,16 +81,15 @@ impl OfflineQueue {
         for op in ops {
             match op.op {
                 QueuedOpType::FieldChange { field, value } => {
-                    engine
-                        .apply_field_change(&op.file_path, &field, &value)
-                        .await?;
+                    engine.apply_field_change(&op.file_path, &field, &value).await?;
                 }
-                QueuedOpType::BodyUpdate { update } => {
-                    engine.apply_body_update(&op.file_path, &update).await?;
+                QueuedOpType::LoroUpdate { update } => {
+                    engine.apply_remote_update(&op.file_path, &update).await?;
                 }
-                QueuedOpType::MetadataSnapshot { .. } => {
-                    // Full snapshot — load and merge
-                    // TODO: implement full Automerge doc merge
+                QueuedOpType::Snapshot { data } => {
+                    // Snapshots replay via the same import path — Loro
+                    // auto-detects snapshot vs updates.
+                    engine.apply_remote_update(&op.file_path, &data).await?;
                 }
             }
         }
@@ -109,46 +97,36 @@ impl OfflineQueue {
         Ok(count)
     }
 
-    /// Save queue to disk (if persistence is configured).
     fn save(&self) {
         let Some(ref path) = self.persist_path else {
             return;
         };
-        // Simple format: one JSON line per op
         let lines: Vec<String> = self
             .ops
             .iter()
-            .map(|op| {
-                match &op.op {
-                    QueuedOpType::FieldChange { field, value } => {
-                        format!(
-                            r#"{{"ts":"{}","path":"{}","type":"field","field":"{}","value":"{}"}}"#,
-                            op.timestamp, op.file_path, field, value
-                        )
-                    }
-                    QueuedOpType::BodyUpdate { update } => {
-                        let b64 = base64_encode(update);
-                        format!(
-                            r#"{{"ts":"{}","path":"{}","type":"body","update":"{}"}}"#,
-                            op.timestamp, op.file_path, b64
-                        )
-                    }
-                    QueuedOpType::MetadataSnapshot { data } => {
-                        let b64 = base64_encode(data);
-                        format!(
-                            r#"{{"ts":"{}","path":"{}","type":"snapshot","data":"{}"}}"#,
-                            op.timestamp, op.file_path, b64
-                        )
-                    }
-                }
+            .map(|op| match &op.op {
+                QueuedOpType::FieldChange { field, value } => format!(
+                    r#"{{"ts":"{}","path":"{}","type":"field","field":"{}","value":"{}"}}"#,
+                    op.timestamp, op.file_path, field, value
+                ),
+                QueuedOpType::LoroUpdate { update } => format!(
+                    r#"{{"ts":"{}","path":"{}","type":"update","update":"{}"}}"#,
+                    op.timestamp,
+                    op.file_path,
+                    base64_encode(update)
+                ),
+                QueuedOpType::Snapshot { data } => format!(
+                    r#"{{"ts":"{}","path":"{}","type":"snapshot","data":"{}"}}"#,
+                    op.timestamp,
+                    op.file_path,
+                    base64_encode(data)
+                ),
             })
             .collect();
 
-        let content = lines.join("\n");
-        let _ = std::fs::write(path, content);
+        let _ = std::fs::write(path, lines.join("\n"));
     }
 
-    /// Load queue from disk.
     fn load(&mut self) {
         let Some(ref path) = self.persist_path else {
             return;
@@ -162,7 +140,6 @@ impl OfflineQueue {
             if line.trim().is_empty() {
                 continue;
             }
-            // Simple JSON parsing (field extraction)
             let ts = extract_json_field(line, "ts").unwrap_or_default();
             let file_path = extract_json_field(line, "path").unwrap_or_default();
             let op_type = extract_json_field(line, "type").unwrap_or_default();
@@ -173,18 +150,12 @@ impl OfflineQueue {
                     let value = extract_json_field(line, "value").unwrap_or_default();
                     QueuedOpType::FieldChange { field, value }
                 }
-                "body" => {
-                    let b64 = extract_json_field(line, "update").unwrap_or_default();
-                    QueuedOpType::BodyUpdate {
-                        update: base64_decode(&b64),
-                    }
-                }
-                "snapshot" => {
-                    let b64 = extract_json_field(line, "data").unwrap_or_default();
-                    QueuedOpType::MetadataSnapshot {
-                        data: base64_decode(&b64),
-                    }
-                }
+                "update" => QueuedOpType::LoroUpdate {
+                    update: base64_decode(&extract_json_field(line, "update").unwrap_or_default()),
+                },
+                "snapshot" => QueuedOpType::Snapshot {
+                    data: base64_decode(&extract_json_field(line, "data").unwrap_or_default()),
+                },
                 _ => continue,
             };
 
@@ -197,6 +168,12 @@ impl OfflineQueue {
     }
 }
 
+impl Default for OfflineQueue {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 fn extract_json_field(json: &str, key: &str) -> Option<String> {
     let pattern = format!(r#""{}":""#, key);
     let start = json.find(&pattern)? + pattern.len();
@@ -206,7 +183,6 @@ fn extract_json_field(json: &str, key: &str) -> Option<String> {
 }
 
 fn base64_encode(data: &[u8]) -> String {
-    // Simple base64 encode (no external dep)
     const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut result = String::new();
     for chunk in data.chunks(3) {
@@ -259,4 +235,33 @@ fn base64_decode(s: &str) -> Vec<u8> {
         }
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn queue_round_trip() {
+        let mut q = OfflineQueue::new();
+        q.push(QueuedOp {
+            timestamp: "2026-04-17T00:00:00Z".into(),
+            file_path: "t-1.md".into(),
+            op: QueuedOpType::FieldChange {
+                field: "status".into(),
+                value: "Done".into(),
+            },
+        });
+        q.push(QueuedOp {
+            timestamp: "2026-04-17T00:00:01Z".into(),
+            file_path: "t-1.md".into(),
+            op: QueuedOpType::LoroUpdate {
+                update: vec![1, 2, 3, 4],
+            },
+        });
+        assert_eq!(q.len(), 2);
+        let drained = q.drain();
+        assert_eq!(drained.len(), 2);
+        assert_eq!(q.len(), 0);
+    }
 }
