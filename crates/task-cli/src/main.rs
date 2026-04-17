@@ -1,6 +1,10 @@
 use clap::{Parser, Subcommand};
+use chrono::{DateTime, TimeZone, Utc};
 use task_core::workflows::{parse_comments, render_comments, Comment};
-use task_core::{Filter, Priority, Query, Sort, Status, Task, VaultServiceImpl, WikiLink};
+use task_core::{
+    Filter, Priority, Query, Sort, Status, Task, TimeEntry, TimeEntryFilter, VaultServiceImpl,
+    WikiLink,
+};
 
 #[derive(Parser)]
 #[command(name = "task", about = "Task management CLI", version)]
@@ -162,10 +166,95 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// Start a timer on a task (fails if another is running)
+    Start {
+        reference: String,
+        #[arg(long)]
+        description: Option<String>,
+        #[arg(long)]
+        billable: bool,
+        /// Billable rate in cents per hour
+        #[arg(long)]
+        rate: Option<u32>,
+    },
+    /// Stop the running timer (optionally scoped to a specific task)
+    Stop {
+        reference: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Time-tracking subcommands
+    Time {
+        #[command(subcommand)]
+        command: TimeCommands,
+    },
     /// Project subcommands
     Project {
         #[command(subcommand)]
         command: ProjectCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum TimeCommands {
+    /// Show the currently-running timer, if any
+    Active {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Log a completed time entry manually
+    Log {
+        reference: String,
+        /// Start time — "YYYY-MM-DDTHH:MM:SS" (UTC) or "YYYY-MM-DD HH:MM"
+        #[arg(long)]
+        start: String,
+        /// End time in the same formats as --start
+        #[arg(long)]
+        end: String,
+        #[arg(long)]
+        description: Option<String>,
+        #[arg(long)]
+        billable: bool,
+        #[arg(long)]
+        rate: Option<u32>,
+    },
+    /// List time entries across the vault
+    List {
+        #[arg(long)]
+        task: Option<String>,
+        #[arg(long)]
+        user: Option<String>,
+        /// From date (YYYY-MM-DD, inclusive)
+        #[arg(long)]
+        from: Option<String>,
+        /// To date (YYYY-MM-DD, inclusive)
+        #[arg(long)]
+        to: Option<String>,
+        #[arg(long)]
+        billable: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Aggregate time by task or user
+    Report {
+        /// task | user
+        #[arg(long, default_value = "task")]
+        group_by: String,
+        #[arg(long)]
+        from: Option<String>,
+        #[arg(long)]
+        to: Option<String>,
+        #[arg(long)]
+        billable: bool,
+        /// Fallback billable rate in cents per hour (used when an entry has no rate override)
+        #[arg(long)]
+        rate: Option<u32>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Delete a time entry by id
+    Delete {
+        entry_id: String,
     },
 }
 
@@ -585,6 +674,149 @@ async fn main() -> eyre::Result<()> {
                 print_tasks_table(&tasks);
             }
         }
+
+        Commands::Start {
+            reference,
+            description,
+            billable,
+            rate,
+        } => {
+            let entry = svc
+                .start_timer(&reference, description, billable, rate, actor.clone())
+                .await?;
+            println!("Started timer on '{reference}' (entry {}).", entry.id);
+        }
+
+        Commands::Stop { reference, json } => {
+            let (title, entry) = svc.stop_timer(reference.as_deref()).await?;
+            if json {
+                println!("{}", facet_json::to_string(&entry).unwrap_or_default());
+            } else {
+                println!(
+                    "Stopped '{title}' — {} min logged.",
+                    entry.duration_minutes()
+                );
+            }
+        }
+
+        Commands::Time {
+            command: TimeCommands::Active { json },
+        } => match svc.active_timer().await {
+            Some((title, entry)) => {
+                if json {
+                    println!(
+                        "{{\"task\":\"{}\",\"entry\":{}}}",
+                        escape_json(&title),
+                        facet_json::to_string(&entry).unwrap_or_default()
+                    );
+                } else {
+                    let elapsed = entry.elapsed_minutes(chrono::Utc::now());
+                    println!("Running: '{title}' — {elapsed} min");
+                    if let Some(d) = &entry.description {
+                        println!("  {d}");
+                    }
+                    println!("  id: {}", entry.id);
+                }
+            }
+            None => {
+                if json {
+                    println!("null");
+                } else {
+                    println!("No running timer.");
+                }
+            }
+        },
+
+        Commands::Time {
+            command:
+                TimeCommands::Log {
+                    reference,
+                    start,
+                    end,
+                    description,
+                    billable,
+                    rate,
+                },
+        } => {
+            let start_dt = parse_datetime(&start)?;
+            let end_dt = parse_datetime(&end)?;
+            let entry = svc
+                .log_time(
+                    &reference,
+                    start_dt,
+                    end_dt,
+                    description,
+                    billable,
+                    rate,
+                    actor.clone(),
+                )
+                .await?;
+            println!(
+                "Logged {} min on '{reference}' (entry {}).",
+                entry.duration_minutes(),
+                entry.id
+            );
+        }
+
+        Commands::Time {
+            command:
+                TimeCommands::List {
+                    task,
+                    user,
+                    from,
+                    to,
+                    billable,
+                    json,
+                },
+        } => {
+            let filter = TimeEntryFilter {
+                task_ref: task,
+                user,
+                from: from.as_deref().map(parse_date_start).transpose()?,
+                to: to.as_deref().map(parse_date_end).transpose()?,
+                billable_only: billable,
+            };
+            let entries = svc.list_time_entries(filter).await;
+            if json {
+                print_time_entries_json(&entries);
+            } else {
+                print_time_entries_table(&entries);
+            }
+        }
+
+        Commands::Time {
+            command:
+                TimeCommands::Report {
+                    group_by,
+                    from,
+                    to,
+                    billable,
+                    rate,
+                    json,
+                },
+        } => {
+            let filter = TimeEntryFilter {
+                task_ref: None,
+                user: None,
+                from: from.as_deref().map(parse_date_start).transpose()?,
+                to: to.as_deref().map(parse_date_end).transpose()?,
+                billable_only: billable,
+            };
+            let entries = svc.list_time_entries(filter).await;
+            let report = aggregate_time(&entries, &group_by, rate)?;
+            if json {
+                print_report_json(&report);
+            } else {
+                print_report_table(&report);
+            }
+        }
+
+        Commands::Time {
+            command: TimeCommands::Delete { entry_id },
+        } => {
+            svc.delete_time_entry(&entry_id).await?;
+            println!("Deleted entry {entry_id}.");
+        }
     }
 
     Ok(())
@@ -648,6 +880,173 @@ fn parse_optional_date(s: &str) -> eyre::Result<Option<chrono::NaiveDate>> {
     } else {
         Ok(Some(s.parse::<chrono::NaiveDate>()?))
     }
+}
+
+// ── Time helpers ──────────────────────────────────────────────────────────────
+
+/// Parse a datetime in a few tolerant shapes. Returns UTC.
+/// Accepted: RFC3339 ("2026-04-17T09:30:00Z"), naive UTC ("2026-04-17T09:30"),
+/// and "YYYY-MM-DD HH:MM" (also naive UTC).
+fn parse_datetime(s: &str) -> eyre::Result<DateTime<Utc>> {
+    if let Ok(dt) = DateTime::parse_from_rfc3339(s) {
+        return Ok(dt.with_timezone(&Utc));
+    }
+    let naive = chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S")
+        .or_else(|_| chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M"))
+        .or_else(|_| chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S"))
+        .or_else(|_| chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M"))
+        .map_err(|_| eyre::eyre!("Invalid datetime: {s}"))?;
+    Ok(Utc.from_utc_datetime(&naive))
+}
+
+fn parse_date_start(s: &str) -> eyre::Result<DateTime<Utc>> {
+    let d = s
+        .parse::<chrono::NaiveDate>()
+        .map_err(|_| eyre::eyre!("Invalid date: {s}"))?;
+    Ok(Utc.from_utc_datetime(&d.and_hms_opt(0, 0, 0).unwrap()))
+}
+
+fn parse_date_end(s: &str) -> eyre::Result<DateTime<Utc>> {
+    let d = s
+        .parse::<chrono::NaiveDate>()
+        .map_err(|_| eyre::eyre!("Invalid date: {s}"))?;
+    Ok(Utc.from_utc_datetime(&d.and_hms_opt(23, 59, 59).unwrap()))
+}
+
+fn escape_json(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+fn print_time_entries_table(entries: &[(String, TimeEntry)]) {
+    if entries.is_empty() {
+        println!("No time entries.");
+        return;
+    }
+    let title_w = entries
+        .iter()
+        .map(|(t, _)| t.len())
+        .max()
+        .unwrap_or(10)
+        .max(5)
+        .min(35);
+    println!(
+        "{:<title_w$}  {:<19}  {:>6}  {:<8}  {:<12}  ID",
+        "TASK", "START (UTC)", "MIN", "BILLABLE", "USER",
+    );
+    println!("{}", "─".repeat(title_w + 55));
+    for (title, e) in entries {
+        let t = truncate(title, title_w);
+        let start = e.start_time.format("%Y-%m-%d %H:%M:%S").to_string();
+        let mins = if e.is_running() {
+            format!("▶{}", e.elapsed_minutes(Utc::now()))
+        } else {
+            e.duration_minutes().to_string()
+        };
+        let billable = if e.billable { "yes" } else { "no" };
+        let user = e.user.clone().unwrap_or_else(|| "—".into());
+        println!(
+            "{:<title_w$}  {:<19}  {:>6}  {:<8}  {:<12}  {}",
+            t, start, mins, billable, user, e.id
+        );
+    }
+    println!("\n{} entr{}", entries.len(), if entries.len() == 1 { "y" } else { "ies" });
+}
+
+fn print_time_entries_json(entries: &[(String, TimeEntry)]) {
+    println!("[");
+    for (i, (title, e)) in entries.iter().enumerate() {
+        let comma = if i + 1 < entries.len() { "," } else { "" };
+        let entry_json = facet_json::to_string(e).unwrap_or_default();
+        println!(
+            "  {{\"task\":\"{}\",\"entry\":{}}}{comma}",
+            escape_json(title),
+            entry_json
+        );
+    }
+    println!("]");
+}
+
+/// ({group_key}, total_minutes, billable_cents, entry_count)
+type ReportRow = (String, u64, u64, usize);
+
+fn aggregate_time(
+    entries: &[(String, TimeEntry)],
+    group_by: &str,
+    fallback_rate: Option<u32>,
+) -> eyre::Result<Vec<ReportRow>> {
+    use std::collections::BTreeMap;
+    let mut acc: BTreeMap<String, (u64, u64, usize)> = BTreeMap::new();
+    for (title, e) in entries {
+        let key = match group_by {
+            "task" => title.clone(),
+            "user" => e.user.clone().unwrap_or_else(|| "—".into()),
+            other => eyre::bail!("Unknown group_by: {other}. Use 'task' or 'user'."),
+        };
+        let mins = e.duration_minutes() as u64;
+        let cents = if e.billable {
+            let rate = e.billable_rate.or(fallback_rate).unwrap_or(0);
+            (mins * rate as u64) / 60
+        } else {
+            0
+        };
+        let slot = acc.entry(key).or_insert((0, 0, 0));
+        slot.0 += mins;
+        slot.1 += cents;
+        slot.2 += 1;
+    }
+    let mut rows: Vec<ReportRow> = acc
+        .into_iter()
+        .map(|(k, (m, c, n))| (k, m, c, n))
+        .collect();
+    rows.sort_by(|a, b| b.1.cmp(&a.1));
+    Ok(rows)
+}
+
+fn print_report_table(rows: &[ReportRow]) {
+    if rows.is_empty() {
+        println!("No entries in range.");
+        return;
+    }
+    let key_w = rows.iter().map(|r| r.0.len()).max().unwrap_or(5).max(5).min(40);
+    println!(
+        "{:<key_w$}  {:>8}  {:>10}  {:>7}",
+        "GROUP", "HOURS", "BILLABLE", "COUNT",
+    );
+    println!("{}", "─".repeat(key_w + 32));
+    let mut total_min: u64 = 0;
+    let mut total_cents: u64 = 0;
+    for (k, mins, cents, count) in rows {
+        let hours = format!("{:.2}", *mins as f64 / 60.0);
+        let billable = format!("${:.2}", *cents as f64 / 100.0);
+        println!(
+            "{:<key_w$}  {:>8}  {:>10}  {:>7}",
+            truncate(k, key_w),
+            hours,
+            billable,
+            count
+        );
+        total_min += mins;
+        total_cents += cents;
+    }
+    println!("{}", "─".repeat(key_w + 32));
+    println!(
+        "{:<key_w$}  {:>8}  {:>10}",
+        "TOTAL",
+        format!("{:.2}", total_min as f64 / 60.0),
+        format!("${:.2}", total_cents as f64 / 100.0)
+    );
+}
+
+fn print_report_json(rows: &[ReportRow]) {
+    println!("[");
+    for (i, (k, mins, cents, count)) in rows.iter().enumerate() {
+        let comma = if i + 1 < rows.len() { "," } else { "" };
+        println!(
+            "  {{\"group\":\"{}\",\"minutes\":{mins},\"billable_cents\":{cents},\"entries\":{count}}}{comma}",
+            escape_json(k)
+        );
+    }
+    println!("]");
 }
 
 // ── Parsing helpers ───────────────────────────────────────────────────────────

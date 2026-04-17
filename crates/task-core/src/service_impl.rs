@@ -346,6 +346,218 @@ impl VaultServiceImpl {
     pub async fn sync_status(&self) -> Option<crate::service::SyncStats> {
         None
     }
+
+    // ── Time tracking ───────────────────────────────────────────────────────
+
+    /// Start a timer on a task. Returns an error if any task in the vault
+    /// already has a running timer — we enforce the "single running timer"
+    /// constraint across the whole vault to match the solidtime/Toggl model.
+    pub async fn start_timer(
+        &self,
+        task_ref: &str,
+        description: Option<String>,
+        billable: bool,
+        billable_rate: Option<u32>,
+        user: Option<String>,
+    ) -> Result<crate::task::TimeEntry, VaultError> {
+        let vault = self.vault.read().await;
+        let tasks = vault.load_tasks();
+
+        if let Some(active) = tasks.iter().find_map(|t| {
+            t.running_timer()
+                .map(|e| (t.title.clone(), e.id.clone()))
+        }) {
+            return Err(VaultError::IoError(format!(
+                "timer already running on '{}' (id {})",
+                active.0, active.1
+            )));
+        }
+
+        let mut task = tasks
+            .into_iter()
+            .find(|t| {
+                t.id.as_deref() == Some(task_ref) || t.title.eq_ignore_ascii_case(task_ref)
+            })
+            .ok_or_else(|| VaultError::NotFound(task_ref.to_string()))?;
+
+        let entry = crate::task::TimeEntry {
+            id: Uuid::new_v4().to_string(),
+            user,
+            start_time: Utc::now(),
+            end_time: None,
+            description,
+            billable,
+            billable_rate,
+            ..Default::default()
+        };
+        task.time_entries.push(entry.clone());
+        task.date_modified = Some(Utc::now());
+        vault.save_task(&task)?;
+        Ok(entry)
+    }
+
+    /// Stop the running timer. If `task_ref` is provided, stops the timer on
+    /// that task specifically; otherwise stops whichever task has a running
+    /// timer (since we enforce at-most-one across the vault).
+    pub async fn stop_timer(
+        &self,
+        task_ref: Option<&str>,
+    ) -> Result<(String, crate::task::TimeEntry), VaultError> {
+        let vault = self.vault.read().await;
+        let tasks = vault.load_tasks();
+
+        let target = tasks
+            .into_iter()
+            .find(|t| match task_ref {
+                Some(r) => {
+                    (t.id.as_deref() == Some(r) || t.title.eq_ignore_ascii_case(r))
+                        && t.running_timer().is_some()
+                }
+                None => t.running_timer().is_some(),
+            });
+
+        let mut task = target.ok_or_else(|| {
+            VaultError::NotFound(match task_ref {
+                Some(r) => format!("no running timer on '{r}'"),
+                None => "no running timer".into(),
+            })
+        })?;
+
+        let now = Utc::now();
+        let idx = task
+            .time_entries
+            .iter()
+            .position(|e| e.is_running())
+            .ok_or_else(|| VaultError::NotFound("running entry vanished".into()))?;
+        task.time_entries[idx].end_time = Some(now);
+        task.date_modified = Some(now);
+
+        let stopped = task.time_entries[idx].clone();
+        let title = task.title.clone();
+        vault.save_task(&task)?;
+        Ok((title, stopped))
+    }
+
+    /// Log a completed time entry manually (for back-dating or bulk import).
+    pub async fn log_time(
+        &self,
+        task_ref: &str,
+        start: chrono::DateTime<Utc>,
+        end: chrono::DateTime<Utc>,
+        description: Option<String>,
+        billable: bool,
+        billable_rate: Option<u32>,
+        user: Option<String>,
+    ) -> Result<crate::task::TimeEntry, VaultError> {
+        if end <= start {
+            return Err(VaultError::ParseError(
+                "end must be after start".into(),
+            ));
+        }
+        let vault = self.vault.read().await;
+        let tasks = vault.load_tasks();
+        let mut task = tasks
+            .into_iter()
+            .find(|t| {
+                t.id.as_deref() == Some(task_ref) || t.title.eq_ignore_ascii_case(task_ref)
+            })
+            .ok_or_else(|| VaultError::NotFound(task_ref.to_string()))?;
+
+        let entry = crate::task::TimeEntry {
+            id: Uuid::new_v4().to_string(),
+            user,
+            start_time: start,
+            end_time: Some(end),
+            description,
+            billable,
+            billable_rate,
+            ..Default::default()
+        };
+        task.time_entries.push(entry.clone());
+        task.date_modified = Some(Utc::now());
+        vault.save_task(&task)?;
+        Ok(entry)
+    }
+
+    /// Return the currently-running timer across the vault, if any.
+    pub async fn active_timer(&self) -> Option<(String, crate::task::TimeEntry)> {
+        let tasks = self.vault.read().await.load_tasks();
+        for t in tasks {
+            if let Some(e) = t.running_timer().cloned() {
+                return Some((t.title, e));
+            }
+        }
+        None
+    }
+
+    /// List time entries across the vault, each tagged with its task title.
+    /// Pass filters to scope by user, task, or date range.
+    pub async fn list_time_entries(
+        &self,
+        filter: TimeEntryFilter,
+    ) -> Vec<(String, crate::task::TimeEntry)> {
+        let tasks = self.vault.read().await.load_tasks();
+        let mut out = Vec::new();
+        for t in tasks {
+            if let Some(ref r) = filter.task_ref {
+                let matches =
+                    t.id.as_deref() == Some(r.as_str()) || t.title.eq_ignore_ascii_case(r);
+                if !matches {
+                    continue;
+                }
+            }
+            for e in &t.time_entries {
+                if let Some(ref u) = filter.user {
+                    if e.user.as_deref() != Some(u.as_str()) {
+                        continue;
+                    }
+                }
+                if let Some(from) = filter.from {
+                    if e.start_time < from {
+                        continue;
+                    }
+                }
+                if let Some(to) = filter.to {
+                    if e.start_time > to {
+                        continue;
+                    }
+                }
+                if filter.billable_only && !e.billable {
+                    continue;
+                }
+                out.push((t.title.clone(), e.clone()));
+            }
+        }
+        out
+    }
+
+    /// Delete a time entry by id.
+    pub async fn delete_time_entry(&self, entry_id: &str) -> Result<(), VaultError> {
+        let vault = self.vault.read().await;
+        let tasks = vault.load_tasks();
+        for mut t in tasks {
+            let before = t.time_entries.len();
+            t.time_entries.retain(|e| e.id != entry_id);
+            if t.time_entries.len() != before {
+                t.date_modified = Some(Utc::now());
+                vault.save_task(&t)?;
+                return Ok(());
+            }
+        }
+        Err(VaultError::NotFound(format!(
+            "time entry {entry_id}"
+        )))
+    }
+}
+
+/// Filter for [`VaultServiceImpl::list_time_entries`].
+#[derive(Debug, Clone, Default)]
+pub struct TimeEntryFilter {
+    pub task_ref: Option<String>,
+    pub user: Option<String>,
+    pub from: Option<chrono::DateTime<Utc>>,
+    pub to: Option<chrono::DateTime<Utc>>,
+    pub billable_only: bool,
 }
 
 // ── VaultService trait implementation ────────────────────────────────────────
