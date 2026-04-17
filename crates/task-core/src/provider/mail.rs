@@ -35,9 +35,10 @@ pub struct MailConfig {
 }
 
 impl MailConfig {
-    fn ocs_base(&self) -> String {
-        format!("{}/ocs/v2.php/apps/mail/api", self.url.trim_end_matches('/'))
-    }
+    /// Base for the Nextcloud Mail app routes. As of Mail 5.x there's no
+    /// third-party-stable OCS surface for most operations — the app
+    /// routes under `/index.php/apps/mail/api/*` are the live endpoint.
+    /// We rely on `OCS-APIRequest: true` to bypass CSRF.
     fn app_base(&self) -> String {
         format!(
             "{}/index.php/apps/mail/api",
@@ -138,25 +139,26 @@ impl MailClient {
 
     /// List mail accounts the authenticated user has configured.
     pub async fn list_accounts(&self) -> Result<Vec<MailAccount>, VaultError> {
-        let url = format!("{}/account/list", self.config.ocs_base());
-        let body = self.ocs_get_data(&url).await?;
-        let data = body
+        let url = format!("{}/accounts", self.config.app_base());
+        let data = self.app_get_json(&url).await?;
+        let arr = data
             .as_array()
             .ok_or_else(|| VaultError::ParseError("mail accounts: not an array".into()))?;
-        Ok(data.iter().filter_map(parse_account).collect())
+        Ok(arr.iter().filter_map(parse_account).collect())
     }
 
     /// List mailboxes in an account.
     pub async fn list_mailboxes(&self, account_id: i64) -> Result<Vec<Mailbox>, VaultError> {
         let url = format!(
-            "{}/ocs/mailboxes?accountId={account_id}",
-            self.config.ocs_base()
+            "{}/accounts/{account_id}/mailboxes",
+            self.config.app_base()
         );
-        let body = self.ocs_get_data(&url).await?;
-        let data = body
+        let data = self.app_get_json(&url).await?;
+        let arr = data
             .as_array()
-            .ok_or_else(|| VaultError::ParseError("mailboxes: not an array".into()))?;
-        Ok(data.iter().filter_map(parse_mailbox).collect())
+            .or_else(|| data.get("mailboxes").and_then(|v| v.as_array()))
+            .ok_or_else(|| VaultError::ParseError("mailboxes: no array".into()))?;
+        Ok(arr.iter().filter_map(parse_mailbox).collect())
     }
 
     /// List messages in a mailbox. `filter` is NC Mail's free-text filter
@@ -170,8 +172,8 @@ impl MailClient {
         cursor: Option<&str>,
     ) -> Result<Vec<MailMessage>, VaultError> {
         let mut url = format!(
-            "{}/ocs/mailboxes/{mailbox_id}/messages?limit={}",
-            self.config.ocs_base(),
+            "{}/mailboxes/{mailbox_id}/messages?limit={}",
+            self.config.app_base(),
             limit.min(100)
         );
         if let Some(f) = filter {
@@ -180,11 +182,11 @@ impl MailClient {
         if let Some(c) = cursor {
             url.push_str(&format!("&cursor={}", urlencode(c)));
         }
-        let body = self.ocs_get_data(&url).await?;
-        let data = body
+        let data = self.app_get_json(&url).await?;
+        let arr = data
             .as_array()
             .ok_or_else(|| VaultError::ParseError("messages: not an array".into()))?;
-        Ok(data
+        Ok(arr
             .iter()
             .filter_map(|m| parse_message(m, mailbox_id))
             .collect())
@@ -238,8 +240,9 @@ impl MailClient {
         Ok(text)
     }
 
-    /// GET an OCS endpoint and unwrap `ocs.data`.
-    async fn ocs_get_data(&self, url: &str) -> Result<serde_json::Value, VaultError> {
+    /// GET an app route and return the parsed JSON body. App routes return
+    /// naked JSON (no `ocs.data` wrapper).
+    async fn app_get_json(&self, url: &str) -> Result<serde_json::Value, VaultError> {
         let resp = self
             .auth(self.http.get(url))
             .send()
@@ -255,12 +258,8 @@ impl MailClient {
                 "mail GET {url} {status}: {text}"
             )));
         }
-        let v: serde_json::Value = serde_json::from_str(&text)
-            .map_err(|e| VaultError::ParseError(format!("mail JSON: {e}")))?;
-        v.get("ocs")
-            .and_then(|o| o.get("data"))
-            .cloned()
-            .ok_or_else(|| VaultError::ParseError("missing ocs.data".into()))
+        serde_json::from_str(&text)
+            .map_err(|e| VaultError::ParseError(format!("mail JSON: {e}")))
     }
 }
 
