@@ -2,6 +2,7 @@ pub mod task;
 pub mod project;
 pub mod client;
 pub mod invoice;
+pub mod email;
 pub mod query;
 pub mod rrule;
 pub mod capture;
@@ -41,6 +42,7 @@ pub use task::{
 pub use project::{next_task, Project, ProjectStatus, ProjectStats};
 pub use client::{resolve_rate, Client};
 pub use invoice::{format_invoice_id, Invoice, InvoiceLine, InvoiceStatus, Payment};
+pub use email::EmailRef;
 pub use views::{SavedView, ViewFilters, ViewDisplay};
 pub use cycle::{Cycle, CycleStatus};
 pub use module::{Module, ModuleStatus};

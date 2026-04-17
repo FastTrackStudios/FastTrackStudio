@@ -96,6 +96,26 @@ pub struct Project {
     /// Invoice Ninja id of the corresponding IN project (opaque hashed
     /// string). Set when the project was pushed to IN.
     pub invoice_ninja_id: Option<String>,
+
+    // ── Email routing ────────────────────────────────────────────────
+
+    /// Inbound email addresses that auto-link to this project. The bot
+    /// sees these on `to:` and tags incoming mail.
+    /// e.g. ["montreal-album@projects.example.com"]
+    #[facet(default)]
+    pub email_aliases: Vec<String>,
+
+    /// Mail-client tag labels (NC Mail, ProtonMail) that map to this
+    /// project. The bot reads these labels from the mail service and
+    /// links the email here.
+    /// e.g. ["project:montreal-album", "PRJ-MA"]
+    #[facet(default)]
+    pub email_tags: Vec<String>,
+
+    /// Emails linked to this project. Populated by the bot or manual
+    /// `task email link` calls.
+    #[facet(default)]
+    pub emails: Vec<crate::email::EmailRef>,
 }
 
 // r[impl project.status]

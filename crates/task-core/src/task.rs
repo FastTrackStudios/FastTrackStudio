@@ -97,6 +97,23 @@ pub struct Task {
     #[facet(default)]
     pub is_draft: bool,
 
+    // ── Email routing ────────────────────────────────────────────────
+
+    /// Inbound email addresses that auto-link to this task.
+    /// e.g. ["mix-feedback@proj.example.com"]
+    #[facet(default)]
+    pub email_aliases: Vec<String>,
+
+    /// Mail-client tag labels (NC Mail, ProtonMail) that map to this task.
+    /// e.g. ["task:mix-v3"]
+    #[facet(default)]
+    pub email_tags: Vec<String>,
+
+    /// Emails linked to this task. Populated by bots or manual `task email
+    /// link` calls — reference-only, body stays in Nextcloud Mail.
+    #[facet(default)]
+    pub emails: Vec<crate::email::EmailRef>,
+
     // ── Content ──────────────────────────────────────────────────────
 
     /// Markdown body content (after frontmatter).
