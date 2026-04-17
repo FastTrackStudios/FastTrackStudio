@@ -394,6 +394,31 @@ enum TimeCommands {
         #[arg(long)]
         json: bool,
     },
+    /// Edit an existing time entry by id
+    Edit {
+        entry_id: String,
+        /// Start time (YYYY-MM-DDTHH:MM[:SS]Z or "YYYY-MM-DD HH:MM")
+        #[arg(long)]
+        start: Option<String>,
+        /// End time — pass "clear" to reopen the timer
+        #[arg(long)]
+        end: Option<String>,
+        #[arg(long)]
+        description: Option<String>,
+        /// Mark billable / non-billable
+        #[arg(long)]
+        billable: Option<bool>,
+        /// Billable rate in cents per hour — pass 0 to clear the override
+        #[arg(long)]
+        rate: Option<u32>,
+        #[arg(long)]
+        user: Option<String>,
+        /// Replace tags (comma-separated). Pass "" to clear.
+        #[arg(long)]
+        tags: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
     /// Delete a time entry by id
     Delete {
         entry_id: String,
@@ -1145,8 +1170,63 @@ async fn main() -> eyre::Result<()> {
         Commands::Time {
             command: TimeCommands::Delete { entry_id },
         } => {
-            svc.delete_time_entry(&entry_id).await?;
+            svc.delete_time_entry_as(&entry_id, actor.as_deref()).await?;
             println!("Deleted entry {entry_id}.");
+        }
+
+        Commands::Time {
+            command:
+                TimeCommands::Edit {
+                    entry_id,
+                    start,
+                    end,
+                    description,
+                    billable,
+                    rate,
+                    user,
+                    tags,
+                    json,
+                },
+        } => {
+            let mut patch = task_core::TimeEntryPatch::default();
+            if let Some(s) = start {
+                patch.start_time = Some(parse_datetime(&s)?);
+            }
+            if let Some(e) = end {
+                patch.end_time = Some(if e == "clear" {
+                    None
+                } else {
+                    Some(parse_datetime(&e)?)
+                });
+            }
+            patch.description = description;
+            patch.billable = billable;
+            patch.billable_rate = rate;
+            patch.user = user;
+            patch.tags = tags.map(|s| {
+                if s.is_empty() {
+                    Vec::new()
+                } else {
+                    s.split(',').map(|t| t.trim().to_string()).collect()
+                }
+            });
+
+            let (title, updated) = svc
+                .edit_time_entry(&entry_id, patch, actor.as_deref())
+                .await?;
+            if json {
+                println!(
+                    "{{\"task\":\"{}\",\"entry\":{}}}",
+                    escape_json(&title),
+                    facet_json::to_string(&updated).unwrap_or_default()
+                );
+            } else {
+                println!(
+                    "Updated entry {} on '{title}' — {} min.",
+                    updated.id,
+                    updated.duration_minutes()
+                );
+            }
         }
 
         Commands::Activity { limit, kind, json } => {

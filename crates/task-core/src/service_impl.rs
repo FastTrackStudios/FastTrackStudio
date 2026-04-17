@@ -443,7 +443,7 @@ impl VaultServiceImpl {
 
         let entry = crate::task::TimeEntry {
             id: Uuid::new_v4().to_string(),
-            user,
+            user: user.clone(),
             start_time: Utc::now(),
             end_time: None,
             description,
@@ -454,6 +454,15 @@ impl VaultServiceImpl {
         task.time_entries.push(entry.clone());
         task.date_modified = Some(Utc::now());
         vault.save_task(&task)?;
+
+        self.record_time_event(
+            "time:started",
+            &task,
+            &entry,
+            None,
+            Some(&entry.id),
+            user.as_deref(),
+        );
         Ok(entry)
     }
 
@@ -496,6 +505,15 @@ impl VaultServiceImpl {
         let stopped = task.time_entries[idx].clone();
         let title = task.title.clone();
         vault.save_task(&task)?;
+
+        self.record_time_event(
+            "time:stopped",
+            &task,
+            &stopped,
+            None,
+            Some(&format!("{} min", stopped.duration_minutes())),
+            stopped.user.as_deref(),
+        );
         Ok((title, stopped))
     }
 
@@ -526,7 +544,7 @@ impl VaultServiceImpl {
 
         let entry = crate::task::TimeEntry {
             id: Uuid::new_v4().to_string(),
-            user,
+            user: user.clone(),
             start_time: start,
             end_time: Some(end),
             description,
@@ -537,6 +555,15 @@ impl VaultServiceImpl {
         task.time_entries.push(entry.clone());
         task.date_modified = Some(Utc::now());
         vault.save_task(&task)?;
+
+        self.record_time_event(
+            "time:logged",
+            &task,
+            &entry,
+            None,
+            Some(&format!("{} min", entry.duration_minutes())),
+            user.as_deref(),
+        );
         Ok(entry)
     }
 
@@ -677,21 +704,152 @@ impl VaultServiceImpl {
 
     /// Delete a time entry by id.
     pub async fn delete_time_entry(&self, entry_id: &str) -> Result<(), VaultError> {
+        self.delete_time_entry_as(entry_id, None).await
+    }
+
+    /// Delete a time entry and stamp the audit row with the acting user.
+    pub async fn delete_time_entry_as(
+        &self,
+        entry_id: &str,
+        actor: Option<&str>,
+    ) -> Result<(), VaultError> {
         let vault = self.vault.read().await;
         let tasks = vault.load_tasks();
         for mut t in tasks {
-            let before = t.time_entries.len();
-            t.time_entries.retain(|e| e.id != entry_id);
-            if t.time_entries.len() != before {
+            if let Some(entry) = t.time_entries.iter().find(|e| e.id == entry_id).cloned() {
+                t.time_entries.retain(|e| e.id != entry_id);
                 t.date_modified = Some(Utc::now());
                 vault.save_task(&t)?;
+
+                self.record_time_event(
+                    "time:deleted",
+                    &t,
+                    &entry,
+                    Some(&format!("{} min", entry.duration_minutes())),
+                    None,
+                    actor,
+                );
                 return Ok(());
             }
         }
-        Err(VaultError::NotFound(format!(
-            "time entry {entry_id}"
-        )))
+        Err(VaultError::NotFound(format!("time entry {entry_id}")))
     }
+
+    /// Edit an existing time entry. Only fields present in `patch` are updated.
+    /// Returns the (task_title, updated_entry) pair.
+    pub async fn edit_time_entry(
+        &self,
+        entry_id: &str,
+        patch: TimeEntryPatch,
+        actor: Option<&str>,
+    ) -> Result<(String, crate::task::TimeEntry), VaultError> {
+        let vault = self.vault.read().await;
+        let tasks = vault.load_tasks();
+
+        for mut t in tasks {
+            let Some(idx) = t.time_entries.iter().position(|e| e.id == entry_id) else {
+                continue;
+            };
+            let before = t.time_entries[idx].clone();
+            let entry = &mut t.time_entries[idx];
+
+            if let Some(s) = patch.start_time {
+                entry.start_time = s;
+            }
+            if let Some(end_opt) = patch.end_time {
+                entry.end_time = end_opt;
+            }
+            if let Some(d) = patch.description {
+                entry.description = if d.is_empty() { None } else { Some(d) };
+            }
+            if let Some(b) = patch.billable {
+                entry.billable = b;
+            }
+            if let Some(r) = patch.billable_rate {
+                entry.billable_rate = if r == 0 { None } else { Some(r) };
+            }
+            if let Some(u) = patch.user {
+                entry.user = if u.is_empty() { None } else { Some(u) };
+            }
+            if let Some(tags) = patch.tags {
+                entry.tags = tags;
+            }
+
+            // Sanity: end after start if both set.
+            if let (Some(end), start) = (entry.end_time, entry.start_time) {
+                if end <= start {
+                    return Err(VaultError::ParseError(
+                        "end must be after start".into(),
+                    ));
+                }
+            }
+
+            let after = entry.clone();
+            t.date_modified = Some(Utc::now());
+            let title = t.title.clone();
+            vault.save_task(&t)?;
+
+            self.record_time_event(
+                "time:edited",
+                &t,
+                &after,
+                Some(&format!("{} min", before.duration_minutes())),
+                Some(&format!("{} min", after.duration_minutes())),
+                actor,
+            );
+            return Ok((title, after));
+        }
+
+        Err(VaultError::NotFound(format!("time entry {entry_id}")))
+    }
+
+    /// Write a row to the audit log for a timer-related event. Uses the
+    /// existing `changes` table so `task activity` surfaces timer events
+    /// alongside other edits.
+    fn record_time_event(
+        &self,
+        field: &str,
+        task: &Task,
+        entry: &crate::task::TimeEntry,
+        old_value: Option<&str>,
+        new_value: Option<&str>,
+        actor: Option<&str>,
+    ) {
+        if let Ok(guard) = self.index.lock() {
+            if let Some(ref index) = *guard {
+                let id = task.id.as_deref().unwrap_or(task.title.as_str());
+                // Include the entry id in the new_value so the audit row is
+                // self-describing.
+                let payload = match new_value {
+                    Some(v) => format!("{v} (entry {})", entry.id),
+                    None => format!("entry {}", entry.id),
+                };
+                let _ = index.record_change(
+                    "task",
+                    id,
+                    Some(field),
+                    old_value,
+                    Some(&payload),
+                    actor,
+                    Some(&format!("{}.md", task.title)),
+                );
+            }
+        }
+    }
+}
+
+/// Patch for [`VaultServiceImpl::edit_time_entry`]. Only `Some(_)` fields
+/// are applied. For `end_time`, an outer `Some(None)` means "clear it (timer
+/// is running again)", while `None` means "leave as-is".
+#[derive(Debug, Default, Clone)]
+pub struct TimeEntryPatch {
+    pub start_time: Option<chrono::DateTime<Utc>>,
+    pub end_time: Option<Option<chrono::DateTime<Utc>>>,
+    pub description: Option<String>,
+    pub billable: Option<bool>,
+    pub billable_rate: Option<u32>,
+    pub user: Option<String>,
+    pub tags: Option<Vec<String>>,
 }
 
 /// Filter for [`VaultServiceImpl::list_time_entries`].
