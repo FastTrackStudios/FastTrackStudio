@@ -3,6 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::client::Client;
+use crate::invoice::Invoice;
 use crate::project::Project;
 use crate::service::VaultError;
 use crate::task::Task;
@@ -189,6 +190,55 @@ impl Vault {
         };
         let content = Self::render_client_file(client, &body)?;
         Self::atomic_write(&path, &content)
+    }
+
+    // ── Invoice I/O ──────────────────────────────────────────────────────────
+
+    pub fn parse_invoice_from_md(content: &str) -> Option<Invoice> {
+        let (frontmatter, _body) = Self::split_frontmatter(content)?;
+        facet_yaml::from_str::<Invoice>(frontmatter).ok()
+    }
+
+    pub fn render_invoice_file(invoice: &Invoice, body: &str) -> Result<String, VaultError> {
+        let yaml = facet_yaml::to_string(invoice)
+            .map_err(|e| VaultError::ParseError(e.to_string()))?;
+        let yaml = yaml.strip_prefix("---\n").unwrap_or(&yaml);
+        Ok(format!("---\n{}---\n{}", yaml, body))
+    }
+
+    /// Load all invoices from the `invoices/` subdirectory.
+    pub fn load_invoices(&self) -> Vec<Invoice> {
+        let dir = self.root.join("invoices");
+        if !dir.exists() {
+            return vec![];
+        }
+        Self::walk_md_in(&dir)
+            .filter_map(|content| Self::parse_invoice_from_md(&content))
+            .collect()
+    }
+
+    /// Save an invoice to `invoices/<id>.md`. Overwrites any existing file
+    /// at the same id (edits are the common case).
+    pub fn save_invoice(&self, invoice: &Invoice) -> Result<(), VaultError> {
+        let dir = self.root.join("invoices");
+        std::fs::create_dir_all(&dir).map_err(|e| VaultError::IoError(e.to_string()))?;
+        let path = dir.join(format!("{}.md", invoice.id));
+        // Re-render the human-friendly body from the frontmatter every
+        // time — keeps the markdown representation in sync with the
+        // authoritative YAML. Users who want custom body text can still
+        // edit it; it just won't survive a service-side update.
+        let body = crate::invoice::render_invoice_body(invoice);
+        let content = Self::render_invoice_file(invoice, &body)?;
+        Self::atomic_write(&path, &content)
+    }
+
+    /// Delete an invoice file by id.
+    pub fn delete_invoice(&self, invoice_id: &str) -> Result<(), VaultError> {
+        let path = self.root.join("invoices").join(format!("{invoice_id}.md"));
+        if path.exists() {
+            std::fs::remove_file(&path).map_err(|e| VaultError::IoError(e.to_string()))?;
+        }
+        Ok(())
     }
 
     pub fn render_task_file(task: &Task, body: &str) -> Result<String, VaultError> {

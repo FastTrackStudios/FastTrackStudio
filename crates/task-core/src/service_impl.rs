@@ -410,6 +410,313 @@ impl VaultServiceImpl {
 
     // ── Invoicing ───────────────────────────────────────────────────────────
 
+    /// Aggregate uninvoiced billable time entries for a client into a new
+    /// markdown-backed Invoice. Saves the invoice to `invoices/` and flips
+    /// `invoiced_at` on every TimeEntry consumed.
+    ///
+    /// - Entries with `invoiced_at: Some(_)` are skipped.
+    /// - Running timers (`end_time: None`) are skipped.
+    /// - Lines are grouped by (task_title, resolved_rate) so mixed-rate
+    ///   work on one task appears as separate lines.
+    /// - Due date defaults to `issue_date + client.payment_terms_days` or
+    ///   `issue_date + 30` if terms are unset.
+    pub async fn create_invoice_from_entries(
+        &self,
+        client_name: &str,
+        from: Option<chrono::DateTime<Utc>>,
+        to: Option<chrono::DateTime<Utc>>,
+        fallback_rate: Option<u32>,
+        tax_rate_percent: Option<f64>,
+        discount_percent: Option<f64>,
+        po_number: Option<String>,
+        public_notes: Option<String>,
+        actor: Option<&str>,
+    ) -> Result<crate::invoice::Invoice, VaultError> {
+        let client = self
+            .find_client(client_name)
+            .await
+            .ok_or_else(|| VaultError::NotFound(format!("client '{client_name}'")))?;
+
+        let ctxs = self
+            .list_time_entries(TimeEntryFilter {
+                client: Some(client_name.to_string()),
+                from,
+                to,
+                billable_only: true,
+                ..Default::default()
+            })
+            .await;
+
+        use std::collections::BTreeMap;
+        let mut by_task_rate: BTreeMap<(String, u32), f64> = BTreeMap::new();
+        let mut entry_ids = Vec::new();
+        for ctx in ctxs {
+            let e = &ctx.entry;
+            if e.invoiced_at.is_some() || e.end_time.is_none() {
+                continue;
+            }
+            let mins = e.duration_minutes() as u64;
+            if mins == 0 {
+                continue;
+            }
+            let rate = ctx.effective_rate(fallback_rate);
+            *by_task_rate
+                .entry((ctx.task_title.clone(), rate))
+                .or_insert(0.0) += mins as f64 / 60.0;
+            entry_ids.push(e.id.clone());
+        }
+
+        if by_task_rate.is_empty() {
+            return Err(VaultError::NotFound(format!(
+                "no uninvoiced billable entries for client '{client_name}' in range"
+            )));
+        }
+
+        let line_items: Vec<crate::invoice::InvoiceLine> = by_task_rate
+            .into_iter()
+            .map(|((task, rate), hours)| crate::invoice::InvoiceLine {
+                id: Uuid::new_v4().to_string(),
+                task_title: task.clone(),
+                description: task,
+                hours,
+                rate_cents: rate,
+                tax_rate_percent: None,
+                discount_percent: None,
+            })
+            .collect();
+
+        let today = chrono::Local::now().date_naive();
+        let terms = client.payment_terms_days.unwrap_or(30) as i64;
+        let due_date = today + chrono::Duration::days(terms);
+        let year = today.format("%Y").to_string().parse::<i32>().unwrap_or(2026);
+        let number = self.next_invoice_number(year).await?;
+        let id = crate::invoice::format_invoice_id(year, number);
+
+        let now = Utc::now();
+        let invoice = crate::invoice::Invoice {
+            id: id.clone(),
+            number,
+            status: crate::invoice::InvoiceStatus::Draft,
+            client: crate::task::WikiLink(client.name.clone()),
+            issue_date: today,
+            due_date,
+            currency_code: if client.currency_code.is_empty() {
+                "USD".to_string()
+            } else {
+                client.currency_code.clone()
+            },
+            line_items,
+            tax_rate_percent,
+            discount_percent,
+            po_number,
+            public_notes,
+            private_notes: None,
+            payments: Vec::new(),
+            entry_ids: entry_ids.clone(),
+            sent_at: None,
+            paid_at: None,
+            cancelled_at: None,
+            cancelled_reason: None,
+            created_by: actor.map(String::from),
+            date_created: Some(now),
+            date_modified: Some(now),
+        };
+
+        self.vault.read().await.save_invoice(&invoice)?;
+        self.mark_entries_invoiced(&entry_ids, &id).await?;
+
+        if let Ok(guard) = self.index.lock() {
+            if let Some(ref idx) = *guard {
+                let _ = idx.record_change(
+                    "invoice",
+                    &id,
+                    Some("status"),
+                    None,
+                    Some("Draft"),
+                    actor,
+                    Some(&format!("invoices/{id}.md")),
+                );
+            }
+        }
+
+        Ok(invoice)
+    }
+
+    /// Next invoice number for a given year. Scans existing invoices and
+    /// returns max+1 so we don't need a separate counter file. Invoices
+    /// are few per year for a single company — scanning is cheap.
+    async fn next_invoice_number(&self, year: i32) -> Result<u32, VaultError> {
+        let invoices = self.vault.read().await.load_invoices();
+        let prefix = format!("INV-{year:04}-");
+        let max = invoices
+            .iter()
+            .filter(|i| i.id.starts_with(&prefix))
+            .map(|i| i.number)
+            .max()
+            .unwrap_or(0);
+        Ok(max + 1)
+    }
+
+    pub async fn list_invoices(&self) -> Vec<crate::invoice::Invoice> {
+        let mut invoices = self.vault.read().await.load_invoices();
+        // Refresh derived status for display (non-destructive — the file
+        // still has whatever we last wrote).
+        let today = chrono::Local::now().date_naive();
+        for inv in &mut invoices {
+            inv.status = inv.derive_status(today);
+        }
+        invoices.sort_by(|a, b| b.number.cmp(&a.number));
+        invoices
+    }
+
+    pub async fn get_invoice(&self, invoice_id: &str) -> Option<crate::invoice::Invoice> {
+        self.vault
+            .read()
+            .await
+            .load_invoices()
+            .into_iter()
+            .find(|i| i.id.eq_ignore_ascii_case(invoice_id))
+    }
+
+    /// Flip an invoice to Sent. Idempotent: re-sending a Sent invoice is a
+    /// no-op.
+    pub async fn send_invoice(
+        &self,
+        invoice_id: &str,
+        actor: Option<&str>,
+    ) -> Result<crate::invoice::Invoice, VaultError> {
+        let vault = self.vault.read().await;
+        let mut invoice = vault
+            .load_invoices()
+            .into_iter()
+            .find(|i| i.id.eq_ignore_ascii_case(invoice_id))
+            .ok_or_else(|| VaultError::NotFound(invoice_id.to_string()))?;
+
+        if matches!(
+            invoice.status,
+            crate::invoice::InvoiceStatus::Cancelled | crate::invoice::InvoiceStatus::Refunded
+        ) {
+            return Err(VaultError::IoError(format!(
+                "cannot send {:?} invoice",
+                invoice.status
+            )));
+        }
+
+        let now = Utc::now();
+        if invoice.sent_at.is_none() {
+            invoice.sent_at = Some(now);
+            invoice.status = crate::invoice::InvoiceStatus::Sent;
+        }
+        invoice.date_modified = Some(now);
+        vault.save_invoice(&invoice)?;
+
+        if let Ok(guard) = self.index.lock() {
+            if let Some(ref idx) = *guard {
+                let _ = idx.record_change(
+                    "invoice",
+                    &invoice.id,
+                    Some("status"),
+                    Some("Draft"),
+                    Some("Sent"),
+                    actor,
+                    Some(&format!("invoices/{}.md", invoice.id)),
+                );
+            }
+        }
+        Ok(invoice)
+    }
+
+    /// Record a payment against an invoice. Status auto-derives
+    /// (PartiallyPaid / Paid) based on totals.
+    pub async fn add_invoice_payment(
+        &self,
+        invoice_id: &str,
+        payment: crate::invoice::Payment,
+        actor: Option<&str>,
+    ) -> Result<crate::invoice::Invoice, VaultError> {
+        let vault = self.vault.read().await;
+        let mut invoice = vault
+            .load_invoices()
+            .into_iter()
+            .find(|i| i.id.eq_ignore_ascii_case(invoice_id))
+            .ok_or_else(|| VaultError::NotFound(invoice_id.to_string()))?;
+
+        let now = Utc::now();
+        let amount = payment.amount_cents;
+        invoice.payments.push(payment);
+        invoice.date_modified = Some(now);
+
+        let today = chrono::Local::now().date_naive();
+        let new_status = invoice.derive_status(today);
+        let old_status = format!("{:?}", invoice.status);
+        invoice.status = new_status.clone();
+        if matches!(new_status, crate::invoice::InvoiceStatus::Paid)
+            && invoice.paid_at.is_none()
+        {
+            invoice.paid_at = Some(now);
+        }
+        vault.save_invoice(&invoice)?;
+
+        if let Ok(guard) = self.index.lock() {
+            if let Some(ref idx) = *guard {
+                let _ = idx.record_change(
+                    "invoice",
+                    &invoice.id,
+                    Some("payment"),
+                    Some(&old_status),
+                    Some(&format!("+${:.2}", amount as f64 / 100.0)),
+                    actor,
+                    Some(&format!("invoices/{}.md", invoice.id)),
+                );
+            }
+        }
+        Ok(invoice)
+    }
+
+    /// Cancel an invoice — sets cancelled_at and flips status. Does NOT
+    /// un-invoice the time entries (that's a separate call if you want
+    /// to re-bill them) because cancellations usually mean "don't bill
+    /// this at all" rather than "rebill later".
+    pub async fn cancel_invoice(
+        &self,
+        invoice_id: &str,
+        reason: Option<String>,
+        actor: Option<&str>,
+    ) -> Result<crate::invoice::Invoice, VaultError> {
+        let vault = self.vault.read().await;
+        let mut invoice = vault
+            .load_invoices()
+            .into_iter()
+            .find(|i| i.id.eq_ignore_ascii_case(invoice_id))
+            .ok_or_else(|| VaultError::NotFound(invoice_id.to_string()))?;
+
+        if matches!(invoice.status, crate::invoice::InvoiceStatus::Cancelled) {
+            return Ok(invoice);
+        }
+        let now = Utc::now();
+        let old_status = format!("{:?}", invoice.status);
+        invoice.status = crate::invoice::InvoiceStatus::Cancelled;
+        invoice.cancelled_at = Some(now);
+        invoice.cancelled_reason = reason;
+        invoice.date_modified = Some(now);
+        vault.save_invoice(&invoice)?;
+
+        if let Ok(guard) = self.index.lock() {
+            if let Some(ref idx) = *guard {
+                let _ = idx.record_change(
+                    "invoice",
+                    &invoice.id,
+                    Some("status"),
+                    Some(&old_status),
+                    Some("Cancelled"),
+                    actor,
+                    Some(&format!("invoices/{}.md", invoice.id)),
+                );
+            }
+        }
+        Ok(invoice)
+    }
+
     /// Mark a set of time entries as invoiced against a specific invoice
     /// id. Idempotent: already-invoiced entries are left alone.
     pub async fn mark_entries_invoiced(

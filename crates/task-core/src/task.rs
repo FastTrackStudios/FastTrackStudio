@@ -161,7 +161,7 @@ impl Priority {
 }
 
 /// A wikilink reference `[[Note Name]]`
-#[derive(Debug, Clone, PartialEq, Facet)]
+#[derive(Debug, Clone, PartialEq, Default, Facet)]
 #[facet(transparent)]
 pub struct WikiLink(pub String);
 
