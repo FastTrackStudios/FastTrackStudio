@@ -449,7 +449,7 @@ async fn main() -> eyre::Result<()> {
         }
 
         Commands::Complete { title } => {
-            let task = svc.complete_task(title).await?;
+            let task = svc.complete_task_as(title, actor.as_deref()).await?;
             if task.recurrence.is_some() {
                 let next = task
                     .scheduled
@@ -535,7 +535,7 @@ async fn main() -> eyre::Result<()> {
                 task.body = b;
             }
 
-            let updated = svc.update_task(task).await?;
+            let updated = svc.update_task_as(task, actor.as_deref()).await?;
             if json {
                 println!("{}", facet_json::to_string(&updated).unwrap_or_default());
             } else {
@@ -546,12 +546,12 @@ async fn main() -> eyre::Result<()> {
         Commands::Delete { reference, hard } => {
             if hard {
                 let task = find_task(&svc, &reference).await?;
-                svc.delete_task(task.title.clone()).await?;
+                svc.delete_task_as(task.title.clone(), actor.as_deref()).await?;
                 println!("Deleted (hard): {}", task.title);
             } else {
                 let mut task = find_task(&svc, &reference).await?;
                 task.deleted_at = Some(chrono::Utc::now());
-                let updated = svc.update_task(task).await?;
+                let updated = svc.update_task_as(task, actor.as_deref()).await?;
                 println!("Deleted (soft): {}", updated.title);
             }
         }
@@ -563,7 +563,7 @@ async fn main() -> eyre::Result<()> {
             } else {
                 Some(user)
             };
-            let updated = svc.update_task(task).await?;
+            let updated = svc.update_task_as(task, actor.as_deref()).await?;
             match &updated.assignee {
                 Some(u) => println!("Assigned '{}' → {u}", updated.title),
                 None => println!("Unassigned '{}'", updated.title),
@@ -604,7 +604,7 @@ async fn main() -> eyre::Result<()> {
             comments.push(new_comment.clone());
             task.body = splice_comments(&task.body, &comments);
 
-            svc.update_task(task).await?;
+            svc.update_task_as(task, actor.as_deref()).await?;
             println!("Comment added ({}).", new_comment.id);
         }
 

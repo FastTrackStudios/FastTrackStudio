@@ -146,12 +146,37 @@ impl VaultServiceImpl {
     }
 
     // r[impl api.service.update-task]
-    pub async fn update_task(&self, mut task: Task) -> Result<Task, VaultError> {
+    pub async fn update_task(&self, task: Task) -> Result<Task, VaultError> {
+        self.update_task_as(task, None).await
+    }
+
+    /// Update a task and emit audit rows for every changed scalar field.
+    /// The `actor` is stamped on each change row so the activity feed can
+    /// show who made the edit.
+    pub async fn update_task_as(
+        &self,
+        mut task: Task,
+        actor: Option<&str>,
+    ) -> Result<Task, VaultError> {
+        // Snapshot the prior state for diffing. Lookup prefers id; if the
+        // task has none, fall back to title match.
+        let vault = self.vault.read().await;
+        let prior = if let Some(id) = task.id.as_deref() {
+            vault.load_tasks().into_iter().find(|t| t.id.as_deref() == Some(id))
+        } else {
+            vault.load_tasks().into_iter().find(|t| t.title == task.title)
+        };
+
         task.date_modified = Some(Utc::now());
-        self.vault.read().await.save_task(&task)?;
+        vault.save_task(&task)?;
+
+        let file_path = format!("{}.md", task.title);
         if let Ok(guard) = self.index.lock() {
             if let Some(ref index) = *guard {
-                let _ = index.index_task(&task, &format!("{}.md", task.title));
+                let _ = index.index_task(&task, &file_path);
+                if let Some(ref old) = prior {
+                    record_task_diff(index, old, &task, actor, &file_path);
+                }
             }
         }
         Ok(task)
@@ -159,6 +184,15 @@ impl VaultServiceImpl {
 
     // r[impl api.service.complete-task]
     pub async fn complete_task(&self, title: String) -> Result<Task, VaultError> {
+        self.complete_task_as(title, None).await
+    }
+
+    /// Complete a task and stamp the audit row with the acting user.
+    pub async fn complete_task_as(
+        &self,
+        title: String,
+        actor: Option<&str>,
+    ) -> Result<Task, VaultError> {
         let vault = self.vault.read().await;
         let tasks = vault.load_tasks();
         let mut task = tasks
@@ -167,6 +201,7 @@ impl VaultServiceImpl {
             .ok_or_else(|| VaultError::NotFound(title.clone()))?;
 
         let today = chrono::Local::now().date_naive();
+        let prior_status = format!("{:?}", task.status);
         task.date_modified = Some(Utc::now());
 
         if task.recurrence.is_some() {
@@ -175,7 +210,6 @@ impl VaultServiceImpl {
             if !task.completed_instances.contains(&today_str) {
                 task.completed_instances.push(today_str);
             }
-            // Advance scheduled date to next occurrence
             if let Some(next) = rrule::next_occurrence(&task) {
                 task.scheduled = Some(next);
             }
@@ -188,10 +222,20 @@ impl VaultServiceImpl {
         }
 
         vault.save_task(&task)?;
+        let new_status = format!("{:?}", task.status);
+        let file_path = format!("{}.md", task.title);
         if let Ok(guard) = self.index.lock() {
             if let Some(ref index) = *guard {
-                let _ = index.index_task(&task, &format!("{}.md", task.title));
-                let _ = index.record_change("task", &task.title, Some("status"), Some("Open"), Some("Done"), None, None);
+                let _ = index.index_task(&task, &file_path);
+                let _ = index.record_change(
+                    "task",
+                    &task.title,
+                    Some("status"),
+                    Some(&prior_status),
+                    Some(&new_status),
+                    actor,
+                    Some(&file_path),
+                );
             }
         }
         Ok(task)
@@ -265,12 +309,29 @@ impl VaultServiceImpl {
     }
 
     pub async fn delete_task(&self, title: String) -> Result<(), VaultError> {
+        self.delete_task_as(title, None).await
+    }
+
+    /// Delete a task and emit an audit row tagged with the acting user.
+    pub async fn delete_task_as(
+        &self,
+        title: String,
+        actor: Option<&str>,
+    ) -> Result<(), VaultError> {
         let path = self.root.join(format!("{}.md", title));
         if path.exists() {
             std::fs::remove_file(&path).map_err(|e| VaultError::IoError(e.to_string()))?;
             if let Ok(guard) = self.index.lock() {
                 if let Some(ref index) = *guard {
-                    let _ = index.record_change("task", &title, None, None, None, None, None);
+                    let _ = index.record_change(
+                        "task",
+                        &title,
+                        Some("deleted"),
+                        Some("present"),
+                        Some("deleted"),
+                        actor,
+                        Some(&format!("{}.md", title)),
+                    );
                 }
             }
             Ok(())
@@ -664,4 +725,99 @@ impl crate::service::VaultService for VaultServiceImpl {
     async fn tasks_for_project(&self, project_title: String) -> Vec<Task> { self.tasks_for_project(project_title).await }
     async fn trigger_sync(&self) -> Result<crate::service::SyncStats, VaultError> { self.trigger_sync().await }
     async fn sync_status(&self) -> Option<crate::service::SyncStats> { self.sync_status().await }
+}
+
+/// Diff two versions of a task and write one audit row per changed scalar
+/// field. Lists (tags/projects/contexts) emit one row tagged with the diff
+/// summary rather than per-element rows — noisy enough as one entry.
+fn record_task_diff(
+    index: &crate::index::TaskIndex,
+    old: &Task,
+    new: &Task,
+    actor: Option<&str>,
+    file_path: &str,
+) {
+    let id = new.id.as_deref().or(Some(new.title.as_str())).unwrap();
+
+    // Scalar fields worth surfacing in the activity feed.
+    let mut rows: Vec<(&str, Option<String>, Option<String>)> = Vec::new();
+    if old.title != new.title {
+        rows.push(("title", Some(old.title.clone()), Some(new.title.clone())));
+    }
+    if old.status != new.status {
+        rows.push((
+            "status",
+            Some(format!("{:?}", old.status)),
+            Some(format!("{:?}", new.status)),
+        ));
+    }
+    if old.priority != new.priority {
+        rows.push((
+            "priority",
+            Some(format!("{:?}", old.priority)),
+            Some(format!("{:?}", new.priority)),
+        ));
+    }
+    if old.assignee != new.assignee {
+        rows.push(("assignee", old.assignee.clone(), new.assignee.clone()));
+    }
+    if old.due != new.due {
+        rows.push((
+            "due",
+            old.due.map(|d| d.to_string()),
+            new.due.map(|d| d.to_string()),
+        ));
+    }
+    if old.scheduled != new.scheduled {
+        rows.push((
+            "scheduled",
+            old.scheduled.map(|d| d.to_string()),
+            new.scheduled.map(|d| d.to_string()),
+        ));
+    }
+    if old.recurrence != new.recurrence {
+        rows.push(("recurrence", old.recurrence.clone(), new.recurrence.clone()));
+    }
+    if old.deleted_at.is_some() != new.deleted_at.is_some() {
+        rows.push((
+            "deleted_at",
+            old.deleted_at.map(|d| d.to_rfc3339()),
+            new.deleted_at.map(|d| d.to_rfc3339()),
+        ));
+    }
+
+    // List fields as one summary row each, naming the net diff.
+    if old.tags != new.tags {
+        rows.push((
+            "tags",
+            Some(old.tags.join(",")),
+            Some(new.tags.join(",")),
+        ));
+    }
+    if old.projects != new.projects {
+        rows.push((
+            "projects",
+            Some(old.projects.iter().map(|p| p.0.as_str()).collect::<Vec<_>>().join(",")),
+            Some(new.projects.iter().map(|p| p.0.as_str()).collect::<Vec<_>>().join(",")),
+        ));
+    }
+    if old.contexts != new.contexts {
+        rows.push((
+            "contexts",
+            Some(old.contexts.join(",")),
+            Some(new.contexts.join(",")),
+        ));
+    }
+
+    for (field, from, to) in rows {
+        let _ = index.record_change(
+            "task",
+            id,
+            Some(field),
+            from.as_deref(),
+            to.as_deref(),
+            actor,
+            Some(file_path),
+        );
+    }
 }
