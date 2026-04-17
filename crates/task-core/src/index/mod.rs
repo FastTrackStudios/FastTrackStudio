@@ -12,5 +12,5 @@
 mod sqlite;
 mod search;
 
-pub use sqlite::TaskIndex;
+pub use sqlite::{ChangeRow, ConflictRow, RebuildStats, TaskIndex, TaskRow};
 pub use search::SearchIndex;

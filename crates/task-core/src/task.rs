@@ -191,12 +191,64 @@ impl Default for DependencyRelType {
 }
 
 /// A logged work session.
+///
+/// A running timer is represented by `end_time == None`. Once stopped, `end_time`
+/// is set and the duration can be computed. Billable rate is stored in cents per
+/// hour (matches solidtime's integer-money convention; no floats).
 // r[impl task.time.entries]
-#[derive(Debug, Clone, PartialEq, Facet)]
+#[derive(Debug, Clone, PartialEq, Default, Facet)]
 pub struct TimeEntry {
+    /// Stable unique ID — required for CRDT merging of the time-entry list.
+    #[facet(default)]
+    pub id: String,
+    /// User who tracked the time.
+    #[facet(default)]
+    pub user: Option<String>,
     pub start_time: DateTime<Utc>,
     pub end_time: Option<DateTime<Utc>>,
     pub description: Option<String>,
+    /// Whether this entry is billable.
+    #[facet(default)]
+    pub billable: bool,
+    /// Billable rate override, in cents per hour. Falls back to project/member/org.
+    #[facet(default)]
+    pub billable_rate: Option<u32>,
+    /// Per-entry tags (separate from task-level tags).
+    #[facet(default)]
+    pub tags: Vec<String>,
+    /// Source if imported from another tool (e.g. "toggl", "clockify").
+    #[facet(default)]
+    pub imported_from: Option<String>,
+}
+
+impl TimeEntry {
+    /// A running timer has no `end_time`.
+    pub fn is_running(&self) -> bool {
+        self.end_time.is_none()
+    }
+
+    /// Duration in minutes. Returns 0 for running timers.
+    pub fn duration_minutes(&self) -> u32 {
+        match self.end_time {
+            Some(end) => {
+                let mins = (end - self.start_time).num_minutes();
+                if mins > 0 { mins as u32 } else { 0 }
+            }
+            None => 0,
+        }
+    }
+
+    /// Elapsed minutes for a running timer, measured from `now`.
+    pub fn elapsed_minutes(&self, now: DateTime<Utc>) -> u32 {
+        let mins = (now - self.start_time).num_minutes();
+        if mins > 0 { mins as u32 } else { 0 }
+    }
+
+    /// Billable amount in cents, given a resolved rate (cents/hour).
+    pub fn amount_cents(&self, resolved_rate: u32) -> u64 {
+        let mins = self.duration_minutes() as u64;
+        (mins * resolved_rate as u64) / 60
+    }
 }
 
 // r[impl task.recurrence.anchor]
@@ -384,13 +436,21 @@ impl Task {
     // r[impl task.time.total-logged]
     /// Total time logged across all completed time entries, in minutes.
     pub fn total_time_logged(&self) -> u32 {
+        self.time_entries.iter().map(|e| e.duration_minutes()).sum()
+    }
+
+    /// The currently-running time entry, if any.
+    pub fn running_timer(&self) -> Option<&TimeEntry> {
+        self.time_entries.iter().find(|e| e.is_running())
+    }
+
+    /// Total billable amount in cents, given a fallback rate (applied to entries
+    /// that don't have their own `billable_rate`). Non-billable entries contribute 0.
+    pub fn billable_amount_cents(&self, fallback_rate: u32) -> u64 {
         self.time_entries
             .iter()
-            .filter_map(|e| {
-                let end = e.end_time?;
-                let mins = (end - e.start_time).num_minutes();
-                if mins > 0 { Some(mins as u32) } else { None }
-            })
+            .filter(|e| e.billable)
+            .map(|e| e.amount_cents(e.billable_rate.unwrap_or(fallback_rate)))
             .sum()
     }
 
@@ -478,5 +538,42 @@ mod tests {
         };
         assert_eq!(task.subtask_count(), 0);
         assert_eq!(task.subtask_progress(), None);
+    }
+
+    #[test]
+    fn running_timer_and_billable() {
+        use chrono::TimeZone;
+        let start = Utc.with_ymd_and_hms(2026, 4, 17, 9, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2026, 4, 17, 10, 30, 0).unwrap();
+
+        let finished = TimeEntry {
+            id: "e1".into(),
+            user: Some("cody".into()),
+            start_time: start,
+            end_time: Some(end),
+            billable: true,
+            billable_rate: Some(12_000), // $120/hr
+            ..Default::default()
+        };
+        assert_eq!(finished.duration_minutes(), 90);
+        assert_eq!(finished.amount_cents(12_000), 18_000); // 1.5h * $120 = $180
+
+        let running = TimeEntry {
+            id: "e2".into(),
+            user: Some("cody".into()),
+            start_time: start,
+            end_time: None,
+            ..Default::default()
+        };
+        assert!(running.is_running());
+        assert_eq!(running.duration_minutes(), 0);
+
+        let task = Task {
+            time_entries: vec![finished, running.clone()],
+            ..Default::default()
+        };
+        assert!(task.running_timer().is_some());
+        // Only the finished billable entry contributes.
+        assert_eq!(task.billable_amount_cents(10_000), 18_000);
     }
 }

@@ -106,7 +106,19 @@ impl TaskIndex {
                 new_value TEXT,
                 changed_by TEXT,
                 changed_at TEXT NOT NULL DEFAULT (datetime('now')),
-                file_path TEXT
+                file_path TEXT,
+                -- Conflict metadata. NULL = ordinary change.
+                -- Otherwise: 'concurrent' (two heads touched same field),
+                -- 'timer' (two running timers), 'manual' (user-flagged).
+                conflict_kind TEXT,
+                -- Concurrent actor ID (for 'concurrent' conflicts): who made
+                -- the competing edit that lost out.
+                conflict_other_actor TEXT,
+                conflict_other_value TEXT,
+                -- Resolution: NULL = open, 'resolved' = decided, 'ignored'.
+                conflict_resolved TEXT,
+                conflict_resolved_by TEXT,
+                conflict_resolved_at TEXT
             );
 
             -- Indexes for common queries
@@ -118,9 +130,24 @@ impl TaskIndex {
             CREATE INDEX IF NOT EXISTS idx_task_tags_tag ON task_tags(tag);
             CREATE INDEX IF NOT EXISTS idx_changes_entity ON changes(entity_type, entity_id);
             CREATE INDEX IF NOT EXISTS idx_changes_time ON changes(changed_at);
+            CREATE INDEX IF NOT EXISTS idx_changes_conflict ON changes(conflict_kind) WHERE conflict_kind IS NOT NULL;
             ",
             )
             .map_err(|e| VaultError::IoError(format!("SQLite schema: {e}")))?;
+
+        // Lightweight migration: add conflict columns to an existing `changes` table
+        // that predates them. `ALTER TABLE ... ADD COLUMN` is idempotent-friendly
+        // because we swallow errors for columns that already exist.
+        for alter in [
+            "ALTER TABLE changes ADD COLUMN conflict_kind TEXT",
+            "ALTER TABLE changes ADD COLUMN conflict_other_actor TEXT",
+            "ALTER TABLE changes ADD COLUMN conflict_other_value TEXT",
+            "ALTER TABLE changes ADD COLUMN conflict_resolved TEXT",
+            "ALTER TABLE changes ADD COLUMN conflict_resolved_by TEXT",
+            "ALTER TABLE changes ADD COLUMN conflict_resolved_at TEXT",
+        ] {
+            let _ = self.conn.execute(alter, []);
+        }
 
         Ok(())
     }
@@ -215,6 +242,115 @@ impl TaskIndex {
         self.conn.execute("DELETE FROM task_tags WHERE task_id = ?1", params![id]).ok();
         self.conn.execute("DELETE FROM task_contexts WHERE task_id = ?1", params![id]).ok();
         Ok(())
+    }
+
+    /// Record a concurrent-edit conflict. Leaves `conflict_resolved` NULL, so the
+    /// row shows up in `list_conflicts()` until a caller resolves it.
+    ///
+    /// `kind` is a short tag: "concurrent" (CRDT heads disagree on a field),
+    /// "timer" (two running timers on the same task), "manual" (user flagged).
+    pub fn record_conflict(
+        &self,
+        entity_type: &str,
+        entity_id: &str,
+        field: &str,
+        winning_value: Option<&str>,
+        losing_value: Option<&str>,
+        winning_actor: Option<&str>,
+        losing_actor: Option<&str>,
+        file_path: Option<&str>,
+        kind: &str,
+    ) -> Result<i64, VaultError> {
+        self.conn
+            .execute(
+                "INSERT INTO changes (
+                    entity_type, entity_id, field, old_value, new_value,
+                    changed_by, file_path,
+                    conflict_kind, conflict_other_actor, conflict_other_value
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                params![
+                    entity_type,
+                    entity_id,
+                    field,
+                    losing_value,
+                    winning_value,
+                    winning_actor,
+                    file_path,
+                    kind,
+                    losing_actor,
+                    losing_value,
+                ],
+            )
+            .map_err(|e| VaultError::IoError(format!("SQLite record conflict: {e}")))?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    /// Mark a conflict row resolved. `how` is a free-form tag ("picked-winning",
+    /// "picked-losing", "merged", "ignored"). `resolver` identifies the user/agent.
+    pub fn resolve_conflict(
+        &self,
+        conflict_id: i64,
+        resolver: Option<&str>,
+        how: &str,
+    ) -> Result<(), VaultError> {
+        self.conn
+            .execute(
+                "UPDATE changes
+                 SET conflict_resolved = ?1,
+                     conflict_resolved_by = ?2,
+                     conflict_resolved_at = datetime('now')
+                 WHERE id = ?3 AND conflict_kind IS NOT NULL",
+                params![how, resolver, conflict_id],
+            )
+            .map_err(|e| VaultError::IoError(format!("SQLite resolve conflict: {e}")))?;
+        Ok(())
+    }
+
+    /// List conflicts. `open_only = true` returns only unresolved ones.
+    pub fn list_conflicts(&self, open_only: bool, limit: u32) -> Result<Vec<ConflictRow>, VaultError> {
+        let sql = if open_only {
+            "SELECT id, entity_type, entity_id, field, new_value, old_value,
+                    changed_by, conflict_other_actor, conflict_kind,
+                    changed_at, file_path, conflict_resolved, conflict_resolved_by
+             FROM changes
+             WHERE conflict_kind IS NOT NULL AND conflict_resolved IS NULL
+             ORDER BY changed_at DESC LIMIT ?1"
+        } else {
+            "SELECT id, entity_type, entity_id, field, new_value, old_value,
+                    changed_by, conflict_other_actor, conflict_kind,
+                    changed_at, file_path, conflict_resolved, conflict_resolved_by
+             FROM changes
+             WHERE conflict_kind IS NOT NULL
+             ORDER BY changed_at DESC LIMIT ?1"
+        };
+
+        let mut stmt = self.conn
+            .prepare(sql)
+            .map_err(|e| VaultError::IoError(e.to_string()))?;
+
+        let rows = stmt
+            .query_map(params![limit], |row| {
+                Ok(ConflictRow {
+                    id: row.get(0)?,
+                    entity_type: row.get(1)?,
+                    entity_id: row.get(2)?,
+                    field: row.get(3)?,
+                    winning_value: row.get(4)?,
+                    losing_value: row.get(5)?,
+                    winning_actor: row.get(6)?,
+                    losing_actor: row.get(7)?,
+                    kind: row.get(8)?,
+                    changed_at: row.get(9)?,
+                    file_path: row.get(10)?,
+                    resolved: row.get(11)?,
+                    resolved_by: row.get(12)?,
+                })
+            })
+            .map_err(|e| VaultError::IoError(e.to_string()))?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(rows)
     }
 
     /// Record a change for the audit trail.
@@ -495,6 +631,29 @@ pub struct ChangeRow {
     pub file_path: Option<String>,
 }
 
+/// A conflict row from the `changes` table.
+///
+/// Represents a concurrent edit where two replicas touched the same field. The
+/// "winning" value is whatever state the local replica currently holds; the
+/// "losing" value is what got overwritten. A human or agent must decide what to
+/// keep via `resolve_conflict`.
+#[derive(Debug, Clone)]
+pub struct ConflictRow {
+    pub id: i64,
+    pub entity_type: String,
+    pub entity_id: String,
+    pub field: Option<String>,
+    pub winning_value: Option<String>,
+    pub losing_value: Option<String>,
+    pub winning_actor: Option<String>,
+    pub losing_actor: Option<String>,
+    pub kind: Option<String>,
+    pub changed_at: String,
+    pub file_path: Option<String>,
+    pub resolved: Option<String>,
+    pub resolved_by: Option<String>,
+}
+
 /// Stats from a rebuild operation.
 #[derive(Debug, Clone, Default)]
 pub struct RebuildStats {
@@ -555,5 +714,44 @@ mod tests {
         assert_eq!(changes[0].entity_id, "test-1");
         assert_eq!(changes[0].field.as_deref(), Some("status"));
         assert_eq!(changes[0].new_value.as_deref(), Some("Done"));
+    }
+
+    #[test]
+    fn conflict_round_trip() {
+        let index = TaskIndex::in_memory().unwrap();
+
+        let id = index
+            .record_conflict(
+                "task",
+                "t-42",
+                "assignee",
+                Some("codywright"),
+                Some("amy"),
+                Some("hermes"),
+                Some("tommy"),
+                Some("tasks/Fix bug.md"),
+                "concurrent",
+            )
+            .unwrap();
+
+        let open = index.list_conflicts(true, 10).unwrap();
+        assert_eq!(open.len(), 1);
+        assert_eq!(open[0].id, id);
+        assert_eq!(open[0].kind.as_deref(), Some("concurrent"));
+        assert_eq!(open[0].winning_value.as_deref(), Some("codywright"));
+        assert_eq!(open[0].losing_value.as_deref(), Some("amy"));
+        assert_eq!(open[0].winning_actor.as_deref(), Some("hermes"));
+        assert_eq!(open[0].losing_actor.as_deref(), Some("tommy"));
+        assert!(open[0].resolved.is_none());
+
+        index.resolve_conflict(id, Some("codywright"), "picked-winning").unwrap();
+
+        let open = index.list_conflicts(true, 10).unwrap();
+        assert!(open.is_empty(), "resolved conflict should not appear in open list");
+
+        let all = index.list_conflicts(false, 10).unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].resolved.as_deref(), Some("picked-winning"));
+        assert_eq!(all[0].resolved_by.as_deref(), Some("codywright"));
     }
 }
