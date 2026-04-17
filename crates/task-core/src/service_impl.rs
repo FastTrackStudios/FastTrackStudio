@@ -626,6 +626,29 @@ impl VaultServiceImpl {
         Ok(invoice)
     }
 
+    /// Convenience wrapper that builds a Payment and calls
+    /// [`Self::add_invoice_payment`]. CLI-friendly.
+    pub async fn record_invoice_payment(
+        &self,
+        invoice_id: &str,
+        amount_cents: u64,
+        method: Option<String>,
+        reference: Option<String>,
+        notes: Option<String>,
+        actor: Option<&str>,
+    ) -> Result<crate::invoice::Invoice, VaultError> {
+        let payment = crate::invoice::Payment {
+            id: Uuid::new_v4().to_string(),
+            amount_cents,
+            received_at: Utc::now(),
+            method: method.unwrap_or_default(),
+            reference,
+            recorded_by: actor.map(String::from),
+            notes,
+        };
+        self.add_invoice_payment(invoice_id, payment, actor).await
+    }
+
     /// Record a payment against an invoice. Status auto-derives
     /// (PartiallyPaid / Paid) based on totals.
     pub async fn add_invoice_payment(

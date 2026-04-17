@@ -219,6 +219,11 @@ enum Commands {
         #[command(subcommand)]
         command: ClientCommands,
     },
+    /// Invoice generation — markdown-backed, lives in `invoices/<id>.md`
+    Invoice {
+        #[command(subcommand)]
+        command: InvoiceCommands,
+    },
     /// Start a timer on a task (fails if another is running)
     Start {
         reference: String,
@@ -297,6 +302,78 @@ enum ClientCommands {
         name: String,
         #[arg(long)]
         json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum InvoiceCommands {
+    /// Create an invoice from uninvoiced billable entries for a client
+    Create {
+        client: String,
+        /// Start of billing window (YYYY-MM-DD, inclusive)
+        #[arg(long)]
+        from: Option<String>,
+        /// End of billing window (YYYY-MM-DD, inclusive)
+        #[arg(long)]
+        to: Option<String>,
+        /// Fallback hourly rate in cents if cascade resolves to 0
+        #[arg(long)]
+        rate: Option<u32>,
+        /// Invoice-level tax rate as a percentage, e.g. 8.5
+        #[arg(long)]
+        tax: Option<f64>,
+        /// Invoice-level discount as a percentage
+        #[arg(long)]
+        discount: Option<f64>,
+        #[arg(long)]
+        po: Option<String>,
+        #[arg(long)]
+        notes: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// List invoices (newest first)
+    List {
+        #[arg(long)]
+        status: Option<String>,
+        #[arg(long)]
+        client: Option<String>,
+        #[arg(long)]
+        year: Option<i32>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show a single invoice
+    Show {
+        id: String,
+        /// Print the full rendered markdown body instead of a summary
+        #[arg(long)]
+        md: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Mark an invoice as sent (sets sent_at, status → Sent)
+    Send {
+        id: String,
+    },
+    /// Record a payment against an invoice
+    Pay {
+        id: String,
+        /// Amount in cents (e.g. 50000 = $500)
+        #[arg(long)]
+        amount: u64,
+        #[arg(long, default_value = "")]
+        method: String,
+        #[arg(long)]
+        reference: Option<String>,
+        #[arg(long)]
+        notes: Option<String>,
+    },
+    /// Cancel an invoice
+    Cancel {
+        id: String,
+        #[arg(long)]
+        reason: Option<String>,
     },
 }
 
@@ -1010,6 +1087,141 @@ async fn main() -> eyre::Result<()> {
             } else {
                 print_client_detail(&client);
             }
+        }
+
+        Commands::Invoice {
+            command:
+                InvoiceCommands::Create {
+                    client,
+                    from,
+                    to,
+                    rate,
+                    tax,
+                    discount,
+                    po,
+                    notes,
+                    json,
+                },
+        } => {
+            let from_dt = from.as_deref().map(parse_date_start).transpose()?;
+            let to_dt = to.as_deref().map(parse_date_end).transpose()?;
+            let invoice = svc
+                .create_invoice_from_entries(
+                    &client,
+                    from_dt,
+                    to_dt,
+                    rate,
+                    tax,
+                    discount,
+                    po,
+                    notes,
+                    actor.as_deref(),
+                )
+                .await?;
+            if json {
+                println!("{}", facet_json::to_string(&invoice).unwrap_or_default());
+            } else {
+                print_invoice_detail(&invoice);
+            }
+        }
+
+        Commands::Invoice {
+            command:
+                InvoiceCommands::List {
+                    status,
+                    client,
+                    year,
+                    json,
+                },
+        } => {
+            let invoices: Vec<task_core::Invoice> = svc
+                .list_invoices()
+                .await
+                .into_iter()
+                .filter(|i| match &status {
+                    Some(s) => {
+                        format!("{:?}", i.status).eq_ignore_ascii_case(s)
+                    }
+                    None => true,
+                })
+                .filter(|i| match &client {
+                    Some(c) => i.client.0.eq_ignore_ascii_case(c),
+                    None => true,
+                })
+                .filter(|i| match year {
+                    Some(y) => i.issue_date.format("%Y").to_string() == format!("{y:04}"),
+                    None => true,
+                })
+                .collect();
+            if json {
+                print_invoices_json(&invoices);
+            } else {
+                print_invoices_table(&invoices);
+            }
+        }
+
+        Commands::Invoice {
+            command: InvoiceCommands::Show { id, md, json },
+        } => {
+            let invoice = svc
+                .get_invoice(&id)
+                .await
+                .ok_or_else(|| eyre::eyre!("Invoice not found: {id}"))?;
+            if json {
+                println!("{}", facet_json::to_string(&invoice).unwrap_or_default());
+            } else if md {
+                println!("{}", task_core::invoice::render_invoice_body(&invoice));
+            } else {
+                print_invoice_detail(&invoice);
+            }
+        }
+
+        Commands::Invoice {
+            command: InvoiceCommands::Send { id },
+        } => {
+            let invoice = svc.send_invoice(&id, actor.as_deref()).await?;
+            println!(
+                "Sent invoice {} — ${:.2} due {}.",
+                invoice.id,
+                invoice.total_cents() as f64 / 100.0,
+                invoice.due_date
+            );
+        }
+
+        Commands::Invoice {
+            command:
+                InvoiceCommands::Pay {
+                    id,
+                    amount,
+                    method,
+                    reference,
+                    notes,
+                },
+        } => {
+            let invoice = svc
+                .record_invoice_payment(
+                    &id,
+                    amount,
+                    if method.is_empty() { None } else { Some(method) },
+                    reference,
+                    notes,
+                    actor.as_deref(),
+                )
+                .await?;
+            println!(
+                "Recorded ${:.2} against {}. Balance: ${:.2}. Status: {:?}",
+                amount as f64 / 100.0,
+                invoice.id,
+                invoice.balance_cents() as f64 / 100.0,
+                invoice.status
+            );
+        }
+
+        Commands::Invoice {
+            command: InvoiceCommands::Cancel { id, reason },
+        } => {
+            let invoice = svc.cancel_invoice(&id, reason, actor.as_deref()).await?;
+            println!("Cancelled invoice {}.", invoice.id);
         }
 
         Commands::Unsubscribe { reference, user } => {
@@ -2096,6 +2308,138 @@ fn parse_sort(s: &str) -> Sort {
         "created" => Sort::DateCreated,
         "modified" => Sort::DateModified,
         _ => Sort::Urgency,
+    }
+}
+
+// ── Invoice printing ─────────────────────────────────────────────────────────
+
+fn print_invoices_table(invoices: &[task_core::Invoice]) {
+    if invoices.is_empty() {
+        println!("No invoices.");
+        return;
+    }
+    println!(
+        "{:<18}  {:<20}  {:<14}  {:<11}  {:>12}  {:>12}",
+        "ID", "CLIENT", "STATUS", "DUE", "TOTAL", "BALANCE",
+    );
+    println!("{}", "─".repeat(95));
+    for inv in invoices {
+        let total = format!("${:.2}", inv.total_cents() as f64 / 100.0);
+        let balance = format!("${:.2}", inv.balance_cents() as f64 / 100.0);
+        println!(
+            "{:<18}  {:<20}  {:<14}  {:<11}  {:>12}  {:>12}",
+            inv.id,
+            truncate(&inv.client.0, 20),
+            format!("{:?}", inv.status),
+            inv.due_date,
+            total,
+            balance,
+        );
+    }
+    println!("\n{} invoice(s)", invoices.len());
+}
+
+fn print_invoices_json(invoices: &[task_core::Invoice]) {
+    println!("[");
+    for (i, inv) in invoices.iter().enumerate() {
+        let comma = if i + 1 < invoices.len() { "," } else { "" };
+        println!(
+            "  {}{comma}",
+            facet_json::to_string(inv).unwrap_or_default()
+        );
+    }
+    println!("]");
+}
+
+fn print_invoice_detail(inv: &task_core::Invoice) {
+    println!("Invoice:  {}", inv.id);
+    println!("Client:   {}", inv.client.0);
+    println!("Status:   {:?}", inv.status);
+    println!("Issued:   {}", inv.issue_date);
+    println!("Due:      {}", inv.due_date);
+    if let Some(po) = &inv.po_number {
+        println!("PO:       {po}");
+    }
+    if !inv.currency_code.is_empty() {
+        println!("Currency: {}", inv.currency_code);
+    }
+    println!();
+    println!(
+        "  {:<30}  {:>7}  {:>10}  {:>12}",
+        "TASK", "HOURS", "RATE", "AMOUNT",
+    );
+    println!("  {}", "─".repeat(65));
+    for l in &inv.line_items {
+        println!(
+            "  {:<30}  {:>7.2}  ${:>9.2}  ${:>11.2}",
+            truncate(&l.task_title, 30),
+            l.hours,
+            l.rate_cents as f64 / 100.0,
+            l.net_cents() as f64 / 100.0,
+        );
+    }
+    println!("  {}", "─".repeat(65));
+    println!(
+        "  {:<30}  {:>7}  {:>10}  ${:>11.2}",
+        "Subtotal",
+        "",
+        "",
+        inv.lines_net_cents() as f64 / 100.0
+    );
+    if let Some(d) = inv.discount_percent {
+        if d > 0.0 {
+            println!(
+                "  {:<30}  {:>7}  {:>10}  -${:.2}",
+                format!("Discount ({}%)", d),
+                "",
+                "",
+                (inv.lines_net_cents().saturating_sub(inv.discounted_cents())) as f64 / 100.0,
+            );
+        }
+    }
+    if inv.tax_cents() > 0 {
+        println!(
+            "  {:<30}  {:>7}  {:>10}  ${:>11.2}",
+            "Tax",
+            "",
+            "",
+            inv.tax_cents() as f64 / 100.0
+        );
+    }
+    println!(
+        "  {:<30}  {:>7}  {:>10}  ${:>11.2}",
+        "TOTAL",
+        "",
+        "",
+        inv.total_cents() as f64 / 100.0
+    );
+    if inv.paid_cents() > 0 {
+        println!(
+            "  {:<30}  {:>7}  {:>10}  ${:>11.2}",
+            "Paid",
+            "",
+            "",
+            inv.paid_cents() as f64 / 100.0
+        );
+        println!(
+            "  {:<30}  {:>7}  {:>10}  ${:>11.2}",
+            "BALANCE",
+            "",
+            "",
+            inv.balance_cents() as f64 / 100.0
+        );
+    }
+    if !inv.payments.is_empty() {
+        println!("\nPayments:");
+        for p in &inv.payments {
+            println!(
+                "  {} — ${:.2}  {} {}",
+                p.received_at.format("%Y-%m-%d"),
+                p.amount_cents as f64 / 100.0,
+                if p.method.is_empty() { "—" } else { &p.method },
+                p.reference.as_deref().unwrap_or(""),
+            );
+        }
     }
 }
 
