@@ -12602,17 +12602,8 @@ dependencies = [
 ]
 
 [[patch.unused]]
-name = "anyrender_vello_hybrid"
-version = "0.1.1"
-source = "git+https://github.com/FastTrackStudios/anyrender.git?rev=422b5d0#422b5d0b820dccda702c882fe3eee7ba8e958e77"
-
-[[patch.unused]]
 name = "blitz"
 version = "0.2.1"
-
-[[patch.unused]]
-name = "ur-taking-me-with-you"
-version = "8.0.0"
 
 [[patch.unused]]
 name = "daw-extension-runtime"
@@ -12625,3 +12616,12 @@ version = "0.1.0"
 [[patch.unused]]
 name = "blitz"
 version = "0.2.1"
+
+[[patch.unused]]
+name = "anyrender_vello_hybrid"
+version = "0.1.1"
+source = "git+https://github.com/FastTrackStudios/anyrender.git?rev=422b5d0#422b5d0b820dccda702c882fe3eee7ba8e958e77"
+
+[[patch.unused]]
+name = "ur-taking-me-with-you"
+version = "8.0.0"

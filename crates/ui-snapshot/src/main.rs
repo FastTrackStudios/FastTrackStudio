@@ -1,10 +1,4 @@
-//! ui-snapshot — headless rendering + fuzzy PNG diff for fts-ui components.
-//!
-//! Uses the same Blitz pipeline as the panels ship with (Dioxus VirtualDom
-//! → DioxusDocument → paint_scene) but routes output to a CPU
-//! `anyrender_vello_cpu::VelloCpuImageRenderer` so the result is deterministic
-//! across machines. Committed reference PNGs live under
-//! `tests/reference/<scene>.png`; diffs are emitted to `target/ui-snapshots/`.
+//! ui-snapshot — CLI shim over the `ui_snapshot` library.
 //!
 //! Commands:
 //!   ui-snapshot check        # render all scenes, fail on pixel diff
@@ -15,44 +9,8 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use anyrender::{PaintScene as _, render_to_buffer};
-use anyrender_vello_cpu::VelloCpuImageRenderer;
-use blitz_dom::{Document, DocumentConfig};
-use blitz_paint::paint_scene;
-use blitz_traits::shell::{ColorScheme, Viewport};
 use clap::{Parser, Subcommand};
-use dioxus::prelude::*;
-use dioxus_native::{DioxusDocument, prelude::*};
-use kurbo::Rect;
-use peniko::{Color as PColor, Fill};
-
-mod scenes;
-
-const TAILWIND_CSS: &str =
-    include_str!("../../fts-extensions/assets/tailwind.css");
-const FTS_THEME_CSS: &str =
-    include_str!("../../fts-extensions/assets/fts-theme.css");
-const COLOR_SCHEME_LIGHT: &str = ":root { color-scheme: light; }";
-
-/// Scene descriptor — pairs a scene id with the component that paints it.
-struct Scene {
-    name: &'static str,
-    width: u32,
-    height: u32,
-    /// Background: we paint a theme-aware background first, then the tree.
-    background: PColor,
-    render: fn() -> Element,
-}
-
-const SCENES: &[Scene] = &[
-    Scene {
-        name: "icons-default",
-        width: 800,
-        height: 400,
-        background: PColor::WHITE,
-        render: scenes::icons_default,
-    },
-];
+use ui_snapshot::{SCENES, Scene, render_scene};
 
 #[derive(Parser)]
 #[command(name = "ui-snapshot")]
@@ -84,68 +42,6 @@ fn main() -> std::process::ExitCode {
     }
 }
 
-// ── rendering ────────────────────────────────────────────────────────────────
-
-/// Render a Dioxus component to a tightly-packed RGBA8 buffer via Blitz + Vello CPU.
-fn render_scene(scene: &Scene) -> Vec<u8> {
-    let width = scene.width;
-    let height = scene.height;
-
-    // Wrap the scene's component in a page shell that attaches the Tailwind +
-    // FTS theme stylesheets. This matches how the real REAPER panel sets up
-    // its document (see reaper-dioxus/src/ui_test_panel.rs).
-    let page_component = scene.render;
-    let vdom = VirtualDom::new_with_props(Page, PageProps { inner: page_component });
-
-    let viewport = Viewport::new(width, height, 1.0, ColorScheme::Light);
-    let mut doc = DioxusDocument::new(
-        vdom,
-        DocumentConfig {
-            viewport: Some(viewport),
-            ..Default::default()
-        },
-    );
-
-    doc.initial_build();
-    doc.inner_mut().resolve(0.0);
-
-    let bg = scene.background;
-    let buffer = render_to_buffer::<VelloCpuImageRenderer, _>(
-        |canvas| {
-            // Opaque background — matches a document's initial paint.
-            canvas.fill(
-                Fill::NonZero,
-                Default::default(),
-                bg,
-                Default::default(),
-                &Rect::new(0.0, 0.0, width as f64, height as f64),
-            );
-            // `doc.inner()` returns a DocGuard (Ref-like); deref to &BaseDocument.
-            paint_scene(canvas, &*doc.inner(), 1.0, width, height);
-        },
-        width,
-        height,
-    );
-    buffer
-}
-
-#[derive(Clone, PartialEq, Props)]
-struct PageProps {
-    inner: fn() -> Element,
-}
-
-#[component]
-fn Page(props: PageProps) -> Element {
-    let inner = props.inner;
-    rsx! {
-        document::Style { {TAILWIND_CSS} }
-        document::Style { {FTS_THEME_CSS} }
-        // Deterministic color scheme — matches the live panel init chain.
-        document::Style { {COLOR_SCHEME_LIGHT} }
-        {inner()}
-    }
-}
-
 fn write_png(path: &Path, buffer: &[u8], width: u32, height: u32) {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).expect("create output dir");
@@ -158,8 +54,6 @@ fn write_png(path: &Path, buffer: &[u8], width: u32, height: u32) {
     w.write_image_data(buffer).expect("png data");
     w.finish().expect("png finish");
 }
-
-// ── commands ────────────────────────────────────────────────────────────────
 
 fn reference_path(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -240,8 +134,7 @@ fn check(tolerance: f32) -> std::process::ExitCode {
 }
 
 /// Runs `dify::diff::run` between two PNGs. Writes a `<actual>-diff.png` if any
-/// pixels exceed the tolerance. Returns the count of differing pixels (0 means
-/// identical or within tolerance).
+/// pixels exceed the tolerance.
 fn diff_png(actual: &Path, reference: &Path, tolerance: f32) -> Result<usize, String> {
     let diff_path = actual.with_file_name(format!(
         "{}-diff.png",
@@ -262,9 +155,14 @@ fn diff_png(actual: &Path, reference: &Path, tolerance: f32) -> Result<usize, St
         block_out_areas: None,
     };
     match dify::diff::run(&params) {
-        // `Some(n)` = n differing pixels above threshold; `None` = no diff.
         Ok(Some(n)) if n > 0 => Ok(n as usize),
         Ok(_) => Ok(0),
         Err(e) => Err(format!("{e:?}")),
     }
+}
+
+// Silence dead-code warnings for the struct re-exported from the lib.
+#[allow(dead_code)]
+fn _unused(scene: &Scene) -> u32 {
+    scene.width
 }
