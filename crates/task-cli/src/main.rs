@@ -224,6 +224,11 @@ enum Commands {
         #[command(subcommand)]
         command: InvoiceCommands,
     },
+    /// Email linking — associate emails with tasks/projects. Bot-friendly.
+    Email {
+        #[command(subcommand)]
+        command: EmailCommands,
+    },
     /// Start a timer on a task (fails if another is running)
     Start {
         reference: String,
@@ -300,6 +305,63 @@ enum ClientCommands {
     /// Show a single client
     Show {
         name: String,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum EmailCommands {
+    /// Link an email to a task or project. Bot-friendly — every field that
+    /// isn't provided is left as None / empty.
+    Link {
+        /// "task" or "project"
+        #[arg(long)]
+        to: String,
+        /// Task title/id or project title
+        reference: String,
+        /// RFC-2822 Message-ID (with or without angle brackets)
+        #[arg(long)]
+        message_id: String,
+        #[arg(long)]
+        subject: Option<String>,
+        #[arg(long)]
+        from: Option<String>,
+        /// Comma-separated recipient list
+        #[arg(long)]
+        to_recipients: Option<String>,
+        /// Send date (RFC3339 or "YYYY-MM-DD HH:MM")
+        #[arg(long)]
+        date: Option<String>,
+        #[arg(long)]
+        snippet: Option<String>,
+        #[arg(long)]
+        account_id: Option<i64>,
+        #[arg(long)]
+        mailbox: Option<String>,
+        #[arg(long)]
+        imap_uid: Option<u32>,
+        #[arg(long)]
+        nc_db_id: Option<i64>,
+        #[arg(long)]
+        attachments: Option<u32>,
+        /// Comma-separated categorization tags
+        #[arg(long)]
+        tags: Option<String>,
+    },
+    /// Unlink an email from a task or project
+    Unlink {
+        #[arg(long)]
+        to: String,
+        reference: String,
+        #[arg(long)]
+        message_id: String,
+    },
+    /// List emails linked to a task or project
+    List {
+        #[arg(long)]
+        to: String,
+        reference: String,
         #[arg(long)]
         json: bool,
     },
@@ -1222,6 +1284,125 @@ async fn main() -> eyre::Result<()> {
         } => {
             let invoice = svc.cancel_invoice(&id, reason, actor.as_deref()).await?;
             println!("Cancelled invoice {}.", invoice.id);
+        }
+
+        Commands::Email {
+            command:
+                EmailCommands::Link {
+                    to,
+                    reference,
+                    message_id,
+                    subject,
+                    from,
+                    to_recipients,
+                    date,
+                    snippet,
+                    account_id,
+                    mailbox,
+                    imap_uid,
+                    nc_db_id,
+                    attachments,
+                    tags,
+                },
+        } => {
+            let now = chrono::Utc::now();
+            let email = task_core::EmailRef {
+                message_id: message_id.clone(),
+                subject: subject.unwrap_or_default(),
+                from: from.unwrap_or_default(),
+                to: to_recipients
+                    .map(|s| s.split(',').map(|t| t.trim().to_string()).collect())
+                    .unwrap_or_default(),
+                date: date
+                    .as_deref()
+                    .map(parse_datetime)
+                    .transpose()?
+                    .unwrap_or(now),
+                snippet,
+                account_id,
+                mailbox,
+                imap_uid,
+                nc_db_id,
+                has_attachments: attachments.map(|n| n > 0).unwrap_or(false),
+                attachment_count: attachments.unwrap_or(0),
+                linked_by: actor.clone(),
+                linked_at: Some(now),
+                user_tags: tags
+                    .map(|s| s.split(',').map(|t| t.trim().to_string()).collect())
+                    .unwrap_or_default(),
+            };
+            match to.as_str() {
+                "task" => {
+                    let task = svc
+                        .link_email_to_task(&reference, email, actor.as_deref())
+                        .await?;
+                    println!(
+                        "Linked {} to task '{}'. ({} emails total)",
+                        message_id,
+                        task.title,
+                        task.emails.len()
+                    );
+                }
+                "project" => {
+                    let p = svc
+                        .link_email_to_project(&reference, email, actor.as_deref())
+                        .await?;
+                    println!(
+                        "Linked {} to project '{}'. ({} emails total)",
+                        message_id,
+                        p.title,
+                        p.emails.len()
+                    );
+                }
+                other => eyre::bail!("--to must be 'task' or 'project', got '{other}'"),
+            }
+        }
+
+        Commands::Email {
+            command:
+                EmailCommands::Unlink {
+                    to,
+                    reference,
+                    message_id,
+                },
+        } => match to.as_str() {
+            "task" => {
+                svc.unlink_email_from_task(&reference, &message_id, actor.as_deref())
+                    .await?;
+                println!("Unlinked {message_id} from task '{reference}'.");
+            }
+            "project" => {
+                svc.unlink_email_from_project(&reference, &message_id, actor.as_deref())
+                    .await?;
+                println!("Unlinked {message_id} from project '{reference}'.");
+            }
+            other => eyre::bail!("--to must be 'task' or 'project', got '{other}'"),
+        },
+
+        Commands::Email {
+            command:
+                EmailCommands::List {
+                    to,
+                    reference,
+                    json,
+                },
+        } => {
+            let emails = match to.as_str() {
+                "task" => svc
+                    .emails_for_task(&reference)
+                    .await
+                    .ok_or_else(|| eyre::eyre!("Task not found: {reference}"))?,
+                "project" => svc
+                    .emails_for_project(&reference)
+                    .await
+                    .ok_or_else(|| eyre::eyre!("Project not found: {reference}"))?,
+                other => eyre::bail!("--to must be 'task' or 'project', got '{other}'"),
+            };
+            if json {
+                print_emails_json(&emails);
+            } else {
+                print_emails_table(&emails);
+            }
         }
 
         Commands::Unsubscribe { reference, user } => {
@@ -2309,6 +2490,49 @@ fn parse_sort(s: &str) -> Sort {
         "modified" => Sort::DateModified,
         _ => Sort::Urgency,
     }
+}
+
+// ── Email printing ───────────────────────────────────────────────────────────
+
+fn print_emails_table(emails: &[task_core::EmailRef]) {
+    if emails.is_empty() {
+        println!("No emails linked.");
+        return;
+    }
+    println!(
+        "{:<19}  {:<20}  {:<40}  BY",
+        "DATE", "FROM", "SUBJECT",
+    );
+    println!("{}", "─".repeat(90));
+    for e in emails {
+        let date = e.date.format("%Y-%m-%d %H:%M:%S").to_string();
+        let by = e.linked_by.as_deref().unwrap_or("—");
+        let atts = if e.has_attachments {
+            format!(" 📎{}", e.attachment_count)
+        } else {
+            String::new()
+        };
+        println!(
+            "{:<19}  {:<20}  {:<40}  {by}",
+            date,
+            truncate(&e.from, 20),
+            format!("{}{}", truncate(&e.subject, 35), atts),
+        );
+        println!("  id: {}", e.message_id);
+        if !e.user_tags.is_empty() {
+            println!("  tags: {}", e.user_tags.join(", "));
+        }
+    }
+    println!("\n{} email(s)", emails.len());
+}
+
+fn print_emails_json(emails: &[task_core::EmailRef]) {
+    println!("[");
+    for (i, e) in emails.iter().enumerate() {
+        let comma = if i + 1 < emails.len() { "," } else { "" };
+        println!("  {}{comma}", facet_json::to_string(e).unwrap_or_default());
+    }
+    println!("]");
 }
 
 // ── Invoice printing ─────────────────────────────────────────────────────────

@@ -99,16 +99,11 @@ pub struct Project {
 
     // ── Email routing ────────────────────────────────────────────────
 
-    /// Inbound email addresses that auto-link to this project. The bot
-    /// sees these on `to:` and tags incoming mail.
-    /// e.g. ["montreal-album@projects.example.com"]
-    #[facet(default)]
-    pub email_aliases: Vec<String>,
-
-    /// Mail-client tag labels (NC Mail, ProtonMail) that map to this
-    /// project. The bot reads these labels from the mail service and
-    /// links the email here.
-    /// e.g. ["project:montreal-album", "PRJ-MA"]
+    /// Matcher hints the bot uses to decide incoming mail belongs to
+    /// this project. Typical values: mail-client tag labels ("project:
+    /// montreal-album"), subject-line tokens ("[MA]"), or sender
+    /// patterns. The bot (Jarvis) reads these and does its own matching
+    /// — the schema just stores the hints.
     #[facet(default)]
     pub email_tags: Vec<String>,
 

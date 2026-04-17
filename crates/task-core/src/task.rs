@@ -99,18 +99,15 @@ pub struct Task {
 
     // ── Email routing ────────────────────────────────────────────────
 
-    /// Inbound email addresses that auto-link to this task.
-    /// e.g. ["mix-feedback@proj.example.com"]
-    #[facet(default)]
-    pub email_aliases: Vec<String>,
-
-    /// Mail-client tag labels (NC Mail, ProtonMail) that map to this task.
-    /// e.g. ["task:mix-v3"]
+    /// Matcher hints the bot uses to route incoming mail to this task.
+    /// Typical values: tag labels ("task:mix-v3"), subject tokens,
+    /// sender patterns. The bot (Jarvis) reads these and does its own
+    /// matching.
     #[facet(default)]
     pub email_tags: Vec<String>,
 
-    /// Emails linked to this task. Populated by bots or manual `task email
-    /// link` calls — reference-only, body stays in Nextcloud Mail.
+    /// Emails linked to this task. Reference-only, body stays in
+    /// Nextcloud Mail.
     #[facet(default)]
     pub emails: Vec<crate::email::EmailRef>,
 

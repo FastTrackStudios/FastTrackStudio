@@ -772,6 +772,198 @@ impl VaultServiceImpl {
         Ok(updated)
     }
 
+    // ── Email linking ───────────────────────────────────────────────────────
+
+    /// Attach an email to a task. De-duplicates by message_id (case-insensitive
+    /// match on the bare form). Returns the updated task.
+    pub async fn link_email_to_task(
+        &self,
+        task_ref: &str,
+        email: crate::email::EmailRef,
+        actor: Option<&str>,
+    ) -> Result<crate::task::Task, VaultError> {
+        let vault = self.vault.read().await;
+        let tasks = vault.load_tasks();
+        let mut task = tasks
+            .into_iter()
+            .find(|t| t.id.as_deref() == Some(task_ref) || t.title.eq_ignore_ascii_case(task_ref))
+            .ok_or_else(|| VaultError::NotFound(task_ref.to_string()))?;
+
+        let bare = email.bare_message_id().to_lowercase();
+        if !task
+            .emails
+            .iter()
+            .any(|e| e.bare_message_id().to_lowercase() == bare)
+        {
+            task.emails.push(email);
+        }
+        task.date_modified = Some(Utc::now());
+        vault.save_task(&task)?;
+
+        if let Ok(guard) = self.index.lock() {
+            if let Some(ref idx) = *guard {
+                let id = task.id.as_deref().unwrap_or(task.title.as_str());
+                let _ = idx.record_change(
+                    "task",
+                    id,
+                    Some("email:linked"),
+                    None,
+                    task.emails.last().map(|e| e.message_id.as_str()),
+                    actor,
+                    Some(&format!("{}.md", task.title)),
+                );
+            }
+        }
+        Ok(task)
+    }
+
+    /// Attach an email to a project. Matches by project title.
+    pub async fn link_email_to_project(
+        &self,
+        project_title: &str,
+        email: crate::email::EmailRef,
+        actor: Option<&str>,
+    ) -> Result<crate::project::Project, VaultError> {
+        let vault = self.vault.read().await;
+        let projects = vault.load_projects();
+        let mut project = projects
+            .into_iter()
+            .find(|p| p.title.eq_ignore_ascii_case(project_title))
+            .ok_or_else(|| VaultError::NotFound(project_title.to_string()))?;
+
+        let bare = email.bare_message_id().to_lowercase();
+        if !project
+            .emails
+            .iter()
+            .any(|e| e.bare_message_id().to_lowercase() == bare)
+        {
+            project.emails.push(email);
+        }
+        vault.save_project(&project)?;
+
+        if let Ok(guard) = self.index.lock() {
+            if let Some(ref idx) = *guard {
+                let _ = idx.record_change(
+                    "project",
+                    &project.title,
+                    Some("email:linked"),
+                    None,
+                    project.emails.last().map(|e| e.message_id.as_str()),
+                    actor,
+                    Some(&format!("{}.md", project.title)),
+                );
+            }
+        }
+        Ok(project)
+    }
+
+    /// Remove an email link from a task by message_id (case-insensitive
+    /// bare-id match).
+    pub async fn unlink_email_from_task(
+        &self,
+        task_ref: &str,
+        message_id: &str,
+        actor: Option<&str>,
+    ) -> Result<crate::task::Task, VaultError> {
+        let vault = self.vault.read().await;
+        let tasks = vault.load_tasks();
+        let mut task = tasks
+            .into_iter()
+            .find(|t| t.id.as_deref() == Some(task_ref) || t.title.eq_ignore_ascii_case(task_ref))
+            .ok_or_else(|| VaultError::NotFound(task_ref.to_string()))?;
+
+        let target = strip_angle_brackets(message_id).to_lowercase();
+        let before = task.emails.len();
+        task.emails
+            .retain(|e| e.bare_message_id().to_lowercase() != target);
+        if task.emails.len() == before {
+            return Err(VaultError::NotFound(format!(
+                "no email with message-id {message_id} on '{task_ref}'"
+            )));
+        }
+        task.date_modified = Some(Utc::now());
+        vault.save_task(&task)?;
+
+        if let Ok(guard) = self.index.lock() {
+            if let Some(ref idx) = *guard {
+                let id = task.id.as_deref().unwrap_or(task.title.as_str());
+                let _ = idx.record_change(
+                    "task",
+                    id,
+                    Some("email:unlinked"),
+                    Some(message_id),
+                    None,
+                    actor,
+                    Some(&format!("{}.md", task.title)),
+                );
+            }
+        }
+        Ok(task)
+    }
+
+    /// Remove an email link from a project by message_id.
+    pub async fn unlink_email_from_project(
+        &self,
+        project_title: &str,
+        message_id: &str,
+        actor: Option<&str>,
+    ) -> Result<crate::project::Project, VaultError> {
+        let vault = self.vault.read().await;
+        let projects = vault.load_projects();
+        let mut project = projects
+            .into_iter()
+            .find(|p| p.title.eq_ignore_ascii_case(project_title))
+            .ok_or_else(|| VaultError::NotFound(project_title.to_string()))?;
+
+        let target = strip_angle_brackets(message_id).to_lowercase();
+        let before = project.emails.len();
+        project
+            .emails
+            .retain(|e| e.bare_message_id().to_lowercase() != target);
+        if project.emails.len() == before {
+            return Err(VaultError::NotFound(format!(
+                "no email with message-id {message_id} on project '{project_title}'"
+            )));
+        }
+        vault.save_project(&project)?;
+
+        if let Ok(guard) = self.index.lock() {
+            if let Some(ref idx) = *guard {
+                let _ = idx.record_change(
+                    "project",
+                    &project.title,
+                    Some("email:unlinked"),
+                    Some(message_id),
+                    None,
+                    actor,
+                    Some(&format!("{}.md", project.title)),
+                );
+            }
+        }
+        Ok(project)
+    }
+
+    /// List emails linked to a task.
+    pub async fn emails_for_task(&self, task_ref: &str) -> Option<Vec<crate::email::EmailRef>> {
+        let tasks = self.vault.read().await.load_tasks();
+        tasks
+            .into_iter()
+            .find(|t| t.id.as_deref() == Some(task_ref) || t.title.eq_ignore_ascii_case(task_ref))
+            .map(|t| t.emails)
+    }
+
+    /// List emails linked to a project.
+    pub async fn emails_for_project(
+        &self,
+        project_title: &str,
+    ) -> Option<Vec<crate::email::EmailRef>> {
+        let projects = self.vault.read().await.load_projects();
+        projects
+            .into_iter()
+            .find(|p| p.title.eq_ignore_ascii_case(project_title))
+            .map(|p| p.emails)
+    }
+
     // ── Clients ─────────────────────────────────────────────────────────────
 
     /// List all clients from the vault's `clients/` directory.
@@ -1318,6 +1510,13 @@ pub struct TimeEntryPatch {
     pub billable_rate: Option<u32>,
     pub user: Option<String>,
     pub tags: Option<Vec<String>>,
+}
+
+/// Strip `<...>` angle brackets from a Message-Id if present.
+fn strip_angle_brackets(s: &str) -> &str {
+    s.strip_prefix('<')
+        .and_then(|s| s.strip_suffix('>'))
+        .unwrap_or(s)
 }
 
 /// Strip `[[...]]` if present, otherwise return the string unchanged.
