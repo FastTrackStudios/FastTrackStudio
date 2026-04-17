@@ -32,6 +32,7 @@ mod webdav;
 mod nextcloud;
 pub mod nextcloud_sync;
 pub mod github;
+pub mod talk;
 
 pub use traits::*;
 pub use local::LocalProvider;
@@ -43,3 +44,4 @@ pub mod mock;
 pub use mock::MockProvider;
 pub use nextcloud::{NextcloudProvider, NextcloudConfig};
 pub use github::{GitHubSync, GitHubConfig, GitHubSyncResult};
+pub use talk::{Message as TalkMessage, Room as TalkRoom, TalkClient, TalkConfig};

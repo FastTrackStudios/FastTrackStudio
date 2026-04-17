@@ -209,6 +209,11 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// Nextcloud Talk — conversational surface for bots and humans
+    Talk {
+        #[command(subcommand)]
+        command: TalkCommands,
+    },
     /// Start a timer on a task (fails if another is running)
     Start {
         reference: String,
@@ -250,6 +255,33 @@ enum Commands {
     Project {
         #[command(subcommand)]
         command: ProjectCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum TalkCommands {
+    /// List rooms the user is a member of
+    Rooms {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Post a message to a room
+    Send {
+        /// Room token (from `talk rooms`)
+        room: String,
+        /// Message body
+        message: String,
+        /// Reply to a parent message id
+        #[arg(long)]
+        reply_to: Option<u64>,
+    },
+    /// Show recent messages in a room
+    History {
+        room: String,
+        #[arg(long, short = 'n', default_value = "20")]
+        limit: u32,
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -398,15 +430,24 @@ enum ProjectCommands {
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
     let cli = Cli::parse();
+    let Cli {
+        vault,
+        as_user: actor,
+        command,
+    } = cli;
 
-    let vault_path = cli.vault.ok_or_else(|| {
+    // Talk commands don't touch the vault — handle them before requiring one.
+    if let Commands::Talk { command: talk } = command {
+        return run_talk(talk, actor).await;
+    }
+
+    let vault_path = vault.ok_or_else(|| {
         eyre::eyre!("No vault specified. Use --vault <path> or set TASK_VAULT env var.")
     })?;
 
     let svc = VaultServiceImpl::new(&vault_path);
-    let actor = cli.as_user;
 
-    match cli.command {
+    match command {
         Commands::List {
             status,
             project,
@@ -807,6 +848,8 @@ async fn main() -> eyre::Result<()> {
             println!("@{who} subscribed.");
         }
 
+        Commands::Talk { .. } => unreachable!("handled above"),
+
         Commands::Unsubscribe { reference, user } => {
             let who = user.or(actor.clone()).ok_or_else(|| {
                 eyre::eyre!("Specify a user or set --as <user>/TASK_USER.")
@@ -1199,6 +1242,145 @@ fn parse_optional_date(s: &str) -> eyre::Result<Option<chrono::NaiveDate>> {
     } else {
         Ok(Some(s.parse::<chrono::NaiveDate>()?))
     }
+}
+
+// ── Nextcloud Talk ────────────────────────────────────────────────────────────
+
+/// Run a Talk subcommand. Reads credentials from NEXTCLOUD_URL / NEXTCLOUD_USER /
+/// NEXTCLOUD_PASSWORD. `as_user` overrides NEXTCLOUD_USER when provided —
+/// useful for Hermes-style bot identities.
+async fn run_talk(cmd: TalkCommands, as_user: Option<String>) -> eyre::Result<()> {
+    use task_core::provider::{TalkClient, TalkConfig};
+
+    let url = std::env::var("NEXTCLOUD_URL")
+        .map_err(|_| eyre::eyre!("Set NEXTCLOUD_URL env var."))?;
+    let env_user = std::env::var("NEXTCLOUD_USER").ok();
+    let username = as_user.clone().or(env_user).ok_or_else(|| {
+        eyre::eyre!("Set NEXTCLOUD_USER env var or pass --as-user.")
+    })?;
+    let password = std::env::var("NEXTCLOUD_PASSWORD")
+        .map_err(|_| eyre::eyre!("Set NEXTCLOUD_PASSWORD env var."))?;
+
+    let client = TalkClient::new(TalkConfig {
+        url,
+        username,
+        password,
+    });
+
+    match cmd {
+        TalkCommands::Rooms { json } => {
+            let rooms = client.list_rooms().await?;
+            if json {
+                print_talk_rooms_json(&rooms);
+            } else {
+                print_talk_rooms_table(&rooms);
+            }
+        }
+        TalkCommands::Send {
+            room,
+            message,
+            reply_to,
+        } => {
+            let id = client.send_message(&room, &message, reply_to).await?;
+            println!("Sent message {id} to {room}.");
+        }
+        TalkCommands::History { room, limit, json } => {
+            let msgs = client.recent_messages(&room, limit).await?;
+            if json {
+                print_talk_history_json(&msgs);
+            } else {
+                print_talk_history_table(&msgs);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn print_talk_rooms_table(rooms: &[task_core::provider::TalkRoom]) {
+    if rooms.is_empty() {
+        println!("No rooms.");
+        return;
+    }
+    let name_w = rooms.iter().map(|r| r.name.len()).max().unwrap_or(10).max(10).min(40);
+    println!(
+        "{:<name_w$}  {:<22}  {:>7}  {:<5}  TOKEN",
+        "NAME", "LAST ACTIVITY (UTC)", "PEOPLE", "TYPE",
+    );
+    println!("{}", "─".repeat(name_w + 55));
+    for r in rooms {
+        let when = if r.last_activity > 0 {
+            chrono::DateTime::<chrono::Utc>::from_timestamp(r.last_activity, 0)
+                .map(|d| d.format("%Y-%m-%d %H:%M:%S").to_string())
+                .unwrap_or_else(|| "—".into())
+        } else {
+            "—".into()
+        };
+        println!(
+            "{:<name_w$}  {:<22}  {:>7}  {:<5}  {}",
+            truncate(&r.name, name_w),
+            when,
+            r.participant_count,
+            r.room_type,
+            r.token,
+        );
+    }
+    println!("\n{} room(s)", rooms.len());
+}
+
+fn print_talk_rooms_json(rooms: &[task_core::provider::TalkRoom]) {
+    println!("[");
+    for (i, r) in rooms.iter().enumerate() {
+        let comma = if i + 1 < rooms.len() { "," } else { "" };
+        println!(
+            "  {{\"token\":\"{}\",\"name\":\"{}\",\"type\":{},\"participants\":{},\"last_activity\":{},\"last_message\":{}}}{comma}",
+            escape_json(&r.token),
+            escape_json(&r.name),
+            r.room_type,
+            r.participant_count,
+            r.last_activity,
+            opt_json(r.last_message.as_deref()),
+        );
+    }
+    println!("]");
+}
+
+fn print_talk_history_table(msgs: &[task_core::provider::TalkMessage]) {
+    if msgs.is_empty() {
+        println!("No messages.");
+        return;
+    }
+    // Messages come newest-first from the API — reverse for readability.
+    let mut list: Vec<&task_core::provider::TalkMessage> = msgs.iter().collect();
+    list.sort_by_key(|m| m.timestamp);
+    for m in list {
+        let when = chrono::DateTime::<chrono::Utc>::from_timestamp(m.timestamp, 0)
+            .map(|d| d.format("%H:%M:%S").to_string())
+            .unwrap_or_else(|| "—".into());
+        let reply = match m.reply_to {
+            Some(id) => format!(" ↪#{id}"),
+            None => String::new(),
+        };
+        println!("[{when}] @{} (#{}{}): {}", m.actor_id, m.id, reply, m.message);
+    }
+}
+
+fn print_talk_history_json(msgs: &[task_core::provider::TalkMessage]) {
+    println!("[");
+    for (i, m) in msgs.iter().enumerate() {
+        let comma = if i + 1 < msgs.len() { "," } else { "" };
+        println!(
+            "  {{\"id\":{},\"token\":\"{}\",\"actor_id\":\"{}\",\"actor_type\":\"{}\",\"actor_display_name\":\"{}\",\"timestamp\":{},\"message\":\"{}\",\"reply_to\":{}}}{comma}",
+            m.id,
+            escape_json(&m.token),
+            escape_json(&m.actor_id),
+            escape_json(&m.actor_type),
+            escape_json(&m.actor_display_name),
+            m.timestamp,
+            escape_json(&m.message),
+            m.reply_to.map(|n| n.to_string()).unwrap_or_else(|| "null".into()),
+        );
+    }
+    println!("]");
 }
 
 // ── Time helpers ──────────────────────────────────────────────────────────────
