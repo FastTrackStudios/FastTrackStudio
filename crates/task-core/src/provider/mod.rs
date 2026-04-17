@@ -33,6 +33,7 @@ mod nextcloud;
 pub mod nextcloud_sync;
 pub mod github;
 pub mod talk;
+pub mod invoice_ninja;
 
 pub use traits::*;
 pub use local::LocalProvider;
@@ -45,3 +46,7 @@ pub use mock::MockProvider;
 pub use nextcloud::{NextcloudProvider, NextcloudConfig};
 pub use github::{GitHubSync, GitHubConfig, GitHubSyncResult};
 pub use talk::{Message as TalkMessage, Room as TalkRoom, TalkClient, TalkConfig};
+pub use invoice_ninja::{
+    CreatedInvoice, InvoiceDraft, InvoiceLine, InvoiceNinjaClient as InvoiceNinjaClientRow,
+    InvoiceNinjaClientApi, InvoiceNinjaConfig,
+};
