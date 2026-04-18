@@ -34,6 +34,8 @@ pub mod nextcloud_sync;
 pub mod github;
 pub mod talk;
 pub mod mail;
+#[cfg(feature = "server")]
+pub mod mail_watch;
 
 pub use traits::*;
 pub use local::LocalProvider;
@@ -50,3 +52,5 @@ pub use mail::{
     MailAccount, MailAttachment, MailClient, MailConfig, MailMessage, MailMessageDetail, MailTag,
     Mailbox,
 };
+#[cfg(feature = "server")]
+pub use mail_watch::{ImapWatchConfig, WatchEvent, watch_idle};

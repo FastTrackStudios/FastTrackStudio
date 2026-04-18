@@ -482,6 +482,28 @@ enum EmailCommands {
         #[arg(long)]
         note: Option<String>,
     },
+    /// Watch an IMAP mailbox via RFC-2177 IDLE and emit one JSON line
+    /// per server-pushed event. Long-running. Intended to run on
+    /// starcommand (where ProtonMail Bridge is on 127.0.0.1).
+    ///
+    /// Credentials: IMAP_PASSWORD env var. The rest are flags.
+    Watch {
+        #[arg(long, default_value = "127.0.0.1")]
+        host: String,
+        #[arg(long, default_value = "1143")]
+        port: u16,
+        #[arg(long)]
+        user: String,
+        #[arg(long, default_value = "INBOX")]
+        mailbox: String,
+        /// PEM bundle to verify the server cert against. On starcommand
+        /// this is `/var/lib/nc-mail-trust/ca-bundle.crt`.
+        #[arg(long)]
+        ca_bundle: Option<std::path::PathBuf>,
+        /// Disable cert verification. Only safe for loopback.
+        #[arg(long)]
+        insecure: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1836,6 +1858,38 @@ async fn main() -> eyre::Result<()> {
                     .map(|n| format!(" — {n}"))
                     .unwrap_or_default()
             );
+        }
+
+        Commands::Email {
+            command: EmailCommands::Watch { host, port, user, mailbox, ca_bundle, insecure },
+        } => {
+            let password = std::env::var("IMAP_PASSWORD")
+                .map_err(|_| eyre::eyre!("Set IMAP_PASSWORD env var (bridge password)"))?;
+            let config = task_core::provider::ImapWatchConfig {
+                host,
+                port,
+                user,
+                password,
+                mailbox,
+                ca_bundle,
+                insecure,
+                ..Default::default()
+            };
+            task_core::provider::watch_idle(config, |ev| {
+                // Emit one JSON line per event — downstream consumer
+                // (Hermes skill, shell pipe) can react on each line.
+                let mailbox = escape_json(&ev.mailbox);
+                let raw = escape_json(&ev.raw);
+                let exists = ev
+                    .exists
+                    .map(|n| n.to_string())
+                    .unwrap_or_else(|| "null".into());
+                let ts = chrono::Utc::now().to_rfc3339();
+                println!(
+                    r#"{{"ts":"{ts}","mailbox":"{mailbox}","exists":{exists},"raw":"{raw}"}}"#
+                );
+            })
+            .await?;
         }
 
         Commands::Unsubscribe { reference, user } => {

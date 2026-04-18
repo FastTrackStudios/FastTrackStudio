@@ -7,7 +7,7 @@ edition.workspace = true
 # "server" enables the async vault, service trait, and service implementation.
 # Disable it for wasm32 builds (obsidian-plugin) to avoid tokio/mio.
 default = ["server"]
-server = ["dep:tokio", "dep:walkdir", "dep:vox", "dep:vox-core", "dep:uuid", "dep:notify", "dep:toml", "dep:serde", "dep:serde_json", "dep:async-trait", "dep:tracing", "dep:reqwest", "dep:rusqlite", "dep:base64"]
+server = ["dep:tokio", "dep:walkdir", "dep:vox", "dep:vox-core", "dep:uuid", "dep:notify", "dep:toml", "dep:serde", "dep:serde_json", "dep:async-trait", "dep:tracing", "dep:reqwest", "dep:rusqlite", "dep:base64", "dep:async-imap", "dep:rustls", "dep:tokio-rustls", "dep:rustls-pki-types", "dep:rustls-pemfile", "dep:tokio-util", "dep:futures"]
 # "caldav" enables CalDAV sync and VTODO conversion.
 caldav = ["server", "dep:icalendar", "dep:libdav", "dep:reqwest"]
 # "realtime" enables CRDT-based real-time collaboration (Loro).
@@ -56,6 +56,16 @@ serde_json = { workspace = true, optional = true }
 # Base64 — used by the Nextcloud Mail provider to decode the tag list
 # that ships inside the Mail app's page bootstrap (no API endpoint).
 base64 = { version = "0.22", optional = true }
+
+# IMAP IDLE push client — used by `task email watch` to stream a
+# notification whenever new mail arrives on a Bridge-proxied account.
+async-imap = { version = "0.11", optional = true }
+rustls = { version = "0.23", optional = true, default-features = false, features = ["std", "tls12", "ring"] }
+tokio-rustls = { version = "0.26", optional = true, default-features = false, features = ["tls12", "ring"] }
+rustls-pki-types = { version = "1", optional = true }
+rustls-pemfile = { version = "2", optional = true }
+tokio-util = { version = "0.7", features = ["compat"], optional = true }
+futures = { version = "0.3", optional = true }
 
 # Async trait (server-side)
 async-trait = { version = "0.1", optional = true }

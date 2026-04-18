@@ -94,14 +94,32 @@ Talk DM; do not guess a link.
 
 Curator runs this skill whenever new mail arrives. Two options:
 
-- **Simple (recommended first)**: cron every 5 minutes.
-  Register a timer with your scheduling tool (e.g. `CronCreate` in
-  the Hermes agent) that fires this skill with argument
-  `--account 3`. Nextcloud Mail background-syncs against Bridge every
-  ~3 minutes, so worst-case latency is ~8 min end-to-end.
+- **Reactive (recommended)**: `task email watch` subscribes to the
+  Bridge IMAP IDLE stream and emits one JSON line per server push.
+  Run it as a systemd user service on starcommand (where Bridge is
+  loopback). On each event, fire this skill once.
 
-- **Reactive** (future): `task email watch --account 3` will stream
-  a JSON line per new message via IMAP IDLE. Not implemented yet.
+  ```
+  # on starcommand, as the curator user's shell
+  IMAP_PASSWORD=<bridge_password from SOPS> \
+  task email watch \
+    --host 127.0.0.1 --port 1143 \
+    --user agent@fasttrackaudio.com \
+    --mailbox INBOX \
+    --ca-bundle /var/lib/nc-mail-trust/ca-bundle.crt \
+  | while read -r line; do
+      echo "$line" | jq -r '.raw'        # debug
+      task email sweep --account 3       # run the triage loop
+    done
+  ```
+
+  Latency: a few seconds from arrival at Proton to a JSON line.
+
+- **Fallback**: cron every ~5 minutes when IDLE is unavailable
+  (e.g. if Bridge restarts or the watcher crashes). Register a
+  timer with your scheduler that fires this skill with
+  `--account 3`. NC Mail polls Bridge every ~3 min so total latency
+  is ~8 min end-to-end.
 
 If you schedule yourself via cron, keep the sweep cheap:
 `--limit 20` per run is plenty, as the triage loop is idempotent.
