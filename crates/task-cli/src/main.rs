@@ -452,6 +452,36 @@ enum EmailCommands {
         #[command(subcommand)]
         cmd: TagCommands,
     },
+    /// Return messages in an inbox that are not yet linked to a task
+    /// or project and are not tagged `$processed`. Curator / Hermes
+    /// use this to find unsorted mail. Output is JSON by default
+    /// (agent-friendly).
+    Sweep {
+        #[arg(long)]
+        account: i64,
+        /// Mailbox id to scan (default: account's INBOX)
+        #[arg(long)]
+        mailbox: Option<i64>,
+        /// Cap on messages scanned per call
+        #[arg(long, default_value = "50")]
+        limit: u32,
+        /// Filter string (same shape as `search --filter`)
+        #[arg(long)]
+        filter: Option<String>,
+        /// Print a human table instead of JSON
+        #[arg(long)]
+        table: bool,
+    },
+    /// Mark a message as triaged by the curator. Applies the
+    /// `$processed` NC Mail tag (auto-creating it on first call).
+    /// Subsequent sweeps skip tagged messages.
+    MarkProcessed {
+        #[arg(long, value_name = "ID")]
+        email_id: i64,
+        /// Optional short note, recorded in the audit log
+        #[arg(long)]
+        note: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1736,6 +1766,76 @@ async fn main() -> eyre::Result<()> {
             let client = build_mail_client(actor.as_deref())?;
             client.remove_tag(email_id, &imap_label).await?;
             println!("Removed tag {imap_label} from message {email_id}.");
+        }
+
+        Commands::Email {
+            command: EmailCommands::Sweep { account, mailbox, limit, filter, table },
+        } => {
+            let client = build_mail_client(actor.as_deref())?;
+            // Default to INBOX for the account if no mailbox was passed.
+            let mailbox_id = match mailbox {
+                Some(m) => m,
+                None => client
+                    .list_mailboxes(account)
+                    .await?
+                    .into_iter()
+                    .find(|m| m.name.eq_ignore_ascii_case("INBOX"))
+                    .ok_or_else(|| eyre::eyre!("No INBOX for account {account}"))?
+                    .id,
+            };
+            let messages = client
+                .list_messages(mailbox_id, filter.as_deref(), limit, None)
+                .await?;
+            let linked = svc.linked_message_ids().await;
+            let mut unprocessed: Vec<_> = messages
+                .into_iter()
+                .filter(|m| {
+                    // Skip if tagged $processed.
+                    if m.tag_labels.iter().any(|t| t == "$processed") {
+                        return false;
+                    }
+                    // Skip if already linked to a task/project.
+                    if let Some(mid) = m.message_id.as_deref() {
+                        let key = mid
+                            .trim()
+                            .trim_start_matches('<')
+                            .trim_end_matches('>')
+                            .to_ascii_lowercase();
+                        if linked.contains(&key) {
+                            return false;
+                        }
+                    }
+                    true
+                })
+                .collect();
+            // Oldest-first — curator works FIFO.
+            unprocessed.sort_by_key(|m| m.date);
+            if table {
+                print_mail_messages_table(&unprocessed);
+            } else {
+                print_mail_messages_json(&unprocessed);
+            }
+        }
+
+        Commands::Email {
+            command: EmailCommands::MarkProcessed { email_id, note },
+        } => {
+            let client = build_mail_client(actor.as_deref())?;
+            // Ensure the $processed tag exists. list_tags is idempotent
+            // and cheap; create only if missing.
+            let tags = client.list_tags().await?;
+            let processed = tags.into_iter().find(|t| t.imap_label == "$processed");
+            let tag = match processed {
+                Some(t) => t,
+                None => client.create_tag("processed", "#64748b").await?,
+            };
+            client.set_tag(email_id, &tag.imap_label).await?;
+            println!(
+                "Marked message {email_id} processed{}",
+                note.as_deref()
+                    .map(|n| format!(" — {n}"))
+                    .unwrap_or_default()
+            );
         }
 
         Commands::Unsubscribe { reference, user } => {

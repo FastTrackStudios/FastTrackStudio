@@ -1137,6 +1137,32 @@ impl VaultServiceImpl {
             .map(|p| p.emails)
     }
 
+    /// All RFC-2822 Message-Ids that are currently linked to any task or
+    /// project. Used by the curator's inbox sweep to decide which
+    /// messages still need triage. Normalized to lowercase and stripped
+    /// of angle brackets.
+    pub async fn linked_message_ids(&self) -> std::collections::HashSet<String> {
+        let vault = self.vault.read().await;
+        let tasks = vault.load_tasks();
+        let projects = vault.load_projects();
+        drop(vault);
+        let mut set = std::collections::HashSet::new();
+        let norm = |s: &str| -> String {
+            s.trim().trim_start_matches('<').trim_end_matches('>').to_ascii_lowercase()
+        };
+        for t in tasks {
+            for e in t.emails {
+                set.insert(norm(&e.message_id));
+            }
+        }
+        for p in projects {
+            for e in p.emails {
+                set.insert(norm(&e.message_id));
+            }
+        }
+        set
+    }
+
     // ── Clients ─────────────────────────────────────────────────────────────
 
     /// List all clients from the vault's `clients/` directory.

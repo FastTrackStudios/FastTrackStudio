@@ -88,6 +88,10 @@ pub struct MailMessage {
     pub has_attachments: bool,
     pub attachment_count: u32,
     pub flags: Vec<String>,
+    /// IMAP keywords attached to this message — e.g. `$label1`,
+    /// `$project.acme`, `$processed`. Populated when present in the
+    /// API response.
+    pub tag_labels: Vec<String>,
 }
 
 /// Full message fetched via the app route, including a body and
@@ -579,6 +583,20 @@ fn parse_message(v: &serde_json::Value, mailbox_id: i64) -> Option<MailMessage> 
                 .collect()
         })
         .unwrap_or_default();
+    // `tags` is either an empty array (no tags) or an object keyed by
+    // imapLabel (`{"$label1": {...}}`). Collect the keys either way.
+    let tag_labels = match v.get("tags") {
+        Some(serde_json::Value::Object(m)) => m.keys().cloned().collect(),
+        Some(serde_json::Value::Array(arr)) => arr
+            .iter()
+            .filter_map(|t| {
+                t.get("imapLabel")
+                    .and_then(|s| s.as_str())
+                    .map(String::from)
+            })
+            .collect(),
+        _ => Vec::new(),
+    };
     Some(MailMessage {
         id,
         message_id,
@@ -593,6 +611,7 @@ fn parse_message(v: &serde_json::Value, mailbox_id: i64) -> Option<MailMessage> 
         has_attachments: attachments > 0,
         attachment_count: attachments as u32,
         flags,
+        tag_labels,
     })
 }
 
