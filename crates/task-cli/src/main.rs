@@ -911,6 +911,48 @@ async fn main() -> eyre::Result<()> {
     if let Commands::Nc { command: nc } = command {
         return run_nc(nc, actor).await;
     }
+    // `task email watch` is a pure IMAP IDLE subscription — no vault
+    // access needed. Handle it here so the watcher service doesn't
+    // have to carry a TASK_VAULT just to emit events.
+    if let Commands::Email {
+        command:
+            EmailCommands::Watch {
+                host,
+                port,
+                user,
+                mailbox,
+                ca_bundle,
+                insecure,
+            },
+    } = command
+    {
+        let password = std::env::var("IMAP_PASSWORD")
+            .map_err(|_| eyre::eyre!("Set IMAP_PASSWORD env var (bridge password)"))?;
+        let config = task_core::provider::ImapWatchConfig {
+            host,
+            port,
+            user,
+            password,
+            mailbox,
+            ca_bundle,
+            insecure,
+            ..Default::default()
+        };
+        return task_core::provider::watch_idle(config, |ev| {
+            let mailbox = escape_json(&ev.mailbox);
+            let raw = escape_json(&ev.raw);
+            let exists = ev
+                .exists
+                .map(|n| n.to_string())
+                .unwrap_or_else(|| "null".into());
+            let ts = chrono::Utc::now().to_rfc3339();
+            println!(
+                r#"{{"ts":"{ts}","mailbox":"{mailbox}","exists":{exists},"raw":"{raw}"}}"#
+            );
+        })
+        .await
+        .map_err(Into::into);
+    }
 
     let vault_path = vault.ok_or_else(|| {
         eyre::eyre!("No vault specified. Use --vault <path> or set TASK_VAULT env var.")
@@ -1861,35 +1903,10 @@ async fn main() -> eyre::Result<()> {
         }
 
         Commands::Email {
-            command: EmailCommands::Watch { host, port, user, mailbox, ca_bundle, insecure },
+            command: EmailCommands::Watch { .. },
         } => {
-            let password = std::env::var("IMAP_PASSWORD")
-                .map_err(|_| eyre::eyre!("Set IMAP_PASSWORD env var (bridge password)"))?;
-            let config = task_core::provider::ImapWatchConfig {
-                host,
-                port,
-                user,
-                password,
-                mailbox,
-                ca_bundle,
-                insecure,
-                ..Default::default()
-            };
-            task_core::provider::watch_idle(config, |ev| {
-                // Emit one JSON line per event — downstream consumer
-                // (Hermes skill, shell pipe) can react on each line.
-                let mailbox = escape_json(&ev.mailbox);
-                let raw = escape_json(&ev.raw);
-                let exists = ev
-                    .exists
-                    .map(|n| n.to_string())
-                    .unwrap_or_else(|| "null".into());
-                let ts = chrono::Utc::now().to_rfc3339();
-                println!(
-                    r#"{{"ts":"{ts}","mailbox":"{mailbox}","exists":{exists},"raw":"{raw}"}}"#
-                );
-            })
-            .await?;
+            // Handled before the vault-requiring branch at the top of main().
+            unreachable!("email watch is dispatched earlier")
         }
 
         Commands::Unsubscribe { reference, user } => {
