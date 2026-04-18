@@ -421,6 +421,76 @@ enum EmailCommands {
         #[arg(long)]
         json: bool,
     },
+    /// Create a mailbox (folder). To create a Proton label, pass a name
+    /// under `Labels/` — e.g. `Labels/project.acme`.
+    FolderCreate {
+        #[arg(long)]
+        account: i64,
+        /// Folder name (supports `/` for nesting, e.g. `Folders/clients/acme`)
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Delete a mailbox (folder) by id. Removes the Proton label if the
+    /// folder is under `Labels/`.
+    FolderDelete {
+        #[arg(long)]
+        mailbox: i64,
+    },
+    /// Move a message to another mailbox. This is a true move — the
+    /// source loses the message. For Proton-style labels that keep a
+    /// message in INBOX, use `task email tag set` instead.
+    Move {
+        #[arg(long, value_name = "ID")]
+        email_id: i64,
+        #[arg(long)]
+        to_folder: i64,
+    },
+    /// Manage NC Mail tags (IMAP keywords, NC-local)
+    Tag {
+        #[command(subcommand)]
+        cmd: TagCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum TagCommands {
+    /// List NC Mail tags
+    List {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Create an NC Mail tag
+    Create {
+        /// Display name, e.g. "project/acme"
+        #[arg(long)]
+        name: String,
+        /// 7-char hex color, e.g. `#8b5cf6`
+        #[arg(long, default_value = "#8b5cf6")]
+        color: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Delete an NC Mail tag
+    Delete {
+        #[arg(long)]
+        account: i64,
+        #[arg(long)]
+        tag: i64,
+    },
+    /// Attach an existing tag to a message (by imapLabel).
+    Set {
+        imap_label: String,
+        #[arg(long, value_name = "ID")]
+        email_id: i64,
+    },
+    /// Remove a tag from a message
+    Unset {
+        imap_label: String,
+        #[arg(long, value_name = "ID")]
+        email_id: i64,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1587,6 +1657,85 @@ async fn main() -> eyre::Result<()> {
             } else {
                 print_emails_table(&emails);
             }
+        }
+
+        Commands::Email {
+            command: EmailCommands::FolderCreate { account, name, json },
+        } => {
+            let client = build_mail_client(actor.as_deref())?;
+            let mb = client.create_mailbox(account, &name).await?;
+            if json {
+                print_mailboxes_json(&[mb]);
+            } else {
+                println!("Created mailbox {} (id {}, account {})", mb.name, mb.id, mb.account_id);
+            }
+        }
+
+        Commands::Email {
+            command: EmailCommands::FolderDelete { mailbox },
+        } => {
+            let client = build_mail_client(actor.as_deref())?;
+            client.delete_mailbox(mailbox).await?;
+            println!("Deleted mailbox {mailbox}.");
+        }
+
+        Commands::Email {
+            command: EmailCommands::Move { email_id, to_folder },
+        } => {
+            let client = build_mail_client(actor.as_deref())?;
+            client.move_message(email_id, to_folder).await?;
+            println!("Moved message {email_id} to folder {to_folder}.");
+        }
+
+        Commands::Email {
+            command: EmailCommands::Tag { cmd: TagCommands::List { json } },
+        } => {
+            let client = build_mail_client(actor.as_deref())?;
+            let tags = client.list_tags().await?;
+            if json {
+                print_mail_tags_json(&tags);
+            } else {
+                print_mail_tags_table(&tags);
+            }
+        }
+
+        Commands::Email {
+            command: EmailCommands::Tag { cmd: TagCommands::Create { name, color, json } },
+        } => {
+            let client = build_mail_client(actor.as_deref())?;
+            let tag = client.create_tag(&name, &color).await?;
+            if json {
+                print_mail_tags_json(&[tag]);
+            } else {
+                println!(
+                    "Created tag {} (id {}, imapLabel {})",
+                    tag.display_name, tag.id, tag.imap_label
+                );
+            }
+        }
+
+        Commands::Email {
+            command: EmailCommands::Tag { cmd: TagCommands::Delete { account, tag } },
+        } => {
+            let client = build_mail_client(actor.as_deref())?;
+            client.delete_tag(account, tag).await?;
+            println!("Deleted tag {tag} on account {account}.");
+        }
+
+        Commands::Email {
+            command: EmailCommands::Tag { cmd: TagCommands::Set { imap_label, email_id } },
+        } => {
+            let client = build_mail_client(actor.as_deref())?;
+            client.set_tag(email_id, &imap_label).await?;
+            println!("Tagged message {email_id} with {imap_label}.");
+        }
+
+        Commands::Email {
+            command: EmailCommands::Tag { cmd: TagCommands::Unset { imap_label, email_id } },
+        } => {
+            let client = build_mail_client(actor.as_deref())?;
+            client.remove_tag(email_id, &imap_label).await?;
+            println!("Removed tag {imap_label} from message {email_id}.");
         }
 
         Commands::Unsubscribe { reference, user } => {
@@ -2960,6 +3109,48 @@ fn print_mailboxes_json(boxes: &[task_core::provider::Mailbox]) {
             m.unread
                 .map(|n| n.to_string())
                 .unwrap_or_else(|| "null".into()),
+        );
+    }
+    println!("]");
+}
+
+fn print_mail_tags_table(tags: &[task_core::provider::MailTag]) {
+    if tags.is_empty() {
+        println!("No tags.");
+        return;
+    }
+    println!(
+        "{:<6}  {:<30}  {:<20}  COLOR",
+        "ID", "DISPLAY NAME", "IMAP LABEL"
+    );
+    println!("{}", "─".repeat(80));
+    for t in tags {
+        println!(
+            "{:<6}  {:<30}  {:<20}  {}",
+            t.id,
+            truncate(&t.display_name, 28),
+            truncate(&t.imap_label, 18),
+            t.color.as_deref().unwrap_or("—"),
+        );
+    }
+    println!("\n{} tag(s)", tags.len());
+}
+
+fn print_mail_tags_json(tags: &[task_core::provider::MailTag]) {
+    println!("[");
+    for (i, t) in tags.iter().enumerate() {
+        let comma = if i + 1 < tags.len() { "," } else { "" };
+        let color = t
+            .color
+            .as_deref()
+            .map(|c| format!("\"{}\"", escape_json(c)))
+            .unwrap_or_else(|| "null".into());
+        println!(
+            "  {{\"id\":{},\"display_name\":\"{}\",\"imap_label\":\"{}\",\"color\":{}}}{comma}",
+            t.id,
+            escape_json(&t.display_name),
+            escape_json(&t.imap_label),
+            color,
         );
     }
     println!("]");

@@ -47,5 +47,6 @@ pub use nextcloud::{NextcloudProvider, NextcloudConfig};
 pub use github::{GitHubSync, GitHubConfig, GitHubSyncResult};
 pub use talk::{Message as TalkMessage, Room as TalkRoom, TalkClient, TalkConfig};
 pub use mail::{
-    MailAccount, MailAttachment, MailClient, MailConfig, MailMessage, MailMessageDetail, Mailbox,
+    MailAccount, MailAttachment, MailClient, MailConfig, MailMessage, MailMessageDetail, MailTag,
+    Mailbox,
 };

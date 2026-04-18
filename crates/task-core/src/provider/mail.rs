@@ -116,6 +116,17 @@ pub struct MailAttachment {
     pub size: u64,
 }
 
+/// NC Mail tag (IMAP keyword). NC-local — not propagated to Proton.
+#[derive(Debug, Clone)]
+pub struct MailTag {
+    pub id: i64,
+    pub display_name: String,
+    /// The IMAP keyword string used in `setTag` / `removeTag` calls.
+    pub imap_label: String,
+    /// 7-char hex colour code.
+    pub color: Option<String>,
+}
+
 /// Nextcloud Mail HTTP client.
 pub struct MailClient {
     config: MailConfig,
@@ -261,6 +272,184 @@ impl MailClient {
         serde_json::from_str(&text)
             .map_err(|e| VaultError::ParseError(format!("mail JSON: {e}")))
     }
+
+    async fn app_send_json(
+        &self,
+        method: reqwest::Method,
+        url: &str,
+        body: Option<&serde_json::Value>,
+    ) -> Result<serde_json::Value, VaultError> {
+        let mut req = self.auth(self.http.request(method.clone(), url));
+        if let Some(b) = body {
+            req = req.json(b);
+        }
+        let resp = req
+            .send()
+            .await
+            .map_err(|e| VaultError::IoError(format!("mail {method} {url}: {e}")))?;
+        let status = resp.status();
+        let text = resp
+            .text()
+            .await
+            .map_err(|e| VaultError::IoError(e.to_string()))?;
+        if !status.is_success() {
+            return Err(VaultError::IoError(format!(
+                "mail {method} {url} {status}: {text}"
+            )));
+        }
+        // Some endpoints return 200 with empty body (e.g. mailbox delete).
+        if text.trim().is_empty() {
+            return Ok(serde_json::Value::Null);
+        }
+        serde_json::from_str(&text)
+            .map_err(|e| VaultError::ParseError(format!("mail JSON: {e}")))
+    }
+
+    /// Create a new mailbox (folder) on the account. To create a Proton
+    /// label, pass `name = "Labels/<label>"`; Bridge translates that into
+    /// a native Proton label.
+    pub async fn create_mailbox(
+        &self,
+        account_id: i64,
+        name: &str,
+    ) -> Result<Mailbox, VaultError> {
+        let url = format!("{}/mailboxes", self.config.app_base());
+        let body = serde_json::json!({
+            "accountId": account_id,
+            "name": name,
+        });
+        let v = self
+            .app_send_json(reqwest::Method::POST, &url, Some(&body))
+            .await?;
+        parse_mailbox(&v).ok_or_else(|| VaultError::ParseError("mailbox response".into()))
+    }
+
+    /// Delete a mailbox (folder). Deleting a mailbox under `Labels/`
+    /// removes the corresponding Proton label.
+    pub async fn delete_mailbox(&self, mailbox_id: i64) -> Result<(), VaultError> {
+        let url = format!("{}/mailboxes/{mailbox_id}", self.config.app_base());
+        self.app_send_json(reqwest::Method::DELETE, &url, None)
+            .await?;
+        Ok(())
+    }
+
+    /// Move a message to another mailbox. Note: this is **move**, not copy
+    /// — the source mailbox loses the message. For Proton-style labels
+    /// that keep a message in INBOX while also tagging it, use NC Mail's
+    /// tag API (`set_tag`) or direct IMAP COPY instead.
+    pub async fn move_message(
+        &self,
+        message_id: i64,
+        dest_folder_id: i64,
+    ) -> Result<(), VaultError> {
+        let url = format!("{}/messages/{message_id}/move", self.config.app_base());
+        let body = serde_json::json!({ "destFolderId": dest_folder_id });
+        self.app_send_json(reqwest::Method::POST, &url, Some(&body))
+            .await?;
+        Ok(())
+    }
+
+    /// List NC Mail tags (IMAP keywords) available on this server. These
+    /// are Nextcloud-local — they don't propagate to Proton's label list.
+    ///
+    /// NC Mail doesn't expose a `GET /api/tags` endpoint; the tag list
+    /// instead ships base64-JSON-encoded inside the Mail app's page
+    /// bootstrap (`<input id="initial-state-mail-tags" value="...">`).
+    /// We fetch the page and pull the tags out of that input.
+    pub async fn list_tags(&self) -> Result<Vec<MailTag>, VaultError> {
+        use base64::prelude::*;
+        let url = format!(
+            "{}/index.php/apps/mail/",
+            self.config.url.trim_end_matches('/')
+        );
+        let resp = self
+            .auth(self.http.get(&url))
+            .send()
+            .await
+            .map_err(|e| VaultError::IoError(format!("mail tags page {url}: {e}")))?;
+        if !resp.status().is_success() {
+            return Err(VaultError::IoError(format!(
+                "mail tags page {url}: {}",
+                resp.status()
+            )));
+        }
+        let html = resp
+            .text()
+            .await
+            .map_err(|e| VaultError::IoError(e.to_string()))?;
+
+        let marker = r#"id="initial-state-mail-tags" value=""#;
+        let start = html
+            .find(marker)
+            .ok_or_else(|| VaultError::ParseError("mail tags: initial-state not found".into()))?
+            + marker.len();
+        let rest = &html[start..];
+        let end = rest
+            .find('"')
+            .ok_or_else(|| VaultError::ParseError("mail tags: closing quote not found".into()))?;
+        let b64 = &rest[..end];
+
+        let decoded = BASE64_STANDARD
+            .decode(b64)
+            .map_err(|e| VaultError::ParseError(format!("mail tags base64: {e}")))?;
+        let v: serde_json::Value = serde_json::from_slice(&decoded)
+            .map_err(|e| VaultError::ParseError(format!("mail tags JSON: {e}")))?;
+        let arr = v
+            .as_array()
+            .ok_or_else(|| VaultError::ParseError("mail tags: not an array".into()))?;
+        Ok(arr.iter().filter_map(parse_tag).collect())
+    }
+
+    /// Create an NC Mail tag. Color is a 7-char hex string (e.g. `#8b5cf6`).
+    pub async fn create_tag(
+        &self,
+        display_name: &str,
+        color: &str,
+    ) -> Result<MailTag, VaultError> {
+        let url = format!("{}/tags", self.config.app_base());
+        let body = serde_json::json!({
+            "displayName": display_name,
+            "color": color,
+        });
+        let v = self
+            .app_send_json(reqwest::Method::POST, &url, Some(&body))
+            .await?;
+        parse_tag(&v).ok_or_else(|| VaultError::ParseError("tag response".into()))
+    }
+
+    /// Delete a tag. NC Mail scopes deletion by account.
+    pub async fn delete_tag(&self, account_id: i64, tag_id: i64) -> Result<(), VaultError> {
+        let url = format!(
+            "{}/tags/{account_id}/delete/{tag_id}",
+            self.config.app_base()
+        );
+        self.app_send_json(reqwest::Method::DELETE, &url, None)
+            .await?;
+        Ok(())
+    }
+
+    /// Attach an existing NC Mail tag to a message.
+    pub async fn set_tag(&self, message_id: i64, imap_label: &str) -> Result<(), VaultError> {
+        let label = urlencode(imap_label);
+        let url = format!(
+            "{}/messages/{message_id}/tags/{label}",
+            self.config.app_base()
+        );
+        self.app_send_json(reqwest::Method::PUT, &url, None).await?;
+        Ok(())
+    }
+
+    /// Remove an NC Mail tag from a message.
+    pub async fn remove_tag(&self, message_id: i64, imap_label: &str) -> Result<(), VaultError> {
+        let label = urlencode(imap_label);
+        let url = format!(
+            "{}/messages/{message_id}/tags/{label}",
+            self.config.app_base()
+        );
+        self.app_send_json(reqwest::Method::DELETE, &url, None)
+            .await?;
+        Ok(())
+    }
 }
 
 // ── parsers ─────────────────────────────────────────────────────────────────
@@ -281,6 +470,30 @@ fn parse_account(v: &serde_json::Value) -> Option<MailAccount> {
             .get("name")
             .and_then(|s| s.as_str())
             .map(|s| s.to_string()),
+    })
+}
+
+fn parse_tag(v: &serde_json::Value) -> Option<MailTag> {
+    let id = v.get("id").and_then(|n| n.as_i64())?;
+    let display_name = v
+        .get("displayName")
+        .and_then(|s| s.as_str())
+        .unwrap_or("")
+        .to_string();
+    let imap_label = v
+        .get("imapLabel")
+        .and_then(|s| s.as_str())
+        .unwrap_or("")
+        .to_string();
+    let color = v
+        .get("color")
+        .and_then(|s| s.as_str())
+        .map(String::from);
+    Some(MailTag {
+        id,
+        display_name,
+        imap_label,
+        color,
     })
 }
 
