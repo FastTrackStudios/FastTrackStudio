@@ -150,7 +150,7 @@ impl MailClient {
     /// List mailboxes in an account.
     pub async fn list_mailboxes(&self, account_id: i64) -> Result<Vec<Mailbox>, VaultError> {
         let url = format!(
-            "{}/accounts/{account_id}/mailboxes",
+            "{}/mailboxes?accountId={account_id}",
             self.config.app_base()
         );
         let data = self.app_get_json(&url).await?;
@@ -172,7 +172,7 @@ impl MailClient {
         cursor: Option<&str>,
     ) -> Result<Vec<MailMessage>, VaultError> {
         let mut url = format!(
-            "{}/mailboxes/{mailbox_id}/messages?limit={}",
+            "{}/messages?mailboxId={mailbox_id}&limit={}",
             self.config.app_base(),
             limit.min(100)
         );
@@ -266,13 +266,17 @@ impl MailClient {
 // ── parsers ─────────────────────────────────────────────────────────────────
 
 fn parse_account(v: &serde_json::Value) -> Option<MailAccount> {
+    // The Nextcloud Mail HTTP API returns `emailAddress`; the fallback to
+    // `email` keeps test fixtures and older deployments working.
+    let email = v
+        .get("emailAddress")
+        .or_else(|| v.get("email"))
+        .and_then(|s| s.as_str())
+        .unwrap_or("")
+        .to_string();
     Some(MailAccount {
         id: v.get("id")?.as_i64()?,
-        email: v
-            .get("email")
-            .and_then(|s| s.as_str())
-            .unwrap_or("")
-            .to_string(),
+        email,
         name: v
             .get("name")
             .and_then(|s| s.as_str())
@@ -281,8 +285,15 @@ fn parse_account(v: &serde_json::Value) -> Option<MailAccount> {
 }
 
 fn parse_mailbox(v: &serde_json::Value) -> Option<Mailbox> {
+    // NC Mail returns `databaseId` as the stable integer id used by other
+    // endpoints; the `id` field is a base64 IMAP path string and not
+    // directly useful for us. Keep `id` as a fallback for older fixtures.
+    let id = v
+        .get("databaseId")
+        .and_then(|n| n.as_i64())
+        .or_else(|| v.get("id").and_then(|n| n.as_i64()))?;
     Some(Mailbox {
-        id: v.get("id")?.as_i64()?,
+        id,
         name: v
             .get("name")
             .or_else(|| v.get("displayName"))
@@ -298,7 +309,11 @@ fn parse_mailbox(v: &serde_json::Value) -> Option<Mailbox> {
 }
 
 fn parse_message(v: &serde_json::Value, mailbox_id: i64) -> Option<MailMessage> {
-    let id = v.get("id")?.as_i64()?;
+    // NC Mail returns the numeric row id as `databaseId`.
+    let id = v
+        .get("databaseId")
+        .and_then(|n| n.as_i64())
+        .or_else(|| v.get("id").and_then(|n| n.as_i64()))?;
     let subject = v
         .get("subject")
         .and_then(|s| s.as_str())
@@ -320,7 +335,11 @@ fn parse_message(v: &serde_json::Value, mailbox_id: i64) -> Option<MailMessage> 
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
-    let date = v.get("sentAt").and_then(|n| n.as_i64()).unwrap_or(0);
+    let date = v
+        .get("sentAt")
+        .and_then(|n| n.as_i64())
+        .or_else(|| v.get("dateInt").and_then(|n| n.as_i64()))
+        .unwrap_or(0);
     let message_id = v
         .get("messageId")
         .and_then(|s| s.as_str())
