@@ -3,7 +3,7 @@
 //! Renders the fts-ui Showcase in the native Dioxus/Blitz renderer.
 
 use daw::module::{ActionDef, DockPosition, PanelComponent, PanelDef};
-use reaper_dioxus::prelude::*;
+use daw::ui::prelude::*;
 
 const TAILWIND_CSS: &str = include_str!("../assets/tailwind.css");
 const FTS_THEME_CSS: &str = include_str!("../assets/fts-theme.css");
@@ -41,7 +41,7 @@ pub fn action_def() -> ActionDef {
         "FTS_UI_TEST_TOGGLE",
         "FTS: Toggle UI Component Test Panel",
         || {
-            reaper_dioxus::toggle_panel("FTS_UI_TEST");
+            daw::ui::dock::toggle_panel("FTS_UI_TEST");
         },
     )
     .in_menu()

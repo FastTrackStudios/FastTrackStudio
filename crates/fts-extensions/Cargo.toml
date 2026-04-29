@@ -22,11 +22,9 @@ sync-proto = { workspace = true }
 reaper-input = { workspace = true }
 keyflow = { workspace = true }
 
-# DAW API — in-process via LocalCaller
-daw = { workspace = true, features = ["reaper", "sync"] }
-
-# Dioxus panel rendering for REAPER dock windows
-reaper-dioxus = { workspace = true }
+# DAW API — in-process via LocalCaller. The `reaper-ui` feature pulls in
+# the Dioxus panel rendering host (formerly the standalone reaper-dioxus crate).
+daw = { workspace = true, features = ["reaper", "sync", "reaper-ui"] }
 
 # FTS design system (shadcn-ui clone for Dioxus)
 fts-ui = { workspace = true }

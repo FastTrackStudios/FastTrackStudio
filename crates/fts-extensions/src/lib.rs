@@ -103,7 +103,7 @@ extern "C" fn timer_callback() {
         catch_panic("poll_and_broadcast", daw::reaper::poll_and_broadcast);
         catch_panic("poll_and_broadcast_tracks", daw::reaper::poll_and_broadcast_tracks);
         catch_panic("process_pending_actions", std::panic::AssertUnwindSafe(|| process_pending_actions(app)));
-        catch_panic("update_panels", reaper_dioxus::update_panels);
+        catch_panic("update_panels", daw::ui::dock::update_panels);
     }
 }
 
@@ -379,15 +379,15 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     }
 
     // ── Dioxus panel rendering ────────────────────────────────────────
-    reaper_dioxus::service::init();
-    reaper_dioxus::dock::init(reaper_low::Reaper::get(), reaper_low::Swell::get());
+    daw::ui::dock::init_service();
+    daw::ui::dock::init_dock(reaper_low::Reaper::get(), reaper_low::Swell::get());
     let mut panels = module::collect_panels(&modules);
     panels.push(ui_test_panel::panel_def());
     info!(panels = panels.len(), "Panel definitions collected");
     for panel in &panels {
-        reaper_dioxus::dock::register_panel_from_service(panel);
+        daw::ui::dock::register_panel_from_service(panel);
     }
-    reaper_dioxus::restore_dock_state();
+    daw::ui::dock::restore_dock_state();
 
     info!(
         modules = modules.len(),
