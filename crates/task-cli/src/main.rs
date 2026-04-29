@@ -1067,17 +1067,6 @@ async fn main() -> eyre::Result<()> {
         print_agent_capabilities();
         return Ok(());
     }
-    if let Some(server) = server {
-        let remote = RemoteVoxConfig::new(server, session_token, organization_id)?;
-        match command {
-            Commands::Agent { command } => {
-                return run_remote_agent_command(&remote, actor.as_deref(), command).await;
-            }
-            ref other => {
-                command_requires_local_vault(&other)?;
-            }
-        }
-    }
     // `task email watch` is a pure IMAP IDLE subscription — no vault
     // access needed. Handle it here so the watcher service doesn't
     // have to carry a TASK_VAULT just to emit events.
@@ -1117,6 +1106,10 @@ async fn main() -> eyre::Result<()> {
         })
         .await
         .map_err(Into::into);
+    }
+    if let Some(server) = server {
+        let remote = RemoteVoxConfig::new(server, session_token, organization_id)?;
+        return run_remote_command(&remote, actor.as_deref(), command).await;
     }
 
     let vault_path = vault.ok_or_else(|| {
@@ -2927,19 +2920,6 @@ async fn run_agent_command(
     Ok(())
 }
 
-fn command_requires_local_vault(command: &Commands) -> eyre::Result<()> {
-    match command {
-        Commands::Talk { .. } | Commands::Nc { .. } => Ok(()),
-        Commands::Email {
-            command: EmailCommands::Watch { .. },
-        } => Ok(()),
-        Commands::Agent { .. } => Ok(()),
-        _ => eyre::bail!(
-            "--server currently routes the `task agent ...` surface over Vox. Use TASK_VAULT/--vault for local commands."
-        ),
-    }
-}
-
 #[derive(Debug, Clone)]
 struct RemoteVoxConfig {
     vox_url: String,
@@ -3006,6 +2986,1374 @@ impl RemoteVoxConfig {
             .establish()
             .await
             .map_err(|e| eyre::eyre!("Remote Vox connection failed: {e}"))
+    }
+}
+
+async fn run_remote_command(
+    remote: &RemoteVoxConfig,
+    actor: Option<&str>,
+    command: Commands,
+) -> eyre::Result<()> {
+    match command {
+        Commands::Agent { command } => run_remote_agent_command(remote, actor, command).await?,
+
+        Commands::List {
+            status,
+            project,
+            context,
+            tag,
+            overdue,
+            today,
+            week,
+            active,
+            search,
+            sort,
+            limit,
+            all,
+            json,
+        } => {
+            let client = remote.task().await?;
+            let tasks = if all {
+                client.list_tasks().await?
+            } else {
+                let mut filters = Vec::new();
+                if let Some(s) = status {
+                    let st = parse_status(&s).ok_or_else(|| eyre::eyre!("Unknown status: {s}"))?;
+                    filters.push(Filter::Status(st));
+                }
+                if let Some(p) = project {
+                    filters.push(Filter::HasProject(p));
+                }
+                if let Some(c) = context {
+                    filters.push(Filter::HasContext(c));
+                }
+                if let Some(t) = tag {
+                    filters.push(Filter::HasTag(t));
+                }
+                if overdue {
+                    filters.push(Filter::Overdue);
+                }
+                if today {
+                    filters.push(Filter::DueToday);
+                }
+                if week {
+                    filters.push(Filter::DueThisWeek);
+                }
+                if active {
+                    filters.push(Filter::NotComplete);
+                    filters.push(Filter::NotCancelled);
+                    filters.push(Filter::NotArchived);
+                }
+                if let Some(q) = search {
+                    filters.push(Filter::TitleContains(q));
+                }
+                client
+                    .execute_query(Query {
+                        filters,
+                        sort: parse_sort(&sort),
+                        limit,
+                        group: None,
+                    })
+                    .await?
+            };
+            if json {
+                print_tasks_json(&tasks);
+            } else {
+                print_tasks_table(&tasks);
+            }
+        }
+
+        Commands::Add {
+            title,
+            priority,
+            status,
+            due,
+            scheduled,
+            project,
+            context,
+            tag,
+            recurrence,
+            assignee,
+        } => {
+            let task = build_new_task(
+                title,
+                priority,
+                status,
+                due,
+                scheduled,
+                project,
+                context,
+                tag,
+                recurrence,
+                assignee,
+                actor.map(str::to_string),
+            )?;
+            let created = remote.task().await?.create_task(task).await?;
+            println!("Created: {}", created.title);
+            println!("  id:  {}", created.id.as_deref().unwrap_or("—"));
+            if let Some(d) = created.due {
+                println!("  due: {d}");
+            }
+        }
+
+        Commands::Complete { title } => {
+            let task = remote.task().await?.complete_task(title).await?;
+            if task.recurrence.is_some() {
+                let next = task
+                    .scheduled
+                    .map(|d| d.to_string())
+                    .unwrap_or_else(|| "—".to_string());
+                println!("Recurring task completed. Next occurrence: {next}");
+            } else {
+                println!("Done: {}", task.title);
+            }
+        }
+
+        Commands::Show { title, json } => {
+            let task = remote_find_task(remote, &title).await?;
+            if json {
+                println!("{}", facet_json::to_string(&task).unwrap_or_default());
+            } else {
+                print_task_detail(&task);
+            }
+        }
+
+        Commands::Update {
+            reference,
+            title,
+            status,
+            priority,
+            due,
+            scheduled,
+            assignee,
+            add_tag,
+            remove_tag,
+            add_project,
+            remove_project,
+            add_context,
+            remove_context,
+            recurrence,
+            body,
+            json,
+        } => {
+            let mut task = remote_find_task(remote, &reference).await?;
+            apply_task_update(
+                &mut task,
+                title,
+                status,
+                priority,
+                due,
+                scheduled,
+                assignee,
+                add_tag,
+                remove_tag,
+                add_project,
+                remove_project,
+                add_context,
+                remove_context,
+                recurrence,
+                body,
+            )?;
+            let updated = remote.task().await?.update_task(task).await?;
+            if json {
+                println!("{}", facet_json::to_string(&updated).unwrap_or_default());
+            } else {
+                println!("Updated: {}", updated.title);
+            }
+        }
+
+        Commands::Delete { reference, hard } => {
+            let client = remote.task().await?;
+            if hard {
+                let task = remote_find_task_with_client(&client, &reference).await?;
+                client.delete_task(task.title.clone()).await?;
+                println!("Deleted (hard): {}", task.title);
+            } else {
+                let mut task = remote_find_task_with_client(&client, &reference).await?;
+                task.deleted_at = Some(chrono::Utc::now());
+                let updated = client.update_task(task).await?;
+                println!("Deleted (soft): {}", updated.title);
+            }
+        }
+
+        Commands::Assign { reference, user } => {
+            let client = remote.task().await?;
+            let mut task = remote_find_task_with_client(&client, &reference).await?;
+            task.assignee = if user == "clear" || user.is_empty() {
+                None
+            } else {
+                Some(user)
+            };
+            let updated = client.update_task(task).await?;
+            match &updated.assignee {
+                Some(u) => println!("Assigned '{}' → {u}", updated.title),
+                None => println!("Unassigned '{}'", updated.title),
+            }
+        }
+
+        Commands::For { user, json } => {
+            let tasks = remote.task().await?.tasks_for_user(user).await?;
+            if json {
+                print_tasks_json(&tasks);
+            } else {
+                print_tasks_table(&tasks);
+            }
+        }
+
+        Commands::DueBy { date, json } => {
+            let tasks = remote.calendar().await?.tasks_due_by(date).await?;
+            if json {
+                print_tasks_json(&tasks);
+            } else {
+                print_tasks_table(&tasks);
+            }
+        }
+
+        Commands::Search { query, json, limit } => {
+            let mut results = remote.task().await?.search_tasks(query).await?;
+            if let Some(n) = limit {
+                results.truncate(n);
+            }
+            if json {
+                print_tasks_json(&results);
+            } else {
+                print_tasks_table(&results);
+            }
+        }
+
+        Commands::Link { from, to, kind } => {
+            let client = remote.task().await?;
+            let mut source = remote_find_task_with_client(&client, &from).await?;
+            let target = remote_find_task_with_client(&client, &to).await?;
+            let rt = parse_relation_kind(&kind)?;
+            let target_ref = target.id.clone().unwrap_or_else(|| target.title.clone());
+            let already = source
+                .relations
+                .iter()
+                .any(|r| r.target == target_ref && r.relation_type == rt);
+            if !already {
+                source.relations.push(TaskRelation {
+                    target: target_ref,
+                    relation_type: rt,
+                });
+                client.update_task(source).await?;
+            }
+            println!("Linked '{from}' --{kind}--> '{to}'.");
+        }
+
+        Commands::React { reference, emoji } => {
+            let user = require_actor(&actor.map(str::to_string))?;
+            let client = remote.task().await?;
+            let mut task = remote_find_task_with_client(&client, &reference).await?;
+            if let Some(e) = emoji.strip_prefix("clear:") {
+                let before = task.reactions.len();
+                task.reactions.retain(|r| !(r.user == user && r.emoji == e));
+                if task.reactions.len() == before {
+                    eyre::bail!("No {e} reaction from @{user} to remove");
+                }
+                client.update_task(task).await?;
+                println!("Removed {e} from @{user}.");
+            } else {
+                if !task
+                    .reactions
+                    .iter()
+                    .any(|r| r.user == user && r.emoji == emoji)
+                {
+                    task.reactions.push(task_core::Reaction {
+                        emoji: emoji.clone(),
+                        user: user.clone(),
+                    });
+                    client.update_task(task).await?;
+                }
+                println!("Reacted {emoji} from @{user}.");
+            }
+        }
+
+        Commands::Subscribe { reference, user } => {
+            let who = user
+                .or_else(|| actor.map(str::to_string))
+                .ok_or_else(|| eyre::eyre!("Specify a user or set --as-user/TASK_USER."))?;
+            let client = remote.task().await?;
+            let mut task = remote_find_task_with_client(&client, &reference).await?;
+            if !task.subscribers.contains(&who) {
+                task.subscribers.push(who.clone());
+                client.update_task(task).await?;
+            }
+            println!("@{who} subscribed.");
+        }
+
+        Commands::Unsubscribe { reference, user } => {
+            let who = user
+                .or_else(|| actor.map(str::to_string))
+                .ok_or_else(|| eyre::eyre!("Specify a user or set --as-user/TASK_USER."))?;
+            let client = remote.task().await?;
+            let mut task = remote_find_task_with_client(&client, &reference).await?;
+            let before = task.subscribers.len();
+            task.subscribers.retain(|u| u != &who);
+            if task.subscribers.len() != before {
+                client.update_task(task).await?;
+            }
+            println!("@{who} unsubscribed.");
+        }
+
+        Commands::Comment { command } => run_remote_comment_command(remote, actor, command).await?,
+
+        Commands::Sync { json } => {
+            let stats = remote.calendar().await?.trigger_sync().await?;
+            if json {
+                println!("{}", facet_json::to_string(&stats).unwrap_or_default());
+            } else {
+                print_sync_stats(&stats);
+            }
+        }
+
+        Commands::Project { command } => run_remote_project_command(remote, actor, command).await?,
+        Commands::Client { command } => run_remote_client_command(remote, command).await?,
+        Commands::Invoice { command } => run_remote_invoice_command(remote, actor, command).await?,
+        Commands::Start {
+            reference,
+            description,
+            billable,
+            rate,
+        } => {
+            let entry = remote
+                .time()
+                .await?
+                .start_timer(task_core::TimeStartRequest {
+                    task_ref: reference.clone(),
+                    description,
+                    billable,
+                    billable_rate: rate,
+                    user: actor.map(str::to_string),
+                })
+                .await?;
+            println!("Started timer on '{reference}' (entry {}).", entry.id);
+        }
+        Commands::Stop { reference, json } => {
+            let entry = remote.time().await?.stop_timer(reference).await?;
+            if json {
+                println!(
+                    "{}",
+                    facet_json::to_string(&entry.entry).unwrap_or_default()
+                );
+            } else {
+                println!(
+                    "Stopped '{}' — {} min logged.",
+                    entry.task_title,
+                    entry.entry.duration_minutes()
+                );
+            }
+        }
+        Commands::Time { command } => run_remote_time_command(remote, actor, command).await?,
+        Commands::Calendar { command } => run_remote_calendar_command(remote, command).await?,
+        Commands::Activity { limit, kind, json } => {
+            let changes = remote.activity().await?.recent_activity(limit).await?;
+            let filtered: Vec<_> = match kind {
+                Some(k) => changes.into_iter().filter(|c| c.entity_type == k).collect(),
+                None => changes,
+            };
+            if json {
+                print_activity_json(&filtered);
+            } else {
+                print_activity_table(&filtered);
+            }
+        }
+        Commands::Conflicts { command } => match command {
+            ConflictCommands::List { all, limit, json } => {
+                let rows = remote.activity().await?.list_conflicts(!all, limit).await?;
+                if json {
+                    print_conflicts_json(&rows);
+                } else {
+                    print_conflicts_table(&rows);
+                }
+            }
+            ConflictCommands::Resolve { conflict_id, how } => {
+                remote
+                    .activity()
+                    .await?
+                    .resolve_conflict(conflict_id, actor.map(str::to_string), how.clone())
+                    .await?;
+                println!("Resolved conflict #{conflict_id} ({how}).");
+            }
+        },
+        Commands::Email { .. } => {
+            eyre::bail!("Remote mode does not support Nextcloud Mail commands yet.")
+        }
+        Commands::Talk { .. } | Commands::Nc { .. } => {
+            unreachable!("handled before remote dispatch")
+        }
+    }
+    Ok(())
+}
+
+async fn remote_find_task(remote: &RemoteVoxConfig, reference: &str) -> eyre::Result<Task> {
+    let client = remote.task().await?;
+    remote_find_task_with_client(&client, reference).await
+}
+
+async fn remote_find_task_with_client(
+    client: &task_core::service::TaskServiceClient,
+    reference: &str,
+) -> eyre::Result<Task> {
+    let tasks = client.list_tasks().await?;
+    find_task_in(tasks, reference)
+}
+
+fn build_new_task(
+    title: String,
+    priority: Option<String>,
+    status: Option<String>,
+    due: Option<String>,
+    scheduled: Option<String>,
+    project: Option<String>,
+    context: Option<String>,
+    tag: Option<String>,
+    recurrence: Option<String>,
+    assignee: Option<String>,
+    actor: Option<String>,
+) -> eyre::Result<Task> {
+    Ok(Task {
+        title,
+        priority: priority
+            .as_deref()
+            .map(parse_priority)
+            .transpose()
+            .map_err(|e| eyre::eyre!("{e}"))?
+            .unwrap_or(Priority::None),
+        status: status
+            .as_deref()
+            .map(|s| parse_status(s).ok_or_else(|| format!("Unknown status: {s}")))
+            .transpose()
+            .map_err(|e| eyre::eyre!("{e}"))?
+            .unwrap_or(Status::Open),
+        due: due
+            .as_deref()
+            .map(|d| {
+                d.parse::<chrono::NaiveDate>()
+                    .map_err(|e| eyre::eyre!("{e}"))
+            })
+            .transpose()?,
+        scheduled: scheduled
+            .as_deref()
+            .map(|d| {
+                d.parse::<chrono::NaiveDate>()
+                    .map_err(|e| eyre::eyre!("{e}"))
+            })
+            .transpose()?,
+        projects: project.map(|p| vec![WikiLink(p)]).unwrap_or_default(),
+        contexts: context.map(|c| vec![c]).unwrap_or_default(),
+        tags: tag.map(|t| vec![t]).unwrap_or_default(),
+        recurrence,
+        assignee,
+        created_by: actor,
+        ..Task::default()
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn apply_task_update(
+    task: &mut Task,
+    title: Option<String>,
+    status: Option<String>,
+    priority: Option<String>,
+    due: Option<String>,
+    scheduled: Option<String>,
+    assignee: Option<String>,
+    add_tag: Vec<String>,
+    remove_tag: Vec<String>,
+    add_project: Vec<String>,
+    remove_project: Vec<String>,
+    add_context: Vec<String>,
+    remove_context: Vec<String>,
+    recurrence: Option<String>,
+    body: Option<String>,
+) -> eyre::Result<()> {
+    if let Some(t) = title {
+        task.title = t;
+    }
+    if let Some(s) = status {
+        task.status = parse_status(&s).ok_or_else(|| eyre::eyre!("Unknown status: {s}"))?;
+    }
+    if let Some(p) = priority {
+        task.priority = parse_priority(&p).map_err(|e| eyre::eyre!("{e}"))?;
+    }
+    if let Some(d) = due {
+        task.due = parse_optional_date(&d)?;
+    }
+    if let Some(d) = scheduled {
+        task.scheduled = parse_optional_date(&d)?;
+    }
+    if let Some(a) = assignee {
+        task.assignee = if a == "clear" || a.is_empty() {
+            None
+        } else {
+            Some(a)
+        };
+    }
+    for t in &remove_tag {
+        task.tags.retain(|x| x != t);
+    }
+    for t in add_tag {
+        if !task.tags.contains(&t) {
+            task.tags.push(t);
+        }
+    }
+    for p in &remove_project {
+        task.projects.retain(|x| &x.0 != p);
+    }
+    for p in add_project {
+        if !task.projects.iter().any(|x| x.0 == p) {
+            task.projects.push(WikiLink(p));
+        }
+    }
+    for c in &remove_context {
+        task.contexts.retain(|x| x != c);
+    }
+    for c in add_context {
+        if !task.contexts.contains(&c) {
+            task.contexts.push(c);
+        }
+    }
+    if let Some(r) = recurrence {
+        task.recurrence = if r == "clear" || r.is_empty() {
+            None
+        } else {
+            Some(r)
+        };
+    }
+    if let Some(b) = body {
+        task.body = b;
+    }
+    Ok(())
+}
+
+async fn run_remote_comment_command(
+    remote: &RemoteVoxConfig,
+    actor: Option<&str>,
+    command: CommentCommands,
+) -> eyre::Result<()> {
+    let client = remote.task().await?;
+    match command {
+        CommentCommands::Add {
+            reference,
+            body,
+            timecode,
+        } => {
+            let author = require_actor(&actor.map(str::to_string))?;
+            let mut task = remote_find_task_with_client(&client, &reference).await?;
+            let time_ref = match timecode.as_deref() {
+                Some(tc) => Some(
+                    task_core::workflows::parse_timecode(tc)
+                        .ok_or_else(|| eyre::eyre!("Invalid timecode: {tc}"))?,
+                ),
+                None => None,
+            };
+            let now = chrono::Local::now().naive_local();
+            let mentions = Comment::extract_mentions(&body);
+            let new_comment = Comment {
+                id: Comment::generate_id(&author, Some(now), &body),
+                author,
+                body,
+                created_at: Some(now),
+                time_ref,
+                mentions,
+                ..Default::default()
+            };
+            let mut comments = parse_comments(&task.body);
+            comments.push(new_comment.clone());
+            task.body = splice_comments(&task.body, &comments);
+            client.update_task(task).await?;
+            println!("Comment added ({}).", new_comment.id);
+        }
+        CommentCommands::List { reference, json } => {
+            let task = remote_find_task_with_client(&client, &reference).await?;
+            let comments = parse_comments(&task.body);
+            if json {
+                print_comments_json(&comments);
+            } else {
+                print_comments_table(&comments);
+            }
+        }
+        CommentCommands::Reply {
+            reference,
+            parent_id,
+            body,
+        } => {
+            let author = require_actor(&actor.map(str::to_string))?;
+            let mut task = remote_find_task_with_client(&client, &reference).await?;
+            let mut comments = parse_comments(&task.body);
+            if !comments.iter().any(|c| c.id == parent_id) {
+                eyre::bail!("No comment with id {parent_id} on task {reference}");
+            }
+            let now = chrono::Local::now().naive_local();
+            let mentions = Comment::extract_mentions(&body);
+            let new_comment = Comment {
+                id: Comment::generate_id(&author, Some(now), &body),
+                author,
+                body,
+                created_at: Some(now),
+                reply_to: Some(parent_id),
+                mentions,
+                ..Default::default()
+            };
+            comments.push(new_comment.clone());
+            task.body = splice_comments(&task.body, &comments);
+            client.update_task(task).await?;
+            println!("Reply added ({}).", new_comment.id);
+        }
+        CommentCommands::Resolve {
+            reference,
+            comment_id,
+        } => {
+            let resolver = require_actor(&actor.map(str::to_string))?;
+            let mut task = remote_find_task_with_client(&client, &reference).await?;
+            let mut comments = parse_comments(&task.body);
+            let Some(c) = comments.iter_mut().find(|c| c.id == comment_id) else {
+                eyre::bail!("No comment with id {comment_id}");
+            };
+            c.resolved = true;
+            c.resolved_by = Some(resolver);
+            task.body = splice_comments(&task.body, &comments);
+            client.update_task(task).await?;
+            println!("Resolved comment {comment_id}.");
+        }
+        CommentCommands::Reopen {
+            reference,
+            comment_id,
+        } => {
+            let mut task = remote_find_task_with_client(&client, &reference).await?;
+            let mut comments = parse_comments(&task.body);
+            let Some(c) = comments.iter_mut().find(|c| c.id == comment_id) else {
+                eyre::bail!("No comment with id {comment_id}");
+            };
+            c.resolved = false;
+            c.resolved_by = None;
+            task.body = splice_comments(&task.body, &comments);
+            client.update_task(task).await?;
+            println!("Reopened comment {comment_id}.");
+        }
+    }
+    Ok(())
+}
+
+async fn run_remote_project_command(
+    remote: &RemoteVoxConfig,
+    actor: Option<&str>,
+    command: ProjectCommands,
+) -> eyre::Result<()> {
+    let client = remote.project().await?;
+    match command {
+        ProjectCommands::List { json } => {
+            let projects = client.list_projects().await?;
+            if json {
+                println!("{}", projects_json(&projects));
+            } else {
+                print_projects_table(&projects);
+            }
+        }
+        ProjectCommands::Stats { name, json } => {
+            let stats = client.project_stats(name.clone()).await?;
+            if json {
+                println!("{}", facet_json::to_string(&stats).unwrap_or_default());
+            } else {
+                println!("Project: {name}");
+                println!("  Open:      {}", stats.open_task_count);
+                println!("  Completed: {}", stats.completed_task_count);
+                println!("  Total:     {}", stats.total());
+                if let Some(pct) = stats.completion_percent() {
+                    println!("  Progress:  {:.0}%", pct);
+                }
+            }
+        }
+        ProjectCommands::Next { name, json } => match client.next_task(name.clone()).await? {
+            Some(task) => {
+                if json {
+                    println!("{}", facet_json::to_string(&task).unwrap_or_default());
+                } else {
+                    println!("Next task for '{}'", name);
+                    print_task_detail(&task);
+                }
+            }
+            None => {
+                if json {
+                    println!("null");
+                } else {
+                    println!("No actionable tasks for '{}'.", name);
+                }
+            }
+        },
+        ProjectCommands::Tasks { name, json } => {
+            let tasks = client.tasks_for_project(name).await?;
+            if json {
+                print_tasks_json(&tasks);
+            } else {
+                print_tasks_table(&tasks);
+            }
+        }
+        ProjectCommands::Edit {
+            name,
+            status,
+            description,
+            area,
+            organization,
+            client: project_client,
+            default_rate,
+            identifier,
+            lead,
+            default_assignee,
+            emoji,
+            repo,
+            dev_path,
+            project_type,
+            workflow,
+            workflow_stage,
+            due,
+            start,
+            add_tag,
+            remove_tag,
+            add_email_tag,
+            remove_email_tag,
+            add_team,
+            remove_team,
+            json,
+        } => {
+            let patch = task_core::ProjectPatch {
+                status,
+                description,
+                area,
+                organization,
+                project_type,
+                workflow,
+                workflow_stage,
+                identifier,
+                lead,
+                default_assignee,
+                emoji,
+                repo,
+                dev_path,
+                client: project_client,
+                default_rate,
+                due,
+                start,
+                add_tag,
+                remove_tag,
+                add_email_tag,
+                remove_email_tag,
+                add_team,
+                remove_team,
+            };
+            let updated = client
+                .update_project(name, patch, actor.map(str::to_string))
+                .await?;
+            if json {
+                println!("{}", facet_json::to_string(&updated).unwrap_or_default());
+            } else {
+                println!("Updated project '{}'.", updated.title);
+            }
+        }
+        ProjectCommands::Show { name, json } => {
+            let projects = client.list_projects().await?;
+            let project = projects
+                .into_iter()
+                .find(|p| p.title.eq_ignore_ascii_case(&name))
+                .ok_or_else(|| eyre::eyre!("Project not found: {name}"))?;
+            if json {
+                println!("{}", facet_json::to_string(&project).unwrap_or_default());
+            } else {
+                print_project_detail(&project);
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn run_remote_client_command(
+    remote: &RemoteVoxConfig,
+    command: ClientCommands,
+) -> eyre::Result<()> {
+    let client = remote.client().await?;
+    match command {
+        ClientCommands::Add {
+            name,
+            rate,
+            currency,
+            terms_days,
+            email,
+            contact,
+            phone,
+            invoice_ninja_id,
+        } => {
+            let existing = client.find_client(name.clone()).await?;
+            let mut item = existing.unwrap_or_else(|| task_core::Client {
+                name: name.clone(),
+                ..Default::default()
+            });
+            if let Some(r) = rate {
+                item.default_hourly_rate = Some(r);
+            }
+            if let Some(c) = currency {
+                item.currency_code = c;
+            }
+            if let Some(d) = terms_days {
+                item.payment_terms_days = Some(d);
+            }
+            if let Some(e) = email {
+                item.email = Some(e);
+            }
+            if let Some(c) = contact {
+                item.contact_name = Some(c);
+            }
+            if let Some(p) = phone {
+                item.phone = Some(p);
+            }
+            if let Some(id) = invoice_ninja_id {
+                item.invoice_ninja_id = Some(id);
+            }
+            let saved = client.save_client(item).await?;
+            println!(
+                "Saved client '{}' (rate {}¢/hr).",
+                saved.name,
+                saved.default_hourly_rate.unwrap_or(0)
+            );
+        }
+        ClientCommands::List { json } => {
+            let clients = client.list_clients().await?;
+            if json {
+                print_clients_json(&clients);
+            } else {
+                print_clients_table(&clients);
+            }
+        }
+        ClientCommands::Show { name, json } => {
+            let item = client
+                .find_client(name.clone())
+                .await?
+                .ok_or_else(|| eyre::eyre!("Client not found: {name}"))?;
+            if json {
+                println!("{}", facet_json::to_string(&item).unwrap_or_default());
+            } else {
+                print_client_detail(&item);
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn run_remote_invoice_command(
+    remote: &RemoteVoxConfig,
+    actor: Option<&str>,
+    command: InvoiceCommands,
+) -> eyre::Result<()> {
+    let client = remote.invoice().await?;
+    match command {
+        InvoiceCommands::Create {
+            client: client_name,
+            from,
+            to,
+            rate,
+            tax,
+            discount,
+            po,
+            notes,
+            json,
+        } => {
+            let invoice = client
+                .create_invoice_from_entries(task_core::InvoiceCreateRequest {
+                    client_name,
+                    from: from.as_deref().map(parse_date_start).transpose()?,
+                    to: to.as_deref().map(parse_date_end).transpose()?,
+                    fallback_rate: rate,
+                    tax_rate_percent: tax,
+                    discount_percent: discount,
+                    po_number: po,
+                    public_notes: notes,
+                    actor: actor.map(str::to_string),
+                })
+                .await?;
+            if json {
+                println!("{}", facet_json::to_string(&invoice).unwrap_or_default());
+            } else {
+                print_invoice_detail(&invoice);
+            }
+        }
+        InvoiceCommands::List {
+            status,
+            client: client_name,
+            year,
+            json,
+        } => {
+            let invoices: Vec<task_core::Invoice> = client
+                .list_invoices()
+                .await?
+                .into_iter()
+                .filter(|i| match &status {
+                    Some(s) => format!("{:?}", i.status).eq_ignore_ascii_case(s),
+                    None => true,
+                })
+                .filter(|i| match &client_name {
+                    Some(c) => i.client.0.eq_ignore_ascii_case(c),
+                    None => true,
+                })
+                .filter(|i| match year {
+                    Some(y) => i.issue_date.format("%Y").to_string() == format!("{y:04}"),
+                    None => true,
+                })
+                .collect();
+            if json {
+                print_invoices_json(&invoices);
+            } else {
+                print_invoices_table(&invoices);
+            }
+        }
+        InvoiceCommands::Show { id, md, json } => {
+            let invoice = client
+                .get_invoice(id.clone())
+                .await?
+                .ok_or_else(|| eyre::eyre!("Invoice not found: {id}"))?;
+            if json {
+                println!("{}", facet_json::to_string(&invoice).unwrap_or_default());
+            } else if md {
+                println!("{}", task_core::invoice::render_invoice_body(&invoice));
+            } else {
+                print_invoice_detail(&invoice);
+            }
+        }
+        InvoiceCommands::Send { id } => {
+            let invoice = client.send_invoice(id, actor.map(str::to_string)).await?;
+            println!(
+                "Sent invoice {} — ${:.2} due {}.",
+                invoice.id,
+                invoice.total_cents() as f64 / 100.0,
+                invoice.due_date
+            );
+        }
+        InvoiceCommands::Pay {
+            id,
+            amount,
+            method,
+            reference,
+            notes,
+        } => {
+            let invoice = client
+                .record_invoice_payment(task_core::InvoicePaymentRequest {
+                    invoice_id: id,
+                    amount_cents: amount,
+                    method: if method.is_empty() {
+                        None
+                    } else {
+                        Some(method)
+                    },
+                    reference,
+                    notes,
+                    actor: actor.map(str::to_string),
+                })
+                .await?;
+            println!(
+                "Recorded ${:.2} against {}. Balance: ${:.2}. Status: {:?}",
+                amount as f64 / 100.0,
+                invoice.id,
+                invoice.balance_cents() as f64 / 100.0,
+                invoice.status
+            );
+        }
+        InvoiceCommands::Cancel { id, reason } => {
+            let invoice = client
+                .cancel_invoice(id, reason, actor.map(str::to_string))
+                .await?;
+            println!("Cancelled invoice {}.", invoice.id);
+        }
+    }
+    Ok(())
+}
+
+async fn run_remote_time_command(
+    remote: &RemoteVoxConfig,
+    actor: Option<&str>,
+    command: TimeCommands,
+) -> eyre::Result<()> {
+    let client = remote.time().await?;
+    match command {
+        TimeCommands::Active { json } => match client.active_timer().await? {
+            Some(entry) => {
+                if json {
+                    println!(
+                        "{{\"task\":\"{}\",\"entry\":{}}}",
+                        escape_json(&entry.task_title),
+                        facet_json::to_string(&entry.entry).unwrap_or_default()
+                    );
+                } else {
+                    let elapsed = entry.entry.elapsed_minutes(chrono::Utc::now());
+                    println!("Running: '{}' — {elapsed} min", entry.task_title);
+                    if let Some(d) = &entry.entry.description {
+                        println!("  {d}");
+                    }
+                    println!("  id: {}", entry.entry.id);
+                }
+            }
+            None => {
+                if json {
+                    println!("null");
+                } else {
+                    println!("No running timer.");
+                }
+            }
+        },
+        TimeCommands::Log {
+            reference,
+            start,
+            end,
+            description,
+            billable,
+            rate,
+        } => {
+            let entry = client
+                .log_time(task_core::TimeLogRequest {
+                    task_ref: reference.clone(),
+                    start: parse_datetime(&start)?,
+                    end: parse_datetime(&end)?,
+                    description,
+                    billable,
+                    billable_rate: rate,
+                    user: actor.map(str::to_string),
+                })
+                .await?;
+            println!(
+                "Logged {} min on '{reference}' (entry {}).",
+                entry.duration_minutes(),
+                entry.id
+            );
+        }
+        TimeCommands::List {
+            task,
+            user,
+            project,
+            client: client_name,
+            tag,
+            from,
+            to,
+            billable,
+            format,
+            json,
+        } => {
+            let fmt = pick_format(&format, json);
+            let entries = client
+                .list_time_entries(TimeEntryFilter {
+                    task_ref: task,
+                    user,
+                    project,
+                    client: client_name,
+                    tag,
+                    from: from.as_deref().map(parse_date_start).transpose()?,
+                    to: to.as_deref().map(parse_date_end).transpose()?,
+                    billable_only: billable,
+                })
+                .await?;
+            match fmt {
+                OutputFormat::Json => print_time_entries_json(&entries),
+                OutputFormat::Csv => print_time_entries_csv(&entries),
+                OutputFormat::Table => print_time_entries_table(&entries),
+            }
+        }
+        TimeCommands::Report {
+            group_by,
+            from,
+            to,
+            project,
+            client: client_name,
+            tag,
+            user,
+            billable,
+            rate,
+            format,
+            json,
+        } => {
+            let fmt = pick_format(&format, json);
+            let entries = client
+                .list_time_entries(TimeEntryFilter {
+                    task_ref: None,
+                    user,
+                    project,
+                    client: client_name,
+                    tag,
+                    from: from.as_deref().map(parse_date_start).transpose()?,
+                    to: to.as_deref().map(parse_date_end).transpose()?,
+                    billable_only: billable,
+                })
+                .await?;
+            let report = aggregate_time(&entries, &group_by, rate)?;
+            match fmt {
+                OutputFormat::Json => print_report_json(&report),
+                OutputFormat::Csv => print_report_csv(&report, &group_by),
+                OutputFormat::Table => print_report_table(&report),
+            }
+        }
+        TimeCommands::Edit {
+            entry_id,
+            start,
+            end,
+            description,
+            billable,
+            rate,
+            user,
+            tags,
+            json,
+        } => {
+            let mut patch = task_core::TimeEntryPatch::default();
+            if let Some(s) = start {
+                patch.start_time = Some(parse_datetime(&s)?);
+            }
+            if let Some(e) = end {
+                patch.end_time = Some(if e == "clear" {
+                    None
+                } else {
+                    Some(parse_datetime(&e)?)
+                });
+            }
+            patch.description = description;
+            patch.billable = billable;
+            patch.billable_rate = rate;
+            patch.user = user;
+            patch.tags = tags.map(|s| {
+                if s.is_empty() {
+                    Vec::new()
+                } else {
+                    s.split(',').map(|t| t.trim().to_string()).collect()
+                }
+            });
+            let updated = client
+                .edit_time_entry(entry_id, patch, actor.map(str::to_string))
+                .await?;
+            if json {
+                println!(
+                    "{{\"task\":\"{}\",\"entry\":{}}}",
+                    escape_json(&updated.task_title),
+                    facet_json::to_string(&updated.entry).unwrap_or_default()
+                );
+            } else {
+                println!(
+                    "Updated entry {} on '{}' — {} min.",
+                    updated.entry.id,
+                    updated.task_title,
+                    updated.entry.duration_minutes()
+                );
+            }
+        }
+        TimeCommands::Delete { entry_id } => {
+            client
+                .delete_time_entry(entry_id.clone(), actor.map(str::to_string))
+                .await?;
+            println!("Deleted entry {entry_id}.");
+        }
+    }
+    Ok(())
+}
+
+async fn run_remote_calendar_command(
+    remote: &RemoteVoxConfig,
+    command: CalendarCommands,
+) -> eyre::Result<()> {
+    let client = remote.calendar().await?;
+    match command {
+        CalendarCommands::List { from, to, json } => {
+            let events =
+                remote_calendar_events_for_range(&client, from.as_deref(), to.as_deref()).await?;
+            if json {
+                print_calendar_events_json(&events);
+            } else {
+                print_calendar_events_table(&events);
+            }
+        }
+        CalendarCommands::Show { reference, json } => {
+            let event = remote_find_calendar_event(&client, &reference).await?;
+            if json {
+                println!("{}", facet_json::to_string(&event).unwrap_or_default());
+            } else {
+                print_calendar_event_detail(&event);
+            }
+        }
+        CalendarCommands::Add {
+            title,
+            start,
+            end,
+            description,
+            location,
+            all_day,
+            status,
+            recurrence,
+            attendee,
+            json,
+        } => {
+            let event = CalendarEvent {
+                title,
+                description,
+                location,
+                start: parse_datetime(&start)?,
+                end: end.as_deref().map(parse_datetime).transpose()?,
+                all_day,
+                status: parse_calendar_status(&status)?,
+                recurrence,
+                attendees: attendee,
+                ..CalendarEvent::default()
+            };
+            let created = client.create_event(event).await?;
+            if json {
+                println!("{}", facet_json::to_string(&created).unwrap_or_default());
+            } else {
+                println!("Created calendar event: {}", created.title);
+                println!("  id: {}", created.id.as_deref().unwrap_or("—"));
+            }
+        }
+        CalendarCommands::Update {
+            reference,
+            title,
+            start,
+            end,
+            description,
+            location,
+            all_day,
+            status,
+            recurrence,
+            attendees,
+            body,
+            json,
+        } => {
+            let patch = build_calendar_patch(
+                title,
+                start,
+                end,
+                description,
+                location,
+                all_day,
+                status,
+                recurrence,
+                attendees,
+                body,
+            )?;
+            let updated = client.update_event(reference, patch).await?;
+            if json {
+                println!("{}", facet_json::to_string(&updated).unwrap_or_default());
+            } else {
+                println!("Updated calendar event: {}", updated.title);
+            }
+        }
+        CalendarCommands::Delete { reference } => {
+            client.delete_event(reference.clone()).await?;
+            println!("Deleted calendar event: {reference}");
+        }
+    }
+    Ok(())
+}
+
+async fn remote_calendar_events_for_range(
+    client: &task_core::service::CalendarServiceClient,
+    from: Option<&str>,
+    to: Option<&str>,
+) -> eyre::Result<Vec<CalendarEvent>> {
+    let from = from
+        .map(parse_calendar_boundary_start)
+        .transpose()?
+        .unwrap_or_else(|| parse_datetime("1970-01-01T00:00:00Z").unwrap())
+        .to_rfc3339();
+    let to = to
+        .map(parse_calendar_boundary_end)
+        .transpose()?
+        .unwrap_or_else(|| parse_datetime("9999-12-31T23:59:59Z").unwrap())
+        .to_rfc3339();
+    Ok(client.events_between(from, to).await?)
+}
+
+async fn remote_find_calendar_event(
+    client: &task_core::service::CalendarServiceClient,
+    reference: &str,
+) -> eyre::Result<CalendarEvent> {
+    remote_calendar_events_for_range(client, None, None)
+        .await?
+        .into_iter()
+        .find(|e| e.id.as_deref() == Some(reference) || e.title == reference)
+        .ok_or_else(|| eyre::eyre!("Calendar event not found: {reference}"))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_calendar_patch(
+    title: Option<String>,
+    start: Option<String>,
+    end: Option<String>,
+    description: Option<String>,
+    location: Option<String>,
+    all_day: Option<bool>,
+    status: Option<String>,
+    recurrence: Option<String>,
+    attendees: Option<String>,
+    body: Option<String>,
+) -> eyre::Result<CalendarEventPatch> {
+    Ok(CalendarEventPatch {
+        title,
+        description: description.map(optional_string_field),
+        location: location.map(optional_string_field),
+        start: start.as_deref().map(parse_datetime).transpose()?,
+        end: match end {
+            Some(s) if s == "clear" || s.is_empty() => Some(None),
+            Some(s) => Some(Some(parse_datetime(&s)?)),
+            None => None,
+        },
+        all_day,
+        status: status.as_deref().map(parse_calendar_status).transpose()?,
+        recurrence: recurrence.map(|s| {
+            if s == "clear" || s.is_empty() {
+                None
+            } else {
+                Some(s)
+            }
+        }),
+        attendees: attendees.map(|s| {
+            if s.is_empty() {
+                Vec::new()
+            } else {
+                s.split(',').map(|a| a.trim().to_string()).collect()
+            }
+        }),
+        body,
+    })
+}
+
+fn print_projects_table(projects: &[Project]) {
+    if projects.is_empty() {
+        println!("No projects found.");
+        return;
+    }
+    let name_w = projects.iter().map(|p| p.title.len()).max().unwrap_or(10) + 2;
+    println!("{:<name_w$}  {:<10}  {}", "NAME", "STATE", "DUE");
+    println!("{}", "─".repeat(name_w + 20));
+    for p in projects {
+        let state = format!("{:?}", p.status);
+        let due = p
+            .due
+            .map(|d| d.to_string())
+            .unwrap_or_else(|| "—".to_string());
+        println!("{:<name_w$}  {:<10}  {}", p.title, state, due);
+    }
+    println!("\n{} project(s)", projects.len());
+}
+
+fn print_sync_stats(stats: &SyncStats) {
+    println!("Sync complete.");
+    println!(
+        "  calendar: +{} / -{}",
+        stats.calendar_pushed, stats.calendar_pulled
+    );
+    println!(
+        "  deck:     +{} / -{}",
+        stats.deck_pushed, stats.deck_pulled
+    );
+    println!(
+        "  files:    created {}, updated {}",
+        stats.files_created, stats.files_updated
+    );
+    if !stats.errors.is_empty() {
+        println!("  errors:");
+        for e in &stats.errors {
+            println!("    - {e}");
+        }
     }
 }
 
@@ -4115,7 +5463,7 @@ fn print_agent_snapshot(snapshot: AgentSnapshot<'_>) {
 
 fn print_agent_capabilities() {
     println!(
-        "{{\"binary\":\"task\",\"package\":\"task-cli\",\"install\":{},\"global_flags\":[\"--vault\",\"--server\",\"--session-token\",\"--organization-id\",\"--as-user\"],\"agent_commands\":[\"snapshot\",\"task\",\"project\",\"calendar\",\"time\",\"sync\",\"capabilities\"],\"control_commands\":[\"add\",\"update\",\"complete\",\"delete\",\"calendar add\",\"calendar update\",\"calendar delete\",\"time log\",\"time edit\",\"start\",\"stop\",\"sync\"],\"remote_mode\":\"Set --server plus --session-token; --organization-id routes multi-instance organization requests.\"}}",
+        "{{\"binary\":\"task\",\"package\":\"task-cli\",\"install\":{},\"global_flags\":[\"--vault\",\"--server\",\"--session-token\",\"--organization-id\",\"--as-user\"],\"agent_commands\":[\"snapshot\",\"task\",\"project\",\"calendar\",\"time\",\"sync\",\"capabilities\"],\"control_commands\":[\"add\",\"update\",\"complete\",\"delete\",\"calendar add\",\"calendar update\",\"calendar delete\",\"time log\",\"time edit\",\"start\",\"stop\",\"sync\"],\"remote_mode\":\"Set --server plus --session-token to route supported task, project, client, invoice, time, calendar, activity, conflict, and agent commands over Vox; --organization-id routes multi-instance organization requests.\"}}",
         agent_install_json()
     );
 }
