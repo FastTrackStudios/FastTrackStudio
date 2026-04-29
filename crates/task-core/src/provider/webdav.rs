@@ -841,6 +841,8 @@ fn percent_decode(input: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use crate::provider::live_nextcloud_credentials;
+
     use super::*;
 
     #[test]
@@ -912,25 +914,21 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires live NEXTCLOUD_URL/NEXTCLOUD_USER/NEXTCLOUD_PASSWORD credentials"]
+    #[ignore = "requires live Nextcloud credentials"]
     async fn live_nextcloud_file_management_smoke() {
-        let url = std::env::var("NEXTCLOUD_URL").expect("NEXTCLOUD_URL");
-        let username = std::env::var("NEXTCLOUD_USER")
-            .or_else(|_| std::env::var("NEXTCLOUD_USERNAME"))
-            .expect("NEXTCLOUD_USER");
-        let password = std::env::var("NEXTCLOUD_PASSWORD").expect("NEXTCLOUD_PASSWORD");
+        let credentials = live_nextcloud_credentials();
         let provider = WebDavProvider::new(
             "nextcloud",
             "Nextcloud",
             WebDavConfig {
                 url: format!(
                     "{}/remote.php/dav/files/{}/",
-                    url.trim_end_matches('/'),
-                    username
+                    credentials.url.trim_end_matches('/'),
+                    credentials.username
                 ),
-                username,
-                password,
-                projects_path: "Projects/".to_string(),
+                username: credentials.username,
+                password: credentials.password,
+                projects_path: credentials.projects_path,
             },
         );
         let suffix = std::time::SystemTime::now()
@@ -969,5 +967,50 @@ mod tests {
         assert!(names.iter().any(|name| name == "hello.txt"));
         assert!(names.iter().any(|name| name == "hello-moved.txt"));
         provider.remove(&dir).await.unwrap();
+    }
+
+    #[tokio::test]
+    #[ignore = "requires live Nextcloud credentials"]
+    async fn live_nextcloud_project_crud_smoke() {
+        let credentials = live_nextcloud_credentials();
+        let provider = WebDavProvider::new(
+            "nextcloud",
+            "Nextcloud",
+            WebDavConfig {
+                url: format!(
+                    "{}/remote.php/dav/files/{}/",
+                    credentials.url.trim_end_matches('/'),
+                    credentials.username
+                ),
+                username: credentials.username,
+                password: credentials.password,
+                projects_path: credentials.projects_path,
+            },
+        );
+        let suffix = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let project = Project {
+            title: format!("_task_webdav_project_smoke_{suffix}"),
+            ..Default::default()
+        };
+        let task = Task {
+            title: "Smoke task".to_string(),
+            body: "Created by live WebDAV smoke test".to_string(),
+            ..Default::default()
+        };
+
+        provider.create_project(&project).await.unwrap();
+        provider.save_task(&project.title, &task).await.unwrap();
+        let loaded = provider
+            .get_project(&project.title)
+            .await
+            .unwrap()
+            .expect("created project");
+        assert_eq!(loaded.project.title, project.title);
+        assert!(loaded.tasks.iter().any(|task| task.title == "Smoke task"));
+        provider.delete_task(&project.title, "Smoke task").await.unwrap();
+        provider.remove(&project.title).await.unwrap();
     }
 }

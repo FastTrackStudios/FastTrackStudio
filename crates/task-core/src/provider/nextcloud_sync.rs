@@ -1213,6 +1213,35 @@ impl NextcloudSync {
         Ok(())
     }
 
+    pub async fn delete_card(
+        &self,
+        board_id: u64,
+        stack_id: u64,
+        card_id: u64,
+    ) -> Result<(), VaultError> {
+        let url = format!(
+            "{}/index.php/apps/deck/api/v1.0/boards/{}/stacks/{}/cards/{}",
+            self.base_url, board_id, stack_id, card_id
+        );
+
+        let resp = self
+            .auth(self.http.delete(&url))
+            .header("OCS-APIRequest", "true")
+            .send()
+            .await
+            .map_err(|e| VaultError::IoError(format!("Deck API delete card: {e}")))?;
+
+        if !resp.status().is_success() && resp.status().as_u16() != 404 {
+            return Err(VaultError::IoError(format!(
+                "Deck API delete card {} failed: {}",
+                card_id,
+                resp.status()
+            )));
+        }
+
+        Ok(())
+    }
+
     /// Convert Deck board stacks + cards to vault-core tasks.
     /// Card descriptions are stored in `task.body`.
     pub async fn deck_board_to_tasks(
@@ -2454,6 +2483,8 @@ fn escape_json(s: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use crate::provider::live_nextcloud_credentials;
+
     use super::*;
 
     fn card(id: u64, title: &str) -> DeckCard {
@@ -2784,14 +2815,11 @@ END:VCALENDAR"#;
     }
 
     #[tokio::test]
-    #[ignore]
+    #[ignore = "requires live Nextcloud credentials"]
     async fn nextcloud_caldav_discovery_and_sync_smoke() {
-        let url = std::env::var("NEXTCLOUD_URL").expect("NEXTCLOUD_URL");
-        let user = std::env::var("NEXTCLOUD_USER")
-            .or_else(|_| std::env::var("NEXTCLOUD_USERNAME"))
-            .expect("NEXTCLOUD_USER");
-        let password = std::env::var("NEXTCLOUD_PASSWORD").expect("NEXTCLOUD_PASSWORD");
-        let client = NextcloudSync::new(&url, &user, &password);
+        let credentials = live_nextcloud_credentials();
+        let client =
+            NextcloudSync::new(&credentials.url, &credentials.username, &credentials.password);
 
         let discovery = client
             .discover_calendars()
@@ -2812,5 +2840,138 @@ END:VCALENDAR"#;
             .await
             .expect("sync collection");
         assert!(sync.sync_token.is_some());
+    }
+
+    #[tokio::test]
+    #[ignore = "requires live Nextcloud credentials"]
+    async fn nextcloud_caldav_vtodo_crud_smoke() {
+        let credentials = live_nextcloud_credentials();
+        let client =
+            NextcloudSync::new(&credentials.url, &credentials.username, &credentials.password);
+        let discovery = client.discover_calendars().await.expect("discover calendars");
+        let calendar = discovery
+            .calendars
+            .iter()
+            .find(|calendar| calendar.components.iter().any(|component| component == "VTODO"))
+            .expect("a VTODO-capable calendar");
+        let suffix = unix_suffix();
+        let uid = format!("task-caldav-vtodo-smoke-{suffix}");
+        let href = calendar_object_href(&calendar.href, &uid);
+        let ics = format!(
+            "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Task//Live Smoke//EN\r\nBEGIN:VTODO\r\nUID:{uid}\r\nSUMMARY:Live CalDAV VTODO smoke {suffix}\r\nSTATUS:NEEDS-ACTION\r\nEND:VTODO\r\nEND:VCALENDAR\r\n"
+        );
+
+        client
+            .put_calendar_object(&calendar.name, &href, &ics, None, Some("*"))
+            .await
+            .expect("put vtodo");
+        let objects = client
+            .calendar_multiget(&calendar.name, std::slice::from_ref(&href))
+            .await
+            .expect("multiget vtodo");
+        assert_eq!(objects.len(), 1);
+        assert_eq!(objects[0].component.as_deref(), Some("VTODO"));
+        let expected_title = format!("Live CalDAV VTODO smoke {suffix}");
+        assert_eq!(
+            objects[0].task.as_ref().map(|task| task.title.as_str()),
+            Some(expected_title.as_str())
+        );
+        client
+            .delete_calendar_object(&calendar.name, &href, objects[0].etag.as_deref())
+            .await
+            .expect("delete vtodo");
+    }
+
+    #[tokio::test]
+    #[ignore = "requires live Nextcloud credentials"]
+    async fn nextcloud_caldav_vevent_crud_smoke() {
+        let credentials = live_nextcloud_credentials();
+        let calendar = credentials
+            .event_calendar
+            .as_deref()
+            .unwrap_or(credentials.calendar.as_str());
+        let client =
+            NextcloudSync::new(&credentials.url, &credentials.username, &credentials.password);
+        let suffix = unix_suffix();
+        let uid = format!("task-caldav-vevent-smoke-{suffix}");
+        let href = format!(
+            "/remote.php/dav/calendars/{}/{}/{}.ics",
+            credentials.username, calendar, uid
+        );
+        let ics = format!(
+            "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Task//Live Smoke//EN\r\nBEGIN:VEVENT\r\nUID:{uid}\r\nSUMMARY:Live CalDAV VEVENT smoke {suffix}\r\nDTSTART:20260501T190000Z\r\nDTEND:20260501T200000Z\r\nSTATUS:CONFIRMED\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+        );
+
+        client
+            .put_calendar_object(calendar, &href, &ics, None, Some("*"))
+            .await
+            .expect("put vevent");
+        let objects = client
+            .calendar_multiget(calendar, std::slice::from_ref(&href))
+            .await
+            .expect("multiget vevent");
+        assert_eq!(objects.len(), 1);
+        assert_eq!(objects[0].component.as_deref(), Some("VEVENT"));
+        let expected_title = format!("Live CalDAV VEVENT smoke {suffix}");
+        assert_eq!(
+            objects[0].event.as_ref().map(|event| event.title.as_str()),
+            Some(expected_title.as_str())
+        );
+        assert_eq!(objects[0].details.as_ref().map(|d| d.events.len()), Some(1));
+        client
+            .delete_calendar_object(calendar, &href, objects[0].etag.as_deref())
+            .await
+            .expect("delete vevent");
+    }
+
+    #[tokio::test]
+    #[ignore = "requires live Nextcloud credentials and Deck access"]
+    async fn nextcloud_deck_board_stack_card_smoke() {
+        let credentials = live_nextcloud_credentials();
+        let client =
+            NextcloudSync::new(&credentials.url, &credentials.username, &credentials.password);
+        let board = client
+            .list_boards()
+            .await
+            .expect("list deck boards")
+            .into_iter()
+            .find(|board| !board.archived)
+            .expect("at least one active Deck board");
+        let stack = client
+            .list_stacks(board.id)
+            .await
+            .expect("list deck stacks")
+            .into_iter()
+            .next()
+            .expect("at least one Deck stack");
+
+        let title = format!("Live Deck smoke {}", unix_suffix());
+        let card_id = client
+            .create_card(board.id, stack.id, &title, "Created by Task live smoke test", None)
+            .await
+            .expect("create deck card");
+        let stacks = client
+            .list_stacks(board.id)
+            .await
+            .expect("list deck stacks after create");
+        assert!(stacks
+            .iter()
+            .flat_map(|stack| stack.cards.iter())
+            .any(|card| card.id == card_id));
+        client
+            .delete_card(board.id, stack.id, card_id)
+            .await
+            .expect("delete deck card");
+    }
+
+    fn unix_suffix() -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+    }
+
+    fn calendar_object_href(calendar_href: &str, uid: &str) -> String {
+        format!("{}/{}.ics", calendar_href.trim_end_matches('/'), uid)
     }
 }
