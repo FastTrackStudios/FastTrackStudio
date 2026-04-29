@@ -37,7 +37,7 @@ pub struct ComboboxProps {
 #[component]
 pub fn Combobox(props: ComboboxProps) -> Element {
     let mut open = use_signal(|| false);
-    let mut search_query = use_signal(|| String::new());
+    let mut search_query = use_signal(String::new);
 
     use_context_provider(|| ComboboxContext {
         value: props.value,

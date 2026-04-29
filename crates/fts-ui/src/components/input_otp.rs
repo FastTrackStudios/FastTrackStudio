@@ -9,7 +9,6 @@ use dioxus::prelude::*;
 #[derive(Clone, Copy)]
 struct InputOtpContext {
     value: Signal<String>,
-    length: usize,
     focused: Signal<bool>,
 }
 
@@ -47,7 +46,6 @@ pub fn InputOtp(props: InputOtpProps) -> Element {
 
     use_context_provider(|| InputOtpContext {
         value,
-        length,
         focused,
     });
 

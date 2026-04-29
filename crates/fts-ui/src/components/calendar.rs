@@ -1,6 +1,6 @@
 //! Calendar — shadcn v4 maia style month calendar for date picking.
 
-use chrono::{Datelike, Duration, Local, NaiveDate, Weekday};
+use chrono::{Datelike, Duration, Local, NaiveDate};
 use dioxus::prelude::*;
 
 // ---------------------------------------------------------------------------

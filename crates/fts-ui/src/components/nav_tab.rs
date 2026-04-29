@@ -35,7 +35,7 @@ pub fn NavTab(props: NavTabProps) -> Element {
         button {
             class: "px-4 py-2 rounded-md font-medium text-sm transition-colors {active_class} {props.class}",
             onclick: {
-                let on_click = props.on_click.clone();
+                let on_click = props.on_click;
                 let tab_id = props.tab_id.clone();
                 move |_| {
                     if let Some(callback) = &on_click {
