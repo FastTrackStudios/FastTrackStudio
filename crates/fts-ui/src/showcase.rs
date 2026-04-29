@@ -65,17 +65,21 @@ pub fn Showcase() -> Element {
                                         }
                                     }
                                     ThemeScope {
-                                        styles: theme_preset("amethyst-haze").unwrap_or_else(default_theme_preset).styles,
+                                        styles: theme_preset("doom-64").unwrap_or_else(default_theme_preset).styles,
                                         mode: Some(ThemeMode::Dark),
-                                        class: "rounded-lg border border-border p-4",
+                                        class: "rounded-xl border border-border p-4",
                                         Card {
                                             CardHeader {
                                                 CardTitle { "Scoped context" }
                                                 CardDescription { "This subtree can choose a different preset and mode." }
                                             }
-                                            CardContent { class: "flex flex-wrap gap-2",
-                                                Button { "Scoped primary" }
-                                                Button { variant: ButtonVariant::Outline, "Scoped outline" }
+                                            CardContent { class: "grid gap-3",
+                                                p { class: "font-mono text-sm text-muted-foreground", "Scoped monospace, radius, spacing, shadows, and colors are isolated." }
+                                                div { class: "flex flex-wrap gap-2",
+                                                    Button { "Scoped primary" }
+                                                    Button { variant: ButtonVariant::Outline, "Scoped outline" }
+                                                    Badge { "Scoped badge" }
+                                                }
                                             }
                                         }
                                     }

@@ -93,6 +93,7 @@ impl ThemeStyle {
             }
         }
 
+        append_tailwind_alias_variables(&mut css, self);
         append_shadow_variables(&mut css, self);
         css
     }
@@ -226,8 +227,13 @@ pub fn ThemeRuntimeStyle() -> Element {
             r#"
                 .fts-theme-root,
                 .fts-theme-scope {{
-                    font-family: var(--font-sans);
+                    font-family: var(--default-font-family, var(--font-sans));
                     letter-spacing: var(--letter-spacing, 0);
+                }}
+
+                .fts-theme-root *,
+                .fts-theme-scope * {{
+                    letter-spacing: inherit;
                 }}
 
                 .fts-theme-root .font-serif,
@@ -403,6 +409,31 @@ fn theme_style_attribute(styles: &ThemeStyles, mode: ThemeMode) -> String {
     style
 }
 
+fn append_tailwind_alias_variables(css: &mut String, style: &ThemeStyle) {
+    if let Some(font_sans) = style.get("font-sans") {
+        push_css_var(css, "default-font-family", font_sans);
+    }
+
+    if let Some(font_mono) = style.get("font-mono") {
+        push_css_var(css, "default-mono-font-family", font_mono);
+    }
+
+    if let Some(radius) = style.get("radius") {
+        push_css_var(css, "radius-sm", &format!("calc({radius} - 4px)"));
+        push_css_var(css, "radius-md", &format!("calc({radius} - 2px)"));
+        push_css_var(css, "radius-lg", radius);
+        push_css_var(css, "radius-xl", &format!("calc({radius} + 4px)"));
+        push_css_var(css, "radius-2xl", &format!("calc({radius} + 8px)"));
+        push_css_var(css, "radius-3xl", &format!("calc({radius} + 12px)"));
+    }
+
+    if let Some(letter_spacing) = style.get("letter-spacing") {
+        push_css_var(css, "tracking-tight", letter_spacing);
+        push_css_var(css, "tracking-normal", letter_spacing);
+        push_css_var(css, "tracking-wide", letter_spacing);
+    }
+}
+
 fn append_shadow_variables(css: &mut String, style: &ThemeStyle) {
     if !SHADOW_KEYS.iter().all(|key| style.get(key).is_some()) {
         return;
@@ -432,6 +463,18 @@ fn append_shadow_variables(css: &mut String, style: &ThemeStyle) {
     css.push_str(&format!(
         "{x} {y} {blur} {spread} {color_full}, {x} 4px 6px -1px {color_full};"
     ));
+}
+
+fn push_css_var(css: &mut String, key: &str, value: &str) {
+    if value.trim().is_empty() {
+        return;
+    }
+
+    css.push_str("--");
+    css.push_str(key);
+    css.push_str(": ");
+    css.push_str(value);
+    css.push(';');
 }
 
 fn default_light_style() -> ThemeStyle {
