@@ -14,7 +14,8 @@ use serde::Serialize;
 use serde_json::json;
 use task_core::crdt::{CrdtSyncEngine, SyncOp};
 use task_core::VaultServiceImpl;
-use task_db::sea_orm;
+use task_db::entities::auth::auth_organization;
+use task_db::sea_orm::{self, EntityTrait, QueryOrder};
 use task_db::SeaOrmAuthAdapter;
 use tokio::sync::mpsc;
 use tower_http::cors::CorsLayer;
@@ -35,8 +36,32 @@ struct ServerInfo {
 #[derive(Clone)]
 struct AppState {
     info: ServerInfo,
+    db: sea_orm::DatabaseConnection,
     crdt: Option<Arc<CrdtSyncEngine>>,
     vault_service: Option<Arc<VaultServiceImpl>>,
+}
+
+#[derive(Clone, Serialize)]
+struct ServerRoute {
+    server_id: String,
+    server_name: String,
+    base_url: String,
+    vox_url: String,
+    crdt_url: String,
+    local: bool,
+}
+
+#[derive(Clone, Serialize)]
+struct OrganizationRoute {
+    organization_id: String,
+    slug: String,
+    name: String,
+    server_id: String,
+    server_name: String,
+    server_url: String,
+    vox_url: String,
+    crdt_url: String,
+    local: bool,
 }
 
 // ── Main ─────────────────────────────────────────────────────────────────────
@@ -104,6 +129,7 @@ async fn main() -> eyre::Result<()> {
         let engine = Arc::new(CrdtSyncEngine::new(std::path::Path::new(path), peer));
         let service = Arc::new(VaultServiceImpl::new(path));
         spawn_crdt_conflict_persister(engine.clone(), service.clone());
+        spawn_crdt_file_watch_bridge(engine.clone(), service.clone());
         info!(vault = %path, peer, "Loro CRDT engine enabled");
         (Some(engine), Some(service))
     } else {
@@ -132,6 +158,7 @@ async fn main() -> eyre::Result<()> {
     let state = AppState {
         crdt,
         vault_service,
+        db,
         info: info_payload,
     };
 
@@ -144,6 +171,8 @@ async fn main() -> eyre::Result<()> {
         .route("/crdt", get(crdt_ws_handler))
         // Minimal HTTP metadata endpoints; domain operations go through Vox.
         .route("/api/info", get(server_info))
+        .route("/api/servers", get(server_routes))
+        .route("/api/organizations/routes", get(organization_routes))
         .route("/api/crdt/status", get(crdt_status))
         .route("/api/health", get(health))
         .layer(CorsLayer::permissive());
@@ -840,6 +869,33 @@ fn spawn_crdt_conflict_persister(
     });
 }
 
+fn spawn_crdt_file_watch_bridge(engine: Arc<CrdtSyncEngine>, vault_service: Arc<VaultServiceImpl>) {
+    tokio::spawn(async move {
+        let handles = vault_service.watch_all().await;
+        for handle in &handles {
+            if let Err(e) = handle {
+                warn!(error = %e, "failed to start CRDT file watcher");
+            }
+        }
+
+        if let Err(e) = engine.rescan_vault().await {
+            warn!(error = %e, "initial CRDT vault scan failed");
+        }
+
+        let mut changes = vault_service.subscribe();
+        loop {
+            if changes.changed().await.is_err() {
+                break;
+            }
+            if let Err(e) = engine.rescan_vault().await {
+                warn!(error = %e, "CRDT vault rescan failed");
+            }
+        }
+
+        drop(handles);
+    });
+}
+
 // ── Vox WebSocket handler ────────────────────────────────────────────────────
 
 async fn vox_ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> impl IntoResponse {
@@ -1072,4 +1128,80 @@ async fn health() -> &'static str {
 
 async fn server_info(State(state): State<AppState>) -> impl IntoResponse {
     Json(state.info)
+}
+
+async fn server_routes(State(state): State<AppState>) -> Json<Vec<ServerRoute>> {
+    Json(vec![route_for_server(&state.info)])
+}
+
+async fn organization_routes(State(state): State<AppState>) -> Json<Vec<OrganizationRoute>> {
+    let orgs = match auth_organization::Entity::find()
+        .order_by_asc(auth_organization::Column::Slug)
+        .all(&state.db)
+        .await
+    {
+        Ok(orgs) => orgs,
+        Err(e) => {
+            warn!(error = %e, "failed to list organization routes");
+            return Json(vec![]);
+        }
+    };
+
+    let routes = orgs
+        .into_iter()
+        .map(|org| {
+            let metadata = org.metadata.unwrap_or_default();
+            let server_id = metadata
+                .get("server_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or(&state.info.id)
+                .to_string();
+            let server_name = metadata
+                .get("server_name")
+                .and_then(|v| v.as_str())
+                .unwrap_or(&state.info.name)
+                .to_string();
+            let server_url = metadata
+                .get("server_url")
+                .and_then(|v| v.as_str())
+                .unwrap_or(&state.info.public_base_url)
+                .trim_end_matches('/')
+                .to_string();
+            OrganizationRoute {
+                organization_id: org.id,
+                slug: org.slug,
+                name: org.name,
+                vox_url: ws_url(&server_url, "/vox"),
+                crdt_url: ws_url(&server_url, "/crdt"),
+                local: server_id == state.info.id,
+                server_id,
+                server_name,
+                server_url,
+            }
+        })
+        .collect();
+
+    Json(routes)
+}
+
+fn route_for_server(info: &ServerInfo) -> ServerRoute {
+    let base_url = info.public_base_url.trim_end_matches('/').to_string();
+    ServerRoute {
+        server_id: info.id.clone(),
+        server_name: info.name.clone(),
+        vox_url: ws_url(&base_url, "/vox"),
+        crdt_url: ws_url(&base_url, "/crdt"),
+        base_url,
+        local: true,
+    }
+}
+
+fn ws_url(base_url: &str, path: &str) -> String {
+    let mut url = base_url.trim_end_matches('/').to_string();
+    if let Some(rest) = url.strip_prefix("https://") {
+        url = format!("wss://{rest}");
+    } else if let Some(rest) = url.strip_prefix("http://") {
+        url = format!("ws://{rest}");
+    }
+    format!("{url}{path}")
 }

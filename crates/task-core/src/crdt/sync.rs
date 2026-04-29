@@ -26,6 +26,7 @@
 //! ```
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -51,19 +52,11 @@ pub enum SyncOp {
         peer: Option<PeerID>,
     },
     /// Raw Loro update bytes — body edits and anything else.
-    DocUpdate {
-        file_path: String,
-        update: Vec<u8>,
-    },
+    DocUpdate { file_path: String, update: Vec<u8> },
     /// A new task was created.
-    TaskCreated {
-        file_path: String,
-        task: Task,
-    },
+    TaskCreated { file_path: String, task: Task },
     /// A task was deleted.
-    TaskDeleted {
-        file_path: String,
-    },
+    TaskDeleted { file_path: String },
     /// Full refresh — file was rewritten out-of-band.
     Refresh,
 }
@@ -175,8 +168,8 @@ impl CrdtSyncEngine {
             return Ok(());
         }
 
-        let content = std::fs::read_to_string(&abs_path)
-            .map_err(|e| VaultError::IoError(e.to_string()))?;
+        let content =
+            std::fs::read_to_string(&abs_path).map_err(|e| VaultError::IoError(e.to_string()))?;
         let Some(task) = Vault::parse_task_from_md(&content) else {
             return Ok(());
         };
@@ -227,11 +220,7 @@ impl CrdtSyncEngine {
     /// Replace the markdown body for a document and broadcast the resulting
     /// Loro update. This is the server-side entry point for clients that edit
     /// prose without constructing their own Loro update bytes.
-    pub async fn apply_body_change(
-        &self,
-        rel_path: &str,
-        body: &str,
-    ) -> Result<(), VaultError> {
+    pub async fn apply_body_change(&self, rel_path: &str, body: &str) -> Result<(), VaultError> {
         self.get_or_load(rel_path).await;
 
         let docs = self.documents.read().await;
@@ -297,6 +286,41 @@ impl CrdtSyncEngine {
 
     pub async fn loaded_count(&self) -> usize {
         self.documents.read().await.len()
+    }
+
+    /// Return the relative paths for every currently loaded CRDT document.
+    pub async fn loaded_paths(&self) -> Vec<String> {
+        self.documents.read().await.keys().cloned().collect()
+    }
+
+    /// Rescan the vault for markdown files and push out-of-band file edits into
+    /// the CRDT broadcast stream. This is the bridge from local editors,
+    /// Nextcloud/WebDAV sync, and service-layer file writes into realtime.
+    pub async fn rescan_vault(&self) -> Result<(), VaultError> {
+        let mut seen = HashSet::new();
+
+        for entry in walkdir::WalkDir::new(&self.root)
+            .follow_links(false)
+            .into_iter()
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| entry.path().extension().and_then(|s| s.to_str()) == Some("md"))
+        {
+            let path = entry.path();
+            let Ok(rel) = path.strip_prefix(&self.root) else {
+                continue;
+            };
+            let rel = rel.to_string_lossy().replace('\\', "/");
+            seen.insert(rel.clone());
+            self.on_file_changed(&rel).await?;
+        }
+
+        for rel in self.loaded_paths().await {
+            if !seen.contains(&rel) {
+                self.on_file_changed(&rel).await?;
+            }
+        }
+
+        Ok(())
     }
 
     /// Export a full Loro snapshot for a document, loading it from disk if
@@ -474,10 +498,16 @@ mod tests {
         // Exactly one conflict, on `status`. Which value wins is Loro's LWW
         // call; the detector's job is to preserve both.
         let status_conflict = conflicts.iter().find(|c| c.field == "status");
-        assert!(status_conflict.is_some(), "expected a status conflict, got {conflicts:?}");
+        assert!(
+            status_conflict.is_some(),
+            "expected a status conflict, got {conflicts:?}"
+        );
         let c = status_conflict.unwrap();
         assert_eq!(c.losing_value.as_deref(), Some("Done"));
-        assert!(matches!(c.winning_value.as_deref(), Some("Done") | Some("Cancelled")));
+        assert!(matches!(
+            c.winning_value.as_deref(),
+            Some("Done") | Some("Cancelled")
+        ));
         assert_eq!(c.losing_peer, Some(1));
     }
 
