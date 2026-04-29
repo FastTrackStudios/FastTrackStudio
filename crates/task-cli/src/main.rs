@@ -4,8 +4,8 @@ use task_core::index::{ChangeRow, ConflictRow};
 use task_core::workflows::{parse_comments, render_comments, Comment};
 use task_core::{
     CalendarEvent, CalendarEventPatch, CalendarEventStatus, Client, Filter, Invoice, Priority,
-    Project, Query, RelationType, Sort, Status, SyncStats, Task, TaskRelation, TimeEntryContext,
-    TimeEntryFilter, VaultServiceImpl, WikiLink,
+    Project, Query, RelationType, Sort, Status, SyncStats, SystemCapabilities, SystemHealth, Task,
+    TaskRelation, TimeEntryContext, TimeEntryFilter, VaultServiceImpl, WikiLink,
 };
 
 #[derive(Parser)]
@@ -290,6 +290,11 @@ enum Commands {
     Project {
         #[command(subcommand)]
         command: ProjectCommands,
+    },
+    /// Validate configuration, server capabilities, and provider health
+    Doctor {
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -1066,6 +1071,13 @@ async fn main() -> eyre::Result<()> {
     {
         print_agent_capabilities();
         return Ok(());
+    }
+    if let Commands::Doctor { json } = command {
+        if let Some(server) = server {
+            let remote = RemoteVoxConfig::new(server, session_token, organization_id)?;
+            return run_remote_doctor(&remote, json).await;
+        }
+        return run_local_doctor(vault.as_deref(), json).await;
     }
     // `task email watch` is a pure IMAP IDLE subscription — no vault
     // access needed. Handle it here so the watcher service doesn't
@@ -2716,6 +2728,8 @@ async fn main() -> eyre::Result<()> {
             run_agent_command(&svc, &vault_path, actor.as_deref(), command).await?;
         }
 
+        Commands::Doctor { .. } => unreachable!("handled before vault dispatch"),
+
         Commands::Activity { limit, kind, json } => {
             let changes = svc.recent_activity(limit).await?;
             let filtered: Vec<_> = match kind {
@@ -2982,6 +2996,10 @@ impl RemoteVoxConfig {
         self.connect().await
     }
 
+    async fn system(&self) -> eyre::Result<task_core::service::SystemServiceClient> {
+        self.connect().await
+    }
+
     async fn connect<C>(&self) -> eyre::Result<C>
     where
         C: vox::FromVoxSession,
@@ -3000,6 +3018,7 @@ async fn run_remote_command(
 ) -> eyre::Result<()> {
     match command {
         Commands::Agent { command } => run_remote_agent_command(remote, actor, command).await?,
+        Commands::Doctor { json } => run_remote_doctor(remote, json).await?,
 
         Commands::List {
             status,
@@ -4592,6 +4611,130 @@ fn normalize_message_id(id: &str) -> String {
         .to_ascii_lowercase()
 }
 
+async fn run_remote_doctor(remote: &RemoteVoxConfig, json: bool) -> eyre::Result<()> {
+    let system = remote.system().await?;
+    let capabilities = system.capabilities().await?;
+    let health = system.health().await?;
+    if json {
+        print_doctor_json(&capabilities, &health);
+    } else {
+        print_doctor_report("remote", Some(&remote.display_url), &capabilities, &health);
+    }
+    Ok(())
+}
+
+async fn run_local_doctor(vault: Option<&str>, json: bool) -> eyre::Result<()> {
+    let vault_root = vault
+        .map(String::from)
+        .or_else(|| std::env::var("TASK_VAULT").ok())
+        .unwrap_or_default();
+    let vault_exists = !vault_root.is_empty() && std::path::Path::new(&vault_root).exists();
+    let nextcloud_url = std::env::var("NEXTCLOUD_URL")
+        .ok()
+        .filter(|s| !s.is_empty());
+    let nextcloud_user = std::env::var("NEXTCLOUD_USER")
+        .ok()
+        .or_else(|| std::env::var("NEXTCLOUD_USERNAME").ok())
+        .filter(|s| !s.is_empty());
+    let nextcloud_password_configured = std::env::var("NEXTCLOUD_PASSWORD")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .is_some()
+        || std::env::var("NEXTCLOUD_PASSWORD_FILE")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .is_some()
+        || std::env::var("TASK_NEXTCLOUD_CONFIG")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .is_some();
+    let capabilities = SystemCapabilities {
+        package: "task-cli".into(),
+        version: env!("CARGO_PKG_VERSION").into(),
+        services: Vec::new(),
+        features: vec![
+            "local-vault".into(),
+            "remote-vox".into(),
+            "task-doctor".into(),
+        ],
+        nextcloud: task_core::NextcloudCapability {
+            configured: nextcloud_url.is_some() && nextcloud_password_configured,
+            url: nextcloud_url.clone(),
+            username: nextcloud_user,
+            projects_path: std::env::var("NEXTCLOUD_PROJECTS_PATH").ok(),
+            task_calendar: std::env::var("NEXTCLOUD_CALENDAR").ok(),
+            event_calendar: std::env::var("NEXTCLOUD_EVENT_CALENDAR")
+                .ok()
+                .or_else(|| std::env::var("NEXTCLOUD_EVENTS_CALENDAR").ok()),
+            deck_enabled: std::env::var("NEXTCLOUD_DECK_ENABLED")
+                .ok()
+                .map(|v| env_truthy(&v))
+                .unwrap_or(true),
+        },
+        vault: task_core::VaultCapability {
+            root: vault_root.clone(),
+            exists: vault_exists,
+            index_available: false,
+        },
+    };
+    let mut checks = Vec::new();
+    checks.push(task_core::HealthCheck {
+        name: "vault".into(),
+        configured: !vault_root.is_empty(),
+        ok: vault_exists,
+        detail: if vault_root.is_empty() {
+            "TASK_VAULT/--vault is not set".into()
+        } else if vault_exists {
+            format!("vault root exists at {vault_root}")
+        } else {
+            format!("vault root is missing at {vault_root}")
+        },
+    });
+    checks.push(task_core::HealthCheck {
+        name: "remote-server".into(),
+        configured: std::env::var("TASK_SERVER")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .is_some(),
+        ok: std::env::var("TASK_SERVER")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .is_some()
+            && std::env::var("TASK_SESSION_TOKEN")
+                .ok()
+                .filter(|s| !s.is_empty())
+                .is_some(),
+        detail: "set TASK_SERVER and TASK_SESSION_TOKEN, or pass --server/--session-token, for remote checks".into(),
+    });
+    checks.push(task_core::HealthCheck {
+        name: "nextcloud-config".into(),
+        configured: nextcloud_url.is_some() || nextcloud_password_configured,
+        ok: nextcloud_url.is_some() && nextcloud_password_configured,
+        detail: if nextcloud_url.is_some() && nextcloud_password_configured {
+            "Nextcloud environment/config is present".into()
+        } else {
+            "Nextcloud URL and password/app-token are not both configured".into()
+        },
+    });
+    let health = SystemHealth {
+        ok: checks.iter().all(|check| check.ok || !check.configured),
+        checks,
+    };
+    if json {
+        print_doctor_json(&capabilities, &health);
+    } else {
+        print_doctor_report("local", None, &capabilities, &health);
+    }
+    Ok(())
+}
+
+fn env_truthy(value: &str) -> bool {
+    matches!(
+        value.to_ascii_lowercase().as_str(),
+        "1" | "true" | "yes" | "on"
+    )
+}
+
 async fn remote_calendar_events_for_range(
     client: &task_core::service::CalendarServiceClient,
     from: Option<&str>,
@@ -5814,6 +5957,69 @@ fn print_agent_capabilities() {
         "{{\"binary\":\"task\",\"package\":\"task-cli\",\"install\":{},\"global_flags\":[\"--vault\",\"--server\",\"--session-token\",\"--organization-id\",\"--as-user\"],\"agent_commands\":[\"snapshot\",\"task\",\"project\",\"calendar\",\"time\",\"sync\",\"capabilities\"],\"control_commands\":[\"add\",\"update\",\"complete\",\"delete\",\"calendar add\",\"calendar update\",\"calendar delete\",\"email accounts\",\"email search\",\"email show\",\"email link\",\"email sweep\",\"time log\",\"time edit\",\"start\",\"stop\",\"sync\"],\"remote_mode\":\"Set --server plus --session-token to route supported task, project, client, invoice, time, calendar, email, activity, conflict, and agent commands over Vox; --organization-id routes multi-instance organization requests.\"}}",
         agent_install_json()
     );
+}
+
+fn print_doctor_json(capabilities: &SystemCapabilities, health: &SystemHealth) {
+    println!(
+        "{{\"capabilities\":{},\"health\":{}}}",
+        facet_json::to_string(capabilities).unwrap_or_default(),
+        facet_json::to_string(health).unwrap_or_default()
+    );
+}
+
+fn print_doctor_report(
+    mode: &str,
+    remote_url: Option<&str>,
+    capabilities: &SystemCapabilities,
+    health: &SystemHealth,
+) {
+    println!(
+        "Task doctor: {}",
+        if health.ok { "ok" } else { "attention needed" }
+    );
+    println!("  mode: {mode}");
+    if let Some(url) = remote_url {
+        println!("  server: {url}");
+    }
+    println!(
+        "  package: {} {}",
+        capabilities.package, capabilities.version
+    );
+    if !capabilities.vault.root.is_empty() {
+        println!("  vault: {}", capabilities.vault.root);
+    }
+    if !capabilities.services.is_empty() {
+        println!("  services: {}", capabilities.services.join(", "));
+    }
+    if capabilities.nextcloud.configured {
+        println!(
+            "  nextcloud: {} ({})",
+            capabilities
+                .nextcloud
+                .url
+                .as_deref()
+                .unwrap_or("configured"),
+            capabilities
+                .nextcloud
+                .username
+                .as_deref()
+                .unwrap_or("unknown user")
+        );
+    } else {
+        println!("  nextcloud: not configured");
+    }
+    println!();
+    println!("{:<20} {:<12} {:<8} DETAIL", "CHECK", "STATUS", "CONFIG");
+    println!("{}", "-".repeat(84));
+    for check in &health.checks {
+        println!(
+            "{:<20} {:<12} {:<8} {}",
+            check.name,
+            if check.ok { "ok" } else { "failed" },
+            if check.configured { "yes" } else { "no" },
+            check.detail
+        );
+    }
 }
 
 fn agent_install_json() -> String {

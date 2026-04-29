@@ -18,9 +18,10 @@ use crate::service::{
     CalendarEventPatch, EmailLinkRequest, EmailLinkResponse, EmailListRequest, EmailUnlinkRequest,
     FileCopyMoveRequest, FileEntry, FileReadResponse, FileWriteRequest, InvoiceCreateRequest,
     InvoicePaymentRequest, MailCreateMailboxRequest, MailCreateTagRequest, MailDeleteTagRequest,
-    MailListMessagesRequest, MailMessageTagRequest, MailMoveMessageRequest, ProjectPatch,
-    RemoteDeckBoard, RemoteDeckStack, SyncStats, TimeEntryContext, TimeEntryFilter,
-    TimeEntryPatch, TimeLogRequest, TimeStartRequest, TimedTaskEntry, VaultError,
+    MailListMessagesRequest, MailMessageTagRequest, MailMoveMessageRequest, NextcloudCapability,
+    ProjectPatch, RemoteDeckBoard, RemoteDeckStack, SyncStats, SystemCapabilities, SystemHealth,
+    TimeEntryContext, TimeEntryFilter, TimeEntryPatch, TimeLogRequest, TimeStartRequest,
+    TimedTaskEntry, VaultCapability, VaultError,
 };
 use crate::task::{Status, Task};
 use crate::vault::Vault;
@@ -183,6 +184,27 @@ fn nextcloud_mail_client() -> Result<crate::provider::MailClient, VaultError> {
         username: config.username,
         password: config.password,
     }))
+}
+
+fn health_check(
+    name: &str,
+    configured: bool,
+    ok: bool,
+    detail: String,
+) -> crate::service::HealthCheck {
+    crate::service::HealthCheck {
+        name: name.into(),
+        ok,
+        configured,
+        detail,
+    }
+}
+
+fn system_health(checks: Vec<crate::service::HealthCheck>) -> SystemHealth {
+    SystemHealth {
+        ok: checks.iter().all(|check| check.ok || !check.configured),
+        checks,
+    }
 }
 
 #[derive(Clone)]
@@ -2765,6 +2787,211 @@ impl crate::service::MailService for VaultServiceImpl {
             .await
             .into_iter()
             .collect()
+    }
+}
+
+impl crate::service::SystemService for VaultServiceImpl {
+    async fn capabilities(&self) -> SystemCapabilities {
+        let nextcloud = NextcloudRuntimeConfig::load().ok().flatten();
+        let index_available = self
+            .index
+            .lock()
+            .ok()
+            .and_then(|guard| guard.as_ref().map(|_| ()))
+            .is_some();
+        SystemCapabilities {
+            package: "task-server".into(),
+            version: env!("CARGO_PKG_VERSION").into(),
+            services: vec![
+                "TaskService".into(),
+                "ProjectService".into(),
+                "TimeService".into(),
+                "ClientService".into(),
+                "InvoiceService".into(),
+                "ActivityService".into(),
+                "MailService".into(),
+                "CalendarService".into(),
+                "FileService".into(),
+                "SystemService".into(),
+            ],
+            features: vec![
+                "task-tracking".into(),
+                "time-tracking".into(),
+                "calendar-events".into(),
+                "caldav".into(),
+                "webdav-files".into(),
+                "nextcloud-mail".into(),
+                "deck-sync".into(),
+                "invoicing".into(),
+                "activity-log".into(),
+                "conflict-log".into(),
+            ],
+            nextcloud: match nextcloud {
+                Some(config) => NextcloudCapability {
+                    configured: true,
+                    url: Some(config.url),
+                    username: Some(config.username),
+                    projects_path: Some(config.projects_path),
+                    task_calendar: Some(config.calendar),
+                    event_calendar: config.event_calendar,
+                    deck_enabled: config.deck_enabled,
+                },
+                None => NextcloudCapability {
+                    configured: false,
+                    ..Default::default()
+                },
+            },
+            vault: VaultCapability {
+                root: self.root.display().to_string(),
+                exists: self.root.exists(),
+                index_available,
+            },
+        }
+    }
+
+    async fn health(&self) -> SystemHealth {
+        let mut checks = Vec::new();
+        let index_available = self
+            .index
+            .lock()
+            .ok()
+            .and_then(|guard| guard.as_ref().map(|_| ()))
+            .is_some();
+        checks.push(health_check(
+            "vault",
+            true,
+            self.root.exists(),
+            if self.root.exists() {
+                format!("vault root exists at {}", self.root.display())
+            } else {
+                format!("vault root is missing at {}", self.root.display())
+            },
+        ));
+        checks.push(health_check(
+            "sqlite-index",
+            true,
+            index_available,
+            if index_available {
+                "SQLite index is available".into()
+            } else {
+                "SQLite index is unavailable; queries will scan files".into()
+            },
+        ));
+
+        let nextcloud = match NextcloudRuntimeConfig::load() {
+            Ok(config) => config,
+            Err(err) => {
+                checks.push(health_check(
+                    "nextcloud-config",
+                    true,
+                    false,
+                    format!("Nextcloud config error: {err}"),
+                ));
+                return system_health(checks);
+            }
+        };
+
+        let Some(config) = nextcloud else {
+            checks.push(health_check(
+                "nextcloud-config",
+                false,
+                false,
+                "Nextcloud is not configured".into(),
+            ));
+            return system_health(checks);
+        };
+
+        checks.push(health_check(
+            "nextcloud-config",
+            true,
+            true,
+            format!("Nextcloud configured for {} at {}", config.username, config.url),
+        ));
+
+        match nextcloud_webdav_provider(&config).stat("").await {
+            Ok(Some(_)) => checks.push(health_check(
+                "webdav",
+                true,
+                true,
+                format!("projects path '{}' is reachable", config.projects_path),
+            )),
+            Ok(None) => checks.push(health_check(
+                "webdav",
+                true,
+                false,
+                format!("projects path '{}' was not found", config.projects_path),
+            )),
+            Err(err) => checks.push(health_check(
+                "webdav",
+                true,
+                false,
+                format!("WebDAV check failed: {err}"),
+            )),
+        }
+
+        match VaultServiceImpl::discover_caldav(self).await {
+            Ok(discovery) => checks.push(health_check(
+                "caldav",
+                true,
+                true,
+                format!("discovered {} calendar(s)", discovery.calendars.len()),
+            )),
+            Err(err) => checks.push(health_check(
+                "caldav",
+                true,
+                false,
+                format!("CalDAV check failed: {err}"),
+            )),
+        }
+
+        match nextcloud_mail_client() {
+            Ok(client) => match client.list_accounts().await {
+                Ok(accounts) => checks.push(health_check(
+                    "mail",
+                    true,
+                    true,
+                    format!("found {} mail account(s)", accounts.len()),
+                )),
+                Err(err) => checks.push(health_check(
+                    "mail",
+                    true,
+                    false,
+                    format!("Mail check failed: {err}"),
+                )),
+            },
+            Err(err) => checks.push(health_check(
+                "mail",
+                true,
+                false,
+                format!("Mail check failed: {err}"),
+            )),
+        }
+
+        if config.deck_enabled {
+            match VaultServiceImpl::list_remote_deck_boards(self).await {
+                Ok(boards) => checks.push(health_check(
+                    "deck",
+                    true,
+                    true,
+                    format!("found {} Deck board(s)", boards.len()),
+                )),
+                Err(err) => checks.push(health_check(
+                    "deck",
+                    true,
+                    false,
+                    format!("Deck check failed: {err}"),
+                )),
+            }
+        } else {
+            checks.push(health_check(
+                "deck",
+                false,
+                true,
+                "Deck checks disabled by configuration".into(),
+            ));
+        }
+
+        system_health(checks)
     }
 }
 

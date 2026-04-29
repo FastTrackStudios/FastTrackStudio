@@ -273,6 +273,15 @@ pub trait FileService {
     async fn move_file(&self, request: FileCopyMoveRequest) -> Result<(), VaultError>;
 }
 
+#[vox::service]
+pub trait SystemService {
+    /// Fast live capability snapshot for this task-server instance.
+    async fn capabilities(&self) -> SystemCapabilities;
+
+    /// Operational health checks for configured providers.
+    async fn health(&self) -> SystemHealth;
+}
+
 /// Sync operation statistics.
 #[derive(Debug, Clone, Default, facet::Facet)]
 pub struct SyncStats {
@@ -284,6 +293,48 @@ pub struct SyncStats {
     pub files_created: u32,
     pub files_updated: u32,
     pub errors: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct SystemCapabilities {
+    pub package: String,
+    pub version: String,
+    pub services: Vec<String>,
+    pub features: Vec<String>,
+    pub nextcloud: NextcloudCapability,
+    pub vault: VaultCapability,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct NextcloudCapability {
+    pub configured: bool,
+    pub url: Option<String>,
+    pub username: Option<String>,
+    pub projects_path: Option<String>,
+    pub task_calendar: Option<String>,
+    pub event_calendar: Option<String>,
+    pub deck_enabled: bool,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct VaultCapability {
+    pub root: String,
+    pub exists: bool,
+    pub index_available: bool,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct SystemHealth {
+    pub ok: bool,
+    pub checks: Vec<HealthCheck>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct HealthCheck {
+    pub name: String,
+    pub ok: bool,
+    pub configured: bool,
+    pub detail: String,
 }
 
 #[derive(Debug, Clone, Default, facet::Facet)]

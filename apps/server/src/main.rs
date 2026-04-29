@@ -1005,6 +1005,12 @@ async fn handle_vox_connection(socket: WebSocket, state: AppState, auth: VoxAuth
                     ));
                     Ok(())
                 }
+                "SystemService" => {
+                    connection.handle_with(task_core::SystemServiceDispatcher::new(
+                        service.as_ref().clone(),
+                    ));
+                    Ok(())
+                }
                 "Noop" => {
                     connection.handle_with(());
                     Ok(())
