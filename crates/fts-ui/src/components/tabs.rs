@@ -34,7 +34,7 @@ pub fn Tabs(props: TabsProps) -> Element {
                 .fts-tab-trigger[data-state="active"] {{
                     background: var(--background);
                     color: var(--foreground);
-                    box-shadow: var(--shadow-sm);
+                    box-shadow: var(--shadow-sm, 0 1px 2px 0 rgb(0 0 0 / 0.05));
                 }}
 
                 .fts-tab-trigger[data-state="inactive"]:hover {{

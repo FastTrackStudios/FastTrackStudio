@@ -12,13 +12,17 @@ use dioxus::prelude::*;
 /// Import this into any app to visually verify the design system.
 #[component]
 pub fn Showcase() -> Element {
+    let theme_state = use_signal(default_theme_state);
+
     rsx! {
+        ThemeProvider { state: theme_state,
         div { class: "min-h-screen bg-background text-foreground",
             div { class: "flex",
                 // Sidebar nav
                 nav { class: "w-56 h-screen sticky top-0 bg-sidebar border-r border-sidebar-border p-4 overflow-y-auto shrink-0",
                     p { class: "text-sm font-semibold mb-4", "Components" }
                     div { class: "flex flex-col gap-1 text-sm text-muted-foreground",
+                        a { class: "hover:text-foreground", href: "#theme", "Theme" }
                         a { class: "hover:text-foreground", href: "#buttons", "Buttons" }
                         a { class: "hover:text-foreground", href: "#inputs", "Inputs" }
                         a { class: "hover:text-foreground", href: "#badges", "Badges" }
@@ -43,6 +47,41 @@ pub fn Showcase() -> Element {
                 // Main content
                 main { class: "flex-1 p-8 overflow-y-auto",
                     div { class: "max-w-4xl mx-auto flex flex-col gap-12",
+
+                        ShowcaseSection { id: "theme", title: "Live Theme",
+                            div { class: "grid gap-4 md:grid-cols-[20rem_1fr]",
+                                ThemeSwitcher { state: theme_state }
+                                div { class: "grid gap-4",
+                                    Card {
+                                        CardHeader {
+                                            CardTitle { "App theme" }
+                                            CardDescription { "Runtime changes apply through shadcn-compatible CSS variables." }
+                                        }
+                                        CardContent { class: "flex flex-wrap gap-2",
+                                            Button { "Primary" }
+                                            Button { variant: ButtonVariant::Secondary, "Secondary" }
+                                            Button { variant: ButtonVariant::Outline, "Outline" }
+                                            Badge { "Badge" }
+                                        }
+                                    }
+                                    ThemeScope {
+                                        styles: theme_preset("amethyst").unwrap_or_else(default_theme_preset).styles,
+                                        mode: Some(ThemeMode::Dark),
+                                        class: "rounded-lg border border-border p-4",
+                                        Card {
+                                            CardHeader {
+                                                CardTitle { "Scoped context" }
+                                                CardDescription { "This subtree can choose a different preset and mode." }
+                                            }
+                                            CardContent { class: "flex flex-wrap gap-2",
+                                                Button { "Scoped primary" }
+                                                Button { variant: ButtonVariant::Outline, "Scoped outline" }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
 
                         // ── Buttons ──────────────────────────────
                         ShowcaseSection { id: "buttons", title: "Buttons",
@@ -563,6 +602,7 @@ pub fn Showcase() -> Element {
                     }
                 }
             }
+        }
         }
     }
 }
