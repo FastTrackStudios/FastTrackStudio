@@ -1,0 +1,32 @@
+use dioxus::desktop::{tao::window::WindowBuilder, Config};
+use dioxus::prelude::*;
+use fts_ui::showcase::Showcase;
+
+const TAILWIND_CSS: Asset = asset!("/assets/tailwind.css");
+
+fn main() {
+    unsafe {
+        std::env::set_var("GTK_THEME", "Adwaita:dark");
+    }
+    unsafe {
+        std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
+    }
+
+    let cfg = Config::new()
+        .with_window(
+            WindowBuilder::new()
+                .with_title("fts-ui Showcase Desktop")
+                .with_inner_size(dioxus::desktop::tao::dpi::LogicalSize::new(1400.0, 900.0)),
+        )
+        .with_menu(None);
+
+    LaunchBuilder::desktop().with_cfg(cfg).launch(App);
+}
+
+#[component]
+fn App() -> Element {
+    rsx! {
+        document::Stylesheet { href: TAILWIND_CSS }
+        Showcase {}
+    }
+}

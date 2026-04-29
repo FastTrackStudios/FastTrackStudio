@@ -1,0 +1,3 @@
+[application]
+name = "fts-ui-showcase-mobile"
+default_platform = "android"

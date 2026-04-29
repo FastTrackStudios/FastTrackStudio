@@ -1,0 +1,6 @@
+[application]
+name = "fts-ui-showcase-desktop"
+default_platform = "desktop"
+
+[desktop]
+title = "fts-ui Showcase Desktop"

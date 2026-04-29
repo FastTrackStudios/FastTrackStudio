@@ -1,0 +1,6 @@
+[application]
+name = "fts-ui-showcase-web"
+default_platform = "web"
+
+[web.app]
+title = "fts-ui Showcase Web"

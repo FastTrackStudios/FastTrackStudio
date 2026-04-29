@@ -1,0 +1,11 @@
+[package]
+name = "fts-ui-showcase-native"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+dioxus = { workspace = true, features = ["native"] }
+fts-ui.workspace = true
+
+[lints]
+workspace = true
