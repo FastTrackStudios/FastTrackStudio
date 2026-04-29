@@ -14,5 +14,9 @@ lucide-dioxus = { workspace = true }
 tracing = { workspace = true }
 tw_merge = { workspace = true }
 
+[features]
+default = []
+router = ["dioxus/router", "dioxus-primitives/router"]
+
 [lints]
 workspace = true

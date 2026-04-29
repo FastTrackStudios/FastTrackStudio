@@ -47,6 +47,9 @@ pub use crate::components::{
     TooltipContent, TooltipSide, TooltipTrigger,
 };
 
+#[cfg(feature = "router")]
+pub use crate::components::{Navbar, NavbarContent, NavbarItem, NavbarNav, NavbarTrigger};
+
 // Toast (used via toast::use_toast(), toast::ToastProvider, etc.)
 pub use crate::components::toast;
 

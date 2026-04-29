@@ -132,9 +132,13 @@ pub use command::*;
 pub use menubar::*;
 
 mod aspect_ratio;
+#[cfg(feature = "router")]
+mod navbar;
 mod navigation_menu;
 
 pub use aspect_ratio::*;
+#[cfg(feature = "router")]
+pub use navbar::*;
 pub use navigation_menu::*;
 
 mod calendar;
