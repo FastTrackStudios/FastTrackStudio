@@ -5,3 +5,4 @@ edition = "2021"
 
 [dependencies]
 dioxus-native = { git = "https://github.com/DioxusLabs/blitz", features = ["prelude"] }
+ui = { workspace = true }

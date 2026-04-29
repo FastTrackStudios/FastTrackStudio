@@ -1,21 +1,8 @@
 use dioxus::prelude::*;
-
-use ui::Navbar;
-use views::{Blog, Home};
-
-mod views;
-
-#[derive(Debug, Clone, Routable, PartialEq)]
-#[rustfmt::skip]
-enum Route {
-    #[layout(WebNavbar)]
-    #[route("/")]
-    Home {},
-    #[route("/blog/:id")]
-    Blog { id: i32 },
-}
+use ui::Showcase;
 
 const FAVICON: Asset = asset!("/assets/favicon.ico");
+const TAILWIND_CSS: Asset = asset!("/assets/tailwind.css");
 
 fn main() {
     dioxus::launch(App);
@@ -25,27 +12,7 @@ fn main() {
 fn App() -> Element {
     rsx! {
         document::Link { rel: "icon", href: FAVICON }
-        document::Stylesheet { href: asset!("/assets/tailwind.css") }
-        Router::<Route> {}
-    }
-}
-
-#[component]
-fn WebNavbar() -> Element {
-    rsx! {
-        Navbar {
-            Link {
-                to: Route::Home {},
-                class: "text-white hover:text-blue-400 transition-colors",
-                "Home"
-            }
-            Link {
-                to: Route::Blog { id: 1 },
-                class: "text-white hover:text-blue-400 transition-colors",
-                "Blog"
-            }
-        }
-
-        Outlet::<Route> {}
+        document::Stylesheet { href: TAILWIND_CSS }
+        Showcase {}
     }
 }
