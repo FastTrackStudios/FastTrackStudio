@@ -103,7 +103,7 @@ pub fn SearchableDropdown(props: SearchableDropdownProps) -> Element {
         // Panel
         div {
             class: format!(
-                "{} {} bg-background border border-border rounded-xl shadow-2xl shadow-black/50 \
+                "{} {} bg-background border border-border rounded-xl shadow-md shadow-black/50 \
                  flex flex-col overflow-hidden {}",
                 props.width,
                 props.max_height,
@@ -127,7 +127,7 @@ pub fn SearchableDropdown(props: SearchableDropdownProps) -> Element {
             div { class: "px-3 py-1.5 border-b border-border",
                 input {
                     id: "{iid}",
-                    class: "w-full bg-secondary/50 border border-border rounded-md px-2.5 py-1.5 \
+                    class: "w-full bg-input/30 border border-border rounded-md px-2.5 py-1.5 \
                             text-[11px] text-foreground outline-none focus:border-ring \
                             placeholder:text-muted-foreground transition-all",
                     r#type: "text",

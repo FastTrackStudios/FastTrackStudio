@@ -1,39 +1,78 @@
 //! Convenience re-exports — `use fts_ui::prelude::*`.
 
-// Components
+// Components — core
 pub use crate::components::{
-    // Wrapped
     Button, ButtonSize, ButtonVariant,
     Input, InputSize, InputVariant,
-    // Migrated
     Dialog, DialogClose, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
     Tabs, TabList, TabTrigger, TabContent,
-    // New
     Badge, BadgeVariant,
     Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle,
+    Checkbox,
+    Collapsible, CollapsibleContent, CollapsibleTrigger,
+    ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuLabel, ContextMenuSeparator, ContextMenuTrigger,
+    Dropdown, DropdownContent, DropdownItem, DropdownLabel, DropdownSeparator, DropdownTrigger,
     EmptyState,
     FormField,
+    HoverCard, HoverCardContent, HoverCardTrigger,
     InlineEdit,
     KeyValueRow,
+    Label,
     ListRow,
+    Progress, ProgressVariant,
     SearchableDropdown,
     SearchableList, SearchableListItem,
     SectionHeader, SectionHeaderSize,
     SegmentedControl, SegmentedControlSize,
+    Sheet, SheetDescription, SheetFooter, SheetHeader, SheetSide, SheetTitle,
     StatusBadge, StatusBadgeVariant,
     StatusDot, StatusDotColor, StatusDotSize,
+    Switch,
     NavTab,
     ProgressBar, ProgressBarOrientation,
+    Accordion, AccordionContent, AccordionItem, AccordionTrigger,
 };
 
-// Re-exported component modules (used via fts_ui::prelude::checkbox::Checkbox etc.)
-pub use crate::components::checkbox;
-pub use crate::components::context_menu;
-pub use crate::components::dropdown;
-pub use crate::components::label;
-pub use crate::components::progress;
-pub use crate::components::side_sheet;
-pub use crate::components::switch;
+// Components — shadcn v4 parity
+pub use crate::components::{
+    Alert, AlertDescription, AlertTitle, AlertVariant,
+    AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogDescription,
+    AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+    Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator,
+    Drawer, DrawerDescription, DrawerFooter, DrawerHandle, DrawerHeader, DrawerSide, DrawerTitle,
+    Field, FieldDescription, FieldLabel, FieldMessage,
+    Kbd,
+    Popover, PopoverContent, PopoverTrigger,
+    RadioGroup, RadioGroupItem,
+    ScrollArea,
+    Select, SelectContent, SelectItem, SelectLabel, SelectSeparator, SelectTrigger,
+    Skeleton, SkeletonCircle, SkeletonText,
+    Slider,
+    Spinner, SpinnerSize,
+    Table, TableBody, TableCaption, TableCell, TableContainer, TableFooter, TableHead, TableHeader, TableRow,
+    Textarea,
+    Toggle, ToggleSize, ToggleVariant,
+    ToggleGroup, ToggleGroupItem,
+    Tooltip, TooltipContent, TooltipSide, TooltipTrigger,
+    Avatar, AvatarFallback, AvatarImage, AvatarSize,
+    InputGroup, InputGroupAddon, InputGroupAlign, InputGroupControl,
+    Pagination, PaginationContent, PaginationEllipsis, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious,
+    Menubar, MenubarMenu, MenubarTrigger, MenubarContent, MenubarItem, MenubarSeparator, MenubarLabel, MenubarShortcut,
+    CommandDialog, CommandInput, CommandList, CommandGroup, CommandItem, CommandEmpty, CommandSeparator, CommandShortcut,
+    Combobox, ComboboxTrigger, ComboboxContent, ComboboxItem, ComboboxEmpty,
+    AspectRatio,
+    NavigationMenu, NavigationMenuList, NavigationMenuItem, NavigationMenuTrigger, NavigationMenuContent, NavigationMenuLink,
+    Calendar,
+    ResizablePanelGroup, ResizablePanel, ResizableHandle, ResizeDirection, ResizableContext,
+    Sidebar, SidebarCollapsible, SidebarContent, SidebarContext, SidebarFooter, SidebarGroup,
+    SidebarGroupContent, SidebarGroupLabel, SidebarHeader, SidebarInset, SidebarMenu,
+    SidebarMenuBadge, SidebarMenuButton, SidebarMenuButtonSize, SidebarMenuButtonVariant,
+    SidebarMenuItem, SidebarProvider, SidebarSeparator, SidebarSide, SidebarTrigger, SidebarVariant,
+    Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious,
+    InputOtp, InputOtpGroup, InputOtpSeparator, InputOtpSlot,
+};
+
+// Toast (used via toast::use_toast(), toast::ToastProvider, etc.)
 pub use crate::components::toast;
 
 // Layout
@@ -44,3 +83,6 @@ pub use crate::typography::{Heading, HeadingLevel, Text, TextVariant};
 
 // Theme tokens
 pub use crate::theme::tokens;
+
+// Class merging utility
+pub use crate::cn::{cn, cn2};

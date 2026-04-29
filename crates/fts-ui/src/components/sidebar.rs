@@ -1,0 +1,478 @@
+//! Sidebar — app sidebar layout system, shadcn v4 maia style.
+
+use dioxus::prelude::*;
+
+// ---------------------------------------------------------------------------
+// Context
+// ---------------------------------------------------------------------------
+
+/// Which side the sidebar sits on.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum SidebarSide {
+    #[default]
+    Left,
+    Right,
+}
+
+/// Shared state provided by [`SidebarProvider`].
+#[derive(Clone, Copy, PartialEq)]
+pub struct SidebarContext {
+    pub collapsed: Signal<bool>,
+    pub side: SidebarSide,
+}
+
+// ---------------------------------------------------------------------------
+// SidebarProvider
+// ---------------------------------------------------------------------------
+
+#[derive(Props, Clone, PartialEq)]
+pub struct SidebarProviderProps {
+    #[props(default = false)]
+    pub default_collapsed: bool,
+    #[props(default)]
+    pub class: String,
+    pub children: Element,
+}
+
+#[component]
+pub fn SidebarProvider(props: SidebarProviderProps) -> Element {
+    let collapsed = use_signal(|| props.default_collapsed);
+    let ctx = SidebarContext {
+        collapsed,
+        side: SidebarSide::Left,
+    };
+    use_context_provider(|| ctx);
+
+    rsx! {
+        div {
+            class: "flex min-h-screen w-full {props.class}",
+            {props.children}
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Sidebar
+// ---------------------------------------------------------------------------
+
+/// Visual variant for the sidebar panel.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum SidebarVariant {
+    #[default]
+    Default,
+    Floating,
+}
+
+/// Collapsible behaviour.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum SidebarCollapsible {
+    #[default]
+    None,
+    Icon,
+}
+
+#[derive(Props, Clone, PartialEq)]
+pub struct SidebarProps {
+    #[props(default)]
+    pub side: SidebarSide,
+    #[props(default)]
+    pub variant: SidebarVariant,
+    #[props(default)]
+    pub collapsible: SidebarCollapsible,
+    #[props(default)]
+    pub class: String,
+    pub children: Element,
+}
+
+#[component]
+pub fn Sidebar(props: SidebarProps) -> Element {
+    let mut ctx = use_context::<SidebarContext>();
+    // Update side in context so children/trigger know which side we are on.
+    ctx.side = props.side;
+
+    let collapsed = (ctx.collapsed)();
+    let is_icon = props.collapsible == SidebarCollapsible::Icon;
+
+    let width = if is_icon && collapsed { "w-16" } else { "w-64" };
+
+    let variant_cls = match props.variant {
+        SidebarVariant::Default => {
+            let border = match props.side {
+                SidebarSide::Left => "border-r",
+                SidebarSide::Right => "border-l",
+            };
+            format!(
+                "bg-sidebar text-sidebar-foreground border-sidebar-border flex flex-col h-full {border}"
+            )
+        }
+        SidebarVariant::Floating => {
+            "bg-sidebar text-sidebar-foreground rounded-lg ring-1 ring-sidebar-border shadow-sm m-2 flex flex-col h-[calc(100%-1rem)]".to_string()
+        }
+    };
+
+    let state = if collapsed { "collapsed" } else { "expanded" };
+    let variant_attr = match props.variant {
+        SidebarVariant::Default => "default",
+        SidebarVariant::Floating => "floating",
+    };
+    let collapsible_attr = match props.collapsible {
+        SidebarCollapsible::None => "none",
+        SidebarCollapsible::Icon => "icon",
+    };
+
+    rsx! {
+        aside {
+            class: "{variant_cls} {width} transition-[width] duration-200 ease-linear overflow-hidden {props.class}",
+            "data-state": state,
+            "data-variant": variant_attr,
+            "data-collapsible": collapsible_attr,
+            {props.children}
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SidebarHeader
+// ---------------------------------------------------------------------------
+
+#[derive(Props, Clone, PartialEq)]
+pub struct SidebarHeaderProps {
+    #[props(default)]
+    pub class: String,
+    pub children: Element,
+}
+
+#[component]
+pub fn SidebarHeader(props: SidebarHeaderProps) -> Element {
+    rsx! {
+        div {
+            class: "flex flex-col gap-2 p-2 {props.class}",
+            {props.children}
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SidebarContent
+// ---------------------------------------------------------------------------
+
+#[derive(Props, Clone, PartialEq)]
+pub struct SidebarContentProps {
+    #[props(default)]
+    pub class: String,
+    pub children: Element,
+}
+
+#[component]
+pub fn SidebarContent(props: SidebarContentProps) -> Element {
+    rsx! {
+        div {
+            class: "flex-1 flex flex-col gap-2 overflow-y-auto overflow-x-hidden {props.class}",
+            {props.children}
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SidebarFooter
+// ---------------------------------------------------------------------------
+
+#[derive(Props, Clone, PartialEq)]
+pub struct SidebarFooterProps {
+    #[props(default)]
+    pub class: String,
+    pub children: Element,
+}
+
+#[component]
+pub fn SidebarFooter(props: SidebarFooterProps) -> Element {
+    rsx! {
+        div {
+            class: "flex flex-col gap-2 p-2 {props.class}",
+            {props.children}
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SidebarSeparator
+// ---------------------------------------------------------------------------
+
+#[derive(Props, Clone, PartialEq)]
+pub struct SidebarSeparatorProps {
+    #[props(default)]
+    pub class: String,
+}
+
+#[component]
+pub fn SidebarSeparator(props: SidebarSeparatorProps) -> Element {
+    rsx! {
+        hr {
+            class: "bg-sidebar-border mx-2 h-px border-none {props.class}",
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SidebarGroup
+// ---------------------------------------------------------------------------
+
+#[derive(Props, Clone, PartialEq)]
+pub struct SidebarGroupProps {
+    #[props(default)]
+    pub class: String,
+    pub children: Element,
+}
+
+#[component]
+pub fn SidebarGroup(props: SidebarGroupProps) -> Element {
+    rsx! {
+        div {
+            class: "relative flex flex-col p-2 {props.class}",
+            {props.children}
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SidebarGroupLabel
+// ---------------------------------------------------------------------------
+
+#[derive(Props, Clone, PartialEq)]
+pub struct SidebarGroupLabelProps {
+    #[props(default)]
+    pub class: String,
+    pub children: Element,
+}
+
+#[component]
+pub fn SidebarGroupLabel(props: SidebarGroupLabelProps) -> Element {
+    rsx! {
+        div {
+            class: "text-sidebar-foreground/70 flex h-8 items-center rounded-md px-3 text-xs font-medium [&>svg]:size-4 {props.class}",
+            {props.children}
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SidebarGroupContent
+// ---------------------------------------------------------------------------
+
+#[derive(Props, Clone, PartialEq)]
+pub struct SidebarGroupContentProps {
+    #[props(default)]
+    pub class: String,
+    pub children: Element,
+}
+
+#[component]
+pub fn SidebarGroupContent(props: SidebarGroupContentProps) -> Element {
+    rsx! {
+        div {
+            class: "flex flex-col gap-1 text-sm {props.class}",
+            {props.children}
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SidebarMenu
+// ---------------------------------------------------------------------------
+
+#[derive(Props, Clone, PartialEq)]
+pub struct SidebarMenuProps {
+    #[props(default)]
+    pub class: String,
+    pub children: Element,
+}
+
+#[component]
+pub fn SidebarMenu(props: SidebarMenuProps) -> Element {
+    rsx! {
+        ul {
+            class: "flex flex-col gap-1 {props.class}",
+            {props.children}
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SidebarMenuItem
+// ---------------------------------------------------------------------------
+
+#[derive(Props, Clone, PartialEq)]
+pub struct SidebarMenuItemProps {
+    #[props(default)]
+    pub class: String,
+    pub children: Element,
+}
+
+#[component]
+pub fn SidebarMenuItem(props: SidebarMenuItemProps) -> Element {
+    rsx! {
+        li {
+            class: "relative {props.class}",
+            {props.children}
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SidebarMenuButton
+// ---------------------------------------------------------------------------
+
+/// Size of a [`SidebarMenuButton`].
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum SidebarMenuButtonSize {
+    Small,
+    #[default]
+    Default,
+    Large,
+}
+
+/// Visual variant of a [`SidebarMenuButton`].
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum SidebarMenuButtonVariant {
+    #[default]
+    Default,
+    Outline,
+}
+
+#[derive(Props, Clone, PartialEq)]
+pub struct SidebarMenuButtonProps {
+    #[props(default = false)]
+    pub is_active: bool,
+    #[props(default)]
+    pub size: SidebarMenuButtonSize,
+    #[props(default)]
+    pub variant: SidebarMenuButtonVariant,
+    #[props(default)]
+    pub on_click: Option<Callback<()>>,
+    #[props(default)]
+    pub class: String,
+    pub children: Element,
+}
+
+#[component]
+pub fn SidebarMenuButton(props: SidebarMenuButtonProps) -> Element {
+    let base = "flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors cursor-pointer select-none";
+
+    let variant_cls = match props.variant {
+        SidebarMenuButtonVariant::Default => {
+            "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+        }
+        SidebarMenuButtonVariant::Outline => {
+            "bg-background hover:bg-sidebar-accent hover:text-sidebar-accent-foreground ring-1 ring-sidebar-border"
+        }
+    };
+
+    let active_cls = if props.is_active {
+        "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
+    } else {
+        ""
+    };
+
+    let size_cls = match props.size {
+        SidebarMenuButtonSize::Small => "h-8 text-xs",
+        SidebarMenuButtonSize::Default => "h-9 text-sm",
+        SidebarMenuButtonSize::Large => "h-14 text-sm",
+    };
+
+    let data_active = props.is_active.then_some("true");
+
+    rsx! {
+        button {
+            class: "{base} {variant_cls} {active_cls} {size_cls} {props.class}",
+            r#type: "button",
+            "data-active": data_active,
+            onclick: move |_| {
+                if let Some(cb) = &props.on_click {
+                    cb.call(());
+                }
+            },
+            {props.children}
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SidebarMenuBadge
+// ---------------------------------------------------------------------------
+
+#[derive(Props, Clone, PartialEq)]
+pub struct SidebarMenuBadgeProps {
+    #[props(default)]
+    pub class: String,
+    pub children: Element,
+}
+
+#[component]
+pub fn SidebarMenuBadge(props: SidebarMenuBadgeProps) -> Element {
+    rsx! {
+        span {
+            class: "text-sidebar-foreground flex h-5 min-w-5 items-center justify-center rounded-md px-1 text-xs font-medium {props.class}",
+            {props.children}
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SidebarTrigger
+// ---------------------------------------------------------------------------
+
+#[derive(Props, Clone, PartialEq)]
+pub struct SidebarTriggerProps {
+    #[props(default)]
+    pub class: String,
+}
+
+#[component]
+pub fn SidebarTrigger(props: SidebarTriggerProps) -> Element {
+    let mut ctx = use_context::<SidebarContext>();
+
+    rsx! {
+        button {
+            class: "inline-flex items-center justify-center size-8 rounded-lg hover:bg-sidebar-accent transition-colors {props.class}",
+            r#type: "button",
+            onclick: move |_| {
+                let current = (ctx.collapsed)();
+                ctx.collapsed.set(!current);
+            },
+            svg {
+                class: "size-4",
+                xmlns: "http://www.w3.org/2000/svg",
+                view_box: "0 0 24 24",
+                fill: "none",
+                stroke: "currentColor",
+                stroke_width: "2",
+                stroke_linecap: "round",
+                stroke_linejoin: "round",
+                // Hamburger / panel-left icon
+                rect { x: "3", y: "3", width: "18", height: "18", rx: "2" }
+                path { d: "M9 3v18" }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SidebarInset
+// ---------------------------------------------------------------------------
+
+#[derive(Props, Clone, PartialEq)]
+pub struct SidebarInsetProps {
+    #[props(default)]
+    pub class: String,
+    pub children: Element,
+}
+
+#[component]
+pub fn SidebarInset(props: SidebarInsetProps) -> Element {
+    rsx! {
+        main {
+            class: "flex-1 bg-background {props.class}",
+            {props.children}
+        }
+    }
+}

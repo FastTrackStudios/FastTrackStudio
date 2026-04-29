@@ -1,4 +1,4 @@
-//! Divider — horizontal or vertical separator line.
+//! Divider — shadcn v4 maia separator style.
 
 use dioxus::prelude::*;
 
@@ -12,25 +12,23 @@ pub enum DividerOrientation {
 
 #[derive(Props, Clone, PartialEq)]
 pub struct DividerProps {
-    /// Orientation.
     #[props(default)]
     pub orientation: DividerOrientation,
-
-    /// Extra CSS classes.
     #[props(default)]
     pub class: String,
 }
 
+/// shadcn v4 maia: cn-separator
 #[component]
 pub fn Divider(props: DividerProps) -> Element {
     let orientation_class = match props.orientation {
-        DividerOrientation::Horizontal => "w-full border-t border-border",
-        DividerOrientation::Vertical => "h-full border-l border-border",
+        DividerOrientation::Horizontal => "h-px w-full",
+        DividerOrientation::Vertical => "h-full w-px",
     };
 
     rsx! {
         div {
-            class: format!("shrink-0 {orientation_class} {}", props.class),
+            class: format!("shrink-0 bg-border {orientation_class} {}", props.class),
             role: "separator",
             aria_orientation: match props.orientation {
                 DividerOrientation::Horizontal => "horizontal",

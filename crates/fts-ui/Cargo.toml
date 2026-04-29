@@ -5,9 +5,8 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+chrono = "0.4"
 dioxus = { workspace = true }
-dioxus-primitives = { workspace = true }
-lumen-blocks = { workspace = true }
 lucide-dioxus = { workspace = true }
 tracing = { workspace = true }
 

@@ -1,24 +1,9 @@
 //! List row — horizontal card with leading indicator, text stack, and trailing action.
 //!
-//! Replaces the repeated `flex items-center justify-between p-3 rounded-lg border`
-//! pattern found throughout the dashboard and manage views.
+//! Styled to match shadcn v4 maia card/item patterns.
 
 use dioxus::prelude::*;
 
-// ---------------------------------------------------------------------------
-// ListRow
-// ---------------------------------------------------------------------------
-
-/// A horizontal card row with optional leading element, text stack, and trailing action.
-///
-/// ```rust,ignore
-/// ListRow {
-///     label: "Signal REAPER",
-///     detail: "Running — PID 1234",
-///     leading: rsx! { StatusDot { color: StatusDotColor::Success } },
-///     trailing: rsx! { Button { variant: ButtonVariant::Secondary, "Launch" } },
-/// }
-/// ```
 #[derive(Props, Clone, PartialEq)]
 pub struct ListRowProps {
     /// Primary label text.
@@ -28,7 +13,7 @@ pub struct ListRowProps {
     #[props(default)]
     pub detail: String,
 
-    /// Optional small tag rendered next to the label (e.g. "AUTO").
+    /// Optional small tag rendered next to the label.
     #[props(default)]
     pub tag: String,
 
@@ -51,11 +36,6 @@ pub struct ListRowProps {
 
 #[component]
 pub fn ListRow(props: ListRowProps) -> Element {
-    let base_class = format!(
-        "flex items-center justify-between p-3 rounded-lg border border-border bg-card/50 {}",
-        props.class
-    );
-
     let clickable_class = if props.on_click.is_some() {
         "cursor-pointer hover:bg-accent/30 transition-colors"
     } else {
@@ -64,7 +44,10 @@ pub fn ListRow(props: ListRowProps) -> Element {
 
     rsx! {
         div {
-            class: "{base_class} {clickable_class}",
+            class: format!(
+                "flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 {} {}",
+                clickable_class, props.class
+            ),
             onclick: move |_| {
                 if let Some(cb) = &props.on_click {
                     cb.call(());
@@ -84,7 +67,7 @@ pub fn ListRow(props: ListRowProps) -> Element {
                         }
                         if !props.tag.is_empty() {
                             span {
-                                class: "px-1.5 py-0.5 text-[10px] font-medium rounded bg-secondary text-muted-foreground flex-shrink-0",
+                                class: "px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-secondary text-muted-foreground flex-shrink-0",
                                 "{props.tag}"
                             }
                         }

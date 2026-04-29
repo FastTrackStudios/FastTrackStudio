@@ -1,21 +1,22 @@
 //! FastTrack Studio design system.
 //!
-//! Single opinionated UI dependency for all FTS apps. Wraps and re-exports
-//! lumen-blocks components, adds layout/typography primitives, and provides
-//! the canonical FTS theme tokens.
+//! Standalone UI component library for all FTS apps. Provides shadcn v4 maia
+//! styled components, layout/typography primitives, and the canonical FTS
+//! theme tokens.
 //!
 //! # Quick start
 //! ```rust,ignore
 //! use fts_ui::prelude::*;
 //! ```
 
+pub mod cn;
 pub mod components;
 pub mod layout;
 pub mod theme;
 pub mod typography;
 
 pub mod prelude;
+pub mod showcase;
 
-// Re-export underlying crates for escape-hatch access.
-pub use lumen_blocks;
+// Re-export lucide icons for consumers.
 pub use lucide_dioxus;

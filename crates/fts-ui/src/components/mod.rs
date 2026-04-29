@@ -7,15 +7,23 @@ mod input;
 pub use button::*;
 pub use input::*;
 
-// --- Re-exported from lumen-blocks ---
-pub mod checkbox;
-pub mod context_menu;
-pub mod dropdown;
-pub mod label;
-pub mod progress;
-pub mod side_sheet;
-pub mod switch;
-pub mod toast;
+// --- Standalone reimplementations (were lumen-blocks) ---
+mod checkbox;
+mod context_menu;
+mod dropdown;
+mod label;
+mod progress;
+mod side_sheet;
+mod switch;
+pub mod toast; // toast stays pub mod for toast::use_toast() access
+
+pub use checkbox::*;
+pub use context_menu::*;
+pub use dropdown::*;
+pub use label::*;
+pub use progress::*;
+pub use side_sheet::*;
+pub use switch::*;
 
 // --- Migrated from signal-ui ---
 mod dialog;
@@ -56,3 +64,91 @@ pub use searchable_list::*;
 pub use section_header::*;
 pub use segmented_control::*;
 pub use status::*;
+
+mod alert;
+mod alert_dialog;
+mod breadcrumb;
+mod drawer;
+mod field;
+mod kbd;
+mod scroll_area;
+mod skeleton;
+mod spinner;
+mod textarea;
+
+pub use alert::*;
+pub use alert_dialog::*;
+pub use breadcrumb::*;
+pub use drawer::*;
+pub use field::*;
+pub use kbd::*;
+pub use scroll_area::*;
+pub use skeleton::*;
+pub use spinner::*;
+pub use textarea::*;
+
+mod popover;
+mod table;
+mod toggle;
+mod toggle_group;
+
+pub use popover::*;
+pub use table::*;
+pub use toggle::*;
+pub use toggle_group::*;
+
+mod radio_group;
+mod select;
+mod slider;
+mod tooltip;
+
+pub use radio_group::*;
+pub use select::*;
+pub use slider::*;
+pub use tooltip::*;
+
+mod accordion;
+mod collapsible;
+mod hover_card;
+
+pub use accordion::*;
+pub use collapsible::*;
+pub use hover_card::*;
+
+mod avatar;
+mod input_group;
+mod pagination;
+
+pub use avatar::*;
+pub use input_group::*;
+pub use pagination::*;
+
+mod command;
+mod combobox;
+mod menubar;
+
+pub use command::*;
+pub use combobox::*;
+pub use menubar::*;
+
+mod aspect_ratio;
+mod navigation_menu;
+
+pub use aspect_ratio::*;
+pub use navigation_menu::*;
+
+mod calendar;
+mod resizable;
+
+pub use calendar::*;
+pub use resizable::*;
+
+mod sidebar;
+
+pub use sidebar::*;
+
+mod carousel;
+mod input_otp;
+
+pub use carousel::*;
+pub use input_otp::*;

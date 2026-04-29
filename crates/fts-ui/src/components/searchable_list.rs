@@ -50,7 +50,7 @@ pub fn SearchableList(props: SearchableListProps) -> Element {
             // Search input
             div { class: "px-3 py-1.5 border-b border-border",
                 input {
-                    class: "w-full bg-secondary/50 border border-border rounded-md px-2.5 py-1.5 \
+                    class: "w-full bg-input/30 border border-border rounded-md px-2.5 py-1.5 \
                             text-[11px] text-foreground outline-none focus:border-ring \
                             placeholder:text-muted-foreground transition-all",
                     r#type: "text",

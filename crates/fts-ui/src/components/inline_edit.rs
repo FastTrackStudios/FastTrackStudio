@@ -86,7 +86,7 @@ pub fn InlineEdit(props: InlineEditProps) -> Element {
         rsx! {
             input {
                 class: format!(
-                    "px-2 py-0.5 text-xs text-foreground bg-secondary border border-ring rounded outline-none {}",
+                    "px-2 py-0.5 text-xs text-foreground bg-secondary border border-input rounded outline-none {}",
                     props.class
                 ),
                 value: "{draft}",

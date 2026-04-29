@@ -1,3 +1,27 @@
-//! Label — re-export from lumen-blocks.
+//! Label — shadcn v4 maia style, standalone (no lumen-blocks).
 
-pub use lumen_blocks::components::label::*;
+use dioxus::prelude::*;
+
+#[derive(Props, Clone, PartialEq)]
+pub struct LabelProps {
+    #[props(default)]
+    pub html_for: Option<String>,
+    #[props(default)]
+    pub class: String,
+    pub children: Element,
+}
+
+/// shadcn v4 maia: cn-label
+#[component]
+pub fn Label(props: LabelProps) -> Element {
+    // shadcn v4 maia: cn-label
+    let base = "text-sm leading-none font-medium select-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70";
+
+    rsx! {
+        label {
+            r#for: props.html_for.as_deref().unwrap_or_default(),
+            class: "{base} {props.class}",
+            {props.children}
+        }
+    }
+}

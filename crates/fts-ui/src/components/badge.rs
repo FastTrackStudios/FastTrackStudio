@@ -1,4 +1,4 @@
-//! Badge — small status indicator with text label.
+//! Badge — shadcn v4 maia style.
 
 use dioxus::prelude::*;
 
@@ -10,38 +10,38 @@ pub enum BadgeVariant {
     Secondary,
     Destructive,
     Outline,
+    Ghost,
 }
 
 impl BadgeVariant {
+    // shadcn v4 maia: cn-badge-variant-*
     fn classes(self) -> &'static str {
         match self {
-            Self::Default => "border-transparent bg-primary text-primary-foreground shadow-sm hover:bg-primary/80",
-            Self::Secondary => "border-transparent bg-secondary text-secondary-foreground hover:bg-secondary/80",
-            Self::Destructive => "border-transparent bg-destructive text-destructive-foreground shadow-sm hover:bg-destructive/80",
-            Self::Outline => "text-foreground",
+            Self::Default => "bg-primary text-primary-foreground",
+            Self::Secondary => "bg-secondary text-secondary-foreground",
+            Self::Destructive => "bg-destructive/10 text-destructive dark:bg-destructive/20",
+            Self::Outline => "border-border text-foreground bg-input/30",
+            Self::Ghost => "hover:bg-muted hover:text-muted-foreground dark:hover:bg-muted/50",
         }
     }
 }
 
 #[derive(Props, Clone, PartialEq)]
 pub struct BadgeProps {
-    /// Visual variant.
     #[props(default)]
     pub variant: BadgeVariant,
-
-    /// Extra CSS classes.
     #[props(default)]
     pub class: String,
-
     pub children: Element,
 }
 
+/// shadcn v4 maia: cn-badge
 #[component]
 pub fn Badge(props: BadgeProps) -> Element {
     rsx! {
         span {
             class: format!(
-                "inline-flex items-center rounded-md border px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 {} {}",
+                "inline-flex items-center h-5 gap-1 rounded-full border border-transparent px-2 py-0.5 text-xs font-medium transition-all [&>svg]:size-3 {} {}",
                 props.variant.classes(),
                 props.class
             ),

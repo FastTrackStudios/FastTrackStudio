@@ -1,31 +1,22 @@
-//! Tabs component — accessible tabbed interface following WAI-ARIA Tabs pattern.
-//!
-//! Migrated from signal-ui. Uses shadcn design tokens for consistent styling.
+//! Tabs — shadcn v4 maia style accessible tabbed interface.
 
 use dioxus::prelude::*;
 
-/// Root container for a tabbed interface.
 #[derive(Props, Clone, PartialEq)]
 pub struct TabsProps {
-    /// The key of the initially selected tab.
     #[props(default = String::new())]
     pub default_value: String,
-
-    /// Callback when the selected tab changes.
     #[props(default)]
     pub on_change: Option<Callback<String>>,
-
-    /// Extra CSS classes.
     #[props(default)]
     pub class: String,
-
     pub children: Element,
 }
 
+/// shadcn v4 maia: cn-tabs
 #[component]
 pub fn Tabs(props: TabsProps) -> Element {
     let selected = use_signal(|| props.default_value.clone());
-
     use_context_provider(|| TabContext {
         selected,
         on_change: props.on_change,
@@ -33,21 +24,19 @@ pub fn Tabs(props: TabsProps) -> Element {
 
     rsx! {
         div {
-            class: format!("flex flex-col {}", props.class),
+            class: format!("flex flex-col gap-2 {}", props.class),
             "data-orientation": "horizontal",
             {props.children}
         }
     }
 }
 
-/// Internal context shared between tab sub-components.
 #[derive(Clone, Copy)]
 struct TabContext {
     selected: Signal<String>,
     on_change: Option<Callback<String>>,
 }
 
-/// Horizontal list of tab triggers.
 #[derive(Props, Clone, PartialEq)]
 pub struct TabListProps {
     #[props(default)]
@@ -55,13 +44,14 @@ pub struct TabListProps {
     pub children: Element,
 }
 
+/// shadcn v4 maia: cn-tabs-list
 #[component]
 pub fn TabList(props: TabListProps) -> Element {
     rsx! {
         div {
             role: "tablist",
             class: format!(
-                "inline-flex h-9 items-center justify-start gap-1 rounded-lg bg-muted p-1 text-muted-foreground {}",
+                "inline-flex h-9 items-center justify-start gap-1 rounded-full bg-muted p-[3px] text-muted-foreground {}",
                 props.class
             ),
             {props.children}
@@ -69,18 +59,15 @@ pub fn TabList(props: TabListProps) -> Element {
     }
 }
 
-/// A single tab trigger button.
 #[derive(Props, Clone, PartialEq)]
 pub struct TabTriggerProps {
-    /// Unique key matching a `TabContent` value.
     pub value: String,
-
     #[props(default)]
     pub class: String,
-
     pub children: Element,
 }
 
+/// shadcn v4 maia: cn-tabs-trigger
 #[component]
 pub fn TabTrigger(props: TabTriggerProps) -> Element {
     let mut ctx: TabContext = use_context();
@@ -99,7 +86,7 @@ pub fn TabTrigger(props: TabTriggerProps) -> Element {
             role: "tab",
             r#type: "button",
             class: format!(
-                "inline-flex items-center justify-center whitespace-nowrap rounded-md px-3 py-1 text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 {active_class} {}",
+                "inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-transparent px-2 py-1 text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg:not([class*='size-'])]:size-4 {active_class} {}",
                 props.class
             ),
             aria_selected: is_selected.to_string(),
@@ -117,18 +104,15 @@ pub fn TabTrigger(props: TabTriggerProps) -> Element {
     }
 }
 
-/// Content panel shown when its `value` matches the selected tab.
 #[derive(Props, Clone, PartialEq)]
 pub struct TabContentProps {
-    /// Key matching a `TabTrigger` value.
     pub value: String,
-
     #[props(default)]
     pub class: String,
-
     pub children: Element,
 }
 
+/// shadcn v4 maia: cn-tabs-content
 #[component]
 pub fn TabContent(props: TabContentProps) -> Element {
     let ctx: TabContext = use_context();
@@ -141,10 +125,7 @@ pub fn TabContent(props: TabContentProps) -> Element {
     rsx! {
         div {
             role: "tabpanel",
-            class: format!(
-                "mt-2 ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 {}",
-                props.class
-            ),
+            class: format!("text-sm {}", props.class),
             "data-state": "active",
             tabindex: "0",
             {props.children}
