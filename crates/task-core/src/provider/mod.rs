@@ -42,7 +42,9 @@ pub use local::LocalProvider;
 pub use vault::VaultProvider;
 pub use registry::ProjectRegistry;
 pub use s3::{S3Provider, S3Config};
-pub use webdav::{WebDavProvider, WebDavConfig};
+pub use webdav::{
+    WebDavConfig, WebDavEntry, WebDavLock, WebDavProvider, WebDavPutOptions, WebDavResourceKind,
+};
 pub mod mock;
 pub use mock::MockProvider;
 pub use nextcloud::{NextcloudProvider, NextcloudConfig};

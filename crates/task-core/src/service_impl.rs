@@ -2,6 +2,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use chrono::{NaiveDate, Utc};
 use tokio::sync::RwLock;
 use uuid::Uuid;
@@ -11,9 +12,10 @@ use crate::project::{next_task as find_next_task, Project, ProjectStats};
 use crate::query::Query;
 use crate::rrule;
 use crate::service::{
-    CalendarEventPatch, InvoiceCreateRequest, InvoicePaymentRequest, ProjectPatch,
-    RemoteDeckBoard, RemoteDeckStack, SyncStats, TimeEntryContext, TimeEntryFilter,
-    TimeEntryPatch, TimeLogRequest, TimeStartRequest, TimedTaskEntry, VaultError,
+    CalendarEventPatch, FileCopyMoveRequest, FileEntry, FileReadResponse, FileWriteRequest,
+    InvoiceCreateRequest, InvoicePaymentRequest, ProjectPatch, RemoteDeckBoard, RemoteDeckStack,
+    SyncStats, TimeEntryContext, TimeEntryFilter, TimeEntryPatch, TimeLogRequest, TimeStartRequest,
+    TimedTaskEntry, VaultError,
 };
 use crate::task::{Status, Task};
 use crate::vault::Vault;
@@ -148,6 +150,23 @@ fn env_truthy(value: &str) -> bool {
     matches!(
         value.to_ascii_lowercase().as_str(),
         "1" | "true" | "yes" | "on"
+    )
+}
+
+fn nextcloud_webdav_provider(config: &NextcloudRuntimeConfig) -> crate::provider::WebDavProvider {
+    crate::provider::WebDavProvider::new(
+        "nextcloud-files",
+        "Nextcloud Files",
+        crate::provider::WebDavConfig {
+            url: format!(
+                "{}/remote.php/dav/files/{}/",
+                config.url.trim_end_matches('/'),
+                config.username
+            ),
+            username: config.username.clone(),
+            password: config.password.clone(),
+            projects_path: config.projects_path.clone(),
+        },
     )
 }
 
@@ -883,19 +902,7 @@ impl VaultServiceImpl {
         &self,
         config: &NextcloudRuntimeConfig,
     ) -> Result<(u32, u32), VaultError> {
-        let provider = crate::provider::NextcloudProvider::new(
-            "nextcloud",
-            "Nextcloud",
-            crate::provider::NextcloudConfig {
-                url: config.url.clone(),
-                username: config.username.clone(),
-                password: config.password.clone(),
-                projects_path: config.projects_path.clone(),
-                calendar: Some(config.calendar.clone()),
-                deck_enabled: false,
-                deck_boards: std::collections::HashMap::new(),
-            },
-        );
+        let provider = nextcloud_webdav_provider(config);
 
         let bundles = crate::provider::ProjectProvider::list_all(&provider).await?;
         let mut created = 0;
@@ -2501,6 +2508,106 @@ impl crate::service::CalendarService for VaultServiceImpl {
     }
     async fn list_deck_stacks(&self, board_id: u64) -> Result<Vec<RemoteDeckStack>, VaultError> {
         self.list_remote_deck_stacks(board_id).await
+    }
+}
+
+impl crate::service::FileService for VaultServiceImpl {
+    async fn list_files(&self, path: String, depth: String) -> Result<Vec<FileEntry>, VaultError> {
+        let config = NextcloudRuntimeConfig::load()?
+            .ok_or_else(|| VaultError::IoError("Nextcloud file provider is not configured".into()))?;
+        let provider = nextcloud_webdav_provider(&config);
+        provider
+            .list(&path, if depth.is_empty() { "1" } else { &depth })
+            .await
+            .map(|entries| entries.into_iter().map(file_entry_from_webdav).collect())
+    }
+
+    async fn stat_file(&self, path: String) -> Result<Option<FileEntry>, VaultError> {
+        let config = NextcloudRuntimeConfig::load()?
+            .ok_or_else(|| VaultError::IoError("Nextcloud file provider is not configured".into()))?;
+        let provider = nextcloud_webdav_provider(&config);
+        provider
+            .stat(&path)
+            .await
+            .map(|entry| entry.map(file_entry_from_webdav))
+    }
+
+    async fn read_file(&self, path: String) -> Result<Option<FileReadResponse>, VaultError> {
+        let config = NextcloudRuntimeConfig::load()?
+            .ok_or_else(|| VaultError::IoError("Nextcloud file provider is not configured".into()))?;
+        let provider = nextcloud_webdav_provider(&config);
+        let stat = provider.stat(&path).await?;
+        let Some(content) = provider.read(&path).await? else {
+            return Ok(None);
+        };
+        Ok(Some(FileReadResponse {
+            content_base64: BASE64.encode(content),
+            content_type: stat.as_ref().and_then(|entry| entry.content_type.clone()),
+            etag: stat.and_then(|entry| entry.etag),
+        }))
+    }
+
+    async fn write_file(&self, request: FileWriteRequest) -> Result<(), VaultError> {
+        let config = NextcloudRuntimeConfig::load()?
+            .ok_or_else(|| VaultError::IoError("Nextcloud file provider is not configured".into()))?;
+        let provider = nextcloud_webdav_provider(&config);
+        let content = BASE64
+            .decode(request.content_base64)
+            .map_err(|e| VaultError::ParseError(format!("invalid base64 content: {e}")))?;
+        provider
+            .write(
+                &request.path,
+                content,
+                crate::provider::WebDavPutOptions {
+                    content_type: request.content_type,
+                    if_match: request.if_match,
+                    if_none_match: request.if_none_match,
+                },
+            )
+            .await
+    }
+
+    async fn create_dir(&self, path: String) -> Result<(), VaultError> {
+        let config = NextcloudRuntimeConfig::load()?
+            .ok_or_else(|| VaultError::IoError("Nextcloud file provider is not configured".into()))?;
+        nextcloud_webdav_provider(&config).create_dir(&path).await
+    }
+
+    async fn delete_file(&self, path: String) -> Result<(), VaultError> {
+        let config = NextcloudRuntimeConfig::load()?
+            .ok_or_else(|| VaultError::IoError("Nextcloud file provider is not configured".into()))?;
+        nextcloud_webdav_provider(&config).remove(&path).await
+    }
+
+    async fn copy_file(&self, request: FileCopyMoveRequest) -> Result<(), VaultError> {
+        let config = NextcloudRuntimeConfig::load()?
+            .ok_or_else(|| VaultError::IoError("Nextcloud file provider is not configured".into()))?;
+        nextcloud_webdav_provider(&config)
+            .copy(&request.from, &request.to, request.overwrite, Some("infinity"))
+            .await
+    }
+
+    async fn move_file(&self, request: FileCopyMoveRequest) -> Result<(), VaultError> {
+        let config = NextcloudRuntimeConfig::load()?
+            .ok_or_else(|| VaultError::IoError("Nextcloud file provider is not configured".into()))?;
+        nextcloud_webdav_provider(&config)
+            .move_resource(&request.from, &request.to, request.overwrite)
+            .await
+    }
+}
+
+fn file_entry_from_webdav(entry: crate::provider::WebDavEntry) -> FileEntry {
+    FileEntry {
+        path: entry.path,
+        name: entry.name,
+        kind: match entry.kind {
+            crate::provider::WebDavResourceKind::File => "file".to_string(),
+            crate::provider::WebDavResourceKind::Collection => "directory".to_string(),
+        },
+        content_type: entry.content_type,
+        content_length: entry.content_length,
+        etag: entry.etag,
+        last_modified: entry.last_modified,
     }
 }
 

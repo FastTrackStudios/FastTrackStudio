@@ -178,6 +178,33 @@ pub trait CalendarService {
     async fn list_deck_stacks(&self, board_id: u64) -> Result<Vec<RemoteDeckStack>, VaultError>;
 }
 
+#[vox::service]
+pub trait FileService {
+    /// List files/directories under the configured Nextcloud project root.
+    async fn list_files(&self, path: String, depth: String) -> Result<Vec<FileEntry>, VaultError>;
+
+    /// Return metadata for one file/directory.
+    async fn stat_file(&self, path: String) -> Result<Option<FileEntry>, VaultError>;
+
+    /// Read a file as base64 content.
+    async fn read_file(&self, path: String) -> Result<Option<FileReadResponse>, VaultError>;
+
+    /// Write a file from base64 content.
+    async fn write_file(&self, request: FileWriteRequest) -> Result<(), VaultError>;
+
+    /// Create a directory.
+    async fn create_dir(&self, path: String) -> Result<(), VaultError>;
+
+    /// Delete a file or directory.
+    async fn delete_file(&self, path: String) -> Result<(), VaultError>;
+
+    /// Copy a file or directory.
+    async fn copy_file(&self, request: FileCopyMoveRequest) -> Result<(), VaultError>;
+
+    /// Move or rename a file or directory.
+    async fn move_file(&self, request: FileCopyMoveRequest) -> Result<(), VaultError>;
+}
+
 /// Sync operation statistics.
 #[derive(Debug, Clone, Default, facet::Facet)]
 pub struct SyncStats {
@@ -217,6 +244,40 @@ pub struct CalendarEventPatch {
     pub recurrence: Option<Option<String>>,
     pub attendees: Option<Vec<String>>,
     pub body: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct FileEntry {
+    pub path: String,
+    pub name: String,
+    pub kind: String,
+    pub content_type: Option<String>,
+    pub content_length: Option<u64>,
+    pub etag: Option<String>,
+    pub last_modified: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct FileReadResponse {
+    pub content_base64: String,
+    pub content_type: Option<String>,
+    pub etag: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct FileWriteRequest {
+    pub path: String,
+    pub content_base64: String,
+    pub content_type: Option<String>,
+    pub if_match: Option<String>,
+    pub if_none_match: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct FileCopyMoveRequest {
+    pub from: String,
+    pub to: String,
+    pub overwrite: bool,
 }
 
 /// Patch for editing time entries. Only `Some(_)` fields are applied. For

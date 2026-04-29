@@ -54,15 +54,16 @@ pub use capture::{CaptureInput, parse_capture};
 #[cfg(feature = "server")]
 pub use service::{
     activity_service_service_descriptor, calendar_service_service_descriptor,
-    client_service_service_descriptor, invoice_service_service_descriptor,
-    project_service_service_descriptor, task_service_service_descriptor,
+    client_service_service_descriptor, file_service_service_descriptor,
+    invoice_service_service_descriptor, project_service_service_descriptor, task_service_service_descriptor,
     time_service_service_descriptor, ActivityService, ActivityServiceDispatcher,
     CalendarEventPatch, CalendarService, CalendarServiceDispatcher, ClientService,
-    ClientServiceDispatcher, InvoiceCreateRequest, InvoicePaymentRequest, InvoiceService,
-    InvoiceServiceDispatcher, ProjectPatch, ProjectService, ProjectServiceDispatcher,
-    RemoteDeckBoard, RemoteDeckStack, SyncStats, TaskService, TaskServiceDispatcher,
-    TimeEntryContext, TimeEntryFilter, TimeEntryPatch, TimeLogRequest, TimeService,
-    TimeServiceDispatcher, TimeStartRequest, TimedTaskEntry, VaultError,
+    ClientServiceDispatcher, FileCopyMoveRequest, FileEntry, FileReadResponse, FileService,
+    FileServiceDispatcher, FileWriteRequest, InvoiceCreateRequest, InvoicePaymentRequest,
+    InvoiceService, InvoiceServiceDispatcher, ProjectPatch, ProjectService,
+    ProjectServiceDispatcher, RemoteDeckBoard, RemoteDeckStack, SyncStats, TaskService,
+    TaskServiceDispatcher, TimeEntryContext, TimeEntryFilter, TimeEntryPatch, TimeLogRequest,
+    TimeService, TimeServiceDispatcher, TimeStartRequest, TimedTaskEntry, VaultError,
 };
 #[cfg(feature = "server")]
 pub use vault::Vault;

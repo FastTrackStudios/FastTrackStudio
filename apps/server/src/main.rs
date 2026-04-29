@@ -957,6 +957,12 @@ async fn handle_vox_connection(socket: WebSocket, state: AppState) {
                     ));
                     Ok(())
                 }
+                "FileService" => {
+                    connection.handle_with(task_core::FileServiceDispatcher::new(
+                        service.as_ref().clone(),
+                    ));
+                    Ok(())
+                }
                 "Noop" => {
                     connection.handle_with(());
                     Ok(())
