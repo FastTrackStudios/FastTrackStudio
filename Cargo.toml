@@ -89,6 +89,7 @@ path = "crates/task-core"
 [workspace.dependencies.vox]
 git = "https://github.com/Codys-Wright/vox"
 rev = "4103658f29c88ffd913314903f16e327c5248cdb"
+features = ["transport-websocket"]
 
 [workspace.dependencies.vox-core]
 git = "https://github.com/Codys-Wright/vox"

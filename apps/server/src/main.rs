@@ -17,9 +17,11 @@ use serde_json::json;
 use task_core::crdt::{CrdtSyncEngine, SyncOp};
 use task_core::VaultServiceImpl;
 use task_db::entities::auth::{auth_member, auth_organization, auth_session};
-use task_db::sea_orm::{self, ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
+use task_db::sea_orm::{
+    self, ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set,
+};
 use task_db::SeaOrmAuthAdapter;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use tower_http::cors::CorsLayer;
 use tracing::{info, warn};
 
@@ -161,6 +163,9 @@ async fn main() -> eyre::Result<()> {
 
     if demo_seeded {
         seed_auth_data(&auth, &info_payload).await;
+        if let Ok(token) = std::env::var("TASK_TEST_SESSION_TOKEN") {
+            seed_test_session(&db, &token).await;
+        }
         info!("Auth mock data seeded");
     } else {
         info!("Demo seed disabled by TASK_SEED_DEMO=0");
@@ -568,6 +573,31 @@ async fn seed_auth_data(
         }
     }
     info!("Seeded {} organizations into better-auth", orgs.len());
+}
+
+async fn seed_test_session(db: &sea_orm::DatabaseConnection, token: &str) {
+    if token.trim().is_empty() {
+        return;
+    }
+
+    let now = Utc::now();
+    let session = auth_session::ActiveModel {
+        id: Set("session_test_agent".to_string()),
+        expires_at: Set(now + chrono::Duration::days(7)),
+        token: Set(token.to_string()),
+        created_at: Set(now),
+        updated_at: Set(now),
+        ip_address: Set(Some("127.0.0.1".to_string())),
+        user_agent: Set(Some("task-server e2e".to_string())),
+        user_id: Set("user_cody".to_string()),
+        impersonated_by: Set(None),
+        active_organization_id: Set(Some("org_fts".to_string())),
+        active: Set(true),
+    };
+
+    if let Err(e) = session.insert(db).await {
+        warn!(error = %e, "Failed to seed TASK_TEST_SESSION_TOKEN session");
+    }
 }
 
 // ── Loro CRDT sync ───────────────────────────────────────────────────────────
@@ -1023,13 +1053,21 @@ async fn handle_vox_connection(socket: WebSocket, state: AppState, auth: VoxAuth
         },
     );
 
-    if let Err(e) = vox::acceptor_on(AxumWsLink::new(socket))
+    let (closed_tx, closed_rx) = oneshot::channel();
+    let root = match vox::acceptor_on(AxumWsLink::new(socket, closed_tx))
         .on_connection(factory)
         .establish::<vox::NoopClient>()
         .await
     {
-        warn!(error = %e, "Vox WebSocket session failed");
-    }
+        Ok(root) => root,
+        Err(e) => {
+            warn!(error = %e, "Vox WebSocket session failed");
+            return;
+        }
+    };
+
+    let _root = root;
+    let _ = closed_rx.await;
 
     info!(
         user_id = %auth.user_id,
@@ -1156,11 +1194,12 @@ fn cookie_value(headers: &HeaderMap, name: &str) -> Option<String> {
 
 struct AxumWsLink {
     socket: WebSocket,
+    closed: oneshot::Sender<()>,
 }
 
 impl AxumWsLink {
-    fn new(socket: WebSocket) -> Self {
-        Self { socket }
+    fn new(socket: WebSocket, closed: oneshot::Sender<()>) -> Self {
+        Self { socket, closed }
     }
 }
 
@@ -1171,7 +1210,7 @@ impl vox::Link for AxumWsLink {
     fn split(self) -> (Self::Tx, Self::Rx) {
         let (tx_out, rx_out) = mpsc::channel::<Vec<u8>>(1);
         let (tx_in, rx_in) = mpsc::channel::<Result<AxumWsMessage, AxumWsError>>(1);
-        let io_task = tokio::spawn(axum_ws_io_loop(self.socket, rx_out, tx_in));
+        let io_task = tokio::spawn(axum_ws_io_loop(self.socket, rx_out, tx_in, self.closed));
 
         (
             AxumWsTx {
@@ -1187,9 +1226,11 @@ async fn axum_ws_io_loop(
     socket: WebSocket,
     mut rx_out: mpsc::Receiver<Vec<u8>>,
     tx_in: mpsc::Sender<Result<AxumWsMessage, AxumWsError>>,
+    closed: oneshot::Sender<()>,
 ) {
     use futures::{SinkExt, StreamExt};
     let (mut ws_tx, mut ws_rx) = socket.split();
+    let _closed = NotifyOnDrop(Some(closed));
 
     loop {
         tokio::select! {
@@ -1228,6 +1269,16 @@ async fn axum_ws_io_loop(
                     None => return,
                 }
             }
+        }
+    }
+}
+
+struct NotifyOnDrop(Option<oneshot::Sender<()>>);
+
+impl Drop for NotifyOnDrop {
+    fn drop(&mut self) {
+        if let Some(tx) = self.0.take() {
+            let _ = tx.send(());
         }
     }
 }
