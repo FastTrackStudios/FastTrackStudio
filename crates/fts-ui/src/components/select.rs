@@ -34,6 +34,24 @@ pub fn Select(props: SelectProps) -> Element {
     };
 
     rsx! {
+        document::Style {
+            r#"
+                .fts-select-item[aria-selected="true"] {{
+                    background: var(--accent);
+                    color: var(--accent-foreground);
+                }}
+
+                .fts-select-item:focus {{
+                    background: var(--accent);
+                    color: var(--accent-foreground);
+                }}
+
+                .fts-select-item[aria-disabled="true"] {{
+                    pointer-events: none;
+                    opacity: 0.5;
+                }}
+            "#
+        }
         PrimitiveSelect::<String> {
             value: Some(selected),
             placeholder: props.placeholder,
@@ -46,7 +64,7 @@ pub fn Select(props: SelectProps) -> Element {
                     callback.call(next);
                 }
             },
-            class: crate::cn::merge_slice(&["relative inline-block w-full", props.class.as_str()]),
+            class: crate::cn::merge_slice(&["relative w-full", props.class.as_str()]),
             SelectTrigger {}
             {props.children}
         }
@@ -66,7 +84,7 @@ pub fn SelectTrigger(props: SelectTriggerProps) -> Element {
     rsx! {
         PrimitiveSelectTrigger {
             class: crate::cn::merge(format!(
-                "inline-flex items-center justify-between gap-2 h-9 w-full px-3 text-sm rounded-lg border border-input bg-transparent shadow-xs hover:bg-accent hover:text-accent-foreground transition-colors cursor-pointer select-none disabled:cursor-not-allowed disabled:opacity-50 {}",
+                "flex h-9 w-full items-center justify-between gap-2 rounded-lg border border-input bg-transparent px-3 py-2 text-sm whitespace-nowrap shadow-xs outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 {}",
                 props.class
             )),
             if props.children.is_ok() {
@@ -109,10 +127,13 @@ pub fn SelectContent(props: SelectContentProps) -> Element {
         PrimitiveSelectList {
             id: props.id,
             class: crate::cn::merge(format!(
-                "absolute z-50 mt-1 min-w-48 w-full rounded-lg bg-popover text-popover-foreground border border-border shadow-md p-1 overflow-hidden {}",
+                "absolute left-0 top-full z-50 mt-1 max-h-80 min-w-full w-fit overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-md animate-fade-in p-1 {}",
                 props.class
             )),
-            {props.children}
+            div {
+                class: "max-h-72 min-w-48 overflow-y-auto",
+                {props.children}
+            }
         }
     }
 }
@@ -134,7 +155,7 @@ pub fn SelectGroup(props: SelectGroupProps) -> Element {
         PrimitiveSelectGroup {
             disabled: props.disabled,
             id: props.id,
-            class: props.class,
+            class: crate::cn::merge_slice(&["py-1", props.class.as_str()]),
             {props.children}
         }
     }
@@ -162,23 +183,25 @@ pub fn SelectItem(props: SelectItemProps) -> Element {
             disabled: props.disabled,
             text_value: props.text_value,
             class: crate::cn::merge(format!(
-                "relative flex cursor-pointer select-none items-center rounded-xl px-3 py-2 text-sm hover:bg-accent hover:text-accent-foreground transition-colors {}",
+                "fts-select-item relative flex w-full cursor-default select-none items-center gap-2 rounded-md py-1.5 pr-8 pl-2 text-sm outline-none transition-colors hover:bg-accent hover:text-accent-foreground {}",
                 props.class
             )),
             span { class: "flex-1", {props.children} }
             SelectItemIndicator {
-                svg {
-                    class: "size-4 text-current shrink-0",
-                    xmlns: "http://www.w3.org/2000/svg",
-                    width: "24",
-                    height: "24",
-                    view_box: "0 0 24 24",
-                    fill: "none",
-                    stroke: "currentColor",
-                    stroke_width: "2",
-                    stroke_linecap: "round",
-                    stroke_linejoin: "round",
-                    path { d: "M20 6 9 17l-5-5" }
+                span { class: "absolute right-2 flex size-3.5 items-center justify-center",
+                    svg {
+                        class: "size-4 text-current",
+                        xmlns: "http://www.w3.org/2000/svg",
+                        width: "24",
+                        height: "24",
+                        view_box: "0 0 24 24",
+                        fill: "none",
+                        stroke: "currentColor",
+                        stroke_width: "2",
+                        stroke_linecap: "round",
+                        stroke_linejoin: "round",
+                        path { d: "M20 6 9 17l-5-5" }
+                    }
                 }
             }
         }
@@ -188,7 +211,7 @@ pub fn SelectItem(props: SelectItemProps) -> Element {
 #[component]
 pub fn SelectSeparator() -> Element {
     rsx! {
-        div { class: "bg-border/50 -mx-1 my-1 h-px" }
+        div { class: "-mx-1 my-1 h-px bg-border" }
     }
 }
 
@@ -206,7 +229,7 @@ pub fn SelectLabel(props: SelectLabelProps) -> Element {
     rsx! {
         div {
             id: props.id,
-            class: crate::cn::merge_slice(&["text-muted-foreground px-3 py-2.5 text-xs", props.class.as_str()]),
+            class: crate::cn::merge_slice(&["px-2 py-1.5 text-xs font-medium text-muted-foreground", props.class.as_str()]),
             {props.children}
         }
     }
