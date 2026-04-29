@@ -987,6 +987,12 @@ async fn handle_vox_connection(socket: WebSocket, state: AppState, auth: VoxAuth
                     ));
                     Ok(())
                 }
+                "MailService" => {
+                    connection.handle_with(task_core::MailServiceDispatcher::new(
+                        service.as_ref().clone(),
+                    ));
+                    Ok(())
+                }
                 "CalendarService" => {
                     connection.handle_with(task_core::CalendarServiceDispatcher::new(
                         service.as_ref().clone(),

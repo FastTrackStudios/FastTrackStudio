@@ -7,9 +7,11 @@ use chrono::{DateTime, Utc};
 
 use crate::calendar_event::{CalendarEvent, CalendarEventStatus};
 use crate::client::Client;
+use crate::email::EmailRef;
 use crate::index::{ChangeRow, ConflictRow};
 use crate::invoice::Invoice;
 use crate::project::{Project, ProjectStats};
+use crate::provider::{MailAccount, MailMessage, MailMessageDetail, MailTag, Mailbox};
 use crate::query::Query;
 use crate::task::{Task, TimeEntry};
 
@@ -135,6 +137,36 @@ pub trait ActivityService {
         resolver: Option<String>,
         how: String,
     ) -> Result<(), VaultError>;
+}
+
+#[vox::service]
+pub trait MailService {
+    async fn list_accounts(&self) -> Result<Vec<MailAccount>, VaultError>;
+    async fn list_mailboxes(&self, account_id: i64) -> Result<Vec<Mailbox>, VaultError>;
+    async fn list_messages(
+        &self,
+        request: MailListMessagesRequest,
+    ) -> Result<Vec<MailMessage>, VaultError>;
+    async fn get_message(&self, id: i64) -> Result<MailMessageDetail, VaultError>;
+    async fn get_body(&self, id: i64) -> Result<String, VaultError>;
+    async fn create_mailbox(
+        &self,
+        request: MailCreateMailboxRequest,
+    ) -> Result<Mailbox, VaultError>;
+    async fn delete_mailbox(&self, mailbox_id: i64) -> Result<(), VaultError>;
+    async fn move_message(&self, request: MailMoveMessageRequest) -> Result<(), VaultError>;
+    async fn list_tags(&self) -> Result<Vec<MailTag>, VaultError>;
+    async fn create_tag(&self, request: MailCreateTagRequest) -> Result<MailTag, VaultError>;
+    async fn delete_tag(&self, request: MailDeleteTagRequest) -> Result<(), VaultError>;
+    async fn set_tag(&self, request: MailMessageTagRequest) -> Result<(), VaultError>;
+    async fn remove_tag(&self, request: MailMessageTagRequest) -> Result<(), VaultError>;
+    async fn link_email(&self, request: EmailLinkRequest) -> Result<EmailLinkResponse, VaultError>;
+    async fn unlink_email(&self, request: EmailUnlinkRequest) -> Result<(), VaultError>;
+    async fn list_linked_emails(
+        &self,
+        request: EmailListRequest,
+    ) -> Result<Vec<EmailRef>, VaultError>;
+    async fn linked_message_ids(&self) -> Vec<String>;
 }
 
 #[vox::service]
@@ -632,6 +664,76 @@ pub struct InvoicePaymentRequest {
     pub reference: Option<String>,
     pub notes: Option<String>,
     pub actor: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct MailListMessagesRequest {
+    pub mailbox_id: i64,
+    pub filter: Option<String>,
+    pub limit: u32,
+    pub cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct MailCreateMailboxRequest {
+    pub account_id: i64,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct MailMoveMessageRequest {
+    pub message_id: i64,
+    pub dest_folder_id: i64,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct MailCreateTagRequest {
+    pub display_name: String,
+    pub color: String,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct MailDeleteTagRequest {
+    pub account_id: i64,
+    pub tag_id: i64,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct MailMessageTagRequest {
+    pub message_id: i64,
+    pub imap_label: String,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct EmailLinkRequest {
+    /// "task" or "project".
+    pub target_type: String,
+    pub reference: String,
+    pub email: EmailRef,
+    pub actor: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct EmailUnlinkRequest {
+    /// "task" or "project".
+    pub target_type: String,
+    pub reference: String,
+    pub message_id: String,
+    pub actor: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct EmailListRequest {
+    /// "task" or "project".
+    pub target_type: String,
+    pub reference: String,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct EmailLinkResponse {
+    pub target_type: String,
+    pub title: String,
+    pub email_count: u32,
 }
 
 /// Errors returned by vault operations.

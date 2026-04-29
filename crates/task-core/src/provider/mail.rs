@@ -48,7 +48,7 @@ impl MailConfig {
 }
 
 /// A configured Mail account.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, facet::Facet)]
 pub struct MailAccount {
     pub id: i64,
     pub email: String,
@@ -56,7 +56,7 @@ pub struct MailAccount {
 }
 
 /// A mailbox (folder) within an account.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, facet::Facet)]
 pub struct Mailbox {
     /// Stable id used in list-messages calls.
     pub id: i64,
@@ -68,7 +68,7 @@ pub struct Mailbox {
 }
 
 /// A message returned from the list endpoint. Lightweight — no body.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, facet::Facet)]
 pub struct MailMessage {
     /// Nextcloud Mail DB id. Stable until the message moves folders.
     pub id: i64,
@@ -96,7 +96,7 @@ pub struct MailMessage {
 
 /// Full message fetched via the app route, including a body and
 /// attachment metadata.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, facet::Facet)]
 pub struct MailMessageDetail {
     pub id: i64,
     pub message_id: Option<String>,
@@ -112,7 +112,7 @@ pub struct MailMessageDetail {
     pub references: Vec<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, facet::Facet)]
 pub struct MailAttachment {
     pub id: i64,
     pub file_name: String,
@@ -121,7 +121,7 @@ pub struct MailAttachment {
 }
 
 /// NC Mail tag (IMAP keyword). NC-local — not propagated to Proton.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, facet::Facet)]
 pub struct MailTag {
     pub id: i64,
     pub display_name: String,

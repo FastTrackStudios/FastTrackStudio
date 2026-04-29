@@ -15,10 +15,12 @@ use crate::service::{
     CalDavDeleteObjectRequest, CalDavDiscovery, CalDavFreeBusyInterval, CalDavFreeBusyRequest,
     CalDavMultigetRequest, CalDavObject, CalDavPutObjectRequest, CalDavScheduleRequest,
     CalDavScheduleResponse, CalDavSyncCollectionRequest, CalDavSyncCollectionResponse,
-    CalendarEventPatch, FileCopyMoveRequest, FileEntry, FileReadResponse, FileWriteRequest,
-    InvoiceCreateRequest, InvoicePaymentRequest, ProjectPatch, RemoteDeckBoard, RemoteDeckStack,
-    SyncStats, TimeEntryContext, TimeEntryFilter, TimeEntryPatch, TimeLogRequest, TimeStartRequest,
-    TimedTaskEntry, VaultError,
+    CalendarEventPatch, EmailLinkRequest, EmailLinkResponse, EmailListRequest, EmailUnlinkRequest,
+    FileCopyMoveRequest, FileEntry, FileReadResponse, FileWriteRequest, InvoiceCreateRequest,
+    InvoicePaymentRequest, MailCreateMailboxRequest, MailCreateTagRequest, MailDeleteTagRequest,
+    MailListMessagesRequest, MailMessageTagRequest, MailMoveMessageRequest, ProjectPatch,
+    RemoteDeckBoard, RemoteDeckStack, SyncStats, TimeEntryContext, TimeEntryFilter,
+    TimeEntryPatch, TimeLogRequest, TimeStartRequest, TimedTaskEntry, VaultError,
 };
 use crate::task::{Status, Task};
 use crate::vault::Vault;
@@ -171,6 +173,16 @@ fn nextcloud_webdav_provider(config: &NextcloudRuntimeConfig) -> crate::provider
             projects_path: config.projects_path.clone(),
         },
     )
+}
+
+fn nextcloud_mail_client() -> Result<crate::provider::MailClient, VaultError> {
+    let config = NextcloudRuntimeConfig::load()?
+        .ok_or_else(|| VaultError::IoError("Nextcloud Mail is not configured".into()))?;
+    Ok(crate::provider::MailClient::new(crate::provider::MailConfig {
+        url: config.url,
+        username: config.username,
+        password: config.password,
+    }))
 }
 
 #[derive(Clone)]
@@ -2580,6 +2592,179 @@ impl crate::service::ActivityService for VaultServiceImpl {
         how: String,
     ) -> Result<(), VaultError> {
         VaultServiceImpl::resolve_conflict(self, conflict_id, resolver.as_deref(), &how).await
+    }
+}
+
+impl crate::service::MailService for VaultServiceImpl {
+    async fn list_accounts(&self) -> Result<Vec<crate::provider::MailAccount>, VaultError> {
+        nextcloud_mail_client()?.list_accounts().await
+    }
+
+    async fn list_mailboxes(
+        &self,
+        account_id: i64,
+    ) -> Result<Vec<crate::provider::Mailbox>, VaultError> {
+        nextcloud_mail_client()?.list_mailboxes(account_id).await
+    }
+
+    async fn list_messages(
+        &self,
+        request: MailListMessagesRequest,
+    ) -> Result<Vec<crate::provider::MailMessage>, VaultError> {
+        nextcloud_mail_client()?
+            .list_messages(
+                request.mailbox_id,
+                request.filter.as_deref(),
+                request.limit,
+                request.cursor.as_deref(),
+            )
+            .await
+    }
+
+    async fn get_message(&self, id: i64) -> Result<crate::provider::MailMessageDetail, VaultError> {
+        nextcloud_mail_client()?.get_message(id).await
+    }
+
+    async fn get_body(&self, id: i64) -> Result<String, VaultError> {
+        nextcloud_mail_client()?.get_body(id).await
+    }
+
+    async fn create_mailbox(
+        &self,
+        request: MailCreateMailboxRequest,
+    ) -> Result<crate::provider::Mailbox, VaultError> {
+        nextcloud_mail_client()?
+            .create_mailbox(request.account_id, &request.name)
+            .await
+    }
+
+    async fn delete_mailbox(&self, mailbox_id: i64) -> Result<(), VaultError> {
+        nextcloud_mail_client()?.delete_mailbox(mailbox_id).await
+    }
+
+    async fn move_message(&self, request: MailMoveMessageRequest) -> Result<(), VaultError> {
+        nextcloud_mail_client()?
+            .move_message(request.message_id, request.dest_folder_id)
+            .await
+    }
+
+    async fn list_tags(&self) -> Result<Vec<crate::provider::MailTag>, VaultError> {
+        nextcloud_mail_client()?.list_tags().await
+    }
+
+    async fn create_tag(
+        &self,
+        request: MailCreateTagRequest,
+    ) -> Result<crate::provider::MailTag, VaultError> {
+        nextcloud_mail_client()?
+            .create_tag(&request.display_name, &request.color)
+            .await
+    }
+
+    async fn delete_tag(&self, request: MailDeleteTagRequest) -> Result<(), VaultError> {
+        nextcloud_mail_client()?
+            .delete_tag(request.account_id, request.tag_id)
+            .await
+    }
+
+    async fn set_tag(&self, request: MailMessageTagRequest) -> Result<(), VaultError> {
+        nextcloud_mail_client()?
+            .set_tag(request.message_id, &request.imap_label)
+            .await
+    }
+
+    async fn remove_tag(&self, request: MailMessageTagRequest) -> Result<(), VaultError> {
+        nextcloud_mail_client()?
+            .remove_tag(request.message_id, &request.imap_label)
+            .await
+    }
+
+    async fn link_email(&self, request: EmailLinkRequest) -> Result<EmailLinkResponse, VaultError> {
+        match request.target_type.as_str() {
+            "task" => {
+                let task = VaultServiceImpl::link_email_to_task(
+                    self,
+                    &request.reference,
+                    request.email,
+                    request.actor.as_deref(),
+                )
+                .await?;
+                Ok(EmailLinkResponse {
+                    target_type: "task".into(),
+                    title: task.title,
+                    email_count: task.emails.len() as u32,
+                })
+            }
+            "project" => {
+                let project = VaultServiceImpl::link_email_to_project(
+                    self,
+                    &request.reference,
+                    request.email,
+                    request.actor.as_deref(),
+                )
+                .await?;
+                Ok(EmailLinkResponse {
+                    target_type: "project".into(),
+                    title: project.title,
+                    email_count: project.emails.len() as u32,
+                })
+            }
+            other => Err(VaultError::ParseError(format!(
+                "target_type must be 'task' or 'project', got '{other}'"
+            ))),
+        }
+    }
+
+    async fn unlink_email(&self, request: EmailUnlinkRequest) -> Result<(), VaultError> {
+        match request.target_type.as_str() {
+            "task" => {
+                VaultServiceImpl::unlink_email_from_task(
+                    self,
+                    &request.reference,
+                    &request.message_id,
+                    request.actor.as_deref(),
+                )
+                .await?;
+                Ok(())
+            }
+            "project" => {
+                VaultServiceImpl::unlink_email_from_project(
+                    self,
+                    &request.reference,
+                    &request.message_id,
+                    request.actor.as_deref(),
+                )
+                .await?;
+                Ok(())
+            }
+            other => Err(VaultError::ParseError(format!(
+                "target_type must be 'task' or 'project', got '{other}'"
+            ))),
+        }
+    }
+
+    async fn list_linked_emails(
+        &self,
+        request: EmailListRequest,
+    ) -> Result<Vec<crate::email::EmailRef>, VaultError> {
+        match request.target_type.as_str() {
+            "task" => VaultServiceImpl::emails_for_task(self, &request.reference)
+                .await
+                .ok_or_else(|| VaultError::NotFound(request.reference)),
+            "project" => VaultServiceImpl::emails_for_project(self, &request.reference)
+                .await
+                .ok_or_else(|| VaultError::NotFound(request.reference)),
+            other => Err(VaultError::ParseError(format!(
+                "target_type must be 'task' or 'project', got '{other}'"
+            ))),
+        }
+    }
+
+    async fn linked_message_ids(&self) -> Vec<String> {
+        VaultServiceImpl::linked_message_ids(self)
+            .await
+            .into_iter()
+            .collect()
     }
 }
 
