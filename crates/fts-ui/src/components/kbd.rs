@@ -17,7 +17,7 @@ pub fn Kbd(props: KbdProps) -> Element {
 
     rsx! {
         kbd {
-            class: "{base} {props.class}",
+            class: crate::cn::merge_slice(&[base, props.class.as_str()]),
             {props.children}
         }
     }

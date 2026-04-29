@@ -48,7 +48,7 @@ pub fn Combobox(props: ComboboxProps) -> Element {
 
     rsx! {
         div {
-            class: format!("relative inline-block w-full {}", props.class),
+            class: crate::cn::merge_slice(&["relative inline-block w-full", props.class.as_str()]),
 
             // Click-outside overlay when open
             if *open.read() {
@@ -93,11 +93,11 @@ pub fn ComboboxTrigger(props: ComboboxTriggerProps) -> Element {
     rsx! {
         button {
             r#type: "button",
-            class: format!(
+            class: crate::cn::merge(format!(
                 "inline-flex items-center justify-between gap-1.5 h-9 w-full px-3 text-sm rounded-lg border border-input bg-input/30 hover:bg-input/50 transition-colors cursor-pointer select-none {} {}",
                 if is_placeholder { "text-muted-foreground" } else { "" },
                 props.class
-            ),
+            )),
             onclick: move |_| {
                 let was_open = *ctx.open.read();
                 ctx.open.set(!was_open);
@@ -149,10 +149,10 @@ pub fn ComboboxContent(props: ComboboxContentProps) -> Element {
 
     rsx! {
         div {
-            class: format!(
+            class: crate::cn::merge(format!(
                 "absolute z-50 mt-1 w-full max-h-72 overflow-hidden rounded-lg bg-popover text-popover-foreground border border-border shadow-md {}",
                 props.class
-            ),
+            )),
             onclick: move |e| e.stop_propagation(),
             // Search input
             div {
@@ -210,10 +210,10 @@ pub fn ComboboxItem(props: ComboboxItemProps) -> Element {
 
     rsx! {
         div {
-            class: format!(
+            class: crate::cn::merge(format!(
                 "relative flex cursor-pointer select-none items-center rounded-xl px-3 py-2 text-sm hover:bg-accent hover:text-accent-foreground transition-colors gap-2.5 {}",
                 props.class
-            ),
+            )),
             onclick: move |_| {
                 let val = item_value.clone();
                 ctx.value.set(val.clone());
@@ -258,7 +258,7 @@ pub struct ComboboxEmptyProps {
 pub fn ComboboxEmpty(props: ComboboxEmptyProps) -> Element {
     rsx! {
         div {
-            class: format!("py-6 text-center text-sm text-muted-foreground {}", props.class),
+            class: crate::cn::merge_slice(&["py-6 text-center text-sm text-muted-foreground", props.class.as_str()]),
             {props.children}
         }
     }

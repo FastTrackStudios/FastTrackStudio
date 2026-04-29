@@ -29,7 +29,7 @@ pub fn ToggleGroup(props: ToggleGroupProps) -> Element {
 
     rsx! {
         div {
-            class: format!("inline-flex items-center gap-1 {}", props.class),
+            class: crate::cn::merge_slice(&["inline-flex items-center gap-1", props.class.as_str()]),
             role: "group",
             {props.children}
         }

@@ -40,7 +40,7 @@ pub fn Switch(props: SwitchProps) -> Element {
             role: "switch",
             "aria-checked": "{checked}",
             "data-state": "{state}",
-            class: "{track_base} {track_color} {disabled_cls} {props.class}",
+            class: crate::cn::merge_slice(&[track_base, track_color, disabled_cls, props.class.as_str()]),
             disabled: if props.disabled { Some(true) } else { None },
             onclick: move |_| {
                 if !props.disabled {

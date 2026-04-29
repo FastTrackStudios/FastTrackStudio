@@ -34,7 +34,7 @@ pub fn Checkbox(props: CheckboxProps) -> Element {
             role: "checkbox",
             "aria-checked": "{checked}",
             "data-state": "{state}",
-            class: "{base} {disabled_cls} {props.class}",
+            class: crate::cn::merge_slice(&[base, disabled_cls, props.class.as_str()]),
             disabled: if props.disabled { Some(true) } else { None },
             onclick: move |_| {
                 if !props.disabled {

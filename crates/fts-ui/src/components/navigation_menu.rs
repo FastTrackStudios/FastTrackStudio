@@ -31,7 +31,7 @@ pub fn NavigationMenu(props: NavigationMenuProps) -> Element {
 
     rsx! {
         nav {
-            class: format!("relative flex max-w-max items-center {}", props.class),
+            class: crate::cn::merge_slice(&["relative flex max-w-max items-center", props.class.as_str()]),
             {props.children}
         }
     }
@@ -51,7 +51,7 @@ pub struct NavigationMenuListProps {
 pub fn NavigationMenuList(props: NavigationMenuListProps) -> Element {
     rsx! {
         ul {
-            class: format!("flex items-center gap-0 {}", props.class),
+            class: crate::cn::merge_slice(&["flex items-center gap-0", props.class.as_str()]),
             {props.children}
         }
     }
@@ -77,7 +77,7 @@ pub fn NavigationMenuItem(props: NavigationMenuItemProps) -> Element {
 
     rsx! {
         li {
-            class: format!("relative {}", props.class),
+            class: crate::cn::merge_slice(&["relative", props.class.as_str()]),
             {props.children}
         }
     }
@@ -114,10 +114,10 @@ pub fn NavigationMenuTrigger(props: NavigationMenuTriggerProps) -> Element {
     rsx! {
         button {
             r#type: "button",
-            class: format!(
+            class: crate::cn::merge(format!(
                 "group/navigation-menu-trigger inline-flex items-center justify-center rounded-lg px-4 py-2.5 text-sm font-medium transition-all hover:bg-muted focus:bg-muted cursor-pointer select-none gap-1 {open_class} {}",
                 props.class
-            ),
+            )),
             onclick: move |_| {
                 let current = ctx.active.read().clone();
                 if current.as_deref() == Some(&toggle_value) {
@@ -179,10 +179,10 @@ pub fn NavigationMenuContent(props: NavigationMenuContentProps) -> Element {
         }
         // Content panel
         div {
-            class: format!(
+            class: crate::cn::merge(format!(
                 "absolute left-0 top-full z-[100] mt-1 rounded-lg bg-popover text-popover-foreground border border-border shadow-md p-2.5 pr-3 {}",
                 props.class
-            ),
+            )),
             onclick: move |e| e.stop_propagation(),
             {props.children}
         }
@@ -217,7 +217,7 @@ pub fn NavigationMenuLink(props: NavigationMenuLinkProps) -> Element {
 
     rsx! {
         a {
-            class: format!("{base} {active_class} {}", props.class),
+            class: crate::cn::merge_slice(&[base, active_class, props.class.as_str()]),
             href: if has_href { href } else { String::new() },
             onclick: move |_| {
                 if let Some(cb) = &props.on_click {

@@ -65,11 +65,15 @@ pub fn ProgressBar(props: ProgressBarProps) -> Element {
 
 fn render_horizontal(props: ProgressBarProps) -> Element {
     let height = props.height.as_deref().unwrap_or("3rem");
+    let selected_class = if props.is_selected { "ring-2 ring-primary" } else { "" };
 
     rsx! {
         div {
-            class: "relative rounded-lg overflow-hidden cursor-pointer transition-all {props.class}",
-            class: if props.is_selected { "ring-2 ring-primary" } else { "" },
+            class: crate::cn::merge_slice(&[
+                "relative rounded-lg overflow-hidden cursor-pointer transition-all",
+                selected_class,
+                props.class.as_str(),
+            ]),
             style: format!("height: {};", height),
             onclick: move |e| {
                 if let Some(callback) = &props.on_click {
@@ -134,7 +138,7 @@ fn render_vertical(props: ProgressBarProps) -> Element {
 
     rsx! {
         div {
-            class: "relative w-1 flex-shrink-0 mr-2 {props.class}",
+            class: crate::cn::merge_slice(&["relative w-1 flex-shrink-0 mr-2", props.class.as_str()]),
             style: format!("height: {};", height),
             // Background (unfilled)
             div {

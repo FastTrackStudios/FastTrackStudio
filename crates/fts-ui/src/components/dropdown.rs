@@ -31,7 +31,7 @@ pub fn Dropdown(props: DropdownProps) -> Element {
 
     rsx! {
         div {
-            class: format!("relative inline-block text-left {disabled_class} {}", props.class),
+            class: crate::cn::merge_slice(&["relative inline-block text-left", disabled_class, props.class.as_str()]),
             {props.children}
         }
     }
@@ -52,7 +52,7 @@ pub fn DropdownTrigger(props: DropdownTriggerProps) -> Element {
 
     rsx! {
         div {
-            class: format!("cursor-pointer {}", props.class),
+            class: crate::cn::merge_slice(&["cursor-pointer", props.class.as_str()]),
             onclick: move |_| {
                 let current = *ctx.open.read();
                 ctx.open.set(!current);
@@ -108,10 +108,10 @@ pub fn DropdownContent(props: DropdownContentProps) -> Element {
         }
         // Menu panel
         div {
-            class: format!(
+            class: crate::cn::merge(format!(
                 "absolute z-[100] mt-2 min-w-48 rounded-lg bg-popover text-popover-foreground border border-border shadow-md p-1 {} {align_class} {}",
                 props.width, props.class
-            ),
+            )),
             onclick: move |e| e.stop_propagation(),
             {props.children}
         }
@@ -154,10 +154,10 @@ pub fn DropdownItem(props: DropdownItemProps) -> Element {
 
     rsx! {
         div {
-            class: format!(
+            class: crate::cn::merge(format!(
                 "relative flex cursor-pointer select-none items-center rounded-xl px-3 py-2 text-sm transition-colors gap-2.5 [&_svg:not([class*='size-'])]:size-4 {variant_class} {disabled_class} {}",
                 props.class
-            ),
+            )),
             onclick: move |_| {
                 if !props.disabled {
                     if let Some(cb) = &props.on_select {
@@ -188,7 +188,7 @@ pub struct DropdownLabelProps {
 pub fn DropdownLabel(props: DropdownLabelProps) -> Element {
     rsx! {
         div {
-            class: format!("text-muted-foreground px-3 py-2.5 text-xs {}", props.class),
+            class: crate::cn::merge_slice(&["text-muted-foreground px-3 py-2.5 text-xs", props.class.as_str()]),
             {props.children}
         }
     }
@@ -207,7 +207,7 @@ pub struct DropdownSeparatorProps {
 pub fn DropdownSeparator(props: DropdownSeparatorProps) -> Element {
     rsx! {
         div {
-            class: format!("bg-border/50 -mx-1 my-1 h-px {}", props.class),
+            class: crate::cn::merge_slice(&["bg-border/50 -mx-1 my-1 h-px", props.class.as_str()]),
             role: "separator",
         }
     }

@@ -45,7 +45,7 @@ pub fn SidebarProvider(props: SidebarProviderProps) -> Element {
 
     rsx! {
         div {
-            class: "flex min-h-screen w-full {props.class}",
+            class: crate::cn::merge_slice(&["flex min-h-screen w-full", props.class.as_str()]),
             {props.children}
         }
     }
@@ -122,7 +122,7 @@ pub fn Sidebar(props: SidebarProps) -> Element {
 
     rsx! {
         aside {
-            class: "{variant_cls} {width} transition-[width] duration-200 ease-linear overflow-hidden {props.class}",
+            class: crate::cn::merge_slice(&["transition-[width] duration-200 ease-linear overflow-hidden", variant_cls.as_str(), width, props.class.as_str()]),
             "data-state": state,
             "data-variant": variant_attr,
             "data-collapsible": collapsible_attr,
@@ -146,7 +146,7 @@ pub struct SidebarHeaderProps {
 pub fn SidebarHeader(props: SidebarHeaderProps) -> Element {
     rsx! {
         div {
-            class: "flex flex-col gap-2 p-2 {props.class}",
+            class: crate::cn::merge_slice(&["flex flex-col gap-2 p-2", props.class.as_str()]),
             {props.children}
         }
     }
@@ -167,7 +167,7 @@ pub struct SidebarContentProps {
 pub fn SidebarContent(props: SidebarContentProps) -> Element {
     rsx! {
         div {
-            class: "flex-1 flex flex-col gap-2 overflow-y-auto overflow-x-hidden {props.class}",
+            class: crate::cn::merge_slice(&["flex-1 flex flex-col gap-2 overflow-y-auto overflow-x-hidden", props.class.as_str()]),
             {props.children}
         }
     }
@@ -188,7 +188,7 @@ pub struct SidebarFooterProps {
 pub fn SidebarFooter(props: SidebarFooterProps) -> Element {
     rsx! {
         div {
-            class: "flex flex-col gap-2 p-2 {props.class}",
+            class: crate::cn::merge_slice(&["flex flex-col gap-2 p-2", props.class.as_str()]),
             {props.children}
         }
     }
@@ -208,7 +208,7 @@ pub struct SidebarSeparatorProps {
 pub fn SidebarSeparator(props: SidebarSeparatorProps) -> Element {
     rsx! {
         hr {
-            class: "bg-sidebar-border mx-2 h-px border-none {props.class}",
+            class: crate::cn::merge_slice(&["bg-sidebar-border mx-2 h-px border-none", props.class.as_str()]),
         }
     }
 }
@@ -228,7 +228,7 @@ pub struct SidebarGroupProps {
 pub fn SidebarGroup(props: SidebarGroupProps) -> Element {
     rsx! {
         div {
-            class: "relative flex flex-col p-2 {props.class}",
+            class: crate::cn::merge_slice(&["relative flex flex-col p-2", props.class.as_str()]),
             {props.children}
         }
     }
@@ -249,7 +249,7 @@ pub struct SidebarGroupLabelProps {
 pub fn SidebarGroupLabel(props: SidebarGroupLabelProps) -> Element {
     rsx! {
         div {
-            class: "text-sidebar-foreground/70 flex h-8 items-center rounded-md px-3 text-xs font-medium [&>svg]:size-4 {props.class}",
+            class: crate::cn::merge_slice(&["text-sidebar-foreground/70 flex h-8 items-center rounded-md px-3 text-xs font-medium [&>svg]:size-4", props.class.as_str()]),
             {props.children}
         }
     }
@@ -270,7 +270,7 @@ pub struct SidebarGroupContentProps {
 pub fn SidebarGroupContent(props: SidebarGroupContentProps) -> Element {
     rsx! {
         div {
-            class: "flex flex-col gap-1 text-sm {props.class}",
+            class: crate::cn::merge_slice(&["flex flex-col gap-1 text-sm", props.class.as_str()]),
             {props.children}
         }
     }
@@ -291,7 +291,7 @@ pub struct SidebarMenuProps {
 pub fn SidebarMenu(props: SidebarMenuProps) -> Element {
     rsx! {
         ul {
-            class: "flex flex-col gap-1 {props.class}",
+            class: crate::cn::merge_slice(&["flex flex-col gap-1", props.class.as_str()]),
             {props.children}
         }
     }
@@ -312,7 +312,7 @@ pub struct SidebarMenuItemProps {
 pub fn SidebarMenuItem(props: SidebarMenuItemProps) -> Element {
     rsx! {
         li {
-            class: "relative {props.class}",
+            class: crate::cn::merge_slice(&["relative", props.class.as_str()]),
             {props.children}
         }
     }
@@ -383,7 +383,7 @@ pub fn SidebarMenuButton(props: SidebarMenuButtonProps) -> Element {
 
     rsx! {
         button {
-            class: "{base} {variant_cls} {active_cls} {size_cls} {props.class}",
+            class: crate::cn::merge_slice(&[base, variant_cls, active_cls, size_cls, props.class.as_str()]),
             r#type: "button",
             "data-active": data_active,
             onclick: move |_| {
@@ -411,7 +411,7 @@ pub struct SidebarMenuBadgeProps {
 pub fn SidebarMenuBadge(props: SidebarMenuBadgeProps) -> Element {
     rsx! {
         span {
-            class: "text-sidebar-foreground flex h-5 min-w-5 items-center justify-center rounded-md px-1 text-xs font-medium {props.class}",
+            class: crate::cn::merge_slice(&["text-sidebar-foreground flex h-5 min-w-5 items-center justify-center rounded-md px-1 text-xs font-medium", props.class.as_str()]),
             {props.children}
         }
     }
@@ -433,7 +433,7 @@ pub fn SidebarTrigger(props: SidebarTriggerProps) -> Element {
 
     rsx! {
         button {
-            class: "inline-flex items-center justify-center size-8 rounded-lg hover:bg-sidebar-accent transition-colors {props.class}",
+            class: crate::cn::merge_slice(&["inline-flex items-center justify-center size-8 rounded-lg hover:bg-sidebar-accent transition-colors", props.class.as_str()]),
             r#type: "button",
             onclick: move |_| {
                 let current = (ctx.collapsed)();
@@ -471,7 +471,7 @@ pub struct SidebarInsetProps {
 pub fn SidebarInset(props: SidebarInsetProps) -> Element {
     rsx! {
         main {
-            class: "flex-1 bg-background {props.class}",
+            class: crate::cn::merge_slice(&["flex-1 bg-background", props.class.as_str()]),
             {props.children}
         }
     }

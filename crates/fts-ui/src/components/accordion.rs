@@ -30,7 +30,7 @@ pub fn Accordion(props: AccordionProps) -> Element {
 
     rsx! {
         div {
-            class: format!("overflow-hidden rounded-lg border {}", props.class),
+            class: crate::cn::merge_slice(&["overflow-hidden rounded-lg border", props.class.as_str()]),
             {use_context_provider(|| AccordionContext { open_item });}
             {props.children}
         }
@@ -60,7 +60,7 @@ pub fn AccordionItem(props: AccordionItemProps) -> Element {
 
     rsx! {
         div {
-            class: format!("not-last:border-b{} {}", bg, props.class),
+            class: crate::cn::merge(format!("not-last:border-b{} {}", bg, props.class)),
             "data-state": state,
             {use_context_provider(|| ItemContext { value: props.value.clone() });}
             {props.children}
@@ -92,10 +92,10 @@ pub fn AccordionTrigger(props: AccordionTriggerProps) -> Element {
     rsx! {
         button {
             r#type: "button",
-            class: format!(
+            class: crate::cn::merge(format!(
                 "flex w-full items-center justify-between gap-6 p-4 text-left text-sm font-medium hover:underline cursor-pointer {}",
                 props.class
-            ),
+            )),
             onclick: move |_| {
                 let current = ctx.open_item.read().clone();
                 if current.as_deref() == Some(value.as_str()) {
@@ -147,7 +147,7 @@ pub fn AccordionContent(props: AccordionContentProps) -> Element {
 
     rsx! {
         div {
-            class: format!("px-4 text-sm {}", props.class),
+            class: crate::cn::merge_slice(&["px-4 text-sm", props.class.as_str()]),
             div {
                 class: "pt-0 pb-4",
                 {props.children}

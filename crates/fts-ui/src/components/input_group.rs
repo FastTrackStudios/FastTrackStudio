@@ -24,7 +24,7 @@ pub fn InputGroup(props: InputGroupProps) -> Element {
 
     rsx! {
         div {
-            class: "{base} {disabled_class} {props.class}",
+            class: crate::cn::merge_slice(&[base, disabled_class, props.class.as_str()]),
             "data-disabled": if props.disabled { Some("true") } else { None },
             {props.children}
         }
@@ -60,7 +60,7 @@ pub fn InputGroupAddon(props: InputGroupAddonProps) -> Element {
 
     rsx! {
         div {
-            class: "{base} {align_class} {props.class}",
+            class: crate::cn::merge_slice(&[base, align_class, props.class.as_str()]),
             {props.children}
         }
     }
@@ -89,7 +89,7 @@ pub fn InputGroupControl(props: InputGroupControlProps) -> Element {
 
     rsx! {
         input {
-            class: "{base} {props.class}",
+            class: crate::cn::merge_slice(&[base, props.class.as_str()]),
             "data-slot": "input-group-control",
             value: "{value}",
             placeholder: "{props.placeholder}",

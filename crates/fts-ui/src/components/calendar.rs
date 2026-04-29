@@ -50,7 +50,7 @@ pub fn Calendar(props: CalendarProps) -> Element {
 
     rsx! {
         div {
-            class: format!("p-3 bg-background w-fit {}", props.class),
+            class: crate::cn::merge_slice(&["p-3 bg-background w-fit", props.class.as_str()]),
 
             // ---- Header ----
             div { class: "flex items-center justify-between mb-4",

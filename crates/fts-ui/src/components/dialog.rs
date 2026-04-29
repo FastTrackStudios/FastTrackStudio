@@ -33,10 +33,10 @@ pub fn Dialog(props: DialogProps) -> Element {
 
         // Content: cn-dialog-content
         div {
-            class: format!(
+            class: crate::cn::merge(format!(
                 "fixed z-50 grid w-full max-w-[calc(100%-2rem)] sm:max-w-md gap-6 rounded-xl bg-popover text-popover-foreground border border-border shadow-lg p-6 text-sm animate-scale-in {}",
                 props.class
-            ),
+            )),
             style: "left: 50%; top: 50%; transform: translate(-50%, -50%);",
             role: "dialog",
             aria_modal: "true",
@@ -60,7 +60,7 @@ pub struct DialogHeaderProps {
 pub fn DialogHeader(props: DialogHeaderProps) -> Element {
     rsx! {
         div {
-            class: format!("flex flex-col gap-2 {}", props.class),
+            class: crate::cn::merge_slice(&["flex flex-col gap-2", props.class.as_str()]),
             {props.children}
         }
     }
@@ -78,7 +78,7 @@ pub struct DialogTitleProps {
 pub fn DialogTitle(props: DialogTitleProps) -> Element {
     rsx! {
         h2 {
-            class: format!("text-base leading-none font-medium {}", props.class),
+            class: crate::cn::merge_slice(&["text-base leading-none font-medium", props.class.as_str()]),
             {props.children}
         }
     }
@@ -96,7 +96,7 @@ pub struct DialogDescriptionProps {
 pub fn DialogDescription(props: DialogDescriptionProps) -> Element {
     rsx! {
         p {
-            class: format!("text-sm text-muted-foreground {}", props.class),
+            class: crate::cn::merge_slice(&["text-sm text-muted-foreground", props.class.as_str()]),
             {props.children}
         }
     }
@@ -114,7 +114,7 @@ pub struct DialogFooterProps {
 pub fn DialogFooter(props: DialogFooterProps) -> Element {
     rsx! {
         div {
-            class: format!("flex flex-col-reverse gap-2 sm:flex-row sm:justify-end {}", props.class),
+            class: crate::cn::merge_slice(&["flex flex-col-reverse gap-2 sm:flex-row sm:justify-end", props.class.as_str()]),
             {props.children}
         }
     }
@@ -132,10 +132,10 @@ pub struct DialogCloseProps {
 pub fn DialogClose(props: DialogCloseProps) -> Element {
     rsx! {
         button {
-            class: format!(
+            class: crate::cn::merge(format!(
                 "absolute top-4 right-4 rounded-sm opacity-70 transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring {}",
                 props.class
-            ),
+            )),
             r#type: "button",
             onclick: move |_| props.on_click.call(()),
             span { class: "size-4 text-lg leading-none", aria_hidden: "true", "\u{2715}" }

@@ -24,7 +24,7 @@ pub fn Tabs(props: TabsProps) -> Element {
 
     rsx! {
         div {
-            class: format!("flex flex-col gap-2 {}", props.class),
+            class: crate::cn::merge_slice(&["flex flex-col gap-2", props.class.as_str()]),
             "data-orientation": "horizontal",
             {props.children}
         }
@@ -50,10 +50,10 @@ pub fn TabList(props: TabListProps) -> Element {
     rsx! {
         div {
             role: "tablist",
-            class: format!(
+            class: crate::cn::merge(format!(
                 "inline-flex h-9 items-center justify-start gap-1 rounded-full bg-muted p-[3px] text-muted-foreground {}",
                 props.class
-            ),
+            )),
             {props.children}
         }
     }
@@ -85,10 +85,10 @@ pub fn TabTrigger(props: TabTriggerProps) -> Element {
         button {
             role: "tab",
             r#type: "button",
-            class: format!(
+            class: crate::cn::merge(format!(
                 "inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-transparent px-2 py-1 text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg:not([class*='size-'])]:size-4 {active_class} {}",
                 props.class
-            ),
+            )),
             aria_selected: is_selected.to_string(),
             "data-state": if is_selected { "active" } else { "inactive" },
             tabindex: if is_selected { "0" } else { "-1" },
@@ -125,7 +125,7 @@ pub fn TabContent(props: TabContentProps) -> Element {
     rsx! {
         div {
             role: "tabpanel",
-            class: format!("text-sm {}", props.class),
+            class: crate::cn::merge_slice(&["text-sm", props.class.as_str()]),
             "data-state": "active",
             tabindex: "0",
             {props.children}

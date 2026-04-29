@@ -37,7 +37,7 @@ pub fn KeyValueRow(props: KeyValueRowProps) -> Element {
 
     rsx! {
         div {
-            class: format!("flex justify-between items-center {weight} {}", props.class),
+            class: crate::cn::merge_slice(&["flex justify-between items-center", weight, props.class.as_str()]),
 
             span { class: "text-muted-foreground", "{props.label}" }
             span { class: "{font}", "{props.value}" }

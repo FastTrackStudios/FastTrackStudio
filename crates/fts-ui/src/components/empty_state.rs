@@ -27,10 +27,10 @@ pub struct EmptyStateProps {
 pub fn EmptyState(props: EmptyStateProps) -> Element {
     rsx! {
         div {
-            class: format!(
+            class: crate::cn::merge(format!(
                 "flex flex-col items-center justify-center gap-2 p-8 rounded-lg border border-dashed border-border {}",
                 props.class
-            ),
+            )),
 
             if let Some(icon) = &props.icon {
                 {icon}

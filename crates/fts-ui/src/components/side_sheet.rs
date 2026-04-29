@@ -62,10 +62,10 @@ pub fn Sheet(props: SheetProps) -> Element {
 
         // Content
         div {
-            class: format!(
+            class: crate::cn::merge(format!(
                 "{position_class} flex flex-col h-full bg-popover text-popover-foreground {border_class} p-6 gap-4 {}",
                 props.class
-            ),
+            )),
             onclick: move |evt: MouseEvent| { evt.stop_propagation(); },
 
             // Close button
@@ -130,7 +130,7 @@ pub struct SheetHeaderProps {
 pub fn SheetHeader(props: SheetHeaderProps) -> Element {
     rsx! {
         div {
-            class: format!("flex flex-col gap-2 {}", props.class),
+            class: crate::cn::merge_slice(&["flex flex-col gap-2", props.class.as_str()]),
             {props.children}
         }
     }
@@ -148,7 +148,7 @@ pub struct SheetTitleProps {
 pub fn SheetTitle(props: SheetTitleProps) -> Element {
     rsx! {
         h2 {
-            class: format!("text-base font-medium {}", props.class),
+            class: crate::cn::merge_slice(&["text-base font-medium", props.class.as_str()]),
             {props.children}
         }
     }
@@ -166,7 +166,7 @@ pub struct SheetDescriptionProps {
 pub fn SheetDescription(props: SheetDescriptionProps) -> Element {
     rsx! {
         p {
-            class: format!("text-muted-foreground text-sm {}", props.class),
+            class: crate::cn::merge_slice(&["text-muted-foreground text-sm", props.class.as_str()]),
             {props.children}
         }
     }
@@ -184,7 +184,7 @@ pub struct SheetFooterProps {
 pub fn SheetFooter(props: SheetFooterProps) -> Element {
     rsx! {
         div {
-            class: format!("flex flex-col-reverse gap-2 sm:flex-row sm:justify-end mt-auto {}", props.class),
+            class: crate::cn::merge_slice(&["flex flex-col-reverse gap-2 sm:flex-row sm:justify-end mt-auto", props.class.as_str()]),
             {props.children}
         }
     }

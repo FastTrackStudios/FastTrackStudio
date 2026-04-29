@@ -42,7 +42,7 @@ pub struct HeadingProps {
 
 #[component]
 pub fn Heading(props: HeadingProps) -> Element {
-    let class = format!("{} {}", props.level.classes(), props.class);
+    let class = crate::cn::merge_slice(&[props.level.classes(), props.class.as_str()]);
 
     match props.level {
         HeadingLevel::H1 => rsx! { h1 { class, {props.children} } },

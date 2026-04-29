@@ -49,7 +49,7 @@ pub fn Slider(props: SliderProps) -> Element {
 
     rsx! {
         div {
-            class: format!("relative flex w-full touch-none select-none items-center {}", props.class),
+            class: crate::cn::merge_slice(&["relative flex w-full touch-none select-none items-center", props.class.as_str()]),
 
             // Visual track
             div { class: "relative h-3 w-full rounded-full bg-muted overflow-hidden",

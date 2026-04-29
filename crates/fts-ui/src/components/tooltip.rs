@@ -43,7 +43,7 @@ pub struct TooltipProps {
 pub fn Tooltip(props: TooltipProps) -> Element {
     rsx! {
         div {
-            class: format!("relative inline-flex group {}", props.class),
+            class: crate::cn::merge_slice(&["relative inline-flex group", props.class.as_str()]),
             {props.children}
         }
     }
@@ -88,11 +88,11 @@ pub fn TooltipContent(props: TooltipContentProps) -> Element {
     rsx! {
         div {
             role: "tooltip",
-            class: format!(
+            class: crate::cn::merge(format!(
                 "invisible group-hover:visible opacity-0 group-hover:opacity-100 transition-all duration-150 absolute z-50 inline-flex items-center gap-1.5 rounded-lg bg-primary text-primary-foreground px-3 py-1.5 text-xs shadow-md whitespace-nowrap pointer-events-none {} {}",
                 props.side.position_classes(),
                 props.class
-            ),
+            )),
             {props.children}
         }
     }

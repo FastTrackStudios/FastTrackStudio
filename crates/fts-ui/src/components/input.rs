@@ -66,7 +66,7 @@ pub fn Input(props: InputProps) -> Element {
 
     rsx! {
         input {
-            class: "{base} {size_class} {variant_class} {props.class}",
+            class: crate::cn::merge_slice(&[base, size_class, variant_class, props.class.as_str()]),
             value: "{value}",
             placeholder: "{props.placeholder}",
             disabled: if props.disabled { Some(true) } else { None },

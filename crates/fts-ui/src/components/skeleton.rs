@@ -14,7 +14,7 @@ pub fn Skeleton(props: SkeletonProps) -> Element {
     let base = "bg-muted rounded-xl animate-pulse";
 
     rsx! {
-        div { class: "{base} {props.class}" }
+        div { class: crate::cn::merge_slice(&[base, props.class.as_str()]) }
     }
 }
 
@@ -30,7 +30,7 @@ pub fn SkeletonText(props: SkeletonTextProps) -> Element {
     let base = "bg-muted rounded-xl animate-pulse h-4";
 
     rsx! {
-        div { class: "{base} {props.class}" }
+        div { class: crate::cn::merge_slice(&[base, props.class.as_str()]) }
     }
 }
 
@@ -46,6 +46,6 @@ pub fn SkeletonCircle(props: SkeletonCircleProps) -> Element {
     let base = "bg-muted rounded-full animate-pulse";
 
     rsx! {
-        div { class: "{base} {props.class}" }
+        div { class: crate::cn::merge_slice(&[base, props.class.as_str()]) }
     }
 }

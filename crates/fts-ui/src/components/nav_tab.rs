@@ -33,7 +33,7 @@ pub fn NavTab(props: NavTabProps) -> Element {
 
     rsx! {
         button {
-            class: "px-4 py-2 rounded-md font-medium text-sm transition-colors {active_class} {props.class}",
+            class: crate::cn::merge_slice(&["px-4 py-2 rounded-md font-medium text-sm transition-colors", active_class, props.class.as_str()]),
             onclick: {
                 let on_click = props.on_click;
                 let tab_id = props.tab_id.clone();

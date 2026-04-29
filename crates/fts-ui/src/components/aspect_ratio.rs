@@ -19,7 +19,7 @@ pub struct AspectRatioProps {
 pub fn AspectRatio(props: AspectRatioProps) -> Element {
     rsx! {
         div {
-            class: format!("relative w-full overflow-hidden {}", props.class),
+            class: crate::cn::merge_slice(&["relative w-full overflow-hidden", props.class.as_str()]),
             style: "aspect-ratio: {props.ratio};",
             div {
                 class: "absolute inset-0",

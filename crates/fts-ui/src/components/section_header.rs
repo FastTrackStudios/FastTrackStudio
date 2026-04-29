@@ -53,7 +53,7 @@ pub struct SectionHeaderProps {
 pub fn SectionHeader(props: SectionHeaderProps) -> Element {
     rsx! {
         div {
-            class: format!("flex items-center justify-between {}", props.class),
+            class: crate::cn::merge_slice(&["flex items-center justify-between", props.class.as_str()]),
 
             span {
                 class: format!("text-muted-foreground {}", props.size.classes()),

@@ -38,7 +38,7 @@ pub fn Avatar(props: AvatarProps) -> Element {
 
     rsx! {
         span {
-            class: "{base} {size_class} {props.class}",
+            class: crate::cn::merge_slice(&[base, size_class, props.class.as_str()]),
             {props.children}
         }
     }
@@ -57,7 +57,7 @@ pub struct AvatarImageProps {
 pub fn AvatarImage(props: AvatarImageProps) -> Element {
     rsx! {
         img {
-            class: "absolute inset-0 aspect-square h-full w-full rounded-full object-cover {props.class}",
+            class: crate::cn::merge_slice(&["absolute inset-0 aspect-square h-full w-full rounded-full object-cover", props.class.as_str()]),
             src: "{props.src}",
             alt: "{props.alt}",
         }
@@ -78,7 +78,7 @@ pub fn AvatarFallback(props: AvatarFallbackProps) -> Element {
 
     rsx! {
         span {
-            class: "{base} {props.class}",
+            class: crate::cn::merge_slice(&[base, props.class.as_str()]),
             {props.children}
         }
     }

@@ -76,10 +76,10 @@ pub struct SegmentedControlProps {
 pub fn SegmentedControl(props: SegmentedControlProps) -> Element {
     rsx! {
         div {
-            class: format!(
+            class: crate::cn::merge(format!(
                 "flex items-center gap-0.5 bg-secondary/50 rounded px-0.5 py-0.5 {}",
                 props.class
-            ),
+            )),
 
             for (val, label) in props.options.iter() {
                 {

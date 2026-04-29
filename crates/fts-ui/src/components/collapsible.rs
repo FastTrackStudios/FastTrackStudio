@@ -27,7 +27,7 @@ pub fn Collapsible(props: CollapsibleProps) -> Element {
 
     rsx! {
         div {
-            class: "{props.class}",
+            class: props.class,
             {use_context_provider(|| CollapsibleContext { open });}
             {props.children}
         }
@@ -53,7 +53,7 @@ pub fn CollapsibleTrigger(props: CollapsibleTriggerProps) -> Element {
     rsx! {
         button {
             r#type: "button",
-            class: format!("cursor-pointer {}", props.class),
+            class: crate::cn::merge_slice(&["cursor-pointer", props.class.as_str()]),
             onclick: move |_| {
                 let current = *ctx.open.read();
                 ctx.open.set(!current);
@@ -85,7 +85,7 @@ pub fn CollapsibleContent(props: CollapsibleContentProps) -> Element {
 
     rsx! {
         div {
-            class: "{props.class}",
+            class: props.class,
             {props.children}
         }
     }

@@ -28,7 +28,7 @@ pub fn Divider(props: DividerProps) -> Element {
 
     rsx! {
         div {
-            class: format!("shrink-0 bg-border {orientation_class} {}", props.class),
+            class: crate::cn::merge_slice(&["shrink-0 bg-border", orientation_class, props.class.as_str()]),
             role: "separator",
             aria_orientation: match props.orientation {
                 DividerOrientation::Horizontal => "horizontal",

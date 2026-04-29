@@ -43,7 +43,7 @@ pub fn RadioGroup(props: RadioGroupProps) -> Element {
     rsx! {
         div {
             role: "radiogroup",
-            class: format!("grid gap-3 {}", props.class),
+            class: crate::cn::merge_slice(&["grid gap-3", props.class.as_str()]),
             {props.children}
         }
     }
@@ -87,10 +87,10 @@ pub fn RadioGroupItem(props: RadioGroupItemProps) -> Element {
             disabled: if props.disabled { Some(true) } else { None },
             aria_checked: is_checked.to_string(),
             "data-state": if is_checked { "checked" } else { "unchecked" },
-            class: format!(
+            class: crate::cn::merge(format!(
                 "relative flex size-4 items-center justify-center rounded-full border focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 {outer_class} {}",
                 props.class
-            ),
+            )),
             onclick: move |_| {
                 if !props.disabled {
                     let val = item_value.clone();

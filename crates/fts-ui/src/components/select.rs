@@ -57,7 +57,7 @@ pub fn Select(props: SelectProps) -> Element {
 
     rsx! {
         div {
-            class: format!("relative inline-block w-full {}", props.class),
+            class: crate::cn::merge_slice(&["relative inline-block w-full", props.class.as_str()]),
 
             // Click-outside overlay when open
             if *open.read() {
@@ -101,11 +101,11 @@ pub fn SelectTrigger(props: SelectTriggerProps) -> Element {
         button {
             r#type: "button",
             disabled: if props.disabled { Some(true) } else { None },
-            class: format!(
+            class: crate::cn::merge(format!(
                 "inline-flex items-center justify-between gap-2 h-9 w-full px-3 text-sm rounded-lg border border-input bg-transparent shadow-xs hover:bg-accent hover:text-accent-foreground transition-colors cursor-pointer select-none disabled:cursor-not-allowed disabled:opacity-50 {} {}",
                 if is_placeholder { "text-muted-foreground" } else { "text-foreground" },
                 props.class
-            ),
+            )),
             onclick: move |_| {
                 if !props.disabled {
                     let was_open = *ctx.open.read();
@@ -154,10 +154,10 @@ pub fn SelectContent(props: SelectContentProps) -> Element {
 
     rsx! {
         div {
-            class: format!(
+            class: crate::cn::merge(format!(
                 "absolute z-50 mt-1 min-w-48 w-full rounded-lg bg-popover text-popover-foreground border border-border shadow-md p-1 overflow-hidden {}",
                 props.class
-            ),
+            )),
             {props.children}
         }
     }
@@ -187,10 +187,10 @@ pub fn SelectItem(props: SelectItemProps) -> Element {
 
     rsx! {
         div {
-            class: format!(
+            class: crate::cn::merge(format!(
                 "relative flex cursor-pointer select-none items-center rounded-xl px-3 py-2 text-sm hover:bg-accent hover:text-accent-foreground transition-colors {}",
                 props.class
-            ),
+            )),
             "data-state": if is_selected { "checked" } else { "unchecked" },
             onclick: move |_| {
                 let val = item_value.clone();
@@ -249,7 +249,7 @@ pub struct SelectLabelProps {
 pub fn SelectLabel(props: SelectLabelProps) -> Element {
     rsx! {
         div {
-            class: format!("text-muted-foreground px-3 py-2.5 text-xs {}", props.class),
+            class: crate::cn::merge_slice(&["text-muted-foreground px-3 py-2.5 text-xs", props.class.as_str()]),
             {props.children}
         }
     }

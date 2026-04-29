@@ -33,10 +33,10 @@ pub struct BreadcrumbListProps {
 pub fn BreadcrumbList(props: BreadcrumbListProps) -> Element {
     rsx! {
         ol {
-            class: format!(
+            class: crate::cn::merge(format!(
                 "flex items-center flex-wrap text-muted-foreground gap-1.5 text-sm sm:gap-2.5 {}",
                 props.class
-            ),
+            )),
             {props.children}
         }
     }
@@ -54,7 +54,7 @@ pub struct BreadcrumbItemProps {
 pub fn BreadcrumbItem(props: BreadcrumbItemProps) -> Element {
     rsx! {
         li {
-            class: format!("inline-flex items-center gap-1.5 {}", props.class),
+            class: crate::cn::merge_slice(&["inline-flex items-center gap-1.5", props.class.as_str()]),
             {props.children}
         }
     }
@@ -72,7 +72,7 @@ pub struct BreadcrumbLinkProps {
 pub fn BreadcrumbLink(props: BreadcrumbLinkProps) -> Element {
     rsx! {
         a {
-            class: format!("hover:text-foreground transition-colors {}", props.class),
+            class: crate::cn::merge_slice(&["hover:text-foreground transition-colors", props.class.as_str()]),
             {props.children}
         }
     }
@@ -90,7 +90,7 @@ pub struct BreadcrumbPageProps {
 pub fn BreadcrumbPage(props: BreadcrumbPageProps) -> Element {
     rsx! {
         span {
-            class: format!("text-foreground font-normal {}", props.class),
+            class: crate::cn::merge_slice(&["text-foreground font-normal", props.class.as_str()]),
             role: "link",
             aria_disabled: "true",
             aria_current: "page",
@@ -113,7 +113,7 @@ pub struct BreadcrumbSeparatorProps {
 pub fn BreadcrumbSeparator(props: BreadcrumbSeparatorProps) -> Element {
     rsx! {
         li {
-            class: format!("[&>svg]:size-3.5 {}", props.class),
+            class: crate::cn::merge_slice(&["[&>svg]:size-3.5", props.class.as_str()]),
             role: "presentation",
             aria_hidden: "true",
             if props.children == VNode::empty() {

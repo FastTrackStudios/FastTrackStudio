@@ -39,7 +39,7 @@ pub fn Alert(props: AlertProps) -> Element {
     rsx! {
         div {
             role: "alert",
-            class: "{base} {variant_class} {props.class}",
+            class: crate::cn::merge_slice(&[base, variant_class, props.class.as_str()]),
             {props.children}
         }
     }
@@ -58,7 +58,7 @@ pub struct AlertTitleProps {
 pub fn AlertTitle(props: AlertTitleProps) -> Element {
     rsx! {
         div {
-            class: "font-medium {props.class}",
+            class: crate::cn::merge_slice(&["font-medium", props.class.as_str()]),
             {props.children}
         }
     }
@@ -77,7 +77,7 @@ pub struct AlertDescriptionProps {
 pub fn AlertDescription(props: AlertDescriptionProps) -> Element {
     rsx! {
         div {
-            class: "text-muted-foreground text-sm {props.class}",
+            class: crate::cn::merge_slice(&["text-muted-foreground text-sm", props.class.as_str()]),
             {props.children}
         }
     }

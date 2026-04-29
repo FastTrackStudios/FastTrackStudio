@@ -30,7 +30,7 @@ pub fn Popover(props: PopoverProps) -> Element {
 
     rsx! {
         div {
-            class: format!("relative inline-block {}", props.class),
+            class: crate::cn::merge_slice(&["relative inline-block", props.class.as_str()]),
             {props.children}
         }
     }
@@ -50,7 +50,7 @@ pub fn PopoverTrigger(props: PopoverTriggerProps) -> Element {
 
     rsx! {
         div {
-            class: format!("cursor-pointer {}", props.class),
+            class: crate::cn::merge_slice(&["cursor-pointer", props.class.as_str()]),
             onclick: move |_| {
                 let current = *ctx.open.read();
                 ctx.open.set(!current);
@@ -91,10 +91,10 @@ pub fn PopoverContent(props: PopoverContentProps) -> Element {
 
         // Floating content panel
         div {
-            class: format!(
+            class: crate::cn::merge(format!(
                 "bg-popover text-popover-foreground border border-border flex flex-col gap-4 rounded-lg p-4 text-sm shadow-md absolute z-50 mt-2 {}",
                 props.class
-            ),
+            )),
             onclick: move |evt: MouseEvent| {
                 evt.stop_propagation();
             },

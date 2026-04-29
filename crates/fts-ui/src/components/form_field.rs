@@ -38,7 +38,7 @@ pub struct FormFieldProps {
 pub fn FormField(props: FormFieldProps) -> Element {
     rsx! {
         div {
-            class: format!("flex flex-col gap-1.5 {}", props.class),
+            class: crate::cn::merge_slice(&["flex flex-col gap-1.5", props.class.as_str()]),
 
             label {
                 class: "text-xs font-semibold text-muted-foreground uppercase tracking-wider",

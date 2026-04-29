@@ -44,10 +44,10 @@ pub fn ListRow(props: ListRowProps) -> Element {
 
     rsx! {
         div {
-            class: format!(
+            class: crate::cn::merge(format!(
                 "flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 {} {}",
                 clickable_class, props.class
-            ),
+            )),
             onclick: move |_| {
                 if let Some(cb) = &props.on_click {
                     cb.call(());

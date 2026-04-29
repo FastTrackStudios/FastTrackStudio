@@ -42,10 +42,10 @@ pub fn SearchableList(props: SearchableListProps) -> Element {
 
     rsx! {
         div {
-            class: format!(
+            class: crate::cn::merge(format!(
                 "flex flex-col bg-background border border-border rounded-xl overflow-hidden {}",
                 props.class
-            ),
+            )),
 
             // Search input
             div { class: "px-3 py-1.5 border-b border-border",
@@ -116,11 +116,11 @@ pub fn SearchableListItem(props: SearchableListItemProps) -> Element {
 
     rsx! {
         button {
-            class: format!(
+            class: crate::cn::merge(format!(
                 "w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left \
                  transition-all duration-100 {bg_class} {}",
                 props.class
-            ),
+            )),
             onclick: move |_| props.on_click.call(()),
 
             if let Some(icon) = &props.icon {

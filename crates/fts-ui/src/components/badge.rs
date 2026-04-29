@@ -40,11 +40,11 @@ pub struct BadgeProps {
 pub fn Badge(props: BadgeProps) -> Element {
     rsx! {
         span {
-            class: format!(
+            class: crate::cn::merge(format!(
                 "inline-flex items-center h-5 gap-1 rounded-full border border-transparent px-2 py-0.5 text-xs font-medium transition-all [&>svg]:size-3 {} {}",
                 props.variant.classes(),
                 props.class
-            ),
+            )),
             {props.children}
         }
     }

@@ -50,10 +50,10 @@ pub fn Drawer(props: DrawerProps) -> Element {
 
         // Content
         div {
-            class: format!(
+            class: crate::cn::merge(format!(
                 "{position_classes} flex flex-col bg-popover text-popover-foreground border border-border shadow-lg p-4 text-sm {}",
                 props.class
-            ),
+            )),
             role: "dialog",
             aria_modal: "true",
             onclick: move |evt: MouseEvent| {
@@ -76,7 +76,7 @@ pub struct DrawerHeaderProps {
 pub fn DrawerHeader(props: DrawerHeaderProps) -> Element {
     rsx! {
         div {
-            class: format!("flex flex-col gap-0.5 p-4 {}", props.class),
+            class: crate::cn::merge_slice(&["flex flex-col gap-0.5 p-4", props.class.as_str()]),
             {props.children}
         }
     }
@@ -94,7 +94,7 @@ pub struct DrawerTitleProps {
 pub fn DrawerTitle(props: DrawerTitleProps) -> Element {
     rsx! {
         h2 {
-            class: format!("text-foreground text-base font-medium {}", props.class),
+            class: crate::cn::merge_slice(&["text-foreground text-base font-medium", props.class.as_str()]),
             {props.children}
         }
     }
@@ -112,7 +112,7 @@ pub struct DrawerDescriptionProps {
 pub fn DrawerDescription(props: DrawerDescriptionProps) -> Element {
     rsx! {
         p {
-            class: format!("text-muted-foreground text-sm {}", props.class),
+            class: crate::cn::merge_slice(&["text-muted-foreground text-sm", props.class.as_str()]),
             {props.children}
         }
     }
@@ -130,7 +130,7 @@ pub struct DrawerFooterProps {
 pub fn DrawerFooter(props: DrawerFooterProps) -> Element {
     rsx! {
         div {
-            class: format!("flex flex-col gap-2 p-4 {}", props.class),
+            class: crate::cn::merge_slice(&["flex flex-col gap-2 p-4", props.class.as_str()]),
             {props.children}
         }
     }
@@ -147,10 +147,10 @@ pub struct DrawerHandleProps {
 pub fn DrawerHandle(props: DrawerHandleProps) -> Element {
     rsx! {
         div {
-            class: format!(
+            class: crate::cn::merge(format!(
                 "mx-auto mt-4 h-1.5 w-[100px] shrink-0 rounded-full bg-muted {}",
                 props.class
-            ),
+            )),
         }
     }
 }

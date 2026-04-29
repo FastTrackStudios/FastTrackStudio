@@ -14,7 +14,7 @@ pub struct PaginationProps {
 pub fn Pagination(props: PaginationProps) -> Element {
     rsx! {
         nav {
-            class: "flex justify-center {props.class}",
+            class: crate::cn::merge_slice(&["flex justify-center", props.class.as_str()]),
             role: "navigation",
             aria_label: "pagination",
             {props.children}
@@ -34,7 +34,7 @@ pub struct PaginationContentProps {
 pub fn PaginationContent(props: PaginationContentProps) -> Element {
     rsx! {
         div {
-            class: "flex items-center gap-1 {props.class}",
+            class: crate::cn::merge_slice(&["flex items-center gap-1", props.class.as_str()]),
             {props.children}
         }
     }
@@ -52,7 +52,7 @@ pub struct PaginationItemProps {
 pub fn PaginationItem(props: PaginationItemProps) -> Element {
     rsx! {
         div {
-            class: "{props.class}",
+            class: props.class,
             {props.children}
         }
     }
@@ -84,7 +84,7 @@ pub fn PaginationLink(props: PaginationLinkProps) -> Element {
     rsx! {
         button {
             r#type: "button",
-            class: "{base} {state_class} {props.class}",
+            class: crate::cn::merge_slice(&[base, state_class, props.class.as_str()]),
             aria_current: if props.is_active { Some("page") } else { None },
             onclick: move |_| {
                 props.on_click.call(page);
@@ -117,7 +117,7 @@ pub fn PaginationPrevious(props: PaginationPreviousProps) -> Element {
     rsx! {
         button {
             r#type: "button",
-            class: "{base} {disabled_class} {props.class}",
+            class: crate::cn::merge_slice(&[base, disabled_class, props.class.as_str()]),
             disabled: if props.disabled { Some(true) } else { None },
             onclick: move |_| {
                 props.on_click.call(());
@@ -162,7 +162,7 @@ pub fn PaginationNext(props: PaginationNextProps) -> Element {
     rsx! {
         button {
             r#type: "button",
-            class: "{base} {disabled_class} {props.class}",
+            class: crate::cn::merge_slice(&[base, disabled_class, props.class.as_str()]),
             disabled: if props.disabled { Some(true) } else { None },
             onclick: move |_| {
                 props.on_click.call(());

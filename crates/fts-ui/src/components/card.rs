@@ -14,10 +14,10 @@ pub struct CardProps {
 pub fn Card(props: CardProps) -> Element {
     rsx! {
         div {
-            class: format!(
+            class: crate::cn::merge(format!(
                 "rounded-xl border border-border bg-card text-card-foreground shadow-sm {}",
                 props.class
-            ),
+            )),
             {props.children}
         }
     }
@@ -34,7 +34,7 @@ pub struct CardHeaderProps {
 pub fn CardHeader(props: CardHeaderProps) -> Element {
     rsx! {
         div {
-            class: format!("flex flex-col space-y-1.5 p-6 {}", props.class),
+            class: crate::cn::merge_slice(&["flex flex-col space-y-1.5 p-6", props.class.as_str()]),
             {props.children}
         }
     }
@@ -51,7 +51,7 @@ pub struct CardTitleProps {
 pub fn CardTitle(props: CardTitleProps) -> Element {
     rsx! {
         h3 {
-            class: format!("font-semibold leading-none tracking-tight {}", props.class),
+            class: crate::cn::merge_slice(&["font-semibold leading-none tracking-tight", props.class.as_str()]),
             {props.children}
         }
     }
@@ -68,7 +68,7 @@ pub struct CardDescriptionProps {
 pub fn CardDescription(props: CardDescriptionProps) -> Element {
     rsx! {
         p {
-            class: format!("text-sm text-muted-foreground {}", props.class),
+            class: crate::cn::merge_slice(&["text-sm text-muted-foreground", props.class.as_str()]),
             {props.children}
         }
     }
@@ -85,7 +85,7 @@ pub struct CardContentProps {
 pub fn CardContent(props: CardContentProps) -> Element {
     rsx! {
         div {
-            class: format!("p-6 pt-0 {}", props.class),
+            class: crate::cn::merge_slice(&["p-6 pt-0", props.class.as_str()]),
             {props.children}
         }
     }
@@ -102,7 +102,7 @@ pub struct CardFooterProps {
 pub fn CardFooter(props: CardFooterProps) -> Element {
     rsx! {
         div {
-            class: format!("flex items-center p-6 pt-0 {}", props.class),
+            class: crate::cn::merge_slice(&["flex items-center p-6 pt-0", props.class.as_str()]),
             {props.children}
         }
     }

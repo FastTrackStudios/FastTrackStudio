@@ -17,7 +17,7 @@ pub struct ScrollAreaProps {
 pub fn ScrollArea(props: ScrollAreaProps) -> Element {
     rsx! {
         div {
-            class: format!("relative overflow-hidden {}", props.class),
+            class: crate::cn::merge_slice(&["relative overflow-hidden", props.class.as_str()]),
             div {
                 class: "h-full w-full overflow-auto scrollbar-thin scrollbar-thumb-rounded-full scrollbar-thumb-border scrollbar-track-transparent",
                 {props.children}

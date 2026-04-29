@@ -26,7 +26,7 @@ pub struct HoverCardProps {
 pub fn HoverCard(props: HoverCardProps) -> Element {
     rsx! {
         div {
-            class: format!("relative inline-flex group {}", props.class),
+            class: crate::cn::merge_slice(&["relative inline-flex group", props.class.as_str()]),
             {props.children}
         }
     }
@@ -70,10 +70,10 @@ pub fn HoverCardContent(props: HoverCardContentProps) -> Element {
 
     rsx! {
         div {
-            class: format!(
+            class: crate::cn::merge(format!(
                 "invisible group-hover:visible opacity-0 group-hover:opacity-100 transition-all duration-200 delay-200 absolute z-50 w-64 rounded-lg bg-popover text-popover-foreground border border-border shadow-md p-4 text-sm pointer-events-none group-hover:pointer-events-auto {} {}",
                 position, props.class
-            ),
+            )),
             {props.children}
         }
     }

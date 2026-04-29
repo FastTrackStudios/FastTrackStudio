@@ -31,10 +31,10 @@ pub fn AlertDialog(props: AlertDialogProps) -> Element {
 
         // Content
         div {
-            class: format!(
+            class: crate::cn::merge(format!(
                 "fixed z-50 grid w-full max-w-[calc(100%-2rem)] sm:max-w-md gap-6 rounded-xl bg-popover text-popover-foreground border border-border shadow-lg p-6 text-sm animate-scale-in {}",
                 props.class
-            ),
+            )),
             style: "left: 50%; top: 50%; transform: translate(-50%, -50%);",
             role: "alertdialog",
             aria_modal: "true",
@@ -58,7 +58,7 @@ pub struct AlertDialogHeaderProps {
 pub fn AlertDialogHeader(props: AlertDialogHeaderProps) -> Element {
     rsx! {
         div {
-            class: format!("flex flex-col gap-1.5 text-center sm:text-left {}", props.class),
+            class: crate::cn::merge_slice(&["flex flex-col gap-1.5 text-center sm:text-left", props.class.as_str()]),
             {props.children}
         }
     }
@@ -76,7 +76,7 @@ pub struct AlertDialogTitleProps {
 pub fn AlertDialogTitle(props: AlertDialogTitleProps) -> Element {
     rsx! {
         h2 {
-            class: format!("text-lg font-medium {}", props.class),
+            class: crate::cn::merge_slice(&["text-lg font-medium", props.class.as_str()]),
             {props.children}
         }
     }
@@ -94,7 +94,7 @@ pub struct AlertDialogDescriptionProps {
 pub fn AlertDialogDescription(props: AlertDialogDescriptionProps) -> Element {
     rsx! {
         p {
-            class: format!("text-muted-foreground text-sm {}", props.class),
+            class: crate::cn::merge_slice(&["text-muted-foreground text-sm", props.class.as_str()]),
             {props.children}
         }
     }
@@ -112,7 +112,7 @@ pub struct AlertDialogFooterProps {
 pub fn AlertDialogFooter(props: AlertDialogFooterProps) -> Element {
     rsx! {
         div {
-            class: format!("flex flex-col-reverse gap-2 sm:flex-row sm:justify-end {}", props.class),
+            class: crate::cn::merge_slice(&["flex flex-col-reverse gap-2 sm:flex-row sm:justify-end", props.class.as_str()]),
             {props.children}
         }
     }

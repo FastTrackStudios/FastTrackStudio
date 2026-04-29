@@ -90,13 +90,13 @@ pub fn StatusDot(props: StatusDotProps) -> Element {
 
     rsx! {
         div {
-            class: format!(
+            class: crate::cn::merge(format!(
                 "{} {} {} flex-shrink-0 {}",
                 props.size.classes(),
                 props.color.class(),
                 shape,
                 props.class
-            ),
+            )),
             style: "{props.color.style()}",
         }
     }
@@ -164,10 +164,10 @@ pub fn StatusBadge(props: StatusBadgeProps) -> Element {
 
     rsx! {
         div {
-            class: format!(
+            class: crate::cn::merge(format!(
                 "flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium {bg} {text} {}",
                 props.class
-            ),
+            )),
 
             if let Some(icon) = &props.icon {
                 {icon}

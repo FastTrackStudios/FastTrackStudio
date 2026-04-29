@@ -52,10 +52,10 @@ pub fn CommandDialog(props: CommandDialogProps) -> Element {
         }
         // Content
         div {
-            class: format!(
+            class: crate::cn::merge(format!(
                 "fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-full max-w-md rounded-xl bg-popover text-popover-foreground border border-border shadow-md p-0 overflow-hidden {}",
                 props.class
-            ),
+            )),
             onclick: move |e| e.stop_propagation(),
             {props.children}
         }
@@ -83,7 +83,7 @@ pub fn CommandInput(props: CommandInputProps) -> Element {
 
     rsx! {
         div {
-            class: format!("flex items-center border-b border-border px-3 {}", props.class),
+            class: crate::cn::merge_slice(&["flex items-center border-b border-border px-3", props.class.as_str()]),
             // Search icon
             svg {
                 class: "size-4 opacity-50 shrink-0",
@@ -124,7 +124,7 @@ pub struct CommandListProps {
 pub fn CommandList(props: CommandListProps) -> Element {
     rsx! {
         div {
-            class: format!("max-h-72 overflow-y-auto p-1 {}", props.class),
+            class: crate::cn::merge_slice(&["max-h-72 overflow-y-auto p-1", props.class.as_str()]),
             {props.children}
         }
     }
@@ -148,7 +148,7 @@ pub struct CommandGroupProps {
 pub fn CommandGroup(props: CommandGroupProps) -> Element {
     rsx! {
         div {
-            class: format!("overflow-hidden p-1 {}", props.class),
+            class: crate::cn::merge_slice(&["overflow-hidden p-1", props.class.as_str()]),
             div {
                 class: "text-muted-foreground px-3 py-2 text-xs font-medium",
                 "{props.heading}"
@@ -178,10 +178,10 @@ pub fn CommandItem(props: CommandItemProps) -> Element {
 
     rsx! {
         div {
-            class: format!(
+            class: crate::cn::merge(format!(
                 "relative flex cursor-pointer items-center gap-2 rounded-xl px-3 py-2 text-sm hover:bg-muted hover:text-foreground transition-colors select-none [&_svg:not([class*='size-'])]:size-4 {}",
                 props.class
-            ),
+            )),
             onclick: move |_| {
                 if let Some(cb) = &props.on_select {
                     cb.call(());
@@ -209,7 +209,7 @@ pub struct CommandEmptyProps {
 pub fn CommandEmpty(props: CommandEmptyProps) -> Element {
     rsx! {
         div {
-            class: format!("py-6 text-center text-sm text-muted-foreground {}", props.class),
+            class: crate::cn::merge_slice(&["py-6 text-center text-sm text-muted-foreground", props.class.as_str()]),
             {props.children}
         }
     }
@@ -228,7 +228,7 @@ pub struct CommandSeparatorProps {
 pub fn CommandSeparator(props: CommandSeparatorProps) -> Element {
     rsx! {
         div {
-            class: format!("bg-border/50 my-1 h-px {}", props.class),
+            class: crate::cn::merge_slice(&["bg-border/50 my-1 h-px", props.class.as_str()]),
             role: "separator",
         }
     }
@@ -248,7 +248,7 @@ pub struct CommandShortcutProps {
 pub fn CommandShortcut(props: CommandShortcutProps) -> Element {
     rsx! {
         span {
-            class: format!("ml-auto text-xs tracking-widest text-muted-foreground {}", props.class),
+            class: crate::cn::merge_slice(&["ml-auto text-xs tracking-widest text-muted-foreground", props.class.as_str()]),
             {props.children}
         }
     }

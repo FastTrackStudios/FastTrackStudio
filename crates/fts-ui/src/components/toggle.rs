@@ -69,10 +69,10 @@ pub fn Toggle(props: ToggleProps) -> Element {
     rsx! {
         button {
             r#type: "button",
-            class: format!(
+            class: crate::cn::merge(format!(
                 "{base} {variant_class} {size_class} {pressed_class} {disabled_class} {}",
                 props.class
-            ),
+            )),
             aria_pressed: pressed.to_string(),
             "data-state": if pressed { "on" } else { "off" },
             disabled: props.disabled,

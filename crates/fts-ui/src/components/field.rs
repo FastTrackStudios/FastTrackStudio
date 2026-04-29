@@ -17,7 +17,7 @@ pub struct FieldProps {
 pub fn Field(props: FieldProps) -> Element {
     rsx! {
         div {
-            class: format!("grid gap-2 {}", props.class),
+            class: crate::cn::merge_slice(&["grid gap-2", props.class.as_str()]),
             {props.children}
         }
     }
@@ -37,7 +37,7 @@ pub struct FieldLabelProps {
 pub fn FieldLabel(props: FieldLabelProps) -> Element {
     rsx! {
         label {
-            class: format!("text-sm font-medium leading-none {}", props.class),
+            class: crate::cn::merge_slice(&["text-sm font-medium leading-none", props.class.as_str()]),
             {props.children}
             if props.required {
                 span { class: "text-destructive ml-0.5", "*" }
@@ -58,7 +58,7 @@ pub struct FieldDescriptionProps {
 pub fn FieldDescription(props: FieldDescriptionProps) -> Element {
     rsx! {
         p {
-            class: format!("text-muted-foreground text-sm {}", props.class),
+            class: crate::cn::merge_slice(&["text-muted-foreground text-sm", props.class.as_str()]),
             {props.children}
         }
     }
@@ -76,7 +76,7 @@ pub struct FieldMessageProps {
 pub fn FieldMessage(props: FieldMessageProps) -> Element {
     rsx! {
         p {
-            class: format!("text-destructive text-sm {}", props.class),
+            class: crate::cn::merge_slice(&["text-destructive text-sm", props.class.as_str()]),
             {props.children}
         }
     }

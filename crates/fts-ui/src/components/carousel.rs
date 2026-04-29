@@ -32,7 +32,7 @@ pub fn Carousel(props: CarouselProps) -> Element {
 
     rsx! {
         div {
-            class: format!("relative w-full overflow-hidden {}", props.class),
+            class: crate::cn::merge_slice(&["relative w-full overflow-hidden", props.class.as_str()]),
             {props.children}
         }
     }
@@ -63,7 +63,7 @@ pub fn CarouselContent(props: CarouselContentProps) -> Element {
 
     rsx! {
         div {
-            class: format!("flex transition-transform duration-300 ease-in-out {}", props.class),
+            class: crate::cn::merge_slice(&["flex transition-transform duration-300 ease-in-out", props.class.as_str()]),
             style: format!("transform: translateX(-{}%);", current * 100),
             {props.children}
         }
@@ -86,7 +86,7 @@ pub struct CarouselItemProps {
 pub fn CarouselItem(props: CarouselItemProps) -> Element {
     rsx! {
         div {
-            class: format!("min-w-full flex-shrink-0 {}", props.class),
+            class: crate::cn::merge_slice(&["min-w-full flex-shrink-0", props.class.as_str()]),
             {props.children}
         }
     }
@@ -112,10 +112,10 @@ pub fn CarouselPrevious(props: CarouselPreviousProps) -> Element {
     rsx! {
         button {
             r#type: "button",
-            class: format!(
+            class: crate::cn::merge(format!(
                 "absolute left-2 top-1/2 -translate-y-1/2 z-10 inline-flex items-center justify-center size-8 rounded-full border border-input bg-background hover:bg-muted transition-colors disabled:opacity-50 {}",
                 props.class
-            ),
+            )),
             disabled,
             onclick: move |_| {
                 let cur = *ctx.current.read();
@@ -161,10 +161,10 @@ pub fn CarouselNext(props: CarouselNextProps) -> Element {
     rsx! {
         button {
             r#type: "button",
-            class: format!(
+            class: crate::cn::merge(format!(
                 "absolute right-2 top-1/2 -translate-y-1/2 z-10 inline-flex items-center justify-center size-8 rounded-full border border-input bg-background hover:bg-muted transition-colors disabled:opacity-50 {}",
                 props.class
-            ),
+            )),
             disabled,
             onclick: move |_| {
                 let cur = *ctx.current.read();

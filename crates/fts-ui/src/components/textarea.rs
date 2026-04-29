@@ -36,7 +36,7 @@ pub fn Textarea(props: TextareaProps) -> Element {
 
     rsx! {
         textarea {
-            class: "{base} {props.class}",
+            class: crate::cn::merge_slice(&[base, props.class.as_str()]),
             value: "{value}",
             placeholder: "{props.placeholder}",
             disabled: if props.disabled { Some(true) } else { None },

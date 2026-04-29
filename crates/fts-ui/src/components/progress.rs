@@ -49,7 +49,7 @@ pub fn Progress(props: ProgressProps) -> Element {
 
     rsx! {
         div {
-            class: "{track} {props.class}",
+            class: crate::cn::merge_slice(&[track, props.class.as_str()]),
             role: "progressbar",
             "aria-valuenow": "{value}",
             "aria-valuemin": "0",

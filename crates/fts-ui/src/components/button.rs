@@ -66,7 +66,7 @@ pub fn Button(props: ButtonProps) -> Element {
 
     rsx! {
         button {
-            class: "{base} {variant} {size} {props.class}",
+            class: crate::cn::merge_slice(&[base, variant, size, props.class.as_str()]),
             disabled: disabled,
             r#type: "button",
             onclick: move |e| {

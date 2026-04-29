@@ -37,7 +37,7 @@ pub fn Spinner(props: SpinnerProps) -> Element {
 
     rsx! {
         svg {
-            class: "animate-spin text-muted-foreground {size_class} {props.class}",
+            class: crate::cn::merge_slice(&["animate-spin text-muted-foreground", size_class, props.class.as_str()]),
             xmlns: "http://www.w3.org/2000/svg",
             fill: "none",
             view_box: "0 0 24 24",

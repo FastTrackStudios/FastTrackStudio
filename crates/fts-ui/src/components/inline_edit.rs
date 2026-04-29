@@ -85,10 +85,10 @@ pub fn InlineEdit(props: InlineEditProps) -> Element {
 
         rsx! {
             input {
-                class: format!(
+                class: crate::cn::merge(format!(
                     "px-2 py-0.5 text-xs text-foreground bg-secondary border border-input rounded outline-none {}",
                     props.class
-                ),
+                )),
                 value: "{draft}",
                 placeholder: "{props.placeholder}",
                 autofocus: true,
@@ -114,10 +114,10 @@ pub fn InlineEdit(props: InlineEditProps) -> Element {
 
         rsx! {
             button {
-                class: format!(
+                class: crate::cn::merge(format!(
                     "px-2.5 py-1 text-xs rounded transition-colors {active_class} {}",
                     props.class
-                ),
+                )),
                 ondoubleclick: move |_| enter_edit(),
                 "{props.value}"
             }

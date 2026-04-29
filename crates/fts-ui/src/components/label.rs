@@ -20,7 +20,7 @@ pub fn Label(props: LabelProps) -> Element {
     rsx! {
         label {
             r#for: props.html_for.as_deref().unwrap_or_default(),
-            class: "{base} {props.class}",
+            class: crate::cn::merge_slice(&[base, props.class.as_str()]),
             {props.children}
         }
     }

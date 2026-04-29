@@ -57,7 +57,7 @@ pub fn ResizablePanelGroup(props: ResizablePanelGroupProps) -> Element {
 
     rsx! {
         div {
-            class: format!("{base} {}", props.class),
+            class: crate::cn::merge_slice(&[base, props.class.as_str()]),
             {props.children}
         }
     }
@@ -122,7 +122,7 @@ pub fn ResizablePanel(props: ResizablePanelProps) -> Element {
 
     rsx! {
         div {
-            class: format!("overflow-auto {}", props.class),
+            class: crate::cn::merge_slice(&["overflow-auto", props.class.as_str()]),
             style: "{style}",
             {props.children}
         }
@@ -162,7 +162,7 @@ pub fn ResizableHandle(props: ResizableHandleProps) -> Element {
 
     rsx! {
         div {
-            class: format!("{base} {dir_cls} {}", props.class),
+            class: crate::cn::merge_slice(&[base, dir_cls, props.class.as_str()]),
 
             if props.with_handle {
                 div {

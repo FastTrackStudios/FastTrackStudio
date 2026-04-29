@@ -102,13 +102,13 @@ pub fn SearchableDropdown(props: SearchableDropdownProps) -> Element {
 
         // Panel
         div {
-            class: format!(
+            class: crate::cn::merge(format!(
                 "{} {} bg-background border border-border rounded-xl shadow-md shadow-black/50 \
                  flex flex-col overflow-hidden {}",
                 props.width,
                 props.max_height,
                 props.class
-            ),
+            )),
             style: "{panel_style}",
             onclick: move |evt| evt.stop_propagation(),
             onkeydown: move |evt| {

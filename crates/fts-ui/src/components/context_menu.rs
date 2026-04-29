@@ -26,7 +26,7 @@ pub fn ContextMenu(props: ContextMenuProps) -> Element {
 
     rsx! {
         div {
-            class: format!("relative {}", props.class),
+            class: crate::cn::merge_slice(&["relative", props.class.as_str()]),
             {props.children}
         }
     }
@@ -97,10 +97,10 @@ pub fn ContextMenuContent(props: ContextMenuContentProps) -> Element {
 
         // Menu
         div {
-            class: format!(
+            class: crate::cn::merge(format!(
                 "fixed z-50 min-w-48 rounded-lg bg-popover text-popover-foreground border border-border shadow-md p-1 {}",
                 props.class
-            ),
+            )),
             style: format!("left: {}px; top: {}px;", s.x, s.y),
             onclick: move |evt: MouseEvent| { evt.stop_propagation(); },
             {props.children}
@@ -145,7 +145,7 @@ pub fn ContextMenuItem(props: ContextMenuItemProps) -> Element {
 
     rsx! {
         div {
-            class: format!("{base} {variant} {disabled_class} {}", props.class),
+            class: crate::cn::merge_slice(&[base, variant, disabled_class, props.class.as_str()]),
             role: "menuitem",
             onclick: move |_| {
                 if !disabled {
@@ -188,7 +188,7 @@ pub struct ContextMenuLabelProps {
 pub fn ContextMenuLabel(props: ContextMenuLabelProps) -> Element {
     rsx! {
         div {
-            class: format!("text-muted-foreground px-3 py-2.5 text-xs {}", props.class),
+            class: crate::cn::merge_slice(&["text-muted-foreground px-3 py-2.5 text-xs", props.class.as_str()]),
             {props.children}
         }
     }

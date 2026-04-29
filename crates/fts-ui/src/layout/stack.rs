@@ -34,7 +34,7 @@ pub fn VStack(props: VStackProps) -> Element {
     let gap_rem = spacing_to_rem(&props.gap);
     rsx! {
         div {
-            class: format!("flex flex-col {}", props.class),
+            class: crate::cn::merge_slice(&["flex flex-col", props.class.as_str()]),
             style: "gap: {gap_rem};",
             {props.children}
         }
@@ -57,7 +57,7 @@ pub fn HStack(props: HStackProps) -> Element {
     let gap_rem = spacing_to_rem(&props.gap);
     rsx! {
         div {
-            class: format!("flex flex-row items-center {}", props.class),
+            class: crate::cn::merge_slice(&["flex flex-row items-center", props.class.as_str()]),
             style: "gap: {gap_rem};",
             {props.children}
         }

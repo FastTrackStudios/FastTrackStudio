@@ -51,7 +51,7 @@ pub fn InputOtp(props: InputOtpProps) -> Element {
 
     rsx! {
         div {
-            class: format!("relative flex items-center gap-2 {}", props.class),
+            class: crate::cn::merge_slice(&["relative flex items-center gap-2", props.class.as_str()]),
             onclick: move |_| {
                 // Clicking anywhere in the component focuses the hidden input.
                 // The JS eval below focuses the sibling input element.
@@ -105,7 +105,7 @@ pub struct InputOtpGroupProps {
 pub fn InputOtpGroup(props: InputOtpGroupProps) -> Element {
     rsx! {
         div {
-            class: format!("flex items-center {}", props.class),
+            class: crate::cn::merge_slice(&["flex items-center", props.class.as_str()]),
             {props.children}
         }
     }
@@ -139,10 +139,10 @@ pub fn InputOtpSlot(props: InputOtpSlotProps) -> Element {
 
     rsx! {
         div {
-            class: format!(
+            class: crate::cn::merge(format!(
                 "relative flex items-center justify-center size-9 border-y border-r border-input bg-input/30 text-sm transition-all first:rounded-l-lg first:border-l last:rounded-r-lg {focus_class} {}",
                 props.class
-            ),
+            )),
             if let Some(c) = ch {
                 span { "{c}" }
             } else if is_focused {
@@ -167,7 +167,7 @@ pub struct InputOtpSeparatorProps {
 pub fn InputOtpSeparator(props: InputOtpSeparatorProps) -> Element {
     rsx! {
         span {
-            class: format!("flex items-center text-muted-foreground px-1 {}", props.class),
+            class: crate::cn::merge_slice(&["flex items-center text-muted-foreground px-1", props.class.as_str()]),
             "\u{2014}"
         }
     }

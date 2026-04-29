@@ -42,7 +42,7 @@ pub struct TextProps {
 
 #[component]
 pub fn Text(props: TextProps) -> Element {
-    let class = format!("{} {}", props.variant.classes(), props.class);
+    let class = crate::cn::merge_slice(&[props.variant.classes(), props.class.as_str()]);
 
     match props.variant {
         TextVariant::Code => rsx! { code { class, {props.children} } },
