@@ -11,11 +11,13 @@
 //!
 //! # TLS
 //!
-//! Bridge presents a per-install self-signed cert. Pass `ca_bundle`
-//! pointing at the merged bundle (on starcommand:
-//! `/var/lib/nc-mail-trust/ca-bundle.crt`) so rustls can verify it.
-//! `insecure = true` disables verification entirely — acceptable only
-//! on loopback connections.
+//! Bridge presents a per-install self-signed cert with CA:TRUE.
+//! Pass `ca_bundle` pointing at the bundle that contains that exact
+//! certificate (on starcommand: `/var/lib/nc-mail-trust/ca-bundle.crt`).
+//! We pin the presented server cert against that bundle instead of
+//! feeding it to rustls' root-store validation, because rustls rejects
+//! CA-marked certificates as leaf server certs. `insecure = true`
+//! disables verification entirely — acceptable only on loopback.
 
 use crate::service::VaultError;
 use std::net::IpAddr;
@@ -37,9 +39,10 @@ pub struct ImapWatchConfig {
     pub password: String,
     /// Mailbox to select (e.g. `INBOX`).
     pub mailbox: String,
-    /// Optional path to a PEM-encoded CA bundle. When set, rustls
-    /// verifies the server cert against just this bundle. When None
-    /// AND `insecure = false`, falls back to webpki-roots (public CAs).
+    /// Optional path to a PEM-encoded cert bundle. When set, the
+    /// watcher pins the server certificate against the exact PEM
+    /// certificates in this bundle. When None AND `insecure = false`,
+    /// falls back to public roots.
     pub ca_bundle: Option<PathBuf>,
     /// Disable cert verification entirely. Only safe on loopback.
     pub insecure: bool,
@@ -207,28 +210,33 @@ fn build_tls_config(config: &ImapWatchConfig) -> Result<rustls::ClientConfig, Va
         return Ok(cfg);
     }
 
-    let mut roots = rustls::RootCertStore::empty();
     if let Some(path) = &config.ca_bundle {
         let bytes = std::fs::read(path)
             .map_err(|e| VaultError::IoError(format!("read ca bundle {path:?}: {e}")))?;
         let mut cursor = std::io::Cursor::new(bytes);
+        let mut trusted = Vec::new();
         for cert in rustls_pemfile::certs(&mut cursor) {
             let cert =
                 cert.map_err(|e| VaultError::ParseError(format!("ca bundle PEM: {e}")))?;
-            roots
-                .add(cert)
-                .map_err(|e| VaultError::ParseError(format!("add cert: {e}")))?;
+            trusted.push(cert.into_owned());
         }
+        let verifier = Arc::new(PinnedServerCertVerifier { trusted });
+        let cfg = ClientConfig::builder()
+            .dangerous()
+            .with_custom_certificate_verifier(verifier)
+            .with_no_client_auth();
+        return Ok(cfg);
     } else {
+        let mut roots = rustls::RootCertStore::empty();
         // Fall back to system/webpki roots via rustls-native-certs equivalent.
         // We keep this cheap — if the caller has a self-signed bridge cert,
         // they MUST pass a ca_bundle.
         roots.extend(webpki_roots_fallback());
+        let cfg = ClientConfig::builder()
+            .with_root_certificates(roots)
+            .with_no_client_auth();
+        return Ok(cfg);
     }
-    let cfg = ClientConfig::builder()
-        .with_root_certificates(roots)
-        .with_no_client_auth();
-    Ok(cfg)
 }
 
 fn webpki_roots_fallback() -> Vec<rustls_pki_types::TrustAnchor<'static>> {
@@ -278,6 +286,69 @@ impl rustls::client::danger::ServerCertVerifier for DangerousAcceptAny {
     ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
         Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
     }
+    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+        vec![
+            rustls::SignatureScheme::RSA_PKCS1_SHA256,
+            rustls::SignatureScheme::RSA_PKCS1_SHA384,
+            rustls::SignatureScheme::RSA_PKCS1_SHA512,
+            rustls::SignatureScheme::ECDSA_NISTP256_SHA256,
+            rustls::SignatureScheme::ECDSA_NISTP384_SHA384,
+            rustls::SignatureScheme::ED25519,
+            rustls::SignatureScheme::RSA_PSS_SHA256,
+            rustls::SignatureScheme::RSA_PSS_SHA384,
+            rustls::SignatureScheme::RSA_PSS_SHA512,
+        ]
+    }
+}
+
+/// rustls verifier that accepts only the exact certificate(s) in the
+/// provided bundle. This is intentionally narrow: it preserves
+/// verification on loopback while tolerating Bridge's CA-marked leaf.
+#[derive(Debug)]
+struct PinnedServerCertVerifier {
+    trusted: Vec<rustls_pki_types::CertificateDer<'static>>,
+}
+
+impl rustls::client::danger::ServerCertVerifier for PinnedServerCertVerifier {
+    fn verify_server_cert(
+        &self,
+        end_entity: &rustls_pki_types::CertificateDer<'_>,
+        _intermediates: &[rustls_pki_types::CertificateDer<'_>],
+        _server_name: &rustls_pki_types::ServerName<'_>,
+        _ocsp_response: &[u8],
+        _now: rustls_pki_types::UnixTime,
+    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+        if self
+            .trusted
+            .iter()
+            .any(|cert| cert.as_ref() == end_entity.as_ref())
+        {
+            Ok(rustls::client::danger::ServerCertVerified::assertion())
+        } else {
+            Err(rustls::Error::General(
+                "server certificate did not match pinned bundle".into(),
+            ))
+        }
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        _message: &[u8],
+        _cert: &rustls_pki_types::CertificateDer<'_>,
+        _dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        _message: &[u8],
+        _cert: &rustls_pki_types::CertificateDer<'_>,
+        _dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+    }
+
     fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
         vec![
             rustls::SignatureScheme::RSA_PKCS1_SHA256,

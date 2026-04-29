@@ -10,6 +10,7 @@ serde_json.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 eyre.workspace = true
+base64 = "0.22"
 
 axum = { version = "0.8", features = ["ws"] }
 chrono.workspace = true
@@ -18,6 +19,7 @@ futures.workspace = true
 tower-http = { version = "0.6", features = ["cors", "fs"] }
 slug = "0.1"
 task-db = { path = "../../crates/task-db" }
+task-core = { workspace = true, features = ["realtime"] }
 better-auth = { path = "../../../FastTrackStudio/better-auth", features = ["axum"], default-features = false }
 better-auth-core = { path = "../../../FastTrackStudio/better-auth/crates/core" }
 better-auth-api = { path = "../../../FastTrackStudio/better-auth/crates/api", default-features = false, features = ["rustls", "vox"] }

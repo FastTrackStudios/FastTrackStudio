@@ -14,6 +14,8 @@ mod workflows;
 
 /// Global org list — fetched once, available everywhere.
 static ORG_LIST: GlobalSignal<Vec<OrgInfo>> = Signal::global(|| Vec::new());
+#[cfg(target_arch = "wasm32")]
+const KNOWN_SERVERS_KEY: &str = "task.servers.v1";
 
 /// Look up org display info from the global list.
 fn org_display(slug: &str) -> (String, u32) {
@@ -132,12 +134,7 @@ fn App() -> Element {
             web_sys::console::log_1(&format!("[Task] Discovered API server: {url}").into());
             base_url.set(url.clone());
 
-            // Fetch org list into global signal
-            if let Ok(result) = rpc_call(&url, "list_orgs", serde_json::json!({})).await {
-                if let Ok(orgs) = serde_json::from_value::<Vec<OrgInfo>>(result) {
-                    *ORG_LIST.write() = orgs;
-                }
-            }
+            load_orgs_into_global(&url).await;
 
             resolved.set(true);
         });
@@ -219,6 +216,146 @@ async fn probe_health(base_url: &str) -> bool {
     }
 }
 
+async fn load_orgs(base_url: &str) -> Vec<OrgInfo> {
+    match rpc_call(base_url, "list_orgs", serde_json::json!({})).await {
+        Ok(result) => serde_json::from_value::<Vec<OrgInfo>>(result).unwrap_or_default(),
+        Err(_) => Vec::new(),
+    }
+}
+
+async fn load_orgs_into_global(base_url: &str) {
+    let primary = register_known_server(base_url).await;
+    let mut servers = read_known_servers();
+    if !servers.iter().any(|s| s.url == primary.url) {
+        servers.push(primary);
+    }
+
+    let mut orgs = Vec::new();
+    for server in servers {
+        let mut server_orgs = load_orgs(&server.url).await;
+        for org in &mut server_orgs {
+            if org.server_id.is_empty() {
+                org.server_id = server.id.clone();
+            }
+            if org.server_name.is_empty() {
+                org.server_name = server.name.clone();
+            }
+            if org.server_url.is_empty() {
+                org.server_url = server.url.clone();
+            }
+        }
+        orgs.extend(server_orgs);
+    }
+    orgs.sort_by(|a, b| {
+        a.server_name
+            .cmp(&b.server_name)
+            .then_with(|| a.name.cmp(&b.name))
+    });
+    orgs.dedup_by(|a, b| a.server_url == b.server_url && a.slug == b.slug);
+    *ORG_LIST.write() = orgs;
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+struct KnownServer {
+    id: String,
+    name: String,
+    url: String,
+}
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Debug, Clone, Deserialize)]
+struct ApiServerInfo {
+    id: String,
+    name: String,
+    public_base_url: String,
+}
+
+async fn register_known_server(base_url: &str) -> KnownServer {
+    let fallback_url = base_url.trim_end_matches('/').to_string();
+    let server = KnownServer {
+        id: fallback_url.clone(),
+        name: fallback_url.clone(),
+        url: fallback_url,
+    };
+    let server = fetch_server_info(server).await;
+
+    upsert_known_server(server.clone());
+    server
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn fetch_server_info(mut server: KnownServer) -> KnownServer {
+    if let Ok(resp) = gloo_net::http::Request::get(&format!("{}/api/info", server.url))
+        .send()
+        .await
+    {
+        if let Ok(info) = resp.json::<ApiServerInfo>().await {
+            server = KnownServer {
+                id: info.id,
+                name: info.name,
+                url: if info.public_base_url.is_empty() {
+                    server.url
+                } else {
+                    info.public_base_url.trim_end_matches('/').to_string()
+                },
+            };
+        }
+    }
+    server
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn fetch_server_info(server: KnownServer) -> KnownServer {
+    server
+}
+
+fn read_known_servers() -> Vec<KnownServer> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let Some(window) = web_sys::window() else {
+            return Vec::new();
+        };
+        let Ok(Some(storage)) = window.local_storage() else {
+            return Vec::new();
+        };
+        let Ok(Some(raw)) = storage.get_item(KNOWN_SERVERS_KEY) else {
+            return Vec::new();
+        };
+        serde_json::from_str(&raw).unwrap_or_default()
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        Vec::new()
+    }
+}
+
+fn write_known_servers(servers: &[KnownServer]) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let Some(window) = web_sys::window() else {
+            return;
+        };
+        let Ok(Some(storage)) = window.local_storage() else {
+            return;
+        };
+        if let Ok(raw) = serde_json::to_string(servers) {
+            let _ = storage.set_item(KNOWN_SERVERS_KEY, &raw);
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = servers;
+    }
+}
+
+fn upsert_known_server(server: KnownServer) {
+    let mut servers = read_known_servers();
+    servers.retain(|s| s.id != server.id && s.url != server.url);
+    servers.push(server);
+    servers.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.url.cmp(&b.url)));
+    write_known_servers(&servers);
+}
+
 // ── Vox WebSocket RPC ───────────────────────────────────────────────────────
 
 #[allow(unused_variables)]
@@ -277,6 +414,55 @@ async fn rpc_call(base_url: &str, method: &str, params: serde_json::Value) -> Re
     {
         Err("rpc_call only works in WASM".into())
     }
+}
+
+fn use_crdt_refresh(refresh: Signal<u64>) {
+    let base_url: Signal<String> = use_context();
+    use_effect(move || {
+        let base = base_url.read().clone();
+        if base.is_empty() {
+            return;
+        }
+        spawn(async move {
+            let _ = crdt_watch_refresh(&base, refresh).await;
+        });
+    });
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn crdt_watch_refresh(base_url: &str, mut refresh: Signal<u64>) -> Result<(), String> {
+    use futures::StreamExt;
+    use gloo_net::websocket::futures::WebSocket;
+    use gloo_net::websocket::Message;
+
+    let ws_url = format!(
+        "{}/crdt",
+        base_url.replace("http://", "ws://").replace("https://", "wss://")
+    );
+    let ws = WebSocket::open(&ws_url).map_err(|e| format!("CRDT WS open failed: {e:?}"))?;
+    let (_, mut read) = ws.split();
+
+    while let Some(msg) = read.next().await {
+        let Ok(Message::Text(text)) = msg else {
+            continue;
+        };
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
+            continue;
+        };
+        let kind = value.get("type").and_then(|t| t.as_str()).unwrap_or("");
+        if matches!(
+            kind,
+            "field_changed" | "doc_update" | "task_created" | "task_deleted" | "refresh" | "conflict"
+        ) {
+            refresh += 1;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn crdt_watch_refresh(_base_url: &str, _refresh: Signal<u64>) -> Result<(), String> {
+    Ok(())
 }
 
 // ── Shell (sidebar + content) ───────────────────────────────────────────────
@@ -446,6 +632,12 @@ struct OrgInfo {
     name: String,
     description: String,
     #[serde(default)]
+    server_id: String,
+    #[serde(default)]
+    server_name: String,
+    #[serde(default)]
+    server_url: String,
+    #[serde(default)]
     members: Vec<String>,
     /// Emoji icon for the org (e.g. "🎵", "💻", "🎸")
     #[serde(default)]
@@ -458,6 +650,7 @@ struct OrgInfo {
 #[component]
 fn OrgSwitcher() -> Element {
     let mut open = use_signal(|| false);
+    let mut base_url: Signal<String> = use_context();
 
     // Read from global signal — no fetch needed
     let org_list = ORG_LIST.read().clone();
@@ -537,6 +730,17 @@ fn OrgSwitcher() -> Element {
                         {
                             let slug = org.slug.clone();
                             let is_selected = *selected.read() == slug;
+                            let server_url = org.server_url.clone();
+                            let server_name = if org.server_name.is_empty() {
+                                "Current server".to_string()
+                            } else {
+                                org.server_name.clone()
+                            };
+                            let detail = if server_url.is_empty() {
+                                format!("{} members", org.members.len())
+                            } else {
+                                format!("{} members · {}", org.members.len(), server_name)
+                            };
                             rsx! {
                                 button {
                                     class: if is_selected {
@@ -544,7 +748,18 @@ fn OrgSwitcher() -> Element {
                                     } else {
                                         "flex items-center gap-2 w-full px-3 py-2 text-xs hover:bg-accent transition-colors text-left"
                                     },
-                                    onclick: move |_| { selected.set(slug.clone()); open.set(false); },
+                                    onclick: move |_| {
+                                        selected.set(slug.clone());
+                                        open.set(false);
+
+                                        let next_url = server_url.clone();
+                                        if !next_url.is_empty() && base_url.read().as_str() != next_url {
+                                            base_url.set(next_url.clone());
+                                            spawn(async move {
+                                                load_orgs_into_global(&next_url).await;
+                                            });
+                                        }
+                                    },
                                     {
                                         let org_bg = format!("oklch(0.45 0.12 {})", org.hue);
                                         rsx! {
@@ -558,7 +773,7 @@ fn OrgSwitcher() -> Element {
                                     div { class: "min-w-0",
                                         p { class: "font-medium truncate", "{org.name}" }
                                         p { class: "text-[10px] text-muted-foreground truncate",
-                                            { format!("{} members", org.members.len()) }
+                                            "{detail}"
                                         }
                                     }
                                     if is_selected {
@@ -752,9 +967,12 @@ fn next_subtask(body: &str) -> Option<String> {
 #[component]
 fn CommandCenter() -> Element {
     let base_url: Signal<String> = use_context();
+    let refresh = use_signal(|| 0u64);
+    use_crdt_refresh(refresh);
 
     let data = use_resource(move || {
         let base = base_url.read().clone();
+        let _rev = refresh();
         async move {
             if base.is_empty() {
                 return Vec::new();
@@ -942,6 +1160,7 @@ fn TasksPage() -> Element {
 
     // Tracks titles currently being completed (optimistic UI)
     let mut pending = use_signal(|| std::collections::HashSet::<String>::new());
+    use_crdt_refresh(refresh);
 
     let tasks = use_resource(move || {
         let base = base_url.read().clone();
@@ -1251,6 +1470,7 @@ struct TaskDetail {
 fn TaskDetailPage(title: ReadSignal<String>) -> Element {
     let base_url: Signal<String> = use_context();
     let mut refresh = use_signal(|| 0u64);
+    use_crdt_refresh(refresh);
 
     let detail = use_resource(move || {
         let base = base_url.read().clone();
@@ -1497,9 +1717,12 @@ fn TaskDetailPage(title: ReadSignal<String>) -> Element {
 #[component]
 fn ProjectsPage() -> Element {
     let base_url: Signal<String> = use_context();
+    let refresh = use_signal(|| 0u64);
+    use_crdt_refresh(refresh);
 
     let projects = use_resource(move || {
         let base = base_url.read().clone();
+        let _rev = refresh();
         async move {
             if base.is_empty() {
                 return Vec::new();
@@ -1688,10 +1911,13 @@ struct ProjectDetail {
 #[component]
 fn ProjectDetailPage(title: ReadSignal<String>) -> Element {
     let base_url: Signal<String> = use_context();
+    let refresh = use_signal(|| 0u64);
+    use_crdt_refresh(refresh);
 
     let detail = use_resource(move || {
         let base = base_url.read().clone();
         let t = title();
+        let _rev = refresh();
         async move {
             if base.is_empty() || t.is_empty() {
                 return None;

@@ -5,8 +5,12 @@ use axum::extract::ws::WebSocket;
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use base64::Engine as _;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
+use task_core::crdt::{CrdtSyncEngine, SyncOp};
+use task_core::VaultServiceImpl;
 use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
 use tracing::{info, warn};
@@ -25,6 +29,10 @@ use task_db::sea_orm::prelude::Uuid;
 struct ServerInfo {
     name: String,
     id: String,
+    public_base_url: String,
+    db: String,
+    vault_enabled: bool,
+    demo_seeded: bool,
 }
 
 #[derive(Clone)]
@@ -32,6 +40,8 @@ struct AppState {
     db: sea_orm::DatabaseConnection,
     auth: Arc<better_auth::BetterAuth<SeaOrmAuthAdapter>>,
     info: ServerInfo,
+    crdt: Option<Arc<CrdtSyncEngine>>,
+    vault_service: Option<Arc<VaultServiceImpl>>,
 }
 
 // ── Main ─────────────────────────────────────────────────────────────────────
@@ -53,14 +63,17 @@ async fn main() -> eyre::Result<()> {
 
 
     // ── Database initialization ─────────────────────────────────
-    let db = task_db::init_memory().await
-        .expect("Failed to initialize in-memory database");
-    info!("In-memory database initialized");
+    let (db, db_label) = init_server_db().await?;
+    info!(db = %db_label, "Database initialized");
 
     // ── Auth initialization (better-auth) ───────────────────────
     let bind_addr = std::env::var("BIND_ADDR").unwrap_or_else(|_| "0.0.0.0:3456".to_string());
-    let auth_config = AuthConfig::new("task-server-secret-key-must-be-at-least-32-chars")
-        .base_url(&format!("http://{bind_addr}"));
+    let auth_secret = std::env::var("AUTH_SECRET")
+        .unwrap_or_else(|_| "task-server-secret-key-must-be-at-least-32-chars".to_string());
+    let auth_base_url = std::env::var("PUBLIC_BASE_URL")
+        .unwrap_or_else(|_| format!("http://{bind_addr}"));
+    let auth_config = AuthConfig::new(&auth_secret)
+        .base_url(&auth_base_url);
 
     let auth_db = SeaOrmAuthAdapter::new(db.clone());
     let auth = Arc::new(
@@ -77,21 +90,57 @@ async fn main() -> eyre::Result<()> {
     );
     info!("Auth system initialized (better-auth)");
 
-    // Seed mock data
-    {
-        seed_auth_data(&auth).await;
+    let vault_path = std::env::var("TASK_VAULT")
+        .ok()
+        .or_else(|| std::env::var("VAULT_ROOT").ok());
+    let (crdt, vault_service) = if let Some(path) = vault_path.as_deref() {
+        let peer = std::env::var("TASK_PEER_ID")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or_else(|| {
+                let mut hash = 1469598103934665603u64;
+                for b in server_id.as_bytes() {
+                    hash ^= *b as u64;
+                    hash = hash.wrapping_mul(1099511628211);
+                }
+                hash
+            });
+        let engine = Arc::new(CrdtSyncEngine::new(std::path::Path::new(path), peer));
+        let service = Arc::new(VaultServiceImpl::new(path));
+        spawn_crdt_conflict_persister(engine.clone(), service.clone());
+        info!(vault = %path, peer, "Loro CRDT engine enabled");
+        (Some(engine), Some(service))
+    } else {
+        info!("TASK_VAULT is not set; Loro CRDT endpoint will report disabled");
+        (None, None)
+    };
+
+    let vault_enabled = vault_service.is_some();
+    let demo_seeded = env_truthy_default("TASK_SEED_DEMO", true);
+    let info_payload = ServerInfo {
+        name: server_name.clone(),
+        id: server_id,
+        public_base_url: auth_base_url.clone(),
+        db: db_label,
+        vault_enabled,
+        demo_seeded,
+    };
+
+    if demo_seeded {
+        seed_auth_data(&auth, &info_payload).await;
         info!("Auth mock data seeded");
         seed_mock_db(&db).await;
         info!("Mock DB data seeded");
+    } else {
+        info!("Demo seed disabled by TASK_SEED_DEMO=0");
     }
 
     let state = AppState {
         db,
         auth: auth.clone(),
-        info: ServerInfo {
-            name: server_name.clone(),
-            id: server_id,
-        },
+        crdt,
+        vault_service,
+        info: info_payload,
     };
 
     info!(name = %server_name, "server starting");
@@ -99,8 +148,11 @@ async fn main() -> eyre::Result<()> {
     let app = Router::new()
         // Vox WebSocket RPC — typed service calls over WebSocket
         .route("/vox", get(vox_ws_handler))
+        // Loro CRDT sync — realtime task document replication
+        .route("/crdt", get(crdt_ws_handler))
         // REST API — JSON endpoints for simple integrations
         .route("/api/info", get(server_info))
+        .route("/api/crdt/status", get(crdt_status))
         .route("/api/projects", get(list_projects_handler))
         .route("/api/projects/active", get(list_active_projects_handler))
         .route("/api/tasks", get(list_tasks_handler))
@@ -152,6 +204,44 @@ async fn main() -> eyre::Result<()> {
     info!("  JSON-RPC WS:   ws://{bind_addr}/vox");
     axum::serve(listener, app).await?;
     Ok(())
+}
+
+async fn init_server_db() -> eyre::Result<(sea_orm::DatabaseConnection, String)> {
+    if let Ok(url) = std::env::var("TASK_DATABASE_URL").or_else(|_| std::env::var("DATABASE_URL")) {
+        let db = task_db::init(&url).await?;
+        return Ok((db, redact_db_url(&url)));
+    }
+
+    if let Ok(path) = std::env::var("TASK_DB_PATH") {
+        if let Some(parent) = std::path::Path::new(&path).parent() {
+            if !parent.as_os_str().is_empty() {
+                std::fs::create_dir_all(parent)?;
+            }
+        }
+        let db = task_db::init_file(&path).await?;
+        return Ok((db, format!("sqlite://{path}")));
+    }
+
+    let db = task_db::init_memory().await?;
+    Ok((db, "sqlite::memory:".to_string()))
+}
+
+fn redact_db_url(url: &str) -> String {
+    if url.contains('@') {
+        "<database-url>".to_string()
+    } else {
+        url.to_string()
+    }
+}
+
+fn env_truthy_default(name: &str, default: bool) -> bool {
+    std::env::var(name)
+        .map(|v| match v.to_ascii_lowercase().as_str() {
+            "1" | "true" | "yes" | "on" => true,
+            "0" | "false" | "no" | "off" => false,
+            _ => default,
+        })
+        .unwrap_or(default)
 }
 
 // ── Mock data seeder (SQLite) ──────────────────────────────────────────────
@@ -456,7 +546,10 @@ async fn seed_mock_db(db: &sea_orm::DatabaseConnection) {
 }
 
 /// Seed mock users and organizations into better-auth.
-async fn seed_auth_data(auth: &Arc<better_auth::BetterAuth<SeaOrmAuthAdapter>>) {
+async fn seed_auth_data(
+    auth: &Arc<better_auth::BetterAuth<SeaOrmAuthAdapter>>,
+    server: &ServerInfo,
+) {
     let db = auth.database();
 
     // ── Users ───────────────────────────────────────────────────────
@@ -572,6 +665,9 @@ async fn seed_auth_data(auth: &Arc<better_auth::BetterAuth<SeaOrmAuthAdapter>>) 
                 "hue": org.hue,
                 "description": org.description,
                 "owner": org.owner,
+                "server_id": server.id,
+                "server_name": server.name,
+                "server_url": server.public_base_url,
             }));
         create.id = Some(org.id.to_string());
         if let Err(e) = db.create_organization(create).await {
@@ -599,6 +695,295 @@ fn hue_from_string(s: &str) -> u32 {
     hash % 360
 }
 
+// ── Loro CRDT sync ───────────────────────────────────────────────────────────
+
+async fn crdt_status(State(state): State<AppState>) -> Json<serde_json::Value> {
+    match state.crdt.as_ref() {
+        Some(engine) => Json(json!({
+            "enabled": true,
+            "peer": engine.local_peer().to_string(),
+            "loaded_documents": engine.loaded_count().await,
+        })),
+        None => Json(json!({
+            "enabled": false,
+            "reason": "TASK_VAULT is not set",
+        })),
+    }
+}
+
+async fn crdt_ws_handler(
+    ws: WebSocketUpgrade,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| handle_crdt_connection(socket, state))
+}
+
+async fn handle_crdt_connection(socket: WebSocket, state: AppState) {
+    let Some(engine) = state.crdt.clone() else {
+        return;
+    };
+
+    info!("Loro CRDT WebSocket client connected");
+
+    use futures::{SinkExt, StreamExt};
+    let (mut ws_tx, mut ws_rx) = socket.split();
+    let mut sync_rx = engine.subscribe();
+    let mut conflict_rx = engine.subscribe_conflicts();
+
+    let ready = json!({
+        "type": "ready",
+        "peer": engine.local_peer().to_string(),
+        "protocol": "task.loro.v1",
+    });
+    let _ = ws_tx.send(axum::extract::ws::Message::Text(ready.to_string().into())).await;
+
+    loop {
+        tokio::select! {
+            msg = ws_rx.next() => {
+                match msg {
+                    Some(Ok(msg)) => match msg {
+                    axum::extract::ws::Message::Text(text) => {
+                        let response = handle_crdt_request(&engine, &text).await;
+                        if let Some(response) = response {
+                            let _ = ws_tx.send(axum::extract::ws::Message::Text(response.to_string().into())).await;
+                        }
+                    }
+                    axum::extract::ws::Message::Binary(data) => {
+                        if let Ok(text) = std::str::from_utf8(&data) {
+                            let response = handle_crdt_request(&engine, text).await;
+                            if let Some(response) = response {
+                                let _ = ws_tx.send(axum::extract::ws::Message::Text(response.to_string().into())).await;
+                            }
+                        }
+                    }
+                    axum::extract::ws::Message::Ping(data) => {
+                        let _ = ws_tx.send(axum::extract::ws::Message::Pong(data)).await;
+                    }
+                    axum::extract::ws::Message::Close(_) => break,
+                    _ => {}
+                    },
+                    Some(Err(e)) => {
+                        warn!(error = %e, "Loro CRDT WebSocket receive error");
+                        break;
+                    }
+                    None => break,
+                };
+            }
+            recv = sync_rx.recv() => {
+                match recv {
+                    Ok(op) => {
+                        let event = sync_op_to_json(op);
+                        let _ = ws_tx.send(axum::extract::ws::Message::Text(event.to_string().into())).await;
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                        let event = json!({"type": "lagged", "skipped": skipped});
+                        let _ = ws_tx.send(axum::extract::ws::Message::Text(event.to_string().into())).await;
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                }
+            }
+            recv = conflict_rx.recv() => {
+                match recv {
+                    Ok(conflict) => {
+                        let event = json!({
+                            "type": "conflict",
+                            "path": conflict.file_path,
+                            "field": conflict.field,
+                            "losing_value": conflict.losing_value,
+                            "winning_value": conflict.winning_value,
+                            "losing_peer": conflict.losing_peer.map(|p| p.to_string()),
+                            "winning_peer": conflict.winning_peer.map(|p| p.to_string()),
+                        });
+                        let _ = ws_tx.send(axum::extract::ws::Message::Text(event.to_string().into())).await;
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                        let event = json!({"type": "conflict_lagged", "skipped": skipped});
+                        let _ = ws_tx.send(axum::extract::ws::Message::Text(event.to_string().into())).await;
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                }
+            }
+            else => break,
+        }
+    }
+
+    info!("Loro CRDT WebSocket client disconnected");
+}
+
+async fn handle_crdt_request(
+    engine: &Arc<CrdtSyncEngine>,
+    text: &str,
+) -> Option<serde_json::Value> {
+    let request: serde_json::Value = match serde_json::from_str(text) {
+        Ok(v) => v,
+        Err(e) => return Some(json!({"type": "error", "error": format!("invalid JSON: {e}")})),
+    };
+
+    let id = request.get("id").cloned().unwrap_or(serde_json::Value::Null);
+    let kind = request.get("type").and_then(|t| t.as_str()).unwrap_or("");
+    let path = request
+        .get("path")
+        .and_then(|p| p.as_str())
+        .unwrap_or("")
+        .trim_start_matches('/');
+
+    match kind {
+        "hello" => Some(json!({
+            "type": "ready",
+            "id": id,
+            "peer": engine.local_peer().to_string(),
+            "protocol": "task.loro.v1",
+        })),
+        "snapshot" => {
+            if path.is_empty() {
+                return Some(json!({"type": "error", "id": id, "error": "missing path"}));
+            }
+            match engine.export_snapshot(path).await {
+                Ok(Some(bytes)) => {
+                    let task = engine.task(path).await.map(task_to_crdt_json);
+                    Some(json!({
+                        "type": "snapshot",
+                        "id": id,
+                        "path": path,
+                        "data": encode_b64(&bytes),
+                        "task": task,
+                    }))
+                }
+                Ok(None) => Some(json!({"type": "error", "id": id, "path": path, "error": "document not found"})),
+                Err(e) => Some(json!({"type": "error", "id": id, "path": path, "error": e.to_string()})),
+            }
+        }
+        "task" => {
+            if path.is_empty() {
+                return Some(json!({"type": "error", "id": id, "error": "missing path"}));
+            }
+            let task = engine.task(path).await.map(task_to_crdt_json);
+            Some(json!({"type": "task", "id": id, "path": path, "task": task}))
+        }
+        "field" => {
+            let field = request.get("field").and_then(|f| f.as_str()).unwrap_or("");
+            let value = request.get("value").and_then(|v| v.as_str()).unwrap_or("");
+            if path.is_empty() || field.is_empty() {
+                return Some(json!({"type": "error", "id": id, "error": "missing path or field"}));
+            }
+            match engine.apply_field_change(path, field, value).await {
+                Ok(()) => Some(json!({"type": "ok", "id": id, "path": path})),
+                Err(e) => Some(json!({"type": "error", "id": id, "path": path, "error": e.to_string()})),
+            }
+        }
+        "body" => {
+            let body = request.get("body").and_then(|b| b.as_str()).unwrap_or("");
+            if path.is_empty() {
+                return Some(json!({"type": "error", "id": id, "error": "missing path"}));
+            }
+            match engine.apply_body_change(path, body).await {
+                Ok(()) => Some(json!({"type": "ok", "id": id, "path": path})),
+                Err(e) => Some(json!({"type": "error", "id": id, "path": path, "error": e.to_string()})),
+            }
+        }
+        "update" => {
+            let Some(data) = request.get("data").and_then(|d| d.as_str()) else {
+                return Some(json!({"type": "error", "id": id, "error": "missing data"}));
+            };
+            if path.is_empty() {
+                return Some(json!({"type": "error", "id": id, "error": "missing path"}));
+            }
+            let bytes = match decode_b64(data) {
+                Ok(bytes) => bytes,
+                Err(e) => return Some(json!({"type": "error", "id": id, "path": path, "error": e})),
+            };
+            match engine.apply_remote_update(path, &bytes).await {
+                Ok(()) => Some(json!({"type": "ok", "id": id, "path": path})),
+                Err(e) => Some(json!({"type": "error", "id": id, "path": path, "error": e.to_string()})),
+            }
+        }
+        "subscribe" => Some(json!({"type": "ok", "id": id, "subscribed": true})),
+        _ => Some(json!({"type": "error", "id": id, "error": format!("unknown CRDT message type: {kind}")})),
+    }
+}
+
+fn sync_op_to_json(op: SyncOp) -> serde_json::Value {
+    match op {
+        SyncOp::FieldChanged { file_path, field, value, peer } => json!({
+            "type": "field_changed",
+            "path": file_path,
+            "field": field,
+            "value": value,
+            "peer": peer.map(|p| p.to_string()),
+        }),
+        SyncOp::DocUpdate { file_path, update } => json!({
+            "type": "doc_update",
+            "path": file_path,
+            "data": encode_b64(&update),
+        }),
+        SyncOp::TaskCreated { file_path, task } => json!({
+            "type": "task_created",
+            "path": file_path,
+            "task": task_to_crdt_json(task),
+        }),
+        SyncOp::TaskDeleted { file_path } => json!({
+            "type": "task_deleted",
+            "path": file_path,
+        }),
+        SyncOp::Refresh => json!({"type": "refresh"}),
+    }
+}
+
+fn task_to_crdt_json(task: task_core::Task) -> serde_json::Value {
+    json!({
+        "id": task.id,
+        "title": task.title,
+        "status": format!("{:?}", task.status),
+        "priority": format!("{:?}", task.priority),
+        "projects": task.projects.into_iter().map(|p| p.0).collect::<Vec<_>>(),
+        "contexts": task.contexts,
+        "tags": task.tags,
+        "due": task.due.map(|d| d.to_string()),
+        "scheduled": task.scheduled.map(|d| d.to_string()),
+        "assignee": task.assignee,
+        "body": task.body,
+    })
+}
+
+fn encode_b64(bytes: &[u8]) -> String {
+    base64::engine::general_purpose::STANDARD.encode(bytes)
+}
+
+fn decode_b64(data: &str) -> Result<Vec<u8>, String> {
+    base64::engine::general_purpose::STANDARD
+        .decode(data)
+        .map_err(|e| format!("invalid base64: {e}"))
+}
+
+fn spawn_crdt_conflict_persister(
+    engine: Arc<CrdtSyncEngine>,
+    vault_service: Arc<VaultServiceImpl>,
+) {
+    tokio::spawn(async move {
+        let mut conflicts = engine.subscribe_conflicts();
+        while let Ok(conflict) = conflicts.recv().await {
+            let winning_peer = conflict.winning_peer.map(|p| p.to_string());
+            let losing_peer = conflict.losing_peer.map(|p| p.to_string());
+            let result = vault_service
+                .record_conflict(
+                    "task",
+                    &conflict.file_path,
+                    &conflict.field,
+                    conflict.winning_value.as_deref(),
+                    conflict.losing_value.as_deref(),
+                    winning_peer.as_deref(),
+                    losing_peer.as_deref(),
+                    Some(&conflict.file_path),
+                    "concurrent",
+                )
+                .await;
+            if let Err(e) = result {
+                warn!(path = %conflict.file_path, field = %conflict.field, error = %e, "failed to persist CRDT conflict");
+            }
+        }
+    });
+}
+
 // ── Vox WebSocket handler ────────────────────────────────────────────────────
 
 async fn vox_ws_handler(
@@ -620,7 +1005,7 @@ async fn handle_vox_connection(socket: WebSocket, state: AppState) {
                 if let Ok(text) = std::str::from_utf8(&data) {
                     if let Ok(request) = serde_json::from_str::<serde_json::Value>(text) {
                         let method = request.get("method").and_then(|m| m.as_str()).unwrap_or("");
-                        let response = dispatch_rpc(&state.db, &state.auth, method, &request).await;
+                        let response = dispatch_rpc(&state, method, &request).await;
                         let response_bytes = serde_json::to_vec(&response).unwrap_or_default();
                         let _ = ws_tx.send(axum::extract::ws::Message::Binary(response_bytes.into())).await;
                     }
@@ -629,7 +1014,7 @@ async fn handle_vox_connection(socket: WebSocket, state: AppState) {
             axum::extract::ws::Message::Text(text) => {
                 if let Ok(request) = serde_json::from_str::<serde_json::Value>(&text) {
                     let method = request.get("method").and_then(|m| m.as_str()).unwrap_or("");
-                    let response = dispatch_rpc(&state.db, &state.auth, method, &request).await;
+                    let response = dispatch_rpc(&state, method, &request).await;
                     let response_text = serde_json::to_string(&response).unwrap_or_default();
                     let _ = ws_tx.send(axum::extract::ws::Message::Text(response_text.into())).await;
                 }
@@ -684,14 +1069,373 @@ fn task_to_api(t: &task::Model) -> serde_json::Value {
     })
 }
 
-/// Dispatch a JSON-RPC-style request to the database.
+fn vault_task_to_api(t: task_core::Task) -> serde_json::Value {
+    json!({
+        "title": t.title,
+        "status": format!("{:?}", t.status),
+        "priority": format!("{:?}", t.priority),
+        "assignee": t.assignee,
+        "due": t.due.map(|d| d.to_string()),
+        "projects": t.projects.into_iter().map(|p| p.0).collect::<Vec<_>>(),
+        "tags": t.tags,
+        "body": if t.body.is_empty() { None::<String> } else { Some(t.body) },
+    })
+}
+
+fn vault_project_to_api(p: task_core::Project) -> serde_json::Value {
+    let hue = hue_from_string(&p.title);
+    let today = chrono::Local::now().date_naive();
+    let slug = slug::slugify(&p.title);
+    let status = format!("{:?}", p.status);
+    let is_overdue = p.due.map_or(false, |d| d < today) && status != "Completed" && status != "Archived";
+    json!({
+        "title": p.title,
+        "slug": slug,
+        "status": status.to_lowercase(),
+        "area": p.area,
+        "due": p.due.map(|d| d.to_string()),
+        "team": p.team,
+        "is_overdue": is_overdue,
+        "hue": hue,
+        "project_type": p.project_type,
+        "organization": p.organization,
+        "description": p.description,
+        "repo": p.repo,
+        "workflow": p.workflow,
+        "workflow_stage": p.workflow_stage,
+        "parent": p.up.first().map(|p| slug::slugify(&p.0)),
+        "references": p.references.into_iter().map(|r| r.0).collect::<Vec<_>>(),
+    })
+}
+
+async fn dispatch_vault_rpc(
+    state: &AppState,
+    method: &str,
+    request: &serde_json::Value,
+) -> Option<serde_json::Value> {
+    let svc = state.vault_service.as_ref()?;
+    let params = request.get("params").cloned().unwrap_or_default();
+
+    match method {
+        "list_tasks" => {
+            let tasks = svc.list_tasks().await;
+            Some(json!({"result": tasks.into_iter().map(vault_task_to_api).collect::<Vec<_>>(), "error": null}))
+        }
+        "create_task" => {
+            let mut task = task_from_params(&params);
+            if task.title.is_empty() {
+                task.title = "Untitled".to_string();
+            }
+            match svc.create_task(task).await {
+                Ok(created) => {
+                    notify_crdt_file_changed(state, &created.title).await;
+                    Some(json!({"result": vault_task_to_api(created), "error": null}))
+                }
+                Err(e) => Some(json!({"error": e.to_string()})),
+            }
+        }
+        "task_detail" => {
+            let Some(title) = params.get("title").and_then(|t| t.as_str()) else {
+                return Some(json!({"error": "missing params.title"}));
+            };
+            let task = find_vault_task(svc, title).await;
+            Some(match task {
+                Some(t) => json!({
+                    "result": {
+                        "task": vault_task_to_api(t),
+                        "subtasks": [],
+                        "subtask_progress": null,
+                        "comments": [],
+                    },
+                    "error": null
+                }),
+                None => json!({"error": format!("task not found: {title}")}),
+            })
+        }
+        "update_task" => {
+            let Some(title) = params.get("title").and_then(|t| t.as_str()) else {
+                return Some(json!({"error": "missing params.title"}));
+            };
+            let Some(mut task) = find_vault_task(svc, title).await else {
+                return Some(json!({"error": format!("task not found: {title}")}));
+            };
+            apply_task_params(&mut task, &params);
+            match svc.update_task(task.clone()).await {
+                Ok(updated) => {
+                    notify_crdt_file_changed(state, title).await;
+                    if updated.title != title {
+                        notify_crdt_file_changed(state, &updated.title).await;
+                    }
+                    Some(json!({"result": vault_task_to_api(updated), "error": null}))
+                }
+                Err(e) => Some(json!({"error": e.to_string()})),
+            }
+        }
+        "complete_task" => {
+            let Some(title) = params.get("title").and_then(|t| t.as_str()) else {
+                return Some(json!({"error": "missing params.title"}));
+            };
+            match svc.complete_task(title.to_string()).await {
+                Ok(updated) => {
+                    notify_crdt_file_changed(state, title).await;
+                    Some(json!({"result": vault_task_to_api(updated), "error": null}))
+                }
+                Err(e) => Some(json!({"error": e.to_string()})),
+            }
+        }
+        "search_tasks" => {
+            let q = params.get("query").and_then(|q| q.as_str()).unwrap_or("");
+            let tasks = svc.search_tasks(q.to_string()).await;
+            Some(json!({"result": tasks.into_iter().map(vault_task_to_api).collect::<Vec<_>>(), "error": null}))
+        }
+        "tasks_for_user" => {
+            let Some(username) = params.get("username").and_then(|u| u.as_str()) else {
+                return Some(json!({"error": "missing params.username"}));
+            };
+            let tasks = svc.tasks_for_user(username.to_string()).await;
+            Some(json!({"result": tasks.into_iter().map(vault_task_to_api).collect::<Vec<_>>(), "error": null}))
+        }
+        "tasks_for_project" => {
+            let Some(project) = params.get("project").and_then(|p| p.as_str()) else {
+                return Some(json!({"error": "missing params.project"}));
+            };
+            let tasks = svc.tasks_for_project(project.to_string()).await;
+            Some(json!({"result": tasks.into_iter().map(vault_task_to_api).collect::<Vec<_>>(), "error": null}))
+        }
+        "list_projects" | "list_active_projects" => {
+            let mut projects = svc.list_projects().await;
+            if method == "list_active_projects" {
+                projects.retain(|p| p.is_active() && p.up.is_empty());
+            }
+            Some(json!({"result": projects.into_iter().map(vault_project_to_api).collect::<Vec<_>>(), "error": null}))
+        }
+        "project_detail" => {
+            let Some(title) = params.get("title").and_then(|t| t.as_str()) else {
+                return Some(json!({"error": "missing params.title"}));
+            };
+            let slug_title = slug::slugify(title);
+            let project = svc
+                .list_projects()
+                .await
+                .into_iter()
+                .find(|p| p.title == title || slug::slugify(&p.title) == slug_title);
+            Some(match project {
+                Some(p) => {
+                    let tasks = svc.tasks_for_project(p.title.clone()).await;
+                    let done = tasks.iter().filter(|t| t.is_complete()).count();
+                    let by_status = |status: task_core::Status| -> Vec<serde_json::Value> {
+                        tasks
+                            .iter()
+                            .filter(|t| t.status == status)
+                            .cloned()
+                            .map(vault_task_to_api)
+                            .collect()
+                    };
+                    json!({
+                        "result": {
+                            "project": vault_project_to_api(p),
+                            "total_tasks": tasks.len(),
+                            "done_tasks": done,
+                            "tasks_by_status": {
+                                "open": by_status(task_core::Status::Open),
+                                "in_progress": by_status(task_core::Status::InProgress),
+                                "planned": by_status(task_core::Status::Planned),
+                                "on_hold": by_status(task_core::Status::OnHold),
+                                "done": by_status(task_core::Status::Done),
+                            },
+                            "all_tasks": tasks.into_iter().map(vault_task_to_api).collect::<Vec<_>>(),
+                            "workflow": {},
+                            "children": [],
+                            "referenced_projects": [],
+                        },
+                        "error": null
+                    })
+                }
+                None => json!({"error": format!("project not found: {title}")}),
+            })
+        }
+        "command_center" => {
+            let projects = svc.list_projects().await;
+            let tasks = svc.list_tasks().await;
+            let today = chrono::Local::now().date_naive();
+            let items = projects
+                .into_iter()
+                .filter(|p| p.is_active() && p.up.is_empty())
+                .map(|p| {
+                    let project_tasks: Vec<_> = tasks
+                        .iter()
+                        .filter(|t| t.projects.iter().any(|tp| tp.0 == p.title))
+                        .collect();
+                    let open_tasks: Vec<_> = project_tasks
+                        .iter()
+                        .copied()
+                        .filter(|t| !t.is_complete() && t.status != task_core::Status::Cancelled)
+                        .collect();
+                    let done = project_tasks.iter().filter(|t| t.is_complete()).count();
+                    let urgent_count = open_tasks.iter().filter(|t| t.priority == task_core::Priority::Urgent).count();
+                    let overdue_count = open_tasks.iter().filter(|t| t.due.map_or(false, |d| d < today)).count();
+                    let in_progress = open_tasks.iter().filter(|t| t.status == task_core::Status::InProgress).count();
+                    let mut next_candidates = open_tasks.clone();
+                    next_candidates.sort_by_key(|t| std::cmp::Reverse(t.urgency_score()));
+                    let next_task = next_candidates.first().map(|t| vault_task_to_api((*t).clone()));
+                    let notifications = urgent_count + overdue_count;
+                    json!({
+                        "project": vault_project_to_api(p),
+                        "total_tasks": project_tasks.len(),
+                        "done_tasks": done,
+                        "open_tasks": open_tasks.len(),
+                        "in_progress": in_progress,
+                        "urgent_count": urgent_count,
+                        "overdue_count": overdue_count,
+                        "notifications": notifications,
+                        "next_task": next_task,
+                    })
+                })
+                .collect::<Vec<_>>();
+            Some(json!({"result": items, "error": null}))
+        }
+        "list_notifications" => {
+            let tasks = svc.list_tasks().await;
+            let today = chrono::Local::now().date_naive();
+            let mut notifs = Vec::new();
+            for t in tasks {
+                if !t.is_complete() {
+                    if let Some(due) = t.due {
+                        if due < today {
+                            notifs.push(json!({
+                                "id": format!("overdue-{}", t.title),
+                                "message": format!("{} is overdue (due {})", t.title, due),
+                                "actor": t.assignee,
+                                "time_ago": format!("{} days ago", (today - due).num_days()),
+                                "read": false,
+                                "kind": "overdue",
+                            }));
+                        } else if (due - today).num_days() <= 2 {
+                            notifs.push(json!({
+                                "id": format!("due-soon-{}", t.title),
+                                "message": format!("{} is due {}", t.title, if due == today { "today".to_string() } else { format!("in {} day(s)", (due - today).num_days()) }),
+                                "actor": t.assignee,
+                                "time_ago": "upcoming",
+                                "read": false,
+                                "kind": "due_reminder",
+                            }));
+                        }
+                    }
+                    if t.priority == task_core::Priority::Urgent {
+                        notifs.push(json!({
+                            "id": format!("urgent-{}", t.title),
+                            "message": format!("{} is marked urgent", t.title),
+                            "actor": t.assignee,
+                            "time_ago": "active",
+                            "read": true,
+                            "kind": "urgent",
+                        }));
+                    }
+                }
+            }
+            notifs.truncate(20);
+            Some(json!({"result": notifs, "error": null}))
+        }
+        _ => None,
+    }
+}
+
+async fn find_vault_task(svc: &VaultServiceImpl, title: &str) -> Option<task_core::Task> {
+    let slug_title = slug::slugify(title);
+    svc.list_tasks()
+        .await
+        .into_iter()
+        .find(|t| t.title == title || slug::slugify(&t.title) == slug_title || t.id.as_deref() == Some(title))
+}
+
+fn task_from_params(params: &serde_json::Value) -> task_core::Task {
+    let mut task = task_core::Task::default();
+    apply_task_params(&mut task, params);
+    task
+}
+
+fn apply_task_params(task: &mut task_core::Task, params: &serde_json::Value) {
+    if let Some(title) = params.get("title").and_then(|t| t.as_str()) {
+        task.title = title.to_string();
+    }
+    if let Some(status) = params.get("status").and_then(|s| s.as_str()).and_then(parse_vault_status) {
+        task.status = status;
+    }
+    if let Some(priority) = params.get("priority").and_then(|p| p.as_str()).and_then(parse_vault_priority) {
+        task.priority = priority;
+    }
+    if let Some(assignee) = params.get("assignee").and_then(|a| a.as_str()) {
+        task.assignee = if assignee.is_empty() { None } else { Some(assignee.to_string()) };
+    }
+    if let Some(due) = params.get("due").and_then(|d| d.as_str()) {
+        task.due = chrono::NaiveDate::parse_from_str(due, "%Y-%m-%d").ok();
+    }
+    if let Some(project) = params.get("project").and_then(|p| p.as_str()) {
+        task.projects = vec![task_core::WikiLink(project.to_string())];
+    }
+    if let Some(projects) = params.get("projects").and_then(|p| p.as_array()) {
+        task.projects = projects
+            .iter()
+            .filter_map(|p| p.as_str().map(|s| task_core::WikiLink(s.to_string())))
+            .collect();
+    }
+    if let Some(tags) = params.get("tags").and_then(|t| t.as_array()) {
+        task.tags = tags.iter().filter_map(|t| t.as_str().map(str::to_string)).collect();
+    }
+    if let Some(body) = params.get("body").and_then(|b| b.as_str()) {
+        task.body = body.to_string();
+    }
+}
+
+fn parse_vault_status(s: &str) -> Option<task_core::Status> {
+    match s.to_ascii_lowercase().as_str() {
+        "none" => Some(task_core::Status::None),
+        "open" => Some(task_core::Status::Open),
+        "inprogress" | "in-progress" | "in_progress" => Some(task_core::Status::InProgress),
+        "onhold" | "on-hold" | "on_hold" => Some(task_core::Status::OnHold),
+        "planned" => Some(task_core::Status::Planned),
+        "done" => Some(task_core::Status::Done),
+        "cancelled" | "canceled" => Some(task_core::Status::Cancelled),
+        "archived" => Some(task_core::Status::Archived),
+        _ => None,
+    }
+}
+
+fn parse_vault_priority(s: &str) -> Option<task_core::Priority> {
+    match s.to_ascii_lowercase().as_str() {
+        "none" => Some(task_core::Priority::None),
+        "low" => Some(task_core::Priority::Low),
+        "normal" => Some(task_core::Priority::Normal),
+        "high" => Some(task_core::Priority::High),
+        "urgent" => Some(task_core::Priority::Urgent),
+        _ => None,
+    }
+}
+
+async fn notify_crdt_file_changed(state: &AppState, title: &str) {
+    if let Some(engine) = state.crdt.as_ref() {
+        let path = format!("{title}.md");
+        if let Err(e) = engine.on_file_changed(&path).await {
+            warn!(path = %path, error = %e, "failed to publish vault change to CRDT engine");
+        }
+    }
+}
+
+/// Dispatch a JSON-RPC-style request. When TASK_VAULT is configured, task and
+/// project operations use the markdown vault and Loro engine; the in-memory DB
+/// remains as a fallback for auth/demo-only surfaces.
 async fn dispatch_rpc(
-    db: &sea_orm::DatabaseConnection,
-    auth: &Arc<better_auth::BetterAuth<SeaOrmAuthAdapter>>,
+    state: &AppState,
     method: &str,
     request: &serde_json::Value,
 ) -> serde_json::Value {
     info!(method = method, "RPC dispatch");
+    if let Some(response) = dispatch_vault_rpc(state, method, request).await {
+        return response;
+    }
+
+    let db = &state.db;
+    let auth = &state.auth;
     match method {
         "list_tasks" => {
             match task::Entity::find().all(db).await {
@@ -1142,6 +1886,9 @@ async fn dispatch_rpc(
                     "hue": meta.and_then(|m| m.get("hue")).and_then(|h| h.as_u64()).unwrap_or(0),
                     "description": meta.and_then(|m| m.get("description")).and_then(|d| d.as_str()).unwrap_or(""),
                     "owner": meta.and_then(|m| m.get("owner")).and_then(|o| o.as_str()).unwrap_or(""),
+                    "server_id": meta.and_then(|m| m.get("server_id")).and_then(|s| s.as_str()).unwrap_or(&state.info.id),
+                    "server_name": meta.and_then(|m| m.get("server_name")).and_then(|s| s.as_str()).unwrap_or(&state.info.name),
+                    "server_url": meta.and_then(|m| m.get("server_url")).and_then(|s| s.as_str()).unwrap_or(&state.info.public_base_url),
                     "members": member_names,
                 }));
             }
@@ -1327,6 +2074,20 @@ async fn list_projects_handler(
     State(state): State<AppState>,
     AxumQuery(filter): AxumQuery<ProjectFilter>,
 ) -> impl IntoResponse {
+    if let Some(svc) = state.vault_service.as_ref() {
+        let mut projects = svc.list_projects().await;
+        if let Some(ref area) = filter.area {
+            projects.retain(|p| p.area.as_deref() == Some(area.as_str()));
+        }
+        if let Some(ref status) = filter.status {
+            projects.retain(|p| format!("{:?}", p.status).eq_ignore_ascii_case(status));
+        }
+        if let Some(ref pt) = filter.project_type {
+            projects.retain(|p| p.project_type.as_deref() == Some(pt.as_str()));
+        }
+        return Json(projects.into_iter().map(vault_project_to_api).collect::<Vec<_>>());
+    }
+
     let mut query = project::Entity::find();
     if let Some(ref area) = filter.area {
         query = query.filter(project::Column::Area.eq(area));
@@ -1342,6 +2103,17 @@ async fn list_projects_handler(
 }
 
 async fn list_active_projects_handler(State(state): State<AppState>) -> impl IntoResponse {
+    if let Some(svc) = state.vault_service.as_ref() {
+        let projects = svc
+            .list_projects()
+            .await
+            .into_iter()
+            .filter(|p| p.is_active() && p.deleted_at.is_none() && p.archived_at.is_none())
+            .map(vault_project_to_api)
+            .collect::<Vec<_>>();
+        return Json(projects);
+    }
+
     let projects = project::Entity::find()
         .filter(project::Column::Status.eq("Active"))
         .filter(project::Column::DeletedAt.is_null())
@@ -1351,6 +2123,11 @@ async fn list_active_projects_handler(State(state): State<AppState>) -> impl Int
 }
 
 async fn list_tasks_handler(State(state): State<AppState>) -> impl IntoResponse {
+    if let Some(svc) = state.vault_service.as_ref() {
+        let tasks = svc.list_tasks().await;
+        return Json(tasks.into_iter().map(vault_task_to_api).collect::<Vec<_>>());
+    }
+
     let tasks = task::Entity::find().all(&state.db).await.unwrap_or_default();
     Json(tasks.iter().map(task_to_api).collect::<Vec<_>>())
 }
@@ -1378,6 +2155,27 @@ async fn create_task_api(
     State(state): State<AppState>,
     Json(req): Json<CreateTaskRequest>,
 ) -> impl IntoResponse {
+    if let Some(svc) = state.vault_service.as_ref() {
+        let params = json!({
+            "title": req.title,
+            "status": req.status,
+            "priority": req.priority,
+            "assignee": req.assignee,
+            "due": req.due,
+            "project": req.project,
+            "tags": req.tags,
+            "body": req.body,
+        });
+        let task = task_from_params(&params);
+        return match svc.create_task(task).await {
+            Ok(created) => {
+                notify_crdt_file_changed(&state, &created.title).await;
+                Json(json!({"task": vault_task_to_api(created)}))
+            }
+            Err(e) => Json(json!({"error": e.to_string()})),
+        };
+    }
+
     let now = Utc::now();
     let model = task::ActiveModel {
         id: Set(Uuid::new_v4()),
@@ -1414,6 +2212,16 @@ async fn complete_task_api(
     State(state): State<AppState>,
     axum::extract::Path(title): axum::extract::Path<String>,
 ) -> impl IntoResponse {
+    if let Some(svc) = state.vault_service.as_ref() {
+        return match svc.complete_task(title.clone()).await {
+            Ok(updated) => {
+                notify_crdt_file_changed(&state, &title).await;
+                Json(json!({"task": vault_task_to_api(updated)}))
+            }
+            Err(e) => Json(json!({"error": e.to_string()})),
+        };
+    }
+
     match task::Entity::find().filter(task::Column::Title.eq(&title)).one(&state.db).await {
         Ok(Some(existing)) => {
             let mut active: task::ActiveModel = existing.into();
@@ -1434,6 +2242,13 @@ async fn get_task(
     State(state): State<AppState>,
     axum::extract::Path(title): axum::extract::Path<String>,
 ) -> impl IntoResponse {
+    if let Some(svc) = state.vault_service.as_ref() {
+        return match find_vault_task(svc, &title).await {
+            Some(task) => Json(json!({"task": vault_task_to_api(task)})),
+            None => Json(json!({"error": "not found"})),
+        };
+    }
+
     match task::Entity::find().filter(task::Column::Title.eq(&title)).one(&state.db).await {
         Ok(Some(t)) => Json(serde_json::json!({"task": task_to_api(&t)})),
         Ok(None) => Json(serde_json::json!({"error": "not found"})),
@@ -1445,6 +2260,11 @@ async fn tasks_by_user(
     State(state): State<AppState>,
     axum::extract::Path(username): axum::extract::Path<String>,
 ) -> impl IntoResponse {
+    if let Some(svc) = state.vault_service.as_ref() {
+        let tasks = svc.tasks_for_user(username).await;
+        return Json(json!({"tasks": tasks.into_iter().map(vault_task_to_api).collect::<Vec<_>>()}));
+    }
+
     let tasks = task::Entity::find()
         .filter(task::Column::Assignee.eq(&username))
         .all(&state.db).await.unwrap_or_default();

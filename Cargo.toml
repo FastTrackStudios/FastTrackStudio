@@ -54,7 +54,7 @@ version = "0.44.1"
 version = "0.44.1"
 
 [workspace.dependencies.fts-ui]
-path = "../FastTrackStudio/Plugins/fts-ui/crates/fts-ui"
+path = "../FastTrackStudio/fts-ui/crates/fts-ui"
 
 [workspace.dependencies.lucide-dioxus]
 git = "https://github.com/Leaf-Computer/lucide.git"
@@ -78,7 +78,8 @@ features = ["derive"]
 version = "1"
 
 [workspace.dependencies.shm-primitives]
-path = "../FastTrackStudio/vox/rust/shm-primitives"
+git = "https://github.com/Codys-Wright/vox"
+rev = "4103658f29c88ffd913314903f16e327c5248cdb"
 
 [workspace.dependencies.task-ui]
 path = "crates/task-ui"
@@ -102,28 +103,40 @@ features = [
 path = "crates/task-core"
 
 [workspace.dependencies.vox]
-path = "../FastTrackStudio/vox/rust/vox"
+git = "https://github.com/Codys-Wright/vox"
+rev = "4103658f29c88ffd913314903f16e327c5248cdb"
 
 [workspace.dependencies.vox-core]
-path = "../FastTrackStudio/vox/rust/vox-core"
+git = "https://github.com/Codys-Wright/vox"
+rev = "4103658f29c88ffd913314903f16e327c5248cdb"
+
+[workspace.dependencies.vox-codegen]
+git = "https://github.com/Codys-Wright/vox"
+rev = "4103658f29c88ffd913314903f16e327c5248cdb"
 
 [workspace.dependencies.vox-inprocess]
-path = "../FastTrackStudio/vox/rust/vox-inprocess"
+git = "https://github.com/Codys-Wright/vox"
+rev = "4103658f29c88ffd913314903f16e327c5248cdb"
 
 [workspace.dependencies.vox-local]
-path = "../FastTrackStudio/vox/rust/vox-local"
+git = "https://github.com/Codys-Wright/vox"
+rev = "4103658f29c88ffd913314903f16e327c5248cdb"
 
 [workspace.dependencies.vox-schema]
-path = "../FastTrackStudio/vox/rust/vox-schema"
+git = "https://github.com/Codys-Wright/vox"
+rev = "4103658f29c88ffd913314903f16e327c5248cdb"
 
 [workspace.dependencies.vox-stream]
-path = "../FastTrackStudio/vox/rust/vox-stream"
+git = "https://github.com/Codys-Wright/vox"
+rev = "4103658f29c88ffd913314903f16e327c5248cdb"
 
 [workspace.dependencies.vox-types]
-path = "../FastTrackStudio/vox/rust/vox-types"
+git = "https://github.com/Codys-Wright/vox"
+rev = "4103658f29c88ffd913314903f16e327c5248cdb"
 
 [workspace.dependencies.vox-websocket]
-path = "../FastTrackStudio/vox/rust/vox-websocket"
+git = "https://github.com/Codys-Wright/vox"
+rev = "4103658f29c88ffd913314903f16e327c5248cdb"
 
 [workspace.dependencies.sea-orm]
 path = "../FastTrackStudio/sea-orm"

@@ -224,6 +224,32 @@ impl CrdtSyncEngine {
         Ok(())
     }
 
+    /// Replace the markdown body for a document and broadcast the resulting
+    /// Loro update. This is the server-side entry point for clients that edit
+    /// prose without constructing their own Loro update bytes.
+    pub async fn apply_body_change(
+        &self,
+        rel_path: &str,
+        body: &str,
+    ) -> Result<(), VaultError> {
+        self.get_or_load(rel_path).await;
+
+        let docs = self.documents.read().await;
+        if let Some(doc) = docs.get(rel_path) {
+            let before = doc.version_vector();
+            doc.set_body(body);
+            doc.commit();
+            let update = doc.export_updates_since(&before)?;
+
+            let _ = self.broadcast_tx.send(SyncOp::DocUpdate {
+                file_path: rel_path.to_string(),
+                update,
+            });
+            let _ = self.write_tx.send(rel_path.to_string()).await;
+        }
+        Ok(())
+    }
+
     /// Apply a remote Loro update. Detects concurrent writes: for every
     /// conflict-relevant field we held a value for, check whether the import
     /// overwrote it with a value written by a different peer. Each collision
@@ -271,6 +297,23 @@ impl CrdtSyncEngine {
 
     pub async fn loaded_count(&self) -> usize {
         self.documents.read().await.len()
+    }
+
+    /// Export a full Loro snapshot for a document, loading it from disk if
+    /// needed. Clients use this as the initial sync payload.
+    pub async fn export_snapshot(&self, rel_path: &str) -> Result<Option<Vec<u8>>, VaultError> {
+        self.get_or_load(rel_path).await;
+
+        let docs = self.documents.read().await;
+        match docs.get(rel_path) {
+            Some(doc) => doc.export_snapshot().map(Some),
+            None => Ok(None),
+        }
+    }
+
+    /// Return the current server view of a task document.
+    pub async fn task(&self, rel_path: &str) -> Option<Task> {
+        self.get_or_load(rel_path).await
     }
 }
 

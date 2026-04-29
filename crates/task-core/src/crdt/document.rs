@@ -17,7 +17,7 @@
 
 use std::collections::BTreeMap;
 
-use loro::{ExportMode, LoroDoc, LoroList, LoroText, LoroValue, PeerID, ValueOrContainer};
+use loro::{ExportMode, LoroDoc, LoroList, LoroValue, PeerID, ValueOrContainer};
 
 use crate::service::VaultError;
 use crate::task::{Priority, Status, Task, WikiLink};

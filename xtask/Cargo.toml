@@ -10,6 +10,6 @@ path = "src/main.rs"
 
 [dependencies]
 task-core.workspace = true
-vox-codegen     = { path = "../../FastTrackStudio/vox/rust/vox-codegen" }
-vox-types       = { path = "../../FastTrackStudio/vox/rust/vox-types" }
+vox-codegen.workspace = true
+vox-types.workspace = true
 xshell          = "0.2"
