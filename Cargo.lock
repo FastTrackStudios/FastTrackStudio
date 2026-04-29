@@ -3167,6 +3167,7 @@ dependencies = [
  "dioxus",
  "dioxus-primitives",
  "lucide-dioxus",
+ "time",
  "tracing",
  "tw_merge",
 ]

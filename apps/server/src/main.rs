@@ -1090,14 +1090,13 @@ async fn dispatch_vault_rpc(
 ) -> Option<serde_json::Value> {
     let svc = state.vault_service.as_ref()?;
     let params = request.get("params").cloned().unwrap_or_default();
-    let method = canonical_vault_rpc_method(method);
 
     match method {
-        "list_tasks" => {
+        "TaskService.listTasks" => {
             let tasks = svc.list_tasks().await;
             Some(json!({"result": tasks.into_iter().map(vault_task_to_api).collect::<Vec<_>>(), "error": null}))
         }
-        "create_task" => {
+        "TaskService.createTask" => {
             let mut task = task_from_params(&params);
             if task.title.is_empty() {
                 task.title = "Untitled".to_string();
@@ -1110,25 +1109,7 @@ async fn dispatch_vault_rpc(
                 Err(e) => Some(json!({"error": e.to_string()})),
             }
         }
-        "task_detail" => {
-            let Some(title) = params.get("title").and_then(|t| t.as_str()) else {
-                return Some(json!({"error": "missing params.title"}));
-            };
-            let task = find_vault_task(svc, title).await;
-            Some(match task {
-                Some(t) => json!({
-                    "result": {
-                        "task": vault_task_to_api(t),
-                        "subtasks": [],
-                        "subtask_progress": null,
-                        "comments": [],
-                    },
-                    "error": null
-                }),
-                None => json!({"error": format!("task not found: {title}")}),
-            })
-        }
-        "update_task" => {
+        "TaskService.updateTask" => {
             let Some(title) = params.get("title").and_then(|t| t.as_str()) else {
                 return Some(json!({"error": "missing params.title"}));
             };
@@ -1147,7 +1128,7 @@ async fn dispatch_vault_rpc(
                 Err(e) => Some(json!({"error": e.to_string()})),
             }
         }
-        "complete_task" => {
+        "TaskService.completeTask" => {
             let Some(title) = params.get("title").and_then(|t| t.as_str()) else {
                 return Some(json!({"error": "missing params.title"}));
             };
@@ -1159,33 +1140,33 @@ async fn dispatch_vault_rpc(
                 Err(e) => Some(json!({"error": e.to_string()})),
             }
         }
-        "search_tasks" => {
+        "TaskService.searchTasks" => {
             let q = params.get("query").and_then(|q| q.as_str()).unwrap_or("");
             let tasks = svc.search_tasks(q.to_string()).await;
             Some(json!({"result": tasks.into_iter().map(vault_task_to_api).collect::<Vec<_>>(), "error": null}))
         }
-        "tasks_for_user" => {
+        "TaskService.tasksForUser" => {
             let Some(username) = params.get("username").and_then(|u| u.as_str()) else {
                 return Some(json!({"error": "missing params.username"}));
             };
             let tasks = svc.tasks_for_user(username.to_string()).await;
             Some(json!({"result": tasks.into_iter().map(vault_task_to_api).collect::<Vec<_>>(), "error": null}))
         }
-        "tasks_due_by" => {
+        "CalendarService.tasksDueBy" => {
             let Some(date) = params.get("date").and_then(|d| d.as_str()) else {
                 return Some(json!({"error": "missing params.date"}));
             };
             let tasks = svc.tasks_due_by(date.to_string()).await;
             Some(json!({"result": tasks.into_iter().map(vault_task_to_api).collect::<Vec<_>>(), "error": null}))
         }
-        "tasks_for_project" => {
+        "ProjectService.tasksForProject" => {
             let Some(project) = params.get("project").and_then(|p| p.as_str()) else {
                 return Some(json!({"error": "missing params.project"}));
             };
             let tasks = svc.tasks_for_project(project.to_string()).await;
             Some(json!({"result": tasks.into_iter().map(vault_task_to_api).collect::<Vec<_>>(), "error": null}))
         }
-        "project_stats" => {
+        "ProjectService.projectStats" => {
             let Some(project) = params.get("project").or_else(|| params.get("project_title")).and_then(|p| p.as_str()) else {
                 return Some(json!({"error": "missing params.project"}));
             };
@@ -1200,166 +1181,17 @@ async fn dispatch_vault_rpc(
                 "error": null
             }))
         }
-        "next_task" => {
+        "ProjectService.nextTask" => {
             let Some(project) = params.get("project").or_else(|| params.get("project_title")).and_then(|p| p.as_str()) else {
                 return Some(json!({"error": "missing params.project"}));
             };
             Some(json!({"result": svc.next_task(project.to_string()).await.map(vault_task_to_api), "error": null}))
         }
-        "list_projects" | "list_active_projects" => {
-            let mut projects = svc.list_projects().await;
-            if method == "list_active_projects" {
-                projects.retain(|p| p.is_active() && p.up.is_empty());
-            }
+        "ProjectService.listProjects" => {
+            let projects = svc.list_projects().await;
             Some(json!({"result": projects.into_iter().map(vault_project_to_api).collect::<Vec<_>>(), "error": null}))
         }
-        "project_detail" => {
-            let Some(title) = params.get("title").and_then(|t| t.as_str()) else {
-                return Some(json!({"error": "missing params.title"}));
-            };
-            let slug_title = slug::slugify(title);
-            let project = svc
-                .list_projects()
-                .await
-                .into_iter()
-                .find(|p| p.title == title || slug::slugify(&p.title) == slug_title);
-            Some(match project {
-                Some(p) => {
-                    let tasks = svc.tasks_for_project(p.title.clone()).await;
-                    let done = tasks.iter().filter(|t| t.is_complete()).count();
-                    let by_status = |status: task_core::Status| -> Vec<serde_json::Value> {
-                        tasks
-                            .iter()
-                            .filter(|t| t.status == status)
-                            .cloned()
-                            .map(vault_task_to_api)
-                            .collect()
-                    };
-                    json!({
-                        "result": {
-                            "project": vault_project_to_api(p),
-                            "total_tasks": tasks.len(),
-                            "done_tasks": done,
-                            "tasks_by_status": {
-                                "open": by_status(task_core::Status::Open),
-                                "in_progress": by_status(task_core::Status::InProgress),
-                                "planned": by_status(task_core::Status::Planned),
-                                "on_hold": by_status(task_core::Status::OnHold),
-                                "done": by_status(task_core::Status::Done),
-                            },
-                            "all_tasks": tasks.into_iter().map(vault_task_to_api).collect::<Vec<_>>(),
-                            "workflow": {},
-                            "children": [],
-                            "referenced_projects": [],
-                        },
-                        "error": null
-                    })
-                }
-                None => json!({"error": format!("project not found: {title}")}),
-            })
-        }
-        "command_center" => {
-            let projects = svc.list_projects().await;
-            let tasks = svc.list_tasks().await;
-            let today = chrono::Local::now().date_naive();
-            let items = projects
-                .into_iter()
-                .filter(|p| p.is_active() && p.up.is_empty())
-                .map(|p| {
-                    let project_tasks: Vec<_> = tasks
-                        .iter()
-                        .filter(|t| t.projects.iter().any(|tp| tp.0 == p.title))
-                        .collect();
-                    let open_tasks: Vec<_> = project_tasks
-                        .iter()
-                        .copied()
-                        .filter(|t| !t.is_complete() && t.status != task_core::Status::Cancelled)
-                        .collect();
-                    let done = project_tasks.iter().filter(|t| t.is_complete()).count();
-                    let urgent_count = open_tasks.iter().filter(|t| t.priority == task_core::Priority::Urgent).count();
-                    let overdue_count = open_tasks.iter().filter(|t| t.due.map_or(false, |d| d < today)).count();
-                    let in_progress = open_tasks.iter().filter(|t| t.status == task_core::Status::InProgress).count();
-                    let mut next_candidates = open_tasks.clone();
-                    next_candidates.sort_by_key(|t| std::cmp::Reverse(t.urgency_score()));
-                    let next_task = next_candidates.first().map(|t| vault_task_to_api((*t).clone()));
-                    let notifications = urgent_count + overdue_count;
-                    json!({
-                        "project": vault_project_to_api(p),
-                        "total_tasks": project_tasks.len(),
-                        "done_tasks": done,
-                        "open_tasks": open_tasks.len(),
-                        "in_progress": in_progress,
-                        "urgent_count": urgent_count,
-                        "overdue_count": overdue_count,
-                        "notifications": notifications,
-                        "next_task": next_task,
-                    })
-                })
-                .collect::<Vec<_>>();
-            Some(json!({"result": items, "error": null}))
-        }
-        "list_notifications" => {
-            let tasks = svc.list_tasks().await;
-            let today = chrono::Local::now().date_naive();
-            let mut notifs = Vec::new();
-            for t in tasks {
-                if !t.is_complete() {
-                    if let Some(due) = t.due {
-                        if due < today {
-                            notifs.push(json!({
-                                "id": format!("overdue-{}", t.title),
-                                "message": format!("{} is overdue (due {})", t.title, due),
-                                "actor": t.assignee,
-                                "time_ago": format!("{} days ago", (today - due).num_days()),
-                                "read": false,
-                                "kind": "overdue",
-                            }));
-                        } else if (due - today).num_days() <= 2 {
-                            notifs.push(json!({
-                                "id": format!("due-soon-{}", t.title),
-                                "message": format!("{} is due {}", t.title, if due == today { "today".to_string() } else { format!("in {} day(s)", (due - today).num_days()) }),
-                                "actor": t.assignee,
-                                "time_ago": "upcoming",
-                                "read": false,
-                                "kind": "due_reminder",
-                            }));
-                        }
-                    }
-                    if t.priority == task_core::Priority::Urgent {
-                        notifs.push(json!({
-                            "id": format!("urgent-{}", t.title),
-                            "message": format!("{} is marked urgent", t.title),
-                            "actor": t.assignee,
-                            "time_ago": "active",
-                            "read": true,
-                            "kind": "urgent",
-                        }));
-                    }
-                }
-            }
-            notifs.truncate(20);
-            Some(json!({"result": notifs, "error": null}))
-        }
         _ => None,
-    }
-}
-
-fn canonical_vault_rpc_method(method: &str) -> &str {
-    match method {
-        "TaskService.listTasks" => "list_tasks",
-        "TaskService.createTask" => "create_task",
-        "TaskService.updateTask" => "update_task",
-        "TaskService.completeTask" => "complete_task",
-        "TaskService.searchTasks" => "search_tasks",
-        "TaskService.tasksForUser" => "tasks_for_user",
-        "ProjectService.listProjects" => "list_projects",
-        "ProjectService.listActiveProjects" => "list_active_projects",
-        "ProjectService.tasksForProject" => "tasks_for_project",
-        "ProjectService.projectStats" => "project_stats",
-        "ProjectService.nextTask" => "next_task",
-        "ProjectService.projectDetail" => "project_detail",
-        "CalendarService.tasksDueBy" => "tasks_due_by",
-        other => other,
     }
 }
 
@@ -1457,486 +1289,8 @@ async fn dispatch_rpc(
         return response;
     }
 
-    let db = &state.db;
     let auth = &state.auth;
     match method {
-        "list_tasks" => {
-            match task::Entity::find().all(db).await {
-                Ok(tasks) => serde_json::json!({ "result": tasks.iter().map(task_to_api).collect::<Vec<_>>(), "error": null }),
-                Err(e) => serde_json::json!({ "error": e.to_string() }),
-            }
-        }
-        "create_task" => {
-            let params = request.get("params").cloned().unwrap_or_default();
-            let title = params.get("title").and_then(|t| t.as_str()).unwrap_or("Untitled");
-            let now = Utc::now();
-            let model = task::ActiveModel {
-                id: Set(Uuid::new_v4()),
-                sequence_id: Set(None),
-                title: Set(title.to_string()),
-                status: Set(params.get("status").and_then(|s| s.as_str()).unwrap_or("Open").to_string()),
-                priority: Set(params.get("priority").and_then(|p| p.as_str()).unwrap_or("Normal").to_string()),
-                issue_type: Set(None),
-                project: Set(params.get("project").and_then(|p| p.as_str()).map(|s| s.to_string())),
-                assignee: Set(params.get("assignee").and_then(|a| a.as_str()).map(|s| s.to_string())),
-                assignees: Set(serde_json::json!([]).into()),
-                created_by: Set(None),
-                due: Set(params.get("due").and_then(|d| d.as_str()).and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())),
-                scheduled: Set(None),
-                start: Set(None),
-                completed_date: Set(None),
-                tags: Set(params.get("tags").cloned().unwrap_or(serde_json::json!([])).into()),
-                time_estimate: Set(None),
-                sort_order: Set(None),
-                body: Set(params.get("body").and_then(|b| b.as_str()).map(|s| s.to_string())),
-                file_path: Set(None),
-                is_draft: Set(false),
-                deleted_at: Set(None),
-                created_at: Set(now),
-                updated_at: Set(now),
-            };
-            match model.insert(db).await {
-                Ok(created) => serde_json::json!({ "result": task_to_api(&created), "error": null }),
-                Err(e) => serde_json::json!({ "error": e.to_string() }),
-            }
-        }
-        "task_detail" => {
-            if let Some(title) = request.get("params").and_then(|p| p.get("title")).and_then(|t| t.as_str()) {
-                match task::Entity::find().filter(task::Column::Title.eq(title)).one(db).await {
-                    Ok(Some(t)) => serde_json::json!({
-                        "result": {
-                            "task": task_to_api(&t),
-                            "subtasks": [],
-                            "subtask_progress": null,
-                            "comments": [],
-                        },
-                        "error": null
-                    }),
-                    Ok(None) => serde_json::json!({ "error": format!("task not found: {title}") }),
-                    Err(e) => serde_json::json!({ "error": e.to_string() }),
-                }
-            } else {
-                serde_json::json!({ "error": "missing params.title" })
-            }
-        }
-        "update_task" => {
-            let params = request.get("params").cloned().unwrap_or_default();
-            if let Some(title) = params.get("title").and_then(|t| t.as_str()) {
-                match task::Entity::find().filter(task::Column::Title.eq(title)).one(db).await {
-                    Ok(Some(existing)) => {
-                        let mut active: task::ActiveModel = existing.into();
-                        if let Some(status) = params.get("status").and_then(|s| s.as_str()) {
-                            active.status = Set(status.to_string());
-                        }
-                        if let Some(priority) = params.get("priority").and_then(|p| p.as_str()) {
-                            active.priority = Set(priority.to_string());
-                        }
-                        if let Some(assignee) = params.get("assignee").and_then(|a| a.as_str()) {
-                            active.assignee = Set(if assignee.is_empty() { None } else { Some(assignee.to_string()) });
-                        }
-                        if let Some(due) = params.get("due").and_then(|d| d.as_str()) {
-                            active.due = Set(chrono::NaiveDate::parse_from_str(due, "%Y-%m-%d").ok());
-                        }
-                        if let Some(body) = params.get("body").and_then(|b| b.as_str()) {
-                            active.body = Set(Some(body.to_string()));
-                        }
-                        active.updated_at = Set(Utc::now());
-                        match active.update(db).await {
-                            Ok(updated) => serde_json::json!({ "result": task_to_api(&updated), "error": null }),
-                            Err(e) => serde_json::json!({ "error": e.to_string() }),
-                        }
-                    }
-                    Ok(None) => serde_json::json!({ "error": format!("task not found: {title}") }),
-                    Err(e) => serde_json::json!({ "error": e.to_string() }),
-                }
-            } else {
-                serde_json::json!({ "error": "missing params.title" })
-            }
-        }
-        "complete_task" => {
-            if let Some(title) = request.get("params").and_then(|p| p.get("title")).and_then(|t| t.as_str()) {
-                match task::Entity::find().filter(task::Column::Title.eq(title)).one(db).await {
-                    Ok(Some(existing)) => {
-                        let mut active: task::ActiveModel = existing.into();
-                        active.status = Set("Done".to_string());
-                        active.completed_date = Set(Some(chrono::Local::now().date_naive()));
-                        active.updated_at = Set(Utc::now());
-                        match active.update(db).await {
-                            Ok(updated) => serde_json::json!({ "result": task_to_api(&updated), "error": null }),
-                            Err(e) => serde_json::json!({ "error": e.to_string() }),
-                        }
-                    }
-                    Ok(None) => serde_json::json!({ "error": format!("task not found: {title}") }),
-                    Err(e) => serde_json::json!({ "error": e.to_string() }),
-                }
-            } else {
-                serde_json::json!({ "error": "missing params.title" })
-            }
-        }
-        "search_tasks" => {
-            if let Some(query) = request.get("params").and_then(|p| p.get("query")).and_then(|q| q.as_str()) {
-                match task::Entity::find().filter(task::Column::Title.contains(query)).all(db).await {
-                    Ok(tasks) => serde_json::json!({ "result": tasks.iter().map(task_to_api).collect::<Vec<_>>(), "error": null }),
-                    Err(e) => serde_json::json!({ "error": e.to_string() }),
-                }
-            } else {
-                serde_json::json!({ "error": "missing params.query" })
-            }
-        }
-        "list_projects" => {
-            match project::Entity::find().all(db).await {
-                Ok(projects) => serde_json::json!({ "result": projects.iter().map(project_to_api).collect::<Vec<_>>(), "error": null }),
-                Err(e) => serde_json::json!({ "error": e.to_string() }),
-            }
-        }
-        "list_active_projects" => {
-            match project::Entity::find()
-                .filter(project::Column::Status.eq("Active"))
-                .filter(project::Column::ParentSlug.is_null())
-                .all(db).await
-            {
-                Ok(projects) => serde_json::json!({ "result": projects.iter().map(project_to_api).collect::<Vec<_>>(), "error": null }),
-                Err(e) => serde_json::json!({ "error": e.to_string() }),
-            }
-        }
-        "project_detail" => {
-            if let Some(title) = request.get("params").and_then(|p| p.get("title")).and_then(|t| t.as_str()) {
-                let slug_val = slug::slugify(title);
-                let project_result = project::Entity::find()
-                    .filter(
-                        sea_orm::Condition::any()
-                            .add(project::Column::Title.eq(title))
-                            .add(project::Column::Slug.eq(&slug_val))
-                    )
-                    .one(db).await;
-
-                match project_result {
-                    Ok(Some(p)) => {
-                        // Get tasks for this project
-                        let project_tasks = task::Entity::find()
-                            .filter(task::Column::Project.eq(&p.slug))
-                            .all(db).await.unwrap_or_default();
-
-                        let total = project_tasks.len();
-                        let done = project_tasks.iter().filter(|t| t.status == "Done").count();
-
-                        let by_status = |s: &str| -> Vec<serde_json::Value> {
-                            project_tasks.iter()
-                                .filter(|t| t.status == s)
-                                .map(task_to_api)
-                                .collect()
-                        };
-
-                        // Find child projects
-                        let children = project::Entity::find()
-                            .filter(project::Column::ParentSlug.eq(&p.slug))
-                            .all(db).await.unwrap_or_default();
-
-                        let children_json: Vec<serde_json::Value> = children.iter().map(|child| {
-                            serde_json::json!({
-                                "project": project_to_api(child),
-                                "total_tasks": 0,
-                                "done_tasks": 0,
-                            })
-                        }).collect();
-
-                        serde_json::json!({
-                            "result": {
-                                "project": project_to_api(&p),
-                                "total_tasks": total,
-                                "done_tasks": done,
-                                "tasks_by_status": {
-                                    "open": by_status("Open"),
-                                    "in_progress": by_status("InProgress"),
-                                    "planned": by_status("Planned"),
-                                    "on_hold": by_status("OnHold"),
-                                    "done": by_status("Done"),
-                                },
-                                "all_tasks": project_tasks.iter().map(task_to_api).collect::<Vec<_>>(),
-                                "workflow": {},
-                                "children": children_json,
-                                "referenced_projects": [],
-                            },
-                            "error": null
-                        })
-                    }
-                    Ok(None) => serde_json::json!({ "error": format!("project not found: {title}") }),
-                    Err(e) => serde_json::json!({ "error": e.to_string() }),
-                }
-            } else {
-                serde_json::json!({ "error": "missing params.title" })
-            }
-        }
-        "project_ancestry" => {
-            if let Some(title) = request.get("params").and_then(|p| p.get("title")).and_then(|t| t.as_str()) {
-                let slug_val = slug::slugify(title);
-                let target = project::Entity::find()
-                    .filter(
-                        sea_orm::Condition::any()
-                            .add(project::Column::Title.eq(title))
-                            .add(project::Column::Slug.eq(&slug_val))
-                    )
-                    .one(db).await.ok().flatten();
-
-                let Some(target) = target else {
-                    return serde_json::json!({ "result": [], "error": null });
-                };
-
-                // Walk up the parent chain
-                let mut chain = vec![target.clone()];
-                let mut current = target;
-                while let Some(ref parent_slug) = current.parent_slug {
-                    if let Ok(Some(parent)) = project::Entity::find()
-                        .filter(project::Column::Slug.eq(parent_slug))
-                        .one(db).await
-                    {
-                        chain.push(parent.clone());
-                        current = parent;
-                    } else {
-                        break;
-                    }
-                }
-                chain.reverse(); // root first
-
-                // Build columns: each ancestor's children
-                let mut columns: Vec<serde_json::Value> = Vec::new();
-                for proj in &chain {
-                    let children = project::Entity::find()
-                        .filter(project::Column::ParentSlug.eq(&proj.slug))
-                        .all(db).await.unwrap_or_default();
-
-                    let children_json: Vec<serde_json::Value> = children.iter().map(|child| {
-                        serde_json::json!({
-                            "title": child.title,
-                            "slug": child.slug,
-                            "display_name": child.title,
-                            "hue": hue_from_string(&child.title),
-                        })
-                    }).collect();
-
-                    columns.push(serde_json::json!({
-                        "title": proj.title,
-                        "slug": proj.slug,
-                        "hue": hue_from_string(&proj.title),
-                        "children": children_json,
-                    }));
-                }
-
-                serde_json::json!({ "result": columns, "error": null })
-            } else {
-                serde_json::json!({ "error": "missing params.title" })
-            }
-        }
-        "command_center" => {
-            let projects = project::Entity::find()
-                .filter(project::Column::Status.eq("Active"))
-                .filter(project::Column::ParentSlug.is_null())
-                .all(db).await.unwrap_or_default();
-
-            let all_tasks = task::Entity::find().all(db).await.unwrap_or_default();
-            let today = chrono::Local::now().date_naive();
-
-            let items: Vec<serde_json::Value> = projects.iter().map(|p| {
-                let project_tasks: Vec<_> = all_tasks.iter()
-                    .filter(|t| t.project.as_deref() == Some(&p.slug))
-                    .collect();
-                let open_tasks: Vec<_> = project_tasks.iter()
-                    .filter(|t| t.status != "Done" && t.status != "Cancelled")
-                    .collect();
-                let total = project_tasks.len();
-                let done = project_tasks.iter().filter(|t| t.status == "Done").count();
-                let urgent_count = open_tasks.iter().filter(|t| t.priority == "Urgent").count();
-                let overdue_count = open_tasks.iter().filter(|t| {
-                    t.due.map_or(false, |d| d < today)
-                }).count();
-                let in_progress = open_tasks.iter().filter(|t| t.status == "InProgress").count();
-
-                let next = open_tasks.iter()
-                    .min_by_key(|t| {
-                        let prio = match t.priority.as_str() {
-                            "Urgent" => 0,
-                            "High" => 1,
-                            "Normal" => 2,
-                            "Low" => 3,
-                            _ => 4,
-                        };
-                        let due_sort = t.due.map_or(9999_99_99i32, |d| {
-                            use chrono::Datelike;
-                            d.year() * 10000 + d.month() as i32 * 100 + d.day() as i32
-                        });
-                        (prio, due_sort)
-                    })
-                    .map(|t| task_to_api(*t));
-
-                let notifications = urgent_count + overdue_count;
-                serde_json::json!({
-                    "project": project_to_api(p),
-                    "total_tasks": total,
-                    "done_tasks": done,
-                    "open_tasks": open_tasks.len(),
-                    "in_progress": in_progress,
-                    "urgent_count": urgent_count,
-                    "overdue_count": overdue_count,
-                    "notifications": notifications,
-                    "next_task": next,
-                })
-            }).collect();
-
-            serde_json::json!({ "result": items, "error": null })
-        }
-        "tasks_for_user" => {
-            if let Some(username) = request.get("params").and_then(|p| p.get("username")).and_then(|u| u.as_str()) {
-                match task::Entity::find().filter(task::Column::Assignee.eq(username)).all(db).await {
-                    Ok(tasks) => serde_json::json!({ "result": tasks.iter().map(task_to_api).collect::<Vec<_>>(), "error": null }),
-                    Err(e) => serde_json::json!({ "error": e.to_string() }),
-                }
-            } else {
-                serde_json::json!({ "error": "missing params.username" })
-            }
-        }
-        "tasks_for_project" => {
-            if let Some(proj) = request.get("params").and_then(|p| p.get("project")).and_then(|p| p.as_str()) {
-                match task::Entity::find().filter(task::Column::Project.eq(proj)).all(db).await {
-                    Ok(tasks) => serde_json::json!({ "result": tasks.iter().map(task_to_api).collect::<Vec<_>>(), "error": null }),
-                    Err(e) => serde_json::json!({ "error": e.to_string() }),
-                }
-            } else {
-                serde_json::json!({ "error": "missing params.project" })
-            }
-        }
-        "list_notifications" => {
-            let all_tasks = task::Entity::find().all(db).await.unwrap_or_default();
-            let today = chrono::Local::now().date_naive();
-            let mut notifs: Vec<serde_json::Value> = Vec::new();
-
-            for t in all_tasks.iter() {
-                if t.status != "Done" {
-                    if let Some(due) = t.due {
-                        if due < today {
-                            notifs.push(serde_json::json!({
-                                "id": format!("overdue-{}", t.title),
-                                "message": format!("{} is overdue (due {})", t.title, due),
-                                "actor": t.assignee,
-                                "time_ago": format!("{} days ago", (today - due).num_days()),
-                                "read": false,
-                                "kind": "overdue",
-                            }));
-                        } else if (due - today).num_days() <= 2 {
-                            notifs.push(serde_json::json!({
-                                "id": format!("due-soon-{}", t.title),
-                                "message": format!("{} is due {}", t.title, if due == today { "today".to_string() } else { format!("in {} day(s)", (due - today).num_days()) }),
-                                "actor": t.assignee,
-                                "time_ago": "upcoming",
-                                "read": false,
-                                "kind": "due_reminder",
-                            }));
-                        }
-                    }
-                    if t.priority == "Urgent" {
-                        notifs.push(serde_json::json!({
-                            "id": format!("urgent-{}", t.title),
-                            "message": format!("{} is marked urgent", t.title),
-                            "actor": t.assignee,
-                            "time_ago": "active",
-                            "read": true,
-                            "kind": "urgent",
-                        }));
-                    }
-                }
-            }
-            notifs.truncate(20);
-            serde_json::json!({ "result": notifs, "error": null })
-        }
-        "activity" => {
-            let limit = request.get("params")
-                .and_then(|p| p.get("limit"))
-                .and_then(|l| l.as_u64())
-                .unwrap_or(50);
-            match activity::Entity::find()
-                .order_by_desc(activity::Column::CreatedAt)
-                .paginate(db, limit)
-                .fetch_page(0).await
-            {
-                Ok(activities) => {
-                    let items: Vec<serde_json::Value> = activities.iter().map(|a| {
-                        serde_json::json!({
-                            "entity_type": a.entity_type,
-                            "entity_id": a.entity_id.to_string(),
-                            "field": a.field,
-                            "old_value": a.old_value,
-                            "new_value": a.new_value,
-                            "changed_by": a.actor,
-                            "changed_at": a.created_at.to_rfc3339(),
-                        })
-                    }).collect();
-                    serde_json::json!({ "result": items, "error": null })
-                }
-                Err(e) => serde_json::json!({ "error": e.to_string() }),
-            }
-        }
-
-        // ── Auth-related RPC methods ────────────────────────────────
-        "list_orgs" => {
-            let auth_db = auth.database();
-            let users_result = auth_db.list_users(better_auth_core::types::ListUsersParams::default()).await;
-            let orgs = if let Ok((users, _)) = users_result {
-                if let Some(user) = users.first() {
-                    auth_db.list_user_organizations(&user.id).await.unwrap_or_default()
-                } else {
-                    vec![]
-                }
-            } else {
-                vec![]
-            };
-            let mut items: Vec<serde_json::Value> = Vec::new();
-            for org in &orgs {
-                let meta = org.metadata.as_ref();
-                // Fetch members for this org to get usernames
-                let members = auth_db.list_organization_members(&org.id).await.unwrap_or_default();
-                // Resolve member user_ids to usernames
-                let mut member_names: Vec<String> = Vec::new();
-                for member in &members {
-                    use better_auth_core::entity::AuthMember;
-                    if let Ok(Some(user)) = auth_db.get_user_by_id(member.user_id()).await {
-                        use better_auth_core::entity::AuthUser;
-                        member_names.push(user.username().unwrap_or("unknown").to_string());
-                    }
-                }
-                items.push(serde_json::json!({
-                    "slug": org.slug,
-                    "name": org.name,
-                    "emoji": meta.and_then(|m| m.get("emoji")).and_then(|e| e.as_str()).unwrap_or(""),
-                    "hue": meta.and_then(|m| m.get("hue")).and_then(|h| h.as_u64()).unwrap_or(0),
-                    "description": meta.and_then(|m| m.get("description")).and_then(|d| d.as_str()).unwrap_or(""),
-                    "owner": meta.and_then(|m| m.get("owner")).and_then(|o| o.as_str()).unwrap_or(""),
-                    "server_id": meta.and_then(|m| m.get("server_id")).and_then(|s| s.as_str()).unwrap_or(&state.info.id),
-                    "server_name": meta.and_then(|m| m.get("server_name")).and_then(|s| s.as_str()).unwrap_or(&state.info.name),
-                    "server_url": meta.and_then(|m| m.get("server_url")).and_then(|s| s.as_str()).unwrap_or(&state.info.public_base_url),
-                    "members": member_names,
-                }));
-            }
-            serde_json::json!({ "result": items, "error": null })
-        }
-        "list_team" => {
-            let auth_db = auth.database();
-            let users = auth_db.list_users(better_auth_core::types::ListUsersParams::default())
-                .await
-                .map(|(users, _)| users)
-                .unwrap_or_default();
-            let items: Vec<serde_json::Value> = users.iter().map(|u| {
-                let meta = &u.metadata;
-                serde_json::json!({
-                    "username": u.username,
-                    "name": u.name,
-                    "role": meta.get("role_title").and_then(|v| v.as_str()).unwrap_or(""),
-                    "department": meta.get("department").and_then(|v| v.as_str()).unwrap_or(""),
-                    "email": u.email,
-                    "account_status": meta.get("account_status").and_then(|v| v.as_str()).unwrap_or("claimed"),
-                })
-            }).collect();
-            serde_json::json!({ "result": items, "error": null })
-        }
-
         // ── Auth RPC methods ────────────────────────────────────────
         "auth.sign_up" => {
             let params = request.get("params").cloned().unwrap_or_default();
