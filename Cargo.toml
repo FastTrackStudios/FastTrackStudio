@@ -1,13 +1,10 @@
 [workspace]
 members = [
-    "apps/desktop",
-    "apps/mobile",
     "apps/server",
     "crates/task-core",
     "crates/task-cli",
     "crates/task-db",
-    "crates/task-obsidian",
-    "crates/task-ui",
+    "integrations/obsidian/plugin",
     "xtask",
 ]
 resolver = "2"
@@ -22,7 +19,6 @@ edition = "2021"
 
 [workspace.dependencies]
 chrono = "0.4"
-dioxus = "0.7.2"
 eyre = "0.6"
 futures = "0.3"
 rrule = "0.11"
@@ -52,14 +48,6 @@ version = "0.44.1"
 [workspace.dependencies.facet-yaml]
 version = "0.44.1"
 
-[workspace.dependencies.fts-ui]
-path = "../FastTrackStudio/fts-ui/crates/fts-ui"
-
-[workspace.dependencies.lucide-dioxus]
-git = "https://github.com/Leaf-Computer/lucide.git"
-rev = "e3e509d5855324e893aef838747cccb2d115dc15"
-features = ["all-icons"]
-
 [workspace.dependencies.lumen-blocks]
 git = "https://github.com/Leaf-Computer/lumen-blocks.git"
 tag = "v0.2.0"
@@ -79,9 +67,6 @@ version = "1"
 [workspace.dependencies.shm-primitives]
 git = "https://github.com/Codys-Wright/vox"
 rev = "4103658f29c88ffd913314903f16e327c5248cdb"
-
-[workspace.dependencies.task-ui]
-path = "crates/task-ui"
 
 [workspace.dependencies.tokio]
 version = "1"

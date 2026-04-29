@@ -9,10 +9,10 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tokio::sync::Mutex;
 
+use super::traits::*;
 use crate::project::Project;
 use crate::service::VaultError;
-use crate::task::{Task, WikiLink};
-use super::traits::*;
+use crate::task::Task;
 
 /// In-memory project provider for testing.
 ///
@@ -155,9 +155,12 @@ impl ProjectProvider for MockProvider {
             .await
             .insert(project.title.clone(), Vec::new());
 
-        let _ = self.event_tx.send(ProviderEvent::ProjectChanged {
-            project: project.title.clone(),
-        }).await;
+        let _ = self
+            .event_tx
+            .send(ProviderEvent::ProjectChanged {
+                project: project.title.clone(),
+            })
+            .await;
 
         Ok(format!("mock://{}", project.title))
     }
@@ -188,10 +191,13 @@ impl ProjectProvider for MockProvider {
             project_tasks.push(task.clone());
         }
 
-        let _ = self.event_tx.send(ProviderEvent::TaskChanged {
-            project: project_title.to_string(),
-            task_title: task.title.clone(),
-        }).await;
+        let _ = self
+            .event_tx
+            .send(ProviderEvent::TaskChanged {
+                project: project_title.to_string(),
+                task_title: task.title.clone(),
+            })
+            .await;
 
         Ok(())
     }
@@ -205,18 +211,21 @@ impl ProjectProvider for MockProvider {
             project_tasks.retain(|t| t.title != task_title);
         }
 
-        let _ = self.event_tx.send(ProviderEvent::TaskDeleted {
-            project: project_title.to_string(),
-            task_title: task_title.to_string(),
-        }).await;
+        let _ = self
+            .event_tx
+            .send(ProviderEvent::TaskDeleted {
+                project: project_title.to_string(),
+                task_title: task_title.to_string(),
+            })
+            .await;
 
         Ok(())
     }
 
     async fn watch(&self) -> Result<tokio::sync::mpsc::Receiver<ProviderEvent>, VaultError> {
-        let rx = self.event_rx.lock().await;
+        let _rx = self.event_rx.lock().await;
         // Create a new channel pair — the original rx is consumed
-        let (tx, new_rx) = tokio::sync::mpsc::channel(64);
+        let (_tx, new_rx) = tokio::sync::mpsc::channel(64);
         Ok(new_rx)
     }
 }

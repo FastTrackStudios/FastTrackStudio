@@ -1,7 +1,7 @@
 use std::cmp::Reverse;
 
+use task_core::{Query, Task};
 use wasm_bindgen::prelude::*;
-use task_core::{Task, Query};
 
 fn err_json(msg: &str) -> String {
     format!("{{\"error\":\"{}\"}}", msg.replace('"', "\\\""))

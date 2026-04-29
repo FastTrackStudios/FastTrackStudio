@@ -16,7 +16,7 @@ Production work — music, video, events, software, creative projects — involv
 - **Self-contained project folders** — a project is a folder. Tasks, schedules, deliverables, session files, media — everything together. Copy the folder and you have everything.
 - **Obsidian-compatible** — works as an Obsidian vault. Properties panel, Dataview, checkboxes, wikilinks — all native.
 - **Nextcloud-native** — full integration with Nextcloud Tasks (CalDAV), Deck (kanban), WebDAV (files), and user management for team collaboration.
-- **Multiple views, same data** — desktop app, web app, mobile app, CLI, Obsidian, Nextcloud Deck, Nextcloud Tasks, Apple Reminders, any CalDAV client.
+- **Multiple views, same data** — CLI, Obsidian, Nextcloud Deck, Nextcloud Tasks, Apple Reminders, any CalDAV client, and future apps over Vox.
 - **Events as first-class entities** — concerts, services, recording sessions, shoots. Recurring events with templates and per-instance overrides. Not everything is a project.
 - **Download portals** — role-based file distribution. One link for the orchestra, each person picks their part.
 - **Self-hosted, privacy-first** — your infrastructure, your data, no cloud dependency.
@@ -25,14 +25,13 @@ Production work — music, video, events, software, creative projects — involv
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                          Clients                                 │
-│   Desktop · Web · Mobile · CLI · Obsidian · Nextcloud Deck       │
+│                    Clients and Integrations                       │
+│   CLI · Obsidian · Nextcloud · Invoice Ninja · future apps        │
 │                                                                  │
 │   Each client has a FULL LOCAL COPY of project data (.md files)  │
 │   All operations work offline. Sync is eventual.                 │
 └────────────────────────┬────────────────────────────────────────┘
-                         │  WebSocket (real-time ops)
-                         │  REST API (CRUD)
+                         │  Vox RPC + Loro CRDT WebSockets
                 ┌────────▼────────┐
                 │   task-server   │
                 │  ┌────────────┐ │
@@ -200,33 +199,24 @@ Storage-agnostic project access:
 
 ### Layer 3: Server (`task-server`)
 
-HTTP API + sync engine:
+Core service runtime:
 
-- REST API for projects, tasks, sync status
-- Automatic sync loop (configurable interval)
-- Manual sync trigger endpoint
+- Vox RPC services for tasks, projects, time, calendar, clients, invoices, and activity
+- Loro CRDT WebSocket endpoint for realtime document collaboration
+- Minimal HTTP metadata endpoints for health, server discovery, auth, and CRDT status
+- Better-auth users, sessions, and organizations
 - NixOS module for deployment
 - Environment-based configuration
 
-### Layer 4: Client Apps
+### Layer 4: Clients and Integrations
 
-- **Desktop** (Dioxus/WebKit) — sidebar navigation, task list, sheet detail, project dashboard
-- **Mobile** (Dioxus) — today view, quick capture, offline-first
-- **Web** (Dioxus) — runs alongside the server
 - **CLI** — list, add, complete, show, project commands
 - **Obsidian plugin** — WASM-powered validation, sorting, querying inside Obsidian
+- **Nextcloud integration** — WebDAV, CalDAV, files, shares, and tasks
+- **Invoice Ninja integration** — invoices, quotes, payments, and client references
+- **Future apps** — should use the same Vox service boundary rather than compatibility REST
 
-### Layer 5: Design System (`fts-ui`)
-
-55 shadcn v4 maia components, fully standalone:
-
-- Buttons, inputs, cards, badges, tables, dialogs, dropdowns, tooltips, etc.
-- Sidebar, navigation menu, command palette, breadcrumbs
-- Calendar, accordion, tabs, carousel
-- `cn()` utility for Tailwind class merging
-- Component showcase for visual verification
-
-### Layer 6: Workflow System
+### Layer 5: Workflow System
 
 Domain-specific project structures that extend the generic model:
 
@@ -256,7 +246,7 @@ Domain-specific project structures that extend the generic model:
   - Recipient tracking (sent, accessed, downloaded)
   - Nextcloud share integration with password and expiry
 
-### Layer 7: External Integrations
+### Layer 6: External Integrations
 
 Connect projects to external services — we store references, they own the data:
 
@@ -267,25 +257,13 @@ Connect projects to external services — we store references, they own the data
 - **CalDAV** — calendar events, scheduling → native VTODO sync
 - **Nextcloud** — files, versions, sharing → native WebDAV
 
-### Layer 8: Client Apps
-
-All sharing the same Dioxus components and fts-ui design system:
-
-- **Desktop** (Dioxus/WebKit) — full app with sidebar, project dashboard, task detail sheet
-- **Web** (Dioxus SSR) — same app served by task-server, plus download portal routes
-- **Mobile** (Dioxus native) — today view, quick capture, offline-first
-- **CLI** — list, add, complete, show, project commands
-- **Obsidian plugin** — WASM-powered validation, sorting, querying inside Obsidian
-
 ## Roadmap
 
 ### Phase 1: Foundation ✅
 - [x] vault-core with full task/project schema
 - [x] File I/O with YAML frontmatter round-trip
 - [x] Query engine, NLP capture, recurrence
-- [x] Desktop app with Plane-inspired UI
 - [x] CLI tool
-- [x] fts-ui component library (55 components)
 - [x] Obsidian plugin (WASM)
 
 ### Phase 2: Collaboration ✅
@@ -309,21 +287,20 @@ All sharing the same Dioxus components and fts-ui design system:
 - [x] Nextcloud share creation for bundles (OCS sharing API)
 
 ### Phase 4: Local-First & Real-Time
-- [x] Automerge CRDT for metadata (task/event fields — concurrent edits merge automatically)
-- [x] Yrs CRDT for body text (markdown body — collaborative subtask/note editing)
-- [x] WebSocket sync via Vox WebSocket (field-level ops broadcast to all clients)
+- [x] Loro CRDT for metadata and markdown body collaboration
+- [x] WebSocket sync via `/crdt` with field-level events and conflict notifications
 - [x] Offline operation queue (CRDT ops queue locally, merge on reconnect)
 - [x] SQLite index with rusqlite (fast queries over frontmatter, rebuilt from files)
 - [ ] cr-sqlite for CRDT-enabled index sync between devices
 - [x] Entity change log (implemented in SQLite index changes table)
 - [ ] Conflict UI (show both versions when CRDTs can't auto-merge)
 
-### Phase 5: Web App & Portal
-- [ ] Dioxus web app served by task-server (SSR)
+### Phase 5: Client Experience & Portal
+- [ ] Decide first-party app surface after core service architecture stabilizes
 - [ ] Download portal route (`/portal/:slug`) with role selector
 - [ ] Audio preview/streaming in portal
-- [ ] Mobile app (Dioxus native, Swift client via Vox)
-- [ ] iOS widgets (WidgetKit + Vox Swift bindings)
+- [ ] Mobile client strategy
+- [ ] iOS widgets
 - [ ] Push notifications (Nextcloud + APNs)
 
 ### Phase 5.5: Scale & Search

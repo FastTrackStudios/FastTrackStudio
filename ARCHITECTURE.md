@@ -8,18 +8,18 @@ Task is a local-first, real-time collaborative production workflow management pl
 ┌─────────────────────────────────────────────────────────────────────┐
 │                           Clients                                    │
 │                                                                      │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌─────┐ ┌────────────────┐ │
-│  │ Desktop  │ │   Web    │ │  Mobile  │ │ CLI │ │ Obsidian Plugin│ │
-│  │ (Dioxus) │ │ (Dioxus) │ │ (Swift)  │ │     │ │ (WASM)         │ │
-│  └────┬─────┘ └────┬─────┘ └────┬─────┘ └──┬──┘ └───────┬────────┘ │
-│       │             │            │           │            │          │
-│       │    Vox RPC (inprocess / WebSocket / local socket)  │          │
-│       └─────────────┼────────────┼───────────┼────────────┘          │
-│                     │            │           │                       │
-└─────────────────────┼────────────┼───────────┼───────────────────────┘
-                      │            │           │
-              ┌───────▼────────────▼───────────▼───────┐
-              │              vault-core                 │
+│  ┌─────┐ ┌────────────────┐ ┌────────────┐ ┌────────────────────┐ │
+│  │ CLI │ │ Obsidian Plugin│ │ Nextcloud  │ │ Invoice Ninja      │ │
+│  │     │ │ (WASM)         │ │ Integration│ │ Integration        │ │
+│  └──┬──┘ └───────┬────────┘ └─────┬──────┘ └──────────┬─────────┘ │
+│     │            │                │                   │           │
+│     │       Vox RPC (in-process / WebSocket)           │           │
+│     └────────────┼────────────────┼───────────────────┘           │
+│                  │                │                               │
+└──────────────────┼────────────────┼───────────────────────────────┘
+                   │                │
+              ┌────▼────────────────▼─────────────┐
+              │              task-core             │
               │                                         │
               │  ┌─────────────────────────────────┐   │
               │  │     Domain Types (Facet)         │   │
@@ -30,13 +30,12 @@ Task is a local-first, real-time collaborative production workflow management pl
               │                                         │
               │  ┌─────────────────────────────────┐   │
               │  │     CRDT Layer                   │   │
-              │  │  Automerge (metadata fields)     │   │
-              │  │  Yrs (markdown body text)        │   │
+              │  │  Loro documents + sync protocol  │   │
               │  └──────────────┬──────────────────┘   │
               │                 │                       │
               │  ┌──────────────▼──────────────────┐   │
               │  │     Sync Engine                  │   │
-              │  │  WebSocket (yrs-axum)            │   │
+              │  │  WebSocket (/crdt)               │   │
               │  │  Nextcloud (CalDAV + Deck)       │   │
               │  │  Offline queue + merge           │   │
               │  └──────────────┬──────────────────┘   │
@@ -48,7 +47,7 @@ Task is a local-first, real-time collaborative production workflow management pl
               │                 │                       │
               │  ┌──────────────▼──────────────────┐   │
               │  │     Index Cache                  │   │
-              │  │  SQLite (rusqlite / cr-sqlite)   │   │
+              │  │  SQLite index                    │   │
               │  │  Disposable — rebuilt from files  │   │
               │  └─────────────────────────────────┘   │
               │                                         │
@@ -67,30 +66,27 @@ Task is a local-first, real-time collaborative production workflow management pl
 
 **Vox** is the RPC layer that makes vault-core accessible from any language. All service interfaces are defined once in Rust with `#[vox::service]` and automatically generate:
 
-- **Rust** — in-process calls (desktop app, CLI)
-- **WebSocket** — remote calls (web app, mobile app over network)
-- **Swift** — native iOS/macOS client via Vox codegen
-- **TypeScript** — web client, Obsidian plugin via WASM bindings
+- **Rust** — in-process service calls from the CLI and integrations
+- **WebSocket** — remote service calls over `/vox`
+- **TypeScript** — generated bindings for integrations that need them
 
 ```rust
 #[vox::service]
-pub trait VaultService {
+pub trait TaskService {
     async fn list_tasks(&self) -> Vec<Task>;
     async fn create_task(&self, task: Task) -> Result<Task, VaultError>;
     async fn complete_task(&self, title: String) -> Result<Task, VaultError>;
-    async fn list_projects(&self) -> Vec<Project>;
-    // ... every operation exposed to all clients
 }
 ```
 
-One trait definition → Rust server, Swift client, TypeScript client, WASM bindings. No manual protocol code.
+The codebase now exposes split service traits (`TaskService`, `ProjectService`, `TimeService`, `CalendarService`, etc.) instead of one compatibility trait or REST facade.
 
 ### Facet — Universal Serialization
 
 **Facet** replaces serde for all domain types. Every struct derives `Facet` and gets:
 
 - **YAML** serialization (frontmatter in `.md` files) via `facet-yaml`
-- **JSON** serialization (REST API, Vox RPC, WASM bridge) via `facet-json`
+- **JSON** serialization (Vox RPC, metadata endpoints, WASM bridge) via `facet-json`
 - **Reflection** for query engine, validation, schema introspection
 
 ```rust
@@ -116,23 +112,20 @@ They enforce a single source of truth for the API surface:
 ```
 vault-core (Rust)
     │
-    ├─→ Vox generates Swift VaultServiceClient
-    │     → iOS app calls list_tasks() natively
-    │
     ├─→ Vox generates TypeScript types
-    │     → Web app calls list_tasks() over WebSocket
+    │     → integrations call service methods over WebSocket
     │
     ├─→ Facet serializes to YAML
     │     → .md files on disk
     │
     ├─→ Facet serializes to JSON
-    │     → REST API responses
+    │     → metadata, RPC payloads, generated bindings
     │
     └─→ WASM + facet-json
           → Obsidian plugin calls parse_task_yaml() in browser
 ```
 
-Add a field to `Task` in Rust → it appears in Swift, TypeScript, YAML, JSON, and WASM automatically. No manual sync of types across languages.
+Add a field to `Task` in Rust → it appears in TypeScript, YAML, JSON, and WASM automatically. No manual sync of types across layers.
 
 ## Data Flow
 
@@ -195,14 +188,14 @@ Push to Nextcloud (CalDAV VTODO + Deck card + WebDAV file)
 
 ## CRDT Architecture
 
-Each `.md` file is represented as two CRDT documents:
+Each collaborative `.md` file is represented by a Loro-backed CRDT document.
 
-### Metadata (Automerge)
+### Metadata
 
-YAML frontmatter fields. Each field is independently mergeable:
+YAML frontmatter fields are synchronized as structured CRDT state:
 
 ```
-Automerge Doc {
+Loro document {
   "title": "Mix track 1",
   "status": "InProgress",
   "assignee": "codywright",
@@ -213,19 +206,19 @@ Automerge Doc {
 }
 ```
 
-Two people can concurrently change `status` and `assignee` — Automerge merges both changes. Same-field concurrent edits use last-writer-wins at the field level (not file level).
+Two people can concurrently change `status` and `assignee`; Loro merges independent field edits and emits explicit conflict events for cases the app needs to surface.
 
-### Body (Yrs)
+### Body
 
-Markdown content after the `---` block. Yrs handles concurrent text insertions/deletions:
+Markdown content after the `---` block is synchronized through the same Loro document model:
 
 ```
-Yrs Text {
+Loro text {
   "Apply compression chain and finalize mix.\n\n## Subtasks\n- [x] Import stems\n- [ ] Set up reverb sends\n..."
 }
 ```
 
-Two people can check off different subtasks simultaneously — Yrs merges without conflict.
+Two people can edit different checklist lines simultaneously without rewriting the whole file.
 
 ### Persistence
 
@@ -249,7 +242,7 @@ vault-core/
 │   ├── capture.rs           # NLP quick-add parser
 │   ├── rrule.rs             # Recurrence (RFC 5545)
 │   ├── vault.rs             # File I/O (.md read/write)
-│   ├── service.rs           # VaultService trait (Vox)
+│   ├── service.rs           # Split Vox service traits
 │   ├── service_impl.rs      # VaultServiceImpl
 │   ├── watch.rs             # File system watcher (notify)
 │   │
@@ -273,11 +266,10 @@ vault-core/
 │   │   ├── vtodo.rs         # Task ↔ VTODO conversion
 │   │   └── sync.rs          # CalDAV client
 │   │
-│   ├── crdt/                # (Phase 4)
-│   │   ├── metadata.rs      # Automerge wrapper for frontmatter fields
-│   │   ├── body.rs          # Yrs wrapper for markdown body
+│   ├── crdt/
+│   │   ├── loro_doc.rs      # Loro document wrapper
 │   │   ├── sync.rs          # WebSocket sync protocol
-│   │   └── merge.rs         # CRDT ↔ .md file round-trip
+│   │   └── mod.rs           # CRDT domain facade
 │   │
 │   └── index/               # (Phase 4)
 │       ├── sqlite.rs        # SQLite index over frontmatter
@@ -287,14 +279,18 @@ vault-core/
 └── ...
 
 apps/
-├── desktop/                  # Dioxus/WebKit desktop app
-├── server/                   # Axum HTTP + WebSocket server
-├── mobile/                   # Dioxus mobile (+ Swift via Vox)
-└── web/                      # Dioxus web (SSR by server)
+└── server/                   # Axum HTTP metadata + Vox/CRDT WebSocket server
 
-task-ui/                      # Shared Dioxus components
-task-cli/                     # CLI tool
-obsidian-plugin/              # WASM plugin for Obsidian
+crates/
+├── task-core/                # Domain model, vault implementation, Vox services
+├── task-cli/                 # CLI tool
+└── task-db/                  # Database/auth adapter layer
+
+integrations/
+├── obsidian/plugin/          # WASM plugin for Obsidian
+├── nextcloud/                # Planned Nextcloud integration
+└── invoice-ninja/            # Planned Invoice Ninja integration
+
 nix/                          # NixOS module for deployment
 ```
 
@@ -311,11 +307,11 @@ nix/                          # NixOS module for deployment
 ### Server (feature-gated, not in WASM)
 | Crate | Purpose |
 |---|---|
-| `vox` + `vox-core` | RPC service trait + codegen (Swift, TypeScript) |
+| `vox` + `vox-core` | RPC service traits + native service dispatch |
 | `tokio` | Async runtime |
 | `axum` | HTTP server |
 | `notify` | File system watching |
-| `reqwest` | HTTP client (Nextcloud API) |
+| `reqwest` | HTTP client for integrations |
 | `serde` + `serde_json` | Deck API transport types |
 | `async-trait` | Async trait support |
 | `tracing` | Structured logging |
@@ -327,21 +323,15 @@ nix/                          # NixOS module for deployment
 | `icalendar` | VTODO parsing/generation |
 | `libdav` | CalDAV protocol client |
 
-### Phase 4 (planned)
+### Collaboration
 | Crate | Purpose |
 |---|---|
-| `automerge` | CRDT for metadata fields |
-| `yrs` | CRDT for markdown body text |
-| `yrs-axum` | WebSocket CRDT sync over Axum |
+| `loro` | CRDT document engine |
 | `rusqlite` | SQLite index cache |
 | `rusqlite_migration` | Index schema evolution |
 
-### UI
-| Crate | Purpose |
-|---|---|
-| `dioxus` | UI framework (desktop, web, mobile) |
-| `fts-ui` | 55 shadcn v4 components (standalone, no lumen-blocks) |
-| `lucide-dioxus` | Icons |
+### Integrations
+Integration implementations live under `integrations/` and should call the core Vox services instead of introducing compatibility REST layers.
 
 ## Client SDK Strategy
 
@@ -349,19 +339,18 @@ Vox + Facet generate client SDKs from the Rust source:
 
 | Platform | Transport | SDK | Generated From |
 |---|---|---|---|
-| **Desktop** (Linux/macOS/Windows) | In-process Rust | Direct Rust calls | — |
-| **Web** (browser) | WebSocket | TypeScript via Vox codegen | `#[vox::service]` trait |
-| **iOS/macOS** (native) | WebSocket or local socket | Swift via Vox codegen | `#[vox::service]` trait |
-| **Android** (native) | WebSocket | Kotlin via Vox codegen (future) | `#[vox::service]` trait |
-| **Obsidian** (browser) | WASM in-process | TypeScript + WASM | `wasm-bindgen` exports |
+| Platform | Transport | SDK | Generated From |
+|---|---|---|---|
+| **Service clients** | WebSocket | Vox native RPC | `#[vox::service]` traits |
+| **Obsidian** | WASM in-process + generated TypeScript | TypeScript + WASM | Vox descriptors and `wasm-bindgen` exports |
 | **CLI** | In-process Rust | Direct Rust calls | — |
 
 Adding a new API method:
 
-1. Add to `VaultService` trait in Rust
-2. Implement in `VaultServiceImpl`
-3. `cargo build` → Vox regenerates Swift/TypeScript clients
-4. All platforms have the new method
+1. Add it to the relevant split service trait (`TaskService`, `TimeService`, `CalendarService`, etc.).
+2. Implement it on `VaultServiceImpl`.
+3. Run `cargo run -p xtask -- codegen` for generated TypeScript bindings.
+4. Serve it through `/vox` with the matching Vox dispatcher.
 
 ## Security Model
 

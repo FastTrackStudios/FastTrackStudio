@@ -15,10 +15,10 @@
 
 use async_trait::async_trait;
 
+use super::traits::*;
 use crate::project::Project;
 use crate::service::VaultError;
 use crate::task::Task;
-use super::traits::*;
 
 /// Configuration for a WebDAV/Nextcloud connection.
 #[derive(Debug, Clone)]
@@ -70,30 +70,45 @@ impl ProjectProvider for WebDavProvider {
     async fn list_projects(&self) -> Result<Vec<Project>, VaultError> {
         // TODO: PROPFIND on projects_url with Depth: 1 to list project folders,
         // then GET each project.md and parse YAML frontmatter.
-        Err(VaultError::IoError("WebDAV provider not yet implemented — add reqwest WebDAV support".into()))
+        Err(VaultError::IoError(format!(
+            "WebDAV provider not yet implemented for {}",
+            self.projects_url()
+        )))
     }
 
     async fn get_project(&self, _title: &str) -> Result<Option<ProjectBundle>, VaultError> {
-        Err(VaultError::IoError("WebDAV provider not yet implemented".into()))
+        Err(VaultError::IoError(
+            "WebDAV provider not yet implemented".into(),
+        ))
     }
 
     async fn list_all(&self) -> Result<Vec<ProjectBundle>, VaultError> {
-        Err(VaultError::IoError("WebDAV provider not yet implemented".into()))
+        Err(VaultError::IoError(
+            "WebDAV provider not yet implemented".into(),
+        ))
     }
 
     async fn create_project(&self, _project: &Project) -> Result<String, VaultError> {
-        Err(VaultError::IoError("WebDAV provider not yet implemented".into()))
+        Err(VaultError::IoError(
+            "WebDAV provider not yet implemented".into(),
+        ))
     }
 
     async fn update_project(&self, _project: &Project) -> Result<(), VaultError> {
-        Err(VaultError::IoError("WebDAV provider not yet implemented".into()))
+        Err(VaultError::IoError(
+            "WebDAV provider not yet implemented".into(),
+        ))
     }
 
     async fn save_task(&self, _project_title: &str, _task: &Task) -> Result<(), VaultError> {
-        Err(VaultError::IoError("WebDAV provider not yet implemented".into()))
+        Err(VaultError::IoError(
+            "WebDAV provider not yet implemented".into(),
+        ))
     }
 
     async fn delete_task(&self, _project_title: &str, _task_title: &str) -> Result<(), VaultError> {
-        Err(VaultError::IoError("WebDAV provider not yet implemented".into()))
+        Err(VaultError::IoError(
+            "WebDAV provider not yet implemented".into(),
+        ))
     }
 }

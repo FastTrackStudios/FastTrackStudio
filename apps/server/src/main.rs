@@ -1,27 +1,24 @@
 use std::sync::Arc;
 
-use axum::extract::{Query as AxumQuery, State, WebSocketUpgrade};
 use axum::extract::ws::{Message as AxumWsMessage, WebSocket};
+use axum::extract::{State, WebSocketUpgrade};
 use axum::response::IntoResponse;
-use axum::routing::{get, post};
+use axum::routing::get;
 use axum::{Json, Router};
 use base64::Engine as _;
-use chrono::Utc;
-use serde::{Deserialize, Serialize};
+use better_auth::AxumIntegration;
+use better_auth_core::adapters::{MemberOps, OrganizationOps, UserOps};
+use better_auth_core::config::AuthConfig;
+use better_auth_core::{CreateMember, CreateOrganization, CreateUser};
+use serde::Serialize;
 use serde_json::json;
 use task_core::crdt::{CrdtSyncEngine, SyncOp};
 use task_core::VaultServiceImpl;
+use task_db::sea_orm;
+use task_db::SeaOrmAuthAdapter;
 use tokio::sync::mpsc;
 use tower_http::cors::CorsLayer;
 use tracing::{info, warn};
-use better_auth_core::config::AuthConfig;
-use better_auth::AxumIntegration;
-use better_auth_core::adapters::{UserOps, OrganizationOps, MemberOps};
-use better_auth_core::{CreateUser, CreateOrganization, CreateMember};
-use task_db::SeaOrmAuthAdapter;
-use task_db::sea_orm::{self, EntityTrait, QueryFilter, ColumnTrait, ActiveModelTrait, Set, QueryOrder, PaginatorTrait};
-use task_db::entities::{task, project, activity};
-use task_db::sea_orm::prelude::Uuid;
 
 // ── App state ────────────────────────────────────────────────────────────────
 
@@ -37,7 +34,6 @@ struct ServerInfo {
 
 #[derive(Clone)]
 struct AppState {
-    db: sea_orm::DatabaseConnection,
     info: ServerInfo,
     crdt: Option<Arc<CrdtSyncEngine>>,
     vault_service: Option<Arc<VaultServiceImpl>>,
@@ -56,10 +52,12 @@ async fn main() -> eyre::Result<()> {
 
     let server_name = std::env::var("SERVER_NAME").unwrap_or_else(|_| "default".to_string());
     let server_id = std::env::var("SERVER_ID").unwrap_or_else(|_| {
-        let host = hostname::get().unwrap_or_default().to_string_lossy().to_string();
+        let host = hostname::get()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
         format!("{}-{}", host, server_name)
     });
-
 
     // ── Database initialization ─────────────────────────────────
     let (db, db_label) = init_server_db().await?;
@@ -69,10 +67,9 @@ async fn main() -> eyre::Result<()> {
     let bind_addr = std::env::var("BIND_ADDR").unwrap_or_else(|_| "0.0.0.0:3456".to_string());
     let auth_secret = std::env::var("AUTH_SECRET")
         .unwrap_or_else(|_| "task-server-secret-key-must-be-at-least-32-chars".to_string());
-    let auth_base_url = std::env::var("PUBLIC_BASE_URL")
-        .unwrap_or_else(|_| format!("http://{bind_addr}"));
-    let auth_config = AuthConfig::new(&auth_secret)
-        .base_url(&auth_base_url);
+    let auth_base_url =
+        std::env::var("PUBLIC_BASE_URL").unwrap_or_else(|_| format!("http://{bind_addr}"));
+    let auth_config = AuthConfig::new(&auth_secret).base_url(&auth_base_url);
 
     let auth_db = SeaOrmAuthAdapter::new(db.clone());
     let auth = Arc::new(
@@ -85,7 +82,7 @@ async fn main() -> eyre::Result<()> {
             .plugin(better_auth_api::plugins::GhostUserPlugin::new())
             .build()
             .await
-            .expect("Failed to initialize auth")
+            .expect("Failed to initialize auth"),
     );
     info!("Auth system initialized (better-auth)");
 
@@ -128,14 +125,11 @@ async fn main() -> eyre::Result<()> {
     if demo_seeded {
         seed_auth_data(&auth, &info_payload).await;
         info!("Auth mock data seeded");
-        seed_mock_db(&db).await;
-        info!("Mock DB data seeded");
     } else {
         info!("Demo seed disabled by TASK_SEED_DEMO=0");
     }
 
     let state = AppState {
-        db,
         crdt,
         vault_service,
         info: info_payload,
@@ -148,17 +142,9 @@ async fn main() -> eyre::Result<()> {
         .route("/vox", get(vox_ws_handler))
         // Loro CRDT sync — realtime task document replication
         .route("/crdt", get(crdt_ws_handler))
-        // REST API — JSON endpoints for simple integrations
+        // Minimal HTTP metadata endpoints; domain operations go through Vox.
         .route("/api/info", get(server_info))
         .route("/api/crdt/status", get(crdt_status))
-        .route("/api/projects", get(list_projects_handler))
-        .route("/api/projects/active", get(list_active_projects_handler))
-        .route("/api/tasks", get(list_tasks_handler))
-        .route("/api/activity", get(activity_feed))
-        .route("/api/tasks", post(create_task_api))
-        .route("/api/tasks/{title}", get(get_task))
-        .route("/api/tasks/{title}/complete", post(complete_task_api))
-        .route("/api/tasks/user/{username}", get(tasks_by_user))
         .route("/api/health", get(health))
         .layer(CorsLayer::permissive());
 
@@ -173,7 +159,8 @@ async fn main() -> eyre::Result<()> {
         .map_err(|e| eyre::eyre!("Failed to bind {bind_addr}: {e}. Is another task-server still running? Kill it with: pkill -f task-server"))?;
     info!("HTTP server listening on {}", bind_addr);
     info!("Endpoints:");
-    info!("  REST API:      http://{bind_addr}/api/*");
+    info!("  Info:          http://{bind_addr}/api/info");
+    info!("  Health:        http://{bind_addr}/api/health");
     info!("  Auth:          http://{bind_addr}/api/auth/*");
     info!("  Vox WS:        ws://{bind_addr}/vox");
     axum::serve(listener, app).await?;
@@ -218,307 +205,6 @@ fn env_truthy_default(name: &str, default: bool) -> bool {
         .unwrap_or(default)
 }
 
-// ── Mock data seeder (SQLite) ──────────────────────────────────────────────
-
-async fn seed_mock_db(db: &sea_orm::DatabaseConnection) {
-    // ── Projects ────────────────────────────────────────────────
-    let now = Utc::now();
-
-    #[allow(dead_code)]
-    struct ProjectSeed {
-        title: &'static str,
-        slug: &'static str,
-        status: &'static str,
-        project_type: &'static str,
-        description: &'static str,
-        organization: &'static str,
-        parent_slug: Option<&'static str>,
-        team: Vec<&'static str>,
-        repo: Option<&'static str>,
-    }
-
-    let projects = vec![
-        ProjectSeed {
-            title: "Demo Album", slug: "demo-album", status: "Active", project_type: "album",
-            description: "Full-length demo album. 5 tracks, targeting streaming release late summer.",
-            organization: "fasttrackaudio", parent_slug: None,
-            team: vec!["cody", "amy", "carter", "tom", "elena", "marcus", "jade", "noah"],
-            repo: None,
-        },
-        ProjectSeed {
-            title: "Sunrise", slug: "sunrise", status: "Active", project_type: "song",
-            description: "Key: G | Tempo: 120 BPM",
-            organization: "fasttrackaudio", parent_slug: Some("demo-album"),
-            team: vec!["cody", "amy"], repo: None,
-        },
-        ProjectSeed {
-            title: "City Lights", slug: "city-lights", status: "Active", project_type: "song",
-            description: "Key: Bb | Tempo: 95 BPM",
-            organization: "fasttrackaudio", parent_slug: Some("demo-album"),
-            team: vec!["cody", "amy"], repo: None,
-        },
-        ProjectSeed {
-            title: "Overflow", slug: "overflow", status: "Active", project_type: "song",
-            description: "Key: Em | Tempo: 140 BPM",
-            organization: "fasttrackaudio", parent_slug: Some("demo-album"),
-            team: vec!["cody", "amy"], repo: None,
-        },
-        ProjectSeed {
-            title: "Midnight EP", slug: "midnight-ep", status: "Active", project_type: "ep",
-            description: "3-track EP. Dark, moody vibes. Fast turnaround for summer release.",
-            organization: "fasttrackaudio", parent_slug: None,
-            team: vec!["cody", "amy", "carter", "marcus"], repo: None,
-        },
-        ProjectSeed {
-            title: "Campus Jax Live", slug: "campus-jax-live", status: "Active", project_type: "concert",
-            description: "4-band showcase at Campus Jax. Our band headlines, 3 guest acts.",
-            organization: "just-friends", parent_slug: None,
-            team: vec!["cody", "amy", "carter", "tom", "bri", "devon", "jordan", "sam"],
-            repo: None,
-        },
-        ProjectSeed {
-            title: "FTS Sync", slug: "fts-sync", status: "Active", project_type: "code",
-            description: "Multi-device sync and clock engine. Ableton Link compatible.",
-            organization: "fasttrackstudio", parent_slug: None,
-            team: vec!["cody", "kai", "alex"],
-            repo: Some("FastTrackStudios/fts-sync"),
-        },
-        ProjectSeed {
-            title: "FTS Session", slug: "fts-session", status: "Active", project_type: "code",
-            description: "DAW session management and recall system.",
-            organization: "fasttrackstudio", parent_slug: None,
-            team: vec!["cody", "kai", "luna"],
-            repo: Some("FastTrackStudios/fts-session"),
-        },
-        ProjectSeed {
-            title: "Task App", slug: "task-app", status: "Active", project_type: "code",
-            description: "Task management application with real-time sync.",
-            organization: "fasttrackstudio", parent_slug: None,
-            team: vec!["cody", "kai", "luna", "alex", "mira"],
-            repo: Some("FastTrackStudios/task"),
-        },
-        ProjectSeed {
-            title: "Wildflower Album Mix", slug: "wildflower-album-mix", status: "Active", project_type: "mixing-client",
-            description: "Full album mix for indie band Wildflower. 10 tracks, stems delivered.",
-            organization: "fasttrackaudio", parent_slug: None,
-            team: vec!["cody", "marcus", "jade"], repo: None,
-        },
-        ProjectSeed {
-            title: "Tom Solo EP", slug: "tom-solo-ep", status: "Active", project_type: "ep",
-            description: "4-track guitar instrumental EP. Fingerstyle + looper.",
-            organization: "tombrooksmusic", parent_slug: None,
-            team: vec!["tom", "cody", "marcus"], repo: None,
-        },
-        ProjectSeed {
-            title: "Website Redesign", slug: "website-redesign", status: "Planning", project_type: "web",
-            description: "Redesign the FastTrackStudio website.",
-            organization: "fasttrackstudio", parent_slug: None,
-            team: vec!["luna", "cody"], repo: None,
-        },
-    ];
-
-    for p in &projects {
-        let model = project::ActiveModel {
-            id: Set(Uuid::new_v4()),
-            title: Set(p.title.to_string()),
-            slug: Set(p.slug.to_string()),
-            status: Set(p.status.to_string()),
-            project_type: Set(Some(p.project_type.to_string())),
-            description: Set(Some(p.description.to_string())),
-            area: Set(Some("Music".to_string())),
-            identifier: Set(None),
-            next_sequence: Set(None),
-            parent_slug: Set(p.parent_slug.map(|s| s.to_string())),
-            lead: Set(None),
-            default_assignee: Set(None),
-            emoji: Set(None),
-            organization: Set(Some(p.organization.to_string())),
-            team: Set(serde_json::json!(p.team).into()),
-            references: Set(serde_json::json!([]).into()),
-            due: Set(None),
-            start: Set(None),
-            file_path: Set(None),
-            deleted_at: Set(None),
-            archived_at: Set(None),
-            created_at: Set(now),
-            updated_at: Set(now),
-        };
-        model.insert(db).await.unwrap();
-    }
-    info!(count = projects.len(), "Seeded projects");
-
-    // ── Tasks ───────────────────────────────────────────────────
-    struct TaskSeed {
-        title: &'static str,
-        status: &'static str,
-        priority: &'static str,
-        assignee: &'static str,
-        project: &'static str,
-        tags: Vec<&'static str>,
-        body: &'static str,
-        due: Option<chrono::NaiveDate>,
-    }
-
-    let tasks = vec![
-        TaskSeed {
-            title: "Edit vocal comps for Sunrise", status: "InProgress", priority: "High",
-            assignee: "cody", project: "sunrise", tags: vec!["editing", "vocals"],
-            body: "Comp the best takes from session 3 and crossfade edits.", due: None,
-        },
-        TaskSeed {
-            title: "Mix v3 drums for Sunrise", status: "Open", priority: "High",
-            assignee: "marcus", project: "sunrise", tags: vec!["mixing"],
-            body: "Kick needs more 60Hz in chorus, snare verb automation.", due: None,
-        },
-        TaskSeed {
-            title: "Master Sunrise", status: "Open", priority: "Normal",
-            assignee: "jade", project: "sunrise", tags: vec!["mastering"],
-            body: "Target -14 LUFS integrated. 24/96 + 16/44.1.", due: None,
-        },
-        TaskSeed {
-            title: "Record guitar overdubs for City Lights", status: "InProgress", priority: "Normal",
-            assignee: "tom", project: "city-lights", tags: vec!["recording"],
-            body: "Bridge section needs sustained pad guitar. Consider e-bow.", due: None,
-        },
-        TaskSeed {
-            title: "Write bridge section for Overflow", status: "Open", priority: "High",
-            assignee: "amy", project: "overflow", tags: vec!["writing"],
-            body: "Current draft feels too literal. Try more abstract imagery.", due: None,
-        },
-        TaskSeed {
-            title: "Mix Midnight EP rough", status: "InProgress", priority: "Normal",
-            assignee: "marcus", project: "midnight-ep", tags: vec!["mixing"],
-            body: "Dark, spacious mix. Reference: James Blake.", due: None,
-        },
-        TaskSeed {
-            title: "Book sound system for Campus Jax", status: "Done", priority: "Urgent",
-            assignee: "devon", project: "campus-jax-live", tags: vec!["logistics"],
-            body: "FOH + monitor engineer booked. Backline confirmed.", due: None,
-        },
-        TaskSeed {
-            title: "Design poster for Campus Jax", status: "InProgress", priority: "Normal",
-            assignee: "riley", project: "campus-jax-live", tags: vec!["marketing"],
-            body: "Neon/retro aesthetic. 4 band names, date, QR code for tickets.", due: None,
-        },
-        TaskSeed {
-            title: "Finalize setlist for Campus Jax", status: "Open", priority: "High",
-            assignee: "cody", project: "campus-jax-live", tags: vec!["planning"],
-            body: "45-min headline slot. 6 songs + encore.", due: None,
-        },
-        TaskSeed {
-            title: "Fix clock drift bug in sync engine", status: "InProgress", priority: "Urgent",
-            assignee: "kai", project: "task-app", tags: vec!["bug"],
-            body: "Drift of ~2ms per minute when syncing to external MIDI clock.", due: None,
-        },
-        TaskSeed {
-            title: "Implement WebSocket reconnect", status: "Open", priority: "High",
-            assignee: "kai", project: "task-app", tags: vec!["feature"],
-            body: "Auto-reconnect with exponential backoff on connection drop.", due: None,
-        },
-        TaskSeed {
-            title: "Design saved views UI", status: "Open", priority: "Normal",
-            assignee: "luna", project: "task-app", tags: vec!["design", "ui"],
-            body: "Saved filter presets with custom naming and sharing.", due: None,
-        },
-        TaskSeed {
-            title: "Add org switcher filtering", status: "InProgress", priority: "Normal",
-            assignee: "luna", project: "task-app", tags: vec!["feature", "ui"],
-            body: "Filter projects and tasks by selected organization.", due: None,
-        },
-        TaskSeed {
-            title: "Set up CI/CD pipeline", status: "Open", priority: "High",
-            assignee: "alex", project: "task-app", tags: vec!["devops"],
-            body: "GitHub Actions for build, test, deploy.", due: None,
-        },
-        TaskSeed {
-            title: "Write integration tests", status: "Open", priority: "Normal",
-            assignee: "mira", project: "task-app", tags: vec!["testing"],
-            body: "End-to-end tests for task CRUD and sync operations.", due: None,
-        },
-        TaskSeed {
-            title: "DAW session auto-save", status: "Open", priority: "Normal",
-            assignee: "kai", project: "fts-session", tags: vec!["feature"],
-            body: "Auto-save every 5 minutes with dirty-flag optimization.", due: None,
-        },
-        TaskSeed {
-            title: "Network discovery for sync", status: "Open", priority: "High",
-            assignee: "alex", project: "fts-sync", tags: vec!["feature"],
-            body: "Discover other Sync instances on the LAN via mDNS/Bonjour.", due: None,
-        },
-        TaskSeed {
-            title: "Mix track 3 for Wildflower", status: "InProgress", priority: "Normal",
-            assignee: "marcus", project: "wildflower-album-mix", tags: vec!["mixing"],
-            body: "Reference: Phoebe Bridgers. Keep it dreamy.", due: None,
-        },
-        TaskSeed {
-            title: "Master Wildflower final", status: "Open", priority: "Normal",
-            assignee: "jade", project: "wildflower-album-mix", tags: vec!["mastering"],
-            body: "All 10 tracks mastered. -14 LUFS target.", due: None,
-        },
-        TaskSeed {
-            title: "Record acoustic guitar for Tom EP", status: "InProgress", priority: "Normal",
-            assignee: "tom", project: "tom-solo-ep", tags: vec!["recording"],
-            body: "Solo acoustic piece. Martin D-28, Neumann KM184 stereo pair.", due: None,
-        },
-        TaskSeed {
-            title: "Mix Tom EP rough", status: "Open", priority: "Normal",
-            assignee: "marcus", project: "tom-solo-ep", tags: vec!["mixing"],
-            body: "Minimal mixing — just balance, EQ, light compression.", due: None,
-        },
-        TaskSeed {
-            title: "Design new landing page", status: "Open", priority: "Normal",
-            assignee: "luna", project: "website-redesign", tags: vec!["design"],
-            body: "Modern, clean design showcasing studio services.", due: None,
-        },
-        TaskSeed {
-            title: "Update album cover art", status: "Open", priority: "Low",
-            assignee: "riley", project: "demo-album", tags: vec!["design", "art"],
-            body: "Warm analog tones, Montreal skyline at dusk, handwritten title.", due: None,
-        },
-        TaskSeed {
-            title: "Submit Demo Album to distributors", status: "Open", priority: "Normal",
-            assignee: "omar", project: "demo-album", tags: vec!["distribution"],
-            body: "Upload to DistroKid. Schedule Friday release.",
-            due: Some(chrono::NaiveDate::from_ymd_opt(2026, 8, 1).unwrap()),
-        },
-        TaskSeed {
-            title: "Review Campus Jax vendor contracts", status: "Open", priority: "High",
-            assignee: "omar", project: "campus-jax-live", tags: vec!["business", "contracts"],
-            body: "Review all vendor agreements before event.", due: None,
-        },
-    ];
-
-    for t in &tasks {
-        let model = task::ActiveModel {
-            id: Set(Uuid::new_v4()),
-            sequence_id: Set(None),
-            title: Set(t.title.to_string()),
-            status: Set(t.status.to_string()),
-            priority: Set(t.priority.to_string()),
-            issue_type: Set(None),
-            project: Set(Some(t.project.to_string())),
-            assignee: Set(Some(t.assignee.to_string())),
-            assignees: Set(serde_json::json!([]).into()),
-            created_by: Set(None),
-            due: Set(t.due),
-            scheduled: Set(None),
-            start: Set(None),
-            completed_date: Set(None),
-            tags: Set(serde_json::json!(t.tags).into()),
-            time_estimate: Set(None),
-            sort_order: Set(None),
-            body: Set(Some(t.body.to_string())),
-            file_path: Set(None),
-            is_draft: Set(false),
-            deleted_at: Set(None),
-            created_at: Set(now),
-            updated_at: Set(now),
-        };
-        model.insert(db).await.unwrap();
-    }
-    info!(count = tasks.len(), "Seeded tasks");
-}
-
 /// Seed mock users and organizations into better-auth.
 async fn seed_auth_data(
     auth: &Arc<better_auth::BetterAuth<SeaOrmAuthAdapter>>,
@@ -538,26 +224,186 @@ async fn seed_auth_data(
     }
 
     let users = [
-        MockUser { id: "user_cody",   username: "cody",   name: "Cody Wright",      email: "cody@fasttrackstudio.com",   role_title: "Founder & Producer",    department: "leadership",  account_status: "claimed" },
-        MockUser { id: "user_amy",    username: "amy",    name: "Amy Chen",          email: "amy@fasttrackstudio.com",    role_title: "Creative Director",     department: "leadership",  account_status: "claimed" },
-        MockUser { id: "user_carter", username: "carter", name: "Carter Whitlock",   email: "carter@fasttrackstudio.com", role_title: "Drummer & Live Sound",  department: "music",       account_status: "claimed" },
-        MockUser { id: "user_tom",    username: "tom",    name: "Tom Brooks",        email: "tom@fasttrackstudio.com",    role_title: "Guitarist",             department: "music",       account_status: "claimed" },
-        MockUser { id: "user_bri",    username: "bri",    name: "Bri Zacharias",     email: "bri@fasttrackstudio.com",    role_title: "Bass & Tour Manager",   department: "music",       account_status: "claimed" },
-        MockUser { id: "user_kai",    username: "kai",    name: "Kai Nakamura",      email: "kai@fasttrackstudio.com",    role_title: "Backend Developer",     department: "engineering", account_status: "claimed" },
-        MockUser { id: "user_luna",   username: "luna",   name: "Luna Zhang",        email: "luna@fasttrackstudio.com",   role_title: "Frontend Developer",    department: "engineering", account_status: "claimed" },
-        MockUser { id: "user_elena",  username: "elena",  name: "Elena Vasquez",     email: "elena.vasquez@gmail.com",    role_title: "Keys & Arrangements",   department: "music",       account_status: "invited" },
-        MockUser { id: "user_marcus", username: "marcus", name: "Marcus Cole",       email: "marcus@mixengineer.com",     role_title: "Mix Engineer",          department: "music",       account_status: "invited" },
-        MockUser { id: "user_jade",   username: "jade",   name: "Jade Kim",          email: "jade@sterling-sound.com",    role_title: "Mastering Engineer",    department: "music",       account_status: "invited" },
-        MockUser { id: "user_devon",  username: "devon",  name: "Devon Miles",       email: "devon.miles@outlook.com",    role_title: "Event Coordinator",     department: "events",      account_status: "invited" },
-        MockUser { id: "user_alex",   username: "alex",   name: "Alex Petrov",       email: "alex.petrov@proton.me",      role_title: "DevOps Engineer",       department: "engineering", account_status: "invited" },
-        MockUser { id: "user_noah",   username: "noah",   name: "Noah Park",         email: "noah@fasttrackstudio.com",   role_title: "Recording Engineer",    department: "music",       account_status: "placeholder" },
-        MockUser { id: "user_priya",  username: "priya",  name: "Priya Sharma",      email: "priya@fasttrackstudio.com",  role_title: "Vocal Coach",           department: "music",       account_status: "placeholder" },
-        MockUser { id: "user_riley",  username: "riley",  name: "Riley Foster",      email: "riley@fasttrackstudio.com",  role_title: "Marketing Lead",        department: "events",      account_status: "placeholder" },
-        MockUser { id: "user_jordan", username: "jordan", name: "Jordan Lee",        email: "jordan@fasttrackstudio.com", role_title: "Lighting & Stage",      department: "events",      account_status: "placeholder" },
-        MockUser { id: "user_sam",    username: "sam",    name: "Sam Rivera",        email: "sam@fasttrackstudio.com",    role_title: "Video & Content",       department: "events",      account_status: "placeholder" },
-        MockUser { id: "user_mira",   username: "mira",   name: "Mira Okafor",       email: "mira@fasttrackstudio.com",   role_title: "QA Engineer",           department: "engineering", account_status: "placeholder" },
-        MockUser { id: "user_omar",   username: "omar",   name: "Omar Hassan",       email: "omar@fasttrackstudio.com",   role_title: "Business Manager",      department: "business",    account_status: "placeholder" },
-        MockUser { id: "user_tess",   username: "tess",   name: "Tess Moreno",       email: "tess@fasttrackstudio.com",   role_title: "A&R",                   department: "business",    account_status: "placeholder" },
+        MockUser {
+            id: "user_cody",
+            username: "cody",
+            name: "Cody Wright",
+            email: "cody@fasttrackstudio.com",
+            role_title: "Founder & Producer",
+            department: "leadership",
+            account_status: "claimed",
+        },
+        MockUser {
+            id: "user_amy",
+            username: "amy",
+            name: "Amy Chen",
+            email: "amy@fasttrackstudio.com",
+            role_title: "Creative Director",
+            department: "leadership",
+            account_status: "claimed",
+        },
+        MockUser {
+            id: "user_carter",
+            username: "carter",
+            name: "Carter Whitlock",
+            email: "carter@fasttrackstudio.com",
+            role_title: "Drummer & Live Sound",
+            department: "music",
+            account_status: "claimed",
+        },
+        MockUser {
+            id: "user_tom",
+            username: "tom",
+            name: "Tom Brooks",
+            email: "tom@fasttrackstudio.com",
+            role_title: "Guitarist",
+            department: "music",
+            account_status: "claimed",
+        },
+        MockUser {
+            id: "user_bri",
+            username: "bri",
+            name: "Bri Zacharias",
+            email: "bri@fasttrackstudio.com",
+            role_title: "Bass & Tour Manager",
+            department: "music",
+            account_status: "claimed",
+        },
+        MockUser {
+            id: "user_kai",
+            username: "kai",
+            name: "Kai Nakamura",
+            email: "kai@fasttrackstudio.com",
+            role_title: "Backend Developer",
+            department: "engineering",
+            account_status: "claimed",
+        },
+        MockUser {
+            id: "user_luna",
+            username: "luna",
+            name: "Luna Zhang",
+            email: "luna@fasttrackstudio.com",
+            role_title: "Frontend Developer",
+            department: "engineering",
+            account_status: "claimed",
+        },
+        MockUser {
+            id: "user_elena",
+            username: "elena",
+            name: "Elena Vasquez",
+            email: "elena.vasquez@gmail.com",
+            role_title: "Keys & Arrangements",
+            department: "music",
+            account_status: "invited",
+        },
+        MockUser {
+            id: "user_marcus",
+            username: "marcus",
+            name: "Marcus Cole",
+            email: "marcus@mixengineer.com",
+            role_title: "Mix Engineer",
+            department: "music",
+            account_status: "invited",
+        },
+        MockUser {
+            id: "user_jade",
+            username: "jade",
+            name: "Jade Kim",
+            email: "jade@sterling-sound.com",
+            role_title: "Mastering Engineer",
+            department: "music",
+            account_status: "invited",
+        },
+        MockUser {
+            id: "user_devon",
+            username: "devon",
+            name: "Devon Miles",
+            email: "devon.miles@outlook.com",
+            role_title: "Event Coordinator",
+            department: "events",
+            account_status: "invited",
+        },
+        MockUser {
+            id: "user_alex",
+            username: "alex",
+            name: "Alex Petrov",
+            email: "alex.petrov@proton.me",
+            role_title: "DevOps Engineer",
+            department: "engineering",
+            account_status: "invited",
+        },
+        MockUser {
+            id: "user_noah",
+            username: "noah",
+            name: "Noah Park",
+            email: "noah@fasttrackstudio.com",
+            role_title: "Recording Engineer",
+            department: "music",
+            account_status: "placeholder",
+        },
+        MockUser {
+            id: "user_priya",
+            username: "priya",
+            name: "Priya Sharma",
+            email: "priya@fasttrackstudio.com",
+            role_title: "Vocal Coach",
+            department: "music",
+            account_status: "placeholder",
+        },
+        MockUser {
+            id: "user_riley",
+            username: "riley",
+            name: "Riley Foster",
+            email: "riley@fasttrackstudio.com",
+            role_title: "Marketing Lead",
+            department: "events",
+            account_status: "placeholder",
+        },
+        MockUser {
+            id: "user_jordan",
+            username: "jordan",
+            name: "Jordan Lee",
+            email: "jordan@fasttrackstudio.com",
+            role_title: "Lighting & Stage",
+            department: "events",
+            account_status: "placeholder",
+        },
+        MockUser {
+            id: "user_sam",
+            username: "sam",
+            name: "Sam Rivera",
+            email: "sam@fasttrackstudio.com",
+            role_title: "Video & Content",
+            department: "events",
+            account_status: "placeholder",
+        },
+        MockUser {
+            id: "user_mira",
+            username: "mira",
+            name: "Mira Okafor",
+            email: "mira@fasttrackstudio.com",
+            role_title: "QA Engineer",
+            department: "engineering",
+            account_status: "placeholder",
+        },
+        MockUser {
+            id: "user_omar",
+            username: "omar",
+            name: "Omar Hassan",
+            email: "omar@fasttrackstudio.com",
+            role_title: "Business Manager",
+            department: "business",
+            account_status: "placeholder",
+        },
+        MockUser {
+            id: "user_tess",
+            username: "tess",
+            name: "Tess Moreno",
+            email: "tess@fasttrackstudio.com",
+            role_title: "A&R",
+            department: "business",
+            account_status: "placeholder",
+        },
     ];
 
     let password_hash = better_auth_core::hash_password(None, "mock-password-123!")
@@ -597,35 +443,54 @@ async fn seed_auth_data(
 
     let orgs = [
         MockOrg {
-            id: "org_personal", name: "Personal", slug: "personal",
-            emoji: "user", hue: 0,
+            id: "org_personal",
+            name: "Personal",
+            slug: "personal",
+            emoji: "user",
+            hue: 0,
             description: "Private tasks and projects",
-            owner: "cody", members: &["cody"],
+            owner: "cody",
+            members: &["cody"],
         },
         MockOrg {
-            id: "org_fta", name: "FastTrackAudio", slug: "fasttrackaudio",
-            emoji: "music", hue: 210,
+            id: "org_fta",
+            name: "FastTrackAudio",
+            slug: "fasttrackaudio",
+            emoji: "music",
+            hue: 210,
             description: "Music production company — albums, EPs, mixing clients",
             owner: "cody",
-            members: &["cody", "amy", "carter", "tom", "bri", "elena", "marcus", "jade", "noah", "priya", "tess", "omar"],
+            members: &[
+                "cody", "amy", "carter", "tom", "bri", "elena", "marcus", "jade", "noah", "priya",
+                "tess", "omar",
+            ],
         },
         MockOrg {
-            id: "org_fts", name: "FastTrackStudio", slug: "fasttrackstudio",
-            emoji: "code", hue: 270,
+            id: "org_fts",
+            name: "FastTrackStudio",
+            slug: "fasttrackstudio",
+            emoji: "code",
+            hue: 270,
             description: "Software development — audio tools, plugins, infrastructure",
             owner: "cody",
             members: &["cody", "tom", "kai", "luna", "alex", "mira"],
         },
         MockOrg {
-            id: "org_jf", name: "Just Friends", slug: "just-friends",
-            emoji: "guitar", hue: 145,
+            id: "org_jf",
+            name: "Just Friends",
+            slug: "just-friends",
+            emoji: "guitar",
+            hue: 145,
             description: "Band project — recurring gigs, rehearsals, recordings",
             owner: "cody",
             members: &["cody", "amy", "carter", "tom", "bri", "elena"],
         },
         MockOrg {
-            id: "org_tbm", name: "TomBrooksMusic", slug: "tombrooksmusic",
-            emoji: "music2", hue: 35,
+            id: "org_tbm",
+            name: "TomBrooksMusic",
+            slug: "tombrooksmusic",
+            emoji: "music2",
+            hue: 35,
             description: "Tom Brooks' solo artist projects and collaborations",
             owner: "tom",
             members: &["tom", "cody", "marcus"],
@@ -633,8 +498,8 @@ async fn seed_auth_data(
     ];
 
     for org in &orgs {
-        let mut create = CreateOrganization::new(org.name, org.slug)
-            .with_metadata(serde_json::json!({
+        let mut create =
+            CreateOrganization::new(org.name, org.slug).with_metadata(serde_json::json!({
                 "emoji": org.emoji,
                 "hue": org.hue,
                 "description": org.description,
@@ -651,7 +516,11 @@ async fn seed_auth_data(
 
         for username in org.members {
             let user_id = format!("user_{username}");
-            let role = if *username == org.owner { "owner" } else { "member" };
+            let role = if *username == org.owner {
+                "owner"
+            } else {
+                "member"
+            };
             let create_member = CreateMember::new(org.id, &user_id, role);
             if let Err(e) = db.create_member(create_member).await {
                 warn!(org = org.slug, user = username, error = %e, "Failed to add member");
@@ -659,14 +528,6 @@ async fn seed_auth_data(
         }
     }
     info!("Seeded {} organizations into better-auth", orgs.len());
-}
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
-/// Derive a stable oklch hue from a string (0-360).
-fn hue_from_string(s: &str) -> u32 {
-    let hash: u32 = s.bytes().fold(5381u32, |h, b| h.wrapping_mul(33).wrapping_add(b as u32));
-    hash % 360
 }
 
 // ── Loro CRDT sync ───────────────────────────────────────────────────────────
@@ -685,10 +546,7 @@ async fn crdt_status(State(state): State<AppState>) -> Json<serde_json::Value> {
     }
 }
 
-async fn crdt_ws_handler(
-    ws: WebSocketUpgrade,
-    State(state): State<AppState>,
-) -> impl IntoResponse {
+async fn crdt_ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> impl IntoResponse {
     ws.on_upgrade(move |socket| handle_crdt_connection(socket, state))
 }
 
@@ -709,7 +567,9 @@ async fn handle_crdt_connection(socket: WebSocket, state: AppState) {
         "peer": engine.local_peer().to_string(),
         "protocol": "task.loro.v1",
     });
-    let _ = ws_tx.send(axum::extract::ws::Message::Text(ready.to_string().into())).await;
+    let _ = ws_tx
+        .send(axum::extract::ws::Message::Text(ready.to_string().into()))
+        .await;
 
     loop {
         tokio::select! {
@@ -793,7 +653,10 @@ async fn handle_crdt_request(
         Err(e) => return Some(json!({"type": "error", "error": format!("invalid JSON: {e}")})),
     };
 
-    let id = request.get("id").cloned().unwrap_or(serde_json::Value::Null);
+    let id = request
+        .get("id")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
     let kind = request.get("type").and_then(|t| t.as_str()).unwrap_or("");
     let path = request
         .get("path")
@@ -823,8 +686,12 @@ async fn handle_crdt_request(
                         "task": task,
                     }))
                 }
-                Ok(None) => Some(json!({"type": "error", "id": id, "path": path, "error": "document not found"})),
-                Err(e) => Some(json!({"type": "error", "id": id, "path": path, "error": e.to_string()})),
+                Ok(None) => Some(
+                    json!({"type": "error", "id": id, "path": path, "error": "document not found"}),
+                ),
+                Err(e) => {
+                    Some(json!({"type": "error", "id": id, "path": path, "error": e.to_string()}))
+                }
             }
         }
         "task" => {
@@ -842,7 +709,9 @@ async fn handle_crdt_request(
             }
             match engine.apply_field_change(path, field, value).await {
                 Ok(()) => Some(json!({"type": "ok", "id": id, "path": path})),
-                Err(e) => Some(json!({"type": "error", "id": id, "path": path, "error": e.to_string()})),
+                Err(e) => {
+                    Some(json!({"type": "error", "id": id, "path": path, "error": e.to_string()}))
+                }
             }
         }
         "body" => {
@@ -852,7 +721,9 @@ async fn handle_crdt_request(
             }
             match engine.apply_body_change(path, body).await {
                 Ok(()) => Some(json!({"type": "ok", "id": id, "path": path})),
-                Err(e) => Some(json!({"type": "error", "id": id, "path": path, "error": e.to_string()})),
+                Err(e) => {
+                    Some(json!({"type": "error", "id": id, "path": path, "error": e.to_string()}))
+                }
             }
         }
         "update" => {
@@ -864,21 +735,32 @@ async fn handle_crdt_request(
             }
             let bytes = match decode_b64(data) {
                 Ok(bytes) => bytes,
-                Err(e) => return Some(json!({"type": "error", "id": id, "path": path, "error": e})),
+                Err(e) => {
+                    return Some(json!({"type": "error", "id": id, "path": path, "error": e}))
+                }
             };
             match engine.apply_remote_update(path, &bytes).await {
                 Ok(()) => Some(json!({"type": "ok", "id": id, "path": path})),
-                Err(e) => Some(json!({"type": "error", "id": id, "path": path, "error": e.to_string()})),
+                Err(e) => {
+                    Some(json!({"type": "error", "id": id, "path": path, "error": e.to_string()}))
+                }
             }
         }
         "subscribe" => Some(json!({"type": "ok", "id": id, "subscribed": true})),
-        _ => Some(json!({"type": "error", "id": id, "error": format!("unknown CRDT message type: {kind}")})),
+        _ => Some(
+            json!({"type": "error", "id": id, "error": format!("unknown CRDT message type: {kind}")}),
+        ),
     }
 }
 
 fn sync_op_to_json(op: SyncOp) -> serde_json::Value {
     match op {
-        SyncOp::FieldChanged { file_path, field, value, peer } => json!({
+        SyncOp::FieldChanged {
+            file_path,
+            field,
+            value,
+            peer,
+        } => json!({
             "type": "field_changed",
             "path": file_path,
             "field": field,
@@ -960,10 +842,7 @@ fn spawn_crdt_conflict_persister(
 
 // ── Vox WebSocket handler ────────────────────────────────────────────────────
 
-async fn vox_ws_handler(
-    ws: WebSocketUpgrade,
-    State(state): State<AppState>,
-) -> impl IntoResponse {
+async fn vox_ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> impl IntoResponse {
     ws.on_upgrade(move |socket| handle_vox_connection(socket, state))
 }
 
@@ -1185,166 +1064,7 @@ impl vox::LinkRx for AxumWsRx {
     }
 }
 
-/// Convert a DB project model to the API shape the web client expects.
-fn project_to_api(p: &project::Model) -> serde_json::Value {
-    let hue = hue_from_string(&p.title);
-    let today = chrono::Local::now().date_naive();
-    let is_overdue = p.due.map_or(false, |d| d < today) && p.status != "Completed" && p.status != "Archived";
-    serde_json::json!({
-        "title": p.title,
-        "slug": p.slug,
-        "status": p.status.to_lowercase(),
-        "area": p.area,
-        "due": p.due.map(|d| d.to_string()),
-        "team": p.team,
-        "is_overdue": is_overdue,
-        "hue": hue,
-        "project_type": p.project_type,
-        "organization": p.organization,
-        "description": p.description,
-        "repo": null,
-        "workflow": null,
-        "workflow_stage": null,
-        "parent": p.parent_slug,
-        "references": p.references,
-    })
-}
-
-/// Convert a DB task model to the API shape the web client expects.
-fn task_to_api(t: &task::Model) -> serde_json::Value {
-    serde_json::json!({
-        "title": t.title,
-        "status": t.status,
-        "priority": t.priority,
-        "assignee": t.assignee,
-        "due": t.due.map(|d| d.to_string()),
-        "projects": t.project.as_ref().map(|p| vec![p.clone()]).unwrap_or_default(),
-        "tags": t.tags,
-        "body": t.body,
-    })
-}
-
-fn vault_task_to_api(t: task_core::Task) -> serde_json::Value {
-    json!({
-        "title": t.title,
-        "status": format!("{:?}", t.status),
-        "priority": format!("{:?}", t.priority),
-        "assignee": t.assignee,
-        "due": t.due.map(|d| d.to_string()),
-        "projects": t.projects.into_iter().map(|p| p.0).collect::<Vec<_>>(),
-        "tags": t.tags,
-        "body": if t.body.is_empty() { None::<String> } else { Some(t.body) },
-    })
-}
-
-fn vault_project_to_api(p: task_core::Project) -> serde_json::Value {
-    let hue = hue_from_string(&p.title);
-    let today = chrono::Local::now().date_naive();
-    let slug = slug::slugify(&p.title);
-    let status = format!("{:?}", p.status);
-    let is_overdue = p.due.map_or(false, |d| d < today) && status != "Completed" && status != "Archived";
-    json!({
-        "title": p.title,
-        "slug": slug,
-        "status": status.to_lowercase(),
-        "area": p.area,
-        "due": p.due.map(|d| d.to_string()),
-        "team": p.team,
-        "is_overdue": is_overdue,
-        "hue": hue,
-        "project_type": p.project_type,
-        "organization": p.organization,
-        "description": p.description,
-        "repo": p.repo,
-        "workflow": p.workflow,
-        "workflow_stage": p.workflow_stage,
-        "parent": p.up.first().map(|p| slug::slugify(&p.0)),
-        "references": p.references.into_iter().map(|r| r.0).collect::<Vec<_>>(),
-    })
-}
-
-async fn find_vault_task(svc: &VaultServiceImpl, title: &str) -> Option<task_core::Task> {
-    let slug_title = slug::slugify(title);
-    svc.list_tasks()
-        .await
-        .into_iter()
-        .find(|t| t.title == title || slug::slugify(&t.title) == slug_title || t.id.as_deref() == Some(title))
-}
-
-fn task_from_params(params: &serde_json::Value) -> task_core::Task {
-    let mut task = task_core::Task::default();
-    apply_task_params(&mut task, params);
-    task
-}
-
-fn apply_task_params(task: &mut task_core::Task, params: &serde_json::Value) {
-    if let Some(title) = params.get("title").and_then(|t| t.as_str()) {
-        task.title = title.to_string();
-    }
-    if let Some(status) = params.get("status").and_then(|s| s.as_str()).and_then(parse_vault_status) {
-        task.status = status;
-    }
-    if let Some(priority) = params.get("priority").and_then(|p| p.as_str()).and_then(parse_vault_priority) {
-        task.priority = priority;
-    }
-    if let Some(assignee) = params.get("assignee").and_then(|a| a.as_str()) {
-        task.assignee = if assignee.is_empty() { None } else { Some(assignee.to_string()) };
-    }
-    if let Some(due) = params.get("due").and_then(|d| d.as_str()) {
-        task.due = chrono::NaiveDate::parse_from_str(due, "%Y-%m-%d").ok();
-    }
-    if let Some(project) = params.get("project").and_then(|p| p.as_str()) {
-        task.projects = vec![task_core::WikiLink(project.to_string())];
-    }
-    if let Some(projects) = params.get("projects").and_then(|p| p.as_array()) {
-        task.projects = projects
-            .iter()
-            .filter_map(|p| p.as_str().map(|s| task_core::WikiLink(s.to_string())))
-            .collect();
-    }
-    if let Some(tags) = params.get("tags").and_then(|t| t.as_array()) {
-        task.tags = tags.iter().filter_map(|t| t.as_str().map(str::to_string)).collect();
-    }
-    if let Some(body) = params.get("body").and_then(|b| b.as_str()) {
-        task.body = body.to_string();
-    }
-}
-
-fn parse_vault_status(s: &str) -> Option<task_core::Status> {
-    match s.to_ascii_lowercase().as_str() {
-        "none" => Some(task_core::Status::None),
-        "open" => Some(task_core::Status::Open),
-        "inprogress" | "in-progress" | "in_progress" => Some(task_core::Status::InProgress),
-        "onhold" | "on-hold" | "on_hold" => Some(task_core::Status::OnHold),
-        "planned" => Some(task_core::Status::Planned),
-        "done" => Some(task_core::Status::Done),
-        "cancelled" | "canceled" => Some(task_core::Status::Cancelled),
-        "archived" => Some(task_core::Status::Archived),
-        _ => None,
-    }
-}
-
-fn parse_vault_priority(s: &str) -> Option<task_core::Priority> {
-    match s.to_ascii_lowercase().as_str() {
-        "none" => Some(task_core::Priority::None),
-        "low" => Some(task_core::Priority::Low),
-        "normal" => Some(task_core::Priority::Normal),
-        "high" => Some(task_core::Priority::High),
-        "urgent" => Some(task_core::Priority::Urgent),
-        _ => None,
-    }
-}
-
-async fn notify_crdt_file_changed(state: &AppState, title: &str) {
-    if let Some(engine) = state.crdt.as_ref() {
-        let path = format!("{title}.md");
-        if let Err(e) = engine.on_file_changed(&path).await {
-            warn!(path = %path, error = %e, "failed to publish vault change to CRDT engine");
-        }
-    }
-}
-
-// ── REST Handlers ───────────────────────────────────────────────────────────
+// ── HTTP metadata handlers ──────────────────────────────────────────────────
 
 async fn health() -> &'static str {
     "ok"
@@ -1352,244 +1072,4 @@ async fn health() -> &'static str {
 
 async fn server_info(State(state): State<AppState>) -> impl IntoResponse {
     Json(state.info)
-}
-
-#[derive(Deserialize)]
-struct ProjectFilter {
-    area: Option<String>,
-    status: Option<String>,
-    project_type: Option<String>,
-}
-
-async fn list_projects_handler(
-    State(state): State<AppState>,
-    AxumQuery(filter): AxumQuery<ProjectFilter>,
-) -> impl IntoResponse {
-    if let Some(svc) = state.vault_service.as_ref() {
-        let mut projects = svc.list_projects().await;
-        if let Some(ref area) = filter.area {
-            projects.retain(|p| p.area.as_deref() == Some(area.as_str()));
-        }
-        if let Some(ref status) = filter.status {
-            projects.retain(|p| format!("{:?}", p.status).eq_ignore_ascii_case(status));
-        }
-        if let Some(ref pt) = filter.project_type {
-            projects.retain(|p| p.project_type.as_deref() == Some(pt.as_str()));
-        }
-        return Json(projects.into_iter().map(vault_project_to_api).collect::<Vec<_>>());
-    }
-
-    let mut query = project::Entity::find();
-    if let Some(ref area) = filter.area {
-        query = query.filter(project::Column::Area.eq(area));
-    }
-    if let Some(ref status) = filter.status {
-        query = query.filter(project::Column::Status.eq(status));
-    }
-    if let Some(ref pt) = filter.project_type {
-        query = query.filter(project::Column::ProjectType.eq(pt));
-    }
-    let projects = query.all(&state.db).await.unwrap_or_default();
-    Json(projects.iter().map(project_to_api).collect::<Vec<_>>())
-}
-
-async fn list_active_projects_handler(State(state): State<AppState>) -> impl IntoResponse {
-    if let Some(svc) = state.vault_service.as_ref() {
-        let projects = svc
-            .list_projects()
-            .await
-            .into_iter()
-            .filter(|p| p.is_active() && p.deleted_at.is_none() && p.archived_at.is_none())
-            .map(vault_project_to_api)
-            .collect::<Vec<_>>();
-        return Json(projects);
-    }
-
-    let projects = project::Entity::find()
-        .filter(project::Column::Status.eq("Active"))
-        .filter(project::Column::DeletedAt.is_null())
-        .filter(project::Column::ArchivedAt.is_null())
-        .all(&state.db).await.unwrap_or_default();
-    Json(projects.iter().map(project_to_api).collect::<Vec<_>>())
-}
-
-async fn list_tasks_handler(State(state): State<AppState>) -> impl IntoResponse {
-    if let Some(svc) = state.vault_service.as_ref() {
-        let tasks = svc.list_tasks().await;
-        return Json(tasks.into_iter().map(vault_task_to_api).collect::<Vec<_>>());
-    }
-
-    let tasks = task::Entity::find().all(&state.db).await.unwrap_or_default();
-    Json(tasks.iter().map(task_to_api).collect::<Vec<_>>())
-}
-
-#[derive(Deserialize)]
-struct CreateTaskRequest {
-    title: String,
-    #[serde(default)]
-    status: Option<String>,
-    #[serde(default)]
-    priority: Option<String>,
-    #[serde(default)]
-    assignee: Option<String>,
-    #[serde(default)]
-    due: Option<String>,
-    #[serde(default)]
-    project: Option<String>,
-    #[serde(default)]
-    tags: Vec<String>,
-    #[serde(default)]
-    body: String,
-}
-
-async fn create_task_api(
-    State(state): State<AppState>,
-    Json(req): Json<CreateTaskRequest>,
-) -> impl IntoResponse {
-    if let Some(svc) = state.vault_service.as_ref() {
-        let params = json!({
-            "title": req.title,
-            "status": req.status,
-            "priority": req.priority,
-            "assignee": req.assignee,
-            "due": req.due,
-            "project": req.project,
-            "tags": req.tags,
-            "body": req.body,
-        });
-        let task = task_from_params(&params);
-        return match svc.create_task(task).await {
-            Ok(created) => {
-                notify_crdt_file_changed(&state, &created.title).await;
-                Json(json!({"task": vault_task_to_api(created)}))
-            }
-            Err(e) => Json(json!({"error": e.to_string()})),
-        };
-    }
-
-    let now = Utc::now();
-    let model = task::ActiveModel {
-        id: Set(Uuid::new_v4()),
-        sequence_id: Set(None),
-        title: Set(req.title),
-        status: Set(req.status.unwrap_or_else(|| "Open".to_string())),
-        priority: Set(req.priority.unwrap_or_else(|| "Normal".to_string())),
-        issue_type: Set(None),
-        project: Set(req.project),
-        assignee: Set(req.assignee),
-        assignees: Set(serde_json::json!([]).into()),
-        created_by: Set(None),
-        due: Set(req.due.and_then(|d| chrono::NaiveDate::parse_from_str(&d, "%Y-%m-%d").ok())),
-        scheduled: Set(None),
-        start: Set(None),
-        completed_date: Set(None),
-        tags: Set(serde_json::json!(req.tags).into()),
-        time_estimate: Set(None),
-        sort_order: Set(None),
-        body: Set(if req.body.is_empty() { None } else { Some(req.body) }),
-        file_path: Set(None),
-        is_draft: Set(false),
-        deleted_at: Set(None),
-        created_at: Set(now),
-        updated_at: Set(now),
-    };
-    match model.insert(&state.db).await {
-        Ok(created) => Json(serde_json::json!({"task": task_to_api(&created)})),
-        Err(e) => Json(serde_json::json!({"error": e.to_string()})),
-    }
-}
-
-async fn complete_task_api(
-    State(state): State<AppState>,
-    axum::extract::Path(title): axum::extract::Path<String>,
-) -> impl IntoResponse {
-    if let Some(svc) = state.vault_service.as_ref() {
-        return match svc.complete_task(title.clone()).await {
-            Ok(updated) => {
-                notify_crdt_file_changed(&state, &title).await;
-                Json(json!({"task": vault_task_to_api(updated)}))
-            }
-            Err(e) => Json(json!({"error": e.to_string()})),
-        };
-    }
-
-    match task::Entity::find().filter(task::Column::Title.eq(&title)).one(&state.db).await {
-        Ok(Some(existing)) => {
-            let mut active: task::ActiveModel = existing.into();
-            active.status = Set("Done".to_string());
-            active.completed_date = Set(Some(chrono::Local::now().date_naive()));
-            active.updated_at = Set(Utc::now());
-            match active.update(&state.db).await {
-                Ok(updated) => Json(serde_json::json!({"task": task_to_api(&updated)})),
-                Err(e) => Json(serde_json::json!({"error": e.to_string()})),
-            }
-        }
-        Ok(None) => Json(serde_json::json!({"error": "not found"})),
-        Err(e) => Json(serde_json::json!({"error": e.to_string()})),
-    }
-}
-
-async fn get_task(
-    State(state): State<AppState>,
-    axum::extract::Path(title): axum::extract::Path<String>,
-) -> impl IntoResponse {
-    if let Some(svc) = state.vault_service.as_ref() {
-        return match find_vault_task(svc, &title).await {
-            Some(task) => Json(json!({"task": vault_task_to_api(task)})),
-            None => Json(json!({"error": "not found"})),
-        };
-    }
-
-    match task::Entity::find().filter(task::Column::Title.eq(&title)).one(&state.db).await {
-        Ok(Some(t)) => Json(serde_json::json!({"task": task_to_api(&t)})),
-        Ok(None) => Json(serde_json::json!({"error": "not found"})),
-        Err(e) => Json(serde_json::json!({"error": e.to_string()})),
-    }
-}
-
-async fn tasks_by_user(
-    State(state): State<AppState>,
-    axum::extract::Path(username): axum::extract::Path<String>,
-) -> impl IntoResponse {
-    if let Some(svc) = state.vault_service.as_ref() {
-        let tasks = svc.tasks_for_user(username).await;
-        return Json(json!({"tasks": tasks.into_iter().map(vault_task_to_api).collect::<Vec<_>>()}));
-    }
-
-    let tasks = task::Entity::find()
-        .filter(task::Column::Assignee.eq(&username))
-        .all(&state.db).await.unwrap_or_default();
-    Json(serde_json::json!({"tasks": tasks.iter().map(task_to_api).collect::<Vec<_>>()}))
-}
-
-#[derive(Deserialize)]
-struct ActivityFilter {
-    limit: Option<u64>,
-    #[allow(dead_code)]
-    entity_type: Option<String>,
-    #[allow(dead_code)]
-    entity_id: Option<String>,
-}
-
-async fn activity_feed(
-    State(state): State<AppState>,
-    AxumQuery(filter): AxumQuery<ActivityFilter>,
-) -> impl IntoResponse {
-    let limit = filter.limit.unwrap_or(50);
-    let activities = activity::Entity::find()
-        .order_by_desc(activity::Column::CreatedAt)
-        .paginate(&state.db, limit)
-        .fetch_page(0).await.unwrap_or_default();
-    let items: Vec<serde_json::Value> = activities.iter().map(|a| {
-        serde_json::json!({
-            "entity_type": a.entity_type,
-            "entity_id": a.entity_id.to_string(),
-            "field": a.field,
-            "old_value": a.old_value,
-            "new_value": a.new_value,
-            "changed_by": a.actor,
-            "changed_at": a.created_at.to_rfc3339(),
-        })
-    }).collect();
-    Json(serde_json::json!({"changes": items}))
 }

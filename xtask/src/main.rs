@@ -4,9 +4,7 @@
 //!
 //! Commands:
 //!   build             — Build WASM + JS bundle for the Obsidian plugin
-//!   codegen           — Generate TypeScript and Swift bindings from Vox services
-//!   codegen --ts      — TypeScript only
-//!   codegen --swift   — Swift only
+//!   codegen           — Generate TypeScript bindings from Vox services
 
 use std::path::Path;
 
@@ -20,26 +18,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             build_obsidian_plugin(&workspace_root)?;
         }
         "codegen" => {
-            let ts_only = args.iter().any(|a| a == "--ts" || a == "--typescript");
-            let swift_only = args.iter().any(|a| a == "--swift");
-
             let workspace_root = workspace_root();
-
-            if !swift_only {
-                codegen_typescript(&workspace_root)?;
-            }
-            if !ts_only {
-                codegen_swift(&workspace_root)?;
-            }
+            codegen_typescript(&workspace_root)?;
         }
         "help" | "--help" | "-h" => {
             println!("cargo xtask <command>");
             println!();
             println!("Commands:");
             println!("  build             Build WASM + JS bundle for the Obsidian plugin");
-            println!("  codegen           Generate TypeScript and Swift bindings");
-            println!("  codegen --ts      TypeScript only");
-            println!("  codegen --swift   Swift only");
+            println!("  codegen           Generate TypeScript bindings");
         }
         other => {
             eprintln!("Unknown command: {other}");
@@ -64,8 +51,9 @@ fn workspace_root() -> std::path::PathBuf {
 
 fn codegen_typescript(workspace_root: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let out_dir = workspace_root
-        .join("crates")
-        .join("task-obsidian")
+        .join("integrations")
+        .join("obsidian")
+        .join("plugin")
         .join("generated");
     std::fs::create_dir_all(&out_dir)?;
 
@@ -78,43 +66,6 @@ fn codegen_typescript(workspace_root: &Path) -> Result<(), Box<dyn std::error::E
         let out_path = out_dir.join(&filename);
         write_if_changed(&out_path, ts)?;
         println!("Generated TypeScript: {}", out_path.display());
-    }
-    Ok(())
-}
-
-fn codegen_swift(workspace_root: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    // Swift client — used by the iOS app and widgets
-    let out_dir = workspace_root
-        .join("ios-widgets")
-        .join("Sources")
-        .join("TaskWidgets")
-        .join("generated");
-    std::fs::create_dir_all(&out_dir)?;
-
-    let desktop_out = workspace_root.join("apps").join("desktop").join("generated");
-    std::fs::create_dir_all(&desktop_out)?;
-
-    for service in service_descriptors() {
-        let service_name = service.service_name.to_string();
-
-        // Client only (iOS connects to the desktop companion as a client)
-        let swift_client = vox_codegen::targets::swift::generate_service_with_bindings(
-            service,
-            vox_codegen::targets::swift::SwiftBindings::Client,
-        );
-        let client_path = out_dir.join(format!("{service_name}Client.swift"));
-        write_if_changed(&client_path, swift_client)?;
-
-        // Server (desktop app implements the service)
-        let swift_server = vox_codegen::targets::swift::generate_service_with_bindings(
-            service,
-            vox_codegen::targets::swift::SwiftBindings::Server,
-        );
-        let server_path = desktop_out.join(format!("{service_name}Server.swift"));
-        write_if_changed(&server_path, swift_server)?;
-
-        println!("Generated Swift client: {}", client_path.display());
-        println!("Generated Swift server: {}", server_path.display());
     }
     Ok(())
 }
@@ -132,15 +83,22 @@ fn service_descriptors() -> Vec<&'static vox_types::ServiceDescriptor> {
 }
 
 fn build_obsidian_plugin(workspace_root: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    use xshell::{Shell, cmd};
+    use xshell::{cmd, Shell};
 
-    let plugin_dir = workspace_root.join("obsidian-plugin");
+    let plugin_dir = workspace_root
+        .join("integrations")
+        .join("obsidian")
+        .join("plugin");
     let sh = Shell::new()?;
     sh.change_dir(&plugin_dir);
 
     // Step 1: compile Rust → WASM and generate JS bindings via wasm-pack
     eprintln!("==> wasm-pack build --target web");
-    cmd!(sh, "wasm-pack build --target web --out-dir pkg --out-name task_task_core").run()?;
+    cmd!(
+        sh,
+        "wasm-pack build --target web --out-dir pkg --out-name task_task_core"
+    )
+    .run()?;
 
     // Step 2: install npm deps if not already present
     if !plugin_dir.join("node_modules").exists() {
