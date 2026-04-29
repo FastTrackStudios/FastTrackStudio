@@ -6,6 +6,7 @@ use dioxus_primitives::select::{
     SelectList as PrimitiveSelectList, SelectOption as PrimitiveSelectOption,
     SelectTrigger as PrimitiveSelectTrigger, SelectValue as PrimitiveSelectValue,
 };
+use lucide_dioxus::{Check, ChevronsUpDown};
 
 #[derive(Props, Clone, PartialEq)]
 pub struct SelectProps {
@@ -75,6 +76,8 @@ pub fn Select(props: SelectProps) -> Element {
 pub struct SelectTriggerProps {
     #[props(default)]
     pub class: String,
+    #[props(default = false)]
+    pub custom_content: bool,
     #[props(default)]
     pub children: Element,
 }
@@ -87,26 +90,13 @@ pub fn SelectTrigger(props: SelectTriggerProps) -> Element {
                 "flex h-9 w-full items-center justify-between gap-2 rounded-lg border border-input bg-transparent px-3 py-2 text-sm whitespace-nowrap shadow-xs outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 {}",
                 props.class
             )),
-            if props.children.is_ok() {
+            if props.custom_content {
                 {props.children}
             } else {
                 PrimitiveSelectValue {
-                    class: "truncate data-[placeholder=true]:text-muted-foreground",
+                    class: "truncate text-left data-[placeholder=true]:text-muted-foreground",
                 }
-                svg {
-                    class: "size-4 text-muted-foreground shrink-0 opacity-50",
-                    xmlns: "http://www.w3.org/2000/svg",
-                    width: "24",
-                    height: "24",
-                    view_box: "0 0 24 24",
-                    fill: "none",
-                    stroke: "currentColor",
-                    stroke_width: "2",
-                    stroke_linecap: "round",
-                    stroke_linejoin: "round",
-                    path { d: "m7 15 5 5 5-5" }
-                    path { d: "m7 9 5-5 5 5" }
-                }
+                ChevronsUpDown { class: "size-4 shrink-0 text-muted-foreground opacity-50" }
             }
         }
     }
@@ -189,19 +179,7 @@ pub fn SelectItem(props: SelectItemProps) -> Element {
             span { class: "flex-1", {props.children} }
             SelectItemIndicator {
                 span { class: "absolute right-2 flex size-3.5 items-center justify-center",
-                    svg {
-                        class: "size-4 text-current",
-                        xmlns: "http://www.w3.org/2000/svg",
-                        width: "24",
-                        height: "24",
-                        view_box: "0 0 24 24",
-                        fill: "none",
-                        stroke: "currentColor",
-                        stroke_width: "2",
-                        stroke_linecap: "round",
-                        stroke_linejoin: "round",
-                        path { d: "M20 6 9 17l-5-5" }
-                    }
+                    Check { class: "size-4 text-current" }
                 }
             }
         }
