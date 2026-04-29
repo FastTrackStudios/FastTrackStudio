@@ -175,15 +175,15 @@ pub fn ThemeProvider(props: ThemeProviderProps) -> Element {
     use_context_provider(|| ThemeContext { state: props.state });
 
     let state = (props.state)();
-    let css = root_theme_css(&state);
+    let style = theme_style_attribute(&state.styles, state.mode);
     let mode = state.mode.as_str();
 
     rsx! {
         ThemeRuntimeStyle {}
-        document::Style { "{css}" }
         div {
             class: crate::cn::merge_slice(&["fts-theme-root min-h-full", props.class.as_str()]),
             "data-theme-mode": mode,
+            style,
             {props.children}
         }
     }
@@ -207,7 +207,7 @@ pub fn ThemeScope(props: ThemeScopeProps) -> Element {
         .map(|context| (context.state)().mode)
         .unwrap_or(ThemeMode::Light);
     let mode = props.mode.unwrap_or(inherited_mode);
-    let style = scoped_theme_style(&props.styles, mode);
+    let style = theme_style_attribute(&props.styles, mode);
 
     rsx! {
         div {
@@ -388,21 +388,13 @@ pub fn theme_preset(name: &str) -> Option<ThemePreset> {
         .find(|preset| preset.name == name)
 }
 
-fn root_theme_css(state: &ThemeState) -> String {
-    let active = state.active_style().css_variables();
-    let color_scheme = if state.mode.is_dark() {
-        "dark"
-    } else {
-        "light"
-    };
-
-    format!(
-        ":root {{{active}color-scheme: {color_scheme};}} body {{font-family: var(--font-sans); letter-spacing: var(--letter-spacing, 0);}}"
-    )
-}
-
-fn scoped_theme_style(styles: &ThemeStyles, mode: ThemeMode) -> String {
+fn theme_style_attribute(styles: &ThemeStyles, mode: ThemeMode) -> String {
     let mut style = styles.active(mode).css_variables();
+    let color_scheme = if mode.is_dark() { "dark" } else { "light" };
+
+    style.push_str("color-scheme: ");
+    style.push_str(color_scheme);
+    style.push(';');
     style.push_str("color: var(--foreground); background-color: var(--background);");
     style
 }
