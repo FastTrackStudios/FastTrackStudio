@@ -200,6 +200,76 @@ export interface SyncStats {
   errors: string[];
 }
 
+export interface CalDavCalendarInfo {
+  href: string;
+  name: string;
+  display_name: string | null;
+  sync_token: string | null;
+  ctag: string | null;
+  components: string[];
+}
+
+export interface CalDavDiscovery {
+  principal_url: string;
+  calendar_home_set: string;
+  schedule_inbox_url: string | null;
+  schedule_outbox_url: string | null;
+  calendar_user_addresses: string[];
+  calendars: CalDavCalendarInfo[];
+}
+
+export interface CalDavMultigetRequest {
+  calendar: string;
+  hrefs: string[];
+}
+
+export interface CalDavObject {
+  href: string;
+  etag: string | null;
+  status: string;
+  component: string | null;
+  calendar_data: string | null;
+  task: Task | null;
+  event: CalendarEvent | null;
+  deleted: boolean;
+}
+
+export interface CalDavSyncCollectionRequest {
+  calendar: string;
+  sync_token: string | null;
+}
+
+export interface CalDavSyncCollectionResponse {
+  sync_token: string | null;
+  objects: CalDavObject[];
+}
+
+export interface CalDavPutObjectRequest {
+  calendar: string;
+  href: string;
+  calendar_data: string;
+  if_match: string | null;
+  if_none_match: string | null;
+}
+
+export interface CalDavDeleteObjectRequest {
+  calendar: string;
+  href: string;
+  if_match: string | null;
+}
+
+export interface CalDavFreeBusyRequest {
+  calendar: string;
+  start: unknown;
+  end: unknown;
+}
+
+export interface CalDavFreeBusyInterval {
+  start: unknown;
+  end: unknown;
+  busy_type: string | null;
+}
+
 export interface RemoteDeckBoard {
   id: bigint;
   title: string;
@@ -246,6 +316,24 @@ export type TriggerSyncResponse = { ok: true; value: SyncStats } | { ok: false; 
 export type SyncStatusRequest = [];
 export type SyncStatusResponse = SyncStats | null;
 
+export type DiscoverCaldavRequest = [];
+export type DiscoverCaldavResponse = { ok: true; value: CalDavDiscovery } | { ok: false; error: VaultError };
+
+export type CalendarMultigetRequest = [CalDavMultigetRequest];
+export type CalendarMultigetResponse = { ok: true; value: CalDavObject[] } | { ok: false; error: VaultError };
+
+export type CalendarSyncCollectionRequest = [CalDavSyncCollectionRequest];
+export type CalendarSyncCollectionResponse = { ok: true; value: CalDavSyncCollectionResponse } | { ok: false; error: VaultError };
+
+export type PutCalendarObjectRequest = [CalDavPutObjectRequest];
+export type PutCalendarObjectResponse = { ok: true; value: void } | { ok: false; error: VaultError };
+
+export type DeleteCalendarObjectRequest = [CalDavDeleteObjectRequest];
+export type DeleteCalendarObjectResponse = { ok: true; value: void } | { ok: false; error: VaultError };
+
+export type CalendarFreeBusyRequest = [CalDavFreeBusyRequest];
+export type CalendarFreeBusyResponse = { ok: true; value: CalDavFreeBusyInterval[] } | { ok: false; error: VaultError };
+
 export type ListDeckBoardsRequest = [];
 export type ListDeckBoardsResponse = { ok: true; value: RemoteDeckBoard[] } | { ok: false; error: VaultError };
 
@@ -270,6 +358,18 @@ export interface CalendarServiceCaller {
   triggerSync(): Promise<{ ok: true; value: SyncStats } | { ok: false; error: VaultError }>;
   /** Get the last sync result. */
   syncStatus(): Promise<SyncStats | null>;
+  /** Discover CalDAV principal, calendar home, and available calendars. */
+  discoverCaldav(): Promise<{ ok: true; value: CalDavDiscovery } | { ok: false; error: VaultError }>;
+  /** Fetch specific calendar objects by href using CalDAV calendar-multiget. */
+  calendarMultiget(request: CalDavMultigetRequest): Promise<{ ok: true; value: CalDavObject[] } | { ok: false; error: VaultError }>;
+  /** Incrementally sync a calendar collection using a previous sync-token. */
+  calendarSyncCollection(request: CalDavSyncCollectionRequest): Promise<{ ok: true; value: CalDavSyncCollectionResponse } | { ok: false; error: VaultError }>;
+  /** Put one raw VCALENDAR object, optionally guarded by ETag preconditions. */
+  putCalendarObject(request: CalDavPutObjectRequest): Promise<{ ok: true; value: void } | { ok: false; error: VaultError }>;
+  /** Delete one raw calendar object, optionally guarded by If-Match. */
+  deleteCalendarObject(request: CalDavDeleteObjectRequest): Promise<{ ok: true; value: void } | { ok: false; error: VaultError }>;
+  /** Query busy VEVENT intervals for a calendar. */
+  calendarFreeBusy(request: CalDavFreeBusyRequest): Promise<{ ok: true; value: CalDavFreeBusyInterval[] } | { ok: false; error: VaultError }>;
   /** List remote Nextcloud Deck boards. */
   listDeckBoards(): Promise<{ ok: true; value: RemoteDeckBoard[] } | { ok: false; error: VaultError }>;
   /** List remote Nextcloud Deck stacks for a board. */
@@ -430,6 +530,126 @@ export class CalendarServiceClient implements CalendarServiceCaller {
       return value as SyncStats | null;
   }
 
+  /** Discover CalDAV principal, calendar home, and available calendars. */
+  async discoverCaldav(): Promise<{ ok: true; value: CalDavDiscovery } | { ok: false; error: VaultError }> {
+    const descriptor = calendarService_discoverCaldav_method;
+    const sendSchemas = calendarService_descriptor.send_schemas;
+      try {
+        const value = await this.caller.call({
+          method: "CalendarService.discoverCaldav",
+          args: {},
+          descriptor,
+          sendSchemas,
+        });
+        return { ok: true, value } as { ok: true; value: CalDavDiscovery } | { ok: false; error: VaultError };
+      } catch (e: any) {
+        if (e instanceof RpcError && e.isUserError()) {
+          return { ok: false, error: e.userError } as { ok: true; value: CalDavDiscovery } | { ok: false; error: VaultError };
+        }
+        throw e;
+      }
+  }
+
+  /** Fetch specific calendar objects by href using CalDAV calendar-multiget. */
+  async calendarMultiget(request: CalDavMultigetRequest): Promise<{ ok: true; value: CalDavObject[] } | { ok: false; error: VaultError }> {
+    const descriptor = calendarService_calendarMultiget_method;
+    const sendSchemas = calendarService_descriptor.send_schemas;
+      try {
+        const value = await this.caller.call({
+          method: "CalendarService.calendarMultiget",
+          args: { request },
+          descriptor,
+          sendSchemas,
+        });
+        return { ok: true, value } as { ok: true; value: CalDavObject[] } | { ok: false; error: VaultError };
+      } catch (e: any) {
+        if (e instanceof RpcError && e.isUserError()) {
+          return { ok: false, error: e.userError } as { ok: true; value: CalDavObject[] } | { ok: false; error: VaultError };
+        }
+        throw e;
+      }
+  }
+
+  /** Incrementally sync a calendar collection using a previous sync-token. */
+  async calendarSyncCollection(request: CalDavSyncCollectionRequest): Promise<{ ok: true; value: CalDavSyncCollectionResponse } | { ok: false; error: VaultError }> {
+    const descriptor = calendarService_calendarSyncCollection_method;
+    const sendSchemas = calendarService_descriptor.send_schemas;
+      try {
+        const value = await this.caller.call({
+          method: "CalendarService.calendarSyncCollection",
+          args: { request },
+          descriptor,
+          sendSchemas,
+        });
+        return { ok: true, value } as { ok: true; value: CalDavSyncCollectionResponse } | { ok: false; error: VaultError };
+      } catch (e: any) {
+        if (e instanceof RpcError && e.isUserError()) {
+          return { ok: false, error: e.userError } as { ok: true; value: CalDavSyncCollectionResponse } | { ok: false; error: VaultError };
+        }
+        throw e;
+      }
+  }
+
+  /** Put one raw VCALENDAR object, optionally guarded by ETag preconditions. */
+  async putCalendarObject(request: CalDavPutObjectRequest): Promise<{ ok: true; value: void } | { ok: false; error: VaultError }> {
+    const descriptor = calendarService_putCalendarObject_method;
+    const sendSchemas = calendarService_descriptor.send_schemas;
+      try {
+        const value = await this.caller.call({
+          method: "CalendarService.putCalendarObject",
+          args: { request },
+          descriptor,
+          sendSchemas,
+        });
+        return { ok: true, value } as { ok: true; value: void } | { ok: false; error: VaultError };
+      } catch (e: any) {
+        if (e instanceof RpcError && e.isUserError()) {
+          return { ok: false, error: e.userError } as { ok: true; value: void } | { ok: false; error: VaultError };
+        }
+        throw e;
+      }
+  }
+
+  /** Delete one raw calendar object, optionally guarded by If-Match. */
+  async deleteCalendarObject(request: CalDavDeleteObjectRequest): Promise<{ ok: true; value: void } | { ok: false; error: VaultError }> {
+    const descriptor = calendarService_deleteCalendarObject_method;
+    const sendSchemas = calendarService_descriptor.send_schemas;
+      try {
+        const value = await this.caller.call({
+          method: "CalendarService.deleteCalendarObject",
+          args: { request },
+          descriptor,
+          sendSchemas,
+        });
+        return { ok: true, value } as { ok: true; value: void } | { ok: false; error: VaultError };
+      } catch (e: any) {
+        if (e instanceof RpcError && e.isUserError()) {
+          return { ok: false, error: e.userError } as { ok: true; value: void } | { ok: false; error: VaultError };
+        }
+        throw e;
+      }
+  }
+
+  /** Query busy VEVENT intervals for a calendar. */
+  async calendarFreeBusy(request: CalDavFreeBusyRequest): Promise<{ ok: true; value: CalDavFreeBusyInterval[] } | { ok: false; error: VaultError }> {
+    const descriptor = calendarService_calendarFreeBusy_method;
+    const sendSchemas = calendarService_descriptor.send_schemas;
+      try {
+        const value = await this.caller.call({
+          method: "CalendarService.calendarFreeBusy",
+          args: { request },
+          descriptor,
+          sendSchemas,
+        });
+        return { ok: true, value } as { ok: true; value: CalDavFreeBusyInterval[] } | { ok: false; error: VaultError };
+      } catch (e: any) {
+        if (e instanceof RpcError && e.isUserError()) {
+          return { ok: false, error: e.userError } as { ok: true; value: CalDavFreeBusyInterval[] } | { ok: false; error: VaultError };
+        }
+        throw e;
+      }
+  }
+
   /** List remote Nextcloud Deck boards. */
   async listDeckBoards(): Promise<{ ok: true; value: RemoteDeckBoard[] } | { ok: false; error: VaultError }> {
     const descriptor = calendarService_listDeckBoards_method;
@@ -495,6 +715,12 @@ export interface CalendarServiceHandler {
   deleteEvent(eventRef: string): Promise<{ ok: true; value: void } | { ok: false; error: VaultError }> | { ok: true; value: void } | { ok: false; error: VaultError };
   triggerSync(): Promise<{ ok: true; value: SyncStats } | { ok: false; error: VaultError }> | { ok: true; value: SyncStats } | { ok: false; error: VaultError };
   syncStatus(): Promise<SyncStats | null> | SyncStats | null;
+  discoverCaldav(): Promise<{ ok: true; value: CalDavDiscovery } | { ok: false; error: VaultError }> | { ok: true; value: CalDavDiscovery } | { ok: false; error: VaultError };
+  calendarMultiget(request: CalDavMultigetRequest): Promise<{ ok: true; value: CalDavObject[] } | { ok: false; error: VaultError }> | { ok: true; value: CalDavObject[] } | { ok: false; error: VaultError };
+  calendarSyncCollection(request: CalDavSyncCollectionRequest): Promise<{ ok: true; value: CalDavSyncCollectionResponse } | { ok: false; error: VaultError }> | { ok: true; value: CalDavSyncCollectionResponse } | { ok: false; error: VaultError };
+  putCalendarObject(request: CalDavPutObjectRequest): Promise<{ ok: true; value: void } | { ok: false; error: VaultError }> | { ok: true; value: void } | { ok: false; error: VaultError };
+  deleteCalendarObject(request: CalDavDeleteObjectRequest): Promise<{ ok: true; value: void } | { ok: false; error: VaultError }> | { ok: true; value: void } | { ok: false; error: VaultError };
+  calendarFreeBusy(request: CalDavFreeBusyRequest): Promise<{ ok: true; value: CalDavFreeBusyInterval[] } | { ok: false; error: VaultError }> | { ok: true; value: CalDavFreeBusyInterval[] } | { ok: false; error: VaultError };
   listDeckBoards(): Promise<{ ok: true; value: RemoteDeckBoard[] } | { ok: false; error: VaultError }> | { ok: true; value: RemoteDeckBoard[] } | { ok: false; error: VaultError };
   listDeckStacks(boardId: bigint): Promise<{ ok: true; value: RemoteDeckStack[] } | { ok: false; error: VaultError }> | { ok: true; value: RemoteDeckStack[] } | { ok: false; error: VaultError };
 }
@@ -568,6 +794,48 @@ export class CalendarServiceDispatcher implements Dispatcher {
       } catch (error) {
         call.replyInternalError(error instanceof Error ? error.message : String(error));
       }
+    } else if (method.id === 0xd79b5663a1916dean) {
+      try {
+        const result = await this.handler.discoverCaldav();
+        if (result.ok) call.reply(result.value); else call.replyErr(result.error);
+      } catch (error) {
+        call.replyInternalError(error instanceof Error ? error.message : String(error));
+      }
+    } else if (method.id === 0xcb7105279cddb3f7n) {
+      try {
+        const result = await this.handler.calendarMultiget(args[0] as CalDavMultigetRequest);
+        if (result.ok) call.reply(result.value); else call.replyErr(result.error);
+      } catch (error) {
+        call.replyInternalError(error instanceof Error ? error.message : String(error));
+      }
+    } else if (method.id === 0x4b35ce91803bbbadn) {
+      try {
+        const result = await this.handler.calendarSyncCollection(args[0] as CalDavSyncCollectionRequest);
+        if (result.ok) call.reply(result.value); else call.replyErr(result.error);
+      } catch (error) {
+        call.replyInternalError(error instanceof Error ? error.message : String(error));
+      }
+    } else if (method.id === 0x82f0151b497521a2n) {
+      try {
+        const result = await this.handler.putCalendarObject(args[0] as CalDavPutObjectRequest);
+        if (result.ok) call.reply(result.value); else call.replyErr(result.error);
+      } catch (error) {
+        call.replyInternalError(error instanceof Error ? error.message : String(error));
+      }
+    } else if (method.id === 0x5f8362deb46fdf13n) {
+      try {
+        const result = await this.handler.deleteCalendarObject(args[0] as CalDavDeleteObjectRequest);
+        if (result.ok) call.reply(result.value); else call.replyErr(result.error);
+      } catch (error) {
+        call.replyInternalError(error instanceof Error ? error.message : String(error));
+      }
+    } else if (method.id === 0x34762fdef26cf9e2n) {
+      try {
+        const result = await this.handler.calendarFreeBusy(args[0] as CalDavFreeBusyRequest);
+        if (result.ok) call.reply(result.value); else call.replyErr(result.error);
+      } catch (error) {
+        call.replyInternalError(error instanceof Error ? error.message : String(error));
+      }
     } else if (method.id === 0x8b4a4fdfab4d5090n) {
       try {
         const result = await this.handler.listDeckBoards();
@@ -621,6 +889,16 @@ export const calendarService_send_schemas: import("@bearcove/vox-core").ServiceS
     [0x420ae8350987c009n, { id: 0x420ae8350987c009n, type_params: [], kind: { tag: 'struct', name: 'CalendarEventPatch', fields: [{ name: 'title', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'description', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }] }, required: true }, { name: 'location', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }] }, required: true }, { name: 'start', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x897ee6096f7bb726n, args: [] }] }, required: true }, { name: 'end', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x897ee6096f7bb726n, args: [] }] }] }, required: true }, { name: 'all_day', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x178367a87f66fb46n, args: [] }] }, required: true }, { name: 'status', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0xc1bf3e08c33fb484n, args: [] }] }, required: true }, { name: 'recurrence', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }] }, required: true }, { name: 'attendees', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }] }, required: true }, { name: 'body', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }] } }],
     [0xbc5c33249a2dc720n, { id: 0xbc5c33249a2dc720n, type_params: [], kind: { tag: 'primitive', primitive_type: 'unit' } }],
     [0x824decc4c5fc6e7an, { id: 0x824decc4c5fc6e7an, type_params: [], kind: { tag: 'struct', name: 'SyncStats', fields: [{ name: 'timestamp', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }, { name: 'calendar_pushed', type_ref: { tag: 'concrete', type_id: 0x281c5be4f2ee63b4n, args: [] }, required: true }, { name: 'calendar_pulled', type_ref: { tag: 'concrete', type_id: 0x281c5be4f2ee63b4n, args: [] }, required: true }, { name: 'deck_pushed', type_ref: { tag: 'concrete', type_id: 0x281c5be4f2ee63b4n, args: [] }, required: true }, { name: 'deck_pulled', type_ref: { tag: 'concrete', type_id: 0x281c5be4f2ee63b4n, args: [] }, required: true }, { name: 'files_created', type_ref: { tag: 'concrete', type_id: 0x281c5be4f2ee63b4n, args: [] }, required: true }, { name: 'files_updated', type_ref: { tag: 'concrete', type_id: 0x281c5be4f2ee63b4n, args: [] }, required: true }, { name: 'errors', type_ref: { tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }] } }],
+    [0x716503aadea5d57an, { id: 0x716503aadea5d57an, type_params: [], kind: { tag: 'struct', name: 'CalDavCalendarInfo', fields: [{ name: 'href', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }, { name: 'name', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }, { name: 'display_name', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'sync_token', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'ctag', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'components', type_ref: { tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }] } }],
+    [0x3727a70a970c6597n, { id: 0x3727a70a970c6597n, type_params: [], kind: { tag: 'struct', name: 'CalDavDiscovery', fields: [{ name: 'principal_url', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }, { name: 'calendar_home_set', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }, { name: 'schedule_inbox_url', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'schedule_outbox_url', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'calendar_user_addresses', type_ref: { tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'calendars', type_ref: { tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x716503aadea5d57an, args: [] }] }, required: true }] } }],
+    [0xc079cd68a3b6f475n, { id: 0xc079cd68a3b6f475n, type_params: [], kind: { tag: 'struct', name: 'CalDavMultigetRequest', fields: [{ name: 'calendar', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }, { name: 'hrefs', type_ref: { tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }] } }],
+    [0x79098e18a7feb8ean, { id: 0x79098e18a7feb8ean, type_params: [], kind: { tag: 'struct', name: 'CalDavObject', fields: [{ name: 'href', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }, { name: 'etag', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'status', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }, { name: 'component', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'calendar_data', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'task', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x97c49e11dc55e02bn, args: [] }] }, required: true }, { name: 'event', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0xe0e8cad5e9c2c992n, args: [] }] }, required: true }, { name: 'deleted', type_ref: { tag: 'concrete', type_id: 0x178367a87f66fb46n, args: [] }, required: true }] } }],
+    [0xe61e2ce3b9362197n, { id: 0xe61e2ce3b9362197n, type_params: [], kind: { tag: 'struct', name: 'CalDavSyncCollectionRequest', fields: [{ name: 'calendar', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }, { name: 'sync_token', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }] } }],
+    [0x1c8d3c42d64fe6fcn, { id: 0x1c8d3c42d64fe6fcn, type_params: [], kind: { tag: 'struct', name: 'CalDavSyncCollectionResponse', fields: [{ name: 'sync_token', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'objects', type_ref: { tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x79098e18a7feb8ean, args: [] }] }, required: true }] } }],
+    [0x5dbb0431bbd5c53fn, { id: 0x5dbb0431bbd5c53fn, type_params: [], kind: { tag: 'struct', name: 'CalDavPutObjectRequest', fields: [{ name: 'calendar', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }, { name: 'href', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }, { name: 'calendar_data', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }, { name: 'if_match', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'if_none_match', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }] } }],
+    [0x915ac42105cb8b8en, { id: 0x915ac42105cb8b8en, type_params: [], kind: { tag: 'struct', name: 'CalDavDeleteObjectRequest', fields: [{ name: 'calendar', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }, { name: 'href', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }, { name: 'if_match', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }] } }],
+    [0xc5e8fb5d97adce5cn, { id: 0xc5e8fb5d97adce5cn, type_params: [], kind: { tag: 'struct', name: 'CalDavFreeBusyRequest', fields: [{ name: 'calendar', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }, { name: 'start', type_ref: { tag: 'concrete', type_id: 0x897ee6096f7bb726n, args: [] }, required: true }, { name: 'end', type_ref: { tag: 'concrete', type_id: 0x897ee6096f7bb726n, args: [] }, required: true }] } }],
+    [0x6d6e14f6827c0d83n, { id: 0x6d6e14f6827c0d83n, type_params: [], kind: { tag: 'struct', name: 'CalDavFreeBusyInterval', fields: [{ name: 'start', type_ref: { tag: 'concrete', type_id: 0x897ee6096f7bb726n, args: [] }, required: true }, { name: 'end', type_ref: { tag: 'concrete', type_id: 0x897ee6096f7bb726n, args: [] }, required: true }, { name: 'busy_type', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }] } }],
     [0xd9356298b81639acn, { id: 0xd9356298b81639acn, type_params: [], kind: { tag: 'primitive', primitive_type: 'u64' } }],
     [0x77186d1d5f08be11n, { id: 0x77186d1d5f08be11n, type_params: [], kind: { tag: 'struct', name: 'RemoteDeckBoard', fields: [{ name: 'id', type_ref: { tag: 'concrete', type_id: 0xd9356298b81639acn, args: [] }, required: true }, { name: 'title', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }, { name: 'archived', type_ref: { tag: 'concrete', type_id: 0x178367a87f66fb46n, args: [] }, required: true }] } }],
     [0xb086dfc81f671605n, { id: 0xb086dfc81f671605n, type_params: [], kind: { tag: 'struct', name: 'RemoteDeckStack', fields: [{ name: 'id', type_ref: { tag: 'concrete', type_id: 0xd9356298b81639acn, args: [] }, required: true }, { name: 'title', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }, { name: 'card_count', type_ref: { tag: 'concrete', type_id: 0x281c5be4f2ee63b4n, args: [] }, required: true }] } }],
@@ -634,6 +912,12 @@ export const calendarService_send_schemas: import("@bearcove/vox-core").ServiceS
     [0xb7639a5e9bb898e2n, { argsRootRef: { tag: 'concrete', type_id: 0x6847ab90feda71c1n, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, responseRootRef: { tag: 'concrete', type_id: 0x42046de663beeef0n, args: [{ tag: 'concrete', type_id: 0xbc5c33249a2dc720n, args: [] }, { tag: 'concrete', type_id: 0x4cf4b2aeb98a1939n, args: [{ tag: 'concrete', type_id: 0xcaab6065094a4dbfn, args: [] }] }] } }],
     [0xb6c35ead6f3a86a1n, { argsRootRef: { tag: 'concrete', type_id: 0xbc5c33249a2dc720n, args: [] }, responseRootRef: { tag: 'concrete', type_id: 0x42046de663beeef0n, args: [{ tag: 'concrete', type_id: 0x824decc4c5fc6e7an, args: [] }, { tag: 'concrete', type_id: 0x4cf4b2aeb98a1939n, args: [{ tag: 'concrete', type_id: 0xcaab6065094a4dbfn, args: [] }] }] } }],
     [0x9c8eb69d02285e61n, { argsRootRef: { tag: 'concrete', type_id: 0xbc5c33249a2dc720n, args: [] }, responseRootRef: { tag: 'concrete', type_id: 0x42046de663beeef0n, args: [{ tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x824decc4c5fc6e7an, args: [] }] }, { tag: 'concrete', type_id: 0x4cf4b2aeb98a1939n, args: [{ tag: 'concrete', type_id: 0x5db70a394660f3e6n, args: [] }] }] } }],
+    [0xd79b5663a1916dean, { argsRootRef: { tag: 'concrete', type_id: 0xbc5c33249a2dc720n, args: [] }, responseRootRef: { tag: 'concrete', type_id: 0x42046de663beeef0n, args: [{ tag: 'concrete', type_id: 0x3727a70a970c6597n, args: [] }, { tag: 'concrete', type_id: 0x4cf4b2aeb98a1939n, args: [{ tag: 'concrete', type_id: 0xcaab6065094a4dbfn, args: [] }] }] } }],
+    [0xcb7105279cddb3f7n, { argsRootRef: { tag: 'concrete', type_id: 0x6847ab90feda71c1n, args: [{ tag: 'concrete', type_id: 0xc079cd68a3b6f475n, args: [] }] }, responseRootRef: { tag: 'concrete', type_id: 0x42046de663beeef0n, args: [{ tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x79098e18a7feb8ean, args: [] }] }, { tag: 'concrete', type_id: 0x4cf4b2aeb98a1939n, args: [{ tag: 'concrete', type_id: 0xcaab6065094a4dbfn, args: [] }] }] } }],
+    [0x4b35ce91803bbbadn, { argsRootRef: { tag: 'concrete', type_id: 0x6847ab90feda71c1n, args: [{ tag: 'concrete', type_id: 0xe61e2ce3b9362197n, args: [] }] }, responseRootRef: { tag: 'concrete', type_id: 0x42046de663beeef0n, args: [{ tag: 'concrete', type_id: 0x1c8d3c42d64fe6fcn, args: [] }, { tag: 'concrete', type_id: 0x4cf4b2aeb98a1939n, args: [{ tag: 'concrete', type_id: 0xcaab6065094a4dbfn, args: [] }] }] } }],
+    [0x82f0151b497521a2n, { argsRootRef: { tag: 'concrete', type_id: 0x6847ab90feda71c1n, args: [{ tag: 'concrete', type_id: 0x5dbb0431bbd5c53fn, args: [] }] }, responseRootRef: { tag: 'concrete', type_id: 0x42046de663beeef0n, args: [{ tag: 'concrete', type_id: 0xbc5c33249a2dc720n, args: [] }, { tag: 'concrete', type_id: 0x4cf4b2aeb98a1939n, args: [{ tag: 'concrete', type_id: 0xcaab6065094a4dbfn, args: [] }] }] } }],
+    [0x5f8362deb46fdf13n, { argsRootRef: { tag: 'concrete', type_id: 0x6847ab90feda71c1n, args: [{ tag: 'concrete', type_id: 0x915ac42105cb8b8en, args: [] }] }, responseRootRef: { tag: 'concrete', type_id: 0x42046de663beeef0n, args: [{ tag: 'concrete', type_id: 0xbc5c33249a2dc720n, args: [] }, { tag: 'concrete', type_id: 0x4cf4b2aeb98a1939n, args: [{ tag: 'concrete', type_id: 0xcaab6065094a4dbfn, args: [] }] }] } }],
+    [0x34762fdef26cf9e2n, { argsRootRef: { tag: 'concrete', type_id: 0x6847ab90feda71c1n, args: [{ tag: 'concrete', type_id: 0xc5e8fb5d97adce5cn, args: [] }] }, responseRootRef: { tag: 'concrete', type_id: 0x42046de663beeef0n, args: [{ tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x6d6e14f6827c0d83n, args: [] }] }, { tag: 'concrete', type_id: 0x4cf4b2aeb98a1939n, args: [{ tag: 'concrete', type_id: 0xcaab6065094a4dbfn, args: [] }] }] } }],
     [0x8b4a4fdfab4d5090n, { argsRootRef: { tag: 'concrete', type_id: 0xbc5c33249a2dc720n, args: [] }, responseRootRef: { tag: 'concrete', type_id: 0x42046de663beeef0n, args: [{ tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x77186d1d5f08be11n, args: [] }] }, { tag: 'concrete', type_id: 0x4cf4b2aeb98a1939n, args: [{ tag: 'concrete', type_id: 0xcaab6065094a4dbfn, args: [] }] }] } }],
     [0x8883cfb34aab2188n, { argsRootRef: { tag: 'concrete', type_id: 0x6847ab90feda71c1n, args: [{ tag: 'concrete', type_id: 0xd9356298b81639acn, args: [] }] }, responseRootRef: { tag: 'concrete', type_id: 0x42046de663beeef0n, args: [{ tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0xb086dfc81f671605n, args: [] }] }, { tag: 'concrete', type_id: 0x4cf4b2aeb98a1939n, args: [{ tag: 'concrete', type_id: 0xcaab6065094a4dbfn, args: [] }] }] } }],
   ]),
@@ -687,6 +971,42 @@ export const calendarService_syncStatus_method: MethodDescriptor = {
   retry: { persist: false, idem: false },
 };
 
+export const calendarService_discoverCaldav_method: MethodDescriptor = {
+  name: 'discoverCaldav',
+  id: 0xd79b5663a1916dean,
+  retry: { persist: false, idem: false },
+};
+
+export const calendarService_calendarMultiget_method: MethodDescriptor = {
+  name: 'calendarMultiget',
+  id: 0xcb7105279cddb3f7n,
+  retry: { persist: false, idem: false },
+};
+
+export const calendarService_calendarSyncCollection_method: MethodDescriptor = {
+  name: 'calendarSyncCollection',
+  id: 0x4b35ce91803bbbadn,
+  retry: { persist: false, idem: false },
+};
+
+export const calendarService_putCalendarObject_method: MethodDescriptor = {
+  name: 'putCalendarObject',
+  id: 0x82f0151b497521a2n,
+  retry: { persist: false, idem: false },
+};
+
+export const calendarService_deleteCalendarObject_method: MethodDescriptor = {
+  name: 'deleteCalendarObject',
+  id: 0x5f8362deb46fdf13n,
+  retry: { persist: false, idem: false },
+};
+
+export const calendarService_calendarFreeBusy_method: MethodDescriptor = {
+  name: 'calendarFreeBusy',
+  id: 0x34762fdef26cf9e2n,
+  retry: { persist: false, idem: false },
+};
+
 export const calendarService_listDeckBoards_method: MethodDescriptor = {
   name: 'listDeckBoards',
   id: 0x8b4a4fdfab4d5090n,
@@ -712,6 +1032,12 @@ export const calendarService_descriptor: ServiceDescriptor = {
     [calendarService_deleteEvent_method.id, calendarService_deleteEvent_method],
     [calendarService_triggerSync_method.id, calendarService_triggerSync_method],
     [calendarService_syncStatus_method.id, calendarService_syncStatus_method],
+    [calendarService_discoverCaldav_method.id, calendarService_discoverCaldav_method],
+    [calendarService_calendarMultiget_method.id, calendarService_calendarMultiget_method],
+    [calendarService_calendarSyncCollection_method.id, calendarService_calendarSyncCollection_method],
+    [calendarService_putCalendarObject_method.id, calendarService_putCalendarObject_method],
+    [calendarService_deleteCalendarObject_method.id, calendarService_deleteCalendarObject_method],
+    [calendarService_calendarFreeBusy_method.id, calendarService_calendarFreeBusy_method],
     [calendarService_listDeckBoards_method.id, calendarService_listDeckBoards_method],
     [calendarService_listDeckStacks_method.id, calendarService_listDeckStacks_method],
   ]),

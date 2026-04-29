@@ -8,7 +8,10 @@ use chrono::{DateTime, NaiveDate, Utc};
 
 use crate::calendar_event::{CalendarEvent, CalendarEventStatus};
 use crate::project::Project;
-use crate::service::VaultError;
+use crate::service::{
+    CalDavCalendarInfo, CalDavDiscovery, CalDavFreeBusyInterval, CalDavObject,
+    CalDavSyncCollectionResponse, VaultError,
+};
 use crate::task::{Priority, Status, Task, WikiLink};
 // Deck API response types use serde for JSON deserialization (complex nested structures).
 // Domain types (Task, Project) use facet throughout.
@@ -217,7 +220,10 @@ fn event_to_ics_inline(event: &CalendarEvent) -> String {
             event.start.date_naive().format("%Y%m%d")
         ));
         if let Some(end) = event.end {
-            lines.push(format!("DTEND;VALUE=DATE:{}", end.date_naive().format("%Y%m%d")));
+            lines.push(format!(
+                "DTEND;VALUE=DATE:{}",
+                end.date_naive().format("%Y%m%d")
+            ));
         }
     } else {
         lines.push(format!("DTSTART:{}", event.start.format("%Y%m%dT%H%M%SZ")));
@@ -253,7 +259,10 @@ fn event_to_ics_inline(event: &CalendarEvent) -> String {
         lines.push(format!("ATTENDEE;CN={}:mailto:{}", attendee, attendee));
     }
     if let Some(source) = &event.external_source {
-        lines.push(format!("X-TASK-EXTERNAL-SOURCE:{}", escape_ics_text(source)));
+        lines.push(format!(
+            "X-TASK-EXTERNAL-SOURCE:{}",
+            escape_ics_text(source)
+        ));
     }
     if let Some(id) = &event.external_id {
         lines.push(format!("X-TASK-EXTERNAL-ID:{}", escape_ics_text(id)));
@@ -305,7 +314,10 @@ fn ics_to_event_inline(ics: &str) -> Option<CalendarEvent> {
         } else if line.starts_with("ATTENDEE") {
             if let Some(cn_start) = line.find("CN=") {
                 let rest = &line[cn_start + 3..];
-                let cn = rest.split(|c: char| c == ':' || c == ';').next().unwrap_or("");
+                let cn = rest
+                    .split(|c: char| c == ':' || c == ';')
+                    .next()
+                    .unwrap_or("");
                 if !cn.is_empty() {
                     event.attendees.push(cn.to_string());
                 }
@@ -346,11 +358,300 @@ impl NextcloudSync {
 
     // ── CalDAV / Nextcloud Tasks ─────────────────────────────────────
 
+    fn calendar_collection_url(&self, calendar: &str) -> String {
+        if calendar.starts_with("http://") || calendar.starts_with("https://") {
+            return ensure_trailing_slash(calendar);
+        }
+        if calendar.starts_with('/') {
+            return format!("{}{}", self.base_url, ensure_trailing_slash(calendar));
+        }
+        format!(
+            "{}/remote.php/dav/calendars/{}/{}/",
+            self.base_url, self.username, calendar
+        )
+    }
+
+    fn absolute_dav_url(&self, href: &str) -> String {
+        if href.starts_with("http://") || href.starts_with("https://") {
+            href.to_string()
+        } else if href.starts_with('/') {
+            format!("{}{}", self.base_url, href)
+        } else {
+            format!("{}/{}", self.base_url, href)
+        }
+    }
+
+    fn calendar_object_url(&self, calendar: &str, href: &str) -> String {
+        if href.starts_with("http://") || href.starts_with("https://") || href.starts_with('/') {
+            return self.absolute_dav_url(href);
+        }
+        format!("{}{}", self.calendar_collection_url(calendar), href)
+    }
+
+    pub async fn discover_calendars(&self) -> Result<CalDavDiscovery, VaultError> {
+        let root = format!("{}/remote.php/dav/", self.base_url);
+        let principal_body = r#"<?xml version="1.0" encoding="utf-8"?>
+<d:propfind xmlns:d="DAV:">
+  <d:prop><d:current-user-principal/></d:prop>
+</d:propfind>"#;
+        let principal_xml = self.propfind(&root, "0", principal_body).await?;
+        let principal_url = extract_href_from_prop(&principal_xml, "current-user-principal")
+            .unwrap_or_else(|| format!("/remote.php/dav/principals/users/{}/", self.username));
+
+        let home_body = r#"<?xml version="1.0" encoding="utf-8"?>
+<d:propfind xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+  <d:prop>
+    <c:calendar-home-set/>
+    <c:schedule-inbox-URL/>
+    <c:schedule-outbox-URL/>
+    <c:calendar-user-address-set/>
+  </d:prop>
+</d:propfind>"#;
+        let principal_url_abs = self.absolute_dav_url(&principal_url);
+        let home_xml = self.propfind(&principal_url_abs, "0", home_body).await?;
+        let calendar_home_set = extract_href_from_prop(&home_xml, "calendar-home-set")
+            .unwrap_or_else(|| format!("/remote.php/dav/calendars/{}/", self.username));
+        let schedule_inbox_url = extract_href_from_prop(&home_xml, "schedule-inbox-URL");
+        let schedule_outbox_url = extract_href_from_prop(&home_xml, "schedule-outbox-URL");
+        let calendar_user_addresses = extract_elements(&home_xml, "calendar-user-address-set")
+            .into_iter()
+            .next()
+            .map(|set| {
+                extract_elements(&set, "href")
+                    .into_iter()
+                    .filter_map(|href| extract_first_text(&href, "href"))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let calendars_body = r#"<?xml version="1.0" encoding="utf-8"?>
+<d:propfind xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav" xmlns:cs="http://calendarserver.org/ns/">
+  <d:prop>
+    <d:displayname/>
+    <d:resourcetype/>
+    <d:sync-token/>
+    <cs:getctag/>
+    <c:supported-calendar-component-set/>
+  </d:prop>
+</d:propfind>"#;
+        let calendar_home_abs = self.absolute_dav_url(&calendar_home_set);
+        let calendars_xml = self
+            .propfind(&calendar_home_abs, "1", calendars_body)
+            .await?;
+        let calendars = parse_calendar_home_multistatus(&calendars_xml);
+
+        Ok(CalDavDiscovery {
+            principal_url,
+            calendar_home_set,
+            schedule_inbox_url,
+            schedule_outbox_url,
+            calendar_user_addresses,
+            calendars,
+        })
+    }
+
+    pub async fn calendar_multiget(
+        &self,
+        calendar: &str,
+        hrefs: &[String],
+    ) -> Result<Vec<CalDavObject>, VaultError> {
+        if hrefs.is_empty() {
+            return Ok(Vec::new());
+        }
+        let url = self.calendar_collection_url(calendar);
+        let href_xml = hrefs
+            .iter()
+            .map(|href| format!("  <d:href>{}</d:href>", escape_xml(href)))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let body = format!(
+            r#"<?xml version="1.0" encoding="utf-8"?>
+<c:calendar-multiget xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+  <d:prop>
+    <d:getetag/>
+    <c:calendar-data/>
+  </d:prop>
+{href_xml}
+</c:calendar-multiget>"#
+        );
+        let xml = self
+            .report(&url, "1", &body, "CalDAV calendar-multiget")
+            .await?;
+        Ok(parse_caldav_objects(&xml))
+    }
+
+    pub async fn sync_calendar_collection(
+        &self,
+        calendar: &str,
+        sync_token: Option<&str>,
+    ) -> Result<CalDavSyncCollectionResponse, VaultError> {
+        let url = self.calendar_collection_url(calendar);
+        let token = sync_token.unwrap_or("");
+        let body = format!(
+            r#"<?xml version="1.0" encoding="utf-8"?>
+<d:sync-collection xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+  <d:sync-token>{}</d:sync-token>
+  <d:sync-level>1</d:sync-level>
+  <d:prop>
+    <d:getetag/>
+    <c:calendar-data/>
+  </d:prop>
+</d:sync-collection>"#,
+            escape_xml(token)
+        );
+        let xml = self
+            .report(&url, "1", &body, "CalDAV sync-collection")
+            .await?;
+        Ok(CalDavSyncCollectionResponse {
+            sync_token: extract_first_text(&xml, "sync-token"),
+            objects: parse_caldav_objects(&xml),
+        })
+    }
+
+    pub async fn put_calendar_object(
+        &self,
+        calendar: &str,
+        href: &str,
+        calendar_data: &str,
+        if_match: Option<&str>,
+        if_none_match: Option<&str>,
+    ) -> Result<(), VaultError> {
+        let url = self.calendar_object_url(calendar, href);
+        let mut req = self
+            .auth(self.http.put(&url))
+            .header("Content-Type", "text/calendar; charset=utf-8");
+        if let Some(etag) = if_match {
+            req = req.header("If-Match", etag);
+        }
+        if let Some(etag) = if_none_match {
+            req = req.header("If-None-Match", etag);
+        }
+        let resp = req
+            .body(calendar_data.to_string())
+            .send()
+            .await
+            .map_err(|e| VaultError::IoError(format!("CalDAV object PUT: {e}")))?;
+        if !resp.status().is_success() {
+            return Err(VaultError::IoError(format!(
+                "CalDAV object PUT {url}: {}",
+                resp.status()
+            )));
+        }
+        Ok(())
+    }
+
+    pub async fn delete_calendar_object(
+        &self,
+        calendar: &str,
+        href: &str,
+        if_match: Option<&str>,
+    ) -> Result<(), VaultError> {
+        let url = self.calendar_object_url(calendar, href);
+        let mut req = self.auth(self.http.delete(&url));
+        if let Some(etag) = if_match {
+            req = req.header("If-Match", etag);
+        }
+        let resp = req
+            .send()
+            .await
+            .map_err(|e| VaultError::IoError(format!("CalDAV object DELETE: {e}")))?;
+        if !resp.status().is_success() && resp.status().as_u16() != 404 {
+            return Err(VaultError::IoError(format!(
+                "CalDAV object DELETE {url}: {}",
+                resp.status()
+            )));
+        }
+        Ok(())
+    }
+
+    pub async fn calendar_free_busy(
+        &self,
+        calendar: &str,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> Result<Vec<CalDavFreeBusyInterval>, VaultError> {
+        let url = self.calendar_collection_url(calendar);
+        let body = format!(
+            r#"<?xml version="1.0" encoding="utf-8"?>
+<c:free-busy-query xmlns:c="urn:ietf:params:xml:ns:caldav">
+  <c:time-range start="{}" end="{}"/>
+</c:free-busy-query>"#,
+            start.format("%Y%m%dT%H%M%SZ"),
+            end.format("%Y%m%dT%H%M%SZ")
+        );
+        let xml = self.report(&url, "1", &body, "CalDAV free-busy").await?;
+        Ok(parse_free_busy_intervals(&xml))
+    }
+
+    async fn propfind(&self, url: &str, depth: &str, body: &str) -> Result<String, VaultError> {
+        let method = reqwest::Method::from_bytes(b"PROPFIND").unwrap();
+        let resp = self
+            .auth(
+                self.http
+                    .request(method, url)
+                    .header("Content-Type", "application/xml; charset=utf-8")
+                    .header("Depth", depth),
+            )
+            .body(body.to_string())
+            .send()
+            .await
+            .map_err(|e| VaultError::IoError(format!("CalDAV PROPFIND: {e}")))?;
+        if !resp.status().is_success() {
+            return Err(VaultError::IoError(format!(
+                "CalDAV PROPFIND {url}: {}",
+                resp.status()
+            )));
+        }
+        resp.text()
+            .await
+            .map_err(|e| VaultError::IoError(e.to_string()))
+    }
+
+    async fn report(
+        &self,
+        url: &str,
+        depth: &str,
+        body: &str,
+        label: &str,
+    ) -> Result<String, VaultError> {
+        let method = reqwest::Method::from_bytes(b"REPORT").unwrap();
+        let resp = self
+            .auth(
+                self.http
+                    .request(method, url)
+                    .header("Content-Type", "application/xml; charset=utf-8")
+                    .header("Depth", depth),
+            )
+            .body(body.to_string())
+            .send()
+            .await
+            .map_err(|e| VaultError::IoError(format!("{label}: {e}")))?;
+        if !resp.status().is_success() {
+            return Err(VaultError::IoError(format!(
+                "{label} {url}: {}",
+                resp.status()
+            )));
+        }
+        resp.text()
+            .await
+            .map_err(|e| VaultError::IoError(e.to_string()))
+    }
+
     /// Push a task to the Nextcloud Tasks app as a VTODO on the given calendar.
     pub async fn push_task_to_calendar(
         &self,
         calendar: &str,
         task: &Task,
+    ) -> Result<(), VaultError> {
+        self.put_task_to_calendar(calendar, task, None, None).await
+    }
+
+    pub async fn put_task_to_calendar(
+        &self,
+        calendar: &str,
+        task: &Task,
+        if_match: Option<&str>,
+        if_none_match: Option<&str>,
     ) -> Result<(), VaultError> {
         let uid = task.id.as_deref().unwrap_or(&task.title);
         let safe_uid = uid.replace(' ', "-").replace('/', "-");
@@ -361,9 +662,17 @@ impl NextcloudSync {
 
         let ics = task_to_ics_inline(task);
 
-        let resp = self
+        let mut req = self
             .auth(self.http.put(&url))
-            .header("Content-Type", "text/calendar; charset=utf-8")
+            .header("Content-Type", "text/calendar; charset=utf-8");
+        if let Some(etag) = if_match {
+            req = req.header("If-Match", etag);
+        }
+        if let Some(etag) = if_none_match {
+            req = req.header("If-None-Match", etag);
+        }
+
+        let resp = req
             .body(ics)
             .send()
             .await
@@ -440,16 +749,38 @@ impl NextcloudSync {
         calendar: &str,
         uid: &str,
     ) -> Result<(), VaultError> {
+        self.delete_task_from_calendar_with_etag(calendar, uid, None)
+            .await
+    }
+
+    pub async fn delete_task_from_calendar_with_etag(
+        &self,
+        calendar: &str,
+        uid: &str,
+        if_match: Option<&str>,
+    ) -> Result<(), VaultError> {
         let safe_uid = uid.replace(' ', "-").replace('/', "-");
         let url = format!(
             "{}/remote.php/dav/calendars/{}/{}/{}.ics",
             self.base_url, self.username, calendar, safe_uid
         );
 
-        self.auth(self.http.delete(&url))
+        let mut req = self.auth(self.http.delete(&url));
+        if let Some(etag) = if_match {
+            req = req.header("If-Match", etag);
+        }
+
+        let resp = req
             .send()
             .await
             .map_err(|e| VaultError::IoError(format!("CalDAV DELETE: {e}")))?;
+        if !resp.status().is_success() && resp.status().as_u16() != 404 {
+            return Err(VaultError::IoError(format!(
+                "CalDAV DELETE {}: {}",
+                safe_uid,
+                resp.status()
+            )));
+        }
 
         Ok(())
     }
@@ -460,6 +791,17 @@ impl NextcloudSync {
         calendar: &str,
         event: &CalendarEvent,
     ) -> Result<(), VaultError> {
+        self.put_event_to_calendar(calendar, event, None, None)
+            .await
+    }
+
+    pub async fn put_event_to_calendar(
+        &self,
+        calendar: &str,
+        event: &CalendarEvent,
+        if_match: Option<&str>,
+        if_none_match: Option<&str>,
+    ) -> Result<(), VaultError> {
         let uid = event.id.as_deref().unwrap_or(&event.title);
         let safe_uid = uid.replace(' ', "-").replace('/', "-");
         let url = format!(
@@ -467,8 +809,17 @@ impl NextcloudSync {
             self.base_url, self.username, calendar, safe_uid
         );
 
-        let resp = self.auth(self.http.put(&url))
-            .header("Content-Type", "text/calendar; charset=utf-8")
+        let mut req = self
+            .auth(self.http.put(&url))
+            .header("Content-Type", "text/calendar; charset=utf-8");
+        if let Some(etag) = if_match {
+            req = req.header("If-Match", etag);
+        }
+        if let Some(etag) = if_none_match {
+            req = req.header("If-None-Match", etag);
+        }
+
+        let resp = req
             .body(event_to_ics_inline(event))
             .send()
             .await
@@ -507,16 +858,17 @@ impl NextcloudSync {
   </c:filter>
 </c:calendar-query>"#;
 
-        let resp = self.auth(
-            self.http
-                .request(reqwest::Method::from_bytes(b"REPORT").unwrap(), &url)
-                .header("Content-Type", "application/xml; charset=utf-8")
-                .header("Depth", "1"),
-        )
-        .body(body)
-        .send()
-        .await
-        .map_err(|e| VaultError::IoError(format!("CalDAV VEVENT REPORT: {e}")))?;
+        let resp = self
+            .auth(
+                self.http
+                    .request(reqwest::Method::from_bytes(b"REPORT").unwrap(), &url)
+                    .header("Content-Type", "application/xml; charset=utf-8")
+                    .header("Depth", "1"),
+            )
+            .body(body)
+            .send()
+            .await
+            .map_err(|e| VaultError::IoError(format!("CalDAV VEVENT REPORT: {e}")))?;
 
         let xml = resp
             .text()
@@ -534,13 +886,28 @@ impl NextcloudSync {
         calendar: &str,
         uid: &str,
     ) -> Result<(), VaultError> {
+        self.delete_event_from_calendar_with_etag(calendar, uid, None)
+            .await
+    }
+
+    pub async fn delete_event_from_calendar_with_etag(
+        &self,
+        calendar: &str,
+        uid: &str,
+        if_match: Option<&str>,
+    ) -> Result<(), VaultError> {
         let safe_uid = uid.replace(' ', "-").replace('/', "-");
         let url = format!(
             "{}/remote.php/dav/calendars/{}/{}/{}.ics",
             self.base_url, self.username, calendar, safe_uid
         );
 
-        let resp = self.auth(self.http.delete(&url))
+        let mut req = self.auth(self.http.delete(&url));
+        if let Some(etag) = if_match {
+            req = req.header("If-Match", etag);
+        }
+
+        let resp = req
             .send()
             .await
             .map_err(|e| VaultError::IoError(format!("CalDAV VEVENT DELETE: {e}")))?;
@@ -1525,6 +1892,224 @@ fn extract_vcalendars(xml: &str) -> Vec<String> {
         .collect()
 }
 
+fn ensure_trailing_slash(value: &str) -> String {
+    if value.ends_with('/') {
+        value.to_string()
+    } else {
+        format!("{value}/")
+    }
+}
+
+fn escape_xml(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
+}
+
+fn unescape_xml(value: &str) -> String {
+    value
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
+        .replace("&amp;", "&")
+}
+
+fn element_local_name(tag: &str) -> &str {
+    let tag = tag
+        .trim()
+        .trim_start_matches('/')
+        .split_whitespace()
+        .next()
+        .unwrap_or("");
+    tag.rsplit_once(':').map(|(_, local)| local).unwrap_or(tag)
+}
+
+fn opening_tag_end(xml: &str, from: usize, local_name: &str) -> Option<usize> {
+    let tag_end = xml[from..].find('>')? + from;
+    let tag = &xml[from + 1..tag_end];
+    if tag.starts_with('/') || element_local_name(tag) != local_name {
+        return None;
+    }
+    Some(tag_end)
+}
+
+fn extract_elements(xml: &str, local_name: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut pos = 0;
+    while let Some(rel) = xml[pos..].find('<') {
+        let start = pos + rel;
+        let Some(open_end) = opening_tag_end(xml, start, local_name) else {
+            pos = start + 1;
+            continue;
+        };
+        let open_tag = &xml[start + 1..open_end];
+        if open_tag.trim_end().ends_with('/') {
+            out.push(xml[start..=open_end].to_string());
+            pos = open_end + 1;
+            continue;
+        }
+        let mut scan = open_end + 1;
+        let mut depth = 1usize;
+        while let Some(next_rel) = xml[scan..].find('<') {
+            let next = scan + next_rel;
+            let Some(next_end) = xml[next..].find('>').map(|i| next + i) else {
+                break;
+            };
+            let tag = &xml[next + 1..next_end];
+            let local = element_local_name(tag);
+            if local == local_name {
+                if tag.trim_start().starts_with('/') {
+                    depth -= 1;
+                    if depth == 0 {
+                        out.push(xml[start..=next_end].to_string());
+                        pos = next_end + 1;
+                        break;
+                    }
+                } else if !tag.trim_end().ends_with('/') {
+                    depth += 1;
+                }
+            }
+            scan = next_end + 1;
+        }
+        if scan >= xml.len() {
+            break;
+        }
+    }
+    out
+}
+
+fn extract_first_text(xml: &str, local_name: &str) -> Option<String> {
+    let element = extract_elements(xml, local_name).into_iter().next()?;
+    let open_end = element.find('>')?;
+    let close_start = element.rfind("</")?;
+    Some(unescape_xml(element[open_end + 1..close_start].trim())).filter(|value| !value.is_empty())
+}
+
+fn extract_href_from_prop(xml: &str, prop_name: &str) -> Option<String> {
+    extract_elements(xml, prop_name)
+        .into_iter()
+        .find_map(|prop| extract_first_text(&prop, "href"))
+        .or_else(|| extract_first_text(xml, "href"))
+}
+
+fn parse_calendar_home_multistatus(xml: &str) -> Vec<CalDavCalendarInfo> {
+    extract_elements(xml, "response")
+        .into_iter()
+        .filter_map(|response| {
+            if !response.contains(":calendar") && !response.contains("<calendar") {
+                return None;
+            }
+            let href = extract_first_text(&response, "href")?;
+            let name = href
+                .trim_end_matches('/')
+                .rsplit('/')
+                .next()
+                .unwrap_or("")
+                .to_string();
+            if name.is_empty() {
+                return None;
+            }
+            let component_set = extract_elements(&response, "supported-calendar-component-set")
+                .into_iter()
+                .next()
+                .unwrap_or_default();
+            let components = ["VEVENT", "VTODO", "VJOURNAL", "VFREEBUSY"]
+                .into_iter()
+                .filter(|component| {
+                    component_set.contains(&format!("name=\"{component}\""))
+                        || component_set.contains(&format!("name='{component}'"))
+                })
+                .map(str::to_string)
+                .collect();
+            Some(CalDavCalendarInfo {
+                href,
+                name,
+                display_name: extract_first_text(&response, "displayname"),
+                sync_token: extract_first_text(&response, "sync-token"),
+                ctag: extract_first_text(&response, "getctag"),
+                components,
+            })
+        })
+        .collect()
+}
+
+fn parse_caldav_objects(xml: &str) -> Vec<CalDavObject> {
+    extract_elements(xml, "response")
+        .into_iter()
+        .filter_map(|response| {
+            let href = extract_first_text(&response, "href")?;
+            let status = extract_first_text(&response, "status").unwrap_or_default();
+            let deleted = status.contains(" 404 ") || status.ends_with(" 404");
+            let calendar_data = extract_first_text(&response, "calendar-data");
+            let component = calendar_data.as_deref().and_then(calendar_component);
+            let task = calendar_data
+                .as_deref()
+                .filter(|ics| ics.contains("BEGIN:VTODO"))
+                .and_then(ics_to_task_inline);
+            let event = calendar_data
+                .as_deref()
+                .filter(|ics| ics.contains("BEGIN:VEVENT"))
+                .and_then(ics_to_event_inline);
+            Some(CalDavObject {
+                href,
+                etag: extract_first_text(&response, "getetag"),
+                status,
+                component,
+                calendar_data,
+                task,
+                event,
+                deleted,
+            })
+        })
+        .collect()
+}
+
+fn calendar_component(ics: &str) -> Option<String> {
+    ["VEVENT", "VTODO", "VJOURNAL", "VFREEBUSY"]
+        .into_iter()
+        .find(|component| ics.contains(&format!("BEGIN:{component}")))
+        .map(str::to_string)
+}
+
+fn parse_free_busy_intervals(xml: &str) -> Vec<CalDavFreeBusyInterval> {
+    let mut intervals = Vec::new();
+    for ics in extract_vcalendars(xml) {
+        let mut busy_type = None;
+        for line in unfold_ics_lines(&ics) {
+            if let Some(value) = line.strip_prefix("FBTYPE:") {
+                busy_type = Some(value.to_string());
+            }
+            if let Some((params, value)) = line
+                .strip_prefix("FREEBUSY")
+                .and_then(|rest| rest.split_once(':'))
+            {
+                let kind = params
+                    .split(';')
+                    .find_map(|part| part.strip_prefix("FBTYPE="))
+                    .map(str::to_string)
+                    .or_else(|| busy_type.clone());
+                if let Some((start, end)) = value.split_once('/') {
+                    if let (Some(start), Some(end)) = (
+                        parse_ics_datetime(start, false),
+                        parse_ics_datetime(end, false),
+                    ) {
+                        intervals.push(CalDavFreeBusyInterval {
+                            start,
+                            end,
+                            busy_type: kind,
+                        });
+                    }
+                }
+            }
+        }
+    }
+    intervals
+}
+
 fn parse_ics_datetime(value: &str, all_day: bool) -> Option<DateTime<Utc>> {
     if all_day {
         return NaiveDate::parse_from_str(value.get(..8)?, "%Y%m%d")
@@ -1721,5 +2306,155 @@ mod tests {
         assert_eq!(parsed.status, event.status);
         assert_eq!(parsed.recurrence, event.recurrence);
         assert_eq!(parsed.attendees, event.attendees);
+    }
+
+    #[test]
+    fn caldav_discovery_parser_extracts_calendars() {
+        let xml = r#"<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav" xmlns:cs="http://calendarserver.org/ns/">
+  <d:response>
+    <d:href>/remote.php/dav/calendars/agent/</d:href>
+    <d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop></d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/remote.php/dav/calendars/agent/tasks/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>Tasks</d:displayname>
+        <d:resourcetype><d:collection/><c:calendar/></d:resourcetype>
+        <d:sync-token>http://nextcloud/ns/sync/42</d:sync-token>
+        <cs:getctag>7</cs:getctag>
+        <c:supported-calendar-component-set>
+          <c:comp name="VTODO"/>
+          <c:comp name="VEVENT"/>
+        </c:supported-calendar-component-set>
+      </d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+</d:multistatus>"#;
+
+        let calendars = parse_calendar_home_multistatus(xml);
+        assert_eq!(calendars.len(), 1);
+        assert_eq!(calendars[0].name, "tasks");
+        assert_eq!(calendars[0].display_name.as_deref(), Some("Tasks"));
+        assert_eq!(
+            calendars[0].sync_token.as_deref(),
+            Some("http://nextcloud/ns/sync/42")
+        );
+        assert_eq!(calendars[0].components, vec!["VEVENT", "VTODO"]);
+    }
+
+    #[test]
+    fn caldav_multiget_parser_extracts_tasks_events_and_deletes() {
+        let event = CalendarEvent {
+            id: Some("event-1".to_string()),
+            title: "Calendar event".to_string(),
+            start: chrono::DateTime::parse_from_rfc3339("2026-05-01T19:00:00Z")
+                .unwrap()
+                .to_utc(),
+            ..Default::default()
+        };
+        let event_ics = escape_xml(&event_to_ics_inline(&event));
+        let task = Task {
+            id: Some("task-1".to_string()),
+            title: "Calendar task".to_string(),
+            ..Default::default()
+        };
+        let task_ics = escape_xml(&task_to_ics_inline(&task));
+        let xml = format!(
+            r#"<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+  <d:response>
+    <d:href>/remote.php/dav/calendars/agent/tasks/task-1.ics</d:href>
+    <d:propstat><d:prop><d:getetag>"abc"</d:getetag><c:calendar-data>{task_ics}</c:calendar-data></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/remote.php/dav/calendars/agent/personal/event-1.ics</d:href>
+    <d:propstat><d:prop><d:getetag>"def"</d:getetag><c:calendar-data>{event_ics}</c:calendar-data></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/remote.php/dav/calendars/agent/tasks/deleted.ics</d:href>
+    <d:status>HTTP/1.1 404 Not Found</d:status>
+  </d:response>
+</d:multistatus>"#
+        );
+
+        let objects = parse_caldav_objects(&xml);
+        assert_eq!(objects.len(), 3);
+        assert_eq!(objects[0].component.as_deref(), Some("VTODO"));
+        assert_eq!(
+            objects[0].task.as_ref().map(|t| t.title.as_str()),
+            Some("Calendar task")
+        );
+        assert_eq!(objects[1].component.as_deref(), Some("VEVENT"));
+        assert_eq!(
+            objects[1].event.as_ref().map(|event| event.title.as_str()),
+            Some("Calendar event")
+        );
+        assert!(objects[2].deleted);
+    }
+
+    #[test]
+    fn caldav_sync_collection_parser_extracts_token() {
+        let xml = r#"<d:multistatus xmlns:d="DAV:">
+  <d:sync-token>http://nextcloud/ns/sync/99</d:sync-token>
+  <d:response><d:href>/remote.php/dav/calendars/agent/tasks/a.ics</d:href><d:status>HTTP/1.1 404 Not Found</d:status></d:response>
+</d:multistatus>"#;
+
+        assert_eq!(
+            extract_first_text(xml, "sync-token").as_deref(),
+            Some("http://nextcloud/ns/sync/99")
+        );
+        let objects = parse_caldav_objects(xml);
+        assert_eq!(objects.len(), 1);
+        assert!(objects[0].deleted);
+    }
+
+    #[test]
+    fn caldav_free_busy_parser_extracts_intervals() {
+        let xml = r#"<c:schedule-response xmlns:c="urn:ietf:params:xml:ns:caldav">
+  <c:response>
+    <c:calendar-data>BEGIN:VCALENDAR
+BEGIN:VFREEBUSY
+FREEBUSY;FBTYPE=BUSY:20260501T190000Z/20260501T200000Z
+END:VFREEBUSY
+END:VCALENDAR</c:calendar-data>
+  </c:response>
+</c:schedule-response>"#;
+
+        let intervals = parse_free_busy_intervals(xml);
+        assert_eq!(intervals.len(), 1);
+        assert_eq!(intervals[0].busy_type.as_deref(), Some("BUSY"));
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn nextcloud_caldav_discovery_and_sync_smoke() {
+        let url = std::env::var("NEXTCLOUD_URL").expect("NEXTCLOUD_URL");
+        let user = std::env::var("NEXTCLOUD_USER")
+            .or_else(|_| std::env::var("NEXTCLOUD_USERNAME"))
+            .expect("NEXTCLOUD_USER");
+        let password = std::env::var("NEXTCLOUD_PASSWORD").expect("NEXTCLOUD_PASSWORD");
+        let client = NextcloudSync::new(&url, &user, &password);
+
+        let discovery = client
+            .discover_calendars()
+            .await
+            .expect("discover calendars");
+        assert!(!discovery.principal_url.is_empty());
+        assert!(!discovery.calendar_home_set.is_empty());
+        assert!(!discovery.calendars.is_empty());
+
+        let calendar = discovery
+            .calendars
+            .iter()
+            .find(|calendar| calendar.components.iter().any(|c| c == "VTODO"))
+            .or_else(|| discovery.calendars.first())
+            .expect("calendar");
+        let sync = client
+            .sync_calendar_collection(&calendar.name, calendar.sync_token.as_deref())
+            .await
+            .expect("sync collection");
+        assert!(sync.sync_token.is_some());
     }
 }

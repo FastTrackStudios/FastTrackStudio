@@ -171,6 +171,33 @@ pub trait CalendarService {
     /// Get the last sync result.
     async fn sync_status(&self) -> Option<SyncStats>;
 
+    /// Discover CalDAV principal, calendar home, and available calendars.
+    async fn discover_caldav(&self) -> Result<CalDavDiscovery, VaultError>;
+
+    /// Fetch specific calendar objects by href using CalDAV calendar-multiget.
+    async fn calendar_multiget(
+        &self,
+        request: CalDavMultigetRequest,
+    ) -> Result<Vec<CalDavObject>, VaultError>;
+
+    /// Incrementally sync a calendar collection using a previous sync-token.
+    async fn calendar_sync_collection(
+        &self,
+        request: CalDavSyncCollectionRequest,
+    ) -> Result<CalDavSyncCollectionResponse, VaultError>;
+
+    /// Put one raw VCALENDAR object, optionally guarded by ETag preconditions.
+    async fn put_calendar_object(&self, request: CalDavPutObjectRequest) -> Result<(), VaultError>;
+
+    /// Delete one raw calendar object, optionally guarded by If-Match.
+    async fn delete_calendar_object(&self, request: CalDavDeleteObjectRequest) -> Result<(), VaultError>;
+
+    /// Query busy VEVENT intervals for a calendar.
+    async fn calendar_free_busy(
+        &self,
+        request: CalDavFreeBusyRequest,
+    ) -> Result<Vec<CalDavFreeBusyInterval>, VaultError>;
+
     /// List remote Nextcloud Deck boards.
     async fn list_deck_boards(&self) -> Result<Vec<RemoteDeckBoard>, VaultError>;
 
@@ -230,6 +257,97 @@ pub struct RemoteDeckStack {
     pub id: u64,
     pub title: String,
     pub card_count: u32,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct CalDavDiscovery {
+    pub principal_url: String,
+    pub calendar_home_set: String,
+    pub schedule_inbox_url: Option<String>,
+    pub schedule_outbox_url: Option<String>,
+    pub calendar_user_addresses: Vec<String>,
+    pub calendars: Vec<CalDavCalendarInfo>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct CalDavCalendarInfo {
+    pub href: String,
+    pub name: String,
+    pub display_name: Option<String>,
+    pub sync_token: Option<String>,
+    pub ctag: Option<String>,
+    pub components: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct CalDavObject {
+    pub href: String,
+    pub etag: Option<String>,
+    pub status: String,
+    pub component: Option<String>,
+    pub calendar_data: Option<String>,
+    pub task: Option<Task>,
+    pub event: Option<CalendarEvent>,
+    pub deleted: bool,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct CalDavMultigetRequest {
+    pub calendar: String,
+    pub hrefs: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct CalDavSyncCollectionRequest {
+    pub calendar: String,
+    pub sync_token: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct CalDavSyncCollectionResponse {
+    pub sync_token: Option<String>,
+    pub objects: Vec<CalDavObject>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct CalDavPutObjectRequest {
+    pub calendar: String,
+    pub href: String,
+    pub calendar_data: String,
+    pub if_match: Option<String>,
+    pub if_none_match: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct CalDavDeleteObjectRequest {
+    pub calendar: String,
+    pub href: String,
+    pub if_match: Option<String>,
+}
+
+#[derive(Debug, Clone, facet::Facet)]
+pub struct CalDavFreeBusyRequest {
+    pub calendar: String,
+    pub start: DateTime<Utc>,
+    pub end: DateTime<Utc>,
+}
+
+impl Default for CalDavFreeBusyRequest {
+    fn default() -> Self {
+        let now = Utc::now();
+        Self {
+            calendar: String::new(),
+            start: now,
+            end: now,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct CalDavFreeBusyInterval {
+    pub start: DateTime<Utc>,
+    pub end: DateTime<Utc>,
+    pub busy_type: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, facet::Facet)]

@@ -12,9 +12,12 @@ use crate::project::{next_task as find_next_task, Project, ProjectStats};
 use crate::query::Query;
 use crate::rrule;
 use crate::service::{
-    CalendarEventPatch, FileCopyMoveRequest, FileEntry, FileReadResponse, FileWriteRequest,
-    InvoiceCreateRequest, InvoicePaymentRequest, ProjectPatch, RemoteDeckBoard, RemoteDeckStack,
-    SyncStats, TimeEntryContext, TimeEntryFilter, TimeEntryPatch, TimeLogRequest, TimeStartRequest,
+    CalDavDeleteObjectRequest, CalDavDiscovery, CalDavFreeBusyInterval, CalDavFreeBusyRequest,
+    CalDavMultigetRequest, CalDavObject, CalDavPutObjectRequest, CalDavSyncCollectionRequest,
+    CalDavSyncCollectionResponse, CalendarEventPatch, FileCopyMoveRequest, FileEntry,
+    FileReadResponse, FileWriteRequest, InvoiceCreateRequest, InvoicePaymentRequest, ProjectPatch,
+    RemoteDeckBoard, RemoteDeckStack, SyncStats,
+    TimeEntryContext, TimeEntryFilter, TimeEntryPatch, TimeLogRequest, TimeStartRequest,
     TimedTaskEntry, VaultError,
 };
 use crate::task::{Status, Task};
@@ -660,6 +663,113 @@ impl VaultServiceImpl {
 
     pub async fn sync_status(&self) -> Option<SyncStats> {
         self.last_sync.lock().unwrap().clone()
+    }
+
+    fn nextcloud_sync_from_config(
+        config: &NextcloudRuntimeConfig,
+    ) -> crate::provider::nextcloud_sync::NextcloudSync {
+        crate::provider::nextcloud_sync::NextcloudSync::new(
+            &config.url,
+            &config.username,
+            &config.password,
+        )
+    }
+
+    pub async fn discover_caldav(&self) -> Result<CalDavDiscovery, VaultError> {
+        let config = NextcloudRuntimeConfig::load()?
+            .ok_or_else(|| VaultError::IoError("Nextcloud CalDAV is not configured".into()))?;
+        Self::nextcloud_sync_from_config(&config)
+            .discover_calendars()
+            .await
+    }
+
+    pub async fn calendar_multiget(
+        &self,
+        request: CalDavMultigetRequest,
+    ) -> Result<Vec<CalDavObject>, VaultError> {
+        let config = NextcloudRuntimeConfig::load()?
+            .ok_or_else(|| VaultError::IoError("Nextcloud CalDAV is not configured".into()))?;
+        let calendar = if request.calendar.is_empty() {
+            config.calendar.as_str()
+        } else {
+            request.calendar.as_str()
+        };
+        Self::nextcloud_sync_from_config(&config)
+            .calendar_multiget(calendar, &request.hrefs)
+            .await
+    }
+
+    pub async fn calendar_sync_collection(
+        &self,
+        request: CalDavSyncCollectionRequest,
+    ) -> Result<CalDavSyncCollectionResponse, VaultError> {
+        let config = NextcloudRuntimeConfig::load()?
+            .ok_or_else(|| VaultError::IoError("Nextcloud CalDAV is not configured".into()))?;
+        let calendar = if request.calendar.is_empty() {
+            config.calendar.as_str()
+        } else {
+            request.calendar.as_str()
+        };
+        Self::nextcloud_sync_from_config(&config)
+            .sync_calendar_collection(calendar, request.sync_token.as_deref())
+            .await
+    }
+
+    pub async fn put_calendar_object(
+        &self,
+        request: CalDavPutObjectRequest,
+    ) -> Result<(), VaultError> {
+        let config = NextcloudRuntimeConfig::load()?
+            .ok_or_else(|| VaultError::IoError("Nextcloud CalDAV is not configured".into()))?;
+        let calendar = if request.calendar.is_empty() {
+            config.calendar.as_str()
+        } else {
+            request.calendar.as_str()
+        };
+        Self::nextcloud_sync_from_config(&config)
+            .put_calendar_object(
+                calendar,
+                &request.href,
+                &request.calendar_data,
+                request.if_match.as_deref(),
+                request.if_none_match.as_deref(),
+            )
+            .await
+    }
+
+    pub async fn delete_calendar_object(
+        &self,
+        request: CalDavDeleteObjectRequest,
+    ) -> Result<(), VaultError> {
+        let config = NextcloudRuntimeConfig::load()?
+            .ok_or_else(|| VaultError::IoError("Nextcloud CalDAV is not configured".into()))?;
+        let calendar = if request.calendar.is_empty() {
+            config.calendar.as_str()
+        } else {
+            request.calendar.as_str()
+        };
+        Self::nextcloud_sync_from_config(&config)
+            .delete_calendar_object(calendar, &request.href, request.if_match.as_deref())
+            .await
+    }
+
+    pub async fn calendar_free_busy(
+        &self,
+        request: CalDavFreeBusyRequest,
+    ) -> Result<Vec<CalDavFreeBusyInterval>, VaultError> {
+        let config = NextcloudRuntimeConfig::load()?
+            .ok_or_else(|| VaultError::IoError("Nextcloud CalDAV is not configured".into()))?;
+        let calendar = if request.calendar.is_empty() {
+            config
+                .event_calendar
+                .as_deref()
+                .unwrap_or(config.calendar.as_str())
+        } else {
+            request.calendar.as_str()
+        };
+        Self::nextcloud_sync_from_config(&config)
+            .calendar_free_busy(calendar, request.start, request.end)
+            .await
     }
 
     pub async fn list_calendar_events(&self) -> Vec<crate::CalendarEvent> {
@@ -2503,6 +2613,33 @@ impl crate::service::CalendarService for VaultServiceImpl {
 
     async fn trigger_sync(&self) -> Result<SyncStats, VaultError> { self.trigger_sync().await }
     async fn sync_status(&self) -> Option<SyncStats> { self.sync_status().await }
+    async fn discover_caldav(&self) -> Result<CalDavDiscovery, VaultError> {
+        VaultServiceImpl::discover_caldav(self).await
+    }
+    async fn calendar_multiget(
+        &self,
+        request: CalDavMultigetRequest,
+    ) -> Result<Vec<CalDavObject>, VaultError> {
+        VaultServiceImpl::calendar_multiget(self, request).await
+    }
+    async fn calendar_sync_collection(
+        &self,
+        request: CalDavSyncCollectionRequest,
+    ) -> Result<CalDavSyncCollectionResponse, VaultError> {
+        VaultServiceImpl::calendar_sync_collection(self, request).await
+    }
+    async fn put_calendar_object(&self, request: CalDavPutObjectRequest) -> Result<(), VaultError> {
+        VaultServiceImpl::put_calendar_object(self, request).await
+    }
+    async fn delete_calendar_object(&self, request: CalDavDeleteObjectRequest) -> Result<(), VaultError> {
+        VaultServiceImpl::delete_calendar_object(self, request).await
+    }
+    async fn calendar_free_busy(
+        &self,
+        request: CalDavFreeBusyRequest,
+    ) -> Result<Vec<CalDavFreeBusyInterval>, VaultError> {
+        VaultServiceImpl::calendar_free_busy(self, request).await
+    }
     async fn list_deck_boards(&self) -> Result<Vec<RemoteDeckBoard>, VaultError> {
         self.list_remote_deck_boards().await
     }
