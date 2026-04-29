@@ -1,8 +1,9 @@
 use std::sync::Arc;
 
 use axum::extract::ws::{Message as AxumWsMessage, WebSocket};
-use axum::extract::{State, WebSocketUpgrade};
-use axum::response::IntoResponse;
+use axum::extract::{Query, State, WebSocketUpgrade};
+use axum::http::{HeaderMap, StatusCode};
+use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
 use base64::Engine as _;
@@ -10,12 +11,13 @@ use better_auth::AxumIntegration;
 use better_auth_core::adapters::{MemberOps, OrganizationOps, UserOps};
 use better_auth_core::config::AuthConfig;
 use better_auth_core::{CreateMember, CreateOrganization, CreateUser};
+use chrono::Utc;
 use serde::Serialize;
 use serde_json::json;
 use task_core::crdt::{CrdtSyncEngine, SyncOp};
 use task_core::VaultServiceImpl;
-use task_db::entities::auth::auth_organization;
-use task_db::sea_orm::{self, EntityTrait, QueryOrder};
+use task_db::entities::auth::{auth_member, auth_organization, auth_session};
+use task_db::sea_orm::{self, ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 use task_db::SeaOrmAuthAdapter;
 use tokio::sync::mpsc;
 use tower_http::cors::CorsLayer;
@@ -62,6 +64,15 @@ struct OrganizationRoute {
     vox_url: String,
     crdt_url: String,
     local: bool,
+}
+
+#[derive(Clone, Debug)]
+struct VoxAuthContext {
+    user_id: String,
+    session_id: String,
+    organization_id: String,
+    member_id: String,
+    role: String,
 }
 
 // ── Main ─────────────────────────────────────────────────────────────────────
@@ -898,22 +909,47 @@ fn spawn_crdt_file_watch_bridge(engine: Arc<CrdtSyncEngine>, vault_service: Arc<
 
 // ── Vox WebSocket handler ────────────────────────────────────────────────────
 
-async fn vox_ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| handle_vox_connection(socket, state))
+async fn vox_ws_handler(
+    ws: WebSocketUpgrade,
+    headers: HeaderMap,
+    Query(query): Query<std::collections::HashMap<String, String>>,
+    State(state): State<AppState>,
+) -> Response {
+    match authenticate_vox_request(&state, &headers, &query).await {
+        Ok(auth) => ws
+            .on_upgrade(move |socket| handle_vox_connection(socket, state, auth))
+            .into_response(),
+        Err(status) => status.into_response(),
+    }
 }
 
-async fn handle_vox_connection(socket: WebSocket, state: AppState) {
-    info!("Vox WebSocket client connected");
+async fn handle_vox_connection(socket: WebSocket, state: AppState, auth: VoxAuthContext) {
+    info!(
+        user_id = %auth.user_id,
+        session_id = %auth.session_id,
+        organization_id = %auth.organization_id,
+        member_id = %auth.member_id,
+        role = %auth.role,
+        "Vox WebSocket client connected"
+    );
 
     let Some(service) = state.vault_service.clone() else {
         warn!("Vox connection rejected because TASK_VAULT is not configured");
         return;
     };
 
+    let request_auth = auth.clone();
     let factory = vox::acceptor_fn(
         move |request: &vox::ConnectionRequest,
               connection: vox::PendingConnection|
               -> Result<(), vox::Metadata<'static>> {
+            info!(
+                user_id = %request_auth.user_id,
+                organization_id = %request_auth.organization_id,
+                role = %request_auth.role,
+                service = request.service(),
+                "Vox service accepted"
+            );
             match request.service() {
                 "TaskService" => {
                     connection.handle_with(task_core::TaskServiceDispatcher::new(
@@ -983,7 +1019,127 @@ async fn handle_vox_connection(socket: WebSocket, state: AppState) {
         warn!(error = %e, "Vox WebSocket session failed");
     }
 
-    info!("Vox WebSocket client disconnected");
+    info!(
+        user_id = %auth.user_id,
+        organization_id = %auth.organization_id,
+        "Vox WebSocket client disconnected"
+    );
+}
+
+async fn authenticate_vox_request(
+    state: &AppState,
+    headers: &HeaderMap,
+    query: &std::collections::HashMap<String, String>,
+) -> Result<VoxAuthContext, StatusCode> {
+    let Some(token) = extract_session_token(headers, query) else {
+        warn!("Vox WebSocket rejected: missing auth session token");
+        return Err(StatusCode::UNAUTHORIZED);
+    };
+
+    let session = auth_session::Entity::find()
+        .filter(auth_session::Column::Token.eq(&token))
+        .one(&state.db)
+        .await
+        .map_err(|e| {
+            warn!(error = %e, "Vox WebSocket rejected: session lookup failed");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
+        .filter(|session| session.active && session.expires_at > Utc::now())
+        .ok_or_else(|| {
+            warn!("Vox WebSocket rejected: invalid or expired session");
+            StatusCode::UNAUTHORIZED
+        })?;
+
+    let organization_id =
+        requested_organization(headers, query).or_else(|| session.active_organization_id.clone());
+
+    let member = match organization_id {
+        Some(org_id) => auth_member::Entity::find()
+            .filter(auth_member::Column::OrganizationId.eq(org_id))
+            .filter(auth_member::Column::UserId.eq(&session.user_id))
+            .one(&state.db)
+            .await
+            .map_err(|e| {
+                warn!(error = %e, "Vox WebSocket rejected: member lookup failed");
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?,
+        None => {
+            let memberships = auth_member::Entity::find()
+                .filter(auth_member::Column::UserId.eq(&session.user_id))
+                .all(&state.db)
+                .await
+                .map_err(|e| {
+                    warn!(error = %e, "Vox WebSocket rejected: membership lookup failed");
+                    StatusCode::INTERNAL_SERVER_ERROR
+                })?;
+            if memberships.len() == 1 {
+                memberships.into_iter().next()
+            } else {
+                warn!(
+                    user_id = %session.user_id,
+                    membership_count = memberships.len(),
+                    "Vox WebSocket rejected: no unambiguous active organization"
+                );
+                return Err(StatusCode::FORBIDDEN);
+            }
+        }
+    }
+    .ok_or_else(|| {
+        warn!(
+            user_id = %session.user_id,
+            "Vox WebSocket rejected: user is not a member of the requested organization"
+        );
+        StatusCode::FORBIDDEN
+    })?;
+
+    Ok(VoxAuthContext {
+        user_id: session.user_id,
+        session_id: session.id,
+        organization_id: member.organization_id,
+        member_id: member.id,
+        role: member.role,
+    })
+}
+
+fn extract_session_token(
+    headers: &HeaderMap,
+    query: &std::collections::HashMap<String, String>,
+) -> Option<String> {
+    header_value(headers, "authorization")
+        .and_then(|value| value.strip_prefix("Bearer ").map(str::to_string))
+        .or_else(|| query.get("token").cloned())
+        .or_else(|| query.get("session_token").cloned())
+        .or_else(|| query.get("sessionToken").cloned())
+        .or_else(|| cookie_value(headers, "better-auth.session-token"))
+}
+
+fn requested_organization(
+    headers: &HeaderMap,
+    query: &std::collections::HashMap<String, String>,
+) -> Option<String> {
+    header_value(headers, "x-task-organization-id")
+        .or_else(|| header_value(headers, "x-organization-id"))
+        .or_else(|| query.get("organization_id").cloned())
+        .or_else(|| query.get("organizationId").cloned())
+        .or_else(|| query.get("org_id").cloned())
+        .filter(|value| !value.is_empty())
+}
+
+fn header_value(headers: &HeaderMap, name: &str) -> Option<String> {
+    headers
+        .get(name)
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn cookie_value(headers: &HeaderMap, name: &str) -> Option<String> {
+    let cookie = header_value(headers, "cookie")?;
+    cookie.split(';').find_map(|part| {
+        let (key, value) = part.trim().split_once('=')?;
+        (key == name && !value.is_empty()).then(|| value.to_string())
+    })
 }
 
 struct AxumWsLink {
@@ -1210,4 +1366,55 @@ fn ws_url(base_url: &str, path: &str) -> String {
         url = format!("ws://{rest}");
     }
     format!("{url}{path}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extracts_vox_session_token_from_bearer_query_or_cookie() {
+        let mut headers = HeaderMap::new();
+        headers.insert("authorization", "Bearer auth-token".parse().unwrap());
+        assert_eq!(
+            extract_session_token(&headers, &std::collections::HashMap::new()).as_deref(),
+            Some("auth-token")
+        );
+
+        let mut query = std::collections::HashMap::new();
+        query.insert("sessionToken".to_string(), "query-token".to_string());
+        assert_eq!(
+            extract_session_token(&HeaderMap::new(), &query).as_deref(),
+            Some("query-token")
+        );
+
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "cookie",
+            "theme=dark; better-auth.session-token=cookie-token"
+                .parse()
+                .unwrap(),
+        );
+        assert_eq!(
+            extract_session_token(&headers, &std::collections::HashMap::new()).as_deref(),
+            Some("cookie-token")
+        );
+    }
+
+    #[test]
+    fn extracts_requested_organization_from_header_or_query() {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-task-organization-id", "org_header".parse().unwrap());
+        assert_eq!(
+            requested_organization(&headers, &std::collections::HashMap::new()).as_deref(),
+            Some("org_header")
+        );
+
+        let mut query = std::collections::HashMap::new();
+        query.insert("organizationId".to_string(), "org_query".to_string());
+        assert_eq!(
+            requested_organization(&HeaderMap::new(), &query).as_deref(),
+            Some("org_query")
+        );
+    }
 }
