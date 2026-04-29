@@ -1,13 +1,25 @@
 //! Tabs — shadcn v4 maia style accessible tabbed interface.
 
 use dioxus::prelude::*;
+use dioxus_primitives::tabs::{
+    TabContent as PrimitiveTabContent, TabList as PrimitiveTabList,
+    TabTrigger as PrimitiveTabTrigger, Tabs as PrimitiveTabs,
+};
 
 #[derive(Props, Clone, PartialEq)]
 pub struct TabsProps {
+    #[props(default)]
+    pub value: Option<String>,
     #[props(default = String::new())]
     pub default_value: String,
     #[props(default)]
     pub on_change: Option<Callback<String>>,
+    #[props(default = false)]
+    pub disabled: bool,
+    #[props(default = true)]
+    pub horizontal: bool,
+    #[props(default = true)]
+    pub roving_loop: bool,
     #[props(default)]
     pub class: String,
     pub children: Element,
@@ -16,25 +28,22 @@ pub struct TabsProps {
 /// shadcn v4 maia: cn-tabs
 #[component]
 pub fn Tabs(props: TabsProps) -> Element {
-    let selected = use_signal(|| props.default_value.clone());
-    use_context_provider(|| TabContext {
-        selected,
-        on_change: props.on_change,
-    });
-
     rsx! {
-        div {
+        PrimitiveTabs {
+            value: props.value,
+            default_value: props.default_value,
+            disabled: props.disabled,
+            horizontal: props.horizontal,
+            roving_loop: props.roving_loop,
+            on_value_change: move |value: String| {
+                if let Some(callback) = &props.on_change {
+                    callback.call(value);
+                }
+            },
             class: crate::cn::merge_slice(&["flex flex-col gap-2", props.class.as_str()]),
-            "data-orientation": "horizontal",
             {props.children}
         }
     }
-}
-
-#[derive(Clone, Copy)]
-struct TabContext {
-    selected: Signal<String>,
-    on_change: Option<Callback<String>>,
 }
 
 #[derive(Props, Clone, PartialEq)]
@@ -48,8 +57,7 @@ pub struct TabListProps {
 #[component]
 pub fn TabList(props: TabListProps) -> Element {
     rsx! {
-        div {
-            role: "tablist",
+        PrimitiveTabList {
             class: crate::cn::merge(format!(
                 "inline-flex h-9 items-center justify-start gap-1 rounded-full bg-muted p-[3px] text-muted-foreground {}",
                 props.class
@@ -62,6 +70,11 @@ pub fn TabList(props: TabListProps) -> Element {
 #[derive(Props, Clone, PartialEq)]
 pub struct TabTriggerProps {
     pub value: String,
+    pub index: usize,
+    #[props(default = false)]
+    pub disabled: bool,
+    #[props(default)]
+    pub id: Option<String>,
     #[props(default)]
     pub class: String,
     pub children: Element,
@@ -70,35 +83,16 @@ pub struct TabTriggerProps {
 /// shadcn v4 maia: cn-tabs-trigger
 #[component]
 pub fn TabTrigger(props: TabTriggerProps) -> Element {
-    let mut ctx: TabContext = use_context();
-    let is_selected = *ctx.selected.read() == props.value;
-
-    let active_class = if is_selected {
-        "bg-background text-foreground shadow-sm"
-    } else {
-        "hover:bg-background/50 hover:text-foreground/80"
-    };
-
-    let value = props.value.clone();
-
     rsx! {
-        button {
-            role: "tab",
-            r#type: "button",
+        PrimitiveTabTrigger {
+            value: props.value,
+            index: props.index,
+            disabled: props.disabled,
+            id: props.id,
             class: crate::cn::merge(format!(
-                "inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-transparent px-2 py-1 text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg:not([class*='size-'])]:size-4 {active_class} {}",
+                "inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-transparent px-2 py-1 text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg:not([class*='size-'])]:size-4 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm data-[state=inactive]:hover:bg-background/50 data-[state=inactive]:hover:text-foreground/80 {}",
                 props.class
             )),
-            aria_selected: is_selected.to_string(),
-            "data-state": if is_selected { "active" } else { "inactive" },
-            tabindex: if is_selected { "0" } else { "-1" },
-            onclick: move |_| {
-                let val = value.clone();
-                ctx.selected.set(val.clone());
-                if let Some(cb) = &ctx.on_change {
-                    cb.call(val);
-                }
-            },
             {props.children}
         }
     }
@@ -107,6 +101,9 @@ pub fn TabTrigger(props: TabTriggerProps) -> Element {
 #[derive(Props, Clone, PartialEq)]
 pub struct TabContentProps {
     pub value: String,
+    pub index: usize,
+    #[props(default)]
+    pub id: Option<String>,
     #[props(default)]
     pub class: String,
     pub children: Element,
@@ -115,19 +112,12 @@ pub struct TabContentProps {
 /// shadcn v4 maia: cn-tabs-content
 #[component]
 pub fn TabContent(props: TabContentProps) -> Element {
-    let ctx: TabContext = use_context();
-    let is_selected = *ctx.selected.read() == props.value;
-
-    if !is_selected {
-        return rsx! {};
-    }
-
     rsx! {
-        div {
-            role: "tabpanel",
+        PrimitiveTabContent {
+            value: props.value,
+            index: props.index,
+            id: props.id,
             class: crate::cn::merge_slice(&["text-sm", props.class.as_str()]),
-            "data-state": "active",
-            tabindex: "0",
             {props.children}
         }
     }

@@ -1,10 +1,21 @@
 //! Dialog — shadcn v4 maia style modal overlay.
 
 use dioxus::prelude::*;
+use dioxus_primitives::dialog::{
+    DialogContent as PrimitiveDialogContent, DialogDescription as PrimitiveDialogDescription,
+    DialogRoot as PrimitiveDialog, DialogTitle as PrimitiveDialogTitle,
+};
 
 #[derive(Props, Clone, PartialEq)]
 pub struct DialogProps {
-    pub open: bool,
+    #[props(default)]
+    pub open: Option<bool>,
+    #[props(default = false)]
+    pub default_open: bool,
+    #[props(default = true)]
+    pub is_modal: bool,
+    #[props(default)]
+    pub on_open_change: Option<Callback<bool>>,
     #[props(default)]
     pub on_close: Option<Callback<()>>,
     #[props(default)]
@@ -15,35 +26,30 @@ pub struct DialogProps {
 /// shadcn v4 maia: cn-dialog-overlay + cn-dialog-content
 #[component]
 pub fn Dialog(props: DialogProps) -> Element {
-    if !props.open {
-        return rsx! {};
-    }
-
     rsx! {
-        // Overlay: cn-dialog-overlay
-        div {
-            class: "fixed inset-0 z-50 bg-black/80 animate-fade-in supports-[backdrop-filter]:backdrop-blur-xs",
-            "data-state": "open",
-            onclick: move |_| {
-                if let Some(cb) = &props.on_close {
-                    cb.call(());
+        PrimitiveDialog {
+            open: props.open,
+            default_open: props.default_open,
+            is_modal: props.is_modal,
+            on_open_change: move |open| {
+                if let Some(callback) = &props.on_open_change {
+                    callback.call(open);
+                }
+                if !open {
+                    if let Some(callback) = &props.on_close {
+                        callback.call(());
+                    }
                 }
             },
-        }
-
-        // Content: cn-dialog-content
-        div {
-            class: crate::cn::merge(format!(
-                "fixed z-50 grid w-full max-w-[calc(100%-2rem)] sm:max-w-md gap-6 rounded-xl bg-popover text-popover-foreground border border-border shadow-lg p-6 text-sm animate-scale-in {}",
-                props.class
-            )),
-            style: "left: 50%; top: 50%; transform: translate(-50%, -50%);",
-            role: "dialog",
-            aria_modal: "true",
-            onclick: move |evt: MouseEvent| {
-                evt.stop_propagation();
-            },
-            {props.children}
+            class: "fixed inset-0 z-50 bg-black/80 animate-fade-in supports-[backdrop-filter]:backdrop-blur-xs",
+            PrimitiveDialogContent {
+                class: crate::cn::merge(format!(
+                    "fixed z-50 grid w-full max-w-[calc(100%-2rem)] sm:max-w-md gap-6 rounded-xl bg-popover text-popover-foreground border border-border shadow-lg p-6 text-sm animate-scale-in {}",
+                    props.class
+                )),
+                style: "left: 50%; top: 50%; transform: translate(-50%, -50%);",
+                {props.children}
+            }
         }
     }
 }
@@ -69,6 +75,8 @@ pub fn DialogHeader(props: DialogHeaderProps) -> Element {
 #[derive(Props, Clone, PartialEq)]
 pub struct DialogTitleProps {
     #[props(default)]
+    pub id: Option<String>,
+    #[props(default)]
     pub class: String,
     pub children: Element,
 }
@@ -77,7 +85,8 @@ pub struct DialogTitleProps {
 #[component]
 pub fn DialogTitle(props: DialogTitleProps) -> Element {
     rsx! {
-        h2 {
+        PrimitiveDialogTitle {
+            id: props.id,
             class: crate::cn::merge_slice(&["text-base leading-none font-medium", props.class.as_str()]),
             {props.children}
         }
@@ -87,6 +96,8 @@ pub fn DialogTitle(props: DialogTitleProps) -> Element {
 #[derive(Props, Clone, PartialEq)]
 pub struct DialogDescriptionProps {
     #[props(default)]
+    pub id: Option<String>,
+    #[props(default)]
     pub class: String,
     pub children: Element,
 }
@@ -95,7 +106,8 @@ pub struct DialogDescriptionProps {
 #[component]
 pub fn DialogDescription(props: DialogDescriptionProps) -> Element {
     rsx! {
-        p {
+        PrimitiveDialogDescription {
+            id: props.id,
             class: crate::cn::merge_slice(&["text-sm text-muted-foreground", props.class.as_str()]),
             {props.children}
         }

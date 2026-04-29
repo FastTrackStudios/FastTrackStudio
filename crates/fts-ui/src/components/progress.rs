@@ -1,6 +1,9 @@
 //! Progress — shadcn v4 maia style, standalone (no lumen-blocks).
 
 use dioxus::prelude::*;
+use dioxus_primitives::progress::{
+    Progress as PrimitiveProgress, ProgressIndicator as PrimitiveProgressIndicator,
+};
 
 /// Visual variant for the progress bar fill.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -48,13 +51,11 @@ pub fn Progress(props: ProgressProps) -> Element {
     let fill_color = props.variant.fill_class();
 
     rsx! {
-        div {
+        PrimitiveProgress {
+            value: Some(value),
+            max: 100.0,
             class: crate::cn::merge_slice(&[track, props.class.as_str()]),
-            role: "progressbar",
-            "aria-valuenow": "{value}",
-            "aria-valuemin": "0",
-            "aria-valuemax": "100",
-            div {
+            PrimitiveProgressIndicator {
                 class: "{fill_base} {fill_color}",
                 style: "width: {value}%",
             }

@@ -8,6 +8,7 @@ edition.workspace = true
 chrono = "0.4"
 clsx = { workspace = true }
 dioxus = { workspace = true }
+dioxus-primitives = { workspace = true }
 lucide-dioxus = { workspace = true }
 tracing = { workspace = true }
 tw_merge = { workspace = true }

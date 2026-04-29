@@ -1,6 +1,7 @@
 //! Divider — shadcn v4 maia separator style.
 
 use dioxus::prelude::*;
+use dioxus_primitives::separator::Separator;
 
 /// Orientation of the divider.
 #[derive(Clone, Copy, PartialEq, Default)]
@@ -25,15 +26,12 @@ pub fn Divider(props: DividerProps) -> Element {
         DividerOrientation::Horizontal => "h-px w-full",
         DividerOrientation::Vertical => "h-full w-px",
     };
+    let horizontal = matches!(props.orientation, DividerOrientation::Horizontal);
 
     rsx! {
-        div {
+        Separator {
+            horizontal,
             class: crate::cn::merge_slice(&["shrink-0 bg-border", orientation_class, props.class.as_str()]),
-            role: "separator",
-            aria_orientation: match props.orientation {
-                DividerOrientation::Horizontal => "horizontal",
-                DividerOrientation::Vertical => "vertical",
-            },
         }
     }
 }

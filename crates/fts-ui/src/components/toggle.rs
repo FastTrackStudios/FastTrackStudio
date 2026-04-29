@@ -1,6 +1,7 @@
 //! Toggle — shadcn v4 maia style.
 
 use dioxus::prelude::*;
+use dioxus_primitives::toggle::Toggle as PrimitiveToggle;
 
 /// Variant for the toggle button.
 #[derive(Clone, Copy, PartialEq, Default)]
@@ -66,18 +67,18 @@ pub fn Toggle(props: ToggleProps) -> Element {
 
     let pressed = props.pressed;
 
+    let class = crate::cn::merge(format!(
+        "{base} {variant_class} {size_class} {pressed_class} {disabled_class} {}",
+        props.class
+    ));
+
     rsx! {
-        button {
-            r#type: "button",
-            class: crate::cn::merge(format!(
-                "{base} {variant_class} {size_class} {pressed_class} {disabled_class} {}",
-                props.class
-            )),
-            aria_pressed: pressed.to_string(),
-            "data-state": if pressed { "on" } else { "off" },
+        PrimitiveToggle {
+            pressed: Some(pressed),
             disabled: props.disabled,
-            onclick: move |_| {
-                props.on_toggle.call(!pressed);
+            class,
+            on_pressed_change: move |next| {
+                props.on_toggle.call(next);
             },
             {props.children}
         }

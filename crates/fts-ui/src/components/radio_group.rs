@@ -1,6 +1,9 @@
 //! Radio group — shadcn v4 maia style radio buttons.
 
 use dioxus::prelude::*;
+use dioxus_primitives::radio_group::{
+    RadioGroup as PrimitiveRadioGroup, RadioItem as PrimitiveRadioItem,
+};
 
 // ---------------------------------------------------------------------------
 // Context shared between RadioGroup and RadioGroupItem
@@ -9,7 +12,7 @@ use dioxus::prelude::*;
 #[derive(Clone, Copy)]
 struct RadioGroupContext {
     value: Signal<String>,
-    on_change: Option<Callback<String>>,
+    next_index: Signal<usize>,
 }
 
 // ---------------------------------------------------------------------------
@@ -35,15 +38,22 @@ pub struct RadioGroupProps {
 /// shadcn v4 maia: radio-group
 #[component]
 pub fn RadioGroup(props: RadioGroupProps) -> Element {
-    use_context_provider(|| RadioGroupContext {
-        value: props.value,
-        on_change: props.on_change,
-    });
+    let mut value = props.value;
+    let on_change = props.on_change;
+    let next_index = use_signal(|| 0usize);
+
+    use_context_provider(|| RadioGroupContext { value, next_index });
 
     rsx! {
-        div {
-            role: "radiogroup",
+        PrimitiveRadioGroup {
+            value: Some(value()),
             class: crate::cn::merge_slice(&["grid gap-3", props.class.as_str()]),
+            on_value_change: move |next: String| {
+                value.set(next.clone());
+                if let Some(cb) = &on_change {
+                    cb.call(next);
+                }
+            },
             {props.children}
         }
     }
@@ -71,8 +81,13 @@ pub struct RadioGroupItemProps {
 #[component]
 pub fn RadioGroupItem(props: RadioGroupItemProps) -> Element {
     let mut ctx: RadioGroupContext = use_context();
+    let index = use_hook(|| {
+        let mut next_index = ctx.next_index.write();
+        let index = *next_index;
+        *next_index += 1;
+        index
+    });
     let is_checked = *ctx.value.read() == props.value;
-    let item_value = props.value.clone();
 
     let outer_class = if is_checked {
         "border-primary bg-primary"
@@ -81,26 +96,14 @@ pub fn RadioGroupItem(props: RadioGroupItemProps) -> Element {
     };
 
     rsx! {
-        button {
-            r#type: "button",
-            role: "radio",
-            disabled: if props.disabled { Some(true) } else { None },
-            aria_checked: is_checked.to_string(),
-            "data-state": if is_checked { "checked" } else { "unchecked" },
+        PrimitiveRadioItem {
+            value: props.value,
+            index,
+            disabled: props.disabled,
             class: crate::cn::merge(format!(
                 "relative flex size-4 items-center justify-center rounded-full border focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 {outer_class} {}",
                 props.class
             )),
-            onclick: move |_| {
-                if !props.disabled {
-                    let val = item_value.clone();
-                    ctx.value.set(val.clone());
-                    if let Some(cb) = &ctx.on_change {
-                        cb.call(val);
-                    }
-                }
-            },
-            // Inner dot when checked
             if is_checked {
                 span {
                     class: "absolute bg-primary-foreground size-2 rounded-full",

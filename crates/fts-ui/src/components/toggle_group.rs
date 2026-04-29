@@ -1,19 +1,27 @@
 //! Toggle group — shadcn v4 maia style.
 
 use dioxus::prelude::*;
-
-use super::toggle::{Toggle, ToggleSize, ToggleVariant};
-
-#[derive(Clone, Copy)]
-struct ToggleGroupContext {
-    value: Signal<String>,
-    on_change: Callback<String>,
-}
+use dioxus_primitives::toggle_group::{
+    ToggleGroup as PrimitiveToggleGroup, ToggleItem as PrimitiveToggleItem,
+};
+use std::collections::HashSet;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct ToggleGroupProps {
-    pub value: Signal<String>,
-    pub on_change: Callback<String>,
+    #[props(default)]
+    pub pressed: Option<HashSet<usize>>,
+    #[props(default)]
+    pub default_pressed: HashSet<usize>,
+    #[props(default)]
+    pub on_pressed_change: Option<Callback<HashSet<usize>>>,
+    #[props(default = false)]
+    pub disabled: bool,
+    #[props(default = false)]
+    pub allow_multiple_pressed: bool,
+    #[props(default = true)]
+    pub horizontal: bool,
+    #[props(default = true)]
+    pub roving_loop: bool,
     #[props(default)]
     pub class: String,
     pub children: Element,
@@ -22,15 +30,20 @@ pub struct ToggleGroupProps {
 /// shadcn v4 maia: cn-toggle-group
 #[component]
 pub fn ToggleGroup(props: ToggleGroupProps) -> Element {
-    use_context_provider(|| ToggleGroupContext {
-        value: props.value,
-        on_change: props.on_change,
-    });
-
     rsx! {
-        div {
+        PrimitiveToggleGroup {
+            pressed: props.pressed,
+            default_pressed: props.default_pressed,
+            disabled: props.disabled,
+            allow_multiple_pressed: props.allow_multiple_pressed,
+            horizontal: props.horizontal,
+            roving_loop: props.roving_loop,
+            on_pressed_change: move |pressed| {
+                if let Some(callback) = &props.on_pressed_change {
+                    callback.call(pressed);
+                }
+            },
             class: crate::cn::merge_slice(&["inline-flex items-center gap-1", props.class.as_str()]),
-            role: "group",
             {props.children}
         }
     }
@@ -38,7 +51,9 @@ pub fn ToggleGroup(props: ToggleGroupProps) -> Element {
 
 #[derive(Props, Clone, PartialEq)]
 pub struct ToggleGroupItemProps {
-    pub value: String,
+    pub index: usize,
+    #[props(default = false)]
+    pub disabled: bool,
     #[props(default)]
     pub class: String,
     pub children: Element,
@@ -47,19 +62,10 @@ pub struct ToggleGroupItemProps {
 /// shadcn v4 maia: cn-toggle-group-item
 #[component]
 pub fn ToggleGroupItem(props: ToggleGroupItemProps) -> Element {
-    let ctx: ToggleGroupContext = use_context();
-    let is_pressed = *ctx.value.read() == props.value;
-    let item_value = props.value.clone();
-
     rsx! {
-        Toggle {
-            pressed: is_pressed,
-            on_toggle: move |_new_state: bool| {
-                let val = item_value.clone();
-                ctx.on_change.call(val);
-            },
-            variant: ToggleVariant::Default,
-            size: ToggleSize::Medium,
+        PrimitiveToggleItem {
+            index: props.index,
+            disabled: props.disabled,
             class: props.class,
             {props.children}
         }

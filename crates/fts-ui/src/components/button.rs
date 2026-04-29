@@ -23,12 +23,30 @@ pub enum ButtonSize {
     Large,
 }
 
+/// Element used for the button root.
+///
+/// This is the Dioxus-native equivalent of the common shadcn `asChild` use
+/// case: the component owns its styling and behavior, while callers can choose
+/// the semantic root element when a real `<button>` is not appropriate.
+#[derive(Clone, PartialEq, Eq, Debug, Default)]
+pub enum ButtonRenderAs {
+    #[default]
+    Button,
+    Anchor {
+        href: String,
+    },
+    Div,
+    Span,
+}
+
 #[derive(Props, Clone, PartialEq)]
 pub struct ButtonProps {
     #[props(default)]
     pub variant: ButtonVariant,
     #[props(default)]
     pub size: ButtonSize,
+    #[props(default)]
+    pub render_as: ButtonRenderAs,
     #[props(default)]
     pub on_click: Option<Callback<MouseEvent>>,
     #[props(default = false)]
@@ -63,29 +81,86 @@ pub fn Button(props: ButtonProps) -> Element {
     };
 
     let disabled = props.disabled || props.loading;
-
-    rsx! {
-        button {
-            class: crate::cn::merge_slice(&[base, variant, size, props.class.as_str()]),
-            disabled: disabled,
-            r#type: "button",
-            onclick: move |e| {
-                if let Some(cb) = &props.on_click {
-                    cb.call(e);
-                }
-            },
-            if props.loading {
-                svg {
-                    class: "size-4 animate-spin",
-                    xmlns: "http://www.w3.org/2000/svg",
-                    view_box: "0 0 24 24",
-                    fill: "none",
-                    stroke: "currentColor",
-                    stroke_width: "2",
-                    path { d: "M21 12a9 9 0 1 1-6.219-8.56" }
-                }
+    let class = crate::cn::merge_slice(&[base, variant, size, props.class.as_str()]);
+    let children = rsx! {
+        if props.loading {
+            svg {
+                class: "size-4 animate-spin",
+                xmlns: "http://www.w3.org/2000/svg",
+                view_box: "0 0 24 24",
+                fill: "none",
+                stroke: "currentColor",
+                stroke_width: "2",
+                path { d: "M21 12a9 9 0 1 1-6.219-8.56" }
             }
-            {props.children}
         }
+        {props.children}
+    };
+
+    match props.render_as {
+        ButtonRenderAs::Button => rsx! {
+            button {
+                class,
+                disabled,
+                r#type: "button",
+                onclick: move |e| {
+                    if let Some(cb) = &props.on_click {
+                        cb.call(e);
+                    }
+                },
+                {children}
+            }
+        },
+        ButtonRenderAs::Anchor { href } => rsx! {
+            a {
+                class,
+                href,
+                role: "button",
+                "aria-disabled": if disabled { "true" } else { "false" },
+                tabindex: if disabled { "-1" } else { "0" },
+                onclick: move |e| {
+                    if disabled {
+                        e.prevent_default();
+                        return;
+                    }
+                    if let Some(cb) = &props.on_click {
+                        cb.call(e);
+                    }
+                },
+                {children}
+            }
+        },
+        ButtonRenderAs::Div => rsx! {
+            div {
+                class,
+                role: "button",
+                "aria-disabled": if disabled { "true" } else { "false" },
+                tabindex: if disabled { "-1" } else { "0" },
+                onclick: move |e| {
+                    if !disabled {
+                        if let Some(cb) = &props.on_click {
+                            cb.call(e);
+                        }
+                    }
+                },
+                {children}
+            }
+        },
+        ButtonRenderAs::Span => rsx! {
+            span {
+                class,
+                role: "button",
+                "aria-disabled": if disabled { "true" } else { "false" },
+                tabindex: if disabled { "-1" } else { "0" },
+                onclick: move |e| {
+                    if !disabled {
+                        if let Some(cb) = &props.on_click {
+                            cb.call(e);
+                        }
+                    }
+                },
+                {children}
+            }
+        },
     }
 }

@@ -1,16 +1,10 @@
 //! Accordion — shadcn v4 maia style collapsible sections (single-open mode).
 
 use dioxus::prelude::*;
-
-#[derive(Clone)]
-struct AccordionContext {
-    open_item: Signal<Option<String>>,
-}
-
-#[derive(Clone)]
-struct ItemContext {
-    value: String,
-}
+use dioxus_primitives::accordion::{
+    Accordion as PrimitiveAccordion, AccordionContent as PrimitiveAccordionContent,
+    AccordionItem as PrimitiveAccordionItem, AccordionTrigger as PrimitiveAccordionTrigger,
+};
 
 // ---------------------------------------------------------------------------
 // Accordion (container)
@@ -19,6 +13,16 @@ struct ItemContext {
 #[derive(Props, Clone, PartialEq)]
 pub struct AccordionProps {
     #[props(default)]
+    pub id: Option<String>,
+    #[props(default = false)]
+    pub allow_multiple_open: bool,
+    #[props(default = false)]
+    pub disabled: bool,
+    #[props(default = true)]
+    pub collapsible: bool,
+    #[props(default = false)]
+    pub horizontal: bool,
+    #[props(default)]
     pub class: String,
     pub children: Element,
 }
@@ -26,12 +30,14 @@ pub struct AccordionProps {
 /// Root accordion container. Provides single-open context to children.
 #[component]
 pub fn Accordion(props: AccordionProps) -> Element {
-    let open_item = use_signal(|| None::<String>);
-
     rsx! {
-        div {
+        PrimitiveAccordion {
+            id: props.id,
+            allow_multiple_open: props.allow_multiple_open,
+            disabled: props.disabled,
+            collapsible: props.collapsible,
+            horizontal: props.horizontal,
             class: crate::cn::merge_slice(&["overflow-hidden rounded-lg border", props.class.as_str()]),
-            {use_context_provider(|| AccordionContext { open_item });}
             {props.children}
         }
     }
@@ -43,7 +49,15 @@ pub fn Accordion(props: AccordionProps) -> Element {
 
 #[derive(Props, Clone, PartialEq)]
 pub struct AccordionItemProps {
-    pub value: String,
+    pub index: usize,
+    #[props(default = false)]
+    pub default_open: bool,
+    #[props(default = false)]
+    pub disabled: bool,
+    #[props(default)]
+    pub on_change: Option<Callback<bool>>,
+    #[props(default)]
+    pub on_trigger_click: Option<Callback>,
     #[props(default)]
     pub class: String,
     pub children: Element,
@@ -52,17 +66,22 @@ pub struct AccordionItemProps {
 /// Individual collapsible section inside an `Accordion`.
 #[component]
 pub fn AccordionItem(props: AccordionItemProps) -> Element {
-    let ctx = use_context::<AccordionContext>();
-    let is_open = ctx.open_item.read().as_deref() == Some(props.value.as_str());
-
-    let bg = if is_open { " bg-muted/50" } else { "" };
-    let state = if is_open { "open" } else { "closed" };
-
     rsx! {
-        div {
-            class: crate::cn::merge(format!("not-last:border-b{} {}", bg, props.class)),
-            "data-state": state,
-            {use_context_provider(|| ItemContext { value: props.value.clone() });}
+        PrimitiveAccordionItem {
+            index: props.index,
+            default_open: props.default_open,
+            disabled: props.disabled,
+            on_change: move |open| {
+                if let Some(callback) = &props.on_change {
+                    callback.call(open);
+                }
+            },
+            on_trigger_click: move |_| {
+                if let Some(callback) = &props.on_trigger_click {
+                    callback.call(());
+                }
+            },
+            class: crate::cn::merge_slice(&["not-last:border-b data-[open=true]:bg-muted/50", props.class.as_str()]),
             {props.children}
         }
     }
@@ -75,6 +94,8 @@ pub fn AccordionItem(props: AccordionItemProps) -> Element {
 #[derive(Props, Clone, PartialEq)]
 pub struct AccordionTriggerProps {
     #[props(default)]
+    pub id: Option<String>,
+    #[props(default)]
     pub class: String,
     pub children: Element,
 }
@@ -82,32 +103,16 @@ pub struct AccordionTriggerProps {
 /// Clickable header that toggles its parent `AccordionItem`.
 #[component]
 pub fn AccordionTrigger(props: AccordionTriggerProps) -> Element {
-    let mut ctx = use_context::<AccordionContext>();
-    let item = use_context::<ItemContext>();
-    let is_open = ctx.open_item.read().as_deref() == Some(item.value.as_str());
-
-    let chevron_rotate = if is_open { " rotate-180" } else { "" };
-
-    let value = item.value.clone();
     rsx! {
-        button {
-            r#type: "button",
+        PrimitiveAccordionTrigger {
+            id: props.id,
             class: crate::cn::merge(format!(
-                "flex w-full items-center justify-between gap-6 p-4 text-left text-sm font-medium hover:underline cursor-pointer {}",
+                "group flex w-full items-center justify-between gap-6 p-4 text-left text-sm font-medium hover:underline cursor-pointer {}",
                 props.class
             )),
-            onclick: move |_| {
-                let current = ctx.open_item.read().clone();
-                if current.as_deref() == Some(value.as_str()) {
-                    ctx.open_item.set(None);
-                } else {
-                    ctx.open_item.set(Some(value.clone()));
-                }
-            },
             {props.children}
-            // Chevron-down SVG
             svg {
-                class: format!("size-4 text-muted-foreground transition-transform{}", chevron_rotate),
+                class: "size-4 text-muted-foreground transition-transform group-aria-expanded:rotate-180",
                 xmlns: "http://www.w3.org/2000/svg",
                 width: "24",
                 height: "24",
@@ -130,6 +135,8 @@ pub fn AccordionTrigger(props: AccordionTriggerProps) -> Element {
 #[derive(Props, Clone, PartialEq)]
 pub struct AccordionContentProps {
     #[props(default)]
+    pub id: Option<String>,
+    #[props(default)]
     pub class: String,
     pub children: Element,
 }
@@ -137,16 +144,9 @@ pub struct AccordionContentProps {
 /// Collapsible body of an `AccordionItem`. Only renders when its item is open.
 #[component]
 pub fn AccordionContent(props: AccordionContentProps) -> Element {
-    let ctx = use_context::<AccordionContext>();
-    let item = use_context::<ItemContext>();
-    let is_open = ctx.open_item.read().as_deref() == Some(item.value.as_str());
-
-    if !is_open {
-        return rsx! {};
-    }
-
     rsx! {
-        div {
+        PrimitiveAccordionContent {
+            id: props.id,
             class: crate::cn::merge_slice(&["px-4 text-sm", props.class.as_str()]),
             div {
                 class: "pt-0 pb-4",

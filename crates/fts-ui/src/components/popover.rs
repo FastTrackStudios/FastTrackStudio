@@ -1,17 +1,24 @@
 //! Popover — shadcn v4 maia style positioned floating panel.
 
 use dioxus::prelude::*;
-
-#[derive(Clone, Copy)]
-struct PopoverContext {
-    open: Signal<bool>,
-    on_close: Option<Callback<()>>,
-}
+use dioxus_primitives::{
+    popover::{
+        PopoverContent as PrimitivePopoverContent, PopoverRoot as PrimitivePopover,
+        PopoverTrigger as PrimitivePopoverTrigger,
+    },
+    ContentAlign, ContentSide,
+};
 
 #[derive(Props, Clone, PartialEq)]
 pub struct PopoverProps {
     #[props(default)]
-    pub open: bool,
+    pub open: Option<bool>,
+    #[props(default = false)]
+    pub default_open: bool,
+    #[props(default = true)]
+    pub is_modal: bool,
+    #[props(default)]
+    pub on_open_change: Option<Callback<bool>>,
     #[props(default)]
     pub on_close: Option<Callback<()>>,
     #[props(default)]
@@ -22,14 +29,21 @@ pub struct PopoverProps {
 /// shadcn v4 maia: cn-popover
 #[component]
 pub fn Popover(props: PopoverProps) -> Element {
-    let open = use_signal(|| props.open);
-    use_context_provider(|| PopoverContext {
-        open,
-        on_close: props.on_close,
-    });
-
     rsx! {
-        div {
+        PrimitivePopover {
+            open: props.open,
+            default_open: props.default_open,
+            is_modal: props.is_modal,
+            on_open_change: move |open| {
+                if let Some(callback) = &props.on_open_change {
+                    callback.call(open);
+                }
+                if !open {
+                    if let Some(callback) = &props.on_close {
+                        callback.call(());
+                    }
+                }
+            },
             class: crate::cn::merge_slice(&["relative inline-block", props.class.as_str()]),
             {props.children}
         }
@@ -46,15 +60,9 @@ pub struct PopoverTriggerProps {
 /// shadcn v4 maia: cn-popover-trigger
 #[component]
 pub fn PopoverTrigger(props: PopoverTriggerProps) -> Element {
-    let mut ctx: PopoverContext = use_context();
-
     rsx! {
-        div {
+        PrimitivePopoverTrigger {
             class: crate::cn::merge_slice(&["cursor-pointer", props.class.as_str()]),
-            onclick: move |_| {
-                let current = *ctx.open.read();
-                ctx.open.set(!current);
-            },
             {props.children}
         }
     }
@@ -63,6 +71,12 @@ pub fn PopoverTrigger(props: PopoverTriggerProps) -> Element {
 #[derive(Props, Clone, PartialEq)]
 pub struct PopoverContentProps {
     #[props(default)]
+    pub id: Option<String>,
+    #[props(default = ContentSide::Bottom)]
+    pub side: ContentSide,
+    #[props(default = ContentAlign::Center)]
+    pub align: ContentAlign,
+    #[props(default)]
     pub class: String,
     pub children: Element,
 }
@@ -70,34 +84,15 @@ pub struct PopoverContentProps {
 /// shadcn v4 maia: cn-popover-content
 #[component]
 pub fn PopoverContent(props: PopoverContentProps) -> Element {
-    let mut ctx: PopoverContext = use_context();
-    let is_open = *ctx.open.read();
-
-    if !is_open {
-        return rsx! {};
-    }
-
     rsx! {
-        // Invisible backdrop to capture outside clicks
-        div {
-            class: "fixed inset-0 z-40",
-            onclick: move |_| {
-                ctx.open.set(false);
-                if let Some(cb) = &ctx.on_close {
-                    cb.call(());
-                }
-            },
-        }
-
-        // Floating content panel
-        div {
+        PrimitivePopoverContent {
+            id: props.id,
+            side: props.side,
+            align: props.align,
             class: crate::cn::merge(format!(
                 "bg-popover text-popover-foreground border border-border flex flex-col gap-4 rounded-lg p-4 text-sm shadow-md absolute z-50 mt-2 {}",
                 props.class
             )),
-            onclick: move |evt: MouseEvent| {
-                evt.stop_propagation();
-            },
             {props.children}
         }
     }

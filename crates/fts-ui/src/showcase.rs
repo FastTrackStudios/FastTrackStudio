@@ -341,15 +341,15 @@ pub fn Showcase() -> Element {
                         // ── Accordion ────────────────────────────
                         ShowcaseSection { id: "accordion", title: "Accordion",
                             Accordion {
-                                AccordionItem { value: "item-1".to_string(),
+                                AccordionItem { index: 0,
                                     AccordionTrigger { "Is it accessible?" }
                                     AccordionContent { "Yes. It follows WAI-ARIA design patterns." }
                                 }
-                                AccordionItem { value: "item-2".to_string(),
+                                AccordionItem { index: 1,
                                     AccordionTrigger { "Is it styled?" }
                                     AccordionContent { "Yes. It matches shadcn v4 maia styling." }
                                 }
-                                AccordionItem { value: "item-3".to_string(),
+                                AccordionItem { index: 2,
                                     AccordionTrigger { "Is it animated?" }
                                     AccordionContent { "Content transitions are CSS-based." }
                                 }
@@ -360,11 +360,11 @@ pub fn Showcase() -> Element {
                         ShowcaseSection { id: "tabs", title: "Tabs",
                             Tabs { default_value: "account".to_string(),
                                 TabList {
-                                    TabTrigger { value: "account".to_string(), "Account" }
-                                    TabTrigger { value: "password".to_string(), "Password" }
-                                    TabTrigger { value: "settings".to_string(), "Settings" }
+                                    TabTrigger { value: "account".to_string(), index: 0, "Account" }
+                                    TabTrigger { value: "password".to_string(), index: 1, "Password" }
+                                    TabTrigger { value: "settings".to_string(), index: 2, "Settings" }
                                 }
-                                TabContent { value: "account".to_string(),
+                                TabContent { value: "account".to_string(), index: 0,
                                     Card {
                                         CardHeader {
                                             CardTitle { "Account" }
@@ -375,7 +375,7 @@ pub fn Showcase() -> Element {
                                         }
                                     }
                                 }
-                                TabContent { value: "password".to_string(),
+                                TabContent { value: "password".to_string(), index: 1,
                                     Card {
                                         CardHeader {
                                             CardTitle { "Password" }
@@ -386,7 +386,7 @@ pub fn Showcase() -> Element {
                                         }
                                     }
                                 }
-                                TabContent { value: "settings".to_string(),
+                                TabContent { value: "settings".to_string(), index: 2,
                                     Card {
                                         CardHeader {
                                             CardTitle { "Settings" }

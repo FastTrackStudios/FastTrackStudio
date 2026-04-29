@@ -2,7 +2,7 @@
 
 // Components — core
 pub use crate::components::{
-    Button, ButtonSize, ButtonVariant,
+    Button, ButtonRenderAs, ButtonSize, ButtonVariant,
     Input, InputSize, InputVariant,
     Dialog, DialogClose, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
     Tabs, TabList, TabTrigger, TabContent,

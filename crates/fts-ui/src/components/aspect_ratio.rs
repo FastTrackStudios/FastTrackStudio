@@ -1,6 +1,7 @@
 //! AspectRatio — shadcn v4 maia style CSS aspect-ratio wrapper.
 
 use dioxus::prelude::*;
+use dioxus_primitives::aspect_ratio::AspectRatio as PrimitiveAspectRatio;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct AspectRatioProps {
@@ -18,13 +19,10 @@ pub struct AspectRatioProps {
 #[component]
 pub fn AspectRatio(props: AspectRatioProps) -> Element {
     rsx! {
-        div {
+        PrimitiveAspectRatio {
+            ratio: props.ratio,
             class: crate::cn::merge_slice(&["relative w-full overflow-hidden", props.class.as_str()]),
-            style: "aspect-ratio: {props.ratio};",
-            div {
-                class: "absolute inset-0",
-                {props.children}
-            }
+            {props.children}
         }
     }
 }

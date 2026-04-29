@@ -20,3 +20,10 @@ pub mod showcase;
 
 // Re-export lucide icons for consumers.
 pub use lucide_dioxus;
+
+/// Accessible, unstyled primitives used as the behavior layer for FTS UI.
+///
+/// These are re-exported so applications and future FTS components can share
+/// the same ARIA, focus, keyboard, and data-state behavior instead of each
+/// component reimplementing it.
+pub use dioxus_primitives as primitives;

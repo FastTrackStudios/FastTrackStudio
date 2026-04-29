@@ -1,6 +1,10 @@
 //! Slider — shadcn v4 maia style range slider.
 
 use dioxus::prelude::*;
+use dioxus_primitives::slider::{
+    Slider as PrimitiveSlider, SliderRange, SliderThumb, SliderTrack,
+    SliderValue as PrimitiveSliderValue,
+};
 
 // ---------------------------------------------------------------------------
 // Slider
@@ -40,40 +44,27 @@ pub fn Slider(props: SliderProps) -> Element {
     let max = props.max;
     let step = props.step;
 
-    let range = max - min;
-    let pct = if range > 0.0 {
-        ((*value.read() - min) / range * 100.0).clamp(0.0, 100.0)
-    } else {
-        0.0
-    };
-
     rsx! {
-        div {
+        PrimitiveSlider {
+            value: Some(PrimitiveSliderValue::Single(value())),
+            min,
+            max,
+            step,
+            disabled: props.disabled,
+            label: None::<String>,
             class: crate::cn::merge_slice(&["relative flex w-full touch-none select-none items-center", props.class.as_str()]),
-
-            // Visual track
-            div { class: "relative h-3 w-full rounded-full bg-muted overflow-hidden",
-                // Filled range
-                div {
+            on_value_change: move |next| {
+                let PrimitiveSliderValue::Single(next) = next;
+                value.set(next);
+            },
+            SliderTrack {
+                class: "relative h-3 w-full rounded-full bg-muted overflow-hidden",
+                SliderRange {
                     class: "absolute h-full bg-primary rounded-full",
-                    style: format!("width: {pct}%"),
                 }
-            }
-
-            // Transparent native range input overlaid on top
-            input {
-                r#type: "range",
-                min: "{min}",
-                max: "{max}",
-                step: "{step}",
-                disabled: if props.disabled { Some(true) } else { None },
-                value: "{value}",
-                class: "absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed",
-                oninput: move |evt| {
-                    if let Ok(v) = evt.value().parse::<f64>() {
-                        value.set(v);
-                    }
-                },
+                SliderThumb {
+                    class: "absolute top-1/2 size-5 -translate-x-1/2 -translate-y-1/2 rounded-full border border-primary bg-background shadow transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50",
+                }
             }
         }
     }
