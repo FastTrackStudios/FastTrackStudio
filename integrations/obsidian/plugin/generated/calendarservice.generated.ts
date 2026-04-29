@@ -164,6 +164,18 @@ export interface SyncStats {
   errors: string[];
 }
 
+export interface RemoteDeckBoard {
+  id: bigint;
+  title: string;
+  archived: boolean;
+}
+
+export interface RemoteDeckStack {
+  id: bigint;
+  title: string;
+  card_count: number;
+}
+
 // Request/Response type aliases
 export type TasksDueByRequest = [string];
 export type TasksDueByResponse = Task[];
@@ -180,6 +192,12 @@ export type TriggerSyncResponse = { ok: true; value: SyncStats } | { ok: false; 
 export type SyncStatusRequest = [];
 export type SyncStatusResponse = SyncStats | null;
 
+export type ListDeckBoardsRequest = [];
+export type ListDeckBoardsResponse = { ok: true; value: RemoteDeckBoard[] } | { ok: false; error: VaultError };
+
+export type ListDeckStacksRequest = [bigint];
+export type ListDeckStacksResponse = { ok: true; value: RemoteDeckStack[] } | { ok: false; error: VaultError };
+
 // Caller interface for CalendarService
 export interface CalendarServiceCaller {
   /** Get tasks due on or before a date (YYYY-MM-DD). */
@@ -190,6 +208,10 @@ export interface CalendarServiceCaller {
   triggerSync(): Promise<{ ok: true; value: SyncStats } | { ok: false; error: VaultError }>;
   /** Get the last sync result. */
   syncStatus(): Promise<SyncStats | null>;
+  /** List remote Nextcloud Deck boards. */
+  listDeckBoards(): Promise<{ ok: true; value: RemoteDeckBoard[] } | { ok: false; error: VaultError }>;
+  /** List remote Nextcloud Deck stacks for a board. */
+  listDeckStacks(boardId: bigint): Promise<{ ok: true; value: RemoteDeckStack[] } | { ok: false; error: VaultError }>;
 }
 
 // Client implementation for CalendarService
@@ -266,6 +288,46 @@ export class CalendarServiceClient implements CalendarServiceCaller {
       return value as SyncStats | null;
   }
 
+  /** List remote Nextcloud Deck boards. */
+  async listDeckBoards(): Promise<{ ok: true; value: RemoteDeckBoard[] } | { ok: false; error: VaultError }> {
+    const descriptor = calendarService_listDeckBoards_method;
+    const sendSchemas = calendarService_descriptor.send_schemas;
+      try {
+        const value = await this.caller.call({
+          method: "CalendarService.listDeckBoards",
+          args: {},
+          descriptor,
+          sendSchemas,
+        });
+        return { ok: true, value } as { ok: true; value: RemoteDeckBoard[] } | { ok: false; error: VaultError };
+      } catch (e: any) {
+        if (e instanceof RpcError && e.isUserError()) {
+          return { ok: false, error: e.userError } as { ok: true; value: RemoteDeckBoard[] } | { ok: false; error: VaultError };
+        }
+        throw e;
+      }
+  }
+
+  /** List remote Nextcloud Deck stacks for a board. */
+  async listDeckStacks(boardId: bigint): Promise<{ ok: true; value: RemoteDeckStack[] } | { ok: false; error: VaultError }> {
+    const descriptor = calendarService_listDeckStacks_method;
+    const sendSchemas = calendarService_descriptor.send_schemas;
+      try {
+        const value = await this.caller.call({
+          method: "CalendarService.listDeckStacks",
+          args: { boardId },
+          descriptor,
+          sendSchemas,
+        });
+        return { ok: true, value } as { ok: true; value: RemoteDeckStack[] } | { ok: false; error: VaultError };
+      } catch (e: any) {
+        if (e instanceof RpcError && e.isUserError()) {
+          return { ok: false, error: e.userError } as { ok: true; value: RemoteDeckStack[] } | { ok: false; error: VaultError };
+        }
+        throw e;
+      }
+  }
+
 }
 
 /**
@@ -287,6 +349,8 @@ export interface CalendarServiceHandler {
   scheduledBetween(from: string, to: string): Promise<{ ok: true; value: Task[] } | { ok: false; error: VaultError }> | { ok: true; value: Task[] } | { ok: false; error: VaultError };
   triggerSync(): Promise<{ ok: true; value: SyncStats } | { ok: false; error: VaultError }> | { ok: true; value: SyncStats } | { ok: false; error: VaultError };
   syncStatus(): Promise<SyncStats | null> | SyncStats | null;
+  listDeckBoards(): Promise<{ ok: true; value: RemoteDeckBoard[] } | { ok: false; error: VaultError }> | { ok: true; value: RemoteDeckBoard[] } | { ok: false; error: VaultError };
+  listDeckStacks(boardId: bigint): Promise<{ ok: true; value: RemoteDeckStack[] } | { ok: false; error: VaultError }> | { ok: true; value: RemoteDeckStack[] } | { ok: false; error: VaultError };
 }
 
 // Dispatcher for CalendarService
@@ -330,6 +394,20 @@ export class CalendarServiceDispatcher implements Dispatcher {
       } catch (error) {
         call.replyInternalError(error instanceof Error ? error.message : String(error));
       }
+    } else if (method.id === 0x8b4a4fdfab4d5090n) {
+      try {
+        const result = await this.handler.listDeckBoards();
+        if (result.ok) call.reply(result.value); else call.replyErr(result.error);
+      } catch (error) {
+        call.replyInternalError(error instanceof Error ? error.message : String(error));
+      }
+    } else if (method.id === 0x8883cfb34aab2188n) {
+      try {
+        const result = await this.handler.listDeckStacks(args[0] as bigint);
+        if (result.ok) call.reply(result.value); else call.replyErr(result.error);
+      } catch (error) {
+        call.replyInternalError(error instanceof Error ? error.message : String(error));
+      }
     }
   }
 }
@@ -366,12 +444,17 @@ export const calendarService_send_schemas: import("@bearcove/vox-core").ServiceS
     [0xcaab6065094a4dbfn, { id: 0xcaab6065094a4dbfn, type_params: [], kind: { tag: 'enum', name: 'VaultError', variants: [{ name: 'NotFound', index: 0, payload: { tag: 'newtype', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] } } }, { name: 'ParseError', index: 1, payload: { tag: 'newtype', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] } } }, { name: 'IoError', index: 2, payload: { tag: 'newtype', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] } } }] } }],
     [0xbc5c33249a2dc720n, { id: 0xbc5c33249a2dc720n, type_params: [], kind: { tag: 'primitive', primitive_type: 'unit' } }],
     [0x824decc4c5fc6e7an, { id: 0x824decc4c5fc6e7an, type_params: [], kind: { tag: 'struct', name: 'SyncStats', fields: [{ name: 'timestamp', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }, { name: 'calendar_pushed', type_ref: { tag: 'concrete', type_id: 0x281c5be4f2ee63b4n, args: [] }, required: true }, { name: 'calendar_pulled', type_ref: { tag: 'concrete', type_id: 0x281c5be4f2ee63b4n, args: [] }, required: true }, { name: 'deck_pushed', type_ref: { tag: 'concrete', type_id: 0x281c5be4f2ee63b4n, args: [] }, required: true }, { name: 'deck_pulled', type_ref: { tag: 'concrete', type_id: 0x281c5be4f2ee63b4n, args: [] }, required: true }, { name: 'files_created', type_ref: { tag: 'concrete', type_id: 0x281c5be4f2ee63b4n, args: [] }, required: true }, { name: 'files_updated', type_ref: { tag: 'concrete', type_id: 0x281c5be4f2ee63b4n, args: [] }, required: true }, { name: 'errors', type_ref: { tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }] } }],
+    [0xd9356298b81639acn, { id: 0xd9356298b81639acn, type_params: [], kind: { tag: 'primitive', primitive_type: 'u64' } }],
+    [0x77186d1d5f08be11n, { id: 0x77186d1d5f08be11n, type_params: [], kind: { tag: 'struct', name: 'RemoteDeckBoard', fields: [{ name: 'id', type_ref: { tag: 'concrete', type_id: 0xd9356298b81639acn, args: [] }, required: true }, { name: 'title', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }, { name: 'archived', type_ref: { tag: 'concrete', type_id: 0x178367a87f66fb46n, args: [] }, required: true }] } }],
+    [0xb086dfc81f671605n, { id: 0xb086dfc81f671605n, type_params: [], kind: { tag: 'struct', name: 'RemoteDeckStack', fields: [{ name: 'id', type_ref: { tag: 'concrete', type_id: 0xd9356298b81639acn, args: [] }, required: true }, { name: 'title', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }, { name: 'card_count', type_ref: { tag: 'concrete', type_id: 0x281c5be4f2ee63b4n, args: [] }, required: true }] } }],
   ]),
   methods: new Map<bigint, import("@bearcove/vox-core").MethodSendSchemas>([
     [0x618248f622408d4bn, { argsRootRef: { tag: 'concrete', type_id: 0x6847ab90feda71c1n, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, responseRootRef: { tag: 'concrete', type_id: 0x42046de663beeef0n, args: [{ tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x97c49e11dc55e02bn, args: [] }] }, { tag: 'concrete', type_id: 0x4cf4b2aeb98a1939n, args: [{ tag: 'concrete', type_id: 0x5db70a394660f3e6n, args: [] }] }] } }],
     [0xa7d4fa1560ec40dan, { argsRootRef: { tag: 'concrete', type_id: 0xba0496aa8cee7a4cn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, responseRootRef: { tag: 'concrete', type_id: 0x42046de663beeef0n, args: [{ tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x97c49e11dc55e02bn, args: [] }] }, { tag: 'concrete', type_id: 0x4cf4b2aeb98a1939n, args: [{ tag: 'concrete', type_id: 0xcaab6065094a4dbfn, args: [] }] }] } }],
     [0xb6c35ead6f3a86a1n, { argsRootRef: { tag: 'concrete', type_id: 0xbc5c33249a2dc720n, args: [] }, responseRootRef: { tag: 'concrete', type_id: 0x42046de663beeef0n, args: [{ tag: 'concrete', type_id: 0x824decc4c5fc6e7an, args: [] }, { tag: 'concrete', type_id: 0x4cf4b2aeb98a1939n, args: [{ tag: 'concrete', type_id: 0xcaab6065094a4dbfn, args: [] }] }] } }],
     [0x9c8eb69d02285e61n, { argsRootRef: { tag: 'concrete', type_id: 0xbc5c33249a2dc720n, args: [] }, responseRootRef: { tag: 'concrete', type_id: 0x42046de663beeef0n, args: [{ tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x824decc4c5fc6e7an, args: [] }] }, { tag: 'concrete', type_id: 0x4cf4b2aeb98a1939n, args: [{ tag: 'concrete', type_id: 0x5db70a394660f3e6n, args: [] }] }] } }],
+    [0x8b4a4fdfab4d5090n, { argsRootRef: { tag: 'concrete', type_id: 0xbc5c33249a2dc720n, args: [] }, responseRootRef: { tag: 'concrete', type_id: 0x42046de663beeef0n, args: [{ tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x77186d1d5f08be11n, args: [] }] }, { tag: 'concrete', type_id: 0x4cf4b2aeb98a1939n, args: [{ tag: 'concrete', type_id: 0xcaab6065094a4dbfn, args: [] }] }] } }],
+    [0x8883cfb34aab2188n, { argsRootRef: { tag: 'concrete', type_id: 0x6847ab90feda71c1n, args: [{ tag: 'concrete', type_id: 0xd9356298b81639acn, args: [] }] }, responseRootRef: { tag: 'concrete', type_id: 0x42046de663beeef0n, args: [{ tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0xb086dfc81f671605n, args: [] }] }, { tag: 'concrete', type_id: 0x4cf4b2aeb98a1939n, args: [{ tag: 'concrete', type_id: 0xcaab6065094a4dbfn, args: [] }] }] } }],
   ]),
 };
 
@@ -399,6 +482,18 @@ export const calendarService_syncStatus_method: MethodDescriptor = {
   retry: { persist: false, idem: false },
 };
 
+export const calendarService_listDeckBoards_method: MethodDescriptor = {
+  name: 'listDeckBoards',
+  id: 0x8b4a4fdfab4d5090n,
+  retry: { persist: false, idem: false },
+};
+
+export const calendarService_listDeckStacks_method: MethodDescriptor = {
+  name: 'listDeckStacks',
+  id: 0x8883cfb34aab2188n,
+  retry: { persist: false, idem: false },
+};
+
 // Service descriptor for runtime dispatch metadata
 export const calendarService_descriptor: ServiceDescriptor = {
   service_name: 'CalendarService',
@@ -408,6 +503,8 @@ export const calendarService_descriptor: ServiceDescriptor = {
     [calendarService_scheduledBetween_method.id, calendarService_scheduledBetween_method],
     [calendarService_triggerSync_method.id, calendarService_triggerSync_method],
     [calendarService_syncStatus_method.id, calendarService_syncStatus_method],
+    [calendarService_listDeckBoards_method.id, calendarService_listDeckBoards_method],
+    [calendarService_listDeckStacks_method.id, calendarService_listDeckStacks_method],
   ]),
 };
 

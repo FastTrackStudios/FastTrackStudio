@@ -149,6 +149,12 @@ pub trait CalendarService {
 
     /// Get the last sync result.
     async fn sync_status(&self) -> Option<SyncStats>;
+
+    /// List remote Nextcloud Deck boards.
+    async fn list_deck_boards(&self) -> Result<Vec<RemoteDeckBoard>, VaultError>;
+
+    /// List remote Nextcloud Deck stacks for a board.
+    async fn list_deck_stacks(&self, board_id: u64) -> Result<Vec<RemoteDeckStack>, VaultError>;
 }
 
 /// Sync operation statistics.
@@ -162,6 +168,20 @@ pub struct SyncStats {
     pub files_created: u32,
     pub files_updated: u32,
     pub errors: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct RemoteDeckBoard {
+    pub id: u64,
+    pub title: String,
+    pub archived: bool,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct RemoteDeckStack {
+    pub id: u64,
+    pub title: String,
+    pub card_count: u32,
 }
 
 /// Patch for editing time entries. Only `Some(_)` fields are applied. For

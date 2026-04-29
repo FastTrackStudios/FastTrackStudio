@@ -57,9 +57,10 @@ pub use service::{
     time_service_service_descriptor, ActivityService, ActivityServiceDispatcher,
     CalendarService, CalendarServiceDispatcher, ClientService, ClientServiceDispatcher,
     InvoiceCreateRequest, InvoicePaymentRequest, InvoiceService, InvoiceServiceDispatcher,
-    ProjectPatch, ProjectService, ProjectServiceDispatcher, SyncStats, TaskService,
-    TaskServiceDispatcher, TimeEntryContext, TimeEntryFilter, TimeEntryPatch, TimeLogRequest,
-    TimeService, TimeServiceDispatcher, TimeStartRequest, TimedTaskEntry, VaultError,
+    ProjectPatch, ProjectService, ProjectServiceDispatcher, RemoteDeckBoard, RemoteDeckStack,
+    SyncStats, TaskService, TaskServiceDispatcher, TimeEntryContext, TimeEntryFilter,
+    TimeEntryPatch, TimeLogRequest, TimeService, TimeServiceDispatcher, TimeStartRequest,
+    TimedTaskEntry, VaultError,
 };
 #[cfg(feature = "server")]
 pub use vault::Vault;

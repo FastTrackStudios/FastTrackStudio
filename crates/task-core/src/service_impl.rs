@@ -11,8 +11,9 @@ use crate::project::{next_task as find_next_task, Project, ProjectStats};
 use crate::query::Query;
 use crate::rrule;
 use crate::service::{
-    InvoiceCreateRequest, InvoicePaymentRequest, ProjectPatch, SyncStats, TimeEntryContext,
-    TimeEntryFilter, TimeEntryPatch, TimeLogRequest, TimeStartRequest, TimedTaskEntry, VaultError,
+    InvoiceCreateRequest, InvoicePaymentRequest, ProjectPatch, RemoteDeckBoard, RemoteDeckStack,
+    SyncStats, TimeEntryContext, TimeEntryFilter, TimeEntryPatch, TimeLogRequest, TimeStartRequest,
+    TimedTaskEntry, VaultError,
 };
 use crate::task::{Status, Task};
 use crate::vault::Vault;
@@ -35,6 +36,111 @@ pub enum VaultKind {
     Projects,
 }
 
+#[derive(Debug, Clone)]
+struct NextcloudRuntimeConfig {
+    url: String,
+    username: String,
+    password: String,
+    projects_path: String,
+    calendar: String,
+    deck_enabled: bool,
+}
+
+impl NextcloudRuntimeConfig {
+    fn load() -> Result<Option<Self>, VaultError> {
+        let file_cfg = load_nextcloud_config_file();
+        let url = env_or_toml("NEXTCLOUD_URL", &file_cfg, "url");
+        let username = env_or_toml("NEXTCLOUD_USER", &file_cfg, "username")
+            .or_else(|| env_or_toml("NEXTCLOUD_USERNAME", &file_cfg, "username"))
+            .unwrap_or_else(|| "agent".to_string());
+        let password = std::env::var("NEXTCLOUD_PASSWORD")
+            .ok()
+            .or_else(|| read_secret_file_var("NEXTCLOUD_PASSWORD_FILE"))
+            .or_else(|| env_or_toml("NEXTCLOUD_PASSWORD", &file_cfg, "password"))
+            .or_else(|| {
+                toml_string(&file_cfg, "password_file")
+                    .and_then(|path| std::fs::read_to_string(path).ok())
+                    .map(|s| s.trim().to_string())
+            });
+
+        let Some(url) = url else {
+            return Ok(None);
+        };
+        let Some(password) = password.filter(|p| !p.is_empty()) else {
+            return Ok(None);
+        };
+
+        let projects_path = env_or_toml("NEXTCLOUD_PROJECTS_PATH", &file_cfg, "projects_path")
+            .unwrap_or_else(|| "Projects/".to_string());
+        let calendar = env_or_toml("NEXTCLOUD_CALENDAR", &file_cfg, "calendar")
+            .unwrap_or_else(|| "tasks".to_string())
+            .to_ascii_lowercase();
+        let deck_enabled = std::env::var("NEXTCLOUD_DECK_ENABLED")
+            .ok()
+            .map(|v| env_truthy(&v))
+            .or_else(|| toml_bool(&file_cfg, "deck_enabled"))
+            .unwrap_or(true);
+
+        Ok(Some(Self {
+            url,
+            username,
+            password,
+            projects_path,
+            calendar,
+            deck_enabled,
+        }))
+    }
+}
+
+fn load_nextcloud_config_file() -> Option<toml::Value> {
+    let path = std::env::var("TASK_NEXTCLOUD_CONFIG")
+        .ok()
+        .map(std::path::PathBuf::from)
+        .or_else(|| {
+            std::env::var("HOME")
+                .ok()
+                .map(|home| std::path::PathBuf::from(home).join(".config/task/nextcloud.toml"))
+        })?;
+    let content = std::fs::read_to_string(path).ok()?;
+    content.parse::<toml::Value>().ok()
+}
+
+fn env_or_toml(env: &str, cfg: &Option<toml::Value>, key: &str) -> Option<String> {
+    std::env::var(env)
+        .ok()
+        .filter(|s| !s.is_empty())
+        .or_else(|| toml_string(cfg, key))
+}
+
+fn toml_string(cfg: &Option<toml::Value>, key: &str) -> Option<String> {
+    cfg.as_ref()
+        .and_then(|v| v.get("nextcloud"))
+        .and_then(|v| v.get(key))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+}
+
+fn toml_bool(cfg: &Option<toml::Value>, key: &str) -> Option<bool> {
+    cfg.as_ref()
+        .and_then(|v| v.get("nextcloud"))
+        .and_then(|v| v.get(key))
+        .and_then(|v| v.as_bool())
+}
+
+fn read_secret_file_var(env: &str) -> Option<String> {
+    let path = std::env::var(env).ok()?;
+    std::fs::read_to_string(path)
+        .ok()
+        .map(|s| s.trim().to_string())
+}
+
+fn env_truthy(value: &str) -> bool {
+    matches!(
+        value.to_ascii_lowercase().as_str(),
+        "1" | "true" | "yes" | "on"
+    )
+}
+
 #[derive(Clone)]
 pub struct VaultServiceImpl {
     /// The primary vault root (personal or first-registered vault).
@@ -45,6 +151,7 @@ pub struct VaultServiceImpl {
     /// Additional vault sources beyond the primary.
     extra_vaults: Arc<RwLock<Vec<VaultSource>>>,
     change_tx: Arc<tokio::sync::watch::Sender<u64>>,
+    last_sync: Arc<std::sync::Mutex<Option<SyncStats>>>,
     // Keep one receiver so the sender is never considered "closed".
     _change_rx: tokio::sync::watch::Receiver<u64>,
 }
@@ -78,6 +185,7 @@ impl VaultServiceImpl {
             index: Arc::new(std::sync::Mutex::new(index)),
             extra_vaults: Arc::new(RwLock::new(Vec::new())),
             change_tx: Arc::new(tx),
+            last_sync: Arc::new(std::sync::Mutex::new(None)),
             _change_rx: rx,
         }
     }
@@ -402,13 +510,195 @@ impl VaultServiceImpl {
     }
 
     pub async fn trigger_sync(&self) -> Result<SyncStats, VaultError> {
-        // Sync is handled by the server's sync loop — this is a no-op at the service level.
-        // The server calls this endpoint to trigger an immediate cycle.
-        Ok(SyncStats::default())
+        let mut stats = SyncStats {
+            timestamp: Utc::now().to_rfc3339(),
+            ..Default::default()
+        };
+
+        let Some(config) = NextcloudRuntimeConfig::load()? else {
+            stats.errors.push(
+                "Nextcloud sync is not configured; set NEXTCLOUD_URL, NEXTCLOUD_USER, and NEXTCLOUD_PASSWORD or ~/.config/task/nextcloud.toml".to_string(),
+            );
+            *self.last_sync.lock().unwrap() = Some(stats.clone());
+            return Ok(stats);
+        };
+
+        let sync = crate::provider::nextcloud_sync::NextcloudSync::new(
+            &config.url,
+            &config.username,
+            &config.password,
+        );
+
+        let local_tasks = self.list_tasks().await;
+        for task in &local_tasks {
+            match sync.push_task_to_calendar(&config.calendar, task).await {
+                Ok(()) => stats.calendar_pushed += 1,
+                Err(e) => stats
+                    .errors
+                    .push(format!("CalDAV push '{}': {e}", task.title)),
+            }
+        }
+
+        match sync.pull_tasks_from_calendar(&config.calendar).await {
+            Ok(remote_tasks) => {
+                stats.calendar_pulled = remote_tasks.len() as u32;
+                self.merge_remote_tasks(remote_tasks, &local_tasks, &mut stats)
+                    .await?;
+            }
+            Err(e) => stats.errors.push(format!("CalDAV pull: {e}")),
+        }
+
+        if config.deck_enabled {
+            match sync.list_boards().await {
+                Ok(boards) => {
+                    for board in boards.into_iter().filter(|b| !b.archived) {
+                        match sync.deck_board_to_tasks(board.id).await {
+                            Ok((project, remote_tasks)) => {
+                                stats.deck_pulled += remote_tasks.len() as u32;
+                                if let Err(e) = self.ensure_project_from_remote(&project).await {
+                                    stats.errors.push(format!(
+                                        "WebDAV/local project '{}': {e}",
+                                        project.title
+                                    ));
+                                }
+                                self.merge_remote_tasks(remote_tasks, &local_tasks, &mut stats)
+                                    .await?;
+                            }
+                            Err(e) => stats
+                                .errors
+                                .push(format!("Deck board {} pull: {e}", board.id)),
+                        }
+                    }
+                }
+                Err(e) => stats.errors.push(format!("Deck list boards: {e}")),
+            }
+        }
+
+        match self.sync_webdav_projects(&config).await {
+            Ok((created, updated)) => {
+                stats.files_created += created;
+                stats.files_updated += updated;
+            }
+            Err(e) => stats.errors.push(format!("WebDAV project sync: {e}")),
+        }
+
+        *self.last_sync.lock().unwrap() = Some(stats.clone());
+        Ok(stats)
     }
 
     pub async fn sync_status(&self) -> Option<SyncStats> {
-        None
+        self.last_sync.lock().unwrap().clone()
+    }
+
+    pub async fn list_remote_deck_boards(&self) -> Result<Vec<RemoteDeckBoard>, VaultError> {
+        let config = NextcloudRuntimeConfig::load()?
+            .ok_or_else(|| VaultError::IoError("Nextcloud sync is not configured".into()))?;
+        let sync = crate::provider::nextcloud_sync::NextcloudSync::new(
+            &config.url,
+            &config.username,
+            &config.password,
+        );
+        Ok(sync
+            .list_boards()
+            .await?
+            .into_iter()
+            .map(|b| RemoteDeckBoard {
+                id: b.id,
+                title: b.title,
+                archived: b.archived,
+            })
+            .collect())
+    }
+
+    pub async fn list_remote_deck_stacks(
+        &self,
+        board_id: u64,
+    ) -> Result<Vec<RemoteDeckStack>, VaultError> {
+        let config = NextcloudRuntimeConfig::load()?
+            .ok_or_else(|| VaultError::IoError("Nextcloud sync is not configured".into()))?;
+        let sync = crate::provider::nextcloud_sync::NextcloudSync::new(
+            &config.url,
+            &config.username,
+            &config.password,
+        );
+        Ok(sync
+            .list_stacks(board_id)
+            .await?
+            .into_iter()
+            .map(|s| RemoteDeckStack {
+                id: s.id,
+                title: s.title,
+                card_count: s.cards.len() as u32,
+            })
+            .collect())
+    }
+
+    async fn merge_remote_tasks(
+        &self,
+        remote_tasks: Vec<Task>,
+        local_tasks: &[Task],
+        stats: &mut SyncStats,
+    ) -> Result<(), VaultError> {
+        for remote in remote_tasks {
+            let exists = local_tasks.iter().any(|local| {
+                (local.id.as_deref().is_some() && local.id == remote.id)
+                    || local.title == remote.title
+            });
+            if exists {
+                continue;
+            }
+            self.vault.read().await.save_task(&remote)?;
+            stats.files_created += 1;
+        }
+        Ok(())
+    }
+
+    async fn ensure_project_from_remote(&self, project: &Project) -> Result<(), VaultError> {
+        let exists = self
+            .list_projects()
+            .await
+            .into_iter()
+            .any(|p| p.title == project.title);
+        if !exists {
+            self.vault.read().await.save_project(project)?;
+        }
+        Ok(())
+    }
+
+    async fn sync_webdav_projects(
+        &self,
+        config: &NextcloudRuntimeConfig,
+    ) -> Result<(u32, u32), VaultError> {
+        let provider = crate::provider::NextcloudProvider::new(
+            "nextcloud",
+            "Nextcloud",
+            crate::provider::NextcloudConfig {
+                url: config.url.clone(),
+                username: config.username.clone(),
+                password: config.password.clone(),
+                projects_path: config.projects_path.clone(),
+                calendar: Some(config.calendar.clone()),
+                deck_enabled: false,
+                deck_boards: std::collections::HashMap::new(),
+            },
+        );
+
+        let bundles = crate::provider::ProjectProvider::list_all(&provider).await?;
+        let mut created = 0;
+        let mut updated = 0;
+        for bundle in bundles {
+            let project_path = self.root.join(&bundle.project.title).join("project.md");
+            if project_path.exists() {
+                updated += 1;
+            } else {
+                created += 1;
+            }
+            self.vault.read().await.save_project(&bundle.project)?;
+            for task in bundle.tasks {
+                self.vault.read().await.save_task(&task)?;
+            }
+        }
+        Ok((created, updated))
     }
 
     // ── Invoicing ───────────────────────────────────────────────────────────
@@ -1959,6 +2249,12 @@ impl crate::service::CalendarService for VaultServiceImpl {
 
     async fn trigger_sync(&self) -> Result<SyncStats, VaultError> { self.trigger_sync().await }
     async fn sync_status(&self) -> Option<SyncStats> { self.sync_status().await }
+    async fn list_deck_boards(&self) -> Result<Vec<RemoteDeckBoard>, VaultError> {
+        self.list_remote_deck_boards().await
+    }
+    async fn list_deck_stacks(&self, board_id: u64) -> Result<Vec<RemoteDeckStack>, VaultError> {
+        self.list_remote_deck_stacks(board_id).await
+    }
 }
 
 /// Diff two versions of a task and write one audit row per changed scalar
