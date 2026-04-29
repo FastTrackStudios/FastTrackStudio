@@ -84,5 +84,6 @@ pub use crate::typography::{Heading, HeadingLevel, Text, TextVariant};
 // Theme tokens
 pub use crate::theme::tokens;
 
-// Class merging utility
-pub use crate::cn::{cn, cn2};
+// Class merging utilities. The primary component API is the `fts_ui::cn!`
+// macro; these helpers cover already-joined or pre-sliced class strings.
+pub use crate::cn::{merge, merge_slice};

@@ -6,9 +6,11 @@ edition.workspace = true
 
 [dependencies]
 chrono = "0.4"
+clsx = { workspace = true }
 dioxus = { workspace = true }
 lucide-dioxus = { workspace = true }
 tracing = { workspace = true }
+tw_merge = { workspace = true }
 
 [lints]
 workspace = true
