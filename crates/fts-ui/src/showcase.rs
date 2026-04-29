@@ -74,7 +74,7 @@ pub fn Showcase() -> Element {
                                                 CardDescription { "This subtree can choose a different preset and mode." }
                                             }
                                             CardContent { class: "grid gap-3",
-                                                p { class: "font-mono text-sm text-muted-foreground", "Scoped monospace, radius, spacing, shadows, and colors are isolated." }
+                                                p { class: "font-mono text-sm text-muted-foreground", "Scoped monospace, radius, shadows, and colors are isolated." }
                                                 div { class: "flex flex-wrap gap-2",
                                                     Button { "Scoped primary" }
                                                     Button { variant: ButtonVariant::Outline, "Scoped outline" }

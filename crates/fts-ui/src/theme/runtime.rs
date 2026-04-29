@@ -166,6 +166,8 @@ pub struct ThemeContext {
 #[derive(Props, Clone, PartialEq)]
 pub struct ThemeProviderProps {
     pub state: Signal<ThemeState>,
+    #[props(default = false)]
+    pub allow_layout_scale: bool,
     #[props(default)]
     pub class: String,
     pub children: Element,
@@ -176,7 +178,7 @@ pub fn ThemeProvider(props: ThemeProviderProps) -> Element {
     use_context_provider(|| ThemeContext { state: props.state });
 
     let state = (props.state)();
-    let style = theme_style_attribute(&state.styles, state.mode);
+    let style = theme_style_attribute(&state.styles, state.mode, props.allow_layout_scale);
     let mode = state.mode.as_str();
 
     rsx! {
@@ -195,6 +197,8 @@ pub struct ThemeScopeProps {
     pub styles: ThemeStyles,
     #[props(default)]
     pub mode: Option<ThemeMode>,
+    #[props(default = false)]
+    pub allow_layout_scale: bool,
     #[props(default)]
     pub class: String,
     pub children: Element,
@@ -208,7 +212,7 @@ pub fn ThemeScope(props: ThemeScopeProps) -> Element {
         .map(|context| (context.state)().mode)
         .unwrap_or(ThemeMode::Light);
     let mode = props.mode.unwrap_or(inherited_mode);
-    let style = theme_style_attribute(&props.styles, mode);
+    let style = theme_style_attribute(&props.styles, mode, props.allow_layout_scale);
 
     rsx! {
         div {
@@ -409,9 +413,17 @@ pub fn theme_preset(name: &str) -> Option<ThemePreset> {
         .find(|preset| preset.name == name)
 }
 
-fn theme_style_attribute(styles: &ThemeStyles, mode: ThemeMode) -> String {
+fn theme_style_attribute(
+    styles: &ThemeStyles,
+    mode: ThemeMode,
+    allow_layout_scale: bool,
+) -> String {
     let mut style = styles.active(mode).css_variables();
     let color_scheme = if mode.is_dark() { "dark" } else { "light" };
+
+    if !allow_layout_scale {
+        push_css_var(&mut style, "spacing", "0.25rem");
+    }
 
     style.push_str("color-scheme: ");
     style.push_str(color_scheme);
