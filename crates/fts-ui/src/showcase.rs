@@ -65,7 +65,7 @@ pub fn Showcase() -> Element {
                                         }
                                     }
                                     ThemeScope {
-                                        styles: theme_preset("amethyst").unwrap_or_else(default_theme_preset).styles,
+                                        styles: theme_preset("amethyst-haze").unwrap_or_else(default_theme_preset).styles,
                                         mode: Some(ThemeMode::Dark),
                                         class: "rounded-lg border border-border p-4",
                                         Card {
