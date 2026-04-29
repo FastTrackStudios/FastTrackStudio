@@ -32,6 +32,23 @@ impl TooltipSide {
             Self::Right => ContentSide::Right,
         }
     }
+
+    fn position_class(self, align: ContentAlign) -> &'static str {
+        match (self, align) {
+            (Self::Top, ContentAlign::Start) => "bottom-full left-0 mb-2",
+            (Self::Top, ContentAlign::Center) => "bottom-full left-1/2 -translate-x-1/2 mb-2",
+            (Self::Top, ContentAlign::End) => "bottom-full right-0 mb-2",
+            (Self::Bottom, ContentAlign::Start) => "top-full left-0 mt-2",
+            (Self::Bottom, ContentAlign::Center) => "top-full left-1/2 -translate-x-1/2 mt-2",
+            (Self::Bottom, ContentAlign::End) => "top-full right-0 mt-2",
+            (Self::Left, ContentAlign::Start) => "right-full top-0 mr-2",
+            (Self::Left, ContentAlign::Center) => "right-full top-1/2 -translate-y-1/2 mr-2",
+            (Self::Left, ContentAlign::End) => "right-full bottom-0 mr-2",
+            (Self::Right, ContentAlign::Start) => "left-full top-0 ml-2",
+            (Self::Right, ContentAlign::Center) => "left-full top-1/2 -translate-y-1/2 ml-2",
+            (Self::Right, ContentAlign::End) => "left-full bottom-0 ml-2",
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -120,15 +137,18 @@ pub struct TooltipContentProps {
 /// shadcn v4 maia: tooltip content popup
 #[component]
 pub fn TooltipContent(props: TooltipContentProps) -> Element {
+    let position_class = props.side.position_class(props.align);
+
     rsx! {
         PrimitiveTooltipContent {
             id: props.id,
             side: props.side.primitive_side(),
             align: props.align,
-            class: crate::cn::merge(format!(
-                "absolute z-50 inline-flex items-center gap-1.5 rounded-lg bg-primary text-primary-foreground px-3 py-1.5 text-xs shadow-md whitespace-nowrap pointer-events-none data-[side=top]:bottom-full data-[side=top]:left-1/2 data-[side=top]:-translate-x-1/2 data-[side=top]:mb-2 data-[side=bottom]:top-full data-[side=bottom]:left-1/2 data-[side=bottom]:-translate-x-1/2 data-[side=bottom]:mt-2 data-[side=left]:right-full data-[side=left]:top-1/2 data-[side=left]:-translate-y-1/2 data-[side=left]:mr-2 data-[side=right]:left-full data-[side=right]:top-1/2 data-[side=right]:-translate-y-1/2 data-[side=right]:ml-2 {}",
-                props.class
-            )),
+            class: crate::cn::merge_slice(&[
+                "absolute z-50 inline-flex items-center gap-1.5 rounded-lg bg-primary text-primary-foreground px-3 py-1.5 text-xs shadow-md whitespace-nowrap pointer-events-none",
+                position_class,
+                props.class.as_str(),
+            ]),
             {props.children}
         }
     }

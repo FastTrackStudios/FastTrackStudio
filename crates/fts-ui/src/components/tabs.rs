@@ -29,6 +29,20 @@ pub struct TabsProps {
 #[component]
 pub fn Tabs(props: TabsProps) -> Element {
     rsx! {
+        document::Style {
+            r#"
+                .fts-tab-trigger[data-state="active"] {{
+                    background: hsl(var(--background));
+                    color: hsl(var(--foreground));
+                    box-shadow: var(--shadow-sm);
+                }}
+
+                .fts-tab-trigger[data-state="inactive"]:hover {{
+                    background: hsl(var(--background) / 0.5);
+                    color: hsl(var(--foreground) / 0.8);
+                }}
+            "#
+        }
         PrimitiveTabs {
             value: props.value,
             default_value: props.default_value,
@@ -90,7 +104,7 @@ pub fn TabTrigger(props: TabTriggerProps) -> Element {
             disabled: props.disabled,
             id: props.id,
             class: crate::cn::merge(format!(
-                "inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-transparent px-2 py-1 text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg:not([class*='size-'])]:size-4 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm data-[state=inactive]:hover:bg-background/50 data-[state=inactive]:hover:text-foreground/80 {}",
+                "fts-tab-trigger inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-transparent px-2 py-1 text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg:not([class*='size-'])]:size-4 {}",
                 props.class
             )),
             {props.children}
