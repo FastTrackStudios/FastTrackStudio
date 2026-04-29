@@ -20,6 +20,7 @@ tower-http = { version = "0.6", features = ["cors"] }
 slug = "0.1"
 task-db = { path = "../../crates/task-db" }
 task-core = { workspace = true, features = ["realtime"] }
+vox.workspace = true
 better-auth = { path = "../../../FastTrackStudio/better-auth", features = ["axum"], default-features = false }
 better-auth-core = { path = "../../../FastTrackStudio/better-auth/crates/core" }
 better-auth-api = { path = "../../../FastTrackStudio/better-auth/crates/api", default-features = false, features = ["rustls", "vox"] }

@@ -8741,6 +8741,7 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-subscriber",
+ "vox",
 ]
 
 [[package]]

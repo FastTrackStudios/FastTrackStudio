@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use axum::extract::{Query as AxumQuery, State, WebSocketUpgrade};
-use axum::extract::ws::WebSocket;
+use axum::extract::ws::{Message as AxumWsMessage, WebSocket};
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use task_core::crdt::{CrdtSyncEngine, SyncOp};
 use task_core::VaultServiceImpl;
+use tokio::sync::mpsc;
 use tower_http::cors::CorsLayer;
 use tracing::{info, warn};
 use better_auth_core::config::AuthConfig;
@@ -37,7 +38,6 @@ struct ServerInfo {
 #[derive(Clone)]
 struct AppState {
     db: sea_orm::DatabaseConnection,
-    auth: Arc<better_auth::BetterAuth<SeaOrmAuthAdapter>>,
     info: ServerInfo,
     crdt: Option<Arc<CrdtSyncEngine>>,
     vault_service: Option<Arc<VaultServiceImpl>>,
@@ -136,7 +136,6 @@ async fn main() -> eyre::Result<()> {
 
     let state = AppState {
         db,
-        auth: auth.clone(),
         crdt,
         vault_service,
         info: info_payload,
@@ -169,7 +168,7 @@ async fn main() -> eyre::Result<()> {
 
     let app = app.with_state(state);
 
-    // ── HTTP + JSON-RPC WebSocket server ─────────────────────────
+    // ── HTTP + Vox WebSocket server ──────────────────────────────
     let listener = tokio::net::TcpListener::bind(&bind_addr).await
         .map_err(|e| eyre::eyre!("Failed to bind {bind_addr}: {e}. Is another task-server still running? Kill it with: pkill -f task-server"))?;
     info!("HTTP server listening on {}", bind_addr);
@@ -971,38 +970,219 @@ async fn vox_ws_handler(
 async fn handle_vox_connection(socket: WebSocket, state: AppState) {
     info!("Vox WebSocket client connected");
 
-    use futures::{SinkExt, StreamExt};
-    let (mut ws_tx, mut ws_rx) = socket.split();
+    let Some(service) = state.vault_service.clone() else {
+        warn!("Vox connection rejected because TASK_VAULT is not configured");
+        return;
+    };
 
-    while let Some(Ok(msg)) = ws_rx.next().await {
-        match msg {
-            axum::extract::ws::Message::Binary(data) => {
-                if let Ok(text) = std::str::from_utf8(&data) {
-                    if let Ok(request) = serde_json::from_str::<serde_json::Value>(text) {
-                        let method = request.get("method").and_then(|m| m.as_str()).unwrap_or("");
-                        let response = dispatch_rpc(&state, method, &request).await;
-                        let response_bytes = serde_json::to_vec(&response).unwrap_or_default();
-                        let _ = ws_tx.send(axum::extract::ws::Message::Binary(response_bytes.into())).await;
-                    }
+    let factory = vox::acceptor_fn(
+        move |request: &vox::ConnectionRequest,
+              connection: vox::PendingConnection|
+              -> Result<(), vox::Metadata<'static>> {
+            match request.service() {
+                "TaskService" => {
+                    connection.handle_with(task_core::TaskServiceDispatcher::new(
+                        service.as_ref().clone(),
+                    ));
+                    Ok(())
+                }
+                "ProjectService" => {
+                    connection.handle_with(task_core::ProjectServiceDispatcher::new(
+                        service.as_ref().clone(),
+                    ));
+                    Ok(())
+                }
+                "TimeService" => {
+                    connection.handle_with(task_core::TimeServiceDispatcher::new(
+                        service.as_ref().clone(),
+                    ));
+                    Ok(())
+                }
+                "ClientService" => {
+                    connection.handle_with(task_core::ClientServiceDispatcher::new(
+                        service.as_ref().clone(),
+                    ));
+                    Ok(())
+                }
+                "InvoiceService" => {
+                    connection.handle_with(task_core::InvoiceServiceDispatcher::new(
+                        service.as_ref().clone(),
+                    ));
+                    Ok(())
+                }
+                "ActivityService" => {
+                    connection.handle_with(task_core::ActivityServiceDispatcher::new(
+                        service.as_ref().clone(),
+                    ));
+                    Ok(())
+                }
+                "CalendarService" => {
+                    connection.handle_with(task_core::CalendarServiceDispatcher::new(
+                        service.as_ref().clone(),
+                    ));
+                    Ok(())
+                }
+                "Noop" => {
+                    connection.handle_with(());
+                    Ok(())
+                }
+                other => {
+                    warn!(service = other, "Unknown Vox service requested");
+                    Err(vec![])
                 }
             }
-            axum::extract::ws::Message::Text(text) => {
-                if let Ok(request) = serde_json::from_str::<serde_json::Value>(&text) {
-                    let method = request.get("method").and_then(|m| m.as_str()).unwrap_or("");
-                    let response = dispatch_rpc(&state, method, &request).await;
-                    let response_text = serde_json::to_string(&response).unwrap_or_default();
-                    let _ = ws_tx.send(axum::extract::ws::Message::Text(response_text.into())).await;
-                }
-            }
-            axum::extract::ws::Message::Ping(data) => {
-                let _ = ws_tx.send(axum::extract::ws::Message::Pong(data)).await;
-            }
-            axum::extract::ws::Message::Close(_) => break,
-            _ => {}
-        }
+        },
+    );
+
+    if let Err(e) = vox::acceptor_on(AxumWsLink::new(socket))
+        .on_connection(factory)
+        .establish::<vox::NoopClient>()
+        .await
+    {
+        warn!(error = %e, "Vox WebSocket session failed");
     }
 
     info!("Vox WebSocket client disconnected");
+}
+
+struct AxumWsLink {
+    socket: WebSocket,
+}
+
+impl AxumWsLink {
+    fn new(socket: WebSocket) -> Self {
+        Self { socket }
+    }
+}
+
+impl vox::Link for AxumWsLink {
+    type Tx = AxumWsTx;
+    type Rx = AxumWsRx;
+
+    fn split(self) -> (Self::Tx, Self::Rx) {
+        let (tx_out, rx_out) = mpsc::channel::<Vec<u8>>(1);
+        let (tx_in, rx_in) = mpsc::channel::<Result<AxumWsMessage, AxumWsError>>(1);
+        let io_task = tokio::spawn(axum_ws_io_loop(self.socket, rx_out, tx_in));
+
+        (
+            AxumWsTx {
+                tx: tx_out,
+                io_task,
+            },
+            AxumWsRx { rx: rx_in },
+        )
+    }
+}
+
+async fn axum_ws_io_loop(
+    socket: WebSocket,
+    mut rx_out: mpsc::Receiver<Vec<u8>>,
+    tx_in: mpsc::Sender<Result<AxumWsMessage, AxumWsError>>,
+) {
+    use futures::{SinkExt, StreamExt};
+    let (mut ws_tx, mut ws_rx) = socket.split();
+
+    loop {
+        tokio::select! {
+            outbound = rx_out.recv() => {
+                match outbound {
+                    Some(bytes) => {
+                        if let Err(e) = ws_tx.feed(AxumWsMessage::Binary(bytes.into())).await {
+                            let _ = tx_in.send(Err(AxumWsError(e.to_string()))).await;
+                            return;
+                        }
+                        while let Ok(bytes) = rx_out.try_recv() {
+                            if let Err(e) = ws_tx.feed(AxumWsMessage::Binary(bytes.into())).await {
+                                let _ = tx_in.send(Err(AxumWsError(e.to_string()))).await;
+                                return;
+                            }
+                        }
+                        if let Err(e) = ws_tx.flush().await {
+                            let _ = tx_in.send(Err(AxumWsError(e.to_string()))).await;
+                            return;
+                        }
+                    }
+                    None => return,
+                }
+            }
+            inbound = ws_rx.next() => {
+                match inbound {
+                    Some(Ok(msg)) => {
+                        if tx_in.send(Ok(msg)).await.is_err() {
+                            return;
+                        }
+                    }
+                    Some(Err(e)) => {
+                        let _ = tx_in.send(Err(AxumWsError(e.to_string()))).await;
+                        return;
+                    }
+                    None => return,
+                }
+            }
+        }
+    }
+}
+
+struct AxumWsTx {
+    tx: mpsc::Sender<Vec<u8>>,
+    io_task: tokio::task::JoinHandle<()>,
+}
+
+impl vox::LinkTx for AxumWsTx {
+    async fn send(&self, bytes: Vec<u8>) -> std::io::Result<()> {
+        let permit = self.tx.clone().reserve_owned().await.map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::ConnectionReset,
+                "axum websocket writer task stopped",
+            )
+        })?;
+        drop(permit.send(bytes));
+        Ok(())
+    }
+
+    async fn close(self) -> std::io::Result<()> {
+        drop(self.tx);
+        self.io_task.await.map_err(std::io::Error::other)
+    }
+}
+
+struct AxumWsRx {
+    rx: mpsc::Receiver<Result<AxumWsMessage, AxumWsError>>,
+}
+
+#[derive(Debug)]
+struct AxumWsError(String);
+
+impl std::fmt::Display for AxumWsError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "axum websocket: {}", self.0)
+    }
+}
+
+impl std::error::Error for AxumWsError {}
+
+impl vox::LinkRx for AxumWsRx {
+    type Error = AxumWsError;
+
+    async fn recv(&mut self) -> Result<Option<vox::Backing>, Self::Error> {
+        loop {
+            match self.rx.recv().await {
+                Some(Ok(AxumWsMessage::Binary(data))) => {
+                    return Ok(Some(vox::Backing::Boxed(
+                        Vec::from(data).into_boxed_slice(),
+                    )));
+                }
+                Some(Ok(AxumWsMessage::Close(_))) | None => return Ok(None),
+                Some(Ok(AxumWsMessage::Ping(_) | AxumWsMessage::Pong(_))) => continue,
+                Some(Ok(AxumWsMessage::Text(_))) => {
+                    return Err(AxumWsError(
+                        "text frames are not valid Vox websocket payloads".to_string(),
+                    ));
+                }
+                Some(Err(e)) => return Err(e),
+            }
+        }
+    }
 }
 
 /// Convert a DB project model to the API shape the web client expects.
@@ -1083,118 +1263,6 @@ fn vault_project_to_api(p: task_core::Project) -> serde_json::Value {
     })
 }
 
-async fn dispatch_vault_rpc(
-    state: &AppState,
-    method: &str,
-    request: &serde_json::Value,
-) -> Option<serde_json::Value> {
-    let svc = state.vault_service.as_ref()?;
-    let params = request.get("params").cloned().unwrap_or_default();
-
-    match method {
-        "TaskService.listTasks" => {
-            let tasks = svc.list_tasks().await;
-            Some(json!({"result": tasks.into_iter().map(vault_task_to_api).collect::<Vec<_>>(), "error": null}))
-        }
-        "TaskService.createTask" => {
-            let mut task = task_from_params(&params);
-            if task.title.is_empty() {
-                task.title = "Untitled".to_string();
-            }
-            match svc.create_task(task).await {
-                Ok(created) => {
-                    notify_crdt_file_changed(state, &created.title).await;
-                    Some(json!({"result": vault_task_to_api(created), "error": null}))
-                }
-                Err(e) => Some(json!({"error": e.to_string()})),
-            }
-        }
-        "TaskService.updateTask" => {
-            let Some(title) = params.get("title").and_then(|t| t.as_str()) else {
-                return Some(json!({"error": "missing params.title"}));
-            };
-            let Some(mut task) = find_vault_task(svc, title).await else {
-                return Some(json!({"error": format!("task not found: {title}")}));
-            };
-            apply_task_params(&mut task, &params);
-            match svc.update_task(task.clone()).await {
-                Ok(updated) => {
-                    notify_crdt_file_changed(state, title).await;
-                    if updated.title != title {
-                        notify_crdt_file_changed(state, &updated.title).await;
-                    }
-                    Some(json!({"result": vault_task_to_api(updated), "error": null}))
-                }
-                Err(e) => Some(json!({"error": e.to_string()})),
-            }
-        }
-        "TaskService.completeTask" => {
-            let Some(title) = params.get("title").and_then(|t| t.as_str()) else {
-                return Some(json!({"error": "missing params.title"}));
-            };
-            match svc.complete_task(title.to_string()).await {
-                Ok(updated) => {
-                    notify_crdt_file_changed(state, title).await;
-                    Some(json!({"result": vault_task_to_api(updated), "error": null}))
-                }
-                Err(e) => Some(json!({"error": e.to_string()})),
-            }
-        }
-        "TaskService.searchTasks" => {
-            let q = params.get("query").and_then(|q| q.as_str()).unwrap_or("");
-            let tasks = svc.search_tasks(q.to_string()).await;
-            Some(json!({"result": tasks.into_iter().map(vault_task_to_api).collect::<Vec<_>>(), "error": null}))
-        }
-        "TaskService.tasksForUser" => {
-            let Some(username) = params.get("username").and_then(|u| u.as_str()) else {
-                return Some(json!({"error": "missing params.username"}));
-            };
-            let tasks = svc.tasks_for_user(username.to_string()).await;
-            Some(json!({"result": tasks.into_iter().map(vault_task_to_api).collect::<Vec<_>>(), "error": null}))
-        }
-        "CalendarService.tasksDueBy" => {
-            let Some(date) = params.get("date").and_then(|d| d.as_str()) else {
-                return Some(json!({"error": "missing params.date"}));
-            };
-            let tasks = svc.tasks_due_by(date.to_string()).await;
-            Some(json!({"result": tasks.into_iter().map(vault_task_to_api).collect::<Vec<_>>(), "error": null}))
-        }
-        "ProjectService.tasksForProject" => {
-            let Some(project) = params.get("project").and_then(|p| p.as_str()) else {
-                return Some(json!({"error": "missing params.project"}));
-            };
-            let tasks = svc.tasks_for_project(project.to_string()).await;
-            Some(json!({"result": tasks.into_iter().map(vault_task_to_api).collect::<Vec<_>>(), "error": null}))
-        }
-        "ProjectService.projectStats" => {
-            let Some(project) = params.get("project").or_else(|| params.get("project_title")).and_then(|p| p.as_str()) else {
-                return Some(json!({"error": "missing params.project"}));
-            };
-            let stats = svc.project_stats(project.to_string()).await;
-            Some(json!({
-                "result": {
-                    "open_task_count": stats.open_task_count,
-                    "completed_task_count": stats.completed_task_count,
-                    "total": stats.total(),
-                    "completion_percent": stats.completion_percent(),
-                },
-                "error": null
-            }))
-        }
-        "ProjectService.nextTask" => {
-            let Some(project) = params.get("project").or_else(|| params.get("project_title")).and_then(|p| p.as_str()) else {
-                return Some(json!({"error": "missing params.project"}));
-            };
-            Some(json!({"result": svc.next_task(project.to_string()).await.map(vault_task_to_api), "error": null}))
-        }
-        "ProjectService.listProjects" => {
-            let projects = svc.list_projects().await;
-            Some(json!({"result": projects.into_iter().map(vault_project_to_api).collect::<Vec<_>>(), "error": null}))
-        }
-        _ => None,
-    }
-}
-
 async fn find_vault_task(svc: &VaultServiceImpl, title: &str) -> Option<task_core::Task> {
     let slug_title = slug::slugify(title);
     svc.list_tasks()
@@ -1272,160 +1340,6 @@ async fn notify_crdt_file_changed(state: &AppState, title: &str) {
         let path = format!("{title}.md");
         if let Err(e) = engine.on_file_changed(&path).await {
             warn!(path = %path, error = %e, "failed to publish vault change to CRDT engine");
-        }
-    }
-}
-
-/// Dispatch a JSON-RPC-style request. When TASK_VAULT is configured, task and
-/// project operations use the markdown vault and Loro engine; the in-memory DB
-/// remains as a fallback for auth/demo-only surfaces.
-async fn dispatch_rpc(
-    state: &AppState,
-    method: &str,
-    request: &serde_json::Value,
-) -> serde_json::Value {
-    info!(method = method, "RPC dispatch");
-    if let Some(response) = dispatch_vault_rpc(state, method, request).await {
-        return response;
-    }
-
-    let auth = &state.auth;
-    match method {
-        // ── Auth RPC methods ────────────────────────────────────────
-        "auth.sign_up" => {
-            let params = request.get("params").cloned().unwrap_or_default();
-            let email = params.get("email").and_then(|v| v.as_str()).unwrap_or("");
-            let password = params.get("password").and_then(|v| v.as_str()).unwrap_or("");
-            let name = params.get("name").and_then(|v| v.as_str()).unwrap_or("");
-            if email.is_empty() || password.is_empty() || name.is_empty() {
-                return serde_json::json!({ "error": "missing email, password, or name" });
-            }
-            let body = serde_json::json!({ "email": email, "password": password, "name": name });
-            let auth_req = better_auth_core::types::AuthRequest::from_parts(
-                better_auth_core::types::HttpMethod::Post,
-                "/sign-up/email".to_string(),
-                std::collections::HashMap::from([("content-type".to_string(), "application/json".to_string())]),
-                Some(serde_json::to_vec(&body).unwrap()),
-                std::collections::HashMap::new(),
-            );
-            match auth.handle_request(auth_req).await {
-                Ok(resp) => {
-                    let body_str = String::from_utf8_lossy(&resp.body);
-                    match serde_json::from_str::<serde_json::Value>(&body_str) {
-                        Ok(v) => serde_json::json!({ "result": v, "error": null }),
-                        Err(_) => serde_json::json!({ "result": body_str.to_string(), "error": null }),
-                    }
-                }
-                Err(e) => serde_json::json!({ "error": e.to_string() }),
-            }
-        }
-        "auth.sign_in" => {
-            let params = request.get("params").cloned().unwrap_or_default();
-            let email = params.get("email").and_then(|v| v.as_str()).unwrap_or("");
-            let password = params.get("password").and_then(|v| v.as_str()).unwrap_or("");
-            if email.is_empty() || password.is_empty() {
-                return serde_json::json!({ "error": "missing email or password" });
-            }
-            let body = serde_json::json!({ "email": email, "password": password });
-            let auth_req = better_auth_core::types::AuthRequest::from_parts(
-                better_auth_core::types::HttpMethod::Post,
-                "/sign-in/email".to_string(),
-                std::collections::HashMap::from([("content-type".to_string(), "application/json".to_string())]),
-                Some(serde_json::to_vec(&body).unwrap()),
-                std::collections::HashMap::new(),
-            );
-            match auth.handle_request(auth_req).await {
-                Ok(resp) => {
-                    let body_str = String::from_utf8_lossy(&resp.body);
-                    match serde_json::from_str::<serde_json::Value>(&body_str) {
-                        Ok(v) => serde_json::json!({ "result": v, "error": null }),
-                        Err(_) => serde_json::json!({ "result": body_str.to_string(), "error": null }),
-                    }
-                }
-                Err(e) => serde_json::json!({ "error": e.to_string() }),
-            }
-        }
-        "auth.get_session" => {
-            let params = request.get("params").cloned().unwrap_or_default();
-            let token = params.get("token").and_then(|v| v.as_str()).unwrap_or("");
-            if token.is_empty() {
-                return serde_json::json!({ "error": "missing token" });
-            }
-            let mut headers = std::collections::HashMap::new();
-            headers.insert("authorization".to_string(), format!("Bearer {token}"));
-            let auth_req = better_auth_core::types::AuthRequest::from_parts(
-                better_auth_core::types::HttpMethod::Get,
-                "/get-session".to_string(),
-                headers,
-                None,
-                std::collections::HashMap::new(),
-            );
-            match auth.handle_request(auth_req).await {
-                Ok(resp) => {
-                    let body_str = String::from_utf8_lossy(&resp.body);
-                    match serde_json::from_str::<serde_json::Value>(&body_str) {
-                        Ok(v) => serde_json::json!({ "result": v, "error": null }),
-                        Err(_) => serde_json::json!({ "result": body_str.to_string(), "error": null }),
-                    }
-                }
-                Err(e) => serde_json::json!({ "error": e.to_string() }),
-            }
-        }
-        "auth.sign_out" => {
-            let params = request.get("params").cloned().unwrap_or_default();
-            let token = params.get("token").and_then(|v| v.as_str()).unwrap_or("");
-            if token.is_empty() {
-                return serde_json::json!({ "error": "missing token" });
-            }
-            let mut headers = std::collections::HashMap::new();
-            headers.insert("authorization".to_string(), format!("Bearer {token}"));
-            let auth_req = better_auth_core::types::AuthRequest::from_parts(
-                better_auth_core::types::HttpMethod::Post,
-                "/sign-out".to_string(),
-                headers,
-                None,
-                std::collections::HashMap::new(),
-            );
-            match auth.handle_request(auth_req).await {
-                Ok(_) => serde_json::json!({ "result": true, "error": null }),
-                Err(e) => serde_json::json!({ "error": e.to_string() }),
-            }
-        }
-        "auth.list_sessions" => {
-            let params = request.get("params").cloned().unwrap_or_default();
-            let token = params.get("token").and_then(|v| v.as_str()).unwrap_or("");
-            if token.is_empty() {
-                return serde_json::json!({ "error": "missing token" });
-            }
-            let mut headers = std::collections::HashMap::new();
-            headers.insert("authorization".to_string(), format!("Bearer {token}"));
-            let auth_req = better_auth_core::types::AuthRequest::from_parts(
-                better_auth_core::types::HttpMethod::Get,
-                "/list-sessions".to_string(),
-                headers,
-                None,
-                std::collections::HashMap::new(),
-            );
-            match auth.handle_request(auth_req).await {
-                Ok(resp) => {
-                    let body_str = String::from_utf8_lossy(&resp.body);
-                    match serde_json::from_str::<serde_json::Value>(&body_str) {
-                        Ok(v) => serde_json::json!({ "result": v, "error": null }),
-                        Err(_) => serde_json::json!({ "result": body_str.to_string(), "error": null }),
-                    }
-                }
-                Err(e) => serde_json::json!({ "error": e.to_string() }),
-            }
-        }
-
-        "trigger_sync" => {
-            // No-op — sync is not applicable with in-memory DB
-            serde_json::json!({ "result": "ok", "error": null })
-        }
-
-        _ => {
-            warn!(method = method, "Unknown RPC method");
-            serde_json::json!({ "error": format!("unknown method: {method}") })
         }
     }
 }
