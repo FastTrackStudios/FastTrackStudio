@@ -190,7 +190,16 @@ pub trait CalendarService {
     async fn put_calendar_object(&self, request: CalDavPutObjectRequest) -> Result<(), VaultError>;
 
     /// Delete one raw calendar object, optionally guarded by If-Match.
-    async fn delete_calendar_object(&self, request: CalDavDeleteObjectRequest) -> Result<(), VaultError>;
+    async fn delete_calendar_object(
+        &self,
+        request: CalDavDeleteObjectRequest,
+    ) -> Result<(), VaultError>;
+
+    /// Send an iTIP VCALENDAR payload through the CalDAV scheduling outbox.
+    async fn send_calendar_schedule(
+        &self,
+        request: CalDavScheduleRequest,
+    ) -> Result<CalDavScheduleResponse, VaultError>;
 
     /// Query busy VEVENT intervals for a calendar.
     async fn calendar_free_busy(
@@ -286,9 +295,77 @@ pub struct CalDavObject {
     pub status: String,
     pub component: Option<String>,
     pub calendar_data: Option<String>,
+    pub details: Option<CalDavObjectDetails>,
     pub task: Option<Task>,
     pub event: Option<CalendarEvent>,
     pub deleted: bool,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct CalDavObjectDetails {
+    pub product_id: Option<String>,
+    pub method: Option<String>,
+    pub timezones: Vec<CalDavTimezone>,
+    pub events: Vec<CalDavEventInstance>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct CalDavTimezone {
+    pub tzid: String,
+    pub calendar_data: String,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct CalDavEventInstance {
+    pub uid: Option<String>,
+    pub summary: Option<String>,
+    pub status: Option<String>,
+    pub recurrence_id: Option<String>,
+    pub dtstart: Option<String>,
+    pub dtend: Option<String>,
+    pub dtstart_timezone: Option<String>,
+    pub dtend_timezone: Option<String>,
+    pub recurrence_id_timezone: Option<String>,
+    pub rrules: Vec<String>,
+    pub rdates: Vec<String>,
+    pub exdates: Vec<String>,
+    pub organizer: Option<CalDavParticipant>,
+    pub attendees: Vec<CalDavParticipant>,
+    pub alarms: Vec<CalDavAlarm>,
+    pub raw_properties: Vec<CalDavProperty>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct CalDavParticipant {
+    pub value: String,
+    pub cn: Option<String>,
+    pub role: Option<String>,
+    pub partstat: Option<String>,
+    pub rsvp: Option<String>,
+    pub cutype: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct CalDavAlarm {
+    pub action: Option<String>,
+    pub trigger: Option<String>,
+    pub description: Option<String>,
+    pub summary: Option<String>,
+    pub attendees: Vec<CalDavParticipant>,
+    pub raw_properties: Vec<CalDavProperty>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct CalDavProperty {
+    pub name: String,
+    pub value: String,
+    pub parameters: Vec<CalDavParameter>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct CalDavParameter {
+    pub name: String,
+    pub value: String,
 }
 
 #[derive(Debug, Clone, Default, facet::Facet)]
@@ -323,6 +400,18 @@ pub struct CalDavDeleteObjectRequest {
     pub calendar: String,
     pub href: String,
     pub if_match: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct CalDavScheduleRequest {
+    pub outbox_url: Option<String>,
+    pub calendar_data: String,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct CalDavScheduleResponse {
+    pub status: u16,
+    pub body: String,
 }
 
 #[derive(Debug, Clone, facet::Facet)]

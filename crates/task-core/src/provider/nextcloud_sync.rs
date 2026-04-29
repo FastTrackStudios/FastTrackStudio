@@ -9,8 +9,10 @@ use chrono::{DateTime, NaiveDate, Utc};
 use crate::calendar_event::{CalendarEvent, CalendarEventStatus};
 use crate::project::Project;
 use crate::service::{
-    CalDavCalendarInfo, CalDavDiscovery, CalDavFreeBusyInterval, CalDavObject,
-    CalDavSyncCollectionResponse, VaultError,
+    CalDavAlarm, CalDavCalendarInfo, CalDavDiscovery, CalDavEventInstance,
+    CalDavFreeBusyInterval, CalDavObject, CalDavObjectDetails, CalDavParameter,
+    CalDavParticipant, CalDavProperty, CalDavScheduleResponse, CalDavSyncCollectionResponse,
+    CalDavTimezone, VaultError,
 };
 use crate::task::{Priority, Status, Task, WikiLink};
 // Deck API response types use serde for JSON deserialization (complex nested structures).
@@ -562,6 +564,38 @@ impl NextcloudSync {
             )));
         }
         Ok(())
+    }
+
+    pub async fn send_calendar_schedule(
+        &self,
+        outbox_url: &str,
+        calendar_data: &str,
+    ) -> Result<CalDavScheduleResponse, VaultError> {
+        let url = self.absolute_dav_url(outbox_url);
+        let resp = self
+            .auth(
+                self.http
+                    .post(&url)
+                    .header("Content-Type", "text/calendar; charset=utf-8"),
+            )
+            .body(calendar_data.to_string())
+            .send()
+            .await
+            .map_err(|e| VaultError::IoError(format!("CalDAV schedule POST: {e}")))?;
+        let status = resp.status();
+        let body = resp
+            .text()
+            .await
+            .map_err(|e| VaultError::IoError(e.to_string()))?;
+        if !status.is_success() {
+            return Err(VaultError::IoError(format!(
+                "CalDAV schedule POST {url}: {status}: {body}"
+            )));
+        }
+        Ok(CalDavScheduleResponse {
+            status: status.as_u16(),
+            body,
+        })
     }
 
     pub async fn calendar_free_busy(
@@ -2046,6 +2080,7 @@ fn parse_caldav_objects(xml: &str) -> Vec<CalDavObject> {
             let deleted = status.contains(" 404 ") || status.ends_with(" 404");
             let calendar_data = extract_first_text(&response, "calendar-data");
             let component = calendar_data.as_deref().and_then(calendar_component);
+            let details = calendar_data.as_deref().map(parse_caldav_object_details);
             let task = calendar_data
                 .as_deref()
                 .filter(|ics| ics.contains("BEGIN:VTODO"))
@@ -2060,6 +2095,7 @@ fn parse_caldav_objects(xml: &str) -> Vec<CalDavObject> {
                 status,
                 component,
                 calendar_data,
+                details,
                 task,
                 event,
                 deleted,
@@ -2073,6 +2109,248 @@ fn calendar_component(ics: &str) -> Option<String> {
         .into_iter()
         .find(|component| ics.contains(&format!("BEGIN:{component}")))
         .map(str::to_string)
+}
+
+#[derive(Debug, Clone)]
+struct ParsedIcsProperty {
+    name: String,
+    value: String,
+    parameters: Vec<CalDavParameter>,
+}
+
+fn parse_caldav_object_details(ics: &str) -> CalDavObjectDetails {
+    let calendar_props = parse_top_level_ics_properties(ics);
+    CalDavObjectDetails {
+        product_id: property_value(&calendar_props, "PRODID"),
+        method: property_value(&calendar_props, "METHOD"),
+        timezones: extract_ics_blocks(ics, "VTIMEZONE")
+            .into_iter()
+            .filter_map(|block| {
+                let tzid = parse_ics_properties(&block)
+                    .into_iter()
+                    .find(|prop| prop.name == "TZID")
+                    .map(|prop| prop.value)?;
+                Some(CalDavTimezone {
+                    tzid,
+                    calendar_data: block,
+                })
+            })
+            .collect(),
+        events: extract_ics_blocks(ics, "VEVENT")
+            .into_iter()
+            .map(|block| parse_caldav_event_instance(&block))
+            .collect(),
+    }
+}
+
+fn parse_caldav_event_instance(block: &str) -> CalDavEventInstance {
+    let props = parse_ics_properties(block);
+    CalDavEventInstance {
+        uid: property_value(&props, "UID"),
+        summary: property_value(&props, "SUMMARY").map(|value| unescape_ics_text(&value)),
+        status: property_value(&props, "STATUS"),
+        recurrence_id: property_value(&props, "RECURRENCE-ID"),
+        dtstart: property_value(&props, "DTSTART"),
+        dtend: property_value(&props, "DTEND"),
+        dtstart_timezone: property_parameter_value(&props, "DTSTART", "TZID"),
+        dtend_timezone: property_parameter_value(&props, "DTEND", "TZID"),
+        recurrence_id_timezone: property_parameter_value(&props, "RECURRENCE-ID", "TZID"),
+        rrules: property_values(&props, "RRULE"),
+        rdates: property_values(&props, "RDATE"),
+        exdates: property_values(&props, "EXDATE"),
+        organizer: props
+            .iter()
+            .find(|prop| prop.name == "ORGANIZER")
+            .map(parse_participant),
+        attendees: props
+            .iter()
+            .filter(|prop| prop.name == "ATTENDEE")
+            .map(parse_participant)
+            .collect(),
+        alarms: extract_ics_blocks(block, "VALARM")
+            .into_iter()
+            .map(|alarm| parse_caldav_alarm(&alarm))
+            .collect(),
+        raw_properties: props
+            .into_iter()
+            .filter(|prop| {
+                !matches!(
+                    prop.name.as_str(),
+                    "BEGIN" | "END"
+                        | "UID"
+                        | "SUMMARY"
+                        | "STATUS"
+                        | "RECURRENCE-ID"
+                        | "DTSTART"
+                        | "DTEND"
+                        | "RRULE"
+                        | "RDATE"
+                        | "EXDATE"
+                        | "ORGANIZER"
+                        | "ATTENDEE"
+                )
+            })
+            .map(into_caldav_property)
+            .collect(),
+    }
+}
+
+fn parse_caldav_alarm(block: &str) -> CalDavAlarm {
+    let props = parse_ics_properties(block);
+    CalDavAlarm {
+        action: property_value(&props, "ACTION"),
+        trigger: property_value(&props, "TRIGGER"),
+        description: property_value(&props, "DESCRIPTION").map(|value| unescape_ics_text(&value)),
+        summary: property_value(&props, "SUMMARY").map(|value| unescape_ics_text(&value)),
+        attendees: props
+            .iter()
+            .filter(|prop| prop.name == "ATTENDEE")
+            .map(parse_participant)
+            .collect(),
+        raw_properties: props
+            .into_iter()
+            .filter(|prop| {
+                !matches!(
+                    prop.name.as_str(),
+                    "BEGIN" | "END" | "ACTION" | "TRIGGER" | "DESCRIPTION" | "SUMMARY" | "ATTENDEE"
+                )
+            })
+            .map(into_caldav_property)
+            .collect(),
+    }
+}
+
+fn parse_participant(prop: &ParsedIcsProperty) -> CalDavParticipant {
+    CalDavParticipant {
+        value: prop.value.clone(),
+        cn: parameter_value(prop, "CN"),
+        role: parameter_value(prop, "ROLE"),
+        partstat: parameter_value(prop, "PARTSTAT"),
+        rsvp: parameter_value(prop, "RSVP"),
+        cutype: parameter_value(prop, "CUTYPE"),
+    }
+}
+
+fn parse_top_level_ics_properties(ics: &str) -> Vec<ParsedIcsProperty> {
+    let mut depth = 0usize;
+    let mut props = Vec::new();
+    for line in unfold_ics_lines(ics) {
+        let Some(prop) = parse_ics_property(&line) else {
+            continue;
+        };
+        if prop.name == "BEGIN" {
+            depth += 1;
+            continue;
+        }
+        if prop.name == "END" {
+            depth = depth.saturating_sub(1);
+            continue;
+        }
+        if depth == 1 {
+            props.push(prop);
+        }
+    }
+    props
+}
+
+fn parse_ics_properties(block: &str) -> Vec<ParsedIcsProperty> {
+    unfold_ics_lines(block)
+        .into_iter()
+        .filter_map(|line| parse_ics_property(&line))
+        .collect()
+}
+
+fn parse_ics_property(line: &str) -> Option<ParsedIcsProperty> {
+    let line = line.trim_end_matches('\r');
+    let (left, value) = line.split_once(':')?;
+    let mut parts = left.split(';');
+    let name = parts.next()?.to_ascii_uppercase();
+    let parameters = parts
+        .filter_map(|part| {
+            let (name, value) = part.split_once('=')?;
+            Some(CalDavParameter {
+                name: name.to_ascii_uppercase(),
+                value: value.trim_matches('"').to_string(),
+            })
+        })
+        .collect();
+    Some(ParsedIcsProperty {
+        name,
+        value: value.to_string(),
+        parameters,
+    })
+}
+
+fn property_value(props: &[ParsedIcsProperty], name: &str) -> Option<String> {
+    props
+        .iter()
+        .find(|prop| prop.name == name)
+        .map(|prop| prop.value.clone())
+}
+
+fn property_values(props: &[ParsedIcsProperty], name: &str) -> Vec<String> {
+    props
+        .iter()
+        .filter(|prop| prop.name == name)
+        .map(|prop| prop.value.clone())
+        .collect()
+}
+
+fn parameter_value(prop: &ParsedIcsProperty, name: &str) -> Option<String> {
+    prop.parameters
+        .iter()
+        .find(|param| param.name == name)
+        .map(|param| param.value.clone())
+}
+
+fn property_parameter_value(
+    props: &[ParsedIcsProperty],
+    property_name: &str,
+    parameter_name: &str,
+) -> Option<String> {
+    props
+        .iter()
+        .find(|prop| prop.name == property_name)
+        .and_then(|prop| parameter_value(prop, parameter_name))
+}
+
+fn into_caldav_property(prop: ParsedIcsProperty) -> CalDavProperty {
+    CalDavProperty {
+        name: prop.name,
+        value: prop.value,
+        parameters: prop.parameters,
+    }
+}
+
+fn extract_ics_blocks(ics: &str, component: &str) -> Vec<String> {
+    let begin = format!("BEGIN:{component}");
+    let end = format!("END:{component}");
+    let mut blocks = Vec::new();
+    let mut current: Vec<String> = Vec::new();
+    let mut depth = 0usize;
+
+    for line in unfold_ics_lines(ics) {
+        let clean = line.trim_end_matches('\r').to_string();
+        if clean == begin {
+            depth += 1;
+            current.push(clean);
+            continue;
+        }
+        if depth > 0 {
+            current.push(clean.clone());
+            if clean == begin {
+                depth += 1;
+            } else if clean == end {
+                depth -= 1;
+                if depth == 0 {
+                    blocks.push(current.join("\r\n"));
+                    current.clear();
+                }
+            }
+        }
+    }
+
+    blocks
 }
 
 fn parse_free_busy_intervals(xml: &str) -> Vec<CalDavFreeBusyInterval> {
@@ -2425,6 +2703,84 @@ END:VCALENDAR</c:calendar-data>
         let intervals = parse_free_busy_intervals(xml);
         assert_eq!(intervals.len(), 1);
         assert_eq!(intervals[0].busy_type.as_deref(), Some("BUSY"));
+    }
+
+    #[test]
+    fn caldav_object_details_extracts_recurrence_exceptions_alarms_and_participants() {
+        let ics = r#"BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Task Test//EN
+METHOD:REQUEST
+BEGIN:VTIMEZONE
+TZID:America/Los_Angeles
+BEGIN:STANDARD
+DTSTART:20261101T020000
+TZOFFSETFROM:-0700
+TZOFFSETTO:-0800
+END:STANDARD
+END:VTIMEZONE
+BEGIN:VEVENT
+UID:event-1
+SUMMARY:Weekly review
+DTSTART;TZID=America/Los_Angeles:20260501T090000
+DTEND;TZID=America/Los_Angeles:20260501T100000
+RRULE:FREQ=WEEKLY;COUNT=3
+EXDATE;TZID=America/Los_Angeles:20260508T090000
+RDATE;TZID=America/Los_Angeles:20260509T090000
+ORGANIZER;CN=Cody:mailto:cody@example.com
+ATTENDEE;CN=Agent;ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED;RSVP=FALSE:mailto:agent@example.com
+BEGIN:VALARM
+ACTION:DISPLAY
+TRIGGER:-PT15M
+DESCRIPTION:Review starts soon
+END:VALARM
+END:VEVENT
+BEGIN:VEVENT
+UID:event-1
+RECURRENCE-ID;TZID=America/Los_Angeles:20260515T090000
+SUMMARY:Weekly review moved
+DTSTART;TZID=America/Los_Angeles:20260515T110000
+DTEND;TZID=America/Los_Angeles:20260515T120000
+END:VEVENT
+END:VCALENDAR"#;
+
+        let details = parse_caldav_object_details(ics);
+        assert_eq!(details.product_id.as_deref(), Some("-//Task Test//EN"));
+        assert_eq!(details.method.as_deref(), Some("REQUEST"));
+        assert_eq!(details.timezones.len(), 1);
+        assert_eq!(details.timezones[0].tzid, "America/Los_Angeles");
+        assert_eq!(details.events.len(), 2);
+
+        let master = &details.events[0];
+        assert_eq!(master.uid.as_deref(), Some("event-1"));
+        assert_eq!(
+            master.dtstart_timezone.as_deref(),
+            Some("America/Los_Angeles")
+        );
+        assert_eq!(master.rrules, vec!["FREQ=WEEKLY;COUNT=3"]);
+        assert_eq!(master.exdates, vec!["20260508T090000"]);
+        assert_eq!(master.rdates, vec!["20260509T090000"]);
+        assert_eq!(
+            master.organizer.as_ref().and_then(|p| p.cn.as_deref()),
+            Some("Cody")
+        );
+        assert_eq!(master.attendees[0].partstat.as_deref(), Some("ACCEPTED"));
+        assert_eq!(master.alarms.len(), 1);
+        assert_eq!(master.alarms[0].trigger.as_deref(), Some("-PT15M"));
+
+        let override_event = &details.events[1];
+        assert_eq!(
+            override_event.recurrence_id.as_deref(),
+            Some("20260515T090000")
+        );
+        assert_eq!(
+            override_event.recurrence_id_timezone.as_deref(),
+            Some("America/Los_Angeles")
+        );
+        assert_eq!(
+            override_event.summary.as_deref(),
+            Some("Weekly review moved")
+        );
     }
 
     #[tokio::test]

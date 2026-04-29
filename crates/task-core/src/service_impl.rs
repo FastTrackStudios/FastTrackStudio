@@ -13,11 +13,11 @@ use crate::query::Query;
 use crate::rrule;
 use crate::service::{
     CalDavDeleteObjectRequest, CalDavDiscovery, CalDavFreeBusyInterval, CalDavFreeBusyRequest,
-    CalDavMultigetRequest, CalDavObject, CalDavPutObjectRequest, CalDavSyncCollectionRequest,
-    CalDavSyncCollectionResponse, CalendarEventPatch, FileCopyMoveRequest, FileEntry,
-    FileReadResponse, FileWriteRequest, InvoiceCreateRequest, InvoicePaymentRequest, ProjectPatch,
-    RemoteDeckBoard, RemoteDeckStack, SyncStats,
-    TimeEntryContext, TimeEntryFilter, TimeEntryPatch, TimeLogRequest, TimeStartRequest,
+    CalDavMultigetRequest, CalDavObject, CalDavPutObjectRequest, CalDavScheduleRequest,
+    CalDavScheduleResponse, CalDavSyncCollectionRequest, CalDavSyncCollectionResponse,
+    CalendarEventPatch, FileCopyMoveRequest, FileEntry, FileReadResponse, FileWriteRequest,
+    InvoiceCreateRequest, InvoicePaymentRequest, ProjectPatch, RemoteDeckBoard, RemoteDeckStack,
+    SyncStats, TimeEntryContext, TimeEntryFilter, TimeEntryPatch, TimeLogRequest, TimeStartRequest,
     TimedTaskEntry, VaultError,
 };
 use crate::task::{Status, Task};
@@ -750,6 +750,27 @@ impl VaultServiceImpl {
         };
         Self::nextcloud_sync_from_config(&config)
             .delete_calendar_object(calendar, &request.href, request.if_match.as_deref())
+            .await
+    }
+
+    pub async fn send_calendar_schedule(
+        &self,
+        request: CalDavScheduleRequest,
+    ) -> Result<CalDavScheduleResponse, VaultError> {
+        let config = NextcloudRuntimeConfig::load()?
+            .ok_or_else(|| VaultError::IoError("Nextcloud CalDAV is not configured".into()))?;
+        let sync = Self::nextcloud_sync_from_config(&config);
+        let outbox_url = match request.outbox_url {
+            Some(url) if !url.is_empty() => url,
+            _ => sync
+                .discover_calendars()
+                .await?
+                .schedule_outbox_url
+                .ok_or_else(|| {
+                    VaultError::IoError("CalDAV scheduling outbox is not available".into())
+                })?,
+        };
+        sync.send_calendar_schedule(&outbox_url, &request.calendar_data)
             .await
     }
 
@@ -2631,8 +2652,17 @@ impl crate::service::CalendarService for VaultServiceImpl {
     async fn put_calendar_object(&self, request: CalDavPutObjectRequest) -> Result<(), VaultError> {
         VaultServiceImpl::put_calendar_object(self, request).await
     }
-    async fn delete_calendar_object(&self, request: CalDavDeleteObjectRequest) -> Result<(), VaultError> {
+    async fn delete_calendar_object(
+        &self,
+        request: CalDavDeleteObjectRequest,
+    ) -> Result<(), VaultError> {
         VaultServiceImpl::delete_calendar_object(self, request).await
+    }
+    async fn send_calendar_schedule(
+        &self,
+        request: CalDavScheduleRequest,
+    ) -> Result<CalDavScheduleResponse, VaultError> {
+        VaultServiceImpl::send_calendar_schedule(self, request).await
     }
     async fn calendar_free_busy(
         &self,

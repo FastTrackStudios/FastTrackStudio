@@ -223,12 +223,73 @@ export interface CalDavMultigetRequest {
   hrefs: string[];
 }
 
+export interface CalDavTimezone {
+  tzid: string;
+  calendar_data: string;
+}
+
+export interface CalDavParticipant {
+  value: string;
+  cn: string | null;
+  role: string | null;
+  partstat: string | null;
+  rsvp: string | null;
+  cutype: string | null;
+}
+
+export interface CalDavParameter {
+  name: string;
+  value: string;
+}
+
+export interface CalDavProperty {
+  name: string;
+  value: string;
+  parameters: CalDavParameter[];
+}
+
+export interface CalDavAlarm {
+  action: string | null;
+  trigger: string | null;
+  description: string | null;
+  summary: string | null;
+  attendees: CalDavParticipant[];
+  raw_properties: CalDavProperty[];
+}
+
+export interface CalDavEventInstance {
+  uid: string | null;
+  summary: string | null;
+  status: string | null;
+  recurrence_id: string | null;
+  dtstart: string | null;
+  dtend: string | null;
+  dtstart_timezone: string | null;
+  dtend_timezone: string | null;
+  recurrence_id_timezone: string | null;
+  rrules: string[];
+  rdates: string[];
+  exdates: string[];
+  organizer: CalDavParticipant | null;
+  attendees: CalDavParticipant[];
+  alarms: CalDavAlarm[];
+  raw_properties: CalDavProperty[];
+}
+
+export interface CalDavObjectDetails {
+  product_id: string | null;
+  method: string | null;
+  timezones: CalDavTimezone[];
+  events: CalDavEventInstance[];
+}
+
 export interface CalDavObject {
   href: string;
   etag: string | null;
   status: string;
   component: string | null;
   calendar_data: string | null;
+  details: CalDavObjectDetails | null;
   task: Task | null;
   event: CalendarEvent | null;
   deleted: boolean;
@@ -256,6 +317,16 @@ export interface CalDavDeleteObjectRequest {
   calendar: string;
   href: string;
   if_match: string | null;
+}
+
+export interface CalDavScheduleRequest {
+  outbox_url: string | null;
+  calendar_data: string;
+}
+
+export interface CalDavScheduleResponse {
+  status: number;
+  body: string;
 }
 
 export interface CalDavFreeBusyRequest {
@@ -331,6 +402,9 @@ export type PutCalendarObjectResponse = { ok: true; value: void } | { ok: false;
 export type DeleteCalendarObjectRequest = [CalDavDeleteObjectRequest];
 export type DeleteCalendarObjectResponse = { ok: true; value: void } | { ok: false; error: VaultError };
 
+export type SendCalendarScheduleRequest = [CalDavScheduleRequest];
+export type SendCalendarScheduleResponse = { ok: true; value: CalDavScheduleResponse } | { ok: false; error: VaultError };
+
 export type CalendarFreeBusyRequest = [CalDavFreeBusyRequest];
 export type CalendarFreeBusyResponse = { ok: true; value: CalDavFreeBusyInterval[] } | { ok: false; error: VaultError };
 
@@ -368,6 +442,8 @@ export interface CalendarServiceCaller {
   putCalendarObject(request: CalDavPutObjectRequest): Promise<{ ok: true; value: void } | { ok: false; error: VaultError }>;
   /** Delete one raw calendar object, optionally guarded by If-Match. */
   deleteCalendarObject(request: CalDavDeleteObjectRequest): Promise<{ ok: true; value: void } | { ok: false; error: VaultError }>;
+  /** Send an iTIP VCALENDAR payload through the CalDAV scheduling outbox. */
+  sendCalendarSchedule(request: CalDavScheduleRequest): Promise<{ ok: true; value: CalDavScheduleResponse } | { ok: false; error: VaultError }>;
   /** Query busy VEVENT intervals for a calendar. */
   calendarFreeBusy(request: CalDavFreeBusyRequest): Promise<{ ok: true; value: CalDavFreeBusyInterval[] } | { ok: false; error: VaultError }>;
   /** List remote Nextcloud Deck boards. */
@@ -630,6 +706,26 @@ export class CalendarServiceClient implements CalendarServiceCaller {
       }
   }
 
+  /** Send an iTIP VCALENDAR payload through the CalDAV scheduling outbox. */
+  async sendCalendarSchedule(request: CalDavScheduleRequest): Promise<{ ok: true; value: CalDavScheduleResponse } | { ok: false; error: VaultError }> {
+    const descriptor = calendarService_sendCalendarSchedule_method;
+    const sendSchemas = calendarService_descriptor.send_schemas;
+      try {
+        const value = await this.caller.call({
+          method: "CalendarService.sendCalendarSchedule",
+          args: { request },
+          descriptor,
+          sendSchemas,
+        });
+        return { ok: true, value } as { ok: true; value: CalDavScheduleResponse } | { ok: false; error: VaultError };
+      } catch (e: any) {
+        if (e instanceof RpcError && e.isUserError()) {
+          return { ok: false, error: e.userError } as { ok: true; value: CalDavScheduleResponse } | { ok: false; error: VaultError };
+        }
+        throw e;
+      }
+  }
+
   /** Query busy VEVENT intervals for a calendar. */
   async calendarFreeBusy(request: CalDavFreeBusyRequest): Promise<{ ok: true; value: CalDavFreeBusyInterval[] } | { ok: false; error: VaultError }> {
     const descriptor = calendarService_calendarFreeBusy_method;
@@ -720,6 +816,7 @@ export interface CalendarServiceHandler {
   calendarSyncCollection(request: CalDavSyncCollectionRequest): Promise<{ ok: true; value: CalDavSyncCollectionResponse } | { ok: false; error: VaultError }> | { ok: true; value: CalDavSyncCollectionResponse } | { ok: false; error: VaultError };
   putCalendarObject(request: CalDavPutObjectRequest): Promise<{ ok: true; value: void } | { ok: false; error: VaultError }> | { ok: true; value: void } | { ok: false; error: VaultError };
   deleteCalendarObject(request: CalDavDeleteObjectRequest): Promise<{ ok: true; value: void } | { ok: false; error: VaultError }> | { ok: true; value: void } | { ok: false; error: VaultError };
+  sendCalendarSchedule(request: CalDavScheduleRequest): Promise<{ ok: true; value: CalDavScheduleResponse } | { ok: false; error: VaultError }> | { ok: true; value: CalDavScheduleResponse } | { ok: false; error: VaultError };
   calendarFreeBusy(request: CalDavFreeBusyRequest): Promise<{ ok: true; value: CalDavFreeBusyInterval[] } | { ok: false; error: VaultError }> | { ok: true; value: CalDavFreeBusyInterval[] } | { ok: false; error: VaultError };
   listDeckBoards(): Promise<{ ok: true; value: RemoteDeckBoard[] } | { ok: false; error: VaultError }> | { ok: true; value: RemoteDeckBoard[] } | { ok: false; error: VaultError };
   listDeckStacks(boardId: bigint): Promise<{ ok: true; value: RemoteDeckStack[] } | { ok: false; error: VaultError }> | { ok: true; value: RemoteDeckStack[] } | { ok: false; error: VaultError };
@@ -829,6 +926,13 @@ export class CalendarServiceDispatcher implements Dispatcher {
       } catch (error) {
         call.replyInternalError(error instanceof Error ? error.message : String(error));
       }
+    } else if (method.id === 0xff50da5f5c172310n) {
+      try {
+        const result = await this.handler.sendCalendarSchedule(args[0] as CalDavScheduleRequest);
+        if (result.ok) call.reply(result.value); else call.replyErr(result.error);
+      } catch (error) {
+        call.replyInternalError(error instanceof Error ? error.message : String(error));
+      }
     } else if (method.id === 0x34762fdef26cf9e2n) {
       try {
         const result = await this.handler.calendarFreeBusy(args[0] as CalDavFreeBusyRequest);
@@ -892,11 +996,21 @@ export const calendarService_send_schemas: import("@bearcove/vox-core").ServiceS
     [0x716503aadea5d57an, { id: 0x716503aadea5d57an, type_params: [], kind: { tag: 'struct', name: 'CalDavCalendarInfo', fields: [{ name: 'href', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }, { name: 'name', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }, { name: 'display_name', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'sync_token', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'ctag', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'components', type_ref: { tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }] } }],
     [0x3727a70a970c6597n, { id: 0x3727a70a970c6597n, type_params: [], kind: { tag: 'struct', name: 'CalDavDiscovery', fields: [{ name: 'principal_url', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }, { name: 'calendar_home_set', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }, { name: 'schedule_inbox_url', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'schedule_outbox_url', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'calendar_user_addresses', type_ref: { tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'calendars', type_ref: { tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x716503aadea5d57an, args: [] }] }, required: true }] } }],
     [0xc079cd68a3b6f475n, { id: 0xc079cd68a3b6f475n, type_params: [], kind: { tag: 'struct', name: 'CalDavMultigetRequest', fields: [{ name: 'calendar', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }, { name: 'hrefs', type_ref: { tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }] } }],
-    [0x79098e18a7feb8ean, { id: 0x79098e18a7feb8ean, type_params: [], kind: { tag: 'struct', name: 'CalDavObject', fields: [{ name: 'href', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }, { name: 'etag', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'status', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }, { name: 'component', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'calendar_data', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'task', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x97c49e11dc55e02bn, args: [] }] }, required: true }, { name: 'event', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0xe0e8cad5e9c2c992n, args: [] }] }, required: true }, { name: 'deleted', type_ref: { tag: 'concrete', type_id: 0x178367a87f66fb46n, args: [] }, required: true }] } }],
+    [0x4d1b33ecf7d08f98n, { id: 0x4d1b33ecf7d08f98n, type_params: [], kind: { tag: 'struct', name: 'CalDavTimezone', fields: [{ name: 'tzid', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }, { name: 'calendar_data', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }] } }],
+    [0xf825d08931ed7213n, { id: 0xf825d08931ed7213n, type_params: [], kind: { tag: 'struct', name: 'CalDavParticipant', fields: [{ name: 'value', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }, { name: 'cn', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'role', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'partstat', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'rsvp', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'cutype', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }] } }],
+    [0xe50fa875dc3fb582n, { id: 0xe50fa875dc3fb582n, type_params: [], kind: { tag: 'struct', name: 'CalDavParameter', fields: [{ name: 'name', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }, { name: 'value', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }] } }],
+    [0x1d2b04ec523c4ffbn, { id: 0x1d2b04ec523c4ffbn, type_params: [], kind: { tag: 'struct', name: 'CalDavProperty', fields: [{ name: 'name', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }, { name: 'value', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }, { name: 'parameters', type_ref: { tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0xe50fa875dc3fb582n, args: [] }] }, required: true }] } }],
+    [0x68b2120ce268c767n, { id: 0x68b2120ce268c767n, type_params: [], kind: { tag: 'struct', name: 'CalDavAlarm', fields: [{ name: 'action', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'trigger', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'description', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'summary', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'attendees', type_ref: { tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0xf825d08931ed7213n, args: [] }] }, required: true }, { name: 'raw_properties', type_ref: { tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x1d2b04ec523c4ffbn, args: [] }] }, required: true }] } }],
+    [0xe479723fe87f838bn, { id: 0xe479723fe87f838bn, type_params: [], kind: { tag: 'struct', name: 'CalDavEventInstance', fields: [{ name: 'uid', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'summary', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'status', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'recurrence_id', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'dtstart', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'dtend', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'dtstart_timezone', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'dtend_timezone', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'recurrence_id_timezone', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'rrules', type_ref: { tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'rdates', type_ref: { tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'exdates', type_ref: { tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'organizer', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0xf825d08931ed7213n, args: [] }] }, required: true }, { name: 'attendees', type_ref: { tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0xf825d08931ed7213n, args: [] }] }, required: true }, { name: 'alarms', type_ref: { tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x68b2120ce268c767n, args: [] }] }, required: true }, { name: 'raw_properties', type_ref: { tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x1d2b04ec523c4ffbn, args: [] }] }, required: true }] } }],
+    [0x36a43360f1e996e4n, { id: 0x36a43360f1e996e4n, type_params: [], kind: { tag: 'struct', name: 'CalDavObjectDetails', fields: [{ name: 'product_id', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'method', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'timezones', type_ref: { tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x4d1b33ecf7d08f98n, args: [] }] }, required: true }, { name: 'events', type_ref: { tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0xe479723fe87f838bn, args: [] }] }, required: true }] } }],
+    [0x2c5c50fd9ab9e2c6n, { id: 0x2c5c50fd9ab9e2c6n, type_params: [], kind: { tag: 'struct', name: 'CalDavObject', fields: [{ name: 'href', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }, { name: 'etag', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'status', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }, { name: 'component', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'calendar_data', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'details', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x36a43360f1e996e4n, args: [] }] }, required: true }, { name: 'task', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x97c49e11dc55e02bn, args: [] }] }, required: true }, { name: 'event', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0xe0e8cad5e9c2c992n, args: [] }] }, required: true }, { name: 'deleted', type_ref: { tag: 'concrete', type_id: 0x178367a87f66fb46n, args: [] }, required: true }] } }],
     [0xe61e2ce3b9362197n, { id: 0xe61e2ce3b9362197n, type_params: [], kind: { tag: 'struct', name: 'CalDavSyncCollectionRequest', fields: [{ name: 'calendar', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }, { name: 'sync_token', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }] } }],
-    [0x1c8d3c42d64fe6fcn, { id: 0x1c8d3c42d64fe6fcn, type_params: [], kind: { tag: 'struct', name: 'CalDavSyncCollectionResponse', fields: [{ name: 'sync_token', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'objects', type_ref: { tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x79098e18a7feb8ean, args: [] }] }, required: true }] } }],
+    [0xcc8fa33f53ad2796n, { id: 0xcc8fa33f53ad2796n, type_params: [], kind: { tag: 'struct', name: 'CalDavSyncCollectionResponse', fields: [{ name: 'sync_token', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'objects', type_ref: { tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x2c5c50fd9ab9e2c6n, args: [] }] }, required: true }] } }],
     [0x5dbb0431bbd5c53fn, { id: 0x5dbb0431bbd5c53fn, type_params: [], kind: { tag: 'struct', name: 'CalDavPutObjectRequest', fields: [{ name: 'calendar', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }, { name: 'href', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }, { name: 'calendar_data', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }, { name: 'if_match', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'if_none_match', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }] } }],
     [0x915ac42105cb8b8en, { id: 0x915ac42105cb8b8en, type_params: [], kind: { tag: 'struct', name: 'CalDavDeleteObjectRequest', fields: [{ name: 'calendar', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }, { name: 'href', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }, { name: 'if_match', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }] } }],
+    [0xd5d950d6966a63a2n, { id: 0xd5d950d6966a63a2n, type_params: [], kind: { tag: 'struct', name: 'CalDavScheduleRequest', fields: [{ name: 'outbox_url', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'calendar_data', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }] } }],
+    [0x1be6c8d0625ea876n, { id: 0x1be6c8d0625ea876n, type_params: [], kind: { tag: 'primitive', primitive_type: 'u16' } }],
+    [0x762be3dd9f391225n, { id: 0x762be3dd9f391225n, type_params: [], kind: { tag: 'struct', name: 'CalDavScheduleResponse', fields: [{ name: 'status', type_ref: { tag: 'concrete', type_id: 0x1be6c8d0625ea876n, args: [] }, required: true }, { name: 'body', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }] } }],
     [0xc5e8fb5d97adce5cn, { id: 0xc5e8fb5d97adce5cn, type_params: [], kind: { tag: 'struct', name: 'CalDavFreeBusyRequest', fields: [{ name: 'calendar', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }, { name: 'start', type_ref: { tag: 'concrete', type_id: 0x897ee6096f7bb726n, args: [] }, required: true }, { name: 'end', type_ref: { tag: 'concrete', type_id: 0x897ee6096f7bb726n, args: [] }, required: true }] } }],
     [0x6d6e14f6827c0d83n, { id: 0x6d6e14f6827c0d83n, type_params: [], kind: { tag: 'struct', name: 'CalDavFreeBusyInterval', fields: [{ name: 'start', type_ref: { tag: 'concrete', type_id: 0x897ee6096f7bb726n, args: [] }, required: true }, { name: 'end', type_ref: { tag: 'concrete', type_id: 0x897ee6096f7bb726n, args: [] }, required: true }, { name: 'busy_type', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }] } }],
     [0xd9356298b81639acn, { id: 0xd9356298b81639acn, type_params: [], kind: { tag: 'primitive', primitive_type: 'u64' } }],
@@ -913,10 +1027,11 @@ export const calendarService_send_schemas: import("@bearcove/vox-core").ServiceS
     [0xb6c35ead6f3a86a1n, { argsRootRef: { tag: 'concrete', type_id: 0xbc5c33249a2dc720n, args: [] }, responseRootRef: { tag: 'concrete', type_id: 0x42046de663beeef0n, args: [{ tag: 'concrete', type_id: 0x824decc4c5fc6e7an, args: [] }, { tag: 'concrete', type_id: 0x4cf4b2aeb98a1939n, args: [{ tag: 'concrete', type_id: 0xcaab6065094a4dbfn, args: [] }] }] } }],
     [0x9c8eb69d02285e61n, { argsRootRef: { tag: 'concrete', type_id: 0xbc5c33249a2dc720n, args: [] }, responseRootRef: { tag: 'concrete', type_id: 0x42046de663beeef0n, args: [{ tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x824decc4c5fc6e7an, args: [] }] }, { tag: 'concrete', type_id: 0x4cf4b2aeb98a1939n, args: [{ tag: 'concrete', type_id: 0x5db70a394660f3e6n, args: [] }] }] } }],
     [0xd79b5663a1916dean, { argsRootRef: { tag: 'concrete', type_id: 0xbc5c33249a2dc720n, args: [] }, responseRootRef: { tag: 'concrete', type_id: 0x42046de663beeef0n, args: [{ tag: 'concrete', type_id: 0x3727a70a970c6597n, args: [] }, { tag: 'concrete', type_id: 0x4cf4b2aeb98a1939n, args: [{ tag: 'concrete', type_id: 0xcaab6065094a4dbfn, args: [] }] }] } }],
-    [0xcb7105279cddb3f7n, { argsRootRef: { tag: 'concrete', type_id: 0x6847ab90feda71c1n, args: [{ tag: 'concrete', type_id: 0xc079cd68a3b6f475n, args: [] }] }, responseRootRef: { tag: 'concrete', type_id: 0x42046de663beeef0n, args: [{ tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x79098e18a7feb8ean, args: [] }] }, { tag: 'concrete', type_id: 0x4cf4b2aeb98a1939n, args: [{ tag: 'concrete', type_id: 0xcaab6065094a4dbfn, args: [] }] }] } }],
-    [0x4b35ce91803bbbadn, { argsRootRef: { tag: 'concrete', type_id: 0x6847ab90feda71c1n, args: [{ tag: 'concrete', type_id: 0xe61e2ce3b9362197n, args: [] }] }, responseRootRef: { tag: 'concrete', type_id: 0x42046de663beeef0n, args: [{ tag: 'concrete', type_id: 0x1c8d3c42d64fe6fcn, args: [] }, { tag: 'concrete', type_id: 0x4cf4b2aeb98a1939n, args: [{ tag: 'concrete', type_id: 0xcaab6065094a4dbfn, args: [] }] }] } }],
+    [0xcb7105279cddb3f7n, { argsRootRef: { tag: 'concrete', type_id: 0x6847ab90feda71c1n, args: [{ tag: 'concrete', type_id: 0xc079cd68a3b6f475n, args: [] }] }, responseRootRef: { tag: 'concrete', type_id: 0x42046de663beeef0n, args: [{ tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x2c5c50fd9ab9e2c6n, args: [] }] }, { tag: 'concrete', type_id: 0x4cf4b2aeb98a1939n, args: [{ tag: 'concrete', type_id: 0xcaab6065094a4dbfn, args: [] }] }] } }],
+    [0x4b35ce91803bbbadn, { argsRootRef: { tag: 'concrete', type_id: 0x6847ab90feda71c1n, args: [{ tag: 'concrete', type_id: 0xe61e2ce3b9362197n, args: [] }] }, responseRootRef: { tag: 'concrete', type_id: 0x42046de663beeef0n, args: [{ tag: 'concrete', type_id: 0xcc8fa33f53ad2796n, args: [] }, { tag: 'concrete', type_id: 0x4cf4b2aeb98a1939n, args: [{ tag: 'concrete', type_id: 0xcaab6065094a4dbfn, args: [] }] }] } }],
     [0x82f0151b497521a2n, { argsRootRef: { tag: 'concrete', type_id: 0x6847ab90feda71c1n, args: [{ tag: 'concrete', type_id: 0x5dbb0431bbd5c53fn, args: [] }] }, responseRootRef: { tag: 'concrete', type_id: 0x42046de663beeef0n, args: [{ tag: 'concrete', type_id: 0xbc5c33249a2dc720n, args: [] }, { tag: 'concrete', type_id: 0x4cf4b2aeb98a1939n, args: [{ tag: 'concrete', type_id: 0xcaab6065094a4dbfn, args: [] }] }] } }],
     [0x5f8362deb46fdf13n, { argsRootRef: { tag: 'concrete', type_id: 0x6847ab90feda71c1n, args: [{ tag: 'concrete', type_id: 0x915ac42105cb8b8en, args: [] }] }, responseRootRef: { tag: 'concrete', type_id: 0x42046de663beeef0n, args: [{ tag: 'concrete', type_id: 0xbc5c33249a2dc720n, args: [] }, { tag: 'concrete', type_id: 0x4cf4b2aeb98a1939n, args: [{ tag: 'concrete', type_id: 0xcaab6065094a4dbfn, args: [] }] }] } }],
+    [0xff50da5f5c172310n, { argsRootRef: { tag: 'concrete', type_id: 0x6847ab90feda71c1n, args: [{ tag: 'concrete', type_id: 0xd5d950d6966a63a2n, args: [] }] }, responseRootRef: { tag: 'concrete', type_id: 0x42046de663beeef0n, args: [{ tag: 'concrete', type_id: 0x762be3dd9f391225n, args: [] }, { tag: 'concrete', type_id: 0x4cf4b2aeb98a1939n, args: [{ tag: 'concrete', type_id: 0xcaab6065094a4dbfn, args: [] }] }] } }],
     [0x34762fdef26cf9e2n, { argsRootRef: { tag: 'concrete', type_id: 0x6847ab90feda71c1n, args: [{ tag: 'concrete', type_id: 0xc5e8fb5d97adce5cn, args: [] }] }, responseRootRef: { tag: 'concrete', type_id: 0x42046de663beeef0n, args: [{ tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x6d6e14f6827c0d83n, args: [] }] }, { tag: 'concrete', type_id: 0x4cf4b2aeb98a1939n, args: [{ tag: 'concrete', type_id: 0xcaab6065094a4dbfn, args: [] }] }] } }],
     [0x8b4a4fdfab4d5090n, { argsRootRef: { tag: 'concrete', type_id: 0xbc5c33249a2dc720n, args: [] }, responseRootRef: { tag: 'concrete', type_id: 0x42046de663beeef0n, args: [{ tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x77186d1d5f08be11n, args: [] }] }, { tag: 'concrete', type_id: 0x4cf4b2aeb98a1939n, args: [{ tag: 'concrete', type_id: 0xcaab6065094a4dbfn, args: [] }] }] } }],
     [0x8883cfb34aab2188n, { argsRootRef: { tag: 'concrete', type_id: 0x6847ab90feda71c1n, args: [{ tag: 'concrete', type_id: 0xd9356298b81639acn, args: [] }] }, responseRootRef: { tag: 'concrete', type_id: 0x42046de663beeef0n, args: [{ tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0xb086dfc81f671605n, args: [] }] }, { tag: 'concrete', type_id: 0x4cf4b2aeb98a1939n, args: [{ tag: 'concrete', type_id: 0xcaab6065094a4dbfn, args: [] }] }] } }],
@@ -1001,6 +1116,12 @@ export const calendarService_deleteCalendarObject_method: MethodDescriptor = {
   retry: { persist: false, idem: false },
 };
 
+export const calendarService_sendCalendarSchedule_method: MethodDescriptor = {
+  name: 'sendCalendarSchedule',
+  id: 0xff50da5f5c172310n,
+  retry: { persist: false, idem: false },
+};
+
 export const calendarService_calendarFreeBusy_method: MethodDescriptor = {
   name: 'calendarFreeBusy',
   id: 0x34762fdef26cf9e2n,
@@ -1037,6 +1158,7 @@ export const calendarService_descriptor: ServiceDescriptor = {
     [calendarService_calendarSyncCollection_method.id, calendarService_calendarSyncCollection_method],
     [calendarService_putCalendarObject_method.id, calendarService_putCalendarObject_method],
     [calendarService_deleteCalendarObject_method.id, calendarService_deleteCalendarObject_method],
+    [calendarService_sendCalendarSchedule_method.id, calendarService_sendCalendarSchedule_method],
     [calendarService_calendarFreeBusy_method.id, calendarService_calendarFreeBusy_method],
     [calendarService_listDeckBoards_method.id, calendarService_listDeckBoards_method],
     [calendarService_listDeckStacks_method.id, calendarService_listDeckStacks_method],
