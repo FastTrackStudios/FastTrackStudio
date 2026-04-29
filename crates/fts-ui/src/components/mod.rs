@@ -24,6 +24,7 @@ pub use label::*;
 pub use progress::*;
 pub use side_sheet::*;
 pub use switch::*;
+pub use toast::*;
 
 // --- Migrated from signal-ui ---
 mod dialog;
