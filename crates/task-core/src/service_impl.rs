@@ -2,7 +2,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use chrono::Utc;
+use chrono::{NaiveDate, Utc};
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
@@ -34,6 +34,11 @@ pub enum VaultKind {
     Personal,
     /// Shared project vault (Nextcloud-synced) — Projects/Resources/Archive.
     Projects,
+}
+
+#[derive(Debug, Default)]
+struct RemoteMergeResult {
+    blocked_push_keys: std::collections::HashSet<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -530,22 +535,29 @@ impl VaultServiceImpl {
         );
 
         let local_tasks = self.list_tasks().await;
+        let mut blocked_calendar_push = std::collections::HashSet::new();
+
+        match sync.pull_tasks_from_calendar(&config.calendar).await {
+            Ok(remote_tasks) => {
+                stats.calendar_pulled = remote_tasks.len() as u32;
+                let result = self
+                    .merge_remote_tasks("caldav", remote_tasks, &local_tasks, &mut stats)
+                    .await?;
+                blocked_calendar_push.extend(result.blocked_push_keys);
+            }
+            Err(e) => stats.errors.push(format!("CalDAV pull: {e}")),
+        }
+
         for task in &local_tasks {
+            if blocked_calendar_push.contains(&task_sync_key(task)) {
+                continue;
+            }
             match sync.push_task_to_calendar(&config.calendar, task).await {
                 Ok(()) => stats.calendar_pushed += 1,
                 Err(e) => stats
                     .errors
                     .push(format!("CalDAV push '{}': {e}", task.title)),
             }
-        }
-
-        match sync.pull_tasks_from_calendar(&config.calendar).await {
-            Ok(remote_tasks) => {
-                stats.calendar_pulled = remote_tasks.len() as u32;
-                self.merge_remote_tasks(remote_tasks, &local_tasks, &mut stats)
-                    .await?;
-            }
-            Err(e) => stats.errors.push(format!("CalDAV pull: {e}")),
         }
 
         if config.deck_enabled {
@@ -574,8 +586,13 @@ impl VaultServiceImpl {
                                         project.title
                                     ));
                                 }
-                                self.merge_remote_tasks(remote_tasks, &local_tasks, &mut stats)
-                                    .await?;
+                                self.merge_remote_tasks(
+                                    "deck",
+                                    remote_tasks,
+                                    &local_tasks,
+                                    &mut stats,
+                                )
+                                .await?;
                             }
                             Err(e) => stats
                                 .errors
@@ -648,22 +665,55 @@ impl VaultServiceImpl {
 
     async fn merge_remote_tasks(
         &self,
+        source: &str,
         remote_tasks: Vec<Task>,
         local_tasks: &[Task],
         stats: &mut SyncStats,
-    ) -> Result<(), VaultError> {
+    ) -> Result<RemoteMergeResult, VaultError> {
+        let mut result = RemoteMergeResult::default();
         for remote in remote_tasks {
-            let exists = local_tasks.iter().any(|local| {
-                (local.id.as_deref().is_some() && local.id == remote.id)
-                    || local.title == remote.title
-            });
-            if exists {
+            if let Some(local) = find_matching_local_task(&remote, local_tasks) {
+                let conflicts = task_sync_conflicts(local, &remote);
+                if !conflicts.is_empty() {
+                    result.blocked_push_keys.insert(task_sync_key(local));
+                    for conflict in conflicts {
+                        if let Err(e) = self
+                            .record_conflict(
+                                "task",
+                                local
+                                    .id
+                                    .as_deref()
+                                    .or(remote.id.as_deref())
+                                    .unwrap_or(&local.title),
+                                conflict.field,
+                                conflict.local_value.as_deref(),
+                                conflict.remote_value.as_deref(),
+                                Some("local"),
+                                Some(source),
+                                None,
+                                "sync",
+                            )
+                            .await
+                        {
+                            stats.errors.push(format!(
+                                "{source} conflict log '{}': {e}",
+                                local.title
+                            ));
+                        }
+                    }
+                    continue;
+                }
+
+                if remote_is_newer(local, &remote) {
+                    self.vault.read().await.save_task(&remote)?;
+                    stats.files_updated += 1;
+                }
                 continue;
             }
             self.vault.read().await.save_task(&remote)?;
             stats.files_created += 1;
         }
-        Ok(())
+        Ok(result)
     }
 
     async fn ensure_project_from_remote(&self, project: &Project) -> Result<(), VaultError> {
@@ -2270,6 +2320,117 @@ impl crate::service::CalendarService for VaultServiceImpl {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TaskSyncConflict {
+    field: &'static str,
+    local_value: Option<String>,
+    remote_value: Option<String>,
+}
+
+fn task_sync_key(task: &Task) -> String {
+    task.id
+        .as_deref()
+        .map(|id| format!("id:{id}"))
+        .unwrap_or_else(|| format!("title:{}", task.title))
+}
+
+fn find_matching_local_task<'a>(remote: &Task, local_tasks: &'a [Task]) -> Option<&'a Task> {
+    local_tasks.iter().find(|local| {
+        (remote.id.is_some() && local.id == remote.id) || local.title == remote.title
+    })
+}
+
+fn remote_is_newer(local: &Task, remote: &Task) -> bool {
+    matches!(
+        (local.date_modified, remote.date_modified),
+        (Some(local_modified), Some(remote_modified)) if remote_modified > local_modified
+    )
+}
+
+fn both_sides_modified(local: &Task, remote: &Task) -> bool {
+    match (local.date_modified, remote.date_modified) {
+        (Some(local_modified), Some(remote_modified)) => local_modified != remote_modified,
+        _ => false,
+    }
+}
+
+fn task_sync_conflicts(local: &Task, remote: &Task) -> Vec<TaskSyncConflict> {
+    if !both_sides_modified(local, remote) {
+        return Vec::new();
+    }
+
+    let mut conflicts = Vec::new();
+    push_conflict(
+        &mut conflicts,
+        "title",
+        Some(local.title.clone()),
+        Some(remote.title.clone()),
+    );
+    push_conflict(
+        &mut conflicts,
+        "status",
+        Some(format!("{:?}", local.status)),
+        Some(format!("{:?}", remote.status)),
+    );
+    push_conflict(
+        &mut conflicts,
+        "priority",
+        Some(format!("{:?}", local.priority)),
+        Some(format!("{:?}", remote.priority)),
+    );
+    push_conflict(&mut conflicts, "due", fmt_date(local.due), fmt_date(remote.due));
+    push_conflict(
+        &mut conflicts,
+        "scheduled",
+        fmt_date(local.scheduled),
+        fmt_date(remote.scheduled),
+    );
+    push_conflict(
+        &mut conflicts,
+        "assignee",
+        local.assignee.clone(),
+        remote.assignee.clone(),
+    );
+    push_conflict(
+        &mut conflicts,
+        "tags",
+        Some(local.tags.join(",")),
+        Some(remote.tags.join(",")),
+    );
+    push_conflict(
+        &mut conflicts,
+        "projects",
+        Some(local.projects.iter().map(|p| p.0.as_str()).collect::<Vec<_>>().join(",")),
+        Some(remote.projects.iter().map(|p| p.0.as_str()).collect::<Vec<_>>().join(",")),
+    );
+    push_conflict(
+        &mut conflicts,
+        "body",
+        Some(local.body.clone()),
+        Some(remote.body.clone()),
+    );
+    conflicts
+}
+
+fn push_conflict(
+    conflicts: &mut Vec<TaskSyncConflict>,
+    field: &'static str,
+    local_value: Option<String>,
+    remote_value: Option<String>,
+) {
+    if local_value != remote_value {
+        conflicts.push(TaskSyncConflict {
+            field,
+            local_value,
+            remote_value,
+        });
+    }
+}
+
+fn fmt_date(date: Option<NaiveDate>) -> Option<String> {
+    date.map(|d| d.to_string())
+}
+
 /// Diff two versions of a task and write one audit row per changed scalar
 /// field. Lists (tags/projects/contexts) emit one row tagged with the diff
 /// summary rather than per-element rows — noisy enough as one entry.
@@ -2362,5 +2523,61 @@ fn record_task_diff(
             actor,
             Some(file_path),
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::task::{Priority, WikiLink};
+
+    fn modified_at(ts: &str) -> chrono::DateTime<Utc> {
+        chrono::DateTime::parse_from_rfc3339(ts).unwrap().to_utc()
+    }
+
+    #[test]
+    fn caldav_conflict_detection_blocks_same_field_overwrite() {
+        let local = Task {
+            id: Some("task-1".to_string()),
+            title: "Shared task".to_string(),
+            status: Status::InProgress,
+            priority: Priority::Normal,
+            date_modified: Some(modified_at("2026-04-29T10:00:00Z")),
+            projects: vec![WikiLink("Personal".to_string())],
+            ..Default::default()
+        };
+        let remote = Task {
+            id: Some("task-1".to_string()),
+            title: "Shared task".to_string(),
+            status: Status::Done,
+            priority: Priority::Normal,
+            date_modified: Some(modified_at("2026-04-29T10:05:00Z")),
+            projects: vec![WikiLink("Personal".to_string())],
+            ..Default::default()
+        };
+
+        let conflicts = task_sync_conflicts(&local, &remote);
+        assert_eq!(conflicts.len(), 1);
+        assert_eq!(conflicts[0].field, "status");
+        assert_eq!(task_sync_key(&local), "id:task-1");
+    }
+
+    #[test]
+    fn caldav_remote_newer_without_field_delta_is_not_a_conflict() {
+        let local = Task {
+            id: Some("task-2".to_string()),
+            title: "Same task".to_string(),
+            status: Status::Open,
+            priority: Priority::High,
+            date_modified: Some(modified_at("2026-04-29T10:00:00Z")),
+            ..Default::default()
+        };
+        let remote = Task {
+            date_modified: Some(modified_at("2026-04-29T11:00:00Z")),
+            ..local.clone()
+        };
+
+        assert!(remote_is_newer(&local, &remote));
+        assert!(task_sync_conflicts(&local, &remote).is_empty());
     }
 }

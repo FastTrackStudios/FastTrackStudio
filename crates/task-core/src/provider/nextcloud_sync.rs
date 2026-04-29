@@ -45,6 +45,16 @@ fn task_to_ics_inline(task: &Task) -> String {
         format!("STATUS:{status_str}"),
     ];
 
+    if let Some(created) = task.date_created {
+        lines.push(format!("CREATED:{}", created.format("%Y%m%dT%H%M%SZ")));
+    }
+    if let Some(modified) = task.date_modified {
+        lines.push(format!(
+            "LAST-MODIFIED:{}",
+            modified.format("%Y%m%dT%H%M%SZ")
+        ));
+    }
+
     if priority_num > 0 {
         lines.push(format!("PRIORITY:{priority_num}"));
     }
@@ -153,6 +163,14 @@ fn ics_to_task_inline(ics: &str) -> Option<Task> {
         } else if let Some(val) = line.strip_prefix("COMPLETED:") {
             let date_str = &val[..8.min(val.len())];
             task.completed_date = chrono::NaiveDate::parse_from_str(date_str, "%Y%m%d").ok();
+        } else if let Some(val) = line.strip_prefix("CREATED:") {
+            task.date_created = chrono::NaiveDateTime::parse_from_str(val, "%Y%m%dT%H%M%SZ")
+                .ok()
+                .map(|dt| dt.and_utc());
+        } else if let Some(val) = line.strip_prefix("LAST-MODIFIED:") {
+            task.date_modified = chrono::NaiveDateTime::parse_from_str(val, "%Y%m%dT%H%M%SZ")
+                .ok()
+                .map(|dt| dt.and_utc());
         } else if let Some(val) = line.strip_prefix("DESCRIPTION:") {
             for part in val.split("\\n") {
                 if let Some(proj) = part.strip_prefix("Project: ") {
@@ -1321,5 +1339,53 @@ mod tests {
         assert!(stack_matches_status("Done", &Status::Done));
         assert!(stack_matches_status("On Hold", &Status::OnHold));
         assert!(stack_matches_status("To Do", &Status::Open));
+    }
+
+    #[test]
+    fn calendar_task_roundtrip_preserves_tracking_fields() {
+        let created = chrono::DateTime::parse_from_rfc3339("2026-04-28T10:00:00Z")
+            .unwrap()
+            .to_utc();
+        let modified = chrono::DateTime::parse_from_rfc3339("2026-04-29T12:30:00Z")
+            .unwrap()
+            .to_utc();
+        let task = Task {
+            id: Some("calendar-tracking-1".to_string()),
+            title: "Calendar tracked task".to_string(),
+            status: Status::InProgress,
+            priority: Priority::High,
+            due: chrono::NaiveDate::from_ymd_opt(2026, 5, 1),
+            scheduled: chrono::NaiveDate::from_ymd_opt(2026, 4, 30),
+            date_created: Some(created),
+            date_modified: Some(modified),
+            tags: vec!["calendar".to_string(), "sync".to_string()],
+            projects: vec![WikiLink("Personal".to_string())],
+            contexts: vec!["office".to_string()],
+            time_estimate: Some(45),
+            assignee: Some("agent".to_string()),
+            recurrence: Some("FREQ=WEEKLY;BYDAY=WE".to_string()),
+            ..Default::default()
+        };
+
+        let ics = task_to_ics_inline(&task);
+        assert!(ics.contains("CREATED:20260428T100000Z"));
+        assert!(ics.contains("LAST-MODIFIED:20260429T123000Z"));
+        assert!(ics.contains("DTSTART;VALUE=DATE:20260430"));
+        assert!(ics.contains("DUE;VALUE=DATE:20260501"));
+
+        let parsed = ics_to_task_inline(&ics).expect("calendar task should parse");
+        assert_eq!(parsed.id, task.id);
+        assert_eq!(parsed.title, task.title);
+        assert_eq!(parsed.status, task.status);
+        assert_eq!(parsed.priority, task.priority);
+        assert_eq!(parsed.due, task.due);
+        assert_eq!(parsed.scheduled, task.scheduled);
+        assert_eq!(parsed.date_created, task.date_created);
+        assert_eq!(parsed.date_modified, task.date_modified);
+        assert_eq!(parsed.tags, task.tags);
+        assert_eq!(parsed.projects, task.projects);
+        assert_eq!(parsed.contexts, task.contexts);
+        assert_eq!(parsed.assignee, task.assignee);
+        assert_eq!(parsed.recurrence, task.recurrence);
     }
 }
