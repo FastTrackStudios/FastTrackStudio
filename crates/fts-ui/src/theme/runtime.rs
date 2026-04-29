@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 
-use crate::components::{Button, ButtonVariant, Label};
+use crate::components::{Button, ButtonVariant, Label, Select, SelectContent, SelectItem};
 
 const SHADOW_KEYS: [&str; 6] = [
     "shadow-color",
@@ -297,7 +297,12 @@ pub fn ThemeSwitcher(mut props: ThemeSwitcherProps) -> Element {
         .get("font-sans")
         .unwrap_or("ui-sans-serif, system-ui, sans-serif")
         .to_string();
+    let mut preset_value = use_signal(|| preset.clone());
     let input_class = "h-9 w-full rounded-lg border border-input bg-input/30 px-3 py-1 text-sm shadow-xs transition-colors focus-visible:border-ring focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50";
+
+    use_effect(move || {
+        preset_value.set(preset.clone());
+    });
 
     rsx! {
         div {
@@ -306,16 +311,22 @@ pub fn ThemeSwitcher(mut props: ThemeSwitcherProps) -> Element {
             ),
             div { class: "grid gap-1",
                 Label { "Preset" }
-                select {
-                    class: input_class,
-                    value: "{preset}",
-                    onchange: move |event: FormEvent| {
-                        if let Some(preset) = theme_preset(&event.value()) {
+                Select {
+                    value: preset_value,
+                    placeholder: "Choose a theme...".to_string(),
+                    on_change: move |value: String| {
+                        if let Some(preset) = theme_preset(&value) {
                             props.state.write().set_preset(preset);
                         }
                     },
-                    for preset_option in theme_presets() {
-                        option { value: preset_option.name.clone(), "{preset_option.label}" }
+                    SelectContent {
+                        for (index, preset_option) in theme_presets().into_iter().enumerate() {
+                            SelectItem {
+                                value: preset_option.name,
+                                index,
+                                "{preset_option.label}"
+                            }
+                        }
                     }
                 }
             }

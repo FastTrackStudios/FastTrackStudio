@@ -7,7 +7,10 @@ use std::{
 
 use dioxus::prelude::*;
 
-use super::{Table, TableBody, TableCell, TableContainer, TableHead, TableHeader, TableRow};
+use super::{
+    Select, SelectContent, SelectItem, Table, TableBody, TableCell, TableContainer, TableHead,
+    TableHeader, TableRow,
+};
 
 #[derive(Clone)]
 pub struct DataTableColumn<T> {
@@ -998,6 +1001,12 @@ pub fn DataTableToolbar<T: Clone + PartialEq + 'static>(
 ) -> Element {
     let model = props.table.model();
     let selected_count = props.table.selected_count();
+    let current_page_size = model.state.page_size.to_string();
+    let mut page_size_value = use_signal(|| current_page_size.clone());
+
+    use_effect(move || {
+        page_size_value.set(current_page_size.clone());
+    });
 
     rsx! {
         div {
@@ -1028,22 +1037,25 @@ pub fn DataTableToolbar<T: Clone + PartialEq + 'static>(
                     }
                 }
                 if props.show_page_size {
-                    select {
-                        class: "h-9 rounded-lg border border-input bg-background px-3 text-sm shadow-xs focus-visible:border-ring focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50",
-                        value: "{model.state.page_size}",
-                        onchange: {
+                    Select {
+                        value: page_size_value,
+                        class: "w-32".to_string(),
+                        on_change: {
                             let mut table = props.table.clone();
-                            move |event| {
-                            if let Ok(page_size) = event.value().parse::<usize>() {
-                                table.set_page_size(page_size);
-                            }
+                            move |value: String| {
+                                if let Ok(page_size) = value.parse::<usize>() {
+                                    table.set_page_size(page_size);
+                                }
                             }
                         },
-                        for page_size in props.page_sizes.iter().copied() {
-                            option {
-                                key: "{page_size}",
-                                value: "{page_size}",
-                                "{page_size} rows"
+                        SelectContent {
+                            for (index, page_size) in props.page_sizes.iter().copied().enumerate() {
+                                SelectItem {
+                                    key: "{page_size}",
+                                    value: page_size.to_string(),
+                                    index,
+                                    "{page_size} rows"
+                                }
                             }
                         }
                     }
