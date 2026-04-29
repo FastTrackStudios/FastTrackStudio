@@ -1793,6 +1793,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "dioxus-attributes"
+version = "0.1.0"
+source = "git+https://github.com/DioxusLabs/components?rev=733874bb35ab8a360813d841dde8353997246f09#733874bb35ab8a360813d841dde8353997246f09"
+dependencies = [
+ "dioxus-rsx",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
 name = "dioxus-cli-config"
 version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2208,12 +2219,14 @@ dependencies = [
 [[package]]
 name = "dioxus-primitives"
 version = "0.0.1"
-source = "git+https://github.com/DioxusLabs/components?rev=8e25631c7d4234ee070509156ed2abebb7b1d6e9#8e25631c7d4234ee070509156ed2abebb7b1d6e9"
+source = "git+https://github.com/DioxusLabs/components?rev=733874bb35ab8a360813d841dde8353997246f09#733874bb35ab8a360813d841dde8353997246f09"
 dependencies = [
  "dioxus",
- "dioxus-time",
+ "dioxus-attributes",
+ "dioxus-sdk-time",
  "lazy-js-bundle 0.6.2",
  "num-integer",
+ "serde",
  "time",
  "tracing",
 ]
@@ -2267,6 +2280,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "dioxus-sdk-time"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "80c25ae93a3f72e734873b97fbd09d9b1b6adff97205fb0ffd8543e3564fb78e"
+dependencies = [
+ "dioxus",
+ "futures",
+ "gloo-timers",
+ "tokio",
+]
+
+[[package]]
 name = "dioxus-signals"
 version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2304,17 +2329,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
-]
-
-[[package]]
-name = "dioxus-time"
-version = "0.7.0"
-source = "git+https://github.com/ealmloff/dioxus-std?branch=0.7#8c868ac1d60e3232e3f16f6195d6deb3c016de17"
-dependencies = [
- "dioxus",
- "futures",
- "gloo-timers",
- "tokio",
 ]
 
 [[package]]
@@ -5049,6 +5063,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "num_threads"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c7398b9c8b70908f6371f47ed36737907c87c52af34c268fed0bf0ceb92ead9"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "objc"
 version = "0.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7639,7 +7662,9 @@ checksum = "743bd48c283afc0388f9b8827b976905fb217ad9e647fae3a379a9283c4def2c"
 dependencies = [
  "deranged",
  "itoa",
+ "libc",
  "num-conv",
+ "num_threads",
  "powerfmt",
  "serde_core",
  "time-core",

@@ -1,10 +1,7 @@
 //! Slider — shadcn v4 maia style range slider.
 
 use dioxus::prelude::*;
-use dioxus_primitives::slider::{
-    Slider as PrimitiveSlider, SliderRange, SliderThumb, SliderTrack,
-    SliderValue as PrimitiveSliderValue,
-};
+use dioxus_primitives::slider::{Slider as PrimitiveSlider, SliderRange, SliderThumb, SliderTrack};
 
 // ---------------------------------------------------------------------------
 // Slider
@@ -46,15 +43,14 @@ pub fn Slider(props: SliderProps) -> Element {
 
     rsx! {
         PrimitiveSlider {
-            value: Some(PrimitiveSliderValue::Single(value())),
+            value: Some(value()),
             min,
             max,
             step,
             disabled: props.disabled,
             label: None::<String>,
             class: crate::cn::merge_slice(&["relative flex w-full touch-none select-none items-center", props.class.as_str()]),
-            on_value_change: move |next| {
-                let PrimitiveSliderValue::Single(next) = next;
+            on_value_change: move |next: f64| {
                 value.set(next);
             },
             SliderTrack {

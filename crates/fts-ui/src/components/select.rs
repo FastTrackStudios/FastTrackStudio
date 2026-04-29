@@ -28,11 +28,15 @@ pub struct SelectProps {
 #[component]
 pub fn Select(props: SelectProps) -> Element {
     let mut value = props.value;
-    let selected = if value().is_empty() {
-        None
-    } else {
-        Some(value())
-    };
+    let selected: ReadSignal<Option<String>> = use_memo(move || {
+        let value = value();
+        if value.is_empty() {
+            None
+        } else {
+            Some(value)
+        }
+    })
+    .into();
 
     rsx! {
         document::Style {
@@ -55,7 +59,6 @@ pub fn Select(props: SelectProps) -> Element {
         }
         PrimitiveSelect::<String> {
             value: Some(selected),
-            placeholder: props.placeholder,
             disabled: props.disabled,
             roving_loop: props.roving_loop,
             on_value_change: move |next: Option<String>| {
@@ -66,7 +69,7 @@ pub fn Select(props: SelectProps) -> Element {
                 }
             },
             class: crate::cn::merge_slice(&["relative w-full", props.class.as_str()]),
-            SelectTrigger {}
+            SelectTrigger { placeholder: props.placeholder.clone() }
             {props.children}
         }
     }
@@ -74,6 +77,8 @@ pub fn Select(props: SelectProps) -> Element {
 
 #[derive(Props, Clone, PartialEq)]
 pub struct SelectTriggerProps {
+    #[props(default = "Select...".to_string())]
+    pub placeholder: String,
     #[props(default)]
     pub class: String,
     #[props(default = false)]
@@ -94,6 +99,7 @@ pub fn SelectTrigger(props: SelectTriggerProps) -> Element {
                 {props.children}
             } else {
                 PrimitiveSelectValue {
+                    placeholder: props.placeholder,
                     class: "truncate text-left data-[placeholder=true]:text-muted-foreground",
                 }
                 ChevronsUpDown { class: "size-4 shrink-0 text-muted-foreground opacity-50" }
