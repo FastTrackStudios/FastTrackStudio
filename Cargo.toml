@@ -10,7 +10,7 @@ license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
 fts-ui = { path = "crates/fts-ui" }
-dioxus = "0.7.2"
+dioxus = { version = "0.7.2", default-features = false, features = ["lib"] }
 lumen-blocks = { git = "https://github.com/Leaf-Computer/lumen-blocks.git", tag = "v0.2.0" }
 dioxus-primitives = { git = "https://github.com/DioxusLabs/components", package = "dioxus-primitives", rev = "8e25631c7d4234ee070509156ed2abebb7b1d6e9" }
 lucide-dioxus = { git = "https://github.com/Leaf-Computer/lucide.git", rev = "e3e509d5855324e893aef838747cccb2d115dc15", features = ["all-icons"] }
