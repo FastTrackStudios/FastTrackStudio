@@ -26,7 +26,9 @@ pub fn Toolbar(props: ToolbarProps) -> Element {
             disabled: props.disabled,
             horizontal: props.horizontal,
             aria_label: props.aria_label,
-            class: crate::cn::merge_slice(&["inline-flex items-center gap-1 rounded-lg border p-1", props.class.as_str()]),
+            class: crate::cn::merge_slice(
+                &["inline-flex items-center gap-1 rounded-lg border border-border bg-card p-1 text-card-foreground shadow-xs", props.class.as_str()],
+            ),
             {props.children}
         }
     }

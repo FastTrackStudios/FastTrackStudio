@@ -31,13 +31,26 @@ pub struct AccordionProps {
 #[component]
 pub fn Accordion(props: AccordionProps) -> Element {
     rsx! {
+        document::Style {
+            r#"
+                .fts-accordion-item[data-open="true"] {{
+                    background: color-mix(in oklab, var(--muted) 50%, transparent);
+                }}
+
+                .fts-accordion-item:not(:last-child) {{
+                    border-bottom: 1px solid var(--border);
+                }}
+            "#
+        }
         PrimitiveAccordion {
             id: props.id,
             allow_multiple_open: props.allow_multiple_open,
             disabled: props.disabled,
             collapsible: props.collapsible,
             horizontal: props.horizontal,
-            class: crate::cn::merge_slice(&["overflow-hidden rounded-lg border", props.class.as_str()]),
+            class: crate::cn::merge_slice(
+                &["overflow-hidden rounded-lg border border-border bg-card text-card-foreground shadow-sm", props.class.as_str()],
+            ),
             {props.children}
         }
     }
@@ -81,7 +94,7 @@ pub fn AccordionItem(props: AccordionItemProps) -> Element {
                     callback.call(());
                 }
             },
-            class: crate::cn::merge_slice(&["not-last:border-b data-[open=true]:bg-muted/50", props.class.as_str()]),
+            class: crate::cn::merge_slice(&["fts-accordion-item transition-colors", props.class.as_str()]),
             {props.children}
         }
     }
@@ -107,7 +120,7 @@ pub fn AccordionTrigger(props: AccordionTriggerProps) -> Element {
         PrimitiveAccordionTrigger {
             id: props.id,
             class: crate::cn::merge(format!(
-                "group flex w-full items-center justify-between gap-6 p-4 text-left text-sm font-medium hover:underline cursor-pointer {}",
+                "group flex w-full items-center justify-between gap-6 p-4 text-left text-sm font-medium text-foreground hover:underline cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring {}",
                 props.class
             )),
             {props.children}
@@ -147,7 +160,7 @@ pub fn AccordionContent(props: AccordionContentProps) -> Element {
     rsx! {
         PrimitiveAccordionContent {
             id: props.id,
-            class: crate::cn::merge_slice(&["px-4 text-sm", props.class.as_str()]),
+            class: crate::cn::merge_slice(&["px-4 text-sm text-muted-foreground", props.class.as_str()]),
             div {
                 class: "pt-0 pb-4",
                 {props.children}

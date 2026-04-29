@@ -32,14 +32,14 @@ pub fn Tabs(props: TabsProps) -> Element {
         document::Style {
             r#"
                 .fts-tab-trigger[data-state="active"] {{
-                    background: hsl(var(--background));
-                    color: hsl(var(--foreground));
+                    background: var(--background);
+                    color: var(--foreground);
                     box-shadow: var(--shadow-sm);
                 }}
 
                 .fts-tab-trigger[data-state="inactive"]:hover {{
-                    background: hsl(var(--background) / 0.5);
-                    color: hsl(var(--foreground) / 0.8);
+                    background: color-mix(in oklab, var(--background) 50%, transparent);
+                    color: color-mix(in oklab, var(--foreground) 80%, transparent);
                 }}
             "#
         }

@@ -25,7 +25,7 @@ pub fn Menubar(props: MenubarProps) -> Element {
             disabled: props.disabled,
             roving_loop: props.roving_loop,
             class: crate::cn::merge(format!(
-                "inline-flex items-center h-9 rounded-lg border p-1 gap-1 {}",
+                "inline-flex items-center h-9 rounded-lg border border-border bg-card p-1 gap-1 text-card-foreground shadow-xs {}",
                 props.class
             )),
             {props.children}
