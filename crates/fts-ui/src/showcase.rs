@@ -145,14 +145,18 @@ pub fn Showcase() -> Element {
                                     value: use_signal(String::new),
                                     placeholder: "Choose a fruit...".to_string(),
                                     SelectContent {
-                                        SelectLabel { "Fruits" }
-                                        SelectItem { value: "apple".to_string(), index: 0, "Apple" }
-                                        SelectItem { value: "banana".to_string(), index: 1, "Banana" }
-                                        SelectItem { value: "cherry".to_string(), index: 2, "Cherry" }
+                                        SelectGroup {
+                                            SelectLabel { "Fruits" }
+                                            SelectItem { value: "apple".to_string(), index: 0, "Apple" }
+                                            SelectItem { value: "banana".to_string(), index: 1, "Banana" }
+                                            SelectItem { value: "cherry".to_string(), index: 2, "Cherry" }
+                                        }
                                         SelectSeparator {}
-                                        SelectLabel { "Vegetables" }
-                                        SelectItem { value: "carrot".to_string(), index: 3, "Carrot" }
-                                        SelectItem { value: "potato".to_string(), index: 4, "Potato" }
+                                        SelectGroup {
+                                            SelectLabel { "Vegetables" }
+                                            SelectItem { value: "carrot".to_string(), index: 3, "Carrot" }
+                                            SelectItem { value: "potato".to_string(), index: 4, "Potato" }
+                                        }
                                     }
                                 }
                             }

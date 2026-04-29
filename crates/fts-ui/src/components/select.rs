@@ -2,7 +2,7 @@
 
 use dioxus::prelude::*;
 use dioxus_primitives::select::{
-    Select as PrimitiveSelect, SelectGroupLabel as PrimitiveSelectGroupLabel, SelectItemIndicator,
+    Select as PrimitiveSelect, SelectGroup as PrimitiveSelectGroup, SelectItemIndicator,
     SelectList as PrimitiveSelectList, SelectOption as PrimitiveSelectOption,
     SelectTrigger as PrimitiveSelectTrigger, SelectValue as PrimitiveSelectValue,
 };
@@ -118,6 +118,29 @@ pub fn SelectContent(props: SelectContentProps) -> Element {
 }
 
 #[derive(Props, Clone, PartialEq)]
+pub struct SelectGroupProps {
+    #[props(default = false)]
+    pub disabled: bool,
+    #[props(default)]
+    pub id: Option<String>,
+    #[props(default)]
+    pub class: String,
+    pub children: Element,
+}
+
+#[component]
+pub fn SelectGroup(props: SelectGroupProps) -> Element {
+    rsx! {
+        PrimitiveSelectGroup {
+            disabled: props.disabled,
+            id: props.id,
+            class: props.class,
+            {props.children}
+        }
+    }
+}
+
+#[derive(Props, Clone, PartialEq)]
 pub struct SelectItemProps {
     pub value: String,
     pub index: usize,
@@ -181,7 +204,7 @@ pub struct SelectLabelProps {
 #[component]
 pub fn SelectLabel(props: SelectLabelProps) -> Element {
     rsx! {
-        PrimitiveSelectGroupLabel {
+        div {
             id: props.id,
             class: crate::cn::merge_slice(&["text-muted-foreground px-3 py-2.5 text-xs", props.class.as_str()]),
             {props.children}
