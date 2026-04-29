@@ -1,10 +1,11 @@
-use clap::{Parser, Subcommand};
 use chrono::{DateTime, TimeZone, Utc};
+use clap::{Parser, Subcommand};
 use task_core::index::{ChangeRow, ConflictRow};
 use task_core::workflows::{parse_comments, render_comments, Comment};
 use task_core::{
-    Filter, Priority, Query, RelationType, Sort, Status, Task, TaskRelation, TimeEntryFilter,
-    VaultServiceImpl, WikiLink,
+    CalendarEvent, CalendarEventPatch, CalendarEventStatus, Client, Filter, Invoice, Priority,
+    Project, Query, RelationType, Sort, Status, SyncStats, Task, TaskRelation, TimeEntryContext,
+    TimeEntryFilter, VaultServiceImpl, WikiLink,
 };
 
 #[derive(Parser)]
@@ -90,9 +91,7 @@ enum Commands {
         assignee: Option<String>,
     },
     /// Mark a task as complete
-    Complete {
-        title: String,
-    },
+    Complete { title: String },
     /// Show detailed info for a task
     Show {
         title: String,
@@ -171,20 +170,14 @@ enum Commands {
         hard: bool,
     },
     /// Assign a task to a user (shortcut for update --assignee)
-    Assign {
-        reference: String,
-        user: String,
-    },
+    Assign { reference: String, user: String },
     /// Comment on a task. Bare form adds a comment; subcommands manage existing.
     Comment {
         #[command(subcommand)]
         command: CommentCommands,
     },
     /// React to a task with an emoji (or `clear:<emoji>` to remove)
-    React {
-        reference: String,
-        emoji: String,
-    },
+    React { reference: String, emoji: String },
     /// Subscribe to a task (start receiving notifications)
     Subscribe {
         reference: String,
@@ -270,6 +263,16 @@ enum Commands {
     Conflicts {
         #[command(subcommand)]
         command: ConflictCommands,
+    },
+    /// First-class calendar events (VEVENT), separate from task due dates
+    Calendar {
+        #[command(subcommand)]
+        command: CalendarCommands,
+    },
+    /// Stable JSON command surface for agents and automation
+    Agent {
+        #[command(subcommand)]
+        command: AgentCommands,
     },
     /// Project subcommands
     Project {
@@ -593,9 +596,7 @@ enum InvoiceCommands {
         json: bool,
     },
     /// Mark an invoice as sent (sets sent_at, status → Sent)
-    Send {
-        id: String,
-    },
+    Send { id: String },
     /// Record a payment against an invoice
     Pay {
         id: String,
@@ -669,9 +670,15 @@ enum CommentCommands {
         body: String,
     },
     /// Mark a comment resolved (by id)
-    Resolve { reference: String, comment_id: String },
+    Resolve {
+        reference: String,
+        comment_id: String,
+    },
     /// Unresolve a comment
-    Reopen { reference: String, comment_id: String },
+    Reopen {
+        reference: String,
+        comment_id: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -801,9 +808,136 @@ enum TimeCommands {
         json: bool,
     },
     /// Delete a time entry by id
-    Delete {
-        entry_id: String,
+    Delete { entry_id: String },
+}
+
+#[derive(Subcommand)]
+enum CalendarCommands {
+    /// List calendar events, optionally filtered by an RFC3339 or date range
+    List {
+        #[arg(long)]
+        from: Option<String>,
+        #[arg(long)]
+        to: Option<String>,
+        #[arg(long)]
+        json: bool,
     },
+    /// Show a calendar event by id or exact title
+    Show {
+        reference: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Create a calendar event
+    Add {
+        #[arg(long)]
+        title: String,
+        /// Start time: RFC3339, "YYYY-MM-DDTHH:MM", or "YYYY-MM-DD HH:MM"
+        #[arg(long)]
+        start: String,
+        /// End time in the same formats as --start
+        #[arg(long)]
+        end: Option<String>,
+        #[arg(long)]
+        description: Option<String>,
+        #[arg(long)]
+        location: Option<String>,
+        #[arg(long)]
+        all_day: bool,
+        /// confirmed, tentative, or cancelled
+        #[arg(long, default_value = "confirmed")]
+        status: String,
+        #[arg(long)]
+        recurrence: Option<String>,
+        #[arg(long)]
+        attendee: Vec<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Update mutable calendar event fields
+    Update {
+        reference: String,
+        #[arg(long)]
+        title: Option<String>,
+        #[arg(long)]
+        start: Option<String>,
+        /// End time, or "clear"
+        #[arg(long)]
+        end: Option<String>,
+        #[arg(long)]
+        description: Option<String>,
+        #[arg(long)]
+        location: Option<String>,
+        #[arg(long)]
+        all_day: Option<bool>,
+        /// confirmed, tentative, or cancelled
+        #[arg(long)]
+        status: Option<String>,
+        /// RRULE string, or "clear"
+        #[arg(long)]
+        recurrence: Option<String>,
+        /// Replace attendees with comma-separated list. Pass "" to clear.
+        #[arg(long)]
+        attendees: Option<String>,
+        /// Replace markdown body
+        #[arg(long)]
+        body: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Delete a calendar event by id or exact title
+    Delete { reference: String },
+}
+
+#[derive(Subcommand)]
+enum AgentCommands {
+    /// Return one machine-readable snapshot of the vault
+    Snapshot {
+        #[arg(long, default_value = "50")]
+        activity_limit: u32,
+        #[arg(long, default_value = "50")]
+        conflict_limit: u32,
+        /// Include completed/cancelled/archived tasks
+        #[arg(long)]
+        include_completed: bool,
+    },
+    /// Return one task by id or title
+    Task { reference: String },
+    /// Return one project with stats, next task, and project tasks
+    Project { name: String },
+    /// Return calendar events in a range
+    Calendar {
+        #[arg(long)]
+        from: Option<String>,
+        #[arg(long)]
+        to: Option<String>,
+    },
+    /// Return time entries with the same filters as `task time list`
+    Time {
+        #[arg(long)]
+        task: Option<String>,
+        #[arg(long)]
+        user: Option<String>,
+        #[arg(long)]
+        project: Option<String>,
+        #[arg(long)]
+        client: Option<String>,
+        #[arg(long)]
+        tag: Option<String>,
+        #[arg(long)]
+        from: Option<String>,
+        #[arg(long)]
+        to: Option<String>,
+        #[arg(long)]
+        billable: bool,
+    },
+    /// Return sync status, optionally triggering a sync first
+    Sync {
+        #[arg(long)]
+        trigger: bool,
+    },
+    /// Describe the installable CLI surface for agents
+    Capabilities,
 }
 
 #[derive(Subcommand)]
@@ -911,6 +1045,13 @@ async fn main() -> eyre::Result<()> {
     if let Commands::Nc { command: nc } = command {
         return run_nc(nc, actor).await;
     }
+    if let Commands::Agent {
+        command: AgentCommands::Capabilities,
+    } = command
+    {
+        print_agent_capabilities();
+        return Ok(());
+    }
     // `task email watch` is a pure IMAP IDLE subscription — no vault
     // access needed. Handle it here so the watcher service doesn't
     // have to carry a TASK_VAULT just to emit events.
@@ -946,9 +1087,7 @@ async fn main() -> eyre::Result<()> {
                 .map(|n| n.to_string())
                 .unwrap_or_else(|| "null".into());
             let ts = chrono::Utc::now().to_rfc3339();
-            println!(
-                r#"{{"ts":"{ts}","mailbox":"{mailbox}","exists":{exists},"raw":"{raw}"}}"#
-            );
+            println!(r#"{{"ts":"{ts}","mailbox":"{mailbox}","exists":{exists},"raw":"{raw}"}}"#);
         })
         .await
         .map_err(Into::into);
@@ -981,8 +1120,7 @@ async fn main() -> eyre::Result<()> {
             } else {
                 let mut filters = Vec::new();
                 if let Some(s) = status {
-                    let st = parse_status(&s)
-                        .ok_or_else(|| eyre::eyre!("Unknown status: {s}"))?;
+                    let st = parse_status(&s).ok_or_else(|| eyre::eyre!("Unknown status: {s}"))?;
                     filters.push(Filter::Status(st));
                 }
                 if let Some(p) = project {
@@ -1055,11 +1193,17 @@ async fn main() -> eyre::Result<()> {
                     .unwrap_or(Status::Open),
                 due: due
                     .as_deref()
-                    .map(|d| d.parse::<chrono::NaiveDate>().map_err(|e| eyre::eyre!("{e}")))
+                    .map(|d| {
+                        d.parse::<chrono::NaiveDate>()
+                            .map_err(|e| eyre::eyre!("{e}"))
+                    })
                     .transpose()?,
                 scheduled: scheduled
                     .as_deref()
-                    .map(|d| d.parse::<chrono::NaiveDate>().map_err(|e| eyre::eyre!("{e}")))
+                    .map(|d| {
+                        d.parse::<chrono::NaiveDate>()
+                            .map_err(|e| eyre::eyre!("{e}"))
+                    })
                     .transpose()?,
                 projects: project.map(|p| vec![WikiLink(p)]).unwrap_or_default(),
                 contexts: context.map(|c| vec![c]).unwrap_or_default(),
@@ -1123,8 +1267,7 @@ async fn main() -> eyre::Result<()> {
                 task.title = t;
             }
             if let Some(s) = status {
-                task.status = parse_status(&s)
-                    .ok_or_else(|| eyre::eyre!("Unknown status: {s}"))?;
+                task.status = parse_status(&s).ok_or_else(|| eyre::eyre!("Unknown status: {s}"))?;
             }
             if let Some(p) = priority {
                 task.priority = parse_priority(&p).map_err(|e| eyre::eyre!("{e}"))?;
@@ -1136,7 +1279,11 @@ async fn main() -> eyre::Result<()> {
                 task.scheduled = parse_optional_date(&d)?;
             }
             if let Some(a) = assignee {
-                task.assignee = if a == "clear" || a.is_empty() { None } else { Some(a) };
+                task.assignee = if a == "clear" || a.is_empty() {
+                    None
+                } else {
+                    Some(a)
+                };
             }
             for t in &remove_tag {
                 task.tags.retain(|x| x != t);
@@ -1184,7 +1331,8 @@ async fn main() -> eyre::Result<()> {
         Commands::Delete { reference, hard } => {
             if hard {
                 let task = find_task(&svc, &reference).await?;
-                svc.delete_task_as(task.title.clone(), actor.as_deref()).await?;
+                svc.delete_task_as(task.title.clone(), actor.as_deref())
+                    .await?;
                 println!("Deleted (hard): {}", task.title);
             } else {
                 let mut task = find_task(&svc, &reference).await?;
@@ -1291,7 +1439,11 @@ async fn main() -> eyre::Result<()> {
         }
 
         Commands::Comment {
-            command: CommentCommands::Resolve { reference, comment_id },
+            command:
+                CommentCommands::Resolve {
+                    reference,
+                    comment_id,
+                },
         } => {
             let resolver = require_actor(&actor)?;
             let mut task = find_task(&svc, &reference).await?;
@@ -1307,7 +1459,11 @@ async fn main() -> eyre::Result<()> {
         }
 
         Commands::Comment {
-            command: CommentCommands::Reopen { reference, comment_id },
+            command:
+                CommentCommands::Reopen {
+                    reference,
+                    comment_id,
+                },
         } => {
             let mut task = find_task(&svc, &reference).await?;
             let mut comments = parse_comments(&task.body);
@@ -1350,9 +1506,9 @@ async fn main() -> eyre::Result<()> {
         }
 
         Commands::Subscribe { reference, user } => {
-            let who = user.or(actor.clone()).ok_or_else(|| {
-                eyre::eyre!("Specify a user or set --as <user>/TASK_USER.")
-            })?;
+            let who = user
+                .or(actor.clone())
+                .ok_or_else(|| eyre::eyre!("Specify a user or set --as <user>/TASK_USER."))?;
             let mut task = find_task(&svc, &reference).await?;
             if !task.subscribers.contains(&who) {
                 task.subscribers.push(who.clone());
@@ -1487,9 +1643,7 @@ async fn main() -> eyre::Result<()> {
                 .await
                 .into_iter()
                 .filter(|i| match &status {
-                    Some(s) => {
-                        format!("{:?}", i.status).eq_ignore_ascii_case(s)
-                    }
+                    Some(s) => format!("{:?}", i.status).eq_ignore_ascii_case(s),
                     None => true,
                 })
                 .filter(|i| match &client {
@@ -1550,7 +1704,11 @@ async fn main() -> eyre::Result<()> {
                 .record_invoice_payment(
                     &id,
                     amount,
-                    if method.is_empty() { None } else { Some(method) },
+                    if method.is_empty() {
+                        None
+                    } else {
+                        Some(method)
+                    },
                     reference,
                     notes,
                     actor.as_deref(),
@@ -1754,14 +1912,22 @@ async fn main() -> eyre::Result<()> {
         }
 
         Commands::Email {
-            command: EmailCommands::FolderCreate { account, name, json },
+            command:
+                EmailCommands::FolderCreate {
+                    account,
+                    name,
+                    json,
+                },
         } => {
             let client = build_mail_client(actor.as_deref())?;
             let mb = client.create_mailbox(account, &name).await?;
             if json {
                 print_mailboxes_json(&[mb]);
             } else {
-                println!("Created mailbox {} (id {}, account {})", mb.name, mb.id, mb.account_id);
+                println!(
+                    "Created mailbox {} (id {}, account {})",
+                    mb.name, mb.id, mb.account_id
+                );
             }
         }
 
@@ -1774,7 +1940,11 @@ async fn main() -> eyre::Result<()> {
         }
 
         Commands::Email {
-            command: EmailCommands::Move { email_id, to_folder },
+            command:
+                EmailCommands::Move {
+                    email_id,
+                    to_folder,
+                },
         } => {
             let client = build_mail_client(actor.as_deref())?;
             client.move_message(email_id, to_folder).await?;
@@ -1782,7 +1952,10 @@ async fn main() -> eyre::Result<()> {
         }
 
         Commands::Email {
-            command: EmailCommands::Tag { cmd: TagCommands::List { json } },
+            command:
+                EmailCommands::Tag {
+                    cmd: TagCommands::List { json },
+                },
         } => {
             let client = build_mail_client(actor.as_deref())?;
             let tags = client.list_tags().await?;
@@ -1794,7 +1967,10 @@ async fn main() -> eyre::Result<()> {
         }
 
         Commands::Email {
-            command: EmailCommands::Tag { cmd: TagCommands::Create { name, color, json } },
+            command:
+                EmailCommands::Tag {
+                    cmd: TagCommands::Create { name, color, json },
+                },
         } => {
             let client = build_mail_client(actor.as_deref())?;
             let tag = client.create_tag(&name, &color).await?;
@@ -1809,7 +1985,10 @@ async fn main() -> eyre::Result<()> {
         }
 
         Commands::Email {
-            command: EmailCommands::Tag { cmd: TagCommands::Delete { account, tag } },
+            command:
+                EmailCommands::Tag {
+                    cmd: TagCommands::Delete { account, tag },
+                },
         } => {
             let client = build_mail_client(actor.as_deref())?;
             client.delete_tag(account, tag).await?;
@@ -1817,7 +1996,14 @@ async fn main() -> eyre::Result<()> {
         }
 
         Commands::Email {
-            command: EmailCommands::Tag { cmd: TagCommands::Set { imap_label, email_id } },
+            command:
+                EmailCommands::Tag {
+                    cmd:
+                        TagCommands::Set {
+                            imap_label,
+                            email_id,
+                        },
+                },
         } => {
             let client = build_mail_client(actor.as_deref())?;
             client.set_tag(email_id, &imap_label).await?;
@@ -1825,7 +2011,14 @@ async fn main() -> eyre::Result<()> {
         }
 
         Commands::Email {
-            command: EmailCommands::Tag { cmd: TagCommands::Unset { imap_label, email_id } },
+            command:
+                EmailCommands::Tag {
+                    cmd:
+                        TagCommands::Unset {
+                            imap_label,
+                            email_id,
+                        },
+                },
         } => {
             let client = build_mail_client(actor.as_deref())?;
             client.remove_tag(email_id, &imap_label).await?;
@@ -1833,19 +2026,28 @@ async fn main() -> eyre::Result<()> {
         }
 
         Commands::Email {
-            command: EmailCommands::Sweep { account, mailbox, limit, filter, table },
+            command:
+                EmailCommands::Sweep {
+                    account,
+                    mailbox,
+                    limit,
+                    filter,
+                    table,
+                },
         } => {
             let client = build_mail_client(actor.as_deref())?;
             // Default to INBOX for the account if no mailbox was passed.
             let mailbox_id = match mailbox {
                 Some(m) => m,
-                None => client
-                    .list_mailboxes(account)
-                    .await?
-                    .into_iter()
-                    .find(|m| m.name.eq_ignore_ascii_case("INBOX"))
-                    .ok_or_else(|| eyre::eyre!("No INBOX for account {account}"))?
-                    .id,
+                None => {
+                    client
+                        .list_mailboxes(account)
+                        .await?
+                        .into_iter()
+                        .find(|m| m.name.eq_ignore_ascii_case("INBOX"))
+                        .ok_or_else(|| eyre::eyre!("No INBOX for account {account}"))?
+                        .id
+                }
             };
             let messages = client
                 .list_messages(mailbox_id, filter.as_deref(), limit, None)
@@ -1910,9 +2112,9 @@ async fn main() -> eyre::Result<()> {
         }
 
         Commands::Unsubscribe { reference, user } => {
-            let who = user.or(actor.clone()).ok_or_else(|| {
-                eyre::eyre!("Specify a user or set --as <user>/TASK_USER.")
-            })?;
+            let who = user
+                .or(actor.clone())
+                .ok_or_else(|| eyre::eyre!("Specify a user or set --as <user>/TASK_USER."))?;
             let mut task = find_task(&svc, &reference).await?;
             let before = task.subscribers.len();
             task.subscribers.retain(|u| u != &who);
@@ -1978,9 +2180,18 @@ async fn main() -> eyre::Result<()> {
                 println!("{}", facet_json::to_string(&stats).unwrap_or_default());
             } else {
                 println!("Sync complete.");
-                println!("  calendar: +{} / -{}", stats.calendar_pushed, stats.calendar_pulled);
-                println!("  deck:     +{} / -{}", stats.deck_pushed, stats.deck_pulled);
-                println!("  files:    created {}, updated {}", stats.files_created, stats.files_updated);
+                println!(
+                    "  calendar: +{} / -{}",
+                    stats.calendar_pushed, stats.calendar_pulled
+                );
+                println!(
+                    "  deck:     +{} / -{}",
+                    stats.deck_pushed, stats.deck_pulled
+                );
+                println!(
+                    "  files:    created {}, updated {}",
+                    stats.files_created, stats.files_updated
+                );
                 if !stats.errors.is_empty() {
                     println!("  errors:");
                     for e in &stats.errors {
@@ -2011,7 +2222,10 @@ async fn main() -> eyre::Result<()> {
             println!("{}", "─".repeat(name_w + 20));
             for p in &projects {
                 let state = format!("{:?}", p.status);
-                let due = p.due.map(|d| d.to_string()).unwrap_or_else(|| "—".to_string());
+                let due = p
+                    .due
+                    .map(|d| d.to_string())
+                    .unwrap_or_else(|| "—".to_string());
                 println!("{:<name_w$}  {:<10}  {}", p.title, state, due);
             }
             println!("\n{} project(s)", projects.len());
@@ -2300,7 +2514,8 @@ async fn main() -> eyre::Result<()> {
         Commands::Time {
             command: TimeCommands::Delete { entry_id },
         } => {
-            svc.delete_time_entry_as(&entry_id, actor.as_deref()).await?;
+            svc.delete_time_entry_as(&entry_id, actor.as_deref())
+                .await?;
             println!("Deleted entry {entry_id}.");
         }
 
@@ -2359,6 +2574,129 @@ async fn main() -> eyre::Result<()> {
             }
         }
 
+        Commands::Calendar {
+            command: CalendarCommands::List { from, to, json },
+        } => {
+            let events =
+                list_calendar_events_for_range(&svc, from.as_deref(), to.as_deref()).await?;
+            if json {
+                print_calendar_events_json(&events);
+            } else {
+                print_calendar_events_table(&events);
+            }
+        }
+
+        Commands::Calendar {
+            command: CalendarCommands::Show { reference, json },
+        } => {
+            let event = find_calendar_event(&svc, &reference).await?;
+            if json {
+                println!("{}", facet_json::to_string(&event).unwrap_or_default());
+            } else {
+                print_calendar_event_detail(&event);
+            }
+        }
+
+        Commands::Calendar {
+            command:
+                CalendarCommands::Add {
+                    title,
+                    start,
+                    end,
+                    description,
+                    location,
+                    all_day,
+                    status,
+                    recurrence,
+                    attendee,
+                    json,
+                },
+        } => {
+            let event = CalendarEvent {
+                title,
+                description,
+                location,
+                start: parse_datetime(&start)?,
+                end: end.as_deref().map(parse_datetime).transpose()?,
+                all_day,
+                status: parse_calendar_status(&status)?,
+                recurrence,
+                attendees: attendee,
+                ..CalendarEvent::default()
+            };
+            let created = svc.create_calendar_event(event).await?;
+            if json {
+                println!("{}", facet_json::to_string(&created).unwrap_or_default());
+            } else {
+                println!("Created calendar event: {}", created.title);
+                println!("  id: {}", created.id.as_deref().unwrap_or("—"));
+            }
+        }
+
+        Commands::Calendar {
+            command:
+                CalendarCommands::Update {
+                    reference,
+                    title,
+                    start,
+                    end,
+                    description,
+                    location,
+                    all_day,
+                    status,
+                    recurrence,
+                    attendees,
+                    body,
+                    json,
+                },
+        } => {
+            let patch = CalendarEventPatch {
+                title,
+                description: description.map(optional_string_field),
+                location: location.map(optional_string_field),
+                start: start.as_deref().map(parse_datetime).transpose()?,
+                end: match end {
+                    Some(s) if s == "clear" || s.is_empty() => Some(None),
+                    Some(s) => Some(Some(parse_datetime(&s)?)),
+                    None => None,
+                },
+                all_day,
+                status: status.as_deref().map(parse_calendar_status).transpose()?,
+                recurrence: recurrence.map(|s| {
+                    if s == "clear" || s.is_empty() {
+                        None
+                    } else {
+                        Some(s)
+                    }
+                }),
+                attendees: attendees.map(|s| {
+                    if s.is_empty() {
+                        Vec::new()
+                    } else {
+                        s.split(',').map(|a| a.trim().to_string()).collect()
+                    }
+                }),
+                body,
+            };
+            let updated = svc.update_calendar_event(&reference, patch).await?;
+            if json {
+                println!("{}", facet_json::to_string(&updated).unwrap_or_default());
+            } else {
+                println!("Updated calendar event: {}", updated.title);
+            }
+        }
+
+        Commands::Calendar {
+            command: CalendarCommands::Delete { reference },
+        } => {
+            svc.delete_calendar_event(&reference).await?;
+            println!("Deleted calendar event: {reference}");
+        }
+
+        Commands::Agent { command } => {
+            run_agent_command(&svc, &vault_path, actor.as_deref(), command).await?;
+        }
+
         Commands::Activity { limit, kind, json } => {
             let changes = svc.recent_activity(limit).await?;
             let filtered: Vec<_> = match kind {
@@ -2386,7 +2724,8 @@ async fn main() -> eyre::Result<()> {
         Commands::Conflicts {
             command: ConflictCommands::Resolve { conflict_id, how },
         } => {
-            svc.resolve_conflict(conflict_id, actor.as_deref(), &how).await?;
+            svc.resolve_conflict(conflict_id, actor.as_deref(), &how)
+                .await?;
             println!("Resolved conflict #{conflict_id} ({how}).");
         }
     }
@@ -2401,10 +2740,162 @@ async fn find_task(svc: &VaultServiceImpl, reference: &str) -> eyre::Result<Task
     let tasks = svc.list_tasks().await;
     tasks
         .into_iter()
-        .find(|t| {
-            t.id.as_deref() == Some(reference) || t.title.eq_ignore_ascii_case(reference)
-        })
+        .find(|t| t.id.as_deref() == Some(reference) || t.title.eq_ignore_ascii_case(reference))
         .ok_or_else(|| eyre::eyre!("Task not found: {reference}"))
+}
+
+async fn find_calendar_event(
+    svc: &VaultServiceImpl,
+    reference: &str,
+) -> eyre::Result<CalendarEvent> {
+    svc.list_calendar_events()
+        .await
+        .into_iter()
+        .find(|e| e.id.as_deref() == Some(reference) || e.title == reference)
+        .ok_or_else(|| eyre::eyre!("Calendar event not found: {reference}"))
+}
+
+async fn list_calendar_events_for_range(
+    svc: &VaultServiceImpl,
+    from: Option<&str>,
+    to: Option<&str>,
+) -> eyre::Result<Vec<CalendarEvent>> {
+    let from = from.map(parse_calendar_boundary_start).transpose()?;
+    let to = to.map(parse_calendar_boundary_end).transpose()?;
+    Ok(svc
+        .list_calendar_events()
+        .await
+        .into_iter()
+        .filter(|event| {
+            let event_end = event.end.unwrap_or(event.start);
+            from.map_or(true, |from| event_end >= from) && to.map_or(true, |to| event.start <= to)
+        })
+        .collect())
+}
+
+async fn run_agent_command(
+    svc: &VaultServiceImpl,
+    vault_path: &str,
+    actor: Option<&str>,
+    command: AgentCommands,
+) -> eyre::Result<()> {
+    match command {
+        AgentCommands::Snapshot {
+            activity_limit,
+            conflict_limit,
+            include_completed,
+        } => {
+            let tasks = if include_completed {
+                svc.list_tasks().await
+            } else {
+                svc.execute_query(Query {
+                    filters: vec![
+                        Filter::NotComplete,
+                        Filter::NotCancelled,
+                        Filter::NotArchived,
+                    ],
+                    sort: Sort::Urgency,
+                    limit: None,
+                    group: None,
+                })
+                .await
+            };
+            let projects = svc.list_projects().await;
+            let clients = svc.list_clients().await;
+            let invoices = svc.list_invoices().await;
+            let calendar_events = svc.list_calendar_events().await;
+            let time_entries = svc.list_time_entries(TimeEntryFilter::default()).await;
+            let active_timer = svc.active_timer().await;
+            let activity = svc.recent_activity(activity_limit).await?;
+            let conflicts = svc.list_conflicts(true, conflict_limit).await?;
+            let sync_status = svc.sync_status().await;
+            print_agent_snapshot(AgentSnapshot {
+                vault_path,
+                actor,
+                tasks: &tasks,
+                projects: &projects,
+                clients: &clients,
+                invoices: &invoices,
+                calendar_events: &calendar_events,
+                time_entries: &time_entries,
+                active_timer: active_timer.as_ref(),
+                activity: &activity,
+                conflicts: &conflicts,
+                sync_status: sync_status.as_ref(),
+            });
+        }
+        AgentCommands::Task { reference } => {
+            let task = find_task(svc, &reference).await?;
+            println!("{}", facet_json::to_string(&task).unwrap_or_default());
+        }
+        AgentCommands::Project { name } => {
+            let project = svc
+                .find_project(&name)
+                .await
+                .ok_or_else(|| eyre::eyre!("Project not found: {name}"))?;
+            let stats = svc.project_stats(name.clone()).await;
+            let next = svc.next_task(name.clone()).await;
+            let tasks = svc.tasks_for_project(name).await;
+            println!(
+                "{{\"project\":{},\"stats\":{},\"next_task\":{},\"tasks\":{}}}",
+                facet_json::to_string(&project).unwrap_or_default(),
+                facet_json::to_string(&stats).unwrap_or_default(),
+                next.as_ref()
+                    .map(|t| facet_json::to_string(t).unwrap_or_default())
+                    .unwrap_or_else(|| "null".into()),
+                tasks_json(&tasks),
+            );
+        }
+        AgentCommands::Calendar { from, to } => {
+            let events =
+                list_calendar_events_for_range(svc, from.as_deref(), to.as_deref()).await?;
+            println!("{}", calendar_events_json(&events));
+        }
+        AgentCommands::Time {
+            task,
+            user,
+            project,
+            client,
+            tag,
+            from,
+            to,
+            billable,
+        } => {
+            let entries = svc
+                .list_time_entries(TimeEntryFilter {
+                    task_ref: task,
+                    user,
+                    project,
+                    client,
+                    tag,
+                    from: from.as_deref().map(parse_date_start).transpose()?,
+                    to: to.as_deref().map(parse_date_end).transpose()?,
+                    billable_only: billable,
+                })
+                .await;
+            println!("{}", time_entries_json(&entries));
+        }
+        AgentCommands::Sync { trigger } => {
+            if trigger {
+                let stats = svc.trigger_sync().await?;
+                println!(
+                    "{{\"triggered\":true,\"stats\":{}}}",
+                    facet_json::to_string(&stats).unwrap_or_default()
+                );
+            } else {
+                let stats = svc.sync_status().await;
+                println!(
+                    "{{\"triggered\":false,\"stats\":{}}}",
+                    stats
+                        .as_ref()
+                        .map(|s| facet_json::to_string(s).unwrap_or_default())
+                        .unwrap_or_else(|| "null".into())
+                );
+            }
+        }
+        AgentCommands::Capabilities => print_agent_capabilities(),
+    }
+    Ok(())
 }
 
 /// Splice a rendered `## Comments` block back into the body, replacing any
@@ -2462,12 +2953,13 @@ fn parse_optional_date(s: &str) -> eyre::Result<Option<chrono::NaiveDate>> {
 async fn run_nc(cmd: NcCommands, as_user: Option<String>) -> eyre::Result<()> {
     use task_core::provider::{NextcloudConfig, NextcloudProvider};
 
-    let url = std::env::var("NEXTCLOUD_URL")
-        .map_err(|_| eyre::eyre!("Set NEXTCLOUD_URL env var."))?;
+    let url =
+        std::env::var("NEXTCLOUD_URL").map_err(|_| eyre::eyre!("Set NEXTCLOUD_URL env var."))?;
     let env_user = std::env::var("NEXTCLOUD_USER").ok();
-    let username = as_user.clone().or(env_user).ok_or_else(|| {
-        eyre::eyre!("Set NEXTCLOUD_USER env var or pass --as-user.")
-    })?;
+    let username = as_user
+        .clone()
+        .or(env_user)
+        .ok_or_else(|| eyre::eyre!("Set NEXTCLOUD_USER env var or pass --as-user."))?;
     let password = std::env::var("NEXTCLOUD_PASSWORD")
         .map_err(|_| eyre::eyre!("Set NEXTCLOUD_PASSWORD env var."))?;
 
@@ -2532,12 +3024,13 @@ async fn run_nc(cmd: NcCommands, as_user: Option<String>) -> eyre::Result<()> {
 async fn run_talk(cmd: TalkCommands, as_user: Option<String>) -> eyre::Result<()> {
     use task_core::provider::{TalkClient, TalkConfig};
 
-    let url = std::env::var("NEXTCLOUD_URL")
-        .map_err(|_| eyre::eyre!("Set NEXTCLOUD_URL env var."))?;
+    let url =
+        std::env::var("NEXTCLOUD_URL").map_err(|_| eyre::eyre!("Set NEXTCLOUD_URL env var."))?;
     let env_user = std::env::var("NEXTCLOUD_USER").ok();
-    let username = as_user.clone().or(env_user).ok_or_else(|| {
-        eyre::eyre!("Set NEXTCLOUD_USER env var or pass --as-user.")
-    })?;
+    let username = as_user
+        .clone()
+        .or(env_user)
+        .ok_or_else(|| eyre::eyre!("Set NEXTCLOUD_USER env var or pass --as-user."))?;
     let password = std::env::var("NEXTCLOUD_PASSWORD")
         .map_err(|_| eyre::eyre!("Set NEXTCLOUD_PASSWORD env var."))?;
 
@@ -2581,7 +3074,13 @@ fn print_talk_rooms_table(rooms: &[task_core::provider::TalkRoom]) {
         println!("No rooms.");
         return;
     }
-    let name_w = rooms.iter().map(|r| r.name.len()).max().unwrap_or(10).max(10).min(40);
+    let name_w = rooms
+        .iter()
+        .map(|r| r.name.len())
+        .max()
+        .unwrap_or(10)
+        .max(10)
+        .min(40);
     println!(
         "{:<name_w$}  {:<22}  {:>7}  {:<5}  TOKEN",
         "NAME", "LAST ACTIVITY (UTC)", "PEOPLE", "TYPE",
@@ -2640,7 +3139,10 @@ fn print_talk_history_table(msgs: &[task_core::provider::TalkMessage]) {
             Some(id) => format!(" ↪#{id}"),
             None => String::new(),
         };
-        println!("[{when}] @{} (#{}{}): {}", m.actor_id, m.id, reply, m.message);
+        println!(
+            "[{when}] @{} (#{}{}): {}",
+            m.actor_id, m.id, reply, m.message
+        );
     }
 }
 
@@ -2680,6 +3182,31 @@ fn parse_datetime(s: &str) -> eyre::Result<DateTime<Utc>> {
     Ok(Utc.from_utc_datetime(&naive))
 }
 
+fn parse_calendar_boundary_start(s: &str) -> eyre::Result<DateTime<Utc>> {
+    parse_datetime(s).or_else(|_| parse_date_start(s))
+}
+
+fn parse_calendar_boundary_end(s: &str) -> eyre::Result<DateTime<Utc>> {
+    parse_datetime(s).or_else(|_| parse_date_end(s))
+}
+
+fn parse_calendar_status(s: &str) -> eyre::Result<CalendarEventStatus> {
+    match s.to_lowercase().as_str() {
+        "confirmed" | "confirm" => Ok(CalendarEventStatus::Confirmed),
+        "tentative" => Ok(CalendarEventStatus::Tentative),
+        "cancelled" | "canceled" => Ok(CalendarEventStatus::Cancelled),
+        _ => eyre::bail!("Unknown calendar status: {s}"),
+    }
+}
+
+fn optional_string_field(s: String) -> Option<String> {
+    if s == "clear" || s.is_empty() {
+        None
+    } else {
+        Some(s)
+    }
+}
+
 fn parse_date_start(s: &str) -> eyre::Result<DateTime<Utc>> {
     let d = s
         .parse::<chrono::NaiveDate>()
@@ -2695,7 +3222,19 @@ fn parse_date_end(s: &str) -> eyre::Result<DateTime<Utc>> {
 }
 
 fn escape_json(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('"', "\\\"")
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            ch if ch.is_control() => out.push_str(&format!("\\u{:04x}", ch as u32)),
+            ch => out.push(ch),
+        }
+    }
+    out
 }
 
 fn print_time_entries_table(entries: &[task_core::TimeEntryContext]) {
@@ -2750,24 +3289,30 @@ fn print_time_entries_table(entries: &[task_core::TimeEntryContext]) {
 }
 
 fn print_time_entries_json(entries: &[task_core::TimeEntryContext]) {
-    println!("[");
-    for (i, ctx) in entries.iter().enumerate() {
-        let comma = if i + 1 < entries.len() { "," } else { "" };
-        let entry_json = facet_json::to_string(&ctx.entry).unwrap_or_default();
-        let projects_json = ctx
-            .task_projects
-            .iter()
-            .map(|p| format!("\"{}\"", escape_json(p)))
-            .collect::<Vec<_>>()
-            .join(",");
-        println!(
-            "  {{\"task\":\"{}\",\"projects\":[{}],\"entry\":{}}}{comma}",
-            escape_json(&ctx.task_title),
-            projects_json,
-            entry_json
-        );
-    }
-    println!("]");
+    println!("{}", time_entries_json(entries));
+}
+
+fn time_entries_json(entries: &[TimeEntryContext]) -> String {
+    let items = entries
+        .iter()
+        .map(|ctx| {
+            let entry_json = facet_json::to_string(&ctx.entry).unwrap_or_default();
+            let projects_json = ctx
+                .task_projects
+                .iter()
+                .map(|p| format!("\"{}\"", escape_json(p)))
+                .collect::<Vec<_>>()
+                .join(",");
+            format!(
+                "{{\"task\":\"{}\",\"projects\":[{}],\"client\":{},\"entry\":{}}}",
+                escape_json(&ctx.task_title),
+                projects_json,
+                opt_json(ctx.client_name.as_deref()),
+                entry_json
+            )
+        })
+        .collect::<Vec<_>>();
+    format!("[{}]", items.join(","))
 }
 
 fn print_time_entries_csv(entries: &[task_core::TimeEntryContext]) {
@@ -2808,7 +3353,10 @@ fn print_time_entries_csv(entries: &[task_core::TimeEntryContext]) {
         ];
         println!(
             "{}",
-            row.iter().map(|f| csv_escape(f)).collect::<Vec<_>>().join(",")
+            row.iter()
+                .map(|f| csv_escape(f))
+                .collect::<Vec<_>>()
+                .join(",")
         );
     }
 }
@@ -2853,12 +3401,13 @@ fn aggregate_time(
     let mut acc: BTreeMap<String, (u64, u64, usize)> = BTreeMap::new();
 
     // Helper to bump a slot by minutes and billable cents.
-    let bump = |acc: &mut BTreeMap<String, (u64, u64, usize)>, key: String, mins: u64, cents: u64| {
-        let slot = acc.entry(key).or_insert((0, 0, 0));
-        slot.0 += mins;
-        slot.1 += cents;
-        slot.2 += 1;
-    };
+    let bump =
+        |acc: &mut BTreeMap<String, (u64, u64, usize)>, key: String, mins: u64, cents: u64| {
+            let slot = acc.entry(key).or_insert((0, 0, 0));
+            slot.0 += mins;
+            slot.1 += cents;
+            slot.2 += 1;
+        };
 
     for ctx in entries {
         let e = &ctx.entry;
@@ -2925,7 +3474,10 @@ fn aggregate_time(
 }
 
 fn print_report_csv(rows: &[ReportRow], group_by: &str) {
-    println!("{},minutes,hours,billable_cents,billable_dollars,entries", group_by);
+    println!(
+        "{},minutes,hours,billable_cents,billable_dollars,entries",
+        group_by
+    );
     for (k, mins, cents, count) in rows {
         let hours = format!("{:.2}", *mins as f64 / 60.0);
         let dollars = format!("{:.2}", *cents as f64 / 100.0);
@@ -2946,7 +3498,13 @@ fn print_report_table(rows: &[ReportRow]) {
         println!("No entries in range.");
         return;
     }
-    let key_w = rows.iter().map(|r| r.0.len()).max().unwrap_or(5).max(5).min(40);
+    let key_w = rows
+        .iter()
+        .map(|r| r.0.len())
+        .max()
+        .unwrap_or(5)
+        .max(5)
+        .min(40);
     println!(
         "{:<key_w$}  {:>8}  {:>10}  {:>7}",
         "GROUP", "HOURS", "BILLABLE", "COUNT",
@@ -2983,7 +3541,13 @@ fn print_activity_table(rows: &[ChangeRow]) {
         println!("No activity.");
         return;
     }
-    let id_w = rows.iter().map(|r| r.entity_id.len()).max().unwrap_or(5).max(5).min(35);
+    let id_w = rows
+        .iter()
+        .map(|r| r.entity_id.len())
+        .max()
+        .unwrap_or(5)
+        .max(5)
+        .min(35);
     println!(
         "{:<19}  {:<6}  {:<id_w$}  {:<12}  {:<10}  {}",
         "WHEN (UTC)", "KIND", "ENTITY", "FIELD", "BY", "CHANGE",
@@ -3044,12 +3608,17 @@ fn print_conflicts_table(rows: &[ConflictRow]) {
         let winning = r.winning_value.clone().unwrap_or_else(|| "∅".into());
         let losing = r.losing_value.clone().unwrap_or_else(|| "∅".into());
         let kind = r.kind.clone().unwrap_or_else(|| "—".into());
-        let state = r
-            .resolved
-            .clone()
-            .unwrap_or_else(|| "open".into());
-        let w_actor = r.winning_actor.as_deref().map(|a| format!("@{a}")).unwrap_or_default();
-        let l_actor = r.losing_actor.as_deref().map(|a| format!("@{a}")).unwrap_or_default();
+        let state = r.resolved.clone().unwrap_or_else(|| "open".into());
+        let w_actor = r
+            .winning_actor
+            .as_deref()
+            .map(|a| format!("@{a}"))
+            .unwrap_or_default();
+        let l_actor = r
+            .losing_actor
+            .as_deref()
+            .map(|a| format!("@{a}"))
+            .unwrap_or_default();
         println!(
             "{:<4}  {:<12}  {:<20}  {:<10}  {:<20}  {:<20}  {state}",
             r.id,
@@ -3105,6 +3674,235 @@ fn print_report_json(rows: &[ReportRow]) {
     println!("]");
 }
 
+// ── Calendar output ─────────────────────────────────────────────────────────
+
+fn print_calendar_events_table(events: &[CalendarEvent]) {
+    if events.is_empty() {
+        println!("No calendar events.");
+        return;
+    }
+    let title_w = events
+        .iter()
+        .map(|e| e.title.len())
+        .max()
+        .unwrap_or(10)
+        .max(10)
+        .min(36);
+    println!(
+        "{:<title_w$}  {:<19}  {:<19}  {:<10}  ID",
+        "TITLE", "START (UTC)", "END (UTC)", "STATUS",
+    );
+    println!("{}", "-".repeat(title_w + 66));
+    for event in events {
+        let end = event
+            .end
+            .map(|d| d.format("%Y-%m-%d %H:%M:%S").to_string())
+            .unwrap_or_else(|| "-".into());
+        println!(
+            "{:<title_w$}  {:<19}  {:<19}  {:<10}  {}",
+            truncate(&event.title, title_w),
+            event.start.format("%Y-%m-%d %H:%M:%S"),
+            end,
+            calendar_status_label(&event.status),
+            event.id.as_deref().unwrap_or("-"),
+        );
+    }
+    println!("\n{} event(s)", events.len());
+}
+
+fn print_calendar_event_detail(event: &CalendarEvent) {
+    println!("Title:    {}", event.title);
+    println!("Status:   {}", calendar_status_label(&event.status));
+    println!("Start:    {}", event.start.to_rfc3339());
+    if let Some(end) = event.end {
+        println!("End:      {}", end.to_rfc3339());
+    }
+    if let Some(location) = &event.location {
+        println!("Location: {location}");
+    }
+    if let Some(description) = &event.description {
+        println!("Desc:     {description}");
+    }
+    if !event.attendees.is_empty() {
+        println!("Attendees: {}", event.attendees.join(", "));
+    }
+    if let Some(recurrence) = &event.recurrence {
+        println!("Recurs:   {recurrence}");
+    }
+    if let Some(id) = &event.id {
+        println!("ID:       {id}");
+    }
+}
+
+fn print_calendar_events_json(events: &[CalendarEvent]) {
+    println!("{}", calendar_events_json(events));
+}
+
+fn calendar_events_json(events: &[CalendarEvent]) -> String {
+    let items = events
+        .iter()
+        .map(|event| facet_json::to_string(event).unwrap_or_default())
+        .collect::<Vec<_>>();
+    format!("[{}]", items.join(","))
+}
+
+fn calendar_status_label(status: &CalendarEventStatus) -> &'static str {
+    match status {
+        CalendarEventStatus::Confirmed => "confirmed",
+        CalendarEventStatus::Tentative => "tentative",
+        CalendarEventStatus::Cancelled => "cancelled",
+    }
+}
+
+// ── Agent output ────────────────────────────────────────────────────────────
+
+struct AgentSnapshot<'a> {
+    vault_path: &'a str,
+    actor: Option<&'a str>,
+    tasks: &'a [Task],
+    projects: &'a [Project],
+    clients: &'a [Client],
+    invoices: &'a [Invoice],
+    calendar_events: &'a [CalendarEvent],
+    time_entries: &'a [TimeEntryContext],
+    active_timer: Option<&'a (String, task_core::TimeEntry)>,
+    activity: &'a [ChangeRow],
+    conflicts: &'a [ConflictRow],
+    sync_status: Option<&'a SyncStats>,
+}
+
+fn print_agent_snapshot(snapshot: AgentSnapshot<'_>) {
+    println!(
+        "{{\"generated_at\":\"{}\",\"vault\":\"{}\",\"actor\":{},\"install\":{},\"tasks\":{},\"projects\":{},\"clients\":{},\"invoices\":{},\"calendar_events\":{},\"time_entries\":{},\"active_timer\":{},\"activity\":{},\"conflicts\":{},\"sync_status\":{}}}",
+        Utc::now().to_rfc3339(),
+        escape_json(snapshot.vault_path),
+        opt_json(snapshot.actor),
+        agent_install_json(),
+        tasks_json(snapshot.tasks),
+        projects_json(snapshot.projects),
+        clients_json(snapshot.clients),
+        invoices_json(snapshot.invoices),
+        calendar_events_json(snapshot.calendar_events),
+        time_entries_json(snapshot.time_entries),
+        active_timer_json(snapshot.active_timer),
+        activity_json(snapshot.activity),
+        conflicts_json(snapshot.conflicts),
+        snapshot
+            .sync_status
+            .map(|s| facet_json::to_string(s).unwrap_or_default())
+            .unwrap_or_else(|| "null".into()),
+    );
+}
+
+fn print_agent_capabilities() {
+    println!(
+        "{{\"binary\":\"task\",\"package\":\"task-cli\",\"install\":{},\"global_flags\":[\"--vault\",\"--as-user\"],\"agent_commands\":[\"snapshot\",\"task\",\"project\",\"calendar\",\"time\",\"sync\",\"capabilities\"],\"control_commands\":[\"add\",\"update\",\"complete\",\"delete\",\"calendar add\",\"calendar update\",\"calendar delete\",\"time log\",\"time edit\",\"start\",\"stop\",\"sync\"]}}",
+        agent_install_json()
+    );
+}
+
+fn agent_install_json() -> String {
+    "{\"nix\":\"nix profile install .#task-cli\",\"build\":\"nix build .#task-cli\",\"cargo\":\"cargo install --path crates/task-cli\"}".into()
+}
+
+fn tasks_json(tasks: &[Task]) -> String {
+    format!(
+        "[{}]",
+        tasks
+            .iter()
+            .map(|task| facet_json::to_string(task).unwrap_or_default())
+            .collect::<Vec<_>>()
+            .join(",")
+    )
+}
+
+fn projects_json(projects: &[Project]) -> String {
+    format!(
+        "[{}]",
+        projects
+            .iter()
+            .map(|project| facet_json::to_string(project).unwrap_or_default())
+            .collect::<Vec<_>>()
+            .join(",")
+    )
+}
+
+fn clients_json(clients: &[Client]) -> String {
+    format!(
+        "[{}]",
+        clients
+            .iter()
+            .map(|client| facet_json::to_string(client).unwrap_or_default())
+            .collect::<Vec<_>>()
+            .join(",")
+    )
+}
+
+fn invoices_json(invoices: &[Invoice]) -> String {
+    format!(
+        "[{}]",
+        invoices
+            .iter()
+            .map(|invoice| facet_json::to_string(invoice).unwrap_or_default())
+            .collect::<Vec<_>>()
+            .join(",")
+    )
+}
+
+fn active_timer_json(active: Option<&(String, task_core::TimeEntry)>) -> String {
+    match active {
+        Some((title, entry)) => format!(
+            "{{\"task\":\"{}\",\"entry\":{}}}",
+            escape_json(title),
+            facet_json::to_string(entry).unwrap_or_default()
+        ),
+        None => "null".into(),
+    }
+}
+
+fn activity_json(rows: &[ChangeRow]) -> String {
+    let items = rows
+        .iter()
+        .map(|r| {
+            format!(
+                "{{\"entity_type\":\"{}\",\"entity_id\":\"{}\",\"field\":{},\"old\":{},\"new\":{},\"by\":{},\"at\":\"{}\"}}",
+                escape_json(&r.entity_type),
+                escape_json(&r.entity_id),
+                opt_json(r.field.as_deref()),
+                opt_json(r.old_value.as_deref()),
+                opt_json(r.new_value.as_deref()),
+                opt_json(r.changed_by.as_deref()),
+                escape_json(&r.changed_at),
+            )
+        })
+        .collect::<Vec<_>>();
+    format!("[{}]", items.join(","))
+}
+
+fn conflicts_json(rows: &[ConflictRow]) -> String {
+    let items = rows
+        .iter()
+        .map(|r| {
+            format!(
+                "{{\"id\":{},\"entity_type\":\"{}\",\"entity_id\":\"{}\",\"field\":{},\"kind\":{},\"winning_value\":{},\"losing_value\":{},\"winning_actor\":{},\"losing_actor\":{},\"resolved\":{},\"resolved_by\":{},\"at\":\"{}\"}}",
+                r.id,
+                escape_json(&r.entity_type),
+                escape_json(&r.entity_id),
+                opt_json(r.field.as_deref()),
+                opt_json(r.kind.as_deref()),
+                opt_json(r.winning_value.as_deref()),
+                opt_json(r.losing_value.as_deref()),
+                opt_json(r.winning_actor.as_deref()),
+                opt_json(r.losing_actor.as_deref()),
+                opt_json(r.resolved.as_deref()),
+                opt_json(r.resolved_by.as_deref()),
+                escape_json(&r.changed_at),
+            )
+        })
+        .collect::<Vec<_>>();
+    format!("[{}]", items.join(","))
+}
+
 // ── Parsing helpers ───────────────────────────────────────────────────────────
 
 fn parse_status(s: &str) -> Option<Status> {
@@ -3128,7 +3926,9 @@ fn parse_priority(s: &str) -> Result<Priority, String> {
         "normal" | "medium" => Ok(Priority::Normal),
         "high" => Ok(Priority::High),
         "urgent" | "critical" => Ok(Priority::Urgent),
-        _ => Err(format!("Unknown priority: {s}. Use: none, low, normal, high, urgent")),
+        _ => Err(format!(
+            "Unknown priority: {s}. Use: none, low, normal, high, urgent"
+        )),
     }
 }
 
@@ -3197,12 +3997,10 @@ fn print_project_detail(p: &task_core::Project) {
 
 // ── Nextcloud Mail helpers ───────────────────────────────────────────────────
 
-fn build_mail_client(
-    as_user: Option<&str>,
-) -> eyre::Result<task_core::provider::MailClient> {
+fn build_mail_client(as_user: Option<&str>) -> eyre::Result<task_core::provider::MailClient> {
     use task_core::provider::{MailClient, MailConfig};
-    let url = std::env::var("NEXTCLOUD_URL")
-        .map_err(|_| eyre::eyre!("Set NEXTCLOUD_URL env var."))?;
+    let url =
+        std::env::var("NEXTCLOUD_URL").map_err(|_| eyre::eyre!("Set NEXTCLOUD_URL env var."))?;
     let env_user = std::env::var("NEXTCLOUD_USER").ok();
     let username = as_user
         .map(String::from)
@@ -3261,7 +4059,9 @@ fn print_mailboxes_table(boxes: &[task_core::provider::Mailbox]) {
             "{:<6}  {:<6}  {:>6}  {}",
             m.id,
             m.account_id,
-            m.unread.map(|n| n.to_string()).unwrap_or_else(|| "—".into()),
+            m.unread
+                .map(|n| n.to_string())
+                .unwrap_or_else(|| "—".into()),
             m.name,
         );
     }
@@ -3332,10 +4132,7 @@ fn print_mail_messages_table(messages: &[task_core::provider::MailMessage]) {
         println!("No messages.");
         return;
     }
-    println!(
-        "{:<8}  {:<19}  {:<25}  SUBJECT",
-        "ID", "DATE", "FROM",
-    );
+    println!("{:<8}  {:<19}  {:<25}  SUBJECT", "ID", "DATE", "FROM",);
     println!("{}", "─".repeat(90));
     for m in messages {
         let date = chrono::DateTime::<chrono::Utc>::from_timestamp(m.date, 0)
@@ -3365,12 +4162,11 @@ fn print_mail_messages_json(messages: &[task_core::provider::MailMessage]) {
     println!("[");
     for (i, m) in messages.iter().enumerate() {
         let comma = if i + 1 < messages.len() { "," } else { "" };
-        let to_json = m
-            .to
-            .iter()
-            .map(|s| format!("\"{}\"", escape_json(s)))
-            .collect::<Vec<_>>()
-            .join(",");
+        let to_json =
+            m.to.iter()
+                .map(|s| format!("\"{}\"", escape_json(s)))
+                .collect::<Vec<_>>()
+                .join(",");
         println!(
             "  {{\"id\":{},\"message_id\":{},\"subject\":\"{}\",\"from\":\"{}\",\"to\":[{}],\"date\":{},\"preview\":{},\"mailbox_id\":{},\"account_id\":{},\"imap_uid\":{},\"has_attachments\":{},\"attachment_count\":{}}}{comma}",
             m.id,
@@ -3390,10 +4186,7 @@ fn print_mail_messages_json(messages: &[task_core::provider::MailMessage]) {
     println!("]");
 }
 
-fn print_mail_detail(
-    msg: &task_core::provider::MailMessageDetail,
-    body: Option<&str>,
-) {
+fn print_mail_detail(msg: &task_core::provider::MailMessageDetail, body: Option<&str>) {
     println!("ID:        {}", msg.id);
     if let Some(ref mid) = msg.message_id {
         println!("MessageID: {mid}");
@@ -3416,7 +4209,10 @@ fn print_mail_detail(
     if !msg.attachments.is_empty() {
         println!("\nAttachments:");
         for a in &msg.attachments {
-            println!("  [{}] {} ({}, {} bytes)", a.id, a.file_name, a.mime, a.size);
+            println!(
+                "  [{}] {} ({}, {} bytes)",
+                a.id, a.file_name, a.mime, a.size
+            );
         }
     }
     if let Some(b) = body {
@@ -3428,10 +4224,7 @@ fn print_mail_detail(
     }
 }
 
-fn print_mail_detail_json(
-    msg: &task_core::provider::MailMessageDetail,
-    body: Option<&str>,
-) {
+fn print_mail_detail_json(msg: &task_core::provider::MailMessageDetail, body: Option<&str>) {
     let to_json = msg
         .to
         .iter()
@@ -3480,10 +4273,7 @@ fn print_emails_table(emails: &[task_core::EmailRef]) {
         println!("No emails linked.");
         return;
     }
-    println!(
-        "{:<19}  {:<20}  {:<40}  BY",
-        "DATE", "FROM", "SUBJECT",
-    );
+    println!("{:<19}  {:<20}  {:<40}  BY", "DATE", "FROM", "SUBJECT",);
     println!("{}", "─".repeat(90));
     for e in emails {
         let date = e.date.format("%Y-%m-%d %H:%M:%S").to_string();
@@ -3641,7 +4431,11 @@ fn print_invoice_detail(inv: &task_core::Invoice) {
                 "  {} — ${:.2}  {} {}",
                 p.received_at.format("%Y-%m-%d"),
                 p.amount_cents as f64 / 100.0,
-                if p.method.is_empty() { "—" } else { &p.method },
+                if p.method.is_empty() {
+                    "—"
+                } else {
+                    &p.method
+                },
                 p.reference.as_deref().unwrap_or(""),
             );
         }
@@ -3653,7 +4447,13 @@ fn print_clients_table(clients: &[task_core::Client]) {
         println!("No clients.");
         return;
     }
-    let name_w = clients.iter().map(|c| c.name.len()).max().unwrap_or(10).max(10).min(35);
+    let name_w = clients
+        .iter()
+        .map(|c| c.name.len())
+        .max()
+        .unwrap_or(10)
+        .max(10)
+        .min(35);
     println!(
         "{:<name_w$}  {:>10}  {:<4}  {:<25}  IN ID",
         "NAME", "RATE/HR", "CCY", "EMAIL",
@@ -3664,7 +4464,11 @@ fn print_clients_table(clients: &[task_core::Client]) {
             Some(r) => format!("${:.2}", r as f64 / 100.0),
             None => "—".into(),
         };
-        let ccy = if c.currency_code.is_empty() { "—" } else { &c.currency_code };
+        let ccy = if c.currency_code.is_empty() {
+            "—"
+        } else {
+            &c.currency_code
+        };
         let email = c.email.as_deref().unwrap_or("—");
         let in_id = c.invoice_ninja_id.as_deref().unwrap_or("—");
         println!(
@@ -3738,10 +4542,7 @@ fn print_comments_table(comments: &[Comment]) {
             .map(|t| format!(" [{}]", t.display()))
             .unwrap_or_default();
         let resolved = if c.resolved { " ✅" } else { "" };
-        println!(
-            "{indent}@{}{date}{tc}{resolved}",
-            c.author
-        );
+        println!("{indent}@{}{date}{tc}{resolved}", c.author);
         println!("{indent}  {}", c.body);
         println!("{indent}  id: {}", c.id);
     }
@@ -3845,8 +4646,8 @@ fn print_tasks_json(tasks: &[Task]) {
     println!("[");
     for (i, task) in tasks.iter().enumerate() {
         let comma = if i + 1 < tasks.len() { "," } else { "" };
-        let json = facet_json::to_string(task)
-            .unwrap_or_else(|e| format!("{{\"error\":\"{e}}}\"}}", ));
+        let json =
+            facet_json::to_string(task).unwrap_or_else(|e| format!("{{\"error\":\"{e}}}\"}}",));
         println!("  {json}{comma}");
     }
     println!("]");
@@ -3894,4 +4695,3 @@ fn truncate(s: &str, max: usize) -> String {
         format!("{}…", &s[..max.saturating_sub(1)])
     }
 }
-
