@@ -17,11 +17,16 @@ pub struct DataTableColumn<T> {
     pub sort_value: Option<fn(&T) -> DataTableSortValue>,
     pub filter: Option<fn(&T, &str) -> bool>,
     pub cell: Option<fn(&T) -> Element>,
+    pub header_render: Option<fn(DataTableHeaderContext) -> Element>,
+    pub cell_render: Option<fn(DataTableCellContext<T>) -> Element>,
     pub sortable: bool,
     pub filterable: bool,
+    pub hideable: bool,
     pub class: &'static str,
     pub head_class: &'static str,
     pub cell_class: &'static str,
+    pub dynamic_head_class: Option<fn(DataTableHeaderContext) -> String>,
+    pub dynamic_cell_class: Option<fn(DataTableCellContext<T>) -> String>,
 }
 
 impl<T> PartialEq for DataTableColumn<T> {
@@ -30,6 +35,7 @@ impl<T> PartialEq for DataTableColumn<T> {
             && self.header == other.header
             && self.sortable == other.sortable
             && self.filterable == other.filterable
+            && self.hideable == other.hideable
             && self.class == other.class
             && self.head_class == other.head_class
             && self.cell_class == other.cell_class
@@ -45,11 +51,16 @@ impl<T> DataTableColumn<T> {
             sort_value: None,
             filter: None,
             cell: None,
+            header_render: None,
+            cell_render: None,
             sortable: true,
             filterable: true,
+            hideable: true,
             class: "",
             head_class: "",
             cell_class: "",
+            dynamic_head_class: None,
+            dynamic_cell_class: None,
         }
     }
 
@@ -78,6 +89,21 @@ impl<T> DataTableColumn<T> {
         self
     }
 
+    pub fn header_render(mut self, header_render: fn(DataTableHeaderContext) -> Element) -> Self {
+        self.header_render = Some(header_render);
+        self
+    }
+
+    pub fn cell_render(mut self, cell_render: fn(DataTableCellContext<T>) -> Element) -> Self {
+        self.cell_render = Some(cell_render);
+        self
+    }
+
+    pub fn hideable(mut self, hideable: bool) -> Self {
+        self.hideable = hideable;
+        self
+    }
+
     pub fn class(mut self, class: &'static str) -> Self {
         self.class = class;
         self
@@ -92,6 +118,45 @@ impl<T> DataTableColumn<T> {
         self.cell_class = class;
         self
     }
+
+    pub fn dynamic_head_class(
+        mut self,
+        dynamic_head_class: fn(DataTableHeaderContext) -> String,
+    ) -> Self {
+        self.dynamic_head_class = Some(dynamic_head_class);
+        self
+    }
+
+    pub fn dynamic_cell_class(
+        mut self,
+        dynamic_cell_class: fn(DataTableCellContext<T>) -> String,
+    ) -> Self {
+        self.dynamic_cell_class = Some(dynamic_cell_class);
+        self
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct DataTableHeaderContext {
+    pub column_id: String,
+    pub header: String,
+    pub sorted: Option<DataTableSortDirection>,
+}
+
+#[derive(Clone, PartialEq)]
+pub struct DataTableCellContext<T> {
+    pub row_id: String,
+    pub row: T,
+    pub column_id: String,
+    pub value: String,
+    pub selected: bool,
+}
+
+#[derive(Clone, PartialEq)]
+pub struct DataTableRowContext<T> {
+    pub row_id: String,
+    pub row: T,
+    pub selected: bool,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -198,6 +263,7 @@ pub struct DataTableModel<T> {
 #[derive(Clone)]
 pub struct DataTableOptions<T> {
     pub get_row_id: fn(&T, usize) -> String,
+    pub row_class: Option<fn(DataTableRowContext<T>) -> String>,
     pub manual_filtering: bool,
     pub manual_sorting: bool,
     pub manual_pagination: bool,
@@ -217,6 +283,7 @@ impl<T> Default for DataTableOptions<T> {
     fn default() -> Self {
         Self {
             get_row_id: default_row_id::<T>,
+            row_class: None,
             manual_filtering: false,
             manual_sorting: false,
             manual_pagination: false,
@@ -232,6 +299,11 @@ fn default_row_id<T>(_row: &T, index: usize) -> String {
 impl<T> DataTableOptions<T> {
     pub fn get_row_id(mut self, get_row_id: fn(&T, usize) -> String) -> Self {
         self.get_row_id = get_row_id;
+        self
+    }
+
+    pub fn row_class(mut self, row_class: fn(DataTableRowContext<T>) -> String) -> Self {
+        self.row_class = Some(row_class);
         self
     }
 
@@ -403,6 +475,10 @@ impl<T: Clone> DataTableModel<T> {
             .into_iter()
             .filter(|row| row.selected)
             .collect()
+    }
+
+    pub fn selected_count(&self) -> usize {
+        self.state.row_selection.len()
     }
 }
 
@@ -609,6 +685,10 @@ impl<T: Clone + PartialEq + 'static> DataTableApi<T> {
         let rows = self.model().page_row_model();
         rows.iter().any(|row| row.selected) && !rows.iter().all(|row| row.selected)
     }
+
+    pub fn selected_count(&self) -> usize {
+        self.state().row_selection.len()
+    }
 }
 
 #[derive(Props, Clone, PartialEq)]
@@ -678,6 +758,8 @@ pub fn DataTablePagination(props: DataTablePaginationProps) -> Element {
 #[derive(Props, Clone, PartialEq)]
 pub struct DataTableViewProps<T: Clone + PartialEq + 'static> {
     pub table: DataTableApi<T>,
+    #[props(default = false)]
+    pub selectable: bool,
     #[props(default = "No results.".to_string())]
     pub empty: String,
     #[props(default)]
@@ -689,6 +771,7 @@ pub fn DataTableView<T: Clone + PartialEq + 'static>(props: DataTableViewProps<T
     let model = props.table.model();
     let columns = model.visible_columns();
     let rows = model.page_row_model();
+    let total_columns = columns.len() + usize::from(props.selectable);
 
     rsx! {
         div {
@@ -697,27 +780,27 @@ pub fn DataTableView<T: Clone + PartialEq + 'static>(props: DataTableViewProps<T
                 Table {
                     TableHeader {
                         TableRow {
-                            for column in columns.iter() {
+                            if props.selectable {
                                 TableHead {
-                                    key: "{column.id}",
-                                    class: crate::cn::merge_slice(&[column.class, column.head_class]),
-                                    if column.sortable {
-                                        button {
-                                            class: "inline-flex items-center gap-1 rounded-md transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50",
-                                            onclick: {
-                                                let column_id = column.id;
-                                                let mut table = props.table.clone();
-                                                move |_| table.toggle_sort(column_id)
-                                            },
-                                            "{column.header}"
-                                            span {
-                                                class: "text-muted-foreground",
-                                                "{sort_indicator(&model.state, column.id)}"
-                                            }
-                                        }
-                                    } else {
-                                        "{column.header}"
+                                    class: "w-10",
+                                    input {
+                                        class: "size-4 rounded border border-input accent-primary",
+                                        r#type: "checkbox",
+                                        checked: props.table.all_page_rows_selected(),
+                                        "aria-label": "Select all rows",
+                                        onchange: {
+                                            let mut table = props.table.clone();
+                                            move |_| table.toggle_all_page_rows_selected()
+                                        },
                                     }
+                                }
+                            }
+                            for column in columns.iter().cloned().cloned() {
+                                DataTableHeaderCell {
+                                    key: "{column.id}",
+                                    table: props.table.clone(),
+                                    state: model.state.clone(),
+                                    column,
                                 }
                             }
                         }
@@ -727,25 +810,19 @@ pub fn DataTableView<T: Clone + PartialEq + 'static>(props: DataTableViewProps<T
                             TableRow {
                                 td {
                                     class: "h-24 p-3 text-center align-middle text-muted-foreground",
-                                    colspan: columns.len().max(1).to_string(),
+                                    colspan: total_columns.max(1).to_string(),
                                     "{props.empty}"
                                 }
                             }
                         } else {
-                            for row in rows.iter() {
-                                TableRow {
+                            for row in rows.iter().cloned() {
+                                DataTableBodyRow {
                                     key: "{row.id}",
-                                    for column in columns.iter() {
-                                        TableCell {
-                                            key: "{column.id}",
-                                            class: crate::cn::merge_slice(&[column.class, column.cell_class]),
-                                            if let Some(cell) = column.cell {
-                                                {cell(&row.original)}
-                                            } else {
-                                                "{(column.accessor)(&row.original)}"
-                                            }
-                                        }
-                                    }
+                                    table: props.table.clone(),
+                                    columns: columns.iter().cloned().cloned().collect::<Vec<_>>(),
+                                    row,
+                                    row_class: model.options.row_class,
+                                    selectable: props.selectable,
                                 }
                             }
                         }
@@ -753,6 +830,341 @@ pub fn DataTableView<T: Clone + PartialEq + 'static>(props: DataTableViewProps<T
                 }
             }
         }
+    }
+}
+
+#[derive(Props, Clone, PartialEq)]
+struct DataTableHeaderCellProps<T: Clone + PartialEq + 'static> {
+    table: DataTableApi<T>,
+    state: DataTableState,
+    column: DataTableColumn<T>,
+}
+
+#[component]
+fn DataTableHeaderCell<T: Clone + PartialEq + 'static>(
+    props: DataTableHeaderCellProps<T>,
+) -> Element {
+    let context = header_context(&props.state, &props.column);
+    let dynamic_class = props
+        .column
+        .dynamic_head_class
+        .map(|class_fn| class_fn(context.clone()))
+        .unwrap_or_default();
+
+    rsx! {
+        TableHead {
+            class: crate::cn::merge_slice(&[
+                props.column.class,
+                props.column.head_class,
+                dynamic_class.as_str(),
+            ]),
+            if props.column.sortable {
+                button {
+                    class: "inline-flex items-center gap-1 rounded-md transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50",
+                    onclick: {
+                        let column_id = props.column.id;
+                        let mut table = props.table.clone();
+                        move |_| table.toggle_sort(column_id)
+                    },
+                    if let Some(header_render) = props.column.header_render {
+                        {header_render(context.clone())}
+                    } else {
+                        "{props.column.header}"
+                    }
+                    span {
+                        class: "text-muted-foreground text-xs",
+                        "{sort_indicator(&props.state, props.column.id)}"
+                    }
+                }
+            } else if let Some(header_render) = props.column.header_render {
+                {header_render(context)}
+            } else {
+                "{props.column.header}"
+            }
+        }
+    }
+}
+
+#[derive(Props, Clone)]
+struct DataTableBodyRowProps<T: Clone + PartialEq + 'static> {
+    table: DataTableApi<T>,
+    columns: Vec<DataTableColumn<T>>,
+    row: DataTableRow<T>,
+    row_class: Option<fn(DataTableRowContext<T>) -> String>,
+    selectable: bool,
+}
+
+impl<T: Clone + PartialEq + 'static> PartialEq for DataTableBodyRowProps<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.table == other.table
+            && self.columns == other.columns
+            && self.row == other.row
+            && self.selectable == other.selectable
+    }
+}
+
+#[component]
+fn DataTableBodyRow<T: Clone + PartialEq + 'static>(props: DataTableBodyRowProps<T>) -> Element {
+    let row_class = props
+        .row_class
+        .map(|class_fn| class_fn(row_context(&props.row)))
+        .unwrap_or_default();
+
+    rsx! {
+        TableRow {
+            class: row_class,
+            if props.selectable {
+                TableCell {
+                    class: "w-10",
+                    input {
+                        class: "size-4 rounded border border-input accent-primary",
+                        r#type: "checkbox",
+                        checked: props.row.selected,
+                        "aria-label": "Select row",
+                        onchange: {
+                            let row_id = props.row.id.clone();
+                            let mut table = props.table.clone();
+                            move |_| table.toggle_row_selected(row_id.clone())
+                        },
+                    }
+                }
+            }
+            for column in props.columns.iter().cloned() {
+                DataTableBodyCell {
+                    key: "{column.id}",
+                    row: props.row.clone(),
+                    column,
+                }
+            }
+        }
+    }
+}
+
+#[derive(Props, Clone, PartialEq)]
+struct DataTableBodyCellProps<T: Clone + PartialEq + 'static> {
+    row: DataTableRow<T>,
+    column: DataTableColumn<T>,
+}
+
+#[component]
+fn DataTableBodyCell<T: Clone + PartialEq + 'static>(props: DataTableBodyCellProps<T>) -> Element {
+    let context = cell_context(&props.row, &props.column);
+    let dynamic_class = props
+        .column
+        .dynamic_cell_class
+        .map(|class_fn| class_fn(context.clone()))
+        .unwrap_or_default();
+
+    rsx! {
+        TableCell {
+            class: crate::cn::merge_slice(&[
+                props.column.class,
+                props.column.cell_class,
+                dynamic_class.as_str(),
+            ]),
+            if let Some(cell_render) = props.column.cell_render {
+                {cell_render(context.clone())}
+            } else if let Some(cell) = props.column.cell {
+                {cell(&props.row.original)}
+            } else {
+                "{(props.column.accessor)(&props.row.original)}"
+            }
+        }
+    }
+}
+
+#[derive(Props, Clone, PartialEq)]
+pub struct DataTableToolbarProps<T: Clone + PartialEq + 'static> {
+    pub table: DataTableApi<T>,
+    #[props(default = "Search...".to_string())]
+    pub search_placeholder: String,
+    #[props(default = vec![10, 20, 50, 100])]
+    pub page_sizes: Vec<usize>,
+    #[props(default = true)]
+    pub show_search: bool,
+    #[props(default = true)]
+    pub show_column_visibility: bool,
+    #[props(default = true)]
+    pub show_selected_count: bool,
+    #[props(default = true)]
+    pub show_page_size: bool,
+    #[props(default)]
+    pub class: String,
+}
+
+#[component]
+pub fn DataTableToolbar<T: Clone + PartialEq + 'static>(
+    props: DataTableToolbarProps<T>,
+) -> Element {
+    let model = props.table.model();
+    let selected_count = props.table.selected_count();
+
+    rsx! {
+        div {
+            class: crate::cn::merge_slice(&[
+                "flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between",
+                props.class.as_str(),
+            ]),
+            div {
+                class: "flex min-w-0 flex-1 items-center gap-2",
+                if props.show_search {
+                    DataTableFilter {
+                        table: props.table.clone(),
+                        placeholder: props.search_placeholder.clone(),
+                    }
+                }
+                if props.show_selected_count && selected_count > 0 {
+                    span {
+                        class: "whitespace-nowrap text-sm text-muted-foreground",
+                        "{selected_count} selected"
+                    }
+                }
+            }
+            div {
+                class: "flex items-center gap-2",
+                if props.show_column_visibility {
+                    DataTableColumnVisibility {
+                        table: props.table.clone(),
+                    }
+                }
+                if props.show_page_size {
+                    select {
+                        class: "h-9 rounded-lg border border-input bg-background px-3 text-sm shadow-xs focus-visible:border-ring focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50",
+                        value: "{model.state.page_size}",
+                        onchange: {
+                            let mut table = props.table.clone();
+                            move |event| {
+                            if let Ok(page_size) = event.value().parse::<usize>() {
+                                table.set_page_size(page_size);
+                            }
+                            }
+                        },
+                        for page_size in props.page_sizes.iter().copied() {
+                            option {
+                                key: "{page_size}",
+                                value: "{page_size}",
+                                "{page_size} rows"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[derive(Props, Clone, PartialEq)]
+pub struct DataTableColumnVisibilityProps<T: Clone + PartialEq + 'static> {
+    pub table: DataTableApi<T>,
+    #[props(default = "Columns".to_string())]
+    pub label: String,
+    #[props(default)]
+    pub class: String,
+}
+
+#[component]
+pub fn DataTableColumnVisibility<T: Clone + PartialEq + 'static>(
+    props: DataTableColumnVisibilityProps<T>,
+) -> Element {
+    let model = props.table.model();
+
+    rsx! {
+        details {
+            class: crate::cn::merge_slice(&["relative", props.class.as_str()]),
+            summary {
+                class: "inline-flex h-9 cursor-pointer list-none items-center justify-center rounded-lg border border-input bg-background px-3 text-sm shadow-xs transition-colors hover:bg-accent hover:text-accent-foreground [&::-webkit-details-marker]:hidden",
+                "{props.label}"
+            }
+            div {
+                class: "absolute right-0 z-50 mt-2 grid min-w-44 gap-1 rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-md",
+                for column in model.columns.iter().filter(|column| column.hideable) {
+                    label {
+                        key: "{column.id}",
+                        class: "flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground",
+                        input {
+                            class: "size-4 rounded border border-input accent-primary",
+                            r#type: "checkbox",
+                            checked: model
+                                .state
+                                .column_visibility
+                                .get(column.id)
+                                .copied()
+                                .unwrap_or(true),
+                            onchange: {
+                                let column_id = column.id;
+                                let mut table = props.table.clone();
+                                move |event| table.set_column_visible(column_id, event.checked())
+                            },
+                        }
+                        "{column.header}"
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[derive(Props, Clone, PartialEq)]
+pub struct DataTableFooterProps<T: Clone + PartialEq + 'static> {
+    pub table: DataTableApi<T>,
+    #[props(default)]
+    pub class: String,
+}
+
+#[component]
+pub fn DataTableFooter<T: Clone + PartialEq + 'static>(props: DataTableFooterProps<T>) -> Element {
+    let model = props.table.model();
+
+    rsx! {
+        DataTablePagination {
+            page_index: model.state.page_index,
+            page_count: model.page_count(),
+            on_previous: {
+                let mut table = props.table.clone();
+                move |_| table.previous_page()
+            },
+            on_next: {
+                let mut table = props.table.clone();
+                move |_| table.next_page()
+            },
+            class: props.class,
+        }
+    }
+}
+
+fn header_context<T>(
+    state: &DataTableState,
+    column: &DataTableColumn<T>,
+) -> DataTableHeaderContext {
+    DataTableHeaderContext {
+        column_id: column.id.to_string(),
+        header: column.header.to_string(),
+        sorted: state
+            .sorting
+            .iter()
+            .find(|sort| sort.column_id == column.id)
+            .map(|sort| sort.direction),
+    }
+}
+
+fn cell_context<T: Clone>(
+    row: &DataTableRow<T>,
+    column: &DataTableColumn<T>,
+) -> DataTableCellContext<T> {
+    DataTableCellContext {
+        row_id: row.id.clone(),
+        row: row.original.clone(),
+        column_id: column.id.to_string(),
+        value: (column.accessor)(&row.original),
+        selected: row.selected,
+    }
+}
+
+fn row_context<T: Clone>(row: &DataTableRow<T>) -> DataTableRowContext<T> {
+    DataTableRowContext {
+        row_id: row.id.clone(),
+        row: row.original.clone(),
+        selected: row.selected,
     }
 }
 
@@ -922,5 +1334,55 @@ mod tests {
 
         assert_eq!(table.page_count(), 5);
         assert_eq!(table.page_row_model().len(), 2);
+    }
+
+    #[test]
+    fn builds_header_cell_and_row_contexts() {
+        let state = DataTableState {
+            sorting: vec![DataTableSort {
+                column_id: "name".into(),
+                direction: DataTableSortDirection::Asc,
+            }],
+            row_selection: HashSet::from(["user-1".to_string()]),
+            ..Default::default()
+        };
+        let column = DataTableColumn::new("name", "Name", |user: &User| user.name.to_string())
+            .dynamic_head_class(|context| {
+                if context.sorted.is_some() {
+                    "text-primary".to_string()
+                } else {
+                    String::new()
+                }
+            })
+            .dynamic_cell_class(|context| {
+                if context.selected {
+                    "font-medium".to_string()
+                } else {
+                    String::new()
+                }
+            });
+        let table = DataTableModel::with_options(
+            users(),
+            vec![column.clone()],
+            state,
+            DataTableOptions::default().get_row_id(|user, _| format!("user-{}", user.id)),
+        );
+        let row = table.page_row_model()[0].clone();
+        let header = header_context(&table.state, &column);
+        let cell = cell_context(&row, &column);
+        let row_ctx = row_context(&row);
+
+        assert_eq!(header.sorted, Some(DataTableSortDirection::Asc));
+        assert_eq!(cell.value, "Ada");
+        assert!(cell.selected);
+        assert_eq!(row_ctx.row_id, "user-1");
+        assert_eq!(
+            column.dynamic_head_class.unwrap()(header),
+            "text-primary".to_string()
+        );
+        assert_eq!(
+            column.dynamic_cell_class.unwrap()(cell),
+            "font-medium".to_string()
+        );
     }
 }
