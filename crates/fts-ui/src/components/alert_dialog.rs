@@ -1,13 +1,24 @@
-//! AlertDialog — shadcn v4 maia style confirmation dialog for destructive actions.
-//!
-//! Unlike `Dialog`, clicking the overlay does NOT close the dialog —
-//! the user must explicitly choose an action (confirm or cancel).
+//! AlertDialog — primitive-backed confirmation dialog for destructive actions.
 
 use dioxus::prelude::*;
+use dioxus_primitives::alert_dialog::{
+    AlertDialogAction as PrimitiveAlertDialogAction,
+    AlertDialogCancel as PrimitiveAlertDialogCancel,
+    AlertDialogContent as PrimitiveAlertDialogContent,
+    AlertDialogDescription as PrimitiveAlertDialogDescription,
+    AlertDialogRoot as PrimitiveAlertDialog, AlertDialogTitle as PrimitiveAlertDialogTitle,
+};
 
 #[derive(Props, Clone, PartialEq)]
 pub struct AlertDialogProps {
-    pub open: bool,
+    #[props(default)]
+    pub id: Option<String>,
+    #[props(default)]
+    pub open: Option<bool>,
+    #[props(default = false)]
+    pub default_open: bool,
+    #[props(default)]
+    pub on_open_change: Option<Callback<bool>>,
     #[props(default)]
     pub on_close: Option<Callback<()>>,
     #[props(default)]
@@ -15,33 +26,32 @@ pub struct AlertDialogProps {
     pub children: Element,
 }
 
-/// shadcn v4 maia: cn-alert-dialog-overlay + cn-alert-dialog-content
 #[component]
 pub fn AlertDialog(props: AlertDialogProps) -> Element {
-    if !props.open {
-        return rsx! {};
-    }
-
     rsx! {
-        // Overlay — does NOT close on click
-        div {
-            class: "fixed inset-0 z-50 bg-black/80 animate-fade-in supports-[backdrop-filter]:backdrop-blur-xs",
-            "data-state": "open",
-        }
-
-        // Content
-        div {
-            class: crate::cn::merge(format!(
-                "fixed z-50 grid w-full max-w-[calc(100%-2rem)] sm:max-w-md gap-6 rounded-xl bg-popover text-popover-foreground border border-border shadow-lg p-6 text-sm animate-scale-in {}",
-                props.class
-            )),
-            style: "left: 50%; top: 50%; transform: translate(-50%, -50%);",
-            role: "alertdialog",
-            aria_modal: "true",
-            onclick: move |evt: MouseEvent| {
-                evt.stop_propagation();
+        PrimitiveAlertDialog {
+            id: props.id,
+            open: props.open,
+            default_open: props.default_open,
+            on_open_change: move |open| {
+                if let Some(callback) = &props.on_open_change {
+                    callback.call(open);
+                }
+                if !open {
+                    if let Some(callback) = &props.on_close {
+                        callback.call(());
+                    }
+                }
             },
-            {props.children}
+            class: "fixed inset-0 z-50 bg-black/80 animate-fade-in supports-[backdrop-filter]:backdrop-blur-xs",
+            PrimitiveAlertDialogContent {
+                class: crate::cn::merge(format!(
+                    "fixed z-50 grid w-full max-w-[calc(100%-2rem)] sm:max-w-md gap-6 rounded-xl bg-popover text-popover-foreground border border-border shadow-lg p-6 text-sm animate-scale-in {}",
+                    props.class
+                )),
+                style: "left: 50%; top: 50%; transform: translate(-50%, -50%);",
+                {props.children}
+            }
         }
     }
 }
@@ -53,7 +63,6 @@ pub struct AlertDialogHeaderProps {
     pub children: Element,
 }
 
-/// shadcn v4 maia: cn-alert-dialog-header
 #[component]
 pub fn AlertDialogHeader(props: AlertDialogHeaderProps) -> Element {
     rsx! {
@@ -71,11 +80,10 @@ pub struct AlertDialogTitleProps {
     pub children: Element,
 }
 
-/// shadcn v4 maia: cn-alert-dialog-title
 #[component]
 pub fn AlertDialogTitle(props: AlertDialogTitleProps) -> Element {
     rsx! {
-        h2 {
+        PrimitiveAlertDialogTitle {
             class: crate::cn::merge_slice(&["text-lg font-medium", props.class.as_str()]),
             {props.children}
         }
@@ -89,11 +97,10 @@ pub struct AlertDialogDescriptionProps {
     pub children: Element,
 }
 
-/// shadcn v4 maia: cn-alert-dialog-description
 #[component]
 pub fn AlertDialogDescription(props: AlertDialogDescriptionProps) -> Element {
     rsx! {
-        p {
+        PrimitiveAlertDialogDescription {
             class: crate::cn::merge_slice(&["text-muted-foreground text-sm", props.class.as_str()]),
             {props.children}
         }
@@ -107,7 +114,6 @@ pub struct AlertDialogFooterProps {
     pub children: Element,
 }
 
-/// shadcn v4 maia: cn-alert-dialog-footer
 #[component]
 pub fn AlertDialogFooter(props: AlertDialogFooterProps) -> Element {
     rsx! {
@@ -120,22 +126,40 @@ pub fn AlertDialogFooter(props: AlertDialogFooterProps) -> Element {
 
 #[derive(Props, Clone, PartialEq)]
 pub struct AlertDialogActionProps {
+    #[props(default)]
+    pub on_click: Option<EventHandler<MouseEvent>>,
+    #[props(default)]
+    pub class: String,
     pub children: Element,
 }
 
-/// Slot for the primary destructive action button.
 #[component]
 pub fn AlertDialogAction(props: AlertDialogActionProps) -> Element {
-    rsx! { {props.children} }
+    rsx! {
+        PrimitiveAlertDialogAction {
+            on_click: props.on_click,
+            class: props.class,
+            {props.children}
+        }
+    }
 }
 
 #[derive(Props, Clone, PartialEq)]
 pub struct AlertDialogCancelProps {
+    #[props(default)]
+    pub on_click: Option<EventHandler<MouseEvent>>,
+    #[props(default)]
+    pub class: String,
     pub children: Element,
 }
 
-/// Slot for the cancel / secondary button.
 #[component]
 pub fn AlertDialogCancel(props: AlertDialogCancelProps) -> Element {
-    rsx! { {props.children} }
+    rsx! {
+        PrimitiveAlertDialogCancel {
+            on_click: props.on_click,
+            class: props.class,
+            {props.children}
+        }
+    }
 }

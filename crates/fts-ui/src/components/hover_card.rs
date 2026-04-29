@@ -1,6 +1,13 @@
-//! HoverCard — CSS-only hover card (no JS positioning).
+//! HoverCard — primitive-backed hover/focus card.
 
 use dioxus::prelude::*;
+use dioxus_primitives::{
+    hover_card::{
+        HoverCard as PrimitiveHoverCard, HoverCardContent as PrimitiveHoverCardContent,
+        HoverCardTrigger as PrimitiveHoverCardTrigger,
+    },
+    ContentAlign, ContentSide,
+};
 
 /// Which side the hover card appears on.
 #[derive(Clone, Copy, PartialEq, Default)]
@@ -10,69 +17,94 @@ pub enum HoverCardSide {
     Bottom,
 }
 
-// ---------------------------------------------------------------------------
-// HoverCard (wrapper)
-// ---------------------------------------------------------------------------
+impl HoverCardSide {
+    fn to_content_side(self) -> ContentSide {
+        match self {
+            Self::Top => ContentSide::Top,
+            Self::Bottom => ContentSide::Bottom,
+        }
+    }
+}
 
 #[derive(Props, Clone, PartialEq)]
 pub struct HoverCardProps {
+    #[props(default)]
+    pub open: Option<bool>,
+    #[props(default = false)]
+    pub default_open: bool,
+    #[props(default)]
+    pub on_open_change: Option<Callback<bool>>,
+    #[props(default = false)]
+    pub disabled: bool,
     #[props(default)]
     pub class: String,
     pub children: Element,
 }
 
-/// Wrapper that establishes the `group` and `relative` positioning context.
 #[component]
 pub fn HoverCard(props: HoverCardProps) -> Element {
     rsx! {
-        div {
+        PrimitiveHoverCard {
+            open: props.open,
+            default_open: props.default_open,
+            disabled: props.disabled,
+            on_open_change: move |open| {
+                if let Some(callback) = &props.on_open_change {
+                    callback.call(open);
+                }
+            },
             class: crate::cn::merge_slice(&["relative inline-flex group", props.class.as_str()]),
             {props.children}
         }
     }
 }
 
-// ---------------------------------------------------------------------------
-// HoverCardTrigger
-// ---------------------------------------------------------------------------
-
 #[derive(Props, Clone, PartialEq)]
 pub struct HoverCardTriggerProps {
-    pub children: Element,
-}
-
-/// The element the user hovers over.
-#[component]
-pub fn HoverCardTrigger(props: HoverCardTriggerProps) -> Element {
-    rsx! { {props.children} }
-}
-
-// ---------------------------------------------------------------------------
-// HoverCardContent
-// ---------------------------------------------------------------------------
-
-#[derive(Props, Clone, PartialEq)]
-pub struct HoverCardContentProps {
     #[props(default)]
-    pub side: HoverCardSide,
+    pub id: Option<String>,
     #[props(default)]
     pub class: String,
     pub children: Element,
 }
 
-/// The popup card shown on hover.
+#[component]
+pub fn HoverCardTrigger(props: HoverCardTriggerProps) -> Element {
+    rsx! {
+        PrimitiveHoverCardTrigger {
+            id: props.id,
+            class: props.class,
+            {props.children}
+        }
+    }
+}
+
+#[derive(Props, Clone, PartialEq)]
+pub struct HoverCardContentProps {
+    #[props(default)]
+    pub id: Option<String>,
+    #[props(default)]
+    pub side: HoverCardSide,
+    #[props(default = ContentAlign::Center)]
+    pub align: ContentAlign,
+    #[props(default = true)]
+    pub force_mount: bool,
+    #[props(default)]
+    pub class: String,
+    pub children: Element,
+}
+
 #[component]
 pub fn HoverCardContent(props: HoverCardContentProps) -> Element {
-    let position = match props.side {
-        HoverCardSide::Bottom => "top-full left-1/2 -translate-x-1/2 mt-2",
-        HoverCardSide::Top => "bottom-full left-1/2 -translate-x-1/2 mb-2",
-    };
-
     rsx! {
-        div {
+        PrimitiveHoverCardContent {
+            id: props.id,
+            side: props.side.to_content_side(),
+            align: props.align,
+            force_mount: props.force_mount,
             class: crate::cn::merge(format!(
-                "invisible group-hover:visible opacity-0 group-hover:opacity-100 transition-all duration-200 delay-200 absolute z-50 w-64 rounded-lg bg-popover text-popover-foreground border border-border shadow-md p-4 text-sm pointer-events-none group-hover:pointer-events-auto {} {}",
-                position, props.class
+                "absolute z-50 w-64 rounded-lg bg-popover text-popover-foreground border border-border shadow-md p-4 text-sm data-[side=top]:bottom-full data-[side=top]:left-1/2 data-[side=top]:-translate-x-1/2 data-[side=top]:mb-2 data-[side=bottom]:top-full data-[side=bottom]:left-1/2 data-[side=bottom]:-translate-x-1/2 data-[side=bottom]:mt-2 {}",
+                props.class
             )),
             {props.children}
         }

@@ -138,10 +138,14 @@ pub use aspect_ratio::*;
 pub use navigation_menu::*;
 
 mod calendar;
+mod date_picker;
 mod resizable;
+mod toolbar;
 
 pub use calendar::*;
+pub use date_picker::*;
 pub use resizable::*;
+pub use toolbar::*;
 
 mod sidebar;
 

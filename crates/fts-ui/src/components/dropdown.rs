@@ -1,22 +1,23 @@
-//! Dropdown menu — shadcn v4 maia style, standalone implementation.
+//! Dropdown menu — primitive-backed shadcn-style menu.
 
 use dioxus::prelude::*;
-
-// ── Context ──────────────────────────────────────────────────────────────────
-
-#[derive(Clone, Copy)]
-struct DropdownContext {
-    open: Signal<bool>,
-}
-
-// ── Dropdown ─────────────────────────────────────────────────────────────────
+use dioxus_primitives::dropdown_menu::{
+    DropdownMenu as PrimitiveDropdown, DropdownMenuContent as PrimitiveDropdownContent,
+    DropdownMenuItem as PrimitiveDropdownItem, DropdownMenuTrigger as PrimitiveDropdownTrigger,
+};
 
 #[derive(Props, Clone, PartialEq)]
 pub struct DropdownProps {
+    #[props(default)]
+    pub open: Option<bool>,
     #[props(default = false)]
     pub default_open: bool,
     #[props(default)]
+    pub on_open_change: Option<Callback<bool>>,
+    #[props(default = false)]
     pub disabled: bool,
+    #[props(default = true)]
+    pub roving_loop: bool,
     #[props(default)]
     pub class: String,
     pub children: Element,
@@ -24,9 +25,6 @@ pub struct DropdownProps {
 
 #[component]
 pub fn Dropdown(props: DropdownProps) -> Element {
-    let open = use_signal(|| props.default_open);
-    use_context_provider(|| DropdownContext { open });
-
     let disabled_class = if props.disabled {
         "opacity-50 pointer-events-none"
     } else {
@@ -34,14 +32,21 @@ pub fn Dropdown(props: DropdownProps) -> Element {
     };
 
     rsx! {
-        div {
+        PrimitiveDropdown {
+            open: props.open,
+            default_open: props.default_open,
+            disabled: props.disabled,
+            roving_loop: props.roving_loop,
+            on_open_change: move |open| {
+                if let Some(callback) = &props.on_open_change {
+                    callback.call(open);
+                }
+            },
             class: crate::cn::merge_slice(&["relative inline-block text-left", disabled_class, props.class.as_str()]),
             {props.children}
         }
     }
 }
-
-// ── Trigger ──────────────────────────────────────────────────────────────────
 
 #[derive(Props, Clone, PartialEq)]
 pub struct DropdownTriggerProps {
@@ -52,23 +57,14 @@ pub struct DropdownTriggerProps {
 
 #[component]
 pub fn DropdownTrigger(props: DropdownTriggerProps) -> Element {
-    let mut ctx: DropdownContext = use_context();
-
     rsx! {
-        div {
+        PrimitiveDropdownTrigger {
             class: crate::cn::merge_slice(&["cursor-pointer", props.class.as_str()]),
-            onclick: move |_| {
-                let current = *ctx.open.read();
-                ctx.open.set(!current);
-            },
             {props.children}
         }
     }
 }
 
-// ── Content ──────────────────────────────────────────────────────────────────
-
-/// Dropdown size (kept for API compat).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum DropdownSize {
     Small,
@@ -79,6 +75,8 @@ pub enum DropdownSize {
 
 #[derive(Props, Clone, PartialEq)]
 pub struct DropdownContentProps {
+    #[props(default)]
+    pub id: Option<String>,
     #[props(default = String::from("start"))]
     pub align: String,
     #[props(default = String::from("w-56"))]
@@ -88,16 +86,8 @@ pub struct DropdownContentProps {
     pub children: Element,
 }
 
-/// shadcn v4 maia: cn-dropdown-menu-content
 #[component]
 pub fn DropdownContent(props: DropdownContentProps) -> Element {
-    let mut ctx: DropdownContext = use_context();
-    let is_open = *ctx.open.read();
-
-    if !is_open {
-        return rsx! {};
-    }
-
     let align_class = match props.align.as_str() {
         "end" => "right-0 origin-top-right",
         "center" => "left-1/2 -translate-x-1/2 origin-top",
@@ -105,33 +95,27 @@ pub fn DropdownContent(props: DropdownContentProps) -> Element {
     };
 
     rsx! {
-        // Invisible backdrop to close on outside click
-        div {
-            class: "fixed inset-0 z-[99]",
-            onclick: move |_| ctx.open.set(false),
-        }
-        // Menu panel
-        div {
+        PrimitiveDropdownContent {
+            id: props.id,
             class: crate::cn::merge(format!(
                 "absolute z-[100] mt-2 min-w-48 rounded-lg bg-popover text-popover-foreground border border-border shadow-md p-1 {} {align_class} {}",
                 props.width, props.class
             )),
-            onclick: move |e| e.stop_propagation(),
             {props.children}
         }
     }
 }
 
-// ── Item ─────────────────────────────────────────────────────────────────────
-
 #[derive(Props, Clone, PartialEq)]
 pub struct DropdownItemProps {
-    #[props(default)]
+    pub value: String,
+    pub index: usize,
+    #[props(default = false)]
     pub disabled: bool,
     #[props(default = false)]
     pub destructive: bool,
     #[props(default)]
-    pub on_select: Option<Callback<()>>,
+    pub on_select: Option<Callback<String>>,
     #[props(default)]
     pub icon: Option<Element>,
     #[props(default)]
@@ -139,37 +123,28 @@ pub struct DropdownItemProps {
     pub children: Element,
 }
 
-/// shadcn v4 maia: cn-dropdown-menu-item
 #[component]
 pub fn DropdownItem(props: DropdownItemProps) -> Element {
-    let mut ctx: DropdownContext = use_context();
-
     let variant_class = if props.destructive {
         "text-destructive hover:bg-destructive/10"
     } else {
         "hover:bg-accent hover:text-accent-foreground"
     };
 
-    let disabled_class = if props.disabled {
-        "pointer-events-none opacity-50"
-    } else {
-        ""
-    };
-
     rsx! {
-        div {
-            class: crate::cn::merge(format!(
-                "relative flex cursor-pointer select-none items-center rounded-xl px-3 py-2 text-sm transition-colors gap-2.5 [&_svg:not([class*='size-'])]:size-4 {variant_class} {disabled_class} {}",
-                props.class
-            )),
-            onclick: move |_| {
-                if !props.disabled {
-                    if let Some(cb) = &props.on_select {
-                        cb.call(());
-                    }
-                    ctx.open.set(false);
+        PrimitiveDropdownItem::<String> {
+            value: props.value,
+            index: props.index,
+            disabled: props.disabled,
+            on_select: move |value| {
+                if let Some(callback) = &props.on_select {
+                    callback.call(value);
                 }
             },
+            class: crate::cn::merge(format!(
+                "relative flex cursor-pointer select-none items-center rounded-xl px-3 py-2 text-sm transition-colors gap-2.5 [&_svg:not([class*='size-'])]:size-4 {variant_class} {}",
+                props.class
+            )),
             if let Some(icon) = &props.icon {
                 span { class: "flex-shrink-0", {icon} }
             }
@@ -178,8 +153,6 @@ pub fn DropdownItem(props: DropdownItemProps) -> Element {
     }
 }
 
-// ── Label ────────────────────────────────────────────────────────────────────
-
 #[derive(Props, Clone, PartialEq)]
 pub struct DropdownLabelProps {
     #[props(default)]
@@ -187,7 +160,6 @@ pub struct DropdownLabelProps {
     pub children: Element,
 }
 
-/// shadcn v4 maia: cn-dropdown-menu-label
 #[component]
 pub fn DropdownLabel(props: DropdownLabelProps) -> Element {
     rsx! {
@@ -198,15 +170,12 @@ pub fn DropdownLabel(props: DropdownLabelProps) -> Element {
     }
 }
 
-// ── Separator ────────────────────────────────────────────────────────────────
-
 #[derive(Props, Clone, PartialEq)]
 pub struct DropdownSeparatorProps {
     #[props(default)]
     pub class: String,
 }
 
-/// shadcn v4 maia: cn-dropdown-menu-separator
 #[component]
 pub fn DropdownSeparator(props: DropdownSeparatorProps) -> Element {
     rsx! {
