@@ -5,8 +5,8 @@
 //! rsx! { Showcase {} }
 //! ```
 
-use dioxus::prelude::*;
 use crate::prelude::*;
+use dioxus::prelude::*;
 
 /// Full showcase of every fts-ui component with spacing rulers.
 /// Import this into any app to visually verify the design system.

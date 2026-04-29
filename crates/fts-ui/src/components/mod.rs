@@ -123,12 +123,12 @@ pub use avatar::*;
 pub use input_group::*;
 pub use pagination::*;
 
-mod command;
 mod combobox;
+mod command;
 mod menubar;
 
-pub use command::*;
 pub use combobox::*;
+pub use command::*;
 pub use menubar::*;
 
 mod aspect_ratio;

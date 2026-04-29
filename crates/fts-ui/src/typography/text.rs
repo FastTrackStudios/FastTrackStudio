@@ -22,7 +22,9 @@ impl TextVariant {
             Self::Body => "text-sm",
             Self::Small => "text-xs",
             Self::Muted => "text-sm text-muted-foreground",
-            Self::Code => "relative rounded bg-muted px-[0.3rem] py-[0.2rem] font-mono text-sm font-semibold",
+            Self::Code => {
+                "relative rounded bg-muted px-[0.3rem] py-[0.2rem] font-mono text-sm font-semibold"
+            }
         }
     }
 }

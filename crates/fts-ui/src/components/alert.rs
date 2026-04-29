@@ -33,7 +33,8 @@ pub struct AlertProps {
 /// shadcn v4 maia: cn-alert
 #[component]
 pub fn Alert(props: AlertProps) -> Element {
-    let base = "grid gap-0.5 rounded-lg border border-border px-4 py-3 text-left text-sm [&>svg]:size-4";
+    let base =
+        "grid gap-0.5 rounded-lg border border-border px-4 py-3 text-left text-sm [&>svg]:size-4";
     let variant_class = props.variant.classes();
 
     rsx! {

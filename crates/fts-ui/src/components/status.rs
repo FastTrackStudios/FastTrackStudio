@@ -86,7 +86,11 @@ pub struct StatusDotProps {
 
 #[component]
 pub fn StatusDot(props: StatusDotProps) -> Element {
-    let shape = if props.round { "rounded-full" } else { "rounded-sm" };
+    let shape = if props.round {
+        "rounded-full"
+    } else {
+        "rounded-sm"
+    };
 
     rsx! {
         div {

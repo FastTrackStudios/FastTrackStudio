@@ -22,8 +22,12 @@ pub enum SegmentedControlSize {
 impl SegmentedControlSize {
     fn active_classes(self) -> &'static str {
         match self {
-            Self::Small => "px-2 py-0.5 text-[11px] font-medium rounded bg-accent text-accent-foreground",
-            Self::Medium => "px-2.5 py-1 text-xs font-semibold rounded bg-accent text-accent-foreground",
+            Self::Small => {
+                "px-2 py-0.5 text-[11px] font-medium rounded bg-accent text-accent-foreground"
+            }
+            Self::Medium => {
+                "px-2.5 py-1 text-xs font-semibold rounded bg-accent text-accent-foreground"
+            }
         }
     }
 

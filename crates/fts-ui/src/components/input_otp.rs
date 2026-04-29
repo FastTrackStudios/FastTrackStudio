@@ -44,10 +44,7 @@ pub fn InputOtp(props: InputOtpProps) -> Element {
     let on_complete = props.on_complete;
     let mut focused = use_signal(|| false);
 
-    use_context_provider(|| InputOtpContext {
-        value,
-        focused,
-    });
+    use_context_provider(|| InputOtpContext { value, focused });
 
     rsx! {
         div {

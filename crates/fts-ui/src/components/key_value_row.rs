@@ -33,7 +33,11 @@ pub struct KeyValueRowProps {
 #[component]
 pub fn KeyValueRow(props: KeyValueRowProps) -> Element {
     let weight = if props.bold { "font-semibold" } else { "" };
-    let font = if props.mono { "font-mono tabular-nums" } else { "" };
+    let font = if props.mono {
+        "font-mono tabular-nums"
+    } else {
+        ""
+    };
 
     rsx! {
         div {

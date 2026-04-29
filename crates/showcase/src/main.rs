@@ -1,13 +1,17 @@
 //! fts-ui Showcase — visual verification of all components.
 //! Run: `dx serve --platform desktop`
 
-use dioxus::prelude::*;
 use dioxus::desktop::{tao::window::WindowBuilder, Config};
+use dioxus::prelude::*;
 use fts_ui::showcase::Showcase;
 
 fn main() {
-    unsafe { std::env::set_var("GTK_THEME", "Adwaita:dark"); }
-    unsafe { std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1"); }
+    unsafe {
+        std::env::set_var("GTK_THEME", "Adwaita:dark");
+    }
+    unsafe {
+        std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
+    }
 
     let cfg = Config::new()
         .with_window(

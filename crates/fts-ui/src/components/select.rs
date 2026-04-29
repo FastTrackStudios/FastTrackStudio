@@ -94,7 +94,11 @@ pub fn SelectTrigger(props: SelectTriggerProps) -> Element {
     let mut ctx: SelectContext = use_context();
     let current = ctx.value.read().clone();
     let placeholder = ctx.placeholder.read().clone();
-    let display = if current.is_empty() { placeholder } else { current };
+    let display = if current.is_empty() {
+        placeholder
+    } else {
+        current
+    };
     let is_placeholder = ctx.value.read().is_empty();
 
     rsx! {

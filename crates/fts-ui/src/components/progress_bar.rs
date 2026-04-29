@@ -65,7 +65,11 @@ pub fn ProgressBar(props: ProgressBarProps) -> Element {
 
 fn render_horizontal(props: ProgressBarProps) -> Element {
     let height = props.height.as_deref().unwrap_or("3rem");
-    let selected_class = if props.is_selected { "ring-2 ring-primary" } else { "" };
+    let selected_class = if props.is_selected {
+        "ring-2 ring-primary"
+    } else {
+        ""
+    };
 
     rsx! {
         div {

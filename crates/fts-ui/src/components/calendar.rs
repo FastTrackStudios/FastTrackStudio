@@ -33,17 +33,11 @@ pub fn Calendar(props: CalendarProps) -> Element {
     let month = month_start.month();
 
     // Label for the header, e.g. "April 2026"
-    let month_label = format!(
-        "{} {}",
-        month_name(month),
-        year
-    );
+    let month_label = format!("{} {}", month_name(month), year);
 
     // Build the 42-cell grid (6 weeks).
     let grid_start = prev_monday(month_start);
-    let cells: Vec<NaiveDate> = (0..42)
-        .map(|i| grid_start + Duration::days(i))
-        .collect();
+    let cells: Vec<NaiveDate> = (0..42).map(|i| grid_start + Duration::days(i)).collect();
 
     let selected = props.selected;
     let on_select = props.on_select;

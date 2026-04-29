@@ -59,7 +59,9 @@ pub fn Input(props: InputProps) -> Element {
 
     let variant_class = match props.variant {
         InputVariant::Default => "",
-        InputVariant::Error => "aria-invalid:ring-destructive/20 aria-invalid:border-destructive border-destructive",
+        InputVariant::Error => {
+            "aria-invalid:ring-destructive/20 aria-invalid:border-destructive border-destructive"
+        }
     };
 
     let mut value = props.value;

@@ -27,7 +27,11 @@ pub fn Dropdown(props: DropdownProps) -> Element {
     let open = use_signal(|| props.default_open);
     use_context_provider(|| DropdownContext { open });
 
-    let disabled_class = if props.disabled { "opacity-50 pointer-events-none" } else { "" };
+    let disabled_class = if props.disabled {
+        "opacity-50 pointer-events-none"
+    } else {
+        ""
+    };
 
     rsx! {
         div {
