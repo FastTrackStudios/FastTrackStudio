@@ -552,6 +552,19 @@ impl VaultServiceImpl {
             match sync.list_boards().await {
                 Ok(boards) => {
                     for board in boards.into_iter().filter(|b| !b.archived) {
+                        for task in local_tasks
+                            .iter()
+                            .filter(|task| task.projects.iter().any(|p| p.0 == board.title))
+                        {
+                            match sync.push_task_to_deck(board.id, task, &task.body).await {
+                                Ok(()) => stats.deck_pushed += 1,
+                                Err(e) => stats.errors.push(format!(
+                                    "Deck board {} push '{}': {e}",
+                                    board.id, task.title
+                                )),
+                            }
+                        }
+
                         match sync.deck_board_to_tasks(board.id).await {
                             Ok((project, remote_tasks)) => {
                                 stats.deck_pulled += remote_tasks.len() as u32;
