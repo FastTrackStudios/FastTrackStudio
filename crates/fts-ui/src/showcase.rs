@@ -12,7 +12,7 @@ use dioxus::prelude::*;
 /// Import this into any app to visually verify the design system.
 #[component]
 pub fn Showcase() -> Element {
-    let theme_state = use_signal(default_theme_state);
+    let theme_state = use_signal(|| ThemeState::new(default_theme_preset(), ThemeMode::Dark));
 
     rsx! {
         ThemeProvider { state: theme_state,
