@@ -295,6 +295,50 @@ enum Commands {
     Doctor {
         #[arg(long)]
         json: bool,
+        /// Run live provider checks against WebDAV, CalDAV, Mail, and Deck
+        #[arg(long)]
+        deep: bool,
+    },
+    /// Manage named task-server connection profiles
+    Server {
+        #[command(subcommand)]
+        command: ServerCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum ServerCommands {
+    /// Add or update a named server profile
+    Add {
+        name: String,
+        #[arg(long)]
+        url: String,
+        #[arg(long)]
+        session_token: Option<String>,
+        #[arg(long)]
+        organization_id: Option<String>,
+        #[arg(long)]
+        use_now: bool,
+    },
+    /// List configured server profiles
+    List {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Select the default server profile
+    Use { name: String },
+    /// Show the active/default server profile
+    Current {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Run doctor against a configured server profile
+    Doctor {
+        name: Option<String>,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        deep: bool,
     },
 }
 
@@ -955,6 +999,11 @@ enum AgentCommands {
     },
     /// Describe the installable CLI surface for agents
     Capabilities,
+    /// Print machine-readable bootstrap instructions for agents
+    Bootstrap {
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1072,12 +1121,15 @@ async fn main() -> eyre::Result<()> {
         print_agent_capabilities();
         return Ok(());
     }
-    if let Commands::Doctor { json } = command {
+    if let Commands::Doctor { json, deep } = command {
         if let Some(server) = server {
             let remote = RemoteVoxConfig::new(server, session_token, organization_id)?;
-            return run_remote_doctor(&remote, json).await;
+            return run_remote_doctor(&remote, json, deep).await;
         }
-        return run_local_doctor(vault.as_deref(), json).await;
+        return run_local_doctor(vault.as_deref(), json, deep).await;
+    }
+    if let Commands::Server { command } = command {
+        return run_server_command(command).await;
     }
     // `task email watch` is a pure IMAP IDLE subscription — no vault
     // access needed. Handle it here so the watcher service doesn't
@@ -2728,7 +2780,9 @@ async fn main() -> eyre::Result<()> {
             run_agent_command(&svc, &vault_path, actor.as_deref(), command).await?;
         }
 
-        Commands::Doctor { .. } => unreachable!("handled before vault dispatch"),
+        Commands::Doctor { .. } | Commands::Server { .. } => {
+            unreachable!("handled before vault dispatch")
+        }
 
         Commands::Activity { limit, kind, json } => {
             let changes = svc.recent_activity(limit).await?;
@@ -2930,14 +2984,55 @@ async fn run_agent_command(
             }
         }
         AgentCommands::Capabilities => print_agent_capabilities(),
+        AgentCommands::Bootstrap { json } => {
+            print_agent_bootstrap(None, None, json);
+        }
     }
     Ok(())
+}
+
+#[derive(Debug, Clone, Default)]
+struct ServerProfiles {
+    default: Option<String>,
+    servers: Vec<ServerProfile>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct ServerProfile {
+    name: String,
+    url: String,
+    session_token: Option<String>,
+    organization_id: Option<String>,
+}
+
+impl ServerProfiles {
+    fn resolve(&self, name_or_url: &str) -> Option<ServerProfile> {
+        self.servers
+            .iter()
+            .find(|profile| profile.name == name_or_url)
+            .cloned()
+            .or_else(|| {
+                if name_or_url == "default" {
+                    self.current()
+                } else {
+                    None
+                }
+            })
+    }
+
+    fn current(&self) -> Option<ServerProfile> {
+        self.default
+            .as_deref()
+            .and_then(|name| self.servers.iter().find(|p| p.name == name))
+            .cloned()
+    }
 }
 
 #[derive(Debug, Clone)]
 struct RemoteVoxConfig {
     vox_url: String,
     display_url: String,
+    profile_name: Option<String>,
 }
 
 impl RemoteVoxConfig {
@@ -2946,10 +3041,29 @@ impl RemoteVoxConfig {
         session_token: Option<String>,
         organization_id: Option<String>,
     ) -> eyre::Result<Self> {
-        let token = session_token.filter(|s| !s.is_empty()).ok_or_else(|| {
-            eyre::eyre!("Remote mode requires --session-token or TASK_SESSION_TOKEN.")
-        })?;
-        let base_vox_url = normalize_vox_url(&server);
+        let profile = load_server_profiles()
+            .ok()
+            .and_then(|config| config.resolve(&server));
+        let server_url = profile
+            .as_ref()
+            .map(|profile| profile.url.clone())
+            .unwrap_or(server);
+        let token = session_token
+            .or_else(|| {
+                profile
+                    .as_ref()
+                    .and_then(|profile| profile.session_token.clone())
+            })
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| {
+                eyre::eyre!("Remote mode requires --session-token or TASK_SESSION_TOKEN.")
+            })?;
+        let organization_id = organization_id.or_else(|| {
+            profile
+                .as_ref()
+                .and_then(|profile| profile.organization_id.clone())
+        });
+        let base_vox_url = normalize_vox_url(&server_url);
         let mut vox_url = base_vox_url.clone();
         append_query_param(&mut vox_url, "token", &token);
         let mut display_url = base_vox_url;
@@ -2961,6 +3075,7 @@ impl RemoteVoxConfig {
         Ok(Self {
             vox_url,
             display_url,
+            profile_name: profile.map(|profile| profile.name),
         })
     }
 
@@ -3018,7 +3133,8 @@ async fn run_remote_command(
 ) -> eyre::Result<()> {
     match command {
         Commands::Agent { command } => run_remote_agent_command(remote, actor, command).await?,
-        Commands::Doctor { json } => run_remote_doctor(remote, json).await?,
+        Commands::Doctor { json, deep } => run_remote_doctor(remote, json, deep).await?,
+        Commands::Server { .. } => unreachable!("handled before remote dispatch"),
 
         Commands::List {
             status,
@@ -4611,10 +4727,10 @@ fn normalize_message_id(id: &str) -> String {
         .to_ascii_lowercase()
 }
 
-async fn run_remote_doctor(remote: &RemoteVoxConfig, json: bool) -> eyre::Result<()> {
+async fn run_remote_doctor(remote: &RemoteVoxConfig, json: bool, deep: bool) -> eyre::Result<()> {
     let system = remote.system().await?;
     let capabilities = system.capabilities().await?;
-    let health = system.health().await?;
+    let health = system.health(deep).await?;
     if json {
         print_doctor_json(&capabilities, &health);
     } else {
@@ -4623,7 +4739,7 @@ async fn run_remote_doctor(remote: &RemoteVoxConfig, json: bool) -> eyre::Result
     Ok(())
 }
 
-async fn run_local_doctor(vault: Option<&str>, json: bool) -> eyre::Result<()> {
+async fn run_local_doctor(vault: Option<&str>, json: bool, deep: bool) -> eyre::Result<()> {
     let vault_root = vault
         .map(String::from)
         .or_else(|| std::env::var("TASK_VAULT").ok())
@@ -4648,9 +4764,29 @@ async fn run_local_doctor(vault: Option<&str>, json: bool) -> eyre::Result<()> {
             .ok()
             .filter(|s| !s.is_empty())
             .is_some();
+    let remote_configured = std::env::var("TASK_SERVER")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .is_some()
+        || load_server_profiles()
+            .ok()
+            .and_then(|profiles| profiles.current())
+            .is_some();
+    let remote_token_configured = std::env::var("TASK_SESSION_TOKEN")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .is_some()
+        || load_server_profiles()
+            .ok()
+            .and_then(|profiles| profiles.current())
+            .and_then(|profile| profile.session_token)
+            .is_some();
     let capabilities = SystemCapabilities {
         package: "task-cli".into(),
         version: env!("CARGO_PKG_VERSION").into(),
+        protocol_version: 1,
+        min_cli_version: "0.1.0".into(),
+        min_server_version: "0.1.0".into(),
         services: Vec::new(),
         features: vec![
             "local-vault".into(),
@@ -4680,6 +4816,13 @@ async fn run_local_doctor(vault: Option<&str>, json: bool) -> eyre::Result<()> {
     let mut checks = Vec::new();
     checks.push(task_core::HealthCheck {
         name: "vault".into(),
+        code: if vault_exists {
+            "VAULT_OK".into()
+        } else if vault_root.is_empty() {
+            "VAULT_NOT_CONFIGURED".into()
+        } else {
+            "VAULT_ROOT_MISSING".into()
+        },
         configured: !vault_root.is_empty(),
         ok: vault_exists,
         detail: if vault_root.is_empty() {
@@ -4689,25 +4832,29 @@ async fn run_local_doctor(vault: Option<&str>, json: bool) -> eyre::Result<()> {
         } else {
             format!("vault root is missing at {vault_root}")
         },
+        hint: Some("Set --vault or TASK_VAULT to an existing vault root.".into()),
     });
     checks.push(task_core::HealthCheck {
         name: "remote-server".into(),
-        configured: std::env::var("TASK_SERVER")
-            .ok()
-            .filter(|s| !s.is_empty())
-            .is_some(),
-        ok: std::env::var("TASK_SERVER")
-            .ok()
-            .filter(|s| !s.is_empty())
-            .is_some()
-            && std::env::var("TASK_SESSION_TOKEN")
-                .ok()
-                .filter(|s| !s.is_empty())
-                .is_some(),
+        code: if remote_configured && remote_token_configured {
+            "REMOTE_CONFIGURED".into()
+        } else if remote_configured {
+            "REMOTE_TOKEN_MISSING".into()
+        } else {
+            "REMOTE_NOT_CONFIGURED".into()
+        },
+        configured: remote_configured,
+        ok: remote_configured && remote_token_configured,
         detail: "set TASK_SERVER and TASK_SESSION_TOKEN, or pass --server/--session-token, for remote checks".into(),
+        hint: Some("Run `task server add <name> --url <url> --session-token <token> --use-now` to save a profile.".into()),
     });
     checks.push(task_core::HealthCheck {
         name: "nextcloud-config".into(),
+        code: if nextcloud_url.is_some() && nextcloud_password_configured {
+            "NEXTCLOUD_CONFIGURED".into()
+        } else {
+            "NEXTCLOUD_NOT_CONFIGURED".into()
+        },
         configured: nextcloud_url.is_some() || nextcloud_password_configured,
         ok: nextcloud_url.is_some() && nextcloud_password_configured,
         detail: if nextcloud_url.is_some() && nextcloud_password_configured {
@@ -4715,9 +4862,13 @@ async fn run_local_doctor(vault: Option<&str>, json: bool) -> eyre::Result<()> {
         } else {
             "Nextcloud URL and password/app-token are not both configured".into()
         },
+        hint: Some(
+            "Set NEXTCLOUD_URL and NEXTCLOUD_PASSWORD, or use TASK_NEXTCLOUD_CONFIG.".into(),
+        ),
     });
     let health = SystemHealth {
         ok: checks.iter().all(|check| check.ok || !check.configured),
+        deep,
         checks,
     };
     if json {
@@ -4733,6 +4884,197 @@ fn env_truthy(value: &str) -> bool {
         value.to_ascii_lowercase().as_str(),
         "1" | "true" | "yes" | "on"
     )
+}
+
+async fn run_server_command(command: ServerCommands) -> eyre::Result<()> {
+    match command {
+        ServerCommands::Add {
+            name,
+            url,
+            session_token,
+            organization_id,
+            use_now,
+        } => {
+            let mut profiles = load_server_profiles().unwrap_or_default();
+            profiles.servers.retain(|profile| profile.name != name);
+            profiles.servers.push(ServerProfile {
+                name: name.clone(),
+                url,
+                session_token,
+                organization_id,
+            });
+            if use_now || profiles.default.is_none() {
+                profiles.default = Some(name.clone());
+            }
+            save_server_profiles(&profiles)?;
+            println!("Saved server profile '{name}'.");
+        }
+        ServerCommands::List { json } => {
+            let profiles = load_server_profiles().unwrap_or_default();
+            if json {
+                print_server_profiles_json(&profiles);
+            } else if profiles.servers.is_empty() {
+                println!("No server profiles configured.");
+            } else {
+                println!("{:<18} {:<8} URL", "NAME", "DEFAULT");
+                println!("{}", "-".repeat(72));
+                for profile in profiles.servers {
+                    println!(
+                        "{:<18} {:<8} {}",
+                        profile.name,
+                        if profiles.default.as_deref() == Some(&profile.name) {
+                            "yes"
+                        } else {
+                            ""
+                        },
+                        profile.url
+                    );
+                }
+            }
+        }
+        ServerCommands::Use { name } => {
+            let mut profiles = load_server_profiles().unwrap_or_default();
+            if profiles.servers.iter().any(|profile| profile.name == name) {
+                profiles.default = Some(name.clone());
+                save_server_profiles(&profiles)?;
+                println!("Using server profile '{name}'.");
+            } else {
+                eyre::bail!("Unknown server profile: {name}");
+            }
+        }
+        ServerCommands::Current { json } => {
+            let profiles = load_server_profiles().unwrap_or_default();
+            let current = profiles.current();
+            if json {
+                print_server_profile_json(current.as_ref());
+            } else if let Some(profile) = current {
+                println!("{} -> {}", profile.name, profile.url);
+            } else {
+                println!("No default server profile configured.");
+            }
+        }
+        ServerCommands::Doctor { name, json, deep } => {
+            let profiles = load_server_profiles().unwrap_or_default();
+            let profile = name
+                .as_deref()
+                .and_then(|name| profiles.resolve(name))
+                .or_else(|| profiles.current())
+                .ok_or_else(|| eyre::eyre!("No server profile configured."))?;
+            let remote =
+                RemoteVoxConfig::new(profile.name, profile.session_token, profile.organization_id)?;
+            run_remote_doctor(&remote, json, deep).await?;
+        }
+    }
+    Ok(())
+}
+
+fn server_profiles_path() -> eyre::Result<std::path::PathBuf> {
+    let base = std::env::var("TASK_CONFIG_DIR")
+        .ok()
+        .map(std::path::PathBuf::from)
+        .or_else(|| {
+            std::env::var("HOME")
+                .ok()
+                .map(|home| std::path::PathBuf::from(home).join(".config/task"))
+        })
+        .ok_or_else(|| eyre::eyre!("Set HOME or TASK_CONFIG_DIR to store server profiles."))?;
+    Ok(base.join("servers.tsv"))
+}
+
+fn load_server_profiles() -> eyre::Result<ServerProfiles> {
+    let path = server_profiles_path()?;
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return Ok(ServerProfiles::default());
+    };
+    let mut profiles = ServerProfiles::default();
+    for line in content.lines() {
+        let parts: Vec<_> = line.split('\t').collect();
+        match parts.as_slice() {
+            ["default", name] => profiles.default = Some((*name).to_string()),
+            ["server", name, url, token, org] => profiles.servers.push(ServerProfile {
+                name: (*name).to_string(),
+                url: (*url).to_string(),
+                session_token: if token.is_empty() {
+                    None
+                } else {
+                    Some((*token).to_string())
+                },
+                organization_id: if org.is_empty() {
+                    None
+                } else {
+                    Some((*org).to_string())
+                },
+            }),
+            _ => {}
+        }
+    }
+    Ok(profiles)
+}
+
+fn save_server_profiles(profiles: &ServerProfiles) -> eyre::Result<()> {
+    let path = server_profiles_path()?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let mut content = String::new();
+    if let Some(default) = &profiles.default {
+        content.push_str(&format!("default\t{}\n", tsv_escape(default)));
+    }
+    for profile in &profiles.servers {
+        content.push_str(&format!(
+            "server\t{}\t{}\t{}\t{}\n",
+            tsv_escape(&profile.name),
+            tsv_escape(&profile.url),
+            tsv_escape(profile.session_token.as_deref().unwrap_or("")),
+            tsv_escape(profile.organization_id.as_deref().unwrap_or(""))
+        ));
+    }
+    std::fs::write(path, content)?;
+    Ok(())
+}
+
+fn tsv_escape(value: &str) -> String {
+    value.replace(['\t', '\n', '\r'], " ")
+}
+
+fn print_server_profiles_json(profiles: &ServerProfiles) {
+    print!("{{\"default\":");
+    match &profiles.default {
+        Some(default) => print!("\"{}\"", escape_json(default)),
+        None => print!("null"),
+    }
+    print!(",\"servers\":[");
+    for (idx, profile) in profiles.servers.iter().enumerate() {
+        if idx > 0 {
+            print!(",");
+        }
+        print_server_profile_object(profile);
+    }
+    println!("]}}");
+}
+
+fn print_server_profile_json(profile: Option<&ServerProfile>) {
+    match profile {
+        Some(profile) => {
+            print_server_profile_object(profile);
+            println!();
+        }
+        None => println!("null"),
+    }
+}
+
+fn print_server_profile_object(profile: &ServerProfile) {
+    print!(
+        "{{\"name\":\"{}\",\"url\":\"{}\",\"session_token_configured\":{},\"organization_id\":{}}}",
+        escape_json(&profile.name),
+        escape_json(&profile.url),
+        profile.session_token.is_some(),
+        profile
+            .organization_id
+            .as_deref()
+            .map(|org| format!("\"{}\"", escape_json(org)))
+            .unwrap_or_else(|| "null".into())
+    );
 }
 
 async fn remote_calendar_events_for_range(
@@ -5004,6 +5346,10 @@ async fn run_remote_agent_command(
             }
         }
         AgentCommands::Capabilities => print_agent_capabilities(),
+        AgentCommands::Bootstrap { json } => {
+            let capabilities = remote.system().await?.capabilities().await.ok();
+            print_agent_bootstrap(Some(remote), capabilities.as_ref(), json);
+        }
     }
     Ok(())
 }
@@ -5954,7 +6300,7 @@ fn print_agent_snapshot(snapshot: AgentSnapshot<'_>) {
 
 fn print_agent_capabilities() {
     println!(
-        "{{\"binary\":\"task\",\"package\":\"task-cli\",\"install\":{},\"global_flags\":[\"--vault\",\"--server\",\"--session-token\",\"--organization-id\",\"--as-user\"],\"agent_commands\":[\"snapshot\",\"task\",\"project\",\"calendar\",\"time\",\"sync\",\"capabilities\"],\"control_commands\":[\"add\",\"update\",\"complete\",\"delete\",\"calendar add\",\"calendar update\",\"calendar delete\",\"email accounts\",\"email search\",\"email show\",\"email link\",\"email sweep\",\"time log\",\"time edit\",\"start\",\"stop\",\"sync\"],\"remote_mode\":\"Set --server plus --session-token to route supported task, project, client, invoice, time, calendar, email, activity, conflict, and agent commands over Vox; --organization-id routes multi-instance organization requests.\"}}",
+        "{{\"binary\":\"task\",\"package\":\"task-cli\",\"install\":{},\"global_flags\":[\"--vault\",\"--server\",\"--session-token\",\"--organization-id\",\"--as-user\"],\"agent_commands\":[\"snapshot\",\"task\",\"project\",\"calendar\",\"time\",\"sync\",\"capabilities\",\"bootstrap\"],\"control_commands\":[\"doctor\",\"doctor --deep\",\"server add\",\"server list\",\"server use\",\"add\",\"update\",\"complete\",\"delete\",\"calendar add\",\"calendar update\",\"calendar delete\",\"email accounts\",\"email search\",\"email show\",\"email link\",\"email sweep\",\"time log\",\"time edit\",\"start\",\"stop\",\"sync\"],\"remote_mode\":\"Set --server plus --session-token to route supported task, project, client, invoice, time, calendar, email, activity, conflict, system, and agent commands over Vox; --organization-id routes multi-instance organization requests.\"}}",
         agent_install_json()
     );
 }
@@ -5978,6 +6324,7 @@ fn print_doctor_report(
         if health.ok { "ok" } else { "attention needed" }
     );
     println!("  mode: {mode}");
+    println!("  deep checks: {}", if health.deep { "yes" } else { "no" });
     if let Some(url) = remote_url {
         println!("  server: {url}");
     }
@@ -6009,16 +6356,67 @@ fn print_doctor_report(
         println!("  nextcloud: not configured");
     }
     println!();
-    println!("{:<20} {:<12} {:<8} DETAIL", "CHECK", "STATUS", "CONFIG");
-    println!("{}", "-".repeat(84));
+    println!(
+        "  protocol: {} (min cli {}, min server {})",
+        capabilities.protocol_version,
+        capabilities.min_cli_version,
+        capabilities.min_server_version
+    );
+    println!();
+    println!(
+        "{:<20} {:<12} {:<8} {:<28} DETAIL",
+        "CHECK", "STATUS", "CONFIG", "CODE"
+    );
+    println!("{}", "-".repeat(116));
     for check in &health.checks {
         println!(
-            "{:<20} {:<12} {:<8} {}",
+            "{:<20} {:<12} {:<8} {:<28} {}",
             check.name,
             if check.ok { "ok" } else { "failed" },
             if check.configured { "yes" } else { "no" },
+            check.code,
             check.detail
         );
+        if !check.ok {
+            if let Some(hint) = &check.hint {
+                println!("{:<20} {:<12} {:<8} {:<28} hint: {}", "", "", "", "", hint);
+            }
+        }
+    }
+}
+
+fn print_agent_bootstrap(
+    remote: Option<&RemoteVoxConfig>,
+    capabilities: Option<&SystemCapabilities>,
+    json: bool,
+) {
+    let server = remote.map(|remote| remote.display_url.as_str());
+    let profile = remote.and_then(|remote| remote.profile_name.as_deref());
+    let protocol = capabilities.map(|c| c.protocol_version).unwrap_or(1);
+    if json {
+        println!(
+            "{{\"binary\":\"task\",\"install\":{},\"profile\":{},\"server\":{},\"protocol_version\":{},\"commands\":{{\"doctor\":\"task doctor --json\",\"deep_doctor\":\"task doctor --deep --json\",\"capabilities\":\"task agent capabilities\",\"snapshot\":\"task agent snapshot\"}}}}",
+            agent_install_json(),
+            profile
+                .map(|p| format!("\"{}\"", escape_json(p)))
+                .unwrap_or_else(|| "null".into()),
+            server
+                .map(|s| format!("\"{}\"", escape_json(s)))
+                .unwrap_or_else(|| "null".into()),
+            protocol
+        );
+    } else {
+        println!("Agent bootstrap");
+        println!("  install: nix profile install .#task-cli");
+        if let Some(profile) = profile {
+            println!("  profile: {profile}");
+        }
+        if let Some(server) = server {
+            println!("  server: {server}");
+        }
+        println!("  verify: task doctor --json");
+        println!("  deep verify: task doctor --deep --json");
+        println!("  snapshot: task agent snapshot");
     }
 }
 
@@ -6953,5 +7351,31 @@ mod tests {
             config.display_url,
             "wss://tasks.example.com/vox?token=%3Credacted%3E&organization_id=org%2Fone"
         );
+    }
+
+    #[test]
+    fn server_profiles_resolve_default_and_named_profiles() {
+        let profiles = ServerProfiles {
+            default: Some("starcommand".into()),
+            servers: vec![ServerProfile {
+                name: "starcommand".into(),
+                url: "https://cloud.starcommand.live".into(),
+                session_token: Some("token".into()),
+                organization_id: Some("org".into()),
+            }],
+        };
+        assert_eq!(
+            profiles.resolve("default").unwrap().url,
+            "https://cloud.starcommand.live"
+        );
+        assert_eq!(
+            profiles
+                .resolve("starcommand")
+                .unwrap()
+                .organization_id
+                .as_deref(),
+            Some("org")
+        );
+        assert!(profiles.resolve("missing").is_none());
     }
 }

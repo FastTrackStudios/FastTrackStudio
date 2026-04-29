@@ -279,7 +279,7 @@ pub trait SystemService {
     async fn capabilities(&self) -> SystemCapabilities;
 
     /// Operational health checks for configured providers.
-    async fn health(&self) -> SystemHealth;
+    async fn health(&self, deep: bool) -> SystemHealth;
 }
 
 /// Sync operation statistics.
@@ -299,6 +299,9 @@ pub struct SyncStats {
 pub struct SystemCapabilities {
     pub package: String,
     pub version: String,
+    pub protocol_version: u32,
+    pub min_cli_version: String,
+    pub min_server_version: String,
     pub services: Vec<String>,
     pub features: Vec<String>,
     pub nextcloud: NextcloudCapability,
@@ -326,15 +329,18 @@ pub struct VaultCapability {
 #[derive(Debug, Clone, Default, facet::Facet)]
 pub struct SystemHealth {
     pub ok: bool,
+    pub deep: bool,
     pub checks: Vec<HealthCheck>,
 }
 
 #[derive(Debug, Clone, Default, facet::Facet)]
 pub struct HealthCheck {
     pub name: String,
+    pub code: String,
     pub ok: bool,
     pub configured: bool,
     pub detail: String,
+    pub hint: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, facet::Facet)]

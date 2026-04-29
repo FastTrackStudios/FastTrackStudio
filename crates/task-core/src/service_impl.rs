@@ -188,21 +188,26 @@ fn nextcloud_mail_client() -> Result<crate::provider::MailClient, VaultError> {
 
 fn health_check(
     name: &str,
+    code: &str,
     configured: bool,
     ok: bool,
     detail: String,
+    hint: Option<&str>,
 ) -> crate::service::HealthCheck {
     crate::service::HealthCheck {
         name: name.into(),
+        code: code.into(),
         ok,
         configured,
         detail,
+        hint: hint.map(String::from),
     }
 }
 
-fn system_health(checks: Vec<crate::service::HealthCheck>) -> SystemHealth {
+fn system_health(deep: bool, checks: Vec<crate::service::HealthCheck>) -> SystemHealth {
     SystemHealth {
         ok: checks.iter().all(|check| check.ok || !check.configured),
+        deep,
         checks,
     }
 }
@@ -2802,6 +2807,9 @@ impl crate::service::SystemService for VaultServiceImpl {
         SystemCapabilities {
             package: "task-server".into(),
             version: env!("CARGO_PKG_VERSION").into(),
+            protocol_version: 1,
+            min_cli_version: "0.1.0".into(),
+            min_server_version: "0.1.0".into(),
             services: vec![
                 "TaskService".into(),
                 "ProjectService".into(),
@@ -2849,7 +2857,7 @@ impl crate::service::SystemService for VaultServiceImpl {
         }
     }
 
-    async fn health(&self) -> SystemHealth {
+    async fn health(&self, deep: bool) -> SystemHealth {
         let mut checks = Vec::new();
         let index_available = self
             .index
@@ -2859,6 +2867,11 @@ impl crate::service::SystemService for VaultServiceImpl {
             .is_some();
         checks.push(health_check(
             "vault",
+            if self.root.exists() {
+                "VAULT_OK"
+            } else {
+                "VAULT_ROOT_MISSING"
+            },
             true,
             self.root.exists(),
             if self.root.exists() {
@@ -2866,9 +2879,15 @@ impl crate::service::SystemService for VaultServiceImpl {
             } else {
                 format!("vault root is missing at {}", self.root.display())
             },
+            Some("Set TASK_VAULT to an existing vault root or start task-server with a valid vault path."),
         ));
         checks.push(health_check(
             "sqlite-index",
+            if index_available {
+                "INDEX_OK"
+            } else {
+                "INDEX_UNAVAILABLE"
+            },
             true,
             index_available,
             if index_available {
@@ -2876,6 +2895,7 @@ impl crate::service::SystemService for VaultServiceImpl {
             } else {
                 "SQLite index is unavailable; queries will scan files".into()
             },
+            Some("If search feels slow, verify the vault path is writable and restart task-server."),
         ));
 
         let nextcloud = match NextcloudRuntimeConfig::load() {
@@ -2883,64 +2903,92 @@ impl crate::service::SystemService for VaultServiceImpl {
             Err(err) => {
                 checks.push(health_check(
                     "nextcloud-config",
+                    "NEXTCLOUD_CONFIG_ERROR",
                     true,
                     false,
                     format!("Nextcloud config error: {err}"),
+                    Some("Fix NEXTCLOUD_* environment variables or ~/.config/task/nextcloud.toml."),
                 ));
-                return system_health(checks);
+                return system_health(deep, checks);
             }
         };
 
         let Some(config) = nextcloud else {
             checks.push(health_check(
                 "nextcloud-config",
+                "NEXTCLOUD_NOT_CONFIGURED",
                 false,
                 false,
                 "Nextcloud is not configured".into(),
+                Some("Set NEXTCLOUD_URL and NEXTCLOUD_PASSWORD, or configure TASK_NEXTCLOUD_CONFIG."),
             ));
-            return system_health(checks);
+            return system_health(deep, checks);
         };
 
         checks.push(health_check(
             "nextcloud-config",
+            "NEXTCLOUD_CONFIGURED",
             true,
             true,
             format!("Nextcloud configured for {} at {}", config.username, config.url),
+            None,
         ));
+
+        if !deep {
+            checks.push(health_check(
+                "provider-live-checks",
+                "DEEP_CHECKS_SKIPPED",
+                false,
+                true,
+                "live WebDAV/CalDAV/Mail/Deck checks skipped".into(),
+                Some("Run task doctor --deep to verify provider reachability."),
+            ));
+            return system_health(deep, checks);
+        }
 
         match nextcloud_webdav_provider(&config).stat("").await {
             Ok(Some(_)) => checks.push(health_check(
                 "webdav",
+                "WEBDAV_OK",
                 true,
                 true,
                 format!("projects path '{}' is reachable", config.projects_path),
+                None,
             )),
             Ok(None) => checks.push(health_check(
                 "webdav",
+                "WEBDAV_PROJECTS_PATH_MISSING",
                 true,
                 false,
                 format!("projects path '{}' was not found", config.projects_path),
+                Some("Create the configured Nextcloud projects path or update NEXTCLOUD_PROJECTS_PATH."),
             )),
             Err(err) => checks.push(health_check(
                 "webdav",
+                "WEBDAV_UNREACHABLE",
                 true,
                 false,
                 format!("WebDAV check failed: {err}"),
+                Some("Verify Nextcloud URL, credentials, network access, and file permissions."),
             )),
         }
 
         match VaultServiceImpl::discover_caldav(self).await {
             Ok(discovery) => checks.push(health_check(
                 "caldav",
+                "CALDAV_OK",
                 true,
                 true,
                 format!("discovered {} calendar(s)", discovery.calendars.len()),
+                None,
             )),
             Err(err) => checks.push(health_check(
                 "caldav",
+                "CALDAV_DISCOVERY_FAILED",
                 true,
                 false,
                 format!("CalDAV check failed: {err}"),
+                Some("Verify calendar names and CalDAV permissions for the configured Nextcloud user."),
             )),
         }
 
@@ -2948,22 +2996,28 @@ impl crate::service::SystemService for VaultServiceImpl {
             Ok(client) => match client.list_accounts().await {
                 Ok(accounts) => checks.push(health_check(
                     "mail",
+                    "MAIL_OK",
                     true,
                     true,
                     format!("found {} mail account(s)", accounts.len()),
+                    None,
                 )),
                 Err(err) => checks.push(health_check(
                     "mail",
+                    "MAIL_ACCOUNTS_FAILED",
                     true,
                     false,
                     format!("Mail check failed: {err}"),
+                    Some("Verify the Nextcloud Mail app is enabled and the user has mail accounts."),
                 )),
             },
             Err(err) => checks.push(health_check(
                 "mail",
+                "MAIL_CONFIG_ERROR",
                 true,
                 false,
                 format!("Mail check failed: {err}"),
+                Some("Verify Nextcloud Mail shares the same configured Nextcloud credentials."),
             )),
         }
 
@@ -2971,27 +3025,33 @@ impl crate::service::SystemService for VaultServiceImpl {
             match VaultServiceImpl::list_remote_deck_boards(self).await {
                 Ok(boards) => checks.push(health_check(
                     "deck",
+                    "DECK_OK",
                     true,
                     true,
                     format!("found {} Deck board(s)", boards.len()),
+                    None,
                 )),
                 Err(err) => checks.push(health_check(
                     "deck",
+                    "DECK_UNREACHABLE",
                     true,
                     false,
                     format!("Deck check failed: {err}"),
+                    Some("Verify the Deck app is enabled and accessible to the configured user."),
                 )),
             }
         } else {
             checks.push(health_check(
                 "deck",
+                "DECK_DISABLED",
                 false,
                 true,
                 "Deck checks disabled by configuration".into(),
+                Some("Set NEXTCLOUD_DECK_ENABLED=true to enable Deck checks."),
             ));
         }
 
-        system_health(checks)
+        system_health(deep, checks)
     }
 }
 
