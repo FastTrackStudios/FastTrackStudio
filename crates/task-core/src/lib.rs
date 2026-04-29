@@ -1,5 +1,6 @@
 pub mod task;
 pub mod project;
+pub mod calendar_event;
 pub mod client;
 pub mod invoice;
 pub mod email;
@@ -40,6 +41,7 @@ pub use task::{
     TaskDependency, TaskRelation, RelationType, Reaction, TimeEntry, WikiLink,
 };
 pub use project::{next_task, Project, ProjectStatus, ProjectStats};
+pub use calendar_event::{CalendarEvent, CalendarEventStatus};
 pub use client::{resolve_rate, Client};
 pub use invoice::{format_invoice_id, Invoice, InvoiceLine, InvoiceStatus, Payment};
 pub use email::EmailRef;
@@ -55,12 +57,12 @@ pub use service::{
     client_service_service_descriptor, invoice_service_service_descriptor,
     project_service_service_descriptor, task_service_service_descriptor,
     time_service_service_descriptor, ActivityService, ActivityServiceDispatcher,
-    CalendarService, CalendarServiceDispatcher, ClientService, ClientServiceDispatcher,
-    InvoiceCreateRequest, InvoicePaymentRequest, InvoiceService, InvoiceServiceDispatcher,
-    ProjectPatch, ProjectService, ProjectServiceDispatcher, RemoteDeckBoard, RemoteDeckStack,
-    SyncStats, TaskService, TaskServiceDispatcher, TimeEntryContext, TimeEntryFilter,
-    TimeEntryPatch, TimeLogRequest, TimeService, TimeServiceDispatcher, TimeStartRequest,
-    TimedTaskEntry, VaultError,
+    CalendarEventPatch, CalendarService, CalendarServiceDispatcher, ClientService,
+    ClientServiceDispatcher, InvoiceCreateRequest, InvoicePaymentRequest, InvoiceService,
+    InvoiceServiceDispatcher, ProjectPatch, ProjectService, ProjectServiceDispatcher,
+    RemoteDeckBoard, RemoteDeckStack, SyncStats, TaskService, TaskServiceDispatcher,
+    TimeEntryContext, TimeEntryFilter, TimeEntryPatch, TimeLogRequest, TimeService,
+    TimeServiceDispatcher, TimeStartRequest, TimedTaskEntry, VaultError,
 };
 #[cfg(feature = "server")]
 pub use vault::Vault;

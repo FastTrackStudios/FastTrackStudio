@@ -3,6 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::client::Client;
+use crate::calendar_event::CalendarEvent;
 use crate::invoice::Invoice;
 use crate::project::Project;
 use crate::service::VaultError;
@@ -31,6 +32,17 @@ impl Vault {
     pub fn load_projects(&self) -> Vec<Project> {
         self.walk_md_files()
             .filter_map(|content| Self::parse_project_from_md(&content))
+            .collect()
+    }
+
+    /// Load all first-class calendar events.
+    pub fn load_calendar_events(&self) -> Vec<CalendarEvent> {
+        let dir = self.root.join("calendar");
+        if !dir.exists() {
+            return vec![];
+        }
+        Self::walk_md_in(&dir)
+            .filter_map(|content| Self::parse_calendar_event_from_md(&content))
             .collect()
     }
 
@@ -158,6 +170,54 @@ impl Vault {
         facet_yaml::from_str::<Client>(frontmatter).ok()
     }
 
+    pub fn parse_calendar_event_from_md(content: &str) -> Option<CalendarEvent> {
+        let (frontmatter, body) = Self::split_frontmatter(content)?;
+        let mut event = facet_yaml::from_str::<CalendarEvent>(frontmatter).ok()?;
+        event.body = body.to_string();
+        Some(event)
+    }
+
+    pub fn render_calendar_event_file(
+        event: &CalendarEvent,
+        body: &str,
+    ) -> Result<String, VaultError> {
+        let yaml = facet_yaml::to_string(event)
+            .map_err(|e| VaultError::ParseError(e.to_string()))?;
+        let yaml = yaml.strip_prefix("---\n").unwrap_or(&yaml);
+        let body = if body.is_empty() { &event.body } else { body };
+        Ok(format!("---\n{}---\n{}", yaml, body))
+    }
+
+    pub fn save_calendar_event(&self, event: &CalendarEvent) -> Result<(), VaultError> {
+        let dir = self.root.join("calendar");
+        std::fs::create_dir_all(&dir).map_err(|e| VaultError::IoError(e.to_string()))?;
+        let path = dir.join(format!("{}.md", safe_file_name(&event.title)));
+        let body = if !event.body.is_empty() {
+            event.body.clone()
+        } else if path.exists() {
+            let content = fs::read_to_string(&path)
+                .map_err(|e| VaultError::IoError(e.to_string()))?;
+            Self::extract_body(&content).unwrap_or("").to_string()
+        } else {
+            String::new()
+        };
+        let content = Self::render_calendar_event_file(event, &body)?;
+        Self::atomic_write(&path, &content)
+    }
+
+    pub fn delete_calendar_event(&self, event_id: &str) -> Result<(), VaultError> {
+        for event in self.load_calendar_events() {
+            if event.id.as_deref() == Some(event_id) || event.title == event_id {
+                let path = self.root.join("calendar").join(format!("{}.md", safe_file_name(&event.title)));
+                if path.exists() {
+                    std::fs::remove_file(&path).map_err(|e| VaultError::IoError(e.to_string()))?;
+                }
+                return Ok(());
+            }
+        }
+        Ok(())
+    }
+
     pub fn render_client_file(client: &Client, body: &str) -> Result<String, VaultError> {
         let yaml = facet_yaml::to_string(client)
             .map_err(|e| VaultError::ParseError(e.to_string()))?;
@@ -275,4 +335,8 @@ impl Vault {
         Self::split_frontmatter(content).map(|(_, body)| body)
     }
 
+}
+
+fn safe_file_name(title: &str) -> String {
+    title.replace('/', "-")
 }

@@ -4,8 +4,9 @@
 //! - **Nextcloud Tasks** via CalDAV/VTODO
 //! - **Nextcloud Deck** via REST API (boards→projects, cards→tasks)
 
-use chrono::Utc;
+use chrono::{DateTime, NaiveDate, Utc};
 
+use crate::calendar_event::{CalendarEvent, CalendarEventStatus};
 use crate::project::Project;
 use crate::service::VaultError;
 use crate::task::{Priority, Status, Task, WikiLink};
@@ -191,6 +192,136 @@ fn ics_to_task_inline(ics: &str) -> Option<Task> {
     Some(task)
 }
 
+fn event_to_ics_inline(event: &CalendarEvent) -> String {
+    let uid = event.id.as_deref().unwrap_or(&event.title);
+    let safe_uid = uid.replace(' ', "-").replace('/', "-");
+    let now = Utc::now().format("%Y%m%dT%H%M%SZ");
+    let status = match event.status {
+        CalendarEventStatus::Confirmed => "CONFIRMED",
+        CalendarEventStatus::Tentative => "TENTATIVE",
+        CalendarEventStatus::Cancelled => "CANCELLED",
+    };
+    let mut lines = vec![
+        "BEGIN:VCALENDAR".to_string(),
+        "VERSION:2.0".to_string(),
+        "PRODID:-//Task//calendar//EN".to_string(),
+        "BEGIN:VEVENT".to_string(),
+        format!("UID:{safe_uid}"),
+        format!("DTSTAMP:{now}"),
+        format!("SUMMARY:{}", escape_ics_text(&event.title)),
+        format!("STATUS:{status}"),
+    ];
+    if event.all_day {
+        lines.push(format!(
+            "DTSTART;VALUE=DATE:{}",
+            event.start.date_naive().format("%Y%m%d")
+        ));
+        if let Some(end) = event.end {
+            lines.push(format!("DTEND;VALUE=DATE:{}", end.date_naive().format("%Y%m%d")));
+        }
+    } else {
+        lines.push(format!("DTSTART:{}", event.start.format("%Y%m%dT%H%M%SZ")));
+        if let Some(end) = event.end {
+            lines.push(format!("DTEND:{}", end.format("%Y%m%dT%H%M%SZ")));
+        }
+    }
+    if let Some(created) = event.date_created {
+        lines.push(format!("CREATED:{}", created.format("%Y%m%dT%H%M%SZ")));
+    }
+    if let Some(modified) = event.date_modified {
+        lines.push(format!(
+            "LAST-MODIFIED:{}",
+            modified.format("%Y%m%dT%H%M%SZ")
+        ));
+    }
+    if let Some(location) = &event.location {
+        lines.push(format!("LOCATION:{}", escape_ics_text(location)));
+    }
+    if let Some(description) = event.description.as_ref().or_else(|| {
+        if event.body.is_empty() {
+            None
+        } else {
+            Some(&event.body)
+        }
+    }) {
+        lines.push(format!("DESCRIPTION:{}", escape_ics_text(description)));
+    }
+    if let Some(rrule) = &event.recurrence {
+        lines.push(format!("RRULE:{rrule}"));
+    }
+    for attendee in &event.attendees {
+        lines.push(format!("ATTENDEE;CN={}:mailto:{}", attendee, attendee));
+    }
+    if let Some(source) = &event.external_source {
+        lines.push(format!("X-TASK-EXTERNAL-SOURCE:{}", escape_ics_text(source)));
+    }
+    if let Some(id) = &event.external_id {
+        lines.push(format!("X-TASK-EXTERNAL-ID:{}", escape_ics_text(id)));
+    }
+    lines.push("END:VEVENT".to_string());
+    lines.push("END:VCALENDAR".to_string());
+    lines.join("\r\n")
+}
+
+fn ics_to_event_inline(ics: &str) -> Option<CalendarEvent> {
+    if !ics.contains("VEVENT") {
+        return None;
+    }
+    let mut event = CalendarEvent::default();
+    for raw in unfold_ics_lines(ics) {
+        let line = raw.trim_end_matches('\r');
+        if let Some(val) = line.strip_prefix("UID:") {
+            event.id = Some(val.to_string());
+        } else if let Some(val) = line.strip_prefix("SUMMARY:") {
+            event.title = unescape_ics_text(val);
+        } else if let Some(val) = line.strip_prefix("STATUS:") {
+            event.status = match val {
+                "TENTATIVE" => CalendarEventStatus::Tentative,
+                "CANCELLED" => CalendarEventStatus::Cancelled,
+                _ => CalendarEventStatus::Confirmed,
+            };
+        } else if line.starts_with("DTSTART") {
+            event.all_day = line.contains("VALUE=DATE");
+            if let Some(value) = line.rsplit(':').next() {
+                event.start = parse_ics_datetime(value, event.all_day)?;
+            }
+        } else if line.starts_with("DTEND") {
+            let all_day = line.contains("VALUE=DATE");
+            if let Some(value) = line.rsplit(':').next() {
+                event.end = parse_ics_datetime(value, all_day);
+            }
+        } else if let Some(val) = line.strip_prefix("DESCRIPTION:") {
+            let value = unescape_ics_text(val);
+            event.description = Some(value.clone());
+            event.body = value;
+        } else if let Some(val) = line.strip_prefix("LOCATION:") {
+            event.location = Some(unescape_ics_text(val));
+        } else if let Some(val) = line.strip_prefix("RRULE:") {
+            event.recurrence = Some(val.to_string());
+        } else if let Some(val) = line.strip_prefix("CREATED:") {
+            event.date_created = parse_ics_datetime(val, false);
+        } else if let Some(val) = line.strip_prefix("LAST-MODIFIED:") {
+            event.date_modified = parse_ics_datetime(val, false);
+        } else if line.starts_with("ATTENDEE") {
+            if let Some(cn_start) = line.find("CN=") {
+                let rest = &line[cn_start + 3..];
+                let cn = rest.split(|c: char| c == ':' || c == ';').next().unwrap_or("");
+                if !cn.is_empty() {
+                    event.attendees.push(cn.to_string());
+                }
+            }
+        } else if let Some(val) = line.strip_prefix("X-TASK-EXTERNAL-SOURCE:") {
+            event.external_source = Some(unescape_ics_text(val));
+        } else if let Some(val) = line.strip_prefix("X-TASK-EXTERNAL-ID:") {
+            event.external_id = Some(unescape_ics_text(val));
+        }
+    }
+    if event.title.is_empty() {
+        return None;
+    }
+    Some(event)
+}
+
 /// Nextcloud sync client — handles CalDAV + Deck API interactions.
 pub struct NextcloudSync {
     base_url: String,
@@ -319,6 +450,107 @@ impl NextcloudSync {
             .send()
             .await
             .map_err(|e| VaultError::IoError(format!("CalDAV DELETE: {e}")))?;
+
+        Ok(())
+    }
+
+    /// Push a VEVENT to a CalDAV calendar.
+    pub async fn push_event_to_calendar(
+        &self,
+        calendar: &str,
+        event: &CalendarEvent,
+    ) -> Result<(), VaultError> {
+        let uid = event.id.as_deref().unwrap_or(&event.title);
+        let safe_uid = uid.replace(' ', "-").replace('/', "-");
+        let url = format!(
+            "{}/remote.php/dav/calendars/{}/{}/{}.ics",
+            self.base_url, self.username, calendar, safe_uid
+        );
+
+        let resp = self.auth(self.http.put(&url))
+            .header("Content-Type", "text/calendar; charset=utf-8")
+            .body(event_to_ics_inline(event))
+            .send()
+            .await
+            .map_err(|e| VaultError::IoError(format!("CalDAV VEVENT PUT: {e}")))?;
+
+        if !resp.status().is_success() {
+            return Err(VaultError::IoError(format!(
+                "CalDAV VEVENT PUT {}: {}",
+                safe_uid,
+                resp.status()
+            )));
+        }
+
+        Ok(())
+    }
+
+    /// Pull VEVENT calendar items from a CalDAV calendar.
+    pub async fn pull_events_from_calendar(
+        &self,
+        calendar: &str,
+    ) -> Result<Vec<CalendarEvent>, VaultError> {
+        let url = format!(
+            "{}/remote.php/dav/calendars/{}/{}/",
+            self.base_url, self.username, calendar
+        );
+        let body = r#"<?xml version="1.0" encoding="utf-8"?>
+<c:calendar-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+  <d:prop>
+    <d:getetag/>
+    <c:calendar-data/>
+  </d:prop>
+  <c:filter>
+    <c:comp-filter name="VCALENDAR">
+      <c:comp-filter name="VEVENT"/>
+    </c:comp-filter>
+  </c:filter>
+</c:calendar-query>"#;
+
+        let resp = self.auth(
+            self.http
+                .request(reqwest::Method::from_bytes(b"REPORT").unwrap(), &url)
+                .header("Content-Type", "application/xml; charset=utf-8")
+                .header("Depth", "1"),
+        )
+        .body(body)
+        .send()
+        .await
+        .map_err(|e| VaultError::IoError(format!("CalDAV VEVENT REPORT: {e}")))?;
+
+        let xml = resp
+            .text()
+            .await
+            .map_err(|e| VaultError::IoError(e.to_string()))?;
+
+        Ok(extract_vcalendars(&xml)
+            .into_iter()
+            .filter_map(|ics| ics_to_event_inline(&ics))
+            .collect())
+    }
+
+    pub async fn delete_event_from_calendar(
+        &self,
+        calendar: &str,
+        uid: &str,
+    ) -> Result<(), VaultError> {
+        let safe_uid = uid.replace(' ', "-").replace('/', "-");
+        let url = format!(
+            "{}/remote.php/dav/calendars/{}/{}/{}.ics",
+            self.base_url, self.username, calendar, safe_uid
+        );
+
+        let resp = self.auth(self.http.delete(&url))
+            .send()
+            .await
+            .map_err(|e| VaultError::IoError(format!("CalDAV VEVENT DELETE: {e}")))?;
+        if !resp.status().is_success() && resp.status().as_u16() != 404 {
+            return Err(VaultError::IoError(format!(
+                "CalDAV VEVENT DELETE {}: {}",
+                safe_uid,
+                resp.status()
+            )));
+        }
 
         Ok(())
     }
@@ -1283,6 +1515,68 @@ fn parse_deck_comments_json(json: &str) -> Vec<DeckComment> {
         .collect()
 }
 
+fn extract_vcalendars(xml: &str) -> Vec<String> {
+    xml.split("BEGIN:VCALENDAR")
+        .filter(|chunk| chunk.contains("END:VCALENDAR"))
+        .map(|chunk| {
+            let body = chunk.split("END:VCALENDAR").next().unwrap_or("");
+            format!("BEGIN:VCALENDAR{}END:VCALENDAR", body)
+        })
+        .collect()
+}
+
+fn parse_ics_datetime(value: &str, all_day: bool) -> Option<DateTime<Utc>> {
+    if all_day {
+        return NaiveDate::parse_from_str(value.get(..8)?, "%Y%m%d")
+            .ok()
+            .and_then(|d| d.and_hms_opt(0, 0, 0))
+            .map(|dt| dt.and_utc());
+    }
+    chrono::NaiveDateTime::parse_from_str(value, "%Y%m%dT%H%M%SZ")
+        .ok()
+        .map(|dt| dt.and_utc())
+        .or_else(|| {
+            DateTime::parse_from_str(value, "%Y%m%dT%H%M%S%z")
+                .ok()
+                .map(|dt| dt.to_utc())
+        })
+        .or_else(|| {
+            chrono::NaiveDateTime::parse_from_str(value, "%Y%m%dT%H%M%S")
+                .ok()
+                .map(|dt| dt.and_utc())
+        })
+}
+
+fn unfold_ics_lines(ics: &str) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    for line in ics.lines() {
+        if line.starts_with(' ') || line.starts_with('\t') {
+            if let Some(last) = lines.last_mut() {
+                last.push_str(line.trim_start());
+            }
+        } else {
+            lines.push(line.to_string());
+        }
+    }
+    lines
+}
+
+fn escape_ics_text(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('\n', "\\n")
+        .replace(',', "\\,")
+        .replace(';', "\\;")
+}
+
+fn unescape_ics_text(value: &str) -> String {
+    value
+        .replace("\\n", "\n")
+        .replace("\\,", ",")
+        .replace("\\;", ";")
+        .replace("\\\\", "\\")
+}
+
 fn extract_json_id(json: &str) -> Option<u64> {
     serde_json::from_str::<CardCreateResponse>(json)
         .ok()
@@ -1387,5 +1681,45 @@ mod tests {
         assert_eq!(parsed.contexts, task.contexts);
         assert_eq!(parsed.assignee, task.assignee);
         assert_eq!(parsed.recurrence, task.recurrence);
+    }
+
+    #[test]
+    fn calendar_event_roundtrip_preserves_vevent_fields() {
+        let start = chrono::DateTime::parse_from_rfc3339("2026-05-01T19:00:00Z")
+            .unwrap()
+            .to_utc();
+        let end = chrono::DateTime::parse_from_rfc3339("2026-05-01T21:00:00Z")
+            .unwrap()
+            .to_utc();
+        let event = CalendarEvent {
+            id: Some("event-1".to_string()),
+            title: "Album release meeting".to_string(),
+            description: Some("Confirm release plan".to_string()),
+            location: Some("Studio A".to_string()),
+            start,
+            end: Some(end),
+            status: CalendarEventStatus::Tentative,
+            recurrence: Some("FREQ=WEEKLY;COUNT=2".to_string()),
+            attendees: vec!["agent".to_string(), "codywright".to_string()],
+            date_created: Some(start),
+            date_modified: Some(end),
+            ..Default::default()
+        };
+
+        let ics = event_to_ics_inline(&event);
+        assert!(ics.contains("BEGIN:VEVENT"));
+        assert!(ics.contains("DTSTART:20260501T190000Z"));
+        assert!(ics.contains("DTEND:20260501T210000Z"));
+
+        let parsed = ics_to_event_inline(&ics).expect("event should parse");
+        assert_eq!(parsed.id, event.id);
+        assert_eq!(parsed.title, event.title);
+        assert_eq!(parsed.description, event.description);
+        assert_eq!(parsed.location, event.location);
+        assert_eq!(parsed.start, event.start);
+        assert_eq!(parsed.end, event.end);
+        assert_eq!(parsed.status, event.status);
+        assert_eq!(parsed.recurrence, event.recurrence);
+        assert_eq!(parsed.attendees, event.attendees);
     }
 }

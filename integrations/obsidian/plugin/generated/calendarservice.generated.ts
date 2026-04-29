@@ -153,6 +153,42 @@ export type VaultError =
   | { tag: 'ParseError'; value: string }
   | { tag: 'IoError'; value: string };
 
+export type CalendarEventStatus =
+  | { tag: 'Confirmed' }
+  | { tag: 'Tentative' }
+  | { tag: 'Cancelled' };
+
+export interface CalendarEvent {
+  id: string | null;
+  title: string;
+  description: string | null;
+  location: string | null;
+  start: unknown;
+  end: unknown | null;
+  all_day: boolean;
+  status: CalendarEventStatus;
+  recurrence: string | null;
+  attendees: string[];
+  date_created: unknown | null;
+  date_modified: unknown | null;
+  external_id: string | null;
+  external_source: string | null;
+  body: string;
+}
+
+export interface CalendarEventPatch {
+  title: string | null;
+  description: string | null | null;
+  location: string | null | null;
+  start: unknown | null;
+  end: unknown | null | null;
+  all_day: boolean | null;
+  status: CalendarEventStatus | null;
+  recurrence: string | null | null;
+  attendees: string[] | null;
+  body: string | null;
+}
+
 export interface SyncStats {
   timestamp: string;
   calendar_pushed: number;
@@ -186,6 +222,24 @@ export type ScheduledBetweenRequest = [
 ];
 export type ScheduledBetweenResponse = { ok: true; value: Task[] } | { ok: false; error: VaultError };
 
+export type EventsBetweenRequest = [
+  string, // from
+  string, // to
+];
+export type EventsBetweenResponse = { ok: true; value: CalendarEvent[] } | { ok: false; error: VaultError };
+
+export type CreateEventRequest = [CalendarEvent];
+export type CreateEventResponse = { ok: true; value: CalendarEvent } | { ok: false; error: VaultError };
+
+export type UpdateEventRequest = [
+  string, // event_ref
+  CalendarEventPatch, // patch
+];
+export type UpdateEventResponse = { ok: true; value: CalendarEvent } | { ok: false; error: VaultError };
+
+export type DeleteEventRequest = [string];
+export type DeleteEventResponse = { ok: true; value: void } | { ok: false; error: VaultError };
+
 export type TriggerSyncRequest = [];
 export type TriggerSyncResponse = { ok: true; value: SyncStats } | { ok: false; error: VaultError };
 
@@ -204,6 +258,14 @@ export interface CalendarServiceCaller {
   tasksDueBy(date: string): Promise<Task[]>;
   /** Get tasks scheduled between two dates, inclusive (YYYY-MM-DD). */
   scheduledBetween(from: string, to: string): Promise<{ ok: true; value: Task[] } | { ok: false; error: VaultError }>;
+  /** List calendar events whose start/end overlap an RFC3339 time range. */
+  eventsBetween(from: string, to: string): Promise<{ ok: true; value: CalendarEvent[] } | { ok: false; error: VaultError }>;
+  /** Create a first-class calendar event. */
+  createEvent(event: CalendarEvent): Promise<{ ok: true; value: CalendarEvent } | { ok: false; error: VaultError }>;
+  /** Update mutable calendar event fields by id or title. */
+  updateEvent(eventRef: string, patch: CalendarEventPatch): Promise<{ ok: true; value: CalendarEvent } | { ok: false; error: VaultError }>;
+  /** Delete a calendar event by id or title. */
+  deleteEvent(eventRef: string): Promise<{ ok: true; value: void } | { ok: false; error: VaultError }>;
   /** Trigger a Nextcloud sync cycle. Returns sync stats. */
   triggerSync(): Promise<{ ok: true; value: SyncStats } | { ok: false; error: VaultError }>;
   /** Get the last sync result. */
@@ -250,6 +312,86 @@ export class CalendarServiceClient implements CalendarServiceCaller {
       } catch (e: any) {
         if (e instanceof RpcError && e.isUserError()) {
           return { ok: false, error: e.userError } as { ok: true; value: Task[] } | { ok: false; error: VaultError };
+        }
+        throw e;
+      }
+  }
+
+  /** List calendar events whose start/end overlap an RFC3339 time range. */
+  async eventsBetween(from: string, to: string): Promise<{ ok: true; value: CalendarEvent[] } | { ok: false; error: VaultError }> {
+    const descriptor = calendarService_eventsBetween_method;
+    const sendSchemas = calendarService_descriptor.send_schemas;
+      try {
+        const value = await this.caller.call({
+          method: "CalendarService.eventsBetween",
+          args: { from, to },
+          descriptor,
+          sendSchemas,
+        });
+        return { ok: true, value } as { ok: true; value: CalendarEvent[] } | { ok: false; error: VaultError };
+      } catch (e: any) {
+        if (e instanceof RpcError && e.isUserError()) {
+          return { ok: false, error: e.userError } as { ok: true; value: CalendarEvent[] } | { ok: false; error: VaultError };
+        }
+        throw e;
+      }
+  }
+
+  /** Create a first-class calendar event. */
+  async createEvent(event: CalendarEvent): Promise<{ ok: true; value: CalendarEvent } | { ok: false; error: VaultError }> {
+    const descriptor = calendarService_createEvent_method;
+    const sendSchemas = calendarService_descriptor.send_schemas;
+      try {
+        const value = await this.caller.call({
+          method: "CalendarService.createEvent",
+          args: { event },
+          descriptor,
+          sendSchemas,
+        });
+        return { ok: true, value } as { ok: true; value: CalendarEvent } | { ok: false; error: VaultError };
+      } catch (e: any) {
+        if (e instanceof RpcError && e.isUserError()) {
+          return { ok: false, error: e.userError } as { ok: true; value: CalendarEvent } | { ok: false; error: VaultError };
+        }
+        throw e;
+      }
+  }
+
+  /** Update mutable calendar event fields by id or title. */
+  async updateEvent(eventRef: string, patch: CalendarEventPatch): Promise<{ ok: true; value: CalendarEvent } | { ok: false; error: VaultError }> {
+    const descriptor = calendarService_updateEvent_method;
+    const sendSchemas = calendarService_descriptor.send_schemas;
+      try {
+        const value = await this.caller.call({
+          method: "CalendarService.updateEvent",
+          args: { eventRef, patch },
+          descriptor,
+          sendSchemas,
+        });
+        return { ok: true, value } as { ok: true; value: CalendarEvent } | { ok: false; error: VaultError };
+      } catch (e: any) {
+        if (e instanceof RpcError && e.isUserError()) {
+          return { ok: false, error: e.userError } as { ok: true; value: CalendarEvent } | { ok: false; error: VaultError };
+        }
+        throw e;
+      }
+  }
+
+  /** Delete a calendar event by id or title. */
+  async deleteEvent(eventRef: string): Promise<{ ok: true; value: void } | { ok: false; error: VaultError }> {
+    const descriptor = calendarService_deleteEvent_method;
+    const sendSchemas = calendarService_descriptor.send_schemas;
+      try {
+        const value = await this.caller.call({
+          method: "CalendarService.deleteEvent",
+          args: { eventRef },
+          descriptor,
+          sendSchemas,
+        });
+        return { ok: true, value } as { ok: true; value: void } | { ok: false; error: VaultError };
+      } catch (e: any) {
+        if (e instanceof RpcError && e.isUserError()) {
+          return { ok: false, error: e.userError } as { ok: true; value: void } | { ok: false; error: VaultError };
         }
         throw e;
       }
@@ -347,6 +489,10 @@ export async function connectCalendarService(
 export interface CalendarServiceHandler {
   tasksDueBy(date: string): Promise<Task[]> | Task[];
   scheduledBetween(from: string, to: string): Promise<{ ok: true; value: Task[] } | { ok: false; error: VaultError }> | { ok: true; value: Task[] } | { ok: false; error: VaultError };
+  eventsBetween(from: string, to: string): Promise<{ ok: true; value: CalendarEvent[] } | { ok: false; error: VaultError }> | { ok: true; value: CalendarEvent[] } | { ok: false; error: VaultError };
+  createEvent(event: CalendarEvent): Promise<{ ok: true; value: CalendarEvent } | { ok: false; error: VaultError }> | { ok: true; value: CalendarEvent } | { ok: false; error: VaultError };
+  updateEvent(eventRef: string, patch: CalendarEventPatch): Promise<{ ok: true; value: CalendarEvent } | { ok: false; error: VaultError }> | { ok: true; value: CalendarEvent } | { ok: false; error: VaultError };
+  deleteEvent(eventRef: string): Promise<{ ok: true; value: void } | { ok: false; error: VaultError }> | { ok: true; value: void } | { ok: false; error: VaultError };
   triggerSync(): Promise<{ ok: true; value: SyncStats } | { ok: false; error: VaultError }> | { ok: true; value: SyncStats } | { ok: false; error: VaultError };
   syncStatus(): Promise<SyncStats | null> | SyncStats | null;
   listDeckBoards(): Promise<{ ok: true; value: RemoteDeckBoard[] } | { ok: false; error: VaultError }> | { ok: true; value: RemoteDeckBoard[] } | { ok: false; error: VaultError };
@@ -376,6 +522,34 @@ export class CalendarServiceDispatcher implements Dispatcher {
     } else if (method.id === 0xa7d4fa1560ec40dan) {
       try {
         const result = await this.handler.scheduledBetween(args[0] as string, args[1] as string);
+        if (result.ok) call.reply(result.value); else call.replyErr(result.error);
+      } catch (error) {
+        call.replyInternalError(error instanceof Error ? error.message : String(error));
+      }
+    } else if (method.id === 0x8569af36d7ff599an) {
+      try {
+        const result = await this.handler.eventsBetween(args[0] as string, args[1] as string);
+        if (result.ok) call.reply(result.value); else call.replyErr(result.error);
+      } catch (error) {
+        call.replyInternalError(error instanceof Error ? error.message : String(error));
+      }
+    } else if (method.id === 0xa8ec39ab4cede598n) {
+      try {
+        const result = await this.handler.createEvent(args[0] as CalendarEvent);
+        if (result.ok) call.reply(result.value); else call.replyErr(result.error);
+      } catch (error) {
+        call.replyInternalError(error instanceof Error ? error.message : String(error));
+      }
+    } else if (method.id === 0x6387b975eac58016n) {
+      try {
+        const result = await this.handler.updateEvent(args[0] as string, args[1] as CalendarEventPatch);
+        if (result.ok) call.reply(result.value); else call.replyErr(result.error);
+      } catch (error) {
+        call.replyInternalError(error instanceof Error ? error.message : String(error));
+      }
+    } else if (method.id === 0xb7639a5e9bb898e2n) {
+      try {
+        const result = await this.handler.deleteEvent(args[0] as string);
         if (result.ok) call.reply(result.value); else call.replyErr(result.error);
       } catch (error) {
         call.replyInternalError(error instanceof Error ? error.message : String(error));
@@ -442,6 +616,9 @@ export const calendarService_send_schemas: import("@bearcove/vox-core").ServiceS
     [0x97c49e11dc55e02bn, { id: 0x97c49e11dc55e02bn, type_params: [], kind: { tag: 'struct', name: 'Task', fields: [{ name: 'id', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: false }, { name: 'title', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }, { name: 'status', type_ref: { tag: 'concrete', type_id: 0x3535eb8c824ab0f3n, args: [] }, required: true }, { name: 'priority', type_ref: { tag: 'concrete', type_id: 0xd8334ce8267b6538n, args: [] }, required: true }, { name: 'projects', type_ref: { tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: false }, { name: 'contexts', type_ref: { tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: false }, { name: 'tags', type_ref: { tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: false }, { name: 'areas', type_ref: { tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: false }, { name: 'due', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x897ee6096f7bb726n, args: [] }] }, required: true }, { name: 'scheduled', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x897ee6096f7bb726n, args: [] }] }, required: true }, { name: 'start', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x897ee6096f7bb726n, args: [] }] }, required: true }, { name: 'due_time', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'date_created', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x897ee6096f7bb726n, args: [] }] }, required: true }, { name: 'date_modified', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x897ee6096f7bb726n, args: [] }] }, required: true }, { name: 'completed_date', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x897ee6096f7bb726n, args: [] }] }, required: true }, { name: 'time_estimate', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x281c5be4f2ee63b4n, args: [] }] }, required: true }, { name: 'time_entries', type_ref: { tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x2b0dcc5ebcae46b8n, args: [] }] }, required: false }, { name: 'pomodoro_count', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x281c5be4f2ee63b4n, args: [] }] }, required: true }, { name: 'recurrence', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'recurrence_anchor', type_ref: { tag: 'concrete', type_id: 0x24664d010ac47a66n, args: [] }, required: true }, { name: 'completed_instances', type_ref: { tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: false }, { name: 'skipped_instances', type_ref: { tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: false }, { name: 'blocked_by', type_ref: { tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x1f359cf32e5da680n, args: [] }] }, required: false }, { name: 'blocking', type_ref: { tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: false }, { name: 'reminders', type_ref: { tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x86b827a434c19602n, args: [] }] }, required: false }, { name: 'sort_order', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'external_id', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'external_source', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'assignee', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'assignees', type_ref: { tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: false }, { name: 'created_by', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'sequence_id', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x281c5be4f2ee63b4n, args: [] }] }, required: true }, { name: 'issue_type', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'relations', type_ref: { tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0xad06f5e700f5c136n, args: [] }] }, required: false }, { name: 'subscribers', type_ref: { tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: false }, { name: 'reactions', type_ref: { tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x08b141e9d37c6b0an, args: [] }] }, required: false }, { name: 'deleted_at', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x897ee6096f7bb726n, args: [] }] }, required: true }, { name: 'is_draft', type_ref: { tag: 'concrete', type_id: 0x178367a87f66fb46n, args: [] }, required: false }, { name: 'email_tags', type_ref: { tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: false }, { name: 'emails', type_ref: { tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0xe17ca737388ceb38n, args: [] }] }, required: false }, { name: 'body', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: false }] } }],
     [0xba0496aa8cee7a4cn, { id: 0xba0496aa8cee7a4cn, type_params: ['T0', 'T1'], kind: { tag: 'tuple', elements: [{ tag: 'var', name: 'T0' }, { tag: 'var', name: 'T1' }] } }],
     [0xcaab6065094a4dbfn, { id: 0xcaab6065094a4dbfn, type_params: [], kind: { tag: 'enum', name: 'VaultError', variants: [{ name: 'NotFound', index: 0, payload: { tag: 'newtype', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] } } }, { name: 'ParseError', index: 1, payload: { tag: 'newtype', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] } } }, { name: 'IoError', index: 2, payload: { tag: 'newtype', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] } } }] } }],
+    [0xc1bf3e08c33fb484n, { id: 0xc1bf3e08c33fb484n, type_params: [], kind: { tag: 'enum', name: 'CalendarEventStatus', variants: [{ name: 'Confirmed', index: 0, payload: { tag: 'unit' } }, { name: 'Tentative', index: 1, payload: { tag: 'unit' } }, { name: 'Cancelled', index: 2, payload: { tag: 'unit' } }] } }],
+    [0xe0e8cad5e9c2c992n, { id: 0xe0e8cad5e9c2c992n, type_params: [], kind: { tag: 'struct', name: 'CalendarEvent', fields: [{ name: 'id', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'title', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }, { name: 'description', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'location', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'start', type_ref: { tag: 'concrete', type_id: 0x897ee6096f7bb726n, args: [] }, required: true }, { name: 'end', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x897ee6096f7bb726n, args: [] }] }, required: true }, { name: 'all_day', type_ref: { tag: 'concrete', type_id: 0x178367a87f66fb46n, args: [] }, required: false }, { name: 'status', type_ref: { tag: 'concrete', type_id: 0xc1bf3e08c33fb484n, args: [] }, required: true }, { name: 'recurrence', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'attendees', type_ref: { tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: false }, { name: 'date_created', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x897ee6096f7bb726n, args: [] }] }, required: true }, { name: 'date_modified', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x897ee6096f7bb726n, args: [] }] }, required: true }, { name: 'external_id', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'external_source', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'body', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: false }] } }],
+    [0x420ae8350987c009n, { id: 0x420ae8350987c009n, type_params: [], kind: { tag: 'struct', name: 'CalendarEventPatch', fields: [{ name: 'title', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }, { name: 'description', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }] }, required: true }, { name: 'location', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }] }, required: true }, { name: 'start', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x897ee6096f7bb726n, args: [] }] }, required: true }, { name: 'end', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x897ee6096f7bb726n, args: [] }] }] }, required: true }, { name: 'all_day', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x178367a87f66fb46n, args: [] }] }, required: true }, { name: 'status', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0xc1bf3e08c33fb484n, args: [] }] }, required: true }, { name: 'recurrence', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }] }, required: true }, { name: 'attendees', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }] }, required: true }, { name: 'body', type_ref: { tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }] } }],
     [0xbc5c33249a2dc720n, { id: 0xbc5c33249a2dc720n, type_params: [], kind: { tag: 'primitive', primitive_type: 'unit' } }],
     [0x824decc4c5fc6e7an, { id: 0x824decc4c5fc6e7an, type_params: [], kind: { tag: 'struct', name: 'SyncStats', fields: [{ name: 'timestamp', type_ref: { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, required: true }, { name: 'calendar_pushed', type_ref: { tag: 'concrete', type_id: 0x281c5be4f2ee63b4n, args: [] }, required: true }, { name: 'calendar_pulled', type_ref: { tag: 'concrete', type_id: 0x281c5be4f2ee63b4n, args: [] }, required: true }, { name: 'deck_pushed', type_ref: { tag: 'concrete', type_id: 0x281c5be4f2ee63b4n, args: [] }, required: true }, { name: 'deck_pulled', type_ref: { tag: 'concrete', type_id: 0x281c5be4f2ee63b4n, args: [] }, required: true }, { name: 'files_created', type_ref: { tag: 'concrete', type_id: 0x281c5be4f2ee63b4n, args: [] }, required: true }, { name: 'files_updated', type_ref: { tag: 'concrete', type_id: 0x281c5be4f2ee63b4n, args: [] }, required: true }, { name: 'errors', type_ref: { tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, required: true }] } }],
     [0xd9356298b81639acn, { id: 0xd9356298b81639acn, type_params: [], kind: { tag: 'primitive', primitive_type: 'u64' } }],
@@ -451,6 +628,10 @@ export const calendarService_send_schemas: import("@bearcove/vox-core").ServiceS
   methods: new Map<bigint, import("@bearcove/vox-core").MethodSendSchemas>([
     [0x618248f622408d4bn, { argsRootRef: { tag: 'concrete', type_id: 0x6847ab90feda71c1n, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, responseRootRef: { tag: 'concrete', type_id: 0x42046de663beeef0n, args: [{ tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x97c49e11dc55e02bn, args: [] }] }, { tag: 'concrete', type_id: 0x4cf4b2aeb98a1939n, args: [{ tag: 'concrete', type_id: 0x5db70a394660f3e6n, args: [] }] }] } }],
     [0xa7d4fa1560ec40dan, { argsRootRef: { tag: 'concrete', type_id: 0xba0496aa8cee7a4cn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, responseRootRef: { tag: 'concrete', type_id: 0x42046de663beeef0n, args: [{ tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x97c49e11dc55e02bn, args: [] }] }, { tag: 'concrete', type_id: 0x4cf4b2aeb98a1939n, args: [{ tag: 'concrete', type_id: 0xcaab6065094a4dbfn, args: [] }] }] } }],
+    [0x8569af36d7ff599an, { argsRootRef: { tag: 'concrete', type_id: 0xba0496aa8cee7a4cn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, { tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, responseRootRef: { tag: 'concrete', type_id: 0x42046de663beeef0n, args: [{ tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0xe0e8cad5e9c2c992n, args: [] }] }, { tag: 'concrete', type_id: 0x4cf4b2aeb98a1939n, args: [{ tag: 'concrete', type_id: 0xcaab6065094a4dbfn, args: [] }] }] } }],
+    [0xa8ec39ab4cede598n, { argsRootRef: { tag: 'concrete', type_id: 0x6847ab90feda71c1n, args: [{ tag: 'concrete', type_id: 0xe0e8cad5e9c2c992n, args: [] }] }, responseRootRef: { tag: 'concrete', type_id: 0x42046de663beeef0n, args: [{ tag: 'concrete', type_id: 0xe0e8cad5e9c2c992n, args: [] }, { tag: 'concrete', type_id: 0x4cf4b2aeb98a1939n, args: [{ tag: 'concrete', type_id: 0xcaab6065094a4dbfn, args: [] }] }] } }],
+    [0x6387b975eac58016n, { argsRootRef: { tag: 'concrete', type_id: 0xba0496aa8cee7a4cn, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }, { tag: 'concrete', type_id: 0x420ae8350987c009n, args: [] }] }, responseRootRef: { tag: 'concrete', type_id: 0x42046de663beeef0n, args: [{ tag: 'concrete', type_id: 0xe0e8cad5e9c2c992n, args: [] }, { tag: 'concrete', type_id: 0x4cf4b2aeb98a1939n, args: [{ tag: 'concrete', type_id: 0xcaab6065094a4dbfn, args: [] }] }] } }],
+    [0xb7639a5e9bb898e2n, { argsRootRef: { tag: 'concrete', type_id: 0x6847ab90feda71c1n, args: [{ tag: 'concrete', type_id: 0x6d7dce914ee150e8n, args: [] }] }, responseRootRef: { tag: 'concrete', type_id: 0x42046de663beeef0n, args: [{ tag: 'concrete', type_id: 0xbc5c33249a2dc720n, args: [] }, { tag: 'concrete', type_id: 0x4cf4b2aeb98a1939n, args: [{ tag: 'concrete', type_id: 0xcaab6065094a4dbfn, args: [] }] }] } }],
     [0xb6c35ead6f3a86a1n, { argsRootRef: { tag: 'concrete', type_id: 0xbc5c33249a2dc720n, args: [] }, responseRootRef: { tag: 'concrete', type_id: 0x42046de663beeef0n, args: [{ tag: 'concrete', type_id: 0x824decc4c5fc6e7an, args: [] }, { tag: 'concrete', type_id: 0x4cf4b2aeb98a1939n, args: [{ tag: 'concrete', type_id: 0xcaab6065094a4dbfn, args: [] }] }] } }],
     [0x9c8eb69d02285e61n, { argsRootRef: { tag: 'concrete', type_id: 0xbc5c33249a2dc720n, args: [] }, responseRootRef: { tag: 'concrete', type_id: 0x42046de663beeef0n, args: [{ tag: 'concrete', type_id: 0xdcafd4de6b7969bbn, args: [{ tag: 'concrete', type_id: 0x824decc4c5fc6e7an, args: [] }] }, { tag: 'concrete', type_id: 0x4cf4b2aeb98a1939n, args: [{ tag: 'concrete', type_id: 0x5db70a394660f3e6n, args: [] }] }] } }],
     [0x8b4a4fdfab4d5090n, { argsRootRef: { tag: 'concrete', type_id: 0xbc5c33249a2dc720n, args: [] }, responseRootRef: { tag: 'concrete', type_id: 0x42046de663beeef0n, args: [{ tag: 'concrete', type_id: 0x0a96b404b4d79d67n, args: [{ tag: 'concrete', type_id: 0x77186d1d5f08be11n, args: [] }] }, { tag: 'concrete', type_id: 0x4cf4b2aeb98a1939n, args: [{ tag: 'concrete', type_id: 0xcaab6065094a4dbfn, args: [] }] }] } }],
@@ -467,6 +648,30 @@ export const calendarService_tasksDueBy_method: MethodDescriptor = {
 export const calendarService_scheduledBetween_method: MethodDescriptor = {
   name: 'scheduledBetween',
   id: 0xa7d4fa1560ec40dan,
+  retry: { persist: false, idem: false },
+};
+
+export const calendarService_eventsBetween_method: MethodDescriptor = {
+  name: 'eventsBetween',
+  id: 0x8569af36d7ff599an,
+  retry: { persist: false, idem: false },
+};
+
+export const calendarService_createEvent_method: MethodDescriptor = {
+  name: 'createEvent',
+  id: 0xa8ec39ab4cede598n,
+  retry: { persist: false, idem: false },
+};
+
+export const calendarService_updateEvent_method: MethodDescriptor = {
+  name: 'updateEvent',
+  id: 0x6387b975eac58016n,
+  retry: { persist: false, idem: false },
+};
+
+export const calendarService_deleteEvent_method: MethodDescriptor = {
+  name: 'deleteEvent',
+  id: 0xb7639a5e9bb898e2n,
   retry: { persist: false, idem: false },
 };
 
@@ -501,6 +706,10 @@ export const calendarService_descriptor: ServiceDescriptor = {
   methods: new Map<bigint, MethodDescriptor>([
     [calendarService_tasksDueBy_method.id, calendarService_tasksDueBy_method],
     [calendarService_scheduledBetween_method.id, calendarService_scheduledBetween_method],
+    [calendarService_eventsBetween_method.id, calendarService_eventsBetween_method],
+    [calendarService_createEvent_method.id, calendarService_createEvent_method],
+    [calendarService_updateEvent_method.id, calendarService_updateEvent_method],
+    [calendarService_deleteEvent_method.id, calendarService_deleteEvent_method],
     [calendarService_triggerSync_method.id, calendarService_triggerSync_method],
     [calendarService_syncStatus_method.id, calendarService_syncStatus_method],
     [calendarService_listDeckBoards_method.id, calendarService_listDeckBoards_method],

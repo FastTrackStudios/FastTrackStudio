@@ -5,6 +5,7 @@
 
 use chrono::{DateTime, Utc};
 
+use crate::calendar_event::{CalendarEvent, CalendarEventStatus};
 use crate::client::Client;
 use crate::index::{ChangeRow, ConflictRow};
 use crate::invoice::Invoice;
@@ -144,6 +145,26 @@ pub trait CalendarService {
     /// Get tasks scheduled between two dates, inclusive (YYYY-MM-DD).
     async fn scheduled_between(&self, from: String, to: String) -> Result<Vec<Task>, VaultError>;
 
+    /// List calendar events whose start/end overlap an RFC3339 time range.
+    async fn events_between(
+        &self,
+        from: String,
+        to: String,
+    ) -> Result<Vec<CalendarEvent>, VaultError>;
+
+    /// Create a first-class calendar event.
+    async fn create_event(&self, event: CalendarEvent) -> Result<CalendarEvent, VaultError>;
+
+    /// Update mutable calendar event fields by id or title.
+    async fn update_event(
+        &self,
+        event_ref: String,
+        patch: CalendarEventPatch,
+    ) -> Result<CalendarEvent, VaultError>;
+
+    /// Delete a calendar event by id or title.
+    async fn delete_event(&self, event_ref: String) -> Result<(), VaultError>;
+
     /// Trigger a Nextcloud sync cycle. Returns sync stats.
     async fn trigger_sync(&self) -> Result<SyncStats, VaultError>;
 
@@ -182,6 +203,20 @@ pub struct RemoteDeckStack {
     pub id: u64,
     pub title: String,
     pub card_count: u32,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct CalendarEventPatch {
+    pub title: Option<String>,
+    pub description: Option<Option<String>>,
+    pub location: Option<Option<String>>,
+    pub start: Option<DateTime<Utc>>,
+    pub end: Option<Option<DateTime<Utc>>>,
+    pub all_day: Option<bool>,
+    pub status: Option<CalendarEventStatus>,
+    pub recurrence: Option<Option<String>>,
+    pub attendees: Option<Vec<String>>,
+    pub body: Option<String>,
 }
 
 /// Patch for editing time entries. Only `Some(_)` fields are applied. For

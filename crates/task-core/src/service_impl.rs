@@ -11,9 +11,9 @@ use crate::project::{next_task as find_next_task, Project, ProjectStats};
 use crate::query::Query;
 use crate::rrule;
 use crate::service::{
-    InvoiceCreateRequest, InvoicePaymentRequest, ProjectPatch, RemoteDeckBoard, RemoteDeckStack,
-    SyncStats, TimeEntryContext, TimeEntryFilter, TimeEntryPatch, TimeLogRequest, TimeStartRequest,
-    TimedTaskEntry, VaultError,
+    CalendarEventPatch, InvoiceCreateRequest, InvoicePaymentRequest, ProjectPatch,
+    RemoteDeckBoard, RemoteDeckStack, SyncStats, TimeEntryContext, TimeEntryFilter,
+    TimeEntryPatch, TimeLogRequest, TimeStartRequest, TimedTaskEntry, VaultError,
 };
 use crate::task::{Status, Task};
 use crate::vault::Vault;
@@ -48,6 +48,7 @@ struct NextcloudRuntimeConfig {
     password: String,
     projects_path: String,
     calendar: String,
+    event_calendar: Option<String>,
     deck_enabled: bool,
 }
 
@@ -80,6 +81,9 @@ impl NextcloudRuntimeConfig {
         let calendar = env_or_toml("NEXTCLOUD_CALENDAR", &file_cfg, "calendar")
             .unwrap_or_else(|| "tasks".to_string())
             .to_ascii_lowercase();
+        let event_calendar = env_or_toml("NEXTCLOUD_EVENT_CALENDAR", &file_cfg, "event_calendar")
+            .or_else(|| env_or_toml("NEXTCLOUD_EVENTS_CALENDAR", &file_cfg, "events_calendar"))
+            .map(|s| s.to_ascii_lowercase());
         let deck_enabled = std::env::var("NEXTCLOUD_DECK_ENABLED")
             .ok()
             .map(|v| env_truthy(&v))
@@ -92,6 +96,7 @@ impl NextcloudRuntimeConfig {
             password,
             projects_path,
             calendar,
+            event_calendar,
             deck_enabled,
         }))
     }
@@ -548,6 +553,24 @@ impl VaultServiceImpl {
             Err(e) => stats.errors.push(format!("CalDAV pull: {e}")),
         }
 
+        if let Some(event_calendar) = config.event_calendar.as_deref() {
+            match sync.pull_events_from_calendar(event_calendar).await {
+                Ok(remote_events) => {
+                    self.merge_remote_events(remote_events, &mut stats).await?;
+                }
+                Err(e) => stats.errors.push(format!("CalDAV event pull: {e}")),
+            }
+
+            for event in self.list_calendar_events().await {
+                match sync.push_event_to_calendar(event_calendar, &event).await {
+                    Ok(()) => stats.calendar_pushed += 1,
+                    Err(e) => stats
+                        .errors
+                        .push(format!("CalDAV event push '{}': {e}", event.title)),
+                }
+            }
+        }
+
         for task in &local_tasks {
             if blocked_calendar_push.contains(&task_sync_key(task)) {
                 continue;
@@ -618,6 +641,86 @@ impl VaultServiceImpl {
 
     pub async fn sync_status(&self) -> Option<SyncStats> {
         self.last_sync.lock().unwrap().clone()
+    }
+
+    pub async fn list_calendar_events(&self) -> Vec<crate::CalendarEvent> {
+        self.vault.read().await.load_calendar_events()
+    }
+
+    pub async fn calendar_events_between(
+        &self,
+        from: chrono::DateTime<Utc>,
+        to: chrono::DateTime<Utc>,
+    ) -> Vec<crate::CalendarEvent> {
+        self.list_calendar_events()
+            .await
+            .into_iter()
+            .filter(|event| event_overlaps(event, from, to))
+            .collect()
+    }
+
+    pub async fn create_calendar_event(
+        &self,
+        mut event: crate::CalendarEvent,
+    ) -> Result<crate::CalendarEvent, VaultError> {
+        if event.id.is_none() {
+            event.id = Some(Uuid::new_v4().to_string());
+        }
+        let now = Utc::now();
+        event.date_created.get_or_insert(now);
+        event.date_modified = Some(now);
+        self.vault.read().await.save_calendar_event(&event)?;
+        Ok(event)
+    }
+
+    pub async fn update_calendar_event(
+        &self,
+        event_ref: &str,
+        patch: CalendarEventPatch,
+    ) -> Result<crate::CalendarEvent, VaultError> {
+        let mut event = self
+            .list_calendar_events()
+            .await
+            .into_iter()
+            .find(|e| e.id.as_deref() == Some(event_ref) || e.title == event_ref)
+            .ok_or_else(|| VaultError::NotFound(event_ref.to_string()))?;
+        if let Some(title) = patch.title {
+            event.title = title;
+        }
+        if let Some(description) = patch.description {
+            event.description = description;
+        }
+        if let Some(location) = patch.location {
+            event.location = location;
+        }
+        if let Some(start) = patch.start {
+            event.start = start;
+        }
+        if let Some(end) = patch.end {
+            event.end = end;
+        }
+        if let Some(all_day) = patch.all_day {
+            event.all_day = all_day;
+        }
+        if let Some(status) = patch.status {
+            event.status = status;
+        }
+        if let Some(recurrence) = patch.recurrence {
+            event.recurrence = recurrence;
+        }
+        if let Some(attendees) = patch.attendees {
+            event.attendees = attendees;
+        }
+        if let Some(body) = patch.body {
+            event.body = body;
+        }
+        event.date_modified = Some(Utc::now());
+        self.vault.read().await.save_calendar_event(&event)?;
+        Ok(event)
+    }
+
+    pub async fn delete_calendar_event(&self, event_ref: &str) -> Result<(), VaultError> {
+        self.vault.read().await.delete_calendar_event(event_ref)
     }
 
     pub async fn list_remote_deck_boards(&self) -> Result<Vec<RemoteDeckBoard>, VaultError> {
@@ -714,6 +817,54 @@ impl VaultServiceImpl {
             stats.files_created += 1;
         }
         Ok(result)
+    }
+
+    async fn merge_remote_events(
+        &self,
+        remote_events: Vec<crate::CalendarEvent>,
+        stats: &mut SyncStats,
+    ) -> Result<(), VaultError> {
+        let local_events = self.list_calendar_events().await;
+        for remote in remote_events {
+            if let Some(local) = local_events.iter().find(|local| {
+                (remote.id.is_some() && local.id == remote.id) || local.title == remote.title
+            }) {
+                if calendar_event_conflicts(local, &remote) {
+                    let id = local
+                        .id
+                        .as_deref()
+                        .or(remote.id.as_deref())
+                        .unwrap_or(&local.title);
+                    if let Err(e) = self
+                        .record_conflict(
+                            "calendar_event",
+                            id,
+                            "event",
+                            Some(&format!("{:?}", local)),
+                            Some(&format!("{:?}", remote)),
+                            Some("local"),
+                            Some("caldav"),
+                            None,
+                            "sync",
+                        )
+                        .await
+                    {
+                        stats
+                            .errors
+                            .push(format!("CalDAV event conflict log '{}': {e}", local.title));
+                    }
+                    continue;
+                }
+                if calendar_event_remote_is_newer(local, &remote) {
+                    self.vault.read().await.save_calendar_event(&remote)?;
+                    stats.files_updated += 1;
+                }
+                continue;
+            }
+            self.vault.read().await.save_calendar_event(&remote)?;
+            stats.files_created += 1;
+        }
+        Ok(())
     }
 
     async fn ensure_project_from_remote(&self, project: &Project) -> Result<(), VaultError> {
@@ -2310,6 +2461,39 @@ impl crate::service::CalendarService for VaultServiceImpl {
             .collect())
     }
 
+    async fn events_between(
+        &self,
+        from: String,
+        to: String,
+    ) -> Result<Vec<crate::CalendarEvent>, VaultError> {
+        let from = chrono::DateTime::parse_from_rfc3339(&from)
+            .map_err(|e| VaultError::ParseError(e.to_string()))?
+            .to_utc();
+        let to = chrono::DateTime::parse_from_rfc3339(&to)
+            .map_err(|e| VaultError::ParseError(e.to_string()))?
+            .to_utc();
+        Ok(self.calendar_events_between(from, to).await)
+    }
+
+    async fn create_event(
+        &self,
+        event: crate::CalendarEvent,
+    ) -> Result<crate::CalendarEvent, VaultError> {
+        self.create_calendar_event(event).await
+    }
+
+    async fn update_event(
+        &self,
+        event_ref: String,
+        patch: CalendarEventPatch,
+    ) -> Result<crate::CalendarEvent, VaultError> {
+        self.update_calendar_event(&event_ref, patch).await
+    }
+
+    async fn delete_event(&self, event_ref: String) -> Result<(), VaultError> {
+        self.delete_calendar_event(&event_ref).await
+    }
+
     async fn trigger_sync(&self) -> Result<SyncStats, VaultError> { self.trigger_sync().await }
     async fn sync_status(&self) -> Option<SyncStats> { self.sync_status().await }
     async fn list_deck_boards(&self) -> Result<Vec<RemoteDeckBoard>, VaultError> {
@@ -2429,6 +2613,41 @@ fn push_conflict(
 
 fn fmt_date(date: Option<NaiveDate>) -> Option<String> {
     date.map(|d| d.to_string())
+}
+
+fn event_overlaps(
+    event: &crate::CalendarEvent,
+    from: chrono::DateTime<Utc>,
+    to: chrono::DateTime<Utc>,
+) -> bool {
+    let end = event.end.unwrap_or(event.start);
+    event.start <= to && end >= from
+}
+
+fn calendar_event_remote_is_newer(
+    local: &crate::CalendarEvent,
+    remote: &crate::CalendarEvent,
+) -> bool {
+    matches!(
+        (local.date_modified, remote.date_modified),
+        (Some(local_modified), Some(remote_modified)) if remote_modified > local_modified
+    )
+}
+
+fn calendar_event_conflicts(local: &crate::CalendarEvent, remote: &crate::CalendarEvent) -> bool {
+    match (local.date_modified, remote.date_modified) {
+        (Some(local_modified), Some(remote_modified)) if local_modified != remote_modified => {
+            local.title != remote.title
+                || local.description != remote.description
+                || local.location != remote.location
+                || local.start != remote.start
+                || local.end != remote.end
+                || local.status != remote.status
+                || local.recurrence != remote.recurrence
+                || local.attendees != remote.attendees
+        }
+        _ => false,
+    }
 }
 
 /// Diff two versions of a task and write one audit row per changed scalar
@@ -2579,5 +2798,33 @@ mod tests {
 
         assert!(remote_is_newer(&local, &remote));
         assert!(task_sync_conflicts(&local, &remote).is_empty());
+    }
+
+    #[test]
+    fn calendar_event_overlap_and_conflict_detection() {
+        let start = modified_at("2026-05-01T10:00:00Z");
+        let end = modified_at("2026-05-01T11:00:00Z");
+        let local = crate::CalendarEvent {
+            id: Some("event-1".to_string()),
+            title: "Planning".to_string(),
+            start,
+            end: Some(end),
+            location: Some("Room A".to_string()),
+            date_modified: Some(modified_at("2026-04-29T10:00:00Z")),
+            ..Default::default()
+        };
+        let remote = crate::CalendarEvent {
+            location: Some("Room B".to_string()),
+            date_modified: Some(modified_at("2026-04-29T10:05:00Z")),
+            ..local.clone()
+        };
+
+        assert!(event_overlaps(
+            &local,
+            modified_at("2026-05-01T10:30:00Z"),
+            modified_at("2026-05-01T12:00:00Z")
+        ));
+        assert!(calendar_event_remote_is_newer(&local, &remote));
+        assert!(calendar_event_conflicts(&local, &remote));
     }
 }
