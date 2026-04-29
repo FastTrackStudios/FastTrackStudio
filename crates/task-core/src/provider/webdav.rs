@@ -841,9 +841,15 @@ fn percent_decode(input: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::{BTreeMap, BTreeSet};
+    use std::sync::Arc;
+
     use crate::provider::live_nextcloud_credentials;
 
     use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::{TcpListener, TcpStream};
+    use tokio::sync::Mutex;
 
     #[test]
     fn parses_multistatus_direct_children() {
@@ -911,6 +917,380 @@ mod tests {
         assert_eq!(xml_name("task color"), "task_color");
         assert_eq!(xml_name("1bad"), "_1bad");
         assert_eq!(escape_xml("A&B <C>"), "A&amp;B &lt;C&gt;");
+    }
+
+    #[tokio::test]
+    async fn local_webdav_provider_project_task_crud() {
+        let server = LocalDavServer::start().await;
+        let provider = WebDavProvider::new(
+            "local-dav",
+            "Local DAV",
+            WebDavConfig {
+                url: server.base_url(),
+                username: "agent".into(),
+                password: "secret".into(),
+                projects_path: "Projects/".into(),
+            },
+        );
+        let project = Project {
+            title: "Local DAV Project".into(),
+            ..Default::default()
+        };
+        let task = Task {
+            title: "Write WebDAV integration test".into(),
+            body: "Verify real HTTP WebDAV CRUD.".into(),
+            projects: vec![WikiLink(project.title.clone())],
+            ..Default::default()
+        };
+
+        let location = provider.create_project(&project).await.unwrap();
+        assert!(location.ends_with("Projects/Local%20DAV%20Project"));
+
+        let projects = provider.list_projects().await.unwrap();
+        assert_eq!(projects.len(), 1);
+        assert_eq!(projects[0].title, project.title);
+
+        provider.save_task(&project.title, &task).await.unwrap();
+        let loaded = provider
+            .get_project(&project.title)
+            .await
+            .unwrap()
+            .expect("project should load");
+        assert_eq!(loaded.project.title, project.title);
+        assert_eq!(loaded.tasks.len(), 1);
+        assert_eq!(loaded.tasks[0].title, task.title);
+        assert_eq!(loaded.tasks[0].body, task.body);
+        assert!(loaded.tasks[0]
+            .projects
+            .iter()
+            .any(|link| link.0 == project.title));
+
+        let stat = provider
+            .stat(&format!("{}/tasks/{}.md", project.title, task.title))
+            .await
+            .unwrap()
+            .expect("task file should exist");
+        assert_eq!(stat.kind, WebDavResourceKind::File);
+        assert_eq!(stat.content_type.as_deref(), Some("text/markdown"));
+
+        provider
+            .delete_task(&project.title, &task.title)
+            .await
+            .unwrap();
+        let loaded = provider.get_project(&project.title).await.unwrap().unwrap();
+        assert!(loaded.tasks.is_empty());
+
+        provider.remove(&project.title).await.unwrap();
+        assert!(provider.list_projects().await.unwrap().is_empty());
+
+        let methods = server.methods().await;
+        for expected in ["MKCOL", "PUT", "PROPFIND", "GET", "DELETE"] {
+            assert!(
+                methods.contains(expected),
+                "expected local DAV server to receive {expected}, got {methods:?}"
+            );
+        }
+    }
+
+    #[derive(Clone)]
+    struct LocalDavServer {
+        addr: std::net::SocketAddr,
+        state: Arc<Mutex<LocalDavState>>,
+    }
+
+    #[derive(Default)]
+    struct LocalDavState {
+        collections: BTreeSet<String>,
+        files: BTreeMap<String, Vec<u8>>,
+        methods: BTreeSet<String>,
+    }
+
+    struct LocalDavRequest {
+        method: String,
+        path: String,
+        headers: BTreeMap<String, String>,
+        body: Vec<u8>,
+    }
+
+    struct LocalDavResponse {
+        status: u16,
+        reason: &'static str,
+        content_type: Option<&'static str>,
+        body: Vec<u8>,
+    }
+
+    impl LocalDavServer {
+        async fn start() -> Self {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let addr = listener.local_addr().unwrap();
+            let state = Arc::new(Mutex::new(LocalDavState::default()));
+            state.lock().await.collections.insert("Projects".into());
+            let server = Self {
+                addr,
+                state: state.clone(),
+            };
+            tokio::spawn(async move {
+                loop {
+                    let Ok((stream, _)) = listener.accept().await else {
+                        break;
+                    };
+                    let state = state.clone();
+                    tokio::spawn(async move {
+                        let _ = handle_local_dav_connection(stream, state).await;
+                    });
+                }
+            });
+            server
+        }
+
+        fn base_url(&self) -> String {
+            format!("http://{}/dav/", self.addr)
+        }
+
+        async fn methods(&self) -> BTreeSet<String> {
+            self.state.lock().await.methods.clone()
+        }
+    }
+
+    async fn handle_local_dav_connection(
+        mut stream: TcpStream,
+        state: Arc<Mutex<LocalDavState>>,
+    ) -> std::io::Result<()> {
+        let request = read_local_dav_request(&mut stream).await?;
+        let response = handle_local_dav_request(request, state).await;
+        write_local_dav_response(&mut stream, response).await
+    }
+
+    async fn read_local_dav_request(stream: &mut TcpStream) -> std::io::Result<LocalDavRequest> {
+        let mut buffer = Vec::new();
+        let header_end = loop {
+            let mut chunk = [0_u8; 1024];
+            let n = stream.read(&mut chunk).await?;
+            if n == 0 {
+                break None;
+            }
+            buffer.extend_from_slice(&chunk[..n]);
+            if let Some(pos) = find_header_end(&buffer) {
+                break Some(pos);
+            }
+        }
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "no headers"))?;
+
+        let header_bytes = &buffer[..header_end];
+        let header_text = String::from_utf8_lossy(header_bytes);
+        let mut lines = header_text.split("\r\n");
+        let request_line = lines.next().unwrap_or_default();
+        let mut request_parts = request_line.split_whitespace();
+        let method = request_parts.next().unwrap_or_default().to_string();
+        let path = request_parts.next().unwrap_or_default().to_string();
+        let headers = lines
+            .filter_map(|line| line.split_once(':'))
+            .map(|(name, value)| (name.to_ascii_lowercase(), value.trim().to_string()))
+            .collect::<BTreeMap<_, _>>();
+        let content_length = headers
+            .get("content-length")
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or(0);
+        let body_start = header_end + 4;
+        let mut body = buffer[body_start..].to_vec();
+        while body.len() < content_length {
+            let mut chunk = vec![0_u8; content_length - body.len()];
+            let n = stream.read(&mut chunk).await?;
+            if n == 0 {
+                break;
+            }
+            body.extend_from_slice(&chunk[..n]);
+        }
+        body.truncate(content_length);
+
+        Ok(LocalDavRequest {
+            method,
+            path,
+            headers,
+            body,
+        })
+    }
+
+    fn find_header_end(buffer: &[u8]) -> Option<usize> {
+        buffer.windows(4).position(|window| window == b"\r\n\r\n")
+    }
+
+    async fn handle_local_dav_request(
+        request: LocalDavRequest,
+        state: Arc<Mutex<LocalDavState>>,
+    ) -> LocalDavResponse {
+        let mut state = state.lock().await;
+        state.methods.insert(request.method.clone());
+        let path = request_path_to_dav_path(&request.path);
+        match request.method.as_str() {
+            "PROPFIND" => {
+                if !state.collections.contains(&path) && !state.files.contains_key(&path) {
+                    return response(404, "Not Found", None, Vec::new());
+                }
+                let depth = request
+                    .headers
+                    .get("depth")
+                    .map(String::as_str)
+                    .unwrap_or("infinity");
+                let xml = multistatus_xml(&state, &path, depth);
+                response(
+                    207,
+                    "Multi-Status",
+                    Some("application/xml"),
+                    xml.into_bytes(),
+                )
+            }
+            "MKCOL" => {
+                if state.collections.contains(&path) {
+                    return response(405, "Method Not Allowed", None, Vec::new());
+                }
+                if let Some(parent) = parent_path(&path) {
+                    if !state.collections.contains(&parent) {
+                        return response(409, "Conflict", None, Vec::new());
+                    }
+                }
+                state.collections.insert(path);
+                response(201, "Created", None, Vec::new())
+            }
+            "PUT" => {
+                if let Some(parent) = parent_path(&path) {
+                    if !state.collections.contains(&parent) {
+                        return response(409, "Conflict", None, Vec::new());
+                    }
+                }
+                state.files.insert(path, request.body);
+                response(201, "Created", None, Vec::new())
+            }
+            "GET" => match state.files.get(&path) {
+                Some(body) => response(200, "OK", Some("text/markdown"), body.clone()),
+                None => response(404, "Not Found", None, Vec::new()),
+            },
+            "DELETE" => {
+                remove_path(&mut state, &path);
+                response(204, "No Content", None, Vec::new())
+            }
+            _ => response(405, "Method Not Allowed", None, Vec::new()),
+        }
+    }
+
+    fn request_path_to_dav_path(path: &str) -> String {
+        let path = path.split('?').next().unwrap_or(path);
+        let path = percent_decode(path.trim_start_matches('/'));
+        path.strip_prefix("dav/")
+            .unwrap_or(&path)
+            .trim_matches('/')
+            .to_string()
+    }
+
+    fn parent_path(path: &str) -> Option<String> {
+        path.rsplit_once('/').map(|(parent, _)| parent.to_string())
+    }
+
+    fn remove_path(state: &mut LocalDavState, path: &str) {
+        state.files.remove(path);
+        state.collections.remove(path);
+        let prefix = format!("{path}/");
+        state
+            .files
+            .retain(|candidate, _| !candidate.starts_with(&prefix));
+        state
+            .collections
+            .retain(|candidate| !candidate.starts_with(&prefix));
+    }
+
+    fn multistatus_xml(state: &LocalDavState, path: &str, depth: &str) -> String {
+        let mut paths = Vec::new();
+        paths.push(path.to_string());
+        if depth != "0" {
+            let prefix = if path.is_empty() {
+                String::new()
+            } else {
+                format!("{path}/")
+            };
+            for collection in &state.collections {
+                if is_direct_child(collection, &prefix) {
+                    paths.push(collection.clone());
+                }
+            }
+            for file in state.files.keys() {
+                if is_direct_child(file, &prefix) {
+                    paths.push(file.clone());
+                }
+            }
+        }
+        paths.sort();
+        paths.dedup();
+
+        let mut xml =
+            String::from(r#"<?xml version="1.0" encoding="utf-8"?><d:multistatus xmlns:d="DAV:">"#);
+        for entry_path in paths {
+            let is_collection = state.collections.contains(&entry_path);
+            let href = format!(
+                "/dav/{}{}",
+                encode_path(&entry_path),
+                if is_collection { "/" } else { "" }
+            );
+            let content_length = state.files.get(&entry_path).map(Vec::len).unwrap_or(0);
+            let content_type = if is_collection {
+                "httpd/unix-directory"
+            } else {
+                "text/markdown"
+            };
+            let resource_type = if is_collection {
+                "<d:resourcetype><d:collection/></d:resourcetype>"
+            } else {
+                "<d:resourcetype/>"
+            };
+            xml.push_str(&format!(
+                "<d:response><d:href>{}</d:href><d:propstat><d:prop>{}<d:getcontenttype>{}</d:getcontenttype><d:getcontentlength>{}</d:getcontentlength><d:getetag>\"{}\"</d:getetag><d:getlastmodified>Wed, 29 Apr 2026 18:00:00 GMT</d:getlastmodified></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>",
+                escape_xml(&href),
+                resource_type,
+                content_type,
+                content_length,
+                escape_xml(&entry_path)
+            ));
+        }
+        xml.push_str("</d:multistatus>");
+        xml
+    }
+
+    fn is_direct_child(candidate: &str, prefix: &str) -> bool {
+        candidate
+            .strip_prefix(prefix)
+            .map(|tail| !tail.is_empty() && !tail.contains('/'))
+            .unwrap_or(false)
+    }
+
+    fn response(
+        status: u16,
+        reason: &'static str,
+        content_type: Option<&'static str>,
+        body: Vec<u8>,
+    ) -> LocalDavResponse {
+        LocalDavResponse {
+            status,
+            reason,
+            content_type,
+            body,
+        }
+    }
+
+    async fn write_local_dav_response(
+        stream: &mut TcpStream,
+        response: LocalDavResponse,
+    ) -> std::io::Result<()> {
+        let mut headers = format!(
+            "HTTP/1.1 {} {}\r\nContent-Length: {}\r\nConnection: close\r\n",
+            response.status,
+            response.reason,
+            response.body.len()
+        );
+        if let Some(content_type) = response.content_type {
+            headers.push_str(&format!("Content-Type: {content_type}\r\n"));
+        }
+        headers.push_str("\r\n");
+        stream.write_all(headers.as_bytes()).await?;
+        stream.write_all(&response.body).await
     }
 
     #[tokio::test]
