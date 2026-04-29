@@ -50,7 +50,7 @@ pub struct TableHeaderProps {
 pub fn TableHeader(props: TableHeaderProps) -> Element {
     rsx! {
         thead {
-            class: crate::cn::merge_slice(&["[&_tr]:border-b", props.class.as_str()]),
+            class: crate::cn::merge_slice(&["[&_tr]:border-b [&_tr]:border-border", props.class.as_str()]),
             {props.children}
         }
     }
@@ -87,7 +87,7 @@ pub fn TableFooter(props: TableFooterProps) -> Element {
     rsx! {
         tfoot {
             class: crate::cn::merge(format!(
-                "bg-muted/50 border-t font-medium [&>tr]:last:border-b-0 {}",
+                "bg-muted/50 border-t border-border font-medium [&>tr]:last:border-b-0 {}",
                 props.class
             )),
             {props.children}
@@ -108,7 +108,7 @@ pub fn TableRow(props: TableRowProps) -> Element {
     rsx! {
         tr {
             class: crate::cn::merge(format!(
-                "hover:bg-muted/50 data-[state=selected]:bg-muted border-b transition-colors {}",
+                "hover:bg-muted/50 data-[state=selected]:bg-muted border-b border-border transition-colors {}",
                 props.class
             )),
             {props.children}
