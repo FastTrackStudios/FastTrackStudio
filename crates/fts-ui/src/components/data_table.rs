@@ -1,14 +1,22 @@
 //! Data table — TanStack-inspired headless table state for Dioxus.
 
-use std::collections::{HashMap, HashSet};
+use std::{
+    cmp::Ordering,
+    collections::{HashMap, HashSet},
+};
 
 use dioxus::prelude::*;
+
+use super::{Table, TableBody, TableCell, TableContainer, TableHead, TableHeader, TableRow};
 
 #[derive(Clone)]
 pub struct DataTableColumn<T> {
     pub id: &'static str,
     pub header: &'static str,
     pub accessor: fn(&T) -> String,
+    pub sort_value: Option<fn(&T) -> DataTableSortValue>,
+    pub filter: Option<fn(&T, &str) -> bool>,
+    pub cell: Option<fn(&T) -> Element>,
     pub sortable: bool,
     pub filterable: bool,
     pub class: &'static str,
@@ -34,6 +42,9 @@ impl<T> DataTableColumn<T> {
             id,
             header,
             accessor,
+            sort_value: None,
+            filter: None,
+            cell: None,
             sortable: true,
             filterable: true,
             class: "",
@@ -47,8 +58,23 @@ impl<T> DataTableColumn<T> {
         self
     }
 
+    pub fn sort_value(mut self, sort_value: fn(&T) -> DataTableSortValue) -> Self {
+        self.sort_value = Some(sort_value);
+        self
+    }
+
     pub fn filterable(mut self, filterable: bool) -> Self {
         self.filterable = filterable;
+        self
+    }
+
+    pub fn filter(mut self, filter: fn(&T, &str) -> bool) -> Self {
+        self.filter = Some(filter);
+        self
+    }
+
+    pub fn cell(mut self, cell: fn(&T) -> Element) -> Self {
+        self.cell = Some(cell);
         self
     }
 
@@ -68,6 +94,62 @@ impl<T> DataTableColumn<T> {
     }
 }
 
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum DataTableSortValue {
+    Text(String),
+    Number(i64),
+    Bool(bool),
+}
+
+impl DataTableSortValue {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match (self, other) {
+            (Self::Text(a), Self::Text(b)) => a.cmp(b),
+            (Self::Number(a), Self::Number(b)) => a.cmp(b),
+            (Self::Bool(a), Self::Bool(b)) => a.cmp(b),
+            (a, b) => a.as_sort_key().cmp(&b.as_sort_key()),
+        }
+    }
+
+    fn as_sort_key(&self) -> String {
+        match self {
+            Self::Text(value) => value.clone(),
+            Self::Number(value) => value.to_string(),
+            Self::Bool(value) => value.to_string(),
+        }
+    }
+}
+
+impl From<String> for DataTableSortValue {
+    fn from(value: String) -> Self {
+        Self::Text(value)
+    }
+}
+
+impl From<&str> for DataTableSortValue {
+    fn from(value: &str) -> Self {
+        Self::Text(value.to_string())
+    }
+}
+
+impl From<i64> for DataTableSortValue {
+    fn from(value: i64) -> Self {
+        Self::Number(value)
+    }
+}
+
+impl From<u32> for DataTableSortValue {
+    fn from(value: u32) -> Self {
+        Self::Number(value.into())
+    }
+}
+
+impl From<bool> for DataTableSortValue {
+    fn from(value: bool) -> Self {
+        Self::Bool(value)
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum DataTableSortDirection {
     Asc,
@@ -84,6 +166,7 @@ pub struct DataTableSort {
 pub struct DataTableState {
     pub sorting: Vec<DataTableSort>,
     pub global_filter: String,
+    pub column_filters: HashMap<String, String>,
     pub page_index: usize,
     pub page_size: usize,
     pub column_visibility: HashMap<String, bool>,
@@ -95,6 +178,7 @@ impl Default for DataTableState {
         Self {
             sorting: Vec::new(),
             global_filter: String::new(),
+            column_filters: HashMap::new(),
             page_index: 0,
             page_size: 10,
             column_visibility: HashMap::new(),
@@ -108,14 +192,93 @@ pub struct DataTableModel<T> {
     pub rows: Vec<T>,
     pub columns: Vec<DataTableColumn<T>>,
     pub state: DataTableState,
+    pub options: DataTableOptions<T>,
+}
+
+#[derive(Clone)]
+pub struct DataTableOptions<T> {
+    pub get_row_id: fn(&T, usize) -> String,
+    pub manual_filtering: bool,
+    pub manual_sorting: bool,
+    pub manual_pagination: bool,
+    pub total_rows: Option<usize>,
+}
+
+impl<T> PartialEq for DataTableOptions<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.manual_filtering == other.manual_filtering
+            && self.manual_sorting == other.manual_sorting
+            && self.manual_pagination == other.manual_pagination
+            && self.total_rows == other.total_rows
+    }
+}
+
+impl<T> Default for DataTableOptions<T> {
+    fn default() -> Self {
+        Self {
+            get_row_id: default_row_id::<T>,
+            manual_filtering: false,
+            manual_sorting: false,
+            manual_pagination: false,
+            total_rows: None,
+        }
+    }
+}
+
+fn default_row_id<T>(_row: &T, index: usize) -> String {
+    index.to_string()
+}
+
+impl<T> DataTableOptions<T> {
+    pub fn get_row_id(mut self, get_row_id: fn(&T, usize) -> String) -> Self {
+        self.get_row_id = get_row_id;
+        self
+    }
+
+    pub fn manual_filtering(mut self, manual_filtering: bool) -> Self {
+        self.manual_filtering = manual_filtering;
+        self
+    }
+
+    pub fn manual_sorting(mut self, manual_sorting: bool) -> Self {
+        self.manual_sorting = manual_sorting;
+        self
+    }
+
+    pub fn manual_pagination(mut self, manual_pagination: bool) -> Self {
+        self.manual_pagination = manual_pagination;
+        self
+    }
+
+    pub fn total_rows(mut self, total_rows: usize) -> Self {
+        self.total_rows = Some(total_rows);
+        self
+    }
+}
+
+#[derive(Clone, PartialEq)]
+pub struct DataTableRow<T> {
+    pub id: String,
+    pub original: T,
+    pub selected: bool,
 }
 
 impl<T: Clone> DataTableModel<T> {
     pub fn new(rows: Vec<T>, columns: Vec<DataTableColumn<T>>, state: DataTableState) -> Self {
+        Self::with_options(rows, columns, state, DataTableOptions::default())
+    }
+
+    pub fn with_options(
+        rows: Vec<T>,
+        columns: Vec<DataTableColumn<T>>,
+        state: DataTableState,
+        options: DataTableOptions<T>,
+    ) -> Self {
         Self {
             rows,
             columns,
             state,
+            options,
         }
     }
 
@@ -133,36 +296,75 @@ impl<T: Clone> DataTableModel<T> {
     }
 
     pub fn row_model(&self) -> Vec<T> {
-        let filter = self.state.global_filter.trim().to_lowercase();
+        self.resolved_rows()
+            .into_iter()
+            .map(|row| row.original)
+            .collect()
+    }
+
+    pub fn resolved_rows(&self) -> Vec<DataTableRow<T>> {
+        let global_filter = self.state.global_filter.trim().to_lowercase();
         let mut rows = self
             .rows
             .iter()
-            .filter(|row| {
-                if filter.is_empty() {
+            .enumerate()
+            .filter(|(_, row)| {
+                if self.options.manual_filtering {
                     return true;
                 }
 
-                self.columns
+                let global_matches = if global_filter.is_empty() {
+                    true
+                } else {
+                    self.columns
+                        .iter()
+                        .filter(|column| column.filterable)
+                        .any(|column| column_matches_filter(column, row, &global_filter))
+                };
+
+                let column_matches = self
+                    .state
+                    .column_filters
                     .iter()
-                    .filter(|column| column.filterable)
-                    .any(|column| (column.accessor)(row).to_lowercase().contains(&filter))
+                    .filter(|(_, filter)| !filter.trim().is_empty())
+                    .all(|(column_id, filter)| {
+                        self.columns
+                            .iter()
+                            .find(|column| column.id == column_id && column.filterable)
+                            .map(|column| {
+                                column_matches_filter(column, row, &filter.to_lowercase())
+                            })
+                            .unwrap_or(true)
+                    });
+
+                global_matches && column_matches
             })
-            .cloned()
+            .map(|(index, row)| {
+                let id = (self.options.get_row_id)(row, index);
+                DataTableRow {
+                    selected: self.state.row_selection.contains(&id),
+                    id,
+                    original: row.clone(),
+                }
+            })
             .collect::<Vec<_>>();
 
-        for sort in self.state.sorting.iter().rev() {
-            if let Some(column) = self
-                .columns
-                .iter()
-                .find(|column| column.id == sort.column_id && column.sortable)
-            {
-                rows.sort_by(|a, b| {
-                    let ordering = (column.accessor)(a).cmp(&(column.accessor)(b));
-                    match sort.direction {
-                        DataTableSortDirection::Asc => ordering,
-                        DataTableSortDirection::Desc => ordering.reverse(),
-                    }
-                });
+        if !self.options.manual_sorting {
+            for sort in self.state.sorting.iter().rev() {
+                if let Some(column) = self
+                    .columns
+                    .iter()
+                    .find(|column| column.id == sort.column_id && column.sortable)
+                {
+                    rows.sort_by(|a, b| {
+                        let ordering =
+                            sort_value(column, &a.original).cmp(&sort_value(column, &b.original));
+                        match sort.direction {
+                            DataTableSortDirection::Asc => ordering,
+                            DataTableSortDirection::Desc => ordering.reverse(),
+                        }
+                    });
+                }
             }
         }
 
@@ -171,17 +373,52 @@ impl<T: Clone> DataTableModel<T> {
 
     pub fn page_count(&self) -> usize {
         let page_size = self.state.page_size.max(1);
-        self.row_model().len().div_ceil(page_size)
+        let total = self
+            .options
+            .total_rows
+            .unwrap_or_else(|| self.resolved_rows().len());
+        total.div_ceil(page_size)
     }
 
     pub fn page_rows(&self) -> Vec<T> {
+        self.page_row_model()
+            .into_iter()
+            .map(|row| row.original)
+            .collect()
+    }
+
+    pub fn page_row_model(&self) -> Vec<DataTableRow<T>> {
+        let rows = self.resolved_rows();
+        if self.options.manual_pagination {
+            return rows;
+        }
+
         let page_size = self.state.page_size.max(1);
         let start = self.state.page_index.saturating_mul(page_size);
-        self.row_model()
+        rows.into_iter().skip(start).take(page_size).collect()
+    }
+
+    pub fn selected_rows(&self) -> Vec<DataTableRow<T>> {
+        self.resolved_rows()
             .into_iter()
-            .skip(start)
-            .take(page_size)
+            .filter(|row| row.selected)
             .collect()
+    }
+}
+
+fn column_matches_filter<T>(column: &DataTableColumn<T>, row: &T, filter: &str) -> bool {
+    if let Some(filter_fn) = column.filter {
+        filter_fn(row, filter)
+    } else {
+        (column.accessor)(row).to_lowercase().contains(filter)
+    }
+}
+
+fn sort_value<T>(column: &DataTableColumn<T>, row: &T) -> DataTableSortValue {
+    if let Some(sort_value) = column.sort_value {
+        sort_value(row)
+    } else {
+        DataTableSortValue::Text((column.accessor)(row))
     }
 }
 
@@ -189,17 +426,30 @@ impl<T: Clone> DataTableModel<T> {
 pub struct DataTableApi<T: Clone + PartialEq + 'static> {
     rows: ReadSignal<Vec<T>>,
     columns: ReadSignal<Vec<DataTableColumn<T>>>,
+    options: ReadSignal<DataTableOptions<T>>,
     state: Signal<DataTableState>,
+    on_state_change: Option<Callback<DataTableState>>,
 }
 
 pub fn use_data_table<T: Clone + PartialEq + 'static>(
     rows: impl Into<ReadSignal<Vec<T>>>,
     columns: impl Into<ReadSignal<Vec<DataTableColumn<T>>>>,
 ) -> DataTableApi<T> {
+    let options = use_signal(DataTableOptions::default);
+    use_data_table_with_options(rows, columns, options)
+}
+
+pub fn use_data_table_with_options<T: Clone + PartialEq + 'static>(
+    rows: impl Into<ReadSignal<Vec<T>>>,
+    columns: impl Into<ReadSignal<Vec<DataTableColumn<T>>>>,
+    options: impl Into<ReadSignal<DataTableOptions<T>>>,
+) -> DataTableApi<T> {
     DataTableApi {
         rows: rows.into(),
         columns: columns.into(),
+        options: options.into(),
         state: use_signal(DataTableState::default),
+        on_state_change: None,
     }
 }
 
@@ -209,22 +459,54 @@ impl<T: Clone + PartialEq + 'static> DataTableApi<T> {
     }
 
     pub fn set_state(&mut self, state: DataTableState) {
-        self.state.set(state);
+        self.state.set(state.clone());
+        if let Some(callback) = &self.on_state_change {
+            callback.call(state);
+        }
     }
 
     pub fn model(&self) -> DataTableModel<T> {
-        DataTableModel::new((self.rows)(), (self.columns)(), self.state())
+        DataTableModel::with_options(
+            (self.rows)(),
+            (self.columns)(),
+            self.state(),
+            (self.options)(),
+        )
+    }
+
+    pub fn with_on_state_change(mut self, on_state_change: Callback<DataTableState>) -> Self {
+        self.on_state_change = Some(on_state_change);
+        self
+    }
+
+    fn update_state(&mut self, update: impl FnOnce(&mut DataTableState)) {
+        let mut next = self.state();
+        update(&mut next);
+        self.set_state(next);
     }
 
     pub fn set_global_filter(&mut self, filter: impl Into<String>) {
-        self.state.with_mut(|state| {
+        self.update_state(|state| {
             state.global_filter = filter.into();
             state.page_index = 0;
         });
     }
 
+    pub fn set_column_filter(&mut self, column_id: impl Into<String>, filter: impl Into<String>) {
+        let column_id = column_id.into();
+        let filter = filter.into();
+        self.update_state(|state| {
+            if filter.trim().is_empty() {
+                state.column_filters.remove(&column_id);
+            } else {
+                state.column_filters.insert(column_id, filter);
+            }
+            state.page_index = 0;
+        });
+    }
+
     pub fn set_page_size(&mut self, page_size: usize) {
-        self.state.with_mut(|state| {
+        self.update_state(|state| {
             state.page_size = page_size.max(1);
             state.page_index = 0;
         });
@@ -232,7 +514,7 @@ impl<T: Clone + PartialEq + 'static> DataTableApi<T> {
 
     pub fn next_page(&mut self) {
         let page_count = self.model().page_count();
-        self.state.with_mut(|state| {
+        self.update_state(|state| {
             if state.page_index + 1 < page_count {
                 state.page_index += 1;
             }
@@ -240,14 +522,21 @@ impl<T: Clone + PartialEq + 'static> DataTableApi<T> {
     }
 
     pub fn previous_page(&mut self) {
-        self.state.with_mut(|state| {
+        self.update_state(|state| {
             state.page_index = state.page_index.saturating_sub(1);
+        });
+    }
+
+    pub fn set_page_index(&mut self, page_index: usize) {
+        let max_page_index = self.model().page_count().saturating_sub(1);
+        self.update_state(|state| {
+            state.page_index = page_index.min(max_page_index);
         });
     }
 
     pub fn toggle_sort(&mut self, column_id: impl Into<String>) {
         let column_id = column_id.into();
-        self.state.with_mut(|state| {
+        self.update_state(|state| {
             if let Some(sort) = state
                 .sorting
                 .iter_mut()
@@ -271,19 +560,54 @@ impl<T: Clone + PartialEq + 'static> DataTableApi<T> {
     }
 
     pub fn set_column_visible(&mut self, column_id: impl Into<String>, visible: bool) {
-        self.state
-            .write()
-            .column_visibility
-            .insert(column_id.into(), visible);
+        let column_id = column_id.into();
+        self.update_state(|state| {
+            state.column_visibility.insert(column_id, visible);
+        });
     }
 
     pub fn toggle_row_selected(&mut self, row_id: impl Into<String>) {
         let row_id = row_id.into();
-        self.state.with_mut(|state| {
+        self.update_state(|state| {
             if !state.row_selection.remove(&row_id) {
                 state.row_selection.insert(row_id);
             }
         });
+    }
+
+    pub fn set_row_selected(&mut self, row_id: impl Into<String>, selected: bool) {
+        let row_id = row_id.into();
+        self.update_state(|state| {
+            if selected {
+                state.row_selection.insert(row_id);
+            } else {
+                state.row_selection.remove(&row_id);
+            }
+        });
+    }
+
+    pub fn toggle_all_page_rows_selected(&mut self) {
+        let rows = self.model().page_row_model();
+        let all_selected = !rows.is_empty() && rows.iter().all(|row| row.selected);
+        self.update_state(|state| {
+            for row in rows {
+                if all_selected {
+                    state.row_selection.remove(&row.id);
+                } else {
+                    state.row_selection.insert(row.id);
+                }
+            }
+        });
+    }
+
+    pub fn all_page_rows_selected(&self) -> bool {
+        let rows = self.model().page_row_model();
+        !rows.is_empty() && rows.iter().all(|row| row.selected)
+    }
+
+    pub fn some_page_rows_selected(&self) -> bool {
+        let rows = self.model().page_row_model();
+        rows.iter().any(|row| row.selected) && !rows.iter().all(|row| row.selected)
     }
 }
 
@@ -349,6 +673,99 @@ pub fn DataTablePagination(props: DataTablePaginationProps) -> Element {
             }
         }
     }
+}
+
+#[derive(Props, Clone, PartialEq)]
+pub struct DataTableViewProps<T: Clone + PartialEq + 'static> {
+    pub table: DataTableApi<T>,
+    #[props(default = "No results.".to_string())]
+    pub empty: String,
+    #[props(default)]
+    pub class: String,
+}
+
+#[component]
+pub fn DataTableView<T: Clone + PartialEq + 'static>(props: DataTableViewProps<T>) -> Element {
+    let model = props.table.model();
+    let columns = model.visible_columns();
+    let rows = model.page_row_model();
+
+    rsx! {
+        div {
+            class: crate::cn::merge_slice(&["rounded-lg border border-border", props.class.as_str()]),
+            TableContainer {
+                Table {
+                    TableHeader {
+                        TableRow {
+                            for column in columns.iter() {
+                                TableHead {
+                                    key: "{column.id}",
+                                    class: crate::cn::merge_slice(&[column.class, column.head_class]),
+                                    if column.sortable {
+                                        button {
+                                            class: "inline-flex items-center gap-1 rounded-md transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50",
+                                            onclick: {
+                                                let column_id = column.id;
+                                                let mut table = props.table.clone();
+                                                move |_| table.toggle_sort(column_id)
+                                            },
+                                            "{column.header}"
+                                            span {
+                                                class: "text-muted-foreground",
+                                                "{sort_indicator(&model.state, column.id)}"
+                                            }
+                                        }
+                                    } else {
+                                        "{column.header}"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    TableBody {
+                        if rows.is_empty() {
+                            TableRow {
+                                td {
+                                    class: "h-24 p-3 text-center align-middle text-muted-foreground",
+                                    colspan: columns.len().max(1).to_string(),
+                                    "{props.empty}"
+                                }
+                            }
+                        } else {
+                            for row in rows.iter() {
+                                TableRow {
+                                    key: "{row.id}",
+                                    for column in columns.iter() {
+                                        TableCell {
+                                            key: "{column.id}",
+                                            class: crate::cn::merge_slice(&[column.class, column.cell_class]),
+                                            if let Some(cell) = column.cell {
+                                                {cell(&row.original)}
+                                            } else {
+                                                "{(column.accessor)(&row.original)}"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn sort_indicator(state: &DataTableState, column_id: &str) -> &'static str {
+    state
+        .sorting
+        .iter()
+        .find(|sort| sort.column_id == column_id)
+        .map(|sort| match sort.direction {
+            DataTableSortDirection::Asc => "Asc",
+            DataTableSortDirection::Desc => "Desc",
+        })
+        .unwrap_or("Sort")
 }
 
 #[cfg(test)]
@@ -428,5 +845,82 @@ mod tests {
 
         assert_eq!(table.page_count(), 2);
         assert_eq!(table.page_rows()[0].name, "Grace");
+    }
+
+    #[test]
+    fn filters_by_column() {
+        let mut state = DataTableState::default();
+        state.column_filters.insert("name".into(), "ada".into());
+        let table = DataTableModel::new(
+            users(),
+            vec![
+                DataTableColumn::new("name", "Name", |user: &User| user.name.to_string()),
+                DataTableColumn::new("role", "Role", |user: &User| user.role.to_string()),
+            ],
+            state,
+        );
+
+        assert_eq!(table.row_model().len(), 1);
+        assert_eq!(table.row_model()[0].name, "Ada");
+    }
+
+    #[test]
+    fn uses_typed_sort_values() {
+        let mut state = DataTableState::default();
+        state.sorting = vec![DataTableSort {
+            column_id: "id".into(),
+            direction: DataTableSortDirection::Desc,
+        }];
+        let table = DataTableModel::new(
+            users(),
+            vec![
+                DataTableColumn::new("id", "ID", |user: &User| user.id.to_string())
+                    .sort_value(|user| user.id.into()),
+            ],
+            state,
+        );
+
+        assert_eq!(table.row_model()[0].id, 2);
+    }
+
+    #[test]
+    fn tracks_selection_with_stable_row_ids() {
+        let state = DataTableState {
+            row_selection: HashSet::from(["user-2".to_string()]),
+            ..Default::default()
+        };
+        let table = DataTableModel::with_options(
+            users(),
+            vec![DataTableColumn::new("name", "Name", |user: &User| {
+                user.name.to_string()
+            })],
+            state,
+            DataTableOptions::default().get_row_id(|user, _| format!("user-{}", user.id)),
+        );
+
+        assert_eq!(table.selected_rows().len(), 1);
+        assert_eq!(table.selected_rows()[0].original.name, "Grace");
+    }
+
+    #[test]
+    fn manual_pagination_uses_supplied_rows_and_total() {
+        let state = DataTableState {
+            page_index: 1,
+            page_size: 2,
+            ..Default::default()
+        };
+        let table = DataTableModel::with_options(
+            users(),
+            vec![DataTableColumn::new("name", "Name", |user: &User| {
+                user.name.to_string()
+            })],
+            state,
+            DataTableOptions::default()
+                .manual_pagination(true)
+                .total_rows(10),
+        );
+
+        assert_eq!(table.page_count(), 5);
+        assert_eq!(table.page_row_model().len(), 2);
     }
 }

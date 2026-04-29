@@ -2,13 +2,14 @@
 
 // Components — core
 pub use crate::components::{
-    use_data_table, use_direction, use_form, Accordion, AccordionContent, AccordionItem,
-    AccordionTrigger, Badge, BadgeVariant, Button, ButtonGroup, ButtonGroupOrientation,
-    ButtonGroupText, ButtonRenderAs, ButtonSize, ButtonVariant, Card, CardContent, CardDescription,
-    CardFooter, CardHeader, CardTitle, Checkbox, Collapsible, CollapsibleContent,
-    CollapsibleTrigger, ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuLabel,
-    ContextMenuSeparator, ContextMenuTrigger, DataTableApi, DataTableColumn, DataTableFilter,
-    DataTableModel, DataTablePagination, DataTableSort, DataTableSortDirection, DataTableState,
+    use_data_table, use_data_table_with_options, use_direction, use_form, Accordion,
+    AccordionContent, AccordionItem, AccordionTrigger, Badge, BadgeVariant, Button, ButtonGroup,
+    ButtonGroupOrientation, ButtonGroupText, ButtonRenderAs, ButtonSize, ButtonVariant, Card,
+    CardContent, CardDescription, CardFooter, CardHeader, CardTitle, Checkbox, Collapsible,
+    CollapsibleContent, CollapsibleTrigger, ContextMenu, ContextMenuContent, ContextMenuItem,
+    ContextMenuLabel, ContextMenuSeparator, ContextMenuTrigger, DataTableApi, DataTableColumn,
+    DataTableFilter, DataTableModel, DataTableOptions, DataTablePagination, DataTableRow,
+    DataTableSort, DataTableSortDirection, DataTableSortValue, DataTableState, DataTableView,
     Dialog, DialogClose, DialogDescription, DialogFooter, DialogHeader, DialogTitle, Direction,
     DirectionContext, DirectionProvider, Dropdown, DropdownContent, DropdownItem, DropdownLabel,
     DropdownSeparator, DropdownTrigger, EmptyState, FieldApi, Form, FormApi, FormField,
