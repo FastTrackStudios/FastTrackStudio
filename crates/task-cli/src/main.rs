@@ -15,6 +15,18 @@ struct Cli {
     #[arg(long, env = "TASK_VAULT", global = true)]
     vault: Option<String>,
 
+    /// task-server base URL or Vox URL. When set, agent commands use remote Vox services.
+    #[arg(long, env = "TASK_SERVER", global = true)]
+    server: Option<String>,
+
+    /// Better Auth session token for remote Vox connections.
+    #[arg(long, env = "TASK_SESSION_TOKEN", global = true)]
+    session_token: Option<String>,
+
+    /// Organization id to route remote Vox requests.
+    #[arg(long, env = "TASK_ORGANIZATION_ID", global = true)]
+    organization_id: Option<String>,
+
     /// Act as this user — sets created_by / comment author / resolved_by.
     #[arg(long, env = "TASK_USER", global = true)]
     as_user: Option<String>,
@@ -1033,6 +1045,9 @@ async fn main() -> eyre::Result<()> {
     let cli = Cli::parse();
     let Cli {
         vault,
+        server,
+        session_token,
+        organization_id,
         as_user: actor,
         command,
     } = cli;
@@ -1051,6 +1066,17 @@ async fn main() -> eyre::Result<()> {
     {
         print_agent_capabilities();
         return Ok(());
+    }
+    if let Some(server) = server {
+        let remote = RemoteVoxConfig::new(server, session_token, organization_id)?;
+        match command {
+            Commands::Agent { command } => {
+                return run_remote_agent_command(&remote, actor.as_deref(), command).await;
+            }
+            ref other => {
+                command_requires_local_vault(&other)?;
+            }
+        }
     }
     // `task email watch` is a pure IMAP IDLE subscription — no vault
     // access needed. Handle it here so the watcher service doesn't
@@ -2810,7 +2836,8 @@ async fn run_agent_command(
             let conflicts = svc.list_conflicts(true, conflict_limit).await?;
             let sync_status = svc.sync_status().await;
             print_agent_snapshot(AgentSnapshot {
-                vault_path,
+                source: "local",
+                location: vault_path,
                 actor,
                 tasks: &tasks,
                 projects: &projects,
@@ -2818,7 +2845,9 @@ async fn run_agent_command(
                 invoices: &invoices,
                 calendar_events: &calendar_events,
                 time_entries: &time_entries,
-                active_timer: active_timer.as_ref(),
+                active_timer: active_timer
+                    .as_ref()
+                    .map(|(title, entry)| AgentActiveTimer { title, entry }),
                 activity: &activity,
                 conflicts: &conflicts,
                 sync_status: sync_status.as_ref(),
@@ -2896,6 +2925,289 @@ async fn run_agent_command(
         AgentCommands::Capabilities => print_agent_capabilities(),
     }
     Ok(())
+}
+
+fn command_requires_local_vault(command: &Commands) -> eyre::Result<()> {
+    match command {
+        Commands::Talk { .. } | Commands::Nc { .. } => Ok(()),
+        Commands::Email {
+            command: EmailCommands::Watch { .. },
+        } => Ok(()),
+        Commands::Agent { .. } => Ok(()),
+        _ => eyre::bail!(
+            "--server currently routes the `task agent ...` surface over Vox. Use TASK_VAULT/--vault for local commands."
+        ),
+    }
+}
+
+#[derive(Debug, Clone)]
+struct RemoteVoxConfig {
+    vox_url: String,
+    display_url: String,
+}
+
+impl RemoteVoxConfig {
+    fn new(
+        server: String,
+        session_token: Option<String>,
+        organization_id: Option<String>,
+    ) -> eyre::Result<Self> {
+        let token = session_token.filter(|s| !s.is_empty()).ok_or_else(|| {
+            eyre::eyre!("Remote mode requires --session-token or TASK_SESSION_TOKEN.")
+        })?;
+        let base_vox_url = normalize_vox_url(&server);
+        let mut vox_url = base_vox_url.clone();
+        append_query_param(&mut vox_url, "token", &token);
+        let mut display_url = base_vox_url;
+        append_query_param(&mut display_url, "token", "<redacted>");
+        if let Some(org) = organization_id.filter(|s| !s.is_empty()) {
+            append_query_param(&mut vox_url, "organization_id", &org);
+            append_query_param(&mut display_url, "organization_id", &org);
+        }
+        Ok(Self {
+            vox_url,
+            display_url,
+        })
+    }
+
+    async fn task(&self) -> eyre::Result<task_core::service::TaskServiceClient> {
+        self.connect().await
+    }
+
+    async fn project(&self) -> eyre::Result<task_core::service::ProjectServiceClient> {
+        self.connect().await
+    }
+
+    async fn time(&self) -> eyre::Result<task_core::service::TimeServiceClient> {
+        self.connect().await
+    }
+
+    async fn client(&self) -> eyre::Result<task_core::service::ClientServiceClient> {
+        self.connect().await
+    }
+
+    async fn invoice(&self) -> eyre::Result<task_core::service::InvoiceServiceClient> {
+        self.connect().await
+    }
+
+    async fn activity(&self) -> eyre::Result<task_core::service::ActivityServiceClient> {
+        self.connect().await
+    }
+
+    async fn calendar(&self) -> eyre::Result<task_core::service::CalendarServiceClient> {
+        self.connect().await
+    }
+
+    async fn connect<C>(&self) -> eyre::Result<C>
+    where
+        C: vox::FromVoxSession,
+    {
+        vox::connect(&self.vox_url)
+            .establish()
+            .await
+            .map_err(|e| eyre::eyre!("Remote Vox connection failed: {e}"))
+    }
+}
+
+async fn run_remote_agent_command(
+    remote: &RemoteVoxConfig,
+    actor: Option<&str>,
+    command: AgentCommands,
+) -> eyre::Result<()> {
+    match command {
+        AgentCommands::Snapshot {
+            activity_limit,
+            conflict_limit,
+            include_completed,
+        } => {
+            let task_client = remote.task().await?;
+            let project_client = remote.project().await?;
+            let client_client = remote.client().await?;
+            let invoice_client = remote.invoice().await?;
+            let calendar_client = remote.calendar().await?;
+            let time_client = remote.time().await?;
+            let activity_client = remote.activity().await?;
+
+            let tasks = if include_completed {
+                task_client.list_tasks().await?
+            } else {
+                task_client
+                    .execute_query(Query {
+                        filters: vec![
+                            Filter::NotComplete,
+                            Filter::NotCancelled,
+                            Filter::NotArchived,
+                        ],
+                        sort: Sort::Urgency,
+                        limit: None,
+                        group: None,
+                    })
+                    .await?
+            };
+            let projects = project_client.list_projects().await?;
+            let clients = client_client.list_clients().await?;
+            let invoices = invoice_client.list_invoices().await?;
+            let calendar_events = calendar_client
+                .events_between("1970-01-01T00:00:00Z".into(), "9999-12-31T23:59:59Z".into())
+                .await?;
+            let time_entries = time_client
+                .list_time_entries(TimeEntryFilter::default())
+                .await?;
+            let active_timer = time_client.active_timer().await?;
+            let activity = activity_client.recent_activity(activity_limit).await?;
+            let conflicts = activity_client.list_conflicts(true, conflict_limit).await?;
+            let sync_status = calendar_client.sync_status().await?;
+
+            print_agent_snapshot(AgentSnapshot {
+                source: "remote",
+                location: &remote.display_url,
+                actor,
+                tasks: &tasks,
+                projects: &projects,
+                clients: &clients,
+                invoices: &invoices,
+                calendar_events: &calendar_events,
+                time_entries: &time_entries,
+                active_timer: active_timer.as_ref().map(|entry| AgentActiveTimer {
+                    title: &entry.task_title,
+                    entry: &entry.entry,
+                }),
+                activity: &activity,
+                conflicts: &conflicts,
+                sync_status: sync_status.as_ref(),
+            });
+        }
+        AgentCommands::Task { reference } => {
+            let client = remote.task().await?;
+            let tasks = client.list_tasks().await?;
+            let task = find_task_in(tasks, &reference)?;
+            println!("{}", facet_json::to_string(&task).unwrap_or_default());
+        }
+        AgentCommands::Project { name } => {
+            let project_client = remote.project().await?;
+            let projects = project_client.list_projects().await?;
+            let project = projects
+                .into_iter()
+                .find(|p| p.title.eq_ignore_ascii_case(&name))
+                .ok_or_else(|| eyre::eyre!("Project not found: {name}"))?;
+            let stats = project_client.project_stats(name.clone()).await?;
+            let next = project_client.next_task(name.clone()).await?;
+            let tasks = project_client.tasks_for_project(name).await?;
+            println!(
+                "{{\"project\":{},\"stats\":{},\"next_task\":{},\"tasks\":{}}}",
+                facet_json::to_string(&project).unwrap_or_default(),
+                facet_json::to_string(&stats).unwrap_or_default(),
+                next.as_ref()
+                    .map(|t| facet_json::to_string(t).unwrap_or_default())
+                    .unwrap_or_else(|| "null".into()),
+                tasks_json(&tasks),
+            );
+        }
+        AgentCommands::Calendar { from, to } => {
+            let client = remote.calendar().await?;
+            let from = from
+                .as_deref()
+                .map(parse_calendar_boundary_start)
+                .transpose()?
+                .unwrap_or_else(|| parse_datetime("1970-01-01T00:00:00Z").unwrap())
+                .to_rfc3339();
+            let to = to
+                .as_deref()
+                .map(parse_calendar_boundary_end)
+                .transpose()?
+                .unwrap_or_else(|| parse_datetime("9999-12-31T23:59:59Z").unwrap())
+                .to_rfc3339();
+            let events = client.events_between(from, to).await?;
+            println!("{}", calendar_events_json(&events));
+        }
+        AgentCommands::Time {
+            task,
+            user,
+            project,
+            client,
+            tag,
+            from,
+            to,
+            billable,
+        } => {
+            let time_client = remote.time().await?;
+            let entries = time_client
+                .list_time_entries(TimeEntryFilter {
+                    task_ref: task,
+                    user,
+                    project,
+                    client,
+                    tag,
+                    from: from.as_deref().map(parse_date_start).transpose()?,
+                    to: to.as_deref().map(parse_date_end).transpose()?,
+                    billable_only: billable,
+                })
+                .await?;
+            println!("{}", time_entries_json(&entries));
+        }
+        AgentCommands::Sync { trigger } => {
+            let client = remote.calendar().await?;
+            if trigger {
+                let stats = client.trigger_sync().await?;
+                println!(
+                    "{{\"triggered\":true,\"stats\":{}}}",
+                    facet_json::to_string(&stats).unwrap_or_default()
+                );
+            } else {
+                let stats = client.sync_status().await?;
+                println!(
+                    "{{\"triggered\":false,\"stats\":{}}}",
+                    stats
+                        .as_ref()
+                        .map(|s| facet_json::to_string(s).unwrap_or_default())
+                        .unwrap_or_else(|| "null".into())
+                );
+            }
+        }
+        AgentCommands::Capabilities => print_agent_capabilities(),
+    }
+    Ok(())
+}
+
+fn find_task_in(tasks: Vec<Task>, reference: &str) -> eyre::Result<Task> {
+    tasks
+        .into_iter()
+        .find(|t| t.id.as_deref() == Some(reference) || t.title.eq_ignore_ascii_case(reference))
+        .ok_or_else(|| eyre::eyre!("Task not found: {reference}"))
+}
+
+fn normalize_vox_url(server: &str) -> String {
+    let trimmed = server.trim().trim_end_matches('/');
+    if trimmed.starts_with("ws://") || trimmed.starts_with("wss://") {
+        trimmed.to_string()
+    } else if let Some(rest) = trimmed.strip_prefix("https://") {
+        format!("wss://{}/vox", rest.trim_end_matches("/vox"))
+    } else if let Some(rest) = trimmed.strip_prefix("http://") {
+        format!("ws://{}/vox", rest.trim_end_matches("/vox"))
+    } else {
+        format!("ws://{}/vox", trimmed.trim_end_matches("/vox"))
+    }
+}
+
+fn append_query_param(url: &mut String, key: &str, value: &str) {
+    let separator = if url.contains('?') { '&' } else { '?' };
+    url.push(separator);
+    url.push_str(key);
+    url.push('=');
+    url.push_str(&percent_encode_query_value(value));
+}
+
+fn percent_encode_query_value(value: &str) -> String {
+    let mut out = String::new();
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                out.push(byte as char);
+            }
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
 }
 
 /// Splice a rendered `## Comments` block back into the body, replacing any
@@ -3757,7 +4069,8 @@ fn calendar_status_label(status: &CalendarEventStatus) -> &'static str {
 // ── Agent output ────────────────────────────────────────────────────────────
 
 struct AgentSnapshot<'a> {
-    vault_path: &'a str,
+    source: &'a str,
+    location: &'a str,
     actor: Option<&'a str>,
     tasks: &'a [Task],
     projects: &'a [Project],
@@ -3765,17 +4078,23 @@ struct AgentSnapshot<'a> {
     invoices: &'a [Invoice],
     calendar_events: &'a [CalendarEvent],
     time_entries: &'a [TimeEntryContext],
-    active_timer: Option<&'a (String, task_core::TimeEntry)>,
+    active_timer: Option<AgentActiveTimer<'a>>,
     activity: &'a [ChangeRow],
     conflicts: &'a [ConflictRow],
     sync_status: Option<&'a SyncStats>,
 }
 
+struct AgentActiveTimer<'a> {
+    title: &'a str,
+    entry: &'a task_core::TimeEntry,
+}
+
 fn print_agent_snapshot(snapshot: AgentSnapshot<'_>) {
     println!(
-        "{{\"generated_at\":\"{}\",\"vault\":\"{}\",\"actor\":{},\"install\":{},\"tasks\":{},\"projects\":{},\"clients\":{},\"invoices\":{},\"calendar_events\":{},\"time_entries\":{},\"active_timer\":{},\"activity\":{},\"conflicts\":{},\"sync_status\":{}}}",
+        "{{\"generated_at\":\"{}\",\"source\":\"{}\",\"location\":\"{}\",\"actor\":{},\"install\":{},\"tasks\":{},\"projects\":{},\"clients\":{},\"invoices\":{},\"calendar_events\":{},\"time_entries\":{},\"active_timer\":{},\"activity\":{},\"conflicts\":{},\"sync_status\":{}}}",
         Utc::now().to_rfc3339(),
-        escape_json(snapshot.vault_path),
+        escape_json(snapshot.source),
+        escape_json(snapshot.location),
         opt_json(snapshot.actor),
         agent_install_json(),
         tasks_json(snapshot.tasks),
@@ -3796,7 +4115,7 @@ fn print_agent_snapshot(snapshot: AgentSnapshot<'_>) {
 
 fn print_agent_capabilities() {
     println!(
-        "{{\"binary\":\"task\",\"package\":\"task-cli\",\"install\":{},\"global_flags\":[\"--vault\",\"--as-user\"],\"agent_commands\":[\"snapshot\",\"task\",\"project\",\"calendar\",\"time\",\"sync\",\"capabilities\"],\"control_commands\":[\"add\",\"update\",\"complete\",\"delete\",\"calendar add\",\"calendar update\",\"calendar delete\",\"time log\",\"time edit\",\"start\",\"stop\",\"sync\"]}}",
+        "{{\"binary\":\"task\",\"package\":\"task-cli\",\"install\":{},\"global_flags\":[\"--vault\",\"--server\",\"--session-token\",\"--organization-id\",\"--as-user\"],\"agent_commands\":[\"snapshot\",\"task\",\"project\",\"calendar\",\"time\",\"sync\",\"capabilities\"],\"control_commands\":[\"add\",\"update\",\"complete\",\"delete\",\"calendar add\",\"calendar update\",\"calendar delete\",\"time log\",\"time edit\",\"start\",\"stop\",\"sync\"],\"remote_mode\":\"Set --server plus --session-token; --organization-id routes multi-instance organization requests.\"}}",
         agent_install_json()
     );
 }
@@ -3849,12 +4168,12 @@ fn invoices_json(invoices: &[Invoice]) -> String {
     )
 }
 
-fn active_timer_json(active: Option<&(String, task_core::TimeEntry)>) -> String {
+fn active_timer_json(active: Option<AgentActiveTimer<'_>>) -> String {
     match active {
-        Some((title, entry)) => format!(
+        Some(active) => format!(
             "{{\"task\":\"{}\",\"entry\":{}}}",
-            escape_json(title),
-            facet_json::to_string(entry).unwrap_or_default()
+            escape_json(active.title),
+            facet_json::to_string(active.entry).unwrap_or_default()
         ),
         None => "null".into(),
     }
@@ -4693,5 +5012,44 @@ fn truncate(s: &str, max: usize) -> String {
         s.to_string()
     } else {
         format!("{}…", &s[..max.saturating_sub(1)])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalizes_server_urls_to_vox_websocket_endpoint() {
+        assert_eq!(
+            normalize_vox_url("https://tasks.example.com"),
+            "wss://tasks.example.com/vox"
+        );
+        assert_eq!(
+            normalize_vox_url("http://127.0.0.1:3000/vox"),
+            "ws://127.0.0.1:3000/vox"
+        );
+        assert_eq!(
+            normalize_vox_url("ws://localhost:3000/vox"),
+            "ws://localhost:3000/vox"
+        );
+    }
+
+    #[test]
+    fn remote_vox_config_adds_auth_query_params() {
+        let config = RemoteVoxConfig::new(
+            "https://tasks.example.com".into(),
+            Some("tok en+/=".into()),
+            Some("org/one".into()),
+        )
+        .unwrap();
+        assert_eq!(
+            config.vox_url,
+            "wss://tasks.example.com/vox?token=tok%20en%2B%2F%3D&organization_id=org%2Fone"
+        );
+        assert_eq!(
+            config.display_url,
+            "wss://tasks.example.com/vox?token=%3Credacted%3E&organization_id=org%2Fone"
+        );
     }
 }
