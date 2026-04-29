@@ -14,6 +14,7 @@ use std::sync::{Arc, OnceLock};
 
 use crossbeam_channel::{Receiver, Sender};
 use daw::module::{self, DawModule, ModuleContext};
+use daw::service::ActionEvent;
 use daw::Daw;
 use fragile::Fragile;
 use reaper_high::{MainTaskMiddleware, MainThreadTask, Reaper as HighReaper, TaskSupport};
@@ -127,54 +128,95 @@ fn initialize_daw(tokio_runtime: &tokio::runtime::Runtime) -> eyre::Result<Daw> 
         .map_err(|e| eyre::eyre!("Failed to initialise in-process DAW: {e}"))
 }
 
-/// Register all actions synchronously on the main thread (like helgobox).
+/// Register all actions synchronously on the main thread.
 ///
-/// This ensures command IDs are available immediately for the menu hook
-/// and action list. Actions are registered via `reaper_high::Reaper::register_action`,
-/// and gaccels are added manually so they appear in REAPER's action list even
-/// after `wake_up()` has already run.
+/// The registry service in `daw-reaper` owns the REAPER command IDs and
+/// toggle state. We register through that service here, then forward action
+/// trigger events into the existing dispatch channel.
 fn register_actions_sync(defs: &actions::ActionDefs) {
-    let reaper = HighReaper::get();
-    let (tx, _) = action_channel();
+    let g = Global::get();
+    let daw = g.daw.clone();
+    let runtime = g.tokio_runtime.clone();
+    let defs = defs.clone();
+    let daw_for_subscription = daw.clone();
 
-    for (command_id, display_name, handler, _show_in_menu) in defs {
-        let handler = handler.clone();
-        let tx = tx.clone();
-        let cmd_name_for_broadcast = command_id.clone();
+    runtime.spawn(async move {
+        let registry = daw.action_registry();
 
-        // Leak strings for 'static lifetime — actions live for the process lifetime.
-        let cmd_name: &'static str = Box::leak(command_id.clone().into_boxed_str());
-        let desc: &'static str = Box::leak(display_name.clone().into_boxed_str());
+        for (command_id, display_name, _handler, show_in_menu, toggleable) in defs {
+            let description = display_name.as_str();
+            let result = match (show_in_menu, toggleable) {
+                (true, true) => registry.register_toggle_in_menu(&command_id, description).await,
+                (true, false) => registry.register_in_menu(&command_id, description).await,
+                (false, true) => registry.register_toggle(&command_id, description).await,
+                (false, false) => registry.register(&command_id, description).await,
+            };
 
-        let action = reaper.register_action(
-            cmd_name,
-            desc,
-            None,
-            move || {
-                handler();
-                // Also forward to the action channel so App::dispatch_action
-                // can handle it (for modules that use the broadcast path).
-                let _ = tx.send(cmd_name_for_broadcast.clone());
-            },
-            reaper_high::ActionKind::NotToggleable,
-        );
+            match result {
+                Ok(cmd_id) if cmd_id > 0 => {
+                    info!(command_id = %command_id, cmd_id, "Registered action");
 
-        // Register gaccel so the action appears in REAPER's action list
-        // (register_action doesn't do this after wake_up has already run).
-        let cmd_id = action.command_id();
-        {
-            let gaccel = reaper_medium::OwnedGaccelRegister::without_key_binding(cmd_id, desc);
-            let mut session = reaper.medium_session();
-            if let Err(e) = session.plugin_register_add_gaccel(gaccel) {
-                warn!("Failed to register gaccel for '{}': {:?}", command_id, e);
+                    if matches!(
+                        command_id.as_str(),
+                        "FTS_INPUT_TOGGLE"
+                            | "FTS_INPUT_TOGGLE_PASSTHROUGH"
+                            | "FTS_INPUT_TOGGLE_DEBUG_LOGGING"
+                            | "FTS_INPUT_PROFILE_SELECTOR"
+                            | "FTS_INPUT_WORKFLOW_SELECTOR"
+                            | "FTS_INPUT_TOGGLE_ACTIONS_PANEL"
+                            | "FTS_INPUT_TOGGLE_KEYBOARD_PANEL"
+                            | "FTS_INPUT_TOGGLE_STATUS_PANEL"
+                    ) {
+                        match registry.is_in_action_list(&command_id).await {
+                            Ok(true) => info!(
+                                command_id = %command_id,
+                                "Input action list probe: present immediately after registration"
+                            ),
+                            Ok(false) => warn!(
+                                command_id = %command_id,
+                                "Input action list probe: missing immediately after registration"
+                            ),
+                            Err(e) => warn!(
+                                command_id = %command_id,
+                                "Input action list probe failed after registration: {e}"
+                            ),
+                        }
+                    }
+                }
+                Ok(_) => warn!("Failed to register action: {command_id}"),
+                Err(e) => warn!("Error registering action {command_id}: {e}"),
             }
         }
+    });
 
-        // Leak the RegisteredAction so it stays alive (action stays registered).
-        std::mem::forget(action);
-    }
+    let (tx, _) = action_channel();
+    let tx = tx.clone();
+    runtime.spawn(async move {
+        let registry = daw_for_subscription.action_registry();
+        let Ok(mut rx) = registry.subscribe_actions().await else {
+            warn!("Failed to subscribe to action trigger events");
+            return;
+        };
 
-    info!("Registered {} FTS actions (synchronous)", defs.len());
+        info!("Subscribed to action trigger events");
+        loop {
+            match rx.recv().await {
+                Ok(Some(event)) => match *event {
+                    ActionEvent::Triggered { ref command_name } => {
+                        let _ = tx.send(command_name.clone());
+                    }
+                },
+                Ok(None) => {
+                    info!("Action trigger stream closed");
+                    break;
+                }
+                Err(e) => {
+                    warn!("Action trigger stream error: {e:?}");
+                    break;
+                }
+            }
+        }
+    });
 }
 
 // ── Entry point ──────────────────────────────────────────────────────────────
@@ -258,10 +300,15 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
         keyflow::daw_module::module(),
     ];
 
-    // Initialize all modules
+    // Initialize all modules before collecting actions.
+    //
+    // Several module actions derive toggle state or dynamic bindings from
+    // configuration loaded during init, so registering them before init can
+    // produce incomplete or stale action metadata.
     let module_ctx = ModuleContext::new(g.tokio_runtime.clone());
+    module::init_all(&modules, &module_ctx);
 
-    // Collect actions from all modules
+    // Collect actions from all modules after init has populated runtime state.
     let module_actions = module::collect_actions(&modules);
 
     // Also collect legacy (non-module) actions from this crate
@@ -269,10 +316,10 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
 
     // Merge all actions
     let mut all_actions: HashMap<String, Arc<dyn Fn() + Send + Sync>> = HashMap::new();
-    for (id, _, handler, _) in &legacy_defs {
+    for (id, _, handler, _, _) in &legacy_defs {
         all_actions.insert(id.clone(), handler.clone());
     }
-    for (id, _, handler, _) in &module_actions {
+    for (id, _, handler, _, _) in &module_actions {
         all_actions.insert(id.clone(), handler.clone());
     }
 
@@ -285,10 +332,13 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
 
     // Combine all defs for REAPER registration
     let mut all_defs: actions::ActionDefs = legacy_defs;
-    all_defs.extend(module_actions);
-    // Add the UI test panel toggle action
-    let ui_test_action = ui_test_panel::action_def();
-    all_defs.push(ui_test_action.into_tuple());
+    all_defs.extend(
+        module_actions
+            .into_iter()
+            .map(|(id, display_name, handler, show_in_menu, toggleable)| {
+                (id, display_name, handler, show_in_menu, toggleable)
+            }),
+    );
 
     let session = ReaperSession::load(context);
     let app = App {
@@ -301,9 +351,6 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
 
     register_actions_sync(&all_defs);
 
-    // Initialize all modules and subscribe to events
-    module::init_all(&modules, &module_ctx);
-
     let app = APP.get().unwrap().get();
     let mut session = app.session.borrow_mut();
     session.plugin_register_add_timer(timer_callback)?;
@@ -314,8 +361,8 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     // Collect menu entries from all action defs that have show_in_menu=true.
     let menu_entries: Vec<(String, String)> = all_defs
         .iter()
-        .filter(|(_, _, _, show_in_menu)| *show_in_menu)
-        .map(|(id, display_name, _, _)| (id.clone(), display_name.clone()))
+        .filter(|(_, _, _, show_in_menu, _)| *show_in_menu)
+        .map(|(id, display_name, _, _, _)| (id.clone(), display_name.clone()))
         .collect();
     info!(menu_entries = menu_entries.len(), "Menu entries collected");
     menu::set_menu_entries(menu_entries);

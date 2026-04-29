@@ -5,8 +5,10 @@
 //! call inside `lib.rs`.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use reaper_high::Reaper;
+use crate::Global;
 use crate::continuous_action::start_continuous_action;
 #[allow(unused_imports)]
 use crate::item_actions;
@@ -16,10 +18,35 @@ use crate::tempo::{
     snap_grid_to_transient_handler,
 };
 
-pub type ActionDefs = Vec<(String, String, Arc<dyn Fn() + Send + Sync>, bool)>;
+pub type ActionDefs = Vec<(String, String, Arc<dyn Fn() + Send + Sync>, bool, bool)>;
 
 fn show(msg: impl Into<String>) {
     Reaper::get().show_console_msg(msg.into());
+}
+
+static TEST_TOGGLE_STATE: AtomicBool = AtomicBool::new(false);
+
+fn sync_toggle_state(command_id: &str, is_on: bool) {
+    let Some(daw) = Global::try_daw() else {
+        return;
+    };
+
+    let daw = daw.clone();
+    let command_id = command_id.to_string();
+    Global::get().tokio_runtime.spawn(async move {
+        let _ = daw.action_registry().set_toggle_state(&command_id, is_on).await;
+    });
+}
+
+fn toggle_test_toggle_handler() {
+    let new_state = !TEST_TOGGLE_STATE.load(Ordering::Relaxed);
+    TEST_TOGGLE_STATE.store(new_state, Ordering::Relaxed);
+
+    show(format!(
+        "FTS: Test Toggle {}\n",
+        if new_state { "on" } else { "off" }
+    ));
+    sync_toggle_state("FTS_TEST_TOGGLE", new_state);
 }
 
 /// Build the list of all FTS utility actions.
@@ -106,6 +133,11 @@ pub fn build_action_defs() -> ActionDefs {
             "Split selected items at cursor with crossfade on left",
             || item_actions::split_items_with_crossfade_left(),
         ),
+        toggle_menu_action(
+            "FTS_TEST_TOGGLE",
+            "Test Toggle",
+            toggle_test_toggle_handler,
+        ),
         // ── Info ─────────────────────────────────────────────────────────────
         menu_action(
             "FTS_INFO",
@@ -131,8 +163,14 @@ fn action(
     id: &str,
     display_name: &str,
     handler: impl Fn() + Send + Sync + 'static,
-) -> (String, String, Arc<dyn Fn() + Send + Sync>, bool) {
-    (id.to_string(), format!("FTS: {display_name}"), Arc::new(handler), false)
+) -> (String, String, Arc<dyn Fn() + Send + Sync>, bool, bool) {
+    (
+        id.to_string(),
+        format!("FTS: {display_name}"),
+        Arc::new(handler),
+        false,
+        false,
+    )
 }
 
 /// Convenience constructor for a single action entry shown in the Extensions menu.
@@ -140,6 +178,27 @@ fn menu_action(
     id: &str,
     display_name: &str,
     handler: impl Fn() + Send + Sync + 'static,
-) -> (String, String, Arc<dyn Fn() + Send + Sync>, bool) {
-    (id.to_string(), format!("FTS: {display_name}"), Arc::new(handler), true)
+) -> (String, String, Arc<dyn Fn() + Send + Sync>, bool, bool) {
+    (
+        id.to_string(),
+        format!("FTS: {display_name}"),
+        Arc::new(handler),
+        true,
+        false,
+    )
+}
+
+/// Convenience constructor for a toggleable action shown in the Extensions menu.
+fn toggle_menu_action(
+    id: &str,
+    display_name: &str,
+    handler: impl Fn() + Send + Sync + 'static,
+) -> (String, String, Arc<dyn Fn() + Send + Sync>, bool, bool) {
+    (
+        id.to_string(),
+        format!("FTS: {display_name}"),
+        Arc::new(handler),
+        true,
+        true,
+    )
 }
