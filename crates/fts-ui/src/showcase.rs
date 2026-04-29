@@ -28,6 +28,8 @@ pub fn Showcase() -> Element {
                         a { class: "hover:text-foreground", href: "#progress", "Progress" }
                         a { class: "hover:text-foreground", href: "#alerts", "Alerts" }
                         a { class: "hover:text-foreground", href: "#tables", "Tables" }
+                        a { class: "hover:text-foreground", href: "#data-table", "Data Table" }
+                        a { class: "hover:text-foreground", href: "#forms", "Forms" }
                         a { class: "hover:text-foreground", href: "#layout", "Layout" }
                         a { class: "hover:text-foreground", href: "#typography", "Typography" }
                         a { class: "hover:text-foreground", href: "#tooltips", "Tooltips" }
@@ -270,6 +272,16 @@ pub fn Showcase() -> Element {
                                     }
                                 }
                             }
+                        }
+
+                        // ── Data Table ───────────────────────────
+                        ShowcaseSection { id: "data-table", title: "Data Table",
+                            ShowcaseDataTable {}
+                        }
+
+                        // ── Forms ────────────────────────────────
+                        ShowcaseSection { id: "forms", title: "Forms",
+                            ShowcaseForm {}
                         }
 
                         // ── Layout ───────────────────────────────
@@ -575,6 +587,196 @@ fn ShowcaseRow(label: String, children: Element) -> Element {
             span { class: "text-xs font-medium uppercase tracking-wider text-muted-foreground", "{label}" }
             div { class: "flex items-start gap-3 flex-wrap",
                 {children}
+            }
+        }
+    }
+}
+
+#[derive(Clone, PartialEq)]
+struct ShowcaseTask {
+    id: u32,
+    title: &'static str,
+    status: &'static str,
+    owner: &'static str,
+    priority: u32,
+}
+
+fn showcase_tasks() -> Vec<ShowcaseTask> {
+    vec![
+        ShowcaseTask {
+            id: 101,
+            title: "Wire account settings",
+            status: "In Progress",
+            owner: "Ada",
+            priority: 3,
+        },
+        ShowcaseTask {
+            id: 102,
+            title: "Review invoice export",
+            status: "Queued",
+            owner: "Grace",
+            priority: 2,
+        },
+        ShowcaseTask {
+            id: 103,
+            title: "Ship mobile shell",
+            status: "Blocked",
+            owner: "Linus",
+            priority: 4,
+        },
+        ShowcaseTask {
+            id: 104,
+            title: "Tighten data table API",
+            status: "Done",
+            owner: "Barbara",
+            priority: 1,
+        },
+    ]
+}
+
+fn showcase_task_columns() -> Vec<DataTableColumn<ShowcaseTask>> {
+    vec![
+        DataTableColumn::new("title", "Task", |task: &ShowcaseTask| {
+            task.title.to_string()
+        })
+        .cell_render(task_title_cell)
+        .dynamic_cell_class(task_title_class),
+        DataTableColumn::new("status", "Status", |task: &ShowcaseTask| {
+            task.status.to_string()
+        })
+        .cell_render(task_status_cell),
+        DataTableColumn::new("owner", "Owner", |task: &ShowcaseTask| {
+            task.owner.to_string()
+        }),
+        DataTableColumn::new("priority", "Priority", |task: &ShowcaseTask| {
+            task.priority.to_string()
+        })
+        .sort_value(|task| task.priority.into())
+        .cell_class("text-right")
+        .head_class("text-right"),
+    ]
+}
+
+fn task_title_cell(context: DataTableCellContext<ShowcaseTask>) -> Element {
+    rsx! {
+        div { class: "flex flex-col gap-1",
+            span { class: "font-medium", "{context.value}" }
+            span { class: "text-xs text-muted-foreground", "TASK-{context.row.id}" }
+        }
+    }
+}
+
+fn task_status_cell(context: DataTableCellContext<ShowcaseTask>) -> Element {
+    let variant = match context.value.as_str() {
+        "Blocked" => BadgeVariant::Destructive,
+        "Done" => BadgeVariant::Secondary,
+        _ => BadgeVariant::Default,
+    };
+
+    rsx! {
+        Badge { variant, "{context.value}" }
+    }
+}
+
+fn task_title_class(context: DataTableCellContext<ShowcaseTask>) -> String {
+    if context.selected {
+        "bg-muted/40".to_string()
+    } else {
+        String::new()
+    }
+}
+
+fn task_row_class(context: DataTableRowContext<ShowcaseTask>) -> String {
+    if context.row.status == "Blocked" {
+        "bg-destructive/5 hover:bg-destructive/10".to_string()
+    } else {
+        String::new()
+    }
+}
+
+#[component]
+fn ShowcaseDataTable() -> Element {
+    let rows = use_signal(showcase_tasks);
+    let columns = use_signal(showcase_task_columns);
+    let options = use_signal(|| {
+        DataTableOptions::default()
+            .get_row_id(|task: &ShowcaseTask, _| task.id.to_string())
+            .row_class(task_row_class)
+    });
+    let table = use_data_table_with_options(rows, columns, options);
+
+    rsx! {
+        div { class: "flex flex-col gap-4",
+            DataTableToolbar { table: table.clone() }
+            DataTableView {
+                table: table.clone(),
+                selectable: true,
+                empty: "No tasks match the current filters.".to_string(),
+            }
+            DataTableFooter { table }
+        }
+    }
+}
+
+#[component]
+fn ShowcaseForm() -> Element {
+    let mut form = use_form();
+    let mut initialized = use_signal(|| false);
+    if !initialized() {
+        form.register("name", "Ada Lovelace");
+        form.register("email", "ada@example.com");
+        initialized.set(true);
+    }
+
+    let name = form.field("name");
+    let email = form.field("email");
+    let state = form.state();
+    let submitted = state.submit_count > 0;
+    let name_error = if submitted && name.value().trim().is_empty() {
+        Some("Name is required.".to_string())
+    } else {
+        None
+    };
+    let email_error = if submitted && !email.value().contains('@') {
+        Some("Enter a valid email address.".to_string())
+    } else {
+        None
+    };
+
+    rsx! {
+        Form {
+            class: "max-w-xl".to_string(),
+            on_submit: move |_| {
+                form.submit();
+                form.validate_field("name", &[FormRule::required("Name is required.")]);
+                form.validate_field("email", &[FormRule::email("Enter a valid email address.")]);
+            },
+            Field {
+                FieldLabel { required: true, "Name" }
+                input {
+                    class: "h-9 w-full rounded-lg border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50",
+                    value: "{name.value()}",
+                    oninput: name.oninput(),
+                    onblur: name.onblur(),
+                }
+                FieldDescription { "Tracked with FormApi dirty and touched state." }
+                FormMessage { error: name_error }
+            }
+            Field {
+                FieldLabel { required: true, "Email" }
+                input {
+                    class: "h-9 w-full rounded-lg border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50",
+                    value: "{email.value()}",
+                    oninput: email.oninput(),
+                    onblur: email.onblur(),
+                }
+                FormMessage { error: email_error }
+            }
+            div { class: "flex items-center justify-between gap-3",
+                p { class: "text-sm text-muted-foreground",
+                    "Dirty: {state.dirty()} | Touched: {state.touched()} | Submits: {state.submit_count}"
+                }
+                Button { variant: ButtonVariant::Primary, "Validate" }
             }
         }
     }
