@@ -50,14 +50,21 @@ pub use query::{Filter, Group, GroupedTasks, TaskGroup, Query, Sort};
 pub use capture::{CaptureInput, parse_capture};
 
 #[cfg(feature = "server")]
-pub use service::{VaultError, VaultService, VaultServiceDispatcher, SyncStats, vault_service_service_descriptor};
+pub use service::{
+    activity_service_service_descriptor, calendar_service_service_descriptor,
+    client_service_service_descriptor, invoice_service_service_descriptor,
+    project_service_service_descriptor, task_service_service_descriptor,
+    time_service_service_descriptor, ActivityService, ActivityServiceDispatcher,
+    CalendarService, CalendarServiceDispatcher, ClientService, ClientServiceDispatcher,
+    InvoiceCreateRequest, InvoicePaymentRequest, InvoiceService, InvoiceServiceDispatcher,
+    ProjectPatch, ProjectService, ProjectServiceDispatcher, SyncStats, TaskService,
+    TaskServiceDispatcher, TimeEntryContext, TimeEntryFilter, TimeEntryPatch, TimeLogRequest,
+    TimeService, TimeServiceDispatcher, TimeStartRequest, TimedTaskEntry, VaultError,
+};
 #[cfg(feature = "server")]
 pub use vault::Vault;
 #[cfg(feature = "server")]
-pub use service_impl::{
-    ProjectPatch, TimeEntryContext, TimeEntryFilter, TimeEntryPatch, VaultKind, VaultServiceImpl,
-    VaultSource,
-};
+pub use service_impl::{VaultKind, VaultServiceImpl, VaultSource};
 #[cfg(feature = "server")]
 pub use watch::WatchHandle;
 #[cfg(feature = "server")]

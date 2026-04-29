@@ -3,7 +3,6 @@ members = [
     "apps/desktop",
     "apps/mobile",
     "apps/server",
-    "apps/web",
     "crates/task-core",
     "crates/task-cli",
     "crates/task-db",

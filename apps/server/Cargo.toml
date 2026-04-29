@@ -16,7 +16,7 @@ axum = { version = "0.8", features = ["ws"] }
 chrono.workspace = true
 hostname = "0.4"
 futures.workspace = true
-tower-http = { version = "0.6", features = ["cors", "fs"] }
+tower-http = { version = "0.6", features = ["cors"] }
 slug = "0.1"
 task-db = { path = "../../crates/task-db" }
 task-core = { workspace = true, features = ["realtime"] }

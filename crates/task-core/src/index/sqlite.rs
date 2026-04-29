@@ -619,7 +619,7 @@ pub struct TaskRow {
 }
 
 /// A change log entry.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, facet::Facet)]
 pub struct ChangeRow {
     pub entity_type: String,
     pub entity_id: String,
@@ -637,7 +637,7 @@ pub struct ChangeRow {
 /// "winning" value is whatever state the local replica currently holds; the
 /// "losing" value is what got overwritten. A human or agent must decide what to
 /// keep via `resolve_conflict`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, facet::Facet)]
 pub struct ConflictRow {
     pub id: i64,
     pub entity_type: String,

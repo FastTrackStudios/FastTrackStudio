@@ -10,7 +10,10 @@ use crate::index::TaskIndex;
 use crate::project::{next_task as find_next_task, Project, ProjectStats};
 use crate::query::Query;
 use crate::rrule;
-use crate::service::VaultError;
+use crate::service::{
+    InvoiceCreateRequest, InvoicePaymentRequest, ProjectPatch, SyncStats, TimeEntryContext,
+    TimeEntryFilter, TimeEntryPatch, TimeLogRequest, TimeStartRequest, TimedTaskEntry, VaultError,
+};
 use crate::task::{Status, Task};
 use crate::vault::Vault;
 use crate::watch::{start_watch, WatchHandle};
@@ -398,13 +401,13 @@ impl VaultServiceImpl {
             .collect()
     }
 
-    pub async fn trigger_sync(&self) -> Result<crate::service::SyncStats, VaultError> {
+    pub async fn trigger_sync(&self) -> Result<SyncStats, VaultError> {
         // Sync is handled by the server's sync loop — this is a no-op at the service level.
         // The server calls this endpoint to trigger an immediate cycle.
-        Ok(crate::service::SyncStats::default())
+        Ok(SyncStats::default())
     }
 
-    pub async fn sync_status(&self) -> Option<crate::service::SyncStats> {
+    pub async fn sync_status(&self) -> Option<SyncStats> {
         None
     }
 
@@ -1697,52 +1700,6 @@ impl VaultServiceImpl {
     }
 }
 
-/// Patch for [`VaultServiceImpl::edit_time_entry`]. Only `Some(_)` fields
-/// are applied. For `end_time`, an outer `Some(None)` means "clear it (timer
-/// is running again)", while `None` means "leave as-is".
-#[derive(Debug, Default, Clone)]
-pub struct TimeEntryPatch {
-    pub start_time: Option<chrono::DateTime<Utc>>,
-    pub end_time: Option<Option<chrono::DateTime<Utc>>>,
-    pub description: Option<String>,
-    pub billable: Option<bool>,
-    pub billable_rate: Option<u32>,
-    pub user: Option<String>,
-    pub tags: Option<Vec<String>>,
-}
-
-/// Patch for [`VaultServiceImpl::update_project_as`]. Only `Some(_)` fields
-/// are applied. For optional string fields, passing `"clear"` or `""`
-/// clears the value.
-#[derive(Debug, Default, Clone)]
-pub struct ProjectPatch {
-    pub status: Option<String>,
-    pub description: Option<String>,
-    pub area: Option<String>,
-    pub organization: Option<String>,
-    pub project_type: Option<String>,
-    pub workflow: Option<String>,
-    pub workflow_stage: Option<String>,
-    pub identifier: Option<String>,
-    pub lead: Option<String>,
-    pub default_assignee: Option<String>,
-    pub emoji: Option<String>,
-    pub repo: Option<String>,
-    pub dev_path: Option<String>,
-    pub client: Option<String>,
-    /// Cents/hr; pass 0 to clear.
-    pub default_rate: Option<u32>,
-    pub due: Option<String>,
-    pub start: Option<String>,
-
-    pub add_tag: Vec<String>,
-    pub remove_tag: Vec<String>,
-    pub add_email_tag: Vec<String>,
-    pub remove_email_tag: Vec<String>,
-    pub add_team: Vec<String>,
-    pub remove_team: Vec<String>,
-}
-
 fn parse_project_status(s: &str) -> Option<crate::project::ProjectStatus> {
     match s.to_lowercase().replace('-', "").as_str() {
         "planning" => Some(crate::project::ProjectStatus::Planning),
@@ -1794,52 +1751,9 @@ fn strip_wikilink_brackets(s: &str) -> String {
         .to_string()
 }
 
-/// Filter for [`VaultServiceImpl::list_time_entries`].
-#[derive(Debug, Clone, Default)]
-pub struct TimeEntryFilter {
-    pub task_ref: Option<String>,
-    pub user: Option<String>,
-    pub project: Option<String>,
-    pub client: Option<String>,
-    pub tag: Option<String>,
-    pub from: Option<chrono::DateTime<Utc>>,
-    pub to: Option<chrono::DateTime<Utc>>,
-    pub billable_only: bool,
-}
+// ── Vox service trait implementations ────────────────────────────────────────
 
-/// A time entry joined with its owning task's identity, projects, and the
-/// rates that cascade down to it.
-///
-/// `project_rate` and `client_rate` are populated from the projects the task
-/// belongs to (first match wins if there are multiple). Consumers use
-/// [`crate::client::resolve_rate`] to pick the effective per-entry rate.
-#[derive(Debug, Clone, Default)]
-pub struct TimeEntryContext {
-    pub task_title: String,
-    pub task_projects: Vec<String>,
-    pub client_name: Option<String>,
-    pub project_rate: Option<u32>,
-    pub client_rate: Option<u32>,
-    pub entry: crate::task::TimeEntry,
-}
-
-impl TimeEntryContext {
-    /// Effective rate given a caller fallback, using the IN-style cascade.
-    pub fn effective_rate(&self, fallback: Option<u32>) -> u32 {
-        crate::client::resolve_rate(
-            self.entry.billable_rate,
-            self.project_rate,
-            self.client_rate,
-            fallback,
-        )
-    }
-}
-
-// ── VaultService trait implementation ────────────────────────────────────────
-// Formally implements the #[vox::service] trait so that VaultServiceDispatcher
-// can wrap VaultServiceImpl for Vox RPC serving.
-
-impl crate::service::VaultService for VaultServiceImpl {
+impl crate::service::TaskService for VaultServiceImpl {
     async fn list_tasks(&self) -> Vec<Task> { self.list_tasks().await }
     async fn execute_query(&self, query: Query) -> Vec<Task> { self.execute_query(query).await }
     async fn urgency_score(&self, task: Task) -> i32 { self.urgency_score(task).await }
@@ -1849,13 +1763,202 @@ impl crate::service::VaultService for VaultServiceImpl {
     async fn delete_task(&self, title: String) -> Result<(), VaultError> { self.delete_task(title).await }
     async fn search_tasks(&self, query: String) -> Vec<Task> { self.search_tasks(query).await }
     async fn tasks_for_user(&self, username: String) -> Vec<Task> { self.tasks_for_user(username).await }
-    async fn tasks_due_by(&self, date: String) -> Vec<Task> { self.tasks_due_by(date).await }
+}
+
+impl crate::service::ProjectService for VaultServiceImpl {
     async fn list_projects(&self) -> Vec<Project> { self.list_projects().await }
+    async fn update_project(
+        &self,
+        title: String,
+        patch: ProjectPatch,
+        actor: Option<String>,
+    ) -> Result<Project, VaultError> {
+        self.update_project_as(&title, patch, actor.as_deref()).await
+    }
     async fn project_stats(&self, project_title: String) -> ProjectStats { self.project_stats(project_title).await }
     async fn next_task(&self, project_title: String) -> Option<Task> { self.next_task(project_title).await }
     async fn tasks_for_project(&self, project_title: String) -> Vec<Task> { self.tasks_for_project(project_title).await }
-    async fn trigger_sync(&self) -> Result<crate::service::SyncStats, VaultError> { self.trigger_sync().await }
-    async fn sync_status(&self) -> Option<crate::service::SyncStats> { self.sync_status().await }
+}
+
+impl crate::service::TimeService for VaultServiceImpl {
+    async fn start_timer(&self, request: TimeStartRequest) -> Result<crate::task::TimeEntry, VaultError> {
+        VaultServiceImpl::start_timer(
+            self,
+            &request.task_ref,
+            request.description,
+            request.billable,
+            request.billable_rate,
+            request.user,
+        )
+        .await
+    }
+
+    async fn stop_timer(&self, task_ref: Option<String>) -> Result<TimedTaskEntry, VaultError> {
+        VaultServiceImpl::stop_timer(self, task_ref.as_deref())
+            .await
+            .map(|(task_title, entry)| TimedTaskEntry { task_title, entry })
+    }
+
+    async fn log_time(&self, request: TimeLogRequest) -> Result<crate::task::TimeEntry, VaultError> {
+        VaultServiceImpl::log_time(
+            self,
+            &request.task_ref,
+            request.start,
+            request.end,
+            request.description,
+            request.billable,
+            request.billable_rate,
+            request.user,
+        )
+        .await
+    }
+
+    async fn active_timer(&self) -> Option<TimedTaskEntry> {
+        VaultServiceImpl::active_timer(self)
+            .await
+            .map(|(task_title, entry)| TimedTaskEntry { task_title, entry })
+    }
+
+    async fn list_time_entries(&self, filter: TimeEntryFilter) -> Vec<TimeEntryContext> {
+        VaultServiceImpl::list_time_entries(self, filter).await
+    }
+
+    async fn edit_time_entry(
+        &self,
+        entry_id: String,
+        patch: TimeEntryPatch,
+        actor: Option<String>,
+    ) -> Result<TimedTaskEntry, VaultError> {
+        VaultServiceImpl::edit_time_entry(self, &entry_id, patch, actor.as_deref())
+            .await
+            .map(|(task_title, entry)| TimedTaskEntry { task_title, entry })
+    }
+
+    async fn delete_time_entry(&self, entry_id: String, actor: Option<String>) -> Result<(), VaultError> {
+        VaultServiceImpl::delete_time_entry_as(self, &entry_id, actor.as_deref()).await
+    }
+}
+
+impl crate::service::ClientService for VaultServiceImpl {
+    async fn list_clients(&self) -> Vec<crate::client::Client> {
+        VaultServiceImpl::list_clients(self).await
+    }
+
+    async fn save_client(
+        &self,
+        client: crate::client::Client,
+    ) -> Result<crate::client::Client, VaultError> {
+        VaultServiceImpl::save_client(self, client).await
+    }
+
+    async fn find_client(&self, name: String) -> Option<crate::client::Client> {
+        VaultServiceImpl::find_client(self, &name).await
+    }
+}
+
+impl crate::service::InvoiceService for VaultServiceImpl {
+    async fn create_invoice_from_entries(
+        &self,
+        request: InvoiceCreateRequest,
+    ) -> Result<crate::invoice::Invoice, VaultError> {
+        VaultServiceImpl::create_invoice_from_entries(
+            self,
+            &request.client_name,
+            request.from,
+            request.to,
+            request.fallback_rate,
+            request.tax_rate_percent,
+            request.discount_percent,
+            request.po_number,
+            request.public_notes,
+            request.actor.as_deref(),
+        )
+        .await
+    }
+
+    async fn list_invoices(&self) -> Vec<crate::invoice::Invoice> {
+        VaultServiceImpl::list_invoices(self).await
+    }
+
+    async fn get_invoice(&self, invoice_id: String) -> Option<crate::invoice::Invoice> {
+        VaultServiceImpl::get_invoice(self, &invoice_id).await
+    }
+
+    async fn send_invoice(
+        &self,
+        invoice_id: String,
+        actor: Option<String>,
+    ) -> Result<crate::invoice::Invoice, VaultError> {
+        VaultServiceImpl::send_invoice(self, &invoice_id, actor.as_deref()).await
+    }
+
+    async fn record_invoice_payment(
+        &self,
+        request: InvoicePaymentRequest,
+    ) -> Result<crate::invoice::Invoice, VaultError> {
+        VaultServiceImpl::record_invoice_payment(
+            self,
+            &request.invoice_id,
+            request.amount_cents,
+            request.method,
+            request.reference,
+            request.notes,
+            request.actor.as_deref(),
+        )
+        .await
+    }
+
+    async fn cancel_invoice(
+        &self,
+        invoice_id: String,
+        reason: Option<String>,
+        actor: Option<String>,
+    ) -> Result<crate::invoice::Invoice, VaultError> {
+        VaultServiceImpl::cancel_invoice(self, &invoice_id, reason, actor.as_deref()).await
+    }
+}
+
+impl crate::service::ActivityService for VaultServiceImpl {
+    async fn recent_activity(&self, limit: u32) -> Result<Vec<crate::index::ChangeRow>, VaultError> {
+        VaultServiceImpl::recent_activity(self, limit).await
+    }
+
+    async fn list_conflicts(
+        &self,
+        open_only: bool,
+        limit: u32,
+    ) -> Result<Vec<crate::index::ConflictRow>, VaultError> {
+        VaultServiceImpl::list_conflicts(self, open_only, limit).await
+    }
+
+    async fn resolve_conflict(
+        &self,
+        conflict_id: i64,
+        resolver: Option<String>,
+        how: String,
+    ) -> Result<(), VaultError> {
+        VaultServiceImpl::resolve_conflict(self, conflict_id, resolver.as_deref(), &how).await
+    }
+}
+
+impl crate::service::CalendarService for VaultServiceImpl {
+    async fn tasks_due_by(&self, date: String) -> Vec<Task> { self.tasks_due_by(date).await }
+
+    async fn scheduled_between(&self, from: String, to: String) -> Result<Vec<Task>, VaultError> {
+        let from = chrono::NaiveDate::parse_from_str(&from, "%Y-%m-%d")
+            .map_err(|e| VaultError::ParseError(e.to_string()))?;
+        let to = chrono::NaiveDate::parse_from_str(&to, "%Y-%m-%d")
+            .map_err(|e| VaultError::ParseError(e.to_string()))?;
+        Ok(self
+            .list_tasks()
+            .await
+            .into_iter()
+            .filter(|task| task.scheduled.map_or(false, |d| d >= from && d <= to))
+            .collect())
+    }
+
+    async fn trigger_sync(&self) -> Result<SyncStats, VaultError> { self.trigger_sync().await }
+    async fn sync_status(&self) -> Option<SyncStats> { self.sync_status().await }
 }
 
 /// Diff two versions of a task and write one audit row per changed scalar

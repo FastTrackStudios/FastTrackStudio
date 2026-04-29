@@ -12,7 +12,6 @@ use serde_json::json;
 use task_core::crdt::{CrdtSyncEngine, SyncOp};
 use task_core::VaultServiceImpl;
 use tower_http::cors::CorsLayer;
-use tower_http::services::{ServeDir, ServeFile};
 use tracing::{info, warn};
 use better_auth_core::config::AuthConfig;
 use better_auth::AxumIntegration;
@@ -168,30 +167,6 @@ async fn main() -> eyre::Result<()> {
     let auth_router = auth.clone().axum_router();
     let app = app.nest("/api/auth", auth_router.with_state(auth.clone()));
 
-    // Serve the Dioxus WASM web app — auto-discover dx build output
-    let web_dist = std::env::var("WEB_DIST").ok().or_else(|| {
-        let candidates = [
-            "target/dx/task-web/debug/web/public",
-            "apps/web/dist",
-            "../web/dist",
-        ];
-        candidates.iter()
-            .map(std::path::Path::new)
-            .find(|p| p.join("index.html").exists())
-            .map(|p| p.to_string_lossy().to_string())
-    });
-    let app = if let Some(ref dist_path) = web_dist {
-        let index_path = format!("{}/index.html", dist_path);
-        info!(path = %dist_path, "Serving web UI from dist directory");
-        app.fallback_service(
-            ServeDir::new(dist_path)
-                .not_found_service(ServeFile::new(&index_path)),
-        )
-    } else {
-        info!("No web UI found — run `cd apps/web && dx build` first, or set WEB_DIST");
-        app
-    };
-
     let app = app.with_state(state);
 
     // ── HTTP + JSON-RPC WebSocket server ─────────────────────────
@@ -201,7 +176,7 @@ async fn main() -> eyre::Result<()> {
     info!("Endpoints:");
     info!("  REST API:      http://{bind_addr}/api/*");
     info!("  Auth:          http://{bind_addr}/api/auth/*");
-    info!("  JSON-RPC WS:   ws://{bind_addr}/vox");
+    info!("  Vox WS:        ws://{bind_addr}/vox");
     axum::serve(listener, app).await?;
     Ok(())
 }
@@ -1115,6 +1090,7 @@ async fn dispatch_vault_rpc(
 ) -> Option<serde_json::Value> {
     let svc = state.vault_service.as_ref()?;
     let params = request.get("params").cloned().unwrap_or_default();
+    let method = canonical_vault_rpc_method(method);
 
     match method {
         "list_tasks" => {
@@ -1195,12 +1171,40 @@ async fn dispatch_vault_rpc(
             let tasks = svc.tasks_for_user(username.to_string()).await;
             Some(json!({"result": tasks.into_iter().map(vault_task_to_api).collect::<Vec<_>>(), "error": null}))
         }
+        "tasks_due_by" => {
+            let Some(date) = params.get("date").and_then(|d| d.as_str()) else {
+                return Some(json!({"error": "missing params.date"}));
+            };
+            let tasks = svc.tasks_due_by(date.to_string()).await;
+            Some(json!({"result": tasks.into_iter().map(vault_task_to_api).collect::<Vec<_>>(), "error": null}))
+        }
         "tasks_for_project" => {
             let Some(project) = params.get("project").and_then(|p| p.as_str()) else {
                 return Some(json!({"error": "missing params.project"}));
             };
             let tasks = svc.tasks_for_project(project.to_string()).await;
             Some(json!({"result": tasks.into_iter().map(vault_task_to_api).collect::<Vec<_>>(), "error": null}))
+        }
+        "project_stats" => {
+            let Some(project) = params.get("project").or_else(|| params.get("project_title")).and_then(|p| p.as_str()) else {
+                return Some(json!({"error": "missing params.project"}));
+            };
+            let stats = svc.project_stats(project.to_string()).await;
+            Some(json!({
+                "result": {
+                    "open_task_count": stats.open_task_count,
+                    "completed_task_count": stats.completed_task_count,
+                    "total": stats.total(),
+                    "completion_percent": stats.completion_percent(),
+                },
+                "error": null
+            }))
+        }
+        "next_task" => {
+            let Some(project) = params.get("project").or_else(|| params.get("project_title")).and_then(|p| p.as_str()) else {
+                return Some(json!({"error": "missing params.project"}));
+            };
+            Some(json!({"result": svc.next_task(project.to_string()).await.map(vault_task_to_api), "error": null}))
         }
         "list_projects" | "list_active_projects" => {
             let mut projects = svc.list_projects().await;
@@ -1337,6 +1341,25 @@ async fn dispatch_vault_rpc(
             Some(json!({"result": notifs, "error": null}))
         }
         _ => None,
+    }
+}
+
+fn canonical_vault_rpc_method(method: &str) -> &str {
+    match method {
+        "TaskService.listTasks" => "list_tasks",
+        "TaskService.createTask" => "create_task",
+        "TaskService.updateTask" => "update_task",
+        "TaskService.completeTask" => "complete_task",
+        "TaskService.searchTasks" => "search_tasks",
+        "TaskService.tasksForUser" => "tasks_for_user",
+        "ProjectService.listProjects" => "list_projects",
+        "ProjectService.listActiveProjects" => "list_active_projects",
+        "ProjectService.tasksForProject" => "tasks_for_project",
+        "ProjectService.projectStats" => "project_stats",
+        "ProjectService.nextTask" => "next_task",
+        "ProjectService.projectDetail" => "project_detail",
+        "CalendarService.tasksDueBy" => "tasks_due_by",
+        other => other,
     }
 }
 

@@ -4,7 +4,7 @@
 //!
 //! Commands:
 //!   build             — Build WASM + JS bundle for the Obsidian plugin
-//!   codegen           — Generate TypeScript and Swift bindings from VaultService
+//!   codegen           — Generate TypeScript and Swift bindings from Vox services
 //!   codegen --ts      — TypeScript only
 //!   codegen --swift   — Swift only
 
@@ -63,20 +63,22 @@ fn workspace_root() -> std::path::PathBuf {
 }
 
 fn codegen_typescript(workspace_root: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    let out_dir = workspace_root.join("obsidian-plugin").join("generated");
+    let out_dir = workspace_root
+        .join("crates")
+        .join("task-obsidian")
+        .join("generated");
     std::fs::create_dir_all(&out_dir)?;
 
-    let service = task_core::vault_service_service_descriptor();
-    let ts = vox_codegen::targets::typescript::generate_service(service);
-
-    let filename = format!(
-        "{}.generated.ts",
-        service.service_name.to_lowercase().replace(' ', "-")
-    );
-    let out_path = out_dir.join(&filename);
-    write_if_changed(&out_path, ts)?;
-
-    println!("Generated TypeScript: {}", out_path.display());
+    for service in service_descriptors() {
+        let ts = vox_codegen::targets::typescript::generate_service(service);
+        let filename = format!(
+            "{}.generated.ts",
+            service.service_name.to_lowercase().replace(' ', "-")
+        );
+        let out_path = out_dir.join(&filename);
+        write_if_changed(&out_path, ts)?;
+        println!("Generated TypeScript: {}", out_path.display());
+    }
     Ok(())
 }
 
@@ -89,29 +91,44 @@ fn codegen_swift(workspace_root: &Path) -> Result<(), Box<dyn std::error::Error>
         .join("generated");
     std::fs::create_dir_all(&out_dir)?;
 
-    let service = task_core::vault_service_service_descriptor();
-
-    // Client only (iOS connects to the desktop companion as a client)
-    let swift_client = vox_codegen::targets::swift::generate_service_with_bindings(
-        service,
-        vox_codegen::targets::swift::SwiftBindings::Client,
-    );
-    let client_path = out_dir.join("VaultServiceClient.swift");
-    write_if_changed(&client_path, swift_client)?;
-
-    // Server (desktop app implements the service)
     let desktop_out = workspace_root.join("apps").join("desktop").join("generated");
     std::fs::create_dir_all(&desktop_out)?;
-    let swift_server = vox_codegen::targets::swift::generate_service_with_bindings(
-        service,
-        vox_codegen::targets::swift::SwiftBindings::Server,
-    );
-    let server_path = desktop_out.join("VaultServiceServer.swift");
-    write_if_changed(&server_path, swift_server)?;
 
-    println!("Generated Swift client: {}", client_path.display());
-    println!("Generated Swift server: {}", server_path.display());
+    for service in service_descriptors() {
+        let service_name = service.service_name.to_string();
+
+        // Client only (iOS connects to the desktop companion as a client)
+        let swift_client = vox_codegen::targets::swift::generate_service_with_bindings(
+            service,
+            vox_codegen::targets::swift::SwiftBindings::Client,
+        );
+        let client_path = out_dir.join(format!("{service_name}Client.swift"));
+        write_if_changed(&client_path, swift_client)?;
+
+        // Server (desktop app implements the service)
+        let swift_server = vox_codegen::targets::swift::generate_service_with_bindings(
+            service,
+            vox_codegen::targets::swift::SwiftBindings::Server,
+        );
+        let server_path = desktop_out.join(format!("{service_name}Server.swift"));
+        write_if_changed(&server_path, swift_server)?;
+
+        println!("Generated Swift client: {}", client_path.display());
+        println!("Generated Swift server: {}", server_path.display());
+    }
     Ok(())
+}
+
+fn service_descriptors() -> Vec<&'static vox_types::ServiceDescriptor> {
+    vec![
+        task_core::task_service_service_descriptor(),
+        task_core::project_service_service_descriptor(),
+        task_core::time_service_service_descriptor(),
+        task_core::client_service_service_descriptor(),
+        task_core::invoice_service_service_descriptor(),
+        task_core::activity_service_service_descriptor(),
+        task_core::calendar_service_service_descriptor(),
+    ]
 }
 
 fn build_obsidian_plugin(workspace_root: &Path) -> Result<(), Box<dyn std::error::Error>> {
