@@ -61,7 +61,7 @@ pub use service::{
     activity_service_service_descriptor, calendar_service_service_descriptor,
     client_service_service_descriptor, file_service_service_descriptor,
     inbox_service_service_descriptor, invoice_service_service_descriptor, mail_service_service_descriptor,
-    people_service_service_descriptor, project_service_service_descriptor, system_service_service_descriptor, task_service_service_descriptor,
+    conversation_service_service_descriptor, people_service_service_descriptor, project_service_service_descriptor, system_service_service_descriptor, task_service_service_descriptor,
     time_service_service_descriptor, ActivityService, ActivityServiceDispatcher,
     CalDavCalendarInfo, CalDavDeleteObjectRequest, CalDavDiscovery, CalDavFreeBusyInterval,
     CalDavFreeBusyRequest, CalDavMultigetRequest, CalDavObject, CalDavPutObjectRequest,
@@ -76,7 +76,7 @@ pub use service::{
     InboxPromoteRequest, InboxService, InboxServiceDispatcher, InvoiceCreateRequest, InvoicePaymentRequest,
     InvoiceService, InvoiceServiceDispatcher, MailCreateMailboxRequest, MailCreateTagRequest,
     MailDeleteTagRequest, MailListMessagesRequest, MailMessageTagRequest, MailMoveMessageRequest,
-    MailService, MailServiceDispatcher, NextcloudCapability, PeopleService, PeopleServiceDispatcher, ProjectPatch, ProjectService, ProjectServiceDispatcher,
+    ConversationService, ConversationServiceDispatcher, MailService, MailServiceDispatcher, NextcloudCapability, PeopleService, PeopleServiceDispatcher, ProjectPatch, ProjectService, ProjectServiceDispatcher,
     ProviderSyncState, ReviewReport,
     RemoteDeckBoard, RemoteDeckStack, SyncStats, SystemCapabilities, SystemHealth, SystemService, SystemServiceDispatcher, TaskService, TaskServiceDispatcher,
     TimeEntryContext, TimeEntryFilter, TimeEntryPatch, TimeLogRequest, TimeService,
@@ -103,7 +103,8 @@ pub use provider::{
     ProjectProvider, ProjectBundle, ProviderInfo, ProviderEvent,
     ProjectRegistry, LocalProvider, VaultProvider,
     S3Provider, S3Config, WebDavProvider, WebDavConfig,
-    NextcloudProvider, NextcloudConfig,
+    NextcloudProvider, NextcloudConfig, ChannelConversation, ChannelMessage,
+    ChannelSendMessageRequest, CommunicationChannelProvider,
 };
 
 #[cfg(feature = "caldav")]

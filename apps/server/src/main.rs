@@ -1017,6 +1017,12 @@ async fn handle_vox_connection(socket: WebSocket, state: AppState, auth: VoxAuth
                     ));
                     Ok(())
                 }
+                "ConversationService" => {
+                    connection.handle_with(task_core::ConversationServiceDispatcher::new(
+                        service.as_ref().clone(),
+                    ));
+                    Ok(())
+                }
                 "InvoiceService" => {
                     connection.handle_with(task_core::InvoiceServiceDispatcher::new(
                         service.as_ref().clone(),

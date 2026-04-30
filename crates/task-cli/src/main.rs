@@ -3,8 +3,9 @@ use clap::{Parser, Subcommand};
 use task_core::index::{ChangeRow, ConflictRow};
 use task_core::workflows::{parse_comments, render_comments, Comment};
 use task_core::{
-    CalendarEvent, CalendarEventPatch, CalendarEventStatus, CardDavSyncCollectionRequest, Client,
-    Filter, InboxCaptureRequest, InboxItem, InboxPromoteRequest, Invoice, OrganizationContext,
+    CalendarEvent, CalendarEventPatch, CalendarEventStatus, CardDavSyncCollectionRequest,
+    ChannelConversation, ChannelMessage, ChannelSendMessageRequest, Client, Filter,
+    InboxCaptureRequest, InboxItem, InboxPromoteRequest, Invoice, OrganizationContext,
     OrganizationRecord, Person, PersonContext, Priority, Project, ProviderSyncState, Query,
     RelationType, ReviewReport, Sort, Status, SyncStats, SystemCapabilities, SystemHealth, Task,
     TaskRelation, TimeEntryContext, TimeEntryFilter, VaultServiceImpl, WikiLink,
@@ -1237,9 +1238,11 @@ async fn main() -> eyre::Result<()> {
         command,
     } = cli;
 
-    // Talk commands don't touch the vault — handle them before requiring one.
-    if let Commands::Talk { command: talk } = command {
-        return run_talk(talk, actor).await;
+    // Local Talk commands don't touch the vault. Remote Talk goes through Vox.
+    if server.is_none() {
+        if let Commands::Talk { command: talk } = command {
+            return run_talk(talk, actor).await;
+        }
     }
     // Nc smoke-test commands — same deal, no vault.
     if let Commands::Nc { command: nc } = command {
@@ -3373,6 +3376,10 @@ impl RemoteVoxConfig {
         self.connect().await
     }
 
+    async fn conversation(&self) -> eyre::Result<task_core::service::ConversationServiceClient> {
+        self.connect().await
+    }
+
     async fn invoice(&self) -> eyre::Result<task_core::service::InvoiceServiceClient> {
         self.connect().await
     }
@@ -3602,6 +3609,37 @@ async fn run_remote_command(
                 } => {
                     let context = client.organization_context(reference, addressbook).await?;
                     print_organization_context(context.as_ref(), json);
+                }
+            }
+        }
+
+        Commands::Talk { command } => {
+            let client = remote.conversation().await?;
+            match command {
+                TalkCommands::Rooms { json } => {
+                    let rooms = client.list_conversations().await?;
+                    print_channel_rooms(&rooms, json);
+                }
+                TalkCommands::Send {
+                    room,
+                    message,
+                    reply_to,
+                } => {
+                    let sent = client
+                        .send_message(ChannelSendMessageRequest {
+                            conversation_id: room,
+                            body: message,
+                            reply_to: reply_to.map(|id| id.to_string()),
+                        })
+                        .await?;
+                    println!(
+                        "Sent message {} to {}.",
+                        sent.id, sent.conversation_id
+                    );
+                }
+                TalkCommands::History { room, limit, json } => {
+                    let messages = client.recent_messages(room, limit).await?;
+                    print_channel_history(&messages, json);
                 }
             }
         }
@@ -3892,7 +3930,7 @@ async fn run_remote_command(
             }
         },
         Commands::Email { command } => run_remote_email_command(remote, actor, command).await?,
-        Commands::Talk { .. } | Commands::Nc { .. } => {
+        Commands::Nc { .. } => {
             unreachable!("handled before remote dispatch")
         }
     }
@@ -5937,7 +5975,7 @@ async fn run_nc(cmd: NcCommands, as_user: Option<String>) -> eyre::Result<()> {
 }
 
 async fn run_talk(cmd: TalkCommands, as_user: Option<String>) -> eyre::Result<()> {
-    use task_core::provider::{TalkClient, TalkConfig};
+    use task_core::provider::{CommunicationChannelProvider, TalkClient, TalkConfig};
 
     let url =
         std::env::var("NEXTCLOUD_URL").map_err(|_| eyre::eyre!("Set NEXTCLOUD_URL env var."))?;
@@ -5957,34 +5995,42 @@ async fn run_talk(cmd: TalkCommands, as_user: Option<String>) -> eyre::Result<()
 
     match cmd {
         TalkCommands::Rooms { json } => {
-            let rooms = client.list_rooms().await?;
-            if json {
-                print_talk_rooms_json(&rooms);
-            } else {
-                print_talk_rooms_table(&rooms);
-            }
+            let rooms = client.list_conversations().await?;
+            print_channel_rooms(&rooms, json);
         }
         TalkCommands::Send {
             room,
             message,
             reply_to,
         } => {
-            let id = client.send_message(&room, &message, reply_to).await?;
-            println!("Sent message {id} to {room}.");
+            let sent = CommunicationChannelProvider::send_message(
+                &client,
+                ChannelSendMessageRequest {
+                    conversation_id: room,
+                    body: message,
+                    reply_to: reply_to.map(|id| id.to_string()),
+                },
+            )
+            .await?;
+            println!("Sent message {} to {}.", sent.id, sent.conversation_id);
         }
         TalkCommands::History { room, limit, json } => {
-            let msgs = client.recent_messages(&room, limit).await?;
-            if json {
-                print_talk_history_json(&msgs);
-            } else {
-                print_talk_history_table(&msgs);
-            }
+            let msgs = CommunicationChannelProvider::recent_messages(&client, &room, limit).await?;
+            print_channel_history(&msgs, json);
         }
     }
     Ok(())
 }
 
-fn print_talk_rooms_table(rooms: &[task_core::provider::TalkRoom]) {
+fn print_channel_rooms(rooms: &[ChannelConversation], json: bool) {
+    if json {
+        print_channel_rooms_json(rooms);
+    } else {
+        print_channel_rooms_table(rooms);
+    }
+}
+
+fn print_channel_rooms_table(rooms: &[ChannelConversation]) {
     if rooms.is_empty() {
         println!("No rooms.");
         return;
@@ -5997,13 +6043,13 @@ fn print_talk_rooms_table(rooms: &[task_core::provider::TalkRoom]) {
         .max(10)
         .min(40);
     println!(
-        "{:<name_w$}  {:<22}  {:>7}  {:<5}  TOKEN",
-        "NAME", "LAST ACTIVITY (UTC)", "PEOPLE", "TYPE",
+        "{:<name_w$}  {:<22}  {:>7}  {:<12}  ID",
+        "NAME", "LAST ACTIVITY (UTC)", "PEOPLE", "KIND",
     );
     println!("{}", "─".repeat(name_w + 55));
     for r in rooms {
-        let when = if r.last_activity > 0 {
-            chrono::DateTime::<chrono::Utc>::from_timestamp(r.last_activity, 0)
+        let when = if let Some(timestamp) = r.last_activity {
+            chrono::DateTime::<chrono::Utc>::from_timestamp(timestamp, 0)
                 .map(|d| d.format("%Y-%m-%d %H:%M:%S").to_string())
                 .unwrap_or_else(|| "—".into())
         } else {
@@ -6014,67 +6060,78 @@ fn print_talk_rooms_table(rooms: &[task_core::provider::TalkRoom]) {
             truncate(&r.name, name_w),
             when,
             r.participant_count,
-            r.room_type,
-            r.token,
+            r.kind,
+            r.id,
         );
     }
     println!("\n{} room(s)", rooms.len());
 }
 
-fn print_talk_rooms_json(rooms: &[task_core::provider::TalkRoom]) {
+fn print_channel_rooms_json(rooms: &[ChannelConversation]) {
     println!("[");
     for (i, r) in rooms.iter().enumerate() {
         let comma = if i + 1 < rooms.len() { "," } else { "" };
         println!(
-            "  {{\"token\":\"{}\",\"name\":\"{}\",\"type\":{},\"participants\":{},\"last_activity\":{},\"last_message\":{}}}{comma}",
-            escape_json(&r.token),
+            "  {{\"provider\":\"{}\",\"account\":{},\"id\":\"{}\",\"name\":\"{}\",\"kind\":\"{}\",\"participants\":{},\"last_activity\":{},\"last_message\":{}}}{comma}",
+            escape_json(&r.provider),
+            opt_json(r.account.as_deref()),
+            escape_json(&r.id),
             escape_json(&r.name),
-            r.room_type,
+            escape_json(&r.kind),
             r.participant_count,
-            r.last_activity,
+            r.last_activity.map(|n| n.to_string()).unwrap_or_else(|| "null".into()),
             opt_json(r.last_message.as_deref()),
         );
     }
     println!("]");
 }
 
-fn print_talk_history_table(msgs: &[task_core::provider::TalkMessage]) {
+fn print_channel_history(msgs: &[ChannelMessage], json: bool) {
+    if json {
+        print_channel_history_json(msgs);
+    } else {
+        print_channel_history_table(msgs);
+    }
+}
+
+fn print_channel_history_table(msgs: &[ChannelMessage]) {
     if msgs.is_empty() {
         println!("No messages.");
         return;
     }
-    // Messages come newest-first from the API — reverse for readability.
-    let mut list: Vec<&task_core::provider::TalkMessage> = msgs.iter().collect();
+    let mut list: Vec<&ChannelMessage> = msgs.iter().collect();
     list.sort_by_key(|m| m.timestamp);
     for m in list {
         let when = chrono::DateTime::<chrono::Utc>::from_timestamp(m.timestamp, 0)
             .map(|d| d.format("%H:%M:%S").to_string())
             .unwrap_or_else(|| "—".into());
-        let reply = match m.reply_to {
+        let reply = match &m.reply_to {
             Some(id) => format!(" ↪#{id}"),
             None => String::new(),
         };
         println!(
             "[{when}] @{} (#{}{}): {}",
-            m.actor_id, m.id, reply, m.message
+            m.actor_id, m.id, reply, m.body
         );
     }
 }
 
-fn print_talk_history_json(msgs: &[task_core::provider::TalkMessage]) {
+fn print_channel_history_json(msgs: &[ChannelMessage]) {
     println!("[");
     for (i, m) in msgs.iter().enumerate() {
         let comma = if i + 1 < msgs.len() { "," } else { "" };
         println!(
-            "  {{\"id\":{},\"token\":\"{}\",\"actor_id\":\"{}\",\"actor_type\":\"{}\",\"actor_display_name\":\"{}\",\"timestamp\":{},\"message\":\"{}\",\"reply_to\":{}}}{comma}",
-            m.id,
-            escape_json(&m.token),
+            "  {{\"provider\":\"{}\",\"account\":{},\"conversation_id\":\"{}\",\"id\":\"{}\",\"actor_id\":\"{}\",\"actor_type\":\"{}\",\"actor_display_name\":\"{}\",\"timestamp\":{},\"body\":\"{}\",\"reply_to\":{}}}{comma}",
+            escape_json(&m.provider),
+            opt_json(m.account.as_deref()),
+            escape_json(&m.conversation_id),
+            escape_json(&m.id),
             escape_json(&m.actor_id),
             escape_json(&m.actor_type),
             escape_json(&m.actor_display_name),
             m.timestamp,
-            escape_json(&m.message),
-            m.reply_to.map(|n| n.to_string()).unwrap_or_else(|| "null".into()),
+            escape_json(&m.body),
+            opt_json(m.reply_to.as_deref()),
         );
     }
     println!("]");

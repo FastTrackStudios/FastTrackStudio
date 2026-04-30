@@ -21,6 +21,11 @@
 //! All responses are OCS-wrapped JSON:
 //! `{"ocs":{"meta":{...},"data":...}}`.
 
+use async_trait::async_trait;
+
+use crate::provider::{
+    ChannelConversation, ChannelMessage, ChannelSendMessageRequest, CommunicationChannelProvider,
+};
 use crate::service::VaultError;
 
 /// Connection settings for a Nextcloud Talk instance.
@@ -222,6 +227,113 @@ impl TalkClient {
     }
 }
 
+#[async_trait]
+impl CommunicationChannelProvider for TalkClient {
+    fn provider_id(&self) -> &'static str {
+        "nextcloud-talk"
+    }
+
+    fn account_id(&self) -> Option<&str> {
+        Some(&self.config.username)
+    }
+
+    async fn list_conversations(&self) -> Result<Vec<ChannelConversation>, VaultError> {
+        Ok(self
+            .list_rooms()
+            .await?
+            .into_iter()
+            .map(|room| room.into_channel(self.provider_id(), self.account_id()))
+            .collect())
+    }
+
+    async fn recent_messages(
+        &self,
+        conversation_id: &str,
+        limit: u32,
+    ) -> Result<Vec<ChannelMessage>, VaultError> {
+        Ok(TalkClient::recent_messages(self, conversation_id, limit)
+            .await?
+            .into_iter()
+            .map(|message| message.into_channel(self.provider_id(), self.account_id()))
+            .collect())
+    }
+
+    async fn send_message(
+        &self,
+        request: ChannelSendMessageRequest,
+    ) -> Result<ChannelMessage, VaultError> {
+        let reply_to = request
+            .reply_to
+            .as_deref()
+            .map(str::parse::<u64>)
+            .transpose()
+            .map_err(|e| VaultError::ParseError(format!("talk reply id: {e}")))?;
+        let id = TalkClient::send_message(self, &request.conversation_id, &request.body, reply_to)
+            .await?;
+
+        Ok(ChannelMessage {
+            provider: self.provider_id().to_string(),
+            account: self.account_id().map(str::to_string),
+            conversation_id: request.conversation_id,
+            id: id.to_string(),
+            actor_id: self.config.username.clone(),
+            actor_type: "users".to_string(),
+            actor_display_name: self.config.username.clone(),
+            timestamp: chrono::Utc::now().timestamp(),
+            body: request.body,
+            reply_to: request.reply_to,
+        })
+    }
+}
+
+impl Room {
+    pub fn into_channel(
+        self,
+        provider: &str,
+        account: Option<&str>,
+    ) -> ChannelConversation {
+        ChannelConversation {
+            provider: provider.to_string(),
+            account: account.map(str::to_string),
+            id: self.token,
+            name: self.name,
+            kind: talk_room_kind(self.room_type).to_string(),
+            participant_count: self.participant_count,
+            last_activity: (self.last_activity > 0).then_some(self.last_activity),
+            last_message: self.last_message,
+        }
+    }
+}
+
+impl Message {
+    pub fn into_channel(self, provider: &str, account: Option<&str>) -> ChannelMessage {
+        ChannelMessage {
+            provider: provider.to_string(),
+            account: account.map(str::to_string),
+            conversation_id: self.token,
+            id: self.id.to_string(),
+            actor_id: self.actor_id,
+            actor_type: self.actor_type,
+            actor_display_name: self.actor_display_name,
+            timestamp: self.timestamp,
+            body: self.message,
+            reply_to: self.reply_to.map(|id| id.to_string()),
+        }
+    }
+}
+
+fn talk_room_kind(room_type: u32) -> &'static str {
+    match room_type {
+        1 => "direct",
+        2 => "group",
+        3 => "public",
+        4 => "changelog",
+        5 => "former-direct",
+        6 => "note-to-self",
+        _ => "unknown",
+    }
+}
+
 fn room_from_json(v: &serde_json::Value) -> Option<Room> {
     Some(Room {
         token: v.get("token")?.as_str()?.to_string(),
@@ -308,6 +420,12 @@ mod tests {
         assert_eq!(r.participant_count, 4);
         assert_eq!(r.last_activity, 1744903200);
         assert_eq!(r.last_message.as_deref(), Some("New mix uploaded"));
+
+        let channel = r.into_channel("nextcloud-talk", Some("agent"));
+        assert_eq!(channel.provider, "nextcloud-talk");
+        assert_eq!(channel.account.as_deref(), Some("agent"));
+        assert_eq!(channel.id, "abc123");
+        assert_eq!(channel.kind, "group");
     }
 
     #[test]
@@ -330,6 +448,12 @@ mod tests {
         assert_eq!(m.actor_type, "bots");
         assert_eq!(m.reply_to, Some(40));
         assert_eq!(m.token, "abc123");
+
+        let channel = m.into_channel("nextcloud-talk", Some("agent"));
+        assert_eq!(channel.conversation_id, "abc123");
+        assert_eq!(channel.id, "42");
+        assert_eq!(channel.reply_to.as_deref(), Some("40"));
+        assert_eq!(channel.body, "Running latency check now");
     }
 
     #[test]

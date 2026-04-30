@@ -92,6 +92,8 @@ async fn authenticated_core_services_smoke_over_vox() {
     let time_service: task_core::service::TimeServiceClient = connect_service(&vox_url).await;
     let client_service: task_core::service::ClientServiceClient = connect_service(&vox_url).await;
     let people_service: task_core::service::PeopleServiceClient = connect_service(&vox_url).await;
+    let conversation_service: task_core::service::ConversationServiceClient =
+        connect_service(&vox_url).await;
     let invoice_service: task_core::service::InvoiceServiceClient = connect_service(&vox_url).await;
     let calendar_service: task_core::service::CalendarServiceClient =
         connect_service(&vox_url).await;
@@ -122,6 +124,9 @@ async fn authenticated_core_services_smoke_over_vox() {
         Some("E2E Client".to_string())
     );
     assert!(service_error("list_people", people_service.list_people(None)).await);
+    assert!(
+        service_error("list_conversations", conversation_service.list_conversations()).await
+    );
 
     let captured = service_call(
         "capture",

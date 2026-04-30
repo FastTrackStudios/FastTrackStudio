@@ -13,6 +13,10 @@ use crate::people::{
     PersonContext, ProviderConflict, ProviderConflictField, ProviderRef,
 };
 use crate::project::{next_task as find_next_task, Project, ProjectStats};
+use crate::provider::{
+    ChannelConversation, ChannelMessage, ChannelSendMessageRequest, CommunicationChannelProvider,
+    TalkClient, TalkConfig,
+};
 use crate::query::Query;
 use crate::rrule;
 use crate::service::{
@@ -181,6 +185,14 @@ fn nextcloud_webdav_provider(config: &NextcloudRuntimeConfig) -> crate::provider
             projects_path: config.projects_path.clone(),
         },
     )
+}
+
+fn nextcloud_talk_provider(config: &NextcloudRuntimeConfig) -> TalkClient {
+    TalkClient::new(TalkConfig {
+        url: config.url.clone(),
+        username: config.username.clone(),
+        password: config.password.clone(),
+    })
 }
 
 fn nextcloud_mail_client() -> Result<crate::provider::MailClient, VaultError> {
@@ -3647,6 +3659,50 @@ impl crate::service::ActivityService for VaultServiceImpl {
     }
 }
 
+impl crate::service::ConversationService for VaultServiceImpl {
+    async fn list_conversations(&self) -> Result<Vec<ChannelConversation>, VaultError> {
+        let config = NextcloudRuntimeConfig::load()?.ok_or_else(|| {
+            VaultError::IoError("Nextcloud Talk channel is not configured".into())
+        })?;
+        nextcloud_talk_provider(&config).list_conversations().await
+    }
+
+    async fn recent_messages(
+        &self,
+        conversation_id: String,
+        limit: u32,
+    ) -> Result<Vec<ChannelMessage>, VaultError> {
+        let config = NextcloudRuntimeConfig::load()?.ok_or_else(|| {
+            VaultError::IoError("Nextcloud Talk channel is not configured".into())
+        })?;
+        let provider = nextcloud_talk_provider(&config);
+        let messages =
+            CommunicationChannelProvider::recent_messages(&provider, &conversation_id, limit)
+                .await?;
+        self.record_provider_sync_state(
+            "nextcloud-talk",
+            Some(&config.username),
+            &conversation_id,
+            None,
+            Some(messages.last().map(|message| message.id.clone()).unwrap_or_default()),
+            None,
+            None,
+        );
+        Ok(messages)
+    }
+
+    async fn send_message(
+        &self,
+        request: ChannelSendMessageRequest,
+    ) -> Result<ChannelMessage, VaultError> {
+        let config = NextcloudRuntimeConfig::load()?.ok_or_else(|| {
+            VaultError::IoError("Nextcloud Talk channel is not configured".into())
+        })?;
+        let provider = nextcloud_talk_provider(&config);
+        CommunicationChannelProvider::send_message(&provider, request).await
+    }
+}
+
 impl crate::service::MailService for VaultServiceImpl {
     async fn list_accounts(&self) -> Result<Vec<crate::provider::MailAccount>, VaultError> {
         nextcloud_mail_client()?.list_accounts().await
@@ -3842,6 +3898,7 @@ impl crate::service::SystemService for VaultServiceImpl {
                 "TimeService".into(),
                 "ClientService".into(),
                 "PeopleService".into(),
+                "ConversationService".into(),
                 "InvoiceService".into(),
                 "ActivityService".into(),
                 "MailService".into(),

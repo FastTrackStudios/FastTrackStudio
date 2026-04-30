@@ -14,7 +14,10 @@ use crate::people::{
     OrganizationContext, OrganizationRecord, Person, PersonContext, ProviderConflict,
 };
 use crate::project::{Project, ProjectStats};
-use crate::provider::{MailAccount, MailMessage, MailMessageDetail, MailTag, Mailbox};
+use crate::provider::{
+    ChannelConversation, ChannelMessage, ChannelSendMessageRequest, MailAccount, MailMessage,
+    MailMessageDetail, MailTag, Mailbox,
+};
 use crate::query::Query;
 use crate::task::{Task, TimeEntry};
 
@@ -240,6 +243,25 @@ pub trait MailService {
         request: EmailListRequest,
     ) -> Result<Vec<EmailRef>, VaultError>;
     async fn linked_message_ids(&self) -> Vec<String>;
+}
+
+#[vox::service]
+pub trait ConversationService {
+    /// List conversations across the configured channel provider.
+    async fn list_conversations(&self) -> Result<Vec<ChannelConversation>, VaultError>;
+
+    /// Read recent messages from a conversation.
+    async fn recent_messages(
+        &self,
+        conversation_id: String,
+        limit: u32,
+    ) -> Result<Vec<ChannelMessage>, VaultError>;
+
+    /// Send or reply to a message in a conversation.
+    async fn send_message(
+        &self,
+        request: ChannelSendMessageRequest,
+    ) -> Result<ChannelMessage, VaultError>;
 }
 
 #[vox::service]
