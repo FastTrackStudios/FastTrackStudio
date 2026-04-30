@@ -55,6 +55,12 @@ pub trait InboxService {
 
     /// Classify/promote an inbox item into a commitment, idea, or task.
     async fn promote(&self, request: InboxPromoteRequest) -> Result<InboxItem, VaultError>;
+
+    /// Return review buckets for today's operational sweep.
+    async fn daily_review(&self) -> ReviewReport;
+
+    /// Return review buckets for a weekly planning sweep.
+    async fn weekly_review(&self) -> ReviewReport;
 }
 
 #[vox::service]
@@ -680,6 +686,60 @@ pub struct InboxItem {
     pub assignee: Option<String>,
     pub source: Option<String>,
     pub body: String,
+}
+
+#[derive(Debug, Clone, facet::Facet)]
+pub struct ReviewReport {
+    pub generated_at: DateTime<Utc>,
+    /// Local date used as the review anchor.
+    pub today: String,
+    /// Inclusive local date horizon for upcoming work.
+    pub horizon_end: String,
+    pub stale_after_days: u32,
+    #[facet(default)]
+    pub inbox: Vec<InboxItem>,
+    #[facet(default)]
+    pub commitments: Vec<Task>,
+    #[facet(default)]
+    pub ideas: Vec<Task>,
+    #[facet(default)]
+    pub someday: Vec<Task>,
+    #[facet(default)]
+    pub waiting: Vec<Task>,
+    #[facet(default)]
+    pub overdue: Vec<Task>,
+    #[facet(default)]
+    pub due_today: Vec<Task>,
+    #[facet(default)]
+    pub scheduled_today: Vec<Task>,
+    #[facet(default)]
+    pub upcoming: Vec<Task>,
+    #[facet(default)]
+    pub unscheduled: Vec<Task>,
+    #[facet(default)]
+    pub stale: Vec<Task>,
+}
+
+impl Default for ReviewReport {
+    fn default() -> Self {
+        Self {
+            generated_at: Utc::now(),
+            today: String::new(),
+            horizon_end: String::new(),
+            stale_after_days: 0,
+            inbox: Vec::new(),
+            commitments: Vec::new(),
+            ideas: Vec::new(),
+            someday: Vec::new(),
+            waiting: Vec::new(),
+            overdue: Vec::new(),
+            due_today: Vec::new(),
+            scheduled_today: Vec::new(),
+            upcoming: Vec::new(),
+            unscheduled: Vec::new(),
+            stale: Vec::new(),
+        }
+    }
 }
 
 /// Filter for querying time entries across the vault.

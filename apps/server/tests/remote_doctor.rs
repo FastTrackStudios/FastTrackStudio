@@ -6,8 +6,10 @@ use std::{fmt::Debug, future::Future};
 
 use chrono::{TimeZone, Utc};
 use task_core::{
-    Client, Filter, InboxCaptureRequest, InboxPromoteRequest, Priority, Project, ProjectPatch,
-    Query, Sort, Status, Task, TimeEntryFilter, WikiLink,
+    CalendarEvent, CalendarEventPatch, CalendarEventStatus, Client, Filter, InboxCaptureRequest,
+    InboxPromoteRequest, InvoiceCreateRequest, InvoicePaymentRequest, Priority, Project,
+    ProjectPatch, Query, Sort, Status, Task, TimeEntryFilter, TimeLogRequest, TimeStartRequest,
+    WikiLink,
 };
 use tokio::net::{TcpListener, TcpStream};
 use tokio::process::{Child, Command};
@@ -122,7 +124,7 @@ async fn authenticated_core_services_smoke_over_vox() {
     let captured = service_call(
         "capture",
         inbox_service.capture(InboxCaptureRequest {
-            text: "Review inbox capture flow !high #ops @desk".to_string(),
+            text: "Review inbox capture flow 2026-05-01 !high #ops @desk".to_string(),
             actor: Some("agent".to_string()),
             source: Some("e2e".to_string()),
             kind: None,
@@ -145,7 +147,7 @@ async fn authenticated_core_services_smoke_over_vox() {
             status: Some("planned".to_string()),
             assignee: Some("agent".to_string()),
             due: None,
-            scheduled: None,
+            scheduled: Some("2026-05-01".to_string()),
             add_tags: vec!["review".to_string()],
             actor: Some("agent".to_string()),
         }),
@@ -159,6 +161,40 @@ async fn authenticated_core_services_smoke_over_vox() {
         .any(|project| project == "E2E Project"));
     assert!(promoted.tags.iter().any(|tag| tag == "review"));
     assert!(!promoted.tags.iter().any(|tag| tag == "inbox"));
+    assert_eq!(promoted.due.as_deref(), Some("2026-05-01"));
+    assert_eq!(promoted.scheduled.as_deref(), Some("2026-05-01"));
+
+    let created = service_call(
+        "create_task",
+        task_service.create_task(Task {
+            title: "E2E remote task".to_string(),
+            status: Status::Open,
+            priority: Priority::High,
+            projects: vec![WikiLink("E2E Project".to_string())],
+            assignee: Some("agent".to_string()),
+            due: Some(chrono::NaiveDate::from_ymd_opt(2026, 5, 2).unwrap()),
+            scheduled: Some(chrono::NaiveDate::from_ymd_opt(2026, 5, 1).unwrap()),
+            body: "Created through authenticated Vox e2e.".to_string(),
+            ..Default::default()
+        }),
+    )
+    .await;
+    assert_eq!(created.title, "E2E remote task");
+    assert!(created.id.is_some());
+    assert!(created.date_created.is_some());
+    assert!(created.date_modified.is_some());
+
+    let daily_review = service_call("daily_review", inbox_service.daily_review()).await;
+    assert!(daily_review.inbox.is_empty());
+    assert!(daily_review
+        .commitments
+        .iter()
+        .any(|task| task.title == promoted.title));
+    let weekly_review = service_call("weekly_review", inbox_service.weekly_review()).await;
+    assert!(weekly_review
+        .commitments
+        .iter()
+        .any(|task| task.title == promoted.title));
 
     let tasks = service_call("list_tasks", task_service.list_tasks()).await;
     let seeded = tasks
@@ -166,6 +202,7 @@ async fn authenticated_core_services_smoke_over_vox() {
         .find(|task| task.title == "E2E seeded task")
         .cloned()
         .expect("seeded task should be listed");
+    assert!(tasks.iter().any(|task| task.title == created.title));
     let search = service_call(
         "search_tasks",
         task_service.search_tasks("seeded task".to_string()),
@@ -178,6 +215,7 @@ async fn authenticated_core_services_smoke_over_vox() {
     )
     .await;
     assert!(assigned.iter().any(|task| task.title == seeded.title));
+    assert!(assigned.iter().any(|task| task.title == created.title));
     let urgency = service_call("urgency_score", task_service.urgency_score(seeded.clone())).await;
     assert!(urgency > 0);
     let query_results = service_call(
@@ -217,6 +255,7 @@ async fn authenticated_core_services_smoke_over_vox() {
     )
     .await;
     assert!(project_tasks.iter().any(|task| task.title == seeded.title));
+    assert!(project_tasks.iter().any(|task| task.title == created.title));
     assert!(
         service_call(
             "project_stats",
@@ -235,45 +274,147 @@ async fn authenticated_core_services_smoke_over_vox() {
         project_service.next_task("E2E Project".to_string()),
     )
     .await;
-    assert_eq!(next_task.map(|task| task.title), Some(seeded.title.clone()));
+    let next_task = next_task.expect("E2E project should have a next task");
+    assert!(next_task
+        .projects
+        .iter()
+        .any(|project| project.0 == "E2E Project"));
 
     assert!(service_call("active_timer", time_service.active_timer())
         .await
         .is_none());
+    let timer = service_call(
+        "start_timer",
+        time_service.start_timer(TimeStartRequest {
+            task_ref: created.title.clone(),
+            description: Some("active e2e timer".to_string()),
+            billable: true,
+            billable_rate: Some(18_000),
+            user: Some("agent".to_string()),
+        }),
+    )
+    .await;
+    assert!(timer.is_running());
+    assert!(service_call("active_timer", time_service.active_timer())
+        .await
+        .is_some());
+    let stopped = service_call(
+        "stop_timer",
+        time_service.stop_timer(Some(created.title.clone())),
+    )
+    .await;
+    assert_eq!(stopped.task_title, created.title);
+    assert!(!stopped.entry.is_running());
+
+    let start = Utc.with_ymd_and_hms(2026, 4, 29, 9, 0, 0).unwrap();
+    let end = Utc.with_ymd_and_hms(2026, 4, 29, 10, 0, 0).unwrap();
+    let logged = service_call(
+        "log_time",
+        time_service.log_time(TimeLogRequest {
+            task_ref: created.title.clone(),
+            start,
+            end,
+            description: Some("billable invoice hour".to_string()),
+            billable: true,
+            billable_rate: Some(20_000),
+            user: Some("agent".to_string()),
+        }),
+    )
+    .await;
+    assert_eq!(logged.duration_minutes(), 60);
     let entries = service_call(
         "list_time_entries",
         time_service.list_time_entries(TimeEntryFilter {
-            task_ref: Some(seeded.title.clone()),
+            task_ref: Some(created.title.clone()),
             user: Some("agent".to_string()),
             ..Default::default()
         }),
     )
     .await;
-    assert!(entries.is_empty());
+    assert!(entries.iter().any(|entry| entry.entry.id == logged.id));
 
+    let invoice = service_call(
+        "create_invoice_from_entries",
+        invoice_service.create_invoice_from_entries(InvoiceCreateRequest {
+            client_name: "E2E Client".to_string(),
+            from: Some(start),
+            to: Some(end),
+            fallback_rate: Some(10_000),
+            tax_rate_percent: Some(0.0),
+            discount_percent: Some(0.0),
+            po_number: Some("PO-E2E".to_string()),
+            public_notes: Some("Remote Vox invoice e2e".to_string()),
+            actor: Some("agent".to_string()),
+        }),
+    )
+    .await;
+    assert_eq!(invoice.client.0, "E2E Client");
+    assert!(invoice.total_cents() >= 20_000);
     let invoices = service_call("list_invoices", invoice_service.list_invoices()).await;
-    assert!(invoices.is_empty());
+    assert!(invoices.iter().any(|candidate| candidate.id == invoice.id));
+    let paid = service_call(
+        "record_invoice_payment",
+        invoice_service.record_invoice_payment(InvoicePaymentRequest {
+            invoice_id: invoice.id.clone(),
+            amount_cents: invoice.total_cents(),
+            method: Some("test".to_string()),
+            reference: Some("remote-e2e".to_string()),
+            notes: None,
+            actor: Some("agent".to_string()),
+        }),
+    )
+    .await;
+    assert_eq!(paid.balance_cents(), 0);
 
     let event_start = Utc.with_ymd_and_hms(2026, 4, 30, 15, 0, 0).unwrap();
     let event_end = Utc.with_ymd_and_hms(2026, 4, 30, 16, 0, 0).unwrap();
+    let event = service_call(
+        "create_event",
+        calendar_service.create_event(CalendarEvent {
+            title: "E2E calendar event".to_string(),
+            description: Some("Remote calendar event".to_string()),
+            location: Some("Remote".to_string()),
+            start: event_start,
+            end: Some(event_end),
+            status: CalendarEventStatus::Confirmed,
+            ..Default::default()
+        }),
+    )
+    .await;
+    assert!(event.id.is_some());
+    let updated_event = service_call(
+        "update_event",
+        calendar_service.update_event(
+            event.id.clone().expect("created event should have id"),
+            CalendarEventPatch {
+                title: Some("E2E calendar event updated".to_string()),
+                status: Some(CalendarEventStatus::Tentative),
+                ..Default::default()
+            },
+        ),
+    )
+    .await;
+    assert_eq!(updated_event.title, "E2E calendar event updated");
     let events = service_call(
         "events_between",
         calendar_service.events_between(event_start.to_rfc3339(), event_end.to_rfc3339()),
     )
     .await;
-    assert!(events.is_empty());
+    assert!(events
+        .iter()
+        .any(|candidate| candidate.title == updated_event.title));
     let due = service_call(
         "tasks_due_by",
-        calendar_service.tasks_due_by("2026-04-30".to_string()),
+        calendar_service.tasks_due_by("2026-05-02".to_string()),
     )
     .await;
-    assert!(due.is_empty());
+    assert!(due.iter().any(|task| task.title == created.title));
     let scheduled = service_call(
         "scheduled_between",
-        calendar_service.scheduled_between("2026-04-29".to_string(), "2026-04-30".to_string()),
+        calendar_service.scheduled_between("2026-05-01".to_string(), "2026-05-01".to_string()),
     )
     .await;
-    assert!(scheduled.is_empty());
+    assert!(scheduled.iter().any(|task| task.title == created.title));
     assert!(service_call("sync_status", calendar_service.sync_status())
         .await
         .is_none());
@@ -291,6 +432,18 @@ async fn authenticated_core_services_smoke_over_vox() {
         .await
     );
     assert!(service_error("list_accounts", mail_service.list_accounts()).await);
+
+    let completed = service_call(
+        "complete_task",
+        task_service.complete_task(created.title.clone()),
+    )
+    .await;
+    assert_eq!(completed.status, Status::Done);
+    service_call(
+        "delete_event",
+        calendar_service.delete_event(updated_event.id.expect("updated event should have id")),
+    )
+    .await;
 
     server.stop().await;
 }

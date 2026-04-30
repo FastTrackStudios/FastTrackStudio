@@ -21,7 +21,7 @@ use crate::service::{
     InvoicePaymentRequest, MailCreateMailboxRequest, MailCreateTagRequest, MailDeleteTagRequest,
     MailListMessagesRequest, MailMessageTagRequest, MailMoveMessageRequest, NextcloudCapability,
     ProjectPatch, RemoteDeckBoard, RemoteDeckStack, SyncStats, SystemCapabilities, SystemHealth,
-    TimeEntryContext, TimeEntryFilter, TimeEntryPatch, TimeLogRequest, TimeStartRequest,
+    ReviewReport, TimeEntryContext, TimeEntryFilter, TimeEntryPatch, TimeLogRequest, TimeStartRequest,
     TimedTaskEntry, VaultCapability, VaultError,
 };
 use crate::task::{Priority, Status, Task, WikiLink};
@@ -374,6 +374,16 @@ impl VaultServiceImpl {
             .filter(is_inbox_task)
             .map(|task| inbox_item_from_task(&task))
             .collect()
+    }
+
+    pub async fn daily_review_report(&self) -> ReviewReport {
+        let tasks = self.vault.read().await.load_tasks();
+        build_review_report(tasks, 7, 7)
+    }
+
+    pub async fn weekly_review_report(&self) -> ReviewReport {
+        let tasks = self.vault.read().await.load_tasks();
+        build_review_report(tasks, 30, 30)
     }
 
     pub async fn promote_inbox(&self, request: InboxPromoteRequest) -> Result<InboxItem, VaultError> {
@@ -2565,6 +2575,97 @@ fn is_inbox_task(task: &Task) -> bool {
     task.tags.iter().any(|tag| tag == "inbox") || task.issue_type.as_deref() == Some("inbox")
 }
 
+fn build_review_report(mut tasks: Vec<Task>, horizon_days: i64, stale_after_days: u32) -> ReviewReport {
+    let today = chrono::Local::now().date_naive();
+    let horizon_end = today + chrono::Duration::days(horizon_days);
+    let stale_before = today - chrono::Duration::days(stale_after_days as i64);
+    sort_review_tasks(&mut tasks);
+
+    ReviewReport {
+        generated_at: Utc::now(),
+        today: today.to_string(),
+        horizon_end: horizon_end.to_string(),
+        stale_after_days,
+        inbox: tasks
+            .iter()
+            .filter(|task| is_inbox_task(task))
+            .map(inbox_item_from_task)
+            .collect(),
+        commitments: review_tasks(&tasks, |task| task.issue_type.as_deref() == Some("commitment")),
+        ideas: review_tasks(&tasks, |task| is_idea_task(task) && !is_someday_task(task)),
+        someday: review_tasks(&tasks, is_someday_task),
+        waiting: review_tasks(&tasks, is_waiting_task),
+        overdue: review_tasks(&tasks, |task| task.due.map(|due| due < today).unwrap_or(false)),
+        due_today: review_tasks(&tasks, |task| task.due == Some(today)),
+        scheduled_today: review_tasks(&tasks, |task| task.scheduled == Some(today)),
+        upcoming: review_tasks(&tasks, |task| {
+            task.due
+                .or(task.scheduled)
+                .map(|date| date > today && date <= horizon_end)
+                .unwrap_or(false)
+        }),
+        unscheduled: review_tasks(&tasks, |task| {
+            task.due.is_none()
+                && task.scheduled.is_none()
+                && !is_inbox_task(task)
+                && !is_waiting_task(task)
+                && !is_idea_task(task)
+                && !is_someday_task(task)
+        }),
+        stale: review_tasks(&tasks, |task| {
+            task.date_modified
+                .map(|date| date.date_naive() < stale_before)
+                .unwrap_or(false)
+        }),
+    }
+}
+
+fn review_tasks(tasks: &[Task], predicate: impl Fn(&Task) -> bool) -> Vec<Task> {
+    tasks
+        .iter()
+        .filter(|task| is_review_actionable(task) && predicate(task))
+        .cloned()
+        .collect()
+}
+
+fn sort_review_tasks(tasks: &mut [Task]) {
+    tasks.sort_by(|a, b| {
+        a.due
+            .or(a.scheduled)
+            .cmp(&b.due.or(b.scheduled))
+            .then_with(|| b.priority.weight().cmp(&a.priority.weight()))
+            .then_with(|| b.urgency_score().cmp(&a.urgency_score()))
+            .then_with(|| a.title.cmp(&b.title))
+    });
+}
+
+fn is_review_actionable(task: &Task) -> bool {
+    !task.is_complete()
+        && !matches!(task.status, Status::Cancelled | Status::Archived)
+        && task.deleted_at.is_none()
+}
+
+fn is_waiting_task(task: &Task) -> bool {
+    task.issue_type
+        .as_deref()
+        .map(|kind| matches!(kind, "waiting" | "waiting-on"))
+        .unwrap_or(false)
+        || matches!(task.status, Status::OnHold)
+        || task.tags.iter().any(|tag| matches!(tag.as_str(), "waiting" | "waiting-on"))
+}
+
+fn is_idea_task(task: &Task) -> bool {
+    task.issue_type.as_deref() == Some("idea") || task.tags.iter().any(|tag| tag == "idea")
+}
+
+fn is_someday_task(task: &Task) -> bool {
+    task.issue_type
+        .as_deref()
+        .map(|kind| matches!(kind, "someday" | "maybe"))
+        .unwrap_or(false)
+        || task.tags.iter().any(|tag| matches!(tag.as_str(), "someday" | "maybe"))
+}
+
 fn task_matches_reference(task: &Task, reference: &str) -> bool {
     task.id.as_deref() == Some(reference) || task.title.eq_ignore_ascii_case(reference)
 }
@@ -2647,6 +2748,14 @@ impl crate::service::InboxService for VaultServiceImpl {
 
     async fn promote(&self, request: InboxPromoteRequest) -> Result<InboxItem, VaultError> {
         self.promote_inbox(request).await
+    }
+
+    async fn daily_review(&self) -> ReviewReport {
+        self.daily_review_report().await
+    }
+
+    async fn weekly_review(&self) -> ReviewReport {
+        self.weekly_review_report().await
     }
 }
 
@@ -3762,6 +3871,70 @@ mod tests {
         assert!(promoted.projects.iter().any(|project| project == "Operations"));
         assert!(!promoted.tags.iter().any(|tag| tag == "inbox"));
         assert!(svc.list_inbox_items().await.is_empty());
+
+        let _ = std::fs::remove_dir_all(vault);
+    }
+
+    #[tokio::test]
+    async fn inbox_review_buckets_life_and_business_work() {
+        let vault = temp_vault();
+        let svc = VaultServiceImpl::new(&vault);
+        let today = chrono::Local::now().date_naive();
+        let old = today - chrono::Duration::days(10);
+
+        for task in [
+            Task {
+                title: "Loose capture".to_string(),
+                tags: vec!["inbox".to_string()],
+                issue_type: Some("inbox".to_string()),
+                ..Default::default()
+            },
+            Task {
+                title: "Client commitment".to_string(),
+                issue_type: Some("commitment".to_string()),
+                due: Some(today),
+                ..Default::default()
+            },
+            Task {
+                title: "Waiting on vendor".to_string(),
+                issue_type: Some("waiting".to_string()),
+                status: Status::OnHold,
+                ..Default::default()
+            },
+            Task {
+                title: "Someday cabin idea".to_string(),
+                issue_type: Some("idea".to_string()),
+                tags: vec!["someday".to_string()],
+                ..Default::default()
+            },
+            Task {
+                title: "Overdue tax thing".to_string(),
+                due: Some(today - chrono::Duration::days(1)),
+                ..Default::default()
+            },
+        ] {
+            svc.create_task(task).await.unwrap();
+        }
+        svc.vault
+            .read()
+            .await
+            .save_task(&Task {
+                id: Some("stale-review-task".to_string()),
+                title: "Unscheduled stale thing".to_string(),
+                date_modified: Some(modified_at(&format!("{old}T00:00:00Z"))),
+                ..Default::default()
+            })
+            .unwrap();
+
+        let report = svc.daily_review_report().await;
+        assert!(report.inbox.iter().any(|item| item.title == "Loose capture"));
+        assert!(report.commitments.iter().any(|task| task.title == "Client commitment"));
+        assert!(report.due_today.iter().any(|task| task.title == "Client commitment"));
+        assert!(report.waiting.iter().any(|task| task.title == "Waiting on vendor"));
+        assert!(report.someday.iter().any(|task| task.title == "Someday cabin idea"));
+        assert!(report.overdue.iter().any(|task| task.title == "Overdue tax thing"));
+        assert!(report.unscheduled.iter().any(|task| task.title == "Unscheduled stale thing"));
+        assert!(report.stale.iter().any(|task| task.title == "Unscheduled stale thing"));
 
         let _ = std::fs::remove_dir_all(vault);
     }

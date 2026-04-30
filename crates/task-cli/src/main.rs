@@ -4,9 +4,9 @@ use task_core::index::{ChangeRow, ConflictRow};
 use task_core::workflows::{parse_comments, render_comments, Comment};
 use task_core::{
     CalendarEvent, CalendarEventPatch, CalendarEventStatus, Client, Filter, InboxCaptureRequest,
-    InboxItem, InboxPromoteRequest, Invoice, Priority, Project, Query, RelationType, Sort, Status,
-    SyncStats, SystemCapabilities, SystemHealth, Task, TaskRelation, TimeEntryContext,
-    TimeEntryFilter, VaultServiceImpl, WikiLink,
+    InboxItem, InboxPromoteRequest, Invoice, Priority, Project, Query, RelationType, ReviewReport,
+    Sort, Status, SyncStats, SystemCapabilities, SystemHealth, Task, TaskRelation,
+    TimeEntryContext, TimeEntryFilter, VaultServiceImpl, WikiLink,
 };
 
 #[derive(Parser)]
@@ -366,6 +366,18 @@ enum ServerCommands {
 enum InboxCommands {
     /// List untriaged inbox captures
     List {
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show daily review buckets
+    Daily {
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show weekly review buckets
+    Weekly {
         /// Output as JSON
         #[arg(long)]
         json: bool,
@@ -1379,6 +1391,14 @@ async fn main() -> eyre::Result<()> {
             InboxCommands::List { json } => {
                 let items = svc.list_inbox_items().await;
                 print_inbox_items(&items, json);
+            }
+            InboxCommands::Daily { json } => {
+                let report = svc.daily_review_report().await;
+                print_review_report(&report, json);
+            }
+            InboxCommands::Weekly { json } => {
+                let report = svc.weekly_review_report().await;
+                print_review_report(&report, json);
             }
             InboxCommands::Promote {
                 reference,
@@ -3367,6 +3387,14 @@ async fn run_remote_command(
                 InboxCommands::List { json } => {
                     let items = client.list_inbox().await?;
                     print_inbox_items(&items, json);
+                }
+                InboxCommands::Daily { json } => {
+                    let report = client.daily_review().await?;
+                    print_review_report(&report, json);
+                }
+                InboxCommands::Weekly { json } => {
+                    let report = client.weekly_review().await?;
+                    print_review_report(&report, json);
                 }
                 InboxCommands::Promote {
                     reference,
@@ -7487,6 +7515,77 @@ fn print_inbox_items(items: &[InboxItem], json: bool) {
         );
     }
     println!("\n{} inbox item(s)", items.len());
+}
+
+fn print_review_report(report: &ReviewReport, json: bool) {
+    if json {
+        println!("{}", facet_json::to_string(report).unwrap_or_default());
+        return;
+    }
+
+    println!(
+        "Review for {} through {} (stale after {} days)",
+        report.today, report.horizon_end, report.stale_after_days
+    );
+    println!(
+        "inbox {} | overdue {} | today {} | upcoming {} | waiting {} | ideas {} | unscheduled {} | stale {}",
+        report.inbox.len(),
+        report.overdue.len(),
+        report.due_today.len() + report.scheduled_today.len(),
+        report.upcoming.len(),
+        report.waiting.len(),
+        report.ideas.len() + report.someday.len(),
+        report.unscheduled.len(),
+        report.stale.len()
+    );
+
+    if !report.inbox.is_empty() {
+        println!("\nInbox");
+        print_inbox_items(&report.inbox, false);
+    }
+    print_review_task_bucket("Overdue", &report.overdue);
+    print_review_task_bucket("Due today", &report.due_today);
+    print_review_task_bucket("Scheduled today", &report.scheduled_today);
+    print_review_task_bucket("Upcoming", &report.upcoming);
+    print_review_task_bucket("Waiting", &report.waiting);
+    print_review_task_bucket("Commitments", &report.commitments);
+    print_review_task_bucket("Ideas", &report.ideas);
+    print_review_task_bucket("Someday / maybe", &report.someday);
+    print_review_task_bucket("Unscheduled", &report.unscheduled);
+    print_review_task_bucket("Stale", &report.stale);
+}
+
+fn print_review_task_bucket(label: &str, tasks: &[Task]) {
+    if tasks.is_empty() {
+        return;
+    }
+    println!("\n{label}");
+    for task in tasks.iter().take(20) {
+        let due = task
+            .due
+            .map(|date| date.to_string())
+            .unwrap_or_else(|| "—".to_string());
+        let scheduled = task
+            .scheduled
+            .map(|date| date.to_string())
+            .unwrap_or_else(|| "—".to_string());
+        let project = task
+            .projects
+            .first()
+            .map(|project| project.0.as_str())
+            .unwrap_or("—");
+        println!(
+            "  {:<46} {:<9} due {:<10} scheduled {:<10} {}",
+            truncate(&task.title, 46),
+            priority_label(&task.priority),
+            due,
+            scheduled,
+            project
+        );
+    }
+    if tasks.len() > 20 {
+        println!("  ... {} more", tasks.len() - 20);
+    }
 }
 
 fn print_task_detail(task: &Task) {

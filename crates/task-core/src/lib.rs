@@ -69,6 +69,7 @@ pub use service::{
     InvoiceService, InvoiceServiceDispatcher, MailCreateMailboxRequest, MailCreateTagRequest,
     MailDeleteTagRequest, MailListMessagesRequest, MailMessageTagRequest, MailMoveMessageRequest,
     MailService, MailServiceDispatcher, NextcloudCapability, ProjectPatch, ProjectService, ProjectServiceDispatcher,
+    ReviewReport,
     RemoteDeckBoard, RemoteDeckStack, SyncStats, SystemCapabilities, SystemHealth, SystemService, SystemServiceDispatcher, TaskService, TaskServiceDispatcher,
     TimeEntryContext, TimeEntryFilter, TimeEntryPatch, TimeLogRequest, TimeService,
     TimeServiceDispatcher, TimeStartRequest, TimedTaskEntry, VaultCapability, VaultError,
