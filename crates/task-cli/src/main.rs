@@ -3,10 +3,10 @@ use clap::{Parser, Subcommand};
 use task_core::index::{ChangeRow, ConflictRow};
 use task_core::workflows::{parse_comments, render_comments, Comment};
 use task_core::{
-    CalendarEvent, CalendarEventPatch, CalendarEventStatus, Client, Filter, InboxCaptureRequest,
-    InboxItem, InboxPromoteRequest, Invoice, Priority, Project, Query, RelationType, ReviewReport,
-    Sort, Status, SyncStats, SystemCapabilities, SystemHealth, Task, TaskRelation,
-    TimeEntryContext, TimeEntryFilter, VaultServiceImpl, WikiLink,
+    CalendarEvent, CalendarEventPatch, CalendarEventStatus, CardDavSyncCollectionRequest, Client,
+    Filter, InboxCaptureRequest, InboxItem, InboxPromoteRequest, Invoice, Priority, Project, Query,
+    RelationType, ReviewReport, Sort, Status, SyncStats, SystemCapabilities, SystemHealth, Task,
+    TaskRelation, TimeEntryContext, TimeEntryFilter, VaultServiceImpl, WikiLink,
 };
 
 #[derive(Parser)]
@@ -1013,6 +1013,29 @@ enum CalendarCommands {
     },
     /// Delete a calendar event by id or exact title
     Delete { reference: String },
+    /// CardDAV addressbook controls
+    Carddav {
+        #[command(subcommand)]
+        command: CardDavCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum CardDavCommands {
+    /// Discover addressbooks
+    Discover {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Sync an addressbook and print vCard objects
+    Sync {
+        #[arg(long, default_value = "contacts")]
+        addressbook: String,
+        #[arg(long)]
+        sync_token: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -2899,6 +2922,51 @@ async fn main() -> eyre::Result<()> {
             println!("Deleted calendar event: {reference}");
         }
 
+        Commands::Calendar {
+            command: CalendarCommands::Carddav { command },
+        } => match command {
+            CardDavCommands::Discover { json } => {
+                let discovery = svc.discover_carddav().await?;
+                if json {
+                    println!("{}", facet_json::to_string(&discovery).unwrap_or_default());
+                } else {
+                    println!("Addressbook home: {}", discovery.addressbook_home_set);
+                    for book in discovery.addressbooks {
+                        println!(
+                            "{}\t{}",
+                            book.name,
+                            book.display_name.as_deref().unwrap_or("—")
+                        );
+                    }
+                }
+            }
+            CardDavCommands::Sync {
+                addressbook,
+                sync_token,
+                json,
+            } => {
+                let sync = svc
+                    .addressbook_sync_collection(CardDavSyncCollectionRequest {
+                        addressbook,
+                        sync_token,
+                    })
+                    .await?;
+                if json {
+                    println!("{}", facet_json::to_string(&sync).unwrap_or_default());
+                } else {
+                    println!("sync-token: {}", sync.sync_token.as_deref().unwrap_or("—"));
+                    for object in sync.objects {
+                        let name = object
+                            .contact
+                            .as_ref()
+                            .and_then(|contact| contact.full_name.as_deref())
+                            .unwrap_or(object.href.as_str());
+                        println!("{}\t{}", object.href, name);
+                    }
+                }
+            }
+        },
+
         Commands::Agent { command } => {
             run_agent_command(&svc, &vault_path, actor.as_deref(), command).await?;
         }
@@ -4567,6 +4635,48 @@ async fn run_remote_calendar_command(
             client.delete_event(reference.clone()).await?;
             println!("Deleted calendar event: {reference}");
         }
+        CalendarCommands::Carddav { command } => match command {
+            CardDavCommands::Discover { json } => {
+                let discovery = client.discover_carddav().await?;
+                if json {
+                    println!("{}", facet_json::to_string(&discovery).unwrap_or_default());
+                } else {
+                    println!("Addressbook home: {}", discovery.addressbook_home_set);
+                    for book in discovery.addressbooks {
+                        println!(
+                            "{}\t{}",
+                            book.name,
+                            book.display_name.as_deref().unwrap_or("—")
+                        );
+                    }
+                }
+            }
+            CardDavCommands::Sync {
+                addressbook,
+                sync_token,
+                json,
+            } => {
+                let sync = client
+                    .addressbook_sync_collection(CardDavSyncCollectionRequest {
+                        addressbook,
+                        sync_token,
+                    })
+                    .await?;
+                if json {
+                    println!("{}", facet_json::to_string(&sync).unwrap_or_default());
+                } else {
+                    println!("sync-token: {}", sync.sync_token.as_deref().unwrap_or("—"));
+                    for object in sync.objects {
+                        let name = object
+                            .contact
+                            .as_ref()
+                            .and_then(|contact| contact.full_name.as_deref())
+                            .unwrap_or(object.href.as_str());
+                        println!("{}\t{}", object.href, name);
+                    }
+                }
+            }
+        },
     }
     Ok(())
 }

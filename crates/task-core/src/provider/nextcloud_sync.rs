@@ -12,7 +12,8 @@ use crate::service::{
     CalDavAlarm, CalDavCalendarInfo, CalDavDiscovery, CalDavEventInstance,
     CalDavFreeBusyInterval, CalDavObject, CalDavObjectDetails, CalDavParameter,
     CalDavParticipant, CalDavProperty, CalDavScheduleResponse, CalDavSyncCollectionResponse,
-    CalDavTimezone, VaultError,
+    CalDavTimezone, CardDavAddressBookInfo, CardDavContact, CardDavDiscovery, CardDavObject,
+    CardDavSyncCollectionResponse, VaultError,
 };
 use crate::task::{Priority, Status, Task, WikiLink};
 // Deck API response types use serde for JSON deserialization (complex nested structures).
@@ -390,6 +391,26 @@ impl NextcloudSync {
         format!("{}{}", self.calendar_collection_url(calendar), href)
     }
 
+    fn addressbook_collection_url(&self, addressbook: &str) -> String {
+        if addressbook.starts_with("http://") || addressbook.starts_with("https://") {
+            return ensure_trailing_slash(addressbook);
+        }
+        if addressbook.starts_with('/') {
+            return format!("{}{}", self.base_url, ensure_trailing_slash(addressbook));
+        }
+        format!(
+            "{}/remote.php/dav/addressbooks/users/{}/{}/",
+            self.base_url, self.username, addressbook
+        )
+    }
+
+    fn addressbook_object_url(&self, addressbook: &str, href: &str) -> String {
+        if href.starts_with("http://") || href.starts_with("https://") || href.starts_with('/') {
+            return self.absolute_dav_url(href);
+        }
+        format!("{}{}", self.addressbook_collection_url(addressbook), href)
+    }
+
     pub async fn discover_calendars(&self) -> Result<CalDavDiscovery, VaultError> {
         let root = format!("{}/remote.php/dav/", self.base_url);
         let principal_body = r#"<?xml version="1.0" encoding="utf-8"?>
@@ -450,6 +471,164 @@ impl NextcloudSync {
             calendar_user_addresses,
             calendars,
         })
+    }
+
+    pub async fn discover_addressbooks(&self) -> Result<CardDavDiscovery, VaultError> {
+        let root = format!("{}/remote.php/dav/", self.base_url);
+        let principal_body = r#"<?xml version="1.0" encoding="utf-8"?>
+<d:propfind xmlns:d="DAV:">
+  <d:prop><d:current-user-principal/></d:prop>
+</d:propfind>"#;
+        let principal_xml = self.propfind(&root, "0", principal_body).await?;
+        let principal_url = extract_href_from_prop(&principal_xml, "current-user-principal")
+            .unwrap_or_else(|| format!("/remote.php/dav/principals/users/{}/", self.username));
+
+        let home_body = r#"<?xml version="1.0" encoding="utf-8"?>
+<d:propfind xmlns:d="DAV:" xmlns:card="urn:ietf:params:xml:ns:carddav">
+  <d:prop>
+    <card:addressbook-home-set/>
+  </d:prop>
+</d:propfind>"#;
+        let principal_url_abs = self.absolute_dav_url(&principal_url);
+        let home_xml = self.propfind(&principal_url_abs, "0", home_body).await?;
+        let addressbook_home_set = extract_href_from_prop(&home_xml, "addressbook-home-set")
+            .unwrap_or_else(|| format!("/remote.php/dav/addressbooks/users/{}/", self.username));
+
+        let addressbooks_body = r#"<?xml version="1.0" encoding="utf-8"?>
+<d:propfind xmlns:d="DAV:" xmlns:card="urn:ietf:params:xml:ns:carddav" xmlns:cs="http://calendarserver.org/ns/">
+  <d:prop>
+    <d:displayname/>
+    <d:resourcetype/>
+    <d:sync-token/>
+    <cs:getctag/>
+    <card:addressbook-description/>
+  </d:prop>
+</d:propfind>"#;
+        let addressbook_home_abs = self.absolute_dav_url(&addressbook_home_set);
+        let addressbooks_xml = self
+            .propfind(&addressbook_home_abs, "1", addressbooks_body)
+            .await?;
+        let addressbooks = parse_addressbook_home_multistatus(&addressbooks_xml);
+
+        Ok(CardDavDiscovery {
+            principal_url,
+            addressbook_home_set,
+            addressbooks,
+        })
+    }
+
+    pub async fn addressbook_multiget(
+        &self,
+        addressbook: &str,
+        hrefs: &[String],
+    ) -> Result<Vec<CardDavObject>, VaultError> {
+        if hrefs.is_empty() {
+            return Ok(Vec::new());
+        }
+        let url = self.addressbook_collection_url(addressbook);
+        let href_xml = hrefs
+            .iter()
+            .map(|href| format!("  <d:href>{}</d:href>", escape_xml(href)))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let body = format!(
+            r#"<?xml version="1.0" encoding="utf-8"?>
+<card:addressbook-multiget xmlns:d="DAV:" xmlns:card="urn:ietf:params:xml:ns:carddav">
+  <d:prop>
+    <d:getetag/>
+    <card:address-data/>
+  </d:prop>
+{href_xml}
+</card:addressbook-multiget>"#
+        );
+        let xml = self
+            .report(&url, "1", &body, "CardDAV addressbook-multiget")
+            .await?;
+        Ok(parse_carddav_objects(&xml))
+    }
+
+    pub async fn sync_addressbook_collection(
+        &self,
+        addressbook: &str,
+        sync_token: Option<&str>,
+    ) -> Result<CardDavSyncCollectionResponse, VaultError> {
+        let url = self.addressbook_collection_url(addressbook);
+        let token = sync_token.unwrap_or("");
+        let body = format!(
+            r#"<?xml version="1.0" encoding="utf-8"?>
+<d:sync-collection xmlns:d="DAV:" xmlns:card="urn:ietf:params:xml:ns:carddav">
+  <d:sync-token>{}</d:sync-token>
+  <d:sync-level>1</d:sync-level>
+  <d:prop>
+    <d:getetag/>
+    <card:address-data/>
+  </d:prop>
+</d:sync-collection>"#,
+            escape_xml(token)
+        );
+        let xml = self
+            .report(&url, "1", &body, "CardDAV sync-collection")
+            .await?;
+        Ok(CardDavSyncCollectionResponse {
+            sync_token: extract_first_text(&xml, "sync-token"),
+            objects: parse_carddav_objects(&xml),
+        })
+    }
+
+    pub async fn put_addressbook_object(
+        &self,
+        addressbook: &str,
+        href: &str,
+        address_data: &str,
+        if_match: Option<&str>,
+        if_none_match: Option<&str>,
+    ) -> Result<(), VaultError> {
+        let url = self.addressbook_object_url(addressbook, href);
+        let mut req = self
+            .auth(self.http.put(&url))
+            .header("Content-Type", "text/vcard; charset=utf-8");
+        if let Some(etag) = if_match {
+            req = req.header("If-Match", etag);
+        }
+        if let Some(etag) = if_none_match {
+            req = req.header("If-None-Match", etag);
+        }
+        let resp = req
+            .body(address_data.to_string())
+            .send()
+            .await
+            .map_err(|e| VaultError::IoError(format!("CardDAV object PUT: {e}")))?;
+        if !resp.status().is_success() {
+            return Err(VaultError::IoError(format!(
+                "CardDAV object PUT {url}: {}",
+                resp.status()
+            )));
+        }
+        Ok(())
+    }
+
+    pub async fn delete_addressbook_object(
+        &self,
+        addressbook: &str,
+        href: &str,
+        if_match: Option<&str>,
+    ) -> Result<(), VaultError> {
+        let url = self.addressbook_object_url(addressbook, href);
+        let mut req = self.auth(self.http.delete(&url));
+        if let Some(etag) = if_match {
+            req = req.header("If-Match", etag);
+        }
+        let resp = req
+            .send()
+            .await
+            .map_err(|e| VaultError::IoError(format!("CardDAV object DELETE: {e}")))?;
+        if !resp.status().is_success() && resp.status().as_u16() != 404 {
+            return Err(VaultError::IoError(format!(
+                "CardDAV object DELETE {url}: {}",
+                resp.status()
+            )));
+        }
+        Ok(())
     }
 
     pub async fn calendar_multiget(
@@ -2100,6 +2279,35 @@ fn parse_calendar_home_multistatus(xml: &str) -> Vec<CalDavCalendarInfo> {
         .collect()
 }
 
+fn parse_addressbook_home_multistatus(xml: &str) -> Vec<CardDavAddressBookInfo> {
+    extract_elements(xml, "response")
+        .into_iter()
+        .filter_map(|response| {
+            if !response.contains(":addressbook") && !response.contains("<addressbook") {
+                return None;
+            }
+            let href = extract_first_text(&response, "href")?;
+            let name = href
+                .trim_end_matches('/')
+                .rsplit('/')
+                .next()
+                .unwrap_or("")
+                .to_string();
+            if name.is_empty() {
+                return None;
+            }
+            Some(CardDavAddressBookInfo {
+                href,
+                name,
+                display_name: extract_first_text(&response, "displayname"),
+                description: extract_first_text(&response, "addressbook-description"),
+                sync_token: extract_first_text(&response, "sync-token"),
+                ctag: extract_first_text(&response, "getctag"),
+            })
+        })
+        .collect()
+}
+
 fn parse_caldav_objects(xml: &str) -> Vec<CalDavObject> {
     extract_elements(xml, "response")
         .into_iter()
@@ -2131,6 +2339,75 @@ fn parse_caldav_objects(xml: &str) -> Vec<CalDavObject> {
             })
         })
         .collect()
+}
+
+fn parse_carddav_objects(xml: &str) -> Vec<CardDavObject> {
+    extract_elements(xml, "response")
+        .into_iter()
+        .filter_map(|response| {
+            let href = extract_first_text(&response, "href")?;
+            let status = extract_first_text(&response, "status").unwrap_or_default();
+            let deleted = status.contains(" 404 ") || status.ends_with(" 404");
+            let address_data = extract_first_text(&response, "address-data");
+            let contact = address_data.as_deref().map(parse_vcard_contact);
+            Some(CardDavObject {
+                href,
+                etag: extract_first_text(&response, "getetag"),
+                status,
+                address_data,
+                contact,
+                deleted,
+            })
+        })
+        .collect()
+}
+
+fn parse_vcard_contact(vcard: &str) -> CardDavContact {
+    let mut contact = CardDavContact::default();
+    for line in unfold_vcard_lines(vcard) {
+        let Some((name_params, value)) = line.split_once(':') else {
+            continue;
+        };
+        let name = name_params
+            .split(';')
+            .next()
+            .unwrap_or("")
+            .to_ascii_uppercase();
+        match name.as_str() {
+            "UID" => contact.uid = Some(value.to_string()),
+            "FN" => contact.full_name = Some(value.to_string()),
+            "N" => {
+                let mut parts = value.split(';');
+                contact.family_name = parts.next().filter(|v| !v.is_empty()).map(str::to_string);
+                contact.given_name = parts.next().filter(|v| !v.is_empty()).map(str::to_string);
+                contact.additional_names = parts.next().filter(|v| !v.is_empty()).map(str::to_string);
+                contact.prefixes = parts.next().filter(|v| !v.is_empty()).map(str::to_string);
+                contact.suffixes = parts.next().filter(|v| !v.is_empty()).map(str::to_string);
+            }
+            "ORG" => contact.organization = value.split(';').next().map(str::to_string),
+            "TITLE" => contact.title = Some(value.to_string()),
+            "EMAIL" => contact.emails.push(value.to_string()),
+            "TEL" => contact.phones.push(value.to_string()),
+            "URL" => contact.urls.push(value.to_string()),
+            "NOTE" => contact.note = Some(value.to_string()),
+            _ => {}
+        }
+    }
+    contact
+}
+
+fn unfold_vcard_lines(vcard: &str) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    for raw in vcard.replace("\r\n", "\n").lines() {
+        if raw.starts_with(' ') || raw.starts_with('\t') {
+            if let Some(last) = lines.last_mut() {
+                last.push_str(raw.trim_start());
+            }
+        } else {
+            lines.push(raw.to_string());
+        }
+    }
+    lines
 }
 
 fn calendar_component(ics: &str) -> Option<String> {
@@ -2701,6 +2978,53 @@ mod tests {
             Some("Calendar event")
         );
         assert!(objects[2].deleted);
+    }
+
+    #[test]
+    fn carddav_parsers_extract_addressbooks_contacts_and_deletes() {
+        let discovery_xml = r#"<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:" xmlns:card="urn:ietf:params:xml:ns:carddav" xmlns:cs="http://calendarserver.org/ns/">
+  <d:response>
+    <d:href>/remote.php/dav/addressbooks/users/agent/contacts/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>Contacts</d:displayname>
+        <d:resourcetype><d:collection/><card:addressbook/></d:resourcetype>
+        <d:sync-token>http://nextcloud/ns/sync/12</d:sync-token>
+        <cs:getctag>5</cs:getctag>
+        <card:addressbook-description>People and organizations</card:addressbook-description>
+      </d:prop>
+    </d:propstat>
+  </d:response>
+</d:multistatus>"#;
+        let books = parse_addressbook_home_multistatus(discovery_xml);
+        assert_eq!(books.len(), 1);
+        assert_eq!(books[0].name, "contacts");
+        assert_eq!(books[0].display_name.as_deref(), Some("Contacts"));
+
+        let vcard = escape_xml(
+            "BEGIN:VCARD\r\nVERSION:4.0\r\nUID:person-1\r\nFN:Ada Lovelace\r\nN:Lovelace;Ada;;;\r\nORG:Analytical Engines;Research\r\nTITLE:Founder\r\nEMAIL;TYPE=work:ada@example.com\r\nTEL;TYPE=cell:+15550100\r\nURL:https://example.com\r\nNOTE:Met at launch\r\nEND:VCARD\r\n",
+        );
+        let xml = format!(
+            r#"<d:multistatus xmlns:d="DAV:" xmlns:card="urn:ietf:params:xml:ns:carddav">
+  <d:response>
+    <d:href>/remote.php/dav/addressbooks/users/agent/contacts/person-1.vcf</d:href>
+    <d:propstat><d:prop><d:getetag>"abc"</d:getetag><card:address-data>{vcard}</card:address-data></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/remote.php/dav/addressbooks/users/agent/contacts/deleted.vcf</d:href>
+    <d:status>HTTP/1.1 404 Not Found</d:status>
+  </d:response>
+</d:multistatus>"#
+        );
+        let objects = parse_carddav_objects(&xml);
+        assert_eq!(objects.len(), 2);
+        let contact = objects[0].contact.as_ref().expect("contact parsed");
+        assert_eq!(contact.uid.as_deref(), Some("person-1"));
+        assert_eq!(contact.full_name.as_deref(), Some("Ada Lovelace"));
+        assert_eq!(contact.organization.as_deref(), Some("Analytical Engines"));
+        assert_eq!(contact.emails, vec!["ada@example.com"]);
+        assert!(objects[1].deleted);
     }
 
     #[test]

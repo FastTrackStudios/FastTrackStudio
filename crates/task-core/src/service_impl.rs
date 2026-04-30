@@ -15,7 +15,9 @@ use crate::service::{
     CalDavDeleteObjectRequest, CalDavDiscovery, CalDavFreeBusyInterval, CalDavFreeBusyRequest,
     CalDavMultigetRequest, CalDavObject, CalDavPutObjectRequest, CalDavScheduleRequest,
     CalDavScheduleResponse, CalDavSyncCollectionRequest, CalDavSyncCollectionResponse,
-    CalendarEventPatch, EmailLinkRequest, EmailLinkResponse, EmailListRequest, EmailUnlinkRequest,
+    CalendarEventPatch, CardDavDeleteObjectRequest, CardDavDiscovery, CardDavMultigetRequest,
+    CardDavObject, CardDavPutObjectRequest, CardDavSyncCollectionRequest,
+    CardDavSyncCollectionResponse, EmailLinkRequest, EmailLinkResponse, EmailListRequest, EmailUnlinkRequest,
     FileCopyMoveRequest, FileEntry, FileReadResponse, FileWriteRequest, InboxCaptureRequest,
     InboxItem, InboxPromoteRequest, InvoiceCreateRequest,
     InvoicePaymentRequest, MailCreateMailboxRequest, MailCreateTagRequest, MailDeleteTagRequest,
@@ -829,6 +831,14 @@ impl VaultServiceImpl {
             .await
     }
 
+    pub async fn discover_carddav(&self) -> Result<CardDavDiscovery, VaultError> {
+        let config = NextcloudRuntimeConfig::load()?
+            .ok_or_else(|| VaultError::IoError("Nextcloud CardDAV is not configured".into()))?;
+        Self::nextcloud_sync_from_config(&config)
+            .discover_addressbooks()
+            .await
+    }
+
     pub async fn calendar_multiget(
         &self,
         request: CalDavMultigetRequest,
@@ -858,6 +868,38 @@ impl VaultServiceImpl {
         };
         Self::nextcloud_sync_from_config(&config)
             .sync_calendar_collection(calendar, request.sync_token.as_deref())
+            .await
+    }
+
+    pub async fn addressbook_multiget(
+        &self,
+        request: CardDavMultigetRequest,
+    ) -> Result<Vec<CardDavObject>, VaultError> {
+        let config = NextcloudRuntimeConfig::load()?
+            .ok_or_else(|| VaultError::IoError("Nextcloud CardDAV is not configured".into()))?;
+        let addressbook = if request.addressbook.is_empty() {
+            "contacts"
+        } else {
+            request.addressbook.as_str()
+        };
+        Self::nextcloud_sync_from_config(&config)
+            .addressbook_multiget(addressbook, &request.hrefs)
+            .await
+    }
+
+    pub async fn addressbook_sync_collection(
+        &self,
+        request: CardDavSyncCollectionRequest,
+    ) -> Result<CardDavSyncCollectionResponse, VaultError> {
+        let config = NextcloudRuntimeConfig::load()?
+            .ok_or_else(|| VaultError::IoError("Nextcloud CardDAV is not configured".into()))?;
+        let addressbook = if request.addressbook.is_empty() {
+            "contacts"
+        } else {
+            request.addressbook.as_str()
+        };
+        Self::nextcloud_sync_from_config(&config)
+            .sync_addressbook_collection(addressbook, request.sync_token.as_deref())
             .await
     }
 
@@ -896,6 +938,44 @@ impl VaultServiceImpl {
         };
         Self::nextcloud_sync_from_config(&config)
             .delete_calendar_object(calendar, &request.href, request.if_match.as_deref())
+            .await
+    }
+
+    pub async fn put_addressbook_object(
+        &self,
+        request: CardDavPutObjectRequest,
+    ) -> Result<(), VaultError> {
+        let config = NextcloudRuntimeConfig::load()?
+            .ok_or_else(|| VaultError::IoError("Nextcloud CardDAV is not configured".into()))?;
+        let addressbook = if request.addressbook.is_empty() {
+            "contacts"
+        } else {
+            request.addressbook.as_str()
+        };
+        Self::nextcloud_sync_from_config(&config)
+            .put_addressbook_object(
+                addressbook,
+                &request.href,
+                &request.address_data,
+                request.if_match.as_deref(),
+                request.if_none_match.as_deref(),
+            )
+            .await
+    }
+
+    pub async fn delete_addressbook_object(
+        &self,
+        request: CardDavDeleteObjectRequest,
+    ) -> Result<(), VaultError> {
+        let config = NextcloudRuntimeConfig::load()?
+            .ok_or_else(|| VaultError::IoError("Nextcloud CardDAV is not configured".into()))?;
+        let addressbook = if request.addressbook.is_empty() {
+            "contacts"
+        } else {
+            request.addressbook.as_str()
+        };
+        Self::nextcloud_sync_from_config(&config)
+            .delete_addressbook_object(addressbook, &request.href, request.if_match.as_deref())
             .await
     }
 
@@ -3424,6 +3504,9 @@ impl crate::service::CalendarService for VaultServiceImpl {
     async fn discover_caldav(&self) -> Result<CalDavDiscovery, VaultError> {
         VaultServiceImpl::discover_caldav(self).await
     }
+    async fn discover_carddav(&self) -> Result<CardDavDiscovery, VaultError> {
+        VaultServiceImpl::discover_carddav(self).await
+    }
     async fn calendar_multiget(
         &self,
         request: CalDavMultigetRequest,
@@ -3436,6 +3519,18 @@ impl crate::service::CalendarService for VaultServiceImpl {
     ) -> Result<CalDavSyncCollectionResponse, VaultError> {
         VaultServiceImpl::calendar_sync_collection(self, request).await
     }
+    async fn addressbook_multiget(
+        &self,
+        request: CardDavMultigetRequest,
+    ) -> Result<Vec<CardDavObject>, VaultError> {
+        VaultServiceImpl::addressbook_multiget(self, request).await
+    }
+    async fn addressbook_sync_collection(
+        &self,
+        request: CardDavSyncCollectionRequest,
+    ) -> Result<CardDavSyncCollectionResponse, VaultError> {
+        VaultServiceImpl::addressbook_sync_collection(self, request).await
+    }
     async fn put_calendar_object(&self, request: CalDavPutObjectRequest) -> Result<(), VaultError> {
         VaultServiceImpl::put_calendar_object(self, request).await
     }
@@ -3444,6 +3539,15 @@ impl crate::service::CalendarService for VaultServiceImpl {
         request: CalDavDeleteObjectRequest,
     ) -> Result<(), VaultError> {
         VaultServiceImpl::delete_calendar_object(self, request).await
+    }
+    async fn put_addressbook_object(&self, request: CardDavPutObjectRequest) -> Result<(), VaultError> {
+        VaultServiceImpl::put_addressbook_object(self, request).await
+    }
+    async fn delete_addressbook_object(
+        &self,
+        request: CardDavDeleteObjectRequest,
+    ) -> Result<(), VaultError> {
+        VaultServiceImpl::delete_addressbook_object(self, request).await
     }
     async fn send_calendar_schedule(
         &self,

@@ -224,6 +224,9 @@ pub trait CalendarService {
     /// Discover CalDAV principal, calendar home, and available calendars.
     async fn discover_caldav(&self) -> Result<CalDavDiscovery, VaultError>;
 
+    /// Discover CardDAV principal, addressbook home, and available addressbooks.
+    async fn discover_carddav(&self) -> Result<CardDavDiscovery, VaultError>;
+
     /// Fetch specific calendar objects by href using CalDAV calendar-multiget.
     async fn calendar_multiget(
         &self,
@@ -236,6 +239,18 @@ pub trait CalendarService {
         request: CalDavSyncCollectionRequest,
     ) -> Result<CalDavSyncCollectionResponse, VaultError>;
 
+    /// Fetch specific vCards by href using CardDAV addressbook-multiget.
+    async fn addressbook_multiget(
+        &self,
+        request: CardDavMultigetRequest,
+    ) -> Result<Vec<CardDavObject>, VaultError>;
+
+    /// Incrementally sync an addressbook using a previous sync-token.
+    async fn addressbook_sync_collection(
+        &self,
+        request: CardDavSyncCollectionRequest,
+    ) -> Result<CardDavSyncCollectionResponse, VaultError>;
+
     /// Put one raw VCALENDAR object, optionally guarded by ETag preconditions.
     async fn put_calendar_object(&self, request: CalDavPutObjectRequest) -> Result<(), VaultError>;
 
@@ -243,6 +258,15 @@ pub trait CalendarService {
     async fn delete_calendar_object(
         &self,
         request: CalDavDeleteObjectRequest,
+    ) -> Result<(), VaultError>;
+
+    /// Put one raw VCARD object, optionally guarded by ETag preconditions.
+    async fn put_addressbook_object(&self, request: CardDavPutObjectRequest) -> Result<(), VaultError>;
+
+    /// Delete one raw vCard object, optionally guarded by If-Match.
+    async fn delete_addressbook_object(
+        &self,
+        request: CardDavDeleteObjectRequest,
     ) -> Result<(), VaultError>;
 
     /// Send an iTIP VCALENDAR payload through the CalDAV scheduling outbox.
@@ -396,6 +420,50 @@ pub struct CalDavCalendarInfo {
 }
 
 #[derive(Debug, Clone, Default, facet::Facet)]
+pub struct CardDavDiscovery {
+    pub principal_url: String,
+    pub addressbook_home_set: String,
+    pub addressbooks: Vec<CardDavAddressBookInfo>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct CardDavAddressBookInfo {
+    pub href: String,
+    pub name: String,
+    pub display_name: Option<String>,
+    pub description: Option<String>,
+    pub sync_token: Option<String>,
+    pub ctag: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct CardDavObject {
+    pub href: String,
+    pub etag: Option<String>,
+    pub status: String,
+    pub address_data: Option<String>,
+    pub contact: Option<CardDavContact>,
+    pub deleted: bool,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct CardDavContact {
+    pub uid: Option<String>,
+    pub full_name: Option<String>,
+    pub family_name: Option<String>,
+    pub given_name: Option<String>,
+    pub additional_names: Option<String>,
+    pub prefixes: Option<String>,
+    pub suffixes: Option<String>,
+    pub organization: Option<String>,
+    pub title: Option<String>,
+    pub emails: Vec<String>,
+    pub phones: Vec<String>,
+    pub urls: Vec<String>,
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
 pub struct CalDavObject {
     pub href: String,
     pub etag: Option<String>,
@@ -494,12 +562,46 @@ pub struct CalDavSyncCollectionResponse {
 }
 
 #[derive(Debug, Clone, Default, facet::Facet)]
+pub struct CardDavSyncCollectionResponse {
+    pub sync_token: Option<String>,
+    pub objects: Vec<CardDavObject>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
 pub struct CalDavPutObjectRequest {
     pub calendar: String,
     pub href: String,
     pub calendar_data: String,
     pub if_match: Option<String>,
     pub if_none_match: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct CardDavMultigetRequest {
+    pub addressbook: String,
+    pub hrefs: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct CardDavSyncCollectionRequest {
+    pub addressbook: String,
+    pub sync_token: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct CardDavPutObjectRequest {
+    pub addressbook: String,
+    pub href: String,
+    pub address_data: String,
+    pub if_match: Option<String>,
+    pub if_none_match: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct CardDavDeleteObjectRequest {
+    pub addressbook: String,
+    pub href: String,
+    pub if_match: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, facet::Facet)]
