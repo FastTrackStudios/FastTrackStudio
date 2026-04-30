@@ -4,7 +4,8 @@ use task_core::index::{ChangeRow, ConflictRow};
 use task_core::workflows::{parse_comments, render_comments, Comment};
 use task_core::{
     CalendarEvent, CalendarEventPatch, CalendarEventStatus, CardDavSyncCollectionRequest, Client,
-    Filter, InboxCaptureRequest, InboxItem, InboxPromoteRequest, Invoice, Priority, Project, Query,
+    Filter, InboxCaptureRequest, InboxItem, InboxPromoteRequest, Invoice, OrganizationContext,
+    OrganizationRecord, Person, PersonContext, Priority, Project, ProviderSyncState, Query,
     RelationType, ReviewReport, Sort, Status, SyncStats, SystemCapabilities, SystemHealth, Task,
     TaskRelation, TimeEntryContext, TimeEntryFilter, VaultServiceImpl, WikiLink,
 };
@@ -122,6 +123,11 @@ enum Commands {
         #[command(subcommand)]
         command: InboxCommands,
     },
+    /// People, organizations, and relationship context
+    People {
+        #[command(subcommand)]
+        command: PeopleCommands,
+    },
     /// Mark a task as complete
     Complete { title: String },
     /// Show detailed info for a task
@@ -233,6 +239,9 @@ enum Commands {
     Sync {
         #[arg(long)]
         json: bool,
+        /// Print persisted provider sync state instead of triggering sync
+        #[arg(long)]
+        state: bool,
     },
     /// Nextcloud Talk — conversational surface for bots and humans
     Talk {
@@ -402,6 +411,40 @@ enum InboxCommands {
         #[arg(long = "tag")]
         add_tags: Vec<String>,
         /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum PeopleCommands {
+    /// List CardDAV-backed people
+    List {
+        #[arg(long)]
+        addressbook: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// List CardDAV-backed organizations
+    Orgs {
+        #[arg(long)]
+        addressbook: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show one person with related tasks/projects/events
+    Show {
+        reference: String,
+        #[arg(long)]
+        addressbook: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show one organization with related people/tasks/projects/events
+    Org {
+        reference: String,
+        #[arg(long)]
+        addressbook: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -1451,6 +1494,37 @@ async fn main() -> eyre::Result<()> {
             }
         },
 
+        Commands::People { command } => match command {
+            PeopleCommands::List { addressbook, json } => {
+                let people = svc.list_people_from_carddav(addressbook).await?;
+                print_people(&people, json);
+            }
+            PeopleCommands::Orgs { addressbook, json } => {
+                let orgs = svc.list_organizations_from_carddav(addressbook).await?;
+                print_organizations(&orgs, json);
+            }
+            PeopleCommands::Show {
+                reference,
+                addressbook,
+                json,
+            } => {
+                let context = svc
+                    .person_context_from_carddav(reference, addressbook)
+                    .await?;
+                print_person_context(context.as_ref(), json);
+            }
+            PeopleCommands::Org {
+                reference,
+                addressbook,
+                json,
+            } => {
+                let context = svc
+                    .organization_context_from_carddav(reference, addressbook)
+                    .await?;
+                print_organization_context(context.as_ref(), json);
+            }
+        },
+
         Commands::Complete { title } => {
             let task = svc.complete_task_as(title, actor.as_deref()).await?;
             if task.recurrence.is_some() {
@@ -2403,7 +2477,12 @@ async fn main() -> eyre::Result<()> {
             }
         }
 
-        Commands::Sync { json } => {
+        Commands::Sync { json, state } => {
+            if state {
+                let states = svc.list_provider_sync_states().await?;
+                print_sync_states(&states, json);
+                return Ok(());
+            }
             let stats = svc.trigger_sync().await?;
             if json {
                 println!("{}", facet_json::to_string(&stats).unwrap_or_default());
@@ -3290,6 +3369,10 @@ impl RemoteVoxConfig {
         self.connect().await
     }
 
+    async fn people(&self) -> eyre::Result<task_core::service::PeopleServiceClient> {
+        self.connect().await
+    }
+
     async fn invoice(&self) -> eyre::Result<task_core::service::InvoiceServiceClient> {
         self.connect().await
     }
@@ -3489,6 +3572,36 @@ async fn run_remote_command(
                         })
                         .await?;
                     print_inbox_capture(&item, json);
+                }
+            }
+        }
+
+        Commands::People { command } => {
+            let client = remote.people().await?;
+            match command {
+                PeopleCommands::List { addressbook, json } => {
+                    let people = client.list_people(addressbook).await?;
+                    print_people(&people, json);
+                }
+                PeopleCommands::Orgs { addressbook, json } => {
+                    let orgs = client.list_organizations(addressbook).await?;
+                    print_organizations(&orgs, json);
+                }
+                PeopleCommands::Show {
+                    reference,
+                    addressbook,
+                    json,
+                } => {
+                    let context = client.person_context(reference, addressbook).await?;
+                    print_person_context(context.as_ref(), json);
+                }
+                PeopleCommands::Org {
+                    reference,
+                    addressbook,
+                    json,
+                } => {
+                    let context = client.organization_context(reference, addressbook).await?;
+                    print_organization_context(context.as_ref(), json);
                 }
             }
         }
@@ -3695,7 +3808,12 @@ async fn run_remote_command(
 
         Commands::Comment { command } => run_remote_comment_command(remote, actor, command).await?,
 
-        Commands::Sync { json } => {
+        Commands::Sync { json, state } => {
+            if state {
+                let states = remote.activity().await?.list_sync_states().await?;
+                print_sync_states(&states, json);
+                return Ok(());
+            }
             let stats = remote.calendar().await?.trigger_sync().await?;
             if json {
                 println!("{}", facet_json::to_string(&stats).unwrap_or_default());
@@ -7695,6 +7813,160 @@ fn print_review_task_bucket(label: &str, tasks: &[Task]) {
     }
     if tasks.len() > 20 {
         println!("  ... {} more", tasks.len() - 20);
+    }
+}
+
+fn print_people(people: &[Person], json: bool) {
+    if json {
+        println!("[");
+        for (index, person) in people.iter().enumerate() {
+            let comma = if index + 1 < people.len() { "," } else { "" };
+            println!(
+                "  {}{comma}",
+                facet_json::to_string(person).unwrap_or_default()
+            );
+        }
+        println!("]");
+        return;
+    }
+    if people.is_empty() {
+        println!("No people found.");
+        return;
+    }
+    for person in people {
+        let primary = person
+            .contact_methods
+            .iter()
+            .find(|method| method.primary)
+            .or_else(|| person.contact_methods.first())
+            .map(|method| method.value.as_str())
+            .unwrap_or("—");
+        println!(
+            "{:<32} {:<28} {}",
+            truncate(&person.display_name, 32),
+            truncate(person.organization.as_deref().unwrap_or("—"), 28),
+            primary
+        );
+    }
+    println!("\n{} people", people.len());
+}
+
+fn print_organizations(organizations: &[OrganizationRecord], json: bool) {
+    if json {
+        println!("[");
+        for (index, org) in organizations.iter().enumerate() {
+            let comma = if index + 1 < organizations.len() {
+                ","
+            } else {
+                ""
+            };
+            println!(
+                "  {}{comma}",
+                facet_json::to_string(org).unwrap_or_default()
+            );
+        }
+        println!("]");
+        return;
+    }
+    if organizations.is_empty() {
+        println!("No organizations found.");
+        return;
+    }
+    for org in organizations {
+        println!(
+            "{:<36} {} people",
+            truncate(&org.name, 36),
+            org.people.len()
+        );
+    }
+    println!("\n{} organizations", organizations.len());
+}
+
+fn print_person_context(context: Option<&PersonContext>, json: bool) {
+    if json {
+        match context {
+            Some(context) => println!("{}", facet_json::to_string(context).unwrap_or_default()),
+            None => println!("null"),
+        }
+        return;
+    }
+    let Some(context) = context else {
+        println!("Person not found.");
+        return;
+    };
+    println!("Person: {}", context.person.display_name);
+    if let Some(org) = &context.person.organization {
+        println!("Organization: {org}");
+    }
+    println!(
+        "Related: {} task(s), {} project(s), {} event(s), {} communication ref(s)",
+        context.tasks.len(),
+        context.projects.len(),
+        context.calendar_events.len(),
+        context.communications.len()
+    );
+    print_review_task_bucket("Tasks", &context.tasks);
+}
+
+fn print_organization_context(context: Option<&OrganizationContext>, json: bool) {
+    if json {
+        match context {
+            Some(context) => println!("{}", facet_json::to_string(context).unwrap_or_default()),
+            None => println!("null"),
+        }
+        return;
+    }
+    let Some(context) = context else {
+        println!("Organization not found.");
+        return;
+    };
+    println!("Organization: {}", context.organization.name);
+    println!(
+        "Related: {} people, {} task(s), {} project(s), {} event(s), {} communication ref(s)",
+        context.people.len(),
+        context.tasks.len(),
+        context.projects.len(),
+        context.calendar_events.len(),
+        context.communications.len()
+    );
+    print_people(&context.people, false);
+    print_review_task_bucket("Tasks", &context.tasks);
+}
+
+fn print_sync_states(states: &[ProviderSyncState], json: bool) {
+    if json {
+        println!("[");
+        for (index, state) in states.iter().enumerate() {
+            let comma = if index + 1 < states.len() { "," } else { "" };
+            println!(
+                "  {}{comma}",
+                facet_json::to_string(state).unwrap_or_default()
+            );
+        }
+        println!("]");
+        return;
+    }
+    if states.is_empty() {
+        println!("No provider sync state recorded.");
+        return;
+    }
+    for state in states {
+        let status = state
+            .last_error
+            .as_deref()
+            .map(|_| "failed")
+            .unwrap_or("ok");
+        println!(
+            "{:<14} {:<24} {:<8} token={} updated={}",
+            state.provider,
+            truncate(&state.collection, 24),
+            status,
+            state.sync_token.as_deref().unwrap_or("—"),
+            state.updated_at
+        );
+        if let Some(error) = &state.last_error {
+            println!("  error: {error}");
+        }
     }
 }
 

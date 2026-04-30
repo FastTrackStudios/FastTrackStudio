@@ -9,11 +9,10 @@ use chrono::{DateTime, NaiveDate, Utc};
 use crate::calendar_event::{CalendarEvent, CalendarEventStatus};
 use crate::project::Project;
 use crate::service::{
-    CalDavAlarm, CalDavCalendarInfo, CalDavDiscovery, CalDavEventInstance,
-    CalDavFreeBusyInterval, CalDavObject, CalDavObjectDetails, CalDavParameter,
-    CalDavParticipant, CalDavProperty, CalDavScheduleResponse, CalDavSyncCollectionResponse,
-    CalDavTimezone, CardDavAddressBookInfo, CardDavContact, CardDavDiscovery, CardDavObject,
-    CardDavSyncCollectionResponse, VaultError,
+    CalDavAlarm, CalDavCalendarInfo, CalDavDiscovery, CalDavEventInstance, CalDavFreeBusyInterval,
+    CalDavObject, CalDavObjectDetails, CalDavParameter, CalDavParticipant, CalDavProperty,
+    CalDavScheduleResponse, CalDavSyncCollectionResponse, CalDavTimezone, CardDavAddressBookInfo,
+    CardDavContact, CardDavDiscovery, CardDavObject, CardDavSyncCollectionResponse, VaultError,
 };
 use crate::task::{Priority, Status, Task, WikiLink};
 // Deck API response types use serde for JSON deserialization (complex nested structures).
@@ -2380,7 +2379,8 @@ fn parse_vcard_contact(vcard: &str) -> CardDavContact {
                 let mut parts = value.split(';');
                 contact.family_name = parts.next().filter(|v| !v.is_empty()).map(str::to_string);
                 contact.given_name = parts.next().filter(|v| !v.is_empty()).map(str::to_string);
-                contact.additional_names = parts.next().filter(|v| !v.is_empty()).map(str::to_string);
+                contact.additional_names =
+                    parts.next().filter(|v| !v.is_empty()).map(str::to_string);
                 contact.prefixes = parts.next().filter(|v| !v.is_empty()).map(str::to_string);
                 contact.suffixes = parts.next().filter(|v| !v.is_empty()).map(str::to_string);
             }
@@ -2482,7 +2482,8 @@ fn parse_caldav_event_instance(block: &str) -> CalDavEventInstance {
             .filter(|prop| {
                 !matches!(
                     prop.name.as_str(),
-                    "BEGIN" | "END"
+                    "BEGIN"
+                        | "END"
                         | "UID"
                         | "SUMMARY"
                         | "STATUS"
@@ -3142,8 +3143,11 @@ END:VCALENDAR"#;
     #[ignore = "requires live Nextcloud credentials"]
     async fn nextcloud_caldav_discovery_and_sync_smoke() {
         let credentials = live_nextcloud_credentials();
-        let client =
-            NextcloudSync::new(&credentials.url, &credentials.username, &credentials.password);
+        let client = NextcloudSync::new(
+            &credentials.url,
+            &credentials.username,
+            &credentials.password,
+        );
 
         let discovery = client
             .discover_calendars()
@@ -3170,13 +3174,24 @@ END:VCALENDAR"#;
     #[ignore = "requires live Nextcloud credentials"]
     async fn nextcloud_caldav_vtodo_crud_smoke() {
         let credentials = live_nextcloud_credentials();
-        let client =
-            NextcloudSync::new(&credentials.url, &credentials.username, &credentials.password);
-        let discovery = client.discover_calendars().await.expect("discover calendars");
+        let client = NextcloudSync::new(
+            &credentials.url,
+            &credentials.username,
+            &credentials.password,
+        );
+        let discovery = client
+            .discover_calendars()
+            .await
+            .expect("discover calendars");
         let calendar = discovery
             .calendars
             .iter()
-            .find(|calendar| calendar.components.iter().any(|component| component == "VTODO"))
+            .find(|calendar| {
+                calendar
+                    .components
+                    .iter()
+                    .any(|component| component == "VTODO")
+            })
             .expect("a VTODO-capable calendar");
         let suffix = unix_suffix();
         let uid = format!("task-caldav-vtodo-smoke-{suffix}");
@@ -3208,14 +3223,88 @@ END:VCALENDAR"#;
 
     #[tokio::test]
     #[ignore = "requires live Nextcloud credentials"]
+    async fn nextcloud_carddav_discovery_and_vcard_crud_smoke() {
+        let credentials = live_nextcloud_credentials();
+        let client = NextcloudSync::new(
+            &credentials.url,
+            &credentials.username,
+            &credentials.password,
+        );
+        let discovery = client
+            .discover_addressbooks()
+            .await
+            .expect("discover addressbooks");
+        assert!(!discovery.principal_url.is_empty());
+        assert!(!discovery.addressbook_home_set.is_empty());
+        assert!(!discovery.addressbooks.is_empty());
+
+        let addressbook = discovery
+            .addressbooks
+            .iter()
+            .find(|book| book.name == "contacts")
+            .or_else(|| discovery.addressbooks.first())
+            .expect("addressbook");
+        let sync = client
+            .sync_addressbook_collection(&addressbook.name, addressbook.sync_token.as_deref())
+            .await
+            .expect("sync addressbook");
+        assert!(sync.sync_token.is_some());
+
+        let suffix = unix_suffix();
+        let uid = format!("task-carddav-smoke-{suffix}");
+        let href = addressbook_object_href(&addressbook.href, &uid);
+        let vcard = format!(
+            "BEGIN:VCARD\r\nVERSION:4.0\r\nUID:{uid}\r\nFN:Task CardDAV Smoke {suffix}\r\nN:Smoke;Task;;;\r\nORG:Task Live Tests\r\nTITLE:Integration Test\r\nEMAIL;TYPE=work:task-carddav-smoke-{suffix}@example.com\r\nEND:VCARD\r\n"
+        );
+
+        client
+            .put_addressbook_object(&addressbook.name, &href, &vcard, None, Some("*"))
+            .await
+            .expect("put vcard");
+        let objects = client
+            .addressbook_multiget(&addressbook.name, std::slice::from_ref(&href))
+            .await
+            .expect("multiget vcard");
+        assert_eq!(objects.len(), 1);
+        let expected_name = format!("Task CardDAV Smoke {suffix}");
+        assert_eq!(
+            objects[0]
+                .contact
+                .as_ref()
+                .and_then(|contact| contact.full_name.as_deref()),
+            Some(expected_name.as_str())
+        );
+
+        let updated = vcard.replace("Integration Test", "Updated Integration Test");
+        client
+            .put_addressbook_object(
+                &addressbook.name,
+                &href,
+                &updated,
+                objects[0].etag.as_deref(),
+                None,
+            )
+            .await
+            .expect("update vcard");
+        client
+            .delete_addressbook_object(&addressbook.name, &href, None)
+            .await
+            .expect("delete vcard");
+    }
+
+    #[tokio::test]
+    #[ignore = "requires live Nextcloud credentials"]
     async fn nextcloud_caldav_vevent_crud_smoke() {
         let credentials = live_nextcloud_credentials();
         let calendar = credentials
             .event_calendar
             .as_deref()
             .unwrap_or(credentials.calendar.as_str());
-        let client =
-            NextcloudSync::new(&credentials.url, &credentials.username, &credentials.password);
+        let client = NextcloudSync::new(
+            &credentials.url,
+            &credentials.username,
+            &credentials.password,
+        );
         let suffix = unix_suffix();
         let uid = format!("task-caldav-vevent-smoke-{suffix}");
         let href = format!(
@@ -3252,8 +3341,11 @@ END:VCALENDAR"#;
     #[ignore = "requires live Nextcloud credentials and Deck access"]
     async fn nextcloud_deck_board_stack_card_smoke() {
         let credentials = live_nextcloud_credentials();
-        let client =
-            NextcloudSync::new(&credentials.url, &credentials.username, &credentials.password);
+        let client = NextcloudSync::new(
+            &credentials.url,
+            &credentials.username,
+            &credentials.password,
+        );
         let board = client
             .list_boards()
             .await
@@ -3271,7 +3363,13 @@ END:VCALENDAR"#;
 
         let title = format!("Live Deck smoke {}", unix_suffix());
         let card_id = client
-            .create_card(board.id, stack.id, &title, "Created by Task live smoke test", None)
+            .create_card(
+                board.id,
+                stack.id,
+                &title,
+                "Created by Task live smoke test",
+                None,
+            )
             .await
             .expect("create deck card");
         let stacks = client
@@ -3297,5 +3395,9 @@ END:VCALENDAR"#;
 
     fn calendar_object_href(calendar_href: &str, uid: &str) -> String {
         format!("{}/{}.ics", calendar_href.trim_end_matches('/'), uid)
+    }
+
+    fn addressbook_object_href(addressbook_href: &str, uid: &str) -> String {
+        format!("{}/{}.vcf", addressbook_href.trim_end_matches('/'), uid)
     }
 }

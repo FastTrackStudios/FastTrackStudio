@@ -12,6 +12,7 @@ pub mod views;
 pub mod cycle;
 pub mod module;
 pub mod team;
+pub mod people;
 
 #[cfg(feature = "server")]
 pub mod service;
@@ -50,13 +51,17 @@ pub use cycle::{Cycle, CycleStatus};
 pub use module::{Module, ModuleStatus};
 pub use query::{Filter, Group, GroupedTasks, TaskGroup, Query, Sort};
 pub use capture::{CaptureInput, parse_capture};
+pub use people::{
+    CommunicationRef, ContactMethod, OrganizationContext, OrganizationRecord, Person,
+    PersonContext, ProviderConflict, ProviderConflictField, ProviderRef, Relationship,
+};
 
 #[cfg(feature = "server")]
 pub use service::{
     activity_service_service_descriptor, calendar_service_service_descriptor,
     client_service_service_descriptor, file_service_service_descriptor,
     inbox_service_service_descriptor, invoice_service_service_descriptor, mail_service_service_descriptor,
-    project_service_service_descriptor, system_service_service_descriptor, task_service_service_descriptor,
+    people_service_service_descriptor, project_service_service_descriptor, system_service_service_descriptor, task_service_service_descriptor,
     time_service_service_descriptor, ActivityService, ActivityServiceDispatcher,
     CalDavCalendarInfo, CalDavDeleteObjectRequest, CalDavDiscovery, CalDavFreeBusyInterval,
     CalDavFreeBusyRequest, CalDavMultigetRequest, CalDavObject, CalDavPutObjectRequest,
@@ -71,8 +76,8 @@ pub use service::{
     InboxPromoteRequest, InboxService, InboxServiceDispatcher, InvoiceCreateRequest, InvoicePaymentRequest,
     InvoiceService, InvoiceServiceDispatcher, MailCreateMailboxRequest, MailCreateTagRequest,
     MailDeleteTagRequest, MailListMessagesRequest, MailMessageTagRequest, MailMoveMessageRequest,
-    MailService, MailServiceDispatcher, NextcloudCapability, ProjectPatch, ProjectService, ProjectServiceDispatcher,
-    ReviewReport,
+    MailService, MailServiceDispatcher, NextcloudCapability, PeopleService, PeopleServiceDispatcher, ProjectPatch, ProjectService, ProjectServiceDispatcher,
+    ProviderSyncState, ReviewReport,
     RemoteDeckBoard, RemoteDeckStack, SyncStats, SystemCapabilities, SystemHealth, SystemService, SystemServiceDispatcher, TaskService, TaskServiceDispatcher,
     TimeEntryContext, TimeEntryFilter, TimeEntryPatch, TimeLogRequest, TimeService,
     TimeServiceDispatcher, TimeStartRequest, TimedTaskEntry, VaultCapability, VaultError,

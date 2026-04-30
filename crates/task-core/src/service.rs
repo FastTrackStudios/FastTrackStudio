@@ -10,6 +10,9 @@ use crate::client::Client;
 use crate::email::EmailRef;
 use crate::index::{ChangeRow, ConflictRow};
 use crate::invoice::Invoice;
+use crate::people::{
+    OrganizationContext, OrganizationRecord, Person, PersonContext, ProviderConflict,
+};
 use crate::project::{Project, ProjectStats};
 use crate::provider::{MailAccount, MailMessage, MailMessageDetail, MailTag, Mailbox};
 use crate::query::Query;
@@ -112,7 +115,11 @@ pub trait TimeService {
     ) -> Result<TimedTaskEntry, VaultError>;
 
     /// Delete a time entry by id.
-    async fn delete_time_entry(&self, entry_id: String, actor: Option<String>) -> Result<(), VaultError>;
+    async fn delete_time_entry(
+        &self,
+        entry_id: String,
+        actor: Option<String>,
+    ) -> Result<(), VaultError>;
 }
 
 #[vox::service]
@@ -120,6 +127,46 @@ pub trait ClientService {
     async fn list_clients(&self) -> Vec<Client>;
     async fn save_client(&self, client: Client) -> Result<Client, VaultError>;
     async fn find_client(&self, name: String) -> Option<Client>;
+}
+
+#[vox::service]
+pub trait PeopleService {
+    /// Sync CardDAV contacts and return normalized people.
+    async fn list_people(&self, addressbook: Option<String>) -> Result<Vec<Person>, VaultError>;
+
+    /// Sync CardDAV contacts and return organizations grouped from contacts.
+    async fn list_organizations(
+        &self,
+        addressbook: Option<String>,
+    ) -> Result<Vec<OrganizationRecord>, VaultError>;
+
+    /// Return one person plus related tasks/projects/events/communication refs.
+    async fn person_context(
+        &self,
+        reference: String,
+        addressbook: Option<String>,
+    ) -> Result<Option<PersonContext>, VaultError>;
+
+    /// Return one organization plus related people/tasks/projects/events/communication refs.
+    async fn organization_context(
+        &self,
+        reference: String,
+        addressbook: Option<String>,
+    ) -> Result<Option<OrganizationContext>, VaultError>;
+
+    /// Compare two versions of a provider-backed contact and return changed fields.
+    async fn detect_person_conflict(
+        &self,
+        local: Person,
+        remote: Person,
+    ) -> Result<Option<ProviderConflict>, VaultError>;
+
+    /// Compare two versions of a provider-backed organization and return changed fields.
+    async fn detect_organization_conflict(
+        &self,
+        local: OrganizationRecord,
+        remote: OrganizationRecord,
+    ) -> Result<Option<ProviderConflict>, VaultError>;
 }
 
 #[vox::service]
@@ -131,8 +178,15 @@ pub trait InvoiceService {
 
     async fn list_invoices(&self) -> Vec<Invoice>;
     async fn get_invoice(&self, invoice_id: String) -> Option<Invoice>;
-    async fn send_invoice(&self, invoice_id: String, actor: Option<String>) -> Result<Invoice, VaultError>;
-    async fn record_invoice_payment(&self, request: InvoicePaymentRequest) -> Result<Invoice, VaultError>;
+    async fn send_invoice(
+        &self,
+        invoice_id: String,
+        actor: Option<String>,
+    ) -> Result<Invoice, VaultError>;
+    async fn record_invoice_payment(
+        &self,
+        request: InvoicePaymentRequest,
+    ) -> Result<Invoice, VaultError>;
     async fn cancel_invoice(
         &self,
         invoice_id: String,
@@ -144,6 +198,7 @@ pub trait InvoiceService {
 #[vox::service]
 pub trait ActivityService {
     async fn recent_activity(&self, limit: u32) -> Result<Vec<ChangeRow>, VaultError>;
+    async fn list_sync_states(&self) -> Result<Vec<ProviderSyncState>, VaultError>;
     async fn list_conflicts(
         &self,
         open_only: bool,
@@ -261,7 +316,10 @@ pub trait CalendarService {
     ) -> Result<(), VaultError>;
 
     /// Put one raw VCARD object, optionally guarded by ETag preconditions.
-    async fn put_addressbook_object(&self, request: CardDavPutObjectRequest) -> Result<(), VaultError>;
+    async fn put_addressbook_object(
+        &self,
+        request: CardDavPutObjectRequest,
+    ) -> Result<(), VaultError>;
 
     /// Delete one raw vCard object, optionally guarded by If-Match.
     async fn delete_addressbook_object(
@@ -373,6 +431,20 @@ pub struct SystemHealth {
     pub ok: bool,
     pub deep: bool,
     pub checks: Vec<HealthCheck>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct ProviderSyncState {
+    pub provider: String,
+    pub account: Option<String>,
+    pub collection: String,
+    pub sync_token: Option<String>,
+    pub cursor: Option<String>,
+    pub etag: Option<String>,
+    pub last_success_at: Option<String>,
+    pub last_failure_at: Option<String>,
+    pub last_error: Option<String>,
+    pub updated_at: String,
 }
 
 #[derive(Debug, Clone, Default, facet::Facet)]

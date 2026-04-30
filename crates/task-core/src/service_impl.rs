@@ -8,6 +8,10 @@ use tokio::sync::RwLock;
 use uuid::Uuid;
 
 use crate::index::TaskIndex;
+use crate::people::{
+    CommunicationRef, ContactMethod, OrganizationContext, OrganizationRecord, Person,
+    PersonContext, ProviderConflict, ProviderConflictField, ProviderRef,
+};
 use crate::project::{next_task as find_next_task, Project, ProjectStats};
 use crate::query::Query;
 use crate::rrule;
@@ -17,14 +21,14 @@ use crate::service::{
     CalDavScheduleResponse, CalDavSyncCollectionRequest, CalDavSyncCollectionResponse,
     CalendarEventPatch, CardDavDeleteObjectRequest, CardDavDiscovery, CardDavMultigetRequest,
     CardDavObject, CardDavPutObjectRequest, CardDavSyncCollectionRequest,
-    CardDavSyncCollectionResponse, EmailLinkRequest, EmailLinkResponse, EmailListRequest, EmailUnlinkRequest,
-    FileCopyMoveRequest, FileEntry, FileReadResponse, FileWriteRequest, InboxCaptureRequest,
-    InboxItem, InboxPromoteRequest, InvoiceCreateRequest,
+    CardDavSyncCollectionResponse, EmailLinkRequest, EmailLinkResponse, EmailListRequest,
+    EmailUnlinkRequest, FileCopyMoveRequest, FileEntry, FileReadResponse, FileWriteRequest,
+    InboxCaptureRequest, InboxItem, InboxPromoteRequest, InvoiceCreateRequest,
     InvoicePaymentRequest, MailCreateMailboxRequest, MailCreateTagRequest, MailDeleteTagRequest,
     MailListMessagesRequest, MailMessageTagRequest, MailMoveMessageRequest, NextcloudCapability,
-    ProjectPatch, RemoteDeckBoard, RemoteDeckStack, SyncStats, SystemCapabilities, SystemHealth,
-    ReviewReport, TimeEntryContext, TimeEntryFilter, TimeEntryPatch, TimeLogRequest, TimeStartRequest,
-    TimedTaskEntry, VaultCapability, VaultError,
+    ProjectPatch, ProviderSyncState, RemoteDeckBoard, RemoteDeckStack, ReviewReport, SyncStats,
+    SystemCapabilities, SystemHealth, TimeEntryContext, TimeEntryFilter, TimeEntryPatch,
+    TimeLogRequest, TimeStartRequest, TimedTaskEntry, VaultCapability, VaultError,
 };
 use crate::task::{Priority, Status, Task, WikiLink};
 use crate::vault::Vault;
@@ -182,11 +186,13 @@ fn nextcloud_webdav_provider(config: &NextcloudRuntimeConfig) -> crate::provider
 fn nextcloud_mail_client() -> Result<crate::provider::MailClient, VaultError> {
     let config = NextcloudRuntimeConfig::load()?
         .ok_or_else(|| VaultError::IoError("Nextcloud Mail is not configured".into()))?;
-    Ok(crate::provider::MailClient::new(crate::provider::MailConfig {
-        url: config.url,
-        username: config.username,
-        password: config.password,
-    }))
+    Ok(crate::provider::MailClient::new(
+        crate::provider::MailConfig {
+            url: config.url,
+            username: config.username,
+            password: config.password,
+        },
+    ))
 }
 
 fn health_check(
@@ -242,7 +248,11 @@ impl VaultServiceImpl {
                 Ok(idx) => {
                     // Rebuild index from files on startup
                     if let Ok(stats) = idx.rebuild_from_dir(&root) {
-                        tracing::info!(tasks = stats.tasks, files = stats.files_scanned, "Index rebuilt");
+                        tracing::info!(
+                            tasks = stats.tasks,
+                            files = stats.files_scanned,
+                            "Index rebuilt"
+                        );
                     }
                     Some(idx)
                 }
@@ -330,7 +340,10 @@ impl VaultServiceImpl {
         Ok(task)
     }
 
-    pub async fn capture_inbox(&self, request: InboxCaptureRequest) -> Result<InboxItem, VaultError> {
+    pub async fn capture_inbox(
+        &self,
+        request: InboxCaptureRequest,
+    ) -> Result<InboxItem, VaultError> {
         let parsed = crate::capture::parse_capture(&request.text);
         let title = if parsed.title.trim().is_empty() {
             request.text.trim().to_string()
@@ -371,7 +384,10 @@ impl VaultServiceImpl {
     }
 
     pub async fn list_inbox_items(&self) -> Vec<InboxItem> {
-        self.vault.read().await.load_tasks()
+        self.vault
+            .read()
+            .await
+            .load_tasks()
             .into_iter()
             .filter(is_inbox_task)
             .map(|task| inbox_item_from_task(&task))
@@ -388,9 +404,13 @@ impl VaultServiceImpl {
         build_review_report(tasks, 30, 30)
     }
 
-    pub async fn promote_inbox(&self, request: InboxPromoteRequest) -> Result<InboxItem, VaultError> {
+    pub async fn promote_inbox(
+        &self,
+        request: InboxPromoteRequest,
+    ) -> Result<InboxItem, VaultError> {
         let vault = self.vault.read().await;
-        let mut task = vault.load_tasks()
+        let mut task = vault
+            .load_tasks()
             .into_iter()
             .find(|task| task_matches_reference(task, &request.reference))
             .ok_or_else(|| VaultError::NotFound(request.reference.clone()))?;
@@ -408,7 +428,11 @@ impl VaultServiceImpl {
                 .ok_or_else(|| VaultError::ParseError(format!("unknown status: {status}")))?;
         }
         if let Some(assignee) = request.assignee {
-            task.assignee = if assignee.is_empty() || assignee == "clear" { None } else { Some(assignee) };
+            task.assignee = if assignee.is_empty() || assignee == "clear" {
+                None
+            } else {
+                Some(assignee)
+            };
         }
         if let Some(due) = request.due {
             task.due = parse_optional_naive_date(&due, "due")?;
@@ -453,9 +477,15 @@ impl VaultServiceImpl {
         // task has none, fall back to title match.
         let vault = self.vault.read().await;
         let prior = if let Some(id) = task.id.as_deref() {
-            vault.load_tasks().into_iter().find(|t| t.id.as_deref() == Some(id))
+            vault
+                .load_tasks()
+                .into_iter()
+                .find(|t| t.id.as_deref() == Some(id))
         } else {
-            vault.load_tasks().into_iter().find(|t| t.title == task.title)
+            vault
+                .load_tasks()
+                .into_iter()
+                .find(|t| t.title == task.title)
         };
 
         task.date_modified = Some(Utc::now());
@@ -570,10 +600,16 @@ impl VaultServiceImpl {
     }
 
     /// Create a project in the shared project vault's Projects/ directory.
-    pub async fn create_project(&self, project: Project, vault_name: Option<&str>) -> Result<Project, VaultError> {
+    pub async fn create_project(
+        &self,
+        project: Project,
+        vault_name: Option<&str>,
+    ) -> Result<Project, VaultError> {
         if let Some(name) = vault_name {
             let extras = self.extra_vaults.read().await;
-            let src = extras.iter().find(|s| s.name == name)
+            let src = extras
+                .iter()
+                .find(|s| s.name == name)
                 .ok_or_else(|| VaultError::NotFound(format!("vault '{}' not registered", name)))?;
             let vault = Vault::new(&src.root);
             vault.save_project_in("Projects", &project)?;
@@ -634,21 +670,20 @@ impl VaultServiceImpl {
     pub async fn search_tasks(&self, query: String) -> Vec<Task> {
         // Try index first — extract matching titles under the mutex, then drop it
         // before hitting any .await so the MutexGuard doesn't cross an await point.
-        let index_titles: Option<std::collections::HashSet<String>> = self
-            .index
-            .lock()
-            .ok()
-            .and_then(|guard| {
+        let index_titles: Option<std::collections::HashSet<String>> =
+            self.index.lock().ok().and_then(|guard| {
                 guard.as_ref().and_then(|index| {
-                    index.search(&query).ok().map(|rows| {
-                        rows.iter().map(|r| r.title.clone()).collect()
-                    })
+                    index
+                        .search(&query)
+                        .ok()
+                        .map(|rows| rows.iter().map(|r| r.title.clone()).collect())
                 })
             });
 
         if let Some(matching_titles) = index_titles {
             let all_tasks = self.vault.read().await.load_tasks();
-            return all_tasks.into_iter()
+            return all_tasks
+                .into_iter()
                 .filter(|t| matching_titles.contains(&t.title))
                 .collect();
         }
@@ -656,14 +691,16 @@ impl VaultServiceImpl {
         // Fallback: scan all tasks
         let tasks = self.vault.read().await.load_tasks();
         let q = query.to_lowercase();
-        tasks.into_iter()
+        tasks
+            .into_iter()
             .filter(|t| t.title.to_lowercase().contains(&q) || t.body.to_lowercase().contains(&q))
             .collect()
     }
 
     pub async fn tasks_for_user(&self, username: String) -> Vec<Task> {
         let tasks = self.vault.read().await.load_tasks();
-        tasks.into_iter()
+        tasks
+            .into_iter()
             .filter(|t| t.assignee.as_deref() == Some(&username))
             .collect()
     }
@@ -674,17 +711,16 @@ impl VaultServiceImpl {
             Err(_) => return vec![],
         };
         let tasks = self.vault.read().await.load_tasks();
-        tasks.into_iter()
-            .filter(|t| {
-                t.due.map(|d| d <= due_date).unwrap_or(false)
-                    && !t.is_complete()
-            })
+        tasks
+            .into_iter()
+            .filter(|t| t.due.map(|d| d <= due_date).unwrap_or(false) && !t.is_complete())
             .collect()
     }
 
     pub async fn tasks_for_project(&self, project_title: String) -> Vec<Task> {
         let tasks = self.vault.read().await.load_tasks();
-        tasks.into_iter()
+        tasks
+            .into_iter()
             .filter(|t| t.projects.iter().any(|p| p.0 == project_title))
             .collect()
     }
@@ -715,20 +751,60 @@ impl VaultServiceImpl {
         match sync.pull_tasks_from_calendar(&config.calendar).await {
             Ok(remote_tasks) => {
                 stats.calendar_pulled = remote_tasks.len() as u32;
+                self.record_provider_sync_state(
+                    "caldav",
+                    Some(&config.username),
+                    &config.calendar,
+                    None,
+                    None,
+                    None,
+                    None,
+                );
                 let result = self
                     .merge_remote_tasks("caldav", remote_tasks, &local_tasks, &mut stats)
                     .await?;
                 blocked_calendar_push.extend(result.blocked_push_keys);
             }
-            Err(e) => stats.errors.push(format!("CalDAV pull: {e}")),
+            Err(e) => {
+                self.record_provider_sync_state(
+                    "caldav",
+                    Some(&config.username),
+                    &config.calendar,
+                    None,
+                    None,
+                    None,
+                    Some(e.to_string()),
+                );
+                stats.errors.push(format!("CalDAV pull: {e}"));
+            }
         }
 
         if let Some(event_calendar) = config.event_calendar.as_deref() {
             match sync.pull_events_from_calendar(event_calendar).await {
                 Ok(remote_events) => {
+                    self.record_provider_sync_state(
+                        "caldav-events",
+                        Some(&config.username),
+                        event_calendar,
+                        None,
+                        None,
+                        None,
+                        None,
+                    );
                     self.merge_remote_events(remote_events, &mut stats).await?;
                 }
-                Err(e) => stats.errors.push(format!("CalDAV event pull: {e}")),
+                Err(e) => {
+                    self.record_provider_sync_state(
+                        "caldav-events",
+                        Some(&config.username),
+                        event_calendar,
+                        None,
+                        None,
+                        None,
+                        Some(e.to_string()),
+                    );
+                    stats.errors.push(format!("CalDAV event pull: {e}"));
+                }
             }
 
             for event in self.list_calendar_events().await {
@@ -756,6 +832,15 @@ impl VaultServiceImpl {
         if config.deck_enabled {
             match sync.list_boards().await {
                 Ok(boards) => {
+                    self.record_provider_sync_state(
+                        "deck",
+                        Some(&config.username),
+                        "boards",
+                        None,
+                        None,
+                        None,
+                        None,
+                    );
                     for board in boards.into_iter().filter(|b| !b.archived) {
                         for task in local_tasks
                             .iter()
@@ -793,7 +878,18 @@ impl VaultServiceImpl {
                         }
                     }
                 }
-                Err(e) => stats.errors.push(format!("Deck list boards: {e}")),
+                Err(e) => {
+                    self.record_provider_sync_state(
+                        "deck",
+                        Some(&config.username),
+                        "boards",
+                        None,
+                        None,
+                        None,
+                        Some(e.to_string()),
+                    );
+                    stats.errors.push(format!("Deck list boards: {e}"));
+                }
             }
         }
 
@@ -811,6 +907,51 @@ impl VaultServiceImpl {
 
     pub async fn sync_status(&self) -> Option<SyncStats> {
         self.last_sync.lock().unwrap().clone()
+    }
+
+    pub async fn list_provider_sync_states(&self) -> Result<Vec<ProviderSyncState>, VaultError> {
+        let guard = self
+            .index
+            .lock()
+            .map_err(|e| VaultError::IoError(e.to_string()))?;
+        match guard.as_ref() {
+            Some(index) => index.list_sync_states(),
+            None => Ok(Vec::new()),
+        }
+    }
+
+    fn record_provider_sync_state(
+        &self,
+        provider: &str,
+        account: Option<&str>,
+        collection: &str,
+        sync_token: Option<String>,
+        cursor: Option<String>,
+        etag: Option<String>,
+        error: Option<String>,
+    ) {
+        let now = Utc::now().to_rfc3339();
+        let state = ProviderSyncState {
+            provider: provider.to_string(),
+            account: account.map(str::to_string),
+            collection: collection.to_string(),
+            sync_token,
+            cursor,
+            etag,
+            last_success_at: if error.is_none() {
+                Some(now.clone())
+            } else {
+                None
+            },
+            last_failure_at: if error.is_some() { Some(now) } else { None },
+            last_error: error,
+            updated_at: String::new(),
+        };
+        if let Ok(guard) = self.index.lock() {
+            if let Some(index) = guard.as_ref() {
+                let _ = index.upsert_sync_state(&state);
+            }
+        }
     }
 
     fn nextcloud_sync_from_config(
@@ -977,6 +1118,137 @@ impl VaultServiceImpl {
         Self::nextcloud_sync_from_config(&config)
             .delete_addressbook_object(addressbook, &request.href, request.if_match.as_deref())
             .await
+    }
+
+    pub async fn list_people_from_carddav(
+        &self,
+        addressbook: Option<String>,
+    ) -> Result<Vec<Person>, VaultError> {
+        let objects = self.sync_carddav_people_objects(addressbook).await?;
+        Ok(objects
+            .into_iter()
+            .filter(|object| !object.deleted)
+            .filter_map(person_from_carddav_object)
+            .collect())
+    }
+
+    pub async fn list_organizations_from_carddav(
+        &self,
+        addressbook: Option<String>,
+    ) -> Result<Vec<OrganizationRecord>, VaultError> {
+        Ok(organizations_from_people(
+            &self.list_people_from_carddav(addressbook).await?,
+        ))
+    }
+
+    pub async fn person_context_from_carddav(
+        &self,
+        reference: String,
+        addressbook: Option<String>,
+    ) -> Result<Option<PersonContext>, VaultError> {
+        let people = self.list_people_from_carddav(addressbook).await?;
+        let Some(person) = people
+            .into_iter()
+            .find(|person| person_matches_reference(person, &reference))
+        else {
+            return Ok(None);
+        };
+        let tokens = person_context_tokens(&person);
+        let tasks = self.vault.read().await.load_tasks();
+        let projects = self.list_projects().await;
+        let events = self.list_calendar_events().await;
+        Ok(Some(PersonContext {
+            communications: communication_refs_for_tokens(&tasks, &events, &tokens),
+            tasks: tasks
+                .into_iter()
+                .filter(|task| task_matches_tokens(task, &tokens))
+                .collect(),
+            projects: projects
+                .into_iter()
+                .filter(|project| project_matches_tokens(project, &tokens))
+                .collect(),
+            calendar_events: events
+                .into_iter()
+                .filter(|event| event_matches_tokens(event, &tokens))
+                .collect(),
+            person,
+        }))
+    }
+
+    pub async fn organization_context_from_carddav(
+        &self,
+        reference: String,
+        addressbook: Option<String>,
+    ) -> Result<Option<OrganizationContext>, VaultError> {
+        let people = self.list_people_from_carddav(addressbook).await?;
+        let organizations = organizations_from_people(&people);
+        let Some(organization) = organizations
+            .into_iter()
+            .find(|organization| organization_matches_reference(organization, &reference))
+        else {
+            return Ok(None);
+        };
+        let org_people: Vec<Person> = people
+            .into_iter()
+            .filter(|person| person.organization.as_deref() == Some(organization.name.as_str()))
+            .collect();
+        let tokens = organization_context_tokens(&organization, &org_people);
+        let tasks = self.vault.read().await.load_tasks();
+        let projects = self.list_projects().await;
+        let events = self.list_calendar_events().await;
+        Ok(Some(OrganizationContext {
+            communications: communication_refs_for_tokens(&tasks, &events, &tokens),
+            tasks: tasks
+                .into_iter()
+                .filter(|task| task_matches_tokens(task, &tokens))
+                .collect(),
+            projects: projects
+                .into_iter()
+                .filter(|project| project_matches_tokens(project, &tokens))
+                .collect(),
+            calendar_events: events
+                .into_iter()
+                .filter(|event| event_matches_tokens(event, &tokens))
+                .collect(),
+            people: org_people,
+            organization,
+        }))
+    }
+
+    async fn sync_carddav_people_objects(
+        &self,
+        addressbook: Option<String>,
+    ) -> Result<Vec<CardDavObject>, VaultError> {
+        let discovery = self.discover_carddav().await?;
+        let addressbook = addressbook
+            .filter(|name| !name.is_empty())
+            .or_else(|| {
+                discovery
+                    .addressbooks
+                    .iter()
+                    .find(|book| book.name == "contacts")
+                    .map(|book| book.name.clone())
+            })
+            .or_else(|| discovery.addressbooks.first().map(|book| book.name.clone()))
+            .ok_or_else(|| {
+                VaultError::NotFound("no CardDAV addressbooks discovered".to_string())
+            })?;
+        let sync = self
+            .addressbook_sync_collection(CardDavSyncCollectionRequest {
+                addressbook: addressbook.clone(),
+                sync_token: None,
+            })
+            .await?;
+        self.record_provider_sync_state(
+            "carddav",
+            None,
+            &addressbook,
+            sync.sync_token.clone(),
+            None,
+            None,
+            None,
+        );
+        Ok(sync.objects)
     }
 
     pub async fn send_calendar_schedule(
@@ -1174,10 +1446,9 @@ impl VaultServiceImpl {
                             )
                             .await
                         {
-                            stats.errors.push(format!(
-                                "{source} conflict log '{}': {e}",
-                                local.title
-                            ));
+                            stats
+                                .errors
+                                .push(format!("{source} conflict log '{}': {e}", local.title));
                         }
                     }
                     continue;
@@ -1359,7 +1630,11 @@ impl VaultServiceImpl {
         let today = chrono::Local::now().date_naive();
         let terms = client.payment_terms_days.unwrap_or(30) as i64;
         let due_date = today + chrono::Duration::days(terms);
-        let year = today.format("%Y").to_string().parse::<i32>().unwrap_or(2026);
+        let year = today
+            .format("%Y")
+            .to_string()
+            .parse::<i32>()
+            .unwrap_or(2026);
         let number = self.next_invoice_number(year).await?;
         let id = crate::invoice::format_invoice_id(year, number);
 
@@ -1544,9 +1819,7 @@ impl VaultServiceImpl {
         let new_status = invoice.derive_status(today);
         let old_status = format!("{:?}", invoice.status);
         invoice.status = new_status.clone();
-        if matches!(new_status, crate::invoice::InvoiceStatus::Paid)
-            && invoice.paid_at.is_none()
-        {
+        if matches!(new_status, crate::invoice::InvoiceStatus::Paid) && invoice.paid_at.is_none() {
             invoice.paid_at = Some(now);
         }
         vault.save_invoice(&invoice)?;
@@ -1702,9 +1975,8 @@ impl VaultServiceImpl {
 
         if let Some(s) = patch.status {
             let before = format!("{:?}", project.status);
-            let new_status = parse_project_status(&s).ok_or_else(|| {
-                VaultError::ParseError(format!("unknown project status: {s}"))
-            })?;
+            let new_status = parse_project_status(&s)
+                .ok_or_else(|| VaultError::ParseError(format!("unknown project status: {s}")))?;
             if format!("{:?}", new_status) != before {
                 changes.push((
                     "status",
@@ -2019,7 +2291,10 @@ impl VaultServiceImpl {
         drop(vault);
         let mut set = std::collections::HashSet::new();
         let norm = |s: &str| -> String {
-            s.trim().trim_start_matches('<').trim_end_matches('>').to_ascii_lowercase()
+            s.trim()
+                .trim_start_matches('<')
+                .trim_end_matches('>')
+                .to_ascii_lowercase()
         };
         for t in tasks {
             for e in t.emails {
@@ -2076,10 +2351,10 @@ impl VaultServiceImpl {
         let vault = self.vault.read().await;
         let tasks = vault.load_tasks();
 
-        if let Some(active) = tasks.iter().find_map(|t| {
-            t.running_timer()
-                .map(|e| (t.title.clone(), e.id.clone()))
-        }) {
+        if let Some(active) = tasks
+            .iter()
+            .find_map(|t| t.running_timer().map(|e| (t.title.clone(), e.id.clone())))
+        {
             return Err(VaultError::IoError(format!(
                 "timer already running on '{}' (id {})",
                 active.0, active.1
@@ -2088,9 +2363,7 @@ impl VaultServiceImpl {
 
         let mut task = tasks
             .into_iter()
-            .find(|t| {
-                t.id.as_deref() == Some(task_ref) || t.title.eq_ignore_ascii_case(task_ref)
-            })
+            .find(|t| t.id.as_deref() == Some(task_ref) || t.title.eq_ignore_ascii_case(task_ref))
             .ok_or_else(|| VaultError::NotFound(task_ref.to_string()))?;
 
         let entry = crate::task::TimeEntry {
@@ -2128,15 +2401,13 @@ impl VaultServiceImpl {
         let vault = self.vault.read().await;
         let tasks = vault.load_tasks();
 
-        let target = tasks
-            .into_iter()
-            .find(|t| match task_ref {
-                Some(r) => {
-                    (t.id.as_deref() == Some(r) || t.title.eq_ignore_ascii_case(r))
-                        && t.running_timer().is_some()
-                }
-                None => t.running_timer().is_some(),
-            });
+        let target = tasks.into_iter().find(|t| match task_ref {
+            Some(r) => {
+                (t.id.as_deref() == Some(r) || t.title.eq_ignore_ascii_case(r))
+                    && t.running_timer().is_some()
+            }
+            None => t.running_timer().is_some(),
+        });
 
         let mut task = target.ok_or_else(|| {
             VaultError::NotFound(match task_ref {
@@ -2181,17 +2452,13 @@ impl VaultServiceImpl {
         user: Option<String>,
     ) -> Result<crate::task::TimeEntry, VaultError> {
         if end <= start {
-            return Err(VaultError::ParseError(
-                "end must be after start".into(),
-            ));
+            return Err(VaultError::ParseError("end must be after start".into()));
         }
         let vault = self.vault.read().await;
         let tasks = vault.load_tasks();
         let mut task = tasks
             .into_iter()
-            .find(|t| {
-                t.id.as_deref() == Some(task_ref) || t.title.eq_ignore_ascii_case(task_ref)
-            })
+            .find(|t| t.id.as_deref() == Some(task_ref) || t.title.eq_ignore_ascii_case(task_ref))
             .ok_or_else(|| VaultError::NotFound(task_ref.to_string()))?;
 
         let entry = crate::task::TimeEntry {
@@ -2237,10 +2504,7 @@ impl VaultServiceImpl {
     /// Each returned context carries the cascade inputs (project_rate,
     /// client_rate) so callers can pick an effective rate without a second
     /// lookup.
-    pub async fn list_time_entries(
-        &self,
-        filter: TimeEntryFilter,
-    ) -> Vec<TimeEntryContext> {
+    pub async fn list_time_entries(&self, filter: TimeEntryFilter) -> Vec<TimeEntryContext> {
         let vault = self.vault.read().await;
         let tasks = vault.load_tasks();
         let projects = vault.load_projects();
@@ -2269,8 +2533,7 @@ impl VaultServiceImpl {
                     continue;
                 }
             }
-            let task_projects: Vec<String> =
-                t.projects.iter().map(|w| w.0.clone()).collect();
+            let task_projects: Vec<String> = t.projects.iter().map(|w| w.0.clone()).collect();
 
             // Walk linked projects to find the first one carrying a rate and
             // the first one carrying a client. We intentionally pick the
@@ -2358,9 +2621,10 @@ impl VaultServiceImpl {
         open_only: bool,
         limit: u32,
     ) -> Result<Vec<crate::index::ConflictRow>, VaultError> {
-        let guard = self.index.lock().map_err(|_| {
-            VaultError::IoError("index poisoned".into())
-        })?;
+        let guard = self
+            .index
+            .lock()
+            .map_err(|_| VaultError::IoError("index poisoned".into()))?;
         match &*guard {
             Some(idx) => idx.list_conflicts(open_only, limit),
             None => Ok(Vec::new()),
@@ -2374,9 +2638,10 @@ impl VaultServiceImpl {
         resolver: Option<&str>,
         how: &str,
     ) -> Result<(), VaultError> {
-        let guard = self.index.lock().map_err(|_| {
-            VaultError::IoError("index poisoned".into())
-        })?;
+        let guard = self
+            .index
+            .lock()
+            .map_err(|_| VaultError::IoError("index poisoned".into()))?;
         match &*guard {
             Some(idx) => idx.resolve_conflict(conflict_id, resolver, how),
             None => Err(VaultError::IoError("index unavailable".into())),
@@ -2397,9 +2662,10 @@ impl VaultServiceImpl {
         file_path: Option<&str>,
         kind: &str,
     ) -> Result<i64, VaultError> {
-        let guard = self.index.lock().map_err(|_| {
-            VaultError::IoError("index poisoned".into())
-        })?;
+        let guard = self
+            .index
+            .lock()
+            .map_err(|_| VaultError::IoError("index poisoned".into()))?;
         match &*guard {
             Some(idx) => idx.record_conflict(
                 entity_type,
@@ -2423,9 +2689,10 @@ impl VaultServiceImpl {
         &self,
         limit: u32,
     ) -> Result<Vec<crate::index::ChangeRow>, VaultError> {
-        let guard = self.index.lock().map_err(|_| {
-            VaultError::IoError("index poisoned".into())
-        })?;
+        let guard = self
+            .index
+            .lock()
+            .map_err(|_| VaultError::IoError("index poisoned".into()))?;
         match &*guard {
             Some(idx) => idx.recent_changes(limit),
             None => Ok(Vec::new()),
@@ -2508,9 +2775,7 @@ impl VaultServiceImpl {
             // Sanity: end after start if both set.
             if let (Some(end), start) = (entry.end_time, entry.start_time) {
                 if end <= start {
-                    return Err(VaultError::ParseError(
-                        "end must be after start".into(),
-                    ));
+                    return Err(VaultError::ParseError("end must be after start".into()));
                 }
             }
 
@@ -2635,16 +2900,25 @@ fn inbox_item_from_task(task: &Task) -> InboxItem {
     InboxItem {
         id: task.id.clone(),
         title: task.title.clone(),
-        kind: task.issue_type.clone().unwrap_or_else(|| "task".to_string()),
+        kind: task
+            .issue_type
+            .clone()
+            .unwrap_or_else(|| "task".to_string()),
         status: status_label(&task.status).to_string(),
         priority: priority_label(&task.priority).to_string(),
-        projects: task.projects.iter().map(|project| project.0.clone()).collect(),
+        projects: task
+            .projects
+            .iter()
+            .map(|project| project.0.clone())
+            .collect(),
         tags: task.tags.clone(),
         contexts: task.contexts.clone(),
         due: task.due.map(|date| date.to_string()),
         scheduled: task.scheduled.map(|date| date.to_string()),
         assignee: task.assignee.clone(),
-        source: task.external_source.as_deref()
+        source: task
+            .external_source
+            .as_deref()
             .and_then(|source| source.strip_prefix("inbox:"))
             .map(str::to_string),
         body: task.body.clone(),
@@ -2655,7 +2929,11 @@ fn is_inbox_task(task: &Task) -> bool {
     task.tags.iter().any(|tag| tag == "inbox") || task.issue_type.as_deref() == Some("inbox")
 }
 
-fn build_review_report(mut tasks: Vec<Task>, horizon_days: i64, stale_after_days: u32) -> ReviewReport {
+fn build_review_report(
+    mut tasks: Vec<Task>,
+    horizon_days: i64,
+    stale_after_days: u32,
+) -> ReviewReport {
     let today = chrono::Local::now().date_naive();
     let horizon_end = today + chrono::Duration::days(horizon_days);
     let stale_before = today - chrono::Duration::days(stale_after_days as i64);
@@ -2671,11 +2949,15 @@ fn build_review_report(mut tasks: Vec<Task>, horizon_days: i64, stale_after_days
             .filter(|task| is_inbox_task(task))
             .map(inbox_item_from_task)
             .collect(),
-        commitments: review_tasks(&tasks, |task| task.issue_type.as_deref() == Some("commitment")),
+        commitments: review_tasks(&tasks, |task| {
+            task.issue_type.as_deref() == Some("commitment")
+        }),
         ideas: review_tasks(&tasks, |task| is_idea_task(task) && !is_someday_task(task)),
         someday: review_tasks(&tasks, is_someday_task),
         waiting: review_tasks(&tasks, is_waiting_task),
-        overdue: review_tasks(&tasks, |task| task.due.map(|due| due < today).unwrap_or(false)),
+        overdue: review_tasks(&tasks, |task| {
+            task.due.map(|due| due < today).unwrap_or(false)
+        }),
         due_today: review_tasks(&tasks, |task| task.due == Some(today)),
         scheduled_today: review_tasks(&tasks, |task| task.scheduled == Some(today)),
         upcoming: review_tasks(&tasks, |task| {
@@ -2731,7 +3013,10 @@ fn is_waiting_task(task: &Task) -> bool {
         .map(|kind| matches!(kind, "waiting" | "waiting-on"))
         .unwrap_or(false)
         || matches!(task.status, Status::OnHold)
-        || task.tags.iter().any(|tag| matches!(tag.as_str(), "waiting" | "waiting-on"))
+        || task
+            .tags
+            .iter()
+            .any(|tag| matches!(tag.as_str(), "waiting" | "waiting-on"))
 }
 
 fn is_idea_task(task: &Task) -> bool {
@@ -2743,7 +3028,262 @@ fn is_someday_task(task: &Task) -> bool {
         .as_deref()
         .map(|kind| matches!(kind, "someday" | "maybe"))
         .unwrap_or(false)
-        || task.tags.iter().any(|tag| matches!(tag.as_str(), "someday" | "maybe"))
+        || task
+            .tags
+            .iter()
+            .any(|tag| matches!(tag.as_str(), "someday" | "maybe"))
+}
+
+fn person_from_carddav_object(object: CardDavObject) -> Option<Person> {
+    let contact = object.contact?;
+    let display_name = contact
+        .full_name
+        .clone()
+        .or_else(|| {
+            match (
+                contact.given_name.as_deref(),
+                contact.family_name.as_deref(),
+            ) {
+                (Some(given), Some(family)) => Some(format!("{given} {family}")),
+                (Some(given), None) => Some(given.to_string()),
+                (None, Some(family)) => Some(family.to_string()),
+                _ => None,
+            }
+        })
+        .or_else(|| contact.emails.first().cloned())
+        .or_else(|| contact.uid.clone())?;
+    let mut contact_methods = Vec::new();
+    for (index, email) in contact.emails.iter().enumerate() {
+        contact_methods.push(ContactMethod {
+            kind: "email".to_string(),
+            value: email.clone(),
+            primary: index == 0,
+            ..Default::default()
+        });
+    }
+    for (index, phone) in contact.phones.iter().enumerate() {
+        contact_methods.push(ContactMethod {
+            kind: "phone".to_string(),
+            value: phone.clone(),
+            primary: index == 0 && contact.emails.is_empty(),
+            ..Default::default()
+        });
+    }
+    for url in &contact.urls {
+        contact_methods.push(ContactMethod {
+            kind: "url".to_string(),
+            value: url.clone(),
+            ..Default::default()
+        });
+    }
+    Some(Person {
+        id: contact.uid.clone(),
+        display_name,
+        given_name: contact.given_name,
+        family_name: contact.family_name,
+        organization: contact.organization,
+        title: contact.title,
+        contact_methods,
+        provider_refs: vec![ProviderRef {
+            provider: "carddav".to_string(),
+            collection: object
+                .href
+                .trim_end_matches('/')
+                .rsplit_once('/')
+                .map(|(collection, _)| collection.trim_end_matches('/').to_string()),
+            href: Some(object.href),
+            etag: object.etag,
+            uid: contact.uid,
+            ..Default::default()
+        }],
+        notes: contact.note,
+        ..Default::default()
+    })
+}
+
+fn organizations_from_people(people: &[Person]) -> Vec<OrganizationRecord> {
+    let mut organizations: Vec<OrganizationRecord> = Vec::new();
+    for person in people {
+        let Some(name) = person
+            .organization
+            .as_deref()
+            .filter(|name| !name.is_empty())
+        else {
+            continue;
+        };
+        if let Some(org) = organizations.iter_mut().find(|org| org.name == name) {
+            push_unique(&mut org.people, person.display_name.clone());
+        } else {
+            organizations.push(OrganizationRecord {
+                id: Some(slug_id(name)),
+                name: name.to_string(),
+                people: vec![person.display_name.clone()],
+                ..Default::default()
+            });
+        }
+    }
+    organizations.sort_by(|a, b| a.name.cmp(&b.name));
+    organizations
+}
+
+fn person_matches_reference(person: &Person, reference: &str) -> bool {
+    let needle = reference.to_ascii_lowercase();
+    person
+        .id
+        .as_deref()
+        .map(|id| id.eq_ignore_ascii_case(reference))
+        .unwrap_or(false)
+        || person.display_name.eq_ignore_ascii_case(reference)
+        || person
+            .contact_methods
+            .iter()
+            .any(|method| method.value.eq_ignore_ascii_case(reference))
+        || person.display_name.to_ascii_lowercase().contains(&needle)
+}
+
+fn organization_matches_reference(organization: &OrganizationRecord, reference: &str) -> bool {
+    let needle = reference.to_ascii_lowercase();
+    organization
+        .id
+        .as_deref()
+        .map(|id| id.eq_ignore_ascii_case(reference))
+        .unwrap_or(false)
+        || organization.name.eq_ignore_ascii_case(reference)
+        || organization.name.to_ascii_lowercase().contains(&needle)
+}
+
+fn person_context_tokens(person: &Person) -> Vec<String> {
+    let mut tokens = vec![person.display_name.clone()];
+    if let Some(given) = &person.given_name {
+        tokens.push(given.clone());
+    }
+    if let Some(family) = &person.family_name {
+        tokens.push(family.clone());
+    }
+    if let Some(org) = &person.organization {
+        tokens.push(org.clone());
+    }
+    for method in &person.contact_methods {
+        tokens.push(method.value.clone());
+    }
+    normalize_context_tokens(tokens)
+}
+
+fn organization_context_tokens(
+    organization: &OrganizationRecord,
+    people: &[Person],
+) -> Vec<String> {
+    let mut tokens = vec![organization.name.clone()];
+    for person in people {
+        tokens.extend(person_context_tokens(person));
+    }
+    normalize_context_tokens(tokens)
+}
+
+fn normalize_context_tokens(tokens: Vec<String>) -> Vec<String> {
+    let mut normalized = Vec::new();
+    for token in tokens {
+        let token = token.trim();
+        if token.len() >= 3 {
+            push_unique(&mut normalized, token.to_ascii_lowercase());
+        }
+    }
+    normalized
+}
+
+fn task_matches_tokens(task: &Task, tokens: &[String]) -> bool {
+    let haystack = format!(
+        "{}\n{}\n{}\n{}\n{}",
+        task.title,
+        task.body,
+        task.assignee.clone().unwrap_or_default(),
+        task.tags.join("\n"),
+        task.contexts.join("\n")
+    )
+    .to_ascii_lowercase();
+    tokens.iter().any(|token| haystack.contains(token))
+}
+
+fn project_matches_tokens(project: &Project, tokens: &[String]) -> bool {
+    let haystack = format!(
+        "{}\n{}\n{}\n{}\n{}",
+        project.title,
+        project.description.clone().unwrap_or_default(),
+        project.organization.clone().unwrap_or_default(),
+        project.team.join("\n"),
+        project.tags.join("\n")
+    )
+    .to_ascii_lowercase();
+    tokens.iter().any(|token| haystack.contains(token))
+}
+
+fn event_matches_tokens(event: &crate::CalendarEvent, tokens: &[String]) -> bool {
+    let haystack = format!(
+        "{}\n{}\n{}\n{}",
+        event.title,
+        event.description.clone().unwrap_or_default(),
+        event.location.clone().unwrap_or_default(),
+        event.attendees.join("\n")
+    )
+    .to_ascii_lowercase();
+    tokens.iter().any(|token| haystack.contains(token))
+}
+
+fn communication_refs_for_tokens(
+    tasks: &[Task],
+    events: &[crate::CalendarEvent],
+    tokens: &[String],
+) -> Vec<CommunicationRef> {
+    let mut refs = Vec::new();
+    for task in tasks
+        .iter()
+        .filter(|task| task_matches_tokens(task, tokens))
+    {
+        for email in &task.emails {
+            refs.push(CommunicationRef {
+                kind: "email".to_string(),
+                external_id: email.message_id.clone(),
+                summary: Some(email.subject.clone()),
+                occurred_at: Some(email.date),
+                provider: Some("mail".to_string()),
+            });
+        }
+    }
+    for event in events
+        .iter()
+        .filter(|event| event_matches_tokens(event, tokens))
+    {
+        refs.push(CommunicationRef {
+            kind: "calendar".to_string(),
+            external_id: event.id.clone().unwrap_or_else(|| event.title.clone()),
+            summary: Some(event.title.clone()),
+            occurred_at: Some(event.start),
+            provider: Some(
+                event
+                    .external_source
+                    .clone()
+                    .unwrap_or_else(|| "calendar".to_string()),
+            ),
+        });
+    }
+    refs
+}
+
+fn slug_id(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() {
+                ch.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>()
+        .split('-')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("-")
 }
 
 fn task_matches_reference(task: &Task, reference: &str) -> bool {
@@ -2760,7 +3300,8 @@ fn parse_optional_naive_date(input: &str, field: &str) -> Result<Option<NaiveDat
     if input.is_empty() || input == "clear" {
         Ok(None)
     } else {
-        input.parse::<NaiveDate>()
+        input
+            .parse::<NaiveDate>()
             .map(Some)
             .map_err(|e| VaultError::ParseError(format!("invalid {field}: {e}")))
     }
@@ -2806,15 +3347,33 @@ fn priority_label(priority: &Priority) -> &'static str {
 // ── Vox service trait implementations ────────────────────────────────────────
 
 impl crate::service::TaskService for VaultServiceImpl {
-    async fn list_tasks(&self) -> Vec<Task> { self.list_tasks().await }
-    async fn execute_query(&self, query: Query) -> Vec<Task> { self.execute_query(query).await }
-    async fn urgency_score(&self, task: Task) -> i32 { self.urgency_score(task).await }
-    async fn create_task(&self, task: Task) -> Result<Task, VaultError> { self.create_task(task).await }
-    async fn update_task(&self, task: Task) -> Result<Task, VaultError> { self.update_task(task).await }
-    async fn complete_task(&self, title: String) -> Result<Task, VaultError> { self.complete_task(title).await }
-    async fn delete_task(&self, title: String) -> Result<(), VaultError> { self.delete_task(title).await }
-    async fn search_tasks(&self, query: String) -> Vec<Task> { self.search_tasks(query).await }
-    async fn tasks_for_user(&self, username: String) -> Vec<Task> { self.tasks_for_user(username).await }
+    async fn list_tasks(&self) -> Vec<Task> {
+        self.list_tasks().await
+    }
+    async fn execute_query(&self, query: Query) -> Vec<Task> {
+        self.execute_query(query).await
+    }
+    async fn urgency_score(&self, task: Task) -> i32 {
+        self.urgency_score(task).await
+    }
+    async fn create_task(&self, task: Task) -> Result<Task, VaultError> {
+        self.create_task(task).await
+    }
+    async fn update_task(&self, task: Task) -> Result<Task, VaultError> {
+        self.update_task(task).await
+    }
+    async fn complete_task(&self, title: String) -> Result<Task, VaultError> {
+        self.complete_task(title).await
+    }
+    async fn delete_task(&self, title: String) -> Result<(), VaultError> {
+        self.delete_task(title).await
+    }
+    async fn search_tasks(&self, query: String) -> Vec<Task> {
+        self.search_tasks(query).await
+    }
+    async fn tasks_for_user(&self, username: String) -> Vec<Task> {
+        self.tasks_for_user(username).await
+    }
 }
 
 impl crate::service::InboxService for VaultServiceImpl {
@@ -2840,22 +3399,34 @@ impl crate::service::InboxService for VaultServiceImpl {
 }
 
 impl crate::service::ProjectService for VaultServiceImpl {
-    async fn list_projects(&self) -> Vec<Project> { self.list_projects().await }
+    async fn list_projects(&self) -> Vec<Project> {
+        self.list_projects().await
+    }
     async fn update_project(
         &self,
         title: String,
         patch: ProjectPatch,
         actor: Option<String>,
     ) -> Result<Project, VaultError> {
-        self.update_project_as(&title, patch, actor.as_deref()).await
+        self.update_project_as(&title, patch, actor.as_deref())
+            .await
     }
-    async fn project_stats(&self, project_title: String) -> ProjectStats { self.project_stats(project_title).await }
-    async fn next_task(&self, project_title: String) -> Option<Task> { self.next_task(project_title).await }
-    async fn tasks_for_project(&self, project_title: String) -> Vec<Task> { self.tasks_for_project(project_title).await }
+    async fn project_stats(&self, project_title: String) -> ProjectStats {
+        self.project_stats(project_title).await
+    }
+    async fn next_task(&self, project_title: String) -> Option<Task> {
+        self.next_task(project_title).await
+    }
+    async fn tasks_for_project(&self, project_title: String) -> Vec<Task> {
+        self.tasks_for_project(project_title).await
+    }
 }
 
 impl crate::service::TimeService for VaultServiceImpl {
-    async fn start_timer(&self, request: TimeStartRequest) -> Result<crate::task::TimeEntry, VaultError> {
+    async fn start_timer(
+        &self,
+        request: TimeStartRequest,
+    ) -> Result<crate::task::TimeEntry, VaultError> {
         VaultServiceImpl::start_timer(
             self,
             &request.task_ref,
@@ -2873,7 +3444,10 @@ impl crate::service::TimeService for VaultServiceImpl {
             .map(|(task_title, entry)| TimedTaskEntry { task_title, entry })
     }
 
-    async fn log_time(&self, request: TimeLogRequest) -> Result<crate::task::TimeEntry, VaultError> {
+    async fn log_time(
+        &self,
+        request: TimeLogRequest,
+    ) -> Result<crate::task::TimeEntry, VaultError> {
         VaultServiceImpl::log_time(
             self,
             &request.task_ref,
@@ -2908,7 +3482,11 @@ impl crate::service::TimeService for VaultServiceImpl {
             .map(|(task_title, entry)| TimedTaskEntry { task_title, entry })
     }
 
-    async fn delete_time_entry(&self, entry_id: String, actor: Option<String>) -> Result<(), VaultError> {
+    async fn delete_time_entry(
+        &self,
+        entry_id: String,
+        actor: Option<String>,
+    ) -> Result<(), VaultError> {
         VaultServiceImpl::delete_time_entry_as(self, &entry_id, actor.as_deref()).await
     }
 }
@@ -2927,6 +3505,53 @@ impl crate::service::ClientService for VaultServiceImpl {
 
     async fn find_client(&self, name: String) -> Option<crate::client::Client> {
         VaultServiceImpl::find_client(self, &name).await
+    }
+}
+
+impl crate::service::PeopleService for VaultServiceImpl {
+    async fn list_people(&self, addressbook: Option<String>) -> Result<Vec<Person>, VaultError> {
+        self.list_people_from_carddav(addressbook).await
+    }
+
+    async fn list_organizations(
+        &self,
+        addressbook: Option<String>,
+    ) -> Result<Vec<OrganizationRecord>, VaultError> {
+        self.list_organizations_from_carddav(addressbook).await
+    }
+
+    async fn person_context(
+        &self,
+        reference: String,
+        addressbook: Option<String>,
+    ) -> Result<Option<PersonContext>, VaultError> {
+        self.person_context_from_carddav(reference, addressbook)
+            .await
+    }
+
+    async fn organization_context(
+        &self,
+        reference: String,
+        addressbook: Option<String>,
+    ) -> Result<Option<OrganizationContext>, VaultError> {
+        self.organization_context_from_carddav(reference, addressbook)
+            .await
+    }
+
+    async fn detect_person_conflict(
+        &self,
+        local: Person,
+        remote: Person,
+    ) -> Result<Option<ProviderConflict>, VaultError> {
+        Ok(person_provider_conflicts(&local, &remote))
+    }
+
+    async fn detect_organization_conflict(
+        &self,
+        local: OrganizationRecord,
+        remote: OrganizationRecord,
+    ) -> Result<Option<ProviderConflict>, VaultError> {
+        Ok(organization_provider_conflicts(&local, &remote))
     }
 }
 
@@ -2993,8 +3618,15 @@ impl crate::service::InvoiceService for VaultServiceImpl {
 }
 
 impl crate::service::ActivityService for VaultServiceImpl {
-    async fn recent_activity(&self, limit: u32) -> Result<Vec<crate::index::ChangeRow>, VaultError> {
+    async fn recent_activity(
+        &self,
+        limit: u32,
+    ) -> Result<Vec<crate::index::ChangeRow>, VaultError> {
         VaultServiceImpl::recent_activity(self, limit).await
+    }
+
+    async fn list_sync_states(&self) -> Result<Vec<ProviderSyncState>, VaultError> {
+        VaultServiceImpl::list_provider_sync_states(self).await
     }
 
     async fn list_conflicts(
@@ -3209,6 +3841,7 @@ impl crate::service::SystemService for VaultServiceImpl {
                 "ProjectService".into(),
                 "TimeService".into(),
                 "ClientService".into(),
+                "PeopleService".into(),
                 "InvoiceService".into(),
                 "ActivityService".into(),
                 "MailService".into(),
@@ -3290,7 +3923,9 @@ impl crate::service::SystemService for VaultServiceImpl {
             } else {
                 "SQLite index is unavailable; queries will scan files".into()
             },
-            Some("If search feels slow, verify the vault path is writable and restart task-server."),
+            Some(
+                "If search feels slow, verify the vault path is writable and restart task-server.",
+            ),
         ));
 
         let nextcloud = match NextcloudRuntimeConfig::load() {
@@ -3315,7 +3950,9 @@ impl crate::service::SystemService for VaultServiceImpl {
                 false,
                 false,
                 "Nextcloud is not configured".into(),
-                Some("Set NEXTCLOUD_URL and NEXTCLOUD_PASSWORD, or configure TASK_NEXTCLOUD_CONFIG."),
+                Some(
+                    "Set NEXTCLOUD_URL and NEXTCLOUD_PASSWORD, or configure TASK_NEXTCLOUD_CONFIG.",
+                ),
             ));
             return system_health(deep, checks);
         };
@@ -3325,7 +3962,10 @@ impl crate::service::SystemService for VaultServiceImpl {
             "NEXTCLOUD_CONFIGURED",
             true,
             true,
-            format!("Nextcloud configured for {} at {}", config.username, config.url),
+            format!(
+                "Nextcloud configured for {} at {}",
+                config.username, config.url
+            ),
             None,
         ));
 
@@ -3403,7 +4043,9 @@ impl crate::service::SystemService for VaultServiceImpl {
                     true,
                     false,
                     format!("Mail check failed: {err}"),
-                    Some("Verify the Nextcloud Mail app is enabled and the user has mail accounts."),
+                    Some(
+                        "Verify the Nextcloud Mail app is enabled and the user has mail accounts.",
+                    ),
                 )),
             },
             Err(err) => checks.push(health_check(
@@ -3451,7 +4093,9 @@ impl crate::service::SystemService for VaultServiceImpl {
 }
 
 impl crate::service::CalendarService for VaultServiceImpl {
-    async fn tasks_due_by(&self, date: String) -> Vec<Task> { self.tasks_due_by(date).await }
+    async fn tasks_due_by(&self, date: String) -> Vec<Task> {
+        self.tasks_due_by(date).await
+    }
 
     async fn scheduled_between(&self, from: String, to: String) -> Result<Vec<Task>, VaultError> {
         let from = chrono::NaiveDate::parse_from_str(&from, "%Y-%m-%d")
@@ -3499,8 +4143,12 @@ impl crate::service::CalendarService for VaultServiceImpl {
         self.delete_calendar_event(&event_ref).await
     }
 
-    async fn trigger_sync(&self) -> Result<SyncStats, VaultError> { self.trigger_sync().await }
-    async fn sync_status(&self) -> Option<SyncStats> { self.sync_status().await }
+    async fn trigger_sync(&self) -> Result<SyncStats, VaultError> {
+        self.trigger_sync().await
+    }
+    async fn sync_status(&self) -> Option<SyncStats> {
+        self.sync_status().await
+    }
     async fn discover_caldav(&self) -> Result<CalDavDiscovery, VaultError> {
         VaultServiceImpl::discover_caldav(self).await
     }
@@ -3540,7 +4188,10 @@ impl crate::service::CalendarService for VaultServiceImpl {
     ) -> Result<(), VaultError> {
         VaultServiceImpl::delete_calendar_object(self, request).await
     }
-    async fn put_addressbook_object(&self, request: CardDavPutObjectRequest) -> Result<(), VaultError> {
+    async fn put_addressbook_object(
+        &self,
+        request: CardDavPutObjectRequest,
+    ) -> Result<(), VaultError> {
         VaultServiceImpl::put_addressbook_object(self, request).await
     }
     async fn delete_addressbook_object(
@@ -3571,8 +4222,9 @@ impl crate::service::CalendarService for VaultServiceImpl {
 
 impl crate::service::FileService for VaultServiceImpl {
     async fn list_files(&self, path: String, depth: String) -> Result<Vec<FileEntry>, VaultError> {
-        let config = NextcloudRuntimeConfig::load()?
-            .ok_or_else(|| VaultError::IoError("Nextcloud file provider is not configured".into()))?;
+        let config = NextcloudRuntimeConfig::load()?.ok_or_else(|| {
+            VaultError::IoError("Nextcloud file provider is not configured".into())
+        })?;
         let provider = nextcloud_webdav_provider(&config);
         provider
             .list(&path, if depth.is_empty() { "1" } else { &depth })
@@ -3581,8 +4233,9 @@ impl crate::service::FileService for VaultServiceImpl {
     }
 
     async fn stat_file(&self, path: String) -> Result<Option<FileEntry>, VaultError> {
-        let config = NextcloudRuntimeConfig::load()?
-            .ok_or_else(|| VaultError::IoError("Nextcloud file provider is not configured".into()))?;
+        let config = NextcloudRuntimeConfig::load()?.ok_or_else(|| {
+            VaultError::IoError("Nextcloud file provider is not configured".into())
+        })?;
         let provider = nextcloud_webdav_provider(&config);
         provider
             .stat(&path)
@@ -3591,8 +4244,9 @@ impl crate::service::FileService for VaultServiceImpl {
     }
 
     async fn read_file(&self, path: String) -> Result<Option<FileReadResponse>, VaultError> {
-        let config = NextcloudRuntimeConfig::load()?
-            .ok_or_else(|| VaultError::IoError("Nextcloud file provider is not configured".into()))?;
+        let config = NextcloudRuntimeConfig::load()?.ok_or_else(|| {
+            VaultError::IoError("Nextcloud file provider is not configured".into())
+        })?;
         let provider = nextcloud_webdav_provider(&config);
         let stat = provider.stat(&path).await?;
         let Some(content) = provider.read(&path).await? else {
@@ -3606,8 +4260,9 @@ impl crate::service::FileService for VaultServiceImpl {
     }
 
     async fn write_file(&self, request: FileWriteRequest) -> Result<(), VaultError> {
-        let config = NextcloudRuntimeConfig::load()?
-            .ok_or_else(|| VaultError::IoError("Nextcloud file provider is not configured".into()))?;
+        let config = NextcloudRuntimeConfig::load()?.ok_or_else(|| {
+            VaultError::IoError("Nextcloud file provider is not configured".into())
+        })?;
         let provider = nextcloud_webdav_provider(&config);
         let content = BASE64
             .decode(request.content_base64)
@@ -3626,28 +4281,37 @@ impl crate::service::FileService for VaultServiceImpl {
     }
 
     async fn create_dir(&self, path: String) -> Result<(), VaultError> {
-        let config = NextcloudRuntimeConfig::load()?
-            .ok_or_else(|| VaultError::IoError("Nextcloud file provider is not configured".into()))?;
+        let config = NextcloudRuntimeConfig::load()?.ok_or_else(|| {
+            VaultError::IoError("Nextcloud file provider is not configured".into())
+        })?;
         nextcloud_webdav_provider(&config).create_dir(&path).await
     }
 
     async fn delete_file(&self, path: String) -> Result<(), VaultError> {
-        let config = NextcloudRuntimeConfig::load()?
-            .ok_or_else(|| VaultError::IoError("Nextcloud file provider is not configured".into()))?;
+        let config = NextcloudRuntimeConfig::load()?.ok_or_else(|| {
+            VaultError::IoError("Nextcloud file provider is not configured".into())
+        })?;
         nextcloud_webdav_provider(&config).remove(&path).await
     }
 
     async fn copy_file(&self, request: FileCopyMoveRequest) -> Result<(), VaultError> {
-        let config = NextcloudRuntimeConfig::load()?
-            .ok_or_else(|| VaultError::IoError("Nextcloud file provider is not configured".into()))?;
+        let config = NextcloudRuntimeConfig::load()?.ok_or_else(|| {
+            VaultError::IoError("Nextcloud file provider is not configured".into())
+        })?;
         nextcloud_webdav_provider(&config)
-            .copy(&request.from, &request.to, request.overwrite, Some("infinity"))
+            .copy(
+                &request.from,
+                &request.to,
+                request.overwrite,
+                Some("infinity"),
+            )
             .await
     }
 
     async fn move_file(&self, request: FileCopyMoveRequest) -> Result<(), VaultError> {
-        let config = NextcloudRuntimeConfig::load()?
-            .ok_or_else(|| VaultError::IoError("Nextcloud file provider is not configured".into()))?;
+        let config = NextcloudRuntimeConfig::load()?.ok_or_else(|| {
+            VaultError::IoError("Nextcloud file provider is not configured".into())
+        })?;
         nextcloud_webdav_provider(&config)
             .move_resource(&request.from, &request.to, request.overwrite)
             .await
@@ -3669,6 +4333,229 @@ fn file_entry_from_webdav(entry: crate::provider::WebDavEntry) -> FileEntry {
     }
 }
 
+fn person_provider_conflicts(local: &Person, remote: &Person) -> Option<ProviderConflict> {
+    let (local_ref, remote_ref) = shared_provider_ref(&local.provider_refs, &remote.provider_refs)?;
+    if !provider_refs_changed(local_ref, remote_ref) {
+        return None;
+    }
+
+    let mut fields = Vec::new();
+    push_provider_conflict(
+        &mut fields,
+        "display_name",
+        Some(local.display_name.clone()),
+        Some(remote.display_name.clone()),
+    );
+    push_provider_conflict(
+        &mut fields,
+        "given_name",
+        local.given_name.clone(),
+        remote.given_name.clone(),
+    );
+    push_provider_conflict(
+        &mut fields,
+        "family_name",
+        local.family_name.clone(),
+        remote.family_name.clone(),
+    );
+    push_provider_conflict(
+        &mut fields,
+        "organization",
+        local.organization.clone(),
+        remote.organization.clone(),
+    );
+    push_provider_conflict(
+        &mut fields,
+        "title",
+        local.title.clone(),
+        remote.title.clone(),
+    );
+    push_provider_conflict(
+        &mut fields,
+        "contact_methods",
+        Some(format_contact_methods(&local.contact_methods)),
+        Some(format_contact_methods(&remote.contact_methods)),
+    );
+    push_provider_conflict(
+        &mut fields,
+        "notes",
+        local.notes.clone(),
+        remote.notes.clone(),
+    );
+    push_provider_conflict(
+        &mut fields,
+        "follow_up_on",
+        fmt_date(local.follow_up_on),
+        fmt_date(remote.follow_up_on),
+    );
+    push_provider_conflict(
+        &mut fields,
+        "last_contacted_at",
+        local.last_contacted_at.map(|value| value.to_rfc3339()),
+        remote.last_contacted_at.map(|value| value.to_rfc3339()),
+    );
+
+    provider_conflict_report(
+        "person",
+        local
+            .id
+            .as_deref()
+            .or(remote.id.as_deref())
+            .unwrap_or(&local.display_name),
+        local_ref,
+        remote_ref,
+        fields,
+    )
+}
+
+fn organization_provider_conflicts(
+    local: &OrganizationRecord,
+    remote: &OrganizationRecord,
+) -> Option<ProviderConflict> {
+    let (local_ref, remote_ref) = shared_provider_ref(&local.provider_refs, &remote.provider_refs)?;
+    if !provider_refs_changed(local_ref, remote_ref) {
+        return None;
+    }
+
+    let mut fields = Vec::new();
+    push_provider_conflict(
+        &mut fields,
+        "name",
+        Some(local.name.clone()),
+        Some(remote.name.clone()),
+    );
+    push_provider_conflict(
+        &mut fields,
+        "people",
+        Some(format_string_list(&local.people)),
+        Some(format_string_list(&remote.people)),
+    );
+    push_provider_conflict(
+        &mut fields,
+        "contact_methods",
+        Some(format_contact_methods(&local.contact_methods)),
+        Some(format_contact_methods(&remote.contact_methods)),
+    );
+    push_provider_conflict(
+        &mut fields,
+        "notes",
+        local.notes.clone(),
+        remote.notes.clone(),
+    );
+    push_provider_conflict(
+        &mut fields,
+        "follow_up_on",
+        fmt_date(local.follow_up_on),
+        fmt_date(remote.follow_up_on),
+    );
+
+    provider_conflict_report(
+        "organization",
+        local
+            .id
+            .as_deref()
+            .or(remote.id.as_deref())
+            .unwrap_or(&local.name),
+        local_ref,
+        remote_ref,
+        fields,
+    )
+}
+
+fn shared_provider_ref<'a>(
+    local_refs: &'a [ProviderRef],
+    remote_refs: &'a [ProviderRef],
+) -> Option<(&'a ProviderRef, &'a ProviderRef)> {
+    local_refs.iter().find_map(|local| {
+        remote_refs
+            .iter()
+            .find(|remote| {
+                local.provider == remote.provider
+                    && local.account == remote.account
+                    && local.collection == remote.collection
+                    && ((local.href.is_some() && local.href == remote.href)
+                        || (local.uid.is_some() && local.uid == remote.uid))
+            })
+            .map(|remote| (local, remote))
+    })
+}
+
+fn provider_refs_changed(local: &ProviderRef, remote: &ProviderRef) -> bool {
+    match (&local.etag, &remote.etag) {
+        (Some(local_etag), Some(remote_etag)) => local_etag != remote_etag,
+        _ => true,
+    }
+}
+
+fn provider_conflict_report(
+    entity_type: &str,
+    entity_id: &str,
+    local_ref: &ProviderRef,
+    remote_ref: &ProviderRef,
+    fields: Vec<ProviderConflictField>,
+) -> Option<ProviderConflict> {
+    if fields.is_empty() {
+        return None;
+    }
+
+    Some(ProviderConflict {
+        entity_type: entity_type.to_string(),
+        entity_id: entity_id.to_string(),
+        provider: local_ref.provider.clone(),
+        account: local_ref
+            .account
+            .clone()
+            .or_else(|| remote_ref.account.clone()),
+        collection: local_ref
+            .collection
+            .clone()
+            .or_else(|| remote_ref.collection.clone()),
+        href: local_ref.href.clone().or_else(|| remote_ref.href.clone()),
+        uid: local_ref.uid.clone().or_else(|| remote_ref.uid.clone()),
+        local_etag: local_ref.etag.clone(),
+        remote_etag: remote_ref.etag.clone(),
+        fields,
+    })
+}
+
+fn push_provider_conflict(
+    fields: &mut Vec<ProviderConflictField>,
+    field: &str,
+    local_value: Option<String>,
+    remote_value: Option<String>,
+) {
+    if local_value != remote_value {
+        fields.push(ProviderConflictField {
+            field: field.to_string(),
+            local_value,
+            remote_value,
+        });
+    }
+}
+
+fn format_contact_methods(methods: &[ContactMethod]) -> String {
+    let mut values = methods
+        .iter()
+        .map(|method| {
+            format!(
+                "{}:{}:{}:{}",
+                method.kind,
+                method.value,
+                method.label.as_deref().unwrap_or_default(),
+                method.primary
+            )
+        })
+        .collect::<Vec<_>>();
+    values.sort();
+    values.join(",")
+}
+
+fn format_string_list(values: &[String]) -> String {
+    let mut values = values.to_vec();
+    values.sort();
+    values.join(",")
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct TaskSyncConflict {
     field: &'static str,
@@ -3684,9 +4571,9 @@ fn task_sync_key(task: &Task) -> String {
 }
 
 fn find_matching_local_task<'a>(remote: &Task, local_tasks: &'a [Task]) -> Option<&'a Task> {
-    local_tasks.iter().find(|local| {
-        (remote.id.is_some() && local.id == remote.id) || local.title == remote.title
-    })
+    local_tasks
+        .iter()
+        .find(|local| (remote.id.is_some() && local.id == remote.id) || local.title == remote.title)
 }
 
 fn remote_is_newer(local: &Task, remote: &Task) -> bool {
@@ -3727,7 +4614,12 @@ fn task_sync_conflicts(local: &Task, remote: &Task) -> Vec<TaskSyncConflict> {
         Some(format!("{:?}", local.priority)),
         Some(format!("{:?}", remote.priority)),
     );
-    push_conflict(&mut conflicts, "due", fmt_date(local.due), fmt_date(remote.due));
+    push_conflict(
+        &mut conflicts,
+        "due",
+        fmt_date(local.due),
+        fmt_date(remote.due),
+    );
     push_conflict(
         &mut conflicts,
         "scheduled",
@@ -3749,8 +4641,22 @@ fn task_sync_conflicts(local: &Task, remote: &Task) -> Vec<TaskSyncConflict> {
     push_conflict(
         &mut conflicts,
         "projects",
-        Some(local.projects.iter().map(|p| p.0.as_str()).collect::<Vec<_>>().join(",")),
-        Some(remote.projects.iter().map(|p| p.0.as_str()).collect::<Vec<_>>().join(",")),
+        Some(
+            local
+                .projects
+                .iter()
+                .map(|p| p.0.as_str())
+                .collect::<Vec<_>>()
+                .join(","),
+        ),
+        Some(
+            remote
+                .projects
+                .iter()
+                .map(|p| p.0.as_str())
+                .collect::<Vec<_>>()
+                .join(","),
+        ),
     );
     push_conflict(
         &mut conflicts,
@@ -3876,17 +4782,25 @@ fn record_task_diff(
 
     // List fields as one summary row each, naming the net diff.
     if old.tags != new.tags {
-        rows.push((
-            "tags",
-            Some(old.tags.join(",")),
-            Some(new.tags.join(",")),
-        ));
+        rows.push(("tags", Some(old.tags.join(",")), Some(new.tags.join(","))));
     }
     if old.projects != new.projects {
         rows.push((
             "projects",
-            Some(old.projects.iter().map(|p| p.0.as_str()).collect::<Vec<_>>().join(",")),
-            Some(new.projects.iter().map(|p| p.0.as_str()).collect::<Vec<_>>().join(",")),
+            Some(
+                old.projects
+                    .iter()
+                    .map(|p| p.0.as_str())
+                    .collect::<Vec<_>>()
+                    .join(","),
+            ),
+            Some(
+                new.projects
+                    .iter()
+                    .map(|p| p.0.as_str())
+                    .collect::<Vec<_>>()
+                    .join(","),
+            ),
         ));
     }
     if old.contexts != new.contexts {
@@ -3972,7 +4886,10 @@ mod tests {
         assert_eq!(promoted.kind, "commitment");
         assert_eq!(promoted.status, "planned");
         assert_eq!(promoted.scheduled.as_deref(), Some("2026-05-01"));
-        assert!(promoted.projects.iter().any(|project| project == "Operations"));
+        assert!(promoted
+            .projects
+            .iter()
+            .any(|project| project == "Operations"));
         assert!(!promoted.tags.iter().any(|tag| tag == "inbox"));
         assert!(svc.list_inbox_items().await.is_empty());
 
@@ -4031,16 +4948,165 @@ mod tests {
             .unwrap();
 
         let report = svc.daily_review_report().await;
-        assert!(report.inbox.iter().any(|item| item.title == "Loose capture"));
-        assert!(report.commitments.iter().any(|task| task.title == "Client commitment"));
-        assert!(report.due_today.iter().any(|task| task.title == "Client commitment"));
-        assert!(report.waiting.iter().any(|task| task.title == "Waiting on vendor"));
-        assert!(report.someday.iter().any(|task| task.title == "Someday cabin idea"));
-        assert!(report.overdue.iter().any(|task| task.title == "Overdue tax thing"));
-        assert!(report.unscheduled.iter().any(|task| task.title == "Unscheduled stale thing"));
-        assert!(report.stale.iter().any(|task| task.title == "Unscheduled stale thing"));
+        assert!(report
+            .inbox
+            .iter()
+            .any(|item| item.title == "Loose capture"));
+        assert!(report
+            .commitments
+            .iter()
+            .any(|task| task.title == "Client commitment"));
+        assert!(report
+            .due_today
+            .iter()
+            .any(|task| task.title == "Client commitment"));
+        assert!(report
+            .waiting
+            .iter()
+            .any(|task| task.title == "Waiting on vendor"));
+        assert!(report
+            .someday
+            .iter()
+            .any(|task| task.title == "Someday cabin idea"));
+        assert!(report
+            .overdue
+            .iter()
+            .any(|task| task.title == "Overdue tax thing"));
+        assert!(report
+            .unscheduled
+            .iter()
+            .any(|task| task.title == "Unscheduled stale thing"));
+        assert!(report
+            .stale
+            .iter()
+            .any(|task| task.title == "Unscheduled stale thing"));
 
         let _ = std::fs::remove_dir_all(vault);
+    }
+
+    #[test]
+    fn carddav_contacts_become_people_and_organizations() {
+        let person = person_from_carddav_object(CardDavObject {
+            href: "/remote.php/dav/addressbooks/users/agent/contacts/ada.vcf".to_string(),
+            etag: Some("\"abc\"".to_string()),
+            contact: Some(crate::service::CardDavContact {
+                uid: Some("person-1".to_string()),
+                full_name: Some("Ada Lovelace".to_string()),
+                given_name: Some("Ada".to_string()),
+                family_name: Some("Lovelace".to_string()),
+                organization: Some("Analytical Engines".to_string()),
+                title: Some("Founder".to_string()),
+                emails: vec!["ada@example.com".to_string()],
+                phones: vec!["+15550100".to_string()],
+                ..Default::default()
+            }),
+            ..Default::default()
+        })
+        .expect("person should map from contact");
+
+        assert_eq!(person.id.as_deref(), Some("person-1"));
+        assert_eq!(person.display_name, "Ada Lovelace");
+        assert_eq!(person.organization.as_deref(), Some("Analytical Engines"));
+        assert!(person
+            .contact_methods
+            .iter()
+            .any(|method| method.kind == "email" && method.value == "ada@example.com"));
+
+        let orgs = organizations_from_people(&[person.clone()]);
+        assert_eq!(orgs.len(), 1);
+        assert_eq!(orgs[0].name, "Analytical Engines");
+        assert_eq!(orgs[0].people, vec!["Ada Lovelace"]);
+
+        let tokens = person_context_tokens(&person);
+        let task = Task {
+            title: "Follow up with Ada".to_string(),
+            body: "Email ada@example.com about the prototype.".to_string(),
+            ..Default::default()
+        };
+        assert!(task_matches_tokens(&task, &tokens));
+    }
+
+    #[test]
+    fn carddav_people_and_org_conflicts_report_changed_fields() {
+        let base_ref = ProviderRef {
+            provider: "carddav".to_string(),
+            account: Some("agent".to_string()),
+            collection: Some("/remote.php/dav/addressbooks/users/agent/contacts/".to_string()),
+            href: Some("/remote.php/dav/addressbooks/users/agent/contacts/ada.vcf".to_string()),
+            uid: Some("person-1".to_string()),
+            etag: Some("\"local\"".to_string()),
+        };
+        let remote_ref = ProviderRef {
+            etag: Some("\"remote\"".to_string()),
+            ..base_ref.clone()
+        };
+        let local = Person {
+            id: Some("person-1".to_string()),
+            display_name: "Ada Lovelace".to_string(),
+            title: Some("Founder".to_string()),
+            contact_methods: vec![ContactMethod {
+                kind: "email".to_string(),
+                value: "ada@example.com".to_string(),
+                primary: true,
+                ..Default::default()
+            }],
+            provider_refs: vec![base_ref],
+            ..Default::default()
+        };
+        let remote = Person {
+            title: Some("CEO".to_string()),
+            contact_methods: vec![ContactMethod {
+                kind: "email".to_string(),
+                value: "ada@analytical.example".to_string(),
+                primary: true,
+                ..Default::default()
+            }],
+            provider_refs: vec![remote_ref],
+            ..local.clone()
+        };
+
+        let conflict =
+            person_provider_conflicts(&local, &remote).expect("changed etags and fields");
+        assert_eq!(conflict.entity_type, "person");
+        assert_eq!(conflict.entity_id, "person-1");
+        assert_eq!(conflict.provider, "carddav");
+        assert_eq!(conflict.local_etag.as_deref(), Some("\"local\""));
+        assert_eq!(conflict.remote_etag.as_deref(), Some("\"remote\""));
+        assert!(conflict.fields.iter().any(|field| field.field == "title"));
+        assert!(conflict
+            .fields
+            .iter()
+            .any(|field| field.field == "contact_methods"));
+
+        let org_local = OrganizationRecord {
+            id: Some("org-1".to_string()),
+            name: "Analytical Engines".to_string(),
+            people: vec!["Ada Lovelace".to_string()],
+            provider_refs: vec![ProviderRef {
+                provider: "carddav".to_string(),
+                collection: Some("/remote.php/dav/addressbooks/users/agent/contacts/".to_string()),
+                href: Some("/remote.php/dav/addressbooks/users/agent/contacts/org.vcf".to_string()),
+                etag: Some("\"org-local\"".to_string()),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let org_remote = OrganizationRecord {
+            people: vec!["Ada Lovelace".to_string(), "Charles Babbage".to_string()],
+            provider_refs: vec![ProviderRef {
+                etag: Some("\"org-remote\"".to_string()),
+                ..org_local.provider_refs[0].clone()
+            }],
+            ..org_local.clone()
+        };
+
+        let org_conflict =
+            organization_provider_conflicts(&org_local, &org_remote).expect("org conflict");
+        assert_eq!(org_conflict.entity_type, "organization");
+        assert!(org_conflict
+            .fields
+            .iter()
+            .any(|field| field.field == "people"));
     }
 
     #[test]

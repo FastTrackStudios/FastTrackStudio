@@ -7,8 +7,8 @@ use std::path::Path;
 
 use rusqlite::{params, Connection};
 
+use crate::service::{ProviderSyncState, VaultError};
 use crate::task::Task;
-use crate::service::VaultError;
 
 /// SQLite index over task .md files.
 pub struct TaskIndex {
@@ -18,8 +18,8 @@ pub struct TaskIndex {
 impl TaskIndex {
     /// Open or create an index database.
     pub fn open(path: &Path) -> Result<Self, VaultError> {
-        let conn = Connection::open(path)
-            .map_err(|e| VaultError::IoError(format!("SQLite open: {e}")))?;
+        let conn =
+            Connection::open(path).map_err(|e| VaultError::IoError(format!("SQLite open: {e}")))?;
 
         let index = Self { conn };
         index.create_tables()?;
@@ -121,6 +121,20 @@ impl TaskIndex {
                 conflict_resolved_at TEXT
             );
 
+            CREATE TABLE IF NOT EXISTS provider_sync_state (
+                provider TEXT NOT NULL,
+                account TEXT,
+                collection TEXT NOT NULL,
+                sync_token TEXT,
+                cursor TEXT,
+                etag TEXT,
+                last_success_at TEXT,
+                last_failure_at TEXT,
+                last_error TEXT,
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                PRIMARY KEY (provider, collection)
+            );
+
             -- Indexes for common queries
             CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
             CREATE INDEX IF NOT EXISTS idx_tasks_assignee ON tasks(assignee);
@@ -131,6 +145,7 @@ impl TaskIndex {
             CREATE INDEX IF NOT EXISTS idx_changes_entity ON changes(entity_type, entity_id);
             CREATE INDEX IF NOT EXISTS idx_changes_time ON changes(changed_at);
             CREATE INDEX IF NOT EXISTS idx_changes_conflict ON changes(conflict_kind) WHERE conflict_kind IS NOT NULL;
+            CREATE INDEX IF NOT EXISTS idx_provider_sync_state_provider ON provider_sync_state(provider);
             ",
             )
             .map_err(|e| VaultError::IoError(format!("SQLite schema: {e}")))?;
@@ -150,6 +165,69 @@ impl TaskIndex {
         }
 
         Ok(())
+    }
+
+    pub fn upsert_sync_state(&self, state: &ProviderSyncState) -> Result<(), VaultError> {
+        self.conn
+            .execute(
+                "INSERT INTO provider_sync_state (
+                    provider, account, collection, sync_token, cursor, etag,
+                    last_success_at, last_failure_at, last_error, updated_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, datetime('now'))
+                 ON CONFLICT(provider, collection) DO UPDATE SET
+                    account = excluded.account,
+                    sync_token = excluded.sync_token,
+                    cursor = excluded.cursor,
+                    etag = excluded.etag,
+                    last_success_at = COALESCE(excluded.last_success_at, provider_sync_state.last_success_at),
+                    last_failure_at = COALESCE(excluded.last_failure_at, provider_sync_state.last_failure_at),
+                    last_error = excluded.last_error,
+                    updated_at = datetime('now')",
+                params![
+                    state.provider,
+                    state.account,
+                    state.collection,
+                    state.sync_token,
+                    state.cursor,
+                    state.etag,
+                    state.last_success_at,
+                    state.last_failure_at,
+                    state.last_error,
+                ],
+            )
+            .map_err(|e| VaultError::IoError(format!("SQLite upsert sync state: {e}")))?;
+        Ok(())
+    }
+
+    pub fn list_sync_states(&self) -> Result<Vec<ProviderSyncState>, VaultError> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT provider, account, collection, sync_token, cursor, etag,
+                        last_success_at, last_failure_at, last_error, updated_at
+                 FROM provider_sync_state
+                 ORDER BY provider ASC, collection ASC",
+            )
+            .map_err(|e| VaultError::IoError(e.to_string()))?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(ProviderSyncState {
+                    provider: row.get(0)?,
+                    account: row.get(1)?,
+                    collection: row.get(2)?,
+                    sync_token: row.get(3)?,
+                    cursor: row.get(4)?,
+                    etag: row.get(5)?,
+                    last_success_at: row.get(6)?,
+                    last_failure_at: row.get(7)?,
+                    last_error: row.get(8)?,
+                    updated_at: row.get(9)?,
+                })
+            })
+            .map_err(|e| VaultError::IoError(e.to_string()))?
+            .filter_map(|row| row.ok())
+            .collect();
+        Ok(rows)
     }
 
     // ── Write ────────────────────────────────────────────────────────
@@ -237,10 +315,18 @@ impl TaskIndex {
 
     /// Remove a task from the index.
     pub fn remove_task(&self, id: &str) -> Result<(), VaultError> {
-        self.conn.execute("DELETE FROM tasks WHERE id = ?1", params![id]).ok();
-        self.conn.execute("DELETE FROM task_projects WHERE task_id = ?1", params![id]).ok();
-        self.conn.execute("DELETE FROM task_tags WHERE task_id = ?1", params![id]).ok();
-        self.conn.execute("DELETE FROM task_contexts WHERE task_id = ?1", params![id]).ok();
+        self.conn
+            .execute("DELETE FROM tasks WHERE id = ?1", params![id])
+            .ok();
+        self.conn
+            .execute("DELETE FROM task_projects WHERE task_id = ?1", params![id])
+            .ok();
+        self.conn
+            .execute("DELETE FROM task_tags WHERE task_id = ?1", params![id])
+            .ok();
+        self.conn
+            .execute("DELETE FROM task_contexts WHERE task_id = ?1", params![id])
+            .ok();
         Ok(())
     }
 
@@ -307,7 +393,11 @@ impl TaskIndex {
     }
 
     /// List conflicts. `open_only = true` returns only unresolved ones.
-    pub fn list_conflicts(&self, open_only: bool, limit: u32) -> Result<Vec<ConflictRow>, VaultError> {
+    pub fn list_conflicts(
+        &self,
+        open_only: bool,
+        limit: u32,
+    ) -> Result<Vec<ConflictRow>, VaultError> {
         let sql = if open_only {
             "SELECT id, entity_type, entity_id, field, new_value, old_value,
                     changed_by, conflict_other_actor, conflict_kind,
@@ -324,7 +414,8 @@ impl TaskIndex {
              ORDER BY changed_at DESC LIMIT ?1"
         };
 
-        let mut stmt = self.conn
+        let mut stmt = self
+            .conn
             .prepare(sql)
             .map_err(|e| VaultError::IoError(e.to_string()))?;
 
@@ -393,7 +484,8 @@ impl TaskIndex {
 
     /// Count tasks by status.
     pub fn count_by_status(&self) -> Result<Vec<(String, i64)>, VaultError> {
-        let mut stmt = self.conn
+        let mut stmt = self
+            .conn
             .prepare("SELECT status, COUNT(*) FROM tasks GROUP BY status ORDER BY COUNT(*) DESC")
             .map_err(|e| VaultError::IoError(e.to_string()))?;
 
@@ -408,7 +500,8 @@ impl TaskIndex {
 
     /// Get tasks assigned to a specific user.
     pub fn tasks_for_user(&self, username: &str) -> Result<Vec<TaskRow>, VaultError> {
-        let mut stmt = self.conn
+        let mut stmt = self
+            .conn
             .prepare(
                 "SELECT id, title, status, priority, assignee, due, urgency, file_path
                  FROM tasks WHERE assignee = ?1 ORDER BY urgency DESC",
@@ -586,7 +679,11 @@ impl TaskIndex {
                 Err(_) => continue,
             };
 
-            let rel_path = path.strip_prefix(root).unwrap_or(path).to_string_lossy().to_string();
+            let rel_path = path
+                .strip_prefix(root)
+                .unwrap_or(path)
+                .to_string_lossy()
+                .to_string();
 
             // Try parsing as task
             if let Some(task) = crate::vault::Vault::parse_task_from_md(&content) {
@@ -664,7 +761,7 @@ pub struct RebuildStats {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::task::{Task, Status, Priority, WikiLink};
+    use crate::task::{Priority, Status, Task, WikiLink};
 
     #[test]
     fn index_and_query() {
@@ -706,7 +803,15 @@ mod tests {
         let index = TaskIndex::in_memory().unwrap();
 
         index
-            .record_change("task", "test-1", Some("status"), Some("Open"), Some("Done"), Some("codywright"), Some("tasks/test.md"))
+            .record_change(
+                "task",
+                "test-1",
+                Some("status"),
+                Some("Open"),
+                Some("Done"),
+                Some("codywright"),
+                Some("tasks/test.md"),
+            )
             .unwrap();
 
         let changes = index.recent_changes(10).unwrap();
@@ -744,14 +849,56 @@ mod tests {
         assert_eq!(open[0].losing_actor.as_deref(), Some("tommy"));
         assert!(open[0].resolved.is_none());
 
-        index.resolve_conflict(id, Some("codywright"), "picked-winning").unwrap();
+        index
+            .resolve_conflict(id, Some("codywright"), "picked-winning")
+            .unwrap();
 
         let open = index.list_conflicts(true, 10).unwrap();
-        assert!(open.is_empty(), "resolved conflict should not appear in open list");
+        assert!(
+            open.is_empty(),
+            "resolved conflict should not appear in open list"
+        );
 
         let all = index.list_conflicts(false, 10).unwrap();
         assert_eq!(all.len(), 1);
         assert_eq!(all[0].resolved.as_deref(), Some("picked-winning"));
         assert_eq!(all[0].resolved_by.as_deref(), Some("codywright"));
+    }
+
+    #[test]
+    fn provider_sync_state_round_trip() {
+        let index = TaskIndex::in_memory().unwrap();
+        index
+            .upsert_sync_state(&ProviderSyncState {
+                provider: "carddav".to_string(),
+                account: Some("agent".to_string()),
+                collection: "contacts".to_string(),
+                sync_token: Some("sync-1".to_string()),
+                last_success_at: Some("2026-04-30T08:00:00Z".to_string()),
+                ..Default::default()
+            })
+            .unwrap();
+        index
+            .upsert_sync_state(&ProviderSyncState {
+                provider: "carddav".to_string(),
+                account: Some("agent".to_string()),
+                collection: "contacts".to_string(),
+                sync_token: Some("sync-2".to_string()),
+                last_error: Some("temporary failure".to_string()),
+                last_failure_at: Some("2026-04-30T08:05:00Z".to_string()),
+                ..Default::default()
+            })
+            .unwrap();
+
+        let states = index.list_sync_states().unwrap();
+        assert_eq!(states.len(), 1);
+        assert_eq!(states[0].provider, "carddav");
+        assert_eq!(states[0].collection, "contacts");
+        assert_eq!(states[0].sync_token.as_deref(), Some("sync-2"));
+        assert_eq!(states[0].last_error.as_deref(), Some("temporary failure"));
+        assert_eq!(
+            states[0].last_success_at.as_deref(),
+            Some("2026-04-30T08:00:00Z")
+        );
     }
 }
