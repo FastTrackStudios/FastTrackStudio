@@ -3,7 +3,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
-use chrono::{NaiveDate, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
@@ -20,19 +20,22 @@ use crate::provider::{
 use crate::query::Query;
 use crate::rrule;
 use crate::service::{
-    CalDavDeleteObjectRequest, CalDavDiscovery, CalDavFreeBusyInterval, CalDavFreeBusyRequest,
-    CalDavMultigetRequest, CalDavObject, CalDavPutObjectRequest, CalDavScheduleRequest,
-    CalDavScheduleResponse, CalDavSyncCollectionRequest, CalDavSyncCollectionResponse,
-    CalendarEventPatch, CardDavDeleteObjectRequest, CardDavDiscovery, CardDavMultigetRequest,
-    CardDavObject, CardDavPutObjectRequest, CardDavSyncCollectionRequest,
-    CardDavSyncCollectionResponse, EmailLinkRequest, EmailLinkResponse, EmailListRequest,
-    EmailUnlinkRequest, FileCopyMoveRequest, FileEntry, FileReadResponse, FileWriteRequest,
-    InboxCaptureRequest, InboxItem, InboxPromoteRequest, InvoiceCreateRequest,
-    InvoicePaymentRequest, MailCreateMailboxRequest, MailCreateTagRequest, MailDeleteTagRequest,
-    MailListMessagesRequest, MailMessageTagRequest, MailMoveMessageRequest, NextcloudCapability,
-    ProjectPatch, ProviderSyncState, RemoteDeckBoard, RemoteDeckStack, ReviewReport, SyncStats,
-    SystemCapabilities, SystemHealth, TimeEntryContext, TimeEntryFilter, TimeEntryPatch,
-    TimeLogRequest, TimeStartRequest, TimedTaskEntry, VaultCapability, VaultError,
+    BusinessFinanceClientSummary, BusinessFinanceReport, CalDavDeleteObjectRequest,
+    CalDavDiscovery, CalDavFreeBusyInterval, CalDavFreeBusyRequest, CalDavMultigetRequest,
+    CalDavObject, CalDavPutObjectRequest, CalDavScheduleRequest, CalDavScheduleResponse,
+    CalDavSyncCollectionRequest, CalDavSyncCollectionResponse, CalendarEventPatch,
+    CardDavDeleteObjectRequest, CardDavDiscovery, CardDavMultigetRequest, CardDavObject,
+    CardDavPutObjectRequest, CardDavSyncCollectionRequest, CardDavSyncCollectionResponse,
+    EmailLinkRequest, EmailLinkResponse, EmailListRequest, EmailUnlinkRequest, FileCopyMoveRequest,
+    FileEntry, FileReadResponse, FileWriteRequest, InboxCaptureRequest, InboxItem,
+    InboxPromoteRequest, InvoiceAgingBucket, InvoiceCreateRequest, InvoicePaymentRequest,
+    MailCreateMailboxRequest, MailCreateTagRequest, MailDeleteTagRequest, MailListMessagesRequest,
+    MailMessageTagRequest, MailMoveMessageRequest, NextcloudCapability, OperatingAreaStatus,
+    OperatingGoal, OperatingModelReport, OperatingRoutine, ProjectFileSummary,
+    ProjectKnowledgeContext, ProjectPatch, ProviderSyncState, RemoteDeckBoard, RemoteDeckStack,
+    ReviewReport, SyncPlan, SyncPlanItem, SyncStats, SystemCapabilities, SystemHealth,
+    TimeEntryContext, TimeEntryFilter, TimeEntryPatch, TimeLogRequest, TimeStartRequest,
+    TimedTaskEntry, VaultCapability, VaultError,
 };
 use crate::task::{Priority, Status, Task, WikiLink};
 use crate::vault::Vault;
@@ -416,6 +419,23 @@ impl VaultServiceImpl {
         build_review_report(tasks, 30, 30)
     }
 
+    pub async fn monthly_review_report(&self) -> ReviewReport {
+        let tasks = self.vault.read().await.load_tasks();
+        build_review_report(tasks, 90, 45)
+    }
+
+    pub async fn project_review_report(&self, project_title: String) -> ReviewReport {
+        let tasks = self.tasks_for_project(project_title).await;
+        build_review_report(tasks, 30, 21)
+    }
+
+    pub async fn operating_model_report(&self) -> OperatingModelReport {
+        let tasks = self.vault.read().await.load_tasks();
+        let projects = self.list_projects().await;
+        let events = self.list_calendar_events().await;
+        build_operating_model_report(tasks, projects, events)
+    }
+
     pub async fn promote_inbox(
         &self,
         request: InboxPromoteRequest,
@@ -737,6 +757,67 @@ impl VaultServiceImpl {
             .collect()
     }
 
+    pub async fn project_knowledge_context(
+        &self,
+        project_title: String,
+        include_files: bool,
+        depth: String,
+    ) -> Result<Option<ProjectKnowledgeContext>, VaultError> {
+        let project = self
+            .list_projects()
+            .await
+            .into_iter()
+            .find(|project| project.title.eq_ignore_ascii_case(&project_title));
+        let Some(project) = project else {
+            return Ok(None);
+        };
+        let tasks = self.tasks_for_project(project.title.clone()).await;
+        let next_action = find_next_task(&project.title, &tasks).cloned();
+        let project_path = project_storage_path(&project);
+        let mut files = Vec::new();
+        if include_files {
+            if let Some(config) = NextcloudRuntimeConfig::load()? {
+                let provider = nextcloud_webdav_provider(&config);
+                files = provider
+                    .list(&project_path, if depth.is_empty() { "1" } else { &depth })
+                    .await?
+                    .into_iter()
+                    .map(project_file_summary_from_webdav)
+                    .collect();
+            }
+        }
+        let notes = files
+            .iter()
+            .filter(|file| file.role == "note")
+            .cloned()
+            .collect();
+        let decisions = files
+            .iter()
+            .filter(|file| file.role == "decision")
+            .cloned()
+            .collect();
+        let deliverables = files
+            .iter()
+            .filter(|file| file.role == "deliverable")
+            .cloned()
+            .collect();
+        Ok(Some(ProjectKnowledgeContext {
+            references: project
+                .references
+                .iter()
+                .map(|link| link.0.clone())
+                .collect(),
+            project,
+            project_path,
+            tasks,
+            next_action,
+            files,
+            notes,
+            decisions,
+            deliverables,
+        }))
+    }
+
     pub async fn trigger_sync(&self) -> Result<SyncStats, VaultError> {
         let mut stats = SyncStats {
             timestamp: Utc::now().to_rfc3339(),
@@ -919,6 +1000,10 @@ impl VaultServiceImpl {
 
     pub async fn sync_status(&self) -> Option<SyncStats> {
         self.last_sync.lock().unwrap().clone()
+    }
+
+    pub async fn sync_plan(&self) -> SyncPlan {
+        build_sync_plan(NextcloudRuntimeConfig::load().ok().flatten())
     }
 
     pub async fn list_provider_sync_states(&self) -> Result<Vec<ProviderSyncState>, VaultError> {
@@ -1169,8 +1254,10 @@ impl VaultServiceImpl {
         let tasks = self.vault.read().await.load_tasks();
         let projects = self.list_projects().await;
         let events = self.list_calendar_events().await;
+        let mut communications = communication_refs_for_tokens(&tasks, &events, &tokens);
+        communications.extend(self.channel_communication_refs_for_tokens(&tokens).await);
         Ok(Some(PersonContext {
-            communications: communication_refs_for_tokens(&tasks, &events, &tokens),
+            communications,
             tasks: tasks
                 .into_iter()
                 .filter(|task| task_matches_tokens(task, &tokens))
@@ -1208,8 +1295,10 @@ impl VaultServiceImpl {
         let tasks = self.vault.read().await.load_tasks();
         let projects = self.list_projects().await;
         let events = self.list_calendar_events().await;
+        let mut communications = communication_refs_for_tokens(&tasks, &events, &tokens);
+        communications.extend(self.channel_communication_refs_for_tokens(&tokens).await);
         Ok(Some(OrganizationContext {
-            communications: communication_refs_for_tokens(&tasks, &events, &tokens),
+            communications,
             tasks: tasks
                 .into_iter()
                 .filter(|task| task_matches_tokens(task, &tokens))
@@ -1225,6 +1314,61 @@ impl VaultServiceImpl {
             people: org_people,
             organization,
         }))
+    }
+
+    async fn channel_communication_refs_for_tokens(
+        &self,
+        tokens: &[String],
+    ) -> Vec<CommunicationRef> {
+        let Some(config) = NextcloudRuntimeConfig::load().ok().flatten() else {
+            return Vec::new();
+        };
+        let provider = nextcloud_talk_provider(&config);
+        let Ok(conversations) = provider.list_conversations().await else {
+            return Vec::new();
+        };
+        let mut refs = Vec::new();
+        for conversation in conversations.iter().take(25) {
+            let conversation_matches = text_matches_tokens(
+                &format!(
+                    "{}\n{}",
+                    conversation.name,
+                    conversation.last_message.clone().unwrap_or_default()
+                ),
+                tokens,
+            );
+            if conversation_matches {
+                refs.push(CommunicationRef {
+                    kind: "conversation".to_string(),
+                    external_id: conversation.id.clone(),
+                    summary: Some(conversation.name.clone()),
+                    occurred_at: conversation
+                        .last_activity
+                        .and_then(|ts| DateTime::<Utc>::from_timestamp(ts, 0)),
+                    provider: Some(conversation.provider.clone()),
+                });
+            }
+            let Ok(messages) =
+                CommunicationChannelProvider::recent_messages(&provider, &conversation.id, 25)
+                    .await
+            else {
+                continue;
+            };
+            for message in messages
+                .into_iter()
+                .filter(|message| text_matches_tokens(&message.body, tokens))
+                .take(10)
+            {
+                refs.push(CommunicationRef {
+                    kind: "message".to_string(),
+                    external_id: message.id,
+                    summary: Some(format!("{}: {}", message.actor_display_name, message.body)),
+                    occurred_at: DateTime::<Utc>::from_timestamp(message.timestamp, 0),
+                    provider: Some(message.provider),
+                });
+            }
+        }
+        refs
     }
 
     async fn sync_carddav_people_objects(
@@ -1734,6 +1878,13 @@ impl VaultServiceImpl {
             .load_invoices()
             .into_iter()
             .find(|i| i.id.eq_ignore_ascii_case(invoice_id))
+    }
+
+    pub async fn finance_report(&self) -> BusinessFinanceReport {
+        let today = chrono::Local::now().date_naive();
+        let time_entries = self.list_time_entries(TimeEntryFilter::default()).await;
+        let invoices = self.list_invoices().await;
+        build_finance_report(time_entries, invoices, today)
     }
 
     /// Flip an invoice to Sent. Idempotent: re-sending a Sent invoice is a
@@ -2994,6 +3145,153 @@ fn build_review_report(
     }
 }
 
+fn build_operating_model_report(
+    mut tasks: Vec<Task>,
+    projects: Vec<Project>,
+    events: Vec<crate::CalendarEvent>,
+) -> OperatingModelReport {
+    let today = chrono::Local::now().date_naive();
+    let stale_before = today - chrono::Duration::days(14);
+    sort_review_tasks(&mut tasks);
+    let review = build_review_report(tasks.clone(), 30, 14);
+    let active_projects = projects
+        .iter()
+        .filter(|project| project.is_active() && !project.is_archived())
+        .cloned()
+        .collect::<Vec<_>>();
+    let mut area_names = tasks
+        .iter()
+        .flat_map(|task| task.areas.iter().map(|area| area.0.clone()))
+        .chain(projects.iter().filter_map(|project| project.area.clone()))
+        .filter(|area| !area.trim().is_empty())
+        .collect::<Vec<_>>();
+    area_names.sort();
+    area_names.dedup();
+    if area_names.is_empty() {
+        area_names.push("Unassigned".to_string());
+    }
+
+    let mut areas = area_names
+        .iter()
+        .map(|area| {
+            let area_tasks = tasks
+                .iter()
+                .filter(|task| task_in_area(task, area))
+                .collect::<Vec<_>>();
+            OperatingAreaStatus {
+                name: area.clone(),
+                open_tasks: area_tasks
+                    .iter()
+                    .filter(|task| is_review_actionable(task))
+                    .count() as u32,
+                active_projects: projects
+                    .iter()
+                    .filter(|project| {
+                        project.area.as_deref() == Some(area.as_str())
+                            && project.is_active()
+                            && !project.is_archived()
+                    })
+                    .count() as u32,
+                overdue_tasks: area_tasks
+                    .iter()
+                    .filter(|task| task.due.map(|due| due < today).unwrap_or(false))
+                    .count() as u32,
+                due_today_tasks: area_tasks
+                    .iter()
+                    .filter(|task| task.due == Some(today))
+                    .count() as u32,
+                waiting_tasks: area_tasks
+                    .iter()
+                    .filter(|task| is_waiting_task(task))
+                    .count() as u32,
+                stale_tasks: area_tasks
+                    .iter()
+                    .filter(|task| {
+                        is_review_actionable(task)
+                            && task
+                                .date_modified
+                                .map(|date| date.date_naive() < stale_before)
+                                .unwrap_or(false)
+                    })
+                    .count() as u32,
+                routine_tasks: area_tasks
+                    .iter()
+                    .filter(|task| is_routine_task(task))
+                    .count() as u32,
+                habit_tasks: area_tasks.iter().filter(|task| is_habit_task(task)).count() as u32,
+                goal_tasks: area_tasks.iter().filter(|task| is_goal_task(task)).count() as u32,
+                next_action: area_tasks
+                    .iter()
+                    .filter(|task| is_review_actionable(task) && !is_waiting_task(task))
+                    .next()
+                    .map(|task| (*task).clone()),
+            }
+        })
+        .collect::<Vec<_>>();
+    areas.sort_by(|a, b| {
+        b.overdue_tasks
+            .cmp(&a.overdue_tasks)
+            .then_with(|| b.due_today_tasks.cmp(&a.due_today_tasks))
+            .then_with(|| b.open_tasks.cmp(&a.open_tasks))
+            .then_with(|| a.name.cmp(&b.name))
+    });
+
+    let goals = tasks
+        .iter()
+        .filter(|task| is_goal_task(task))
+        .map(|task| OperatingGoal {
+            title: task.title.clone(),
+            area: first_task_area(task),
+            project: task.projects.first().map(|project| project.0.clone()),
+            status: status_label(&task.status).to_string(),
+            due: task.due.map(|date| date.to_string()),
+            next_action: related_next_action(task, &tasks),
+        })
+        .collect::<Vec<_>>();
+    let routines = tasks
+        .iter()
+        .filter(|task| is_routine_task(task) && !is_habit_task(task))
+        .map(task_to_operating_routine)
+        .collect::<Vec<_>>();
+    let habits = tasks
+        .iter()
+        .filter(|task| is_habit_task(task))
+        .map(task_to_operating_routine)
+        .collect::<Vec<_>>();
+    let active_timers = tasks
+        .iter()
+        .flat_map(|task| task.time_entries.iter())
+        .filter(|entry| entry.is_running())
+        .count() as u32;
+    let upcoming_events = events
+        .iter()
+        .filter(|event| event.start.date_naive() >= today)
+        .count() as u32;
+
+    OperatingModelReport {
+        generated_at: Utc::now(),
+        today: today.to_string(),
+        areas,
+        goals,
+        routines,
+        habits,
+        active_projects,
+        inbox: review.inbox.clone(),
+        open_tasks: tasks
+            .iter()
+            .filter(|task| is_review_actionable(task))
+            .count() as u32,
+        overdue_tasks: review.overdue.len() as u32,
+        due_today_tasks: (review.due_today.len() + review.scheduled_today.len()) as u32,
+        waiting_tasks: review.waiting.len() as u32,
+        stale_tasks: review.stale.len() as u32,
+        unscheduled_tasks: review.unscheduled.len() as u32,
+        active_timers,
+        upcoming_events,
+        review,
+    }
+}
+
 fn review_tasks(tasks: &[Task], predicate: impl Fn(&Task) -> bool) -> Vec<Task> {
     tasks
         .iter()
@@ -3044,6 +3342,339 @@ fn is_someday_task(task: &Task) -> bool {
             .tags
             .iter()
             .any(|tag| matches!(tag.as_str(), "someday" | "maybe"))
+}
+
+fn is_goal_task(task: &Task) -> bool {
+    task.issue_type
+        .as_deref()
+        .map(|kind| matches!(kind, "goal" | "objective" | "outcome"))
+        .unwrap_or(false)
+        || task
+            .tags
+            .iter()
+            .any(|tag| matches!(tag.as_str(), "goal" | "objective" | "outcome"))
+}
+
+fn is_routine_task(task: &Task) -> bool {
+    task.recurrence.is_some()
+        || task
+            .issue_type
+            .as_deref()
+            .map(|kind| matches!(kind, "routine" | "ritual" | "cadence"))
+            .unwrap_or(false)
+        || task
+            .tags
+            .iter()
+            .any(|tag| matches!(tag.as_str(), "routine" | "ritual" | "cadence"))
+}
+
+fn is_habit_task(task: &Task) -> bool {
+    task.issue_type.as_deref() == Some("habit") || task.tags.iter().any(|tag| tag == "habit")
+}
+
+fn first_task_area(task: &Task) -> Option<String> {
+    task.areas.first().map(|area| area.0.clone())
+}
+
+fn task_in_area(task: &Task, area: &str) -> bool {
+    if area == "Unassigned" {
+        return task.areas.is_empty();
+    }
+    task.areas.iter().any(|candidate| candidate.0 == area)
+}
+
+fn task_to_operating_routine(task: &Task) -> OperatingRoutine {
+    OperatingRoutine {
+        title: task.title.clone(),
+        area: first_task_area(task),
+        kind: if is_habit_task(task) {
+            "habit".to_string()
+        } else {
+            task.issue_type
+                .clone()
+                .unwrap_or_else(|| "routine".to_string())
+        },
+        recurrence: task.recurrence.clone(),
+        due: task.due.map(|date| date.to_string()),
+        scheduled: task.scheduled.map(|date| date.to_string()),
+        status: status_label(&task.status).to_string(),
+    }
+}
+
+fn related_next_action(goal: &Task, tasks: &[Task]) -> Option<Task> {
+    goal.projects
+        .first()
+        .and_then(|project| {
+            tasks
+                .iter()
+                .find(|task| {
+                    task.title != goal.title
+                        && is_review_actionable(task)
+                        && !is_waiting_task(task)
+                        && task.projects.iter().any(|candidate| candidate == project)
+                })
+                .cloned()
+        })
+        .or_else(|| {
+            tasks
+                .iter()
+                .find(|task| {
+                    task.title != goal.title
+                        && is_review_actionable(task)
+                        && !is_waiting_task(task)
+                        && task.areas.iter().any(|area| goal.areas.contains(area))
+                })
+                .cloned()
+        })
+}
+
+fn build_finance_report(
+    time_entries: Vec<TimeEntryContext>,
+    invoices: Vec<crate::invoice::Invoice>,
+    today: NaiveDate,
+) -> BusinessFinanceReport {
+    let billable_entries = time_entries
+        .into_iter()
+        .filter(|entry| entry.entry.billable && !entry.entry.is_running())
+        .collect::<Vec<_>>();
+    let mut unbilled_entries = billable_entries
+        .iter()
+        .filter(|entry| entry.entry.invoiced_at.is_none())
+        .cloned()
+        .collect::<Vec<_>>();
+    unbilled_entries.sort_by(|a, b| a.entry.start_time.cmp(&b.entry.start_time));
+    let billable_minutes = billable_entries
+        .iter()
+        .map(|entry| entry.entry.duration_minutes())
+        .sum::<u32>();
+    let unbilled_minutes = unbilled_entries
+        .iter()
+        .map(|entry| entry.entry.duration_minutes())
+        .sum::<u32>();
+    let unbilled_cents = unbilled_entries
+        .iter()
+        .map(|entry| time_entry_cents(entry))
+        .sum::<u64>();
+    let invoiced_cents = invoices
+        .iter()
+        .map(|invoice| invoice.total_cents())
+        .sum::<u64>();
+    let paid_cents = invoices
+        .iter()
+        .map(|invoice| invoice.paid_cents())
+        .sum::<u64>();
+    let open_invoices = invoices
+        .iter()
+        .filter(|invoice| invoice.balance_cents() > 0 && invoice.cancelled_at.is_none())
+        .cloned()
+        .collect::<Vec<_>>();
+    let open_invoice_cents = open_invoices
+        .iter()
+        .map(|invoice| invoice.balance_cents())
+        .sum::<u64>();
+    let overdue_invoice_cents = open_invoices
+        .iter()
+        .filter(|invoice| invoice.due_date < today)
+        .map(|invoice| invoice.balance_cents())
+        .sum::<u64>();
+    let draft_invoices = invoices
+        .iter()
+        .filter(|invoice| matches!(invoice.status, crate::invoice::InvoiceStatus::Draft))
+        .cloned()
+        .collect::<Vec<_>>();
+    let mut clients = std::collections::BTreeMap::<String, BusinessFinanceClientSummary>::new();
+    for entry in &unbilled_entries {
+        let client_name = entry
+            .client_name
+            .clone()
+            .unwrap_or_else(|| "Unassigned".to_string());
+        let summary =
+            clients
+                .entry(client_name.clone())
+                .or_insert_with(|| BusinessFinanceClientSummary {
+                    client_name,
+                    ..Default::default()
+                });
+        summary.unbilled_minutes += entry.entry.duration_minutes();
+        summary.unbilled_cents += time_entry_cents(entry);
+    }
+    for invoice in &open_invoices {
+        let client_name = strip_wikilink_brackets(&invoice.client.0);
+        let summary =
+            clients
+                .entry(client_name.clone())
+                .or_insert_with(|| BusinessFinanceClientSummary {
+                    client_name,
+                    ..Default::default()
+                });
+        summary.open_invoice_cents += invoice.balance_cents();
+        if invoice.due_date < today {
+            summary.overdue_invoice_cents += invoice.balance_cents();
+        }
+    }
+
+    BusinessFinanceReport {
+        generated_at: Utc::now(),
+        today: today.to_string(),
+        billable_minutes,
+        unbilled_minutes,
+        unbilled_cents,
+        invoiced_cents,
+        paid_cents,
+        open_invoice_cents,
+        overdue_invoice_cents,
+        clients: clients.into_values().collect(),
+        aging: invoice_aging(&open_invoices, today),
+        draft_invoices,
+        open_invoices,
+        unbilled_entries,
+    }
+}
+
+fn time_entry_cents(entry: &TimeEntryContext) -> u64 {
+    let minutes = entry.entry.duration_minutes() as u64;
+    let rate = entry.effective_rate(None) as u64;
+    ((minutes * rate) + 30) / 60
+}
+
+fn invoice_aging(
+    invoices: &[crate::invoice::Invoice],
+    today: NaiveDate,
+) -> Vec<InvoiceAgingBucket> {
+    let mut buckets = vec![
+        InvoiceAgingBucket {
+            name: "current".to_string(),
+            ..Default::default()
+        },
+        InvoiceAgingBucket {
+            name: "1-30".to_string(),
+            ..Default::default()
+        },
+        InvoiceAgingBucket {
+            name: "31-60".to_string(),
+            ..Default::default()
+        },
+        InvoiceAgingBucket {
+            name: "61-90".to_string(),
+            ..Default::default()
+        },
+        InvoiceAgingBucket {
+            name: "90+".to_string(),
+            ..Default::default()
+        },
+    ];
+    for invoice in invoices {
+        let overdue_days = (today - invoice.due_date).num_days();
+        let index = if overdue_days <= 0 {
+            0
+        } else if overdue_days <= 30 {
+            1
+        } else if overdue_days <= 60 {
+            2
+        } else if overdue_days <= 90 {
+            3
+        } else {
+            4
+        };
+        buckets[index].invoice_count += 1;
+        buckets[index].balance_cents += invoice.balance_cents();
+    }
+    buckets
+}
+
+fn build_sync_plan(config: Option<NextcloudRuntimeConfig>) -> SyncPlan {
+    let configured = config.is_some();
+    let mut warnings = Vec::new();
+    if !configured {
+        warnings.push(
+            "Nextcloud is not configured; sync would be skipped until credentials are set"
+                .to_string(),
+        );
+    }
+    let (calendar, event_calendar, projects_path, deck_enabled, username) = config
+        .map(|config| {
+            (
+                config.calendar,
+                config
+                    .event_calendar
+                    .unwrap_or_else(|| "events".to_string()),
+                config.projects_path,
+                config.deck_enabled,
+                config.username,
+            )
+        })
+        .unwrap_or_else(|| {
+            (
+                "tasks".to_string(),
+                "events".to_string(),
+                "Projects/".to_string(),
+                false,
+                "unknown".to_string(),
+            )
+        });
+    let mut items = vec![
+        SyncPlanItem {
+            provider: "caldav".to_string(),
+            operation: "sync task calendar".to_string(),
+            collection: calendar,
+            direction: "bidirectional".to_string(),
+            configured,
+            destructive: false,
+            detail: "Pull VTODO changes, merge conflicts, and push local task updates".to_string(),
+        },
+        SyncPlanItem {
+            provider: "caldav-events".to_string(),
+            operation: "sync event calendar".to_string(),
+            collection: event_calendar,
+            direction: "pull".to_string(),
+            configured,
+            destructive: false,
+            detail: "Pull VEVENTs into first-class calendar events".to_string(),
+        },
+        SyncPlanItem {
+            provider: "carddav".to_string(),
+            operation: "sync contacts".to_string(),
+            collection: "contacts".to_string(),
+            direction: "pull".to_string(),
+            configured,
+            destructive: false,
+            detail: "Read contacts for people and organization context".to_string(),
+        },
+        SyncPlanItem {
+            provider: "webdav".to_string(),
+            operation: "sync project files".to_string(),
+            collection: projects_path,
+            direction: "pull".to_string(),
+            configured,
+            destructive: false,
+            detail: "Read project folders and markdown project metadata".to_string(),
+        },
+        SyncPlanItem {
+            provider: "nextcloud-talk".to_string(),
+            operation: "read conversations".to_string(),
+            collection: username,
+            direction: "pull/read".to_string(),
+            configured,
+            destructive: false,
+            detail: "Read conversation lists and recent messages for relationship context"
+                .to_string(),
+        },
+    ];
+    items.push(SyncPlanItem {
+        provider: "deck".to_string(),
+        operation: "sync boards and cards".to_string(),
+        collection: "boards".to_string(),
+        direction: "bidirectional".to_string(),
+        configured: configured && deck_enabled,
+        destructive: false,
+        detail: "Upsert cards by external id/title and move cards between stacks".to_string(),
+    });
+    SyncPlan {
+        generated_at: Utc::now().to_rfc3339(),
+        safe_to_run: configured,
+        items,
+        warnings,
+    }
 }
 
 fn person_from_carddav_object(object: CardDavObject) -> Option<Person> {
@@ -3213,6 +3844,11 @@ fn task_matches_tokens(task: &Task, tokens: &[String]) -> bool {
         task.contexts.join("\n")
     )
     .to_ascii_lowercase();
+    tokens.iter().any(|token| haystack.contains(token))
+}
+
+fn text_matches_tokens(text: &str, tokens: &[String]) -> bool {
+    let haystack = text.to_ascii_lowercase();
     tokens.iter().any(|token| haystack.contains(token))
 }
 
@@ -3408,6 +4044,20 @@ impl crate::service::InboxService for VaultServiceImpl {
     async fn weekly_review(&self) -> ReviewReport {
         self.weekly_review_report().await
     }
+
+    async fn monthly_review(&self) -> ReviewReport {
+        self.monthly_review_report().await
+    }
+
+    async fn project_review(&self, project_title: String) -> ReviewReport {
+        self.project_review_report(project_title).await
+    }
+}
+
+impl crate::service::OperatingService for VaultServiceImpl {
+    async fn operating_model(&self) -> OperatingModelReport {
+        self.operating_model_report().await
+    }
 }
 
 impl crate::service::ProjectService for VaultServiceImpl {
@@ -3431,6 +4081,16 @@ impl crate::service::ProjectService for VaultServiceImpl {
     }
     async fn tasks_for_project(&self, project_title: String) -> Vec<Task> {
         self.tasks_for_project(project_title).await
+    }
+
+    async fn project_context(
+        &self,
+        project_title: String,
+        include_files: bool,
+        depth: String,
+    ) -> Result<Option<ProjectKnowledgeContext>, VaultError> {
+        self.project_knowledge_context(project_title, include_files, depth)
+            .await
     }
 }
 
@@ -3595,6 +4255,10 @@ impl crate::service::InvoiceService for VaultServiceImpl {
         VaultServiceImpl::get_invoice(self, &invoice_id).await
     }
 
+    async fn finance_report(&self) -> BusinessFinanceReport {
+        VaultServiceImpl::finance_report(self).await
+    }
+
     async fn send_invoice(
         &self,
         invoice_id: String,
@@ -3684,7 +4348,12 @@ impl crate::service::ConversationService for VaultServiceImpl {
             Some(&config.username),
             &conversation_id,
             None,
-            Some(messages.last().map(|message| message.id.clone()).unwrap_or_default()),
+            Some(
+                messages
+                    .last()
+                    .map(|message| message.id.clone())
+                    .unwrap_or_default(),
+            ),
             None,
             None,
         );
@@ -3899,6 +4568,7 @@ impl crate::service::SystemService for VaultServiceImpl {
                 "ClientService".into(),
                 "PeopleService".into(),
                 "ConversationService".into(),
+                "OperatingService".into(),
                 "InvoiceService".into(),
                 "ActivityService".into(),
                 "MailService".into(),
@@ -4206,6 +4876,9 @@ impl crate::service::CalendarService for VaultServiceImpl {
     async fn sync_status(&self) -> Option<SyncStats> {
         self.sync_status().await
     }
+    async fn sync_plan(&self) -> SyncPlan {
+        self.sync_plan().await
+    }
     async fn discover_caldav(&self) -> Result<CalDavDiscovery, VaultError> {
         VaultServiceImpl::discover_caldav(self).await
     }
@@ -4388,6 +5061,66 @@ fn file_entry_from_webdav(entry: crate::provider::WebDavEntry) -> FileEntry {
         etag: entry.etag,
         last_modified: entry.last_modified,
     }
+}
+
+fn project_file_summary_from_webdav(entry: crate::provider::WebDavEntry) -> ProjectFileSummary {
+    let role = classify_project_file(&entry.path, &entry.name, &entry.content_type);
+    ProjectFileSummary {
+        path: entry.path,
+        name: entry.name,
+        kind: match entry.kind {
+            crate::provider::WebDavResourceKind::File => "file".to_string(),
+            crate::provider::WebDavResourceKind::Collection => "directory".to_string(),
+        },
+        role,
+        content_type: entry.content_type,
+        content_length: entry.content_length,
+        last_modified: entry.last_modified,
+    }
+}
+
+fn project_storage_path(project: &Project) -> String {
+    project
+        .dev_path
+        .as_deref()
+        .filter(|path| !path.trim().is_empty() && !path.starts_with('~') && !path.starts_with('/'))
+        .map(|path| path.trim_matches('/').to_string())
+        .unwrap_or_else(|| project.title.trim_matches('/').to_string())
+}
+
+fn classify_project_file(path: &str, name: &str, content_type: &Option<String>) -> String {
+    let haystack = format!(
+        "{} {}",
+        path.to_ascii_lowercase(),
+        name.to_ascii_lowercase()
+    );
+    if haystack.contains("decision") || haystack.contains("adr") {
+        return "decision".to_string();
+    }
+    if haystack.contains("deliverable")
+        || haystack.contains("exports/")
+        || haystack.contains("final")
+        || haystack.contains("release")
+    {
+        return "deliverable".to_string();
+    }
+    if haystack.contains("reference")
+        || haystack.contains("refs/")
+        || haystack.contains("asset")
+        || haystack.contains("brief")
+    {
+        return "reference".to_string();
+    }
+    if name.ends_with(".md")
+        || name.ends_with(".txt")
+        || content_type
+            .as_deref()
+            .map(|kind| kind.contains("text/") || kind.contains("markdown"))
+            .unwrap_or(false)
+    {
+        return "note".to_string();
+    }
+    "file".to_string()
 }
 
 fn person_provider_conflicts(local: &Person, remote: &Person) -> Option<ProviderConflict> {
@@ -5164,6 +5897,186 @@ mod tests {
             .fields
             .iter()
             .any(|field| field.field == "people"));
+    }
+
+    #[test]
+    fn operating_model_groups_goals_routines_habits_and_area_pressure() {
+        let today = chrono::Local::now().date_naive();
+        let old = today - chrono::Duration::days(21);
+        let tasks = vec![
+            Task {
+                title: "Grow consulting revenue".to_string(),
+                issue_type: Some("goal".to_string()),
+                areas: vec![WikiLink("Business".to_string())],
+                projects: vec![WikiLink("Consulting".to_string())],
+                due: Some(today + chrono::Duration::days(30)),
+                ..Default::default()
+            },
+            Task {
+                title: "Send proposal".to_string(),
+                areas: vec![WikiLink("Business".to_string())],
+                projects: vec![WikiLink("Consulting".to_string())],
+                due: Some(today),
+                ..Default::default()
+            },
+            Task {
+                title: "Weekly planning".to_string(),
+                issue_type: Some("routine".to_string()),
+                areas: vec![WikiLink("Personal".to_string())],
+                recurrence: Some("FREQ=WEEKLY".to_string()),
+                ..Default::default()
+            },
+            Task {
+                title: "Exercise".to_string(),
+                issue_type: Some("habit".to_string()),
+                areas: vec![WikiLink("Health".to_string())],
+                recurrence: Some("FREQ=DAILY".to_string()),
+                ..Default::default()
+            },
+            Task {
+                title: "Old admin".to_string(),
+                areas: vec![WikiLink("Business".to_string())],
+                date_modified: Some(modified_at(&format!("{old}T00:00:00Z"))),
+                ..Default::default()
+            },
+        ];
+        let projects = vec![Project {
+            title: "Consulting".to_string(),
+            area: Some("Business".to_string()),
+            ..Default::default()
+        }];
+
+        let report = build_operating_model_report(tasks, projects, Vec::new());
+        let business = report
+            .areas
+            .iter()
+            .find(|area| area.name == "Business")
+            .expect("business area");
+        assert_eq!(business.active_projects, 1);
+        assert_eq!(business.due_today_tasks, 1);
+        assert_eq!(business.goal_tasks, 1);
+        assert!(business.next_action.is_some());
+        assert_eq!(report.goals.len(), 1);
+        assert_eq!(
+            report.goals[0]
+                .next_action
+                .as_ref()
+                .map(|task| task.title.as_str()),
+            Some("Send proposal")
+        );
+        assert_eq!(report.routines.len(), 1);
+        assert_eq!(report.habits.len(), 1);
+        assert_eq!(report.stale_tasks, 1);
+    }
+
+    #[test]
+    fn project_file_classifier_identifies_knowledge_roles() {
+        assert_eq!(
+            classify_project_file("Project/docs/decision-auth.md", "decision-auth.md", &None),
+            "decision"
+        );
+        assert_eq!(
+            classify_project_file("Project/Exports/final.wav", "final.wav", &None),
+            "deliverable"
+        );
+        assert_eq!(
+            classify_project_file("Project/References/brief.pdf", "brief.pdf", &None),
+            "reference"
+        );
+        assert_eq!(
+            classify_project_file(
+                "Project/notes.md",
+                "notes.md",
+                &Some("text/markdown".to_string())
+            ),
+            "note"
+        );
+        let project = Project {
+            title: "Client Launch".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(project_storage_path(&project), "Client Launch");
+    }
+
+    #[test]
+    fn finance_report_rolls_up_unbilled_time_and_invoice_aging() {
+        let today = chrono::NaiveDate::from_ymd_opt(2026, 4, 30).unwrap();
+        let start = modified_at("2026-04-29T10:00:00Z");
+        let entries = vec![TimeEntryContext {
+            task_title: "Client implementation".to_string(),
+            client_name: Some("Acme".to_string()),
+            client_rate: Some(12_000),
+            entry: crate::TimeEntry {
+                id: "entry-1".to_string(),
+                start_time: start,
+                end_time: Some(start + chrono::Duration::minutes(90)),
+                billable: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        }];
+        let invoice = crate::invoice::Invoice {
+            id: "INV-2026-0001".to_string(),
+            client: WikiLink("Acme".to_string()),
+            issue_date: today - chrono::Duration::days(45),
+            due_date: today - chrono::Duration::days(15),
+            line_items: vec![crate::invoice::InvoiceLine {
+                hours: 2.0,
+                rate_cents: 10_000,
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+
+        let report = build_finance_report(entries, vec![invoice], today);
+        assert_eq!(report.unbilled_minutes, 90);
+        assert_eq!(report.unbilled_cents, 18_000);
+        assert_eq!(report.open_invoice_cents, 20_000);
+        assert_eq!(report.overdue_invoice_cents, 20_000);
+        assert_eq!(report.clients[0].client_name, "Acme");
+        assert_eq!(report.clients[0].unbilled_cents, 18_000);
+        assert_eq!(report.aging[1].balance_cents, 20_000);
+    }
+
+    #[test]
+    fn communication_token_matching_covers_message_text() {
+        let tokens = normalize_context_tokens(vec![
+            "Ada Lovelace".to_string(),
+            "ada@example.com".to_string(),
+        ]);
+        assert!(text_matches_tokens(
+            "Following up with Ada Lovelace about the contract",
+            &tokens
+        ));
+        assert!(text_matches_tokens(
+            "Ping ada@example.com tomorrow",
+            &tokens
+        ));
+        assert!(!text_matches_tokens("Unrelated message", &tokens));
+    }
+
+    #[test]
+    fn sync_plan_is_safe_dry_run_metadata() {
+        let plan = build_sync_plan(Some(NextcloudRuntimeConfig {
+            url: "https://cloud.example.test".to_string(),
+            username: "agent".to_string(),
+            password: "secret".to_string(),
+            projects_path: "Projects/".to_string(),
+            calendar: "tasks".to_string(),
+            event_calendar: Some("events".to_string()),
+            deck_enabled: true,
+        }));
+        assert!(plan.safe_to_run);
+        assert!(plan.items.iter().any(|item| item.provider == "caldav"));
+        assert!(plan
+            .items
+            .iter()
+            .any(|item| item.provider == "nextcloud-talk"));
+        assert!(plan.items.iter().all(|item| !item.destructive));
+
+        let missing = build_sync_plan(None);
+        assert!(!missing.safe_to_run);
+        assert!(!missing.warnings.is_empty());
     }
 
     #[test]

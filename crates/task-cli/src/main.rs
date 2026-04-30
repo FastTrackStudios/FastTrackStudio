@@ -3,12 +3,13 @@ use clap::{Parser, Subcommand};
 use task_core::index::{ChangeRow, ConflictRow};
 use task_core::workflows::{parse_comments, render_comments, Comment};
 use task_core::{
-    CalendarEvent, CalendarEventPatch, CalendarEventStatus, CardDavSyncCollectionRequest,
-    ChannelConversation, ChannelMessage, ChannelSendMessageRequest, Client, Filter,
-    InboxCaptureRequest, InboxItem, InboxPromoteRequest, Invoice, OrganizationContext,
-    OrganizationRecord, Person, PersonContext, Priority, Project, ProviderSyncState, Query,
-    RelationType, ReviewReport, Sort, Status, SyncStats, SystemCapabilities, SystemHealth, Task,
-    TaskRelation, TimeEntryContext, TimeEntryFilter, VaultServiceImpl, WikiLink,
+    BusinessFinanceReport, CalendarEvent, CalendarEventPatch, CalendarEventStatus,
+    CardDavSyncCollectionRequest, ChannelConversation, ChannelMessage, ChannelSendMessageRequest,
+    Client, Filter, InboxCaptureRequest, InboxItem, InboxPromoteRequest, Invoice,
+    OperatingModelReport, OrganizationContext, OrganizationRecord, Person, PersonContext, Priority,
+    Project, ProjectKnowledgeContext, ProviderSyncState, Query, RelationType, ReviewReport, Sort,
+    Status, SyncStats, SystemCapabilities, SystemHealth, Task, TaskRelation, TimeEntryContext,
+    TimeEntryFilter, VaultServiceImpl, WikiLink,
 };
 
 #[derive(Parser)]
@@ -129,6 +130,11 @@ enum Commands {
         #[command(subcommand)]
         command: PeopleCommands,
     },
+    /// Life/business operating model and review pressure
+    Operate {
+        #[command(subcommand)]
+        command: OperatingCommands,
+    },
     /// Mark a task as complete
     Complete { title: String },
     /// Show detailed info for a task
@@ -243,6 +249,9 @@ enum Commands {
         /// Print persisted provider sync state instead of triggering sync
         #[arg(long)]
         state: bool,
+        /// Print a dry-run sync plan instead of mutating providers
+        #[arg(long)]
+        plan: bool,
     },
     /// Nextcloud Talk — conversational surface for bots and humans
     Talk {
@@ -392,6 +401,19 @@ enum InboxCommands {
         #[arg(long)]
         json: bool,
     },
+    /// Show monthly review buckets
+    Monthly {
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show review buckets scoped to a project
+    Project {
+        name: String,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Promote/classify an inbox capture
     Promote {
         /// Task id or title
@@ -446,6 +468,15 @@ enum PeopleCommands {
         reference: String,
         #[arg(long)]
         addressbook: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum OperatingCommands {
+    /// Show the derived life/business operating model
+    Model {
         #[arg(long)]
         json: bool,
     },
@@ -753,6 +784,11 @@ enum InvoiceCommands {
         client: Option<String>,
         #[arg(long)]
         year: Option<i32>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show billable/unbilled time, invoice balances, and aging
+    Report {
         #[arg(long)]
         json: bool,
     },
@@ -1163,6 +1199,16 @@ enum ProjectCommands {
         #[arg(long)]
         json: bool,
     },
+    /// Show project tasks, next action, references, and storage-backed files
+    Context {
+        name: String,
+        #[arg(long)]
+        files: bool,
+        #[arg(long, default_value = "1")]
+        depth: String,
+        #[arg(long)]
+        json: bool,
+    },
     /// Edit project fields — status, client, rate, email_tags, etc.
     Edit {
         name: String,
@@ -1469,6 +1515,14 @@ async fn main() -> eyre::Result<()> {
                 let report = svc.weekly_review_report().await;
                 print_review_report(&report, json);
             }
+            InboxCommands::Monthly { json } => {
+                let report = svc.monthly_review_report().await;
+                print_review_report(&report, json);
+            }
+            InboxCommands::Project { name, json } => {
+                let report = svc.project_review_report(name).await;
+                print_review_report(&report, json);
+            }
             InboxCommands::Promote {
                 reference,
                 kind,
@@ -1525,6 +1579,13 @@ async fn main() -> eyre::Result<()> {
                     .organization_context_from_carddav(reference, addressbook)
                     .await?;
                 print_organization_context(context.as_ref(), json);
+            }
+        },
+
+        Commands::Operate { command } => match command {
+            OperatingCommands::Model { json } => {
+                let report = svc.operating_model_report().await;
+                print_operating_model(&report, json);
             }
         },
 
@@ -1966,6 +2027,13 @@ async fn main() -> eyre::Result<()> {
             } else {
                 print_invoices_table(&invoices);
             }
+        }
+
+        Commands::Invoice {
+            command: InvoiceCommands::Report { json },
+        } => {
+            let report = svc.finance_report().await;
+            print_finance_report(&report, json);
         }
 
         Commands::Invoice {
@@ -2480,10 +2548,15 @@ async fn main() -> eyre::Result<()> {
             }
         }
 
-        Commands::Sync { json, state } => {
+        Commands::Sync { json, state, plan } => {
             if state {
                 let states = svc.list_provider_sync_states().await?;
                 print_sync_states(&states, json);
+                return Ok(());
+            }
+            if plan {
+                let plan = svc.sync_plan().await;
+                print_sync_plan(&plan, json);
                 return Ok(());
             }
             let stats = svc.trigger_sync().await?;
@@ -2588,6 +2661,19 @@ async fn main() -> eyre::Result<()> {
             } else {
                 print_tasks_table(&tasks);
             }
+        }
+
+        Commands::Project {
+            command:
+                ProjectCommands::Context {
+                    name,
+                    files,
+                    depth,
+                    json,
+                },
+        } => {
+            let context = svc.project_knowledge_context(name, files, depth).await?;
+            print_project_context(context.as_ref(), json);
         }
 
         Commands::Project {
@@ -3380,6 +3466,10 @@ impl RemoteVoxConfig {
         self.connect().await
     }
 
+    async fn operating(&self) -> eyre::Result<task_core::service::OperatingServiceClient> {
+        self.connect().await
+    }
+
     async fn invoice(&self) -> eyre::Result<task_core::service::InvoiceServiceClient> {
         self.connect().await
     }
@@ -3554,6 +3644,14 @@ async fn run_remote_command(
                     let report = client.weekly_review().await?;
                     print_review_report(&report, json);
                 }
+                InboxCommands::Monthly { json } => {
+                    let report = client.monthly_review().await?;
+                    print_review_report(&report, json);
+                }
+                InboxCommands::Project { name, json } => {
+                    let report = client.project_review(name).await?;
+                    print_review_report(&report, json);
+                }
                 InboxCommands::Promote {
                     reference,
                     kind,
@@ -3632,14 +3730,21 @@ async fn run_remote_command(
                             reply_to: reply_to.map(|id| id.to_string()),
                         })
                         .await?;
-                    println!(
-                        "Sent message {} to {}.",
-                        sent.id, sent.conversation_id
-                    );
+                    println!("Sent message {} to {}.", sent.id, sent.conversation_id);
                 }
                 TalkCommands::History { room, limit, json } => {
                     let messages = client.recent_messages(room, limit).await?;
                     print_channel_history(&messages, json);
+                }
+            }
+        }
+
+        Commands::Operate { command } => {
+            let client = remote.operating().await?;
+            match command {
+                OperatingCommands::Model { json } => {
+                    let report = client.operating_model().await?;
+                    print_operating_model(&report, json);
                 }
             }
         }
@@ -3846,10 +3951,15 @@ async fn run_remote_command(
 
         Commands::Comment { command } => run_remote_comment_command(remote, actor, command).await?,
 
-        Commands::Sync { json, state } => {
+        Commands::Sync { json, state, plan } => {
             if state {
                 let states = remote.activity().await?.list_sync_states().await?;
                 print_sync_states(&states, json);
+                return Ok(());
+            }
+            if plan {
+                let plan = remote.calendar().await?.sync_plan().await?;
+                print_sync_plan(&plan, json);
                 return Ok(());
             }
             let stats = remote.calendar().await?.trigger_sync().await?;
@@ -4241,6 +4351,15 @@ async fn run_remote_project_command(
                 print_tasks_table(&tasks);
             }
         }
+        ProjectCommands::Context {
+            name,
+            files,
+            depth,
+            json,
+        } => {
+            let context = client.project_context(name, files, depth).await?;
+            print_project_context(context.as_ref(), json);
+        }
         ProjectCommands::Edit {
             name,
             status,
@@ -4455,6 +4574,10 @@ async fn run_remote_invoice_command(
             } else {
                 print_invoices_table(&invoices);
             }
+        }
+        InvoiceCommands::Report { json } => {
+            let report = client.finance_report().await?;
+            print_finance_report(&report, json);
         }
         InvoiceCommands::Show { id, md, json } => {
             let invoice = client
@@ -5646,6 +5769,41 @@ fn print_sync_stats(stats: &SyncStats) {
     }
 }
 
+fn print_sync_plan(plan: &task_core::SyncPlan, json: bool) {
+    if json {
+        println!("{}", facet_json::to_string(plan).unwrap_or_default());
+        return;
+    }
+    println!(
+        "Sync plan generated at {} ({})",
+        plan.generated_at,
+        if plan.safe_to_run {
+            "safe"
+        } else {
+            "not configured"
+        }
+    );
+    for warning in &plan.warnings {
+        println!("warning: {warning}");
+    }
+    println!(
+        "{:<18}  {:<18}  {:<14}  {:<13}  {}",
+        "PROVIDER", "OPERATION", "DIRECTION", "CONFIGURED", "COLLECTION"
+    );
+    println!("{}", "─".repeat(88));
+    for item in &plan.items {
+        println!(
+            "{:<18}  {:<18}  {:<14}  {:<13}  {}",
+            item.provider,
+            truncate(&item.operation, 18),
+            item.direction,
+            item.configured,
+            item.collection
+        );
+        println!("  {}", item.detail);
+    }
+}
+
 async fn run_remote_agent_command(
     remote: &RemoteVoxConfig,
     actor: Option<&str>,
@@ -6109,10 +6267,7 @@ fn print_channel_history_table(msgs: &[ChannelMessage]) {
             Some(id) => format!(" ↪#{id}"),
             None => String::new(),
         };
-        println!(
-            "[{when}] @{} (#{}{}): {}",
-            m.actor_id, m.id, reply, m.body
-        );
+        println!("[{when}] @{} (#{}{}): {}", m.actor_id, m.id, reply, m.body);
     }
 }
 
@@ -7089,6 +7244,57 @@ fn print_project_detail(p: &task_core::Project) {
     }
 }
 
+fn print_project_context(context: Option<&ProjectKnowledgeContext>, json: bool) {
+    let Some(context) = context else {
+        if json {
+            println!("null");
+        } else {
+            println!("Project not found.");
+        }
+        return;
+    };
+    if json {
+        println!("{}", facet_json::to_string(context).unwrap_or_default());
+        return;
+    }
+
+    print_project_detail(&context.project);
+    println!("Path:        {}", context.project_path);
+    println!("Tasks:       {}", context.tasks.len());
+    if let Some(next) = &context.next_action {
+        println!("Next:        {}", next.title);
+    }
+    if !context.references.is_empty() {
+        println!("References:  {}", context.references.join(", "));
+    }
+
+    if !context.files.is_empty() {
+        println!("\nFiles");
+        for file in context.files.iter().take(40) {
+            println!(
+                "- {} [{}] {}",
+                file.path,
+                file.role,
+                file.content_length
+                    .map(|bytes| format!("{bytes} bytes"))
+                    .unwrap_or_else(|| file.kind.clone())
+            );
+        }
+    }
+    if !context.decisions.is_empty() {
+        println!("\nDecisions");
+        for file in context.decisions.iter().take(20) {
+            println!("- {}", file.path);
+        }
+    }
+    if !context.deliverables.is_empty() {
+        println!("\nDeliverables");
+        for file in context.deliverables.iter().take(20) {
+            println!("- {}", file.path);
+        }
+    }
+}
+
 // ── Nextcloud Mail helpers ───────────────────────────────────────────────────
 
 fn build_mail_client(as_user: Option<&str>) -> eyre::Result<task_core::provider::MailClient> {
@@ -7438,6 +7644,70 @@ fn print_invoices_json(invoices: &[task_core::Invoice]) {
         );
     }
     println!("]");
+}
+
+fn print_finance_report(report: &BusinessFinanceReport, json: bool) {
+    if json {
+        println!("{}", facet_json::to_string(report).unwrap_or_default());
+        return;
+    }
+
+    println!("Finance report for {}", report.today);
+    println!(
+        "billable {:.2}h | unbilled {:.2}h / ${:.2} | invoiced ${:.2} | paid ${:.2} | open ${:.2} | overdue ${:.2}",
+        report.billable_minutes as f64 / 60.0,
+        report.unbilled_minutes as f64 / 60.0,
+        report.unbilled_cents as f64 / 100.0,
+        report.invoiced_cents as f64 / 100.0,
+        report.paid_cents as f64 / 100.0,
+        report.open_invoice_cents as f64 / 100.0,
+        report.overdue_invoice_cents as f64 / 100.0,
+    );
+
+    if !report.clients.is_empty() {
+        println!("\nClients");
+        for client in &report.clients {
+            println!(
+                "- {}: unbilled {:.2}h / ${:.2}, open ${:.2}, overdue ${:.2}",
+                client.client_name,
+                client.unbilled_minutes as f64 / 60.0,
+                client.unbilled_cents as f64 / 100.0,
+                client.open_invoice_cents as f64 / 100.0,
+                client.overdue_invoice_cents as f64 / 100.0,
+            );
+        }
+    }
+
+    if !report.aging.is_empty() {
+        println!("\nAging");
+        for bucket in &report.aging {
+            println!(
+                "- {}: {} invoice(s), ${:.2}",
+                bucket.name,
+                bucket.invoice_count,
+                bucket.balance_cents as f64 / 100.0
+            );
+        }
+    }
+
+    if !report.unbilled_entries.is_empty() {
+        println!("\nUnbilled entries");
+        for entry in report.unbilled_entries.iter().take(20) {
+            println!(
+                "- {}: {:.2}h ${:.2} ({})",
+                entry.task_title,
+                entry.entry.duration_minutes() as f64 / 60.0,
+                super_time_entry_cents(entry) as f64 / 100.0,
+                entry.client_name.as_deref().unwrap_or("Unassigned")
+            );
+        }
+    }
+}
+
+fn super_time_entry_cents(entry: &TimeEntryContext) -> u64 {
+    let minutes = entry.entry.duration_minutes() as u64;
+    let rate = entry.effective_rate(None) as u64;
+    ((minutes * rate) + 30) / 60
 }
 
 fn print_invoice_detail(inv: &task_core::Invoice) {
@@ -7838,6 +8108,84 @@ fn print_review_report(report: &ReviewReport, json: bool) {
     print_review_task_bucket("Someday / maybe", &report.someday);
     print_review_task_bucket("Unscheduled", &report.unscheduled);
     print_review_task_bucket("Stale", &report.stale);
+}
+
+fn print_operating_model(report: &OperatingModelReport, json: bool) {
+    if json {
+        println!("{}", facet_json::to_string(report).unwrap_or_default());
+        return;
+    }
+
+    println!("Operating model for {}", report.today);
+    println!(
+        "open {} | overdue {} | today {} | waiting {} | stale {} | unscheduled {} | timers {} | upcoming events {}",
+        report.open_tasks,
+        report.overdue_tasks,
+        report.due_today_tasks,
+        report.waiting_tasks,
+        report.stale_tasks,
+        report.unscheduled_tasks,
+        report.active_timers,
+        report.upcoming_events,
+    );
+
+    if !report.areas.is_empty() {
+        println!("\nAreas");
+        for area in report.areas.iter().take(20) {
+            let next = area
+                .next_action
+                .as_ref()
+                .map(|task| task.title.as_str())
+                .unwrap_or("—");
+            println!(
+                "- {}: open {} projects {} overdue {} today {} waiting {} stale {} routines {} habits {} goals {} | next {}",
+                area.name,
+                area.open_tasks,
+                area.active_projects,
+                area.overdue_tasks,
+                area.due_today_tasks,
+                area.waiting_tasks,
+                area.stale_tasks,
+                area.routine_tasks,
+                area.habit_tasks,
+                area.goal_tasks,
+                next,
+            );
+        }
+    }
+
+    if !report.goals.is_empty() {
+        println!("\nGoals");
+        for goal in report.goals.iter().take(20) {
+            let area = goal.area.as_deref().unwrap_or("—");
+            let due = goal.due.as_deref().unwrap_or("—");
+            let next = goal
+                .next_action
+                .as_ref()
+                .map(|task| task.title.as_str())
+                .unwrap_or("—");
+            println!("- {} [{}] due {} | next {}", goal.title, area, due, next);
+        }
+    }
+
+    if !report.routines.is_empty() || !report.habits.is_empty() {
+        println!("\nRoutines and habits");
+        for routine in report.routines.iter().chain(report.habits.iter()).take(25) {
+            println!(
+                "- {} ({}) recur {} due {} scheduled {}",
+                routine.title,
+                routine.kind,
+                routine.recurrence.as_deref().unwrap_or("—"),
+                routine.due.as_deref().unwrap_or("—"),
+                routine.scheduled.as_deref().unwrap_or("—"),
+            );
+        }
+    }
+
+    if !report.inbox.is_empty() {
+        println!("\nInbox");
+        print_inbox_items(&report.inbox, false);
+    }
 }
 
 fn print_review_task_bucket(label: &str, tasks: &[Task]) {

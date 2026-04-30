@@ -76,10 +76,15 @@ fn service_descriptors() -> Vec<&'static vox_types::ServiceDescriptor> {
         task_core::project_service_service_descriptor(),
         task_core::time_service_service_descriptor(),
         task_core::client_service_service_descriptor(),
+        task_core::people_service_service_descriptor(),
+        task_core::conversation_service_service_descriptor(),
+        task_core::operating_service_service_descriptor(),
         task_core::invoice_service_service_descriptor(),
         task_core::activity_service_service_descriptor(),
+        task_core::mail_service_service_descriptor(),
         task_core::calendar_service_service_descriptor(),
         task_core::file_service_service_descriptor(),
+        task_core::system_service_service_descriptor(),
     ]
 }
 

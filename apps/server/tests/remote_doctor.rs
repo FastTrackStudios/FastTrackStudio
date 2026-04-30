@@ -94,6 +94,8 @@ async fn authenticated_core_services_smoke_over_vox() {
     let people_service: task_core::service::PeopleServiceClient = connect_service(&vox_url).await;
     let conversation_service: task_core::service::ConversationServiceClient =
         connect_service(&vox_url).await;
+    let operating_service: task_core::service::OperatingServiceClient =
+        connect_service(&vox_url).await;
     let invoice_service: task_core::service::InvoiceServiceClient = connect_service(&vox_url).await;
     let calendar_service: task_core::service::CalendarServiceClient =
         connect_service(&vox_url).await;
@@ -125,8 +127,14 @@ async fn authenticated_core_services_smoke_over_vox() {
     );
     assert!(service_error("list_people", people_service.list_people(None)).await);
     assert!(
-        service_error("list_conversations", conversation_service.list_conversations()).await
+        service_error(
+            "list_conversations",
+            conversation_service.list_conversations()
+        )
+        .await
     );
+    let operating = service_call("operating_model", operating_service.operating_model()).await;
+    assert_eq!(operating.today.len(), 10);
 
     let captured = service_call(
         "capture",

@@ -67,6 +67,12 @@ pub trait InboxService {
 
     /// Return review buckets for a weekly planning sweep.
     async fn weekly_review(&self) -> ReviewReport;
+
+    /// Return review buckets for a monthly planning sweep.
+    async fn monthly_review(&self) -> ReviewReport;
+
+    /// Return review buckets scoped to a project.
+    async fn project_review(&self, project_title: String) -> ReviewReport;
 }
 
 #[vox::service]
@@ -90,6 +96,14 @@ pub trait ProjectService {
 
     /// Get all tasks for a project.
     async fn tasks_for_project(&self, project_title: String) -> Vec<Task>;
+
+    /// Return one project plus tasks and storage-backed knowledge/files context.
+    async fn project_context(
+        &self,
+        project_title: String,
+        include_files: bool,
+        depth: String,
+    ) -> Result<Option<ProjectKnowledgeContext>, VaultError>;
 }
 
 #[vox::service]
@@ -173,6 +187,12 @@ pub trait PeopleService {
 }
 
 #[vox::service]
+pub trait OperatingService {
+    /// Return a derived life/business operating model snapshot.
+    async fn operating_model(&self) -> OperatingModelReport;
+}
+
+#[vox::service]
 pub trait InvoiceService {
     async fn create_invoice_from_entries(
         &self,
@@ -181,6 +201,7 @@ pub trait InvoiceService {
 
     async fn list_invoices(&self) -> Vec<Invoice>;
     async fn get_invoice(&self, invoice_id: String) -> Option<Invoice>;
+    async fn finance_report(&self) -> BusinessFinanceReport;
     async fn send_invoice(
         &self,
         invoice_id: String,
@@ -297,6 +318,9 @@ pub trait CalendarService {
 
     /// Get the last sync result.
     async fn sync_status(&self) -> Option<SyncStats>;
+
+    /// Describe what a sync would touch without mutating providers.
+    async fn sync_plan(&self) -> SyncPlan;
 
     /// Discover CalDAV principal, calendar home, and available calendars.
     async fn discover_caldav(&self) -> Result<CalDavDiscovery, VaultError>;
@@ -415,6 +439,27 @@ pub struct SyncStats {
     pub files_created: u32,
     pub files_updated: u32,
     pub errors: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct SyncPlanItem {
+    pub provider: String,
+    pub operation: String,
+    pub collection: String,
+    pub direction: String,
+    pub configured: bool,
+    pub destructive: bool,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct SyncPlan {
+    pub generated_at: String,
+    pub safe_to_run: bool,
+    #[facet(default)]
+    pub items: Vec<SyncPlanItem>,
+    #[facet(default)]
+    pub warnings: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, facet::Facet)]
@@ -768,6 +813,36 @@ pub struct FileEntry {
 }
 
 #[derive(Debug, Clone, Default, facet::Facet)]
+pub struct ProjectFileSummary {
+    pub path: String,
+    pub name: String,
+    pub kind: String,
+    pub role: String,
+    pub content_type: Option<String>,
+    pub content_length: Option<u64>,
+    pub last_modified: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct ProjectKnowledgeContext {
+    pub project: Project,
+    pub project_path: String,
+    #[facet(default)]
+    pub tasks: Vec<Task>,
+    pub next_action: Option<Task>,
+    #[facet(default)]
+    pub files: Vec<ProjectFileSummary>,
+    #[facet(default)]
+    pub notes: Vec<ProjectFileSummary>,
+    #[facet(default)]
+    pub decisions: Vec<ProjectFileSummary>,
+    #[facet(default)]
+    pub deliverables: Vec<ProjectFileSummary>,
+    #[facet(default)]
+    pub references: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
 pub struct FileReadResponse {
     pub content_base64: String,
     pub content_type: Option<String>,
@@ -914,6 +989,154 @@ pub struct ReviewReport {
     pub unscheduled: Vec<Task>,
     #[facet(default)]
     pub stale: Vec<Task>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct OperatingAreaStatus {
+    pub name: String,
+    pub open_tasks: u32,
+    pub active_projects: u32,
+    pub overdue_tasks: u32,
+    pub due_today_tasks: u32,
+    pub waiting_tasks: u32,
+    pub stale_tasks: u32,
+    pub routine_tasks: u32,
+    pub habit_tasks: u32,
+    pub goal_tasks: u32,
+    pub next_action: Option<Task>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct OperatingGoal {
+    pub title: String,
+    pub area: Option<String>,
+    pub project: Option<String>,
+    pub status: String,
+    pub due: Option<String>,
+    pub next_action: Option<Task>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct OperatingRoutine {
+    pub title: String,
+    pub area: Option<String>,
+    pub kind: String,
+    pub recurrence: Option<String>,
+    pub due: Option<String>,
+    pub scheduled: Option<String>,
+    pub status: String,
+}
+
+#[derive(Debug, Clone, facet::Facet)]
+pub struct OperatingModelReport {
+    pub generated_at: DateTime<Utc>,
+    pub today: String,
+    #[facet(default)]
+    pub areas: Vec<OperatingAreaStatus>,
+    #[facet(default)]
+    pub goals: Vec<OperatingGoal>,
+    #[facet(default)]
+    pub routines: Vec<OperatingRoutine>,
+    #[facet(default)]
+    pub habits: Vec<OperatingRoutine>,
+    #[facet(default)]
+    pub active_projects: Vec<Project>,
+    #[facet(default)]
+    pub inbox: Vec<InboxItem>,
+    #[facet(default)]
+    pub review: ReviewReport,
+    pub open_tasks: u32,
+    pub overdue_tasks: u32,
+    pub due_today_tasks: u32,
+    pub waiting_tasks: u32,
+    pub stale_tasks: u32,
+    pub unscheduled_tasks: u32,
+    pub active_timers: u32,
+    pub upcoming_events: u32,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct BusinessFinanceClientSummary {
+    pub client_name: String,
+    pub unbilled_minutes: u32,
+    pub unbilled_cents: u64,
+    pub open_invoice_cents: u64,
+    pub overdue_invoice_cents: u64,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct InvoiceAgingBucket {
+    pub name: String,
+    pub invoice_count: u32,
+    pub balance_cents: u64,
+}
+
+#[derive(Debug, Clone, facet::Facet)]
+pub struct BusinessFinanceReport {
+    pub generated_at: DateTime<Utc>,
+    pub today: String,
+    pub billable_minutes: u32,
+    pub unbilled_minutes: u32,
+    pub unbilled_cents: u64,
+    pub invoiced_cents: u64,
+    pub paid_cents: u64,
+    pub open_invoice_cents: u64,
+    pub overdue_invoice_cents: u64,
+    #[facet(default)]
+    pub clients: Vec<BusinessFinanceClientSummary>,
+    #[facet(default)]
+    pub aging: Vec<InvoiceAgingBucket>,
+    #[facet(default)]
+    pub draft_invoices: Vec<Invoice>,
+    #[facet(default)]
+    pub open_invoices: Vec<Invoice>,
+    #[facet(default)]
+    pub unbilled_entries: Vec<TimeEntryContext>,
+}
+
+impl Default for BusinessFinanceReport {
+    fn default() -> Self {
+        Self {
+            generated_at: Utc::now(),
+            today: String::new(),
+            billable_minutes: 0,
+            unbilled_minutes: 0,
+            unbilled_cents: 0,
+            invoiced_cents: 0,
+            paid_cents: 0,
+            open_invoice_cents: 0,
+            overdue_invoice_cents: 0,
+            clients: Vec::new(),
+            aging: Vec::new(),
+            draft_invoices: Vec::new(),
+            open_invoices: Vec::new(),
+            unbilled_entries: Vec::new(),
+        }
+    }
+}
+
+impl Default for OperatingModelReport {
+    fn default() -> Self {
+        Self {
+            generated_at: Utc::now(),
+            today: String::new(),
+            areas: Vec::new(),
+            goals: Vec::new(),
+            routines: Vec::new(),
+            habits: Vec::new(),
+            active_projects: Vec::new(),
+            inbox: Vec::new(),
+            review: ReviewReport::default(),
+            open_tasks: 0,
+            overdue_tasks: 0,
+            due_today_tasks: 0,
+            waiting_tasks: 0,
+            stale_tasks: 0,
+            unscheduled_tasks: 0,
+            active_timers: 0,
+            upcoming_events: 0,
+        }
+    }
 }
 
 impl Default for ReviewReport {
