@@ -6,8 +6,8 @@ use std::{fmt::Debug, future::Future};
 
 use chrono::{TimeZone, Utc};
 use task_core::{
-    Client, Filter, Priority, Project, ProjectPatch, Query, Sort, Status, Task, TimeEntryFilter,
-    WikiLink,
+    Client, Filter, InboxCaptureRequest, InboxPromoteRequest, Priority, Project, ProjectPatch,
+    Query, Sort, Status, Task, TimeEntryFilter, WikiLink,
 };
 use tokio::net::{TcpListener, TcpStream};
 use tokio::process::{Child, Command};
@@ -85,6 +85,7 @@ async fn authenticated_core_services_smoke_over_vox() {
     let vox_url = format!("ws://{bind_addr}/vox?token={TEST_TOKEN}&organization_id=org_fts");
 
     let task_service: task_core::service::TaskServiceClient = connect_service(&vox_url).await;
+    let inbox_service: task_core::service::InboxServiceClient = connect_service(&vox_url).await;
     let project_service: task_core::service::ProjectServiceClient = connect_service(&vox_url).await;
     let time_service: task_core::service::TimeServiceClient = connect_service(&vox_url).await;
     let client_service: task_core::service::ClientServiceClient = connect_service(&vox_url).await;
@@ -117,6 +118,47 @@ async fn authenticated_core_services_smoke_over_vox() {
         .map(|client| client.name),
         Some("E2E Client".to_string())
     );
+
+    let captured = service_call(
+        "capture",
+        inbox_service.capture(InboxCaptureRequest {
+            text: "Review inbox capture flow !high #ops @desk".to_string(),
+            actor: Some("agent".to_string()),
+            source: Some("e2e".to_string()),
+            kind: None,
+        }),
+    )
+    .await;
+    assert_eq!(captured.kind, "inbox");
+    assert_eq!(captured.priority, "high");
+    assert_eq!(captured.source.as_deref(), Some("e2e"));
+    let inbox_items = service_call("list_inbox", inbox_service.list_inbox()).await;
+    assert!(inbox_items
+        .iter()
+        .any(|item| item.id == captured.id && item.title == captured.title));
+    let promoted = service_call(
+        "promote",
+        inbox_service.promote(InboxPromoteRequest {
+            reference: captured.id.clone().expect("captured item should have id"),
+            kind: Some("commitment".to_string()),
+            project: Some("E2E Project".to_string()),
+            status: Some("planned".to_string()),
+            assignee: Some("agent".to_string()),
+            due: None,
+            scheduled: None,
+            add_tags: vec!["review".to_string()],
+            actor: Some("agent".to_string()),
+        }),
+    )
+    .await;
+    assert_eq!(promoted.kind, "commitment");
+    assert_eq!(promoted.status, "planned");
+    assert!(promoted
+        .projects
+        .iter()
+        .any(|project| project == "E2E Project"));
+    assert!(promoted.tags.iter().any(|tag| tag == "review"));
+    assert!(!promoted.tags.iter().any(|tag| tag == "inbox"));
 
     let tasks = service_call("list_tasks", task_service.list_tasks()).await;
     let seeded = tasks

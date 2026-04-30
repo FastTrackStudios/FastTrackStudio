@@ -16,14 +16,15 @@ use crate::service::{
     CalDavMultigetRequest, CalDavObject, CalDavPutObjectRequest, CalDavScheduleRequest,
     CalDavScheduleResponse, CalDavSyncCollectionRequest, CalDavSyncCollectionResponse,
     CalendarEventPatch, EmailLinkRequest, EmailLinkResponse, EmailListRequest, EmailUnlinkRequest,
-    FileCopyMoveRequest, FileEntry, FileReadResponse, FileWriteRequest, InvoiceCreateRequest,
+    FileCopyMoveRequest, FileEntry, FileReadResponse, FileWriteRequest, InboxCaptureRequest,
+    InboxItem, InboxPromoteRequest, InvoiceCreateRequest,
     InvoicePaymentRequest, MailCreateMailboxRequest, MailCreateTagRequest, MailDeleteTagRequest,
     MailListMessagesRequest, MailMessageTagRequest, MailMoveMessageRequest, NextcloudCapability,
     ProjectPatch, RemoteDeckBoard, RemoteDeckStack, SyncStats, SystemCapabilities, SystemHealth,
     TimeEntryContext, TimeEntryFilter, TimeEntryPatch, TimeLogRequest, TimeStartRequest,
     TimedTaskEntry, VaultCapability, VaultError,
 };
-use crate::task::{Status, Task};
+use crate::task::{Priority, Status, Task, WikiLink};
 use crate::vault::Vault;
 use crate::watch::{start_watch, WatchHandle};
 
@@ -325,6 +326,102 @@ impl VaultServiceImpl {
             }
         }
         Ok(task)
+    }
+
+    pub async fn capture_inbox(&self, request: InboxCaptureRequest) -> Result<InboxItem, VaultError> {
+        let parsed = crate::capture::parse_capture(&request.text);
+        let title = if parsed.title.trim().is_empty() {
+            request.text.trim().to_string()
+        } else {
+            parsed.title.trim().to_string()
+        };
+        if title.is_empty() {
+            return Err(VaultError::ParseError("capture text is empty".to_string()));
+        }
+
+        let kind = normalize_inbox_kind(request.kind.as_deref());
+        let mut tags = parsed.tags;
+        push_unique(&mut tags, "inbox".to_string());
+
+        let task = Task {
+            id: Some(Uuid::new_v4().to_string()),
+            title,
+            status: Status::Open,
+            priority: parsed.priority.unwrap_or(Priority::Normal),
+            projects: parsed.projects,
+            contexts: parsed.contexts,
+            tags,
+            due: parsed.due,
+            issue_type: Some(kind),
+            created_by: request.actor,
+            external_source: request.source.map(|source| format!("inbox:{source}")),
+            body: request.text,
+            ..Default::default()
+        };
+
+        self.vault.read().await.save_task(&task)?;
+        if let Ok(guard) = self.index.lock() {
+            if let Some(ref index) = *guard {
+                let _ = index.index_task(&task, &format!("{}.md", task.title));
+            }
+        }
+        Ok(inbox_item_from_task(&task))
+    }
+
+    pub async fn list_inbox_items(&self) -> Vec<InboxItem> {
+        self.vault.read().await.load_tasks()
+            .into_iter()
+            .filter(is_inbox_task)
+            .map(|task| inbox_item_from_task(&task))
+            .collect()
+    }
+
+    pub async fn promote_inbox(&self, request: InboxPromoteRequest) -> Result<InboxItem, VaultError> {
+        let vault = self.vault.read().await;
+        let mut task = vault.load_tasks()
+            .into_iter()
+            .find(|task| task_matches_reference(task, &request.reference))
+            .ok_or_else(|| VaultError::NotFound(request.reference.clone()))?;
+
+        if let Some(kind) = request.kind {
+            task.issue_type = Some(normalize_inbox_kind(Some(&kind)));
+        }
+        if let Some(project) = request.project {
+            if !project.is_empty() && project != "clear" {
+                push_unique(&mut task.projects, WikiLink(project));
+            }
+        }
+        if let Some(status) = request.status {
+            task.status = parse_task_status(&status)
+                .ok_or_else(|| VaultError::ParseError(format!("unknown status: {status}")))?;
+        }
+        if let Some(assignee) = request.assignee {
+            task.assignee = if assignee.is_empty() || assignee == "clear" { None } else { Some(assignee) };
+        }
+        if let Some(due) = request.due {
+            task.due = parse_optional_naive_date(&due, "due")?;
+        }
+        if let Some(scheduled) = request.scheduled {
+            task.scheduled = parse_optional_naive_date(&scheduled, "scheduled")?;
+        }
+        for tag in request.add_tags {
+            push_unique(&mut task.tags, tag);
+        }
+        task.tags.retain(|tag| tag != "inbox");
+        if task.issue_type.as_deref() == Some("inbox") {
+            task.issue_type = Some("commitment".to_string());
+        }
+        if task.created_by.is_none() {
+            task.created_by = request.actor;
+        }
+
+        vault.save_task(&task)?;
+        if let Ok(guard) = self.index.lock() {
+            if let Some(ref index) = *guard {
+                let _ = index.index_task(&task, &format!("{}.md", task.title));
+            }
+        }
+        Ok(inbox_item_from_task(&task))
     }
 
     // r[impl api.service.update-task]
@@ -2432,6 +2529,99 @@ fn strip_wikilink_brackets(s: &str) -> String {
         .to_string()
 }
 
+fn normalize_inbox_kind(kind: Option<&str>) -> String {
+    match kind.unwrap_or("inbox").trim().to_ascii_lowercase().as_str() {
+        "commitment" | "committed" => "commitment".to_string(),
+        "idea" | "someday" | "maybe" => "idea".to_string(),
+        "task" | "action" => "task".to_string(),
+        "waiting" | "waiting-on" => "waiting".to_string(),
+        "reference" | "note" => "reference".to_string(),
+        "inbox" | "" => "inbox".to_string(),
+        other => other.to_string(),
+    }
+}
+
+fn inbox_item_from_task(task: &Task) -> InboxItem {
+    InboxItem {
+        id: task.id.clone(),
+        title: task.title.clone(),
+        kind: task.issue_type.clone().unwrap_or_else(|| "task".to_string()),
+        status: status_label(&task.status).to_string(),
+        priority: priority_label(&task.priority).to_string(),
+        projects: task.projects.iter().map(|project| project.0.clone()).collect(),
+        tags: task.tags.clone(),
+        contexts: task.contexts.clone(),
+        due: task.due.map(|date| date.to_string()),
+        scheduled: task.scheduled.map(|date| date.to_string()),
+        assignee: task.assignee.clone(),
+        source: task.external_source.as_deref()
+            .and_then(|source| source.strip_prefix("inbox:"))
+            .map(str::to_string),
+        body: task.body.clone(),
+    }
+}
+
+fn is_inbox_task(task: &Task) -> bool {
+    task.tags.iter().any(|tag| tag == "inbox") || task.issue_type.as_deref() == Some("inbox")
+}
+
+fn task_matches_reference(task: &Task, reference: &str) -> bool {
+    task.id.as_deref() == Some(reference) || task.title.eq_ignore_ascii_case(reference)
+}
+
+fn push_unique<T: PartialEq>(items: &mut Vec<T>, item: T) {
+    if !items.contains(&item) {
+        items.push(item);
+    }
+}
+
+fn parse_optional_naive_date(input: &str, field: &str) -> Result<Option<NaiveDate>, VaultError> {
+    if input.is_empty() || input == "clear" {
+        Ok(None)
+    } else {
+        input.parse::<NaiveDate>()
+            .map(Some)
+            .map_err(|e| VaultError::ParseError(format!("invalid {field}: {e}")))
+    }
+}
+
+fn parse_task_status(status: &str) -> Option<Status> {
+    match status.to_ascii_lowercase().as_str() {
+        "none" => Some(Status::None),
+        "open" => Some(Status::Open),
+        "in-progress" | "in_progress" | "doing" => Some(Status::InProgress),
+        "on-hold" | "on_hold" | "hold" | "waiting" => Some(Status::OnHold),
+        "planned" => Some(Status::Planned),
+        "done" | "complete" | "completed" => Some(Status::Done),
+        "cancelled" | "canceled" => Some(Status::Cancelled),
+        "archived" => Some(Status::Archived),
+        _ => None,
+    }
+}
+
+fn status_label(status: &Status) -> &'static str {
+    match status {
+        Status::None => "none",
+        Status::Open => "open",
+        Status::InProgress => "in-progress",
+        Status::OnHold => "on-hold",
+        Status::Planned => "planned",
+        Status::Done => "done",
+        Status::Cancelled => "cancelled",
+        Status::Archived => "archived",
+    }
+}
+
+fn priority_label(priority: &Priority) -> &'static str {
+    match priority {
+        Priority::None => "none",
+        Priority::Low => "low",
+        Priority::Normal => "normal",
+        Priority::High => "high",
+        Priority::Urgent => "urgent",
+    }
+}
+
 // ── Vox service trait implementations ────────────────────────────────────────
 
 impl crate::service::TaskService for VaultServiceImpl {
@@ -2444,6 +2634,20 @@ impl crate::service::TaskService for VaultServiceImpl {
     async fn delete_task(&self, title: String) -> Result<(), VaultError> { self.delete_task(title).await }
     async fn search_tasks(&self, query: String) -> Vec<Task> { self.search_tasks(query).await }
     async fn tasks_for_user(&self, username: String) -> Vec<Task> { self.tasks_for_user(username).await }
+}
+
+impl crate::service::InboxService for VaultServiceImpl {
+    async fn capture(&self, request: InboxCaptureRequest) -> Result<InboxItem, VaultError> {
+        self.capture_inbox(request).await
+    }
+
+    async fn list_inbox(&self) -> Vec<InboxItem> {
+        self.list_inbox_items().await
+    }
+
+    async fn promote(&self, request: InboxPromoteRequest) -> Result<InboxItem, VaultError> {
+        self.promote_inbox(request).await
+    }
 }
 
 impl crate::service::ProjectService for VaultServiceImpl {
@@ -2812,6 +3016,7 @@ impl crate::service::SystemService for VaultServiceImpl {
             min_server_version: "0.1.0".into(),
             services: vec![
                 "TaskService".into(),
+                "InboxService".into(),
                 "ProjectService".into(),
                 "TimeService".into(),
                 "ClientService".into(),
@@ -2823,6 +3028,7 @@ impl crate::service::SystemService for VaultServiceImpl {
                 "SystemService".into(),
             ],
             features: vec![
+                "inbox-capture".into(),
                 "task-tracking".into(),
                 "time-tracking".into(),
                 "calendar-events".into(),
@@ -3495,9 +3701,69 @@ fn record_task_diff(
 mod tests {
     use super::*;
     use crate::task::{Priority, WikiLink};
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     fn modified_at(ts: &str) -> chrono::DateTime<Utc> {
         chrono::DateTime::parse_from_rfc3339(ts).unwrap().to_utc()
+    }
+
+    fn temp_vault() -> std::path::PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("task-core-inbox-test-{nanos}"));
+        std::fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    #[tokio::test]
+    async fn inbox_capture_and_promote_round_trip() {
+        let vault = temp_vault();
+        let svc = VaultServiceImpl::new(&vault);
+
+        let captured = svc
+            .capture_inbox(InboxCaptureRequest {
+                text: "Call accountant tomorrow !high #finance @phone".to_string(),
+                actor: Some("agent".to_string()),
+                source: Some("test".to_string()),
+                kind: None,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(captured.title, "Call accountant");
+        assert_eq!(captured.kind, "inbox");
+        assert_eq!(captured.priority, "high");
+        assert_eq!(captured.source.as_deref(), Some("test"));
+        assert!(captured.tags.iter().any(|tag| tag == "inbox"));
+
+        let inbox = svc.list_inbox_items().await;
+        assert_eq!(inbox.len(), 1);
+
+        let promoted = svc
+            .promote_inbox(InboxPromoteRequest {
+                reference: captured.id.clone().unwrap(),
+                kind: Some("commitment".to_string()),
+                project: Some("Operations".to_string()),
+                status: Some("planned".to_string()),
+                assignee: Some("agent".to_string()),
+                due: None,
+                scheduled: Some("2026-05-01".to_string()),
+                add_tags: vec!["review".to_string()],
+                actor: Some("agent".to_string()),
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(promoted.kind, "commitment");
+        assert_eq!(promoted.status, "planned");
+        assert_eq!(promoted.scheduled.as_deref(), Some("2026-05-01"));
+        assert!(promoted.projects.iter().any(|project| project == "Operations"));
+        assert!(!promoted.tags.iter().any(|tag| tag == "inbox"));
+        assert!(svc.list_inbox_items().await.is_empty());
+
+        let _ = std::fs::remove_dir_all(vault);
     }
 
     #[test]

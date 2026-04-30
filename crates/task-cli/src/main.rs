@@ -3,9 +3,10 @@ use clap::{Parser, Subcommand};
 use task_core::index::{ChangeRow, ConflictRow};
 use task_core::workflows::{parse_comments, render_comments, Comment};
 use task_core::{
-    CalendarEvent, CalendarEventPatch, CalendarEventStatus, Client, Filter, Invoice, Priority,
-    Project, Query, RelationType, Sort, Status, SyncStats, SystemCapabilities, SystemHealth, Task,
-    TaskRelation, TimeEntryContext, TimeEntryFilter, VaultServiceImpl, WikiLink,
+    CalendarEvent, CalendarEventPatch, CalendarEventStatus, Client, Filter, InboxCaptureRequest,
+    InboxItem, InboxPromoteRequest, Invoice, Priority, Project, Query, RelationType, Sort, Status,
+    SyncStats, SystemCapabilities, SystemHealth, Task, TaskRelation, TimeEntryContext,
+    TimeEntryFilter, VaultServiceImpl, WikiLink,
 };
 
 #[derive(Parser)]
@@ -101,6 +102,25 @@ enum Commands {
         recurrence: Option<String>,
         #[arg(long)]
         assignee: Option<String>,
+    },
+    /// Capture raw text into the untriaged inbox
+    Capture {
+        #[arg(required = true, trailing_var_arg = true)]
+        text: Vec<String>,
+        /// Initial kind: inbox, commitment, idea, task, waiting, reference
+        #[arg(long)]
+        kind: Option<String>,
+        /// Capture source label
+        #[arg(long, default_value = "cli")]
+        source: String,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Inbox capture and triage commands
+    Inbox {
+        #[command(subcommand)]
+        command: InboxCommands,
     },
     /// Mark a task as complete
     Complete { title: String },
@@ -339,6 +359,39 @@ enum ServerCommands {
         json: bool,
         #[arg(long)]
         deep: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum InboxCommands {
+    /// List untriaged inbox captures
+    List {
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Promote/classify an inbox capture
+    Promote {
+        /// Task id or title
+        reference: String,
+        /// commitment, idea, task, waiting, reference, someday
+        #[arg(long)]
+        kind: Option<String>,
+        #[arg(long)]
+        project: Option<String>,
+        #[arg(long)]
+        status: Option<String>,
+        #[arg(long)]
+        assignee: Option<String>,
+        #[arg(long)]
+        due: Option<String>,
+        #[arg(long)]
+        scheduled: Option<String>,
+        #[arg(long = "tag")]
+        add_tags: Vec<String>,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -1304,6 +1357,56 @@ async fn main() -> eyre::Result<()> {
                 println!("  due: {d}");
             }
         }
+
+        Commands::Capture {
+            text,
+            kind,
+            source,
+            json,
+        } => {
+            let item = svc
+                .capture_inbox(InboxCaptureRequest {
+                    text: text.join(" "),
+                    actor: actor.clone(),
+                    source: Some(source),
+                    kind,
+                })
+                .await?;
+            print_inbox_capture(&item, json);
+        }
+
+        Commands::Inbox { command } => match command {
+            InboxCommands::List { json } => {
+                let items = svc.list_inbox_items().await;
+                print_inbox_items(&items, json);
+            }
+            InboxCommands::Promote {
+                reference,
+                kind,
+                project,
+                status,
+                assignee,
+                due,
+                scheduled,
+                add_tags,
+                json,
+            } => {
+                let item = svc
+                    .promote_inbox(InboxPromoteRequest {
+                        reference,
+                        kind,
+                        project,
+                        status,
+                        assignee,
+                        due,
+                        scheduled,
+                        add_tags,
+                        actor: actor.clone(),
+                    })
+                    .await?;
+                print_inbox_capture(&item, json);
+            }
+        },
 
         Commands::Complete { title } => {
             let task = svc.complete_task_as(title, actor.as_deref()).await?;
@@ -3083,6 +3186,10 @@ impl RemoteVoxConfig {
         self.connect().await
     }
 
+    async fn inbox(&self) -> eyre::Result<task_core::service::InboxServiceClient> {
+        self.connect().await
+    }
+
     async fn project(&self) -> eyre::Result<task_core::service::ProjectServiceClient> {
         self.connect().await
     }
@@ -3232,6 +3339,61 @@ async fn run_remote_command(
             println!("  id:  {}", created.id.as_deref().unwrap_or("—"));
             if let Some(d) = created.due {
                 println!("  due: {d}");
+            }
+        }
+
+        Commands::Capture {
+            text,
+            kind,
+            source,
+            json,
+        } => {
+            let item = remote
+                .inbox()
+                .await?
+                .capture(InboxCaptureRequest {
+                    text: text.join(" "),
+                    actor: actor.map(str::to_string),
+                    source: Some(source),
+                    kind,
+                })
+                .await?;
+            print_inbox_capture(&item, json);
+        }
+
+        Commands::Inbox { command } => {
+            let client = remote.inbox().await?;
+            match command {
+                InboxCommands::List { json } => {
+                    let items = client.list_inbox().await?;
+                    print_inbox_items(&items, json);
+                }
+                InboxCommands::Promote {
+                    reference,
+                    kind,
+                    project,
+                    status,
+                    assignee,
+                    due,
+                    scheduled,
+                    add_tags,
+                    json,
+                } => {
+                    let item = client
+                        .promote(InboxPromoteRequest {
+                            reference,
+                            kind,
+                            project,
+                            status,
+                            assignee,
+                            due,
+                            scheduled,
+                            add_tags,
+                            actor: actor.map(str::to_string),
+                        })
+                        .await?;
+                    print_inbox_capture(&item, json);
+                }
             }
         }
 
@@ -6300,7 +6462,7 @@ fn print_agent_snapshot(snapshot: AgentSnapshot<'_>) {
 
 fn print_agent_capabilities() {
     println!(
-        "{{\"binary\":\"task\",\"package\":\"task-cli\",\"install\":{},\"global_flags\":[\"--vault\",\"--server\",\"--session-token\",\"--organization-id\",\"--as-user\"],\"agent_commands\":[\"snapshot\",\"task\",\"project\",\"calendar\",\"time\",\"sync\",\"capabilities\",\"bootstrap\"],\"control_commands\":[\"doctor\",\"doctor --deep\",\"server add\",\"server list\",\"server use\",\"add\",\"update\",\"complete\",\"delete\",\"calendar add\",\"calendar update\",\"calendar delete\",\"email accounts\",\"email search\",\"email show\",\"email link\",\"email sweep\",\"time log\",\"time edit\",\"start\",\"stop\",\"sync\"],\"remote_mode\":\"Set --server plus --session-token to route supported task, project, client, invoice, time, calendar, email, activity, conflict, system, and agent commands over Vox; --organization-id routes multi-instance organization requests.\"}}",
+        "{{\"binary\":\"task\",\"package\":\"task-cli\",\"install\":{},\"global_flags\":[\"--vault\",\"--server\",\"--session-token\",\"--organization-id\",\"--as-user\"],\"agent_commands\":[\"snapshot\",\"task\",\"project\",\"calendar\",\"time\",\"sync\",\"capabilities\",\"bootstrap\"],\"control_commands\":[\"doctor\",\"doctor --deep\",\"server add\",\"server list\",\"server use\",\"capture\",\"inbox list\",\"inbox promote\",\"add\",\"update\",\"complete\",\"delete\",\"calendar add\",\"calendar update\",\"calendar delete\",\"email accounts\",\"email search\",\"email show\",\"email link\",\"email sweep\",\"time log\",\"time edit\",\"start\",\"stop\",\"sync\"],\"remote_mode\":\"Set --server plus --session-token to route supported inbox, task, project, client, invoice, time, calendar, email, activity, conflict, system, and agent commands over Vox; --organization-id routes multi-instance organization requests.\"}}",
         agent_install_json()
     );
 }
@@ -7270,6 +7432,61 @@ fn print_tasks_json(tasks: &[Task]) {
         println!("  {json}{comma}");
     }
     println!("]");
+}
+
+fn print_inbox_capture(item: &InboxItem, json: bool) {
+    if json {
+        println!("{}", facet_json::to_string(item).unwrap_or_default());
+    } else {
+        println!("Captured: {}", item.title);
+        println!("  kind: {}", item.kind);
+        println!("  id:   {}", item.id.as_deref().unwrap_or("—"));
+        if let Some(due) = &item.due {
+            println!("  due:  {due}");
+        }
+    }
+}
+
+fn print_inbox_items(items: &[InboxItem], json: bool) {
+    if json {
+        println!("[");
+        for (i, item) in items.iter().enumerate() {
+            let comma = if i + 1 < items.len() { "," } else { "" };
+            let json = facet_json::to_string(item).unwrap_or_default();
+            println!("  {json}{comma}");
+        }
+        println!("]");
+        return;
+    }
+
+    if items.is_empty() {
+        println!("Inbox is empty.");
+        return;
+    }
+
+    let title_w = items
+        .iter()
+        .map(|item| item.title.len())
+        .max()
+        .unwrap_or(5)
+        .max(5)
+        .min(48);
+    println!(
+        "{:<title_w$}  {:<12}  {:<8}  {:<12}  {}",
+        "TITLE", "KIND", "PRIORITY", "DUE", "SOURCE"
+    );
+    println!("{}", "─".repeat(title_w + 48));
+    for item in items {
+        println!(
+            "{:<title_w$}  {:<12}  {:<8}  {:<12}  {}",
+            truncate(&item.title, title_w),
+            item.kind,
+            item.priority,
+            item.due.as_deref().unwrap_or("—"),
+            item.source.as_deref().unwrap_or("—")
+        );
+    }
+    println!("\n{} inbox item(s)", items.len());
 }
 
 fn print_task_detail(task: &Task) {

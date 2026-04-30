@@ -46,6 +46,18 @@ pub trait TaskService {
 }
 
 #[vox::service]
+pub trait InboxService {
+    /// Capture raw text into the untriaged inbox.
+    async fn capture(&self, request: InboxCaptureRequest) -> Result<InboxItem, VaultError>;
+
+    /// Return untriaged inbox items.
+    async fn list_inbox(&self) -> Vec<InboxItem>;
+
+    /// Classify/promote an inbox item into a commitment, idea, or task.
+    async fn promote(&self, request: InboxPromoteRequest) -> Result<InboxItem, VaultError>;
+}
+
+#[vox::service]
 pub trait ProjectService {
     /// Return all projects in the vault.
     async fn list_projects(&self) -> Vec<Project>;
@@ -622,6 +634,52 @@ impl Default for TimeLogRequest {
             user: None,
         }
     }
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct InboxCaptureRequest {
+    pub text: String,
+    pub actor: Option<String>,
+    /// Optional capture source such as cli, email, voice, web, or agent.
+    pub source: Option<String>,
+    /// Optional initial classification. Defaults to inbox.
+    pub kind: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct InboxPromoteRequest {
+    /// Task id or title.
+    pub reference: String,
+    /// commitment, idea, task, waiting, reference, someday.
+    pub kind: Option<String>,
+    pub project: Option<String>,
+    pub status: Option<String>,
+    pub assignee: Option<String>,
+    pub due: Option<String>,
+    pub scheduled: Option<String>,
+    #[facet(default)]
+    pub add_tags: Vec<String>,
+    pub actor: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct InboxItem {
+    pub id: Option<String>,
+    pub title: String,
+    pub kind: String,
+    pub status: String,
+    pub priority: String,
+    #[facet(default)]
+    pub projects: Vec<String>,
+    #[facet(default)]
+    pub tags: Vec<String>,
+    #[facet(default)]
+    pub contexts: Vec<String>,
+    pub due: Option<String>,
+    pub scheduled: Option<String>,
+    pub assignee: Option<String>,
+    pub source: Option<String>,
+    pub body: String,
 }
 
 /// Filter for querying time entries across the vault.

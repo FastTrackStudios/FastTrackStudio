@@ -55,7 +55,7 @@ pub use capture::{CaptureInput, parse_capture};
 pub use service::{
     activity_service_service_descriptor, calendar_service_service_descriptor,
     client_service_service_descriptor, file_service_service_descriptor,
-    invoice_service_service_descriptor, mail_service_service_descriptor,
+    inbox_service_service_descriptor, invoice_service_service_descriptor, mail_service_service_descriptor,
     project_service_service_descriptor, system_service_service_descriptor, task_service_service_descriptor,
     time_service_service_descriptor, ActivityService, ActivityServiceDispatcher,
     CalDavCalendarInfo, CalDavDeleteObjectRequest, CalDavDiscovery, CalDavFreeBusyInterval,
@@ -64,7 +64,8 @@ pub use service::{
     CalDavSyncCollectionResponse, CalendarEventPatch, CalendarService, CalendarServiceDispatcher,
     ClientService, ClientServiceDispatcher, EmailLinkRequest, EmailLinkResponse, EmailListRequest,
     EmailUnlinkRequest, FileCopyMoveRequest, FileEntry, FileReadResponse, FileService,
-    FileServiceDispatcher, FileWriteRequest, HealthCheck, InvoiceCreateRequest, InvoicePaymentRequest,
+    FileServiceDispatcher, FileWriteRequest, HealthCheck, InboxCaptureRequest, InboxItem,
+    InboxPromoteRequest, InboxService, InboxServiceDispatcher, InvoiceCreateRequest, InvoicePaymentRequest,
     InvoiceService, InvoiceServiceDispatcher, MailCreateMailboxRequest, MailCreateTagRequest,
     MailDeleteTagRequest, MailListMessagesRequest, MailMessageTagRequest, MailMoveMessageRequest,
     MailService, MailServiceDispatcher, NextcloudCapability, ProjectPatch, ProjectService, ProjectServiceDispatcher,
