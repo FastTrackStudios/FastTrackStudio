@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
 use axum::extract::ws::{Message as AxumWsMessage, WebSocket};
-use axum::extract::{Query, State, WebSocketUpgrade};
+use axum::extract::{Path as AxumPath, Query, State, WebSocketUpgrade};
 use axum::http::{HeaderMap, StatusCode};
-use axum::response::{IntoResponse, Response};
+use axum::response::{Html, IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
 use base64::Engine as _;
@@ -15,6 +15,9 @@ use chrono::Utc;
 use serde::Serialize;
 use serde_json::json;
 use task_core::crdt::{CrdtSyncEngine, SyncOp};
+use task_core::workflows::{
+    parse_download_portal, DownloadBundle, DownloadPortal, PortalVisibility,
+};
 use task_core::VaultServiceImpl;
 use task_db::entities::auth::{auth_member, auth_organization, auth_session};
 use task_db::sea_orm::{
@@ -43,6 +46,7 @@ struct AppState {
     db: sea_orm::DatabaseConnection,
     crdt: Option<Arc<CrdtSyncEngine>>,
     vault_service: Option<Arc<VaultServiceImpl>>,
+    vault_root: Option<String>,
 }
 
 #[derive(Clone, Serialize)]
@@ -174,6 +178,7 @@ async fn main() -> eyre::Result<()> {
     let state = AppState {
         crdt,
         vault_service,
+        vault_root: vault_path.clone(),
         db,
         info: info_payload,
     };
@@ -191,6 +196,8 @@ async fn main() -> eyre::Result<()> {
         .route("/api/organizations/routes", get(organization_routes))
         .route("/api/crdt/status", get(crdt_status))
         .route("/api/health", get(health))
+        .route("/portal/{slug}", get(portal_page))
+        .route("/portal/{slug}/{bundle_id}", get(portal_bundle_page))
         .layer(CorsLayer::permissive());
 
     // Mount better-auth routes under /api/auth
@@ -1383,6 +1390,246 @@ async fn server_routes(State(state): State<AppState>) -> Json<Vec<ServerRoute>> 
     Json(vec![route_for_server(&state.info)])
 }
 
+async fn portal_page(
+    State(state): State<AppState>,
+    AxumPath(slug): AxumPath<String>,
+    Query(query): Query<std::collections::HashMap<String, String>>,
+) -> Response {
+    match load_portal(&state, &slug) {
+        Ok(portal) => render_portal_response(&portal, None, &query),
+        Err(response) => response,
+    }
+}
+
+async fn portal_bundle_page(
+    State(state): State<AppState>,
+    AxumPath((slug, bundle_id)): AxumPath<(String, String)>,
+    Query(query): Query<std::collections::HashMap<String, String>>,
+) -> Response {
+    match load_portal(&state, &slug) {
+        Ok(portal) => render_portal_response(&portal, Some(&bundle_id), &query),
+        Err(response) => response,
+    }
+}
+
+fn load_portal(state: &AppState, slug: &str) -> Result<DownloadPortal, Response> {
+    if !safe_slug(slug) {
+        return Err((StatusCode::BAD_REQUEST, "invalid portal slug").into_response());
+    }
+
+    let Some(root) = state.vault_root.as_deref() else {
+        return Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            "TASK_VAULT is not configured",
+        )
+            .into_response());
+    };
+
+    let Some(path) = find_portal_file(std::path::Path::new(root), slug) else {
+        return Err((StatusCode::NOT_FOUND, "portal not found").into_response());
+    };
+
+    let content = match std::fs::read_to_string(&path) {
+        Ok(content) => content,
+        Err(e) => {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("failed to read portal: {e}"),
+            )
+                .into_response())
+        }
+    };
+
+    parse_download_portal(&content)
+        .filter(|portal| portal.slug == slug)
+        .ok_or_else(|| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "portal frontmatter is invalid",
+            )
+                .into_response()
+        })
+}
+
+fn find_portal_file(root: &std::path::Path, slug: &str) -> Option<std::path::PathBuf> {
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let entries = std::fs::read_dir(&dir).ok()?;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                if path.file_name().and_then(|name| name.to_str()) == Some("target") {
+                    continue;
+                }
+                stack.push(path);
+                continue;
+            }
+
+            if path.file_name().and_then(|name| name.to_str()) != Some("portal.md") {
+                continue;
+            }
+
+            let content = std::fs::read_to_string(&path).ok()?;
+            if parse_download_portal(&content).is_some_and(|portal| portal.slug == slug) {
+                return Some(path);
+            }
+        }
+    }
+    None
+}
+
+fn render_portal_response(
+    portal: &DownloadPortal,
+    selected_bundle_id: Option<&str>,
+    query: &std::collections::HashMap<String, String>,
+) -> Response {
+    if !portal.published {
+        return (StatusCode::NOT_FOUND, "portal is not published").into_response();
+    }
+
+    if portal
+        .expires
+        .is_some_and(|expires| expires < Utc::now().date_naive())
+    {
+        return (StatusCode::GONE, "portal has expired").into_response();
+    }
+
+    if let Some(password) = portal.password.as_deref() {
+        let provided = query
+            .get("password")
+            .or_else(|| query.get("p"))
+            .map(String::as_str);
+        if provided != Some(password) {
+            return (StatusCode::UNAUTHORIZED, Html(render_password_page(portal))).into_response();
+        }
+    }
+
+    let selected =
+        selected_bundle_id.and_then(|id| portal.bundles.iter().find(|bundle| bundle.id == id));
+    if selected_bundle_id.is_some() && selected.is_none() {
+        return (StatusCode::NOT_FOUND, "bundle not found").into_response();
+    }
+
+    Html(render_portal_html(portal, selected)).into_response()
+}
+
+fn render_password_page(portal: &DownloadPortal) -> String {
+    format!(
+        "<!doctype html><html><head><meta charset=\"utf-8\"><title>{}</title>{}</head><body><main class=\"card\"><h1>{}</h1><p>This portal is password protected.</p><form><input name=\"password\" type=\"password\" autofocus><button type=\"submit\">Open portal</button></form></main></body></html>",
+        html_escape(&portal.title),
+        portal_css(),
+        html_escape(&portal.title),
+    )
+}
+
+fn render_portal_html(portal: &DownloadPortal, selected: Option<&DownloadBundle>) -> String {
+    let mut html = format!(
+        "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>{}</title>{}</head><body><main><header><p class=\"eyebrow\">{}</p><h1>{}</h1><p>{}</p></header>",
+        html_escape(&portal.title),
+        portal_css(),
+        html_escape(&portal.event),
+        html_escape(&portal.title),
+        html_escape(&portal.message),
+    );
+
+    html.push_str("<section class=\"grid\">");
+    for bundle in &portal.bundles {
+        html.push_str(&render_bundle_card(
+            portal,
+            bundle,
+            selected.is_some_and(|chosen| chosen.id == bundle.id),
+        ));
+    }
+    html.push_str("</section>");
+
+    if let Some(bundle) = selected {
+        html.push_str(&render_bundle_detail(bundle, &portal.visibility));
+    }
+
+    html.push_str("</main></body></html>");
+    html
+}
+
+fn render_bundle_card(portal: &DownloadPortal, bundle: &DownloadBundle, selected: bool) -> String {
+    let selected_class = if selected { " selected" } else { "" };
+    let icon = bundle.icon.as_deref().unwrap_or("📦");
+    let group = bundle.group.as_deref().unwrap_or("General");
+    format!(
+        "<a class=\"bundle{}\" href=\"/portal/{}/{}\"><span class=\"icon\">{}</span><span><strong>{}</strong><small>{}</small></span></a>",
+        selected_class,
+        url_path_segment(&portal.slug),
+        url_path_segment(&bundle.id),
+        html_escape(icon),
+        html_escape(&bundle.name),
+        html_escape(group),
+    )
+}
+
+fn render_bundle_detail(bundle: &DownloadBundle, visibility: &PortalVisibility) -> String {
+    let mut html = format!(
+        "<section class=\"card\"><h2>{}</h2>",
+        html_escape(&bundle.name)
+    );
+    if !bundle.notes.is_empty() {
+        html.push_str(&format!("<p>{}</p>", html_escape(&bundle.notes)));
+    }
+
+    if let Some(url) = bundle.direct_url.as_deref() {
+        html.push_str(&format!(
+            "<p><a class=\"button\" href=\"{}\">Open download share</a></p>",
+            html_escape(url)
+        ));
+    }
+
+    html.push_str("<h3>Files</h3><ul>");
+    for file in &bundle.files {
+        let category = file.category.as_deref().unwrap_or("Files");
+        let dest = file.dest.as_deref().unwrap_or(&file.source);
+        html.push_str(&format!(
+            "<li><span>{}</span><small>{}</small></li>",
+            html_escape(dest),
+            html_escape(category)
+        ));
+    }
+    if bundle.files.is_empty() {
+        html.push_str("<li>No explicit files listed yet.</li>");
+    }
+    html.push_str("</ul>");
+
+    if matches!(visibility, PortalVisibility::BrowseAll) {
+        html.push_str("<p class=\"hint\">Other roles are browseable, but download access is scoped to each role share.</p>");
+    }
+    html.push_str("</section>");
+    html
+}
+
+fn portal_css() -> &'static str {
+    "<style>body{margin:0;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#0b1020;color:#edf2ff}main{max-width:1100px;margin:0 auto;padding:48px 20px}.eyebrow{color:#8fb4ff;text-transform:uppercase;letter-spacing:.12em}h1{font-size:clamp(2rem,6vw,4rem);margin:.2em 0}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin:32px 0}.bundle,.card{background:#151d35;border:1px solid #2f3b61;border-radius:18px;padding:20px;color:inherit;text-decoration:none}.bundle{display:flex;gap:14px;align-items:center}.bundle:hover,.selected{border-color:#8fb4ff;background:#1b2748}.icon{font-size:2rem}.bundle small{display:block;color:#aab6d3}.button{display:inline-block;background:#8fb4ff;color:#071022;padding:12px 16px;border-radius:12px;text-decoration:none;font-weight:700}input,button{font:inherit;padding:12px;border-radius:10px;border:0}button{background:#8fb4ff;color:#071022;font-weight:700}li{margin:.6em 0}.hint{color:#aab6d3}</style>"
+}
+
+fn safe_slug(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'))
+}
+
+fn url_path_segment(value: &str) -> String {
+    value
+        .replace('%', "%25")
+        .replace('/', "%2F")
+        .replace(' ', "%20")
+}
+
+fn html_escape(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
+}
+
 async fn organization_routes(State(state): State<AppState>) -> Json<Vec<OrganizationRoute>> {
     let orgs = match auth_organization::Entity::find()
         .order_by_asc(auth_organization::Column::Slug)
@@ -1486,6 +1733,17 @@ mod tests {
             extract_session_token(&headers, &std::collections::HashMap::new()).as_deref(),
             Some("cookie-token")
         );
+    }
+
+    #[test]
+    fn escapes_portal_html_and_url_segments() {
+        assert_eq!(
+            html_escape("Tom & <Jerry> \"quote\""),
+            "Tom &amp; &lt;Jerry&gt; &quot;quote&quot;"
+        );
+        assert_eq!(url_path_segment("a b/c%"), "a%20b%2Fc%25");
+        assert!(safe_slug("campus-jax_2026"));
+        assert!(!safe_slug("../secret"));
     }
 
     #[test]
