@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use axum::extract::ws::{Message as AxumWsMessage, WebSocket};
 use axum::extract::{Path as AxumPath, Query, State, WebSocketUpgrade};
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
@@ -198,6 +198,10 @@ async fn main() -> eyre::Result<()> {
         .route("/api/health", get(health))
         .route("/portal/{slug}", get(portal_page))
         .route("/portal/{slug}/{bundle_id}", get(portal_bundle_page))
+        .route(
+            "/portal/{slug}/{bundle_id}/file/{file_index}",
+            get(portal_file),
+        )
         .layer(CorsLayer::permissive());
 
     // Mount better-auth routes under /api/auth
@@ -1412,6 +1416,87 @@ async fn portal_bundle_page(
     }
 }
 
+async fn portal_file(
+    State(state): State<AppState>,
+    AxumPath((slug, bundle_id, file_index)): AxumPath<(String, String, usize)>,
+    Query(query): Query<std::collections::HashMap<String, String>>,
+) -> Response {
+    let Some(root) = state.vault_root.as_deref() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "TASK_VAULT is not configured",
+        )
+            .into_response();
+    };
+    if !safe_slug(&slug) || !safe_slug(&bundle_id) {
+        return (StatusCode::BAD_REQUEST, "invalid portal path").into_response();
+    }
+
+    let Some(portal_path) = find_portal_file(std::path::Path::new(root), &slug) else {
+        return (StatusCode::NOT_FOUND, "portal not found").into_response();
+    };
+    let content = match std::fs::read_to_string(&portal_path) {
+        Ok(content) => content,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("failed to read portal: {e}"),
+            )
+                .into_response()
+        }
+    };
+    let Some(portal) = parse_download_portal(&content).filter(|portal| portal.slug == slug) else {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "portal frontmatter is invalid",
+        )
+            .into_response();
+    };
+    if let Err(response) = authorize_portal(&portal, &query) {
+        return response;
+    }
+
+    let Some(bundle) = portal.bundles.iter().find(|bundle| bundle.id == bundle_id) else {
+        return (StatusCode::NOT_FOUND, "bundle not found").into_response();
+    };
+    let Some(file) = bundle.files.get(file_index) else {
+        return (StatusCode::NOT_FOUND, "file not found").into_response();
+    };
+    let Some(project_root) = project_root_for_portal(&portal_path) else {
+        return (StatusCode::INTERNAL_SERVER_ERROR, "invalid portal location").into_response();
+    };
+    let Some(relative_path) = safe_project_relative_path(&file.source) else {
+        return (StatusCode::BAD_REQUEST, "invalid file source").into_response();
+    };
+    let path = project_root.join(relative_path);
+    let bytes = match std::fs::read(&path) {
+        Ok(bytes) => bytes,
+        Err(_) => return (StatusCode::NOT_FOUND, "file not found").into_response(),
+    };
+    let display_name = file.dest.as_deref().unwrap_or_else(|| {
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("download")
+    });
+    let mime = file
+        .mime_type
+        .as_deref()
+        .filter(|mime| !mime.is_empty())
+        .unwrap_or_else(|| guess_mime_type(display_name));
+
+    (
+        [
+            (header::CONTENT_TYPE, mime.to_string()),
+            (
+                header::CONTENT_DISPOSITION,
+                format!("inline; filename=\"{}\"", header_escape(display_name)),
+            ),
+        ],
+        bytes,
+    )
+        .into_response()
+}
+
 fn load_portal(state: &AppState, slug: &str) -> Result<DownloadPortal, Response> {
     if !safe_slug(slug) {
         return Err((StatusCode::BAD_REQUEST, "invalid portal slug").into_response());
@@ -1543,7 +1628,7 @@ fn render_portal_html(portal: &DownloadPortal, selected: Option<&DownloadBundle>
     html.push_str("</section>");
 
     if let Some(bundle) = selected {
-        html.push_str(&render_bundle_detail(bundle, &portal.visibility));
+        html.push_str(&render_bundle_detail(portal, bundle, &portal.visibility));
     }
 
     html.push_str("</main></body></html>");
@@ -1565,7 +1650,11 @@ fn render_bundle_card(portal: &DownloadPortal, bundle: &DownloadBundle, selected
     )
 }
 
-fn render_bundle_detail(bundle: &DownloadBundle, visibility: &PortalVisibility) -> String {
+fn render_bundle_detail(
+    portal: &DownloadPortal,
+    bundle: &DownloadBundle,
+    visibility: &PortalVisibility,
+) -> String {
     let mut html = format!(
         "<section class=\"card\"><h2>{}</h2>",
         html_escape(&bundle.name)
@@ -1582,13 +1671,21 @@ fn render_bundle_detail(bundle: &DownloadBundle, visibility: &PortalVisibility) 
     }
 
     html.push_str("<h3>Files</h3><ul>");
-    for file in &bundle.files {
+    for (index, file) in bundle.files.iter().enumerate() {
         let category = file.category.as_deref().unwrap_or("Files");
         let dest = file.dest.as_deref().unwrap_or(&file.source);
+        let file_url = format!(
+            "/portal/{}/{}/file/{}",
+            url_path_segment(&portal.slug),
+            url_path_segment(&bundle.id),
+            index
+        );
         html.push_str(&format!(
-            "<li><span>{}</span><small>{}</small></li>",
+            "<li><a href=\"{}\" download>{}</a><small>{}</small>{}</li>",
+            html_escape(&file_url),
             html_escape(dest),
-            html_escape(category)
+            html_escape(category),
+            render_audio_preview(file, &file_url),
         ));
     }
     if bundle.files.is_empty() {
@@ -1601,6 +1698,110 @@ fn render_bundle_detail(bundle: &DownloadBundle, visibility: &PortalVisibility) 
     }
     html.push_str("</section>");
     html
+}
+
+fn render_audio_preview(file: &task_core::workflows::BundleFile, file_url: &str) -> String {
+    if is_audio_file(file) {
+        format!(
+            "<audio controls preload=\"metadata\" src=\"{}\"></audio>",
+            html_escape(file_url)
+        )
+    } else {
+        String::new()
+    }
+}
+
+fn is_audio_file(file: &task_core::workflows::BundleFile) -> bool {
+    file.mime_type
+        .as_deref()
+        .is_some_and(|mime| mime.starts_with("audio/"))
+        || file
+            .dest
+            .as_deref()
+            .unwrap_or(&file.source)
+            .rsplit('.')
+            .next()
+            .is_some_and(|ext| {
+                matches!(
+                    ext.to_ascii_lowercase().as_str(),
+                    "aac" | "aif" | "aiff" | "flac" | "m4a" | "mp3" | "ogg" | "opus" | "wav"
+                )
+            })
+}
+
+fn authorize_portal(
+    portal: &DownloadPortal,
+    query: &std::collections::HashMap<String, String>,
+) -> Result<(), Response> {
+    if !portal.published {
+        return Err((StatusCode::NOT_FOUND, "portal is not published").into_response());
+    }
+    if portal
+        .expires
+        .is_some_and(|expires| expires < Utc::now().date_naive())
+    {
+        return Err((StatusCode::GONE, "portal has expired").into_response());
+    }
+    if let Some(password) = portal.password.as_deref() {
+        let provided = query
+            .get("password")
+            .or_else(|| query.get("p"))
+            .map(String::as_str);
+        if provided != Some(password) {
+            return Err(
+                (StatusCode::UNAUTHORIZED, Html(render_password_page(portal))).into_response(),
+            );
+        }
+    }
+    Ok(())
+}
+
+fn project_root_for_portal(portal_path: &std::path::Path) -> Option<std::path::PathBuf> {
+    let parent = portal_path.parent()?;
+    if parent.file_name().and_then(|name| name.to_str()) == Some("downloads") {
+        parent.parent().map(std::path::Path::to_path_buf)
+    } else {
+        Some(parent.to_path_buf())
+    }
+}
+
+fn safe_project_relative_path(source: &str) -> Option<std::path::PathBuf> {
+    let path = std::path::Path::new(source);
+    if path.is_absolute() {
+        return None;
+    }
+    let mut safe = std::path::PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::Normal(part) => safe.push(part),
+            std::path::Component::CurDir => {}
+            _ => return None,
+        }
+    }
+    (!safe.as_os_str().is_empty()).then_some(safe)
+}
+
+fn guess_mime_type(name: &str) -> &'static str {
+    match name
+        .rsplit('.')
+        .next()
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "mp3" => "audio/mpeg",
+        "wav" => "audio/wav",
+        "flac" => "audio/flac",
+        "m4a" => "audio/mp4",
+        "ogg" => "audio/ogg",
+        "pdf" => "application/pdf",
+        "txt" | "md" => "text/plain; charset=utf-8",
+        _ => "application/octet-stream",
+    }
+}
+
+fn header_escape(value: &str) -> String {
+    value.replace(['\\', '"', '\r', '\n'], "_")
 }
 
 fn portal_css() -> &'static str {
@@ -1744,6 +1945,32 @@ mod tests {
         assert_eq!(url_path_segment("a b/c%"), "a%20b%2Fc%25");
         assert!(safe_slug("campus-jax_2026"));
         assert!(!safe_slug("../secret"));
+    }
+
+    #[test]
+    fn renders_audio_files_with_preview_and_download_links() {
+        let portal = DownloadPortal {
+            slug: "campus-jax".to_string(),
+            ..Default::default()
+        };
+        let bundle = DownloadBundle {
+            id: "vocals".to_string(),
+            name: "Vocalists".to_string(),
+            files: vec![task_core::workflows::BundleFile {
+                source: "audio/reference mix.mp3".to_string(),
+                dest: Some("Reference Mix.mp3".to_string()),
+                category: Some("Audio".to_string()),
+                mime_type: Some("audio/mpeg".to_string()),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+
+        let html = render_bundle_detail(&portal, &bundle, &PortalVisibility::BrowseAll);
+
+        assert!(html.contains("<audio controls"));
+        assert!(html.contains("/portal/campus-jax/vocals/file/0"));
+        assert!(html.contains("download"));
     }
 
     #[test]
