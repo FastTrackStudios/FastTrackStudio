@@ -3,7 +3,7 @@
 //! Stub. Planned shape:
 //!
 //! ```ignore
-//! use fts_vt_snapshots::{Runner, RunnerConfig};
+//! use fts_story_snapshots::{Runner, RunnerConfig};
 //! let runner = Runner::new(RunnerConfig::default());
 //! runner.snapshot_all(); // iterates STORIES × auto_states, writes PNGs
 //! runner.assert_against_baseline(); // dssim diff against snapshots/
@@ -31,6 +31,6 @@
 
 #[cfg(debug_assertions)]
 compile_error!(
-    "fts-vt-snapshots must be built with `--release`. Stylo/Parley produce \
+    "fts-story-snapshots must be built with `--release`. Stylo/Parley produce \
      incorrect renders under debug_assertions, not merely slow ones."
 );

@@ -1,0 +1,15 @@
+[package]
+name = "fts-story-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Dioxus runtime layer for fts-story: typed knobs, render thunks, interaction execution."
+
+[dependencies]
+fts-story-core = { workspace = true }
+fts-story-macros = { workspace = true }
+dioxus = { workspace = true }
+
+[lints]
+workspace = true

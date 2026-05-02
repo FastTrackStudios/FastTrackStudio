@@ -1,10 +1,10 @@
 [package]
-name = "fts-vt-core"
+name = "fts-story-core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Core types for fts-visual-testing: stories, knobs, interactions, registry."
+description = "Core types for fts-story: stories, knobs, interactions, registry."
 
 [dependencies]
 linkme = { workspace = true }

@@ -1,23 +1,23 @@
-//! Dioxus-aware runtime for `fts-visual-testing`.
+//! Dioxus-aware runtime for `fts-story`.
 //!
-//! Re-exports `fts-vt-core` and `fts-vt-macros` so consumers only need
+//! Re-exports `fts-story-core` and `fts-story-macros` so consumers only need
 //! one dep, and provides:
 //!
 //! - The concrete render-thunk signature stored in
-//!   [`Story::render`](fts_vt_core::Story::render). The opaque
+//!   [`Story::render`](fts_story_core::Story::render). The opaque
 //!   `*const ()` in core is cast back to [`RenderFn`] by callers.
 //! - [`KnobSource`] — runtime trait the macro-generated thunk uses to
 //!   read knob values out of the shell or VRT runner.
-//! - Helpers for executing [`Interaction`](fts_vt_core::Interaction)
+//! - Helpers for executing [`Interaction`](fts_story_core::Interaction)
 //!   steps against a `dioxus_core::VirtualDom` (and, in
-//!   `fts-vt-snapshots`, a `DioxusDocument`).
+//!   `fts-story-snapshots`, a `DioxusDocument`).
 //!
 //! This crate intentionally has no Blitz / wgpu dep. It works in any
 //! Dioxus 0.7 context — desktop, web, native — so the interactive
 //! shell can run anywhere.
 
-pub use fts_vt_core::*;
-pub use fts_vt_macros::{states, story, story_test};
+pub use fts_story_core::*;
+pub use fts_story_macros::{states, story, story_test};
 
 use dioxus::prelude::Element;
 

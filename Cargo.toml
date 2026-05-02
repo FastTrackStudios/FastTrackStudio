@@ -1,11 +1,11 @@
 [workspace]
 members = [
-    "crates/fts-vt-core",
-    "crates/fts-vt-macros",
-    "crates/fts-vt-runtime",
-    "crates/fts-vt-shell",
-    "crates/fts-vt-snapshots",
-    "crates/fts-vt-fuzz",
+    "crates/fts-story-core",
+    "crates/fts-story-macros",
+    "crates/fts-story-runtime",
+    "crates/fts-story-shell",
+    "crates/fts-story-snapshots",
+    "crates/fts-story-fuzz",
 ]
 resolver = "2"
 
@@ -14,20 +14,20 @@ version = "0.1.0"
 edition = "2021"
 authors = ["FastTrack Studio"]
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/FastTrackStudios/fts-visual-testing"
+repository = "https://github.com/FastTrackStudios/fts-story"
 
 [workspace.dependencies]
 # Internal
-fts-vt-core    = { path = "crates/fts-vt-core",    version = "0.1.0" }
-fts-vt-macros  = { path = "crates/fts-vt-macros",  version = "0.1.0" }
-fts-vt-runtime = { path = "crates/fts-vt-runtime", version = "0.1.0" }
-fts-vt-shell   = { path = "crates/fts-vt-shell",   version = "0.1.0" }
-fts-vt-snapshots     = { path = "crates/fts-vt-snapshots",     version = "0.1.0" }
+fts-story-core    = { path = "crates/fts-story-core",    version = "0.1.0" }
+fts-story-macros  = { path = "crates/fts-story-macros",  version = "0.1.0" }
+fts-story-runtime = { path = "crates/fts-story-runtime", version = "0.1.0" }
+fts-story-shell   = { path = "crates/fts-story-shell",   version = "0.1.0" }
+fts-story-snapshots     = { path = "crates/fts-story-snapshots",     version = "0.1.0" }
 
 # Dioxus — loose `0.7` requirement so this crate is consumable by every
 # dioxus 0.7.x project we care about (`frame` is on 0.7.2, `fts-ui` on
 # 0.7.6, both unify on the same dioxus-core). The native/Blitz target is
-# fed via `dioxus-native` inside `fts-vt-snapshots`, not here.
+# fed via `dioxus-native` inside `fts-story-snapshots`, not here.
 dioxus = { version = "0.7", default-features = false, features = ["lib"] }
 
 # Compile-time story registration. Provides `#[distributed_slice]` so each

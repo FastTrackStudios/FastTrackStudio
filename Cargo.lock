@@ -1691,7 +1691,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "42703706b716c37f96a77aea830392ad231f44c9e9a67872fa5548707e11b11c"
 
 [[package]]
-name = "fts-vt-core"
+name = "fts-story-core"
 version = "0.1.0"
 dependencies = [
  "linkme",
@@ -1699,17 +1699,17 @@ dependencies = [
 ]
 
 [[package]]
-name = "fts-vt-fuzz"
+name = "fts-story-fuzz"
 version = "0.1.0"
 dependencies = [
- "fts-vt-core",
- "fts-vt-runtime",
- "fts-vt-snapshots",
+ "fts-story-core",
+ "fts-story-runtime",
+ "fts-story-snapshots",
  "proptest",
 ]
 
 [[package]]
-name = "fts-vt-macros"
+name = "fts-story-macros"
 version = "0.1.0"
 dependencies = [
  "proc-macro2",
@@ -1718,31 +1718,31 @@ dependencies = [
 ]
 
 [[package]]
-name = "fts-vt-runtime"
+name = "fts-story-runtime"
 version = "0.1.0"
 dependencies = [
  "dioxus",
- "fts-vt-core",
- "fts-vt-macros",
+ "fts-story-core",
+ "fts-story-macros",
 ]
 
 [[package]]
-name = "fts-vt-shell"
+name = "fts-story-shell"
 version = "0.1.0"
 dependencies = [
  "dioxus",
- "fts-vt-core",
- "fts-vt-runtime",
+ "fts-story-core",
+ "fts-story-runtime",
 ]
 
 [[package]]
-name = "fts-vt-snapshots"
+name = "fts-story-snapshots"
 version = "0.1.0"
 dependencies = [
  "dioxus-native",
  "dssim-core",
- "fts-vt-core",
- "fts-vt-runtime",
+ "fts-story-core",
+ "fts-story-runtime",
  "png 0.17.16",
 ]
 

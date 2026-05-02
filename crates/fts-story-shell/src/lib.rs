@@ -3,7 +3,7 @@
 //! Renderer-agnostic Dioxus component. Drop into any Dioxus 0.7 app
 //! (web/desktop/native/mobile) and it renders:
 //!
-//! - Sidebar: every story registered via [`STORIES`](fts_vt_core::STORIES),
+//! - Sidebar: every story registered via [`STORIES`](fts_story_core::STORIES),
 //!   grouped by `category`.
 //! - Preview pane: the selected story rendered with the current knob values.
 //! - Knob editor: typed inputs based on each `KnobSpec`.
@@ -17,8 +17,8 @@ use dioxus::prelude::*;
 #[component]
 pub fn Lookbook() -> Element {
     rsx! {
-        div { class: "fts-vt-shell",
-            p { "fts-visual-testing: shell stub. Wire stories via fts_vt_core::STORIES." }
+        div { class: "fts-story-shell",
+            p { "fts-story: shell stub. Wire stories via fts_story_core::STORIES." }
         }
     }
 }

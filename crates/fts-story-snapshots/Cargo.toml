@@ -1,14 +1,14 @@
 [package]
-name = "fts-vt-snapshots"
+name = "fts-story-snapshots"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Headless Blitz-based visual regression runner for fts-visual-testing."
+description = "Headless Blitz-based visual regression runner for fts-story."
 
 [dependencies]
-fts-vt-core    = { workspace = true }
-fts-vt-runtime = { workspace = true }
+fts-story-core    = { workspace = true }
+fts-story-runtime = { workspace = true }
 dssim-core = { workspace = true }
 png        = { workspace = true }
 

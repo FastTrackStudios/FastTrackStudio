@@ -1,10 +1,10 @@
 [package]
-name = "fts-vt-macros"
+name = "fts-story-macros"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Proc-macros for fts-visual-testing: #[story], #[story_test], #[states]."
+description = "Proc-macros for fts-story: #[story], #[story_test], #[states]."
 
 [lib]
 proc-macro = true

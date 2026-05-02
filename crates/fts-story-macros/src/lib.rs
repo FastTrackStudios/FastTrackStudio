@@ -1,4 +1,4 @@
-//! Proc-macros for `fts-visual-testing`.
+//! Proc-macros for `fts-story`.
 //!
 //! Currently a stub. The MVP target is:
 //!
@@ -36,7 +36,7 @@
 //!      = &BUTTON_STORY;`.
 //!
 //! Until the macro lands, stories can be declared by hand against
-//! `fts-vt-core::Story` for early bring-up of the shell + VRT.
+//! `fts-story-core::Story` for early bring-up of the shell + VRT.
 
 use proc_macro::TokenStream;
 

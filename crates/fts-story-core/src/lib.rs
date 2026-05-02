@@ -1,4 +1,4 @@
-//! Core, dependency-light types for `fts-visual-testing`.
+//! Core, dependency-light types for `fts-story`.
 //!
 //! This crate intentionally does NOT depend on `dioxus`. It defines:
 //!
@@ -12,7 +12,7 @@
 //!
 //! Renderer-specific concerns (rendering Dioxus VDOMs, rasterizing via
 //! Blitz, dispatching events into a `DioxusDocument`) live in
-//! `fts-vt-runtime` and `fts-vt-snapshots`. Anything that needs to talk about
+//! `fts-story-runtime` and `fts-story-snapshots`. Anything that needs to talk about
 //! a story without pulling in Dioxus belongs here.
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
@@ -21,12 +21,12 @@ use linkme::distributed_slice;
 
 /// The compile-time story registry.
 ///
-/// `#[story]` (in `fts-vt-macros`) appends to this slice. Tools that
+/// `#[story]` (in `fts-story-macros`) appends to this slice. Tools that
 /// enumerate stories — the interactive shell, the VRT runner, the fuzz
 /// harness — iterate it.
 ///
 /// ```ignore
-/// for story in fts_vt_core::STORIES {
+/// for story in fts_story_core::STORIES {
 ///     println!("{}/{}", story.category, story.name);
 /// }
 /// ```
@@ -36,8 +36,8 @@ pub static STORIES: [&'static Story] = [..];
 /// Metadata + render entry point for a single story.
 ///
 /// `render` is intentionally an opaque pointer — its signature is defined
-/// by `fts-vt-runtime`. This crate stores it as `*const ()` so we can
-/// keep `fts-vt-core` free of any rendering dependency.
+/// by `fts-story-runtime`. This crate stores it as `*const ()` so we can
+/// keep `fts-story-core` free of any rendering dependency.
 pub struct Story {
     /// Stable identifier — usually the function name.
     pub name: &'static str,
@@ -112,8 +112,8 @@ pub enum KnobValue {
 
 /// One step in an interaction script.
 ///
-/// Used by `fts-vt-snapshots` to drive a `DioxusDocument` between snapshots,
-/// and by `fts-vt-fuzz` as the unit of mutation.
+/// Used by `fts-story-snapshots` to drive a `DioxusDocument` between snapshots,
+/// and by `fts-story-fuzz` as the unit of mutation.
 pub enum Interaction {
     /// Click the first node matching the selector.
     Click(Selector),
@@ -134,7 +134,7 @@ pub enum Interaction {
     /// Take a named snapshot at this point in the script.
     Snapshot(&'static str),
     /// Assert against the running app via a runtime-defined predicate.
-    /// The opaque pointer is interpreted by `fts-vt-runtime`.
+    /// The opaque pointer is interpreted by `fts-story-runtime`.
     Assert(*const ()),
 }
 

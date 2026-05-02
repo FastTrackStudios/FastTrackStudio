@@ -1,14 +1,14 @@
 [package]
-name = "fts-vt-shell"
+name = "fts-story-shell"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Interactive Lookbook-style shell for fts-visual-testing."
+description = "Interactive Lookbook-style shell for fts-story."
 
 [dependencies]
-fts-vt-core    = { workspace = true }
-fts-vt-runtime = { workspace = true }
+fts-story-core    = { workspace = true }
+fts-story-runtime = { workspace = true }
 dioxus = { workspace = true }
 
 [lints]
