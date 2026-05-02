@@ -134,11 +134,20 @@ fn capture_inner(
 }
 
 fn spawn_xvfb(cfg: &WryCaptureConfig) -> Result<Child, WryCaptureError> {
+    // Pin Xvfb DPI to 96 so 1 CSS pixel == 1 device pixel in webkit.
+    // Default Xvfb DPI is 75, which makes webkit scale every CSS-pixel
+    // value by 96/75 ≈ 1.28 (or some implementation-specific factor) —
+    // a `width: 32px` div renders as 33–34 device pixels and text
+    // baselines drift ~1 px per row. Blitz's CPU rasteriser uses
+    // CSS-pixel == device-pixel at scale=1.0, so the only way to get
+    // pixel-perfect parity is to make Xvfb agree.
     Command::new("Xvfb")
         .arg(format!(":{}", cfg.display))
         .arg("-screen")
         .arg("0")
         .arg(format!("{}x{}x24", cfg.screen_w, cfg.screen_h))
+        .arg("-dpi")
+        .arg("96")
         .arg("-nolisten")
         .arg("tcp")
         .stdout(Stdio::null())
