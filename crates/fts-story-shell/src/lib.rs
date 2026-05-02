@@ -13,8 +13,10 @@
 //! macro is emitting `KnobSpec` defaults. For now the shell renders each
 //! story with [`NoKnobs`](fts_story_runtime::NoKnobs).
 
+use std::collections::HashMap;
+
 use dioxus::prelude::*;
-use fts_story_runtime::{render_fn, NoKnobs, Story, STORIES};
+use fts_story_runtime::{render_fn, KnobKind, KnobSource, KnobValue, Story, STORIES};
 
 #[component]
 pub fn Lookbook() -> Element {
@@ -50,10 +52,7 @@ pub fn Lookbook() -> Element {
                 }
                 main { class: "fts-story-shell__main",
                     if let Some(story) = current {
-                        StoryHeader { story }
-                        div { class: "fts-story-shell__preview",
-                            StoryPreview { story }
-                        }
+                        StoryView { story }
                     } else {
                         EmptyState {}
                     }
@@ -131,12 +130,198 @@ fn StoryHeader(story: &'static Story) -> Element {
     }
 }
 
+/// `StoryView` ties the header, knob editor, and preview together.
+/// Each story gets its own keyed instance so the per-story knob state
+/// resets cleanly when the user navigates between stories.
 #[component]
-fn StoryPreview(story: &'static Story) -> Element {
-    // SAFETY: `story.render` is a `RenderFn` produced via the const_story
-    // builder or the (forthcoming) `#[story]` macro.
+fn StoryView(story: &'static Story) -> Element {
+    let initial: HashMap<&'static str, KnobValue> = story
+        .knobs
+        .iter()
+        .filter_map(|spec| spec.default.as_ref().map(|v| (spec.name, clone_knob(v))))
+        .collect();
+    let knob_state = use_signal(|| initial);
+
+    rsx! {
+        div { key: "{story.name}",
+            StoryHeader { story }
+            if !story.knobs.is_empty() {
+                KnobEditor { story, knob_state }
+            }
+            div { class: "fts-story-shell__preview",
+                StoryPreview { story, knob_state }
+            }
+        }
+    }
+}
+
+#[component]
+fn StoryPreview(story: &'static Story, knob_state: Signal<HashMap<&'static str, KnobValue>>) -> Element {
+    // SAFETY: `story.render` is a `RenderFn` produced via the
+    // `const_story` builder or the `#[story]` proc-macro.
     let render = unsafe { render_fn(story) };
-    render(&NoKnobs)
+    let snapshot = knob_state.read().clone();
+    render(&MapKnobs(&snapshot))
+}
+
+#[component]
+fn KnobEditor(
+    story: &'static Story,
+    knob_state: Signal<HashMap<&'static str, KnobValue>>,
+) -> Element {
+    rsx! {
+        section { class: "fts-story-shell__knobs",
+            for spec in story.knobs.iter() {
+                {
+                    let name = spec.name;
+                    let doc = spec.doc;
+                    rsx! {
+                        div { class: "fts-story-shell__knob",
+                            label { class: "fts-story-shell__knob-name", "{name}" }
+                            if !doc.is_empty() {
+                                p { class: "fts-story-shell__knob-doc", "{doc}" }
+                            }
+                            KnobControl { spec, knob_state }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn KnobControl(
+    spec: &'static fts_story_runtime::KnobSpec,
+    knob_state: Signal<HashMap<&'static str, KnobValue>>,
+) -> Element {
+    let name = spec.name;
+    let current = knob_state
+        .read()
+        .get(name)
+        .or(spec.default.as_ref())
+        .map(clone_knob);
+
+    match &spec.kind {
+        KnobKind::Bool => {
+            let checked = matches!(current, Some(KnobValue::Bool(true)));
+            rsx! {
+                input {
+                    r#type: "checkbox",
+                    checked,
+                    onchange: move |e| {
+                        let v = e.value() == "true";
+                        knob_state.write().insert(name, KnobValue::Bool(v));
+                    },
+                }
+            }
+        }
+        KnobKind::Number { .. } => {
+            let value_str = match &current {
+                Some(KnobValue::Int(v)) => v.to_string(),
+                Some(KnobValue::Float(v)) => v.to_string(),
+                _ => String::new(),
+            };
+            rsx! {
+                input {
+                    r#type: "number",
+                    class: "fts-story-shell__knob-input",
+                    value: "{value_str}",
+                    oninput: move |e| {
+                        let raw = e.value();
+                        let value = if raw.contains('.') {
+                            raw.parse::<f64>().ok().map(KnobValue::Float)
+                        } else {
+                            raw.parse::<i64>().ok().map(KnobValue::Int)
+                        };
+                        if let Some(v) = value {
+                            knob_state.write().insert(name, v);
+                        }
+                    },
+                }
+            }
+        }
+        KnobKind::String { multiline } => {
+            let value_str = match &current {
+                Some(KnobValue::Str(s)) => s.to_string(),
+                _ => String::new(),
+            };
+            // KnobValue::Str holds &'static str — to support free-form
+            // editing without leaking we store the edited string into
+            // a side signal and only commit it on blur. For the MVP
+            // we leak via Box::leak so the changes flow through to the
+            // render thunk. This is fine for an interactive dev tool;
+            // the snapshot harness uses defaults verbatim.
+            let on_change = move |e: FormEvent| {
+                let leaked: &'static str = Box::leak(e.value().into_boxed_str());
+                knob_state.write().insert(name, KnobValue::Str(leaked));
+            };
+            if *multiline {
+                rsx! {
+                    textarea {
+                        class: "fts-story-shell__knob-input fts-story-shell__knob-textarea",
+                        value: "{value_str}",
+                        oninput: on_change,
+                    }
+                }
+            } else {
+                rsx! {
+                    input {
+                        r#type: "text",
+                        class: "fts-story-shell__knob-input",
+                        value: "{value_str}",
+                        oninput: on_change,
+                    }
+                }
+            }
+        }
+        KnobKind::Enum { variants } => {
+            let selected = match &current {
+                Some(KnobValue::EnumVariant(v)) => v.to_string(),
+                _ => variants.first().map(|s| s.to_string()).unwrap_or_default(),
+            };
+            rsx! {
+                select {
+                    class: "fts-story-shell__knob-input",
+                    onchange: move |e| {
+                        // Enum variant names are part of the static
+                        // KnobSpec, so we leak (cheap, bounded) to
+                        // produce the &'static str the KnobValue wants.
+                        let leaked: &'static str = Box::leak(e.value().into_boxed_str());
+                        knob_state.write().insert(name, KnobValue::EnumVariant(leaked));
+                    },
+                    for v in variants.iter() {
+                        option { value: "{v}", selected: selected == *v, "{v}" }
+                    }
+                }
+            }
+        }
+        KnobKind::Color | KnobKind::Opaque => rsx! {
+            span { class: "fts-story-shell__knob-readonly",
+                "(no editor — use defaults)"
+            }
+        },
+    }
+}
+
+fn clone_knob(v: &KnobValue) -> KnobValue {
+    match *v {
+        KnobValue::Bool(b) => KnobValue::Bool(b),
+        KnobValue::Int(i) => KnobValue::Int(i),
+        KnobValue::Float(f) => KnobValue::Float(f),
+        KnobValue::Str(s) => KnobValue::Str(s),
+        KnobValue::EnumVariant(s) => KnobValue::EnumVariant(s),
+    }
+}
+
+/// `KnobSource` over a borrowed map. Cheap to construct per-render so
+/// `StoryPreview` doesn't have to plumb signals through the trait.
+struct MapKnobs<'a>(&'a HashMap<&'static str, KnobValue>);
+
+impl KnobSource for MapKnobs<'_> {
+    fn get(&self, name: &'static str) -> Option<&KnobValue> {
+        self.0.get(name)
+    }
 }
 
 #[component]
@@ -270,6 +455,52 @@ const SHELL_CSS: &str = r#"
     border-radius: 8px;
     padding: 24px;
     min-height: 240px;
+}
+.fts-story-shell__knobs {
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin-bottom: 16px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 12px 20px;
+}
+.fts-story-shell__knob {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.fts-story-shell__knob-name {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--fg-muted);
+}
+.fts-story-shell__knob-doc {
+    font-size: 11px;
+    color: var(--fg-muted);
+    margin: 0;
+}
+.fts-story-shell__knob-input {
+    background: var(--bg);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 4px 8px;
+    font: inherit;
+    font-size: 13px;
+}
+.fts-story-shell__knob-textarea {
+    min-height: 60px;
+    resize: vertical;
+    font-family: ui-monospace, monospace;
+}
+.fts-story-shell__knob-readonly {
+    font-size: 11px;
+    color: var(--fg-muted);
+    font-style: italic;
 }
 .fts-story-shell__empty {
     color: var(--fg-muted);

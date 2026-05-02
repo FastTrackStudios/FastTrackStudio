@@ -75,6 +75,7 @@ impl PartialEq for Story {
 impl Eq for Story {}
 
 /// One knob declaration.
+#[derive(Clone)]
 pub struct KnobSpec {
     pub name: &'static str,
     pub doc: &'static str,
@@ -89,9 +90,21 @@ pub struct KnobSpec {
     pub default: Option<KnobValue>,
 }
 
+// Identity-compare so `&'static KnobSpec` flows through Dioxus props.
+// Each `#[story]` emits its KnobSpec values into a single `static`
+// slice, so pointer equality ≡ semantic equality.
+impl PartialEq for KnobSpec {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        std::ptr::eq(self, other)
+    }
+}
+impl Eq for KnobSpec {}
+
 /// What kind of input a knob accepts. The shell uses this to pick a
 /// control widget; the VRT runner uses it to enumerate values for the
 /// auto-state matrix.
+#[derive(Clone)]
 pub enum KnobKind {
     Bool,
     /// Variants of an enum. The first is the default unless overridden.
@@ -120,6 +133,7 @@ pub struct StateAssignment {
 
 /// A static, statically-typed knob value. The macro converts literals
 /// into these.
+#[derive(Clone)]
 pub enum KnobValue {
     Bool(bool),
     Int(i64),
