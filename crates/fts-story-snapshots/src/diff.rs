@@ -43,6 +43,27 @@ fn decode_rgba(bytes: &[u8]) -> Result<(Vec<u8>, u32, u32), DiffError> {
             }
             (rgba, info.width, info.height)
         }
+        png::ColorType::Grayscale => {
+            // ImageMagick `import` against an Xvfb screen sometimes
+            // emits Grayscale when the captured region is uniform —
+            // typically a too-early screenshot before the WebView
+            // has painted. Promote to RGBA so the diff still runs;
+            // the resulting score will be poor (uniform image),
+            // which is the right signal that paint_grace needs
+            // bumping.
+            let mut rgba = Vec::with_capacity(info.width as usize * info.height as usize * 4);
+            for &g in &buf {
+                rgba.extend_from_slice(&[g, g, g, 255]);
+            }
+            (rgba, info.width, info.height)
+        }
+        png::ColorType::GrayscaleAlpha => {
+            let mut rgba = Vec::with_capacity(info.width as usize * info.height as usize * 4);
+            for chunk in buf.chunks_exact(2) {
+                rgba.extend_from_slice(&[chunk[0], chunk[0], chunk[0], chunk[1]]);
+            }
+            (rgba, info.width, info.height)
+        }
         other => {
             return Err(DiffError::Unsupported(format!(
                 "unsupported PNG color type {other:?}"

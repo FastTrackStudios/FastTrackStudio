@@ -5,6 +5,7 @@ members = [
     "crates/fts-story-runtime",
     "crates/fts-story-shell",
     "crates/fts-story-snapshots",
+    "crates/fts-story-parity",
     "crates/fts-story-fuzz",
 ]
 resolver = "2"
@@ -23,6 +24,7 @@ fts-story-macros  = { path = "crates/fts-story-macros",  version = "0.1.0" }
 fts-story-runtime = { path = "crates/fts-story-runtime", version = "0.1.0" }
 fts-story-shell   = { path = "crates/fts-story-shell",   version = "0.1.0" }
 fts-story-snapshots     = { path = "crates/fts-story-snapshots",     version = "0.1.0" }
+fts-story-parity        = { path = "crates/fts-story-parity",        version = "0.1.0" }
 
 # Dioxus — loose `0.7` requirement so this crate is consumable by every
 # dioxus 0.7.x project we care about (`frame` is on 0.7.2, `fts-ui` on

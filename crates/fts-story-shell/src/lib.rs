@@ -3,34 +3,65 @@
 //! Renderer-agnostic Dioxus component. Drop into any Dioxus 0.7 app
 //! (web/desktop/native/mobile) and it renders:
 //!
+//! - **Top bar** — branding plus a `header_extras` slot the host fills
+//!   with theme controls, density toggle, etc.
 //! - **Sidebar** — every story registered via
 //!   [`STORIES`](fts_story_runtime::STORIES), grouped by `category`.
 //! - **Preview pane** — the selected story rendered with the current
-//!   knob values.
-//! - **Header** — story name, category breadcrumb, source location.
+//!   knob values (and inheriting whatever theme the host provides).
+//! - **Knob editor** — typed inputs above the preview, one per knob.
 //!
-//! Knob editor + state-matrix toggle land in Phase 2 once the `#[story]`
-//! macro is emitting `KnobSpec` defaults. For now the shell renders each
-//! story with [`NoKnobs`](fts_story_runtime::NoKnobs).
+//! ## Styling
+//!
+//! The shell does **not** ship its own colour palette. Every surface
+//! uses the standard shadcn-style Tailwind tokens — `bg-background`,
+//! `bg-card`, `text-foreground`, `text-muted-foreground`, `border`,
+//! `border-border`, `bg-accent`, etc. — so when the host wraps the
+//! Lookbook in a `ThemeProvider`, switching the preset or mode in the
+//! top bar reskins the shell *and* every preview at once.
+//!
+//! Consumers must therefore have a Tailwind config / generated CSS that
+//! defines those tokens. fts-ui ships that out of the box; any other
+//! consumer (frame-ui, etc.) just needs the same `@theme` block in
+//! their tailwind input file.
 
 use std::collections::HashMap;
 
 use dioxus::prelude::*;
 use fts_story_runtime::{render_fn, KnobKind, KnobSource, KnobValue, Story, STORIES};
 
+#[derive(Props, Clone, PartialEq)]
+pub struct LookbookProps {
+    /// Optional content rendered into the sticky top bar — typically a
+    /// theme picker, density toggle, or other globally-scoped control.
+    /// Anything dispatched from here should propagate through Dioxus
+    /// context so the previews below pick it up.
+    #[props(default)]
+    pub header_extras: Option<Element>,
+    /// Optional starting story by name. Useful for snapshot harnesses
+    /// that boot the binary into a specific preview.
+    #[props(default)]
+    pub initial_story: Option<String>,
+    /// When `false`, render only the preview (no sidebar / top bar /
+    /// header / knob editor). Used by the parity harness so the
+    /// captured pixels are just the component, not the chrome.
+    #[props(default = true)]
+    pub chrome: bool,
+}
+
 #[component]
-pub fn Lookbook() -> Element {
-    // Snapshot the global registry once. STORIES is a `linkme` slice
-    // populated at link time; iterating it on every render is cheap, but
-    // we pre-collect into a Vec so we can sort by category/name.
+pub fn Lookbook(props: LookbookProps) -> Element {
     let stories: Vec<&'static Story> = {
         let mut v: Vec<&'static Story> = STORIES.iter().copied().collect();
         v.sort_by_key(|s| (s.category.unwrap_or("zzz"), s.name));
         v
     };
 
-    let initial = stories.first().map(|s| s.name).unwrap_or("");
-    let selected = use_signal(|| initial.to_string());
+    let initial = props
+        .initial_story
+        .clone()
+        .unwrap_or_else(|| stories.first().map(|s| s.name.to_string()).unwrap_or_default());
+    let selected = use_signal(|| initial);
 
     let current = stories
         .iter()
@@ -38,19 +69,38 @@ pub fn Lookbook() -> Element {
         .copied()
         .or_else(|| stories.first().copied());
 
+    if !props.chrome {
+        // Headless / snapshot mode: render the preview only. No
+        // sidebar, no top bar, no story header. The host app sets a
+        // fixed window size so the captured pixels are deterministic.
+        return rsx! {
+            div { class: "min-h-screen bg-background text-foreground p-6",
+                "data-fts-story-name": current.map(|s| s.name).unwrap_or_default(),
+                if let Some(story) = current {
+                    ChromelessPreview { story }
+                }
+            }
+        };
+    }
+
     rsx! {
-        div { class: "fts-story-shell",
-            style { {SHELL_CSS} }
-            div { class: "fts-story-shell__layout",
-                aside { class: "fts-story-shell__sidebar",
-                    h1 { class: "fts-story-shell__brand", "fts-story" }
-                    p { class: "fts-story-shell__count", "{stories.len()} stories" }
-                    SidebarTree {
-                        stories: stories.clone(),
-                        selected,
+        div { class: "min-h-screen bg-background text-foreground",
+            header { class: "sticky top-0 z-20 flex items-center gap-4 h-12 px-4 border-b border-border bg-card text-card-foreground",
+                div { class: "flex items-baseline gap-3",
+                    span { class: "text-xs font-semibold uppercase tracking-wider", "fts-story" }
+                    span { class: "text-[11px] text-muted-foreground", "{stories.len()} stories" }
+                }
+                if let Some(extras) = props.header_extras {
+                    div { class: "ml-auto flex items-center gap-2",
+                        {extras}
                     }
                 }
-                main { class: "fts-story-shell__main",
+            }
+            div { class: "grid grid-cols-[240px_1fr] min-h-[calc(100vh-3rem)]",
+                aside { class: "sticky top-12 self-start max-h-[calc(100vh-3rem)] w-60 overflow-y-auto border-r border-border bg-card text-card-foreground",
+                    SidebarTree { stories: stories.clone(), selected }
+                }
+                main { class: "p-6 overflow-y-auto",
                     if let Some(story) = current {
                         StoryView { story }
                     } else {
@@ -64,7 +114,6 @@ pub fn Lookbook() -> Element {
 
 #[component]
 fn SidebarTree(stories: Vec<&'static Story>, selected: Signal<String>) -> Element {
-    // Group by category preserving the sorted order.
     let mut groups: Vec<(&'static str, Vec<&'static Story>)> = Vec::new();
     for story in &stories {
         let cat = story.category.unwrap_or("Uncategorised");
@@ -75,19 +124,21 @@ fn SidebarTree(stories: Vec<&'static Story>, selected: Signal<String>) -> Elemen
     }
 
     rsx! {
-        nav { class: "fts-story-shell__nav",
+        nav { class: "flex flex-col py-2",
             for (category, items) in groups {
-                section { class: "fts-story-shell__group",
-                    h2 { class: "fts-story-shell__group-name", "{category}" }
-                    ul { class: "fts-story-shell__group-list",
+                section { class: "py-2",
+                    h2 { class: "px-4 mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground",
+                        "{category}"
+                    }
+                    ul { class: "flex flex-col",
                         for story in items {
                             {
                                 let name = story.name;
                                 let active = selected() == name;
                                 let class = if active {
-                                    "fts-story-shell__nav-item fts-story-shell__nav-item--active"
+                                    "block w-full text-left px-4 py-1.5 text-sm border-l-2 border-primary bg-accent/40 text-foreground font-medium"
                                 } else {
-                                    "fts-story-shell__nav-item"
+                                    "block w-full text-left px-4 py-1.5 text-sm border-l-2 border-transparent hover:bg-accent/20 text-muted-foreground hover:text-foreground"
                                 };
                                 rsx! {
                                     li {
@@ -107,32 +158,21 @@ fn SidebarTree(stories: Vec<&'static Story>, selected: Signal<String>) -> Elemen
     }
 }
 
+/// Chromeless preview used by the parity / snapshot harness — renders
+/// the story with its declared default knobs, no editor or header.
 #[component]
-fn StoryHeader(story: &'static Story) -> Element {
+fn ChromelessPreview(story: &'static Story) -> Element {
+    let initial: HashMap<&'static str, KnobValue> = story
+        .knobs
+        .iter()
+        .filter_map(|spec| spec.default.as_ref().map(|v| (spec.name, clone_knob(v))))
+        .collect();
+    let knob_state = use_signal(|| initial);
     rsx! {
-        header { class: "fts-story-shell__header",
-            div { class: "fts-story-shell__crumbs",
-                if let Some(category) = story.category {
-                    span { class: "fts-story-shell__crumb", "{category}" }
-                    span { class: "fts-story-shell__crumb-sep", " / " }
-                }
-                span { class: "fts-story-shell__crumb fts-story-shell__crumb--leaf",
-                    "{story.name}"
-                }
-            }
-            if !story.description.is_empty() {
-                p { class: "fts-story-shell__description", "{story.description}" }
-            }
-            if !story.source.is_empty() {
-                p { class: "fts-story-shell__source", "{story.source}" }
-            }
-        }
+        StoryPreview { story, knob_state }
     }
 }
 
-/// `StoryView` ties the header, knob editor, and preview together.
-/// Each story gets its own keyed instance so the per-story knob state
-/// resets cleanly when the user navigates between stories.
 #[component]
 fn StoryView(story: &'static Story) -> Element {
     let initial: HashMap<&'static str, KnobValue> = story
@@ -143,13 +183,36 @@ fn StoryView(story: &'static Story) -> Element {
     let knob_state = use_signal(|| initial);
 
     rsx! {
-        div { key: "{story.name}",
+        div { key: "{story.name}", class: "flex flex-col gap-4 max-w-5xl",
             StoryHeader { story }
             if !story.knobs.is_empty() {
                 KnobEditor { story, knob_state }
             }
-            div { class: "fts-story-shell__preview",
+            div { class: "rounded-lg border border-border bg-card text-card-foreground p-6 min-h-[14rem]",
                 StoryPreview { story, knob_state }
+            }
+        }
+    }
+}
+
+#[component]
+fn StoryHeader(story: &'static Story) -> Element {
+    rsx! {
+        header { class: "pb-3 border-b border-border",
+            div { class: "text-sm text-muted-foreground",
+                if let Some(category) = story.category {
+                    span { "{category}" }
+                    span { class: "mx-1", "/" }
+                }
+                span { class: "text-foreground font-semibold", "{story.name}" }
+            }
+            if !story.description.is_empty() {
+                p { class: "mt-1 text-sm", "{story.description}" }
+            }
+            if !story.source.is_empty() {
+                p { class: "mt-1 text-[11px] font-mono text-muted-foreground",
+                    "{story.source}"
+                }
             }
         }
     }
@@ -170,16 +233,18 @@ fn KnobEditor(
     knob_state: Signal<HashMap<&'static str, KnobValue>>,
 ) -> Element {
     rsx! {
-        section { class: "fts-story-shell__knobs",
+        section { class: "rounded-lg border border-border bg-card text-card-foreground p-4 grid gap-3 grid-cols-[repeat(auto-fill,minmax(13rem,1fr))]",
             for spec in story.knobs.iter() {
                 {
                     let name = spec.name;
                     let doc = spec.doc;
                     rsx! {
-                        div { class: "fts-story-shell__knob",
-                            label { class: "fts-story-shell__knob-name", "{name}" }
+                        div { class: "flex flex-col gap-1",
+                            label { class: "text-[11px] font-semibold uppercase tracking-wider text-muted-foreground",
+                                "{name}"
+                            }
                             if !doc.is_empty() {
-                                p { class: "fts-story-shell__knob-doc", "{doc}" }
+                                p { class: "text-[11px] text-muted-foreground", "{doc}" }
                             }
                             KnobControl { spec, knob_state }
                         }
@@ -202,12 +267,15 @@ fn KnobControl(
         .or(spec.default.as_ref())
         .map(clone_knob);
 
+    let input_class = "h-8 rounded border border-input bg-background px-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+
     match &spec.kind {
         KnobKind::Bool => {
             let checked = matches!(current, Some(KnobValue::Bool(true)));
             rsx! {
                 input {
                     r#type: "checkbox",
+                    class: "size-4 accent-primary",
                     checked,
                     onchange: move |e| {
                         let v = e.value() == "true";
@@ -225,7 +293,7 @@ fn KnobControl(
             rsx! {
                 input {
                     r#type: "number",
-                    class: "fts-story-shell__knob-input",
+                    class: input_class,
                     value: "{value_str}",
                     oninput: move |e| {
                         let raw = e.value();
@@ -246,12 +314,10 @@ fn KnobControl(
                 Some(KnobValue::Str(s)) => s.to_string(),
                 _ => String::new(),
             };
-            // KnobValue::Str holds &'static str — to support free-form
-            // editing without leaking we store the edited string into
-            // a side signal and only commit it on blur. For the MVP
-            // we leak via Box::leak so the changes flow through to the
-            // render thunk. This is fine for an interactive dev tool;
-            // the snapshot harness uses defaults verbatim.
+            // Free-form text edits leak via Box::leak so the resulting
+            // &'static str can flow into KnobValue::Str. This is bounded
+            // and fine for an interactive dev tool; the snapshot
+            // harness uses defaults verbatim.
             let on_change = move |e: FormEvent| {
                 let leaked: &'static str = Box::leak(e.value().into_boxed_str());
                 knob_state.write().insert(name, KnobValue::Str(leaked));
@@ -259,7 +325,7 @@ fn KnobControl(
             if *multiline {
                 rsx! {
                     textarea {
-                        class: "fts-story-shell__knob-input fts-story-shell__knob-textarea",
+                        class: "{input_class} h-20 font-mono",
                         value: "{value_str}",
                         oninput: on_change,
                     }
@@ -268,7 +334,7 @@ fn KnobControl(
                 rsx! {
                     input {
                         r#type: "text",
-                        class: "fts-story-shell__knob-input",
+                        class: input_class,
                         value: "{value_str}",
                         oninput: on_change,
                     }
@@ -282,11 +348,8 @@ fn KnobControl(
             };
             rsx! {
                 select {
-                    class: "fts-story-shell__knob-input",
+                    class: input_class,
                     onchange: move |e| {
-                        // Enum variant names are part of the static
-                        // KnobSpec, so we leak (cheap, bounded) to
-                        // produce the &'static str the KnobValue wants.
                         let leaked: &'static str = Box::leak(e.value().into_boxed_str());
                         knob_state.write().insert(name, KnobValue::EnumVariant(leaked));
                     },
@@ -297,8 +360,8 @@ fn KnobControl(
             }
         }
         KnobKind::Color | KnobKind::Opaque => rsx! {
-            span { class: "fts-story-shell__knob-readonly",
-                "(no editor — use defaults)"
+            span { class: "text-[11px] text-muted-foreground italic",
+                "(no editor — uses default)"
             }
         },
     }
@@ -314,6 +377,24 @@ fn clone_knob(v: &KnobValue) -> KnobValue {
     }
 }
 
+#[component]
+fn EmptyState() -> Element {
+    rsx! {
+        div { class: "max-w-md text-muted-foreground text-sm",
+            h2 { class: "text-foreground text-base font-semibold mb-2", "No stories registered" }
+            p {
+                "Add "
+                code { class: "rounded bg-accent/40 px-1 py-0.5 text-[12px]", "#[story]" }
+                " to a Dioxus component, or hand-roll a "
+                code { class: "rounded bg-accent/40 px-1 py-0.5 text-[12px]", "Story" }
+                " value and register it via "
+                code { class: "rounded bg-accent/40 px-1 py-0.5 text-[12px]", "#[linkme::distributed_slice(STORIES)]" }
+                "."
+            }
+        }
+    }
+}
+
 /// `KnobSource` over a borrowed map. Cheap to construct per-render so
 /// `StoryPreview` doesn't have to plumb signals through the trait.
 struct MapKnobs<'a>(&'a HashMap<&'static str, KnobValue>);
@@ -323,193 +404,3 @@ impl KnobSource for MapKnobs<'_> {
         self.0.get(name)
     }
 }
-
-#[component]
-fn EmptyState() -> Element {
-    rsx! {
-        div { class: "fts-story-shell__empty",
-            h2 { "No stories registered" }
-            p {
-                "Add "
-                code { "#[story]" }
-                " to a Dioxus component, or hand-roll a "
-                code { "Story" }
-                " value and register it via "
-                code { "#[linkme::distributed_slice(STORIES)]" }
-                "."
-            }
-        }
-    }
-}
-
-const SHELL_CSS: &str = r#"
-.fts-story-shell {
-    --fg: #e5e7eb;
-    --fg-muted: #9ca3af;
-    --bg: #0b0f17;
-    --bg-elev: #111827;
-    --border: #1f2937;
-    --accent: #60a5fa;
-
-    color: var(--fg);
-    background: var(--bg);
-    font-family: ui-sans-serif, system-ui, sans-serif;
-    min-height: 100vh;
-}
-.fts-story-shell__layout {
-    display: grid;
-    grid-template-columns: 240px 1fr;
-    min-height: 100vh;
-}
-.fts-story-shell__sidebar {
-    border-right: 1px solid var(--border);
-    background: var(--bg-elev);
-    padding: 12px 0;
-    overflow-y: auto;
-    position: sticky;
-    top: 0;
-    max-height: 100vh;
-}
-.fts-story-shell__brand {
-    font-size: 13px;
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    color: var(--fg-muted);
-    margin: 0 16px 4px;
-}
-.fts-story-shell__count {
-    font-size: 11px;
-    color: var(--fg-muted);
-    margin: 0 16px 12px;
-}
-.fts-story-shell__group {
-    padding: 8px 0;
-    border-top: 1px solid var(--border);
-}
-.fts-story-shell__group-name {
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--fg-muted);
-    margin: 0 16px 6px;
-}
-.fts-story-shell__group-list {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-}
-.fts-story-shell__nav-item {
-    display: block;
-    width: 100%;
-    text-align: left;
-    background: transparent;
-    border: 0;
-    color: var(--fg);
-    font: inherit;
-    padding: 6px 16px;
-    cursor: pointer;
-    border-left: 2px solid transparent;
-}
-.fts-story-shell__nav-item:hover {
-    background: rgba(96, 165, 250, 0.08);
-}
-.fts-story-shell__nav-item--active {
-    background: rgba(96, 165, 250, 0.16);
-    border-left-color: var(--accent);
-    font-weight: 600;
-}
-.fts-story-shell__main {
-    padding: 24px 32px;
-    overflow-y: auto;
-}
-.fts-story-shell__header {
-    margin-bottom: 24px;
-    padding-bottom: 16px;
-    border-bottom: 1px solid var(--border);
-}
-.fts-story-shell__crumbs {
-    font-size: 13px;
-    color: var(--fg-muted);
-    margin-bottom: 6px;
-}
-.fts-story-shell__crumb--leaf {
-    color: var(--fg);
-    font-weight: 600;
-}
-.fts-story-shell__description {
-    font-size: 14px;
-    color: var(--fg);
-    margin: 4px 0 0;
-}
-.fts-story-shell__source {
-    font-size: 11px;
-    font-family: ui-monospace, monospace;
-    color: var(--fg-muted);
-    margin: 4px 0 0;
-}
-.fts-story-shell__preview {
-    background: var(--bg-elev);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 24px;
-    min-height: 240px;
-}
-.fts-story-shell__knobs {
-    background: var(--bg-elev);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 16px 20px;
-    margin-bottom: 16px;
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-    gap: 12px 20px;
-}
-.fts-story-shell__knob {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-}
-.fts-story-shell__knob-name {
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    color: var(--fg-muted);
-}
-.fts-story-shell__knob-doc {
-    font-size: 11px;
-    color: var(--fg-muted);
-    margin: 0;
-}
-.fts-story-shell__knob-input {
-    background: var(--bg);
-    color: var(--fg);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    padding: 4px 8px;
-    font: inherit;
-    font-size: 13px;
-}
-.fts-story-shell__knob-textarea {
-    min-height: 60px;
-    resize: vertical;
-    font-family: ui-monospace, monospace;
-}
-.fts-story-shell__knob-readonly {
-    font-size: 11px;
-    color: var(--fg-muted);
-    font-style: italic;
-}
-.fts-story-shell__empty {
-    color: var(--fg-muted);
-    max-width: 480px;
-}
-.fts-story-shell__empty code {
-    background: var(--bg-elev);
-    padding: 2px 6px;
-    border-radius: 4px;
-    font-size: 12px;
-}
-"#;

@@ -1745,6 +1745,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "fts-story-parity"
+version = "0.1.0"
+dependencies = [
+ "dssim-core",
+ "fts-story-core",
+ "fts-story-runtime",
+ "fts-story-snapshots",
+ "png 0.17.16",
+ "rgb",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "fts-story-runtime"
 version = "0.1.0"
 dependencies = [
@@ -1778,6 +1791,7 @@ dependencies = [
  "dssim-core",
  "fts-story-core",
  "fts-story-runtime",
+ "fts-story-shell",
  "futures-util",
  "peniko",
  "png 0.17.16",

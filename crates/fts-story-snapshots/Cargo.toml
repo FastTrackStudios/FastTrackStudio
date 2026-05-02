@@ -9,6 +9,12 @@ description = "Headless Blitz-based visual regression runner for fts-story."
 [dependencies]
 fts-story-core    = { workspace = true }
 fts-story-runtime = { workspace = true }
+# Snapshot path uses the same `Lookbook { chrome: false, ... }`
+# entry as `apps/desktop/src/main.rs::SnapshotApp` so both renderers
+# follow the same code path. Without this Blitz would render the bare
+# story render fn while wry rendered through the Lookbook host,
+# producing dissimilar layouts even when the story itself is identical.
+fts-story-shell   = { workspace = true }
 dioxus            = { workspace = true }
 dssim-core = { workspace = true }
 png        = { workspace = true }

@@ -133,7 +133,7 @@ pub struct StateAssignment {
 
 /// A static, statically-typed knob value. The macro converts literals
 /// into these.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum KnobValue {
     Bool(bool),
     Int(i64),

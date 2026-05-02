@@ -19,7 +19,8 @@ use blitz_paint::paint_scene;
 use blitz_traits::shell::{ColorScheme, Viewport};
 use dioxus::prelude::*;
 use dioxus_native_dom::DioxusDocument;
-use fts_story_runtime::{render_fn, KnobSource, KnobValue, RenderFn, Story};
+use fts_story_runtime::{KnobValue, Story};
+use fts_story_shell::Lookbook;
 use peniko::kurbo::Rect;
 use peniko::Fill;
 
@@ -55,6 +56,13 @@ impl Default for RenderConfig {
 ///
 /// **Panics in debug builds** because Stylo and Parley produce
 /// visually-incorrect output under `debug_assertions`.
+///
+/// Internally this routes through
+/// [`fts_story_shell::Lookbook`]`{ chrome: false, initial_story: ... }`
+/// so the rendered tree is identical to what `apps/desktop`'s
+/// `--snapshot=<story>` mode hands wry. Knob overrides aren't yet
+/// honoured by the chromeless Lookbook path; the parameter is kept
+/// for forward-compat with a future API.
 pub fn render_story(
     story: &'static Story,
     knobs: HashMap<&'static str, KnobValue>,
@@ -68,7 +76,7 @@ pub fn render_story(
         );
     }
 
-    install_snapshot(unsafe { render_fn(story) }, knobs);
+    install_snapshot(story.name.to_string(), knobs);
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         render_inner(cfg)
     }));
@@ -172,17 +180,46 @@ fn encode_png(rgba: &[u8], width: u32, height: u32) -> Vec<u8> {
 
 thread_local! {
     static CURRENT: RefCell<Option<Snapshot>> = const { RefCell::new(None) };
+    static WRAPPER: RefCell<Option<fn(Element) -> Element>> = const { RefCell::new(None) };
 }
 
 struct Snapshot {
-    render: RenderFn,
+    /// Story name passed to `Lookbook`'s `initial_story` prop.
+    story_name: String,
+    /// Reserved for future per-story knob overrides; the Lookbook
+    /// chromeless path currently always uses each KnobSpec.default.
+    #[allow(dead_code)]
     knobs: Rc<HashMap<&'static str, KnobValue>>,
 }
 
-fn install_snapshot(render: RenderFn, knobs: HashMap<&'static str, KnobValue>) {
+/// Install a wrapper fn that is applied to every snapshot-rendered
+/// element. Lets the consumer wrap stories in a `ThemeProvider`,
+/// `Router`, or any other context the bare component fn would
+/// otherwise see. Stays installed until [`clear_wrapper`] is called or
+/// another wrapper is installed.
+///
+/// The fn receives the story's rendered `Element` and must return the
+/// wrapped one. Typical use:
+///
+/// ```ignore
+/// fn theme_wrap(child: Element) -> Element {
+///     let state = use_signal(|| ThemeState::new(default_theme_preset(), ThemeMode::Dark));
+///     rsx! { ThemeProvider { state, {child} } }
+/// }
+/// fts_story_snapshots::install_wrapper(theme_wrap);
+/// ```
+pub fn install_wrapper(wrap: fn(Element) -> Element) {
+    WRAPPER.with(|cell| *cell.borrow_mut() = Some(wrap));
+}
+
+pub fn clear_wrapper() {
+    WRAPPER.with(|cell| *cell.borrow_mut() = None);
+}
+
+fn install_snapshot(story_name: String, knobs: HashMap<&'static str, KnobValue>) {
     CURRENT.with(|cell| {
         *cell.borrow_mut() = Some(Snapshot {
-            render,
+            story_name,
             knobs: Rc::new(knobs),
         });
     });
@@ -192,15 +229,14 @@ fn clear_snapshot() {
     CURRENT.with(|cell| *cell.borrow_mut() = None);
 }
 
-/// Component handed to `VirtualDom::new`. Pulls the render thunk +
-/// knob snapshot out of the thread-local and invokes the user fn.
+/// Component handed to `VirtualDom::new`. Pulls the story name from
+/// the thread-local, mounts the same `Lookbook { chrome: false }`
+/// host that `apps/desktop`'s `--snapshot=<story>` mode uses, then
+/// applies any installed wrapper (typically `ThemeProvider` plus
+/// inline Tailwind stylesheet).
 fn snapshot_component() -> Element {
-    let snap = CURRENT.with(|cell| {
-        cell.borrow()
-            .as_ref()
-            .map(|s| (s.render, Rc::clone(&s.knobs)))
-    });
-    let (render, knobs) = match snap {
+    let story_name = CURRENT.with(|cell| cell.borrow().as_ref().map(|s| s.story_name.clone()));
+    let story_name = match story_name {
         Some(s) => s,
         None => {
             return rsx! {
@@ -208,14 +244,16 @@ fn snapshot_component() -> Element {
             }
         }
     };
-    let src = MapKnobs(knobs);
-    render(&src)
-}
-
-struct MapKnobs(Rc<HashMap<&'static str, KnobValue>>);
-
-impl KnobSource for MapKnobs {
-    fn get(&self, name: &'static str) -> Option<&KnobValue> {
-        self.0.get(name)
+    let element = rsx! {
+        Lookbook {
+            chrome: false,
+            initial_story: story_name,
+        }
+    };
+    let wrapper = WRAPPER.with(|cell| *cell.borrow());
+    match wrapper {
+        Some(wrap) => wrap(element),
+        None => element,
     }
 }
+
