@@ -36,6 +36,11 @@ btca resources   # list all available resources
 | `helgobox` | helgoboss/helgobox | Full REAPER extension (ReaLearn/Playtime) — reference for building complex REAPER plugins in Rust |
 | `sws` | reaper-oss/sws | SWS/S&M Extension — large open-source REAPER extension with actions, snapshots, and API extensions |
 
+When working on REAPER extension behavior, especially action registration,
+toggle states, toolbar refresh, menu integration, or command invocation, query
+`helgobox` and `sws` with `btca` before changing code. Prefer those repositories
+as source-code references for how production extensions use the REAPER API.
+
 ## Landing the Plane (Session Completion)
 
 **When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.

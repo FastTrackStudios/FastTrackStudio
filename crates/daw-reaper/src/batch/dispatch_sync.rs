@@ -1520,6 +1520,15 @@ fn dispatch_resource_sync(op: &ResourceOp) -> Result<StepOutput, String> {
 fn dispatch_action_registry_sync(op: &ActionRegistryOp) -> Result<StepOutput, String> {
     let reaper = Reaper::get();
     let medium = reaper.medium_reaper();
+    let lookup_named = |name: &str| {
+        medium.named_command_lookup(name).or_else(|| {
+            if name.starts_with('_') {
+                None
+            } else {
+                medium.named_command_lookup(format!("_{name}"))
+            }
+        })
+    };
 
     match op {
         ActionRegistryOp::RegisterAction(..) => {
@@ -1534,13 +1543,11 @@ fn dispatch_action_registry_sync(op: &ActionRegistryOp) -> Result<StepOutput, St
             Ok(StepOutput::Bool(removed))
         }
         ActionRegistryOp::IsRegistered(name) => {
-            let found = medium.named_command_lookup(format!("_{name}")).is_some();
+            let found = lookup_named(name).is_some();
             Ok(StepOutput::Bool(found))
         }
         ActionRegistryOp::LookupCommandId(name) => {
-            let id = medium
-                .named_command_lookup(format!("_{name}"))
-                .map(|id| id.get());
+            let id = lookup_named(name).map(|id| id.get());
             Ok(StepOutput::OptU32(id))
         }
         ActionRegistryOp::IsInActionList(_name) => {
@@ -1551,8 +1558,7 @@ fn dispatch_action_registry_sync(op: &ActionRegistryOp) -> Result<StepOutput, St
             Ok(StepOutput::Unit)
         }
         ActionRegistryOp::ExecuteNamedAction(name) => {
-            let lookup = format!("_{name}");
-            if let Some(cmd_id) = medium.named_command_lookup(lookup) {
+            if let Some(cmd_id) = lookup_named(name) {
                 medium.main_on_command_ex(cmd_id, 0, ReaperProjectContext::CurrentProject);
                 Ok(StepOutput::Bool(true))
             } else {

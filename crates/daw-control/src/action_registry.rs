@@ -158,6 +158,10 @@ impl ActionRegistry {
 
     /// Execute a named action (custom or native).
     ///
+    /// Accepts either REAPER's underscore-prefixed command name
+    /// (`"_S&M_WNTSHW1"`) or the unprefixed custom action name
+    /// (`"FTS_SIGNAL_ARM"`).
+    ///
     /// Returns `true` if the command was found and executed.
     pub async fn execute_named_action(&self, command_name: &str) -> crate::Result<bool> {
         Ok(self
@@ -165,6 +169,20 @@ impl ActionRegistry {
             .action_registry
             .execute_named_action(command_name.to_string())
             .await?)
+    }
+
+    /// Execute any REAPER action identifier.
+    ///
+    /// Accepts a numeric command ID as a string (for built-in actions such as
+    /// `"40044"`) or a named command identifier (for custom, extension, and SWS
+    /// actions such as `"FTS_SIGNAL_ARM"` or `"_S&M_WNTSHW1"`).
+    pub async fn execute_action(&self, action_id: &str) -> crate::Result<bool> {
+        if let Ok(command_id) = action_id.parse::<u32>() {
+            self.execute_command(command_id).await?;
+            Ok(true)
+        } else {
+            self.execute_named_action(action_id).await
+        }
     }
 
     /// Set the toggle state for a toggleable action.

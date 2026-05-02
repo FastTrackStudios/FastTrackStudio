@@ -238,6 +238,45 @@ async fn execute_named_action_for_registered_action(ctx: &ReaperTestContext) -> 
 }
 
 #[reaper_test(isolated)]
+async fn execute_named_action_accepts_prefixed_command_name(
+    ctx: &ReaperTestContext,
+) -> eyre::Result<()> {
+    let actions = ctx.daw.action_registry();
+
+    let cmd_id = actions
+        .register(
+            "FTS_SYNC_TEST_EXEC_PREFIXED",
+            "FTS Test: Execute Prefixed Action",
+        )
+        .await?;
+    assert!(cmd_id > 0);
+
+    assert!(
+        actions
+            .is_registered("_FTS_SYNC_TEST_EXEC_PREFIXED")
+            .await?,
+        "is_registered should accept REAPER's underscore-prefixed command name"
+    );
+    assert_eq!(
+        actions
+            .lookup_command_id("_FTS_SYNC_TEST_EXEC_PREFIXED")
+            .await?,
+        Some(cmd_id),
+        "lookup should accept REAPER's underscore-prefixed command name"
+    );
+
+    let result = actions
+        .execute_named_action("_FTS_SYNC_TEST_EXEC_PREFIXED")
+        .await?;
+    assert!(
+        result,
+        "execute_named_action should accept REAPER's underscore-prefixed command name"
+    );
+
+    Ok(())
+}
+
+#[reaper_test(isolated)]
 async fn execute_named_action_for_unknown_returns_false(
     ctx: &ReaperTestContext,
 ) -> eyre::Result<()> {

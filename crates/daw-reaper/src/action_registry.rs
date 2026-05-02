@@ -205,6 +205,17 @@ fn notify_action_triggered(command_name: String) {
     let _ = tx.send(command_name);
 }
 
+fn named_command_lookup(command_name: &str) -> Option<CommandId> {
+    let medium = Reaper::get().medium_reaper();
+    medium.named_command_lookup(command_name).or_else(|| {
+        if command_name.starts_with('_') {
+            None
+        } else {
+            medium.named_command_lookup(format!("_{command_name}"))
+        }
+    })
+}
+
 // ============================================================================
 // Extensions Menu
 // ============================================================================
@@ -495,12 +506,10 @@ impl ActionRegistryService for ReaperActionRegistry {
             if toggleable {
                 // REAPER can be slow to surface newly registered toggle actions in the
                 // action list unless their toolbar state is refreshed at least once.
-                unsafe {
-                    reaper
-                        .medium_reaper()
-                        .low()
-                        .RefreshToolbar2(0, cmd_id.get() as i32);
-                }
+                reaper
+                    .medium_reaper()
+                    .low()
+                    .RefreshToolbar2(0, cmd_id.get() as i32);
             }
 
             let cmd_id_val = cmd_id.get();
@@ -631,24 +640,17 @@ impl ActionRegistryService for ReaperActionRegistry {
     }
 
     async fn is_registered(&self, command_name: String) -> bool {
-        main_thread::query(move || {
-            let reaper = Reaper::get();
-            let medium = reaper.medium_reaper();
-            medium
-                .named_command_lookup(format!("_{command_name}"))
-                .is_some()
-        })
-        .await
-        .unwrap_or(false)
+        main_thread::query(move || named_command_lookup(&command_name).is_some())
+            .await
+            .unwrap_or(false)
     }
 
     async fn is_in_action_list(&self, command_name: String) -> bool {
         main_thread::query(move || {
             let reaper = Reaper::get();
-            let medium = reaper.medium_reaper();
 
             // First resolve the command name to a command ID
-            let cmd_id = match medium.named_command_lookup(format!("_{command_name}")) {
+            let cmd_id = match named_command_lookup(&command_name) {
                 Some(id) => id,
                 None => return false,
             };
@@ -671,15 +673,9 @@ impl ActionRegistryService for ReaperActionRegistry {
     }
 
     async fn lookup_command_id(&self, command_name: String) -> Option<u32> {
-        main_thread::query(move || {
-            let reaper = Reaper::get();
-            let medium = reaper.medium_reaper();
-            medium
-                .named_command_lookup(format!("_{command_name}"))
-                .map(|id| id.get())
-        })
-        .await
-        .flatten()
+        main_thread::query(move || named_command_lookup(&command_name).map(|id| id.get()))
+            .await
+            .flatten()
     }
 
     async fn subscribe_actions(&self, tx: Tx<ActionEvent>) {
@@ -726,8 +722,7 @@ impl ActionRegistryService for ReaperActionRegistry {
         main_thread::query(move || {
             let reaper = Reaper::get();
             let medium = reaper.medium_reaper();
-            let lookup = format!("_{command_name}");
-            if let Some(cmd_id) = medium.named_command_lookup(lookup) {
+            if let Some(cmd_id) = named_command_lookup(&command_name) {
                 medium.main_on_command_ex(cmd_id, 0, ProjectContext::CurrentProject);
                 true
             } else {
@@ -775,12 +770,10 @@ impl ActionRegistryService for ReaperActionRegistry {
             // there per the REAPER plugin SDK contract.
             let _ = main_thread::query(move || {
                 let reaper = Reaper::get();
-                unsafe {
-                    reaper
-                        .medium_reaper()
-                        .low()
-                        .RefreshToolbar2(0, cmd_id as i32);
-                }
+                reaper
+                    .medium_reaper()
+                    .low()
+                    .RefreshToolbar2(0, cmd_id as i32);
             })
             .await;
         }
