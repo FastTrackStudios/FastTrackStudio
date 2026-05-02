@@ -1,4 +1,5 @@
 // r[impl api.service]
+use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -325,12 +326,12 @@ impl VaultServiceImpl {
     // r[impl api.service.list-tasks]
     pub async fn list_tasks(&self) -> Vec<Task> {
         // r[impl query.execute.snapshot]
-        self.vault.read().await.load_tasks()
+        dedupe_tasks(self.vault.read().await.load_tasks())
     }
 
     // r[impl api.service.execute-query]
     pub async fn execute_query(&self, query: Query) -> Vec<Task> {
-        let tasks = self.vault.read().await.load_tasks();
+        let tasks = dedupe_tasks(self.vault.read().await.load_tasks());
         query.execute(&tasks).into_iter().cloned().collect()
     }
 
@@ -3088,6 +3089,17 @@ fn inbox_item_from_task(task: &Task) -> InboxItem {
     }
 }
 
+fn dedupe_tasks(tasks: Vec<Task>) -> Vec<Task> {
+    let mut seen = HashSet::new();
+    tasks
+        .into_iter()
+        .filter(|task| match task.id.as_ref() {
+            Some(id) => seen.insert(id.clone()),
+            None => true,
+        })
+        .collect()
+}
+
 fn is_inbox_task(task: &Task) -> bool {
     !task.is_deleted()
         && (task.tags.iter().any(|tag| tag == "inbox")
@@ -5702,6 +5714,46 @@ mod tests {
             .any(|project| project == "Operations"));
         assert!(!promoted.tags.iter().any(|tag| tag == "inbox"));
         assert!(svc.list_inbox_items().await.is_empty());
+
+        let _ = std::fs::remove_dir_all(vault);
+    }
+
+    #[tokio::test]
+    async fn list_tasks_deduplicates_records_with_same_stable_id() {
+        let vault = temp_vault();
+        let svc = VaultServiceImpl::new(&vault);
+        let duplicate_id = "task-duplicate-id".to_string();
+
+        for title in ["Duplicate A", "Duplicate B"] {
+            svc.create_task(Task {
+                id: Some(duplicate_id.clone()),
+                title: title.to_string(),
+                status: Status::Open,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        }
+
+        let listed = svc.list_tasks().await;
+        assert_eq!(
+            listed
+                .iter()
+                .filter(|task| task.id.as_deref() == Some(&duplicate_id))
+                .count(),
+            1,
+            "task list should not emit duplicate logical tasks with the same stable id"
+        );
+
+        let queried = svc.execute_query(Query::default()).await;
+        assert_eq!(
+            queried
+                .iter()
+                .filter(|task| task.id.as_deref() == Some(&duplicate_id))
+                .count(),
+            1,
+            "query output should not emit duplicate logical tasks with the same stable id"
+        );
 
         let _ = std::fs::remove_dir_all(vault);
     }
