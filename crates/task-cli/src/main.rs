@@ -3,13 +3,13 @@ use clap::{Parser, Subcommand};
 use task_core::index::{ChangeRow, ConflictRow};
 use task_core::workflows::{parse_comments, render_comments, Comment};
 use task_core::{
-    BusinessFinanceReport, CalendarEvent, CalendarEventPatch, CalendarEventStatus,
-    CardDavSyncCollectionRequest, ChannelConversation, ChannelMessage, ChannelSendMessageRequest,
-    Client, Filter, InboxCaptureRequest, InboxItem, InboxPromoteRequest, Invoice,
-    OperatingModelReport, OrganizationContext, OrganizationRecord, Person, PersonContext, Priority,
-    Project, ProjectKnowledgeContext, ProviderSyncState, Query, RelationType, ReviewReport, Sort,
-    Status, SyncStats, SystemCapabilities, SystemHealth, Task, TaskRelation, TimeEntryContext,
-    TimeEntryFilter, VaultServiceImpl, WikiLink,
+    create_project, save_project_task, BusinessFinanceReport, CalendarEvent, CalendarEventPatch,
+    CalendarEventStatus, CardDavSyncCollectionRequest, ChannelConversation, ChannelMessage,
+    ChannelSendMessageRequest, Client, Filter, InboxCaptureRequest, InboxItem, InboxPromoteRequest,
+    Invoice, OperatingModelReport, OrganizationContext, OrganizationRecord, Person, PersonContext,
+    Priority, Project, ProjectKnowledgeContext, ProviderSyncState, Query, RelationType,
+    ReviewReport, Sort, Status, SyncStats, SystemCapabilities, SystemHealth, Task, TaskRelation,
+    TimeEntry, TimeEntryContext, TimeEntryFilter, VaultServiceImpl, WikiLink,
 };
 
 #[derive(Parser)]
@@ -278,6 +278,11 @@ enum Commands {
         #[command(subcommand)]
         command: NcCommands,
     },
+    /// Demo data and smoke-test fixture generation
+    Demo {
+        #[command(subcommand)]
+        command: DemoCommands,
+    },
     /// Start a timer on a task (fails if another is running)
     Start {
         reference: String,
@@ -342,6 +347,25 @@ enum Commands {
     Server {
         #[command(subcommand)]
         command: ServerCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum DemoCommands {
+    /// Seed deterministic demo data into an isolated project prefix
+    Seed {
+        /// Demo organization/workspace name
+        #[arg(long, default_value = "Demo")]
+        org: String,
+        /// Demo billable client name
+        #[arg(long, default_value = "Demo Client")]
+        client: String,
+        /// Project/folder prefix to create or update
+        #[arg(long, default_value = "Demo Workflow Smoke")]
+        prefix: String,
+        /// Print machine-readable summary
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -1359,6 +1383,10 @@ async fn main() -> eyre::Result<()> {
     let vault_path = vault.ok_or_else(|| {
         eyre::eyre!("No vault specified. Use --vault <path> or set TASK_VAULT env var.")
     })?;
+
+    if let Commands::Demo { command } = command {
+        return run_demo_command(&vault_path, command, actor.as_deref());
+    }
 
     let svc = VaultServiceImpl::new(&vault_path);
 
@@ -3139,7 +3167,7 @@ async fn main() -> eyre::Result<()> {
             run_agent_command(&svc, &vault_path, actor.as_deref(), command).await?;
         }
 
-        Commands::Doctor { .. } | Commands::Server { .. } => {
+        Commands::Doctor { .. } | Commands::Server { .. } | Commands::Demo { .. } => {
             unreachable!("handled before vault dispatch")
         }
 
@@ -4046,6 +4074,11 @@ async fn run_remote_command(
             }
         },
         Commands::Email { command } => run_remote_email_command(remote, actor, command).await?,
+        Commands::Demo { .. } => {
+            return Err(eyre::eyre!(
+                "demo commands seed local vault files; omit --server and pass --vault or TASK_VAULT"
+            ));
+        }
         Commands::Nc { .. } => {
             unreachable!("handled before remote dispatch")
         }
@@ -5488,6 +5521,197 @@ fn env_truthy(value: &str) -> bool {
         value.to_ascii_lowercase().as_str(),
         "1" | "true" | "yes" | "on"
     )
+}
+
+fn run_demo_command(
+    vault_path: &str,
+    command: DemoCommands,
+    actor: Option<&str>,
+) -> eyre::Result<()> {
+    match command {
+        DemoCommands::Seed {
+            org,
+            client,
+            prefix,
+            json,
+        } => {
+            let summary = seed_demo_vault(
+                std::path::Path::new(vault_path),
+                &org,
+                &client,
+                &prefix,
+                actor,
+            )?;
+            if json {
+                println!(
+                    "{{\"project\":\"{}\",\"files\":[{}]}}",
+                    escape_json(&summary.project),
+                    summary
+                        .files
+                        .iter()
+                        .map(|file| format!("\"{}\"", escape_json(file)))
+                        .collect::<Vec<_>>()
+                        .join(",")
+                );
+            } else {
+                println!("Seeded demo project: {}", summary.project);
+                for file in &summary.files {
+                    println!("  {file}");
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone)]
+struct DemoSeedSummary {
+    project: String,
+    files: Vec<String>,
+}
+
+fn seed_demo_vault(
+    vault_root: &std::path::Path,
+    org: &str,
+    client: &str,
+    prefix: &str,
+    actor: Option<&str>,
+) -> eyre::Result<DemoSeedSummary> {
+    let actor = actor.unwrap_or("demo-agent");
+    let project = Project {
+        title: prefix.to_string(),
+        description: Some("Deterministic Task demo/smoke project.".to_string()),
+        organization: Some(org.to_string()),
+        client: Some(WikiLink(client.to_string())),
+        tags: vec![
+            "project".to_string(),
+            "demo".to_string(),
+            "smoke".to_string(),
+        ],
+        identifier: Some("DEMO".to_string()),
+        lead: Some(actor.to_string()),
+        default_assignee: Some(actor.to_string()),
+        default_rate: Some(12_000),
+        ..Default::default()
+    };
+    let project_dir = create_project(vault_root, &project)?;
+    let mut files = vec![project_dir.join("project.md")];
+    let project_link = WikiLink(prefix.to_string());
+    let created = Utc.with_ymd_and_hms(2026, 5, 1, 9, 0, 0).unwrap();
+    let work_start = Utc.with_ymd_and_hms(2026, 5, 1, 10, 0, 0).unwrap();
+    let work_end = Utc.with_ymd_and_hms(2026, 5, 1, 11, 30, 0).unwrap();
+
+    let tasks = vec![
+        Task {
+            id: Some("demo-task-capture-inbox".to_string()),
+            title: "Demo capture inbox item".to_string(),
+            status: Status::Planned,
+            priority: Priority::High,
+            projects: vec![project_link.clone()],
+            tags: vec!["demo".to_string(), "inbox".to_string()],
+            assignee: Some(actor.to_string()),
+            created_by: Some(actor.to_string()),
+            date_created: Some(created),
+            date_modified: Some(created),
+            body: "Exercises inbox capture/promotion flows in a deterministic fixture.".to_string(),
+            ..Default::default()
+        },
+        Task {
+            id: Some("demo-task-billable-work".to_string()),
+            title: "Demo billable work item".to_string(),
+            status: Status::InProgress,
+            priority: Priority::Normal,
+            projects: vec![project_link.clone()],
+            tags: vec![
+                "demo".to_string(),
+                "time".to_string(),
+                "invoice".to_string(),
+            ],
+            assignee: Some(actor.to_string()),
+            created_by: Some(actor.to_string()),
+            date_created: Some(created),
+            date_modified: Some(created),
+            time_entries: vec![TimeEntry {
+                id: "demo-time-entry-billable".to_string(),
+                user: Some(actor.to_string()),
+                start_time: work_start,
+                end_time: Some(work_end),
+                description: Some("Deterministic billable smoke-test work".to_string()),
+                billable: true,
+                billable_rate: Some(12_000),
+                tags: vec!["demo".to_string()],
+                ..Default::default()
+            }],
+            body: "Provides a stable time-entry fixture for reports and invoice smoke tests."
+                .to_string(),
+            ..Default::default()
+        },
+        Task {
+            id: Some("demo-task-review-invoice".to_string()),
+            title: "Demo review invoice lifecycle".to_string(),
+            status: Status::Open,
+            priority: Priority::Normal,
+            projects: vec![project_link],
+            tags: vec!["demo".to_string(), "invoice".to_string()],
+            assignee: Some(actor.to_string()),
+            created_by: Some(actor.to_string()),
+            date_created: Some(created),
+            date_modified: Some(created),
+            body: "Used by smoke tests to validate draft/sent/paid invoice lifecycle paths."
+                .to_string(),
+            ..Default::default()
+        },
+    ];
+
+    for task in &tasks {
+        save_project_task(&project_dir, task)?;
+        files.push(project_dir.join("tasks").join(format!("{}.md", task.title)));
+    }
+
+    let inbox_dir = vault_root.join("inbox");
+    std::fs::create_dir_all(&inbox_dir)?;
+    let inbox_file = inbox_dir.join("demo-capture.md");
+    std::fs::write(
+        &inbox_file,
+        format!(
+            "---\nid: demo-inbox-capture\ntitle: Demo inbox capture\nkind: inbox\nsource: demo\norganization: {}\nproject: \"[[{}]]\"\n---\nDemo capture item for smoke testing.\n",
+            org, prefix
+        ),
+    )?;
+    files.push(inbox_file);
+
+    let invoice_dir = vault_root.join("invoices");
+    std::fs::create_dir_all(&invoice_dir)?;
+    let invoice_file = invoice_dir.join("demo-invoice.md");
+    std::fs::write(
+        &invoice_file,
+        format!(
+            "---\nid: demo-invoice\nclient: \"[[{}]]\"\nproject: \"[[{}]]\"\nstatus: draft\ntotal_cents: 18000\npaid_cents: 0\n---\n# Demo Invoice\n\nDeterministic invoice fixture for smoke tests.\n",
+            client, prefix
+        ),
+    )?;
+    files.push(invoice_file);
+
+    let calendar_dir = vault_root.join("calendar");
+    std::fs::create_dir_all(&calendar_dir)?;
+    let event_file = calendar_dir.join("demo-event.md");
+    std::fs::write(
+        &event_file,
+        format!(
+            "---\nid: demo-event\ntitle: Demo workflow review\nstatus: confirmed\nstart: 2026-05-02T15:00:00Z\nend: 2026-05-02T16:00:00Z\nproject: \"[[{}]]\"\n---\nCalendar fixture for demo smoke testing.\n",
+            prefix
+        ),
+    )?;
+    files.push(event_file);
+
+    let files = files
+        .into_iter()
+        .map(|path| path.display().to_string())
+        .collect();
+    Ok(DemoSeedSummary {
+        project: prefix.to_string(),
+        files,
+    })
 }
 
 async fn run_server_command(command: ServerCommands) -> eyre::Result<()> {
@@ -8466,6 +8690,57 @@ fn truncate(s: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn seeds_deterministic_demo_vault_files() {
+        let root = std::env::temp_dir().join(format!(
+            "task-demo-seed-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+
+        let summary = seed_demo_vault(
+            &root,
+            "Acme Org",
+            "Acme Client",
+            "Demo Smoke Project",
+            Some("tester"),
+        )
+        .unwrap();
+
+        assert_eq!(summary.project, "Demo Smoke Project");
+        assert_eq!(summary.files.len(), 7);
+        let project_file = root.join("Demo Smoke Project").join("project.md");
+        let billable_task = root
+            .join("Demo Smoke Project")
+            .join("tasks")
+            .join("Demo billable work item.md");
+        let inbox_file = root.join("inbox").join("demo-capture.md");
+        let invoice_file = root.join("invoices").join("demo-invoice.md");
+        let event_file = root.join("calendar").join("demo-event.md");
+
+        for path in [
+            &project_file,
+            &billable_task,
+            &inbox_file,
+            &invoice_file,
+            &event_file,
+        ] {
+            assert!(path.exists(), "expected seeded file {}", path.display());
+        }
+        let billable = std::fs::read_to_string(&billable_task).unwrap();
+        assert!(billable.contains("demo-time-entry-billable"));
+        assert!(billable.contains("Deterministic billable smoke-test work"));
+        let invoice = std::fs::read_to_string(&invoice_file).unwrap();
+        assert!(invoice.contains("client: \"[[Acme Client]]\""));
+        assert!(invoice.contains("total_cents: 18000"));
+
+        std::fs::remove_dir_all(&root).unwrap();
+    }
 
     #[test]
     fn normalizes_server_urls_to_vox_websocket_endpoint() {
