@@ -365,6 +365,36 @@ pub fn diag_svg_smoke(_marker: bool) -> Element {
     }
 }
 
+/// Regression test for cross-renderer layout parity. Renders 8 rows
+/// of `flex items-center gap-3` (text label + 32×32 box) inside
+/// `flex-col gap-6`. Originally a bisection probe that pinned a 1 px
+/// per-row vertical drift between Blitz and wry to a single root
+/// cause: Xvfb's default DPI (75) made webkit scale every CSS-pixel
+/// value by ~96/75, while Blitz's CPU rasteriser uses CSS-px ==
+/// device-px at scale 1.0. Pinning Xvfb to `-dpi 96` brought parity
+/// from `dssim ≈ 0.085` to `≈ 0.003`. Keep this story so any future
+/// regression in flex / gap / line-height / DPI handling shows up
+/// here before the heavier Button-matrix tests fail.
+#[story(
+    category = "Diagnostics",
+    name = "layout-stack",
+    knobs(_marker = false),
+)]
+pub fn diag_layout_stack(_marker: bool) -> Element {
+    rsx! {
+        div { class: "p-6 bg-background text-foreground flex flex-col gap-6",
+            for i in 0..8 {
+                div { class: "flex items-center gap-3",
+                    span { class: "w-48 text-sm text-muted-foreground", "row {i} text-sm label" }
+                    div {
+                        style: "width: 32px; height: 32px; background: white;",
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Force-link helper — referenced from the binary's `main` so LTO
 /// can't drop the static registrations. Each `#[story]` macro emits
 /// a registration as a `static` item; without a code path that
@@ -378,5 +408,6 @@ pub fn force_link() {
         &BADGE_VARIANTS_STORY,
         &CARD_BASIC_STORY,
         &DIAG_SVG_SMOKE_STORY,
+        &DIAG_LAYOUT_STACK_STORY,
     );
 }

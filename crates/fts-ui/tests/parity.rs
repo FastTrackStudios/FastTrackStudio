@@ -101,3 +101,9 @@ fn button_sizes_parity() {
 fn diag_svg_smoke_parity() {
     run(&stories::DIAG_SVG_SMOKE_STORY);
 }
+
+#[test]
+#[ignore = "requires Xvfb/xdotool/imagemagick + a built target/release/fts-ui-showcase-desktop"]
+fn diag_layout_stack_parity() {
+    run(&stories::DIAG_LAYOUT_STACK_STORY);
+}
