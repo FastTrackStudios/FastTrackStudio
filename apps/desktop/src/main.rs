@@ -73,12 +73,28 @@ mod snapshot {
             let _ = SNAPSHOT_STORY.set(name);
         }
 
+        // CSS injected only in snapshot mode. Pins every CSS animation
+        // (e.g. Tailwind `animate-spin`) to a fixed point in its
+        // timeline so wry's screenshot is deterministic and matches the
+        // animation clock the Blitz CPU snapshot path advances to.
+        // `animation-delay: -0.125s` seeks 125 ms into the animation;
+        // `animation-play-state: paused` freezes it there. Keep in sync
+        // with `RenderConfig::animation_time_secs` in fts-story-snapshots.
+        pub const SNAPSHOT_ANIMATION_PIN: &str = r#"
+            *, *::before, *::after {
+                animation-delay: -0.125s !important;
+                animation-play-state: paused !important;
+                transition: none !important;
+            }
+        "#;
+
         pub fn run() -> Element {
             let story = SNAPSHOT_STORY.get().cloned().unwrap_or_default();
             let theme_state =
                 use_signal(|| ThemeState::new(default_theme_preset(), ThemeMode::Dark));
             rsx! {
                 document::Stylesheet { href: TAILWIND_CSS }
+                style { {Self::SNAPSHOT_ANIMATION_PIN} }
                 ThemeProvider { state: theme_state,
                     Lookbook {
                         chrome: false,

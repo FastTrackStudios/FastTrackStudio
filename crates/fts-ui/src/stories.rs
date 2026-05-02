@@ -324,6 +324,43 @@ pub fn diag_svg_smoke(_marker: bool) -> Element {
                     style: "background: white;",
                 }
             }
+            // 11. size-4 + animate-spin + stroke="white" (no
+            //     currentColor). If this renders, the bug is
+            //     specifically `currentColor` at small sizes — usvg
+            //     resolves currentColor to black when the SVG markup
+            //     has no `color` attribute, and Blitz doesn't inject
+            //     the computed color before parsing. If this still
+            //     vanishes, the bug is animate-spin on small SVGs
+            //     regardless of stroke source.
+            div { class: "flex items-center gap-3",
+                span { class: "w-48 text-sm text-muted-foreground", "size-4 + animate-spin + white stroke" }
+                svg {
+                    class: "size-4 animate-spin",
+                    view_box: "0 0 24 24",
+                    fill: "none",
+                    stroke: "white",
+                    stroke_width: "2",
+                    path { d: "M21 12a9 9 0 1 1-6.219-8.56" }
+                }
+            }
+            // 12. size-4 + stroke="currentColor" WITHOUT animate-spin.
+            //     If this vanishes (or renders black-on-dark and is
+            //     functionally invisible), the bug is `currentColor`
+            //     at small sizes independent of animation. Pairs with
+            //     test 2 (currentColor at 32px ✓) — if 12 fails and 2
+            //     passes, the threshold is size, not currentColor in
+            //     general.
+            div { class: "flex items-center gap-3 text-foreground",
+                span { class: "w-48 text-sm text-muted-foreground", "size-4 + currentColor (no animate-spin)" }
+                svg {
+                    class: "size-4",
+                    view_box: "0 0 24 24",
+                    fill: "none",
+                    stroke: "currentColor",
+                    stroke_width: "2",
+                    path { d: "M21 12a9 9 0 1 1-6.219-8.56" }
+                }
+            }
         }
     }
 }
