@@ -395,6 +395,90 @@ pub fn diag_layout_stack(_marker: bool) -> Element {
     }
 }
 
+/// Probe for the dropdown-doesn't-close-on-outside-click bug on the
+/// Blitz native renderer. Renders a single `Dropdown` next to a
+/// large neutral target area. On wry / web the dropdown closes when
+/// you click the target area (the trigger button loses focus →
+/// `dioxus_primitives::dropdown_menu`'s `use_effect` watching
+/// `focus.any_focused()` flips `open` → false). On Blitz native it
+/// stays open because Blitz doesn't blur the trigger when an
+/// unfocusable element is clicked, so the focus signal never
+/// changes. Counter and visible state badge make it easy to confirm
+/// whether interactions are reaching the renderer at all.
+///
+/// Steps to reproduce:
+///   1. Click "Open menu" — dropdown opens, badge shows `open`.
+///   2. Click the large grey "click-away target".
+///   3. Native renderer: dropdown stays open, badge still `open`.
+///      wry / web: dropdown closes, badge flips to `closed`.
+///   4. Press Escape — dropdown closes on every renderer (proves
+///      the close path itself works; the bug is the trigger).
+#[story(
+    category = "Diagnostics",
+    name = "dropdown-close",
+    knobs(_marker = false),
+)]
+pub fn diag_dropdown_close(_marker: bool) -> Element {
+    let mut click_count = use_signal(|| 0u32);
+    let mut last_open = use_signal(|| false);
+
+    rsx! {
+        div { class: "p-6 bg-background text-foreground flex flex-col gap-6 min-h-screen",
+            div { class: "flex items-center gap-4",
+                Dropdown {
+                    on_open_change: move |open: bool| { last_open.set(open); },
+                    DropdownTrigger {
+                        class: "px-3 py-2 rounded-md bg-primary text-primary-foreground",
+                        "Open menu"
+                    }
+                    DropdownContent { align: "start".to_string(),
+                        DropdownItem {
+                            value: "edit".to_string(),
+                            index: 0,
+                            on_select: move |_| {},
+                            "Edit"
+                        }
+                        DropdownItem {
+                            value: "duplicate".to_string(),
+                            index: 1,
+                            on_select: move |_| {},
+                            "Duplicate"
+                        }
+                        DropdownSeparator {}
+                        DropdownItem {
+                            value: "delete".to_string(),
+                            index: 2,
+                            destructive: true,
+                            on_select: move |_| {},
+                            "Delete"
+                        }
+                    }
+                }
+                span { class: "text-sm text-muted-foreground",
+                    "open signal: "
+                    span { class: "font-mono", if last_open() { "open" } else { "closed" } }
+                }
+            }
+
+            // Click-away target. Counts clicks so we can verify the
+            // event is reaching Dioxus at all even when the dropdown
+            // refuses to close.
+            div {
+                class: "h-64 rounded-md border border-border bg-muted/40 flex items-center justify-center cursor-pointer select-none",
+                onclick: move |_| { *click_count.write() += 1; },
+                span { class: "text-sm text-muted-foreground",
+                    "click-away target — clicks received: "
+                    span { class: "font-mono", "{click_count}" }
+                }
+            }
+
+            div { class: "text-xs text-muted-foreground",
+                "Bug repro: open the menu, then click the grey area. On wry / web the menu closes; on Blitz native it stays open because the trigger never receives a blur event when an unfocusable sibling is clicked."
+            }
+        }
+    }
+}
+
 /// Force-link helper — referenced from the binary's `main` so LTO
 /// can't drop the static registrations. Each `#[story]` macro emits
 /// a registration as a `static` item; without a code path that
@@ -409,5 +493,6 @@ pub fn force_link() {
         &CARD_BASIC_STORY,
         &DIAG_SVG_SMOKE_STORY,
         &DIAG_LAYOUT_STACK_STORY,
+        &DIAG_DROPDOWN_CLOSE_STORY,
     );
 }
