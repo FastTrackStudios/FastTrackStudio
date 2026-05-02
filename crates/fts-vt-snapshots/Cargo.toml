@@ -1,0 +1,20 @@
+[package]
+name = "fts-vt-snapshots"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Headless Blitz-based visual regression runner for fts-visual-testing."
+
+[dependencies]
+fts-vt-core    = { workspace = true }
+fts-vt-runtime = { workspace = true }
+dssim-core = { workspace = true }
+png        = { workspace = true }
+
+# Pin to our patched Blitz fork. Carries the RefCell-borrow fix and any
+# follow-on fixes; bumped via `cargo update -p dioxus-native`.
+dioxus-native = { git = "https://github.com/FastTrackStudios/blitz", branch = "fts/integration", features = ["prelude", "system-fonts"] }
+
+[lints]
+workspace = true

@@ -1,0 +1,15 @@
+[package]
+name = "fts-vt-shell"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Interactive Lookbook-style shell for fts-visual-testing."
+
+[dependencies]
+fts-vt-core    = { workspace = true }
+fts-vt-runtime = { workspace = true }
+dioxus = { workspace = true }
+
+[lints]
+workspace = true

@@ -1,0 +1,16 @@
+[package]
+name = "fts-vt-fuzz"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Interaction fuzzing for fts-visual-testing."
+
+[dependencies]
+fts-vt-core    = { workspace = true }
+fts-vt-runtime = { workspace = true }
+fts-vt-snapshots     = { workspace = true }
+proptest = { workspace = true }
+
+[lints]
+workspace = true

@@ -1,0 +1,179 @@
+//! Core, dependency-light types for `fts-visual-testing`.
+//!
+//! This crate intentionally does NOT depend on `dioxus`. It defines:
+//!
+//! - [`Story`] — the metadata + render-fn pointer that `#[story]` produces.
+//! - [`Knob`] / [`KnobValue`] — typed inputs to a story.
+//! - [`Interaction`] — a step in a recorded interaction script (click, type,
+//!   key press, scroll, wait, snapshot, assert).
+//! - [`STORIES`] — the global, compile-time registry populated via
+//!   [`linkme::distributed_slice`]. Both the interactive shell and the
+//!   headless VRT runner enumerate stories from this slice.
+//!
+//! Renderer-specific concerns (rendering Dioxus VDOMs, rasterizing via
+//! Blitz, dispatching events into a `DioxusDocument`) live in
+//! `fts-vt-runtime` and `fts-vt-snapshots`. Anything that needs to talk about
+//! a story without pulling in Dioxus belongs here.
+
+#![cfg_attr(docsrs, feature(doc_cfg))]
+
+use linkme::distributed_slice;
+
+/// The compile-time story registry.
+///
+/// `#[story]` (in `fts-vt-macros`) appends to this slice. Tools that
+/// enumerate stories — the interactive shell, the VRT runner, the fuzz
+/// harness — iterate it.
+///
+/// ```ignore
+/// for story in fts_vt_core::STORIES {
+///     println!("{}/{}", story.category, story.name);
+/// }
+/// ```
+#[distributed_slice]
+pub static STORIES: [&'static Story] = [..];
+
+/// Metadata + render entry point for a single story.
+///
+/// `render` is intentionally an opaque pointer — its signature is defined
+/// by `fts-vt-runtime`. This crate stores it as `*const ()` so we can
+/// keep `fts-vt-core` free of any rendering dependency.
+pub struct Story {
+    /// Stable identifier — usually the function name.
+    pub name: &'static str,
+    /// Sidebar grouping. `None` collapses into a default "Uncategorised".
+    pub category: Option<&'static str>,
+    /// Source-doc-comment description, surfaced in the shell.
+    pub description: &'static str,
+    /// Rust path to the source function (file:line, populated by the macro).
+    pub source: &'static str,
+    /// Knob declarations, in declaration order.
+    pub knobs: &'static [KnobSpec],
+    /// Render thunk. Cast back to the runtime-defined fn pointer.
+    pub render: *const (),
+    /// Optional auto-snapshot matrix. When present, the VRT runner takes
+    /// the cartesian product of the listed knob values and snapshots each.
+    /// `None` means "use defaults only".
+    pub auto_states: Option<&'static [StateAssignment]>,
+}
+
+// SAFETY: the `render` pointer is to a `'static` fn item; sharing across
+// threads is fine. Stories themselves are immutable `&'static`.
+unsafe impl Sync for Story {}
+
+/// One knob declaration.
+pub struct KnobSpec {
+    pub name: &'static str,
+    pub doc: &'static str,
+    pub kind: KnobKind,
+}
+
+/// What kind of input a knob accepts. The shell uses this to pick a
+/// control widget; the VRT runner uses it to enumerate values for the
+/// auto-state matrix.
+pub enum KnobKind {
+    Bool,
+    /// Variants of an enum. The first is the default unless overridden.
+    Enum {
+        variants: &'static [&'static str],
+    },
+    String {
+        multiline: bool,
+    },
+    Number {
+        min: Option<f64>,
+        max: Option<f64>,
+        step: Option<f64>,
+    },
+    Color,
+    /// Opaque value the shell can't introspect. Knob shows as read-only.
+    Opaque,
+}
+
+/// Either a literal default or a `serde_json`-style override emitted by
+/// `#[states(...)]`. Stored as `&'static str` so this stays alloc-free.
+pub struct StateAssignment {
+    pub name: &'static str,
+    pub knobs: &'static [(&'static str, KnobValue)],
+}
+
+/// A static, statically-typed knob value. The macro converts literals
+/// into these.
+pub enum KnobValue {
+    Bool(bool),
+    Int(i64),
+    Float(f64),
+    Str(&'static str),
+    /// One variant of an enum, by name. The runtime is responsible for
+    /// converting the name back into the actual enum value via
+    /// `<T as FromKnobName>::from_name`.
+    EnumVariant(&'static str),
+}
+
+/// One step in an interaction script.
+///
+/// Used by `fts-vt-snapshots` to drive a `DioxusDocument` between snapshots,
+/// and by `fts-vt-fuzz` as the unit of mutation.
+pub enum Interaction {
+    /// Click the first node matching the selector.
+    Click(Selector),
+    /// Hover (mousemove + mouseenter) onto the matching node.
+    Hover(Selector),
+    /// Press and release a key on the currently-focused node.
+    Key(KeyAction),
+    /// Type a string into the currently-focused node.
+    Type(&'static str),
+    /// Scroll the matching node by (dx, dy) pixels.
+    Scroll {
+        target: Selector,
+        dx: f32,
+        dy: f32,
+    },
+    /// Wait for a condition before continuing.
+    Wait(WaitCondition),
+    /// Take a named snapshot at this point in the script.
+    Snapshot(&'static str),
+    /// Assert against the running app via a runtime-defined predicate.
+    /// The opaque pointer is interpreted by `fts-vt-runtime`.
+    Assert(*const ()),
+}
+
+unsafe impl Sync for Interaction {}
+
+/// How to find a node in the rendered document.
+pub enum Selector {
+    /// CSS-style selector evaluated by Blitz/Stylo.
+    Css(&'static str),
+    /// ARIA role + accessible-name pair (preferred — survives styling churn).
+    Role {
+        role: &'static str,
+        name: Option<&'static str>,
+    },
+    /// `data-test-id` attribute.
+    TestId(&'static str),
+}
+
+pub enum KeyAction {
+    Press(&'static str),
+    Down(&'static str),
+    Up(&'static str),
+}
+
+pub enum WaitCondition {
+    /// The runtime is idle (no pending mutations or pending futures).
+    Idle,
+    /// A node matching the selector has mounted.
+    Mounted(Selector),
+    /// A fixed wall-clock duration. Discouraged — prefer `Idle`/`Mounted`.
+    Millis(u64),
+}
+
+/// Recorded interaction script associated with a story.
+pub struct InteractionScript {
+    pub story: &'static str,
+    pub name: &'static str,
+    pub steps: &'static [Interaction],
+}
+
+#[distributed_slice]
+pub static INTERACTION_SCRIPTS: [&'static InteractionScript] = [..];

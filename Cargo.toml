@@ -1,0 +1,54 @@
+[workspace]
+members = [
+    "crates/fts-vt-core",
+    "crates/fts-vt-macros",
+    "crates/fts-vt-runtime",
+    "crates/fts-vt-shell",
+    "crates/fts-vt-snapshots",
+    "crates/fts-vt-fuzz",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["FastTrack Studio"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/FastTrackStudios/fts-visual-testing"
+
+[workspace.dependencies]
+# Internal
+fts-vt-core    = { path = "crates/fts-vt-core",    version = "0.1.0" }
+fts-vt-macros  = { path = "crates/fts-vt-macros",  version = "0.1.0" }
+fts-vt-runtime = { path = "crates/fts-vt-runtime", version = "0.1.0" }
+fts-vt-shell   = { path = "crates/fts-vt-shell",   version = "0.1.0" }
+fts-vt-snapshots     = { path = "crates/fts-vt-snapshots",     version = "0.1.0" }
+
+# Dioxus — loose `0.7` requirement so this crate is consumable by every
+# dioxus 0.7.x project we care about (`frame` is on 0.7.2, `fts-ui` on
+# 0.7.6, both unify on the same dioxus-core). The native/Blitz target is
+# fed via `dioxus-native` inside `fts-vt-snapshots`, not here.
+dioxus = { version = "0.7", default-features = false, features = ["lib"] }
+
+# Compile-time story registration. Provides `#[distributed_slice]` so each
+# `#[story]` invocation can append to a global slice the VRT runner reads.
+linkme = "0.3"
+
+# Proc-macro plumbing
+syn = { version = "2", features = ["full", "extra-traits"] }
+quote = "1"
+proc-macro2 = "1"
+
+# Image diffing for VRT
+dssim-core = "3"
+png = "0.17"
+
+# Fuzz / property-based testing
+proptest = "1"
+
+# Misc
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+
+[workspace.lints.rust]
+unused = "warn"

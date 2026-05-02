@@ -1,0 +1,18 @@
+[package]
+name = "fts-vt-macros"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Proc-macros for fts-visual-testing: #[story], #[story_test], #[states]."
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { workspace = true }
+quote = { workspace = true }
+proc-macro2 = { workspace = true }
+
+[lints]
+workspace = true
