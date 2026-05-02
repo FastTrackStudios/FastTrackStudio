@@ -50,15 +50,24 @@ async fn run() -> Result<()> {
     // Register actions and subscribe to events
     let reg = daw_extension_runtime::register_actions(
         &daw,
-        &[ActionDef {
-            command_name: "FTS_GUEST_HELLO",
-            description: "FTS: Guest Hello World",
-            toggleable: false,
-        }],
+        &[
+            ActionDef {
+                command_name: "FTS_GUEST_HELLO",
+                description: "FTS: Guest Hello World",
+                toggleable: false,
+            },
+            ActionDef {
+                command_name: "FTS_GUEST_TOGGLE_EXAMPLE",
+                description: "FTS: Guest Toggle Example",
+                toggleable: true,
+            },
+        ],
     )
     .await?;
 
     let mut rx = reg.rx;
+    let actions = daw.action_registry();
+    let mut toggle_example_on = false;
 
     info!("[guest:{pid}] Ready — waiting for action triggers");
 
@@ -69,6 +78,14 @@ async fn run() -> Result<()> {
                 let daw::service::ActionEvent::Triggered { ref command_name } = *item;
                 println!(">>> HOT RELOAD WORKS! Action: {command_name} <<<");
                 info!("[guest:{pid}] Action triggered: {command_name}");
+
+                if command_name == "FTS_GUEST_TOGGLE_EXAMPLE" {
+                    toggle_example_on = !toggle_example_on;
+                    actions
+                        .set_toggle_state(command_name, toggle_example_on)
+                        .await?;
+                    info!("[guest:{pid}] Toggle state for {command_name}: {toggle_example_on}");
+                }
             }
             Ok(None) => {
                 info!("[guest:{pid}] Action event stream ended");
