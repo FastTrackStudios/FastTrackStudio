@@ -395,24 +395,31 @@ pub fn diag_layout_stack(_marker: bool) -> Element {
     }
 }
 
-/// Probe for the dropdown-doesn't-close-on-outside-click bug on the
-/// Blitz native renderer. Renders a single `Dropdown` next to a
-/// large neutral target area. On wry / web the dropdown closes when
-/// you click the target area (the trigger button loses focus →
-/// `dioxus_primitives::dropdown_menu`'s `use_effect` watching
-/// `focus.any_focused()` flips `open` → false). On Blitz native it
-/// stays open because Blitz doesn't blur the trigger when an
-/// unfocusable element is clicked, so the focus signal never
-/// changes. Counter and visible state badge make it easy to confirm
-/// whether interactions are reaching the renderer at all.
+/// Regression test for the dropdown-crash-on-first-click bug on the
+/// Blitz native renderer (fixed in
+/// `FastTrackStudios/blitz#fix/dom-handle-focus-defer-queue`). The
+/// original symptom was that `dioxus_primitives::dropdown_menu`'s
+/// trigger called `mounted.set_focus(true).await` from a `spawn`ed
+/// task, which the Dioxus runtime polled inside the same call stack
+/// as the event-dispatch loop while Blitz still held a `borrow_mut`
+/// on its document RefCell — `RefCell already borrowed`, panic on
+/// the first click. Visually it looked like "the dropdown isn't
+/// closing on outside click" because the renderer was dead.
 ///
-/// Steps to reproduce:
+/// `NodeHandle::set_focus` now queues into a
+/// `Rc<RefCell<Vec<(NodeId, bool)>>>` that `DioxusDocument` drains
+/// after every UI event, so the focus mutation lands on a clean
+/// borrow. With that, the existing Stylo focus state machine flips
+/// the trigger blur → primitive's `use_effect(focus.any_focused())`
+/// → `set_open(false)` chain correctly.
+///
+/// Steps to verify:
 ///   1. Click "Open menu" — dropdown opens, badge shows `open`.
 ///   2. Click the large grey "click-away target".
-///   3. Native renderer: dropdown stays open, badge still `open`.
-///      wry / web: dropdown closes, badge flips to `closed`.
-///   4. Press Escape — dropdown closes on every renderer (proves
-///      the close path itself works; the bug is the trigger).
+///   3. Dropdown closes, badge flips to `closed`, click counter
+///      increments. Renderer does not panic on either click.
+///   4. Press Escape — closes via the keyboard path (independent
+///      of the focus path). Belt-and-suspenders.
 #[story(
     category = "Diagnostics",
     name = "dropdown-close",
@@ -462,9 +469,13 @@ pub fn diag_dropdown_close(_marker: bool) -> Element {
 
             // Click-away target. Counts clicks so we can verify the
             // event is reaching Dioxus at all even when the dropdown
-            // refuses to close.
+            // refuses to close. Inline style on width/height/background
+            // so this still renders as a giant target even when run
+            // outside a styled host (e.g. raw `--diag-dropdown` mode
+            // without Tailwind).
             div {
                 class: "h-64 rounded-md border border-border bg-muted/40 flex items-center justify-center cursor-pointer select-none",
+                style: "width: 600px; height: 300px; background: #444; margin-top: 24px;",
                 onclick: move |_| { *click_count.write() += 1; },
                 span { class: "text-sm text-muted-foreground",
                     "click-away target — clicks received: "
