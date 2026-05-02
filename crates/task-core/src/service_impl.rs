@@ -3089,7 +3089,9 @@ fn inbox_item_from_task(task: &Task) -> InboxItem {
 }
 
 fn is_inbox_task(task: &Task) -> bool {
-    task.tags.iter().any(|tag| tag == "inbox") || task.issue_type.as_deref() == Some("inbox")
+    !task.is_deleted()
+        && (task.tags.iter().any(|tag| tag == "inbox")
+            || task.issue_type.as_deref() == Some("inbox"))
 }
 
 fn build_review_report(
@@ -5657,6 +5659,24 @@ mod tests {
 
         let inbox = svc.list_inbox_items().await;
         assert_eq!(inbox.len(), 1);
+
+        let mut deleted_capture = svc
+            .vault
+            .read()
+            .await
+            .load_tasks()
+            .into_iter()
+            .find(|task| task.id == captured.id)
+            .unwrap();
+        deleted_capture.deleted_at = Some(Utc::now());
+        svc.update_task(deleted_capture.clone()).await.unwrap();
+        assert!(
+            svc.list_inbox_items().await.is_empty(),
+            "soft-deleted inbox captures should be hidden by default"
+        );
+
+        deleted_capture.deleted_at = None;
+        svc.update_task(deleted_capture).await.unwrap();
 
         let promoted = svc
             .promote_inbox(InboxPromoteRequest {
