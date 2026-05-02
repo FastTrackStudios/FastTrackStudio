@@ -79,6 +79,14 @@ pub struct KnobSpec {
     pub name: &'static str,
     pub doc: &'static str,
     pub kind: KnobKind,
+    /// The default value used when no `KnobSource` override is present.
+    /// `None` means the knob is "opaque" (the shell can't synthesise a
+    /// default — typically because the underlying type is a non-primitive
+    /// the macro couldn't introspect). The macro emits the user's
+    /// `#[knob(default = ...)]` expression directly into the render
+    /// thunk in that case, so a missing `default` here doesn't break
+    /// rendering — just hides the knob from the shell editor.
+    pub default: Option<KnobValue>,
 }
 
 /// What kind of input a knob accepts. The shell uses this to pick a

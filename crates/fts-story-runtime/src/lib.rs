@@ -19,6 +19,11 @@
 pub use fts_story_core::*;
 pub use fts_story_macros::{states, story, story_test};
 
+// Re-export `linkme` so the `#[story]` macro can emit
+// `::fts_story_runtime::linkme::distributed_slice(...)` and consumers
+// don't need a direct `linkme` dep.
+pub use linkme;
+
 use dioxus::prelude::Element;
 
 /// Concrete signature stored in [`Story::render`].

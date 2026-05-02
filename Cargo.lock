@@ -1712,6 +1712,7 @@ dependencies = [
 name = "fts-story-macros"
 version = "0.1.0"
 dependencies = [
+ "heck",
  "proc-macro2",
  "quote",
  "syn",
@@ -1724,6 +1725,7 @@ dependencies = [
  "dioxus",
  "fts-story-core",
  "fts-story-macros",
+ "linkme",
 ]
 
 [[package]]
