@@ -961,6 +961,9 @@
   .border-border {
     border-color: var(--border);
   }
+  .border-current {
+    border-color: currentcolor;
+  }
   .border-destructive {
     border-color: var(--destructive);
   }
@@ -978,6 +981,9 @@
   }
   .border-transparent {
     border-color: transparent;
+  }
+  .border-t-transparent {
+    border-top-color: transparent;
   }
   .border-l-destructive {
     border-left-color: var(--destructive);
