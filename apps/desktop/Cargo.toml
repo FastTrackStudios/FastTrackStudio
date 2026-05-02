@@ -5,7 +5,8 @@ edition.workspace = true
 
 [dependencies]
 dioxus = { workspace = true, features = ["desktop"] }
-fts-ui.workspace = true
+fts-ui = { workspace = true, features = ["stories"] }
+fts-story-shell.workspace = true
 
 [lints]
 workspace = true

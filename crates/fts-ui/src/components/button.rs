@@ -84,14 +84,15 @@ pub fn Button(props: ButtonProps) -> Element {
     let class = crate::cn::merge_slice(&[base, variant, size, props.class.as_str()]);
     let children = rsx! {
         if props.loading {
-            svg {
-                class: "size-4 animate-spin",
-                xmlns: "http://www.w3.org/2000/svg",
-                view_box: "0 0 24 24",
-                fill: "none",
-                stroke: "currentColor",
-                stroke_width: "2",
-                path { d: "M21 12a9 9 0 1 1-6.219-8.56" }
+            // Pure-CSS spinner (border-radius + one transparent edge),
+            // not an SVG. Renders correctly across all renderers we
+            // currently target. The earlier inline-SVG spinner trips
+            // a Blitz-specific bug where small (<24px) inline SVGs
+            // animated via Stylo CSS animations vanish from the paint
+            // tree — see the `Diagnostics/svg-smoke` story for a
+            // standalone repro and the upstream bug report.
+            div {
+                class: "size-4 rounded-full border-2 border-current border-t-transparent animate-spin",
             }
         }
         {props.children}

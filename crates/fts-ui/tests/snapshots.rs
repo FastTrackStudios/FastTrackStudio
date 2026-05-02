@@ -1,0 +1,43 @@
+//! Snapshot regression tests for fts-ui stories.
+//!
+//! Run with `cargo test --release -p fts-ui --features stories`.
+//! In debug mode `render_story` panics — Stylo/Parley produce
+//! incorrect output under `debug_assertions`.
+//!
+//! On first run, baselines are written to `crates/fts-ui/snapshots/`.
+//! On mismatch, a candidate PNG is written to
+//! `crates/fts-ui/diff_output/` and the test panics with both paths.
+//! To accept current renders as new baselines:
+//! `FTS_STORY_UPDATE_SNAPSHOTS=1 cargo test --release -p fts-ui --features stories`.
+
+#![cfg(feature = "stories")]
+
+use fts_story_snapshots::{assert_snapshot, SnapshotConfig};
+use fts_ui::stories;
+
+fn cfg() -> SnapshotConfig {
+    SnapshotConfig::for_crate(env!("CARGO_MANIFEST_DIR"))
+}
+
+#[test]
+fn button_primary_default() {
+    // Touch force_link so other registrations also pull in cleanly when
+    // this test file is the only consumer of the stories module.
+    stories::force_link();
+    assert_snapshot(&stories::BUTTON_PRIMARY_STORY, &cfg());
+}
+
+#[test]
+fn button_variants_default() {
+    assert_snapshot(&stories::BUTTON_VARIANTS_STORY, &cfg());
+}
+
+#[test]
+fn badge_variants_default() {
+    assert_snapshot(&stories::BADGE_VARIANTS_STORY, &cfg());
+}
+
+#[test]
+fn card_basic_default() {
+    assert_snapshot(&stories::CARD_BASIC_STORY, &cfg());
+}

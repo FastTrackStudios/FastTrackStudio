@@ -11,6 +11,6 @@ fn main() {
 fn App() -> Element {
     rsx! {
         document::Stylesheet { href: TAILWIND_CSS }
-        Showcase {}
+        Showcase { renderer: "Mobile".to_string() }
     }
 }

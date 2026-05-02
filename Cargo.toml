@@ -10,13 +10,31 @@ license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
 fts-ui = { path = "crates/fts-ui" }
+fts-ui-audio = { path = "crates/fts-ui-audio" }
 clsx = "0.1.1"
 dioxus = { version = "0.7.6", default-features = false, features = ["lib"] }
+# Blitz / dioxus-native pulled from our fork's `fts/integration` branch.
+# That branch is rebased on upstream `DioxusLabs/blitz` main and stacks any
+# in-flight bug-fix branches we have not yet upstreamed. See
+# `docs/blitz-fork-workflow.md` for the contribution flow.
+# Re-exported as `dioxus` (via `package = "dioxus-native"`) inside the
+# native app so component code can keep `use dioxus::prelude::*` unchanged.
+dioxus-native = { git = "https://github.com/FastTrackStudios/blitz", branch = "fts/integration", features = ["prelude", "system-fonts"] }
 lumen-blocks = { git = "https://github.com/Leaf-Computer/lumen-blocks.git", tag = "v0.2.0" }
 dioxus-primitives = { git = "https://github.com/DioxusLabs/components", package = "dioxus-primitives", rev = "733874bb35ab8a360813d841dde8353997246f09", default-features = false }
 lucide-dioxus = { git = "https://github.com/Leaf-Computer/lucide.git", rev = "e3e509d5855324e893aef838747cccb2d115dc15", features = ["all-icons"] }
 tracing = { version = "0.1", features = ["std"] }
 tw_merge = "0.1.21"
+
+# fts-story — story registry / Lookbook shell / VRT runner. Currently
+# pulled via path dep against a sibling checkout for fast iteration; swap
+# to `git = "ssh://git@github.com/FastTrackStudios/fts-story", rev = "<sha>"`
+# once the API stabilises.
+fts-story-runtime   = { path = "../fts-story/crates/fts-story-runtime" }
+fts-story-shell     = { path = "../fts-story/crates/fts-story-shell" }
+fts-story-snapshots = { path = "../fts-story/crates/fts-story-snapshots" }
+fts-story-parity    = { path = "../fts-story/crates/fts-story-parity" }
+linkme              = "0.3"
 
 [workspace.lints.rust]
 unused = "warn"

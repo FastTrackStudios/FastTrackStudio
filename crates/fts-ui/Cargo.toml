@@ -14,9 +14,24 @@ lucide-dioxus = { workspace = true }
 tracing = { workspace = true }
 tw_merge = { workspace = true }
 
+# Story registration. Optional — only consumers that want components to
+# show up in the Lookbook / snapshot harness need to enable this feature.
+# `linkme` MUST be a direct consumer dep: attribute-macro paths cannot
+# resolve through `pub use` re-exports, so the `#[story]` macro emits
+# `#[linkme::distributed_slice(...)]` directly.
+fts-story-runtime = { workspace = true, optional = true }
+linkme = { workspace = true, optional = true }
+
 [features]
 default = []
 router = ["dioxus/router", "dioxus-primitives/router"]
+stories = ["dep:fts-story-runtime", "dep:linkme"]
+
+[dev-dependencies]
+# Always available to tests/ — heavy (pulls Blitz CPU rasteriser) but
+# `cargo build` never compiles dev-deps so the lib build stays light.
+fts-story-snapshots = { workspace = true }
+fts-story-parity    = { workspace = true }
 
 [lints]
 workspace = true

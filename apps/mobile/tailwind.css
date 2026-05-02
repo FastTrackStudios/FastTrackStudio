@@ -1,0 +1,11 @@
+@import "tailwindcss";
+@import "../../crates/showcase/assets/fts-theme.css";
+
+@source "./src/**/*.{rs,html,css}";
+@source "../../crates/fts-ui/src/**/*.rs";
+
+@layer base {
+    html {
+        color-scheme: dark;
+    }
+}
