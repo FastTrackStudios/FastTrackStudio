@@ -37,6 +37,15 @@ pub struct RenderConfig {
     pub color_scheme: ColorScheme,
     /// Maximum settling iterations (resolve → poll → resolve loop).
     pub max_settle_iters: usize,
+    /// Animation clock (in seconds) to use for the **final** resolve.
+    /// Stylo's animation engine uses this as `current_time_for_animations`
+    /// — anything that reaches that timestamp without finishing renders at
+    /// the interpolated value for that instant. The default of `0.125s`
+    /// lands a 1s linear `animate-spin` keyframe at 45° (a visibly-rotated
+    /// frame for parity diffs against wry).
+    ///
+    /// Set to `0.0` to capture the un-animated initial state.
+    pub animation_time_secs: f64,
 }
 
 impl Default for RenderConfig {
@@ -47,6 +56,7 @@ impl Default for RenderConfig {
             scale: 1.0,
             color_scheme: ColorScheme::Dark,
             max_settle_iters: 64,
+            animation_time_secs: 0.125,
         }
     }
 }
@@ -108,6 +118,15 @@ fn render_inner(cfg: &RenderConfig) -> Vec<u8> {
     //  - dioxus async tasks (effects / spawn'd futures)
     //  - mounted-event flushes
     //  - layout/style resolution against any newly-inserted nodes
+    //
+    // Animation-clock convention: settle iters all use t=0.0 so animations
+    // get **registered** in the Stylo animation set with a `start_time`
+    // anchored at zero. Stylo only inserts animations on a restyle pass
+    // where it sees the keyframe rule; `start_time` is captured from the
+    // `current_time_for_animations` of that pass. Bumping the clock during
+    // settling would offset every animation's start by an inconsistent
+    // amount (depending on which iter happened to insert it) and produce
+    // non-deterministic captures.
     for _ in 0..cfg.max_settle_iters {
         let progressed = doc.poll(None);
         doc.inner.borrow_mut().resolve(0.0);
@@ -116,8 +135,12 @@ fn render_inner(cfg: &RenderConfig) -> Vec<u8> {
         }
     }
 
-    // Final layout pass to guarantee post-poll mutations are realised.
-    doc.inner.borrow_mut().resolve(0.0);
+    // Final resolve at the configured animation time. With every
+    // animation's `start_time = 0.0` from the settle loop, this single
+    // jump deterministically advances each one by `animation_time_secs`
+    // — e.g. a 1s linear `animate-spin` lands at
+    // `animation_time_secs * 360°` of rotation.
+    doc.inner.borrow_mut().resolve(cfg.animation_time_secs);
 
     // Render the painted scene into a CPU buffer via vello-cpu.
     let buffer = render_to_buffer::<VelloCpuImageRenderer, _>(
