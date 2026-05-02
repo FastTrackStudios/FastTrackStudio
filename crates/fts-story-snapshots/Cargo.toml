@@ -9,12 +9,26 @@ description = "Headless Blitz-based visual regression runner for fts-story."
 [dependencies]
 fts-story-core    = { workspace = true }
 fts-story-runtime = { workspace = true }
+dioxus            = { workspace = true }
 dssim-core = { workspace = true }
 png        = { workspace = true }
+thiserror  = { workspace = true }
 
-# Pin to our patched Blitz fork. Carries the RefCell-borrow fix and any
-# follow-on fixes; bumped via `cargo update -p dioxus-native`.
-dioxus-native = { git = "https://github.com/FastTrackStudios/blitz", branch = "fts/integration", features = ["prelude", "system-fonts"] }
+# Pin every Blitz crate to our patched fork. Carries the RefCell-borrow
+# fix and any follow-on fixes; bumped via `cargo update -p dioxus-native`.
+dioxus-native     = { git = "https://github.com/FastTrackStudios/blitz", branch = "fts/integration", features = ["prelude", "system-fonts"] }
+dioxus-native-dom = { git = "https://github.com/FastTrackStudios/blitz", branch = "fts/integration" }
+blitz-dom         = { git = "https://github.com/FastTrackStudios/blitz", branch = "fts/integration" }
+blitz-paint       = { git = "https://github.com/FastTrackStudios/blitz", branch = "fts/integration" }
+blitz-traits      = { git = "https://github.com/FastTrackStudios/blitz", branch = "fts/integration" }
+
+# Vello CPU rasteriser — matches what blitz's `examples/screenshot.rs`
+# uses. CPU only so snapshots don't need a GPU in CI.
+anyrender           = "0.8"
+anyrender_vello_cpu = "0.10"
+futures-util        = "0.3"
+peniko              = "0.6"
+rgb                 = "0.8"
 
 [lints]
 workspace = true
