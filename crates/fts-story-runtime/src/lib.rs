@@ -53,3 +53,66 @@ pub fn knob<'a>(src: &'a dyn KnobSource, name: &'static str, fallback: &'a KnobV
 pub unsafe fn render_fn(story: &Story) -> RenderFn {
     unsafe { std::mem::transmute::<*const (), RenderFn>(story.render) }
 }
+
+/// Zero-sized [`KnobSource`] for stories that take no knobs. Useful while
+/// hand-rolling stories before the `#[story]` macro lands.
+pub struct NoKnobs;
+
+impl KnobSource for NoKnobs {
+    #[inline]
+    fn get(&self, _name: &'static str) -> Option<&KnobValue> {
+        None
+    }
+}
+
+/// Helper for hand-rolling stories. Wraps `Story` construction so callers
+/// don't have to remember to set every field. The `render` field is built
+/// from a `RenderFn` and cast to `*const ()` here.
+///
+/// ```ignore
+/// pub static BUTTON_PRIMARY: Story = const_story(StoryDef {
+///     name: "button_primary",
+///     category: Some("Buttons"),
+///     description: "Default primary button.",
+///     source: concat!(file!(), ":", line!()),
+///     render: |_| rsx! { Button { "Click me" } },
+///     ..StoryDef::DEFAULT
+/// });
+///
+/// #[linkme::distributed_slice(STORIES)]
+/// static __BUTTON_PRIMARY_REG: &Story = &BUTTON_PRIMARY;
+/// ```
+pub struct StoryDef {
+    pub name: &'static str,
+    pub category: Option<&'static str>,
+    pub description: &'static str,
+    pub source: &'static str,
+    pub render: RenderFn,
+    pub knobs: &'static [KnobSpec],
+    pub auto_states: Option<&'static [StateAssignment]>,
+}
+
+impl StoryDef {
+    pub const DEFAULT: Self = Self {
+        name: "",
+        category: None,
+        description: "",
+        source: "",
+        render: |_| panic!("StoryDef::DEFAULT render thunk invoked"),
+        knobs: &[],
+        auto_states: None,
+    };
+}
+
+/// `const fn` builder so stories can be `static` items.
+pub const fn const_story(def: StoryDef) -> Story {
+    Story {
+        name: def.name,
+        category: def.category,
+        description: def.description,
+        source: def.source,
+        knobs: def.knobs,
+        render: def.render as *const (),
+        auto_states: def.auto_states,
+    }
+}

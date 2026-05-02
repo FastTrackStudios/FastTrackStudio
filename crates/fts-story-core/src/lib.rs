@@ -61,6 +61,19 @@ pub struct Story {
 // threads is fine. Stories themselves are immutable `&'static`.
 unsafe impl Sync for Story {}
 
+// `Story` is identity-compared so it can flow through Dioxus props
+// (which require `PartialEq`). Two stories are equal iff they share the
+// same `&'static` address — story values are interned at link time, so
+// pointer equality matches semantic equality without forcing every
+// nested field to derive PartialEq.
+impl PartialEq for Story {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        std::ptr::eq(self, other)
+    }
+}
+impl Eq for Story {}
+
 /// One knob declaration.
 pub struct KnobSpec {
     pub name: &'static str,
