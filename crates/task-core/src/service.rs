@@ -496,6 +496,7 @@ pub struct VaultCapability {
 #[derive(Debug, Clone, Default, facet::Facet)]
 pub struct SystemHealth {
     pub ok: bool,
+    pub degraded: bool,
     pub deep: bool,
     pub checks: Vec<HealthCheck>,
 }
@@ -518,6 +519,7 @@ pub struct ProviderSyncState {
 pub struct HealthCheck {
     pub name: String,
     pub code: String,
+    pub severity: String,
     pub ok: bool,
     pub configured: bool,
     pub detail: String,

@@ -219,9 +219,30 @@ fn health_check(
     detail: String,
     hint: Option<&str>,
 ) -> crate::service::HealthCheck {
+    health_check_with_severity(
+        name,
+        code,
+        configured,
+        ok,
+        if ok { "ok" } else { "error" },
+        detail,
+        hint,
+    )
+}
+
+fn health_check_with_severity(
+    name: &str,
+    code: &str,
+    configured: bool,
+    ok: bool,
+    severity: &str,
+    detail: String,
+    hint: Option<&str>,
+) -> crate::service::HealthCheck {
     crate::service::HealthCheck {
         name: name.into(),
         code: code.into(),
+        severity: severity.into(),
         ok,
         configured,
         detail,
@@ -230,8 +251,14 @@ fn health_check(
 }
 
 fn system_health(deep: bool, checks: Vec<crate::service::HealthCheck>) -> SystemHealth {
+    let degraded = checks
+        .iter()
+        .any(|check| check.configured && !check.ok && check.severity == "warning");
     SystemHealth {
-        ok: checks.iter().all(|check| check.ok || !check.configured),
+        ok: checks
+            .iter()
+            .all(|check| check.ok || !check.configured || check.severity == "warning"),
+        degraded,
         deep,
         checks,
     }
@@ -4650,7 +4677,7 @@ impl crate::service::SystemService for VaultServiceImpl {
             },
             Some("Set TASK_VAULT to an existing vault root or start task-server with a valid vault path."),
         ));
-        checks.push(health_check(
+        checks.push(health_check_with_severity(
             "sqlite-index",
             if index_available {
                 "INDEX_OK"
@@ -4659,13 +4686,14 @@ impl crate::service::SystemService for VaultServiceImpl {
             },
             true,
             index_available,
+            if index_available { "ok" } else { "warning" },
             if index_available {
                 "SQLite index is available".into()
             } else {
                 "SQLite index is unavailable; queries will scan files".into()
             },
             Some(
-                "If search feels slow, verify the vault path is writable and restart task-server.",
+                "File-scan mode is usable but slower. Run `task index rebuild` after verifying the vault path is writable, or restart task-server to reopen the index.",
             ),
         ));
 
@@ -5646,6 +5674,40 @@ mod tests {
         let path = std::env::temp_dir().join(format!("task-core-inbox-test-{nanos}"));
         std::fs::create_dir_all(&path).unwrap();
         path
+    }
+
+    #[tokio::test]
+    async fn health_treats_unavailable_index_as_degraded_not_failed() {
+        let vault = temp_vault();
+        let svc = VaultServiceImpl::new(&vault);
+        svc.index.lock().unwrap().take();
+
+        let health = crate::service::SystemService::health(&svc, false).await;
+        let index = health
+            .checks
+            .iter()
+            .find(|check| check.code == "INDEX_UNAVAILABLE")
+            .expect("health should report the unavailable SQLite index");
+
+        assert!(
+            health.ok,
+            "file-scan mode remains usable when the SQLite index is unavailable"
+        );
+        assert!(
+            health.degraded,
+            "health JSON should expose the usable-but-degraded state"
+        );
+        assert_eq!(index.severity, "warning");
+        assert!(
+            index
+                .hint
+                .as_deref()
+                .unwrap_or_default()
+                .contains("task index rebuild"),
+            "operator hint should explain how to rebuild or enable the index"
+        );
+
+        let _ = std::fs::remove_dir_all(vault);
     }
 
     #[tokio::test]

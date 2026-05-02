@@ -5408,6 +5408,7 @@ async fn run_local_doctor(vault: Option<&str>, json: bool, deep: bool) -> eyre::
         } else {
             "VAULT_ROOT_MISSING".into()
         },
+        severity: if vault_exists { "ok" } else { "error" }.into(),
         configured: !vault_root.is_empty(),
         ok: vault_exists,
         detail: if vault_root.is_empty() {
@@ -5428,6 +5429,12 @@ async fn run_local_doctor(vault: Option<&str>, json: bool, deep: bool) -> eyre::
         } else {
             "REMOTE_NOT_CONFIGURED".into()
         },
+        severity: if remote_configured && remote_token_configured {
+            "ok"
+        } else {
+            "error"
+        }
+        .into(),
         configured: remote_configured,
         ok: remote_configured && remote_token_configured,
         detail: "set TASK_SERVER and TASK_SESSION_TOKEN, or pass --server/--session-token, for remote checks".into(),
@@ -5440,6 +5447,12 @@ async fn run_local_doctor(vault: Option<&str>, json: bool, deep: bool) -> eyre::
         } else {
             "NEXTCLOUD_NOT_CONFIGURED".into()
         },
+        severity: if nextcloud_url.is_some() && nextcloud_password_configured {
+            "ok"
+        } else {
+            "error"
+        }
+        .into(),
         configured: nextcloud_url.is_some() || nextcloud_password_configured,
         ok: nextcloud_url.is_some() && nextcloud_password_configured,
         detail: if nextcloud_url.is_some() && nextcloud_password_configured {
@@ -5451,8 +5464,14 @@ async fn run_local_doctor(vault: Option<&str>, json: bool, deep: bool) -> eyre::
             "Set NEXTCLOUD_URL and NEXTCLOUD_PASSWORD, or use TASK_NEXTCLOUD_CONFIG.".into(),
         ),
     });
+    let degraded = checks
+        .iter()
+        .any(|check| check.configured && !check.ok && check.severity == "warning");
     let health = SystemHealth {
-        ok: checks.iter().all(|check| check.ok || !check.configured),
+        ok: checks
+            .iter()
+            .all(|check| check.ok || !check.configured || check.severity == "warning"),
+        degraded,
         deep,
         checks,
     };
@@ -6953,6 +6972,16 @@ fn print_doctor_json(capabilities: &SystemCapabilities, health: &SystemHealth) {
     );
 }
 
+fn doctor_check_status(check: &task_core::HealthCheck) -> &str {
+    if check.ok {
+        "ok"
+    } else if check.severity == "warning" {
+        "warning"
+    } else {
+        "failed"
+    }
+}
+
 fn print_doctor_report(
     mode: &str,
     remote_url: Option<&str>,
@@ -6961,7 +6990,13 @@ fn print_doctor_report(
 ) {
     println!(
         "Task doctor: {}",
-        if health.ok { "ok" } else { "attention needed" }
+        if !health.ok {
+            "attention needed"
+        } else if health.degraded {
+            "degraded (usable with warnings)"
+        } else {
+            "ok"
+        }
     );
     println!("  mode: {mode}");
     println!("  deep checks: {}", if health.deep { "yes" } else { "no" });
@@ -7012,7 +7047,7 @@ fn print_doctor_report(
         println!(
             "{:<20} {:<12} {:<8} {:<28} {}",
             check.name,
-            if check.ok { "ok" } else { "failed" },
+            doctor_check_status(check),
             if check.configured { "yes" } else { "no" },
             check.code,
             check.detail
