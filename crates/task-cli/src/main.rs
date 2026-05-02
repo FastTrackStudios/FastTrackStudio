@@ -3366,9 +3366,15 @@ struct ServerProfile {
 
 impl ServerProfiles {
     fn resolve(&self, name_or_url: &str) -> Option<ServerProfile> {
+        let requested_url = normalize_profile_url(name_or_url);
         self.servers
             .iter()
             .find(|profile| profile.name == name_or_url)
+            .or_else(|| {
+                self.servers
+                    .iter()
+                    .find(|profile| normalize_profile_url(&profile.url) == requested_url)
+            })
             .cloned()
             .or_else(|| {
                 if name_or_url == "default" {
@@ -5975,6 +5981,10 @@ fn find_task_in(tasks: Vec<Task>, reference: &str) -> eyre::Result<Task> {
         .ok_or_else(|| eyre::eyre!("Task not found: {reference}"))
 }
 
+fn normalize_profile_url(url: &str) -> String {
+    url.trim().trim_end_matches('/').to_string()
+}
+
 fn normalize_vox_url(server: &str) -> String {
     let trimmed = server.trim().trim_end_matches('/');
     if trimmed.starts_with("ws://") || trimmed.starts_with("wss://") {
@@ -8480,5 +8490,28 @@ mod tests {
             Some("org")
         );
         assert!(profiles.resolve("missing").is_none());
+    }
+
+    #[test]
+    fn server_profiles_resolve_by_configured_url() {
+        let profiles = ServerProfiles {
+            default: Some("starcommand".into()),
+            servers: vec![ServerProfile {
+                name: "starcommand".into(),
+                url: "http://10.10.10.1:3456".into(),
+                session_token: Some("token".into()),
+                organization_id: Some("org".into()),
+            }],
+        };
+
+        let profile = profiles.resolve("http://10.10.10.1:3456").unwrap();
+        assert_eq!(profile.name, "starcommand");
+        assert_eq!(profile.session_token.as_deref(), Some("token"));
+        assert_eq!(profile.organization_id.as_deref(), Some("org"));
+
+        assert_eq!(
+            profiles.resolve("http://10.10.10.1:3456/").unwrap().name,
+            "starcommand"
+        );
     }
 }
