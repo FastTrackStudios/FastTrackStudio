@@ -1731,6 +1731,9 @@ async fn dispatch_action_registry(
         ActionRegistryOp::IsInActionList(name) => {
             Ok(StepOutput::Bool(svc.is_in_action_list(name.clone()).await))
         }
+        ActionRegistryOp::ListActions(request) => Ok(StepOutput::ActionInfoList(
+            svc.list_actions(request.clone()).await,
+        )),
         ActionRegistryOp::ExecuteCommand(id) => {
             svc.execute_command(*id).await;
             Ok(StepOutput::Unit)

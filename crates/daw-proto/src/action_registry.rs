@@ -43,6 +43,79 @@ pub enum ActionEvent {
     },
 }
 
+/// Action list category used when enumerating REAPER's action list.
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Facet)]
+pub enum ActionListFilter {
+    /// Return every action in the main action section.
+    All,
+    /// Return REAPER built-in actions.
+    Reaper,
+    /// Return extension, script, and custom actions.
+    NonReaper,
+    /// Return actions that look like SWS/S&M actions.
+    Sws,
+    /// Return FastTrackStudio actions.
+    Fts,
+    /// Return actions registered through this action registry instance.
+    Registered,
+}
+
+/// Best-effort source classification for an action-list entry.
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Facet)]
+pub enum ActionOrigin {
+    /// A built-in REAPER action.
+    Reaper,
+    /// An SWS/S&M extension action.
+    Sws,
+    /// A FastTrackStudio action.
+    Fts,
+    /// Any other named extension, script, or custom action.
+    Extension,
+}
+
+/// Request parameters for action-list enumeration.
+#[derive(Debug, Clone, Facet)]
+pub struct ActionListRequest {
+    /// Which class of actions to return.
+    pub filter: ActionListFilter,
+    /// Optional case-insensitive search over description and command name.
+    pub query: Option<String>,
+    /// Optional maximum number of rows to return.
+    pub limit: Option<u32>,
+}
+
+impl Default for ActionListRequest {
+    fn default() -> Self {
+        Self {
+            filter: ActionListFilter::All,
+            query: None,
+            limit: None,
+        }
+    }
+}
+
+/// One action from REAPER's main action list.
+#[derive(Debug, Clone, Facet)]
+pub struct ActionInfo {
+    /// Numeric REAPER command ID.
+    pub command_id: u32,
+    /// Named command identifier, if REAPER has one.
+    ///
+    /// REAPER's `ReverseNamedCommandLookup` returns names without the leading
+    /// underscore; built-in actions usually have no named identifier.
+    pub command_name: Option<String>,
+    /// Text shown in REAPER's action list.
+    pub description: String,
+    /// Best-effort action source classification.
+    pub origin: ActionOrigin,
+    /// True if this action was registered by the FastTrackStudio registry.
+    pub registered_by_fts: bool,
+    /// Stored toggle state for FastTrackStudio toggle actions.
+    pub toggle_state: Option<bool>,
+}
+
 /// Dynamic action registration for DAW extensions and clients.
 ///
 /// Extensions use this service to register REAPER actions at runtime.
@@ -105,6 +178,13 @@ pub trait ActionRegistryService {
     /// gaccel entry exists. An action can have a command ID without being in the
     /// action list if the gaccel registration was missed.
     async fn is_in_action_list(&self, command_name: String) -> bool;
+
+    /// Enumerate actions in REAPER's main action list.
+    ///
+    /// This is the programmatic equivalent of the Actions window for the main
+    /// section. Results include built-in REAPER commands, SWS/S&M actions,
+    /// scripts/custom actions, and FastTrackStudio registered actions.
+    async fn list_actions(&self, request: ActionListRequest) -> Vec<ActionInfo>;
 
     /// Execute a native DAW command by numeric ID.
     ///

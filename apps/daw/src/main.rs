@@ -502,6 +502,54 @@ enum Command {
 
 #[derive(Subcommand)]
 enum ActionsCommand {
+    /// List actions from REAPER's main action list
+    List {
+        /// Filter: all, reaper, non-reaper, sws, fts, registered
+        #[arg(long, default_value = "all")]
+        filter: String,
+        /// Case-insensitive search over description and command name
+        #[arg(long)]
+        query: Option<String>,
+        /// Maximum number of actions to return
+        #[arg(long)]
+        limit: Option<u32>,
+    },
+    /// List SWS/S&M extension actions
+    Sws {
+        /// Case-insensitive search over description and command name
+        #[arg(long)]
+        query: Option<String>,
+        /// Maximum number of actions to return
+        #[arg(long)]
+        limit: Option<u32>,
+    },
+    /// List built-in REAPER actions
+    Reaper {
+        /// Case-insensitive search over description and command name
+        #[arg(long)]
+        query: Option<String>,
+        /// Maximum number of actions to return
+        #[arg(long)]
+        limit: Option<u32>,
+    },
+    /// List extension, script, and custom actions
+    NonReaper {
+        /// Case-insensitive search over description and command name
+        #[arg(long)]
+        query: Option<String>,
+        /// Maximum number of actions to return
+        #[arg(long)]
+        limit: Option<u32>,
+    },
+    /// List actions registered by FastTrackStudio
+    Registered {
+        /// Case-insensitive search over description and command name
+        #[arg(long)]
+        query: Option<String>,
+        /// Maximum number of actions to return
+        #[arg(long)]
+        limit: Option<u32>,
+    },
     /// Look up an action registration and command ID
     #[command(visible_alias = "status")]
     Lookup {
@@ -909,6 +957,30 @@ async fn main() -> Result<()> {
             cli.json,
         )?,
         Command::Actions { ref command } => match command {
+            ActionsCommand::List {
+                filter,
+                query,
+                limit,
+            } => print_value(
+                daw_cli::ops::action_list(&daw, filter, query.as_deref(), *limit).await?,
+                cli.json,
+            )?,
+            ActionsCommand::Sws { query, limit } => print_value(
+                daw_cli::ops::action_list(&daw, "sws", query.as_deref(), *limit).await?,
+                cli.json,
+            )?,
+            ActionsCommand::Reaper { query, limit } => print_value(
+                daw_cli::ops::action_list(&daw, "reaper", query.as_deref(), *limit).await?,
+                cli.json,
+            )?,
+            ActionsCommand::NonReaper { query, limit } => print_value(
+                daw_cli::ops::action_list(&daw, "non-reaper", query.as_deref(), *limit).await?,
+                cli.json,
+            )?,
+            ActionsCommand::Registered { query, limit } => print_value(
+                daw_cli::ops::action_list(&daw, "registered", query.as_deref(), *limit).await?,
+                cli.json,
+            )?,
             ActionsCommand::Lookup { command_name } => print_value(
                 daw_cli::ops::action_lookup(&daw, command_name).await?,
                 cli.json,

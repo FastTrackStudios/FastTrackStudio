@@ -513,6 +513,7 @@ pub enum ActionRegistryOp {
     IsRegistered(String),
     LookupCommandId(String),
     IsInActionList(String),
+    ListActions(ActionListRequest),
     ExecuteCommand(u32),
     ExecuteNamedAction(String),
     SetToggleState(String, bool),

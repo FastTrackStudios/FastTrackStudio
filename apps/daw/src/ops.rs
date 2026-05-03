@@ -983,6 +983,45 @@ pub async fn action_lookup(daw: &Daw, command_name: &str) -> Result<Value> {
     }))
 }
 
+pub async fn action_list(
+    daw: &Daw,
+    filter: &str,
+    query: Option<&str>,
+    limit: Option<u32>,
+) -> Result<Value> {
+    let filter = match filter.trim().to_ascii_lowercase().as_str() {
+        "all" => daw::service::ActionListFilter::All,
+        "reaper" | "native" | "built-in" | "builtin" => daw::service::ActionListFilter::Reaper,
+        "non-reaper" | "nonreaper" | "extension" | "extensions" | "custom" => {
+            daw::service::ActionListFilter::NonReaper
+        }
+        "sws" | "sws/s&m" | "s&m" => daw::service::ActionListFilter::Sws,
+        "fts" | "fasttrackstudio" => daw::service::ActionListFilter::Fts,
+        "registered" | "local" => daw::service::ActionListFilter::Registered,
+        _ => eyre::bail!("action filter must be all, reaper, non-reaper, sws, fts, or registered"),
+    };
+
+    let request = daw::service::ActionListRequest {
+        filter,
+        query: query.map(str::to_string),
+        limit,
+    };
+    let actions = daw.action_registry().list_actions(request).await?;
+    Ok(json!({
+        "filter": format!("{filter:?}"),
+        "query": query,
+        "count": actions.len(),
+        "actions": actions.iter().map(|action| json!({
+            "command_id": action.command_id,
+            "command_name": action.command_name,
+            "description": action.description,
+            "origin": format!("{:?}", action.origin),
+            "registered_by_fts": action.registered_by_fts,
+            "toggle_state": action.toggle_state,
+        })).collect::<Vec<_>>(),
+    }))
+}
+
 pub async fn action_set_toggle(daw: &Daw, command_name: &str, is_on: bool) -> Result<Value> {
     daw.action_registry()
         .set_toggle_state(command_name, is_on)

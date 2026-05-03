@@ -12,11 +12,14 @@
 //! command name prefix (e.g., `FTS_SESSION_*` → Session submenu).
 
 use crate::main_thread;
-use daw_proto::{ActionEvent, ActionRegistryService};
+use daw_proto::{
+    ActionEvent, ActionInfo, ActionListFilter, ActionListRequest, ActionOrigin,
+    ActionRegistryService,
+};
 use reaper_high::{Reaper, RegisteredAction};
 use reaper_medium::{
     CommandId, Handle, Hmenu, HookCustomMenu, MenuHookFlag, OwnedGaccelRegister, ProjectContext,
-    ReaperStr,
+    ReaperStr, SectionContext,
 };
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Mutex;
@@ -221,6 +224,71 @@ fn named_command_lookup(command_name: &str) -> Option<CommandId> {
             medium.named_command_lookup(format!("_{command_name}"))
         }
     })
+}
+
+fn normalize_command_name(command_name: &str) -> &str {
+    command_name.strip_prefix('_').unwrap_or(command_name)
+}
+
+fn is_sws_action(command_name: Option<&str>, description: &str) -> bool {
+    let normalized = command_name.map(normalize_command_name);
+    let name_matches = normalized.is_some_and(|name| {
+        name.starts_with("SWS")
+            || name.starts_with("S&M")
+            || name.starts_with("BR_")
+            || name.starts_with("FNG_")
+            || name.starts_with("NF_")
+            || name.starts_with("SN_")
+            || name.starts_with("XENAKIOS")
+            || name.starts_with("PADRE")
+            || name.starts_with("AUTORENDER")
+    });
+    let desc_matches = description.starts_with("SWS")
+        || description.starts_with("S&M")
+        || description.starts_with("BR:")
+        || description.starts_with("FNG:")
+        || description.starts_with("NF:")
+        || description.starts_with("SN:")
+        || description.starts_with("Xenakios");
+    name_matches || desc_matches
+}
+
+fn classify_action(command_name: Option<&str>, description: &str) -> ActionOrigin {
+    if let Some(name) = command_name.map(normalize_command_name)
+        && name.starts_with("FTS")
+    {
+        return ActionOrigin::Fts;
+    }
+    if is_sws_action(command_name, description) {
+        return ActionOrigin::Sws;
+    }
+    if command_name.is_some() {
+        ActionOrigin::Extension
+    } else {
+        ActionOrigin::Reaper
+    }
+}
+
+fn action_matches_filter(info: &ActionInfo, filter: ActionListFilter) -> bool {
+    match filter {
+        ActionListFilter::All => true,
+        ActionListFilter::Reaper => info.origin == ActionOrigin::Reaper,
+        ActionListFilter::NonReaper => info.origin != ActionOrigin::Reaper,
+        ActionListFilter::Sws => info.origin == ActionOrigin::Sws,
+        ActionListFilter::Fts => info.origin == ActionOrigin::Fts,
+        ActionListFilter::Registered => info.registered_by_fts,
+    }
+}
+
+fn action_matches_query(info: &ActionInfo, query: Option<&str>) -> bool {
+    let Some(query) = query else {
+        return true;
+    };
+    info.description.to_ascii_lowercase().contains(query)
+        || info
+            .command_name
+            .as_ref()
+            .is_some_and(|name| name.to_ascii_lowercase().contains(query))
 }
 
 // ============================================================================
@@ -695,6 +763,72 @@ impl ActionRegistryService for ReaperActionRegistry {
         main_thread::query(move || named_command_lookup(&command_name).map(|id| id.get()))
             .await
             .flatten()
+    }
+
+    async fn list_actions(&self, request: ActionListRequest) -> Vec<ActionInfo> {
+        main_thread::query(move || {
+            let reaper = Reaper::get();
+            let medium = reaper.medium_reaper();
+            let registered = registered_actions().lock().unwrap().clone();
+            let toggles = toggle_states().lock().unwrap().clone();
+            let query = request.query.as_ref().map(|q| q.to_ascii_lowercase());
+            let limit = request.limit.unwrap_or(u32::MAX) as usize;
+            if limit == 0 {
+                return Vec::new();
+            }
+            let mut actions = Vec::new();
+
+            let section = reaper.main_section();
+            let _ = section.with_raw(|s| {
+                for i in 0..s.action_list_cnt() {
+                    let Some(cmd) = s.get_action_by_index(i).map(|a| a.cmd()) else {
+                        continue;
+                    };
+
+                    let description = unsafe {
+                        medium.kbd_get_text_from_cmd(cmd, SectionContext::MainSection, |name| {
+                            name.to_string()
+                        })
+                    }
+                    .unwrap_or_default();
+                    let command_name =
+                        medium.reverse_named_command_lookup(cmd, |name| name.to_string());
+
+                    let normalized = command_name.as_deref().map(normalize_command_name);
+                    let registered_by_fts = normalized
+                        .is_some_and(|name| registered.contains_key(name))
+                        || registered.values().any(|id| *id == cmd.get());
+                    let toggle_state = normalized.and_then(|name| toggles.get(name).copied());
+                    let origin = if registered_by_fts {
+                        ActionOrigin::Fts
+                    } else {
+                        classify_action(command_name.as_deref(), &description)
+                    };
+
+                    let info = ActionInfo {
+                        command_id: cmd.get(),
+                        command_name,
+                        description,
+                        origin,
+                        registered_by_fts,
+                        toggle_state,
+                    };
+
+                    if action_matches_filter(&info, request.filter)
+                        && action_matches_query(&info, query.as_deref())
+                    {
+                        actions.push(info);
+                        if actions.len() >= limit {
+                            break;
+                        }
+                    }
+                }
+            });
+
+            actions
+        })
+        .await
+        .unwrap_or_default()
     }
 
     async fn subscribe_actions(&self, tx: Tx<ActionEvent>) {

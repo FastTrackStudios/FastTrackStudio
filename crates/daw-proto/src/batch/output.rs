@@ -91,6 +91,10 @@ pub enum StepOutput {
     /// Time signature
     TimeSignature(TimeSignature),
 
+    // -- Action registry types --
+    /// List of REAPER action-list entries.
+    ActionInfoList(Vec<ActionInfo>),
+
     // -- Routing types --
     /// List of routes
     RouteList(Vec<TrackRoute>),

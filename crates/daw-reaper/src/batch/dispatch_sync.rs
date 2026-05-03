@@ -1553,6 +1553,9 @@ fn dispatch_action_registry_sync(op: &ActionRegistryOp) -> Result<StepOutput, St
         ActionRegistryOp::IsInActionList(_name) => {
             Err("IsInActionList requires async dispatch (action list enumeration)".to_string())
         }
+        ActionRegistryOp::ListActions(_request) => {
+            Err("ListActions requires async dispatch (action list enumeration)".to_string())
+        }
         ActionRegistryOp::ExecuteCommand(id) => {
             medium.main_on_command_ex(CommandId::new(*id), 0, ReaperProjectContext::CurrentProject);
             Ok(StepOutput::Unit)

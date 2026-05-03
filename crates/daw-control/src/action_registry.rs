@@ -135,6 +135,14 @@ impl ActionRegistry {
             .await?)
     }
 
+    /// Enumerate REAPER main-section actions.
+    pub async fn list_actions(
+        &self,
+        request: daw_proto::ActionListRequest,
+    ) -> crate::Result<Vec<daw_proto::ActionInfo>> {
+        Ok(self.clients.action_registry.list_actions(request).await?)
+    }
+
     /// Subscribe to action trigger events.
     ///
     /// Returns a stream of `ActionEvent::Triggered` events whenever a REAPER
