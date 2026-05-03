@@ -1,4 +1,4 @@
-//! Structured operations shared by the CLI and MCP server.
+//! Structured operations shared by DAW CLI commands.
 
 use std::path::{Path, PathBuf};
 
@@ -7,93 +7,6 @@ use eyre::Result;
 use serde_json::{Value, json};
 
 use crate::{flags_str, format_position, fx_type_str, pan_to_string, resolve_track, vol_to_db};
-
-#[cfg(feature = "mcp")]
-fn shape_name(shape: &'static facet::Shape) -> String {
-    match shape.module_path {
-        Some(module) => format!("{module}::{}", shape.type_identifier),
-        None => shape.type_identifier.to_string(),
-    }
-}
-
-#[cfg(feature = "mcp")]
-fn service_descriptor_json(service: &'static vox::ServiceDescriptor) -> Value {
-    json!({
-        "service": service.service_name,
-        "doc": service.doc,
-        "methods": service.methods.iter().map(|method| json!({
-            "id": method.id.0,
-            "service": method.service_name,
-            "method": method.method_name,
-            "doc": method.doc,
-            "args_shape": shape_name(method.args_shape),
-            "return_shape": shape_name(method.return_shape),
-            "retry": {
-                "persist": method.retry.persist,
-                "idempotent": method.retry.idem,
-            },
-            "args": method.args.iter().map(|arg| json!({
-                "name": arg.name,
-                "shape": shape_name(arg.shape),
-            })).collect::<Vec<_>>(),
-        })).collect::<Vec<_>>(),
-    })
-}
-
-#[cfg(feature = "mcp")]
-fn daw_service_descriptors() -> Vec<&'static vox::ServiceDescriptor> {
-    vec![
-        daw::service::action_registry_service_service_descriptor(),
-        daw::service::audio_accessor_service_service_descriptor(),
-        daw::service::audio_engine_service_service_descriptor(),
-        daw::service::automation_service_service_descriptor(),
-        daw::service::batch_service_service_descriptor(),
-        daw::service::dock_host_service_service_descriptor(),
-        daw::service::ext_state_service_service_descriptor(),
-        daw::service::fx_service_service_descriptor(),
-        daw::service::health_service_service_descriptor(),
-        daw::service::input_service_service_descriptor(),
-        daw::service::item_service_service_descriptor(),
-        daw::service::live_midi_service_service_descriptor(),
-        daw::service::marker_service_service_descriptor(),
-        daw::service::midi_analysis_service_service_descriptor(),
-        daw::service::midi_service_service_descriptor(),
-        daw::service::peak_service_service_descriptor(),
-        daw::service::plugin_loader_service_service_descriptor(),
-        daw::service::position_conversion_service_service_descriptor(),
-        daw::service::project_service_service_descriptor(),
-        daw::service::region_service_service_descriptor(),
-        daw::service::resource_service_service_descriptor(),
-        daw::service::routing_service_service_descriptor(),
-        daw::service::take_service_service_descriptor(),
-        daw::service::tempo_map_service_service_descriptor(),
-        daw::service::toolbar_service_service_descriptor(),
-        daw::service::track_service_service_descriptor(),
-        daw::service::transport_service_service_descriptor(),
-        daw::service::ui_service_service_descriptor(),
-    ]
-}
-
-#[cfg(feature = "mcp")]
-pub fn vox_service_catalog() -> Value {
-    Value::Array(
-        daw_service_descriptors()
-            .into_iter()
-            .map(service_descriptor_json)
-            .collect(),
-    )
-}
-
-#[cfg(feature = "mcp")]
-pub async fn vox_execute_batch(daw: &Daw, request: Value) -> Result<Value> {
-    let json = serde_json::to_string(&request)?;
-    let request: daw::service::BatchRequest = facet_json::from_str(&json)
-        .map_err(|err| eyre::eyre!("invalid BatchRequest JSON: {err}"))?;
-    let response = daw.execute_batch(request).await?;
-    let response_json = facet_json::to_string(&response)
-        .map_err(|err| eyre::eyre!("serialize BatchResponse: {err}"))?;
-    Ok(serde_json::from_str(&response_json)?)
-}
 
 fn fx_param_json(p: &daw::service::FxParameter) -> Value {
     let mut obj = json!({

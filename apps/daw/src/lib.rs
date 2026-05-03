@@ -18,8 +18,6 @@ use vox::{
     SessionHandle,
 };
 
-#[cfg(feature = "mcp")]
-pub mod mcp;
 pub mod ops;
 
 /// A DAW connection that keeps the vox session alive.

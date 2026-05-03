@@ -53,9 +53,6 @@ enum Command {
     Plugins,
     /// Check if a DAW instance is reachable
     Ping,
-    /// Serve an MCP server over stdio
-    #[cfg(feature = "mcp")]
-    Mcp,
 
     // -- Process & Project Management --
     /// Launch a REAPER instance
@@ -138,10 +135,6 @@ async fn main() -> Result<()> {
         } => {
             return daw_cli::cmd_combine(input, output.as_deref(), gap);
         }
-        #[cfg(feature = "mcp")]
-        Command::Mcp => {
-            return daw_cli::mcp::serve_stdio(cli.socket).await;
-        }
         _ => {}
     }
 
@@ -170,8 +163,6 @@ async fn main() -> Result<()> {
         Command::RemoveTrack { ref track } => daw_cli::cmd_remove_track(&daw, track).await?,
         // Already handled above
         Command::Launch { .. } | Command::Quit { .. } | Command::Combine { .. } => unreachable!(),
-        #[cfg(feature = "mcp")]
-        Command::Mcp => unreachable!(),
     }
 
     Ok(())
