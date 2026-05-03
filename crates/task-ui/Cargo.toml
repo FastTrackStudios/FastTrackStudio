@@ -1,10 +1,13 @@
 [package]
 name = "task-ui"
-version.workspace = true
-edition.workspace = true
-authors.workspace = true
-license.workspace = true
+version = "0.1.0"
+edition = "2021"
+authors = ["Cody Wright"]
+license = "MIT OR Apache-2.0"
+
+# This crate is intentionally outside the root Task workspace — see the
+# `exclude` block in ../../Cargo.toml for the rationale.
 
 [dependencies]
-dioxus = { workspace = true }
-fts-ui = { workspace = true }
+dioxus = { version = "0.7.6", default-features = false, features = ["lib"] }
+fts-ui = { path = "../../../FastTrackStudio/fts-ui/crates/fts-ui" }

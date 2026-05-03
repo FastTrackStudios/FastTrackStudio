@@ -1,21 +1,23 @@
 [workspace]
 members = [
     "apps/server",
-    "apps/web",
-    "apps/desktop",
-    "apps/mobile",
     "crates/task-core",
     "crates/task-cli",
     "crates/task-db",
-    "crates/task-ui",
     "integrations/obsidian/plugin",
     "xtask",
 ]
+# UI crates (task-ui + apps/{web,desktop,mobile}) live outside this workspace
+# because fts-ui's own Cargo.toml has path-deps to a sibling fts-story repo.
+# Including them here would force every cargo invocation in this workspace to
+# resolve fts-story, which breaks server/cli builds (especially under Nix).
+# Each UI crate carries its own Cargo.toml with inline deps and gets its own
+# Cargo.lock; they all share the live ../FastTrackStudio/fts-ui sibling.
 exclude = [
-    "nix-external/FastTrackStudio/better-auth",
-    "nix-external/FastTrackStudio/sea-orm",
-    "nix-external/FastTrackStudio/sea-orm/sea-orm-cli",
-    "nix-external/FastTrackStudio/sea-orm/sea-orm-migration",
+    "apps/web",
+    "apps/desktop",
+    "apps/mobile",
+    "crates/task-ui",
 ]
 resolver = "2"
 
@@ -31,10 +33,6 @@ repository = "https://github.com/Codys-Wright/Task"
 
 [workspace.dependencies]
 async-trait = "0.1"
-task-ui = { path = "crates/task-ui" }
-dioxus = { version = "0.7.6", default-features = false, features = ["lib"] }
-fts-ui = { path = "../FastTrackStudio/fts-ui/crates/fts-ui" }
-
 chrono = "0.4"
 eyre = "0.6"
 futures = "0.3"
@@ -141,14 +139,17 @@ git = "https://github.com/Codys-Wright/vox"
 rev = "ccb46b5416100d38430cb082d71bf0377428c241"
 
 [workspace.dependencies.sea-orm]
-path = "../FastTrackStudio/sea-orm"
+git = "https://github.com/FastTrackStudios/sea-orm"
+rev = "d01afa40d79227a4a2de85b50e76849300890766"
 features = ["sqlx-sqlite", "runtime-tokio-rustls", "macros", "with-chrono", "with-uuid", "with-json", "facet"]
 
 [workspace.dependencies.sea-orm-migration]
-path = "../FastTrackStudio/sea-orm/sea-orm-migration"
+git = "https://github.com/FastTrackStudios/sea-orm"
+rev = "d01afa40d79227a4a2de85b50e76849300890766"
 
 [workspace.dependencies.crudcrate]
-path = "../FastTrackStudio/crudcrate/crudcrate"
+git = "https://github.com/FastTrackStudios/crudcrate"
+rev = "d2b49419cdd9d6ffbdf6fb2a8aed019ee9cf68ca"
 features = ["derive"]
 
 [workspace.dependencies.argon2]
@@ -173,15 +174,23 @@ version = "0.2.0"
 [workspace.dependencies.base64]
 version = "0.22"
 
+[workspace.dependencies.better-auth]
+git = "https://github.com/FastTrackStudios/better-auth"
+rev = "e32926ba4a7546f3405b78e5dbb19dbe3a0d2f02"
+default-features = false
+
 [workspace.dependencies.better-auth-core]
-path = "../FastTrackStudio/better-auth/crates/core"
+git = "https://github.com/FastTrackStudios/better-auth"
+rev = "e32926ba4a7546f3405b78e5dbb19dbe3a0d2f02"
 
 [workspace.dependencies.better-auth-api]
-path = "../FastTrackStudio/better-auth/crates/api"
+git = "https://github.com/FastTrackStudios/better-auth"
+rev = "e32926ba4a7546f3405b78e5dbb19dbe3a0d2f02"
 default-features = false
 
 [workspace.dependencies.better-auth-derive]
-path = "../FastTrackStudio/better-auth/crates/derive"
+git = "https://github.com/FastTrackStudios/better-auth"
+rev = "e32926ba4a7546f3405b78e5dbb19dbe3a0d2f02"
 
 [workspace.dependencies.cookie]
 version = "0.18"
