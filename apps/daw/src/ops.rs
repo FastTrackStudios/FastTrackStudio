@@ -967,9 +967,112 @@ pub async fn plugin_loader_list(daw: &Daw) -> Result<Value> {
 }
 
 pub async fn action_execute(daw: &Daw, action_id: &str) -> Result<Value> {
-    Ok(
-        json!({ "action_id": action_id, "executed": daw.action_registry().execute_action(action_id).await? }),
-    )
+    let result = daw
+        .action_registry()
+        .execute_action_detailed(action_id)
+        .await?;
+    Ok(json!({
+        "requested_action": result.requested_action,
+        "executed": result.executed,
+        "command_id": result.command_id,
+        "command_name": result.command_name,
+        "description": result.description,
+        "origin": result.origin.map(|origin| format!("{origin:?}")),
+        "registered_by_fts": result.registered_by_fts,
+        "toggle_state_before": result.toggle_state_before,
+        "toggle_state_after": result.toggle_state_after,
+    }))
+}
+
+struct ActionAlias {
+    alias: &'static str,
+    action_id: &'static str,
+    provider: &'static str,
+    description: &'static str,
+}
+
+const ACTION_ALIASES: &[ActionAlias] = &[
+    ActionAlias {
+        alias: "transport.play",
+        action_id: "1007",
+        provider: "reaper",
+        description: "Transport: Play",
+    },
+    ActionAlias {
+        alias: "transport.stop",
+        action_id: "1016",
+        provider: "reaper",
+        description: "Transport: Stop",
+    },
+    ActionAlias {
+        alias: "transport.pause",
+        action_id: "1008",
+        provider: "reaper",
+        description: "Transport: Pause",
+    },
+    ActionAlias {
+        alias: "transport.record",
+        action_id: "1013",
+        provider: "reaper",
+        description: "Transport: Record",
+    },
+    ActionAlias {
+        alias: "transport.play_stop",
+        action_id: "40044",
+        provider: "reaper",
+        description: "Transport: Play/stop",
+    },
+    ActionAlias {
+        alias: "edit.undo",
+        action_id: "40029",
+        provider: "reaper",
+        description: "Edit: Undo",
+    },
+    ActionAlias {
+        alias: "edit.redo",
+        action_id: "40030",
+        provider: "reaper",
+        description: "Edit: Redo",
+    },
+    ActionAlias {
+        alias: "marker.insert",
+        action_id: "40157",
+        provider: "reaper",
+        description: "Markers: Insert marker at current position",
+    },
+    ActionAlias {
+        alias: "region.insert",
+        action_id: "40306",
+        provider: "reaper",
+        description: "Regions: Insert region from time selection",
+    },
+];
+
+fn action_alias(alias: &str) -> Option<&'static ActionAlias> {
+    ACTION_ALIASES
+        .iter()
+        .find(|entry| entry.alias.eq_ignore_ascii_case(alias))
+}
+
+pub fn action_aliases() -> Value {
+    json!({
+        "count": ACTION_ALIASES.len(),
+        "aliases": ACTION_ALIASES.iter().map(|entry| json!({
+            "alias": entry.alias,
+            "action_id": entry.action_id,
+            "provider": entry.provider,
+            "description": entry.description,
+        })).collect::<Vec<_>>(),
+    })
+}
+
+pub async fn action_execute_alias(daw: &Daw, alias: &str) -> Result<Value> {
+    let entry = action_alias(alias).ok_or_else(|| eyre::eyre!("unknown action alias: {alias}"))?;
+    let mut value = action_execute(daw, entry.action_id).await?;
+    value["alias"] = json!(entry.alias);
+    value["alias_description"] = json!(entry.description);
+    value["alias_provider"] = json!(entry.provider);
+    Ok(value)
 }
 
 pub async fn action_lookup(daw: &Daw, command_name: &str) -> Result<Value> {
@@ -1006,12 +1109,14 @@ pub async fn action_list(
         query: query.map(str::to_string),
         limit,
     };
-    let actions = daw.action_registry().list_actions(request).await?;
+    let response = daw.action_registry().list_actions(request).await?;
     Ok(json!({
         "filter": format!("{filter:?}"),
         "query": query,
-        "count": actions.len(),
-        "actions": actions.iter().map(|action| json!({
+        "count": response.actions.len(),
+        "total_count": response.total_count,
+        "limited": limit.is_some_and(|limit| response.total_count > limit),
+        "actions": response.actions.iter().map(|action| json!({
             "command_id": action.command_id,
             "command_name": action.command_name,
             "description": action.description,

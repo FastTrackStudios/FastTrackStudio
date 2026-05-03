@@ -1568,6 +1568,9 @@ fn dispatch_action_registry_sync(op: &ActionRegistryOp) -> Result<StepOutput, St
                 Ok(StepOutput::Bool(false))
             }
         }
+        ActionRegistryOp::ExecuteAction(_action_id) => {
+            Err("ExecuteAction requires async dispatch (action metadata lookup)".to_string())
+        }
         ActionRegistryOp::SetToggleState(name, v) => {
             let mut states = crate::action_registry::toggle_states().lock().unwrap();
             if states.contains_key(name) {

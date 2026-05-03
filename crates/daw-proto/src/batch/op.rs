@@ -516,6 +516,7 @@ pub enum ActionRegistryOp {
     ListActions(ActionListRequest),
     ExecuteCommand(u32),
     ExecuteNamedAction(String),
+    ExecuteAction(String),
     SetToggleState(String, bool),
     GetToggleState(String),
 }

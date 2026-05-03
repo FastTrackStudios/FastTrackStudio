@@ -513,6 +513,9 @@ enum ActionsCommand {
         /// Maximum number of actions to return
         #[arg(long)]
         limit: Option<u32>,
+        /// Non-JSON columns: id,name,origin,toggle,description
+        #[arg(long, default_value = "id,name,origin,description")]
+        columns: String,
     },
     /// List SWS/S&M extension actions
     Sws {
@@ -522,6 +525,9 @@ enum ActionsCommand {
         /// Maximum number of actions to return
         #[arg(long)]
         limit: Option<u32>,
+        /// Non-JSON columns: id,name,origin,toggle,description
+        #[arg(long, default_value = "id,name,origin,description")]
+        columns: String,
     },
     /// List built-in REAPER actions
     Reaper {
@@ -531,6 +537,9 @@ enum ActionsCommand {
         /// Maximum number of actions to return
         #[arg(long)]
         limit: Option<u32>,
+        /// Non-JSON columns: id,name,origin,toggle,description
+        #[arg(long, default_value = "id,name,origin,description")]
+        columns: String,
     },
     /// List extension, script, and custom actions
     NonReaper {
@@ -540,6 +549,9 @@ enum ActionsCommand {
         /// Maximum number of actions to return
         #[arg(long)]
         limit: Option<u32>,
+        /// Non-JSON columns: id,name,origin,toggle,description
+        #[arg(long, default_value = "id,name,origin,description")]
+        columns: String,
     },
     /// List actions registered by FastTrackStudio
     Registered {
@@ -549,6 +561,16 @@ enum ActionsCommand {
         /// Maximum number of actions to return
         #[arg(long)]
         limit: Option<u32>,
+        /// Non-JSON columns: id,name,origin,toggle,description
+        #[arg(long, default_value = "id,name,origin,description")]
+        columns: String,
+    },
+    /// List stable convenience aliases for common actions
+    Aliases,
+    /// Execute a stable convenience alias
+    ExecAlias {
+        /// Alias from `daw actions aliases`, such as transport.play_stop
+        alias: String,
     },
     /// Look up an action registration and command ID
     #[command(visible_alias = "status")]
@@ -598,6 +620,77 @@ fn print_value(value: Value, as_json: bool) -> Result<()> {
     Ok(())
 }
 
+fn print_action_list(value: Value, as_json: bool, columns: &str) -> Result<()> {
+    if as_json {
+        return print_value(value, true);
+    }
+
+    let columns = columns
+        .split(',')
+        .map(|col| col.trim())
+        .filter(|col| !col.is_empty())
+        .collect::<Vec<_>>();
+    for col in &columns {
+        match *col {
+            "id" | "name" | "origin" | "toggle" | "description" => {}
+            _ => eyre::bail!(
+                "unknown action list column '{col}' (expected id,name,origin,toggle,description)"
+            ),
+        }
+    }
+
+    let count = value.get("count").and_then(Value::as_u64).unwrap_or(0);
+    let total = value
+        .get("total_count")
+        .and_then(Value::as_u64)
+        .unwrap_or(count);
+    let filter = value.get("filter").and_then(Value::as_str).unwrap_or("All");
+    println!("actions: {count}/{total} filter={filter}");
+
+    let Some(actions) = value.get("actions").and_then(Value::as_array) else {
+        return Ok(());
+    };
+
+    for action in actions {
+        let mut fields = Vec::new();
+        for col in &columns {
+            let text = match *col {
+                "id" => action
+                    .get("command_id")
+                    .and_then(Value::as_u64)
+                    .map(|id| id.to_string())
+                    .unwrap_or_default(),
+                "name" => action
+                    .get("command_name")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string(),
+                "origin" => action
+                    .get("origin")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string(),
+                "toggle" => action
+                    .get("toggle_state")
+                    .and_then(Value::as_bool)
+                    .map(|v| if v { "on" } else { "off" })
+                    .unwrap_or("")
+                    .to_string(),
+                "description" => action
+                    .get("description")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string(),
+                _ => unreachable!(),
+            };
+            fields.push(text);
+        }
+        println!("{}", fields.join("\t"));
+    }
+
+    Ok(())
+}
+
 fn read_json_input(input: &str) -> Result<Value> {
     let text = if input == "-" {
         std::io::read_to_string(std::io::stdin())?
@@ -638,6 +731,11 @@ async fn main() -> Result<()> {
         }
         Command::ServiceCatalog => {
             return print_value(daw_cli::ops::service_catalog(), cli.json);
+        }
+        Command::Actions {
+            command: ActionsCommand::Aliases,
+        } => {
+            return print_value(daw_cli::ops::action_aliases(), cli.json);
         }
         _ => {}
     }
@@ -961,24 +1059,51 @@ async fn main() -> Result<()> {
                 filter,
                 query,
                 limit,
-            } => print_value(
+                columns,
+            } => print_action_list(
                 daw_cli::ops::action_list(&daw, filter, query.as_deref(), *limit).await?,
                 cli.json,
+                columns,
             )?,
-            ActionsCommand::Sws { query, limit } => print_value(
+            ActionsCommand::Sws {
+                query,
+                limit,
+                columns,
+            } => print_action_list(
                 daw_cli::ops::action_list(&daw, "sws", query.as_deref(), *limit).await?,
                 cli.json,
+                columns,
             )?,
-            ActionsCommand::Reaper { query, limit } => print_value(
+            ActionsCommand::Reaper {
+                query,
+                limit,
+                columns,
+            } => print_action_list(
                 daw_cli::ops::action_list(&daw, "reaper", query.as_deref(), *limit).await?,
                 cli.json,
+                columns,
             )?,
-            ActionsCommand::NonReaper { query, limit } => print_value(
+            ActionsCommand::NonReaper {
+                query,
+                limit,
+                columns,
+            } => print_action_list(
                 daw_cli::ops::action_list(&daw, "non-reaper", query.as_deref(), *limit).await?,
                 cli.json,
+                columns,
             )?,
-            ActionsCommand::Registered { query, limit } => print_value(
+            ActionsCommand::Registered {
+                query,
+                limit,
+                columns,
+            } => print_action_list(
                 daw_cli::ops::action_list(&daw, "registered", query.as_deref(), *limit).await?,
+                cli.json,
+                columns,
+            )?,
+            ActionsCommand::Aliases => print_value(daw_cli::ops::action_aliases(), cli.json)?,
+            ActionsCommand::ExecAlias { alias } => print_value(
+                daw_cli::ops::action_execute_alias(&daw, alias).await?,
                 cli.json,
             )?,
             ActionsCommand::Lookup { command_name } => print_value(

@@ -549,6 +549,8 @@ fn reaper_test(filter: Option<String>, keep_open: bool) -> Result<(), Box<dyn st
             "-p",
             "daw-reaper",
             "-p",
+            "daw-cli",
+            "-p",
             "example-plugin",
             "--no-run",
         ])
@@ -672,6 +674,13 @@ fn reaper_test(filter: Option<String>, keep_open: bool) -> Result<(), Box<dyn st
             features: vec![],
             test_threads: 1,
             default_skips: vec!["timer_responsive_for_60s".into()],
+            test_binary: None,
+        },
+        TestPackage {
+            package: "daw-cli".into(),
+            features: vec![],
+            test_threads: 1,
+            default_skips: vec![],
             test_binary: None,
         },
         TestPackage {

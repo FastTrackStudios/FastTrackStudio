@@ -300,13 +300,14 @@ async fn execute_named_action_for_unknown_returns_false(
 async fn list_actions_returns_reaper_builtin_actions(ctx: &ReaperTestContext) -> eyre::Result<()> {
     let actions = ctx.daw.action_registry();
 
-    let listed = actions
+    let response = actions
         .list_actions(ActionListRequest {
             filter: ActionListFilter::Reaper,
             query: Some("undo".to_string()),
             limit: Some(256),
         })
         .await?;
+    let listed = response.actions;
 
     assert!(
         !listed.is_empty(),
@@ -344,13 +345,14 @@ async fn list_actions_returns_registered_fts_toggle_state(
         .set_toggle_state("FTS_TEST_LIST_ACTIONS_TOGGLE", true)
         .await?;
 
-    let listed = actions
+    let response = actions
         .list_actions(ActionListRequest {
             filter: ActionListFilter::Registered,
             query: Some("List Actions Toggle".to_string()),
             limit: None,
         })
         .await?;
+    let listed = response.actions;
 
     let action = listed
         .iter()
@@ -381,13 +383,14 @@ async fn list_actions_non_reaper_includes_registered_actions(
         )
         .await?;
 
-    let listed = actions
+    let response = actions
         .list_actions(ActionListRequest {
             filter: ActionListFilter::NonReaper,
             query: Some("List Actions Non Reaper".to_string()),
             limit: Some(16),
         })
         .await?;
+    let listed = response.actions;
 
     assert!(
         listed.iter().any(|action| action.command_id == cmd_id
@@ -400,18 +403,55 @@ async fn list_actions_non_reaper_includes_registered_actions(
 }
 
 #[reaper_test(isolated)]
+async fn list_actions_reports_total_count_when_limited(
+    ctx: &ReaperTestContext,
+) -> eyre::Result<()> {
+    let actions = ctx.daw.action_registry();
+
+    actions
+        .register(
+            "FTS_TEST_LIST_ACTIONS_LIMIT_A",
+            "FTS Test: List Actions Limit",
+        )
+        .await?;
+    actions
+        .register(
+            "FTS_TEST_LIST_ACTIONS_LIMIT_B",
+            "FTS Test: List Actions Limit",
+        )
+        .await?;
+
+    let response = actions
+        .list_actions(ActionListRequest {
+            filter: ActionListFilter::Registered,
+            query: Some("List Actions Limit".to_string()),
+            limit: Some(1),
+        })
+        .await?;
+
+    assert_eq!(response.actions.len(), 1, "limit must cap returned rows");
+    assert!(
+        response.total_count >= 2,
+        "total_count should include matches not returned by limit: {response:#?}"
+    );
+
+    Ok(())
+}
+
+#[reaper_test(isolated)]
 async fn list_actions_sws_filter_only_returns_sws_classified_actions(
     ctx: &ReaperTestContext,
 ) -> eyre::Result<()> {
     let actions = ctx.daw.action_registry();
 
-    let listed = actions
+    let response = actions
         .list_actions(ActionListRequest {
             filter: ActionListFilter::Sws,
             query: None,
             limit: Some(32),
         })
         .await?;
+    let listed = response.actions;
 
     assert!(
         listed
@@ -420,6 +460,47 @@ async fn list_actions_sws_filter_only_returns_sws_classified_actions(
         "SWS filter must only return SWS-classified actions: {listed:#?}"
     );
     ctx.log(&format!("SWS action sample count: {}", listed.len()));
+
+    Ok(())
+}
+
+#[reaper_test(isolated)]
+async fn execute_action_detailed_reports_registered_toggle_transition(
+    ctx: &ReaperTestContext,
+) -> eyre::Result<()> {
+    let actions = ctx.daw.action_registry();
+
+    let cmd_id = actions
+        .register_toggle(
+            "FTS_TEST_EXECUTE_DETAILED_TOGGLE",
+            "FTS Test: Execute Detailed Toggle",
+        )
+        .await?;
+    assert_eq!(
+        actions
+            .get_toggle_state("FTS_TEST_EXECUTE_DETAILED_TOGGLE")
+            .await?,
+        Some(false)
+    );
+
+    let result = actions
+        .execute_action_detailed("FTS_TEST_EXECUTE_DETAILED_TOGGLE")
+        .await?;
+
+    assert!(result.executed);
+    assert_eq!(result.command_id, Some(cmd_id));
+    assert_eq!(
+        result.command_name.as_deref(),
+        Some("FTS_TEST_EXECUTE_DETAILED_TOGGLE")
+    );
+    assert_eq!(
+        result.description.as_deref(),
+        Some("FTS Test: Execute Detailed Toggle")
+    );
+    assert_eq!(result.origin, Some(ActionOrigin::Fts));
+    assert!(result.registered_by_fts);
+    assert_eq!(result.toggle_state_before, Some(false));
+    assert_eq!(result.toggle_state_after, Some(true));
 
     Ok(())
 }

@@ -116,6 +116,47 @@ pub struct ActionInfo {
     pub toggle_state: Option<bool>,
 }
 
+/// Response from action-list enumeration.
+#[derive(Debug, Clone, Facet)]
+pub struct ActionListResponse {
+    /// Total number of actions matching the requested filter/query before limit.
+    pub total_count: u32,
+    /// Returned action rows after applying limit.
+    pub actions: Vec<ActionInfo>,
+}
+
+impl Default for ActionListResponse {
+    fn default() -> Self {
+        Self {
+            total_count: 0,
+            actions: Vec::new(),
+        }
+    }
+}
+
+/// Detailed result from executing a REAPER action.
+#[derive(Debug, Clone, Facet)]
+pub struct ActionExecutionResult {
+    /// Identifier supplied by the caller.
+    pub requested_action: String,
+    /// Whether a command was resolved and dispatched.
+    pub executed: bool,
+    /// Numeric REAPER command ID, if resolved.
+    pub command_id: Option<u32>,
+    /// Named command identifier, if REAPER has one.
+    pub command_name: Option<String>,
+    /// Text shown in REAPER's action list, if known.
+    pub description: Option<String>,
+    /// Best-effort source classification, if known.
+    pub origin: Option<ActionOrigin>,
+    /// True if this action was registered by the FastTrackStudio registry.
+    pub registered_by_fts: bool,
+    /// Stored toggle state before dispatch for FastTrackStudio toggle actions.
+    pub toggle_state_before: Option<bool>,
+    /// Stored toggle state after dispatch for FastTrackStudio toggle actions.
+    pub toggle_state_after: Option<bool>,
+}
+
 /// Dynamic action registration for DAW extensions and clients.
 ///
 /// Extensions use this service to register REAPER actions at runtime.
@@ -184,7 +225,7 @@ pub trait ActionRegistryService {
     /// This is the programmatic equivalent of the Actions window for the main
     /// section. Results include built-in REAPER commands, SWS/S&M actions,
     /// scripts/custom actions, and FastTrackStudio registered actions.
-    async fn list_actions(&self, request: ActionListRequest) -> Vec<ActionInfo>;
+    async fn list_actions(&self, request: ActionListRequest) -> ActionListResponse;
 
     /// Execute a native DAW command by numeric ID.
     ///
@@ -198,6 +239,11 @@ pub trait ActionRegistryService {
     /// Looks up the command by name (e.g., "_FTS_SIGNAL_ARM") and executes it.
     /// Returns `true` if the command was found and executed.
     async fn execute_named_action(&self, command_name: String) -> bool;
+
+    /// Execute any REAPER action identifier and return resolved metadata.
+    ///
+    /// Accepts either a numeric command ID or a named command identifier.
+    async fn execute_action(&self, action_id: String) -> ActionExecutionResult;
 
     /// Set the toggle state for a toggleable action.
     ///

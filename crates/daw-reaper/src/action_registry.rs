@@ -13,8 +13,8 @@
 
 use crate::main_thread;
 use daw_proto::{
-    ActionEvent, ActionInfo, ActionListFilter, ActionListRequest, ActionOrigin,
-    ActionRegistryService,
+    ActionEvent, ActionExecutionResult, ActionInfo, ActionListFilter, ActionListRequest,
+    ActionListResponse, ActionOrigin, ActionRegistryService,
 };
 use reaper_high::{Reaper, RegisteredAction};
 use reaper_medium::{
@@ -289,6 +289,56 @@ fn action_matches_query(info: &ActionInfo, query: Option<&str>) -> bool {
             .command_name
             .as_ref()
             .is_some_and(|name| name.to_ascii_lowercase().contains(query))
+}
+
+fn find_action_info(command_id: CommandId) -> Option<ActionInfo> {
+    let reaper = Reaper::get();
+    let medium = reaper.medium_reaper();
+    let registered = registered_actions().lock().unwrap().clone();
+    let toggles = toggle_states().lock().unwrap().clone();
+    let section = reaper.main_section();
+
+    section
+        .with_raw(|s| {
+            for i in 0..s.action_list_cnt() {
+                let Some(cmd) = s.get_action_by_index(i).map(|a| a.cmd()) else {
+                    continue;
+                };
+                if cmd != command_id {
+                    continue;
+                }
+
+                let description = unsafe {
+                    medium.kbd_get_text_from_cmd(cmd, SectionContext::MainSection, |name| {
+                        name.to_string()
+                    })
+                }
+                .unwrap_or_default();
+                let command_name =
+                    medium.reverse_named_command_lookup(cmd, |name| name.to_string());
+                let normalized = command_name.as_deref().map(normalize_command_name);
+                let registered_by_fts = normalized
+                    .is_some_and(|name| registered.contains_key(name))
+                    || registered.values().any(|id| *id == cmd.get());
+                let toggle_state = normalized.and_then(|name| toggles.get(name).copied());
+                let origin = if registered_by_fts {
+                    ActionOrigin::Fts
+                } else {
+                    classify_action(command_name.as_deref(), &description)
+                };
+
+                return Some(ActionInfo {
+                    command_id: cmd.get(),
+                    command_name,
+                    description,
+                    origin,
+                    registered_by_fts,
+                    toggle_state,
+                });
+            }
+            None
+        })
+        .flatten()
 }
 
 // ============================================================================
@@ -765,7 +815,7 @@ impl ActionRegistryService for ReaperActionRegistry {
             .flatten()
     }
 
-    async fn list_actions(&self, request: ActionListRequest) -> Vec<ActionInfo> {
+    async fn list_actions(&self, request: ActionListRequest) -> ActionListResponse {
         main_thread::query(move || {
             let reaper = Reaper::get();
             let medium = reaper.medium_reaper();
@@ -773,10 +823,8 @@ impl ActionRegistryService for ReaperActionRegistry {
             let toggles = toggle_states().lock().unwrap().clone();
             let query = request.query.as_ref().map(|q| q.to_ascii_lowercase());
             let limit = request.limit.unwrap_or(u32::MAX) as usize;
-            if limit == 0 {
-                return Vec::new();
-            }
             let mut actions = Vec::new();
+            let mut total_count = 0_u32;
 
             let section = reaper.main_section();
             let _ = section.with_raw(|s| {
@@ -817,15 +865,20 @@ impl ActionRegistryService for ReaperActionRegistry {
                     if action_matches_filter(&info, request.filter)
                         && action_matches_query(&info, query.as_deref())
                     {
-                        actions.push(info);
                         if actions.len() >= limit {
-                            break;
+                            total_count += 1;
+                            continue;
                         }
+                        actions.push(info);
+                        total_count += 1;
                     }
                 }
             });
 
-            actions
+            ActionListResponse {
+                total_count,
+                actions,
+            }
         })
         .await
         .unwrap_or_default()
@@ -885,6 +938,68 @@ impl ActionRegistryService for ReaperActionRegistry {
         })
         .await
         .unwrap_or(false)
+    }
+
+    async fn execute_action(&self, action_id: String) -> ActionExecutionResult {
+        let fallback_action = action_id.clone();
+        main_thread::query(move || {
+            let reaper = Reaper::get();
+            let medium = reaper.medium_reaper();
+            let requested_action = action_id.clone();
+
+            let command_id = if let Ok(id) = action_id.parse::<u32>() {
+                if id == 0 {
+                    None
+                } else {
+                    Some(CommandId::new(id))
+                }
+            } else {
+                named_command_lookup(&action_id)
+            };
+
+            let Some(command_id) = command_id else {
+                return ActionExecutionResult {
+                    requested_action,
+                    executed: false,
+                    command_id: None,
+                    command_name: None,
+                    description: None,
+                    origin: None,
+                    registered_by_fts: false,
+                    toggle_state_before: None,
+                    toggle_state_after: None,
+                };
+            };
+
+            let before = find_action_info(command_id);
+            medium.main_on_command_ex(command_id, 0, ProjectContext::CurrentProject);
+            let after = find_action_info(command_id);
+            let info = after.as_ref().or(before.as_ref());
+
+            ActionExecutionResult {
+                requested_action,
+                executed: true,
+                command_id: Some(command_id.get()),
+                command_name: info.and_then(|info| info.command_name.clone()),
+                description: info.map(|info| info.description.clone()),
+                origin: info.map(|info| info.origin),
+                registered_by_fts: info.is_some_and(|info| info.registered_by_fts),
+                toggle_state_before: before.and_then(|info| info.toggle_state),
+                toggle_state_after: after.and_then(|info| info.toggle_state),
+            }
+        })
+        .await
+        .unwrap_or_else(|| ActionExecutionResult {
+            requested_action: fallback_action,
+            executed: false,
+            command_id: None,
+            command_name: None,
+            description: None,
+            origin: None,
+            registered_by_fts: false,
+            toggle_state_before: None,
+            toggle_state_after: None,
+        })
     }
 
     async fn set_toggle_state(&self, command_name: String, is_on: bool) {

@@ -139,7 +139,7 @@ impl ActionRegistry {
     pub async fn list_actions(
         &self,
         request: daw_proto::ActionListRequest,
-    ) -> crate::Result<Vec<daw_proto::ActionInfo>> {
+    ) -> crate::Result<daw_proto::ActionListResponse> {
         Ok(self.clients.action_registry.list_actions(request).await?)
     }
 
@@ -191,6 +191,18 @@ impl ActionRegistry {
         } else {
             self.execute_named_action(action_id).await
         }
+    }
+
+    /// Execute any REAPER action identifier and return resolved metadata.
+    pub async fn execute_action_detailed(
+        &self,
+        action_id: &str,
+    ) -> crate::Result<daw_proto::ActionExecutionResult> {
+        Ok(self
+            .clients
+            .action_registry
+            .execute_action(action_id.to_string())
+            .await?)
     }
 
     /// Set the toggle state for a toggleable action.

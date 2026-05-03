@@ -93,7 +93,9 @@ pub enum StepOutput {
 
     // -- Action registry types --
     /// List of REAPER action-list entries.
-    ActionInfoList(Vec<ActionInfo>),
+    ActionList(ActionListResponse),
+    /// Result from executing one REAPER action.
+    ActionExecution(ActionExecutionResult),
 
     // -- Routing types --
     /// List of routes

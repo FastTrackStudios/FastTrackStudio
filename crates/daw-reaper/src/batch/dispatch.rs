@@ -1731,7 +1731,7 @@ async fn dispatch_action_registry(
         ActionRegistryOp::IsInActionList(name) => {
             Ok(StepOutput::Bool(svc.is_in_action_list(name.clone()).await))
         }
-        ActionRegistryOp::ListActions(request) => Ok(StepOutput::ActionInfoList(
+        ActionRegistryOp::ListActions(request) => Ok(StepOutput::ActionList(
             svc.list_actions(request.clone()).await,
         )),
         ActionRegistryOp::ExecuteCommand(id) => {
@@ -1740,6 +1740,9 @@ async fn dispatch_action_registry(
         }
         ActionRegistryOp::ExecuteNamedAction(name) => Ok(StepOutput::Bool(
             svc.execute_named_action(name.clone()).await,
+        )),
+        ActionRegistryOp::ExecuteAction(action_id) => Ok(StepOutput::ActionExecution(
+            svc.execute_action(action_id.clone()).await,
         )),
         ActionRegistryOp::SetToggleState(name, v) => {
             svc.set_toggle_state(name.clone(), *v).await;

@@ -30,3 +30,8 @@ dawfile-reaper = { path = "../../crates/dawfile-reaper" }
 
 [features]
 default = []
+
+[dev-dependencies]
+daw-proto = { path = "../../crates/daw-proto" }
+reaper-test.workspace = true
+eyre.workspace = true
