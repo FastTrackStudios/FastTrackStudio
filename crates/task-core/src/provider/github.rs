@@ -10,6 +10,8 @@
 use crate::service::VaultError;
 use crate::task::{Priority, Status, Task, WikiLink};
 use serde::Deserialize;
+use std::collections::HashSet;
+use std::fmt;
 
 // ── Configuration ───────────────────────────────────────────────────────────
 
@@ -79,6 +81,164 @@ pub struct GitHubSyncResult {
     pub tasks_created: usize,
     pub statuses_pushed: usize,
     pub errors: Vec<String>,
+}
+
+// ── Sync plan (dry-run) ────────────────────────────────────────────────────
+
+/// A single action in a sync plan.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SyncAction {
+    /// A remote issue will be imported as a new local task.
+    Pull { issue_number: String, title: String },
+    /// A local task's status will be pushed to GitHub.
+    Push {
+        issue_number: String,
+        title: String,
+        new_state: String,
+    },
+}
+
+/// Dry-run plan showing what a sync *would* do.
+#[derive(Debug, Clone, Default)]
+pub struct SyncPlan {
+    pub actions: Vec<SyncAction>,
+}
+
+impl fmt::Display for SyncPlan {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.actions.is_empty() {
+            return writeln!(f, "Nothing to sync.");
+        }
+        writeln!(f, "Sync plan ({} actions):", self.actions.len())?;
+        for action in &self.actions {
+            match action {
+                SyncAction::Pull {
+                    issue_number,
+                    title,
+                } => writeln!(f, "  ← pull  #{issue_number}: {title}")?,
+                SyncAction::Push {
+                    issue_number,
+                    title,
+                    new_state,
+                } => writeln!(f, "  → push  #{issue_number}: {title} → {new_state}")?,
+            }
+        }
+        Ok(())
+    }
+}
+
+// ── Pure helpers ───────────────────────────────────────────────────────────
+
+/// Validate and split an `owner/repo` string.
+pub fn parse_repo(s: &str) -> Result<(String, String), String> {
+    let parts: Vec<&str> = s.splitn(2, '/').collect();
+    if parts.len() != 2 || parts[0].is_empty() || parts[1].is_empty() {
+        return Err(format!(
+            "invalid repo format '{s}': expected 'owner/repo'"
+        ));
+    }
+    // Reject paths with extra slashes or whitespace.
+    if parts[1].contains('/') || s.chars().any(|c| c.is_whitespace()) {
+        return Err(format!(
+            "invalid repo format '{s}': expected 'owner/repo'"
+        ));
+    }
+    Ok((parts[0].to_string(), parts[1].to_string()))
+}
+
+/// Resolve a GitHub token: explicit value → `GITHUB_TOKEN` → `GH_TOKEN`.
+pub fn resolve_token(explicit: Option<&str>) -> Result<String, String> {
+    if let Some(t) = explicit {
+        if !t.is_empty() {
+            return Ok(t.to_string());
+        }
+    }
+    if let Ok(t) = std::env::var("GITHUB_TOKEN") {
+        if !t.is_empty() {
+            return Ok(t);
+        }
+    }
+    if let Ok(t) = std::env::var("GH_TOKEN") {
+        if !t.is_empty() {
+            return Ok(t);
+        }
+    }
+    Err("no GitHub token: set GITHUB_TOKEN, GH_TOKEN, or pass --token".to_string())
+}
+
+/// Build a dry-run sync plan by diffing local tasks against remote tasks.
+///
+/// This is the pure computation extracted from `GitHubSync::sync` so it can
+/// be tested without network access.
+pub fn build_sync_plan(local_tasks: &[Task], remote_tasks: &[Task]) -> SyncPlan {
+    let mut actions = Vec::new();
+
+    // Which external IDs are already tracked locally?
+    let local_ids: HashSet<&str> = local_tasks
+        .iter()
+        .filter(|t| t.external_source.as_deref() == Some("github"))
+        .filter_map(|t| t.external_id.as_deref())
+        .collect();
+
+    // New issues → pull actions.
+    for remote in remote_tasks {
+        if let Some(ref eid) = remote.external_id {
+            if !local_ids.contains(eid.as_str()) {
+                actions.push(SyncAction::Pull {
+                    issue_number: eid.clone(),
+                    title: remote.title.clone(),
+                });
+            }
+        }
+    }
+
+    // Build remote lookup.
+    let remote_by_id: std::collections::HashMap<&str, &Task> = remote_tasks
+        .iter()
+        .filter_map(|t| t.external_id.as_deref().map(|id| (id, t)))
+        .collect();
+
+    // Local tasks with divergent status → push actions.
+    for local in local_tasks {
+        if local.external_source.as_deref() != Some("github") {
+            continue;
+        }
+        let eid = match local.external_id.as_deref() {
+            Some(id) => id,
+            None => continue,
+        };
+        let local_closed = matches!(local.status, Status::Done | Status::Cancelled);
+        let remote_closed = remote_by_id
+            .get(eid)
+            .map(|r| matches!(r.status, Status::Done | Status::Cancelled))
+            .unwrap_or(!local_closed);
+
+        if local_closed != remote_closed {
+            let new_state = if local_closed { "closed" } else { "open" };
+            actions.push(SyncAction::Push {
+                issue_number: eid.to_string(),
+                title: local.title.clone(),
+                new_state: new_state.to_string(),
+            });
+        }
+    }
+
+    SyncPlan { actions }
+}
+
+/// Format a `GitHubSyncResult` for human-readable CLI output.
+pub fn format_sync_result(result: &GitHubSyncResult) -> String {
+    let mut out = format!(
+        "GitHub sync complete: {} pulled, {} created, {} pushed",
+        result.issues_pulled, result.tasks_created, result.statuses_pushed
+    );
+    if !result.errors.is_empty() {
+        out.push_str(&format!("\n{} errors:", result.errors.len()));
+        for e in &result.errors {
+            out.push_str(&format!("\n  - {e}"));
+        }
+    }
+    out
 }
 
 // ── GitHubSync client ───────────────────────────────────────────────────────
@@ -378,5 +538,215 @@ impl GitHubSync {
         }
 
         Ok(result)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Mutex, OnceLock};
+
+    fn token_env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    #[test]
+    fn parse_repo_valid() {
+        let (owner, repo) = parse_repo("FastTrackStudios/task").unwrap();
+        assert_eq!(owner, "FastTrackStudios");
+        assert_eq!(repo, "task");
+    }
+
+    #[test]
+    fn parse_repo_rejects_bare_name() {
+        assert!(parse_repo("task").is_err());
+    }
+
+    #[test]
+    fn parse_repo_rejects_trailing_slash() {
+        assert!(parse_repo("owner/").is_err());
+    }
+
+    #[test]
+    fn parse_repo_rejects_extra_slashes() {
+        assert!(parse_repo("a/b/c").is_err());
+    }
+
+    #[test]
+    fn parse_repo_rejects_whitespace() {
+        assert!(parse_repo("owner/ repo").is_err());
+    }
+
+    // ── resolve_token ──────────────────────────────────────────────────
+
+    #[test]
+    fn resolve_token_explicit_wins() {
+        // Even if env vars are set, explicit takes priority.
+        let result = resolve_token(Some("ghp_explicit"));
+        assert_eq!(result.unwrap(), "ghp_explicit");
+    }
+
+    #[test]
+    fn resolve_token_env_fallback_chain() {
+        let _guard = token_env_lock().lock().unwrap();
+
+        // All env-based token tests in one function to avoid parallel races.
+        // 0. Explicit empty string falls through.
+        std::env::set_var("GITHUB_TOKEN", "ghp_env");
+        std::env::set_var("GH_TOKEN", "ghp_gh");
+        // Empty explicit → falls to GITHUB_TOKEN.
+        assert_eq!(resolve_token(Some("")).unwrap(), "ghp_env");
+
+        // 1. GITHUB_TOKEN takes priority over GH_TOKEN.
+        assert_eq!(resolve_token(None).unwrap(), "ghp_env");
+
+        // 2. Falls back to GH_TOKEN when GITHUB_TOKEN is absent.
+        std::env::remove_var("GITHUB_TOKEN");
+        assert_eq!(resolve_token(None).unwrap(), "ghp_gh");
+
+        // 3. Fails when neither is set.
+        std::env::remove_var("GH_TOKEN");
+        assert!(resolve_token(None).is_err());
+        assert!(resolve_token(Some("")).is_err());
+
+        // Restore so other tests aren't affected.
+    }
+
+    // ── build_sync_plan ────────────────────────────────────────────────
+
+    fn github_task(eid: &str, title: &str, status: Status) -> Task {
+        Task {
+            title: title.to_string(),
+            status,
+            external_id: Some(eid.to_string()),
+            external_source: Some("github".to_string()),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn plan_pull_new_issue() {
+        let local: Vec<Task> = vec![];
+        let remote = vec![github_task("42", "New bug", Status::Open)];
+        let plan = build_sync_plan(&local, &remote);
+        assert_eq!(plan.actions.len(), 1);
+        assert_eq!(
+            plan.actions[0],
+            SyncAction::Pull {
+                issue_number: "42".into(),
+                title: "New bug".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn plan_skips_already_tracked() {
+        let local = vec![github_task("42", "Existing", Status::Open)];
+        let remote = vec![github_task("42", "Existing", Status::Open)];
+        let plan = build_sync_plan(&local, &remote);
+        assert!(plan.actions.is_empty());
+    }
+
+    #[test]
+    fn plan_push_status_change() {
+        let local = vec![github_task("7", "Fixed bug", Status::Done)];
+        let remote = vec![github_task("7", "Fixed bug", Status::Open)];
+        let plan = build_sync_plan(&local, &remote);
+        assert_eq!(plan.actions.len(), 1);
+        assert_eq!(
+            plan.actions[0],
+            SyncAction::Push {
+                issue_number: "7".into(),
+                title: "Fixed bug".into(),
+                new_state: "closed".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn plan_mixed_actions() {
+        let local = vec![github_task("1", "Close me", Status::Cancelled)];
+        let remote = vec![
+            github_task("1", "Close me", Status::Open),
+            github_task("2", "Brand new", Status::Open),
+        ];
+        let plan = build_sync_plan(&local, &remote);
+        assert_eq!(plan.actions.len(), 2);
+    }
+
+    #[test]
+    fn plan_ignores_non_github_local() {
+        let local_task = Task {
+            title: "Local only".into(),
+            status: Status::Done,
+            external_id: Some("99".into()),
+            external_source: Some("jira".into()),
+            ..Default::default()
+        };
+        let remote = vec![github_task("99", "Something", Status::Open)];
+        let plan = build_sync_plan(&[local_task], &remote);
+        // The jira task should not produce a push, but issue 99 should be pulled
+        // since no *github* local task tracks it.
+        assert_eq!(plan.actions.len(), 1);
+        assert!(matches!(plan.actions[0], SyncAction::Pull { .. }));
+    }
+
+    // ── format_sync_result ─────────────────────────────────────────────
+
+    #[test]
+    fn format_result_clean() {
+        let r = GitHubSyncResult {
+            issues_pulled: 5,
+            tasks_created: 2,
+            statuses_pushed: 1,
+            errors: vec![],
+        };
+        let s = format_sync_result(&r);
+        assert!(s.contains("5 pulled"));
+        assert!(s.contains("2 created"));
+        assert!(s.contains("1 pushed"));
+        assert!(!s.contains("error"));
+    }
+
+    #[test]
+    fn format_result_with_errors() {
+        let r = GitHubSyncResult {
+            issues_pulled: 0,
+            tasks_created: 0,
+            statuses_pushed: 0,
+            errors: vec!["oops".into()],
+        };
+        let s = format_sync_result(&r);
+        assert!(s.contains("1 errors"));
+        assert!(s.contains("oops"));
+    }
+
+    // ── SyncPlan Display ───────────────────────────────────────────────
+
+    #[test]
+    fn plan_display_empty() {
+        let plan = SyncPlan::default();
+        assert_eq!(format!("{plan}"), "Nothing to sync.\n");
+    }
+
+    #[test]
+    fn plan_display_actions() {
+        let plan = SyncPlan {
+            actions: vec![
+                SyncAction::Pull {
+                    issue_number: "1".into(),
+                    title: "Bug".into(),
+                },
+                SyncAction::Push {
+                    issue_number: "2".into(),
+                    title: "Fix".into(),
+                    new_state: "closed".into(),
+                },
+            ],
+        };
+        let s = format!("{plan}");
+        assert!(s.contains("← pull  #1: Bug"));
+        assert!(s.contains("→ push  #2: Fix → closed"));
     }
 }

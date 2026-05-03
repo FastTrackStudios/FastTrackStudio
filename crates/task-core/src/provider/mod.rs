@@ -49,7 +49,10 @@ pub use webdav::{
 pub mod mock;
 pub use mock::MockProvider;
 pub use nextcloud::{NextcloudProvider, NextcloudConfig};
-pub use github::{GitHubSync, GitHubConfig, GitHubSyncResult};
+pub use github::{
+    GitHubSync, GitHubConfig, GitHubSyncResult, SyncAction, SyncPlan,
+    build_sync_plan, format_sync_result, parse_repo, resolve_token,
+};
 pub use talk::{Message as TalkMessage, Room as TalkRoom, TalkClient, TalkConfig};
 pub use channel::{
     ChannelConversation, ChannelMessage, ChannelSendMessageRequest, CommunicationChannelProvider,
