@@ -483,13 +483,9 @@ pub fn diag_dropdown_close(_marker: bool) -> Element {
 
             // Click-away target. Counts clicks so we can verify the
             // event is reaching Dioxus at all even when the dropdown
-            // refuses to close. Inline style on width/height/background
-            // so this still renders as a giant target even when run
-            // outside a styled host (e.g. raw `--diag-dropdown` mode
-            // without Tailwind).
+            // refuses to close.
             div {
                 class: "h-64 rounded-md border border-border bg-muted/40 flex items-center justify-center cursor-pointer select-none",
-                style: "width: 600px; height: 300px; background: #444; margin-top: 24px;",
                 onclick: move |_| { *click_count.write() += 1; },
                 span { class: "text-sm text-muted-foreground",
                     "click-away target — clicks received: "
