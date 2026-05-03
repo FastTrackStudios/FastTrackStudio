@@ -46,6 +46,20 @@ enum Command {
     },
     /// Return the last touched FX parameter
     LastTouchedFx,
+    /// Bypass an FX
+    BypassFx {
+        /// Track name or index
+        track: String,
+        /// FX name or index
+        fx: String,
+    },
+    /// Enable an FX
+    EnableFx {
+        /// Track name or index
+        track: String,
+        /// FX name or index
+        fx: String,
+    },
     /// Add an FX to a track chain
     FxAdd {
         /// Track name or index
@@ -126,6 +140,18 @@ enum Command {
     },
     /// Show transport state
     Transport,
+    /// Start playback
+    Play,
+    /// Stop playback
+    Stop,
+    /// Pause playback
+    Pause,
+    /// Start recording
+    Record,
+    /// Toggle playback
+    PlayPause,
+    /// Toggle loop mode
+    Loop,
     /// Run a transport action
     TransportDo {
         /// Action: play, pause, stop, play_pause, play_stop, record, stop_recording, toggle_recording, goto_start, goto_end, toggle_loop
@@ -315,6 +341,46 @@ enum Command {
         /// Track name or index
         track: String,
     },
+    /// Mute a track
+    Mute {
+        /// Track name or index
+        track: String,
+    },
+    /// Unmute a track
+    Unmute {
+        /// Track name or index
+        track: String,
+    },
+    /// Solo a track
+    Solo {
+        /// Track name or index
+        track: String,
+    },
+    /// Unsolo a track
+    Unsolo {
+        /// Track name or index
+        track: String,
+    },
+    /// Arm a track for recording
+    Arm {
+        /// Track name or index
+        track: String,
+    },
+    /// Disarm a track for recording
+    Disarm {
+        /// Track name or index
+        track: String,
+    },
+    /// Select a track
+    SelectTrack {
+        /// Track name or index
+        track: String,
+    },
+    /// Deselect a track
+    DeselectTrack {
+        /// Track name or index
+        track: String,
+    },
     /// Set a track field
     TrackSet {
         /// Track name or index
@@ -388,21 +454,29 @@ enum Command {
         action: String,
     },
     /// Execute a REAPER action by numeric ID or command name
+    #[command(hide = true)]
     Action {
         /// Action ID or command name
         action_id: String,
     },
     /// Look up an action registration and command ID
+    #[command(hide = true)]
     ActionLookup {
         /// Command name
         command_name: String,
     },
     /// Set a registered action toggle state
+    #[command(hide = true)]
     ActionToggle {
         /// Command name
         command_name: String,
         /// Toggle state
         is_on: bool,
+    },
+    /// Work with registered REAPER/extension actions
+    Actions {
+        #[command(subcommand)]
+        command: ActionsCommand,
     },
     /// Return dynamic toolbar availability and tracked buttons
     Toolbar,
@@ -426,8 +500,45 @@ enum Command {
     },
 }
 
+#[derive(Subcommand)]
+enum ActionsCommand {
+    /// Look up an action registration and command ID
+    #[command(visible_alias = "status")]
+    Lookup {
+        /// Command name
+        command_name: String,
+    },
+    /// Execute a REAPER action by numeric ID or command name
+    #[command(visible_alias = "run")]
+    Exec {
+        /// Action ID or command name
+        action_id: String,
+    },
+    /// Set a registered action toggle state
+    Toggle {
+        /// Command name
+        command_name: String,
+        /// Toggle state: on, off, true, false, 1, 0
+        state: String,
+    },
+    /// Return toolbar availability and tracked buttons
+    Toolbar,
+}
+
 fn cli_value(value: &str) -> Value {
     serde_json::from_str(value).unwrap_or_else(|_| Value::String(value.to_string()))
+}
+
+fn bool_value(value: bool) -> Value {
+    Value::Bool(value)
+}
+
+fn parse_toggle_state(state: &str) -> Result<bool> {
+    match state.trim().to_ascii_lowercase().as_str() {
+        "on" | "true" | "yes" | "1" => Ok(true),
+        "off" | "false" | "no" | "0" => Ok(false),
+        _ => eyre::bail!("toggle state must be on/off, true/false, yes/no, or 1/0"),
+    }
 }
 
 fn print_value(value: Value, as_json: bool) -> Result<()> {
@@ -497,6 +608,14 @@ async fn main() -> Result<()> {
         Command::LastTouchedFx => {
             print_value(daw_cli::ops::last_touched_fx(&daw).await?, cli.json)?
         }
+        Command::BypassFx { ref track, ref fx } => print_value(
+            daw_cli::ops::fx_set_enabled(&daw, track, fx, false).await?,
+            cli.json,
+        )?,
+        Command::EnableFx { ref track, ref fx } => print_value(
+            daw_cli::ops::fx_set_enabled(&daw, track, fx, true).await?,
+            cli.json,
+        )?,
         Command::FxAdd {
             ref track,
             ref name,
@@ -557,6 +676,30 @@ async fn main() -> Result<()> {
             cli.json,
         )?,
         Command::Transport => daw_cli::cmd_transport(&daw, cli.json).await?,
+        Command::Play => print_value(
+            daw_cli::ops::transport_control(&daw, "play").await?,
+            cli.json,
+        )?,
+        Command::Stop => print_value(
+            daw_cli::ops::transport_control(&daw, "stop").await?,
+            cli.json,
+        )?,
+        Command::Pause => print_value(
+            daw_cli::ops::transport_control(&daw, "pause").await?,
+            cli.json,
+        )?,
+        Command::Record => print_value(
+            daw_cli::ops::transport_control(&daw, "record").await?,
+            cli.json,
+        )?,
+        Command::PlayPause => print_value(
+            daw_cli::ops::transport_control(&daw, "play_pause").await?,
+            cli.json,
+        )?,
+        Command::Loop => print_value(
+            daw_cli::ops::transport_control(&daw, "toggle_loop").await?,
+            cli.json,
+        )?,
         Command::TransportDo { ref action } => print_value(
             daw_cli::ops::transport_control(&daw, action).await?,
             cli.json,
@@ -660,6 +803,38 @@ async fn main() -> Result<()> {
             daw_cli::cmd_add_track(&daw, name.as_deref(), at, cli.json).await?
         }
         Command::RemoveTrack { ref track } => daw_cli::cmd_remove_track(&daw, track).await?,
+        Command::Mute { ref track } => print_value(
+            daw_cli::ops::track_set(&daw, track, "muted", bool_value(true)).await?,
+            cli.json,
+        )?,
+        Command::Unmute { ref track } => print_value(
+            daw_cli::ops::track_set(&daw, track, "muted", bool_value(false)).await?,
+            cli.json,
+        )?,
+        Command::Solo { ref track } => print_value(
+            daw_cli::ops::track_set(&daw, track, "soloed", bool_value(true)).await?,
+            cli.json,
+        )?,
+        Command::Unsolo { ref track } => print_value(
+            daw_cli::ops::track_set(&daw, track, "soloed", bool_value(false)).await?,
+            cli.json,
+        )?,
+        Command::Arm { ref track } => print_value(
+            daw_cli::ops::track_set(&daw, track, "armed", bool_value(true)).await?,
+            cli.json,
+        )?,
+        Command::Disarm { ref track } => print_value(
+            daw_cli::ops::track_set(&daw, track, "armed", bool_value(false)).await?,
+            cli.json,
+        )?,
+        Command::SelectTrack { ref track } => print_value(
+            daw_cli::ops::track_set(&daw, track, "selected", bool_value(true)).await?,
+            cli.json,
+        )?,
+        Command::DeselectTrack { ref track } => print_value(
+            daw_cli::ops::track_set(&daw, track, "selected", bool_value(false)).await?,
+            cli.json,
+        )?,
         Command::TrackSet {
             ref track,
             ref field,
@@ -733,6 +908,27 @@ async fn main() -> Result<()> {
             daw_cli::ops::action_set_toggle(&daw, command_name, is_on).await?,
             cli.json,
         )?,
+        Command::Actions { ref command } => match command {
+            ActionsCommand::Lookup { command_name } => print_value(
+                daw_cli::ops::action_lookup(&daw, command_name).await?,
+                cli.json,
+            )?,
+            ActionsCommand::Exec { action_id } => print_value(
+                daw_cli::ops::action_execute(&daw, action_id).await?,
+                cli.json,
+            )?,
+            ActionsCommand::Toggle {
+                command_name,
+                state,
+            } => print_value(
+                daw_cli::ops::action_set_toggle(&daw, command_name, parse_toggle_state(state)?)
+                    .await?,
+                cli.json,
+            )?,
+            ActionsCommand::Toolbar => {
+                print_value(daw_cli::ops::toolbar_status(&daw).await?, cli.json)?
+            }
+        },
         Command::Toolbar => print_value(daw_cli::ops::toolbar_status(&daw).await?, cli.json)?,
         // Already handled above
         Command::Launch { .. }
