@@ -270,10 +270,15 @@ enum Command {
     // -- Process & Project Management --
     /// Launch a REAPER instance
     Launch {
-        /// Config ID (e.g., "fts-tracks", "fts-signal")
+        /// Profile ID (e.g., "fasttrackstudio", "fts-dev", "sandbox")
+        #[arg(long)]
+        profile: Option<String>,
+        /// Legacy alias for --profile
         #[arg(long)]
         config: Option<String>,
     },
+    /// List configured DAW launch profiles
+    Profiles,
     /// Quit a running REAPER instance (sends SIGTERM)
     Quit {
         /// PID of the REAPER instance to kill
@@ -738,8 +743,15 @@ async fn main() -> Result<()> {
 
     // Commands that don't need an RPC connection
     match cli.command {
-        Command::Launch { ref config } => {
-            return daw_cli::cmd_launch(config.as_deref());
+        Command::Launch {
+            ref profile,
+            ref config,
+        } => {
+            let selected = profile.as_deref().or(config.as_deref());
+            return daw_cli::cmd_launch(selected);
+        }
+        Command::Profiles => {
+            return daw_cli::cmd_profiles(cli.json);
         }
         Command::Quit { pid } => {
             return daw_cli::cmd_quit(pid);
@@ -1162,6 +1174,7 @@ async fn main() -> Result<()> {
         Command::Toolbar => print_value(daw_cli::ops::toolbar_status(&daw).await?, cli.json)?,
         // Already handled above
         Command::Launch { .. }
+        | Command::Profiles
         | Command::Quit { .. }
         | Command::Combine { .. }
         | Command::RppSummary { .. }

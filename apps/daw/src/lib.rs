@@ -5,9 +5,11 @@
 //! REAPER instance via the vox RPC protocol.
 
 use std::borrow::Cow;
+use std::collections::BTreeSet;
 use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use std::{env, fs};
 
 use daw::Daw;
 use daw::service::FxType;
@@ -45,6 +47,7 @@ const SOCKET_PREFIX: &str = "fts-daw-";
 const SOCKET_SUFFIX: &str = ".sock";
 
 pub fn discover_socket() -> Option<PathBuf> {
+    clean_stale_daw_sockets();
     let entries = std::fs::read_dir(SOCKET_DIR).ok()?;
     let mut sockets: Vec<(u32, PathBuf)> = entries
         .filter_map(|entry| {
@@ -67,6 +70,7 @@ pub fn discover_socket() -> Option<PathBuf> {
 
 /// Discover all DAW sockets in /tmp, returning (pid, path) pairs.
 pub fn discover_all_sockets() -> Vec<(u32, PathBuf)> {
+    clean_stale_daw_sockets();
     let entries = match std::fs::read_dir(SOCKET_DIR) {
         Ok(e) => e,
         Err(_) => return vec![],
@@ -87,63 +91,404 @@ pub fn discover_all_sockets() -> Vec<(u32, PathBuf)> {
     sockets
 }
 
+pub fn clean_stale_daw_sockets() {
+    let Ok(entries) = fs::read_dir(SOCKET_DIR) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(filename) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        let Some(rest) = filename.strip_prefix(SOCKET_PREFIX) else {
+            continue;
+        };
+        let Some(pid_str) = rest.strip_suffix(SOCKET_SUFFIX) else {
+            continue;
+        };
+        let Ok(pid) = pid_str.parse::<u32>() else {
+            continue;
+        };
+        let alive = unsafe { libc::kill(pid as i32, 0) } == 0;
+        if !alive {
+            let _ = fs::remove_file(path);
+        }
+    }
+}
+
 // ============================================================================
 // REAPER Launcher
 // ============================================================================
 
-/// A known REAPER configuration (app bundle + role).
-pub struct ReaperConfig {
+/// A known DAW launch profile.
+#[derive(Debug, Clone)]
+pub struct DawProfile {
     pub id: &'static str,
     pub label: &'static str,
+    pub daw: &'static str,
     pub executable: String,
-    pub resources: String,
+    pub resources_dir: PathBuf,
+    pub ini_path: PathBuf,
     pub role: &'static str,
+    pub sandboxed: bool,
 }
 
-fn fts_home() -> String {
-    if let Ok(p) = std::env::var("FTS_HOME") {
-        return p;
+fn home_dir() -> PathBuf {
+    env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/tmp"))
+}
+
+fn expand_home(path: &str) -> PathBuf {
+    if path == "~" {
+        return home_dir();
     }
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-    format!("{home}/.fasttrackstudio")
+    path.strip_prefix("~/")
+        .map(|rest| home_dir().join(rest))
+        .unwrap_or_else(|| PathBuf::from(path))
 }
 
-pub fn reaper_configs() -> Vec<ReaperConfig> {
-    let fts = fts_home();
-    let live_app = format!("{fts}/Reaper/FTS-LIVE.app");
-    let executable = format!("{live_app}/Contents/MacOS/REAPER");
-    let resources = format!("{live_app}/Contents/Resources");
+fn which_command(name: &str) -> Option<String> {
+    let path = env::var_os("PATH")?;
+    for dir in env::split_paths(&path) {
+        let candidate = dir.join(name);
+        if candidate.is_file() {
+            return Some(candidate.to_string_lossy().to_string());
+        }
+    }
+    None
+}
 
+fn default_reaper_executable(root: &std::path::Path) -> String {
+    let app_exe = root.join("Reaper/FTS-LIVE.app/Contents/MacOS/REAPER");
+    if app_exe.exists() {
+        return app_exe.to_string_lossy().to_string();
+    }
+    env::var("FTS_REAPER_EXECUTABLE")
+        .ok()
+        .or_else(|| which_command("reaper"))
+        .unwrap_or_else(|| "reaper".to_string())
+}
+
+fn reaper_profile(
+    id: &'static str,
+    label: &'static str,
+    root: &str,
+    role: &'static str,
+    sandboxed: bool,
+) -> DawProfile {
+    let root = expand_home(root);
+    let resources_dir = root.join("Reaper");
+    let ini_path = resources_dir.join("reaper.ini");
+
+    DawProfile {
+        id,
+        label,
+        daw: "reaper",
+        executable: default_reaper_executable(&root),
+        resources_dir,
+        ini_path,
+        role,
+        sandboxed,
+    }
+}
+
+pub fn daw_profiles() -> Vec<DawProfile> {
     vec![
-        ReaperConfig {
+        reaper_profile(
+            "fasttrackstudio",
+            "FastTrackStudio REAPER",
+            "~/.fasttrackstudio",
+            "session",
+            false,
+        ),
+        reaper_profile("fts-dev", "FTS Dev REAPER", "~/.fts-dev", "dev", false),
+        reaper_profile(
+            "sandbox",
+            "Sandbox REAPER",
+            "~/.fts-dev/sandbox",
+            "sandbox",
+            true,
+        ),
+        DawProfile {
             id: "fts-tracks",
-            label: "FTS-TRACKS (Session)",
-            executable: executable.clone(),
-            resources: resources.clone(),
+            label: "FTS-TRACKS (legacy alias)",
+            daw: "reaper",
+            executable: default_reaper_executable(&expand_home("~/.fasttrackstudio")),
+            resources_dir: expand_home("~/.fasttrackstudio").join("Reaper"),
+            ini_path: expand_home("~/.fasttrackstudio").join("Reaper/reaper.ini"),
             role: "session",
+            sandboxed: false,
         },
-        ReaperConfig {
+        DawProfile {
             id: "fts-signal",
-            label: "FTS-SIGNAL (Signal)",
-            executable,
-            resources,
+            label: "FTS-SIGNAL (legacy alias)",
+            daw: "reaper",
+            executable: default_reaper_executable(&expand_home("~/.fasttrackstudio")),
+            resources_dir: expand_home("~/.fasttrackstudio").join("Reaper"),
+            ini_path: expand_home("~/.fasttrackstudio").join("Reaper/reaper.ini"),
             role: "signal",
+            sandboxed: false,
         },
     ]
 }
 
-pub fn config_by_id(id: &str) -> Option<ReaperConfig> {
-    reaper_configs().into_iter().find(|c| c.id == id)
+pub fn profile_by_id(id: &str) -> Option<DawProfile> {
+    daw_profiles().into_iter().find(|c| c.id == id)
 }
 
-pub fn spawn_reaper(config: &ReaperConfig) -> Result<u32> {
-    let mut cmd = Command::new(&config.executable);
-    cmd.current_dir(&config.resources)
-        .env("FTS_DAW_ROLE", config.role)
+fn sandbox_launcher() -> Option<String> {
+    env::var("FTS_REAPER_SANDBOX")
+        .ok()
+        .or_else(|| env::var("FTS_REAPER_FHS").ok())
+        .or_else(|| which_command("reaper-env"))
+        .or_else(|| which_command("fts-test"))
+}
+
+fn ensure_reaper_profile_dirs(profile: &DawProfile) -> Result<()> {
+    let user_plugins = profile.resources_dir.join("UserPlugins");
+    fs::create_dir_all(&user_plugins)?;
+    if let Some(parent) = profile.ini_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    if !profile.ini_path.exists() {
+        fs::write(&profile.ini_path, "[reaper]\n")?;
+    }
+    patch_reaper_profile_ini(profile)?;
+    prewarm_reaper_profile_if_needed(profile);
+    install_available_daw_bridge(&user_plugins)?;
+    Ok(())
+}
+
+fn patch_reaper_profile_ini(profile: &DawProfile) -> Result<()> {
+    if let Ok(audio_driver) = env::var("FTS_AUDIO_DRIVER") {
+        patch_ini_key(&profile.ini_path, "audiodriver", &audio_driver)?;
+    }
+
+    let now_ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    patch_ini_section_key(&profile.ini_path, "verchk", "lastt", &now_ts.to_string())?;
+    remove_stale_project_tabs(&profile.ini_path)?;
+    Ok(())
+}
+
+fn prewarm_reaper_profile_if_needed(profile: &DawProfile) {
+    let needs_prewarm = fs::read_to_string(&profile.ini_path)
+        .map(|content| !content.contains("[nag]"))
+        .unwrap_or(true);
+    if !needs_prewarm {
+        return;
+    }
+
+    eprintln!(
+        "Profile '{}' has no [nag] token yet; prewarming REAPER once so the evaluation dialog can settle.",
+        profile.id
+    );
+    let sockets_before = discover_all_sockets()
+        .into_iter()
+        .map(|(_, socket)| socket)
+        .collect::<BTreeSet<_>>();
+
+    let mut cmd = if profile.sandboxed {
+        let Some(launcher) = sandbox_launcher() else {
+            eprintln!("Warning: cannot prewarm sandbox profile without reaper-env/fts-test");
+            return;
+        };
+        let mut cmd = Command::new(launcher);
+        cmd.arg(&profile.executable);
+        cmd
+    } else {
+        Command::new(&profile.executable)
+    };
+
+    let spawn = cmd
+        .current_dir(&profile.resources_dir)
+        .env("FTS_DAW_PROFILE", profile.id)
+        .env("FTS_DAW_ROLE", profile.role)
+        .arg("-cfgfile")
+        .arg(&profile.ini_path)
+        .arg("-newinst")
+        .arg("-nosplash")
+        .arg("-ignoreerrors")
         .process_group(0)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
+        .spawn();
+
+    let Ok(mut child) = spawn else {
+        eprintln!("Warning: failed to prewarm REAPER profile '{}'", profile.id);
+        return;
+    };
+
+    std::thread::sleep(std::time::Duration::from_secs(10));
+    let _ = kill_reaper(child.id());
+    let _ = child.wait();
+
+    for (_, socket) in discover_all_sockets() {
+        if !sockets_before.contains(&socket) {
+            let _ = fs::remove_file(socket);
+        }
+    }
+
+    if fs::read_to_string(&profile.ini_path)
+        .map(|content| content.contains("[nag]"))
+        .unwrap_or(false)
+    {
+        eprintln!("Profile '{}' prewarm complete.", profile.id);
+    } else {
+        eprintln!(
+            "Warning: profile '{}' still has no [nag] token after prewarm; REAPER may show its evaluation dialog.",
+            profile.id
+        );
+    }
+}
+
+fn patch_ini_key(path: &std::path::Path, key: &str, value: &str) -> Result<()> {
+    let content = fs::read_to_string(path).unwrap_or_default();
+    let line = format!("{key}={value}");
+    let patched = if content
+        .lines()
+        .any(|existing| existing.starts_with(&format!("{key}=")))
+    {
+        content
+            .lines()
+            .map(|existing| {
+                if existing.starts_with(&format!("{key}=")) {
+                    line.clone()
+                } else {
+                    existing.to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    } else {
+        format!("{content}\n{line}\n")
+    };
+    fs::write(path, patched)?;
+    Ok(())
+}
+
+fn patch_ini_section_key(
+    path: &std::path::Path,
+    section: &str,
+    key: &str,
+    value: &str,
+) -> Result<()> {
+    let content = fs::read_to_string(path).unwrap_or_default();
+    let section_header = format!("[{section}]");
+    let key_prefix = format!("{key}=");
+    let key_line = format!("{key}={value}");
+
+    let patched = if content.lines().any(|line| line.starts_with(&key_prefix)) {
+        content
+            .lines()
+            .map(|line| {
+                if line.starts_with(&key_prefix) {
+                    key_line.clone()
+                } else {
+                    line.to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    } else if content.contains(&section_header) {
+        content.replace(&section_header, &format!("{section_header}\n{key_line}"))
+    } else {
+        format!("{content}\n{section_header}\n{key_line}\n")
+    };
+
+    fs::write(path, patched)?;
+    Ok(())
+}
+
+fn remove_stale_project_tabs(path: &std::path::Path) -> Result<()> {
+    let content = fs::read_to_string(path).unwrap_or_default();
+    let cleaned = content
+        .lines()
+        .filter(|line| !line.starts_with("projecttab") && !line.starts_with("lastproject="))
+        .collect::<Vec<_>>()
+        .join("\n");
+    if cleaned != content {
+        fs::write(path, cleaned)?;
+    }
+    Ok(())
+}
+
+fn install_available_daw_bridge(user_plugins: &std::path::Path) -> Result<()> {
+    let Some(source) = find_built_daw_bridge() else {
+        eprintln!(
+            "Warning: daw-bridge is not built yet; run `cargo build -p daw-bridge` before launching if this profile needs CLI control."
+        );
+        return Ok(());
+    };
+
+    let dest = user_plugins.join("reaper_daw_bridge.so");
+    if fs::read_link(&dest).ok().as_deref() == Some(source.as_path()) {
+        return Ok(());
+    }
+    let _ = fs::remove_file(&dest);
+
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(&source, &dest).or_else(|_| {
+            fs::copy(&source, &dest)?;
+            Ok::<(), std::io::Error>(())
+        })?;
+    }
+    #[cfg(not(unix))]
+    {
+        fs::copy(&source, &dest)?;
+    }
+    Ok(())
+}
+
+fn find_built_daw_bridge() -> Option<PathBuf> {
+    let mut candidates = Vec::new();
+    if let Ok(exe) = env::current_exe()
+        && let Some(profile_dir) = exe.parent()
+    {
+        candidates.push(profile_dir.join("libreaper_daw_bridge.so"));
+        if let Some(target_dir) = profile_dir.parent() {
+            candidates.push(target_dir.join("debug/libreaper_daw_bridge.so"));
+            candidates.push(target_dir.join("release/libreaper_daw_bridge.so"));
+        }
+    }
+    if let Ok(cwd) = env::current_dir() {
+        candidates.push(cwd.join("target/debug/libreaper_daw_bridge.so"));
+        candidates.push(cwd.join("target/release/libreaper_daw_bridge.so"));
+    }
+    candidates.into_iter().find(|path| path.is_file())
+}
+
+pub fn spawn_reaper(profile: &DawProfile) -> Result<u32> {
+    ensure_reaper_profile_dirs(profile)?;
+
+    let mut cmd = if profile.sandboxed {
+        let launcher = sandbox_launcher().ok_or_else(|| {
+            eyre::eyre!(
+                "Profile '{}' is sandboxed, but no sandbox launcher was found. Set FTS_REAPER_SANDBOX or install reaper-env/fts-test.",
+                profile.id
+            )
+        })?;
+        let mut cmd = Command::new(launcher);
+        cmd.arg(&profile.executable);
+        cmd
+    } else {
+        Command::new(&profile.executable)
+    };
+
+    cmd.current_dir(&profile.resources_dir)
+        .env("FTS_DAW_PROFILE", profile.id)
+        .env("FTS_DAW_ROLE", profile.role)
+        .process_group(0)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .arg("-cfgfile")
+        .arg(&profile.ini_path)
         .arg("-newinst")
         .arg("-nosplash")
         .arg("-ignoreerrors");
@@ -151,8 +496,8 @@ pub fn spawn_reaper(config: &ReaperConfig) -> Result<u32> {
     let child = cmd.spawn().map_err(|e| {
         eyre::eyre!(
             "Failed to spawn REAPER ({}) at {}: {e}",
-            config.label,
-            config.executable
+            profile.label,
+            profile.executable
         )
     })?;
 
@@ -162,6 +507,18 @@ pub fn spawn_reaper(config: &ReaperConfig) -> Result<u32> {
 }
 
 pub fn kill_reaper(pid: u32) -> bool {
+    let process_group = format!("-{pid}");
+    if Command::new("kill")
+        .args(["-TERM", "--", &process_group])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+    {
+        return true;
+    }
+
     Command::new("kill")
         .args(["-TERM", &pid.to_string()])
         .stdout(Stdio::null())
@@ -176,19 +533,27 @@ pub fn kill_reaper(pid: u32) -> bool {
 /// Returns `(Daw, pid, socket_path)` on success. The caller is responsible
 /// for calling `teardown_owned(pid, socket_path)` when done.
 pub async fn launch_and_connect(config_id: &str) -> Result<(DawConnection, u32, PathBuf)> {
-    let config =
-        config_by_id(config_id).ok_or_else(|| eyre::eyre!("Unknown REAPER config: {config_id}"))?;
+    let profile =
+        profile_by_id(config_id).ok_or_else(|| eyre::eyre!("Unknown DAW profile: {config_id}"))?;
 
-    eprintln!("Spawning REAPER ({})...", config.label);
-    let pid = spawn_reaper(&config)?;
-    let socket_path = PathBuf::from(format!("/tmp/fts-daw-{pid}.sock"));
-    let _ = std::fs::remove_file(&socket_path); // remove any stale
+    eprintln!("Spawning REAPER ({})...", profile.label);
+    let before = discover_all_sockets()
+        .into_iter()
+        .map(|(_, path)| path)
+        .collect::<BTreeSet<_>>();
+    let pid = spawn_reaper(&profile)?;
 
     // Wait up to 30s for socket to appear
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
     eprint!("  Waiting for socket");
+    let socket_path;
     loop {
-        if socket_path.exists() {
+        if let Some(path) = discover_all_sockets()
+            .into_iter()
+            .map(|(_, path)| path)
+            .find(|path| !before.contains(path))
+        {
+            socket_path = path;
             break;
         }
         if std::time::Instant::now() > deadline {
@@ -855,17 +1220,65 @@ pub async fn cmd_ping(daw: &Daw) -> Result<()> {
 // ============================================================================
 
 pub fn cmd_launch(config_id: Option<&str>) -> Result<()> {
-    let id = config_id.unwrap_or("fts-tracks");
-    let config = config_by_id(id).ok_or_else(|| {
-        let known: Vec<_> = reaper_configs().iter().map(|c| c.id).collect();
+    let id = config_id.unwrap_or("fasttrackstudio");
+    let profile = profile_by_id(id).ok_or_else(|| {
+        let known: Vec<_> = daw_profiles().iter().map(|c| c.id).collect();
         eyre::eyre!(
-            "Unknown config \"{id}\". Known configs: {}",
+            "Unknown DAW profile \"{id}\". Known profiles: {}",
             known.join(", ")
         )
     })?;
 
-    let pid = spawn_reaper(&config)?;
-    println!("Launched {} (PID {pid})", config.label);
+    let pid = spawn_reaper(&profile)?;
+    println!("Launched {} (PID {pid})", profile.label);
+    Ok(())
+}
+
+pub fn profiles_value() -> serde_json::Value {
+    json!(
+        daw_profiles()
+            .into_iter()
+            .map(|profile| {
+                json!({
+                    "id": profile.id,
+                    "label": profile.label,
+                    "daw": profile.daw,
+                    "role": profile.role,
+                    "sandboxed": profile.sandboxed,
+                    "executable": profile.executable,
+                    "resources_dir": profile.resources_dir,
+                    "ini_path": profile.ini_path,
+                })
+            })
+            .collect::<Vec<_>>()
+    )
+}
+
+pub fn cmd_profiles(as_json: bool) -> Result<()> {
+    let profiles = profiles_value();
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&profiles)?);
+        return Ok(());
+    }
+
+    println!(
+        "{:<18} {:<8} {:<10} {:<9} {}",
+        "PROFILE", "DAW", "ROLE", "SANDBOX", "CONFIG"
+    );
+    for profile in profiles.as_array().into_iter().flatten() {
+        println!(
+            "{:<18} {:<8} {:<10} {:<9} {}",
+            profile["id"].as_str().unwrap_or_default(),
+            profile["daw"].as_str().unwrap_or_default(),
+            profile["role"].as_str().unwrap_or_default(),
+            if profile["sandboxed"].as_bool().unwrap_or(false) {
+                "yes"
+            } else {
+                "no"
+            },
+            profile["resources_dir"].as_str().unwrap_or_default(),
+        );
+    }
     Ok(())
 }
 
@@ -890,6 +1303,10 @@ pub fn cmd_quit(pid: Option<u32>) -> Result<()> {
     };
 
     if kill_reaper(target_pid) {
+        for _ in 0..8 {
+            std::thread::sleep(std::time::Duration::from_millis(250));
+            clean_stale_daw_sockets();
+        }
         println!("Sent SIGTERM to PID {target_pid}");
     } else {
         bail!("Failed to kill PID {target_pid}");
