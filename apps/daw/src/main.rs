@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
+use daw_cli::cli_values::{OnOff, TrackColor, TrackFolderDepth, TrackName};
 use eyre::Result;
 use serde_json::Value;
 
@@ -84,7 +85,7 @@ enum Command {
         /// FX name or index
         fx: String,
         /// Set enabled state
-        enabled: bool,
+        enabled: OnOff,
     },
     /// Move an FX to a new chain index
     FxMove {
@@ -169,8 +170,8 @@ enum Command {
     },
     /// Set transport loop state
     SetLoop {
-        /// Loop enabled
-        enabled: bool,
+        /// Loop enabled: on/off, true/false, yes/no, or 1/0
+        enabled: OnOff,
     },
     /// Set transport playrate
     SetPlayrate {
@@ -386,6 +387,27 @@ enum Command {
         /// Track name or index
         track: String,
     },
+    /// Rename a track with a non-empty typed name
+    TrackRename {
+        /// Track name or index
+        track: String,
+        /// New non-empty track name
+        name: TrackName,
+    },
+    /// Set a track color using #RRGGBB, 0xRRGGBB, decimal, or default
+    TrackColor {
+        /// Track name or index
+        track: String,
+        /// Color value: #RRGGBB, 0xRRGGBB, decimal, or default
+        color: TrackColor,
+    },
+    /// Set REAPER folder depth using named values instead of raw integers
+    TrackFolderDepth {
+        /// Track name or index
+        track: String,
+        /// Depth: normal, folder-start, close, close:N, or an integer
+        depth: TrackFolderDepth,
+    },
     /// Set a track field
     TrackSet {
         /// Track name or index
@@ -476,7 +498,7 @@ enum Command {
         /// Command name
         command_name: String,
         /// Toggle state
-        is_on: bool,
+        is_on: OnOff,
     },
     /// Work with registered REAPER/extension actions
     Actions {
@@ -812,7 +834,7 @@ async fn main() -> Result<()> {
             ref fx,
             enabled,
         } => print_value(
-            daw_cli::ops::fx_set_enabled(&daw, track, fx, enabled).await?,
+            daw_cli::ops::fx_set_enabled(&daw, track, fx, enabled.0).await?,
             cli.json,
         )?,
         Command::FxMove {
@@ -896,7 +918,7 @@ async fn main() -> Result<()> {
             cli.json,
         )?,
         Command::SetLoop { enabled } => print_value(
-            daw_cli::ops::transport_set_loop(&daw, enabled).await?,
+            daw_cli::ops::transport_set_loop(&daw, enabled.0).await?,
             cli.json,
         )?,
         Command::SetPlayrate { rate } => print_value(
@@ -1018,6 +1040,21 @@ async fn main() -> Result<()> {
             daw_cli::ops::track_set(&daw, track, "selected", bool_value(false)).await?,
             cli.json,
         )?,
+        Command::TrackRename {
+            ref track,
+            ref name,
+        } => print_value(
+            daw_cli::ops::track_rename(&daw, track, &name.0).await?,
+            cli.json,
+        )?,
+        Command::TrackColor { ref track, color } => print_value(
+            daw_cli::ops::track_set_color(&daw, track, color.0).await?,
+            cli.json,
+        )?,
+        Command::TrackFolderDepth { ref track, depth } => print_value(
+            daw_cli::ops::track_set_folder_depth(&daw, track, depth.0).await?,
+            cli.json,
+        )?,
         Command::TrackSet {
             ref track,
             ref field,
@@ -1088,7 +1125,7 @@ async fn main() -> Result<()> {
             ref command_name,
             is_on,
         } => print_value(
-            daw_cli::ops::action_set_toggle(&daw, command_name, is_on).await?,
+            daw_cli::ops::action_set_toggle(&daw, command_name, is_on.0).await?,
             cli.json,
         )?,
         Command::Actions { ref command } => match command {

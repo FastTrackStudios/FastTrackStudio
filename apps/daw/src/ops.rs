@@ -864,6 +864,37 @@ pub async fn track_set(daw: &Daw, track_arg: &str, field: &str, value: Value) ->
     }))
 }
 
+pub async fn track_rename(daw: &Daw, track_arg: &str, name: &str) -> Result<Value> {
+    let handle = crate::resolve_track_handle(daw, track_arg).await?;
+    handle.rename(name).await?;
+    let info = handle.info().await?;
+    Ok(json!({ "guid": info.guid, "index": info.index, "name": info.name }))
+}
+
+pub async fn track_set_color(daw: &Daw, track_arg: &str, color: u32) -> Result<Value> {
+    let handle = crate::resolve_track_handle(daw, track_arg).await?;
+    handle.set_color(color).await?;
+    let info = handle.info().await?;
+    Ok(json!({
+        "guid": info.guid,
+        "index": info.index,
+        "name": info.name,
+        "color": info.color,
+    }))
+}
+
+pub async fn track_set_folder_depth(daw: &Daw, track_arg: &str, depth: i32) -> Result<Value> {
+    let handle = crate::resolve_track_handle(daw, track_arg).await?;
+    handle.set_folder_depth(depth).await?;
+    let info = handle.info().await?;
+    Ok(json!({
+        "guid": info.guid,
+        "index": info.index,
+        "name": info.name,
+        "folder_depth": info.folder_depth,
+    }))
+}
+
 pub async fn track_move(daw: &Daw, track_arg: &str, index: u32) -> Result<Value> {
     let handle = crate::resolve_track_handle(daw, track_arg).await?;
     handle.move_to_index(index).await?;

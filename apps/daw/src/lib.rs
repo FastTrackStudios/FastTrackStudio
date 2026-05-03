@@ -20,6 +20,7 @@ use vox::{
     SessionHandle,
 };
 
+pub mod cli_values;
 pub mod ops;
 
 /// A DAW connection that keeps the vox session alive.
