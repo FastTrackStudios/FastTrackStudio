@@ -577,7 +577,7 @@ dependencies = [
  "urlencoding",
  "uuid",
  "validator",
- "vox-types 0.2.2",
+ "vox-types",
 ]
 
 [[package]]
@@ -1103,7 +1103,7 @@ dependencies = [
  "crudcrate-derive",
  "facet",
  "hyper",
- "sea-orm",
+ "sea-orm 1.1.20 (git+https://github.com/FastTrackStudios/sea-orm?rev=d01afa40d79227a4a2de85b50e76849300890766)",
  "serde",
  "serde_json",
  "serde_with",
@@ -1533,15 +1533,6 @@ dependencies = [
  "facet-reflect",
  "facet-toml",
  "facet-value",
-]
-
-[[package]]
-name = "facet-cbor"
-version = "0.2.2"
-dependencies = [
- "facet",
- "facet-core",
- "facet-reflect",
 ]
 
 [[package]]
@@ -4553,7 +4544,7 @@ dependencies = [
  "ouroboros",
  "pgvector",
  "rust_decimal",
- "sea-orm-macros",
+ "sea-orm-macros 1.1.20",
  "sea-query",
  "sea-query-binder",
  "serde",
@@ -4565,6 +4556,29 @@ dependencies = [
  "tracing",
  "url",
  "utoipa",
+ "uuid",
+]
+
+[[package]]
+name = "sea-orm"
+version = "1.1.20"
+source = "git+https://github.com/FastTrackStudios/sea-orm?rev=d01afa40d79227a4a2de85b50e76849300890766#d01afa40d79227a4a2de85b50e76849300890766"
+dependencies = [
+ "async-stream",
+ "async-trait",
+ "derive_more",
+ "futures-util",
+ "log",
+ "ouroboros",
+ "sea-orm-macros 1.1.20 (git+https://github.com/FastTrackStudios/sea-orm?rev=d01afa40d79227a4a2de85b50e76849300890766)",
+ "sea-query",
+ "sea-query-binder",
+ "serde",
+ "sqlx",
+ "strum",
+ "thiserror 2.0.18",
+ "tracing",
+ "url",
  "uuid",
 ]
 
@@ -4595,13 +4609,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "sea-orm-macros"
+version = "1.1.20"
+source = "git+https://github.com/FastTrackStudios/sea-orm?rev=d01afa40d79227a4a2de85b50e76849300890766#d01afa40d79227a4a2de85b50e76849300890766"
+dependencies = [
+ "heck 0.5.0",
+ "proc-macro2",
+ "quote",
+ "sea-bae",
+ "syn 2.0.117",
+ "unicode-ident",
+]
+
+[[package]]
 name = "sea-orm-migration"
 version = "1.1.20"
 dependencies = [
  "async-trait",
  "clap",
  "dotenvy",
- "sea-orm",
+ "sea-orm 1.1.20",
  "sea-orm-cli",
  "sea-schema",
  "tracing",
@@ -5417,7 +5444,7 @@ dependencies = [
  "crudcrate",
  "facet",
  "hyper",
- "sea-orm",
+ "sea-orm 1.1.20",
  "sea-orm-migration",
  "serde",
  "serde_json",
@@ -6123,10 +6150,10 @@ dependencies = [
  "tokio-rustls",
  "tracing",
  "vox-core",
- "vox-postcard 0.3.1",
+ "vox-postcard",
  "vox-service-macros",
  "vox-stream",
- "vox-types 0.3.1",
+ "vox-types",
  "vox-websocket",
 ]
 
@@ -6135,10 +6162,10 @@ name = "vox-codegen"
 version = "0.3.1"
 source = "git+https://github.com/Codys-Wright/vox?rev=ccb46b5416100d38430cb082d71bf0377428c241#ccb46b5416100d38430cb082d71bf0377428c241"
 dependencies = [
- "facet-cbor 0.3.1",
+ "facet-cbor",
  "facet-core",
  "heck 0.5.0",
- "vox-types 0.3.1",
+ "vox-types",
 ]
 
 [[package]]
@@ -6147,7 +6174,7 @@ version = "0.3.1"
 source = "git+https://github.com/Codys-Wright/vox?rev=ccb46b5416100d38430cb082d71bf0377428c241#ccb46b5416100d38430cb082d71bf0377428c241"
 dependencies = [
  "facet",
- "facet-cbor 0.3.1",
+ "facet-cbor",
  "facet-core",
  "facet-error",
  "facet-reflect",
@@ -6156,8 +6183,8 @@ dependencies = [
  "smallvec 1.15.1",
  "tokio",
  "tracing",
- "vox-postcard 0.3.1",
- "vox-types 0.3.1",
+ "vox-postcard",
+ "vox-types",
  "wasm-bindgen-futures",
  "zerocopy",
 ]
@@ -6185,17 +6212,6 @@ dependencies = [
 
 [[package]]
 name = "vox-postcard"
-version = "0.2.2"
-dependencies = [
- "chrono",
- "facet",
- "facet-core",
- "facet-reflect",
- "vox-schema 0.2.2",
-]
-
-[[package]]
-name = "vox-postcard"
 version = "0.3.1"
 source = "git+https://github.com/Codys-Wright/vox?rev=ccb46b5416100d38430cb082d71bf0377428c241#ccb46b5416100d38430cb082d71bf0377428c241"
 dependencies = [
@@ -6203,18 +6219,7 @@ dependencies = [
  "facet",
  "facet-core",
  "facet-reflect",
- "vox-schema 0.3.1",
-]
-
-[[package]]
-name = "vox-schema"
-version = "0.2.2"
-dependencies = [
- "blake3",
- "facet",
- "facet-cbor 0.2.2",
- "facet-core",
- "indexmap 2.13.0",
+ "vox-schema",
 ]
 
 [[package]]
@@ -6224,7 +6229,7 @@ source = "git+https://github.com/Codys-Wright/vox?rev=ccb46b5416100d38430cb082d7
 dependencies = [
  "blake3",
  "facet",
- "facet-cbor 0.3.1",
+ "facet-cbor",
  "facet-core",
  "indexmap 2.13.0",
 ]
@@ -6247,28 +6252,7 @@ dependencies = [
  "moire",
  "tokio",
  "vox-core",
- "vox-types 0.3.1",
-]
-
-[[package]]
-name = "vox-types"
-version = "0.2.2"
-dependencies = [
- "bitflags 2.11.0",
- "blake3",
- "facet",
- "facet-cbor 0.2.2",
- "facet-core",
- "facet-path",
- "futures-channel",
- "heck 0.5.0",
- "indexmap 2.13.0",
- "moire",
- "smallvec 1.15.1",
- "structstruck",
- "tokio",
- "vox-postcard 0.2.2",
- "vox-schema 0.2.2",
+ "vox-types",
 ]
 
 [[package]]
@@ -6279,7 +6263,7 @@ dependencies = [
  "bitflags 2.11.0",
  "blake3",
  "facet",
- "facet-cbor 0.3.1",
+ "facet-cbor",
  "facet-core",
  "facet-path",
  "facet-reflect",
@@ -6290,8 +6274,8 @@ dependencies = [
  "smallvec 1.15.1",
  "structstruck",
  "tokio",
- "vox-postcard 0.3.1",
- "vox-schema 0.3.1",
+ "vox-postcard",
+ "vox-schema",
 ]
 
 [[package]]
@@ -6306,7 +6290,7 @@ dependencies = [
  "tokio",
  "tokio-tungstenite 0.26.2",
  "vox-core",
- "vox-types 0.3.1",
+ "vox-types",
  "wasm-bindgen",
  "web-sys",
 ]
@@ -6958,7 +6942,7 @@ version = "0.1.0"
 dependencies = [
  "task-core",
  "vox-codegen",
- "vox-types 0.3.1",
+ "vox-types",
  "xshell",
 ]
 

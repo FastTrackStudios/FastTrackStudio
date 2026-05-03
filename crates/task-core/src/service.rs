@@ -9,6 +9,7 @@ use crate::calendar_event::{CalendarEvent, CalendarEventStatus};
 use crate::client::Client;
 use crate::email::EmailRef;
 use crate::index::{ChangeRow, ConflictRow};
+use crate::expense::{Expense, ExpenseCreateRequest, ExpenseFilter, ExpensePatch, ExpenseReport};
 use crate::invoice::Invoice;
 use crate::people::{
     OrganizationContext, OrganizationRecord, Person, PersonContext, ProviderConflict,
@@ -217,6 +218,35 @@ pub trait InvoiceService {
         reason: Option<String>,
         actor: Option<String>,
     ) -> Result<Invoice, VaultError>;
+}
+
+#[vox::service]
+pub trait ExpenseService {
+    /// Create a new expense entry.
+    async fn create_expense(
+        &self,
+        request: ExpenseCreateRequest,
+    ) -> Result<Expense, VaultError>;
+
+    /// Return all expenses matching the filter, newest first.
+    async fn list_expenses(&self, filter: ExpenseFilter) -> Vec<Expense>;
+
+    /// Return a single expense by id.
+    async fn get_expense(&self, expense_id: String) -> Option<Expense>;
+
+    /// Update an expense.
+    async fn update_expense(
+        &self,
+        expense_id: String,
+        patch: ExpensePatch,
+        actor: Option<String>,
+    ) -> Result<Expense, VaultError>;
+
+    /// Delete an expense by id.
+    async fn delete_expense(&self, expense_id: String) -> Result<(), VaultError>;
+
+    /// Return a roll-up expense report.
+    async fn expense_report(&self, filter: ExpenseFilter) -> ExpenseReport;
 }
 
 #[vox::service]

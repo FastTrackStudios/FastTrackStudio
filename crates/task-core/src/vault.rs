@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 use crate::client::Client;
 use crate::calendar_event::CalendarEvent;
+use crate::expense::Expense;
 use crate::invoice::Invoice;
 use crate::project::Project;
 use crate::service::VaultError;
@@ -301,9 +302,53 @@ impl Vault {
         Ok(())
     }
 
+    // ── Expense I/O ───────────────────────────────────────────────────────────
+
+    pub fn parse_expense_from_md(content: &str) -> Option<Expense> {
+        let (frontmatter, _body) = Self::split_frontmatter(content)?;
+        facet_yaml::from_str::<Expense>(frontmatter).ok()
+    }
+
+    pub fn render_expense_file(expense: &Expense, body: &str) -> Result<String, VaultError> {
+        let yaml =
+            facet_yaml::to_string(expense).map_err(|e| VaultError::ParseError(e.to_string()))?;
+        let yaml = yaml.strip_prefix("---\n").unwrap_or(&yaml);
+        Ok(format!("---\n{}---\n{}", yaml, body))
+    }
+
+    /// Load all expenses from the `expenses/` subdirectory.
+    pub fn load_expenses(&self) -> Vec<Expense> {
+        let dir = self.root.join("expenses");
+        if !dir.exists() {
+            return vec![];
+        }
+        Self::walk_md_in(&dir)
+            .filter_map(|content| Self::parse_expense_from_md(&content))
+            .collect()
+    }
+
+    /// Save an expense to `expenses/<id>.md`.
+    pub fn save_expense(&self, expense: &Expense) -> Result<(), VaultError> {
+        let dir = self.root.join("expenses");
+        std::fs::create_dir_all(&dir).map_err(|e| VaultError::IoError(e.to_string()))?;
+        let path = dir.join(format!("{}.md", expense.id));
+        let body = crate::expense::render_expense_body(expense);
+        let content = Self::render_expense_file(expense, &body)?;
+        Self::atomic_write(&path, &content)
+    }
+
+    /// Delete an expense file by id.
+    pub fn delete_expense(&self, expense_id: &str) -> Result<(), VaultError> {
+        let path = self.root.join("expenses").join(format!("{expense_id}.md"));
+        if path.exists() {
+            std::fs::remove_file(&path).map_err(|e| VaultError::IoError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
     pub fn render_task_file(task: &Task, body: &str) -> Result<String, VaultError> {
-        let yaml = facet_yaml::to_string(task)
-            .map_err(|e| VaultError::ParseError(e.to_string()))?;
+        let yaml =
+            facet_yaml::to_string(task).map_err(|e| VaultError::ParseError(e.to_string()))?;
         let yaml = yaml.strip_prefix("---\n").unwrap_or(&yaml);
         // Use provided body, or fall back to task.body
         let body = if body.is_empty() { &task.body } else { body };

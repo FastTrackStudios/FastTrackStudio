@@ -1,7 +1,11 @@
-use chrono::{DateTime, TimeZone, Utc};
+use chrono::{DateTime, NaiveDate, TimeZone, Utc};
 use clap::{Parser, Subcommand};
 use task_core::index::{ChangeRow, ConflictRow};
 use task_core::workflows::{parse_comments, render_comments, Comment};
+use task_core::expense::{
+    render_expense_body, render_expense_report, ExpenseCreateRequest,
+    ExpenseFilter, ExpensePatch,
+};
 use task_core::{
     create_project, save_project_task, BusinessFinanceReport, CalendarEvent, CalendarEventPatch,
     CalendarEventStatus, CardDavSyncCollectionRequest, ChannelConversation, ChannelMessage,
@@ -272,6 +276,11 @@ enum Commands {
     Invoice {
         #[command(subcommand)]
         command: InvoiceCommands,
+    },
+    /// Expense tracking — CLI-first spend ledger, stored in `expenses/<id>.md`
+    Expense {
+        #[command(subcommand)]
+        command: ExpenseCommands,
     },
     /// Email linking — associate emails with tasks/projects. Bot-friendly.
     Email {
@@ -870,6 +879,120 @@ enum InvoiceCommands {
         #[arg(long)]
         reason: Option<String>,
     },
+}
+
+#[derive(Subcommand)]
+enum ExpenseCommands {
+    /// Create a new expense
+    Create {
+        description: String,
+        #[arg(long)]
+        amount: u64,
+        #[arg(long)]
+        date: Option<String>,
+        #[arg(long)]
+        currency: Option<String>,
+        #[arg(long)]
+        project: Option<String>,
+        #[arg(long)]
+        client: Option<String>,
+        #[arg(long)]
+        category: Option<String>,
+        #[arg(long)]
+        vendor: Option<String>,
+        #[arg(long)]
+        receipt: Option<String>,
+        #[arg(long)]
+        reimbursable: bool,
+        #[arg(long)]
+        status: Option<String>,
+        #[arg(long)]
+        notes: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// List expenses (newest first)
+    List {
+        #[arg(long)]
+        from: Option<String>,
+        #[arg(long)]
+        to: Option<String>,
+        #[arg(long)]
+        project: Option<String>,
+        #[arg(long)]
+        client: Option<String>,
+        #[arg(long)]
+        category: Option<String>,
+        #[arg(long)]
+        vendor: Option<String>,
+        #[arg(long)]
+        status: Option<String>,
+        #[arg(long)]
+        reimbursable_only: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show a single expense
+    Show {
+        id: String,
+        #[arg(long)]
+        md: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show an expense roll-up report
+    Report {
+        #[arg(long)]
+        from: Option<String>,
+        #[arg(long)]
+        to: Option<String>,
+        #[arg(long)]
+        project: Option<String>,
+        #[arg(long)]
+        client: Option<String>,
+        #[arg(long)]
+        category: Option<String>,
+        #[arg(long)]
+        vendor: Option<String>,
+        #[arg(long)]
+        status: Option<String>,
+        #[arg(long)]
+        reimbursable_only: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Update an expense
+    Update {
+        id: String,
+        #[arg(long)]
+        amount: Option<u64>,
+        #[arg(long)]
+        date: Option<String>,
+        #[arg(long)]
+        currency: Option<String>,
+        #[arg(long)]
+        project: Option<String>,
+        #[arg(long)]
+        client: Option<String>,
+        #[arg(long)]
+        category: Option<String>,
+        #[arg(long)]
+        vendor: Option<String>,
+        #[arg(long)]
+        description: Option<String>,
+        #[arg(long)]
+        receipt: Option<String>,
+        #[arg(long)]
+        reimbursable: Option<bool>,
+        #[arg(long)]
+        status: Option<String>,
+        #[arg(long)]
+        notes: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Delete an expense
+    Delete { id: String },
 }
 
 #[derive(Subcommand)]
@@ -2011,6 +2134,8 @@ async fn main() -> eyre::Result<()> {
                 print_client_detail(&client);
             }
         }
+
+        Commands::Expense { command } => run_expense_command(&svc, actor.as_deref(), command).await?,
 
         Commands::Invoice {
             command:
@@ -4040,6 +4165,10 @@ async fn run_remote_command(
         Commands::Project { command } => run_remote_project_command(remote, actor, command).await?,
         Commands::Client { command } => run_remote_client_command(remote, command).await?,
         Commands::Invoice { command } => run_remote_invoice_command(remote, actor, command).await?,
+        Commands::Expense { command } => {
+            let client: task_core::service::ExpenseServiceClient = remote.connect().await?;
+            run_remote_expense_command(&client, actor, command).await?
+        }
         Commands::Start {
             reference,
             description,
@@ -4711,6 +4840,369 @@ async fn run_remote_invoice_command(
     }
     Ok(())
 }
+
+async fn run_expense_command(
+    svc: &VaultServiceImpl,
+    actor: Option<&str>,
+    command: ExpenseCommands,
+) -> eyre::Result<()> {
+    let parse_date = |s: &str| -> eyre::Result<NaiveDate> {
+        s.parse::<NaiveDate>()
+            .map_err(|_| eyre::eyre!("Invalid date: {s}"))
+    };
+
+    match command {
+        ExpenseCommands::Create {
+            description,
+            amount,
+            date,
+            currency,
+            project,
+            client: client_name,
+            category,
+            vendor,
+            receipt,
+            reimbursable,
+            status,
+            notes,
+            json,
+        } => {
+            let expense = svc
+                .create_expense(ExpenseCreateRequest {
+                    description,
+                    amount_cents: amount,
+                    date: date.as_deref().map(parse_date).transpose()?,
+                    currency_code: currency,
+                    project,
+                    client: client_name,
+                    category,
+                    vendor,
+                    receipt,
+                    reimbursable,
+                    status,
+                    notes,
+                    actor: actor.map(str::to_string),
+                })
+                .await?;
+            if json {
+                println!("{}", facet_json::to_string(&expense).unwrap_or_default());
+            } else {
+                println!("Created expense {} — ${:.2}", expense.id, expense.amount_cents as f64 / 100.0);
+                println!("{}", render_expense_body(&expense));
+            }
+        }
+        ExpenseCommands::List {
+            from,
+            to,
+            project,
+            client: client_name,
+            category,
+            vendor,
+            status,
+            reimbursable_only,
+            json,
+        } => {
+            let filter = ExpenseFilter {
+                from: from.as_deref().map(parse_date).transpose()?,
+                to: to.as_deref().map(parse_date).transpose()?,
+                project,
+                client: client_name,
+                category,
+                vendor,
+                status,
+                reimbursable_only,
+            };
+            let expenses = svc.list_expenses(filter).await;
+            if json {
+                println!("{}", facet_json::to_string(&expenses).unwrap_or_default());
+            } else if expenses.is_empty() {
+                println!("No expenses.");
+            } else {
+                for expense in expenses {
+                    println!(
+                        "{}  ${:.2}  {:<10}  {}",
+                        expense.date,
+                        expense.amount_cents as f64 / 100.0,
+                        format!("{:?}", expense.status),
+                        expense.description
+                    );
+                }
+            }
+        }
+        ExpenseCommands::Show { id, md, json } => {
+            let expense = svc
+                .get_expense(&id)
+                .await
+                .ok_or_else(|| eyre::eyre!("Expense not found: {id}"))?;
+            if json {
+                println!("{}", facet_json::to_string(&expense).unwrap_or_default());
+            } else if md {
+                println!("{}", render_expense_body(&expense));
+            } else {
+                println!("{}", render_expense_body(&expense));
+            }
+        }
+        ExpenseCommands::Report {
+            from,
+            to,
+            project,
+            client: client_name,
+            category,
+            vendor,
+            status,
+            reimbursable_only,
+            json,
+        } => {
+            let filter = ExpenseFilter {
+                from: from.as_deref().map(parse_date).transpose()?,
+                to: to.as_deref().map(parse_date).transpose()?,
+                project,
+                client: client_name,
+                category,
+                vendor,
+                status,
+                reimbursable_only,
+            };
+            let report = svc.expense_report(filter).await;
+            if json {
+                println!("{}", facet_json::to_string(&report).unwrap_or_default());
+            } else {
+                println!("{}", render_expense_report(&report));
+            }
+        }
+        ExpenseCommands::Update {
+            id,
+            amount,
+            date,
+            currency,
+            project,
+            client: client_name,
+            category,
+            vendor,
+            description,
+            receipt,
+            reimbursable,
+            status,
+            notes,
+            json,
+        } => {
+            let expense = svc
+                .update_expense(
+                    &id,
+                    ExpensePatch {
+                        status,
+                        date,
+                        amount_cents: amount,
+                        currency_code: currency,
+                        project,
+                        client: client_name,
+                        category,
+                        vendor,
+                        description,
+                        receipt,
+                        reimbursable,
+                        notes,
+                    },
+                    actor,
+                )
+                .await?;
+            if json {
+                println!("{}", facet_json::to_string(&expense).unwrap_or_default());
+            } else {
+                println!("Updated expense {}.", expense.id);
+                println!("{}", render_expense_body(&expense));
+            }
+        }
+        ExpenseCommands::Delete { id } => {
+            svc.delete_expense(&id).await?;
+            println!("Deleted expense {id}.");
+        }
+    }
+
+    Ok(())
+}
+
+async fn run_remote_expense_command(
+    client: &task_core::service::ExpenseServiceClient,
+    actor: Option<&str>,
+    command: ExpenseCommands,
+) -> eyre::Result<()> {
+    let parse_date = |s: &str| -> eyre::Result<NaiveDate> {
+        s.parse::<NaiveDate>()
+            .map_err(|_| eyre::eyre!("Invalid date: {s}"))
+    };
+
+    match command {
+        ExpenseCommands::Create {
+            description,
+            amount,
+            date,
+            currency,
+            project,
+            client: client_name,
+            category,
+            vendor,
+            receipt,
+            reimbursable,
+            status,
+            notes,
+            json,
+        } => {
+            let expense = client
+                .create_expense(ExpenseCreateRequest {
+                    description,
+                    amount_cents: amount,
+                    date: date.as_deref().map(parse_date).transpose()?,
+                    currency_code: currency,
+                    project,
+                    client: client_name,
+                    category,
+                    vendor,
+                    receipt,
+                    reimbursable,
+                    status,
+                    notes,
+                    actor: actor.map(str::to_string),
+                })
+                .await?;
+            if json {
+                println!("{}", facet_json::to_string(&expense).unwrap_or_default());
+            } else {
+                println!("Created expense {} — ${:.2}", expense.id, expense.amount_cents as f64 / 100.0);
+                println!("{}", render_expense_body(&expense));
+            }
+        }
+        ExpenseCommands::List {
+            from,
+            to,
+            project,
+            client: client_name,
+            category,
+            vendor,
+            status,
+            reimbursable_only,
+            json,
+        } => {
+            let filter = ExpenseFilter {
+                from: from.as_deref().map(parse_date).transpose()?,
+                to: to.as_deref().map(parse_date).transpose()?,
+                project,
+                client: client_name,
+                category,
+                vendor,
+                status,
+                reimbursable_only,
+            };
+            let expenses = client.list_expenses(filter).await?;
+            if json {
+                println!("{}", facet_json::to_string(&expenses).unwrap_or_default());
+            } else if expenses.is_empty() {
+                println!("No expenses.");
+            } else {
+                for expense in expenses {
+                    println!(
+                        "{}  ${:.2}  {:<10}  {}",
+                        expense.date,
+                        expense.amount_cents as f64 / 100.0,
+                        format!("{:?}", expense.status),
+                        expense.description
+                    );
+                }
+            }
+        }
+        ExpenseCommands::Show { id, md, json } => {
+            let expense = client
+                .get_expense(id.clone())
+                .await?
+                .ok_or_else(|| eyre::eyre!("Expense not found: {id}"))?;
+            if json {
+                println!("{}", facet_json::to_string(&expense).unwrap_or_default());
+            } else if md {
+                println!("{}", render_expense_body(&expense));
+            } else {
+                println!("{}", render_expense_body(&expense));
+            }
+        }
+        ExpenseCommands::Report {
+            from,
+            to,
+            project,
+            client: client_name,
+            category,
+            vendor,
+            status,
+            reimbursable_only,
+            json,
+        } => {
+            let filter = ExpenseFilter {
+                from: from.as_deref().map(parse_date).transpose()?,
+                to: to.as_deref().map(parse_date).transpose()?,
+                project,
+                client: client_name,
+                category,
+                vendor,
+                status,
+                reimbursable_only,
+            };
+            let report = client.expense_report(filter).await?;
+            if json {
+                println!("{}", facet_json::to_string(&report).unwrap_or_default());
+            } else {
+                println!("{}", render_expense_report(&report));
+            }
+        }
+        ExpenseCommands::Update {
+            id,
+            amount,
+            date,
+            currency,
+            project,
+            client: client_name,
+            category,
+            vendor,
+            description,
+            receipt,
+            reimbursable,
+            status,
+            notes,
+            json,
+        } => {
+            let expense = client
+                .update_expense(
+                    id,
+                    ExpensePatch {
+                        status,
+                        date,
+                        amount_cents: amount,
+                        currency_code: currency,
+                        project,
+                        client: client_name,
+                        category,
+                        vendor,
+                        description,
+                        receipt,
+                        reimbursable,
+                        notes,
+                    },
+                    actor.map(str::to_string),
+                )
+                .await?;
+            if json {
+                println!("{}", facet_json::to_string(&expense).unwrap_or_default());
+            } else {
+                println!("Updated expense {}.", expense.id);
+                println!("{}", render_expense_body(&expense));
+            }
+        }
+        ExpenseCommands::Delete { id } => {
+            client.delete_expense(id.clone()).await?;
+            println!("Deleted expense {id}.");
+        }
+    }
+
+    Ok(())
+}
+
 
 async fn run_remote_time_command(
     remote: &RemoteVoxConfig,

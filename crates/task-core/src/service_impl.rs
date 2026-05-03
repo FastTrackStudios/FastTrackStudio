@@ -4,7 +4,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
-use chrono::{DateTime, NaiveDate, Utc};
+use chrono::{DateTime, Datelike, NaiveDate, Utc};
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
@@ -20,6 +20,10 @@ use crate::provider::{
 };
 use crate::query::Query;
 use crate::rrule;
+use crate::expense::{
+    build_expense_report, format_expense_id, matches_expense_filter, parse_expense_status,
+    Expense, ExpenseCreateRequest, ExpenseFilter, ExpensePatch, ExpenseReport, ExpenseStatus,
+};
 use crate::service::{
     BusinessFinanceClientSummary, BusinessFinanceReport, CalDavDeleteObjectRequest,
     CalDavDiscovery, CalDavFreeBusyInterval, CalDavFreeBusyRequest, CalDavMultigetRequest,
@@ -2073,6 +2077,161 @@ impl VaultServiceImpl {
             }
         }
         Ok(invoice)
+    }
+
+    async fn next_expense_number(&self, year: i32) -> Result<u32, VaultError> {
+        let prefix = format!("EXP-{year:04}-");
+        let max = self
+            .vault
+            .read()
+            .await
+            .load_expenses()
+            .into_iter()
+            .filter(|expense| expense.id.starts_with(&prefix))
+            .map(|expense| expense.number)
+            .max()
+            .unwrap_or(0);
+        Ok(max + 1)
+    }
+
+    pub async fn list_expenses(&self, filter: ExpenseFilter) -> Vec<Expense> {
+        let mut expenses = self.vault.read().await.load_expenses();
+        expenses.retain(|expense| matches_expense_filter(expense, &filter));
+        expenses.sort_by(|a, b| b.date.cmp(&a.date).then_with(|| b.number.cmp(&a.number)));
+        expenses
+    }
+
+    pub async fn get_expense(&self, expense_id: &str) -> Option<Expense> {
+        self.vault
+            .read()
+            .await
+            .load_expenses()
+            .into_iter()
+            .find(|expense| expense.id.eq_ignore_ascii_case(expense_id))
+    }
+
+    pub async fn create_expense(
+        &self,
+        request: ExpenseCreateRequest,
+    ) -> Result<Expense, VaultError> {
+        let now = Utc::now();
+        let date = request.date.unwrap_or_else(|| now.date_naive());
+        let number = self.next_expense_number(date.year()).await?;
+        let id = format_expense_id(date.year(), number);
+        let status = request
+            .status
+            .as_deref()
+            .and_then(parse_expense_status)
+            .unwrap_or(ExpenseStatus::Draft);
+        let expense = Expense {
+            id,
+            number,
+            status,
+            date,
+            amount_cents: request.amount_cents,
+            currency_code: request.currency_code.unwrap_or_else(|| "USD".into()),
+            project: request.project.map(crate::task::WikiLink),
+            client: request.client.map(crate::task::WikiLink),
+            category: request.category,
+            vendor: request.vendor,
+            description: request.description,
+            receipt: request.receipt,
+            reimbursable: request.reimbursable,
+            notes: request.notes,
+            created_by: request.actor,
+            date_created: Some(now),
+            date_modified: Some(now),
+            body: String::new(),
+        };
+        self.vault.read().await.save_expense(&expense)?;
+        Ok(expense)
+    }
+
+    pub async fn update_expense(
+        &self,
+        expense_id: &str,
+        patch: ExpensePatch,
+        actor: Option<&str>,
+    ) -> Result<Expense, VaultError> {
+        let vault = self.vault.read().await;
+        let mut expense = vault
+            .load_expenses()
+            .into_iter()
+            .find(|expense| expense.id.eq_ignore_ascii_case(expense_id))
+            .ok_or_else(|| VaultError::NotFound(expense_id.to_string()))?;
+        let now = Utc::now();
+        if let Some(status) = patch.status.as_deref() {
+            expense.status = parse_expense_status(status)
+                .ok_or_else(|| VaultError::ParseError(format!("invalid expense status: {status}")))?;
+        }
+        if let Some(date) = patch.date.as_deref() {
+            expense.date = NaiveDate::parse_from_str(date, "%Y-%m-%d")
+                .map_err(|e| VaultError::ParseError(e.to_string()))?;
+        }
+        if let Some(amount) = patch.amount_cents {
+            expense.amount_cents = amount;
+        }
+        if let Some(currency) = patch.currency_code {
+            expense.currency_code = currency;
+        }
+        if let Some(project) = patch.project {
+            expense.project = if project.trim().is_empty() {
+                None
+            } else {
+                Some(crate::task::WikiLink(project))
+            };
+        }
+        if let Some(client) = patch.client {
+            expense.client = if client.trim().is_empty() {
+                None
+            } else {
+                Some(crate::task::WikiLink(client))
+            };
+        }
+        if let Some(category) = patch.category {
+            expense.category = if category.trim().is_empty() { None } else { Some(category) };
+        }
+        if let Some(vendor) = patch.vendor {
+            expense.vendor = if vendor.trim().is_empty() { None } else { Some(vendor) };
+        }
+        if let Some(description) = patch.description {
+            expense.description = description;
+        }
+        if let Some(receipt) = patch.receipt {
+            expense.receipt = if receipt.trim().is_empty() { None } else { Some(receipt) };
+        }
+        if let Some(reimbursable) = patch.reimbursable {
+            expense.reimbursable = reimbursable;
+        }
+        if let Some(notes) = patch.notes {
+            expense.notes = if notes.trim().is_empty() { None } else { Some(notes) };
+        }
+        expense.date_modified = Some(now);
+        vault.save_expense(&expense)?;
+        if let Ok(guard) = self.index.lock() {
+            if let Some(ref idx) = *guard {
+                let _ = idx.record_change(
+                    "expense",
+                    &expense.id,
+                    Some("update"),
+                    None,
+                    None,
+                    actor,
+                    Some(&format!("expenses/{}.md", expense.id)),
+                );
+            }
+        }
+        Ok(expense)
+    }
+
+    pub async fn delete_expense(&self, expense_id: &str) -> Result<(), VaultError> {
+        self.vault.read().await.delete_expense(expense_id)
+    }
+
+    pub async fn expense_report(&self, filter: ExpenseFilter) -> ExpenseReport {
+        let today = Utc::now().date_naive();
+        let expenses = self.list_expenses(filter).await;
+        build_expense_report(&expenses, today)
     }
 
     /// Mark a set of time entries as invoiced against a specific invoice
@@ -4265,6 +4424,40 @@ impl crate::service::PeopleService for VaultServiceImpl {
         remote: OrganizationRecord,
     ) -> Result<Option<ProviderConflict>, VaultError> {
         Ok(organization_provider_conflicts(&local, &remote))
+    }
+}
+
+impl crate::service::ExpenseService for VaultServiceImpl {
+    async fn create_expense(
+        &self,
+        request: ExpenseCreateRequest,
+    ) -> Result<Expense, VaultError> {
+        VaultServiceImpl::create_expense(self, request).await
+    }
+
+    async fn list_expenses(&self, filter: ExpenseFilter) -> Vec<Expense> {
+        VaultServiceImpl::list_expenses(self, filter).await
+    }
+
+    async fn get_expense(&self, expense_id: String) -> Option<Expense> {
+        VaultServiceImpl::get_expense(self, &expense_id).await
+    }
+
+    async fn update_expense(
+        &self,
+        expense_id: String,
+        patch: ExpensePatch,
+        actor: Option<String>,
+    ) -> Result<Expense, VaultError> {
+        VaultServiceImpl::update_expense(self, &expense_id, patch, actor.as_deref()).await
+    }
+
+    async fn delete_expense(&self, expense_id: String) -> Result<(), VaultError> {
+        VaultServiceImpl::delete_expense(self, &expense_id).await
+    }
+
+    async fn expense_report(&self, filter: ExpenseFilter) -> ExpenseReport {
+        VaultServiceImpl::expense_report(self, filter).await
     }
 }
 
