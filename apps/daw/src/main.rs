@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 use eyre::Result;
+use serde_json::Value;
 
 #[derive(Parser)]
 #[command(name = "daw", about = "Live-query a running REAPER instance")]
@@ -43,16 +44,202 @@ enum Command {
         /// FX name or index
         fx: String,
     },
+    /// Return the last touched FX parameter
+    LastTouchedFx,
+    /// Add an FX to a track chain
+    FxAdd {
+        /// Track name or index
+        track: String,
+        /// Plugin/FX name
+        name: String,
+        /// Insert at zero-based FX index
+        #[arg(long)]
+        at: Option<u32>,
+    },
+    /// Remove an FX from a track chain
+    FxRemove {
+        /// Track name or index
+        track: String,
+        /// FX name or index
+        fx: String,
+    },
+    /// Enable or bypass an FX
+    FxEnable {
+        /// Track name or index
+        track: String,
+        /// FX name or index
+        fx: String,
+        /// Set enabled state
+        enabled: bool,
+    },
+    /// Move an FX to a new chain index
+    FxMove {
+        /// Track name or index
+        track: String,
+        /// FX name or index
+        fx: String,
+        /// New zero-based FX index
+        index: u32,
+    },
+    /// Set an FX parameter by index
+    FxSetParam {
+        /// Track name or index
+        track: String,
+        /// FX name or index
+        fx: String,
+        /// Parameter index
+        param: u32,
+        /// Normalized value
+        value: f64,
+    },
+    /// Set an FX parameter by name
+    FxSetParamName {
+        /// Track name or index
+        track: String,
+        /// FX name or index
+        fx: String,
+        /// Parameter name
+        param: String,
+        /// Normalized value
+        value: f64,
+    },
+    /// Open, close, or toggle an FX UI
+    FxUi {
+        /// Track name or index
+        track: String,
+        /// FX name or index
+        fx: String,
+        /// Action: open, close, toggle
+        action: String,
+    },
+    /// Get or change an FX preset
+    FxPreset {
+        /// Track name or index
+        track: String,
+        /// FX name or index
+        fx: String,
+        /// Action: get, next, previous, set
+        action: String,
+        /// Preset index for action=set
+        #[arg(long)]
+        index: Option<u32>,
+    },
     /// Show transport state
     Transport,
+    /// Run a transport action
+    TransportDo {
+        /// Action: play, pause, stop, play_pause, play_stop, record, stop_recording, toggle_recording, goto_start, goto_end, toggle_loop
+        action: String,
+    },
+    /// Set playhead position in seconds
+    SetPosition {
+        /// Position in seconds
+        seconds: f64,
+    },
+    /// Set project tempo in BPM
+    SetTempo {
+        /// Tempo in BPM
+        bpm: f64,
+    },
+    /// Set transport loop state
+    SetLoop {
+        /// Loop enabled
+        enabled: bool,
+    },
+    /// Set transport playrate
+    SetPlayrate {
+        /// Playback rate multiplier
+        rate: f64,
+    },
+    /// Move playhead to a measure
+    GotoMeasure {
+        /// Measure number
+        measure: i32,
+    },
     /// List markers
     Markers,
+    /// Add a project marker
+    MarkerAdd {
+        /// Position in seconds
+        position: f64,
+        /// Marker name
+        name: String,
+        /// Marker lane
+        #[arg(long)]
+        lane: Option<u32>,
+    },
+    /// Remove a project marker
+    MarkerRemove {
+        /// Marker ID
+        id: u32,
+    },
+    /// Move a project marker
+    MarkerMove {
+        /// Marker ID
+        id: u32,
+        /// New position in seconds
+        position: f64,
+    },
+    /// Rename a project marker
+    MarkerRename {
+        /// Marker ID
+        id: u32,
+        /// New marker name
+        name: String,
+    },
     /// List regions
     Regions,
+    /// Add a project region
+    RegionAdd {
+        /// Start position in seconds
+        start: f64,
+        /// End position in seconds
+        end: f64,
+        /// Region name
+        name: String,
+        /// Region lane
+        #[arg(long)]
+        lane: Option<u32>,
+    },
+    /// Remove a project region
+    RegionRemove {
+        /// Region ID
+        id: u32,
+    },
+    /// Set project region bounds
+    RegionBounds {
+        /// Region ID
+        id: u32,
+        /// Start position in seconds
+        start: f64,
+        /// End position in seconds
+        end: f64,
+    },
+    /// Rename a project region
+    RegionRename {
+        /// Region ID
+        id: u32,
+        /// New region name
+        name: String,
+    },
     /// List all installed plugins
     Plugins,
+    /// Return loaded plugin binaries
+    LoadedPlugins,
+    /// Load a plugin binary into REAPER
+    LoadPlugin {
+        /// Plugin binary path
+        path: String,
+    },
     /// Check if a DAW instance is reachable
     Ping,
+    /// Return generated DAW service and method catalog
+    ServiceCatalog,
+    /// Execute a daw::service::BatchRequest from a JSON file or stdin
+    Batch {
+        /// JSON file path, or "-" to read stdin
+        input: String,
+    },
 
     // -- Process & Project Management --
     /// Launch a REAPER instance
@@ -69,6 +256,13 @@ enum Command {
     },
     /// List open project tabs
     Projects,
+    /// Create a new project tab
+    NewProject,
+    /// Select an open project by GUID
+    SelectProject {
+        /// Project GUID
+        guid: String,
+    },
     /// Open a project file
     Open {
         /// Path to the .rpp project file
@@ -79,6 +273,33 @@ enum Command {
         /// GUID of the project to close (defaults to current)
         #[arg(long)]
         guid: Option<String>,
+    },
+    /// Save the current project
+    Save,
+    /// Save all open projects
+    SaveAll,
+    /// Undo in the current project
+    Undo,
+    /// Redo in the current project
+    Redo,
+    /// Run a REAPER command/action in the current project
+    RunCommand {
+        /// Numeric command ID or named command
+        command: String,
+    },
+    /// Get or set a project info string key
+    ProjectInfoString {
+        /// Project info key
+        key: String,
+        /// Optional value to set
+        value: Option<String>,
+    },
+    /// Get or set a project info numeric key
+    ProjectInfoNumber {
+        /// Project info key
+        key: String,
+        /// Optional value to set
+        value: Option<f64>,
     },
     /// Add a new track
     AddTrack {
@@ -94,8 +315,104 @@ enum Command {
         /// Track name or index
         track: String,
     },
+    /// Set a track field
+    TrackSet {
+        /// Track name or index
+        track: String,
+        /// Field: muted, soloed, armed, selected, volume, pan, name, color, folder_depth, num_channels, visible_in_tcp, visible_in_mixer, parent_send
+        field: String,
+        /// JSON value, or a raw string if it is not valid JSON
+        value: String,
+    },
+    /// Move a track to a new zero-based index
+    TrackMove {
+        /// Track name or index
+        track: String,
+        /// New zero-based track index
+        index: u32,
+    },
+    /// Get or set track-scoped P_EXT state
+    TrackExtState {
+        /// Track name or index
+        track: String,
+        /// ExtState section
+        section: String,
+        /// ExtState key
+        key: String,
+        /// Optional value to set
+        value: Option<String>,
+    },
+    /// Delete track-scoped P_EXT state
+    TrackExtStateDelete {
+        /// Track name or index
+        track: String,
+        /// ExtState section
+        section: String,
+        /// ExtState key
+        key: String,
+    },
+    /// Get global REAPER ExtState
+    ExtStateGet {
+        /// ExtState section
+        section: String,
+        /// ExtState key
+        key: String,
+    },
+    /// Set global REAPER ExtState
+    ExtStateSet {
+        /// ExtState section
+        section: String,
+        /// ExtState key
+        key: String,
+        /// ExtState value
+        value: String,
+        /// Persist across REAPER restarts
+        #[arg(long)]
+        persist: bool,
+    },
+    /// Delete global REAPER ExtState
+    ExtStateDelete {
+        /// ExtState section
+        section: String,
+        /// ExtState key
+        key: String,
+        /// Persist deletion across REAPER restarts
+        #[arg(long)]
+        persist: bool,
+    },
+    /// Return audio engine state and latency
+    AudioEngine,
+    /// Run an audio engine action
+    AudioEngineDo {
+        /// Action: init, quit
+        action: String,
+    },
+    /// Execute a REAPER action by numeric ID or command name
+    Action {
+        /// Action ID or command name
+        action_id: String,
+    },
+    /// Look up an action registration and command ID
+    ActionLookup {
+        /// Command name
+        command_name: String,
+    },
+    /// Set a registered action toggle state
+    ActionToggle {
+        /// Command name
+        command_name: String,
+        /// Toggle state
+        is_on: bool,
+    },
+    /// Return dynamic toolbar availability and tracked buttons
+    Toolbar,
 
     // -- File Operations --
+    /// Parse an RPP file and return a project summary
+    RppSummary {
+        /// Path to .RPP project file
+        path: String,
+    },
     /// Combine multiple RPP files into a single project
     Combine {
         /// Path to .RPL file or list of .RPP files
@@ -107,6 +424,28 @@ enum Command {
         #[arg(long, default_value = "0")]
         gap: u32,
     },
+}
+
+fn cli_value(value: &str) -> Value {
+    serde_json::from_str(value).unwrap_or_else(|_| Value::String(value.to_string()))
+}
+
+fn print_value(value: Value, as_json: bool) -> Result<()> {
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&value)?);
+    } else {
+        println!("{}", serde_json::to_string(&value)?);
+    }
+    Ok(())
+}
+
+fn read_json_input(input: &str) -> Result<Value> {
+    let text = if input == "-" {
+        std::io::read_to_string(std::io::stdin())?
+    } else {
+        std::fs::read_to_string(input)?
+    };
+    Ok(serde_json::from_str(&text)?)
 }
 
 #[tokio::main]
@@ -135,6 +474,12 @@ async fn main() -> Result<()> {
         } => {
             return daw_cli::cmd_combine(input, output.as_deref(), gap);
         }
+        Command::RppSummary { ref path } => {
+            return print_value(daw_cli::ops::rpp_summary(path)?, cli.json);
+        }
+        Command::ServiceCatalog => {
+            return print_value(daw_cli::ops::service_catalog(), cli.json);
+        }
         _ => {}
     }
 
@@ -149,20 +494,252 @@ async fn main() -> Result<()> {
         Command::Params { ref track, ref fx } => {
             daw_cli::cmd_params(&daw, track, fx, cli.json).await?
         }
+        Command::LastTouchedFx => {
+            print_value(daw_cli::ops::last_touched_fx(&daw).await?, cli.json)?
+        }
+        Command::FxAdd {
+            ref track,
+            ref name,
+            at,
+        } => print_value(daw_cli::ops::fx_add(&daw, track, name, at).await?, cli.json)?,
+        Command::FxRemove { ref track, ref fx } => {
+            print_value(daw_cli::ops::fx_remove(&daw, track, fx).await?, cli.json)?
+        }
+        Command::FxEnable {
+            ref track,
+            ref fx,
+            enabled,
+        } => print_value(
+            daw_cli::ops::fx_set_enabled(&daw, track, fx, enabled).await?,
+            cli.json,
+        )?,
+        Command::FxMove {
+            ref track,
+            ref fx,
+            index,
+        } => print_value(
+            daw_cli::ops::fx_move(&daw, track, fx, index).await?,
+            cli.json,
+        )?,
+        Command::FxSetParam {
+            ref track,
+            ref fx,
+            param,
+            value,
+        } => print_value(
+            daw_cli::ops::fx_set_param(&daw, track, fx, param, value).await?,
+            cli.json,
+        )?,
+        Command::FxSetParamName {
+            ref track,
+            ref fx,
+            ref param,
+            value,
+        } => print_value(
+            daw_cli::ops::fx_set_param_by_name(&daw, track, fx, param, value).await?,
+            cli.json,
+        )?,
+        Command::FxUi {
+            ref track,
+            ref fx,
+            ref action,
+        } => print_value(
+            daw_cli::ops::fx_ui(&daw, track, fx, action).await?,
+            cli.json,
+        )?,
+        Command::FxPreset {
+            ref track,
+            ref fx,
+            ref action,
+            index,
+        } => print_value(
+            daw_cli::ops::fx_preset(&daw, track, fx, action, index).await?,
+            cli.json,
+        )?,
         Command::Transport => daw_cli::cmd_transport(&daw, cli.json).await?,
+        Command::TransportDo { ref action } => print_value(
+            daw_cli::ops::transport_control(&daw, action).await?,
+            cli.json,
+        )?,
+        Command::SetPosition { seconds } => print_value(
+            daw_cli::ops::transport_set_position(&daw, seconds).await?,
+            cli.json,
+        )?,
+        Command::SetTempo { bpm } => print_value(
+            daw_cli::ops::transport_set_tempo(&daw, bpm).await?,
+            cli.json,
+        )?,
+        Command::SetLoop { enabled } => print_value(
+            daw_cli::ops::transport_set_loop(&daw, enabled).await?,
+            cli.json,
+        )?,
+        Command::SetPlayrate { rate } => print_value(
+            daw_cli::ops::transport_set_playrate(&daw, rate).await?,
+            cli.json,
+        )?,
+        Command::GotoMeasure { measure } => print_value(
+            daw_cli::ops::transport_goto_measure(&daw, measure).await?,
+            cli.json,
+        )?,
         Command::Markers => daw_cli::cmd_markers(&daw, cli.json).await?,
+        Command::MarkerAdd {
+            position,
+            ref name,
+            lane,
+        } => print_value(
+            daw_cli::ops::marker_add(&daw, position, name, lane).await?,
+            cli.json,
+        )?,
+        Command::MarkerRemove { id } => {
+            print_value(daw_cli::ops::marker_remove(&daw, id).await?, cli.json)?
+        }
+        Command::MarkerMove { id, position } => print_value(
+            daw_cli::ops::marker_move(&daw, id, position).await?,
+            cli.json,
+        )?,
+        Command::MarkerRename { id, ref name } => {
+            print_value(daw_cli::ops::marker_rename(&daw, id, name).await?, cli.json)?
+        }
         Command::Regions => daw_cli::cmd_regions(&daw, cli.json).await?,
+        Command::RegionAdd {
+            start,
+            end,
+            ref name,
+            lane,
+        } => print_value(
+            daw_cli::ops::region_add(&daw, start, end, name, lane).await?,
+            cli.json,
+        )?,
+        Command::RegionRemove { id } => {
+            print_value(daw_cli::ops::region_remove(&daw, id).await?, cli.json)?
+        }
+        Command::RegionBounds { id, start, end } => print_value(
+            daw_cli::ops::region_set_bounds(&daw, id, start, end).await?,
+            cli.json,
+        )?,
+        Command::RegionRename { id, ref name } => {
+            print_value(daw_cli::ops::region_rename(&daw, id, name).await?, cli.json)?
+        }
         Command::Plugins => daw_cli::cmd_plugins(&daw, cli.json).await?,
+        Command::LoadedPlugins => {
+            print_value(daw_cli::ops::plugin_loader_list(&daw).await?, cli.json)?
+        }
+        Command::LoadPlugin { ref path } => print_value(
+            daw_cli::ops::plugin_loader_load(&daw, path).await?,
+            cli.json,
+        )?,
         Command::Ping => daw_cli::cmd_ping(&daw).await?,
+        Command::Batch { ref input } => {
+            let request = read_json_input(input)?;
+            print_value(daw_cli::ops::execute_batch(&daw, request).await?, cli.json)?
+        }
         Command::Projects => daw_cli::cmd_projects(&daw, cli.json).await?,
+        Command::NewProject => print_value(daw_cli::ops::create_project(&daw).await?, cli.json)?,
+        Command::SelectProject { ref guid } => {
+            print_value(daw_cli::ops::select_project(&daw, guid).await?, cli.json)?
+        }
         Command::Open { ref path } => daw_cli::cmd_open(&daw, path, cli.json).await?,
         Command::Close { ref guid } => daw_cli::cmd_close(&daw, guid.as_deref()).await?,
+        Command::Save => print_value(daw_cli::ops::save_project(&daw).await?, cli.json)?,
+        Command::SaveAll => print_value(daw_cli::ops::save_all_projects(&daw).await?, cli.json)?,
+        Command::Undo => print_value(daw_cli::ops::project_undo(&daw).await?, cli.json)?,
+        Command::Redo => print_value(daw_cli::ops::project_redo(&daw).await?, cli.json)?,
+        Command::RunCommand { ref command } => print_value(
+            daw_cli::ops::project_run_command(&daw, command).await?,
+            cli.json,
+        )?,
+        Command::ProjectInfoString { ref key, ref value } => print_value(
+            daw_cli::ops::project_info_string(&daw, key, value.as_deref()).await?,
+            cli.json,
+        )?,
+        Command::ProjectInfoNumber { ref key, value } => print_value(
+            daw_cli::ops::project_info_number(&daw, key, value).await?,
+            cli.json,
+        )?,
         Command::AddTrack { ref name, at } => {
             daw_cli::cmd_add_track(&daw, name.as_deref(), at, cli.json).await?
         }
         Command::RemoveTrack { ref track } => daw_cli::cmd_remove_track(&daw, track).await?,
+        Command::TrackSet {
+            ref track,
+            ref field,
+            ref value,
+        } => print_value(
+            daw_cli::ops::track_set(&daw, track, field, cli_value(value)).await?,
+            cli.json,
+        )?,
+        Command::TrackMove { ref track, index } => print_value(
+            daw_cli::ops::track_move(&daw, track, index).await?,
+            cli.json,
+        )?,
+        Command::TrackExtState {
+            ref track,
+            ref section,
+            ref key,
+            ref value,
+        } => print_value(
+            daw_cli::ops::track_ext_state(&daw, track, section, key, value.as_deref()).await?,
+            cli.json,
+        )?,
+        Command::TrackExtStateDelete {
+            ref track,
+            ref section,
+            ref key,
+        } => print_value(
+            daw_cli::ops::track_delete_ext_state(&daw, track, section, key).await?,
+            cli.json,
+        )?,
+        Command::ExtStateGet {
+            ref section,
+            ref key,
+        } => print_value(
+            daw_cli::ops::ext_state_get(&daw, section, key).await?,
+            cli.json,
+        )?,
+        Command::ExtStateSet {
+            ref section,
+            ref key,
+            ref value,
+            persist,
+        } => print_value(
+            daw_cli::ops::ext_state_set(&daw, section, key, value, persist).await?,
+            cli.json,
+        )?,
+        Command::ExtStateDelete {
+            ref section,
+            ref key,
+            persist,
+        } => print_value(
+            daw_cli::ops::ext_state_delete(&daw, section, key, persist).await?,
+            cli.json,
+        )?,
+        Command::AudioEngine => print_value(daw_cli::ops::audio_engine(&daw).await?, cli.json)?,
+        Command::AudioEngineDo { ref action } => print_value(
+            daw_cli::ops::audio_engine_control(&daw, action).await?,
+            cli.json,
+        )?,
+        Command::Action { ref action_id } => print_value(
+            daw_cli::ops::action_execute(&daw, action_id).await?,
+            cli.json,
+        )?,
+        Command::ActionLookup { ref command_name } => print_value(
+            daw_cli::ops::action_lookup(&daw, command_name).await?,
+            cli.json,
+        )?,
+        Command::ActionToggle {
+            ref command_name,
+            is_on,
+        } => print_value(
+            daw_cli::ops::action_set_toggle(&daw, command_name, is_on).await?,
+            cli.json,
+        )?,
+        Command::Toolbar => print_value(daw_cli::ops::toolbar_status(&daw).await?, cli.json)?,
         // Already handled above
-        Command::Launch { .. } | Command::Quit { .. } | Command::Combine { .. } => unreachable!(),
+        Command::Launch { .. }
+        | Command::Quit { .. }
+        | Command::Combine { .. }
+        | Command::RppSummary { .. }
+        | Command::ServiceCatalog => unreachable!(),
     }
 
     Ok(())

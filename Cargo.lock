@@ -1947,6 +1947,8 @@ dependencies = [
  "daw",
  "dawfile-reaper",
  "eyre",
+ "facet 0.44.3",
+ "facet-json",
  "libc",
  "moire",
  "serde",
