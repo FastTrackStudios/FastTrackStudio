@@ -156,10 +156,12 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # dock-proto = { path = "../dock-dioxus/crates/dock-proto" }
 
 # ── Patch remote daw.git refs from transitive deps (e.g. keyflow) ────
-# [patch."https://github.com/FastTrackStudios/daw.git"]
-# daw-proto = { path = "crates/daw-proto" }
-# daw-control = { path = "crates/daw-control" }
-# dawfile-reaper = { path = "crates/dawfile-reaper" }
+[patch."https://github.com/FastTrackStudios/daw.git"]
+daw-proto = { path = "crates/daw-proto" }
+daw-module = { path = "crates/daw-module" }
+daw-reaper-embed = { path = "crates/daw-reaper-embed" }
+daw-control = { path = "crates/daw-control" }
+dawfile-reaper = { path = "crates/dawfile-reaper" }
 
 # ── Vendored patches ──────────────────────────────────────────────────
 # Redirect bearcove/vox.git transitive deps to the FTS fork (fixes noisy eprintln! debug logs).

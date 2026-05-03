@@ -18,10 +18,12 @@ use daw_proto::{
 };
 use reaper_high::{Reaper, RegisteredAction};
 use reaper_medium::{
-    CommandId, Handle, Hmenu, HookCustomMenu, MenuHookFlag, OwnedGaccelRegister, ProjectContext,
-    ReaperStr, SectionContext, SectionId,
+    CommandId, Handle, Hmenu, HookCustomMenu, MenuHookFlag, OwnedGaccelRegister, ReaperStr,
+    SectionContext, SectionId,
 };
 use std::collections::{BTreeMap, HashMap};
+use std::ffi::{CStr, CString};
+use std::ptr::null_mut;
 use std::sync::Mutex;
 use tokio::sync::broadcast;
 use tracing::{debug, info, warn};
@@ -81,6 +83,8 @@ static MENU_ACTIONS: std::sync::OnceLock<Mutex<Vec<MenuActionDef>>> = std::sync:
 /// Guests update this via `set_toggle_state`.
 static TOGGLE_STATES: std::sync::OnceLock<Mutex<HashMap<String, bool>>> =
     std::sync::OnceLock::new();
+
+const SHARED_TOGGLE_EXTSTATE_SECTION: &str = "FastTrackStudio.ActionToggleState";
 
 /// Action metadata stored for menu building.
 #[derive(Clone)]
@@ -230,6 +234,111 @@ fn normalize_command_name(command_name: &str) -> &str {
     command_name.strip_prefix('_').unwrap_or(command_name)
 }
 
+fn read_shared_toggle_state(command_name: &str) -> Option<bool> {
+    let section = CString::new(SHARED_TOGGLE_EXTSTATE_SECTION).ok()?;
+    let key = CString::new(normalize_command_name(command_name)).ok()?;
+    let value = unsafe {
+        let ptr = Reaper::get()
+            .medium_reaper()
+            .low()
+            .GetExtState(section.as_ptr(), key.as_ptr());
+        if ptr.is_null() {
+            return None;
+        }
+        CStr::from_ptr(ptr).to_string_lossy().into_owned()
+    };
+
+    match value.as_str() {
+        "1" | "true" | "on" => Some(true),
+        "0" | "false" | "off" => Some(false),
+        _ => None,
+    }
+}
+
+fn write_shared_toggle_state(command_name: &str, is_on: bool) {
+    let Ok(section) = CString::new(SHARED_TOGGLE_EXTSTATE_SECTION) else {
+        return;
+    };
+    let Ok(key) = CString::new(normalize_command_name(command_name)) else {
+        return;
+    };
+    let value = if is_on { c"1".as_ptr() } else { c"0".as_ptr() };
+    unsafe {
+        Reaper::get().medium_reaper().low().SetExtState(
+            section.as_ptr(),
+            key.as_ptr(),
+            value,
+            false,
+        );
+    }
+}
+
+fn read_reaper_toggle_state(
+    medium: &reaper_medium::Reaper,
+    section_id: u32,
+    section_context: SectionContext<'_>,
+    command_id: CommandId,
+) -> Option<bool> {
+    let hook_state = unsafe {
+        medium
+            .low()
+            .GetToggleCommandStateThroughHooks(section_context.to_raw(), command_id.to_raw())
+    };
+    if hook_state != -1 {
+        return Some(hook_state != 0);
+    }
+
+    medium.get_toggle_command_state_ex(SectionId::new(section_id), command_id)
+}
+
+fn write_reaper_toggle_state(section_id: u32, command_id: CommandId, is_on: bool) {
+    let medium = Reaper::get().medium_reaper();
+    let state = i32::from(is_on);
+    if !medium
+        .low()
+        .SetToggleCommandState(section_id as i32, command_id.get() as i32, state)
+    {
+        debug!(
+            "SetToggleCommandState({}, {}, {}) returned false",
+            section_id,
+            command_id.get(),
+            state
+        );
+    }
+    medium
+        .low()
+        .RefreshToolbar2(section_id as i32, command_id.get() as i32);
+}
+
+fn execute_main_action(medium: &reaper_medium::Reaper, command_id: CommandId) {
+    unsafe {
+        medium
+            .low()
+            .KBD_OnMainActionEx(command_id.to_raw(), 0, -1, 0, null_mut(), null_mut());
+    }
+}
+
+fn action_toggle_state(
+    medium: &reaper_medium::Reaper,
+    section_id: u32,
+    section_context: SectionContext<'_>,
+    command_id: CommandId,
+    command_name: Option<&str>,
+    toggles: &HashMap<String, bool>,
+) -> Option<bool> {
+    if let Some(state) = command_name
+        .map(normalize_command_name)
+        .and_then(|name| toggles.get(name).copied())
+    {
+        return Some(state);
+    }
+    if let Some(state) = command_name.and_then(read_shared_toggle_state) {
+        return Some(state);
+    }
+
+    read_reaper_toggle_state(medium, section_id, section_context, command_id)
+}
+
 fn is_sws_action(command_name: Option<&str>, description: &str) -> bool {
     let normalized = command_name.map(normalize_command_name);
     let name_matches = normalized.is_some_and(|name| {
@@ -331,14 +440,10 @@ fn action_section_label(section: ActionSection) -> (u32, String) {
 }
 
 fn section_context_for<'a>(
-    section_id: u32,
+    _section_id: u32,
     raw: &'a reaper_medium::KbdSectionInfo,
 ) -> SectionContext<'a> {
-    if section_id == 0 {
-        SectionContext::MainSection
-    } else {
-        SectionContext::Sec(raw)
-    }
+    SectionContext::Sec(raw)
 }
 
 fn action_matches_filter(info: &ActionInfo, filter: ActionListFilter) -> bool {
@@ -348,7 +453,10 @@ fn action_matches_filter(info: &ActionInfo, filter: ActionListFilter) -> bool {
         ActionListFilter::NonReaper => info.origin != ActionOrigin::Reaper,
         ActionListFilter::Sws => info.origin == ActionOrigin::Sws,
         ActionListFilter::Fts => info.origin == ActionOrigin::Fts,
-        ActionListFilter::Registered => info.registered_by_fts,
+        ActionListFilter::Registered => {
+            info.registered_by_fts
+                || (info.origin == ActionOrigin::Fts && info.command_name.is_some())
+        }
     }
 }
 
@@ -392,7 +500,14 @@ fn find_action_info(command_id: CommandId, section: ActionSection) -> Option<Act
                 let registered_by_fts = normalized
                     .is_some_and(|name| registered.contains_key(name))
                     || registered.values().any(|id| *id == cmd.get());
-                let toggle_state = normalized.and_then(|name| toggles.get(name).copied());
+                let toggle_state = action_toggle_state(
+                    medium,
+                    section_id,
+                    section_context,
+                    cmd,
+                    command_name.as_deref(),
+                    &toggles,
+                );
                 let origin = if registered_by_fts {
                     ActionOrigin::Fts
                 } else {
@@ -653,6 +768,10 @@ impl ActionRegistryService for ReaperActionRegistry {
                         );
                     }
                 }
+                if toggleable {
+                    write_shared_toggle_state(&name_for_query, false);
+                    write_reaper_toggle_state(0, existing, false);
+                }
                 return existing.get();
             }
 
@@ -679,11 +798,9 @@ impl ActionRegistryService for ReaperActionRegistry {
                 move || {
                     if toggleable {
                         let state = flip_toggle_state(&trigger_name);
+                        write_shared_toggle_state(&trigger_name, state);
                         if let Some(cmd_id) = named_command_lookup(&trigger_name) {
-                            Reaper::get()
-                                .medium_reaper()
-                                .low()
-                                .RefreshToolbar2(0, cmd_id.get() as i32);
+                            write_reaper_toggle_state(0, cmd_id, state);
                         }
                         debug!("Toggle state for '{}' -> {}", trigger_name, state);
                     }
@@ -724,10 +841,8 @@ impl ActionRegistryService for ReaperActionRegistry {
             if toggleable {
                 // REAPER can be slow to surface newly registered toggle actions in the
                 // action list unless their toolbar state is refreshed at least once.
-                reaper
-                    .medium_reaper()
-                    .low()
-                    .RefreshToolbar2(0, cmd_id.get() as i32);
+                write_shared_toggle_state(&name_for_query, false);
+                write_reaper_toggle_state(0, cmd_id, false);
             }
 
             let cmd_id_val = cmd_id.get();
@@ -927,7 +1042,14 @@ impl ActionRegistryService for ReaperActionRegistry {
                     let registered_by_fts = normalized
                         .is_some_and(|name| registered.contains_key(name))
                         || registered.values().any(|id| *id == cmd.get());
-                    let toggle_state = normalized.and_then(|name| toggles.get(name).copied());
+                    let toggle_state = action_toggle_state(
+                        medium,
+                        section_id,
+                        section_context,
+                        cmd,
+                        command_name.as_deref(),
+                        &toggles,
+                    );
                     let origin = if registered_by_fts {
                         ActionOrigin::Fts
                     } else {
@@ -1005,11 +1127,7 @@ impl ActionRegistryService for ReaperActionRegistry {
 
     async fn execute_command(&self, command_id: u32) {
         main_thread::query(move || {
-            Reaper::get().medium_reaper().main_on_command_ex(
-                CommandId::new(command_id),
-                0,
-                ProjectContext::CurrentProject,
-            );
+            execute_main_action(&Reaper::get().medium_reaper(), CommandId::new(command_id));
         })
         .await;
     }
@@ -1019,7 +1137,7 @@ impl ActionRegistryService for ReaperActionRegistry {
             let reaper = Reaper::get();
             let medium = reaper.medium_reaper();
             if let Some(cmd_id) = named_command_lookup(&command_name) {
-                medium.main_on_command_ex(cmd_id, 0, ProjectContext::CurrentProject);
+                execute_main_action(&medium, cmd_id);
                 true
             } else {
                 warn!("Named action not found: {}", command_name);
@@ -1064,7 +1182,7 @@ impl ActionRegistryService for ReaperActionRegistry {
             };
 
             let before = find_action_info(command_id, ActionSection::Main);
-            medium.main_on_command_ex(command_id, 0, ProjectContext::CurrentProject);
+            execute_main_action(medium, command_id);
             let after = find_action_info(command_id, ActionSection::Main);
             let info = after.as_ref().or(before.as_ref());
 
@@ -1117,6 +1235,24 @@ impl ActionRegistryService for ReaperActionRegistry {
         };
 
         if !was_known {
+            let _ = main_thread::query(move || {
+                let Some(cmd_id) = named_command_lookup(&command_name) else {
+                    return;
+                };
+                let Some(info) = find_action_info(cmd_id, ActionSection::Main) else {
+                    return;
+                };
+                if info.origin != ActionOrigin::Fts {
+                    return;
+                }
+                if info.toggle_state.is_none() && read_shared_toggle_state(&command_name).is_none()
+                {
+                    return;
+                }
+                write_shared_toggle_state(&command_name, is_on);
+                write_reaper_toggle_state(0, cmd_id, is_on);
+            })
+            .await;
             return;
         }
 
@@ -1135,18 +1271,35 @@ impl ActionRegistryService for ReaperActionRegistry {
             // Hop to the main thread; RefreshToolbar2 must be called
             // there per the REAPER plugin SDK contract.
             let _ = main_thread::query(move || {
-                let reaper = Reaper::get();
-                reaper
-                    .medium_reaper()
-                    .low()
-                    .RefreshToolbar2(0, cmd_id as i32);
+                write_shared_toggle_state(&command_name, is_on);
+                write_reaper_toggle_state(0, CommandId::new(cmd_id), is_on);
             })
             .await;
         }
     }
 
     async fn get_toggle_state(&self, command_name: String) -> Option<bool> {
-        toggle_states().lock().unwrap().get(&command_name).copied()
+        main_thread::query(move || {
+            let normalized = normalize_command_name(&command_name);
+            let toggles = toggle_states().lock().unwrap();
+            if let Some(state) = toggles.get(normalized).copied() {
+                return Some(state);
+            }
+            if let Some(state) = read_shared_toggle_state(normalized) {
+                return Some(state);
+            }
+
+            let medium = Reaper::get().medium_reaper();
+            let command_id = named_command_lookup(normalized)?;
+            Reaper::get()
+                .main_section()
+                .with_raw(|section| {
+                    read_reaper_toggle_state(&medium, 0, SectionContext::Sec(section), command_id)
+                })
+                .flatten()
+        })
+        .await
+        .flatten()
     }
 }
 
