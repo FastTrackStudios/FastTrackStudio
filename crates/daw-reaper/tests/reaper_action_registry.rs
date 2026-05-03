@@ -7,6 +7,7 @@
 //!
 //!   cargo xtask reaper-test -- reaper_action_registry
 
+use daw_proto::{ActionListFilter, ActionListRequest, ActionOrigin};
 use reaper_test::reaper_test;
 
 #[reaper_test(isolated)]
@@ -289,6 +290,136 @@ async fn execute_named_action_for_unknown_returns_false(
         !result,
         "execute_named_action should return false for an unknown action"
     );
+
+    Ok(())
+}
+
+// ── Action list enumeration ────────────────────────────────────────────────
+
+#[reaper_test(isolated)]
+async fn list_actions_returns_reaper_builtin_actions(ctx: &ReaperTestContext) -> eyre::Result<()> {
+    let actions = ctx.daw.action_registry();
+
+    let listed = actions
+        .list_actions(ActionListRequest {
+            filter: ActionListFilter::Reaper,
+            query: Some("undo".to_string()),
+            limit: Some(256),
+        })
+        .await?;
+
+    assert!(
+        !listed.is_empty(),
+        "REAPER filter should return built-in actions for query 'undo'"
+    );
+    assert!(
+        listed
+            .iter()
+            .all(|action| action.origin == ActionOrigin::Reaper),
+        "REAPER filter must only return built-in REAPER actions: {listed:#?}"
+    );
+    assert!(
+        listed
+            .iter()
+            .any(|action| action.command_id == 40029 || action.description.contains("Undo")),
+        "REAPER action list should include the built-in undo action: {listed:#?}"
+    );
+
+    Ok(())
+}
+
+#[reaper_test(isolated)]
+async fn list_actions_returns_registered_fts_toggle_state(
+    ctx: &ReaperTestContext,
+) -> eyre::Result<()> {
+    let actions = ctx.daw.action_registry();
+
+    let cmd_id = actions
+        .register_toggle(
+            "FTS_TEST_LIST_ACTIONS_TOGGLE",
+            "FTS Test: List Actions Toggle",
+        )
+        .await?;
+    actions
+        .set_toggle_state("FTS_TEST_LIST_ACTIONS_TOGGLE", true)
+        .await?;
+
+    let listed = actions
+        .list_actions(ActionListRequest {
+            filter: ActionListFilter::Registered,
+            query: Some("List Actions Toggle".to_string()),
+            limit: None,
+        })
+        .await?;
+
+    let action = listed
+        .iter()
+        .find(|action| action.command_id == cmd_id)
+        .ok_or_else(|| eyre::eyre!("registered toggle action not found: {listed:#?}"))?;
+    assert_eq!(
+        action.command_name.as_deref(),
+        Some("FTS_TEST_LIST_ACTIONS_TOGGLE")
+    );
+    assert_eq!(action.description, "FTS Test: List Actions Toggle");
+    assert_eq!(action.origin, ActionOrigin::Fts);
+    assert!(action.registered_by_fts);
+    assert_eq!(action.toggle_state, Some(true));
+
+    Ok(())
+}
+
+#[reaper_test(isolated)]
+async fn list_actions_non_reaper_includes_registered_actions(
+    ctx: &ReaperTestContext,
+) -> eyre::Result<()> {
+    let actions = ctx.daw.action_registry();
+
+    let cmd_id = actions
+        .register(
+            "FTS_TEST_LIST_ACTIONS_NON_REAPER",
+            "FTS Test: List Actions Non Reaper",
+        )
+        .await?;
+
+    let listed = actions
+        .list_actions(ActionListRequest {
+            filter: ActionListFilter::NonReaper,
+            query: Some("List Actions Non Reaper".to_string()),
+            limit: Some(16),
+        })
+        .await?;
+
+    assert!(
+        listed.iter().any(|action| action.command_id == cmd_id
+            && action.origin == ActionOrigin::Fts
+            && action.registered_by_fts),
+        "non-reaper filter should include registered FTS actions: {listed:#?}"
+    );
+
+    Ok(())
+}
+
+#[reaper_test(isolated)]
+async fn list_actions_sws_filter_only_returns_sws_classified_actions(
+    ctx: &ReaperTestContext,
+) -> eyre::Result<()> {
+    let actions = ctx.daw.action_registry();
+
+    let listed = actions
+        .list_actions(ActionListRequest {
+            filter: ActionListFilter::Sws,
+            query: None,
+            limit: Some(32),
+        })
+        .await?;
+
+    assert!(
+        listed
+            .iter()
+            .all(|action| action.origin == ActionOrigin::Sws),
+        "SWS filter must only return SWS-classified actions: {listed:#?}"
+    );
+    ctx.log(&format!("SWS action sample count: {}", listed.len()));
 
     Ok(())
 }
