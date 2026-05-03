@@ -1,6 +1,6 @@
 //! Integration tests for the ActionRegistry service.
 //!
-//! Verifies that guest processes can register custom REAPER actions,
+//! Verifies that DAW clients can register custom REAPER actions,
 //! look them up, and check registration status.
 //!
 //! Run with:

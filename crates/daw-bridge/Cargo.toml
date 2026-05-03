@@ -21,9 +21,6 @@ daw-allocator.workspace = true
 # ROAM service framework
 vox.workspace = true
 vox-stream.workspace = true
-vox-shm.workspace = true
-shm-primitives.workspace = true
-shm-primitives-async.workspace = true
 
 # Async runtime
 
@@ -55,6 +52,3 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 tempfile = "3"
 eyre = "0.6"
-
-# Ensure child processes die with parent (cross-platform)
-ur-taking-me-with-you.workspace = true

@@ -1,12 +1,13 @@
 //! Action Registry — Dynamic REAPER Action Registration
 //!
-//! Allows guest processes to register custom REAPER actions at runtime.
+//! Allows integrated extensions and external clients to register custom REAPER
+//! actions at runtime.
 //! Actions appear in REAPER's action list and can be bound to keyboard shortcuts.
 //!
 //! When a registered action is triggered (by user hotkey, toolbar button, or
-//! script), the host notifies the originating guest via a subscription stream.
-//! Guests handle the action locally — the host has no knowledge of what signal,
-//! session, or sync domains do.
+//! script), the host notifies subscribers via a subscription stream. Integrated
+//! extensions can subscribe in-process; external clients can subscribe through
+//! the socket bridge.
 //!
 //! # Example (via daw-control)
 //!
@@ -31,7 +32,7 @@
 use facet::Facet;
 use vox::{Tx, service};
 
-/// Events pushed to guests when their registered actions are triggered.
+/// Events pushed to subscribers when their registered actions are triggered.
 #[repr(u8)]
 #[derive(Debug, Clone, Facet)]
 pub enum ActionEvent {
@@ -42,14 +43,14 @@ pub enum ActionEvent {
     },
 }
 
-/// Dynamic action registration for guest processes.
+/// Dynamic action registration for DAW extensions and clients.
 ///
-/// Guest processes use this service to register REAPER actions at runtime.
+/// Extensions use this service to register REAPER actions at runtime.
 /// Registered actions appear in REAPER's action list (Actions > Show action list)
 /// and can be assigned keyboard shortcuts by the user.
 ///
 /// After registering, call [`subscribe_actions`] to receive trigger events.
-/// The guest handles all action logic — the host is domain-agnostic.
+/// The subscriber handles action-specific domain logic.
 #[service]
 pub trait ActionRegistryService {
     /// Register a new REAPER action.
@@ -61,7 +62,8 @@ pub trait ActionRegistryService {
     ///   FastTrackStudio menu. The menu hierarchy is derived from the command
     ///   name prefix (e.g., `FTS_SESSION_*` → Session submenu).
     /// - `toggleable`: If true, REAPER shows an on/off indicator for this action.
-    ///   Use [`set_toggle_state`] to update the state from the guest.
+    ///   The host flips fake-toggle state synchronously when the action runs;
+    ///   use [`set_toggle_state`] to force the state from extension code.
     ///
     /// Returns the numeric command ID assigned by REAPER, or 0 on failure.
     async fn register_action(

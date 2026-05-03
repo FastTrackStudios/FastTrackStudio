@@ -8,7 +8,7 @@
 //! ```no_run
 //! use daw_control::Daw;
 //!
-//! # async fn example(handle: vox::ErasedCaller) -> daw_control::Result<()> {
+//! # async fn example(handle: vox::Caller) -> daw_control::Result<()> {
 //! // Initialize global connection
 //! Daw::init(handle)?;
 //!
@@ -25,7 +25,7 @@
 //! ```no_run
 //! use daw_control::Daw;
 //!
-//! # async fn example(handle1: vox::ErasedCaller, handle2: vox::ErasedCaller) -> daw_control::Result<()> {
+//! # async fn example(handle1: vox::Caller, handle2: vox::Caller) -> daw_control::Result<()> {
 //! // Create Daw instances for each host
 //! let daw1 = Daw::new(handle1);
 //! let daw2 = Daw::new(handle2);
@@ -141,7 +141,7 @@ pub(crate) use daw_proto::dock_host::DockHostServiceClient;
 pub(crate) use daw_proto::plugin_loader::PluginLoaderServiceClient;
 pub(crate) use daw_proto::toolbar::ToolbarServiceClient;
 pub(crate) use daw_proto::transport::transport::TransportServiceClient;
-pub use vox::ErasedCaller;
+pub use vox::Caller;
 
 pub mod error;
 pub use error::{Error, Result};
@@ -221,7 +221,7 @@ pub struct DawClients {
 
 impl DawClients {
     /// Create service clients from a connection handle
-    pub fn new(handle: ErasedCaller) -> Self {
+    pub fn new(handle: Caller) -> Self {
         Self {
             action_registry: ActionRegistryServiceClient::new(handle.clone()),
             dock_host: DockHostServiceClient::new(handle.clone()),
@@ -263,7 +263,7 @@ impl DawClients {
 /// ```no_run
 /// use daw_control::Daw;
 ///
-/// # async fn example(handle: vox::ErasedCaller) -> daw_control::Result<()> {
+/// # async fn example(handle: vox::Caller) -> daw_control::Result<()> {
 /// let daw = Daw::new(handle);
 /// let project = daw.current_project().await?;
 /// project.transport().play().await?;
@@ -286,13 +286,13 @@ impl Daw {
     /// ```no_run
     /// use daw_control::Daw;
     ///
-    /// # async fn example(handle: vox::ErasedCaller) -> daw_control::Result<()> {
+    /// # async fn example(handle: vox::Caller) -> daw_control::Result<()> {
     /// let daw = Daw::new(handle);
     /// daw.current_project().await?.transport().play().await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub fn new(handle: ErasedCaller) -> Self {
+    pub fn new(handle: Caller) -> Self {
         Self {
             clients: Arc::new(DawClients::new(handle)),
         }
@@ -618,7 +618,7 @@ impl Daw {
 
 // ============================================================================
 // Global singleton support (for backwards compatibility / single-host usage)
-// Not available on WASM — vox's ErasedCallerDyn uses MaybeSend/MaybeSync
+// Not available on WASM — vox's CallerDyn uses MaybeSend/MaybeSync
 // which are empty traits on wasm32, so Daw is not Sync and can't be in a static.
 // ============================================================================
 
@@ -637,7 +637,7 @@ mod global {
         /// # Errors
         ///
         /// Returns an error if already initialized.
-        pub fn init(handle: ErasedCaller) -> crate::Result<()> {
+        pub fn init(handle: Caller) -> crate::Result<()> {
             GLOBAL_DAW
                 .set(Daw::new(handle))
                 .map_err(|_| Error::InvalidOperation("DAW already initialized".to_string()))

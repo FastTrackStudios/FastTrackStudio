@@ -19,7 +19,7 @@ use vox::service;
 /// Service for executing batch instruction programs.
 ///
 /// A single RPC call executes a sequence of instructions, resolving
-/// cross-step dependencies server-side. Cost: 1 SHM round-trip + N
+/// cross-step dependencies server-side. Cost: 1 RPC round-trip + N
 /// cheap main-thread dispatches.
 #[service]
 pub trait BatchService {

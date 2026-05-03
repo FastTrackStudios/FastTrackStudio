@@ -1,16 +1,16 @@
 //! fts-audio-proto — RT-safe instruction set for the fts-audio VST plugin.
 //!
-//! This crate defines the shared-memory rule tables that guest processes upload
-//! and the fts-audio VST executes on REAPER's audio thread. All types are flat,
+//! This crate defines the rule tables that integrated extensions upload and the
+//! fts-audio VST executes on REAPER's audio thread. All types are flat,
 //! fixed-size, and `Copy` — no heap allocation ever touches the audio thread.
 //!
 //! # Architecture
 //!
 //! ```text
-//! ┌─────────────────┐    SHM rule table     ┌─────────────────┐
-//! │  Guest process   │ ──────────────────▶  │  fts-audio VST   │
-//! │  (fts-macros,    │   lock-free swap      │  (audio thread)  │
-//! │   signal, etc.)  │                       │                  │
+//! ┌─────────────────┐      rule table       ┌─────────────────┐
+//! │  Integrated     │ ──────────────────▶  │  fts-audio VST   │
+//! │  extension      │   lock-free swap      │  (audio thread)  │
+//! │                 │                       │                  │
 //! └─────────────────┘                       └─────────────────┘
 //! ```
 //!
@@ -274,7 +274,7 @@ pub struct AutomationEvent {
 pub struct SampleTrigger {
     /// Sample position at which to start playback.
     pub trigger_position: u64,
-    /// Index into a pre-loaded sample bank (shared memory slot).
+    /// Index into a pre-loaded sample bank.
     pub sample_bank_slot: u16,
     /// Output channel pair (0 = ch 1-2, 1 = ch 3-4, etc.).
     pub output_pair: u8,

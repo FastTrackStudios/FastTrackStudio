@@ -4,6 +4,7 @@
 //! formatting helpers, and command implementations for querying a running
 //! REAPER instance via the vox RPC protocol.
 
+use std::borrow::Cow;
 use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -13,7 +14,7 @@ use daw::service::FxType;
 use eyre::{Result, bail};
 use serde_json::json;
 use vox::{
-    ConnectionSettings, Driver, ErasedCaller, MetadataEntry, MetadataFlags, MetadataValue, Parity,
+    Caller, ConnectionSettings, Driver, MetadataEntry, MetadataFlags, MetadataValue, Parity,
     SessionHandle,
 };
 
@@ -247,11 +248,16 @@ pub async fn connect(socket: Option<PathBuf>) -> Result<DawConnection> {
         peer_resume_key: None,
         our_schema: vec![],
         peer_schema: vec![],
+        peer_metadata: vec![],
     };
-    let (_root_caller, session) = vox::initiator_conduit(vox::BareConduit::new(link), handshake)
-        .establish::<vox::DriverCaller>(())
+    let root = vox::initiator_conduit(vox::BareConduit::new(link), handshake)
+        .establish::<vox::NoopClient>()
         .await
         .map_err(|e| eyre::eyre!("Failed to establish vox session: {:?}", e))?;
+    let session = root
+        .session
+        .clone()
+        .ok_or_else(|| eyre::eyre!("root session missing handle"))?;
 
     let caller = open_daw_connection(&session).await?;
 
@@ -264,25 +270,32 @@ pub async fn connect(socket: Option<PathBuf>) -> Result<DawConnection> {
 /// Open a DAW virtual connection on an established vox session.
 ///
 /// Sends metadata identifying this as a DAW client, then creates a Driver
-/// on the virtual connection and returns an `ErasedCaller` for RPC.
-async fn open_daw_connection(session: &SessionHandle) -> Result<ErasedCaller> {
+/// on the virtual connection and returns an `Caller` for RPC.
+async fn open_daw_connection(session: &SessionHandle) -> Result<Caller> {
     let conn = session
         .open_connection(
             ConnectionSettings {
                 parity: Parity::Odd,
                 max_concurrent_requests: 64,
             },
-            vec![MetadataEntry {
-                key: "role",
-                value: MetadataValue::String("daw-client"),
-                flags: MetadataFlags::NONE,
-            }],
+            vec![
+                MetadataEntry {
+                    key: Cow::Borrowed("vox-service"),
+                    value: MetadataValue::String(Cow::Borrowed("daw-cli")),
+                    flags: MetadataFlags::NONE,
+                },
+                MetadataEntry {
+                    key: Cow::Borrowed("role"),
+                    value: MetadataValue::String(Cow::Borrowed("daw-client")),
+                    flags: MetadataFlags::NONE,
+                },
+            ],
         )
         .await
         .map_err(|e| eyre::eyre!("open_connection failed: {e:?}"))?;
 
     let mut driver = Driver::new(conn, ());
-    let caller = ErasedCaller::new(driver.caller());
+    let caller = Caller::new(driver.caller());
     moire::task::spawn(async move { driver.run().await });
     Ok(caller)
 }

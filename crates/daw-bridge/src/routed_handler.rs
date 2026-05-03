@@ -1,20 +1,17 @@
-//! Handler composition and connection acceptance for vox v7.
+//! Handler composition and connection acceptance for vox.
 //!
 //! - `RoutedHandler`: routes incoming calls to the correct service dispatcher
 //!   by matching `method_id` against each service's known methods.
 //!
-//! - `DawConnectionAcceptor`: a `ConnectionAcceptor` that spawns a `Driver`
-//!   with a `RoutedHandler` for each virtual connection. Guests open virtual
-//!   connections with metadata to specify their role; the acceptor decides
-//!   which services to expose.
+//! - `DawConnectionAcceptor`: a `ConnectionAcceptor` that runs a `Driver`
+//!   with a `RoutedHandler` for each virtual connection.
 
 use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::info;
 use vox::{
-    AcceptedConnection, ConnectionAcceptor, ConnectionHandle, ConnectionId, ConnectionSettings,
-    Driver, DriverReplySink, Handler, MetadataEntry, MetadataValue, MethodId, ReplySink,
-    SchemaRecvTracker, SelfRef, ServiceDescriptor, VoxError,
+    ConnectionAcceptor, ConnectionRequest, DriverReplySink, Handler, MetadataValue, MethodId,
+    PendingConnection, ReplySink, SchemaRecvTracker, SelfRef, ServiceDescriptor, VoxError,
 };
 
 // ============================================================================
@@ -82,7 +79,7 @@ impl Handler<DriverReplySink> for RoutedHandler {
         reply: DriverReplySink,
         schemas: Arc<SchemaRecvTracker>,
     ) {
-        let method_id = call.method_id;
+        let method_id = call.get().method_id;
         if let Some(&idx) = self.method_map.get(&method_id) {
             self.handlers[idx].handle(call, reply, schemas).await;
         } else {
@@ -100,7 +97,7 @@ impl Handler<DriverReplySink> for RoutedHandler {
 /// Accepts inbound virtual connections and spawns a `Driver` with the
 /// `RoutedHandler` for each one.
 ///
-/// Guests open virtual connections with metadata to identify themselves.
+/// Clients open virtual connections with metadata to identify themselves.
 /// Currently all connections get the full set of 16 DAW services.
 /// Future: use metadata to restrict service sets per role.
 #[derive(Clone)]
@@ -119,36 +116,21 @@ impl DawConnectionAcceptor {
 impl ConnectionAcceptor for DawConnectionAcceptor {
     fn accept(
         &self,
-        conn_id: ConnectionId,
-        peer_settings: &ConnectionSettings,
-        metadata: &[MetadataEntry],
-    ) -> Result<AcceptedConnection, vox::Metadata<'static>> {
-        let role = metadata
+        request: &ConnectionRequest,
+        connection: PendingConnection,
+    ) -> Result<(), vox::Metadata<'static>> {
+        let role = request
+            .metadata()
             .iter()
             .find(|e| e.key == "role")
-            .and_then(|e| match e.value {
-                MetadataValue::String(s) => Some(s),
+            .and_then(|e| match &e.value {
+                MetadataValue::String(s) => Some(s.as_ref()),
                 _ => None,
             })
             .unwrap_or("unknown");
 
-        info!("Accepting virtual connection {}: role={}", conn_id, role);
-
-        let handler = Arc::clone(&self.handler);
-        let settings = ConnectionSettings {
-            parity: peer_settings.parity.other(),
-            max_concurrent_requests: 64,
-        };
-
-        Ok(AcceptedConnection {
-            settings,
-            metadata: vec![],
-            setup: Box::new(move |handle: ConnectionHandle| {
-                let mut driver = Driver::new(handle, handler.as_ref().clone());
-                moire::task::spawn(async move {
-                    driver.run().await;
-                });
-            }),
-        })
+        info!("Accepting virtual connection: role={}", role);
+        connection.handle_with(self.handler.as_ref().clone());
+        Ok(())
     }
 }

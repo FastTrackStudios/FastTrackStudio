@@ -13,6 +13,7 @@ pub mod runner;
 use daw::{Daw, Project, TrackHandle};
 use eyre::Result;
 use std::{
+    borrow::Cow,
     fs::{self, File},
     future::Future,
     io::Write,
@@ -601,11 +602,16 @@ pub async fn connect_daw_at(socket_override: Option<&Path>) -> Result<Daw> {
         peer_resume_key: None,
         our_schema: vec![],
         peer_schema: vec![],
+        peer_metadata: vec![],
     };
-    let (_root_caller, session) = vox::initiator_conduit(vox::BareConduit::new(link), handshake)
-        .establish::<vox::DriverCaller>(())
+    let root = vox::initiator_conduit(vox::BareConduit::new(link), handshake)
+        .establish::<vox::NoopClient>()
         .await
         .map_err(|e| eyre::eyre!("Failed to establish vox session: {:?}", e))?;
+    let session = root
+        .session
+        .clone()
+        .ok_or_else(|| eyre::eyre!("root session missing handle"))?;
 
     // Open a virtual connection for DAW services
     let conn = session
@@ -614,17 +620,24 @@ pub async fn connect_daw_at(socket_override: Option<&Path>) -> Result<Daw> {
                 parity: vox::Parity::Odd,
                 max_concurrent_requests: 64,
             },
-            vec![vox::MetadataEntry {
-                key: "role",
-                value: vox::MetadataValue::String("test-client"),
-                flags: vox::MetadataFlags::NONE,
-            }],
+            vec![
+                vox::MetadataEntry {
+                    key: Cow::Borrowed("vox-service"),
+                    value: vox::MetadataValue::String(Cow::Borrowed("reaper-test")),
+                    flags: vox::MetadataFlags::NONE,
+                },
+                vox::MetadataEntry {
+                    key: Cow::Borrowed("role"),
+                    value: vox::MetadataValue::String(Cow::Borrowed("test-client")),
+                    flags: vox::MetadataFlags::NONE,
+                },
+            ],
         )
         .await
         .map_err(|e| eyre::eyre!("open_connection failed: {e:?}"))?;
 
     let mut driver = vox::Driver::new(conn, ());
-    let caller = vox::ErasedCaller::new(driver.caller());
+    let caller = vox::Caller::new(driver.caller());
     moire::task::spawn(async move { driver.run().await });
 
     Ok(Daw::new(caller))

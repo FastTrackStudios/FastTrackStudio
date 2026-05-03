@@ -515,8 +515,8 @@ fn reaper_test(filter: Option<String>, keep_open: bool) -> Result<(), Box<dyn st
     }
     runner::end_section(ci);
 
-    // ── Step 1b: Build example-extension ────────────────────────────────
-    runner::section(ci, "reaper-test: build guest example");
+    // ── Step 1b: Build integrated example extension ─────────────────────
+    runner::section(ci, "reaper-test: build example extension");
     println!("Building example-extension...");
     let status = Command::new("cargo")
         .args(["build", "-p", "example-extension"])
@@ -612,24 +612,34 @@ fn reaper_test(filter: Option<String>, keep_open: bool) -> Result<(), Box<dyn st
         runner::end_section(ci);
     }
 
-    // ── Step 3b: Install daw-guest into fts-extensions/ ──────────────────
-    runner::section(ci, "reaper-test: install guest extensions");
-    let fts_ext_dir = user_plugins_dir.join("fts-extensions");
-    std::fs::create_dir_all(&fts_ext_dir)?;
-    let guest_src = workspace_root.join("target/debug/example-extension");
-    if guest_src.exists() {
-        let guest_dst = fts_ext_dir.join("example-extension");
-        std::fs::copy(&guest_src, &guest_dst)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&guest_dst, std::fs::Permissions::from_mode(0o755))?;
-        }
-        println!("  Installed example-extension -> {}", guest_dst.display());
+    // ── Step 3b: Install integrated example extension ────────────────────
+    runner::section(ci, "reaper-test: install example extension");
+    let legacy_guest_dir = user_plugins_dir.join("fts-extensions");
+    if legacy_guest_dir.exists() {
+        std::fs::remove_dir_all(&legacy_guest_dir)?;
+        println!(
+            "  Removed legacy guest extension dir {}",
+            legacy_guest_dir.display()
+        );
+    }
+
+    let example_so_src = workspace_root
+        .join("target/debug")
+        .join("libreaper_example_extension.so");
+    if example_so_src.exists() {
+        runner::install_plugin(
+            &example_so_src,
+            "reaper_example_extension.so",
+            &user_plugins_dir,
+        )?;
+        println!(
+            "  Installed reaper_example_extension.so -> {}",
+            user_plugins_dir.display()
+        );
     } else {
         println!(
-            "  WARNING: daw-guest binary not found at {}",
-            guest_src.display()
+            "  WARNING: example extension library not found at {}",
+            example_so_src.display()
         );
     }
     // Install example-plugin CLAP into FX/ for scanning

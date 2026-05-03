@@ -2,19 +2,19 @@
 //!
 //! Wraps `vox::memory_link_pair` + acceptor/initiator into a reusable struct
 //! that any in-process consumer (plugins, extensions, desktop apps) can use
-//! to get an `ErasedCaller` without duplicating the boilerplate.
+//! to get a `Caller` without duplicating the boilerplate.
 //!
 //! Uses vox's virtual connection pattern: the root session is established
 //! with an `on_connection` acceptor, then the client opens a virtual connection
-//! to get a service-specific `Driver` and `ErasedCaller`.
+//! to get a service-specific `Driver` and `Caller`.
 
 use moire::task::JoinHandle;
+use std::borrow::Cow;
 use std::sync::Arc;
 use tracing::{debug, warn};
 use vox::{
-    AcceptedConnection, BareConduit, ConnectionAcceptor, ConnectionHandle, ConnectionId,
-    ConnectionSettings, Driver, DriverCaller, DriverReplySink, ErasedCaller, Handler,
-    MetadataEntry, MetadataFlags, MetadataValue, Parity,
+    BareConduit, Caller, ConnectionSettings, Driver, DriverReplySink, Handler, MetadataEntry,
+    MetadataFlags, MetadataValue, Parity,
 };
 
 /// Keeps the server-side acceptor task alive.
@@ -22,40 +22,11 @@ struct KeepAlive {
     _handle: JoinHandle<()>,
 }
 
-/// Wraps a `Handler` into a `ConnectionAcceptor` that spawns a `Driver`
-/// per virtual connection.
-struct LocalAcceptor<H> {
-    handler: Arc<H>,
-}
-
-impl<H: Handler<DriverReplySink> + Clone + 'static> ConnectionAcceptor for LocalAcceptor<H> {
-    fn accept(
-        &self,
-        _conn_id: ConnectionId,
-        peer_settings: &ConnectionSettings,
-        _metadata: &[MetadataEntry],
-    ) -> Result<AcceptedConnection, vox::Metadata<'static>> {
-        let handler = Arc::clone(&self.handler);
-        let settings = ConnectionSettings {
-            parity: peer_settings.parity.other(),
-            max_concurrent_requests: 64,
-        };
-        Ok(AcceptedConnection {
-            settings,
-            metadata: vec![],
-            setup: Box::new(move |handle: ConnectionHandle| {
-                let mut driver = Driver::new(handle, handler.as_ref().clone());
-                moire::task::spawn(async move { driver.run().await });
-            }),
-        })
-    }
-}
-
 /// In-process vox caller backed by memory channels.
 ///
 /// Creates a `memory_link_pair`, spawns an acceptor task for the server side
 /// with a `ConnectionAcceptor`, and establishes an initiator on the client side.
-/// The client then opens a virtual connection to get an `ErasedCaller` for RPC.
+/// The client then opens a virtual connection to get a `Caller` for RPC.
 ///
 /// # Example
 ///
@@ -63,11 +34,11 @@ impl<H: Handler<DriverReplySink> + Clone + 'static> ConnectionAcceptor for Local
 /// let handler = RoutedHandler::new()
 ///     .with(fx_service_descriptor(), FxServiceDispatcher::new(fx_impl));
 /// let local = LocalCaller::new(handler).await?;
-/// let daw = Daw::new(local.erased_caller());
+/// let daw = Daw::new(local.caller());
 /// ```
 #[derive(Clone)]
 pub struct LocalCaller {
-    caller: ErasedCaller,
+    caller: Caller,
     _keep_alive: Arc<KeepAlive>,
 }
 
@@ -77,14 +48,11 @@ impl LocalCaller {
     /// Spawns a background task that accepts virtual connections and dispatches
     /// requests via an in-memory link pair. The task lives as long as any
     /// `LocalCaller` clone exists.
-    pub async fn new(
-        handler: impl Handler<DriverReplySink> + Clone + 'static,
-    ) -> eyre::Result<Self> {
+    pub async fn new<H>(handler: H) -> eyre::Result<Self>
+    where
+        H: Handler<DriverReplySink> + Clone + 'static,
+    {
         let (client_link, server_link) = vox::memory_link_pair(256);
-
-        let acceptor = LocalAcceptor {
-            handler: Arc::new(handler),
-        };
 
         // Server side: accept with virtual connection support
         let handle = moire::task::spawn(async move {
@@ -103,13 +71,14 @@ impl LocalCaller {
                 peer_resume_key: None,
                 our_schema: vec![],
                 peer_schema: vec![],
+                peer_metadata: vec![],
             };
             match vox::acceptor_conduit(BareConduit::new(server_link), handshake)
-                .on_connection(acceptor)
-                .establish::<DriverCaller>(())
+                .on_connection(handler)
+                .establish::<vox::NoopClient>()
                 .await
             {
-                Ok((_caller, _session)) => {
+                Ok(_root) => {
                     debug!("LocalCaller server session established");
                     std::future::pending::<()>().await;
                 }
@@ -135,12 +104,16 @@ impl LocalCaller {
             peer_resume_key: None,
             our_schema: vec![],
             peer_schema: vec![],
+            peer_metadata: vec![],
         };
-        let (_root_caller, session) =
-            vox::initiator_conduit(BareConduit::new(client_link), handshake)
-                .establish::<DriverCaller>(())
-                .await
-                .map_err(|e| eyre::eyre!("LocalCaller initiation failed: {:?}", e))?;
+        let root = vox::initiator_conduit(BareConduit::new(client_link), handshake)
+            .establish::<vox::NoopClient>()
+            .await
+            .map_err(|e| eyre::eyre!("LocalCaller initiation failed: {:?}", e))?;
+        let session = root
+            .session
+            .clone()
+            .ok_or_else(|| eyre::eyre!("LocalCaller root session missing handle"))?;
 
         // Open a virtual connection for DAW services
         let conn = session
@@ -149,17 +122,24 @@ impl LocalCaller {
                     parity: Parity::Odd,
                     max_concurrent_requests: 64,
                 },
-                vec![MetadataEntry {
-                    key: "role",
-                    value: MetadataValue::String("local"),
-                    flags: MetadataFlags::NONE,
-                }],
+                vec![
+                    MetadataEntry {
+                        key: Cow::Borrowed("vox-service"),
+                        value: MetadataValue::String(Cow::Borrowed("daw-local")),
+                        flags: MetadataFlags::NONE,
+                    },
+                    MetadataEntry {
+                        key: Cow::Borrowed("role"),
+                        value: MetadataValue::String(Cow::Borrowed("local")),
+                        flags: MetadataFlags::NONE,
+                    },
+                ],
             )
             .await
             .map_err(|e| eyre::eyre!("LocalCaller open_connection failed: {:?}", e))?;
 
         let mut driver = Driver::new(conn, ());
-        let caller = ErasedCaller::new(driver.caller());
+        let caller = Caller::new(driver.caller());
         moire::task::spawn(async move { driver.run().await });
 
         debug!("LocalCaller established (in-process memory channels, virtual connection)");
@@ -170,8 +150,8 @@ impl LocalCaller {
         })
     }
 
-    /// Get the `ErasedCaller` for use with `Daw::new()` or `Daw::init()`.
-    pub fn erased_caller(&self) -> ErasedCaller {
+    /// Get the `Caller` for use with `Daw::new()` or `Daw::init()`.
+    pub fn caller(&self) -> Caller {
         self.caller.clone()
     }
 }

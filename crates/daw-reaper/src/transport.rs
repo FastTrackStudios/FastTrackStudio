@@ -33,7 +33,7 @@
 //! This avoids:
 //! - Round-trip latency of `main_thread_future()` for streaming
 //! - Flooding with updates for projects that aren't playing
-//! - SHM slot exhaustion from constant polling
+//! - RPC/channel exhaustion from constant polling
 
 use crate::project_context::{
     MAX_PROJECT_TABS, find_project_by_guid, project_guid as project_guid_from,
@@ -130,7 +130,7 @@ const POSITION_CHANGE_THRESHOLD: f64 = 0.001; // 1ms
 ///
 /// **Reactive Pattern**: Only broadcasts when a project's state actually changes.
 /// Projects that are stopped/idle won't generate any updates, preventing
-/// SHM slot exhaustion from constant polling.
+/// RPC/channel exhaustion from constant polling.
 pub fn poll_and_broadcast() {
     let tx = TRANSPORT_BROADCASTER.get();
     let legacy_tx = LEGACY_TRANSPORT_BROADCASTER.get();

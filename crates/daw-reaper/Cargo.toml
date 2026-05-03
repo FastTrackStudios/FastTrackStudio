@@ -41,7 +41,4 @@ serde_json = "1.0"
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
 tokio-util = "0.7"
 vox.workspace = true
-vox-shm.workspace = true
-shm-primitives.workspace = true
 moire.workspace = true
-libc = "0.2"

@@ -1,6 +1,6 @@
 //! Integration tests for the DockHost service.
 //!
-//! Verifies that a guest process can register docks, mint stable handles
+//! Verifies that a DAW client can register docks, mint stable handles
 //! per id, and toggle visibility — through the same vox client surface
 //! the rest of the daw API uses.
 //!

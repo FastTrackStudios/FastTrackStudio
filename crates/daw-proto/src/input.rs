@@ -1,13 +1,13 @@
 //! Input Service — keyboard/mouse event interception and streaming.
 //!
-//! The host intercepts input events from the DAW and streams them to extension
-//! processes over SHM. Extensions process keybindings, modal editing, and
-//! command resolution — then call back to execute actions.
+//! The host intercepts input events from the DAW and streams them to integrated
+//! extensions or external clients. Extensions process keybindings, modal
+//! editing, and command resolution — then call back to execute actions.
 //!
 //! # Latency Design
 //!
 //! The host's keyboard hook runs synchronously on the DAW's main thread.
-//! To avoid per-keypress SHM round-trips, the extension uploads a [`KeyFilter`]
+//! To avoid per-keypress RPC round-trips, the extension uploads a [`KeyFilter`]
 //! that the host evaluates locally. Eaten keys are streamed asynchronously.
 //!
 //! # Platform Agnosticism
@@ -111,7 +111,7 @@ pub enum InputContext {
 /// Describes which keys the host should eat (intercept).
 ///
 /// The extension uploads this filter to the host. The host evaluates it
-/// synchronously — no SHM round-trip per keypress.
+/// synchronously — no RPC round-trip per keypress.
 #[repr(u8)]
 #[derive(Debug, Clone, Facet)]
 pub enum KeyFilter {

@@ -1,8 +1,8 @@
 //! REAPER Input Service Implementation
 //!
 //! Registers a TranslateAccel handler that intercepts keyboard events
-//! and streams them to extension processes via a broadcast channel.
-//! The key filter is evaluated synchronously — no SHM round-trip per keypress.
+//! and streams them to subscribers via a broadcast channel.
+//! The key filter is evaluated synchronously — no RPC round-trip per keypress.
 //!
 //! VK codes from Windows/SWELL are converted to platform-agnostic `KeyCode`
 //! before being sent to extensions.
@@ -32,7 +32,7 @@ struct InputState {
     /// Master enable switch. Checked atomically in TranslateAccel.
     enabled: AtomicBool,
     /// Key filter — determines which keys to eat. Read via `RwLock::read()`
-    /// in TranslateAccel (non-blocking, no SHM round-trip).
+    /// in TranslateAccel (non-blocking, no RPC round-trip).
     filter: RwLock<KeyFilter>,
     /// Broadcast channel for streaming eaten events to subscribers.
     event_tx: broadcast::Sender<InputEvent>,

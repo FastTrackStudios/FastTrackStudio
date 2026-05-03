@@ -1,4 +1,4 @@
-//! Plugin Loader — Eager plugin loading via SHM
+//! Plugin Loader — eager plugin loading through the DAW service API
 //!
 //! Client-side handle for requesting REAPER to load plugins into its address space.
 

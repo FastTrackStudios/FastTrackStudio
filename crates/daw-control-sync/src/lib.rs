@@ -16,7 +16,7 @@
 //!    Daw (async API, from daw-control)
 //!        │
 //!        ▼
-//!    ErasedCaller ← from LocalCaller or socket connection
+//!    Caller ← from LocalCaller or socket connection
 //!        │
 //!        ▼
 //!    Handler → DAW service dispatchers → REAPER API
@@ -44,9 +44,10 @@ pub use local_caller::LocalCaller;
 
 use daw_control::Daw;
 use eyre::{Context, Result};
+use std::borrow::Cow;
 use std::sync::Arc;
 use tracing::error;
-use vox::ErasedCaller;
+use vox::Caller;
 
 /// Thread-safe synchronous interface to the async DAW API.
 ///
@@ -61,8 +62,8 @@ pub struct DawSync {
 }
 
 impl DawSync {
-    /// Create from an existing `ErasedCaller` (e.g. from socket or LocalCaller).
-    pub fn from_caller(caller: ErasedCaller) -> Result<Self> {
+    /// Create from an existing `Caller` (e.g. from socket or LocalCaller).
+    pub fn from_caller(caller: Caller) -> Result<Self> {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(1)
             .enable_all()
@@ -85,7 +86,7 @@ impl DawSync {
             .context("Failed to create tokio runtime for DawSync")?;
 
         Ok(Self {
-            daw: Daw::new(local.erased_caller()),
+            daw: Daw::new(local.caller()),
             runtime: Arc::new(runtime),
             _local_caller: Some(local),
         })
@@ -133,12 +134,16 @@ impl DawSync {
             peer_resume_key: None,
             our_schema: vec![],
             peer_schema: vec![],
+            peer_metadata: vec![],
         };
-        let (_root_caller, session) =
-            vox::initiator_conduit(vox::BareConduit::new(link), handshake)
-                .establish::<vox::DriverCaller>(())
-                .await
-                .context("Failed to establish vox session")?;
+        let root = vox::initiator_conduit(vox::BareConduit::new(link), handshake)
+            .establish::<vox::NoopClient>()
+            .await
+            .context("Failed to establish vox session")?;
+        let session = root
+            .session
+            .clone()
+            .ok_or_else(|| eyre::eyre!("root session missing handle"))?;
 
         // Open a virtual connection for DAW services
         let conn = session
@@ -147,17 +152,24 @@ impl DawSync {
                     parity: vox::Parity::Odd,
                     max_concurrent_requests: 64,
                 },
-                vec![vox::MetadataEntry {
-                    key: "role",
-                    value: vox::MetadataValue::String("sync-client"),
-                    flags: vox::MetadataFlags::NONE,
-                }],
+                vec![
+                    vox::MetadataEntry {
+                        key: Cow::Borrowed("vox-service"),
+                        value: vox::MetadataValue::String(Cow::Borrowed("daw-sync")),
+                        flags: vox::MetadataFlags::NONE,
+                    },
+                    vox::MetadataEntry {
+                        key: Cow::Borrowed("role"),
+                        value: vox::MetadataValue::String(Cow::Borrowed("sync-client")),
+                        flags: vox::MetadataFlags::NONE,
+                    },
+                ],
             )
             .await
             .context("Failed to open DAW virtual connection")?;
 
         let mut driver = vox::Driver::new(conn, ());
-        let caller = ErasedCaller::new(driver.caller());
+        let caller = Caller::new(driver.caller());
         moire::task::spawn(async move { driver.run().await });
 
         Self::from_caller(caller)

@@ -1,13 +1,12 @@
 //! REAPER ↔ DAW bridge extension.
 //!
 //! Loads daw-reaper's service implementations inside REAPER and exposes them
-//! via Unix socket and SHM so external processes (tests, FTS, CLI tools)
-//! can control the DAW through vox RPC.
+//! via Unix socket so external processes (tests, FTS, CLI tools) can control
+//! the DAW through vox RPC. Integrated extensions use daw-extension-runtime
+//! in-process instead of routing through this bridge.
 
-mod guest_loader;
 mod project_import;
 mod routed_handler;
-mod shm_host;
 
 // ============================================================================
 // RT-safe Global Allocator
@@ -291,13 +290,7 @@ async fn register_daw_dispatcher() {
     // Start Unix socket server
     start_unix_socket_server(acceptor.clone());
 
-    // Start SHM host for hot-reloadable guest processes
-    if let Some(bootstrap_sock) = shm_host::start_shm_host(acceptor) {
-        // Launch any guest executables found in UserPlugins/fts-extensions/
-        guest_loader::launch_guests(&bootstrap_sock);
-    }
-
-    info!("DAW bridge registered (21 services, socket + SHM)");
+    info!("DAW bridge registered (21 services, socket)");
 }
 
 // ============================================================================
@@ -356,13 +349,14 @@ fn start_unix_socket_server(acceptor: DawConnectionAcceptor) {
                             peer_resume_key: None,
                             our_schema: vec![],
                             peer_schema: vec![],
+                            peer_metadata: vec![],
                         };
                         match vox::acceptor_conduit(vox::BareConduit::new(link), handshake)
                             .on_connection(acceptor)
-                            .establish::<vox::DriverCaller>(())
+                            .establish::<vox::NoopClient>()
                             .await
                         {
-                            Ok((_caller, _session_handle)) => {
+                            Ok(_root) => {
                                 debug!("Unix socket session established");
                                 std::future::pending::<()>().await;
                             }

@@ -1,6 +1,6 @@
 //! Shared dev tooling for FTS repos.
 //!
-//! Provides helpers for installing (symlinking) REAPER plugins and SHM guest
+//! Provides helpers for installing (symlinking) REAPER plugins and integrated
 //! extensions into the correct directories. Each repo's xtask or build script
 //! can use these instead of hand-rolling install logic.
 //!
@@ -9,15 +9,8 @@
 //! ```text
 //! ~/.config/REAPER/                          (or custom REAPER_PATH)
 //! └── UserPlugins/
-//!     ├── reaper_daw_bridge.so               ← REAPER plugin (.so/.dylib)
-//!     └── fts-extensions/                    ← SHM guest binaries
-//!         ├── signal → /path/to/target/debug/signal
-//!         ├── session → /path/to/target/debug/session
-//!         ├── sync → /path/to/target/debug/sync
-//!         ├── keyflow → ...
-//!         ├── input → ...
-//!         ├── dynamic-template → ...
-//!         └── .fts-ignore                    (optional blacklist)
+//!     ├── reaper_daw_bridge.so               ← socket bridge plugin
+//!     └── reaper_example_extension.so        ← integrated extension plugin
 //! ```
 
 use std::path::{Path, PathBuf};
@@ -145,13 +138,11 @@ pub fn install_plugin(lib_path: &Path, lib_name: &str) -> Result<(), InstallErro
     Ok(())
 }
 
-/// Install an SHM guest extension into `UserPlugins/fts-extensions/`.
+/// Install an integrated REAPER extension into `UserPlugins/`.
 ///
-/// `binary_path` is the built executable (e.g. `target/debug/signal`).
-/// `name` is the extension name used as the filename (e.g. `"signal"`).
-///
-/// The `daw-bridge` guest loader watches this directory at runtime and
-/// auto-launches/hot-reloads any executables it finds.
+/// `binary_path` is the built library (for example,
+/// `target/debug/libreaper_signal.so`). `name` is the filename REAPER should
+/// load from `UserPlugins` (for example, `"reaper_signal.so"`).
 ///
 /// Installs into all discovered REAPER directories.
 pub fn install_extension(binary_path: &Path, name: &str) -> Result<(), InstallError> {
@@ -164,7 +155,7 @@ pub fn install_extension(binary_path: &Path, name: &str) -> Result<(), InstallEr
         .unwrap_or_else(|_| binary_path.to_path_buf());
 
     for reaper_dir in reaper_dirs() {
-        let ext_dir = reaper_dir.join("UserPlugins").join("fts-extensions");
+        let ext_dir = reaper_dir.join("UserPlugins");
         std::fs::create_dir_all(&ext_dir)
             .map_err(|e| InstallError::CreateDir(ext_dir.clone(), e))?;
 
@@ -180,13 +171,10 @@ pub fn install_extension(binary_path: &Path, name: &str) -> Result<(), InstallEr
     Ok(())
 }
 
-/// Uninstall an SHM guest extension from `UserPlugins/fts-extensions/`.
+/// Uninstall an integrated REAPER extension from `UserPlugins/`.
 pub fn uninstall_extension(name: &str) {
     for reaper_dir in reaper_dirs() {
-        let dest = reaper_dir
-            .join("UserPlugins")
-            .join("fts-extensions")
-            .join(name);
+        let dest = reaper_dir.join("UserPlugins").join(name);
         if dest.exists() || dest.is_symlink() {
             let _ = std::fs::remove_file(&dest);
             println!("  removed: {}", dest.display());
@@ -222,22 +210,6 @@ pub fn status() {
                             }
                         }
                     }
-                }
-            }
-        }
-
-        let ext_dir = user_plugins.join("fts-extensions");
-        if ext_dir.is_dir() {
-            println!("  fts-extensions:");
-            if let Ok(entries) = std::fs::read_dir(&ext_dir) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if let Some(name) = path.file_name() {
-                        if name.to_string_lossy().starts_with('.') {
-                            continue;
-                        }
-                    }
-                    print_link_status(&path);
                 }
             }
         }

@@ -163,8 +163,8 @@ use dioxus::prelude::*;
 
 #[tokio::main]
 async fn main() {
-    // Connect to REAPER extension via shared memory
-    let handle = roam_shm::connect("/tmp/reaper-daw.shm").await.unwrap();
+    // Connect to REAPER extension via the DAW service socket
+    let handle = daw_control_sync::DawSync::connect_to_service().await.unwrap();
     Daw::init(handle).unwrap();
     
     dioxus::launch(App);

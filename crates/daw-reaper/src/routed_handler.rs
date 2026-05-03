@@ -68,7 +68,7 @@ impl Handler<DriverReplySink> for RoutedHandler {
         reply: DriverReplySink,
         schemas: Arc<SchemaRecvTracker>,
     ) {
-        let method_id = call.method_id;
+        let method_id = call.get().method_id;
         if let Some(&idx) = self.method_map.get(&method_id) {
             self.handlers[idx].handle(call, reply, schemas).await;
         } else {

@@ -1,7 +1,7 @@
 //! Action Registry — High-level client wrapper
 //!
 //! Provides ergonomic access to the ActionRegistryService for registering
-//! custom REAPER actions from guest processes.
+//! custom REAPER actions from integrated extensions or external clients.
 
 use crate::DawClients;
 use std::sync::Arc;

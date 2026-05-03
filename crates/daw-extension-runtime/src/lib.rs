@@ -1,235 +1,134 @@
-//! SHM extension runtime for daw-bridge.
+//! Integrated REAPER extension runtime helpers.
 //!
-//! Provides a one-call [`connect`] function that handles the full SHM bootstrap
-//! handshake and returns a ready-to-use [`daw::Daw`] handle. This is the only
-//! dependency a hot-reloadable extension process needs to talk to REAPER.
-//!
-//! # Example
-//!
-//! ```rust,ignore
-//! use daw_extension_runtime::GuestOptions;
-//!
-//! #[tokio::main]
-//! async fn main() -> eyre::Result<()> {
-//!     let daw = daw_extension_runtime::connect(GuestOptions {
-//!         role: "my-extension",
-//!         ..Default::default()
-//!     }).await?;
-//!
-//!     let project = daw.current_project().await.unwrap();
-//!     let state = project.transport().get_state().await.unwrap();
-//!     println!("Tempo: {:.1} BPM", state.tempo);
-//!     Ok(())
-//! }
-//! ```
+//! This crate is for extension code loaded directly into REAPER. It builds the
+//! DAW service client in-process through `LocalCaller`, so action registration
+//! and main-thread REAPER API calls do not go through `daw-bridge`, sockets, or
+//! shared memory.
 
-use std::io::Write;
-use std::os::unix::io::{AsRawFd, IntoRawFd};
-use std::os::unix::net::UnixStream;
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::cell::RefCell;
+use std::error::Error;
+use std::sync::OnceLock;
 
-use eyre::{Result, WrapErr, eyre};
-use shm_primitives::PeerId;
-use tracing::{debug, warn};
-use vox::{
-    ConnectionSettings, Driver, ErasedCaller, HandshakeResult, MetadataEntry, MetadataFlags,
-    MetadataValue, Parity, SessionRole,
-};
-use vox_shm::bootstrap::{BootstrapStatus, encode_request};
-use vox_shm::{Segment, ShmLink};
+use crossbeam_channel::{Receiver, Sender};
+use daw::Daw;
+use eyre::{Result, eyre};
+use reaper_high::{MainTaskMiddleware, MainThreadTask, Reaper as HighReaper, TaskSupport};
+use reaper_low::PluginContext;
+use reaper_medium::ReaperSession;
+use tracing::{debug, info, warn};
+use vox::Rx;
 
-/// Options for connecting to daw-bridge as an SHM guest.
-pub struct GuestOptions<'a> {
-    /// Role name sent as connection metadata (e.g. "signal", "session", "fts-macros").
-    pub role: &'a str,
+static GLOBAL: OnceLock<Global> = OnceLock::new();
 
-    /// Explicit bootstrap socket path. If `None`, auto-discovers from
-    /// `FTS_SHM_BOOTSTRAP_SOCK` env var or scans `/tmp/fts-daw-*.bootstrap.sock`.
-    pub bootstrap_socket: Option<PathBuf>,
-
-    /// Maximum number of concurrent in-flight RPC requests.
-    pub max_concurrent_requests: u32,
+struct Global {
+    task_support: TaskSupport,
+    task_sender: Sender<MainThreadTask>,
+    task_receiver: Receiver<MainThreadTask>,
 }
 
-impl Default for GuestOptions<'_> {
-    fn default() -> Self {
-        Self {
-            role: "guest",
-            bootstrap_socket: None,
-            max_concurrent_requests: 64,
+impl Global {
+    fn init() {
+        GLOBAL.get_or_init(|| {
+            let (task_sender, task_receiver) = crossbeam_channel::unbounded();
+            Global {
+                task_support: TaskSupport::new(task_sender.clone()),
+                task_sender,
+                task_receiver,
+            }
+        });
+    }
+
+    fn get() -> &'static Self {
+        GLOBAL
+            .get()
+            .expect("daw-extension-runtime global state was not initialized")
+    }
+
+    fn task_support() -> &'static TaskSupport {
+        &Self::get().task_support
+    }
+
+    fn create_task_middleware(&self) -> MainTaskMiddleware {
+        MainTaskMiddleware::new(self.task_sender.clone(), self.task_receiver.clone())
+    }
+}
+
+/// Runtime state owned by one integrated REAPER extension.
+pub struct ExtensionRuntime {
+    session: RefCell<ReaperSession>,
+    tokio_runtime: tokio::runtime::Runtime,
+    task_middleware: RefCell<MainTaskMiddleware>,
+}
+
+impl std::fmt::Debug for ExtensionRuntime {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ExtensionRuntime").finish_non_exhaustive()
+    }
+}
+
+impl ExtensionRuntime {
+    /// Initialize REAPER access and create an in-process DAW runtime.
+    pub fn new(context: PluginContext) -> Result<Self> {
+        match HighReaper::load(context).setup() {
+            Ok(_) => {
+                info!("REAPER high-level API initialized");
+                match HighReaper::get().wake_up() {
+                    Ok(()) => info!("REAPER high-level API woke up"),
+                    Err(e) => warn!("REAPER high-level API wake_up failed: {e}"),
+                }
+            }
+            Err(_) => debug!("REAPER high-level API already initialized"),
         }
+
+        Global::init();
+        daw::reaper::set_task_support(Global::task_support());
+
+        let tokio_runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()?;
+        let task_middleware = Global::get().create_task_middleware();
+        let session = ReaperSession::load(context);
+
+        Ok(Self {
+            session: RefCell::new(session),
+            tokio_runtime,
+            task_middleware: RefCell::new(task_middleware),
+        })
+    }
+
+    /// Build an async DAW handle backed by the in-process REAPER dispatcher.
+    pub fn build_daw(&self) -> Result<Daw> {
+        self.tokio_runtime
+            .block_on(daw::reaper::build_extension_daw())
+            .map_err(|e| eyre!("{e}"))
+    }
+
+    /// Run an async task on this extension's runtime.
+    pub fn spawn<F>(&self, future: F)
+    where
+        F: std::future::Future<Output = ()> + Send + 'static,
+    {
+        self.tokio_runtime.spawn(future);
+    }
+
+    /// Drain work scheduled onto REAPER's main thread.
+    pub fn process_tasks(&self) {
+        self.task_middleware.borrow_mut().run();
+    }
+
+    /// Register a REAPER timer callback owned by this extension.
+    pub fn add_timer(&self, timer: extern "C" fn()) -> Result<()> {
+        self.session
+            .borrow_mut()
+            .plugin_register_add_timer(timer)
+            .map_err(|e| eyre!("register extension timer: {e:?}"))
     }
 }
 
-/// Connect to daw-bridge via SHM and return a ready-to-use [`daw::Daw`] handle.
-///
-/// This performs the full bootstrap sequence:
-/// 1. Discover the SHM bootstrap socket
-/// 2. Perform SHM handshake (send session ID, receive segment path + fds)
-/// 3. Establish a vox session over the ShmLink
-/// 4. Open a virtual connection with role metadata
-/// 5. Return a [`daw::Daw`] handle wired to the connection
-pub async fn connect(opts: GuestOptions<'_>) -> Result<daw::Daw> {
-    let pid = std::process::id();
-
-    // Step 1: Discover bootstrap socket
-    let bootstrap_sock = match opts.bootstrap_socket {
-        Some(path) => path,
-        None => discover_bootstrap_socket()?,
-    };
-    debug!(
-        "[guest:{pid}] Connecting via bootstrap socket: {}",
-        bootstrap_sock.display()
-    );
-
-    // Step 2: SHM handshake
-    let link = connect_shm(&bootstrap_sock)?;
-    debug!("[guest:{pid}] SHM link established");
-
-    // Step 3: Establish vox session
-    // SHM connections skip the CBOR handshake (handled at the bootstrap layer),
-    // so we provide a synthetic HandshakeResult with matching settings.
-    let handshake_result = shm_handshake_result(opts.max_concurrent_requests);
-    let (_root_caller, session) = vox::initiator_conduit(link, handshake_result)
-        .establish::<vox::DriverCaller>(())
-        .await
-        .map_err(|e| eyre!("vox handshake failed: {e:?}"))?;
-    debug!("[guest:{pid}] Vox session established");
-
-    // Step 4: Open virtual connection
-    // Leak the role string — guest connections live for the process lifetime.
-    let role: &'static str = Box::leak(opts.role.to_string().into_boxed_str());
-    let conn = session
-        .open_connection(
-            ConnectionSettings {
-                parity: Parity::Odd,
-                max_concurrent_requests: opts.max_concurrent_requests,
-            },
-            vec![MetadataEntry {
-                key: "role",
-                value: MetadataValue::String(role),
-                flags: MetadataFlags::NONE,
-            }],
-        )
-        .await
-        .map_err(|e| eyre!("open_connection failed: {e:?}"))?;
-
-    let mut driver = Driver::new(conn, ());
-    let caller = ErasedCaller::new(driver.caller());
-    moire::task::spawn(async move { driver.run().await });
-
-    // Step 5: Return Daw handle
-    let daw = daw::Daw::new(caller);
-    debug!("[guest:{pid}] Connected as role={role}");
-    Ok(daw)
-}
-
-/// Discover the SHM bootstrap socket.
-///
-/// Priority:
-/// 1. `FTS_SHM_BOOTSTRAP_SOCK` env var
-/// 2. Scan `/tmp/fts-daw-*.bootstrap.sock` and pick the newest
-pub fn discover_bootstrap_socket() -> Result<PathBuf> {
-    if let Ok(path) = std::env::var("FTS_SHM_BOOTSTRAP_SOCK") {
-        return Ok(path.into());
-    }
-
-    let mut matches = Vec::new();
-    for entry in std::fs::read_dir("/tmp").wrap_err("reading /tmp")? {
-        let entry = entry?;
-        let name = entry.file_name();
-        let name_str = name.to_string_lossy();
-        if name_str.starts_with("fts-daw-") && name_str.ends_with(".bootstrap.sock") {
-            matches.push(entry.path());
-        }
-    }
-
-    if matches.is_empty() {
-        eyre::bail!(
-            "No SHM bootstrap socket found. Is REAPER running with the daw-bridge?\n\
-             Set FTS_SHM_BOOTSTRAP_SOCK to specify the path manually."
-        );
-    }
-
-    // Sort by modification time (newest first)
-    matches.sort_by(|a, b| {
-        let time_a = std::fs::metadata(a)
-            .and_then(|m| m.modified())
-            .unwrap_or(UNIX_EPOCH);
-        let time_b = std::fs::metadata(b)
-            .and_then(|m| m.modified())
-            .unwrap_or(UNIX_EPOCH);
-        time_b.cmp(&time_a)
-    });
-
-    Ok(matches.remove(0))
-}
-
-/// Connect to the SHM bootstrap socket and establish an ShmLink.
-fn connect_shm(bootstrap_path: &Path) -> Result<ShmLink> {
-    let sid = generate_session_id();
-
-    let request =
-        encode_request(sid.as_bytes()).map_err(|e| eyre!("encode bootstrap request: {e}"))?;
-
-    let mut stream = UnixStream::connect(bootstrap_path).map_err(|e| {
-        eyre!(
-            "connect to bootstrap socket {}: {e}",
-            bootstrap_path.display()
-        )
-    })?;
-    stream
-        .write_all(&request)
-        .wrap_err("send bootstrap request")?;
-
-    let received = shm_primitives::bootstrap::recv_response_unix(stream.as_raw_fd())
-        .map_err(|e| eyre!("receive bootstrap response: {e}"))?;
-
-    if received.response.status != BootstrapStatus::Success {
-        eyre::bail!(
-            "bootstrap rejected: status={:?}, payload={}",
-            received.response.status,
-            String::from_utf8_lossy(&received.response.payload)
-        );
-    }
-
-    let fds = received
-        .fds
-        .ok_or_else(|| eyre!("bootstrap success but no fds received"))?;
-
-    let shm_path = std::str::from_utf8(&received.response.payload)
-        .map_err(|e| eyre!("bootstrap payload not utf-8: {e}"))?;
-    debug!("Attaching to SHM segment at {}", shm_path);
-
-    let segment = Arc::new(
-        Segment::attach(Path::new(shm_path))
-            .map_err(|e| eyre!("attach SHM segment at {shm_path}: {e}"))?,
-    );
-
-    let peer_id = PeerId::new(received.response.peer_id as u8)
-        .ok_or_else(|| eyre!("invalid peer id {}", received.response.peer_id))?;
-
-    let doorbell_fd = fds.doorbell_fd.into_raw_fd();
-    let mmap_rx_fd = fds.mmap_control_fd.into_raw_fd();
-    let mmap_tx_fd = unsafe { libc::dup(mmap_rx_fd) };
-    if mmap_tx_fd < 0 {
-        eyre::bail!(
-            "failed to dup mmap fd for tx: {}",
-            std::io::Error::last_os_error()
-        );
-    }
-
-    unsafe {
-        vox_shm::guest_link_from_raw(segment, peer_id, doorbell_fd, mmap_rx_fd, mmap_tx_fd, true)
-    }
-    .map_err(|e| eyre!("build guest link: {e}"))
-}
-
-/// An action to register with REAPER via the action registry.
+/// An action to register with REAPER through the integrated action registry.
 pub struct ActionDef {
-    /// REAPER command name (e.g., "FTS_SYNC_TOGGLE_LINK").
+    /// REAPER command name (for example, `FTS_SYNC_TOGGLE_LINK`).
     pub command_name: &'static str,
     /// Human-readable description shown in REAPER's action list.
     pub description: &'static str,
@@ -240,34 +139,15 @@ pub struct ActionDef {
 /// Result of registering actions with REAPER.
 pub struct ActionRegistration {
     /// Receiver for action trigger events.
-    pub rx: vox::Rx<daw::service::ActionEvent>,
+    pub rx: Rx<daw::service::ActionEvent>,
     /// Number of actions successfully registered and confirmed in the action list.
     pub registered: usize,
-    /// Number of actions that failed to register or weren't found in the action list.
+    /// Number of actions that failed to register or were not found in the action list.
     pub failed: usize,
 }
 
-/// Register a set of actions with REAPER and subscribe to trigger events.
-///
-/// For each action:
-/// 1. Calls `register()` to get a command ID
-/// 2. Calls `is_in_action_list()` to verify the gaccel was actually registered
-/// 3. Logs success/failure for each action
-///
-/// Returns an [`ActionRegistration`] with the event receiver and counts.
-///
-/// # Example
-///
-/// ```rust,ignore
-/// let reg = daw_extension_runtime::register_actions(&daw, &[
-///     ActionDef { command_name: "FTS_SYNC_TOGGLE_LINK", description: "Toggle Ableton Link" },
-///     ActionDef { command_name: "FTS_SYNC_LINK_OFF", description: "Disable Link" },
-/// ]).await?;
-///
-/// // Use reg.rx to receive action trigger events
-/// ```
-pub async fn register_actions(daw: &daw::Daw, actions: &[ActionDef]) -> Result<ActionRegistration> {
-    let pid = std::process::id();
+/// Register a set of actions and subscribe to trigger events.
+pub async fn register_actions(daw: &Daw, actions: &[ActionDef]) -> Result<ActionRegistration> {
     let registry = daw.action_registry();
     let mut registered = 0usize;
     let mut failed = 0usize;
@@ -286,10 +166,7 @@ pub async fn register_actions(daw: &daw::Daw, actions: &[ActionDef]) -> Result<A
         };
 
         if cmd_id == 0 {
-            warn!(
-                "[guest:{pid}] Failed to register action: {} (cmd_id=0)",
-                action.command_name
-            );
+            warn!("Failed to register action: {}", action.command_name);
             failed += 1;
             continue;
         }
@@ -303,17 +180,12 @@ pub async fn register_actions(daw: &daw::Daw, actions: &[ActionDef]) -> Result<A
             registered += 1;
         } else {
             warn!(
-                "[guest:{pid}] Action NOT in action list after registration: {} (cmd_id={cmd_id})",
+                "Action not in action list after registration: {} (cmd_id={cmd_id})",
                 action.command_name
             );
             failed += 1;
         }
     }
-
-    debug!(
-        "[guest:{pid}] Action registration: {registered} OK, {failed} failed (of {} total)",
-        actions.len()
-    );
 
     let rx = registry
         .subscribe_actions()
@@ -327,37 +199,8 @@ pub async fn register_actions(daw: &daw::Daw, actions: &[ActionDef]) -> Result<A
     })
 }
 
-/// Construct a synthetic `HandshakeResult` for SHM connections.
-///
-/// SHM links handle transport-level handshaking at the bootstrap layer (session ID,
-/// segment path, file descriptors). The vox session layer still expects a
-/// `HandshakeResult` to know the connection settings — we provide one here with
-/// the initiator's perspective.
-fn shm_handshake_result(max_concurrent_requests: u32) -> HandshakeResult {
-    HandshakeResult {
-        role: SessionRole::Initiator,
-        our_settings: ConnectionSettings {
-            parity: Parity::Odd,
-            max_concurrent_requests,
-        },
-        peer_settings: ConnectionSettings {
-            parity: Parity::Even,
-            max_concurrent_requests,
-        },
-        peer_supports_retry: true,
-        session_resume_key: None,
-        peer_resume_key: None,
-        our_schema: vec![],
-        peer_schema: vec![],
-    }
-}
-
-/// Generate a unique session ID for this guest connection.
-fn generate_session_id() -> String {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("time went backwards")
-        .as_nanos();
-    let pid = u128::from(std::process::id());
-    format!("{:032x}", nanos ^ (pid << 64))
+/// Convert any extension initialization error into the boxed error type used by
+/// `reaper_extension_plugin` entry points.
+pub fn boxed_error(error: impl Error + 'static) -> Box<dyn Error> {
+    Box::new(error)
 }

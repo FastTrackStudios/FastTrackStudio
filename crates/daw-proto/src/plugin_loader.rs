@@ -1,6 +1,7 @@
 //! Plugin Loader Service
 //!
-//! Allows SHM guests to request eager loading of REAPER plugins (.clap, .vst3)
+//! Allows integrated extensions and external clients to request eager loading
+//! of REAPER plugins (.clap, .vst3)
 //! by calling `ReaperPluginEntry` on dynamically loaded libraries. This follows
 //! the Helgobox pattern where an extension loads plugins into REAPER's address
 //! space at startup.

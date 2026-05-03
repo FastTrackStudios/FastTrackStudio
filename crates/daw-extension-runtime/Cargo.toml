@@ -4,14 +4,18 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
-description = "SHM extension runtime — one-call connect to daw-bridge for hot-reloadable extensions"
+description = "Integrated REAPER extension runtime helpers"
 
 [dependencies]
-daw.workspace = true
+daw = { workspace = true, features = ["reaper", "sync"] }
 vox.workspace = true
-vox-shm.workspace = true
-shm-primitives.workspace = true
+vox-ffi.workspace = true
 moire.workspace = true
 eyre = "0.6"
 tracing.workspace = true
-libc = "0.2"
+tokio = { workspace = true, features = ["rt-multi-thread"] }
+crossbeam-channel.workspace = true
+fragile.workspace = true
+reaper-high.workspace = true
+reaper-low.workspace = true
+reaper-medium.workspace = true

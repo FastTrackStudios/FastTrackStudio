@@ -205,6 +205,13 @@ fn notify_action_triggered(command_name: String) {
     let _ = tx.send(command_name);
 }
 
+fn flip_toggle_state(command_name: &str) -> bool {
+    let mut states = toggle_states().lock().unwrap();
+    let state = states.entry(command_name.to_string()).or_insert(false);
+    *state = !*state;
+    *state
+}
+
 fn named_command_lookup(command_name: &str) -> Option<CommandId> {
     let medium = Reaper::get().medium_reaper();
     medium.named_command_lookup(command_name).or_else(|| {
@@ -471,8 +478,20 @@ impl ActionRegistryService for ReaperActionRegistry {
                 desc_static,
                 None, // no default key binding
                 move || {
+                    if toggleable {
+                        let state = flip_toggle_state(&trigger_name);
+                        if let Some(cmd_id) = named_command_lookup(&trigger_name) {
+                            Reaper::get()
+                                .medium_reaper()
+                                .low()
+                                .RefreshToolbar2(0, cmd_id.get() as i32);
+                        }
+                        debug!("Toggle state for '{}' -> {}", trigger_name, state);
+                    }
+
                     // Notify all subscribers that this action was triggered.
-                    // Guests handle the actual logic — host is domain-agnostic.
+                    // Consumers handle domain logic; fake-toggle state is
+                    // host-managed so REAPER's UI updates synchronously.
                     info!("Action triggered: {}", trigger_name);
                     notify_action_triggered(trigger_name.clone());
                 },

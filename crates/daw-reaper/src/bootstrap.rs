@@ -188,7 +188,7 @@ pub fn create_plugin_daw(
 
         let daw = runtime.block_on(async {
             let local = LocalCaller::new(handler).await.ok()?;
-            let caller = local.erased_caller();
+            let caller = local.caller();
             let _ = Box::leak(Box::new(local)); // Keep server alive
             Some(Daw::new(caller))
         })?;
@@ -240,7 +240,7 @@ static USER_TIMER_CALLBACKS: std::sync::Mutex<Vec<fn()>> = std::sync::Mutex::new
 pub async fn build_extension_daw() -> eyre::Result<Daw> {
     let handler = crate::plugin_services::create_daw_handler();
     let local = LocalCaller::new(handler).await?;
-    let caller = local.erased_caller();
+    let caller = local.caller();
     // Leak LocalCaller to keep the server-side moire task alive for the
     // process lifetime. The extension owns the process — this is intentional.
     let _ = Box::leak(Box::new(local));
