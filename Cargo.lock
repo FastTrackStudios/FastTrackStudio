@@ -2133,7 +2133,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2314,7 +2314,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -6160,7 +6160,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -6218,7 +6218,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -6365,8 +6365,7 @@ dependencies = [
 [[package]]
 name = "selectors"
 version = "0.37.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2cfaaa6035167f0e604e42723c7650d59ee269ef220d7bbe0565602c8a0173b9"
+source = "git+https://github.com/FastTrackStudios/stylo?branch=fts%2Fintegration#7f29618f17f59ef4b91d6583729b6a4095aa895e"
 dependencies = [
  "bitflags 2.11.0",
  "cssparser 0.36.0",
@@ -6519,8 +6518,7 @@ dependencies = [
 [[package]]
 name = "servo_arc"
 version = "0.4.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "170fb83ab34de17dc69aa7c67482b22218ddb85da56546f9bd6b929e32a05930"
+source = "git+https://github.com/FastTrackStudios/stylo?branch=fts%2Fintegration#7f29618f17f59ef4b91d6583729b6a4095aa895e"
 dependencies = [
  "serde",
  "stable_deref_trait",
@@ -6756,7 +6754,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a766e1110788c36f4fa1c2b71b387a7815aa65f88ce0229841826633d93723e"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -6901,8 +6899,7 @@ dependencies = [
 [[package]]
 name = "stylo"
 version = "0.16.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf16d4d7f37038ec5d0eb0289045a5d797b1b85d3366d6d2bfaf1f9a55471739"
+source = "git+https://github.com/FastTrackStudios/stylo?branch=fts%2Fintegration#7f29618f17f59ef4b91d6583729b6a4095aa895e"
 dependencies = [
  "app_units",
  "arrayvec",
@@ -6958,8 +6955,7 @@ dependencies = [
 [[package]]
 name = "stylo_atoms"
 version = "0.16.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b0ccc231ff982eb5e89a9670275046b1283f1218537e1e498e4fafd41ee78c7e"
+source = "git+https://github.com/FastTrackStudios/stylo?branch=fts%2Fintegration#7f29618f17f59ef4b91d6583729b6a4095aa895e"
 dependencies = [
  "string_cache 0.9.0",
  "string_cache_codegen 0.6.1",
@@ -6968,8 +6964,7 @@ dependencies = [
 [[package]]
 name = "stylo_derive"
 version = "0.16.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e23de306a4574a16fabcdac5d711af99a458a96a7a1d5d6aeb6c312c1a18c22a"
+source = "git+https://github.com/FastTrackStudios/stylo?branch=fts%2Fintegration#7f29618f17f59ef4b91d6583729b6a4095aa895e"
 dependencies = [
  "darling 0.20.11",
  "proc-macro2",
@@ -6981,8 +6976,7 @@ dependencies = [
 [[package]]
 name = "stylo_dom"
 version = "0.16.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b09f4863058955f38d5fee5ae04baa60b2f71735ef406ad35cb01911dfc811d"
+source = "git+https://github.com/FastTrackStudios/stylo?branch=fts%2Fintegration#7f29618f17f59ef4b91d6583729b6a4095aa895e"
 dependencies = [
  "bitflags 2.11.0",
  "stylo_malloc_size_of",
@@ -6991,8 +6985,7 @@ dependencies = [
 [[package]]
 name = "stylo_malloc_size_of"
 version = "0.16.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4bcb103ab4c0ec6fe0cdd71d092d6bd82a5a012489ccf4c4bd1874a659423316"
+source = "git+https://github.com/FastTrackStudios/stylo?branch=fts%2Fintegration#7f29618f17f59ef4b91d6583729b6a4095aa895e"
 dependencies = [
  "app_units",
  "cssparser 0.36.0",
@@ -7009,8 +7002,7 @@ dependencies = [
 [[package]]
 name = "stylo_static_prefs"
 version = "0.16.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4fe8c72f25bcf5b076b1ad183eaaaf1f2e30cb244d77a74e2b4631c41254f768"
+source = "git+https://github.com/FastTrackStudios/stylo?branch=fts%2Fintegration#7f29618f17f59ef4b91d6583729b6a4095aa895e"
 
 [[package]]
 name = "stylo_taffy"
@@ -7025,8 +7017,7 @@ dependencies = [
 [[package]]
 name = "stylo_traits"
 version = "0.16.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "765956b903dbc474540399789062c4a4fcdf3a55d41c4e7919f5e78fc234e30c"
+source = "git+https://github.com/FastTrackStudios/stylo?branch=fts%2Fintegration#7f29618f17f59ef4b91d6583729b6a4095aa895e"
 dependencies = [
  "app_units",
  "bitflags 2.11.0",
@@ -7227,7 +7218,7 @@ dependencies = [
  "getrandom 0.3.4",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -7413,8 +7404,7 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 [[package]]
 name = "to_shmem"
 version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eab187810ca1e6aaa4c97a06492aac9ade2ffae6a301fd2aac103656f5a69edb"
+source = "git+https://github.com/FastTrackStudios/stylo?branch=fts%2Fintegration#7f29618f17f59ef4b91d6583729b6a4095aa895e"
 dependencies = [
  "cssparser 0.36.0",
  "servo_arc 0.4.3",
@@ -7427,8 +7417,7 @@ dependencies = [
 [[package]]
 name = "to_shmem_derive"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2ba1f5563024b63bb6acb4558452d9ba737518c1d11fcc1861febe98d1e31cf4"
+source = "git+https://github.com/FastTrackStudios/stylo?branch=fts%2Fintegration#7f29618f17f59ef4b91d6583729b6a4095aa895e"
 dependencies = [
  "darling 0.20.11",
  "proc-macro2",
@@ -8787,7 +8776,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]

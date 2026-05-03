@@ -38,3 +38,19 @@ linkme              = "0.3"
 
 [workspace.lints.rust]
 unused = "warn"
+
+[patch.crates-io]
+# Our fork of Stylo with the `hover` / `pointer` / `any-hover` /
+# `any-pointer` interaction-media features registered for the Servo
+# embedder. Without this, every Tailwind v4 `hover:*` utility (which
+# wraps in `@media (hover: hover) { … }`) is silently dropped on the
+# native renderer. See `docs/blitz-diagnosis.md` and the upstream PR
+# in <https://github.com/FastTrackStudios/stylo/tree/fts/interaction-media-features>.
+stylo = { git = "https://github.com/FastTrackStudios/stylo", branch = "fts/integration", package = "stylo" }
+stylo_traits = { git = "https://github.com/FastTrackStudios/stylo", branch = "fts/integration", package = "stylo_traits" }
+stylo_atoms = { git = "https://github.com/FastTrackStudios/stylo", branch = "fts/integration", package = "stylo_atoms" }
+stylo_static_prefs = { git = "https://github.com/FastTrackStudios/stylo", branch = "fts/integration", package = "stylo_static_prefs" }
+stylo_dom = { git = "https://github.com/FastTrackStudios/stylo", branch = "fts/integration", package = "stylo_dom" }
+selectors = { git = "https://github.com/FastTrackStudios/stylo", branch = "fts/integration", package = "selectors" }
+servo_arc = { git = "https://github.com/FastTrackStudios/stylo", branch = "fts/integration", package = "servo_arc" }
+to_shmem = { git = "https://github.com/FastTrackStudios/stylo", branch = "fts/integration", package = "to_shmem" }

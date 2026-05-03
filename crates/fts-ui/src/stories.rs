@@ -428,6 +428,8 @@ pub fn diag_layout_stack(_marker: bool) -> Element {
 pub fn diag_dropdown_close(_marker: bool) -> Element {
     let mut click_count = use_signal(|| 0u32);
     let mut last_open = use_signal(|| false);
+    let mut last_selected = use_signal(|| String::from("(none)"));
+    let mut select_count = use_signal(|| 0u32);
 
     rsx! {
         div { class: "p-6 bg-background text-foreground flex flex-col gap-6 min-h-screen",
@@ -442,13 +444,19 @@ pub fn diag_dropdown_close(_marker: bool) -> Element {
                         DropdownItem {
                             value: "edit".to_string(),
                             index: 0,
-                            on_select: move |_| {},
+                            on_select: move |v: String| {
+                                last_selected.set(v);
+                                *select_count.write() += 1;
+                            },
                             "Edit"
                         }
                         DropdownItem {
                             value: "duplicate".to_string(),
                             index: 1,
-                            on_select: move |_| {},
+                            on_select: move |v: String| {
+                                last_selected.set(v);
+                                *select_count.write() += 1;
+                            },
                             "Duplicate"
                         }
                         DropdownSeparator {}
@@ -456,14 +464,20 @@ pub fn diag_dropdown_close(_marker: bool) -> Element {
                             value: "delete".to_string(),
                             index: 2,
                             destructive: true,
-                            on_select: move |_| {},
+                            on_select: move |v: String| {
+                                last_selected.set(v);
+                                *select_count.write() += 1;
+                            },
                             "Delete"
                         }
                     }
                 }
                 span { class: "text-sm text-muted-foreground",
-                    "open signal: "
+                    "open: "
                     span { class: "font-mono", if last_open() { "open" } else { "closed" } }
+                    " · selected: "
+                    span { class: "font-mono", "{last_selected}" }
+                    " (#{select_count})"
                 }
             }
 
