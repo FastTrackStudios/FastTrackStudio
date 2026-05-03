@@ -65,6 +65,7 @@ fts-devtools = { path = "crates/fts-devtools" }
 
 # Facet reflection - use crates.io 0.44.x
 facet = { version = "0.44" }
+facet-json = { version = "0.44" }
 
 # VOX service framework (pinned to FastTrackStudios fork)
 vox = { git = "https://github.com/Codys-Wright/vox.git", rev = "ccb46b5416100d38430cb082d71bf0377428c241" }

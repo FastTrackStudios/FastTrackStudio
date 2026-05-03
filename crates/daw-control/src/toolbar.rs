@@ -118,24 +118,21 @@ impl Toolbar {
 fn live_toolbar_rows_json(
     rows: impl Iterator<Item = daw_proto::TrackedButton>,
 ) -> crate::Result<String> {
-    let mut toolbars = std::collections::BTreeMap::<String, Vec<serde_json::Value>>::new();
+    let mut toolbars = std::collections::BTreeMap::<String, Vec<daw_proto::ToolbarItemInfo>>::new();
     for row in rows.filter(|row| row.workflow_id == "__fts_live_toolbar_item") {
-        let item = serde_json::from_str::<serde_json::Value>(&row.command_name)
+        let item = facet_json::from_str::<daw_proto::ToolbarItemInfo>(&row.command_name)
             .map_err(|err| crate::Error::Other(format!("decode live toolbar row: {err}")))?;
         toolbars.entry(row.toolbar_name).or_default().push(item);
     }
 
-    let value = serde_json::Value::Array(
-        toolbars
-            .into_iter()
-            .map(|(toolbar_name, items)| {
-                serde_json::json!({
-                    "toolbar_name": toolbar_name,
-                    "source": "live",
-                    "items": items,
-                })
-            })
-            .collect(),
-    );
-    Ok(serde_json::to_string(&value).unwrap_or_else(|_| "[]".to_string()))
+    let snapshots = toolbars
+        .into_iter()
+        .map(|(toolbar_name, items)| daw_proto::ToolbarSnapshot {
+            toolbar_name,
+            source: daw_proto::ToolbarSnapshotSource::Live,
+            items,
+        })
+        .collect::<Vec<_>>();
+    facet_json::to_string(&snapshots)
+        .map_err(|err| crate::Error::Other(format!("encode live toolbar snapshot: {err}")))
 }

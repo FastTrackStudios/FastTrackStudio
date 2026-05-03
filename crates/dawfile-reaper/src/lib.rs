@@ -62,6 +62,7 @@ pub mod primitives;
 pub mod rpp_tree;
 pub mod setlist_rpp;
 pub mod stock_fx;
+pub mod toolbar_config;
 pub mod types;
 
 #[cfg(test)]

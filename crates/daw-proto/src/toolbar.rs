@@ -46,6 +46,7 @@ pub enum ToolbarResult {
 /// Source used to build a toolbar snapshot.
 #[repr(u8)]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Facet)]
+#[facet(rename_all = "snake_case")]
 pub enum ToolbarSnapshotSource {
     /// Live REAPER API state.
     #[default]
