@@ -1209,10 +1209,185 @@ pub async fn action_set_toggle(daw: &Daw, command_name: &str, is_on: bool) -> Re
 
 pub async fn toolbar_status(daw: &Daw) -> Result<Value> {
     let toolbar = daw.toolbar();
+    let tracked = toolbar.get_tracked_buttons().await?;
     Ok(json!({
         "available": toolbar.is_available().await?,
-        "tracked_buttons": format!("{:?}", toolbar.get_tracked_buttons().await?),
+        "tracked_buttons": tracked.iter().map(|button| json!({
+            "toolbar_name": button.toolbar_name,
+            "command_name": button.command_name,
+            "workflow_id": button.workflow_id,
+        })).collect::<Vec<_>>(),
     }))
+}
+
+pub fn parse_toolbar_target(target: &str) -> Result<daw::service::ToolbarTarget> {
+    let normalized = target.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "main" | "main-toolbar" | "main_toolbar" | "main toolbar" | "0" => {
+            Ok(daw::service::ToolbarTarget::Main)
+        }
+        value => {
+            let number = value
+                .strip_prefix("floating toolbar ")
+                .or_else(|| value.strip_prefix("floating-toolbar-"))
+                .or_else(|| value.strip_prefix("floating_toolbar_"))
+                .or_else(|| value.strip_prefix("floating "))
+                .or_else(|| value.strip_prefix("floating-"))
+                .or_else(|| value.strip_prefix("floating_"))
+                .unwrap_or(value)
+                .parse::<u8>()
+                .map_err(|_| eyre::eyre!("toolbar target must be main or floating toolbar 1-32"))?;
+            if !(1..=32).contains(&number) {
+                eyre::bail!("floating toolbar number must be between 1 and 32");
+            }
+            Ok(daw::service::ToolbarTarget::Floating(number))
+        }
+    }
+}
+
+fn toolbar_snapshots_json(snapshots: &[daw::service::ToolbarSnapshot]) -> Value {
+    Value::Array(
+        snapshots
+            .iter()
+            .map(|snapshot| {
+                json!({
+                    "toolbar_name": snapshot.toolbar_name,
+                    "source": format!("{:?}", snapshot.source).to_ascii_lowercase(),
+                    "items": snapshot.items.iter().map(|item| json!({
+                        "position": item.position,
+                        "kind": item.kind,
+                        "command_id": item.command_id,
+                        "command_name": item.command_name,
+                        "label": item.label,
+                        "flags": item.flags,
+                        "icon": item.icon,
+                        "raw": item.raw,
+                    })).collect::<Vec<_>>(),
+                })
+            })
+            .collect(),
+    )
+}
+
+pub async fn toolbar_live(daw: &Daw, target: Option<&str>) -> Result<Value> {
+    let toolbar = daw.toolbar();
+    let json = if let Some(target) = target {
+        toolbar
+            .get_live_toolbar_json(parse_toolbar_target(target)?)
+            .await?
+    } else {
+        toolbar.get_live_toolbars_json().await?
+    };
+    Ok(serde_json::from_str(&json)?)
+}
+
+pub async fn toolbar_config(daw: &Daw, path: &str, target: Option<&str>) -> Result<Value> {
+    let _ = daw;
+    let mut snapshots = parse_toolbar_config_local(path)?;
+    if let Some(target) = target {
+        let target_name = match parse_toolbar_target(target)? {
+            daw::service::ToolbarTarget::Main => "Main toolbar".to_string(),
+            daw::service::ToolbarTarget::Floating(n) => format!("Floating toolbar {n}"),
+        };
+        snapshots.retain(|snapshot| snapshot.toolbar_name == target_name);
+    }
+    Ok(toolbar_snapshots_json(&snapshots))
+}
+
+fn parse_toolbar_config_local(path: &str) -> Result<Vec<daw::service::ToolbarSnapshot>> {
+    let content = std::fs::read_to_string(path)?;
+    let mut sections =
+        std::collections::BTreeMap::<String, std::collections::BTreeMap<u32, String>>::new();
+    let mut flags =
+        std::collections::BTreeMap::<String, std::collections::BTreeMap<u32, u32>>::new();
+    let mut current = None::<String>;
+
+    for line in content.lines().map(str::trim) {
+        if line.is_empty() || line.starts_with(';') || line.starts_with('#') {
+            continue;
+        }
+        if let Some(section) = line.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
+            current = section
+                .to_ascii_lowercase()
+                .contains("toolbar")
+                .then(|| section.to_string());
+            continue;
+        }
+        let Some(section) = current.as_ref() else {
+            continue;
+        };
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        if let Some(index) = key
+            .strip_prefix("item_")
+            .and_then(|n| n.parse::<u32>().ok())
+        {
+            sections
+                .entry(section.clone())
+                .or_default()
+                .insert(index, value.to_string());
+        } else if let Some(index) = key.strip_prefix("tbf_").and_then(|n| n.parse::<u32>().ok())
+            && let Ok(value) = value.parse::<u32>()
+        {
+            flags
+                .entry(section.clone())
+                .or_default()
+                .insert(index, value);
+        }
+    }
+
+    Ok(sections
+        .into_iter()
+        .map(|(toolbar_name, items)| {
+            let toolbar_flags = flags.remove(&toolbar_name).unwrap_or_default();
+            daw::service::ToolbarSnapshot {
+                toolbar_name,
+                source: daw::service::ToolbarSnapshotSource::Config,
+                items: items
+                    .into_iter()
+                    .map(|(position, raw)| {
+                        let flags = toolbar_flags.get(&position).copied().unwrap_or_default();
+                        parse_toolbar_config_item(position, &raw, flags)
+                    })
+                    .collect(),
+            }
+        })
+        .collect())
+}
+
+fn parse_toolbar_config_item(
+    position: u32,
+    raw: &str,
+    flags: u32,
+) -> daw::service::ToolbarItemInfo {
+    let trimmed = raw.trim();
+    if matches!(trimmed, "-1" | "-2" | "-3") {
+        let kind = match trimmed {
+            "-1" => "separator",
+            "-2" => "submenu-start",
+            "-3" => "submenu-end",
+            _ => "unknown",
+        };
+        return daw::service::ToolbarItemInfo {
+            position,
+            kind: kind.to_string(),
+            raw: Some(trimmed.to_string()),
+            ..Default::default()
+        };
+    }
+
+    let (id, label) = trimmed.split_once(' ').unwrap_or((trimmed, ""));
+    daw::service::ToolbarItemInfo {
+        position,
+        kind: "command".to_string(),
+        command_id: id.parse::<u32>().ok(),
+        command_name: id.starts_with('_').then(|| id.to_string()),
+        label: label.to_string(),
+        flags,
+        icon: None,
+        raw: Some(trimmed.to_string()),
+    }
 }
 
 pub fn rpp_summary(path: &str) -> Result<Value> {

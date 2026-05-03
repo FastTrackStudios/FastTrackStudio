@@ -7,11 +7,12 @@
 //! re-entrancy issues inside REAPER callbacks.
 
 use daw_proto::toolbar::{
-    ToolbarButton, ToolbarResult, ToolbarService, ToolbarTarget, TrackedButton,
+    ToolbarButton, ToolbarItemInfo, ToolbarResult, ToolbarService, ToolbarSnapshot,
+    ToolbarSnapshotSource, ToolbarTarget, TrackedButton,
 };
 use reaper_high::Reaper;
 use reaper_medium::{CommandId, MenuOrToolbarItem, PositionDescriptor, UiRefreshBehavior};
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::sync::Mutex;
 use tracing::{debug, info, warn};
 
@@ -138,6 +139,10 @@ fn target_from_str(value: &str) -> ToolbarTarget {
         }
     }
     ToolbarTarget::Main
+}
+
+fn toolbar_targets() -> impl Iterator<Item = ToolbarTarget> {
+    std::iter::once(ToolbarTarget::Main).chain((1..=32).map(ToolbarTarget::Floating))
 }
 
 // ============================================================================
@@ -315,12 +320,232 @@ fn scan_toolbar_for_command(toolbar_name: &str, command_id: CommandId) -> Option
     }
 }
 
+fn command_name_for(command_id: CommandId) -> Option<String> {
+    Reaper::get()
+        .medium_reaper()
+        .reverse_named_command_lookup(command_id, |name| format!("_{name}"))
+}
+
+fn snapshot_live_toolbar(target: ToolbarTarget) -> ToolbarSnapshot {
+    let toolbar_name = target_to_str(&target);
+    let medium = Reaper::get().medium_reaper();
+    let mut items = Vec::new();
+    let mut pos = 0;
+
+    loop {
+        let item = medium.get_custom_menu_or_toolbar_item(toolbar_name.as_str(), pos, |item| {
+            item.map(|item| match item {
+                MenuOrToolbarItem::Separator => ToolbarItemInfo {
+                    position: pos,
+                    kind: "separator".to_string(),
+                    raw: Some("-1".to_string()),
+                    ..Default::default()
+                },
+                MenuOrToolbarItem::SubMenuStart(submenu) => ToolbarItemInfo {
+                    position: pos,
+                    kind: "submenu-start".to_string(),
+                    label: submenu.label.to_string(),
+                    raw: Some("-2".to_string()),
+                    ..Default::default()
+                },
+                MenuOrToolbarItem::SubMenuEnd => ToolbarItemInfo {
+                    position: pos,
+                    kind: "submenu-end".to_string(),
+                    raw: Some("-3".to_string()),
+                    ..Default::default()
+                },
+                MenuOrToolbarItem::Command(command) => {
+                    let command_id = command.command_id;
+                    ToolbarItemInfo {
+                        position: pos,
+                        kind: "command".to_string(),
+                        command_id: Some(command_id.get()),
+                        command_name: command_name_for(command_id),
+                        label: command.label.to_string(),
+                        flags: command.toolbar_flags,
+                        icon: command.icon_file_name.map(|name| name.to_string()),
+                        raw: None,
+                    }
+                }
+            })
+        });
+
+        match item {
+            Some(item) => {
+                items.push(item);
+                pos += 1;
+            }
+            None => break,
+        }
+    }
+
+    ToolbarSnapshot {
+        toolbar_name,
+        source: ToolbarSnapshotSource::Live,
+        items,
+    }
+}
+
+fn parse_config_command(position: u32, raw: &str, flags: u32) -> ToolbarItemInfo {
+    let trimmed = raw.trim();
+    match trimmed {
+        "-1" => {
+            return ToolbarItemInfo {
+                position,
+                kind: "separator".to_string(),
+                raw: Some(trimmed.to_string()),
+                ..Default::default()
+            };
+        }
+        "-2" => {
+            return ToolbarItemInfo {
+                position,
+                kind: "submenu-start".to_string(),
+                raw: Some(trimmed.to_string()),
+                ..Default::default()
+            };
+        }
+        "-3" => {
+            return ToolbarItemInfo {
+                position,
+                kind: "submenu-end".to_string(),
+                raw: Some(trimmed.to_string()),
+                ..Default::default()
+            };
+        }
+        _ => {}
+    }
+
+    let (id, label) = trimmed.split_once(' ').unwrap_or((trimmed, ""));
+    let command_id = id.parse::<u32>().ok();
+    let command_name = if id.starts_with('_') {
+        Some(id.to_string())
+    } else {
+        command_id.and_then(|id| command_name_for(CommandId::new(id)))
+    };
+
+    ToolbarItemInfo {
+        position,
+        kind: if command_id.is_some() || command_name.is_some() {
+            "command".to_string()
+        } else {
+            "unknown".to_string()
+        },
+        command_id,
+        command_name,
+        label: label.to_string(),
+        flags,
+        icon: None,
+        raw: Some(trimmed.to_string()),
+    }
+}
+
+fn parse_toolbar_config_file(path: &str) -> Vec<ToolbarSnapshot> {
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return Vec::new();
+    };
+
+    let mut sections: BTreeMap<String, BTreeMap<u32, String>> = BTreeMap::new();
+    let mut flags: BTreeMap<String, BTreeMap<u32, u32>> = BTreeMap::new();
+    let mut current: Option<String> = None;
+
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with(';') || line.starts_with('#') {
+            continue;
+        }
+        if let Some(section) = line.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
+            current = section
+                .to_ascii_lowercase()
+                .contains("toolbar")
+                .then(|| section.to_string());
+            continue;
+        }
+
+        let Some(section) = current.as_ref() else {
+            continue;
+        };
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        if let Some(index) = key
+            .strip_prefix("item_")
+            .and_then(|n| n.parse::<u32>().ok())
+        {
+            sections
+                .entry(section.clone())
+                .or_default()
+                .insert(index, value.to_string());
+        } else if let Some(index) = key.strip_prefix("tbf_").and_then(|n| n.parse::<u32>().ok()) {
+            if let Ok(value) = value.parse::<u32>() {
+                flags
+                    .entry(section.clone())
+                    .or_default()
+                    .insert(index, value);
+            }
+        }
+    }
+
+    sections
+        .into_iter()
+        .map(|(toolbar_name, items)| {
+            let toolbar_flags = flags.remove(&toolbar_name).unwrap_or_default();
+            ToolbarSnapshot {
+                toolbar_name,
+                source: ToolbarSnapshotSource::Config,
+                items: items
+                    .into_iter()
+                    .map(|(position, raw)| {
+                        parse_config_command(
+                            position,
+                            &raw,
+                            toolbar_flags.get(&position).copied().unwrap_or_default(),
+                        )
+                    })
+                    .collect(),
+            }
+        })
+        .collect()
+}
+
+fn snapshots_json(snapshots: &[ToolbarSnapshot]) -> String {
+    let value = serde_json::Value::Array(
+        snapshots
+            .iter()
+            .map(|snapshot| {
+                serde_json::json!({
+                    "toolbar_name": snapshot.toolbar_name,
+                    "source": match snapshot.source {
+                        ToolbarSnapshotSource::Live => "live",
+                        ToolbarSnapshotSource::Config => "config",
+                    },
+                    "items": snapshot.items.iter().map(|item| serde_json::json!({
+                        "position": item.position,
+                        "kind": item.kind,
+                        "command_id": item.command_id,
+                        "command_name": item.command_name,
+                        "label": item.label,
+                        "flags": item.flags,
+                        "icon": item.icon,
+                        "raw": item.raw,
+                    })).collect::<Vec<_>>(),
+                })
+            })
+            .collect(),
+    );
+    serde_json::to_string(&value).unwrap_or_else(|_| "[]".to_string())
+}
+
 // ============================================================================
 // ToolbarService trait implementation
 // ============================================================================
 
 impl ToolbarService for ReaperToolbar {
     async fn add_button(&self, button: ToolbarButton, workflow_id: String) -> ToolbarResult {
+        if let Some(result) = handle_toolbar_query(&button) {
+            return result;
+        }
+
         if !is_api_available() {
             return ToolbarResult::Error("Dynamic toolbar API not available".to_string());
         }
@@ -337,6 +562,10 @@ impl ToolbarService for ReaperToolbar {
     }
 
     async fn update_button(&self, button: ToolbarButton, workflow_id: String) -> ToolbarResult {
+        if let Some(result) = handle_toolbar_query(&button) {
+            return result;
+        }
+
         if !is_api_available() {
             return ToolbarResult::Error("Dynamic toolbar API not available".to_string());
         }
@@ -371,19 +600,53 @@ impl ToolbarService for ReaperToolbar {
     }
 
     async fn get_tracked_buttons(&self) -> Vec<TrackedButton> {
-        state()
-            .lock()
-            .ok()
-            .map(|s| {
-                s.added_buttons
-                    .iter()
-                    .map(|((toolbar, command), workflow)| TrackedButton {
-                        toolbar_name: toolbar.clone(),
-                        command_name: command.clone(),
-                        workflow_id: workflow.clone(),
+        crate::main_thread::query(|| {
+            toolbar_targets()
+                .map(snapshot_live_toolbar)
+                .flat_map(|snapshot| {
+                    let toolbar_name = snapshot.toolbar_name;
+                    snapshot.items.into_iter().map(move |item| TrackedButton {
+                        toolbar_name: toolbar_name.clone(),
+                        command_name: serde_json::to_string(&serde_json::json!({
+                            "position": item.position,
+                            "kind": item.kind,
+                            "command_id": item.command_id,
+                            "command_name": item.command_name,
+                            "label": item.label,
+                            "flags": item.flags,
+                            "icon": item.icon,
+                            "raw": item.raw,
+                        }))
+                        .unwrap_or_default(),
+                        workflow_id: "__fts_live_toolbar_item".to_string(),
                     })
-                    .collect()
-            })
-            .unwrap_or_default()
+                })
+                .collect()
+        })
+        .await
+        .unwrap_or_default()
     }
+}
+
+fn handle_toolbar_query(button: &ToolbarButton) -> Option<ToolbarResult> {
+    match button.command_name.as_str() {
+        "__FTS_TOOLBAR_QUERY_LIVE" => Some(toolbar_query_result(snapshots_json(&[
+            snapshot_live_toolbar(button.target.clone()),
+        ]))),
+        "__FTS_TOOLBAR_QUERY_LIVE_ALL" => {
+            let snapshots = toolbar_targets()
+                .map(snapshot_live_toolbar)
+                .filter(|snapshot| !snapshot.items.is_empty())
+                .collect::<Vec<_>>();
+            Some(toolbar_query_result(snapshots_json(&snapshots)))
+        }
+        "__FTS_TOOLBAR_QUERY_CONFIG" => Some(toolbar_query_result(snapshots_json(
+            &parse_toolbar_config_file(&button.label),
+        ))),
+        _ => None,
+    }
+}
+
+fn toolbar_query_result(json: String) -> ToolbarResult {
+    ToolbarResult::Error(format!("__FTS_TOOLBAR_QUERY_JSON__{json}"))
 }

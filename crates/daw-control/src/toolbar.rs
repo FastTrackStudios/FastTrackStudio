@@ -76,4 +76,66 @@ impl Toolbar {
     pub async fn get_tracked_buttons(&self) -> crate::Result<Vec<daw_proto::TrackedButton>> {
         Ok(self.clients.toolbar.get_tracked_buttons().await?)
     }
+
+    /// Snapshot one live toolbar as JSON.
+    pub async fn get_live_toolbar_json(
+        &self,
+        target: daw_proto::ToolbarTarget,
+    ) -> crate::Result<String> {
+        let target_name = match target {
+            daw_proto::ToolbarTarget::Main => "Main toolbar".to_string(),
+            daw_proto::ToolbarTarget::Floating(n) => format!("Floating toolbar {n}"),
+        };
+        live_toolbar_rows_json(
+            self.clients
+                .toolbar
+                .get_tracked_buttons()
+                .await?
+                .into_iter()
+                .filter(|row| row.toolbar_name == target_name),
+        )
+    }
+
+    /// Snapshot all non-empty live toolbars as JSON.
+    pub async fn get_live_toolbars_json(&self) -> crate::Result<String> {
+        live_toolbar_rows_json(
+            self.clients
+                .toolbar
+                .get_tracked_buttons()
+                .await?
+                .into_iter(),
+        )
+    }
+
+    /// Parse all toolbar sections from a REAPER menu/toolbar config file as JSON.
+    pub async fn parse_toolbar_config_json(&self, path: &str) -> crate::Result<String> {
+        Err(crate::Error::Other(format!(
+            "toolbar config parsing is implemented by daw-cli for local path: {path}"
+        )))
+    }
+}
+
+fn live_toolbar_rows_json(
+    rows: impl Iterator<Item = daw_proto::TrackedButton>,
+) -> crate::Result<String> {
+    let mut toolbars = std::collections::BTreeMap::<String, Vec<serde_json::Value>>::new();
+    for row in rows.filter(|row| row.workflow_id == "__fts_live_toolbar_item") {
+        let item = serde_json::from_str::<serde_json::Value>(&row.command_name)
+            .map_err(|err| crate::Error::Other(format!("decode live toolbar row: {err}")))?;
+        toolbars.entry(row.toolbar_name).or_default().push(item);
+    }
+
+    let value = serde_json::Value::Array(
+        toolbars
+            .into_iter()
+            .map(|(toolbar_name, items)| {
+                serde_json::json!({
+                    "toolbar_name": toolbar_name,
+                    "source": "live",
+                    "items": items,
+                })
+            })
+            .collect(),
+    );
+    Ok(serde_json::to_string(&value).unwrap_or_else(|_| "[]".to_string()))
 }

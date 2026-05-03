@@ -507,6 +507,20 @@ enum Command {
     },
     /// Return dynamic toolbar availability and tracked buttons
     Toolbar,
+    /// Query live REAPER toolbar contents
+    ToolbarLive {
+        /// Toolbar target: main or floating toolbar 1-32. Omit to list all non-empty toolbars.
+        #[arg(long)]
+        target: Option<String>,
+    },
+    /// Parse toolbar contents from a reaper-menu.ini file
+    ToolbarConfig {
+        /// Path to reaper-menu.ini
+        path: String,
+        /// Toolbar target: main or floating toolbar 1-32. Omit to list all toolbar sections.
+        #[arg(long)]
+        target: Option<String>,
+    },
 
     // -- File Operations --
     /// Parse an RPP file and return a project summary
@@ -1209,6 +1223,14 @@ async fn main() -> Result<()> {
             }
         },
         Command::Toolbar => print_value(daw_cli::ops::toolbar_status(&daw).await?, cli.json)?,
+        Command::ToolbarLive { target } => print_value(
+            daw_cli::ops::toolbar_live(&daw, target.as_deref()).await?,
+            cli.json,
+        )?,
+        Command::ToolbarConfig { path, target } => print_value(
+            daw_cli::ops::toolbar_config(&daw, &path, target.as_deref()).await?,
+            cli.json,
+        )?,
         // Already handled above
         Command::Launch { .. }
         | Command::Profiles

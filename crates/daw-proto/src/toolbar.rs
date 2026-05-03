@@ -43,6 +43,49 @@ pub enum ToolbarResult {
     Error(String),
 }
 
+/// Source used to build a toolbar snapshot.
+#[repr(u8)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Facet)]
+pub enum ToolbarSnapshotSource {
+    /// Live REAPER API state.
+    #[default]
+    Live,
+    /// Parsed `reaper-menu.ini` state.
+    Config,
+}
+
+/// A toolbar snapshot.
+#[derive(Debug, Clone, Default, Facet)]
+pub struct ToolbarSnapshot {
+    /// Toolbar name (for example, `Main toolbar` or `Floating toolbar 1`).
+    pub toolbar_name: String,
+    /// Source used to build this snapshot.
+    pub source: ToolbarSnapshotSource,
+    /// Items in toolbar order.
+    pub items: Vec<ToolbarItemInfo>,
+}
+
+/// A single toolbar item.
+#[derive(Debug, Clone, Default, Facet)]
+pub struct ToolbarItemInfo {
+    /// Zero-based item position.
+    pub position: u32,
+    /// Item kind: `command`, `separator`, `submenu-start`, `submenu-end`, or `unknown`.
+    pub kind: String,
+    /// Numeric REAPER command ID for command items.
+    pub command_id: Option<u32>,
+    /// Named command ID where available (for example, `_SWS_ABOUT` or `_FTS_*`).
+    pub command_name: Option<String>,
+    /// Display label from the toolbar/config entry.
+    pub label: String,
+    /// Toolbar flags.
+    pub flags: u32,
+    /// Optional toolbar icon file name.
+    pub icon: Option<String>,
+    /// Raw config line value when parsed from `reaper-menu.ini`.
+    pub raw: Option<String>,
+}
+
 /// Service for managing toolbar buttons in the host DAW.
 ///
 /// Operations are queued and applied from the host's timer callback
