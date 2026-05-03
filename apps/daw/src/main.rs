@@ -507,14 +507,17 @@ enum ActionsCommand {
         /// Filter: all, reaper, non-reaper, sws, fts, registered
         #[arg(long, default_value = "all")]
         filter: String,
+        /// Section: main, main-alt, midi-editor, midi-event-list-editor, midi-inline-editor, media-explorer, or numeric ID
+        #[arg(long, default_value = "main")]
+        section: String,
         /// Case-insensitive search over description and command name
         #[arg(long)]
         query: Option<String>,
         /// Maximum number of actions to return
         #[arg(long)]
         limit: Option<u32>,
-        /// Non-JSON columns: id,name,origin,toggle,description
-        #[arg(long, default_value = "id,name,origin,description")]
+        /// Non-JSON columns: id,name,section,origin,provider,toggle,description
+        #[arg(long, default_value = "id,name,section,provider,description")]
         columns: String,
     },
     /// List SWS/S&M extension actions
@@ -522,11 +525,14 @@ enum ActionsCommand {
         /// Case-insensitive search over description and command name
         #[arg(long)]
         query: Option<String>,
+        /// Section: main, main-alt, midi-editor, midi-event-list-editor, midi-inline-editor, media-explorer, or numeric ID
+        #[arg(long, default_value = "main")]
+        section: String,
         /// Maximum number of actions to return
         #[arg(long)]
         limit: Option<u32>,
-        /// Non-JSON columns: id,name,origin,toggle,description
-        #[arg(long, default_value = "id,name,origin,description")]
+        /// Non-JSON columns: id,name,section,origin,provider,toggle,description
+        #[arg(long, default_value = "id,name,section,provider,description")]
         columns: String,
     },
     /// List built-in REAPER actions
@@ -534,11 +540,14 @@ enum ActionsCommand {
         /// Case-insensitive search over description and command name
         #[arg(long)]
         query: Option<String>,
+        /// Section: main, main-alt, midi-editor, midi-event-list-editor, midi-inline-editor, media-explorer, or numeric ID
+        #[arg(long, default_value = "main")]
+        section: String,
         /// Maximum number of actions to return
         #[arg(long)]
         limit: Option<u32>,
-        /// Non-JSON columns: id,name,origin,toggle,description
-        #[arg(long, default_value = "id,name,origin,description")]
+        /// Non-JSON columns: id,name,section,origin,provider,toggle,description
+        #[arg(long, default_value = "id,name,section,provider,description")]
         columns: String,
     },
     /// List extension, script, and custom actions
@@ -546,11 +555,14 @@ enum ActionsCommand {
         /// Case-insensitive search over description and command name
         #[arg(long)]
         query: Option<String>,
+        /// Section: main, main-alt, midi-editor, midi-event-list-editor, midi-inline-editor, media-explorer, or numeric ID
+        #[arg(long, default_value = "main")]
+        section: String,
         /// Maximum number of actions to return
         #[arg(long)]
         limit: Option<u32>,
-        /// Non-JSON columns: id,name,origin,toggle,description
-        #[arg(long, default_value = "id,name,origin,description")]
+        /// Non-JSON columns: id,name,section,origin,provider,toggle,description
+        #[arg(long, default_value = "id,name,section,provider,description")]
         columns: String,
     },
     /// List actions registered by FastTrackStudio
@@ -558,11 +570,14 @@ enum ActionsCommand {
         /// Case-insensitive search over description and command name
         #[arg(long)]
         query: Option<String>,
+        /// Section: main, main-alt, midi-editor, midi-event-list-editor, midi-inline-editor, media-explorer, or numeric ID
+        #[arg(long, default_value = "main")]
+        section: String,
         /// Maximum number of actions to return
         #[arg(long)]
         limit: Option<u32>,
-        /// Non-JSON columns: id,name,origin,toggle,description
-        #[arg(long, default_value = "id,name,origin,description")]
+        /// Non-JSON columns: id,name,section,origin,provider,toggle,description
+        #[arg(long, default_value = "id,name,section,provider,description")]
         columns: String,
     },
     /// List stable convenience aliases for common actions
@@ -632,9 +647,9 @@ fn print_action_list(value: Value, as_json: bool, columns: &str) -> Result<()> {
         .collect::<Vec<_>>();
     for col in &columns {
         match *col {
-            "id" | "name" | "origin" | "toggle" | "description" => {}
+            "id" | "name" | "section" | "origin" | "provider" | "toggle" | "description" => {}
             _ => eyre::bail!(
-                "unknown action list column '{col}' (expected id,name,origin,toggle,description)"
+                "unknown action list column '{col}' (expected id,name,section,origin,provider,toggle,description)"
             ),
         }
     }
@@ -667,6 +682,16 @@ fn print_action_list(value: Value, as_json: bool, columns: &str) -> Result<()> {
                     .to_string(),
                 "origin" => action
                     .get("origin")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string(),
+                "section" => action
+                    .get("section_name")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string(),
+                "provider" => action
+                    .get("provider")
                     .and_then(Value::as_str)
                     .unwrap_or("")
                     .to_string(),
@@ -1057,47 +1082,55 @@ async fn main() -> Result<()> {
         Command::Actions { ref command } => match command {
             ActionsCommand::List {
                 filter,
+                section,
                 query,
                 limit,
                 columns,
             } => print_action_list(
-                daw_cli::ops::action_list(&daw, filter, query.as_deref(), *limit).await?,
+                daw_cli::ops::action_list(&daw, filter, section, query.as_deref(), *limit).await?,
                 cli.json,
                 columns,
             )?,
             ActionsCommand::Sws {
                 query,
+                section,
                 limit,
                 columns,
             } => print_action_list(
-                daw_cli::ops::action_list(&daw, "sws", query.as_deref(), *limit).await?,
+                daw_cli::ops::action_list(&daw, "sws", section, query.as_deref(), *limit).await?,
                 cli.json,
                 columns,
             )?,
             ActionsCommand::Reaper {
                 query,
+                section,
                 limit,
                 columns,
             } => print_action_list(
-                daw_cli::ops::action_list(&daw, "reaper", query.as_deref(), *limit).await?,
+                daw_cli::ops::action_list(&daw, "reaper", section, query.as_deref(), *limit)
+                    .await?,
                 cli.json,
                 columns,
             )?,
             ActionsCommand::NonReaper {
                 query,
+                section,
                 limit,
                 columns,
             } => print_action_list(
-                daw_cli::ops::action_list(&daw, "non-reaper", query.as_deref(), *limit).await?,
+                daw_cli::ops::action_list(&daw, "non-reaper", section, query.as_deref(), *limit)
+                    .await?,
                 cli.json,
                 columns,
             )?,
             ActionsCommand::Registered {
                 query,
+                section,
                 limit,
                 columns,
             } => print_action_list(
-                daw_cli::ops::action_list(&daw, "registered", query.as_deref(), *limit).await?,
+                daw_cli::ops::action_list(&daw, "registered", section, query.as_deref(), *limit)
+                    .await?,
                 cli.json,
                 columns,
             )?,

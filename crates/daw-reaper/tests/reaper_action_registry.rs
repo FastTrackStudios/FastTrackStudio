@@ -7,7 +7,7 @@
 //!
 //!   cargo xtask reaper-test -- reaper_action_registry
 
-use daw_proto::{ActionListFilter, ActionListRequest, ActionOrigin};
+use daw_proto::{ActionListFilter, ActionListRequest, ActionOrigin, ActionSection};
 use reaper_test::reaper_test;
 
 #[reaper_test(isolated)]
@@ -303,6 +303,7 @@ async fn list_actions_returns_reaper_builtin_actions(ctx: &ReaperTestContext) ->
     let response = actions
         .list_actions(ActionListRequest {
             filter: ActionListFilter::Reaper,
+            section: ActionSection::Main,
             query: Some("undo".to_string()),
             limit: Some(256),
         })
@@ -348,6 +349,7 @@ async fn list_actions_returns_registered_fts_toggle_state(
     let response = actions
         .list_actions(ActionListRequest {
             filter: ActionListFilter::Registered,
+            section: ActionSection::Main,
             query: Some("List Actions Toggle".to_string()),
             limit: None,
         })
@@ -364,6 +366,9 @@ async fn list_actions_returns_registered_fts_toggle_state(
     );
     assert_eq!(action.description, "FTS Test: List Actions Toggle");
     assert_eq!(action.origin, ActionOrigin::Fts);
+    assert_eq!(action.provider, "fts");
+    assert_eq!(action.section_id, 0);
+    assert_eq!(action.section_name, "main");
     assert!(action.registered_by_fts);
     assert_eq!(action.toggle_state, Some(true));
 
@@ -386,6 +391,7 @@ async fn list_actions_non_reaper_includes_registered_actions(
     let response = actions
         .list_actions(ActionListRequest {
             filter: ActionListFilter::NonReaper,
+            section: ActionSection::Main,
             query: Some("List Actions Non Reaper".to_string()),
             limit: Some(16),
         })
@@ -395,6 +401,7 @@ async fn list_actions_non_reaper_includes_registered_actions(
     assert!(
         listed.iter().any(|action| action.command_id == cmd_id
             && action.origin == ActionOrigin::Fts
+            && action.provider == "fts"
             && action.registered_by_fts),
         "non-reaper filter should include registered FTS actions: {listed:#?}"
     );
@@ -424,6 +431,7 @@ async fn list_actions_reports_total_count_when_limited(
     let response = actions
         .list_actions(ActionListRequest {
             filter: ActionListFilter::Registered,
+            section: ActionSection::Main,
             query: Some("List Actions Limit".to_string()),
             limit: Some(1),
         })
@@ -439,6 +447,30 @@ async fn list_actions_reports_total_count_when_limited(
 }
 
 #[reaper_test(isolated)]
+async fn list_actions_accepts_non_main_sections(ctx: &ReaperTestContext) -> eyre::Result<()> {
+    let actions = ctx.daw.action_registry();
+
+    let response = actions
+        .list_actions(ActionListRequest {
+            filter: ActionListFilter::All,
+            section: ActionSection::MidiEditor,
+            query: None,
+            limit: Some(8),
+        })
+        .await?;
+
+    assert!(
+        response
+            .actions
+            .iter()
+            .all(|action| action.section_id == 32060 && action.section_name == "midi-editor"),
+        "MIDI editor rows should report section metadata: {response:#?}"
+    );
+
+    Ok(())
+}
+
+#[reaper_test(isolated)]
 async fn list_actions_sws_filter_only_returns_sws_classified_actions(
     ctx: &ReaperTestContext,
 ) -> eyre::Result<()> {
@@ -447,6 +479,7 @@ async fn list_actions_sws_filter_only_returns_sws_classified_actions(
     let response = actions
         .list_actions(ActionListRequest {
             filter: ActionListFilter::Sws,
+            section: ActionSection::Main,
             query: None,
             limit: Some(32),
         })
@@ -456,7 +489,7 @@ async fn list_actions_sws_filter_only_returns_sws_classified_actions(
     assert!(
         listed
             .iter()
-            .all(|action| action.origin == ActionOrigin::Sws),
+            .all(|action| action.origin == ActionOrigin::Sws && action.provider == "sws"),
         "SWS filter must only return SWS-classified actions: {listed:#?}"
     );
     ctx.log(&format!("SWS action sample count: {}", listed.len()));
@@ -498,6 +531,13 @@ async fn execute_action_detailed_reports_registered_toggle_transition(
         Some("FTS Test: Execute Detailed Toggle")
     );
     assert_eq!(result.origin, Some(ActionOrigin::Fts));
+    assert_eq!(result.provider.as_deref(), Some("fts"));
+    assert!(
+        result
+            .provider_tags
+            .iter()
+            .any(|tag| tag == "fasttrackstudio")
+    );
     assert!(result.registered_by_fts);
     assert_eq!(result.toggle_state_before, Some(false));
     assert_eq!(result.toggle_state_after, Some(true));

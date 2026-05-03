@@ -978,6 +978,8 @@ pub async fn action_execute(daw: &Daw, action_id: &str) -> Result<Value> {
         "command_name": result.command_name,
         "description": result.description,
         "origin": result.origin.map(|origin| format!("{origin:?}")),
+        "provider": result.provider,
+        "provider_tags": result.provider_tags,
         "registered_by_fts": result.registered_by_fts,
         "toggle_state_before": result.toggle_state_before,
         "toggle_state_after": result.toggle_state_after,
@@ -1089,6 +1091,7 @@ pub async fn action_lookup(daw: &Daw, command_name: &str) -> Result<Value> {
 pub async fn action_list(
     daw: &Daw,
     filter: &str,
+    section: &str,
     query: Option<&str>,
     limit: Option<u32>,
 ) -> Result<Value> {
@@ -1103,28 +1106,65 @@ pub async fn action_list(
         "registered" | "local" => daw::service::ActionListFilter::Registered,
         _ => eyre::bail!("action filter must be all, reaper, non-reaper, sws, fts, or registered"),
     };
+    let section = parse_action_section(section)?;
 
     let request = daw::service::ActionListRequest {
         filter,
+        section,
         query: query.map(str::to_string),
         limit,
     };
     let response = daw.action_registry().list_actions(request).await?;
     Ok(json!({
         "filter": format!("{filter:?}"),
+        "section": {
+            "id": section.unique_id(),
+            "name": section.name(),
+        },
         "query": query,
         "count": response.actions.len(),
         "total_count": response.total_count,
         "limited": limit.is_some_and(|limit| response.total_count > limit),
         "actions": response.actions.iter().map(|action| json!({
             "command_id": action.command_id,
+            "section_id": action.section_id,
+            "section_name": action.section_name,
             "command_name": action.command_name,
             "description": action.description,
             "origin": format!("{:?}", action.origin),
+            "provider": action.provider,
+            "provider_tags": action.provider_tags,
             "registered_by_fts": action.registered_by_fts,
             "toggle_state": action.toggle_state,
         })).collect::<Vec<_>>(),
     }))
+}
+
+fn parse_action_section(section: &str) -> Result<daw::service::ActionSection> {
+    match section.trim().to_ascii_lowercase().as_str() {
+        "main" | "0" => Ok(daw::service::ActionSection::Main),
+        "main-alt" | "main_alt" | "100" => Ok(daw::service::ActionSection::MainAlt),
+        "midi-editor" | "midi_editor" | "midi" | "32060" => {
+            Ok(daw::service::ActionSection::MidiEditor)
+        }
+        "midi-event-list-editor" | "midi_event_list_editor" | "midi-event-list" | "32061" => {
+            Ok(daw::service::ActionSection::MidiEventListEditor)
+        }
+        "midi-inline-editor" | "midi_inline_editor" | "midi-inline" | "32062" => {
+            Ok(daw::service::ActionSection::MidiInlineEditor)
+        }
+        "media-explorer" | "media_explorer" | "explorer" | "32063" => {
+            Ok(daw::service::ActionSection::MediaExplorer)
+        }
+        raw => raw
+            .parse::<u32>()
+            .map(daw::service::ActionSection::Custom)
+            .map_err(|_| {
+                eyre::eyre!(
+                    "action section must be main, main-alt, midi-editor, midi-event-list-editor, midi-inline-editor, media-explorer, or a numeric section ID"
+                )
+            }),
+    }
 }
 
 pub async fn action_set_toggle(daw: &Daw, command_name: &str, is_on: bool) -> Result<Value> {

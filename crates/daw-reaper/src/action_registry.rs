@@ -14,12 +14,12 @@
 use crate::main_thread;
 use daw_proto::{
     ActionEvent, ActionExecutionResult, ActionInfo, ActionListFilter, ActionListRequest,
-    ActionListResponse, ActionOrigin, ActionRegistryService,
+    ActionListResponse, ActionOrigin, ActionRegistryService, ActionSection,
 };
 use reaper_high::{Reaper, RegisteredAction};
 use reaper_medium::{
     CommandId, Handle, Hmenu, HookCustomMenu, MenuHookFlag, OwnedGaccelRegister, ProjectContext,
-    ReaperStr, SectionContext,
+    ReaperStr, SectionContext, SectionId,
 };
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Mutex;
@@ -253,6 +253,63 @@ fn is_sws_action(command_name: Option<&str>, description: &str) -> bool {
     name_matches || desc_matches
 }
 
+fn action_provider(command_name: Option<&str>, description: &str) -> (String, Vec<String>) {
+    let mut tags = Vec::new();
+    let normalized = command_name.map(normalize_command_name);
+    if let Some(name) = normalized {
+        if name.starts_with("FTS") {
+            tags.push("fasttrackstudio".to_string());
+            return ("fts".to_string(), tags);
+        }
+        if name.starts_with("RS") {
+            tags.push("script".to_string());
+            return ("reascript".to_string(), tags);
+        }
+        let sws_tags = [
+            ("SWS", "sws"),
+            ("S&M", "s&m"),
+            ("BR_", "br"),
+            ("FNG_", "fng"),
+            ("NF_", "nf"),
+            ("SN_", "sn"),
+            ("XENAKIOS", "xenakios"),
+            ("PADRE", "padre"),
+            ("AUTORENDER", "autorender"),
+        ];
+        for (prefix, tag) in sws_tags {
+            if name.starts_with(prefix) {
+                tags.push(tag.to_string());
+                return ("sws".to_string(), tags);
+            }
+        }
+    }
+    if description.starts_with("SWS") {
+        tags.push("sws".to_string());
+        return ("sws".to_string(), tags);
+    }
+    if description.starts_with("S&M") {
+        tags.push("s&m".to_string());
+        return ("sws".to_string(), tags);
+    }
+    for (prefix, tag) in [
+        ("BR:", "br"),
+        ("FNG:", "fng"),
+        ("NF:", "nf"),
+        ("SN:", "sn"),
+        ("Xenakios", "xenakios"),
+    ] {
+        if description.starts_with(prefix) {
+            tags.push(tag.to_string());
+            return ("sws".to_string(), tags);
+        }
+    }
+    if command_name.is_some() {
+        ("extension".to_string(), tags)
+    } else {
+        ("reaper".to_string(), tags)
+    }
+}
+
 fn classify_action(command_name: Option<&str>, description: &str) -> ActionOrigin {
     if let Some(name) = command_name.map(normalize_command_name)
         && name.starts_with("FTS")
@@ -266,6 +323,21 @@ fn classify_action(command_name: Option<&str>, description: &str) -> ActionOrigi
         ActionOrigin::Extension
     } else {
         ActionOrigin::Reaper
+    }
+}
+
+fn action_section_label(section: ActionSection) -> (u32, String) {
+    (section.unique_id(), section.name())
+}
+
+fn section_context_for<'a>(
+    section_id: u32,
+    raw: &'a reaper_medium::KbdSectionInfo,
+) -> SectionContext<'a> {
+    if section_id == 0 {
+        SectionContext::MainSection
+    } else {
+        SectionContext::Sec(raw)
     }
 }
 
@@ -291,12 +363,13 @@ fn action_matches_query(info: &ActionInfo, query: Option<&str>) -> bool {
             .is_some_and(|name| name.to_ascii_lowercase().contains(query))
 }
 
-fn find_action_info(command_id: CommandId) -> Option<ActionInfo> {
+fn find_action_info(command_id: CommandId, section: ActionSection) -> Option<ActionInfo> {
     let reaper = Reaper::get();
     let medium = reaper.medium_reaper();
     let registered = registered_actions().lock().unwrap().clone();
     let toggles = toggle_states().lock().unwrap().clone();
-    let section = reaper.main_section();
+    let (section_id, section_name) = action_section_label(section);
+    let section = reaper.section_by_id(SectionId::new(section_id));
 
     section
         .with_raw(|s| {
@@ -308,10 +381,9 @@ fn find_action_info(command_id: CommandId) -> Option<ActionInfo> {
                     continue;
                 }
 
+                let section_context = section_context_for(section_id, s);
                 let description = unsafe {
-                    medium.kbd_get_text_from_cmd(cmd, SectionContext::MainSection, |name| {
-                        name.to_string()
-                    })
+                    medium.kbd_get_text_from_cmd(cmd, section_context, |name| name.to_string())
                 }
                 .unwrap_or_default();
                 let command_name =
@@ -326,12 +398,21 @@ fn find_action_info(command_id: CommandId) -> Option<ActionInfo> {
                 } else {
                     classify_action(command_name.as_deref(), &description)
                 };
+                let (provider, provider_tags) = if registered_by_fts {
+                    ("fts".to_string(), vec!["fasttrackstudio".to_string()])
+                } else {
+                    action_provider(command_name.as_deref(), &description)
+                };
 
                 return Some(ActionInfo {
                     command_id: cmd.get(),
+                    section_id,
+                    section_name: section_name.clone(),
                     command_name,
                     description,
                     origin,
+                    provider,
+                    provider_tags,
                     registered_by_fts,
                     toggle_state,
                 });
@@ -823,20 +904,20 @@ impl ActionRegistryService for ReaperActionRegistry {
             let toggles = toggle_states().lock().unwrap().clone();
             let query = request.query.as_ref().map(|q| q.to_ascii_lowercase());
             let limit = request.limit.unwrap_or(u32::MAX) as usize;
+            let (section_id, section_name) = action_section_label(request.section);
             let mut actions = Vec::new();
             let mut total_count = 0_u32;
 
-            let section = reaper.main_section();
+            let section = reaper.section_by_id(SectionId::new(section_id));
             let _ = section.with_raw(|s| {
                 for i in 0..s.action_list_cnt() {
                     let Some(cmd) = s.get_action_by_index(i).map(|a| a.cmd()) else {
                         continue;
                     };
 
+                    let section_context = section_context_for(section_id, s);
                     let description = unsafe {
-                        medium.kbd_get_text_from_cmd(cmd, SectionContext::MainSection, |name| {
-                            name.to_string()
-                        })
+                        medium.kbd_get_text_from_cmd(cmd, section_context, |name| name.to_string())
                     }
                     .unwrap_or_default();
                     let command_name =
@@ -852,12 +933,21 @@ impl ActionRegistryService for ReaperActionRegistry {
                     } else {
                         classify_action(command_name.as_deref(), &description)
                     };
+                    let (provider, provider_tags) = if registered_by_fts {
+                        ("fts".to_string(), vec!["fasttrackstudio".to_string()])
+                    } else {
+                        action_provider(command_name.as_deref(), &description)
+                    };
 
                     let info = ActionInfo {
                         command_id: cmd.get(),
+                        section_id,
+                        section_name: section_name.clone(),
                         command_name,
                         description,
                         origin,
+                        provider,
+                        provider_tags,
                         registered_by_fts,
                         toggle_state,
                     };
@@ -965,15 +1055,17 @@ impl ActionRegistryService for ReaperActionRegistry {
                     command_name: None,
                     description: None,
                     origin: None,
+                    provider: None,
+                    provider_tags: Vec::new(),
                     registered_by_fts: false,
                     toggle_state_before: None,
                     toggle_state_after: None,
                 };
             };
 
-            let before = find_action_info(command_id);
+            let before = find_action_info(command_id, ActionSection::Main);
             medium.main_on_command_ex(command_id, 0, ProjectContext::CurrentProject);
-            let after = find_action_info(command_id);
+            let after = find_action_info(command_id, ActionSection::Main);
             let info = after.as_ref().or(before.as_ref());
 
             ActionExecutionResult {
@@ -983,6 +1075,10 @@ impl ActionRegistryService for ReaperActionRegistry {
                 command_name: info.and_then(|info| info.command_name.clone()),
                 description: info.map(|info| info.description.clone()),
                 origin: info.map(|info| info.origin),
+                provider: info.map(|info| info.provider.clone()),
+                provider_tags: info
+                    .map(|info| info.provider_tags.clone())
+                    .unwrap_or_default(),
                 registered_by_fts: info.is_some_and(|info| info.registered_by_fts),
                 toggle_state_before: before.and_then(|info| info.toggle_state),
                 toggle_state_after: after.and_then(|info| info.toggle_state),
@@ -996,6 +1092,8 @@ impl ActionRegistryService for ReaperActionRegistry {
             command_name: None,
             description: None,
             origin: None,
+            provider: None,
+            provider_tags: Vec::new(),
             registered_by_fts: false,
             toggle_state_before: None,
             toggle_state_after: None,

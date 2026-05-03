@@ -75,11 +75,59 @@ pub enum ActionOrigin {
     Extension,
 }
 
+/// REAPER action-list section selector.
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Facet)]
+pub enum ActionSection {
+    /// Main section, REAPER unique ID 0.
+    Main,
+    /// Main alt section, REAPER unique ID 100.
+    MainAlt,
+    /// MIDI editor section, REAPER unique ID 32060.
+    MidiEditor,
+    /// MIDI event list editor section, REAPER unique ID 32061.
+    MidiEventListEditor,
+    /// MIDI inline editor section, REAPER unique ID 32062.
+    MidiInlineEditor,
+    /// Media explorer section, REAPER unique ID 32063.
+    MediaExplorer,
+    /// Any known REAPER or extension section ID.
+    Custom(u32),
+}
+
+impl ActionSection {
+    pub fn unique_id(self) -> u32 {
+        match self {
+            ActionSection::Main => 0,
+            ActionSection::MainAlt => 100,
+            ActionSection::MidiEditor => 32060,
+            ActionSection::MidiEventListEditor => 32061,
+            ActionSection::MidiInlineEditor => 32062,
+            ActionSection::MediaExplorer => 32063,
+            ActionSection::Custom(id) => id,
+        }
+    }
+
+    pub fn name(self) -> String {
+        match self {
+            ActionSection::Main => "main".to_string(),
+            ActionSection::MainAlt => "main-alt".to_string(),
+            ActionSection::MidiEditor => "midi-editor".to_string(),
+            ActionSection::MidiEventListEditor => "midi-event-list-editor".to_string(),
+            ActionSection::MidiInlineEditor => "midi-inline-editor".to_string(),
+            ActionSection::MediaExplorer => "media-explorer".to_string(),
+            ActionSection::Custom(id) => format!("section-{id}"),
+        }
+    }
+}
+
 /// Request parameters for action-list enumeration.
 #[derive(Debug, Clone, Facet)]
 pub struct ActionListRequest {
     /// Which class of actions to return.
     pub filter: ActionListFilter,
+    /// REAPER action section to enumerate.
+    pub section: ActionSection,
     /// Optional case-insensitive search over description and command name.
     pub query: Option<String>,
     /// Optional maximum number of rows to return.
@@ -90,6 +138,7 @@ impl Default for ActionListRequest {
     fn default() -> Self {
         Self {
             filter: ActionListFilter::All,
+            section: ActionSection::Main,
             query: None,
             limit: None,
         }
@@ -101,6 +150,10 @@ impl Default for ActionListRequest {
 pub struct ActionInfo {
     /// Numeric REAPER command ID.
     pub command_id: u32,
+    /// REAPER action section unique ID.
+    pub section_id: u32,
+    /// REAPER action section name.
+    pub section_name: String,
     /// Named command identifier, if REAPER has one.
     ///
     /// REAPER's `ReverseNamedCommandLookup` returns names without the leading
@@ -110,6 +163,10 @@ pub struct ActionInfo {
     pub description: String,
     /// Best-effort action source classification.
     pub origin: ActionOrigin,
+    /// Stable provider key such as `reaper`, `fts`, `sws`, `reascript`, or `extension`.
+    pub provider: String,
+    /// Provider/detail tags inferred from command name and description.
+    pub provider_tags: Vec<String>,
     /// True if this action was registered by the FastTrackStudio registry.
     pub registered_by_fts: bool,
     /// Stored toggle state for FastTrackStudio toggle actions.
@@ -149,6 +206,10 @@ pub struct ActionExecutionResult {
     pub description: Option<String>,
     /// Best-effort source classification, if known.
     pub origin: Option<ActionOrigin>,
+    /// Stable provider key, if known.
+    pub provider: Option<String>,
+    /// Provider/detail tags, if known.
+    pub provider_tags: Vec<String>,
     /// True if this action was registered by the FastTrackStudio registry.
     pub registered_by_fts: bool,
     /// Stored toggle state before dispatch for FastTrackStudio toggle actions.
