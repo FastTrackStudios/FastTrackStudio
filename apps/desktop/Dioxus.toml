@@ -1,0 +1,6 @@
+[application]
+name = "task-app-desktop"
+default_platform = "desktop"
+
+[desktop]
+title = "Task"

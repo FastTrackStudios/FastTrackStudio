@@ -1,0 +1,10 @@
+[package]
+name = "task-app-web"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+dioxus = { workspace = true, features = ["web"] }
+task-ui.workspace = true

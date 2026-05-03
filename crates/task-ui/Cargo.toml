@@ -1,0 +1,10 @@
+[package]
+name = "task-ui"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+dioxus = { workspace = true }
+fts-ui = { workspace = true }

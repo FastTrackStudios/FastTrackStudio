@@ -1,11 +1,21 @@
 [workspace]
 members = [
     "apps/server",
+    "apps/web",
+    "apps/desktop",
+    "apps/mobile",
     "crates/task-core",
     "crates/task-cli",
     "crates/task-db",
+    "crates/task-ui",
     "integrations/obsidian/plugin",
     "xtask",
+]
+exclude = [
+    "nix-external/FastTrackStudio/better-auth",
+    "nix-external/FastTrackStudio/sea-orm",
+    "nix-external/FastTrackStudio/sea-orm/sea-orm-cli",
+    "nix-external/FastTrackStudio/sea-orm/sea-orm-migration",
 ]
 resolver = "2"
 
@@ -16,8 +26,15 @@ name = "task"
 version = "0.1.0"
 authors = ["Cody Wright"]
 edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Codys-Wright/Task"
 
 [workspace.dependencies]
+async-trait = "0.1"
+task-ui = { path = "crates/task-ui" }
+dioxus = { version = "0.7.6", default-features = false, features = ["lib"] }
+fts-ui = { path = "../FastTrackStudio/fts-ui/crates/fts-ui" }
+
 chrono = "0.4"
 eyre = "0.6"
 futures = "0.3"
@@ -133,6 +150,130 @@ path = "../FastTrackStudio/sea-orm/sea-orm-migration"
 [workspace.dependencies.crudcrate]
 path = "../FastTrackStudio/crudcrate/crudcrate"
 features = ["derive"]
+
+[workspace.dependencies.argon2]
+version = "0.5"
+
+[workspace.dependencies.proc-macro2]
+version = "1.0.103"
+
+[workspace.dependencies.quote]
+version = "1.0.41"
+
+[workspace.dependencies.syn]
+version = "2.0.108"
+features = ["full", "derive", "parsing", "printing", "clone-impls", "proc-macro"]
+
+[workspace.dependencies.axum]
+version = "0.8"
+
+[workspace.dependencies.axum-helmet]
+version = "0.2.0"
+
+[workspace.dependencies.base64]
+version = "0.22"
+
+[workspace.dependencies.better-auth-core]
+path = "../FastTrackStudio/better-auth/crates/core"
+
+[workspace.dependencies.better-auth-api]
+path = "../FastTrackStudio/better-auth/crates/api"
+default-features = false
+
+[workspace.dependencies.better-auth-derive]
+path = "../FastTrackStudio/better-auth/crates/derive"
+
+[workspace.dependencies.cookie]
+version = "0.18"
+
+[workspace.dependencies.convert_case]
+version = "0.8.0"
+
+[workspace.dependencies.criterion]
+version = "0.7.0"
+
+[workspace.dependencies.heck]
+version = "0.5.0"
+default-features = false
+
+[workspace.dependencies.hyper]
+version = "1.7.0"
+features = ["full"]
+
+[workspace.dependencies.jsonwebtoken]
+version = "9"
+
+[workspace.dependencies.rand]
+version = "0.8"
+
+[workspace.dependencies.redis]
+version = "0.27"
+
+[workspace.dependencies.reqwest]
+version = "0.12"
+default-features = false
+features = ["json", "rustls-tls"]
+
+[workspace.dependencies.rust_decimal]
+version = "1.39.0"
+
+[workspace.dependencies.serde_with]
+version = "3.15.1"
+
+[workspace.dependencies.sqlx]
+version = "0.8"
+features = ["runtime-tokio-rustls", "postgres", "chrono", "uuid", "json"]
+
+[workspace.dependencies.spring]
+version = "0.4.3"
+
+[workspace.dependencies.spring-web]
+version = "0.4.3"
+
+[workspace.dependencies.tower]
+version = "0.5"
+
+[workspace.dependencies.tower-http]
+version = "0.6"
+
+[workspace.dependencies.tower_governor]
+version = "0.8.0"
+
+[workspace.dependencies.url]
+version = "2"
+
+[workspace.dependencies.url-escape]
+version = "0.1.1"
+
+[workspace.dependencies.utoipa]
+version = "5.4.0"
+
+[workspace.dependencies.utoipa-axum]
+version = "0.2.0"
+
+[workspace.dependencies.utoipa-scalar]
+version = "0.3.0"
+features = ["axum"]
+
+[workspace.dependencies.validator]
+version = "0.19"
+features = ["derive"]
+
+[workspace.dependencies.sha2]
+version = "0.10"
+
+[workspace.dependencies.aes-gcm]
+version = "0.10"
+
+[workspace.dependencies.hkdf]
+version = "0.12"
+
+[workspace.dependencies.hmac]
+version = "0.12"
+
+[workspace.dependencies.totp-rs]
+version = "5"
+features = ["gen_secret", "otpauth"]
 
 [profile.wasm-dev]
 opt-level = 1
