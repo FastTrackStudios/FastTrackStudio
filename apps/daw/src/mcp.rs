@@ -254,6 +254,12 @@ pub struct ActionToggleParams {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct VoxBatchParams {
+    /// Facet JSON representation of daw::service::BatchRequest.
+    pub request: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct CombineParams {
     /// Path to a .RPL setlist or .RPP input.
     pub input: String,
@@ -294,6 +300,29 @@ impl DawMcpServer {
     pub async fn daw_ping(&self) -> Result<Json<Value>, String> {
         let conn = self.connect().await?;
         Ok(Json(json!({ "ok": conn.daw.healthcheck().await })))
+    }
+
+    #[tool(
+        name = "daw_vox_service_catalog",
+        description = "Return the generated vox DAW service and method catalog."
+    )]
+    pub async fn daw_vox_service_catalog(&self) -> Result<Json<Value>, String> {
+        Ok(Json(crate::ops::vox_service_catalog()))
+    }
+
+    #[tool(
+        name = "daw_vox_execute_batch",
+        description = "Execute a vox-native DAW BatchRequest encoded as Facet JSON."
+    )]
+    pub async fn daw_vox_execute_batch(
+        &self,
+        Parameters(params): Parameters<VoxBatchParams>,
+    ) -> Result<Json<Value>, String> {
+        let conn = self.connect().await?;
+        crate::ops::vox_execute_batch(&conn.daw, params.request)
+            .await
+            .map(Json)
+            .map_err(|err| err.to_string())
     }
 
     #[tool(
