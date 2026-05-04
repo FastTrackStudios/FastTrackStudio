@@ -201,11 +201,18 @@ fn register_actions_sync(defs: &actions::ActionDefs) {
         info!("Subscribed to action trigger events");
         loop {
             match rx.recv().await {
-                Ok(Some(event)) => match *event {
+                Ok(Some(event_ref)) => {
+                    let mut event = None;
+                    let _ = event_ref.map(|value| {
+                        event = Some(value);
+                    });
+                    let event = event.expect("SelfRef::map ran");
+                    match event {
                     ActionEvent::Triggered { ref command_name } => {
                         let _ = tx.send(command_name.clone());
                     }
-                },
+                    }
+                }
                 Ok(None) => {
                     info!("Action trigger stream closed");
                     break;
@@ -322,6 +329,10 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     for (id, _, handler, _, _) in &module_actions {
         all_actions.insert(id.clone(), handler.clone());
     }
+    for action in ui_test_panel::action_defs() {
+        let (id, _, handler, _, _) = action.into_tuple();
+        all_actions.insert(id, handler);
+    }
 
     info!(
         legacy = legacy_defs.len(),
@@ -339,6 +350,7 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
                 (id, display_name, handler, show_in_menu, toggleable)
             }),
     );
+    all_defs.extend(ui_test_panel::action_defs().into_iter().map(|a| a.into_tuple()));
 
     let session = ReaperSession::load(context);
     let app = App {
@@ -382,7 +394,7 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     daw::ui::dock::init_service();
     daw::ui::dock::init_dock(reaper_low::Reaper::get(), reaper_low::Swell::get());
     let mut panels = module::collect_panels(&modules);
-    panels.push(ui_test_panel::panel_def());
+    panels.extend(ui_test_panel::panel_defs());
     info!(panels = panels.len(), "Panel definitions collected");
     for panel in &panels {
         daw::ui::dock::register_panel_from_service(panel);
