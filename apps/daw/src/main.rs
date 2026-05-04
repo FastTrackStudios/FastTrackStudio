@@ -606,6 +606,46 @@ enum Command {
         #[arg(long)]
         clear: bool,
     },
+    /// List named FTS screensets
+    Screensets,
+    /// Capture the current workspace as a named FTS screenset
+    ScreensetCapture {
+        /// Stable screenset id
+        id: String,
+        /// Display name
+        #[arg(long)]
+        name: Option<String>,
+        /// Description
+        #[arg(long)]
+        description: Option<String>,
+        /// Tag; may be passed multiple times
+        #[arg(long = "tag")]
+        tags: Vec<String>,
+        /// REAPER command id/name to run when applying; may be passed multiple times
+        #[arg(long = "apply-action")]
+        actions_on_apply: Vec<String>,
+        /// Persist across REAPER restarts
+        #[arg(long, default_value_t = true)]
+        persist: bool,
+    },
+    /// Show one named FTS screenset
+    ScreensetShow {
+        /// Stable screenset id
+        id: String,
+    },
+    /// Apply one named FTS screenset
+    ScreensetApply {
+        /// Stable screenset id
+        id: String,
+    },
+    /// Delete one named FTS screenset
+    ScreensetDelete {
+        /// Stable screenset id
+        id: String,
+        /// Delete persistent storage too
+        #[arg(long, default_value_t = true)]
+        persist: bool,
+    },
 
     // -- File Operations --
     /// Parse an RPP file and return a project summary
@@ -1395,6 +1435,37 @@ async fn main() -> Result<()> {
                 clear,
             )
             .await?,
+            cli.json,
+        )?,
+        Command::Screensets => print_value(daw_cli::ops::screenset_list(&daw).await?, cli.json)?,
+        Command::ScreensetCapture {
+            id,
+            name,
+            description,
+            tags,
+            actions_on_apply,
+            persist,
+        } => print_value(
+            daw_cli::ops::screenset_capture(
+                &daw,
+                &id,
+                name.as_deref(),
+                description.as_deref(),
+                tags,
+                actions_on_apply,
+                persist,
+            )
+            .await?,
+            cli.json,
+        )?,
+        Command::ScreensetShow { id } => {
+            print_value(daw_cli::ops::screenset_show(&daw, &id).await?, cli.json)?
+        }
+        Command::ScreensetApply { id } => {
+            print_value(daw_cli::ops::screenset_apply(&daw, &id).await?, cli.json)?
+        }
+        Command::ScreensetDelete { id, persist } => print_value(
+            daw_cli::ops::screenset_delete(&daw, &id, persist).await?,
             cli.json,
         )?,
         // Already handled above

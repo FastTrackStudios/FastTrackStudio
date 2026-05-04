@@ -62,6 +62,7 @@ fn daw_service_descriptors() -> Vec<&'static vox::ServiceDescriptor> {
         daw::service::region_service_service_descriptor(),
         daw::service::resource_service_service_descriptor(),
         daw::service::routing_service_service_descriptor(),
+        daw::service::screenset_service_service_descriptor(),
         daw::service::take_service_service_descriptor(),
         daw::service::tempo_map_service_service_descriptor(),
         daw::service::toolbar_service_service_descriptor(),
@@ -1436,6 +1437,78 @@ pub async fn toolbar_icon(
                     .then(|| make_toolbar_icon(icon, icon_kind))
                     .flatten(),
             )
+            .await?,
+    )
+}
+
+fn screenset_options(persist: bool) -> daw::service::ScreensetOptions {
+    daw::service::ScreensetOptions {
+        scope: daw::service::ScreensetScope::Global,
+        persist,
+    }
+}
+
+fn screenset_result_json(result: daw::service::ScreensetResult) -> Result<Value> {
+    if result.ok {
+        Ok(json!({
+            "ok": true,
+            "id": result.id,
+        }))
+    } else {
+        match result.error {
+            Some(message) => Err(eyre::eyre!(message)),
+            None => Err(eyre::eyre!("screenset operation failed")),
+        }
+    }
+}
+
+pub async fn screenset_list(daw: &Daw) -> Result<Value> {
+    let rows = daw.screensets().list(screenset_options(true)).await?;
+    let json = facet_json::to_string(&rows)
+        .map_err(|err| eyre::eyre!("serialize screenset list: {err}"))?;
+    Ok(serde_json::from_str(&json)?)
+}
+
+pub async fn screenset_capture(
+    daw: &Daw,
+    id: &str,
+    name: Option<&str>,
+    description: Option<&str>,
+    tags: Vec<String>,
+    actions_on_apply: Vec<String>,
+    persist: bool,
+) -> Result<Value> {
+    let result = daw
+        .screensets()
+        .capture(
+            id,
+            name.unwrap_or(id),
+            description.unwrap_or_default(),
+            tags,
+            actions_on_apply,
+            screenset_options(persist),
+        )
+        .await?;
+    screenset_result_json(result)
+}
+
+pub async fn screenset_show(daw: &Daw, id: &str) -> Result<Value> {
+    let Some(screenset) = daw.screensets().get(id, screenset_options(true)).await? else {
+        eyre::bail!("screenset not found: {id}");
+    };
+    let json = facet_json::to_string(&screenset)
+        .map_err(|err| eyre::eyre!("serialize screenset: {err}"))?;
+    Ok(serde_json::from_str(&json)?)
+}
+
+pub async fn screenset_apply(daw: &Daw, id: &str) -> Result<Value> {
+    screenset_result_json(daw.screensets().apply(id, screenset_options(true)).await?)
+}
+
+pub async fn screenset_delete(daw: &Daw, id: &str, persist: bool) -> Result<Value> {
+    screenset_result_json(
+        daw.screensets()
+            .delete(id, screenset_options(persist))
             .await?,
     )
 }

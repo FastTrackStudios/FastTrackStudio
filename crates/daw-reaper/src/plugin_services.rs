@@ -8,9 +8,9 @@ use daw_proto::{
     FxServiceDispatcher, HealthServiceDispatcher, InputServiceDispatcher, ItemServiceDispatcher,
     LiveMidiServiceDispatcher, MarkerServiceDispatcher, MidiAnalysisServiceDispatcher,
     MidiServiceDispatcher, PluginLoaderServiceDispatcher, ProjectServiceDispatcher,
-    RegionServiceDispatcher, RoutingServiceDispatcher, TakeServiceDispatcher,
-    TempoMapServiceDispatcher, ToolbarServiceDispatcher, TrackServiceDispatcher,
-    TransportServiceDispatcher,
+    RegionServiceDispatcher, RoutingServiceDispatcher, ScreensetServiceDispatcher,
+    TakeServiceDispatcher, TempoMapServiceDispatcher, ToolbarServiceDispatcher,
+    TrackServiceDispatcher, TransportServiceDispatcher,
 };
 
 use daw_proto::{
@@ -21,9 +21,10 @@ use daw_proto::{
     marker_service_service_descriptor, midi_analysis_service_service_descriptor,
     midi_service_service_descriptor, plugin_loader_service_service_descriptor,
     project_service_service_descriptor, region_service_service_descriptor,
-    routing_service_service_descriptor, take_service_service_descriptor,
-    tempo_map_service_service_descriptor, toolbar_service_service_descriptor,
-    track_service_service_descriptor, transport_service_service_descriptor,
+    routing_service_service_descriptor, screenset_service_service_descriptor,
+    take_service_service_descriptor, tempo_map_service_service_descriptor,
+    toolbar_service_service_descriptor, track_service_service_descriptor,
+    transport_service_service_descriptor,
 };
 
 use daw_proto::batch::{BatchServiceDispatcher, batch_service_service_descriptor};
@@ -65,6 +66,7 @@ pub fn create_daw_handler() -> RoutedHandler {
     let action_registry = crate::ReaperActionRegistry::new();
     let input = crate::ReaperInput::new();
     let toolbar = crate::ReaperToolbar::new();
+    let screenset = crate::ReaperScreenset::new();
     let plugin_loader = crate::ReaperPluginLoader::new();
     let batch = crate::batch::BatchExecutor::new();
 
@@ -144,6 +146,10 @@ pub fn create_daw_handler() -> RoutedHandler {
         .with(
             toolbar_service_service_descriptor(),
             ToolbarServiceDispatcher::new(toolbar),
+        )
+        .with(
+            screenset_service_service_descriptor(),
+            ScreensetServiceDispatcher::new(screenset),
         )
         .with(
             plugin_loader_service_service_descriptor(),
