@@ -33,6 +33,10 @@ use crate::provider::{
     TalkClient, TalkConfig,
 };
 use crate::query::Query;
+use crate::revenue::{
+    build_revenue_report, format_revenue_id, matches_revenue_filter, Revenue, RevenueCreateRequest,
+    RevenueFilter, RevenueReport,
+};
 use crate::rrule;
 use crate::service::{
     BusinessFinanceClientSummary, BusinessFinanceReport, CalDavDeleteObjectRequest,
@@ -2644,6 +2648,80 @@ impl VaultServiceImpl {
         let today = Utc::now().date_naive();
         let expenses = self.list_expenses(filter).await;
         build_expense_report(&expenses, today)
+    }
+
+    async fn next_revenue_number(&self, year: i32) -> Result<u32, VaultError> {
+        let prefix = format!("REV-{year:04}-");
+        let max = self
+            .vault
+            .read()
+            .await
+            .load_revenues()
+            .into_iter()
+            .filter(|revenue| revenue.id.starts_with(&prefix))
+            .map(|revenue| revenue.number)
+            .max()
+            .unwrap_or(0);
+        Ok(max + 1)
+    }
+
+    pub async fn create_revenue(
+        &self,
+        request: RevenueCreateRequest,
+    ) -> Result<Revenue, VaultError> {
+        let now = Utc::now();
+        let date = request.date.unwrap_or_else(|| now.date_naive());
+        let number = self.next_revenue_number(date.year()).await?;
+        let revenue = Revenue {
+            id: format_revenue_id(date.year(), number),
+            number,
+            date,
+            amount_cents: request.amount_cents,
+            currency_code: request.currency_code.unwrap_or_else(|| "USD".into()),
+            project: request.project.map(WikiLink),
+            client: request.client.map(WikiLink),
+            deliverable: request.deliverable,
+            invoice_id: request.invoice_id,
+            invoice_line_id: request.invoice_line_id,
+            category: request.category,
+            payment_method: request.payment_method,
+            payment_reference: request.payment_reference,
+            description: request.description,
+            notes: request.notes,
+            created_by: request.actor,
+            date_created: Some(now),
+            date_modified: Some(now),
+            body: String::new(),
+        };
+        self.vault.read().await.save_revenue(&revenue)?;
+        Ok(revenue)
+    }
+
+    pub async fn list_revenues(&self, filter: RevenueFilter) -> Vec<Revenue> {
+        let mut revenues = self.vault.read().await.load_revenues();
+        revenues.retain(|revenue| matches_revenue_filter(revenue, &filter));
+        revenues.sort_by(|a, b| b.date.cmp(&a.date).then_with(|| b.number.cmp(&a.number)));
+        revenues
+    }
+
+    pub async fn get_revenue(&self, revenue_id: &str) -> Option<Revenue> {
+        self.vault
+            .read()
+            .await
+            .load_revenues()
+            .into_iter()
+            .find(|revenue| revenue.id.eq_ignore_ascii_case(revenue_id))
+    }
+
+    pub async fn delete_revenue(&self, revenue_id: &str) -> Result<(), VaultError> {
+        self.vault.read().await.delete_revenue(revenue_id)
+    }
+
+    pub async fn revenue_report(&self, filter: RevenueFilter) -> RevenueReport {
+        let today = Utc::now().date_naive();
+        let revenues = self.list_revenues(filter).await;
+        let invoices = self.vault.read().await.load_invoices();
+        build_revenue_report(&revenues, &invoices, today)
     }
 
     /// Mark a set of time entries as invoiced against a specific invoice

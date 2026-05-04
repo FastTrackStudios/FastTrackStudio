@@ -8,6 +8,9 @@ use task_core::expense::{
     render_expense_body, render_expense_report, ExpenseCreateRequest, ExpenseFilter, ExpensePatch,
 };
 use task_core::index::{ChangeRow, ConflictRow};
+use task_core::revenue::{
+    render_revenue_body, render_revenue_report, RevenueCreateRequest, RevenueFilter,
+};
 use task_core::workflows::{parse_comments, render_comments, Comment};
 use task_core::{
     build_agent_plan, create_project, save_project_task, BusinessFinanceReport, CalendarEvent,
@@ -289,6 +292,11 @@ enum Commands {
     Expense {
         #[command(subcommand)]
         command: ExpenseCommands,
+    },
+    /// Revenue attribution — realized income ledger, stored in `revenue/<id>.md`
+    Revenue {
+        #[command(subcommand)]
+        command: RevenueCommands,
     },
     /// Email linking — associate emails with tasks/projects. Bot-friendly.
     Email {
@@ -1000,6 +1008,88 @@ enum ExpenseCommands {
         json: bool,
     },
     /// Delete an expense
+    Delete { id: String },
+}
+
+#[derive(Subcommand)]
+enum RevenueCommands {
+    /// Create a new revenue attribution entry
+    Create {
+        description: String,
+        #[arg(long)]
+        amount: u64,
+        #[arg(long)]
+        date: Option<String>,
+        #[arg(long)]
+        currency: Option<String>,
+        #[arg(long)]
+        project: Option<String>,
+        #[arg(long)]
+        client: Option<String>,
+        #[arg(long)]
+        deliverable: Option<String>,
+        #[arg(long = "invoice")]
+        invoice_id: Option<String>,
+        #[arg(long = "invoice-line")]
+        invoice_line_id: Option<String>,
+        #[arg(long)]
+        category: Option<String>,
+        #[arg(long = "payment-method")]
+        payment_method: Option<String>,
+        #[arg(long = "payment-reference")]
+        payment_reference: Option<String>,
+        #[arg(long)]
+        notes: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// List revenue entries
+    List {
+        #[arg(long)]
+        from: Option<String>,
+        #[arg(long)]
+        to: Option<String>,
+        #[arg(long)]
+        project: Option<String>,
+        #[arg(long)]
+        client: Option<String>,
+        #[arg(long)]
+        deliverable: Option<String>,
+        #[arg(long = "invoice")]
+        invoice_id: Option<String>,
+        #[arg(long)]
+        category: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show a single revenue entry
+    Show {
+        id: String,
+        #[arg(long)]
+        md: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show a revenue attribution report
+    Report {
+        #[arg(long)]
+        from: Option<String>,
+        #[arg(long)]
+        to: Option<String>,
+        #[arg(long)]
+        project: Option<String>,
+        #[arg(long)]
+        client: Option<String>,
+        #[arg(long)]
+        deliverable: Option<String>,
+        #[arg(long = "invoice")]
+        invoice_id: Option<String>,
+        #[arg(long)]
+        category: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Delete a revenue entry
     Delete { id: String },
 }
 
@@ -2395,6 +2485,9 @@ async fn main() -> eyre::Result<()> {
 
         Commands::Expense { command } => {
             run_expense_command(&svc, actor.as_deref(), command).await?
+        }
+        Commands::Revenue { command } => {
+            run_revenue_command(&svc, actor.as_deref(), command).await?
         }
 
         Commands::Invoice {
@@ -4443,6 +4536,9 @@ async fn run_remote_command(
             let client: task_core::service::ExpenseServiceClient = remote.connect().await?;
             run_remote_expense_command(&client, actor, command).await?
         }
+        Commands::Revenue { .. } => {
+            eyre::bail!("revenue commands are currently supported only in local vault mode")
+        }
         Commands::Asset { .. } => {
             eyre::bail!("asset commands are currently supported only in local vault mode")
         }
@@ -5304,6 +5400,165 @@ async fn run_expense_command(
         }
     }
 
+    Ok(())
+}
+
+async fn run_revenue_command(
+    svc: &VaultServiceImpl,
+    actor: Option<&str>,
+    command: RevenueCommands,
+) -> eyre::Result<()> {
+    let parse_date = |s: &str| -> eyre::Result<NaiveDate> {
+        s.parse::<NaiveDate>()
+            .map_err(|_| eyre::eyre!("Invalid date: {s}"))
+    };
+    let filter_from = |from: Option<String>,
+                       to: Option<String>,
+                       project: Option<String>,
+                       client: Option<String>,
+                       deliverable: Option<String>,
+                       invoice_id: Option<String>,
+                       category: Option<String>|
+     -> eyre::Result<RevenueFilter> {
+        Ok(RevenueFilter {
+            from: from.as_deref().map(parse_date).transpose()?,
+            to: to.as_deref().map(parse_date).transpose()?,
+            project,
+            client,
+            deliverable,
+            invoice_id,
+            category,
+        })
+    };
+
+    match command {
+        RevenueCommands::Create {
+            description,
+            amount,
+            date,
+            currency,
+            project,
+            client,
+            deliverable,
+            invoice_id,
+            invoice_line_id,
+            category,
+            payment_method,
+            payment_reference,
+            notes,
+            json,
+        } => {
+            let revenue = svc
+                .create_revenue(RevenueCreateRequest {
+                    description,
+                    amount_cents: amount,
+                    date: date.as_deref().map(parse_date).transpose()?,
+                    currency_code: currency,
+                    project,
+                    client,
+                    deliverable,
+                    invoice_id,
+                    invoice_line_id,
+                    category,
+                    payment_method,
+                    payment_reference,
+                    notes,
+                    actor: actor.map(str::to_string),
+                })
+                .await?;
+            if json {
+                println!("{}", facet_json::to_string(&revenue).unwrap_or_default());
+            } else {
+                println!(
+                    "Created revenue {} — ${:.2}",
+                    revenue.id,
+                    revenue.amount_cents as f64 / 100.0
+                );
+                println!("{}", render_revenue_body(&revenue));
+            }
+        }
+        RevenueCommands::List {
+            from,
+            to,
+            project,
+            client,
+            deliverable,
+            invoice_id,
+            category,
+            json,
+        } => {
+            let revenues = svc
+                .list_revenues(filter_from(
+                    from,
+                    to,
+                    project,
+                    client,
+                    deliverable,
+                    invoice_id,
+                    category,
+                )?)
+                .await;
+            if json {
+                println!("{}", facet_json::to_string(&revenues).unwrap_or_default());
+            } else if revenues.is_empty() {
+                println!("No revenue.");
+            } else {
+                for revenue in revenues {
+                    println!(
+                        "{}  ${:.2}  {:<12}  {}",
+                        revenue.date,
+                        revenue.amount_cents as f64 / 100.0,
+                        revenue.deliverable.as_deref().unwrap_or("-"),
+                        revenue.description
+                    );
+                }
+            }
+        }
+        RevenueCommands::Show { id, md, json } => {
+            let revenue = svc
+                .get_revenue(&id)
+                .await
+                .ok_or_else(|| eyre::eyre!("Revenue not found: {id}"))?;
+            if json {
+                println!("{}", facet_json::to_string(&revenue).unwrap_or_default());
+            } else if md {
+                println!("{}", render_revenue_body(&revenue));
+            } else {
+                println!("{}", render_revenue_body(&revenue));
+            }
+        }
+        RevenueCommands::Report {
+            from,
+            to,
+            project,
+            client,
+            deliverable,
+            invoice_id,
+            category,
+            json,
+        } => {
+            let report = svc
+                .revenue_report(filter_from(
+                    from,
+                    to,
+                    project,
+                    client,
+                    deliverable,
+                    invoice_id,
+                    category,
+                )?)
+                .await;
+            if json {
+                println!("{}", facet_json::to_string(&report).unwrap_or_default());
+            } else {
+                println!("{}", render_revenue_report(&report));
+            }
+        }
+        RevenueCommands::Delete { id } => {
+            svc.delete_revenue(&id).await?;
+            println!("Deleted revenue {id}.");
+        }
+    }
     Ok(())
 }
 
