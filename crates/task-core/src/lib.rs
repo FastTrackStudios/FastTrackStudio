@@ -58,7 +58,10 @@ pub use people::{
     CommunicationRef, ContactMethod, OrganizationContext, OrganizationRecord, Person,
     PersonContext, ProviderConflict, ProviderConflictField, ProviderRef, Relationship,
 };
-pub use project::{next_task, Project, ProjectStats, ProjectStatus};
+pub use project::{
+    next_task, project_dashboard, Project, ProjectDashboardBucket, ProjectDashboardEntry,
+    ProjectStats, ProjectStatus,
+};
 pub use query::{Filter, Group, GroupedTasks, Query, Sort, TaskGroup};
 pub use task::{
     DependencyRelType, Priority, Reaction, RecurrenceAnchor, RelationType, Reminder,

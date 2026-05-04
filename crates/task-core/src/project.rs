@@ -24,7 +24,6 @@ pub struct Project {
     pub workflow_stage: Option<String>,
 
     // ── Extended fields (project-vault) ──────────────────────────────
-
     /// Organization/workspace this project belongs to (e.g. "fasttrackaudio",
     /// "fasttrackstudio", "just-friends", "personal").
     pub organization: Option<String>,
@@ -51,7 +50,6 @@ pub struct Project {
     pub references: Vec<WikiLink>,
 
     // ── Plane-inspired additions ────────────────────────────────────
-
     /// Short identifier for human-readable task IDs (e.g. "PRJ" → PRJ-1, PRJ-2).
     pub identifier: Option<String>,
 
@@ -84,7 +82,6 @@ pub struct Project {
     pub favorited_by: Vec<String>,
 
     // ── Billing ──────────────────────────────────────────────────────
-
     /// Client this project is billed to (wikilink to a client note).
     pub client: Option<WikiLink>,
 
@@ -98,7 +95,6 @@ pub struct Project {
     pub invoice_ninja_id: Option<String>,
 
     // ── Email routing ────────────────────────────────────────────────
-
     /// Matcher hints the bot uses to decide incoming mail belongs to
     /// this project. Typical values: mail-client tag labels ("project:
     /// montreal-album"), subject-line tokens ("[MA]"), or sender
@@ -186,6 +182,111 @@ impl ProjectStats {
     }
 }
 
+/// Dashboard bucket for ranking projects by urgency.
+#[derive(Debug, Clone, PartialEq, Facet)]
+#[repr(u8)]
+pub enum ProjectDashboardBucket {
+    Overdue,
+    DueSoon,
+    Active,
+    NoOpenTasks,
+}
+
+impl ProjectDashboardBucket {
+    fn rank(&self) -> u8 {
+        match self {
+            ProjectDashboardBucket::Overdue => 0,
+            ProjectDashboardBucket::DueSoon => 1,
+            ProjectDashboardBucket::Active => 2,
+            ProjectDashboardBucket::NoOpenTasks => 3,
+        }
+    }
+}
+
+/// Computed dashboard entry for one project.
+#[derive(Debug, Clone, PartialEq, Facet)]
+pub struct ProjectDashboardEntry {
+    pub project: Project,
+    pub stats: ProjectStats,
+    pub next_task: Option<Task>,
+    pub completion_percent: Option<f32>,
+    pub overdue_task_count: u32,
+    pub most_overdue_days: Option<i32>,
+    pub next_task_urgency: Option<i32>,
+    pub bucket: ProjectDashboardBucket,
+}
+
+/// Build a dashboard view for the active, non-archived projects in a vault.
+pub fn project_dashboard(projects: &[Project], tasks: &[Task]) -> Vec<ProjectDashboardEntry> {
+    let today = chrono::Local::now().date_naive();
+    let mut entries: Vec<ProjectDashboardEntry> = projects
+        .iter()
+        .filter(|project| project.is_active() && !project.is_archived())
+        .map(|project| {
+            let project_tasks: Vec<&Task> = tasks
+                .iter()
+                .filter(|task| task.projects.iter().any(|p| p.0 == project.title))
+                .collect();
+            let stats = ProjectStats::from_tasks(&project_tasks);
+            let next_task = next_task(&project.title, tasks).cloned();
+            let overdue_task_count = project_tasks
+                .iter()
+                .filter(|task| task.is_overdue())
+                .count() as u32;
+            let most_overdue_days = project_tasks
+                .iter()
+                .filter_map(|task| task.days_until_due().map(|days| days.saturating_neg()))
+                .max();
+            let bucket = if stats.open_task_count == 0 {
+                ProjectDashboardBucket::NoOpenTasks
+            } else if overdue_task_count > 0 {
+                ProjectDashboardBucket::Overdue
+            } else if project
+                .due
+                .map(|due| (due - today).num_days())
+                .map(|days| days <= 7)
+                .unwrap_or(false)
+            {
+                ProjectDashboardBucket::DueSoon
+            } else {
+                ProjectDashboardBucket::Active
+            };
+
+            ProjectDashboardEntry {
+                project: project.clone(),
+                stats: stats.clone(),
+                next_task_urgency: next_task.as_ref().map(|task| task.urgency_score()),
+                completion_percent: stats.completion_percent(),
+                overdue_task_count,
+                most_overdue_days,
+                next_task,
+                bucket,
+            }
+        })
+        .collect();
+
+    entries.sort_by(|a, b| {
+        a.bucket
+            .rank()
+            .cmp(&b.bucket.rank())
+            .then_with(|| match a.bucket {
+                ProjectDashboardBucket::Overdue => b
+                    .most_overdue_days
+                    .unwrap_or(i32::MIN)
+                    .cmp(&a.most_overdue_days.unwrap_or(i32::MIN)),
+                ProjectDashboardBucket::DueSoon => a.project.due.cmp(&b.project.due),
+                ProjectDashboardBucket::Active => b
+                    .next_task_urgency
+                    .unwrap_or(i32::MIN)
+                    .cmp(&a.next_task_urgency.unwrap_or(i32::MIN)),
+                ProjectDashboardBucket::NoOpenTasks => a.project.title.cmp(&b.project.title),
+            })
+            .then_with(|| a.project.title.cmp(&b.project.title))
+    });
+
+    entries
+}
+
 /// Selects the single most actionable next task for a project.
 // r[impl project.computed.next-task]
 pub fn next_task<'a>(project_title: &str, tasks: &'a [Task]) -> Option<&'a Task> {
@@ -210,4 +311,90 @@ pub fn next_task<'a>(project_title: &str, tasks: &'a [Task]) -> Option<&'a Task>
     });
 
     candidates.into_iter().next()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn task_for(project: &str, title: &str, due: Option<i64>, status: Status) -> Task {
+        let today = chrono::Local::now().date_naive();
+        Task {
+            title: title.to_string(),
+            status,
+            priority: crate::task::Priority::Normal,
+            projects: vec![WikiLink(project.to_string())],
+            due: due.map(|days| today + chrono::Duration::days(days)),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn dashboard_sorts_by_urgency_buckets() {
+        let today = chrono::Local::now().date_naive();
+        let projects = vec![
+            Project {
+                title: "Active".into(),
+                status: ProjectStatus::Active,
+                ..Default::default()
+            },
+            Project {
+                title: "Overdue".into(),
+                status: ProjectStatus::Active,
+                ..Default::default()
+            },
+            Project {
+                title: "Due soon".into(),
+                status: ProjectStatus::Active,
+                due: Some(today + chrono::Duration::days(3)),
+                ..Default::default()
+            },
+            Project {
+                title: "No open".into(),
+                status: ProjectStatus::Active,
+                ..Default::default()
+            },
+            Project {
+                title: "Archived".into(),
+                status: ProjectStatus::Archived,
+                ..Default::default()
+            },
+        ];
+
+        let mut complete = task_for("No open", "Done", Some(1), Status::Done);
+        complete.completed_date = Some(today);
+        let tasks = vec![
+            task_for("Overdue", "Fix build", Some(-5), Status::InProgress),
+            task_for("Due soon", "Prep release", Some(2), Status::InProgress),
+            task_for("Active", "General work", Some(12), Status::InProgress),
+            complete,
+        ];
+
+        let dashboard = project_dashboard(&projects, &tasks);
+        let titles: Vec<_> = dashboard
+            .iter()
+            .map(|entry| entry.project.title.as_str())
+            .collect();
+        assert_eq!(titles, vec!["Overdue", "Due soon", "Active", "No open"]);
+
+        let overdue = &dashboard[0];
+        assert_eq!(overdue.bucket, ProjectDashboardBucket::Overdue);
+        assert_eq!(overdue.overdue_task_count, 1);
+        assert_eq!(
+            overdue.next_task.as_ref().map(|task| task.title.as_str()),
+            Some("Fix build")
+        );
+
+        let due_soon = &dashboard[1];
+        assert_eq!(due_soon.bucket, ProjectDashboardBucket::DueSoon);
+        assert_eq!(
+            due_soon.project.due,
+            Some(today + chrono::Duration::days(3))
+        );
+
+        let no_open = &dashboard[3];
+        assert_eq!(no_open.bucket, ProjectDashboardBucket::NoOpenTasks);
+        assert_eq!(no_open.stats.open_task_count, 0);
+        assert_eq!(no_open.completion_percent, Some(100.0));
+    }
 }

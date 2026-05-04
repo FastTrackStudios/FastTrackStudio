@@ -8,13 +8,13 @@ use chrono::{DateTime, Utc};
 use crate::calendar_event::{CalendarEvent, CalendarEventStatus};
 use crate::client::Client;
 use crate::email::EmailRef;
-use crate::index::{ChangeRow, ConflictRow};
 use crate::expense::{Expense, ExpenseCreateRequest, ExpenseFilter, ExpensePatch, ExpenseReport};
+use crate::index::{ChangeRow, ConflictRow};
 use crate::invoice::Invoice;
 use crate::people::{
     OrganizationContext, OrganizationRecord, Person, PersonContext, ProviderConflict,
 };
-use crate::project::{Project, ProjectStats};
+use crate::project::{Project, ProjectDashboardEntry, ProjectStats};
 use crate::provider::{
     ChannelConversation, ChannelMessage, ChannelSendMessageRequest, MailAccount, MailMessage,
     MailMessageDetail, MailTag, Mailbox,
@@ -91,6 +91,9 @@ pub trait ProjectService {
 
     /// Return task count stats for a project.
     async fn project_stats(&self, project_title: String) -> ProjectStats;
+
+    /// Return the active project dashboard sorted by urgency.
+    async fn project_dashboard(&self) -> Vec<ProjectDashboardEntry>;
 
     /// Return the next actionable task for a project.
     async fn next_task(&self, project_title: String) -> Option<Task>;
@@ -223,10 +226,7 @@ pub trait InvoiceService {
 #[vox::service]
 pub trait ExpenseService {
     /// Create a new expense entry.
-    async fn create_expense(
-        &self,
-        request: ExpenseCreateRequest,
-    ) -> Result<Expense, VaultError>;
+    async fn create_expense(&self, request: ExpenseCreateRequest) -> Result<Expense, VaultError>;
 
     /// Return all expenses matching the filter, newest first.
     async fn list_expenses(&self, filter: ExpenseFilter) -> Vec<Expense>;

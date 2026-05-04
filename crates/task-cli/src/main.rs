@@ -1359,6 +1359,11 @@ enum ProjectCommands {
         #[arg(long)]
         json: bool,
     },
+    /// Show the project dashboard / portfolio view
+    Dashboard {
+        #[arg(long)]
+        json: bool,
+    },
     /// Show the next actionable task for a project
     Next {
         name: String,
@@ -2814,6 +2819,13 @@ async fn main() -> eyre::Result<()> {
                     println!("  Progress:  {:.0}%", pct);
                 }
             }
+        }
+
+        Commands::Project {
+            command: ProjectCommands::Dashboard { json },
+        } => {
+            let dashboard = svc.project_dashboard().await;
+            print_project_dashboard(&dashboard, json);
         }
 
         Commands::Project {
@@ -4520,6 +4532,10 @@ async fn run_remote_project_command(
             } else {
                 print_projects_table(&projects);
             }
+        }
+        ProjectCommands::Dashboard { json } => {
+            let dashboard = client.project_dashboard().await?;
+            print_project_dashboard(&dashboard, json);
         }
         ProjectCommands::Stats { name, json } => {
             let stats = client.project_stats(name.clone()).await?;
@@ -6706,6 +6722,105 @@ fn print_projects_table(projects: &[Project]) {
         println!("{:<name_w$}  {:<10}  {}", p.title, state, due);
     }
     println!("\n{} project(s)", projects.len());
+}
+
+fn project_dashboard_bucket_label(bucket: &task_core::ProjectDashboardBucket) -> &'static str {
+    match bucket {
+        task_core::ProjectDashboardBucket::Overdue => "overdue",
+        task_core::ProjectDashboardBucket::DueSoon => "due soon",
+        task_core::ProjectDashboardBucket::Active => "active",
+        task_core::ProjectDashboardBucket::NoOpenTasks => "done",
+    }
+}
+
+fn project_progress_bar(percent: Option<f32>) -> String {
+    let Some(percent) = percent else {
+        return "—".to_string();
+    };
+    let width = 10usize;
+    let filled = ((percent / 100.0) * width as f32)
+        .round()
+        .clamp(0.0, width as f32) as usize;
+    format!(
+        "[{}{}] {:>3.0}%",
+        "█".repeat(filled),
+        "░".repeat(width - filled),
+        percent
+    )
+}
+
+fn print_project_dashboard(entries: &[task_core::ProjectDashboardEntry], json: bool) {
+    if json {
+        println!("{}", facet_json::to_string(entries).unwrap_or_default());
+        return;
+    }
+
+    if entries.is_empty() {
+        println!("No active projects.");
+        return;
+    }
+
+    let name_w = entries
+        .iter()
+        .map(|entry| entry.project.title.len())
+        .max()
+        .unwrap_or(10)
+        .max(10)
+        .min(36)
+        + 2;
+    let next_w = entries
+        .iter()
+        .map(|entry| {
+            entry
+                .next_task
+                .as_ref()
+                .map(|task| task.title.len())
+                .unwrap_or(12)
+        })
+        .max()
+        .unwrap_or(12)
+        .max(12)
+        .min(32)
+        + 2;
+
+    println!(
+        "{:<name_w$}  {:<10}  {:<next_w$}  {:<16}  {:<5}  {:<4}  {}",
+        "PROJECT", "BUCKET", "NEXT", "PROGRESS", "OPEN", "OVD", "DUE"
+    );
+    println!("{}", "─".repeat(name_w + next_w + 45));
+
+    for entry in entries {
+        let next = entry
+            .next_task
+            .as_ref()
+            .map(|task| truncate(&task.title, next_w))
+            .unwrap_or_else(|| "nothing left".to_string());
+        let progress = project_progress_bar(entry.completion_percent);
+        let due = entry
+            .project
+            .due
+            .map(|d| {
+                let due = d.to_string();
+                if entry.project.is_overdue() {
+                    format!("!{due}")
+                } else {
+                    due
+                }
+            })
+            .unwrap_or_else(|| "—".to_string());
+        println!(
+            "{:<name_w$}  {:<10}  {:<next_w$}  {:<16}  {:<5}  {:<4}  {}",
+            truncate(&entry.project.title, name_w),
+            project_dashboard_bucket_label(&entry.bucket),
+            next,
+            progress,
+            entry.stats.open_task_count,
+            entry.overdue_task_count,
+            due
+        );
+    }
+
+    println!("\n{} project(s)", entries.len());
 }
 
 fn print_sync_stats(stats: &SyncStats) {

@@ -8,22 +8,25 @@ use chrono::{DateTime, Datelike, NaiveDate, Utc};
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
+use crate::expense::{
+    build_expense_report, format_expense_id, matches_expense_filter, parse_expense_status, Expense,
+    ExpenseCreateRequest, ExpenseFilter, ExpensePatch, ExpenseReport, ExpenseStatus,
+};
 use crate::index::TaskIndex;
 use crate::people::{
     CommunicationRef, ContactMethod, OrganizationContext, OrganizationRecord, Person,
     PersonContext, ProviderConflict, ProviderConflictField, ProviderRef,
 };
-use crate::project::{next_task as find_next_task, Project, ProjectStats};
+use crate::project::{
+    next_task as find_next_task, project_dashboard as build_project_dashboard, Project,
+    ProjectDashboardEntry, ProjectStats,
+};
 use crate::provider::{
     ChannelConversation, ChannelMessage, ChannelSendMessageRequest, CommunicationChannelProvider,
     TalkClient, TalkConfig,
 };
 use crate::query::Query;
 use crate::rrule;
-use crate::expense::{
-    build_expense_report, format_expense_id, matches_expense_filter, parse_expense_status,
-    Expense, ExpenseCreateRequest, ExpenseFilter, ExpensePatch, ExpenseReport, ExpenseStatus,
-};
 use crate::service::{
     BusinessFinanceClientSummary, BusinessFinanceReport, CalDavDeleteObjectRequest,
     CalDavDiscovery, CalDavFreeBusyInterval, CalDavFreeBusyRequest, CalDavMultigetRequest,
@@ -691,6 +694,12 @@ impl VaultServiceImpl {
             .filter(|t| t.projects.iter().any(|p| p.0 == project_title))
             .collect();
         ProjectStats::from_tasks(&refs)
+    }
+
+    pub async fn project_dashboard(&self) -> Vec<ProjectDashboardEntry> {
+        let projects = self.list_projects().await;
+        let tasks = self.list_tasks().await;
+        build_project_dashboard(&projects, &tasks)
     }
 
     // r[impl api.service.next-task]
@@ -2161,8 +2170,9 @@ impl VaultServiceImpl {
             .ok_or_else(|| VaultError::NotFound(expense_id.to_string()))?;
         let now = Utc::now();
         if let Some(status) = patch.status.as_deref() {
-            expense.status = parse_expense_status(status)
-                .ok_or_else(|| VaultError::ParseError(format!("invalid expense status: {status}")))?;
+            expense.status = parse_expense_status(status).ok_or_else(|| {
+                VaultError::ParseError(format!("invalid expense status: {status}"))
+            })?;
         }
         if let Some(date) = patch.date.as_deref() {
             expense.date = NaiveDate::parse_from_str(date, "%Y-%m-%d")
@@ -2189,22 +2199,38 @@ impl VaultServiceImpl {
             };
         }
         if let Some(category) = patch.category {
-            expense.category = if category.trim().is_empty() { None } else { Some(category) };
+            expense.category = if category.trim().is_empty() {
+                None
+            } else {
+                Some(category)
+            };
         }
         if let Some(vendor) = patch.vendor {
-            expense.vendor = if vendor.trim().is_empty() { None } else { Some(vendor) };
+            expense.vendor = if vendor.trim().is_empty() {
+                None
+            } else {
+                Some(vendor)
+            };
         }
         if let Some(description) = patch.description {
             expense.description = description;
         }
         if let Some(receipt) = patch.receipt {
-            expense.receipt = if receipt.trim().is_empty() { None } else { Some(receipt) };
+            expense.receipt = if receipt.trim().is_empty() {
+                None
+            } else {
+                Some(receipt)
+            };
         }
         if let Some(reimbursable) = patch.reimbursable {
             expense.reimbursable = reimbursable;
         }
         if let Some(notes) = patch.notes {
-            expense.notes = if notes.trim().is_empty() { None } else { Some(notes) };
+            expense.notes = if notes.trim().is_empty() {
+                None
+            } else {
+                Some(notes)
+            };
         }
         expense.date_modified = Some(now);
         vault.save_expense(&expense)?;
@@ -4276,6 +4302,9 @@ impl crate::service::ProjectService for VaultServiceImpl {
     async fn project_stats(&self, project_title: String) -> ProjectStats {
         self.project_stats(project_title).await
     }
+    async fn project_dashboard(&self) -> Vec<ProjectDashboardEntry> {
+        VaultServiceImpl::project_dashboard(self).await
+    }
     async fn next_task(&self, project_title: String) -> Option<Task> {
         self.next_task(project_title).await
     }
@@ -4428,10 +4457,7 @@ impl crate::service::PeopleService for VaultServiceImpl {
 }
 
 impl crate::service::ExpenseService for VaultServiceImpl {
-    async fn create_expense(
-        &self,
-        request: ExpenseCreateRequest,
-    ) -> Result<Expense, VaultError> {
+    async fn create_expense(&self, request: ExpenseCreateRequest) -> Result<Expense, VaultError> {
         VaultServiceImpl::create_expense(self, request).await
     }
 
