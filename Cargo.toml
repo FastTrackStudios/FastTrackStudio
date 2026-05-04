@@ -26,7 +26,7 @@ thiserror = "2.0"
 tracing = "0.1"
 
 [workspace.dependencies.facet]
-version = "0.44.1"
+version = "0.46"
 features = [
     "reflect",
     "chrono",
@@ -34,19 +34,19 @@ features = [
 ]
 
 [workspace.dependencies.facet-core]
-version = "0.44.1"
+version = "0.46"
 
 [workspace.dependencies.facet-json]
-version = "0.44.1"
+version = "0.46"
 
 [workspace.dependencies.facet-pretty]
-version = "0.44.1"
+version = "0.46"
 
 [workspace.dependencies.facet-reflect]
-version = "0.44.1"
+version = "0.46"
 
 [workspace.dependencies.facet-yaml]
-version = "0.44.1"
+version = "0.46"
 
 [workspace.dependencies.lumen-blocks]
 git = "https://github.com/Leaf-Computer/lumen-blocks.git"
