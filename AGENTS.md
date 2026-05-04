@@ -30,3 +30,4 @@ btca resources   # list all available resources
 | `vox` | bearcove/vox | Rust-native RPC framework where Rust traits are the schema, with TS/Swift codegen |
 | `figue` | bearcove/figue | Config parsing from CLI args, env vars, and config files using facet reflection |
 | `styx` | bearcove/styx | Cleaner serialization format — alternative to JSON/YAML with schema support |
+| `capn` | bearcove/capn | Git pre-commit/pre-push automation for formatting and validation |
