@@ -1,5 +1,9 @@
 use chrono::{DateTime, NaiveDate, TimeZone, Utc};
 use clap::{Parser, Subcommand};
+use task_core::asset::{
+    render_asset_body, AssetCreateRequest, AssetFilter, AssetMaintenanceRequest, AssetPatch,
+    AssetRepairRequest, AssetReserveRequest,
+};
 use task_core::expense::{
     render_expense_body, render_expense_report, ExpenseCreateRequest, ExpenseFilter, ExpensePatch,
 };
@@ -260,6 +264,11 @@ enum Commands {
     Github {
         #[command(subcommand)]
         command: GithubCommands,
+    },
+    /// Asset inventory and maintenance tracking
+    Asset {
+        #[command(subcommand)]
+        command: AssetCommands,
     },
     /// Nextcloud Talk — conversational surface for bots and humans
     Talk {
@@ -992,6 +1001,248 @@ enum ExpenseCommands {
     },
     /// Delete an expense
     Delete { id: String },
+}
+
+#[derive(Subcommand)]
+enum AssetCommands {
+    /// Create a new asset
+    Create {
+        name: String,
+        #[arg(long)]
+        status: Option<String>,
+        #[arg(long)]
+        manufacturer: Option<String>,
+        #[arg(long)]
+        model: Option<String>,
+        #[arg(long = "serial-number")]
+        serial_number: Option<String>,
+        #[arg(long)]
+        category: Option<String>,
+        #[arg(long)]
+        organization: Option<String>,
+        #[arg(long)]
+        location: Option<String>,
+        #[arg(long)]
+        space: Option<String>,
+        #[arg(long = "rack-or-case")]
+        rack_or_case: Option<String>,
+        #[arg(long = "assigned-to")]
+        assigned_to: Option<String>,
+        #[arg(long = "purchase-date")]
+        purchase_date: Option<String>,
+        #[arg(long = "warranty-until")]
+        warranty_until: Option<String>,
+        #[arg(long)]
+        vendor: Option<String>,
+        #[arg(long = "cost-cents")]
+        cost_cents: Option<u64>,
+        #[arg(long)]
+        notes: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// List assets
+    List {
+        #[arg(long)]
+        location: Option<String>,
+        #[arg(long)]
+        space: Option<String>,
+        #[arg(long)]
+        status: Option<String>,
+        #[arg(long)]
+        category: Option<String>,
+        #[arg(long)]
+        organization: Option<String>,
+        #[arg(long)]
+        query: Option<String>,
+        #[arg(long = "needs-repair-only")]
+        needs_repair_only: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show a single asset
+    Show {
+        id: String,
+        #[arg(long)]
+        md: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show an asset inventory report
+    Report {
+        #[arg(long)]
+        location: Option<String>,
+        #[arg(long)]
+        space: Option<String>,
+        #[arg(long)]
+        status: Option<String>,
+        #[arg(long)]
+        category: Option<String>,
+        #[arg(long)]
+        organization: Option<String>,
+        #[arg(long)]
+        query: Option<String>,
+        #[arg(long = "needs-repair-only")]
+        needs_repair_only: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Update an asset
+    Update {
+        id: String,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        status: Option<String>,
+        #[arg(long)]
+        manufacturer: Option<String>,
+        #[arg(long)]
+        model: Option<String>,
+        #[arg(long = "serial-number")]
+        serial_number: Option<String>,
+        #[arg(long)]
+        category: Option<String>,
+        #[arg(long)]
+        organization: Option<String>,
+        #[arg(long)]
+        location: Option<String>,
+        #[arg(long)]
+        space: Option<String>,
+        #[arg(long = "rack-or-case")]
+        rack_or_case: Option<String>,
+        #[arg(long = "assigned-to")]
+        assigned_to: Option<String>,
+        #[arg(long = "purchase-date")]
+        purchase_date: Option<String>,
+        #[arg(long = "warranty-until")]
+        warranty_until: Option<String>,
+        #[arg(long)]
+        vendor: Option<String>,
+        #[arg(long = "cost-cents")]
+        cost_cents: Option<Option<u64>>,
+        #[arg(long)]
+        notes: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Move an asset to a location / space / rack or case
+    Move {
+        id: String,
+        #[arg(long = "to")]
+        location: String,
+        #[arg(long)]
+        space: Option<String>,
+        #[arg(long = "rack-or-case")]
+        rack_or_case: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Change an asset status
+    Status {
+        id: String,
+        status: String,
+        #[arg(long)]
+        notes: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Record maintenance for an asset
+    Maintain {
+        id: String,
+        #[arg(long)]
+        date: Option<String>,
+        #[arg(long)]
+        issue: String,
+        #[arg(long)]
+        vendor: Option<String>,
+        #[arg(long)]
+        contact: Option<String>,
+        #[arg(long = "cost-cents")]
+        cost_cents: Option<u64>,
+        #[arg(long)]
+        warranty: bool,
+        #[arg(long)]
+        rma: Option<String>,
+        #[arg(long)]
+        task: Option<String>,
+        #[arg(long)]
+        notes: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Open repair work for an asset and link the created task
+    Repair {
+        #[command(subcommand)]
+        command: AssetRepairCommands,
+    },
+    /// Reserve an asset for an event, booking, project, or freeform reference
+    Reserve {
+        id: String,
+        #[arg(long = "for")]
+        reference: String,
+        #[arg(long)]
+        from: Option<String>,
+        #[arg(long)]
+        to: Option<String>,
+        #[arg(long = "reserved-by")]
+        reserved_by: Option<String>,
+        #[arg(long)]
+        notes: Option<String>,
+        #[arg(long)]
+        force: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Release an asset reservation by id or reference
+    Release {
+        id: String,
+        reservation: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// List reservation and availability conflicts
+    Conflicts {
+        #[arg(long)]
+        location: Option<String>,
+        #[arg(long)]
+        space: Option<String>,
+        #[arg(long)]
+        status: Option<String>,
+        #[arg(long)]
+        category: Option<String>,
+        #[arg(long)]
+        organization: Option<String>,
+        #[arg(long)]
+        query: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Delete an asset
+    Delete { id: String },
+}
+
+#[derive(Subcommand)]
+enum AssetRepairCommands {
+    /// Create and link a repair task
+    Open {
+        id: String,
+        #[arg(long)]
+        title: String,
+        #[arg(long)]
+        notes: Option<String>,
+        #[arg(long)]
+        vendor: Option<String>,
+        #[arg(long)]
+        contact: Option<String>,
+        #[arg(long = "cost-cents")]
+        cost_cents: Option<u64>,
+        #[arg(long)]
+        warranty: bool,
+        #[arg(long)]
+        rma: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -2067,6 +2318,7 @@ async fn main() -> eyre::Result<()> {
 
         Commands::Talk { .. } => unreachable!("handled above"),
         Commands::Nc { .. } => unreachable!("handled above"),
+        Commands::Asset { command } => run_asset_command(&svc, actor.as_deref(), command).await?,
 
         Commands::Client {
             command:
@@ -4189,6 +4441,9 @@ async fn run_remote_command(
             let client: task_core::service::ExpenseServiceClient = remote.connect().await?;
             run_remote_expense_command(&client, actor, command).await?
         }
+        Commands::Asset { .. } => {
+            eyre::bail!("asset commands are currently supported only in local vault mode")
+        }
         Commands::Start {
             reference,
             description,
@@ -5044,6 +5299,432 @@ async fn run_expense_command(
         ExpenseCommands::Delete { id } => {
             svc.delete_expense(&id).await?;
             println!("Deleted expense {id}.");
+        }
+    }
+
+    Ok(())
+}
+
+async fn run_asset_command(
+    svc: &VaultServiceImpl,
+    actor: Option<&str>,
+    command: AssetCommands,
+) -> eyre::Result<()> {
+    let parse_date = |s: &str| -> eyre::Result<NaiveDate> {
+        s.parse::<NaiveDate>()
+            .map_err(|_| eyre::eyre!("Invalid date: {s}"))
+    };
+
+    match command {
+        AssetCommands::Create {
+            name,
+            status,
+            manufacturer,
+            model,
+            serial_number,
+            category,
+            organization,
+            location,
+            space,
+            rack_or_case,
+            assigned_to,
+            purchase_date,
+            warranty_until,
+            vendor,
+            cost_cents,
+            notes,
+            json,
+        } => {
+            let asset = svc
+                .create_asset(AssetCreateRequest {
+                    name,
+                    status,
+                    manufacturer,
+                    model,
+                    serial_number,
+                    category,
+                    organization,
+                    location,
+                    space,
+                    rack_or_case,
+                    assigned_to,
+                    purchase_date: purchase_date.as_deref().map(parse_date).transpose()?,
+                    warranty_until: warranty_until.as_deref().map(parse_date).transpose()?,
+                    vendor,
+                    cost_cents,
+                    notes,
+                    actor: actor.map(str::to_string),
+                })
+                .await?;
+            if json {
+                println!("{}", facet_json::to_string(&asset).unwrap_or_default());
+            } else {
+                println!("Created asset {}.", asset.id);
+                println!("{}", render_asset_body(&asset));
+            }
+        }
+        AssetCommands::List {
+            location,
+            space,
+            status,
+            category,
+            organization,
+            query,
+            needs_repair_only,
+            json,
+        } => {
+            let filter = AssetFilter {
+                location,
+                space,
+                status,
+                category,
+                organization,
+                query,
+                needs_repair_only,
+            };
+            let assets = svc.list_assets(filter).await;
+            if json {
+                println!("{}", facet_json::to_string(&assets).unwrap_or_default());
+            } else if assets.is_empty() {
+                println!("No assets.");
+            } else {
+                for asset in assets {
+                    println!(
+                        "{}  {:<12}  {:<10}  {}",
+                        asset.id,
+                        format!("{:?}", asset.status),
+                        asset.category.clone().unwrap_or_else(|| "-".into()),
+                        asset.name
+                    );
+                }
+            }
+        }
+        AssetCommands::Show { id, md, json } => {
+            let asset = svc
+                .get_asset(&id)
+                .await
+                .ok_or_else(|| eyre::eyre!("Asset not found: {id}"))?;
+            if json {
+                println!("{}", facet_json::to_string(&asset).unwrap_or_default());
+            } else if md {
+                println!("{}", render_asset_body(&asset));
+            } else {
+                println!("{}", render_asset_body(&asset));
+            }
+        }
+        AssetCommands::Report {
+            location,
+            space,
+            status,
+            category,
+            organization,
+            query,
+            needs_repair_only,
+            json,
+        } => {
+            let report = svc
+                .asset_report(AssetFilter {
+                    location,
+                    space,
+                    status,
+                    category,
+                    organization,
+                    query,
+                    needs_repair_only,
+                })
+                .await;
+            if json {
+                println!("{}", facet_json::to_string(&report).unwrap_or_default());
+            } else {
+                println!(
+                    "Assets: {}  Status buckets: {}  Category buckets: {}  Org buckets: {}",
+                    report.asset_count,
+                    report.by_status.len(),
+                    report.by_category.len(),
+                    report.by_organization.len()
+                );
+                for asset in report.assets.iter().take(10) {
+                    println!(
+                        "{}  {:<12}  {:<10}  {}",
+                        asset.id,
+                        format!("{:?}", asset.status),
+                        asset.category.clone().unwrap_or_else(|| "-".into()),
+                        asset.name
+                    );
+                }
+            }
+        }
+        AssetCommands::Update {
+            id,
+            name,
+            status,
+            manufacturer,
+            model,
+            serial_number,
+            category,
+            organization,
+            location,
+            space,
+            rack_or_case,
+            assigned_to,
+            purchase_date,
+            warranty_until,
+            vendor,
+            cost_cents,
+            notes,
+            json,
+        } => {
+            let asset = svc
+                .update_asset(
+                    &id,
+                    AssetPatch {
+                        name,
+                        status,
+                        manufacturer,
+                        model,
+                        serial_number,
+                        category,
+                        organization,
+                        location,
+                        space,
+                        rack_or_case,
+                        assigned_to,
+                        purchase_date,
+                        warranty_until,
+                        vendor,
+                        cost_cents,
+                        notes,
+                    },
+                    actor,
+                )
+                .await?;
+            if json {
+                println!("{}", facet_json::to_string(&asset).unwrap_or_default());
+            } else {
+                println!("Updated asset {}.", asset.id);
+                println!("{}", render_asset_body(&asset));
+            }
+        }
+        AssetCommands::Move {
+            id,
+            location,
+            space,
+            rack_or_case,
+            json,
+        } => {
+            let asset = svc
+                .update_asset(
+                    &id,
+                    AssetPatch {
+                        location: Some(location),
+                        space,
+                        rack_or_case,
+                        ..AssetPatch::default()
+                    },
+                    actor,
+                )
+                .await?;
+            if json {
+                println!("{}", facet_json::to_string(&asset).unwrap_or_default());
+            } else {
+                println!("Moved asset {}.", asset.id);
+                println!("{}", render_asset_body(&asset));
+            }
+        }
+        AssetCommands::Status {
+            id,
+            status,
+            notes,
+            json,
+        } => {
+            let asset = svc
+                .update_asset(
+                    &id,
+                    AssetPatch {
+                        status: Some(status),
+                        notes,
+                        ..AssetPatch::default()
+                    },
+                    actor,
+                )
+                .await?;
+            if json {
+                println!("{}", facet_json::to_string(&asset).unwrap_or_default());
+            } else {
+                println!("Updated asset {} status.", asset.id);
+                println!("{}", render_asset_body(&asset));
+            }
+        }
+        AssetCommands::Maintain {
+            id,
+            date,
+            issue,
+            vendor,
+            contact,
+            cost_cents,
+            warranty,
+            rma,
+            task,
+            notes,
+            json,
+        } => {
+            let asset = svc
+                .log_asset_maintenance(
+                    &id,
+                    AssetMaintenanceRequest {
+                        date: date.as_deref().map(parse_date).transpose()?,
+                        issue,
+                        vendor,
+                        contact,
+                        cost_cents,
+                        warranty,
+                        rma,
+                        task,
+                        notes,
+                    },
+                    actor,
+                )
+                .await?;
+            if json {
+                println!("{}", facet_json::to_string(&asset).unwrap_or_default());
+            } else {
+                println!("Logged maintenance for asset {}.", asset.id);
+                println!("{}", render_asset_body(&asset));
+            }
+        }
+        AssetCommands::Repair { command } => match command {
+            AssetRepairCommands::Open {
+                id,
+                title,
+                notes,
+                vendor,
+                contact,
+                cost_cents,
+                warranty,
+                rma,
+                json,
+            } => {
+                let response = svc
+                    .open_asset_repair(
+                        &id,
+                        AssetRepairRequest {
+                            title,
+                            notes,
+                            vendor,
+                            contact,
+                            cost_cents,
+                            warranty,
+                            rma,
+                            actor: actor.map(str::to_string),
+                        },
+                    )
+                    .await?;
+                if json {
+                    println!("{}", facet_json::to_string(&response).unwrap_or_default());
+                } else {
+                    println!("Opened repair task for asset {}.", response.asset.id);
+                    println!(
+                        "Task: {} ({})",
+                        response.task.title,
+                        response.task.id.as_deref().unwrap_or("no id")
+                    );
+                    println!("{}", render_asset_body(&response.asset));
+                }
+            }
+        },
+        AssetCommands::Reserve {
+            id,
+            reference,
+            from,
+            to,
+            reserved_by,
+            notes,
+            force,
+            json,
+        } => {
+            let response = svc
+                .reserve_asset(
+                    &id,
+                    AssetReserveRequest {
+                        reference,
+                        starts_at: from.as_deref().map(parse_datetime).transpose()?,
+                        ends_at: to.as_deref().map(parse_datetime).transpose()?,
+                        reserved_by,
+                        notes,
+                        force,
+                    },
+                )
+                .await?;
+            if json {
+                println!("{}", facet_json::to_string(&response).unwrap_or_default());
+            } else {
+                println!(
+                    "Reserved asset {} for {}.",
+                    response.asset.id, response.reservation.reference.0
+                );
+                if !response.conflicts.is_empty() {
+                    println!("Conflicts:");
+                    for conflict in &response.conflicts {
+                        println!("  - {}: {}", conflict.asset_name, conflict.reason);
+                    }
+                }
+                println!("{}", render_asset_body(&response.asset));
+            }
+        }
+        AssetCommands::Release {
+            id,
+            reservation,
+            json,
+        } => {
+            let asset = svc.release_asset_reservation(&id, &reservation).await?;
+            if json {
+                println!("{}", facet_json::to_string(&asset).unwrap_or_default());
+            } else {
+                println!("Released reservation from asset {}.", asset.id);
+                println!("{}", render_asset_body(&asset));
+            }
+        }
+        AssetCommands::Conflicts {
+            location,
+            space,
+            status,
+            category,
+            organization,
+            query,
+            json,
+        } => {
+            let conflicts = svc
+                .asset_conflicts(AssetFilter {
+                    location,
+                    space,
+                    status,
+                    category,
+                    organization,
+                    query,
+                    needs_repair_only: false,
+                })
+                .await;
+            if json {
+                println!("{}", facet_json::to_string(&conflicts).unwrap_or_default());
+            } else if conflicts.is_empty() {
+                println!("No asset conflicts.");
+            } else {
+                for conflict in conflicts {
+                    let reservation = conflict
+                        .reservation
+                        .as_ref()
+                        .map(|reservation| reservation.reference.0.as_str())
+                        .unwrap_or("-");
+                    println!(
+                        "{}  {}  {}",
+                        conflict.asset_id, reservation, conflict.reason
+                    );
+                }
+            }
+        }
+        AssetCommands::Delete { id } => {
+            svc.delete_asset(&id).await?;
+            println!("Deleted asset {id}.");
         }
     }
 

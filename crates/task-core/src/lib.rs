@@ -1,4 +1,5 @@
 pub mod agent;
+pub mod asset;
 pub mod calendar_event;
 pub mod capture;
 pub mod client;
@@ -42,6 +43,12 @@ pub mod crdt;
 pub use agent::{
     build_agent_plan, AgentPlan, AgentPlanEdge, AgentPlanNode, AgentPlanNodeKind,
     AgentPlanNodeStatus,
+};
+pub use asset::{
+    format_asset_id, Asset, AssetBucket, AssetConflict, AssetCreateRequest, AssetFilter,
+    AssetMaintenanceRecord, AssetMaintenanceRequest, AssetPatch, AssetRepairRequest,
+    AssetRepairResponse, AssetReport, AssetReservationRecord, AssetReservationResponse,
+    AssetReserveRequest, AssetStatus,
 };
 pub use calendar_event::{CalendarEvent, CalendarEventStatus};
 pub use capture::{parse_capture, CaptureInput};

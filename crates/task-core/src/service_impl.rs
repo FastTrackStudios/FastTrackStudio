@@ -8,6 +8,13 @@ use chrono::{DateTime, Datelike, NaiveDate, Utc};
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
+use crate::asset::{
+    build_asset_report, collect_asset_conflicts, conflicts_for_reservation, format_asset_id,
+    matches_asset_filter, parse_asset_status, Asset, AssetConflict, AssetCreateRequest,
+    AssetFilter, AssetMaintenanceRecord, AssetMaintenanceRequest, AssetPatch, AssetRepairRequest,
+    AssetRepairResponse, AssetReport, AssetReservationRecord, AssetReservationResponse,
+    AssetReserveRequest, AssetStatus,
+};
 use crate::expense::{
     build_expense_report, format_expense_id, matches_expense_filter, parse_expense_status, Expense,
     ExpenseCreateRequest, ExpenseFilter, ExpensePatch, ExpenseReport, ExpenseStatus,
@@ -2101,6 +2108,379 @@ impl VaultServiceImpl {
             .max()
             .unwrap_or(0);
         Ok(max + 1)
+    }
+
+    async fn next_asset_number(&self, year: i32) -> Result<u32, VaultError> {
+        let prefix = format!("AST-{year:04}-");
+        let max = self
+            .vault
+            .read()
+            .await
+            .load_assets()
+            .into_iter()
+            .filter(|asset| asset.id.starts_with(&prefix))
+            .map(|asset| asset.number)
+            .max()
+            .unwrap_or(0);
+        Ok(max + 1)
+    }
+
+    pub async fn list_assets(&self, filter: AssetFilter) -> Vec<Asset> {
+        let mut assets = self.vault.read().await.load_assets();
+        assets.retain(|asset| matches_asset_filter(asset, &filter));
+        assets.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.number.cmp(&b.number)));
+        assets
+    }
+
+    pub async fn get_asset(&self, asset_id: &str) -> Option<Asset> {
+        self.vault
+            .read()
+            .await
+            .load_assets()
+            .into_iter()
+            .find(|asset| {
+                asset.id.eq_ignore_ascii_case(asset_id) || asset.name.eq_ignore_ascii_case(asset_id)
+            })
+    }
+
+    pub async fn create_asset(&self, request: AssetCreateRequest) -> Result<Asset, VaultError> {
+        let now = Utc::now();
+        let number = self.next_asset_number(now.year()).await?;
+        let id = format_asset_id(now.year(), number);
+        let asset = Asset {
+            id,
+            number,
+            name: request.name,
+            status: request
+                .status
+                .as_deref()
+                .and_then(parse_asset_status)
+                .unwrap_or(AssetStatus::Available),
+            manufacturer: request.manufacturer,
+            model: request.model,
+            serial_number: request.serial_number,
+            category: request.category,
+            organization: request.organization,
+            location: request.location.map(WikiLink),
+            space: request.space.map(WikiLink),
+            rack_or_case: request.rack_or_case,
+            assigned_to: request.assigned_to,
+            purchase_date: request.purchase_date,
+            warranty_until: request.warranty_until,
+            vendor: request.vendor,
+            cost_cents: request.cost_cents,
+            maintenance: Vec::new(),
+            reservations: Vec::new(),
+            linked_tasks: Vec::new(),
+            notes: request.notes,
+            created_by: request.actor,
+            date_created: Some(now),
+            date_modified: Some(now),
+            body: String::new(),
+        };
+        self.vault.read().await.save_asset(&asset)?;
+        Ok(asset)
+    }
+
+    pub async fn update_asset(
+        &self,
+        asset_id: &str,
+        patch: AssetPatch,
+        actor: Option<&str>,
+    ) -> Result<Asset, VaultError> {
+        let vault = self.vault.read().await;
+        let mut asset = vault
+            .load_assets()
+            .into_iter()
+            .find(|asset| {
+                asset.id.eq_ignore_ascii_case(asset_id) || asset.name.eq_ignore_ascii_case(asset_id)
+            })
+            .ok_or_else(|| VaultError::NotFound(asset_id.to_string()))?;
+        let now = Utc::now();
+        if let Some(name) = patch.name {
+            asset.name = name;
+        }
+        if let Some(status) = patch.status.as_deref() {
+            asset.status = parse_asset_status(status)
+                .ok_or_else(|| VaultError::ParseError(format!("invalid asset status: {status}")))?;
+        }
+        if let Some(v) = patch.manufacturer {
+            asset.manufacturer = if v.trim().is_empty() { None } else { Some(v) };
+        }
+        if let Some(v) = patch.model {
+            asset.model = if v.trim().is_empty() { None } else { Some(v) };
+        }
+        if let Some(v) = patch.serial_number {
+            asset.serial_number = if v.trim().is_empty() { None } else { Some(v) };
+        }
+        if let Some(v) = patch.category {
+            asset.category = if v.trim().is_empty() { None } else { Some(v) };
+        }
+        if let Some(v) = patch.organization {
+            asset.organization = if v.trim().is_empty() { None } else { Some(v) };
+        }
+        if let Some(v) = patch.location {
+            asset.location = if v.trim().is_empty() || v == "clear" {
+                None
+            } else {
+                Some(WikiLink(v))
+            };
+        }
+        if let Some(v) = patch.space {
+            asset.space = if v.trim().is_empty() || v == "clear" {
+                None
+            } else {
+                Some(WikiLink(v))
+            };
+        }
+        if let Some(v) = patch.rack_or_case {
+            asset.rack_or_case = if v.trim().is_empty() { None } else { Some(v) };
+        }
+        if let Some(v) = patch.assigned_to {
+            asset.assigned_to = if v.trim().is_empty() { None } else { Some(v) };
+        }
+        if let Some(v) = patch.purchase_date {
+            asset.purchase_date = if v.trim().is_empty() || v == "clear" {
+                None
+            } else {
+                Some(
+                    NaiveDate::parse_from_str(&v, "%Y-%m-%d")
+                        .map_err(|e| VaultError::ParseError(e.to_string()))?,
+                )
+            };
+        }
+        if let Some(v) = patch.warranty_until {
+            asset.warranty_until = if v.trim().is_empty() || v == "clear" {
+                None
+            } else {
+                Some(
+                    NaiveDate::parse_from_str(&v, "%Y-%m-%d")
+                        .map_err(|e| VaultError::ParseError(e.to_string()))?,
+                )
+            };
+        }
+        if let Some(v) = patch.vendor {
+            asset.vendor = if v.trim().is_empty() { None } else { Some(v) };
+        }
+        if let Some(v) = patch.cost_cents {
+            asset.cost_cents = v;
+        }
+        if let Some(v) = patch.notes {
+            asset.notes = if v.trim().is_empty() { None } else { Some(v) };
+        }
+        asset.date_modified = Some(now);
+        vault.save_asset(&asset)?;
+        if let Ok(guard) = self.index.lock() {
+            if let Some(ref idx) = *guard {
+                let _ = idx.record_change(
+                    "asset",
+                    &asset.id,
+                    Some("update"),
+                    None,
+                    None,
+                    actor,
+                    Some(&format!("assets/{}.md", asset.name)),
+                );
+            }
+        }
+        Ok(asset)
+    }
+
+    pub async fn log_asset_maintenance(
+        &self,
+        asset_id: &str,
+        request: AssetMaintenanceRequest,
+        actor: Option<&str>,
+    ) -> Result<Asset, VaultError> {
+        let vault = self.vault.read().await;
+        let mut asset = vault
+            .load_assets()
+            .into_iter()
+            .find(|asset| {
+                asset.id.eq_ignore_ascii_case(asset_id) || asset.name.eq_ignore_ascii_case(asset_id)
+            })
+            .ok_or_else(|| VaultError::NotFound(asset_id.to_string()))?;
+        let now = Utc::now();
+        asset.maintenance.push(AssetMaintenanceRecord {
+            date: request.date.unwrap_or_else(|| now.date_naive()),
+            issue: request.issue,
+            vendor: request.vendor,
+            contact: request.contact,
+            cost_cents: request.cost_cents,
+            warranty: request.warranty,
+            rma: request.rma,
+            task: request.task.map(WikiLink),
+            notes: request.notes,
+        });
+        asset.status = if asset.status == AssetStatus::Available {
+            AssetStatus::NeedsRepair
+        } else {
+            asset.status.clone()
+        };
+        asset.date_modified = Some(now);
+        vault.save_asset(&asset)?;
+        if let Ok(guard) = self.index.lock() {
+            if let Some(ref idx) = *guard {
+                let _ = idx.record_change(
+                    "asset",
+                    &asset.id,
+                    Some("update"),
+                    None,
+                    None,
+                    actor,
+                    Some(&format!("assets/{}.md", asset.name)),
+                );
+            }
+        }
+        Ok(asset)
+    }
+
+    pub async fn open_asset_repair(
+        &self,
+        asset_id: &str,
+        request: AssetRepairRequest,
+    ) -> Result<AssetRepairResponse, VaultError> {
+        let mut asset = self
+            .vault
+            .read()
+            .await
+            .load_assets()
+            .into_iter()
+            .find(|asset| {
+                asset.id.eq_ignore_ascii_case(asset_id) || asset.name.eq_ignore_ascii_case(asset_id)
+            })
+            .ok_or_else(|| VaultError::NotFound(asset_id.to_string()))?;
+
+        let task = self
+            .create_task(Task {
+                title: request.title.clone(),
+                status: Status::Open,
+                priority: Priority::Normal,
+                tags: vec!["asset".into(), "repair".into()],
+                body: request.notes.clone().unwrap_or_default(),
+                created_by: request.actor.clone(),
+                ..Task::default()
+            })
+            .await?;
+
+        let now = Utc::now();
+        let task_link = WikiLink(task.title.clone());
+        if !asset.linked_tasks.iter().any(|link| link.0 == task_link.0) {
+            asset.linked_tasks.push(task_link.clone());
+        }
+        asset.maintenance.push(AssetMaintenanceRecord {
+            date: now.date_naive(),
+            issue: request.title,
+            vendor: request.vendor,
+            contact: request.contact,
+            cost_cents: request.cost_cents,
+            warranty: request.warranty,
+            rma: request.rma,
+            task: Some(task_link),
+            notes: request.notes,
+        });
+        if matches!(
+            asset.status,
+            AssetStatus::Available
+                | AssetStatus::Reserved
+                | AssetStatus::InUse
+                | AssetStatus::MaintenanceDue
+        ) {
+            asset.status = AssetStatus::NeedsRepair;
+        }
+        asset.date_modified = Some(now);
+        self.vault.read().await.save_asset(&asset)?;
+
+        Ok(AssetRepairResponse { asset, task })
+    }
+
+    pub async fn reserve_asset(
+        &self,
+        asset_id: &str,
+        request: AssetReserveRequest,
+    ) -> Result<AssetReservationResponse, VaultError> {
+        let vault = self.vault.read().await;
+        let mut asset = vault
+            .load_assets()
+            .into_iter()
+            .find(|asset| {
+                asset.id.eq_ignore_ascii_case(asset_id) || asset.name.eq_ignore_ascii_case(asset_id)
+            })
+            .ok_or_else(|| VaultError::NotFound(asset_id.to_string()))?;
+        let reservation = AssetReservationRecord {
+            id: Uuid::new_v4().to_string(),
+            reference: WikiLink(request.reference),
+            starts_at: request.starts_at,
+            ends_at: request.ends_at,
+            reserved_by: request.reserved_by,
+            notes: request.notes,
+        };
+        let conflicts = conflicts_for_reservation(&asset, &reservation);
+        if !request.force && !conflicts.is_empty() {
+            return Err(VaultError::ParseError(format!(
+                "asset reservation has {} conflict(s); rerun with --force to record anyway",
+                conflicts.len()
+            )));
+        }
+
+        asset.reservations.push(reservation.clone());
+        if asset.status == AssetStatus::Available {
+            asset.status = AssetStatus::Reserved;
+        }
+        asset.date_modified = Some(Utc::now());
+        vault.save_asset(&asset)?;
+        Ok(AssetReservationResponse {
+            asset,
+            reservation,
+            conflicts,
+        })
+    }
+
+    pub async fn release_asset_reservation(
+        &self,
+        asset_id: &str,
+        reservation_ref: &str,
+    ) -> Result<Asset, VaultError> {
+        let vault = self.vault.read().await;
+        let mut asset = vault
+            .load_assets()
+            .into_iter()
+            .find(|asset| {
+                asset.id.eq_ignore_ascii_case(asset_id) || asset.name.eq_ignore_ascii_case(asset_id)
+            })
+            .ok_or_else(|| VaultError::NotFound(asset_id.to_string()))?;
+        let before = asset.reservations.len();
+        asset.reservations.retain(|reservation| {
+            reservation.id != reservation_ref
+                && !reservation
+                    .reference
+                    .0
+                    .eq_ignore_ascii_case(reservation_ref)
+        });
+        if asset.reservations.len() == before {
+            return Err(VaultError::NotFound(reservation_ref.to_string()));
+        }
+        if asset.status == AssetStatus::Reserved && asset.reservations.is_empty() {
+            asset.status = AssetStatus::Available;
+        }
+        asset.date_modified = Some(Utc::now());
+        vault.save_asset(&asset)?;
+        Ok(asset)
+    }
+
+    pub async fn asset_conflicts(&self, filter: AssetFilter) -> Vec<AssetConflict> {
+        let assets = self.list_assets(filter).await;
+        collect_asset_conflicts(&assets)
+    }
+
+    pub async fn delete_asset(&self, asset_id: &str) -> Result<(), VaultError> {
+        self.vault.read().await.delete_asset(asset_id)
+    }
+
+    pub async fn asset_report(&self, filter: AssetFilter) -> AssetReport {
+        let today = Utc::now().date_naive();
+        let assets = self.list_assets(filter).await;
+        build_asset_report(&assets, today)
     }
 
     pub async fn list_expenses(&self, filter: ExpenseFilter) -> Vec<Expense> {
@@ -5995,6 +6375,118 @@ mod tests {
             .any(|project| project == "Operations"));
         assert!(!promoted.tags.iter().any(|tag| tag == "inbox"));
         assert!(svc.list_inbox_items().await.is_empty());
+
+        let _ = std::fs::remove_dir_all(vault);
+    }
+
+    #[tokio::test]
+    async fn open_asset_repair_creates_task_and_links_asset() {
+        let vault = temp_vault();
+        let svc = VaultServiceImpl::new(&vault);
+
+        let asset = svc
+            .create_asset(AssetCreateRequest {
+                name: "Main vocal mic".to_string(),
+                status: Some("available".to_string()),
+                category: Some("audio".to_string()),
+                ..AssetCreateRequest::default()
+            })
+            .await
+            .unwrap();
+
+        let response = svc
+            .open_asset_repair(
+                &asset.id,
+                AssetRepairRequest {
+                    title: "Replace loose XLR connector".to_string(),
+                    notes: Some("Fails when cable moves".to_string()),
+                    vendor: Some("Bench tech".to_string()),
+                    actor: Some("agent".to_string()),
+                    ..AssetRepairRequest::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.asset.status, AssetStatus::NeedsRepair);
+        assert_eq!(response.asset.maintenance.len(), 1);
+        assert_eq!(
+            response.asset.maintenance[0]
+                .task
+                .as_ref()
+                .map(|task| task.0.as_str()),
+            Some(response.task.title.as_str())
+        );
+        assert!(response
+            .asset
+            .linked_tasks
+            .iter()
+            .any(|task| task.0 == response.task.title));
+
+        let tasks = svc.list_tasks().await;
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].title, "Replace loose XLR connector");
+        assert!(tasks[0].tags.iter().any(|tag| tag == "repair"));
+
+        let _ = std::fs::remove_dir_all(vault);
+    }
+
+    #[tokio::test]
+    async fn asset_reservations_flag_conflicts_and_can_be_released() {
+        let vault = temp_vault();
+        let svc = VaultServiceImpl::new(&vault);
+        let start = DateTime::parse_from_rfc3339("2026-05-04T20:00:00Z")
+            .unwrap()
+            .to_utc();
+        let end = DateTime::parse_from_rfc3339("2026-05-04T22:00:00Z")
+            .unwrap()
+            .to_utc();
+
+        let asset = svc
+            .create_asset(AssetCreateRequest {
+                name: "Playback rig".to_string(),
+                ..AssetCreateRequest::default()
+            })
+            .await
+            .unwrap();
+        let first = svc
+            .reserve_asset(
+                &asset.id,
+                AssetReserveRequest {
+                    reference: "Show A".to_string(),
+                    starts_at: Some(start),
+                    ends_at: Some(end),
+                    ..AssetReserveRequest::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert!(first.conflicts.is_empty());
+        assert_eq!(first.asset.status, AssetStatus::Reserved);
+
+        let overlap = svc
+            .reserve_asset(
+                &asset.id,
+                AssetReserveRequest {
+                    reference: "Show B".to_string(),
+                    starts_at: Some(start + chrono::Duration::hours(1)),
+                    ends_at: Some(end + chrono::Duration::hours(1)),
+                    force: true,
+                    ..AssetReserveRequest::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(overlap.conflicts.len(), 1);
+
+        let conflicts = svc.asset_conflicts(AssetFilter::default()).await;
+        assert!(!conflicts.is_empty());
+
+        let released = svc
+            .release_asset_reservation(&asset.id, &first.reservation.id)
+            .await
+            .unwrap();
+        assert_eq!(released.reservations.len(), 1);
 
         let _ = std::fs::remove_dir_all(vault);
     }

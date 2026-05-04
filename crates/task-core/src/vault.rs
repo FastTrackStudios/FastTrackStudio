@@ -2,6 +2,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::asset::Asset;
 use crate::client::Client;
 use crate::calendar_event::CalendarEvent;
 use crate::expense::Expense;
@@ -44,6 +45,17 @@ impl Vault {
         }
         Self::walk_md_in(&dir)
             .filter_map(|content| Self::parse_calendar_event_from_md(&content))
+            .collect()
+    }
+
+    /// Load all asset records.
+    pub fn load_assets(&self) -> Vec<Asset> {
+        let dir = self.root.join("assets");
+        if !dir.exists() {
+            return vec![];
+        }
+        Self::walk_md_in(&dir)
+            .filter_map(|content| Self::parse_asset_from_md(&content))
             .collect()
     }
 
@@ -217,6 +229,51 @@ impl Vault {
             }
         }
         Ok(())
+    }
+
+    pub fn render_asset_file(asset: &Asset, body: &str) -> Result<String, VaultError> {
+        let yaml = facet_yaml::to_string(asset)
+            .map_err(|e| VaultError::ParseError(e.to_string()))?;
+        let yaml = yaml.strip_prefix("---\n").unwrap_or(&yaml);
+        let body = if body.is_empty() { &asset.body } else { body };
+        Ok(format!("---\n{}---\n{}", yaml, body))
+    }
+
+    pub fn parse_asset_from_md(content: &str) -> Option<Asset> {
+        let (frontmatter, body) = Self::split_frontmatter(content)?;
+        let mut asset = facet_yaml::from_str::<Asset>(frontmatter).ok()?;
+        asset.body = body.to_string();
+        Some(asset)
+    }
+
+    pub fn save_asset(&self, asset: &Asset) -> Result<(), VaultError> {
+        let dir = self.root.join("assets");
+        std::fs::create_dir_all(&dir).map_err(|e| VaultError::IoError(e.to_string()))?;
+        let path = dir.join(format!("{}.md", safe_file_name(&asset.name)));
+        let body = if !asset.body.is_empty() {
+            asset.body.clone()
+        } else if path.exists() {
+            let content = fs::read_to_string(&path)
+                .map_err(|e| VaultError::IoError(e.to_string()))?;
+            Self::extract_body(&content).unwrap_or("").to_string()
+        } else {
+            String::new()
+        };
+        let content = Self::render_asset_file(asset, &body)?;
+        Self::atomic_write(&path, &content)
+    }
+
+    pub fn delete_asset(&self, asset_id: &str) -> Result<(), VaultError> {
+        for asset in self.load_assets() {
+            if asset.id.eq_ignore_ascii_case(asset_id) || asset.name.eq_ignore_ascii_case(asset_id) {
+                let path = self.root.join("assets").join(format!("{}.md", safe_file_name(&asset.name)));
+                if path.exists() {
+                    std::fs::remove_file(&path).map_err(|e| VaultError::IoError(e.to_string()))?;
+                }
+                return Ok(());
+            }
+        }
+        Err(VaultError::NotFound(asset_id.to_string()))
     }
 
     pub fn render_client_file(client: &Client, body: &str) -> Result<String, VaultError> {
