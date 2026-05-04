@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
-use daw_cli::cli_values::{OnOff, TrackColor, TrackFolderDepth, TrackName};
+use daw_cli::cli_values::{OnOff, ToolbarIconKindValue, TrackColor, TrackFolderDepth, TrackName};
 use eyre::Result;
 use serde_json::Value;
 
@@ -520,6 +520,91 @@ enum Command {
         /// Toolbar target: main or floating toolbar 1-32. Omit to list all toolbar sections.
         #[arg(long)]
         target: Option<String>,
+    },
+    /// Add a registered action to a toolbar
+    ToolbarAdd {
+        /// REAPER command name, e.g. _FTS_GUEST_TOGGLE_EXAMPLE
+        command_name: String,
+        /// Toolbar button label
+        label: String,
+        /// Toolbar target: main or floating toolbar 1-32
+        #[arg(long, default_value = "main")]
+        target: String,
+        /// Workflow owner used for grouped removal
+        #[arg(long, default_value = "daw-cli")]
+        workflow: String,
+        /// Insert at zero-based toolbar position instead of appending
+        #[arg(long)]
+        position: Option<u32>,
+        /// Icon file name or path
+        #[arg(long)]
+        icon: Option<String>,
+        /// Icon value type
+        #[arg(long, default_value = "file-name")]
+        icon_kind: ToolbarIconKindValue,
+        /// Toolbar flags bitmask
+        #[arg(long, default_value_t = 0)]
+        flags: u32,
+    },
+    /// Update an existing toolbar action label/icon/flags
+    ToolbarUpdate {
+        /// REAPER command name, e.g. _FTS_GUEST_TOGGLE_EXAMPLE
+        command_name: String,
+        /// Toolbar button label
+        label: String,
+        /// Toolbar target: main or floating toolbar 1-32
+        #[arg(long, default_value = "main")]
+        target: String,
+        /// Workflow owner used for grouped removal
+        #[arg(long, default_value = "daw-cli")]
+        workflow: String,
+        /// Move to a zero-based toolbar position while updating
+        #[arg(long)]
+        position: Option<u32>,
+        /// Icon file name or path
+        #[arg(long)]
+        icon: Option<String>,
+        /// Icon value type
+        #[arg(long, default_value = "file-name")]
+        icon_kind: ToolbarIconKindValue,
+        /// Toolbar flags bitmask
+        #[arg(long, default_value_t = 0)]
+        flags: u32,
+    },
+    /// Remove a toolbar action
+    ToolbarRemove {
+        /// REAPER command name
+        command_name: String,
+        /// Toolbar target: main or floating toolbar 1-32
+        #[arg(long, default_value = "main")]
+        target: String,
+    },
+    /// Move a toolbar action to a zero-based position
+    ToolbarMove {
+        /// REAPER command name
+        command_name: String,
+        /// Zero-based toolbar position
+        position: u32,
+        /// Toolbar target: main or floating toolbar 1-32
+        #[arg(long, default_value = "main")]
+        target: String,
+    },
+    /// Set or clear a toolbar action icon
+    ToolbarIcon {
+        /// REAPER command name
+        command_name: String,
+        /// Toolbar target: main or floating toolbar 1-32
+        #[arg(long, default_value = "main")]
+        target: String,
+        /// Icon file name or path
+        #[arg(long)]
+        icon: Option<String>,
+        /// Icon value type
+        #[arg(long, default_value = "file-name")]
+        icon_kind: ToolbarIconKindValue,
+        /// Clear the toolbar icon
+        #[arg(long)]
+        clear: bool,
     },
 
     // -- File Operations --
@@ -1229,6 +1314,87 @@ async fn main() -> Result<()> {
         )?,
         Command::ToolbarConfig { path, target } => print_value(
             daw_cli::ops::toolbar_config(&daw, &path, target.as_deref()).await?,
+            cli.json,
+        )?,
+        Command::ToolbarAdd {
+            command_name,
+            label,
+            target,
+            workflow,
+            position,
+            icon,
+            icon_kind,
+            flags,
+        } => print_value(
+            daw_cli::ops::toolbar_add(
+                &daw,
+                &command_name,
+                &label,
+                &target,
+                &workflow,
+                position,
+                icon.as_deref(),
+                icon_kind.0,
+                flags,
+            )
+            .await?,
+            cli.json,
+        )?,
+        Command::ToolbarUpdate {
+            command_name,
+            label,
+            target,
+            workflow,
+            position,
+            icon,
+            icon_kind,
+            flags,
+        } => print_value(
+            daw_cli::ops::toolbar_update(
+                &daw,
+                &command_name,
+                &label,
+                &target,
+                &workflow,
+                position,
+                icon.as_deref(),
+                icon_kind.0,
+                flags,
+            )
+            .await?,
+            cli.json,
+        )?,
+        Command::ToolbarRemove {
+            command_name,
+            target,
+        } => print_value(
+            daw_cli::ops::toolbar_remove(&daw, &command_name, &target).await?,
+            cli.json,
+        )?,
+        Command::ToolbarMove {
+            command_name,
+            position,
+            target,
+        } => print_value(
+            daw_cli::ops::toolbar_move(&daw, &command_name, &target, position).await?,
+            cli.json,
+        )?,
+        Command::ToolbarIcon {
+            command_name,
+            target,
+            icon,
+            icon_kind,
+            clear,
+        } => print_value(
+            daw_cli::ops::toolbar_icon(
+                &daw,
+                &command_name,
+                &target,
+                icon.as_deref(),
+                icon_kind.0,
+                clear,
+            )
+            .await?,
             cli.json,
         )?,
         // Already handled above

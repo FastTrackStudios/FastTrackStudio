@@ -1275,6 +1275,147 @@ pub async fn toolbar_config(daw: &Daw, path: &str, target: Option<&str>) -> Resu
     Ok(toolbar_snapshots_json(&snapshots))
 }
 
+fn toolbar_operation_json(result: daw::service::ToolbarResult) -> Result<Value> {
+    if result.ok {
+        Ok(json!({
+            "ok": true,
+            "command_id": result.command_id,
+        }))
+    } else {
+        match result.error {
+            Some(message) => Err(eyre::eyre!(message)),
+            None => Err(eyre::eyre!("toolbar operation failed")),
+        }
+    }
+}
+
+fn make_toolbar_icon(
+    icon: Option<&str>,
+    kind: daw::service::ToolbarIconKind,
+) -> Option<daw::service::ToolbarIcon> {
+    icon.map(|value| daw::service::ToolbarIcon {
+        kind,
+        value: value.to_string(),
+    })
+}
+
+fn toolbar_button(
+    command_name: &str,
+    label: &str,
+    target: &str,
+    position: Option<u32>,
+    icon: Option<&str>,
+    icon_kind: daw::service::ToolbarIconKind,
+    flags: u32,
+) -> Result<daw::service::ToolbarButton> {
+    Ok(daw::service::ToolbarButton {
+        command_name: command_name.to_string(),
+        label: label.to_string(),
+        icon: make_toolbar_icon(icon, icon_kind),
+        target: parse_toolbar_target(target)?,
+        placement: position
+            .map(daw::service::ToolbarPlacement::Position)
+            .unwrap_or(daw::service::ToolbarPlacement::Append),
+        flags,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn toolbar_add(
+    daw: &Daw,
+    command_name: &str,
+    label: &str,
+    target: &str,
+    workflow_id: &str,
+    position: Option<u32>,
+    icon: Option<&str>,
+    icon_kind: daw::service::ToolbarIconKind,
+    flags: u32,
+) -> Result<Value> {
+    let button = toolbar_button(
+        command_name,
+        label,
+        target,
+        position,
+        icon,
+        icon_kind,
+        flags,
+    )?;
+    toolbar_operation_json(daw.toolbar().add_button(button, workflow_id).await?)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn toolbar_update(
+    daw: &Daw,
+    command_name: &str,
+    label: &str,
+    target: &str,
+    workflow_id: &str,
+    position: Option<u32>,
+    icon: Option<&str>,
+    icon_kind: daw::service::ToolbarIconKind,
+    flags: u32,
+) -> Result<Value> {
+    let button = toolbar_button(
+        command_name,
+        label,
+        target,
+        position,
+        icon,
+        icon_kind,
+        flags,
+    )?;
+    toolbar_operation_json(daw.toolbar().update_button(button, workflow_id).await?)
+}
+
+pub async fn toolbar_remove(daw: &Daw, command_name: &str, target: &str) -> Result<Value> {
+    toolbar_operation_json(
+        daw.toolbar()
+            .remove_button(parse_toolbar_target(target)?, command_name)
+            .await?,
+    )
+}
+
+pub async fn toolbar_move(
+    daw: &Daw,
+    command_name: &str,
+    target: &str,
+    position: u32,
+) -> Result<Value> {
+    toolbar_operation_json(
+        daw.toolbar()
+            .move_button(parse_toolbar_target(target)?, command_name, position)
+            .await?,
+    )
+}
+
+pub async fn toolbar_icon(
+    daw: &Daw,
+    command_name: &str,
+    target: &str,
+    icon: Option<&str>,
+    icon_kind: daw::service::ToolbarIconKind,
+    clear: bool,
+) -> Result<Value> {
+    if clear && icon.is_some() {
+        eyre::bail!("use either --clear or --icon, not both");
+    }
+    if !clear && icon.is_none() {
+        eyre::bail!("toolbar-icon requires --icon or --clear");
+    }
+    toolbar_operation_json(
+        daw.toolbar()
+            .set_button_icon(
+                parse_toolbar_target(target)?,
+                command_name,
+                (!clear)
+                    .then(|| make_toolbar_icon(icon, icon_kind))
+                    .flatten(),
+            )
+            .await?,
+    )
+}
+
 pub fn rpp_summary(path: &str) -> Result<Value> {
     let content = std::fs::read_to_string(path)?;
     let project = dawfile_reaper::parse_project_text(&content)

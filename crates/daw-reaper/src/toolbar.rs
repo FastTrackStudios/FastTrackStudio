@@ -7,8 +7,8 @@
 //! re-entrancy issues inside REAPER callbacks.
 
 use daw_proto::toolbar::{
-    ToolbarButton, ToolbarItemInfo, ToolbarResult, ToolbarService, ToolbarSnapshot,
-    ToolbarSnapshotSource, ToolbarTarget, TrackedButton,
+    ToolbarButton, ToolbarIcon, ToolbarItemInfo, ToolbarPlacement, ToolbarResult, ToolbarService,
+    ToolbarSnapshot, ToolbarSnapshotSource, ToolbarTarget, TrackedButton,
 };
 use reaper_high::Reaper;
 use reaper_medium::{CommandId, MenuOrToolbarItem, PositionDescriptor, UiRefreshBehavior};
@@ -52,6 +52,16 @@ enum DeferredOp {
     Update {
         button: ToolbarButton,
         workflow_id: String,
+    },
+    Move {
+        target: ToolbarTarget,
+        command_name: String,
+        position: u32,
+    },
+    SetIcon {
+        target: ToolbarTarget,
+        command_name: String,
+        icon: Option<ToolbarIcon>,
     },
     RemoveWorkflow {
         workflow_id: String,
@@ -105,6 +115,16 @@ pub fn process_deferred_ops() {
                 button,
                 workflow_id,
             } => update_button_immediate(&button, &workflow_id).map(|_| ()),
+            DeferredOp::Move {
+                target,
+                command_name,
+                position,
+            } => move_button_immediate(&target, &command_name, position).map(|_| ()),
+            DeferredOp::SetIcon {
+                target,
+                command_name,
+                icon,
+            } => set_button_icon_immediate(&target, &command_name, icon).map(|_| ()),
             DeferredOp::RemoveWorkflow { workflow_id } => {
                 remove_workflow_buttons_immediate(&workflow_id)
             }
@@ -165,24 +185,54 @@ fn resolve_command_id(command_name: &str) -> Result<CommandId, String> {
         .map_err(|e| format!("Command not found: {command_name} - {e}"))
 }
 
+fn position_descriptor(placement: &ToolbarPlacement) -> PositionDescriptor {
+    match placement {
+        ToolbarPlacement::Append => PositionDescriptor::Append,
+        ToolbarPlacement::Position(position) => PositionDescriptor::AtPos(*position),
+    }
+}
+
+fn icon_path(icon: Option<&ToolbarIcon>) -> Option<&camino::Utf8Path> {
+    icon.map(|icon| camino::Utf8Path::new(icon.value.as_str()))
+}
+
+fn add_toolbar_command_item(
+    toolbar_name: &str,
+    position: PositionDescriptor,
+    command_id: CommandId,
+    flags: u32,
+    label: &str,
+    icon: Option<&ToolbarIcon>,
+    refresh: UiRefreshBehavior,
+) -> Result<(), String> {
+    Reaper::get()
+        .medium_reaper()
+        .add_custom_menu_or_toolbar_item_command(
+            toolbar_name,
+            position,
+            command_id,
+            flags,
+            label,
+            icon_path(icon),
+            refresh,
+        )
+        .map_err(|e| format!("Failed to add toolbar item: {e}"))
+}
+
 fn add_button_immediate(button: &ToolbarButton, workflow_id: &str) -> Result<CommandId, String> {
     let command_id = resolve_command_id(&button.command_name)?;
     let toolbar_name = target_to_str(&button.target);
 
     if scan_toolbar_for_command(&toolbar_name, command_id).is_none() {
-        let icon_path = button.icon.as_deref().map(camino::Utf8Path::new);
-        Reaper::get()
-            .medium_reaper()
-            .add_custom_menu_or_toolbar_item_command(
-                toolbar_name.as_str(),
-                PositionDescriptor::Append,
-                command_id,
-                button.flags,
-                button.label.as_str(),
-                icon_path,
-                UiRefreshBehavior::Refresh,
-            )
-            .map_err(|e| format!("Failed to add toolbar item: {e}"))?;
+        add_toolbar_command_item(
+            toolbar_name.as_str(),
+            position_descriptor(&button.placement),
+            command_id,
+            button.flags,
+            button.label.as_str(),
+            button.icon.as_ref(),
+            UiRefreshBehavior::Refresh,
+        )?;
 
         info!(
             command = %button.command_name,
@@ -215,18 +265,19 @@ fn update_button_immediate(button: &ToolbarButton, workflow_id: &str) -> Result<
             )
             .map_err(|e| format!("Failed to remove toolbar item: {e}"))?;
 
-        let icon_path = button.icon.as_deref().map(camino::Utf8Path::new);
-        medium
-            .add_custom_menu_or_toolbar_item_command(
-                toolbar_name.as_str(),
-                PositionDescriptor::AtPos(position),
-                command_id,
-                button.flags,
-                button.label.as_str(),
-                icon_path,
-                UiRefreshBehavior::Refresh,
-            )
-            .map_err(|e| format!("Failed to re-add toolbar item: {e}"))?;
+        let placement = match button.placement {
+            ToolbarPlacement::Append => PositionDescriptor::AtPos(position),
+            ToolbarPlacement::Position(position) => PositionDescriptor::AtPos(position),
+        };
+        add_toolbar_command_item(
+            toolbar_name.as_str(),
+            placement,
+            command_id,
+            button.flags,
+            button.label.as_str(),
+            button.icon.as_ref(),
+            UiRefreshBehavior::Refresh,
+        )?;
 
         debug!(
             command = %button.command_name,
@@ -245,6 +296,105 @@ fn update_button_immediate(button: &ToolbarButton, workflow_id: &str) -> Result<
         );
     }
 
+    Ok(command_id)
+}
+
+struct ToolbarCommandDetails {
+    position: u32,
+    command_id: CommandId,
+    flags: u32,
+    label: String,
+    icon: Option<ToolbarIcon>,
+}
+
+fn get_toolbar_command_details(
+    toolbar_name: &str,
+    command_id: CommandId,
+) -> Option<ToolbarCommandDetails> {
+    let medium = Reaper::get().medium_reaper();
+    let mut pos = 0;
+
+    loop {
+        let result =
+            medium.get_custom_menu_or_toolbar_item(toolbar_name, pos, |item| match item? {
+                MenuOrToolbarItem::Command(cmd) if cmd.command_id == command_id => {
+                    Some(Some(ToolbarCommandDetails {
+                        position: pos,
+                        command_id: cmd.command_id,
+                        flags: cmd.toolbar_flags,
+                        label: cmd.label.to_string(),
+                        icon: cmd.icon_file_name.map(|value| ToolbarIcon {
+                            value: value.to_string(),
+                            ..Default::default()
+                        }),
+                    }))
+                }
+                _ => Some(None),
+            });
+
+        match result {
+            Some(Some(details)) => return Some(details),
+            Some(None) => pos += 1,
+            None => return None,
+        }
+    }
+}
+
+fn move_button_immediate(
+    target: &ToolbarTarget,
+    command_name: &str,
+    position: u32,
+) -> Result<CommandId, String> {
+    let command_id = resolve_command_id(command_name)?;
+    let toolbar_name = target_to_str(target);
+    let details = get_toolbar_command_details(toolbar_name.as_str(), command_id)
+        .ok_or_else(|| format!("Toolbar button not found: {command_name}"))?;
+    let medium = Reaper::get().medium_reaper();
+    medium
+        .delete_custom_menu_or_toolbar_item(
+            toolbar_name.as_str(),
+            details.position,
+            UiRefreshBehavior::NoRefresh,
+        )
+        .map_err(|e| format!("Failed to remove toolbar item: {e}"))?;
+    add_toolbar_command_item(
+        toolbar_name.as_str(),
+        PositionDescriptor::AtPos(position),
+        details.command_id,
+        details.flags,
+        details.label.as_str(),
+        details.icon.as_ref(),
+        UiRefreshBehavior::Refresh,
+    )?;
+    Ok(command_id)
+}
+
+fn set_button_icon_immediate(
+    target: &ToolbarTarget,
+    command_name: &str,
+    icon: Option<ToolbarIcon>,
+) -> Result<CommandId, String> {
+    let command_id = resolve_command_id(command_name)?;
+    let toolbar_name = target_to_str(target);
+    let details = get_toolbar_command_details(toolbar_name.as_str(), command_id)
+        .ok_or_else(|| format!("Toolbar button not found: {command_name}"))?;
+    let medium = Reaper::get().medium_reaper();
+    medium
+        .delete_custom_menu_or_toolbar_item(
+            toolbar_name.as_str(),
+            details.position,
+            UiRefreshBehavior::NoRefresh,
+        )
+        .map_err(|e| format!("Failed to remove toolbar item: {e}"))?;
+    add_toolbar_command_item(
+        toolbar_name.as_str(),
+        PositionDescriptor::AtPos(details.position),
+        details.command_id,
+        details.flags,
+        details.label.as_str(),
+        icon.as_ref(),
+        UiRefreshBehavior::Refresh,
+    )?;
     Ok(command_id)
 }
 
@@ -392,49 +542,80 @@ fn snapshot_live_toolbar(target: ToolbarTarget) -> ToolbarSnapshot {
 
 impl ToolbarService for ReaperToolbar {
     async fn add_button(&self, button: ToolbarButton, workflow_id: String) -> ToolbarResult {
+        debug!(command = %button.command_name, "toolbar add_button service call");
         if !is_api_available() {
-            return ToolbarResult::Error("Dynamic toolbar API not available".to_string());
+            return ToolbarResult::error("Dynamic toolbar API not available");
         }
-        match resolve_command_id(&button.command_name) {
-            Ok(cmd_id) => {
-                enqueue(DeferredOp::Add {
-                    button,
-                    workflow_id,
-                });
-                ToolbarResult::Ok(cmd_id.get())
-            }
-            Err(e) => ToolbarResult::Error(e),
-        }
+        enqueue(DeferredOp::Add {
+            button,
+            workflow_id,
+        });
+        ToolbarResult::ok(0)
     }
 
     async fn update_button(&self, button: ToolbarButton, workflow_id: String) -> ToolbarResult {
         if !is_api_available() {
-            return ToolbarResult::Error("Dynamic toolbar API not available".to_string());
+            return ToolbarResult::error("Dynamic toolbar API not available");
         }
         enqueue(DeferredOp::Update {
             button,
             workflow_id,
         });
-        ToolbarResult::Ok(0)
+        ToolbarResult::ok(0)
     }
 
     async fn remove_button(&self, target: ToolbarTarget, command_name: String) -> ToolbarResult {
         if !is_api_available() {
-            return ToolbarResult::Ok(0);
+            return ToolbarResult::ok(0);
         }
         enqueue(DeferredOp::Remove {
             target,
             command_name,
         });
-        ToolbarResult::Ok(0)
+        ToolbarResult::ok(0)
+    }
+
+    async fn move_button(
+        &self,
+        target: ToolbarTarget,
+        command_name: String,
+        position: u32,
+    ) -> ToolbarResult {
+        debug!(%command_name, position, "toolbar move_button service call");
+        if !is_api_available() {
+            return ToolbarResult::error("Dynamic toolbar API not available");
+        }
+        enqueue(DeferredOp::Move {
+            target,
+            command_name,
+            position,
+        });
+        ToolbarResult::ok(0)
+    }
+
+    async fn set_button_icon(
+        &self,
+        target: ToolbarTarget,
+        command_name: String,
+        icon: Option<ToolbarIcon>,
+    ) -> ToolbarResult {
+        if !is_api_available() {
+            return ToolbarResult::error("Dynamic toolbar API not available");
+        }
+        enqueue(DeferredOp::SetIcon {
+            target,
+            command_name,
+            icon,
+        });
+        ToolbarResult::ok(0)
     }
 
     async fn remove_workflow_buttons(&self, workflow_id: String) -> ToolbarResult {
         if !is_api_available() {
-            return ToolbarResult::Ok(0);
+            return ToolbarResult::ok(0);
         }
         enqueue(DeferredOp::RemoveWorkflow { workflow_id });
-        ToolbarResult::Ok(0)
+        ToolbarResult::ok(0)
     }
 
     async fn is_available(&self) -> bool {

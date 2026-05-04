@@ -55,6 +55,34 @@ impl Toolbar {
             .await?)
     }
 
+    /// Move a toolbar button to a zero-based position.
+    pub async fn move_button(
+        &self,
+        target: daw_proto::ToolbarTarget,
+        command_name: &str,
+        position: u32,
+    ) -> crate::Result<daw_proto::ToolbarResult> {
+        Ok(self
+            .clients
+            .toolbar
+            .move_button(target, command_name.to_string(), position)
+            .await?)
+    }
+
+    /// Set or clear a toolbar button icon.
+    pub async fn set_button_icon(
+        &self,
+        target: daw_proto::ToolbarTarget,
+        command_name: &str,
+        icon: Option<daw_proto::ToolbarIcon>,
+    ) -> crate::Result<daw_proto::ToolbarResult> {
+        Ok(self
+            .clients
+            .toolbar
+            .set_button_icon(target, command_name.to_string(), icon)
+            .await?)
+    }
+
     /// Remove all toolbar buttons belonging to a workflow.
     pub async fn remove_workflow_buttons(
         &self,

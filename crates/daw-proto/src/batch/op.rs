@@ -531,6 +531,8 @@ pub enum ToolbarOp {
     AddButton(ToolbarButton, String),
     UpdateButton(ToolbarButton, String),
     RemoveButton(ToolbarTarget, String),
+    MoveButton(ToolbarTarget, String, u32),
+    SetButtonIcon(ToolbarTarget, String, Option<ToolbarIcon>),
     RemoveWorkflowButtons(String),
     IsAvailable,
     GetTrackedButtons,

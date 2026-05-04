@@ -18,29 +18,83 @@ pub enum ToolbarTarget {
     Floating(u8),
 }
 
+/// Where a toolbar item should be inserted.
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Facet)]
+#[facet(rename_all = "snake_case")]
+pub enum ToolbarPlacement {
+    /// Append to the end of the toolbar.
+    #[default]
+    Append,
+    /// Insert at a zero-based toolbar position.
+    Position(u32),
+}
+
+/// How REAPER should resolve a toolbar icon value.
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Facet)]
+#[facet(rename_all = "snake_case")]
+pub enum ToolbarIconKind {
+    /// A REAPER toolbar icon file name, for example `toolbar_custom.png`.
+    #[default]
+    FileName,
+    /// A filesystem path to an icon file.
+    Path,
+}
+
+/// Icon assigned to a toolbar button.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Facet)]
+pub struct ToolbarIcon {
+    /// Icon lookup strategy.
+    pub kind: ToolbarIconKind,
+    /// Icon file name or path.
+    pub value: String,
+}
+
 /// A toolbar button to add or update.
-#[derive(Debug, Clone, Facet)]
+#[derive(Debug, Clone, Default, Facet)]
 pub struct ToolbarButton {
     /// REAPER command name (e.g., `_FTS_SIGNAL_OPEN_BROWSER`).
     pub command_name: String,
     /// Display label shown on the button.
     pub label: String,
-    /// Optional icon path or name.
-    pub icon: Option<String>,
+    /// Optional icon.
+    pub icon: Option<ToolbarIcon>,
     /// Which toolbar to place the button on.
     pub target: ToolbarTarget,
+    /// Desired placement when adding or moving the button.
+    pub placement: ToolbarPlacement,
     /// Toolbar button flags (bitmask).
     pub flags: u32,
 }
 
 /// Result of a toolbar operation.
-#[repr(u8)]
-#[derive(Debug, Clone, Facet)]
-pub enum ToolbarResult {
-    /// Button was added/updated successfully with this command ID.
-    Ok(u32),
-    /// Operation failed.
-    Error(String),
+#[derive(Debug, Clone, Default, Facet)]
+pub struct ToolbarResult {
+    /// Whether the operation was accepted by the host service.
+    pub ok: bool,
+    /// Resolved REAPER command ID, when applicable.
+    pub command_id: Option<u32>,
+    /// Error message when `ok` is false.
+    pub error: Option<String>,
+}
+
+impl ToolbarResult {
+    pub fn ok(command_id: u32) -> Self {
+        Self {
+            ok: true,
+            command_id: Some(command_id),
+            error: None,
+        }
+    }
+
+    pub fn error(message: impl Into<String>) -> Self {
+        Self {
+            ok: false,
+            command_id: None,
+            error: Some(message.into()),
+        }
+    }
 }
 
 /// Source used to build a toolbar snapshot.
@@ -104,6 +158,22 @@ pub trait ToolbarService {
 
     /// Remove a single toolbar button by command name and target.
     async fn remove_button(&self, target: ToolbarTarget, command_name: String) -> ToolbarResult;
+
+    /// Move a toolbar button to a zero-based position.
+    async fn move_button(
+        &self,
+        target: ToolbarTarget,
+        command_name: String,
+        position: u32,
+    ) -> ToolbarResult;
+
+    /// Set or clear a toolbar button icon while preserving label and flags.
+    async fn set_button_icon(
+        &self,
+        target: ToolbarTarget,
+        command_name: String,
+        icon: Option<ToolbarIcon>,
+    ) -> ToolbarResult;
 
     /// Remove all toolbar buttons belonging to a workflow.
     async fn remove_workflow_buttons(&self, workflow_id: String) -> ToolbarResult;

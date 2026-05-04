@@ -1773,6 +1773,14 @@ async fn dispatch_toolbar(
         ToolbarOp::RemoveButton(target, name) => Ok(StepOutput::ToolbarResult(
             svc.remove_button(target.clone(), name.clone()).await,
         )),
+        ToolbarOp::MoveButton(target, name, position) => Ok(StepOutput::ToolbarResult(
+            svc.move_button(target.clone(), name.clone(), *position)
+                .await,
+        )),
+        ToolbarOp::SetButtonIcon(target, name, icon) => Ok(StepOutput::ToolbarResult(
+            svc.set_button_icon(target.clone(), name.clone(), icon.clone())
+                .await,
+        )),
         ToolbarOp::RemoveWorkflowButtons(wf) => Ok(StepOutput::ToolbarResult(
             svc.remove_workflow_buttons(wf.clone()).await,
         )),

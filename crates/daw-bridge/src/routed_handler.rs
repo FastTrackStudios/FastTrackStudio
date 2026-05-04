@@ -8,10 +8,12 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use tracing::info;
+use tracing::{debug, info, warn};
+use vox::facet;
 use vox::{
     ConnectionAcceptor, ConnectionRequest, DriverReplySink, Handler, MetadataValue, MethodId,
-    PendingConnection, ReplySink, SchemaRecvTracker, SelfRef, ServiceDescriptor, VoxError,
+    PendingConnection, ReplySink, RetryPolicy, SchemaRecvTracker, SelfRef, ServiceDescriptor,
+    VoxError,
 };
 
 // ============================================================================
@@ -20,6 +22,12 @@ use vox::{
 
 /// A handler entry wrapping a concrete dispatcher behind a trait object.
 trait DynHandler: Send + Sync + 'static {
+    fn retry_policy(&self, method_id: MethodId) -> RetryPolicy;
+
+    fn args_have_channels(&self, method_id: MethodId) -> bool;
+
+    fn response_wire_shape(&self, method_id: MethodId) -> Option<&'static facet::Shape>;
+
     fn handle(
         &self,
         call: SelfRef<vox::RequestCall<'static>>,
@@ -30,6 +38,18 @@ trait DynHandler: Send + Sync + 'static {
 
 /// Blanket impl: any `Handler<DriverReplySink>` can be wrapped.
 impl<H: Handler<DriverReplySink>> DynHandler for H {
+    fn retry_policy(&self, method_id: MethodId) -> RetryPolicy {
+        Handler::retry_policy(self, method_id)
+    }
+
+    fn args_have_channels(&self, method_id: MethodId) -> bool {
+        Handler::args_have_channels(self, method_id)
+    }
+
+    fn response_wire_shape(&self, method_id: MethodId) -> Option<&'static facet::Shape> {
+        Handler::response_wire_shape(self, method_id)
+    }
+
     fn handle(
         &self,
         call: SelfRef<vox::RequestCall<'static>>,
@@ -73,6 +93,26 @@ impl RoutedHandler {
 }
 
 impl Handler<DriverReplySink> for RoutedHandler {
+    fn retry_policy(&self, method_id: MethodId) -> RetryPolicy {
+        self.method_map
+            .get(&method_id)
+            .map(|&idx| self.handlers[idx].retry_policy(method_id))
+            .unwrap_or(RetryPolicy::VOLATILE)
+    }
+
+    fn args_have_channels(&self, method_id: MethodId) -> bool {
+        self.method_map
+            .get(&method_id)
+            .map(|&idx| self.handlers[idx].args_have_channels(method_id))
+            .unwrap_or(false)
+    }
+
+    fn response_wire_shape(&self, method_id: MethodId) -> Option<&'static facet::Shape> {
+        self.method_map
+            .get(&method_id)
+            .and_then(|&idx| self.handlers[idx].response_wire_shape(method_id))
+    }
+
     async fn handle(
         &self,
         call: SelfRef<vox::RequestCall<'static>>,
@@ -81,8 +121,10 @@ impl Handler<DriverReplySink> for RoutedHandler {
     ) {
         let method_id = call.get().method_id;
         if let Some(&idx) = self.method_map.get(&method_id) {
+            debug!(?method_id, handler_index = idx, "routing vox call");
             self.handlers[idx].handle(call, reply, schemas).await;
         } else {
+            warn!(?method_id, "unknown vox method");
             reply
                 .send_error(VoxError::<core::convert::Infallible>::UnknownMethod)
                 .await;
