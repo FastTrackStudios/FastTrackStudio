@@ -913,11 +913,15 @@ enum ExpenseCommands {
         #[arg(long)]
         client: Option<String>,
         #[arg(long)]
+        deliverable: Option<String>,
+        #[arg(long)]
         category: Option<String>,
         #[arg(long)]
         vendor: Option<String>,
         #[arg(long)]
         receipt: Option<String>,
+        #[arg(long)]
+        reference: Option<String>,
         #[arg(long)]
         reimbursable: bool,
         #[arg(long)]
@@ -937,6 +941,8 @@ enum ExpenseCommands {
         project: Option<String>,
         #[arg(long)]
         client: Option<String>,
+        #[arg(long)]
+        deliverable: Option<String>,
         #[arg(long)]
         category: Option<String>,
         #[arg(long)]
@@ -967,6 +973,8 @@ enum ExpenseCommands {
         #[arg(long)]
         client: Option<String>,
         #[arg(long)]
+        deliverable: Option<String>,
+        #[arg(long)]
         category: Option<String>,
         #[arg(long)]
         vendor: Option<String>,
@@ -991,6 +999,8 @@ enum ExpenseCommands {
         #[arg(long)]
         client: Option<String>,
         #[arg(long)]
+        deliverable: Option<String>,
+        #[arg(long)]
         category: Option<String>,
         #[arg(long)]
         vendor: Option<String>,
@@ -998,6 +1008,8 @@ enum ExpenseCommands {
         description: Option<String>,
         #[arg(long)]
         receipt: Option<String>,
+        #[arg(long)]
+        reference: Option<String>,
         #[arg(long)]
         reimbursable: Option<bool>,
         #[arg(long)]
@@ -5236,9 +5248,11 @@ async fn run_expense_command(
             currency,
             project,
             client: client_name,
+            deliverable,
             category,
             vendor,
             receipt,
+            reference,
             reimbursable,
             status,
             notes,
@@ -5252,9 +5266,11 @@ async fn run_expense_command(
                     currency_code: currency,
                     project,
                     client: client_name,
+                    deliverable,
                     category,
                     vendor,
                     receipt,
+                    reference,
                     reimbursable,
                     status,
                     notes,
@@ -5277,6 +5293,7 @@ async fn run_expense_command(
             to,
             project,
             client: client_name,
+            deliverable,
             category,
             vendor,
             status,
@@ -5288,6 +5305,7 @@ async fn run_expense_command(
                 to: to.as_deref().map(parse_date).transpose()?,
                 project,
                 client: client_name,
+                deliverable,
                 category,
                 vendor,
                 status,
@@ -5328,6 +5346,7 @@ async fn run_expense_command(
             to,
             project,
             client: client_name,
+            deliverable,
             category,
             vendor,
             status,
@@ -5339,6 +5358,7 @@ async fn run_expense_command(
                 to: to.as_deref().map(parse_date).transpose()?,
                 project,
                 client: client_name,
+                deliverable,
                 category,
                 vendor,
                 status,
@@ -5358,10 +5378,12 @@ async fn run_expense_command(
             currency,
             project,
             client: client_name,
+            deliverable,
             category,
             vendor,
             description,
             receipt,
+            reference,
             reimbursable,
             status,
             notes,
@@ -5377,10 +5399,12 @@ async fn run_expense_command(
                         currency_code: currency,
                         project,
                         client: client_name,
+                        deliverable,
                         category,
                         vendor,
                         description,
                         receipt,
+                        reference,
                         reimbursable,
                         notes,
                     },
@@ -6006,9 +6030,11 @@ async fn run_remote_expense_command(
             currency,
             project,
             client: client_name,
+            deliverable,
             category,
             vendor,
             receipt,
+            reference,
             reimbursable,
             status,
             notes,
@@ -6022,9 +6048,11 @@ async fn run_remote_expense_command(
                     currency_code: currency,
                     project,
                     client: client_name,
+                    deliverable,
                     category,
                     vendor,
                     receipt,
+                    reference,
                     reimbursable,
                     status,
                     notes,
@@ -6047,6 +6075,7 @@ async fn run_remote_expense_command(
             to,
             project,
             client: client_name,
+            deliverable,
             category,
             vendor,
             status,
@@ -6058,6 +6087,7 @@ async fn run_remote_expense_command(
                 to: to.as_deref().map(parse_date).transpose()?,
                 project,
                 client: client_name,
+                deliverable,
                 category,
                 vendor,
                 status,
@@ -6098,6 +6128,7 @@ async fn run_remote_expense_command(
             to,
             project,
             client: client_name,
+            deliverable,
             category,
             vendor,
             status,
@@ -6109,6 +6140,7 @@ async fn run_remote_expense_command(
                 to: to.as_deref().map(parse_date).transpose()?,
                 project,
                 client: client_name,
+                deliverable,
                 category,
                 vendor,
                 status,
@@ -6128,10 +6160,12 @@ async fn run_remote_expense_command(
             currency,
             project,
             client: client_name,
+            deliverable,
             category,
             vendor,
             description,
             receipt,
+            reference,
             reimbursable,
             status,
             notes,
@@ -6147,10 +6181,12 @@ async fn run_remote_expense_command(
                         currency_code: currency,
                         project,
                         client: client_name,
+                        deliverable,
                         category,
                         vendor,
                         description,
                         receipt,
+                        reference,
                         reimbursable,
                         notes,
                     },
