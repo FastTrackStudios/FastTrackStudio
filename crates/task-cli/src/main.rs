@@ -1,19 +1,18 @@
 use chrono::{DateTime, NaiveDate, TimeZone, Utc};
 use clap::{Parser, Subcommand};
+use task_core::expense::{
+    render_expense_body, render_expense_report, ExpenseCreateRequest, ExpenseFilter, ExpensePatch,
+};
 use task_core::index::{ChangeRow, ConflictRow};
 use task_core::workflows::{parse_comments, render_comments, Comment};
-use task_core::expense::{
-    render_expense_body, render_expense_report, ExpenseCreateRequest,
-    ExpenseFilter, ExpensePatch,
-};
 use task_core::{
-    create_project, save_project_task, BusinessFinanceReport, CalendarEvent, CalendarEventPatch,
-    CalendarEventStatus, CardDavSyncCollectionRequest, ChannelConversation, ChannelMessage,
-    ChannelSendMessageRequest, Client, Filter, InboxCaptureRequest, InboxItem, InboxPromoteRequest,
-    Invoice, OperatingModelReport, OrganizationContext, OrganizationRecord, Person, PersonContext,
-    Priority, Project, ProjectKnowledgeContext, ProviderSyncState, Query, RelationType,
-    ReviewReport, Sort, Status, SyncStats, SystemCapabilities, SystemHealth, Task, TaskRelation,
-    TimeEntry, TimeEntryContext, TimeEntryFilter, VaultServiceImpl, WikiLink,
+    build_agent_plan, create_project, save_project_task, BusinessFinanceReport, CalendarEvent,
+    CalendarEventPatch, CalendarEventStatus, CardDavSyncCollectionRequest, ChannelConversation,
+    ChannelMessage, ChannelSendMessageRequest, Client, Filter, InboxCaptureRequest, InboxItem,
+    InboxPromoteRequest, Invoice, OperatingModelReport, OrganizationContext, OrganizationRecord,
+    Person, PersonContext, Priority, Project, ProjectKnowledgeContext, ProviderSyncState, Query,
+    RelationType, ReviewReport, Sort, Status, SyncStats, SystemCapabilities, SystemHealth, Task,
+    TaskRelation, TimeEntry, TimeEntryContext, TimeEntryFilter, VaultServiceImpl, WikiLink,
 };
 
 #[derive(Parser)]
@@ -1303,6 +1302,8 @@ enum AgentCommands {
     },
     /// Return one task by id or title
     Task { reference: String },
+    /// Build a machine-readable execution plan for a task
+    Plan { reference: String },
     /// Return one project with stats, next task, and project tasks
     Project { name: String },
     /// Return calendar events in a range
@@ -2135,7 +2136,9 @@ async fn main() -> eyre::Result<()> {
             }
         }
 
-        Commands::Expense { command } => run_expense_command(&svc, actor.as_deref(), command).await?,
+        Commands::Expense { command } => {
+            run_expense_command(&svc, actor.as_deref(), command).await?
+        }
 
         Commands::Invoice {
             command:
@@ -3457,6 +3460,11 @@ async fn run_agent_command(
         AgentCommands::Task { reference } => {
             let task = find_task(svc, &reference).await?;
             println!("{}", facet_json::to_string(&task).unwrap_or_default());
+        }
+        AgentCommands::Plan { reference } => {
+            let task = find_task(svc, &reference).await?;
+            let plan = build_agent_plan(&task);
+            println!("{}", facet_json::to_string(&plan).unwrap_or_default());
         }
         AgentCommands::Project { name } => {
             let project = svc
@@ -4887,7 +4895,11 @@ async fn run_expense_command(
             if json {
                 println!("{}", facet_json::to_string(&expense).unwrap_or_default());
             } else {
-                println!("Created expense {} — ${:.2}", expense.id, expense.amount_cents as f64 / 100.0);
+                println!(
+                    "Created expense {} — ${:.2}",
+                    expense.id,
+                    expense.amount_cents as f64 / 100.0
+                );
                 println!("{}", render_expense_body(&expense));
             }
         }
@@ -5068,7 +5080,11 @@ async fn run_remote_expense_command(
             if json {
                 println!("{}", facet_json::to_string(&expense).unwrap_or_default());
             } else {
-                println!("Created expense {} — ${:.2}", expense.id, expense.amount_cents as f64 / 100.0);
+                println!(
+                    "Created expense {} — ${:.2}",
+                    expense.id,
+                    expense.amount_cents as f64 / 100.0
+                );
                 println!("{}", render_expense_body(&expense));
             }
         }
@@ -5202,7 +5218,6 @@ async fn run_remote_expense_command(
 
     Ok(())
 }
-
 
 async fn run_remote_time_command(
     remote: &RemoteVoxConfig,
@@ -6053,10 +6068,9 @@ async fn run_github_command(svc: &VaultServiceImpl, command: GithubCommands) -> 
         } => {
             use task_core::provider::github;
 
-            let (owner, name) = github::parse_repo(&repo)
-                .map_err(|e| eyre::eyre!("{e}"))?;
-            let token_val = github::resolve_token(token.as_deref())
-                .map_err(|e| eyre::eyre!("{e}"))?;
+            let (owner, name) = github::parse_repo(&repo).map_err(|e| eyre::eyre!("{e}"))?;
+            let token_val =
+                github::resolve_token(token.as_deref()).map_err(|e| eyre::eyre!("{e}"))?;
 
             // Gather local github-linked tasks for diff.
             let all_tasks = svc.list_tasks().await;
@@ -6069,7 +6083,9 @@ async fn run_github_command(svc: &VaultServiceImpl, command: GithubCommands) -> 
 
             if plan {
                 let sync_client = github::GitHubSync::new(config);
-                let remote_tasks = sync_client.pull_issues().await
+                let remote_tasks = sync_client
+                    .pull_issues()
+                    .await
                     .map_err(|e| eyre::eyre!("GitHub pull failed: {e}"))?;
                 let sync_plan = github::build_sync_plan(&gh_tasks, &remote_tasks);
                 if json {
@@ -6077,7 +6093,10 @@ async fn run_github_command(svc: &VaultServiceImpl, command: GithubCommands) -> 
                         .actions
                         .iter()
                         .map(|a| match a {
-                            github::SyncAction::Pull { issue_number, title } => format!(
+                            github::SyncAction::Pull {
+                                issue_number,
+                                title,
+                            } => format!(
                                 r#"{{"action":"pull","issue":{},"title":{}}}"#,
                                 facet_json::to_string(issue_number).unwrap_or_default(),
                                 facet_json::to_string(title).unwrap_or_default(),
@@ -6102,7 +6121,9 @@ async fn run_github_command(svc: &VaultServiceImpl, command: GithubCommands) -> 
             }
 
             let sync_client = github::GitHubSync::new(config);
-            let result = sync_client.sync(&gh_tasks).await
+            let result = sync_client
+                .sync(&gh_tasks)
+                .await
                 .map_err(|e| eyre::eyre!("GitHub sync failed: {e}"))?;
             if json {
                 println!(
@@ -6133,10 +6154,9 @@ async fn run_github_command_remote(
         } => {
             use task_core::provider::github;
 
-            let (owner, name) = github::parse_repo(&repo)
-                .map_err(|e| eyre::eyre!("{e}"))?;
-            let token_val = github::resolve_token(token.as_deref())
-                .map_err(|e| eyre::eyre!("{e}"))?;
+            let (owner, name) = github::parse_repo(&repo).map_err(|e| eyre::eyre!("{e}"))?;
+            let token_val =
+                github::resolve_token(token.as_deref()).map_err(|e| eyre::eyre!("{e}"))?;
 
             // Fetch tasks via remote Vox service.
             let task_client = remote.task().await?;
@@ -6150,7 +6170,9 @@ async fn run_github_command_remote(
 
             if plan {
                 let sync_client = github::GitHubSync::new(config);
-                let remote_tasks = sync_client.pull_issues().await
+                let remote_tasks = sync_client
+                    .pull_issues()
+                    .await
                     .map_err(|e| eyre::eyre!("GitHub pull failed: {e}"))?;
                 let sync_plan = github::build_sync_plan(&gh_tasks, &remote_tasks);
                 if json {
@@ -6158,7 +6180,10 @@ async fn run_github_command_remote(
                         .actions
                         .iter()
                         .map(|a| match a {
-                            github::SyncAction::Pull { issue_number, title } => format!(
+                            github::SyncAction::Pull {
+                                issue_number,
+                                title,
+                            } => format!(
                                 r#"{{"action":"pull","issue":{},"title":{}}}"#,
                                 facet_json::to_string(issue_number).unwrap_or_default(),
                                 facet_json::to_string(title).unwrap_or_default(),
@@ -6183,7 +6208,9 @@ async fn run_github_command_remote(
             }
 
             let sync_client = github::GitHubSync::new(config);
-            let result = sync_client.sync(&gh_tasks).await
+            let result = sync_client
+                .sync(&gh_tasks)
+                .await
                 .map_err(|e| eyre::eyre!("GitHub sync failed: {e}"))?;
             if json {
                 println!(
@@ -6811,6 +6838,13 @@ async fn run_remote_agent_command(
             let tasks = client.list_tasks().await?;
             let task = find_task_in(tasks, &reference)?;
             println!("{}", facet_json::to_string(&task).unwrap_or_default());
+        }
+        AgentCommands::Plan { reference } => {
+            let client = remote.task().await?;
+            let tasks = client.list_tasks().await?;
+            let task = find_task_in(tasks, &reference)?;
+            let plan = build_agent_plan(&task);
+            println!("{}", facet_json::to_string(&plan).unwrap_or_default());
         }
         AgentCommands::Project { name } => {
             let project_client = remote.project().await?;
@@ -7868,7 +7902,7 @@ fn print_agent_snapshot(snapshot: AgentSnapshot<'_>) {
 
 fn print_agent_capabilities() {
     println!(
-        "{{\"binary\":\"task\",\"package\":\"task-cli\",\"install\":{},\"global_flags\":[\"--vault\",\"--server\",\"--session-token\",\"--organization-id\",\"--as-user\"],\"agent_commands\":[\"snapshot\",\"task\",\"project\",\"calendar\",\"time\",\"sync\",\"capabilities\",\"bootstrap\"],\"control_commands\":[\"doctor\",\"doctor --deep\",\"server add\",\"server list\",\"server use\",\"capture\",\"inbox list\",\"inbox promote\",\"add\",\"update\",\"complete\",\"delete\",\"calendar add\",\"calendar update\",\"calendar delete\",\"email accounts\",\"email search\",\"email show\",\"email link\",\"email sweep\",\"time log\",\"time edit\",\"start\",\"stop\",\"sync\"],\"remote_mode\":\"Set --server plus --session-token to route supported inbox, task, project, client, invoice, time, calendar, email, activity, conflict, system, and agent commands over Vox; --organization-id routes multi-instance organization requests.\"}}",
+        "{{\"binary\":\"task\",\"package\":\"task-cli\",\"install\":{},\"global_flags\":[\"--vault\",\"--server\",\"--session-token\",\"--organization-id\",\"--as-user\"],\"agent_commands\":[\"snapshot\",\"task\",\"plan\",\"project\",\"calendar\",\"time\",\"sync\",\"capabilities\",\"bootstrap\"],\"control_commands\":[\"doctor\",\"doctor --deep\",\"server add\",\"server list\",\"server use\",\"capture\",\"inbox list\",\"inbox promote\",\"add\",\"update\",\"complete\",\"delete\",\"calendar add\",\"calendar update\",\"calendar delete\",\"email accounts\",\"email search\",\"email show\",\"email link\",\"email sweep\",\"time log\",\"time edit\",\"start\",\"stop\",\"sync\"],\"remote_mode\":\"Set --server plus --session-token to route supported inbox, task, project, client, invoice, time, calendar, email, activity, conflict, system, and agent commands over Vox; --organization-id routes multi-instance organization requests.\"}}",
         agent_install_json()
     );
 }
