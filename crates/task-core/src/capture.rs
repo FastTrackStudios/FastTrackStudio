@@ -208,7 +208,7 @@ fn is_date_starter(word: &str) -> bool {
     matches!(
         word.to_lowercase().as_str(),
         // relative anchors
-        | "last" | "this" | "a" | "an" | "end" | "start" | "beginning"
+        |"last"| "this" | "a" | "an" | "end" | "start" | "beginning"
         // month names (full + 3-letter abbrev)
         | "january" | "jan" | "february" | "feb" | "march" | "mar"
         | "april"   | "apr" | "may"      | "june" | "jun"  | "july" | "jul"
@@ -217,8 +217,7 @@ fn is_date_starter(word: &str) -> bool {
         // weekday names (covered by explicit parser but harmless to include)
         | "monday" | "mon" | "tuesday"  | "tue" | "wednesday" | "wed"
         | "thursday"| "thu"| "friday"   | "fri" | "saturday"  | "sat"
-        | "sunday"  | "sun"
-        // ordinal numbers ("1st", "2nd" etc.)
+        | "sunday"  | "sun" // ordinal numbers ("1st", "2nd" etc.)
     ) || is_ordinal(word)
 }
 

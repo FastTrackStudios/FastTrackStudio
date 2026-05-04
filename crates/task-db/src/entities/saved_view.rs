@@ -1,9 +1,9 @@
 //! Saved view entity — persistent filter/sort/display configurations.
 
+use crudcrate::CRUDResource;
+use crudcrate::EntityToModels;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
-use crudcrate::EntityToModels;
-use crudcrate::CRUDResource;
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, EntityToModels, Serialize, Deserialize)]
 #[sea_orm(table_name = "saved_views")]
@@ -11,7 +11,7 @@ use crudcrate::CRUDResource;
     api_struct = "SavedViewApi",
     generate_vox_service,
     name_singular = "saved_view",
-    name_plural = "saved_views",
+    name_plural = "saved_views"
 )]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
@@ -27,11 +27,9 @@ pub struct Model {
     pub project: Option<String>,
 
     /// Filter criteria (JSON).
-
     pub filters: Json,
 
     /// Display settings (JSON: layout, group_by, order_by, visible_properties).
-
     pub display: Json,
 
     #[crudcrate(filterable)]

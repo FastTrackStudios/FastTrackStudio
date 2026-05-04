@@ -6,9 +6,9 @@
 
 use std::path::{Path, PathBuf};
 
+use super::vtodo::{ics_to_task, task_to_ics};
 use crate::service::VaultError;
 use crate::task::Task;
-use super::vtodo::{ics_to_task, task_to_ics};
 
 /// Configuration for a CalDAV connection.
 #[derive(Debug, Clone)]
@@ -198,8 +198,7 @@ impl CalDavClient {
             if let Some(ref id) = task.id {
                 let path = self.config.cache_dir.join(format!("{}.ics", id));
                 let ics = task_to_ics(task);
-                std::fs::write(&path, ics)
-                    .map_err(|e| VaultError::IoError(e.to_string()))?;
+                std::fs::write(&path, ics).map_err(|e| VaultError::IoError(e.to_string()))?;
             }
         }
 
@@ -234,7 +233,10 @@ fn parse_multistatus_vtodos(xml: &str) -> Vec<Task> {
     // would be better for production but this handles the common case.
     for chunk in xml.split("BEGIN:VCALENDAR") {
         if chunk.contains("BEGIN:VTODO") {
-            let ics = format!("BEGIN:VCALENDAR{}", chunk.split("END:VCALENDAR").next().unwrap_or(""));
+            let ics = format!(
+                "BEGIN:VCALENDAR{}",
+                chunk.split("END:VCALENDAR").next().unwrap_or("")
+            );
             let ics = format!("{}END:VCALENDAR", ics);
             if let Some(task) = ics_to_task(&ics) {
                 tasks.push(task);

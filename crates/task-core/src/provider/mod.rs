@@ -23,46 +23,46 @@
 //!   └── GitProvider        github.com/FastTrackStudios/projects
 //! ```
 
-mod traits;
-mod local;
-mod vault;
-mod registry;
-mod s3;
-mod webdav;
-mod nextcloud;
-pub mod nextcloud_sync;
-pub mod github;
-pub mod talk;
-pub mod mail;
 pub mod channel;
+pub mod github;
+mod local;
+pub mod mail;
 #[cfg(feature = "server")]
 pub mod mail_watch;
+mod nextcloud;
+pub mod nextcloud_sync;
+mod registry;
+mod s3;
+pub mod talk;
+mod traits;
+mod vault;
+mod webdav;
 
-pub use traits::*;
 pub use local::LocalProvider;
-pub use vault::VaultProvider;
 pub use registry::ProjectRegistry;
-pub use s3::{S3Provider, S3Config};
+pub use s3::{S3Config, S3Provider};
+pub use traits::*;
+pub use vault::VaultProvider;
 pub use webdav::{
     WebDavConfig, WebDavEntry, WebDavLock, WebDavProvider, WebDavPutOptions, WebDavResourceKind,
 };
 pub mod mock;
-pub use mock::MockProvider;
-pub use nextcloud::{NextcloudProvider, NextcloudConfig};
-pub use github::{
-    GitHubSync, GitHubConfig, GitHubSyncResult, SyncAction, SyncPlan,
-    build_sync_plan, format_sync_result, parse_repo, resolve_token,
-};
-pub use talk::{Message as TalkMessage, Room as TalkRoom, TalkClient, TalkConfig};
 pub use channel::{
     ChannelConversation, ChannelMessage, ChannelSendMessageRequest, CommunicationChannelProvider,
+};
+pub use github::{
+    build_sync_plan, format_sync_result, parse_repo, resolve_token, GitHubConfig, GitHubSync,
+    GitHubSyncResult, SyncAction, SyncPlan,
 };
 pub use mail::{
     MailAccount, MailAttachment, MailClient, MailConfig, MailMessage, MailMessageDetail, MailTag,
     Mailbox,
 };
 #[cfg(feature = "server")]
-pub use mail_watch::{ImapWatchConfig, WatchEvent, watch_idle};
+pub use mail_watch::{watch_idle, ImapWatchConfig, WatchEvent};
+pub use mock::MockProvider;
+pub use nextcloud::{NextcloudConfig, NextcloudProvider};
+pub use talk::{Message as TalkMessage, Room as TalkRoom, TalkClient, TalkConfig};
 
 #[cfg(test)]
 #[derive(Debug, Clone)]

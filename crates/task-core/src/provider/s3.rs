@@ -17,12 +17,12 @@
 
 use async_trait::async_trait;
 
+use super::traits::*;
 use crate::project::Project;
 use crate::service::VaultError;
 use crate::task::Task;
-use crate::vault::Vault;
 use crate::task::WikiLink;
-use super::traits::*;
+use crate::vault::Vault;
 
 /// Configuration for an S3-compatible storage backend.
 #[derive(Debug, Clone)]
@@ -68,7 +68,10 @@ impl S3Provider {
 
     /// Base URL for the bucket (e.g. "http://localhost:9000/my-bucket").
     fn bucket_url(&self) -> String {
-        let endpoint = self.config.endpoint.as_deref()
+        let endpoint = self
+            .config
+            .endpoint
+            .as_deref()
             .unwrap_or("https://s3.amazonaws.com");
         format!("{}/{}", endpoint.trim_end_matches('/'), self.config.bucket)
     }
@@ -76,7 +79,8 @@ impl S3Provider {
     /// Full URL for an object key.
     fn object_url(&self, key: &str) -> String {
         // Percent-encode each path segment to handle spaces and special chars.
-        let encoded: String = key.split('/')
+        let encoded: String = key
+            .split('/')
             .map(|seg| urlenccode(seg))
             .collect::<Vec<_>>()
             .join("/");
@@ -88,7 +92,10 @@ impl S3Provider {
     }
 
     fn task_key(&self, project_title: &str, task_title: &str) -> String {
-        format!("{}{}/tasks/{}.md", self.config.prefix, project_title, task_title)
+        format!(
+            "{}{}/tasks/{}.md",
+            self.config.prefix, project_title, task_title
+        )
     }
 
     fn tasks_prefix(&self, project_title: &str) -> String {
@@ -101,7 +108,8 @@ impl S3Provider {
     async fn s3_get(&self, key: &str) -> Result<Option<String>, VaultError> {
         let url = self.object_url(key);
 
-        let resp = self.http
+        let resp = self
+            .http
             .get(&url)
             .basic_auth(&self.config.access_key, Some(&self.config.secret_key))
             .send()
@@ -112,13 +120,17 @@ impl S3Provider {
             return Ok(None);
         }
         if !resp.status().is_success() {
-            return Err(VaultError::IoError(
-                format!("S3 GET {}: {}", key, resp.status()),
-            ));
+            return Err(VaultError::IoError(format!(
+                "S3 GET {}: {}",
+                key,
+                resp.status()
+            )));
         }
 
         Ok(Some(
-            resp.text().await.map_err(|e| VaultError::IoError(e.to_string()))?,
+            resp.text()
+                .await
+                .map_err(|e| VaultError::IoError(e.to_string()))?,
         ))
     }
 
@@ -126,7 +138,8 @@ impl S3Provider {
     async fn s3_put(&self, key: &str, content: &str) -> Result<(), VaultError> {
         let url = self.object_url(key);
 
-        let resp = self.http
+        let resp = self
+            .http
             .put(&url)
             .basic_auth(&self.config.access_key, Some(&self.config.secret_key))
             .header("Content-Type", "text/markdown; charset=utf-8")
@@ -136,9 +149,11 @@ impl S3Provider {
             .map_err(|e| VaultError::IoError(format!("S3 PUT failed: {e}")))?;
 
         if !resp.status().is_success() {
-            return Err(VaultError::IoError(
-                format!("S3 PUT {}: {}", key, resp.status()),
-            ));
+            return Err(VaultError::IoError(format!(
+                "S3 PUT {}: {}",
+                key,
+                resp.status()
+            )));
         }
         Ok(())
     }
@@ -147,7 +162,8 @@ impl S3Provider {
     async fn s3_delete(&self, key: &str) -> Result<(), VaultError> {
         let url = self.object_url(key);
 
-        let resp = self.http
+        let resp = self
+            .http
             .delete(&url)
             .basic_auth(&self.config.access_key, Some(&self.config.secret_key))
             .send()
@@ -156,9 +172,11 @@ impl S3Provider {
 
         // 204 No Content is the normal success for DELETE; 404 is also fine.
         if !resp.status().is_success() && resp.status().as_u16() != 404 {
-            return Err(VaultError::IoError(
-                format!("S3 DELETE {}: {}", key, resp.status()),
-            ));
+            return Err(VaultError::IoError(format!(
+                "S3 DELETE {}: {}",
+                key,
+                resp.status()
+            )));
         }
         Ok(())
     }
@@ -189,7 +207,8 @@ impl S3Provider {
                 page_url.push_str(&format!("&continuation-token={}", urlenccode(token)));
             }
 
-            let resp = self.http
+            let resp = self
+                .http
                 .get(&page_url)
                 .basic_auth(&self.config.access_key, Some(&self.config.secret_key))
                 .send()
@@ -197,12 +216,16 @@ impl S3Provider {
                 .map_err(|e| VaultError::IoError(format!("S3 ListObjectsV2 failed: {e}")))?;
 
             if !resp.status().is_success() {
-                return Err(VaultError::IoError(
-                    format!("S3 ListObjectsV2 prefix={}: {}", prefix, resp.status()),
-                ));
+                return Err(VaultError::IoError(format!(
+                    "S3 ListObjectsV2 prefix={}: {}",
+                    prefix,
+                    resp.status()
+                )));
             }
 
-            let xml = resp.text().await
+            let xml = resp
+                .text()
+                .await
                 .map_err(|e| VaultError::IoError(e.to_string()))?;
 
             // Parse <Key>...</Key> entries
@@ -253,7 +276,10 @@ impl S3Provider {
     }
 
     /// Load a single project bundle (project.md + tasks/*.md).
-    async fn load_project_bundle(&self, project_name: &str) -> Result<Option<ProjectBundle>, VaultError> {
+    async fn load_project_bundle(
+        &self,
+        project_name: &str,
+    ) -> Result<Option<ProjectBundle>, VaultError> {
         // Load project.md
         let project_key = self.project_key(project_name);
         let project = match self.s3_get(&project_key).await? {
@@ -377,8 +403,9 @@ fn urlenccode(input: &str) -> String {
     let mut out = String::with_capacity(input.len() * 2);
     for b in input.bytes() {
         match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9'
-            | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
             _ => {
                 out.push('%');
                 out.push_str(&format!("{:02X}", b));

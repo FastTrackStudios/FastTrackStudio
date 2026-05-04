@@ -35,10 +35,7 @@ pub fn next_occurrence(task: &Task) -> Option<NaiveDate> {
             .completed_instances
             .last()
             .and_then(|s| s.parse::<NaiveDate>().ok())
-            .or_else(|| {
-                task.date_created
-                    .map(|dt| dt.date_naive())
-            })
+            .or_else(|| task.date_created.map(|dt| dt.date_naive()))
             .unwrap_or_else(|| chrono::Local::now().date_naive()),
         RecurrenceAnchor::Scheduled => task
             .scheduled

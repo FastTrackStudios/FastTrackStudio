@@ -5,10 +5,10 @@
 
 use std::sync::Arc;
 
+use super::traits::*;
 use crate::project::Project;
 use crate::service::VaultError;
 use crate::task::Task;
-use super::traits::*;
 
 /// Aggregates multiple `ProjectProvider`s into a unified project/task view.
 ///
@@ -142,9 +142,9 @@ impl ProjectRegistry {
         provider_name: &str,
         project: &Project,
     ) -> Result<String, VaultError> {
-        let provider = self
-            .get(provider_name)
-            .ok_or_else(|| VaultError::NotFound(format!("Provider '{}' not found", provider_name)))?;
+        let provider = self.get(provider_name).ok_or_else(|| {
+            VaultError::NotFound(format!("Provider '{}' not found", provider_name))
+        })?;
         provider.create_project(project).await
     }
 

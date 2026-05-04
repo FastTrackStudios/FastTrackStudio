@@ -213,7 +213,11 @@ pub fn render_expense_body(expense: &Expense) -> String {
     let _ = writeln!(out);
     let _ = writeln!(out, "**Date:** {}", expense.date);
     let _ = writeln!(out, "**Status:** {:?}", expense.status);
-    let _ = writeln!(out, "**Amount:** ${:.2}", expense.amount_cents as f64 / 100.0);
+    let _ = writeln!(
+        out,
+        "**Amount:** ${:.2}",
+        expense.amount_cents as f64 / 100.0
+    );
     if !expense.currency_code.is_empty() {
         let _ = writeln!(out, "**Currency:** {}", expense.currency_code);
     }
@@ -340,17 +344,18 @@ pub fn build_expense_report(expenses: &[Expense], today: NaiveDate) -> ExpenseRe
             ExpenseStatus::Cancelled => report.cancelled_cents += amount,
         }
 
-        let add_bucket = |map: &mut BTreeMap<String, ExpenseBucket>, name: String, expense: &Expense| {
-            let bucket = map.entry(name.clone()).or_insert_with(|| ExpenseBucket {
-                name,
-                ..ExpenseBucket::default()
-            });
-            bucket.expense_count += 1;
-            bucket.amount_cents += expense.total_cents();
-            if expense.reimbursable {
-                bucket.reimbursable_cents += expense.total_cents();
-            }
-        };
+        let add_bucket =
+            |map: &mut BTreeMap<String, ExpenseBucket>, name: String, expense: &Expense| {
+                let bucket = map.entry(name.clone()).or_insert_with(|| ExpenseBucket {
+                    name,
+                    ..ExpenseBucket::default()
+                });
+                bucket.expense_count += 1;
+                bucket.amount_cents += expense.total_cents();
+                if expense.reimbursable {
+                    bucket.reimbursable_cents += expense.total_cents();
+                }
+            };
 
         add_bucket(
             &mut project_totals,
@@ -385,7 +390,11 @@ pub fn build_expense_report(expenses: &[Expense], today: NaiveDate) -> ExpenseRe
 
     let collect_sorted = |map: BTreeMap<String, ExpenseBucket>| {
         let mut values: Vec<_> = map.into_values().collect();
-        values.sort_by(|a, b| b.amount_cents.cmp(&a.amount_cents).then_with(|| a.name.cmp(&b.name)));
+        values.sort_by(|a, b| {
+            b.amount_cents
+                .cmp(&a.amount_cents)
+                .then_with(|| a.name.cmp(&b.name))
+        });
         values
     };
 
@@ -403,11 +412,19 @@ pub fn render_expense_report(report: &ExpenseReport) -> String {
     let _ = writeln!(out);
     let _ = writeln!(out, "- Expense count: {}", report.expense_count);
     let _ = writeln!(out, "- Total: ${:.2}", report.total_cents as f64 / 100.0);
-    let _ = writeln!(out, "- Reimbursable: ${:.2}", report.reimbursable_cents as f64 / 100.0);
+    let _ = writeln!(
+        out,
+        "- Reimbursable: ${:.2}",
+        report.reimbursable_cents as f64 / 100.0
+    );
     let _ = writeln!(out, "- Paid: ${:.2}", report.paid_cents as f64 / 100.0);
     let _ = writeln!(out, "- Open: ${:.2}", report.open_cents as f64 / 100.0);
     let _ = writeln!(out, "- Draft: ${:.2}", report.draft_cents as f64 / 100.0);
-    let _ = writeln!(out, "- Cancelled: ${:.2}", report.cancelled_cents as f64 / 100.0);
+    let _ = writeln!(
+        out,
+        "- Cancelled: ${:.2}",
+        report.cancelled_cents as f64 / 100.0
+    );
     let _ = writeln!(out);
 
     fn render_bucket(title: &str, buckets: &[ExpenseBucket], out: &mut String) {
@@ -420,7 +437,14 @@ pub fn render_expense_report(report: &ExpenseReport) -> String {
         let _ = writeln!(out, "| Name | Count | Amount | Reimbursable |");
         let _ = writeln!(out, "|------|------:|-------:|--------------:|");
         for b in buckets {
-            let _ = writeln!(out, "| {} | {} | ${:.2} | ${:.2} |", b.name, b.expense_count, b.amount_cents as f64 / 100.0, b.reimbursable_cents as f64 / 100.0);
+            let _ = writeln!(
+                out,
+                "| {} | {} | ${:.2} | ${:.2} |",
+                b.name,
+                b.expense_count,
+                b.amount_cents as f64 / 100.0,
+                b.reimbursable_cents as f64 / 100.0
+            );
         }
         let _ = writeln!(out);
     }
@@ -432,12 +456,27 @@ pub fn render_expense_report(report: &ExpenseReport) -> String {
     if !report.expenses.is_empty() {
         let _ = writeln!(out, "## Expenses");
         let _ = writeln!(out);
-        let _ = writeln!(out, "| Date | Description | Project | Client | Amount | Status |");
-        let _ = writeln!(out, "|------|-------------|---------|--------|-------:|--------|");
+        let _ = writeln!(
+            out,
+            "| Date | Description | Project | Client | Amount | Status |"
+        );
+        let _ = writeln!(
+            out,
+            "|------|-------------|---------|--------|-------:|--------|"
+        );
         for e in &report.expenses {
             let project = e.project.as_ref().map(|w| w.0.as_str()).unwrap_or("—");
             let client = e.client.as_ref().map(|w| w.0.as_str()).unwrap_or("—");
-            let _ = writeln!(out, "| {} | {} | {} | {} | ${:.2} | {:?} |", e.date, e.description, project, client, e.amount_cents as f64 / 100.0, e.status);
+            let _ = writeln!(
+                out,
+                "| {} | {} | {} | {} | ${:.2} | {:?} |",
+                e.date,
+                e.description,
+                project,
+                client,
+                e.amount_cents as f64 / 100.0,
+                e.status
+            );
         }
         let _ = writeln!(out);
     }
@@ -458,7 +497,10 @@ mod tests {
     fn parses_expense_statuses() {
         assert_eq!(parse_expense_status("draft"), Some(ExpenseStatus::Draft));
         assert_eq!(parse_expense_status("paid"), Some(ExpenseStatus::Paid));
-        assert_eq!(parse_expense_status("cancelled"), Some(ExpenseStatus::Cancelled));
+        assert_eq!(
+            parse_expense_status("cancelled"),
+            Some(ExpenseStatus::Cancelled)
+        );
         assert_eq!(parse_expense_status("nope"), None);
     }
 

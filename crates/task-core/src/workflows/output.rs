@@ -107,15 +107,28 @@ pub mod stage_presets {
     pub const DELIVERY: &str = "Delivery";
 
     pub fn audio_defaults() -> Vec<&'static str> {
-        vec![WRITING, RECORDING, PRODUCTION, EDITING, MIXING, MASTERING, APPROVED, RELEASED]
+        vec![
+            WRITING, RECORDING, PRODUCTION, EDITING, MIXING, MASTERING, APPROVED, RELEASED,
+        ]
     }
 
     pub fn video_defaults() -> Vec<&'static str> {
-        vec![FILMING, ROUGH_CUT, FINE_CUT, COLOR_GRADE, SOUND_DESIGN, DELIVERY, APPROVED, RELEASED]
+        vec![
+            FILMING,
+            ROUGH_CUT,
+            FINE_CUT,
+            COLOR_GRADE,
+            SOUND_DESIGN,
+            DELIVERY,
+            APPROVED,
+            RELEASED,
+        ]
     }
 
     pub fn instrumental_defaults() -> Vec<&'static str> {
-        vec![RECORDING, PRODUCTION, EDITING, MIXING, MASTERING, APPROVED, RELEASED]
+        vec![
+            RECORDING, PRODUCTION, EDITING, MIXING, MASTERING, APPROVED, RELEASED,
+        ]
     }
 }
 
@@ -160,7 +173,10 @@ impl Version {
     }
 
     pub fn unresolved_comment_count(&self) -> usize {
-        self.comments.iter().filter(|c| !c.resolved && c.reply_to.is_none()).count()
+        self.comments
+            .iter()
+            .filter(|c| !c.resolved && c.reply_to.is_none())
+            .count()
     }
 }
 
@@ -223,10 +239,13 @@ impl SongManifest {
     pub fn with_stages(title: &str, stage_names: &[&str]) -> Self {
         Self {
             title: title.to_string(),
-            stages: stage_names.iter().map(|name| Stage {
-                name: name.to_string(),
-                ..Default::default()
-            }).collect(),
+            stages: stage_names
+                .iter()
+                .map(|name| Stage {
+                    name: name.to_string(),
+                    ..Default::default()
+                })
+                .collect(),
             ..Default::default()
         }
     }
@@ -265,7 +284,9 @@ impl SongManifest {
 
     /// Overall progress as 0.0–1.0.
     pub fn progress(&self) -> f64 {
-        if self.stages.is_empty() { return 0.0; }
+        if self.stages.is_empty() {
+            return 0.0;
+        }
         self.stages_done() as f64 / self.stages.len() as f64
     }
 
@@ -276,7 +297,8 @@ impl SongManifest {
 
     /// Total unresolved comments across everything.
     pub fn unresolved_comments(&self) -> usize {
-        self.stages.iter()
+        self.stages
+            .iter()
             .flat_map(|s| &s.versions)
             .map(|v| v.unresolved_comment_count())
             .sum()
@@ -363,8 +385,8 @@ pub struct Credit {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::stage_presets::*;
+    use super::*;
 
     #[test]
     fn nonlinear_production() {
@@ -457,10 +479,18 @@ mod tests {
     #[test]
     fn custom_stages() {
         // Podcast episode — totally different stages
-        let song = SongManifest::with_stages("Episode 42", &[
-            "Research", "Outline", "Record", "Edit", "Sound Design",
-            "Review", "Publish",
-        ]);
+        let song = SongManifest::with_stages(
+            "Episode 42",
+            &[
+                "Research",
+                "Outline",
+                "Record",
+                "Edit",
+                "Sound Design",
+                "Review",
+                "Publish",
+            ],
+        );
         assert_eq!(song.stages.len(), 7);
         assert!(song.stage("Research").is_some());
         assert!(song.stage("Publish").is_some());

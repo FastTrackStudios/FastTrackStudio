@@ -15,12 +15,12 @@ use crate::people::{
     OrganizationContext, OrganizationRecord, Person, PersonContext, ProviderConflict,
 };
 use crate::project::{Project, ProjectDashboardEntry, ProjectStats};
-use crate::task::WikiLink;
 use crate::provider::{
     ChannelConversation, ChannelMessage, ChannelSendMessageRequest, MailAccount, MailMessage,
     MailMessageDetail, MailTag, Mailbox,
 };
 use crate::query::Query;
+use crate::task::WikiLink;
 use crate::task::{Task, TimeEntry};
 
 #[vox::service]

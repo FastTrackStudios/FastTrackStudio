@@ -4,19 +4,18 @@
 //! remains the source of truth for body content (notes, subtasks, descriptions).
 //! This table indexes the structured metadata for fast queries.
 
-use sea_orm::entity::prelude::*;
-use crudcrate::EntityToModels;
 use crudcrate::CRUDResource;
+use crudcrate::EntityToModels;
+use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, EntityToModels, Serialize, Deserialize)]
 #[sea_orm(table_name = "tasks")]
 #[crudcrate(
     api_struct = "TaskApi",
-    
     generate_vox_service,
     name_singular = "task",
-    name_plural = "tasks",
+    name_plural = "tasks"
 )]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
@@ -51,7 +50,6 @@ pub struct Model {
     pub assignee: Option<String>,
 
     /// Additional assignees (JSON array).
-    
     pub assignees: Json,
 
     /// Who created this task.
@@ -64,7 +62,6 @@ pub struct Model {
     pub completed_date: Option<chrono::NaiveDate>,
 
     /// Tags (JSON array).
-    
     pub tags: Json,
 
     /// Time estimate in minutes.

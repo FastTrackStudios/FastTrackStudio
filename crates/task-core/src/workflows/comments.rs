@@ -42,12 +42,18 @@ pub struct TimeRef {
 impl TimeRef {
     /// Create a point reference.
     pub fn point(seconds: f64) -> Self {
-        Self { start: seconds, end: None }
+        Self {
+            start: seconds,
+            end: None,
+        }
     }
 
     /// Create a range reference.
     pub fn range(start: f64, end: f64) -> Self {
-        Self { start, end: Some(end) }
+        Self {
+            start,
+            end: Some(end),
+        }
     }
 
     /// Whether this is a range (not a point).
@@ -91,7 +97,8 @@ impl TimeRef {
 /// Parse a timecode string like "2:34" or "2:30–2:36" or "1:23:45–1:24:00".
 pub fn parse_timecode(s: &str) -> Option<TimeRef> {
     // Split on en-dash, em-dash, or hyphen (but not if it looks like negative number)
-    let parts: Vec<&str> = s.splitn(2, |c: char| c == '–' || c == '—' || c == '-')
+    let parts: Vec<&str> = s
+        .splitn(2, |c: char| c == '–' || c == '—' || c == '-')
         .map(|p| p.trim())
         .collect();
 
@@ -170,8 +177,14 @@ pub struct Comment {
 impl Comment {
     /// Generate a stable ID from author + timestamp + body prefix.
     pub fn generate_id(author: &str, created_at: Option<NaiveDateTime>, body: &str) -> String {
-        let ts = created_at.map(|d| d.format("%Y%m%d%H%M%S").to_string()).unwrap_or_default();
-        let prefix: String = body.chars().take(16).filter(|c| c.is_alphanumeric()).collect();
+        let ts = created_at
+            .map(|d| d.format("%Y%m%d%H%M%S").to_string())
+            .unwrap_or_default();
+        let prefix: String = body
+            .chars()
+            .take(16)
+            .filter(|c| c.is_alphanumeric())
+            .collect();
         let hash: u32 = format!("{author}{ts}{prefix}")
             .bytes()
             .fold(5381u32, |h, b| h.wrapping_mul(33).wrapping_add(b as u32));
@@ -196,10 +209,13 @@ impl Comment {
         let mut current = self.reply_to.as_deref();
         while let Some(parent_id) = current {
             d += 1;
-            current = all.iter()
+            current = all
+                .iter()
                 .find(|c| c.id == parent_id)
                 .and_then(|c| c.reply_to.as_deref());
-            if d > 20 { break; } // safety
+            if d > 20 {
+                break;
+            } // safety
         }
         d
     }
@@ -209,14 +225,13 @@ impl Comment {
 
 /// Get all top-level comments (not replies).
 pub fn top_level_comments(comments: &[Comment]) -> Vec<&Comment> {
-    comments.iter()
-        .filter(|c| c.reply_to.is_none())
-        .collect()
+    comments.iter().filter(|c| c.reply_to.is_none()).collect()
 }
 
 /// Get all direct replies to a specific comment by ID.
 pub fn replies_to<'a>(comments: &'a [Comment], parent_id: &str) -> Vec<&'a Comment> {
-    comments.iter()
+    comments
+        .iter()
         .filter(|c| c.reply_to.as_deref() == Some(parent_id))
         .collect()
 }
@@ -245,14 +260,20 @@ fn collect_replies<'a>(comments: &'a [Comment], parent_id: &str, out: &mut Vec<&
 
 /// Get all comments that reference a given time (within tolerance).
 pub fn comments_at_time(comments: &[Comment], time_seconds: f64) -> Vec<&Comment> {
-    comments.iter()
-        .filter(|c| c.time_ref.as_ref().map_or(false, |tr| tr.contains(time_seconds)))
+    comments
+        .iter()
+        .filter(|c| {
+            c.time_ref
+                .as_ref()
+                .map_or(false, |tr| tr.contains(time_seconds))
+        })
         .collect()
 }
 
 /// Get all unresolved top-level comments.
 pub fn unresolved_comments(comments: &[Comment]) -> Vec<&Comment> {
-    comments.iter()
+    comments
+        .iter()
         .filter(|c| !c.resolved && c.reply_to.is_none())
         .collect()
 }
@@ -320,7 +341,9 @@ pub fn parse_comments(body: &str) -> Vec<Comment> {
 
                 // Replies attach to the most recent top-level comment
                 let reply_to = if is_reply {
-                    comments.iter().rev()
+                    comments
+                        .iter()
+                        .rev()
                         .find(|c| c.reply_to.is_none())
                         .map(|c| c.id.clone())
                 } else {
@@ -349,10 +372,13 @@ pub fn render_comments(comments: &[Comment]) -> String {
     let mut out = String::from("## Comments\n\n");
     for comment in comments {
         let prefix = if comment.reply_to.is_some() { "> " } else { "" };
-        let date = comment.created_at
+        let date = comment
+            .created_at
             .map(|d| format!(" ({})", d.format("%Y-%m-%d")))
             .unwrap_or_default();
-        let tc = comment.time_ref.as_ref()
+        let tc = comment
+            .time_ref
+            .as_ref()
             .map(|t| format!(" [{}]", t.display()))
             .unwrap_or_default();
         let resolved = if comment.resolved { " ✅" } else { "" };
@@ -579,6 +605,9 @@ mod tests {
         let comments = parse_comments(md);
         assert_eq!(comments.len(), 2);
         assert!(comments[0].reply_to.is_none());
-        assert_eq!(comments[1].reply_to.as_deref(), Some(comments[0].id.as_str()));
+        assert_eq!(
+            comments[1].reply_to.as_deref(),
+            Some(comments[0].id.as_str())
+        );
     }
 }

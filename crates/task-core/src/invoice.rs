@@ -360,7 +360,11 @@ pub fn render_invoice_body(inv: &Invoice) -> String {
                 "| {} | ${:.2} | {} | {} |",
                 p.received_at.format("%Y-%m-%d"),
                 p.amount_cents as f64 / 100.0,
-                if p.method.is_empty() { "—" } else { &p.method },
+                if p.method.is_empty() {
+                    "—"
+                } else {
+                    &p.method
+                },
                 p.reference.as_deref().unwrap_or("—"),
             );
         }

@@ -1,18 +1,17 @@
 //! Comment entity — threaded comments with timecode ranges.
 
+use crudcrate::CRUDResource;
+use crudcrate::EntityToModels;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
-use crudcrate::EntityToModels;
-use crudcrate::CRUDResource;
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, EntityToModels, Serialize, Deserialize)]
 #[sea_orm(table_name = "comments")]
 #[crudcrate(
     api_struct = "CommentApi",
-    
     generate_vox_service,
     name_singular = "comment",
-    name_plural = "comments",
+    name_plural = "comments"
 )]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
@@ -43,7 +42,6 @@ pub struct Model {
     pub resolved_by: Option<String>,
 
     /// Mentions extracted from body (JSON array).
-    
     pub mentions: Json,
 
     /// Nextcloud Deck comment ID for sync.

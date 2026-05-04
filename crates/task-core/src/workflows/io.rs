@@ -4,9 +4,9 @@
 //! - **Read:** split frontmatter from body, deserialize YAML via `facet_yaml::from_str`
 //! - **Write:** serialize to YAML via `facet_yaml::to_string`, combine with body
 
+use super::download::*;
 use super::event::*;
 use super::output::*;
-use super::download::*;
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -41,9 +41,11 @@ pub fn parse_frontmatter<T: for<'a> facet::Facet<'a>>(content: &str) -> Option<T
 /// Generic render: serialize any `Facet` type to frontmatter + body.
 ///
 /// Produces `---\n{yaml}---\n{body}`.
-pub fn render_frontmatter<T: for<'a> facet::Facet<'a>>(data: &T, body: &str) -> Result<String, RenderError> {
-    let yaml = facet_yaml::to_string(data)
-        .map_err(|e| RenderError(e.to_string()))?;
+pub fn render_frontmatter<T: for<'a> facet::Facet<'a>>(
+    data: &T,
+    body: &str,
+) -> Result<String, RenderError> {
+    let yaml = facet_yaml::to_string(data).map_err(|e| RenderError(e.to_string()))?;
     let yaml = yaml.strip_prefix("---\n").unwrap_or(&yaml);
     Ok(format!("---\n{}---\n{}", yaml, body))
 }
@@ -145,7 +147,10 @@ pub fn render_run_of_show(ros: &RunOfShow, body: &str) -> Result<String, RenderE
 }
 
 /// Render an output manifest to `.md` file content.
-pub fn render_output_manifest(manifest: &OutputManifest, body: &str) -> Result<String, RenderError> {
+pub fn render_output_manifest(
+    manifest: &OutputManifest,
+    body: &str,
+) -> Result<String, RenderError> {
     render_frontmatter(manifest, body)
 }
 

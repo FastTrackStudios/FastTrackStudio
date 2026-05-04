@@ -40,10 +40,7 @@ impl MailConfig {
     /// routes under `/index.php/apps/mail/api/*` are the live endpoint.
     /// We rely on `OCS-APIRequest: true` to bypass CSRF.
     fn app_base(&self) -> String {
-        format!(
-            "{}/index.php/apps/mail/api",
-            self.url.trim_end_matches('/')
-        )
+        format!("{}/index.php/apps/mail/api", self.url.trim_end_matches('/'))
     }
 }
 
@@ -273,8 +270,7 @@ impl MailClient {
                 "mail GET {url} {status}: {text}"
             )));
         }
-        serde_json::from_str(&text)
-            .map_err(|e| VaultError::ParseError(format!("mail JSON: {e}")))
+        serde_json::from_str(&text).map_err(|e| VaultError::ParseError(format!("mail JSON: {e}")))
     }
 
     async fn app_send_json(
@@ -305,18 +301,13 @@ impl MailClient {
         if text.trim().is_empty() {
             return Ok(serde_json::Value::Null);
         }
-        serde_json::from_str(&text)
-            .map_err(|e| VaultError::ParseError(format!("mail JSON: {e}")))
+        serde_json::from_str(&text).map_err(|e| VaultError::ParseError(format!("mail JSON: {e}")))
     }
 
     /// Create a new mailbox (folder) on the account. To create a Proton
     /// label, pass `name = "Labels/<label>"`; Bridge translates that into
     /// a native Proton label.
-    pub async fn create_mailbox(
-        &self,
-        account_id: i64,
-        name: &str,
-    ) -> Result<Mailbox, VaultError> {
+    pub async fn create_mailbox(&self, account_id: i64, name: &str) -> Result<Mailbox, VaultError> {
         let url = format!("{}/mailboxes", self.config.app_base());
         let body = serde_json::json!({
             "accountId": account_id,
@@ -405,11 +396,7 @@ impl MailClient {
     }
 
     /// Create an NC Mail tag. Color is a 7-char hex string (e.g. `#8b5cf6`).
-    pub async fn create_tag(
-        &self,
-        display_name: &str,
-        color: &str,
-    ) -> Result<MailTag, VaultError> {
+    pub async fn create_tag(&self, display_name: &str, color: &str) -> Result<MailTag, VaultError> {
         let url = format!("{}/tags", self.config.app_base());
         let body = serde_json::json!({
             "displayName": display_name,
@@ -489,10 +476,7 @@ fn parse_tag(v: &serde_json::Value) -> Option<MailTag> {
         .and_then(|s| s.as_str())
         .unwrap_or("")
         .to_string();
-    let color = v
-        .get("color")
-        .and_then(|s| s.as_str())
-        .map(String::from);
+    let color = v.get("color").and_then(|s| s.as_str()).map(String::from);
     Some(MailTag {
         id,
         display_name,
@@ -518,10 +502,7 @@ fn parse_mailbox(v: &serde_json::Value) -> Option<Mailbox> {
             .unwrap_or("")
             .to_string(),
         account_id: v.get("accountId").and_then(|n| n.as_i64()).unwrap_or(0),
-        unread: v
-            .get("unread")
-            .and_then(|n| n.as_u64())
-            .map(|n| n as u32),
+        unread: v.get("unread").and_then(|n| n.as_u64()).map(|n| n as u32),
     })
 }
 
@@ -546,11 +527,7 @@ fn parse_message(v: &serde_json::Value, mailbox_id: i64) -> Option<MailMessage> 
     let to = v
         .get("to")
         .and_then(|arr| arr.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(format_address)
-                .collect::<Vec<_>>()
-        })
+        .map(|arr| arr.iter().filter_map(format_address).collect::<Vec<_>>())
         .unwrap_or_default();
     let date = v
         .get("sentAt")
@@ -565,10 +542,7 @@ fn parse_message(v: &serde_json::Value, mailbox_id: i64) -> Option<MailMessage> 
         .get("previewText")
         .and_then(|s| s.as_str())
         .map(String::from);
-    let imap_uid = v
-        .get("uid")
-        .and_then(|n| n.as_u64())
-        .map(|n| n as u32);
+    let imap_uid = v.get("uid").and_then(|n| n.as_u64()).map(|n| n as u32);
     let attachments = v
         .get("attachments")
         .and_then(|a| a.as_array())
@@ -645,10 +619,7 @@ fn parse_message_detail(v: &serde_json::Value) -> Option<MailMessageDetail> {
             .map(|arr| arr.iter().filter_map(format_address).collect())
             .unwrap_or_default(),
         date: v.get("sentAt").and_then(|n| n.as_i64()).unwrap_or(0),
-        body_plain: v
-            .get("body")
-            .and_then(|s| s.as_str())
-            .map(String::from),
+        body_plain: v.get("body").and_then(|s| s.as_str()).map(String::from),
         body_html: v
             .get("hasHtmlBody")
             .and_then(|b| b.as_bool())
@@ -723,10 +694,8 @@ mod tests {
 
     #[test]
     fn parses_account() {
-        let v: serde_json::Value = serde_json::from_str(
-            r#"{"id":1,"email":"cody@example.com","name":"Cody"}"#,
-        )
-        .unwrap();
+        let v: serde_json::Value =
+            serde_json::from_str(r#"{"id":1,"email":"cody@example.com","name":"Cody"}"#).unwrap();
         let a = parse_account(&v).unwrap();
         assert_eq!(a.id, 1);
         assert_eq!(a.email, "cody@example.com");
@@ -735,10 +704,8 @@ mod tests {
 
     #[test]
     fn parses_mailbox() {
-        let v: serde_json::Value = serde_json::from_str(
-            r#"{"id":42,"name":"INBOX","accountId":1,"unread":5}"#,
-        )
-        .unwrap();
+        let v: serde_json::Value =
+            serde_json::from_str(r#"{"id":42,"name":"INBOX","accountId":1,"unread":5}"#).unwrap();
         let m = parse_mailbox(&v).unwrap();
         assert_eq!(m.id, 42);
         assert_eq!(m.name, "INBOX");
@@ -779,8 +746,7 @@ mod tests {
 
     #[test]
     fn format_address_falls_back_to_email() {
-        let v: serde_json::Value =
-            serde_json::from_str(r#"{"email":"a@b.com"}"#).unwrap();
+        let v: serde_json::Value = serde_json::from_str(r#"{"email":"a@b.com"}"#).unwrap();
         assert_eq!(format_address(&v), Some("a@b.com".to_string()));
     }
 }

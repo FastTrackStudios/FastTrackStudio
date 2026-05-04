@@ -3,8 +3,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::asset::Asset;
-use crate::client::Client;
 use crate::calendar_event::CalendarEvent;
+use crate::client::Client;
 use crate::expense::Expense;
 use crate::invoice::Invoice;
 use crate::project::Project;
@@ -90,8 +90,8 @@ impl Vault {
         let body = if !task.body.is_empty() {
             task.body.clone()
         } else if path.exists() {
-            let content = fs::read_to_string(&path)
-                .map_err(|e| VaultError::IoError(e.to_string()))?;
+            let content =
+                fs::read_to_string(&path).map_err(|e| VaultError::IoError(e.to_string()))?;
             Self::extract_body(&content).unwrap_or("").to_string()
         } else {
             String::new()
@@ -105,8 +105,8 @@ impl Vault {
     pub fn save_project(&self, project: &Project) -> Result<(), VaultError> {
         let path = self.project_path(&project.title);
         let body = if path.exists() {
-            let content = fs::read_to_string(&path)
-                .map_err(|e| VaultError::IoError(e.to_string()))?;
+            let content =
+                fs::read_to_string(&path).map_err(|e| VaultError::IoError(e.to_string()))?;
             Self::extract_body(&content).unwrap_or("").to_string()
         } else {
             String::new()
@@ -121,8 +121,8 @@ impl Vault {
         let dir = self.root.join(subdir);
         let path = dir.join(format!("{}/project.md", project.title));
         let body = if path.exists() {
-            let content = fs::read_to_string(&path)
-                .map_err(|e| VaultError::IoError(e.to_string()))?;
+            let content =
+                fs::read_to_string(&path).map_err(|e| VaultError::IoError(e.to_string()))?;
             Self::extract_body(&content).unwrap_or("").to_string()
         } else {
             String::new()
@@ -139,10 +139,8 @@ impl Vault {
         let tmp_path = path.with_extension("md.tmp");
         fs::create_dir_all(path.parent().unwrap())
             .map_err(|e| VaultError::IoError(e.to_string()))?;
-        fs::write(&tmp_path, content)
-            .map_err(|e| VaultError::IoError(e.to_string()))?;
-        fs::rename(&tmp_path, path)
-            .map_err(|e| VaultError::IoError(e.to_string()))?;
+        fs::write(&tmp_path, content).map_err(|e| VaultError::IoError(e.to_string()))?;
+        fs::rename(&tmp_path, path).map_err(|e| VaultError::IoError(e.to_string()))?;
         Ok(())
     }
 
@@ -195,8 +193,8 @@ impl Vault {
         event: &CalendarEvent,
         body: &str,
     ) -> Result<String, VaultError> {
-        let yaml = facet_yaml::to_string(event)
-            .map_err(|e| VaultError::ParseError(e.to_string()))?;
+        let yaml =
+            facet_yaml::to_string(event).map_err(|e| VaultError::ParseError(e.to_string()))?;
         let yaml = yaml.strip_prefix("---\n").unwrap_or(&yaml);
         let body = if body.is_empty() { &event.body } else { body };
         Ok(format!("---\n{}---\n{}", yaml, body))
@@ -209,8 +207,8 @@ impl Vault {
         let body = if !event.body.is_empty() {
             event.body.clone()
         } else if path.exists() {
-            let content = fs::read_to_string(&path)
-                .map_err(|e| VaultError::IoError(e.to_string()))?;
+            let content =
+                fs::read_to_string(&path).map_err(|e| VaultError::IoError(e.to_string()))?;
             Self::extract_body(&content).unwrap_or("").to_string()
         } else {
             String::new()
@@ -222,7 +220,10 @@ impl Vault {
     pub fn delete_calendar_event(&self, event_id: &str) -> Result<(), VaultError> {
         for event in self.load_calendar_events() {
             if event.id.as_deref() == Some(event_id) || event.title == event_id {
-                let path = self.root.join("calendar").join(format!("{}.md", safe_file_name(&event.title)));
+                let path = self
+                    .root
+                    .join("calendar")
+                    .join(format!("{}.md", safe_file_name(&event.title)));
                 if path.exists() {
                     std::fs::remove_file(&path).map_err(|e| VaultError::IoError(e.to_string()))?;
                 }
@@ -233,8 +234,8 @@ impl Vault {
     }
 
     pub fn render_asset_file(asset: &Asset, body: &str) -> Result<String, VaultError> {
-        let yaml = facet_yaml::to_string(asset)
-            .map_err(|e| VaultError::ParseError(e.to_string()))?;
+        let yaml =
+            facet_yaml::to_string(asset).map_err(|e| VaultError::ParseError(e.to_string()))?;
         let yaml = yaml.strip_prefix("---\n").unwrap_or(&yaml);
         let body = if body.is_empty() { &asset.body } else { body };
         Ok(format!("---\n{}---\n{}", yaml, body))
@@ -254,8 +255,8 @@ impl Vault {
         let body = if !asset.body.is_empty() {
             asset.body.clone()
         } else if path.exists() {
-            let content = fs::read_to_string(&path)
-                .map_err(|e| VaultError::IoError(e.to_string()))?;
+            let content =
+                fs::read_to_string(&path).map_err(|e| VaultError::IoError(e.to_string()))?;
             Self::extract_body(&content).unwrap_or("").to_string()
         } else {
             String::new()
@@ -266,8 +267,12 @@ impl Vault {
 
     pub fn delete_asset(&self, asset_id: &str) -> Result<(), VaultError> {
         for asset in self.load_assets() {
-            if asset.id.eq_ignore_ascii_case(asset_id) || asset.name.eq_ignore_ascii_case(asset_id) {
-                let path = self.root.join("assets").join(format!("{}.md", safe_file_name(&asset.name)));
+            if asset.id.eq_ignore_ascii_case(asset_id) || asset.name.eq_ignore_ascii_case(asset_id)
+            {
+                let path = self
+                    .root
+                    .join("assets")
+                    .join(format!("{}.md", safe_file_name(&asset.name)));
                 if path.exists() {
                     std::fs::remove_file(&path).map_err(|e| VaultError::IoError(e.to_string()))?;
                 }
@@ -278,8 +283,8 @@ impl Vault {
     }
 
     pub fn render_client_file(client: &Client, body: &str) -> Result<String, VaultError> {
-        let yaml = facet_yaml::to_string(client)
-            .map_err(|e| VaultError::ParseError(e.to_string()))?;
+        let yaml =
+            facet_yaml::to_string(client).map_err(|e| VaultError::ParseError(e.to_string()))?;
         let yaml = yaml.strip_prefix("---\n").unwrap_or(&yaml);
         Ok(format!("---\n{}---\n{}", yaml, body))
     }
@@ -301,8 +306,8 @@ impl Vault {
         std::fs::create_dir_all(&dir).map_err(|e| VaultError::IoError(e.to_string()))?;
         let path = dir.join(format!("{}.md", client.name));
         let body = if path.exists() {
-            let content = fs::read_to_string(&path)
-                .map_err(|e| VaultError::IoError(e.to_string()))?;
+            let content =
+                fs::read_to_string(&path).map_err(|e| VaultError::IoError(e.to_string()))?;
             Self::extract_body(&content).unwrap_or("").to_string()
         } else {
             String::new()
@@ -319,8 +324,8 @@ impl Vault {
     }
 
     pub fn render_invoice_file(invoice: &Invoice, body: &str) -> Result<String, VaultError> {
-        let yaml = facet_yaml::to_string(invoice)
-            .map_err(|e| VaultError::ParseError(e.to_string()))?;
+        let yaml =
+            facet_yaml::to_string(invoice).map_err(|e| VaultError::ParseError(e.to_string()))?;
         let yaml = yaml.strip_prefix("---\n").unwrap_or(&yaml);
         Ok(format!("---\n{}---\n{}", yaml, body))
     }
@@ -458,8 +463,8 @@ impl Vault {
     }
 
     pub fn render_project_file(project: &Project, body: &str) -> Result<String, VaultError> {
-        let yaml = facet_yaml::to_string(project)
-            .map_err(|e| VaultError::ParseError(e.to_string()))?;
+        let yaml =
+            facet_yaml::to_string(project).map_err(|e| VaultError::ParseError(e.to_string()))?;
         let yaml = yaml.strip_prefix("---\n").unwrap_or(&yaml);
         Ok(format!("---\n{}---\n{}", yaml, body))
     }
@@ -481,7 +486,6 @@ impl Vault {
     pub fn extract_body(content: &str) -> Option<&str> {
         Self::split_frontmatter(content).map(|(_, body)| body)
     }
-
 }
 
 fn safe_file_name(title: &str) -> String {

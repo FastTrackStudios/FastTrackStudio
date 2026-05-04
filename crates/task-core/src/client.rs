@@ -25,7 +25,6 @@ pub struct Client {
     pub name: String,
 
     // ── Invoice Ninja sync ──────────────────────────────────────────
-
     /// Opaque IN client hashed id — set after the first push. All IN
     /// entity ids are strings, not integers.
     pub invoice_ninja_id: Option<String>,
@@ -39,7 +38,6 @@ pub struct Client {
     pub last_synced_at: Option<DateTime<Utc>>,
 
     // ── Billing ─────────────────────────────────────────────────────
-
     /// Default billable rate in cents per hour. Falls back only when the
     /// project and entry don't specify their own rate.
     pub default_hourly_rate: Option<u32>,
@@ -54,7 +52,6 @@ pub struct Client {
     pub payment_terms_days: Option<u32>,
 
     // ── Contact ─────────────────────────────────────────────────────
-
     pub email: Option<String>,
     pub phone: Option<String>,
     pub contact_name: Option<String>,
@@ -70,7 +67,6 @@ pub struct Client {
     pub vat_number: Option<String>,
 
     // ── Bookkeeping ─────────────────────────────────────────────────
-
     pub private_notes: Option<String>,
     pub public_notes: Option<String>,
 
@@ -105,12 +101,18 @@ mod tests {
 
     #[test]
     fn cascade_prefers_entry() {
-        assert_eq!(resolve_rate(Some(12_000), Some(10_000), Some(8_000), None), 12_000);
+        assert_eq!(
+            resolve_rate(Some(12_000), Some(10_000), Some(8_000), None),
+            12_000
+        );
     }
 
     #[test]
     fn cascade_falls_through_to_project() {
-        assert_eq!(resolve_rate(None, Some(10_000), Some(8_000), Some(5_000)), 10_000);
+        assert_eq!(
+            resolve_rate(None, Some(10_000), Some(8_000), Some(5_000)),
+            10_000
+        );
     }
 
     #[test]

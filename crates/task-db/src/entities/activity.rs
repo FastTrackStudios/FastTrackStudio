@@ -1,9 +1,9 @@
 //! Activity entity — audit log for all changes.
 
+use crudcrate::CRUDResource;
+use crudcrate::EntityToModels;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
-use crudcrate::EntityToModels;
-use crudcrate::CRUDResource;
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, EntityToModels, Serialize, Deserialize)]
 #[sea_orm(table_name = "activities")]
@@ -11,7 +11,7 @@ use crudcrate::CRUDResource;
     api_struct = "ActivityApi",
     generate_vox_service,
     name_singular = "activity",
-    name_plural = "activities",
+    name_plural = "activities"
 )]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]

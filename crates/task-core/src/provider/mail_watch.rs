@@ -25,7 +25,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::TcpStream;
-use tokio_util::compat::{TokioAsyncReadCompatExt, Compat};
+use tokio_util::compat::{Compat, TokioAsyncReadCompatExt};
 
 /// Runtime config for a single IDLE subscription.
 #[derive(Debug, Clone)]
@@ -78,10 +78,7 @@ pub struct WatchEvent {
 
 /// Run the watcher forever. Each server-pushed update invokes `on_event`.
 /// Returns only on fatal error (caller should retry with backoff).
-pub async fn watch_idle<F>(
-    config: ImapWatchConfig,
-    mut on_event: F,
-) -> Result<(), VaultError>
+pub async fn watch_idle<F>(config: ImapWatchConfig, mut on_event: F) -> Result<(), VaultError>
 where
     F: FnMut(WatchEvent) + Send,
 {
@@ -216,8 +213,7 @@ fn build_tls_config(config: &ImapWatchConfig) -> Result<rustls::ClientConfig, Va
         let mut cursor = std::io::Cursor::new(bytes);
         let mut trusted = Vec::new();
         for cert in rustls_pemfile::certs(&mut cursor) {
-            let cert =
-                cert.map_err(|e| VaultError::ParseError(format!("ca bundle PEM: {e}")))?;
+            let cert = cert.map_err(|e| VaultError::ParseError(format!("ca bundle PEM: {e}")))?;
             trusted.push(cert.into_owned());
         }
         let verifier = Arc::new(PinnedServerCertVerifier { trusted });

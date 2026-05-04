@@ -88,7 +88,8 @@ impl Approval {
             self.approved_by.push(by.to_string());
         }
         // Auto-approve if all reviewers have approved, or if no reviewers set
-        if self.reviewers.is_empty() || self.reviewers.iter().all(|r| self.approved_by.contains(r)) {
+        if self.reviewers.is_empty() || self.reviewers.iter().all(|r| self.approved_by.contains(r))
+        {
             self.transition(ApprovalStatus::Approved, by, None);
         }
     }
@@ -127,7 +128,10 @@ mod tests {
 
         a.request_changes("amy", "Kick too loud");
         assert_eq!(a.status, ApprovalStatus::ChangesRequested);
-        assert_eq!(a.history.last().unwrap().reason.as_deref(), Some("Kick too loud"));
+        assert_eq!(
+            a.history.last().unwrap().reason.as_deref(),
+            Some("Kick too loud")
+        );
 
         a.submit("cody");
         a.approve("amy");

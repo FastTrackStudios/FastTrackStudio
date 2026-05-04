@@ -1,18 +1,17 @@
 //! Project entity — database index for project metadata.
 
+use crudcrate::CRUDResource;
+use crudcrate::EntityToModels;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
-use crudcrate::EntityToModels;
-use crudcrate::CRUDResource;
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, EntityToModels, Serialize, Deserialize)]
 #[sea_orm(table_name = "projects")]
 #[crudcrate(
     api_struct = "ProjectApi",
-    
     generate_vox_service,
     name_singular = "project",
-    name_plural = "projects",
+    name_plural = "projects"
 )]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
@@ -55,11 +54,9 @@ pub struct Model {
     pub organization: Option<String>,
 
     /// Team members (JSON array).
-    
     pub team: Json,
 
     /// Referenced project slugs (JSON array).
-    
     pub references: Json,
 
     pub due: Option<chrono::NaiveDate>,

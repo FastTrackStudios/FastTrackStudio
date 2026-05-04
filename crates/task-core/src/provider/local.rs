@@ -7,11 +7,11 @@ use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
 
+use super::traits::*;
 use crate::project::Project;
 use crate::project_vault;
 use crate::service::VaultError;
 use crate::task::Task;
-use super::traits::*;
 
 /// Reads projects from a local `Projects/` directory.
 ///
@@ -56,14 +56,15 @@ impl ProjectProvider for LocalProvider {
 
     async fn get_project(&self, title: &str) -> Result<Option<ProjectBundle>, VaultError> {
         let bundles = project_vault::scan_project_vault(&self.root);
-        Ok(bundles.into_iter().find(|b| b.project.title == title).map(|b| {
-            ProjectBundle {
+        Ok(bundles
+            .into_iter()
+            .find(|b| b.project.title == title)
+            .map(|b| ProjectBundle {
                 project: b.project,
                 tasks: b.tasks,
                 location: b.path.to_string_lossy().to_string(),
                 source: self.info.name.clone(),
-            }
-        }))
+            }))
     }
 
     async fn list_all(&self) -> Result<Vec<ProjectBundle>, VaultError> {
@@ -95,7 +96,11 @@ impl ProjectProvider for LocalProvider {
     }
 
     async fn delete_task(&self, project_title: &str, task_title: &str) -> Result<(), VaultError> {
-        let path = self.root.join(project_title).join("tasks").join(format!("{}.md", task_title));
+        let path = self
+            .root
+            .join(project_title)
+            .join("tasks")
+            .join(format!("{}.md", task_title));
         if path.exists() {
             std::fs::remove_file(&path).map_err(|e| VaultError::IoError(e.to_string()))?;
         }

@@ -9,8 +9,8 @@
 //!
 //! The index is NOT the source of truth. The .md files are.
 
-mod sqlite;
 mod search;
+mod sqlite;
 
-pub use sqlite::{ChangeRow, ConflictRow, RebuildStats, TaskIndex, TaskRow};
 pub use search::SearchIndex;
+pub use sqlite::{ChangeRow, ConflictRow, RebuildStats, TaskIndex, TaskRow};

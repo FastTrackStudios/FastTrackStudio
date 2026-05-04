@@ -1,9 +1,9 @@
 //! Notification entity.
 
+use crudcrate::CRUDResource;
+use crudcrate::EntityToModels;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
-use crudcrate::EntityToModels;
-use crudcrate::CRUDResource;
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, EntityToModels, Serialize, Deserialize)]
 #[sea_orm(table_name = "notifications")]
@@ -11,7 +11,7 @@ use crudcrate::CRUDResource;
     api_struct = "NotificationApi",
     generate_vox_service,
     name_singular = "notification",
-    name_plural = "notifications",
+    name_plural = "notifications"
 )]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]

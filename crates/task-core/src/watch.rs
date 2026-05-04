@@ -20,10 +20,7 @@ const DEBOUNCE: Duration = Duration::from_millis(500);
 // r[impl sync.file-watch]
 /// Start watching `root` recursively. Increments `counter` once per debounced
 /// change burst. Returns a `WatchHandle` that stops watching when dropped.
-pub fn start_watch(
-    root: &Path,
-    counter: watch::Sender<u64>,
-) -> notify::Result<WatchHandle> {
+pub fn start_watch(root: &Path, counter: watch::Sender<u64>) -> notify::Result<WatchHandle> {
     let (tx, rx) = std::sync::mpsc::channel();
 
     let mut watcher = RecommendedWatcher::new(

@@ -1,9 +1,9 @@
 //! Cycle/sprint entity.
 
+use crudcrate::CRUDResource;
+use crudcrate::EntityToModels;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
-use crudcrate::EntityToModels;
-use crudcrate::CRUDResource;
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, EntityToModels, Serialize, Deserialize)]
 #[sea_orm(table_name = "cycles")]
@@ -11,7 +11,7 @@ use crudcrate::CRUDResource;
     api_struct = "CycleApi",
     generate_vox_service,
     name_singular = "cycle",
-    name_plural = "cycles",
+    name_plural = "cycles"
 )]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
@@ -32,7 +32,6 @@ pub struct Model {
     pub end_date: Option<chrono::NaiveDate>,
 
     /// Task IDs in this cycle (JSON array).
-
     pub tasks: Json,
 
     pub sort_order: Option<f64>,

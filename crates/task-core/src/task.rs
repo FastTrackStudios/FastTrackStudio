@@ -47,7 +47,6 @@ pub struct Task {
     pub external_source: Option<String>,
 
     // ── Collaboration fields ─────────────────────────────────────────
-
     /// Who this task is assigned to (username, e.g. "codywright").
     pub assignee: Option<String>,
 
@@ -59,46 +58,38 @@ pub struct Task {
     pub created_by: Option<String>,
 
     // ── Sequence ID (human-readable, per-project) ───────────────────
-
     /// Human-readable sequence number within the project (e.g. 42 → "PRJ-42").
     pub sequence_id: Option<u32>,
 
     // ── Type ────────────────────────────────────────────────────────
-
     /// Issue type: task, bug, story, epic, feature, chore, etc.
     pub issue_type: Option<String>,
 
     // ── Relations ───────────────────────────────────────────────────
-
     /// Rich relations to other tasks.
     #[facet(default)]
     pub relations: Vec<TaskRelation>,
 
     // ── Subscribers / watchers ──────────────────────────────────────
-
     /// Users watching this task for updates.
     #[facet(default)]
     pub subscribers: Vec<String>,
 
     // ── Reactions ───────────────────────────────────────────────────
-
     /// Emoji reactions on this task (e.g. "👍:cody", "🎉:amy").
     #[facet(default)]
     pub reactions: Vec<Reaction>,
 
     // ── Soft deletion ───────────────────────────────────────────────
-
     /// Soft delete timestamp. If set, this task is "deleted" but recoverable.
     pub deleted_at: Option<DateTime<Utc>>,
 
     // ── Draft ───────────────────────────────────────────────────────
-
     /// Whether this is a draft (work-in-progress, not yet visible to team).
     #[facet(default)]
     pub is_draft: bool,
 
     // ── Email routing ────────────────────────────────────────────────
-
     /// Matcher hints the bot uses to route incoming mail to this task.
     /// Typical values: tag labels ("task:mix-v3"), subject tokens,
     /// sender patterns. The bot (Jarvis) reads these and does its own
@@ -112,7 +103,6 @@ pub struct Task {
     pub emails: Vec<crate::email::EmailRef>,
 
     // ── Content ──────────────────────────────────────────────────────
-
     /// Markdown body content (after frontmatter).
     #[facet(skip)]
     #[facet(default)]
@@ -235,7 +225,6 @@ pub struct TimeEntry {
     pub imported_from: Option<String>,
 
     // ── Invoicing ─────────────────────────────────────────────────────
-
     /// When this entry was rolled up into an invoice. Non-None means
     /// "don't include in future invoice generation runs".
     #[facet(default)]
@@ -257,7 +246,11 @@ impl TimeEntry {
         match self.end_time {
             Some(end) => {
                 let mins = (end - self.start_time).num_minutes();
-                if mins > 0 { mins as u32 } else { 0 }
+                if mins > 0 {
+                    mins as u32
+                } else {
+                    0
+                }
             }
             None => 0,
         }
@@ -266,7 +259,11 @@ impl TimeEntry {
     /// Elapsed minutes for a running timer, measured from `now`.
     pub fn elapsed_minutes(&self, now: DateTime<Utc>) -> u32 {
         let mins = (now - self.start_time).num_minutes();
-        if mins > 0 { mins as u32 } else { 0 }
+        if mins > 0 {
+            mins as u32
+        } else {
+            0
+        }
     }
 
     /// Billable amount in cents, given a resolved rate (cents/hour).
@@ -376,7 +373,9 @@ impl Task {
     // r[impl task.urgency]
     pub fn urgency_score(&self) -> i32 {
         let priority_weight = self.priority.weight();
-        let days_until = self.days_until_due().or_else(|| self.days_until_scheduled());
+        let days_until = self
+            .days_until_due()
+            .or_else(|| self.days_until_scheduled());
 
         match days_until {
             None => priority_weight,
@@ -413,7 +412,10 @@ impl Task {
     // r[impl task.computed.is-blocked]
     pub fn is_blocked(&self) -> bool {
         !self.blocked_by.is_empty()
-            || self.relations.iter().any(|r| r.relation_type == RelationType::BlockedBy)
+            || self
+                .relations
+                .iter()
+                .any(|r| r.relation_type == RelationType::BlockedBy)
     }
 
     pub fn is_deleted(&self) -> bool {

@@ -1,9 +1,9 @@
 //! Reaction entity — emoji reactions on any entity.
 
+use crudcrate::CRUDResource;
+use crudcrate::EntityToModels;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
-use crudcrate::EntityToModels;
-use crudcrate::CRUDResource;
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, EntityToModels, Serialize, Deserialize)]
 #[sea_orm(table_name = "reactions")]
@@ -11,7 +11,7 @@ use crudcrate::CRUDResource;
     api_struct = "ReactionApi",
     generate_vox_service,
     name_singular = "reaction",
-    name_plural = "reactions",
+    name_plural = "reactions"
 )]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]

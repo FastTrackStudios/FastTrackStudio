@@ -107,7 +107,14 @@ impl TeamMember {
     }
 
     /// Create a fully claimed member.
-    pub fn claimed(username: &str, name: &str, role: &str, department: &str, email: &str, auth_id: &str) -> Self {
+    pub fn claimed(
+        username: &str,
+        name: &str,
+        role: &str,
+        department: &str,
+        email: &str,
+        auth_id: &str,
+    ) -> Self {
         Self {
             username: username.to_string(),
             name: name.to_string(),
@@ -169,7 +176,8 @@ mod tests {
     #[test]
     fn placeholder_lifecycle() {
         // Admin creates a placeholder for the session drummer
-        let mut james = TeamMember::placeholder("james", "James Rodriguez", "Session Drummer", "music");
+        let mut james =
+            TeamMember::placeholder("james", "James Rodriguez", "Session Drummer", "music");
         assert!(james.is_placeholder());
         assert_eq!(james.display_label(), "James Rodriguez (unclaimed)");
         assert!(james.auth_id.is_none());
@@ -192,8 +200,12 @@ mod tests {
     fn merge_existing_account() {
         // "james-temp" was a placeholder assigned to tasks
         let mut real_james = TeamMember::claimed(
-            "james", "James Rodriguez", "Session Drummer", "music",
-            "james@example.com", "auth_123"
+            "james",
+            "James Rodriguez",
+            "Session Drummer",
+            "music",
+            "james@example.com",
+            "auth_123",
         );
 
         // Merge the old placeholder username
