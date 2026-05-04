@@ -1545,6 +1545,12 @@ impl VaultServiceImpl {
         if let Some(location) = patch.location {
             event.location = location;
         }
+        if let Some(venue) = patch.venue {
+            event.venue = venue;
+        }
+        if let Some(spaces) = patch.spaces {
+            event.spaces = spaces;
+        }
         if let Some(start) = patch.start {
             event.start = start;
         }

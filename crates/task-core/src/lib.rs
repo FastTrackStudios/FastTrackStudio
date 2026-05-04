@@ -7,6 +7,7 @@ pub mod cycle;
 pub mod email;
 pub mod expense;
 pub mod invoice;
+pub mod location;
 pub mod module;
 pub mod people;
 pub mod project;
@@ -60,6 +61,7 @@ pub use expense::{
     ExpenseStatus,
 };
 pub use invoice::{format_invoice_id, Invoice, InvoiceLine, InvoiceStatus, Payment};
+pub use location::{Location, Space, VenueDefault};
 pub use module::{Module, ModuleStatus};
 pub use people::{
     CommunicationRef, ContactMethod, OrganizationContext, OrganizationRecord, Person,

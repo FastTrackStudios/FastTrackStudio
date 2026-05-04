@@ -3499,6 +3499,8 @@ async fn main() -> eyre::Result<()> {
                 title,
                 description: description.map(optional_string_field),
                 location: location.map(optional_string_field),
+                venue: None,
+                spaces: None,
                 start: start.as_deref().map(parse_datetime).transpose()?,
                 end: match end {
                     Some(s) if s == "clear" || s.is_empty() => Some(None),
@@ -7360,6 +7362,8 @@ fn build_calendar_patch(
         title,
         description: description.map(optional_string_field),
         location: location.map(optional_string_field),
+        venue: None,
+        spaces: None,
         start: start.as_deref().map(parse_datetime).transpose()?,
         end: match end {
             Some(s) if s == "clear" || s.is_empty() => Some(None),

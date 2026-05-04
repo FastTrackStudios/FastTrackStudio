@@ -15,6 +15,7 @@ use crate::people::{
     OrganizationContext, OrganizationRecord, Person, PersonContext, ProviderConflict,
 };
 use crate::project::{Project, ProjectDashboardEntry, ProjectStats};
+use crate::task::WikiLink;
 use crate::provider::{
     ChannelConversation, ChannelMessage, ChannelSendMessageRequest, MailAccount, MailMessage,
     MailMessageDetail, MailTag, Mailbox,
@@ -824,6 +825,8 @@ pub struct CalendarEventPatch {
     pub title: Option<String>,
     pub description: Option<Option<String>>,
     pub location: Option<Option<String>>,
+    pub venue: Option<Option<WikiLink>>,
+    pub spaces: Option<Vec<WikiLink>>,
     pub start: Option<DateTime<Utc>>,
     pub end: Option<Option<DateTime<Utc>>>,
     pub all_day: Option<bool>,
