@@ -188,12 +188,24 @@ pub struct PanelDef {
     /// Where the panel docks by default.
     pub default_dock: DockPosition,
 
+    /// Which renderer backend should host this panel.
+    pub renderer: PanelRenderer,
+
     /// Default panel size (width, height) in logical pixels.
     pub default_size: (f64, f64),
 
     /// If set, the host auto-generates a toggle action with this command ID.
     /// The action shows/hides the panel.
     pub toggle_action: Option<&'static str>,
+}
+
+/// Renderer backend for a Dioxus panel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PanelRenderer {
+    /// Existing native renderer backed by Blitz/Vello.
+    Native,
+    /// Browser-backed Dioxus desktop renderer hosted in an embedded webview.
+    Desktop,
 }
 
 /// A panel's root component — opaque function pointer.

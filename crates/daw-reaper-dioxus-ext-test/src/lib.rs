@@ -9,7 +9,7 @@
 
 use std::error::Error;
 
-use daw_module::{DockPosition, PanelComponent, PanelDef};
+use daw_module::{DockPosition, PanelComponent, PanelDef, PanelRenderer};
 use daw_reaper_dioxus::prelude::*;
 use reaper_high::Reaper as HighReaper;
 use reaper_low::PluginContext;
@@ -39,6 +39,7 @@ fn plugin_main(_context: PluginContext) -> Result<(), Box<dyn Error>> {
         title: "Test Panel",
         component: PanelComponent::from_fn_ptr(test_panel as *const ()),
         default_dock: DockPosition::Floating,
+        renderer: PanelRenderer::Native,
         default_size: (TEST_PANEL_WIDTH as f64, TEST_PANEL_HEIGHT as f64),
         toggle_action: None,
     });
