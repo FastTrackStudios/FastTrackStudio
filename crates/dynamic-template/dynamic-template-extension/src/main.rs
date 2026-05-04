@@ -137,7 +137,7 @@ async fn run() -> Result<()> {
                 match result {
                     Ok(Some(event)) => {
                         if let Err(e) = handle_track_event(
-                            &*event,
+                            &event,
                             &daw,
                             auto_color_enabled,
                             &mut group_cache,

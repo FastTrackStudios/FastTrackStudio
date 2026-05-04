@@ -4,14 +4,14 @@ use std::path::{Path, PathBuf};
 use clap::Subcommand;
 use daw::file::types::item::Take;
 use daw::file::{
-    read_project, MidiEvent, MidiEventType, MidiSource, MidiSourceEvent, ReaperProject, SourceType,
-    TempoTimeEnvelope, Track,
+    MidiEvent, MidiEventType, MidiSource, MidiSourceEvent, ReaperProject, SourceType,
+    TempoTimeEnvelope, Track, read_project,
 };
 use daw::service::routing::{MidiChannelMapping, MidiDestinationChannel, MidiSourceChannel};
-use eyre::{eyre, Result};
+use eyre::{Result, eyre};
 use midly::{
-    num::{u15, u24, u28, u4, u7},
     Format, Header, MetaMessage, MidiMessage, Smf, Timing, TrackEvent, TrackEventKind,
+    num::{u4, u7, u15, u24, u28},
 };
 use serde::Serialize;
 

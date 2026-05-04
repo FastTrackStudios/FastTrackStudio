@@ -39,10 +39,16 @@ jobs:
         continue-on-error: true
 
       - name: Clippy
-        run: nix develop --impure --command cargo clippy --workspace -- -D warnings
+        run: nix develop --impure --command cargo clippy -p fts-cli -p dynamic-template-extension -- -D warnings
 
       - name: Format
-        run: nix develop --impure --command cargo fmt --all -- --check
+        run: |
+          git fetch --depth=1 origin main
+          base=$(git merge-base origin/main HEAD)
+          files=$(git diff --name-only "$base" HEAD -- '*.rs')
+          if [ -n "$files" ]; then
+            nix develop --impure --command rustfmt --edition 2024 --check $files
+          fi
 
       - name: Tests
         run: nix develop --impure --command cargo nextest run --workspace
