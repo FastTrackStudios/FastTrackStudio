@@ -78,7 +78,7 @@ btca resources   # list all available resources
 | `roam` | bearcove/roam | Rust-native RPC framework where Rust traits are the schema, with TS/Swift codegen |
 | `tracey` | bearcove/tracey | Traceability tool linking requirements/specs to code implementations via annotations |
 | `dodeca` | bearcove/dodeca | Fully incremental static site generator with query-based caching |
-| `captain` | bearcove/captain | Dev automation via git pre-commit/pre-push hooks — formatting, validation, README gen |
+| `capn` | bearcove/capn | Dev automation via git pre-commit/pre-push hooks — formatting, validation, README gen |
 | `peeps` | bearcove/peeps | Low-overhead instrumentation for tokio tasks, threads, locks, and RPC calls |
 | `styx` | bearcove/styx | Data serialization format — cleaner alternative to JSON/YAML with schema support |
 | `figue` | bearcove/figue | Config parsing from CLI args, env vars, and config files using facet reflection |
