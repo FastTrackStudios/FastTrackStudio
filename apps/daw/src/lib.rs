@@ -282,7 +282,7 @@ fn bootstrap_reaper_toolbars(profile: &DawProfile) -> Result<()> {
     let mut changed = false;
 
     append_missing_toolbar_sections(&mut content, "Floating toolbar", 1..=32, &mut changed);
-    append_missing_toolbar_sections(&mut content, "MIDI toolbar", 1..=16, &mut changed);
+    append_missing_toolbar_sections(&mut content, "Floating MIDI toolbar", 1..=8, &mut changed);
 
     if changed {
         if let Some(parent) = menu_path.parent() {
@@ -342,7 +342,7 @@ mod launcher_tests {
         let menu_path = profile.resources_dir.join("reaper-menu.ini");
         fs::write(
             &menu_path,
-            "[Main toolbar]\nitem_0=40023 New project...\n\n[Floating toolbar 1]\nitem_0=_FTS_EXISTING Existing\n\n[MIDI toolbar 1]\nitem_0=_FTS_MIDI Existing MIDI\n",
+            "[Main toolbar]\nitem_0=40023 New project...\n\n[Floating toolbar 1]\nitem_0=_FTS_EXISTING Existing\n\n[Floating MIDI toolbar 1]\nitem_0=_FTS_MIDI Existing MIDI\n",
         )
         .unwrap();
 
@@ -352,11 +352,11 @@ mod launcher_tests {
         assert!(content.contains("[Floating toolbar 1]\nitem_0=_FTS_EXISTING Existing\n"));
         assert!(content.contains("[Floating toolbar 2]\nitem_0=41101 Edit me\n"));
         assert!(content.contains("[Floating toolbar 32]\nitem_0=41101 Edit me\n"));
-        assert!(content.contains("[MIDI toolbar 1]\nitem_0=_FTS_MIDI Existing MIDI\n"));
-        assert!(content.contains("[MIDI toolbar 2]\nitem_0=41101 Edit me\n"));
-        assert!(content.contains("[MIDI toolbar 16]\nitem_0=41101 Edit me\n"));
+        assert!(content.contains("[Floating MIDI toolbar 1]\nitem_0=_FTS_MIDI Existing MIDI\n"));
+        assert!(content.contains("[Floating MIDI toolbar 2]\nitem_0=41101 Edit me\n"));
+        assert!(content.contains("[Floating MIDI toolbar 8]\nitem_0=41101 Edit me\n"));
         assert_eq!(content.matches("[Floating toolbar 1]").count(), 1);
-        assert_eq!(content.matches("[MIDI toolbar 1]").count(), 1);
+        assert_eq!(content.matches("[Floating MIDI toolbar 1]").count(), 1);
 
         let _ = fs::remove_dir_all(profile.resources_dir.parent().unwrap());
     }

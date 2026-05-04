@@ -113,7 +113,7 @@ impl Toolbar {
         let target_name = match target {
             daw_proto::ToolbarTarget::Main => "Main toolbar".to_string(),
             daw_proto::ToolbarTarget::Floating(n) => format!("Floating toolbar {n}"),
-            daw_proto::ToolbarTarget::Midi(n) => format!("MIDI toolbar {n}"),
+            daw_proto::ToolbarTarget::Midi(n) => format!("Floating MIDI toolbar {n}"),
         };
         live_toolbar_rows_json(
             self.clients

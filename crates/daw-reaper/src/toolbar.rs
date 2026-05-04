@@ -62,7 +62,7 @@ fn target_to_str(target: &ToolbarTarget) -> String {
     match target {
         ToolbarTarget::Main => "Main toolbar".to_string(),
         ToolbarTarget::Floating(n) => format!("Floating toolbar {}", (*n).clamp(1, 32)),
-        ToolbarTarget::Midi(n) => format!("MIDI toolbar {}", (*n).clamp(1, 16)),
+        ToolbarTarget::Midi(n) => format!("Floating MIDI toolbar {}", (*n).clamp(1, 8)),
     }
 }
 
@@ -92,9 +92,9 @@ fn target_from_str(value: &str) -> ToolbarTarget {
             }
         }
     }
-    if let Some(num) = value.strip_prefix("MIDI toolbar ") {
+    if let Some(num) = value.strip_prefix("Floating MIDI toolbar ") {
         if let Ok(n) = num.parse::<u8>() {
-            if (1..=16).contains(&n) {
+            if (1..=8).contains(&n) {
                 return ToolbarTarget::Midi(n);
             }
         }
@@ -105,7 +105,7 @@ fn target_from_str(value: &str) -> ToolbarTarget {
 fn toolbar_targets() -> impl Iterator<Item = ToolbarTarget> {
     std::iter::once(ToolbarTarget::Main)
         .chain((1..=32).map(ToolbarTarget::Floating))
-        .chain((1..=16).map(ToolbarTarget::Midi))
+        .chain((1..=8).map(ToolbarTarget::Midi))
 }
 
 // ============================================================================

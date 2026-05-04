@@ -1237,11 +1237,11 @@ pub fn parse_toolbar_target(target: &str) -> Result<daw::service::ToolbarTarget>
             {
                 let number = raw.parse::<u8>().map_err(|_| {
                     eyre::eyre!(
-                        "toolbar target must be main, floating toolbar 1-32, or MIDI toolbar 1-16"
+                        "toolbar target must be main, floating toolbar 1-32, or MIDI toolbar 1-8"
                     )
                 })?;
-                if !(1..=16).contains(&number) {
-                    eyre::bail!("MIDI toolbar number must be between 1 and 16");
+                if !(1..=8).contains(&number) {
+                    eyre::bail!("MIDI toolbar number must be between 1 and 8");
                 }
                 return Ok(daw::service::ToolbarTarget::Midi(number));
             }
@@ -1257,7 +1257,7 @@ pub fn parse_toolbar_target(target: &str) -> Result<daw::service::ToolbarTarget>
                 .parse::<u8>()
                 .map_err(|_| {
                     eyre::eyre!(
-                        "toolbar target must be main, floating toolbar 1-32, or MIDI toolbar 1-16"
+                        "toolbar target must be main, floating toolbar 1-32, or MIDI toolbar 1-8"
                     )
                 })?;
             if !(1..=32).contains(&number) {
@@ -1292,7 +1292,7 @@ pub async fn toolbar_config(daw: &Daw, path: &str, target: Option<&str>) -> Resu
         let target_name = match parse_toolbar_target(target)? {
             daw::service::ToolbarTarget::Main => "Main toolbar".to_string(),
             daw::service::ToolbarTarget::Floating(n) => format!("Floating toolbar {n}"),
-            daw::service::ToolbarTarget::Midi(n) => format!("MIDI toolbar {n}"),
+            daw::service::ToolbarTarget::Midi(n) => format!("Floating MIDI toolbar {n}"),
         };
         snapshots.retain(|snapshot| snapshot.toolbar_name == target_name);
     }
