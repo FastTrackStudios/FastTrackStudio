@@ -26,11 +26,11 @@
 
 use async_trait::async_trait;
 
+use super::traits::*;
 use crate::project::Project;
 use crate::service::VaultError;
 use crate::task::{Task, WikiLink};
 use crate::vault::Vault;
-use super::traits::*;
 
 /// Configuration for connecting to a Nextcloud instance.
 #[derive(Debug, Clone)]
@@ -87,11 +87,7 @@ pub struct NextcloudProvider {
 }
 
 impl NextcloudProvider {
-    pub fn new(
-        name: impl Into<String>,
-        label: impl Into<String>,
-        config: NextcloudConfig,
-    ) -> Self {
+    pub fn new(name: impl Into<String>, label: impl Into<String>, config: NextcloudConfig) -> Self {
         Self {
             info: ProviderInfo {
                 name: name.into(),
@@ -117,7 +113,8 @@ impl NextcloudProvider {
   </d:prop>
 </d:propfind>"#;
 
-        let resp = self.http
+        let resp = self
+            .http
             .request(reqwest::Method::from_bytes(b"PROPFIND").unwrap(), &url)
             .basic_auth(&self.config.username, Some(&self.config.password))
             .header("Content-Type", "application/xml")
@@ -127,7 +124,9 @@ impl NextcloudProvider {
             .await
             .map_err(|e| VaultError::IoError(format!("WebDAV PROPFIND failed: {e}")))?;
 
-        let xml = resp.text().await
+        let xml = resp
+            .text()
+            .await
             .map_err(|e| VaultError::IoError(e.to_string()))?;
 
         // Parse directory names from multistatus response
@@ -143,7 +142,8 @@ impl NextcloudProvider {
             path.trim_start_matches('/')
         );
 
-        let resp = self.http
+        let resp = self
+            .http
             .get(&url)
             .basic_auth(&self.config.username, Some(&self.config.password))
             .send()
@@ -154,10 +154,18 @@ impl NextcloudProvider {
             return Ok(None);
         }
         if !resp.status().is_success() {
-            return Err(VaultError::IoError(format!("WebDAV GET {}: {}", path, resp.status())));
+            return Err(VaultError::IoError(format!(
+                "WebDAV GET {}: {}",
+                path,
+                resp.status()
+            )));
         }
 
-        Ok(Some(resp.text().await.map_err(|e| VaultError::IoError(e.to_string()))?))
+        Ok(Some(
+            resp.text()
+                .await
+                .map_err(|e| VaultError::IoError(e.to_string()))?,
+        ))
     }
 
     /// PUT a file to WebDAV.
@@ -169,7 +177,8 @@ impl NextcloudProvider {
             path.trim_start_matches('/')
         );
 
-        let resp = self.http
+        let resp = self
+            .http
             .put(&url)
             .basic_auth(&self.config.username, Some(&self.config.password))
             .header("Content-Type", "text/markdown; charset=utf-8")
@@ -179,7 +188,11 @@ impl NextcloudProvider {
             .map_err(|e| VaultError::IoError(format!("WebDAV PUT failed: {e}")))?;
 
         if !resp.status().is_success() {
-            return Err(VaultError::IoError(format!("WebDAV PUT {}: {}", path, resp.status())));
+            return Err(VaultError::IoError(format!(
+                "WebDAV PUT {}: {}",
+                path,
+                resp.status()
+            )));
         }
         Ok(())
     }
@@ -193,7 +206,8 @@ impl NextcloudProvider {
             path.trim_start_matches('/')
         );
 
-        let resp = self.http
+        let resp = self
+            .http
             .request(reqwest::Method::from_bytes(b"MKCOL").unwrap(), &url)
             .basic_auth(&self.config.username, Some(&self.config.password))
             .send()
@@ -202,7 +216,11 @@ impl NextcloudProvider {
 
         // 405 = already exists, which is fine
         if !resp.status().is_success() && resp.status().as_u16() != 405 {
-            return Err(VaultError::IoError(format!("WebDAV MKCOL {}: {}", path, resp.status())));
+            return Err(VaultError::IoError(format!(
+                "WebDAV MKCOL {}: {}",
+                path,
+                resp.status()
+            )));
         }
         Ok(())
     }
@@ -216,7 +234,8 @@ impl NextcloudProvider {
             path.trim_start_matches('/')
         );
 
-        let resp = self.http
+        let resp = self
+            .http
             .delete(&url)
             .basic_auth(&self.config.username, Some(&self.config.password))
             .send()
@@ -224,7 +243,11 @@ impl NextcloudProvider {
             .map_err(|e| VaultError::IoError(format!("WebDAV DELETE failed: {e}")))?;
 
         if !resp.status().is_success() && resp.status().as_u16() != 404 {
-            return Err(VaultError::IoError(format!("WebDAV DELETE {}: {}", path, resp.status())));
+            return Err(VaultError::IoError(format!(
+                "WebDAV DELETE {}: {}",
+                path,
+                resp.status()
+            )));
         }
         Ok(())
     }
@@ -246,7 +269,8 @@ impl NextcloudProvider {
   </d:prop>
 </d:propfind>"#;
 
-        let resp = self.http
+        let resp = self
+            .http
             .request(reqwest::Method::from_bytes(b"PROPFIND").unwrap(), &url)
             .basic_auth(&self.config.username, Some(&self.config.password))
             .header("Content-Type", "application/xml")
@@ -256,14 +280,19 @@ impl NextcloudProvider {
             .await
             .map_err(|e| VaultError::IoError(format!("WebDAV PROPFIND failed: {e}")))?;
 
-        let xml = resp.text().await
+        let xml = resp
+            .text()
+            .await
             .map_err(|e| VaultError::IoError(e.to_string()))?;
 
         Ok(parse_webdav_md_files(&xml))
     }
 
     /// Load a project from WebDAV (project.md + tasks/*.md).
-    async fn load_project_from_webdav(&self, project_name: &str) -> Result<Option<ProjectBundle>, VaultError> {
+    async fn load_project_from_webdav(
+        &self,
+        project_name: &str,
+    ) -> Result<Option<ProjectBundle>, VaultError> {
         let projects_base = self.config.projects_path.trim_end_matches('/');
         let project_md_path = format!("{}/{}/project.md", projects_base, project_name);
 
@@ -280,7 +309,10 @@ impl NextcloudProvider {
 
         // Load tasks from tasks/ subdirectory
         let tasks_dir = format!("{}/{}/tasks", projects_base, project_name);
-        let task_files = self.webdav_list_md_files(&tasks_dir).await.unwrap_or_default();
+        let task_files = self
+            .webdav_list_md_files(&tasks_dir)
+            .await
+            .unwrap_or_default();
 
         let mut tasks = Vec::new();
         for file_name in &task_files {
@@ -314,7 +346,8 @@ impl NextcloudProvider {
             user_id
         );
 
-        let resp = self.http
+        let resp = self
+            .http
             .get(&url)
             .basic_auth(&self.config.username, Some(&self.config.password))
             .header("OCS-APIRequest", "true")
@@ -322,7 +355,10 @@ impl NextcloudProvider {
             .await
             .map_err(|e| VaultError::IoError(format!("OCS API failed: {e}")))?;
 
-        let text = resp.text().await.map_err(|e| VaultError::IoError(e.to_string()))?;
+        let text = resp
+            .text()
+            .await
+            .map_err(|e| VaultError::IoError(e.to_string()))?;
 
         // Simple JSON extraction — in production use serde_json
         if let Some(start) = text.find("\"displayname\":\"") {
@@ -339,7 +375,8 @@ impl NextcloudProvider {
     pub async fn list_users(&self) -> Result<Vec<String>, VaultError> {
         let url = format!("{}/cloud/users?format=json", self.config.ocs_url());
 
-        let resp = self.http
+        let resp = self
+            .http
             .get(&url)
             .basic_auth(&self.config.username, Some(&self.config.password))
             .header("OCS-APIRequest", "true")
@@ -347,7 +384,10 @@ impl NextcloudProvider {
             .await
             .map_err(|e| VaultError::IoError(format!("OCS API failed: {e}")))?;
 
-        let text = resp.text().await.map_err(|e| VaultError::IoError(e.to_string()))?;
+        let text = resp
+            .text()
+            .await
+            .map_err(|e| VaultError::IoError(e.to_string()))?;
 
         // Extract user list from JSON — simplified parsing
         let mut users = Vec::new();
@@ -360,7 +400,9 @@ impl NextcloudProvider {
                 && !segment.contains(',')
                 && !segment.contains('[')
                 && segment.len() > 2
-                && segment.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-' || c == '.')
+                && segment
+                    .chars()
+                    .all(|c| c.is_alphanumeric() || c == '_' || c == '-' || c == '.')
             {
                 if !users.contains(&segment.to_string()) {
                     users.push(segment.to_string());
@@ -381,7 +423,8 @@ impl NextcloudProvider {
 
         let url = format!("{}/boards", self.config.deck_url());
 
-        let resp = self.http
+        let resp = self
+            .http
             .get(&url)
             .basic_auth(&self.config.username, Some(&self.config.password))
             .header("OCS-APIRequest", "true")
@@ -389,7 +432,10 @@ impl NextcloudProvider {
             .await
             .map_err(|e| VaultError::IoError(format!("Deck API failed: {e}")))?;
 
-        let text = resp.text().await.map_err(|e| VaultError::IoError(e.to_string()))?;
+        let text = resp
+            .text()
+            .await
+            .map_err(|e| VaultError::IoError(e.to_string()))?;
 
         // Parse boards from JSON — simplified
         Ok(parse_deck_boards(&text))
@@ -455,14 +501,19 @@ impl ProjectProvider for NextcloudProvider {
         self.webdav_mkdir(&tasks_dir).await?;
 
         let content = Vault::render_project_file(project, "")?;
-        self.webdav_put(&format!("{}/project.md", project_dir), &content).await?;
+        self.webdav_put(&format!("{}/project.md", project_dir), &content)
+            .await?;
 
         // Auto-create Deck board if Deck is enabled
         if self.config.deck_enabled {
             // Create board
             let board_url = format!("{}/index.php/apps/deck/api/v1.0/boards", self.config.url);
-            let body = format!(r#"{{"title":"{}","color":"0082C9"}}"#, project.title.replace('"', "\\\""));
-            if let Ok(resp) = self.http
+            let body = format!(
+                r#"{{"title":"{}","color":"0082C9"}}"#,
+                project.title.replace('"', "\\\"")
+            );
+            if let Ok(resp) = self
+                .http
                 .post(&board_url)
                 .basic_auth(&self.config.username, Some(&self.config.password))
                 .header("OCS-APIRequest", "true")
@@ -473,14 +524,23 @@ impl ProjectProvider for NextcloudProvider {
             {
                 if let Ok(text) = resp.text().await {
                     // Create standard stacks
-                    if let Some(board_id) = super::nextcloud::extract_between(&text, r#""id":"#, ",")
-                        .or_else(|| super::nextcloud::extract_between(&text, r#""id":"#, "}"))
-                        .and_then(|s| s.trim().parse::<u64>().ok())
+                    if let Some(board_id) =
+                        super::nextcloud::extract_between(&text, r#""id":"#, ",")
+                            .or_else(|| super::nextcloud::extract_between(&text, r#""id":"#, "}"))
+                            .and_then(|s| s.trim().parse::<u64>().ok())
                     {
-                        for (i, stack_name) in ["To Do", "In Progress", "On Hold", "Done"].iter().enumerate() {
-                            let stack_body = format!(r#"{{"title":"{}","order":{}}}"#, stack_name, i);
-                            let _ = self.http
-                                .post(&format!("{}/index.php/apps/deck/api/v1.0/boards/{}/stacks", self.config.url, board_id))
+                        for (i, stack_name) in ["To Do", "In Progress", "On Hold", "Done"]
+                            .iter()
+                            .enumerate()
+                        {
+                            let stack_body =
+                                format!(r#"{{"title":"{}","order":{}}}"#, stack_name, i);
+                            let _ = self
+                                .http
+                                .post(&format!(
+                                    "{}/index.php/apps/deck/api/v1.0/boards/{}/stacks",
+                                    self.config.url, board_id
+                                ))
                                 .basic_auth(&self.config.username, Some(&self.config.password))
                                 .header("OCS-APIRequest", "true")
                                 .header("Content-Type", "application/json")
@@ -496,8 +556,12 @@ impl ProjectProvider for NextcloudProvider {
                                     r#"{{"type":0,"participant":"{}","permissionEdit":true,"permissionShare":false,"permissionManage":false}}"#,
                                     member
                                 );
-                                let _ = self.http
-                                    .post(&format!("{}/index.php/apps/deck/api/v1.0/boards/{}/acl", self.config.url, board_id))
+                                let _ = self
+                                    .http
+                                    .post(&format!(
+                                        "{}/index.php/apps/deck/api/v1.0/boards/{}/acl",
+                                        self.config.url, board_id
+                                    ))
                                     .basic_auth(&self.config.username, Some(&self.config.password))
                                     .header("OCS-APIRequest", "true")
                                     .header("Content-Type", "application/json")
@@ -547,7 +611,9 @@ impl ProjectProvider for NextcloudProvider {
         // 2. Auto-sync to CalDAV (Nextcloud Tasks app)
         if let Some(ref calendar) = self.config.calendar {
             let sync = super::nextcloud_sync::NextcloudSync::new(
-                &self.config.url, &self.config.username, &self.config.password,
+                &self.config.url,
+                &self.config.username,
+                &self.config.password,
             );
             if let Err(e) = sync.push_task_to_calendar(calendar, task).await {
                 tracing::warn!(task = %task.title, error = %e, "CalDAV sync failed (non-fatal)");
@@ -559,7 +625,9 @@ impl ProjectProvider for NextcloudProvider {
         if self.config.deck_enabled {
             if let Some(&board_id) = self.config.deck_boards.get(project_title) {
                 let sync = super::nextcloud_sync::NextcloudSync::new(
-                    &self.config.url, &self.config.username, &self.config.password,
+                    &self.config.url,
+                    &self.config.username,
+                    &self.config.password,
                 );
                 if let Err(e) = sync.push_task_to_deck(board_id, task, &body).await {
                     tracing::warn!(task = %task.title, board = board_id, error = %e, "Deck sync failed (non-fatal)");
@@ -572,7 +640,10 @@ impl ProjectProvider for NextcloudProvider {
 
     async fn delete_task(&self, project_title: &str, task_title: &str) -> Result<(), VaultError> {
         let projects_base = self.config.projects_path.trim_end_matches('/');
-        let path = format!("{}/{}/tasks/{}.md", projects_base, project_title, task_title);
+        let path = format!(
+            "{}/{}/tasks/{}.md",
+            projects_base, project_title, task_title
+        );
         self.webdav_delete(&path).await
     }
 }
@@ -592,7 +663,9 @@ fn parse_webdav_directories(xml: &str, base_path: &str) -> Vec<String> {
         {
             let decoded = percent_decode(href);
             // Skip the base directory itself
-            if decoded.trim_end_matches('/') == format!("/remote.php/dav/files/{}/{}", "", base).trim_end_matches('/') {
+            if decoded.trim_end_matches('/')
+                == format!("/remote.php/dav/files/{}/{}", "", base).trim_end_matches('/')
+            {
                 continue;
             }
             // Extract just the directory name

@@ -133,15 +133,11 @@ impl fmt::Display for SyncPlan {
 pub fn parse_repo(s: &str) -> Result<(String, String), String> {
     let parts: Vec<&str> = s.splitn(2, '/').collect();
     if parts.len() != 2 || parts[0].is_empty() || parts[1].is_empty() {
-        return Err(format!(
-            "invalid repo format '{s}': expected 'owner/repo'"
-        ));
+        return Err(format!("invalid repo format '{s}': expected 'owner/repo'"));
     }
     // Reject paths with extra slashes or whitespace.
     if parts[1].contains('/') || s.chars().any(|c| c.is_whitespace()) {
-        return Err(format!(
-            "invalid repo format '{s}': expected 'owner/repo'"
-        ));
+        return Err(format!("invalid repo format '{s}': expected 'owner/repo'"));
     }
     Ok((parts[0].to_string(), parts[1].to_string()))
 }
@@ -293,11 +289,7 @@ impl GitHubSync {
             })
             .unwrap_or(Priority::None);
 
-        let tags: Vec<String> = issue
-            .labels
-            .iter()
-            .map(|l| l.name.clone())
-            .collect();
+        let tags: Vec<String> = issue.labels.iter().map(|l| l.name.clone()).collect();
 
         let projects: Vec<WikiLink> = issue
             .milestone
@@ -433,11 +425,7 @@ impl GitHubSync {
     /// Returns the newly created issue number.
     pub async fn create_issue(&self, task: &Task) -> Result<u64, VaultError> {
         let labels: Vec<&str> = task.tags.iter().map(|s| s.as_str()).collect();
-        let assignees: Vec<&str> = task
-            .assignee
-            .as_deref()
-            .into_iter()
-            .collect();
+        let assignees: Vec<&str> = task.assignee.as_deref().into_iter().collect();
 
         let body = serde_json::json!({
             "title": task.title,

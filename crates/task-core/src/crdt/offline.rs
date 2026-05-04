@@ -81,7 +81,9 @@ impl OfflineQueue {
         for op in ops {
             match op.op {
                 QueuedOpType::FieldChange { field, value } => {
-                    engine.apply_field_change(&op.file_path, &field, &value).await?;
+                    engine
+                        .apply_field_change(&op.file_path, &field, &value)
+                        .await?;
                 }
                 QueuedOpType::LoroUpdate { update } => {
                     engine.apply_remote_update(&op.file_path, &update).await?;

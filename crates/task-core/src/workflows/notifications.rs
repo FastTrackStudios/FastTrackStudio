@@ -35,15 +35,15 @@ pub struct Notification {
 #[repr(u8)]
 pub enum NotificationKind {
     #[default]
-    Mention,           // @mentioned in a comment
-    CommentReply,      // someone replied to your comment
-    NewVersion,        // new version uploaded to a stage you're watching
-    ApprovalRequest,   // someone wants your approval
-    ApprovalGranted,   // your submission was approved
-    ChangesRequested,  // reviewer requested changes
-    TaskAssigned,      // a task was assigned to you
-    DueReminder,       // a task/deliverable is due soon
-    ShareAccessed,     // someone accessed your share link
+    Mention, // @mentioned in a comment
+    CommentReply,     // someone replied to your comment
+    NewVersion,       // new version uploaded to a stage you're watching
+    ApprovalRequest,  // someone wants your approval
+    ApprovalGranted,  // your submission was approved
+    ChangesRequested, // reviewer requested changes
+    TaskAssigned,     // a task was assigned to you
+    DueReminder,      // a task/deliverable is due soon
+    ShareAccessed,    // someone accessed your share link
 }
 
 /// A reference to an entity for navigation.
@@ -140,8 +140,11 @@ pub fn approval_request_notification(
 }
 
 fn truncate(s: &str, max: usize) -> String {
-    if s.len() <= max { s.to_string() }
-    else { format!("{}…", &s[..max]) }
+    if s.len() <= max {
+        s.to_string()
+    } else {
+        format!("{}…", &s[..max])
+    }
 }
 
 // Helper to avoid circular dep — duplicated token gen

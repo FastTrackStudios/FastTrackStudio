@@ -6,9 +6,9 @@
 //! - **Database** = operational index for metadata, relations, comments, notifications
 //! - **Sync**: file changes → DB update, DB changes → file regeneration
 
+pub mod auth_adapter;
 pub mod entities;
 pub mod migration;
-pub mod auth_adapter;
 
 pub use auth_adapter::SeaOrmAuthAdapter;
 

@@ -80,7 +80,6 @@ pub struct DownloadBundle {
     pub group: Option<String>,
 
     // ── Content ──────────────────────────────────────────────────
-
     /// Explicitly listed files.
     #[facet(default)]
     pub files: Vec<BundleFile>,
@@ -95,14 +94,12 @@ pub struct DownloadBundle {
     pub include_shared: bool,
 
     // ── Direct link ──────────────────────────────────────────────
-
     /// Direct share URL for this specific role (skips role selector).
     pub direct_url: Option<String>,
     /// Nextcloud share token for the generated bundle folder.
     pub share_token: Option<String>,
 
     // ── Tracking ─────────────────────────────────────────────────
-
     /// Who this bundle was sent to.
     #[facet(default)]
     pub recipients: Vec<Recipient>,

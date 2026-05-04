@@ -41,32 +41,32 @@
 //!     └── deliverables.md         ← What's due, to whom, by when
 //! ```
 
-pub mod event;
-pub mod output;
-pub mod external;
-pub mod download;
-pub mod bundle;
-pub mod finance;
-pub mod io;
-pub mod session;
-pub mod comments;
 pub mod approval;
 pub mod attachments;
-pub mod songwriting;
-pub mod sharing;
+pub mod bundle;
+pub mod comments;
+pub mod download;
+pub mod event;
+pub mod external;
+pub mod finance;
+pub mod io;
 pub mod notifications;
+pub mod output;
+pub mod session;
+pub mod sharing;
+pub mod songwriting;
 
-pub use event::*;
-pub use output::*;
-pub use external::*;
-pub use download::*;
-pub use bundle::*;
-pub use finance::*;
-pub use io::*;
-pub use session::*;
-pub use comments::*;
 pub use approval::*;
 pub use attachments::*;
-pub use songwriting::*;
-pub use sharing::*;
+pub use bundle::*;
+pub use comments::*;
+pub use download::*;
+pub use event::*;
+pub use external::*;
+pub use finance::*;
+pub use io::*;
 pub use notifications::*;
+pub use output::*;
+pub use session::*;
+pub use sharing::*;
+pub use songwriting::*;

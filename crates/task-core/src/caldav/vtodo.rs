@@ -68,7 +68,11 @@ pub fn task_to_vtodo(task: &Task) -> Todo {
     if !task.projects.is_empty() {
         desc_parts.push(format!(
             "Projects: {}",
-            task.projects.iter().map(|p| p.0.as_str()).collect::<Vec<_>>().join(", ")
+            task.projects
+                .iter()
+                .map(|p| p.0.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
         ));
     }
     if !task.contexts.is_empty() {
@@ -98,7 +102,12 @@ pub fn task_to_vtodo(task: &Task) -> Todo {
 
     // X-VAULT-AREAS (custom property for areas)
     if !task.areas.is_empty() {
-        let areas_str = task.areas.iter().map(|a| a.0.as_str()).collect::<Vec<_>>().join(",");
+        let areas_str = task
+            .areas
+            .iter()
+            .map(|a| a.0.as_str())
+            .collect::<Vec<_>>()
+            .join(",");
         todo.add_property("X-VAULT-AREAS", areas_str);
     }
 
@@ -166,9 +175,7 @@ pub fn vtodo_to_task(todo: &Todo) -> Task {
         .and_then(|s| NaiveDate::parse_from_str(s, "%Y%m%d").ok());
 
     // COMPLETED
-    task.completed_date = todo
-        .get_completed()
-        .map(|dt| dt.date_naive());
+    task.completed_date = todo.get_completed().map(|dt| dt.date_naive());
 
     // CATEGORIES → tags (stored in multi_properties)
     if let Some(props) = todo.multi_properties().get("CATEGORIES") {
@@ -197,9 +204,7 @@ pub fn vtodo_to_task(todo: &Todo) -> Task {
                     .map(|s| s.trim().to_string())
                     .collect();
             } else if let Some(est_str) = line.strip_prefix("Estimate: ") {
-                task.time_estimate = est_str
-                    .strip_suffix(" min")
-                    .and_then(|s| s.parse().ok());
+                task.time_estimate = est_str.strip_suffix(" min").and_then(|s| s.parse().ok());
             }
         }
     }
@@ -239,20 +244,16 @@ pub fn vtodo_to_task(todo: &Todo) -> Task {
         .map(|s| s.to_string());
 
     // CREATED / LAST-MODIFIED
-    task.date_created = todo
-        .property_value("CREATED")
-        .and_then(|s| {
-            chrono::NaiveDateTime::parse_from_str(s, "%Y%m%dT%H%M%SZ")
-                .ok()
-                .map(|ndt| ndt.and_utc())
-        });
-    task.date_modified = todo
-        .property_value("LAST-MODIFIED")
-        .and_then(|s| {
-            chrono::NaiveDateTime::parse_from_str(s, "%Y%m%dT%H%M%SZ")
-                .ok()
-                .map(|ndt| ndt.and_utc())
-        });
+    task.date_created = todo.property_value("CREATED").and_then(|s| {
+        chrono::NaiveDateTime::parse_from_str(s, "%Y%m%dT%H%M%SZ")
+            .ok()
+            .map(|ndt| ndt.and_utc())
+    });
+    task.date_modified = todo.property_value("LAST-MODIFIED").and_then(|s| {
+        chrono::NaiveDateTime::parse_from_str(s, "%Y%m%dT%H%M%SZ")
+            .ok()
+            .map(|ndt| ndt.and_utc())
+    });
 
     task
 }

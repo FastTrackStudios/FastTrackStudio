@@ -1,9 +1,9 @@
 //! Task relation entity — typed relationships between tasks.
 
+use crudcrate::CRUDResource;
+use crudcrate::EntityToModels;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
-use crudcrate::EntityToModels;
-use crudcrate::CRUDResource;
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, EntityToModels, Serialize, Deserialize)]
 #[sea_orm(table_name = "task_relations")]
@@ -11,7 +11,7 @@ use crudcrate::CRUDResource;
     api_struct = "TaskRelationApi",
     generate_vox_service,
     name_singular = "task_relation",
-    name_plural = "task_relations",
+    name_plural = "task_relations"
 )]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]

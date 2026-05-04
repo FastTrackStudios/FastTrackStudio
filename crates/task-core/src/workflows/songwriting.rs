@@ -49,8 +49,8 @@ pub enum WritingStatus {
     InProgress,
     ReviewingLyrics,
     ReviewingStructure,
-    Locked,      // structure finalized, ready for production
-    Published,   // lyrics released/registered
+    Locked,    // structure finalized, ready for production
+    Published, // lyrics released/registered
 }
 
 impl WritingStatus {

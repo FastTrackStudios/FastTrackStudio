@@ -103,10 +103,16 @@ impl ShareLink {
     }
 
     pub fn view_count(&self) -> usize {
-        self.access_log.iter().filter(|e| matches!(e.event_type, AccessEventType::Viewed)).count()
+        self.access_log
+            .iter()
+            .filter(|e| matches!(e.event_type, AccessEventType::Viewed))
+            .count()
     }
 
     pub fn download_count(&self) -> usize {
-        self.access_log.iter().filter(|e| matches!(e.event_type, AccessEventType::Downloaded)).count()
+        self.access_log
+            .iter()
+            .filter(|e| matches!(e.event_type, AccessEventType::Downloaded))
+            .count()
     }
 }

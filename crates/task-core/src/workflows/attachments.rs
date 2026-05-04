@@ -53,7 +53,7 @@ pub enum FileType {
     Image,
     Document,
     Archive,
-    Project,   // DAW session, Premiere project, etc.
+    Project, // DAW session, Premiere project, etc.
 }
 
 impl FileType {

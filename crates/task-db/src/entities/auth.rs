@@ -36,25 +36,57 @@ pub mod auth_user {
     impl ActiveModelBehavior for ActiveModel {}
 
     impl better_auth_core::entity::AuthUser for Model {
-        fn id(&self) -> &str { &self.id }
-        fn email(&self) -> Option<&str> { self.email.as_deref() }
-        fn name(&self) -> Option<&str> { self.name.as_deref() }
-        fn email_verified(&self) -> bool { self.email_verified }
-        fn image(&self) -> Option<&str> { self.image.as_deref() }
-        fn created_at(&self) -> chrono::DateTime<chrono::Utc> { self.created_at }
-        fn updated_at(&self) -> chrono::DateTime<chrono::Utc> { self.updated_at }
-        fn username(&self) -> Option<&str> { self.username.as_deref() }
-        fn display_username(&self) -> Option<&str> { self.display_username.as_deref() }
-        fn two_factor_enabled(&self) -> bool { self.two_factor_enabled }
-        fn role(&self) -> Option<&str> { self.role.as_deref() }
-        fn banned(&self) -> bool { self.banned }
-        fn ban_reason(&self) -> Option<&str> { self.ban_reason.as_deref() }
-        fn ban_expires(&self) -> Option<chrono::DateTime<chrono::Utc>> { self.ban_expires }
-        fn metadata(&self) -> &serde_json::Value { &self.metadata }
+        fn id(&self) -> &str {
+            &self.id
+        }
+        fn email(&self) -> Option<&str> {
+            self.email.as_deref()
+        }
+        fn name(&self) -> Option<&str> {
+            self.name.as_deref()
+        }
+        fn email_verified(&self) -> bool {
+            self.email_verified
+        }
+        fn image(&self) -> Option<&str> {
+            self.image.as_deref()
+        }
+        fn created_at(&self) -> chrono::DateTime<chrono::Utc> {
+            self.created_at
+        }
+        fn updated_at(&self) -> chrono::DateTime<chrono::Utc> {
+            self.updated_at
+        }
+        fn username(&self) -> Option<&str> {
+            self.username.as_deref()
+        }
+        fn display_username(&self) -> Option<&str> {
+            self.display_username.as_deref()
+        }
+        fn two_factor_enabled(&self) -> bool {
+            self.two_factor_enabled
+        }
+        fn role(&self) -> Option<&str> {
+            self.role.as_deref()
+        }
+        fn banned(&self) -> bool {
+            self.banned
+        }
+        fn ban_reason(&self) -> Option<&str> {
+            self.ban_reason.as_deref()
+        }
+        fn ban_expires(&self) -> Option<chrono::DateTime<chrono::Utc>> {
+            self.ban_expires
+        }
+        fn metadata(&self) -> &serde_json::Value {
+            &self.metadata
+        }
     }
 
     impl better_auth_core::entity::AuthUserMeta for Model {
-        fn table() -> &'static str { "auth_users" }
+        fn table() -> &'static str {
+            "auth_users"
+        }
     }
 }
 
@@ -85,21 +117,45 @@ pub mod auth_session {
     impl ActiveModelBehavior for ActiveModel {}
 
     impl better_auth_core::entity::AuthSession for Model {
-        fn id(&self) -> &str { &self.id }
-        fn expires_at(&self) -> chrono::DateTime<chrono::Utc> { self.expires_at }
-        fn token(&self) -> &str { &self.token }
-        fn created_at(&self) -> chrono::DateTime<chrono::Utc> { self.created_at }
-        fn updated_at(&self) -> chrono::DateTime<chrono::Utc> { self.updated_at }
-        fn ip_address(&self) -> Option<&str> { self.ip_address.as_deref() }
-        fn user_agent(&self) -> Option<&str> { self.user_agent.as_deref() }
-        fn user_id(&self) -> &str { &self.user_id }
-        fn impersonated_by(&self) -> Option<&str> { self.impersonated_by.as_deref() }
-        fn active_organization_id(&self) -> Option<&str> { self.active_organization_id.as_deref() }
-        fn active(&self) -> bool { self.active }
+        fn id(&self) -> &str {
+            &self.id
+        }
+        fn expires_at(&self) -> chrono::DateTime<chrono::Utc> {
+            self.expires_at
+        }
+        fn token(&self) -> &str {
+            &self.token
+        }
+        fn created_at(&self) -> chrono::DateTime<chrono::Utc> {
+            self.created_at
+        }
+        fn updated_at(&self) -> chrono::DateTime<chrono::Utc> {
+            self.updated_at
+        }
+        fn ip_address(&self) -> Option<&str> {
+            self.ip_address.as_deref()
+        }
+        fn user_agent(&self) -> Option<&str> {
+            self.user_agent.as_deref()
+        }
+        fn user_id(&self) -> &str {
+            &self.user_id
+        }
+        fn impersonated_by(&self) -> Option<&str> {
+            self.impersonated_by.as_deref()
+        }
+        fn active_organization_id(&self) -> Option<&str> {
+            self.active_organization_id.as_deref()
+        }
+        fn active(&self) -> bool {
+            self.active
+        }
     }
 
     impl better_auth_core::entity::AuthSessionMeta for Model {
-        fn table() -> &'static str { "auth_sessions" }
+        fn table() -> &'static str {
+            "auth_sessions"
+        }
     }
 }
 
@@ -132,23 +188,51 @@ pub mod auth_account {
     impl ActiveModelBehavior for ActiveModel {}
 
     impl better_auth_core::entity::AuthAccount for Model {
-        fn id(&self) -> &str { &self.id }
-        fn account_id(&self) -> &str { &self.account_id }
-        fn provider_id(&self) -> &str { &self.provider_id }
-        fn user_id(&self) -> &str { &self.user_id }
-        fn access_token(&self) -> Option<&str> { self.access_token.as_deref() }
-        fn refresh_token(&self) -> Option<&str> { self.refresh_token.as_deref() }
-        fn id_token(&self) -> Option<&str> { self.id_token.as_deref() }
-        fn access_token_expires_at(&self) -> Option<chrono::DateTime<chrono::Utc>> { self.access_token_expires_at }
-        fn refresh_token_expires_at(&self) -> Option<chrono::DateTime<chrono::Utc>> { self.refresh_token_expires_at }
-        fn scope(&self) -> Option<&str> { self.scope.as_deref() }
-        fn password(&self) -> Option<&str> { self.password.as_deref() }
-        fn created_at(&self) -> chrono::DateTime<chrono::Utc> { self.created_at }
-        fn updated_at(&self) -> chrono::DateTime<chrono::Utc> { self.updated_at }
+        fn id(&self) -> &str {
+            &self.id
+        }
+        fn account_id(&self) -> &str {
+            &self.account_id
+        }
+        fn provider_id(&self) -> &str {
+            &self.provider_id
+        }
+        fn user_id(&self) -> &str {
+            &self.user_id
+        }
+        fn access_token(&self) -> Option<&str> {
+            self.access_token.as_deref()
+        }
+        fn refresh_token(&self) -> Option<&str> {
+            self.refresh_token.as_deref()
+        }
+        fn id_token(&self) -> Option<&str> {
+            self.id_token.as_deref()
+        }
+        fn access_token_expires_at(&self) -> Option<chrono::DateTime<chrono::Utc>> {
+            self.access_token_expires_at
+        }
+        fn refresh_token_expires_at(&self) -> Option<chrono::DateTime<chrono::Utc>> {
+            self.refresh_token_expires_at
+        }
+        fn scope(&self) -> Option<&str> {
+            self.scope.as_deref()
+        }
+        fn password(&self) -> Option<&str> {
+            self.password.as_deref()
+        }
+        fn created_at(&self) -> chrono::DateTime<chrono::Utc> {
+            self.created_at
+        }
+        fn updated_at(&self) -> chrono::DateTime<chrono::Utc> {
+            self.updated_at
+        }
     }
 
     impl better_auth_core::entity::AuthAccountMeta for Model {
-        fn table() -> &'static str { "auth_accounts" }
+        fn table() -> &'static str {
+            "auth_accounts"
+        }
     }
 }
 
@@ -176,17 +260,33 @@ pub mod auth_organization {
     impl ActiveModelBehavior for ActiveModel {}
 
     impl better_auth_core::entity::AuthOrganization for Model {
-        fn id(&self) -> &str { &self.id }
-        fn name(&self) -> &str { &self.name }
-        fn slug(&self) -> &str { &self.slug }
-        fn logo(&self) -> Option<&str> { self.logo.as_deref() }
-        fn metadata(&self) -> Option<&serde_json::Value> { self.metadata.as_ref() }
-        fn created_at(&self) -> chrono::DateTime<chrono::Utc> { self.created_at }
-        fn updated_at(&self) -> chrono::DateTime<chrono::Utc> { self.updated_at }
+        fn id(&self) -> &str {
+            &self.id
+        }
+        fn name(&self) -> &str {
+            &self.name
+        }
+        fn slug(&self) -> &str {
+            &self.slug
+        }
+        fn logo(&self) -> Option<&str> {
+            self.logo.as_deref()
+        }
+        fn metadata(&self) -> Option<&serde_json::Value> {
+            self.metadata.as_ref()
+        }
+        fn created_at(&self) -> chrono::DateTime<chrono::Utc> {
+            self.created_at
+        }
+        fn updated_at(&self) -> chrono::DateTime<chrono::Utc> {
+            self.updated_at
+        }
     }
 
     impl better_auth_core::entity::AuthOrganizationMeta for Model {
-        fn table() -> &'static str { "auth_organizations" }
+        fn table() -> &'static str {
+            "auth_organizations"
+        }
     }
 }
 
@@ -211,15 +311,27 @@ pub mod auth_member {
     impl ActiveModelBehavior for ActiveModel {}
 
     impl better_auth_core::entity::AuthMember for Model {
-        fn id(&self) -> &str { &self.id }
-        fn organization_id(&self) -> &str { &self.organization_id }
-        fn user_id(&self) -> &str { &self.user_id }
-        fn role(&self) -> &str { &self.role }
-        fn created_at(&self) -> chrono::DateTime<chrono::Utc> { self.created_at }
+        fn id(&self) -> &str {
+            &self.id
+        }
+        fn organization_id(&self) -> &str {
+            &self.organization_id
+        }
+        fn user_id(&self) -> &str {
+            &self.user_id
+        }
+        fn role(&self) -> &str {
+            &self.role
+        }
+        fn created_at(&self) -> chrono::DateTime<chrono::Utc> {
+            self.created_at
+        }
     }
 
     impl better_auth_core::entity::AuthMemberMeta for Model {
-        fn table() -> &'static str { "auth_members" }
+        fn table() -> &'static str {
+            "auth_members"
+        }
     }
 }
 
@@ -254,10 +366,18 @@ pub mod auth_invitation {
     }
 
     impl better_auth_core::entity::AuthInvitation for Model {
-        fn id(&self) -> &str { &self.id }
-        fn organization_id(&self) -> &str { &self.organization_id }
-        fn email(&self) -> &str { &self.email }
-        fn role(&self) -> &str { &self.role }
+        fn id(&self) -> &str {
+            &self.id
+        }
+        fn organization_id(&self) -> &str {
+            &self.organization_id
+        }
+        fn email(&self) -> &str {
+            &self.email
+        }
+        fn role(&self) -> &str {
+            &self.role
+        }
         fn status(&self) -> &better_auth_core::types::InvitationStatus {
             // The trait requires `&InvitationStatus` with lifetime tied to `&self`,
             // but we store a String in the DB. We leak a Box to produce a
@@ -265,13 +385,21 @@ pub mod auth_invitation {
             // small enum and invitations are not created in hot loops.
             Box::leak(Box::new(self.parsed_status()))
         }
-        fn inviter_id(&self) -> &str { &self.inviter_id }
-        fn expires_at(&self) -> chrono::DateTime<chrono::Utc> { self.expires_at }
-        fn created_at(&self) -> chrono::DateTime<chrono::Utc> { self.created_at }
+        fn inviter_id(&self) -> &str {
+            &self.inviter_id
+        }
+        fn expires_at(&self) -> chrono::DateTime<chrono::Utc> {
+            self.expires_at
+        }
+        fn created_at(&self) -> chrono::DateTime<chrono::Utc> {
+            self.created_at
+        }
     }
 
     impl better_auth_core::entity::AuthInvitationMeta for Model {
-        fn table() -> &'static str { "auth_invitations" }
+        fn table() -> &'static str {
+            "auth_invitations"
+        }
     }
 }
 
@@ -297,16 +425,30 @@ pub mod auth_verification {
     impl ActiveModelBehavior for ActiveModel {}
 
     impl better_auth_core::entity::AuthVerification for Model {
-        fn id(&self) -> &str { &self.id }
-        fn identifier(&self) -> &str { &self.identifier }
-        fn value(&self) -> &str { &self.value }
-        fn expires_at(&self) -> chrono::DateTime<chrono::Utc> { self.expires_at }
-        fn created_at(&self) -> chrono::DateTime<chrono::Utc> { self.created_at }
-        fn updated_at(&self) -> chrono::DateTime<chrono::Utc> { self.updated_at }
+        fn id(&self) -> &str {
+            &self.id
+        }
+        fn identifier(&self) -> &str {
+            &self.identifier
+        }
+        fn value(&self) -> &str {
+            &self.value
+        }
+        fn expires_at(&self) -> chrono::DateTime<chrono::Utc> {
+            self.expires_at
+        }
+        fn created_at(&self) -> chrono::DateTime<chrono::Utc> {
+            self.created_at
+        }
+        fn updated_at(&self) -> chrono::DateTime<chrono::Utc> {
+            self.updated_at
+        }
     }
 
     impl better_auth_core::entity::AuthVerificationMeta for Model {
-        fn table() -> &'static str { "auth_verifications" }
+        fn table() -> &'static str {
+            "auth_verifications"
+        }
     }
 }
 
@@ -332,16 +474,30 @@ pub mod auth_two_factor {
     impl ActiveModelBehavior for ActiveModel {}
 
     impl better_auth_core::entity::AuthTwoFactor for Model {
-        fn id(&self) -> &str { &self.id }
-        fn secret(&self) -> &str { &self.secret }
-        fn backup_codes(&self) -> Option<&str> { self.backup_codes.as_deref() }
-        fn user_id(&self) -> &str { &self.user_id }
-        fn created_at(&self) -> chrono::DateTime<chrono::Utc> { self.created_at }
-        fn updated_at(&self) -> chrono::DateTime<chrono::Utc> { self.updated_at }
+        fn id(&self) -> &str {
+            &self.id
+        }
+        fn secret(&self) -> &str {
+            &self.secret
+        }
+        fn backup_codes(&self) -> Option<&str> {
+            self.backup_codes.as_deref()
+        }
+        fn user_id(&self) -> &str {
+            &self.user_id
+        }
+        fn created_at(&self) -> chrono::DateTime<chrono::Utc> {
+            self.created_at
+        }
+        fn updated_at(&self) -> chrono::DateTime<chrono::Utc> {
+            self.updated_at
+        }
     }
 
     impl better_auth_core::entity::AuthTwoFactorMeta for Model {
-        fn table() -> &'static str { "auth_two_factor" }
+        fn table() -> &'static str {
+            "auth_two_factor"
+        }
     }
 }
 
@@ -383,31 +539,75 @@ pub mod auth_api_key {
     impl ActiveModelBehavior for ActiveModel {}
 
     impl better_auth_core::entity::AuthApiKey for Model {
-        fn id(&self) -> &str { &self.id }
-        fn name(&self) -> Option<&str> { self.name.as_deref() }
-        fn start(&self) -> Option<&str> { self.start.as_deref() }
-        fn prefix(&self) -> Option<&str> { self.prefix.as_deref() }
-        fn key_hash(&self) -> &str { &self.key_hash }
-        fn user_id(&self) -> &str { &self.user_id }
-        fn refill_interval(&self) -> Option<i64> { self.refill_interval }
-        fn refill_amount(&self) -> Option<i64> { self.refill_amount }
-        fn last_refill_at(&self) -> Option<&str> { self.last_refill_at.as_deref() }
-        fn enabled(&self) -> bool { self.enabled }
-        fn rate_limit_enabled(&self) -> bool { self.rate_limit_enabled }
-        fn rate_limit_time_window(&self) -> Option<i64> { self.rate_limit_time_window }
-        fn rate_limit_max(&self) -> Option<i64> { self.rate_limit_max }
-        fn request_count(&self) -> Option<i64> { self.request_count }
-        fn remaining(&self) -> Option<i64> { self.remaining }
-        fn last_request(&self) -> Option<&str> { self.last_request.as_deref() }
-        fn expires_at(&self) -> Option<&str> { self.expires_at.as_deref() }
-        fn created_at(&self) -> &str { &self.created_at }
-        fn updated_at(&self) -> &str { &self.updated_at }
-        fn permissions(&self) -> Option<&str> { self.permissions.as_deref() }
-        fn metadata(&self) -> Option<&str> { self.metadata.as_deref() }
+        fn id(&self) -> &str {
+            &self.id
+        }
+        fn name(&self) -> Option<&str> {
+            self.name.as_deref()
+        }
+        fn start(&self) -> Option<&str> {
+            self.start.as_deref()
+        }
+        fn prefix(&self) -> Option<&str> {
+            self.prefix.as_deref()
+        }
+        fn key_hash(&self) -> &str {
+            &self.key_hash
+        }
+        fn user_id(&self) -> &str {
+            &self.user_id
+        }
+        fn refill_interval(&self) -> Option<i64> {
+            self.refill_interval
+        }
+        fn refill_amount(&self) -> Option<i64> {
+            self.refill_amount
+        }
+        fn last_refill_at(&self) -> Option<&str> {
+            self.last_refill_at.as_deref()
+        }
+        fn enabled(&self) -> bool {
+            self.enabled
+        }
+        fn rate_limit_enabled(&self) -> bool {
+            self.rate_limit_enabled
+        }
+        fn rate_limit_time_window(&self) -> Option<i64> {
+            self.rate_limit_time_window
+        }
+        fn rate_limit_max(&self) -> Option<i64> {
+            self.rate_limit_max
+        }
+        fn request_count(&self) -> Option<i64> {
+            self.request_count
+        }
+        fn remaining(&self) -> Option<i64> {
+            self.remaining
+        }
+        fn last_request(&self) -> Option<&str> {
+            self.last_request.as_deref()
+        }
+        fn expires_at(&self) -> Option<&str> {
+            self.expires_at.as_deref()
+        }
+        fn created_at(&self) -> &str {
+            &self.created_at
+        }
+        fn updated_at(&self) -> &str {
+            &self.updated_at
+        }
+        fn permissions(&self) -> Option<&str> {
+            self.permissions.as_deref()
+        }
+        fn metadata(&self) -> Option<&str> {
+            self.metadata.as_deref()
+        }
     }
 
     impl better_auth_core::entity::AuthApiKeyMeta for Model {
-        fn table() -> &'static str { "auth_api_keys" }
+        fn table() -> &'static str {
+            "auth_api_keys"
+        }
     }
 }
 
@@ -437,19 +637,41 @@ pub mod auth_passkey {
     impl ActiveModelBehavior for ActiveModel {}
 
     impl better_auth_core::entity::AuthPasskey for Model {
-        fn id(&self) -> &str { &self.id }
-        fn name(&self) -> &str { &self.name }
-        fn public_key(&self) -> &str { &self.public_key }
-        fn user_id(&self) -> &str { &self.user_id }
-        fn credential_id(&self) -> &str { &self.credential_id }
-        fn counter(&self) -> u64 { self.counter as u64 }
-        fn device_type(&self) -> &str { &self.device_type }
-        fn backed_up(&self) -> bool { self.backed_up }
-        fn transports(&self) -> Option<&str> { self.transports.as_deref() }
-        fn created_at(&self) -> chrono::DateTime<chrono::Utc> { self.created_at }
+        fn id(&self) -> &str {
+            &self.id
+        }
+        fn name(&self) -> &str {
+            &self.name
+        }
+        fn public_key(&self) -> &str {
+            &self.public_key
+        }
+        fn user_id(&self) -> &str {
+            &self.user_id
+        }
+        fn credential_id(&self) -> &str {
+            &self.credential_id
+        }
+        fn counter(&self) -> u64 {
+            self.counter as u64
+        }
+        fn device_type(&self) -> &str {
+            &self.device_type
+        }
+        fn backed_up(&self) -> bool {
+            self.backed_up
+        }
+        fn transports(&self) -> Option<&str> {
+            self.transports.as_deref()
+        }
+        fn created_at(&self) -> chrono::DateTime<chrono::Utc> {
+            self.created_at
+        }
     }
 
     impl better_auth_core::entity::AuthPasskeyMeta for Model {
-        fn table() -> &'static str { "auth_passkeys" }
+        fn table() -> &'static str {
+            "auth_passkeys"
+        }
     }
 }

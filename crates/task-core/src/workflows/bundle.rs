@@ -1,6 +1,6 @@
-use std::path::Path;
-use crate::service::VaultError;
 use super::download::*;
+use crate::service::VaultError;
+use std::path::Path;
 
 /// Result of generating a bundle.
 #[derive(Debug, Clone, Default)]
@@ -28,14 +28,15 @@ pub fn generate_bundles_local(
 
     for bundle in &portal.bundles {
         let bundle_dir = output_dir.join(&bundle.id);
-        std::fs::create_dir_all(&bundle_dir)
-            .map_err(|e| VaultError::IoError(e.to_string()))?;
+        std::fs::create_dir_all(&bundle_dir).map_err(|e| VaultError::IoError(e.to_string()))?;
 
         // Copy explicit files
         for file in &bundle.files {
             let src = project_root.join(&file.source);
             if !src.exists() {
-                result.errors.push(format!("File not found: {}", file.source));
+                result
+                    .errors
+                    .push(format!("File not found: {}", file.source));
                 continue;
             }
 
@@ -45,10 +46,11 @@ pub fn generate_bundles_local(
             } else {
                 bundle_dir.clone()
             };
-            std::fs::create_dir_all(&dest_dir)
-                .map_err(|e| VaultError::IoError(e.to_string()))?;
+            std::fs::create_dir_all(&dest_dir).map_err(|e| VaultError::IoError(e.to_string()))?;
 
-            let dest_name = file.dest.as_deref()
+            let dest_name = file
+                .dest
+                .as_deref()
                 .unwrap_or_else(|| src.file_name().unwrap().to_str().unwrap());
             let dest = dest_dir.join(dest_name);
 
@@ -93,7 +95,8 @@ fn glob_files(root: &Path, pattern: &str) -> Result<Vec<std::path::PathBuf>, Vau
 
     let pattern_path = root.join(pattern);
     let dir = pattern_path.parent().unwrap_or(root);
-    let file_pattern = pattern_path.file_name()
+    let file_pattern = pattern_path
+        .file_name()
         .and_then(|f| f.to_str())
         .unwrap_or("*");
 
@@ -117,7 +120,9 @@ fn glob_files(root: &Path, pattern: &str) -> Result<Vec<std::path::PathBuf>, Vau
 
 /// Simple glob matcher (supports * and ? wildcards).
 fn matches_glob(name: &str, pattern: &str) -> bool {
-    if pattern == "*" { return true; }
+    if pattern == "*" {
+        return true;
+    }
 
     // Handle *.ext pattern
     if let Some(ext) = pattern.strip_prefix("*.") {
@@ -141,7 +146,7 @@ pub async fn create_nextcloud_shares(
     nc_url: &str,
     nc_user: &str,
     nc_pass: &str,
-    bundles_path: &str,  // WebDAV path to the downloads/ folder
+    bundles_path: &str, // WebDAV path to the downloads/ folder
 ) -> Result<usize, VaultError> {
     let http = reqwest::Client::new();
     let mut shares_created = 0;
@@ -152,7 +157,7 @@ pub async fn create_nextcloud_shares(
         // Create public share via OCS API
         let url = format!("{}/ocs/v2.php/apps/files_sharing/api/v1/shares", nc_url);
         let body = format!(
-            "path={}&shareType=3&permissions=1",  // shareType=3 = public link, permissions=1 = read
+            "path={}&shareType=3&permissions=1", // shareType=3 = public link, permissions=1 = read
             urlencode_form(&share_path)
         );
 
@@ -170,7 +175,8 @@ pub async fn create_nextcloud_shares(
             body
         };
 
-        let resp = http.post(&url)
+        let resp = http
+            .post(&url)
             .basic_auth(nc_user, Some(nc_pass))
             .header("OCS-APIRequest", "true")
             .header("Content-Type", "application/x-www-form-urlencoded")
@@ -179,7 +185,9 @@ pub async fn create_nextcloud_shares(
             .await
             .map_err(|e| VaultError::IoError(format!("Share creation failed: {e}")))?;
 
-        let text = resp.text().await
+        let text = resp
+            .text()
+            .await
             .map_err(|e| VaultError::IoError(e.to_string()))?;
 
         // Extract share URL and token from response
@@ -197,9 +205,9 @@ pub async fn create_nextcloud_shares(
 
 fn urlencode_form(s: &str) -> String {
     s.replace(' ', "+")
-     .replace('/', "%2F")
-     .replace('&', "%26")
-     .replace('=', "%3D")
+        .replace('/', "%2F")
+        .replace('&', "%26")
+        .replace('=', "%3D")
 }
 
 fn extract_xml_value_simple(xml: &str, tag: &str) -> Option<String> {

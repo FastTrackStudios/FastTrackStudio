@@ -25,7 +25,6 @@ pub struct Location {
     pub name: String,
 
     // ── Address ─────────────────────────────────────────────────────
-
     pub address1: Option<String>,
     pub address2: Option<String>,
     pub city: Option<String>,
@@ -35,13 +34,11 @@ pub struct Location {
     pub country_code: Option<String>,
 
     // ── Contact ─────────────────────────────────────────────────────
-
     pub contact_name: Option<String>,
     pub contact_email: Option<String>,
     pub contact_phone: Option<String>,
 
     // ── Access & logistics ──────────────────────────────────────────
-
     /// Free-text access/directions notes (gate codes, buzzer, etc.).
     pub access_notes: Option<String>,
     /// Parking and load-in instructions.
@@ -50,30 +47,25 @@ pub struct Location {
     pub network_power: Option<String>,
 
     // ── Venue type ──────────────────────────────────────────────────
-
     /// Freeform type tag: studio, live-venue, church, rehearsal, remote, etc.
     pub venue_type: Option<String>,
 
     // ── Defaults ────────────────────────────────────────────────────
-
     /// Default files associated with this venue (stage plot, input list, etc.).
     /// Each entry is a relative path or WikiLink to a file in the vault.
     #[facet(default)]
     pub default_files: Vec<VenueDefault>,
 
     // ── Bookable spaces ─────────────────────────────────────────────
-
     /// Sub-locations within this venue (rooms, stages, studios).
     #[facet(default)]
     pub spaces: Vec<Space>,
 
     // ── Tags ────────────────────────────────────────────────────────
-
     #[facet(default)]
     pub tags: Vec<String>,
 
     // ── Bookkeeping ─────────────────────────────────────────────────
-
     pub date_created: Option<DateTime<Utc>>,
     pub date_modified: Option<DateTime<Utc>>,
     pub deleted_at: Option<DateTime<Utc>>,

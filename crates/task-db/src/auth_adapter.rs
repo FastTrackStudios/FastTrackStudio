@@ -82,21 +82,47 @@ impl UserOps for SeaOrmAuthAdapter {
     }
 
     async fn update_user(&self, id: &str, update: UpdateUser) -> AuthResult<Self::User> {
-        let existing = self.get_user_by_id(id).await?
+        let existing = self
+            .get_user_by_id(id)
+            .await?
             .ok_or_else(|| AuthError::UserNotFound)?;
         let mut model: auth_user::ActiveModel = existing.into();
-        if let Some(email) = update.email { model.email = Set(Some(email)); }
-        if let Some(name) = update.name { model.name = Set(Some(name)); }
-        if let Some(image) = update.image { model.image = Set(Some(image)); }
-        if let Some(ev) = update.email_verified { model.email_verified = Set(ev); }
-        if let Some(username) = update.username { model.username = Set(Some(username)); }
-        if let Some(du) = update.display_username { model.display_username = Set(Some(du)); }
-        if let Some(role) = update.role { model.role = Set(Some(role)); }
-        if let Some(banned) = update.banned { model.banned = Set(banned); }
-        if let Some(reason) = update.ban_reason { model.ban_reason = Set(Some(reason)); }
-        if let Some(expires) = update.ban_expires { model.ban_expires = Set(Some(expires)); }
-        if let Some(tfa) = update.two_factor_enabled { model.two_factor_enabled = Set(tfa); }
-        if let Some(meta) = update.metadata { model.metadata = Set(meta); }
+        if let Some(email) = update.email {
+            model.email = Set(Some(email));
+        }
+        if let Some(name) = update.name {
+            model.name = Set(Some(name));
+        }
+        if let Some(image) = update.image {
+            model.image = Set(Some(image));
+        }
+        if let Some(ev) = update.email_verified {
+            model.email_verified = Set(ev);
+        }
+        if let Some(username) = update.username {
+            model.username = Set(Some(username));
+        }
+        if let Some(du) = update.display_username {
+            model.display_username = Set(Some(du));
+        }
+        if let Some(role) = update.role {
+            model.role = Set(Some(role));
+        }
+        if let Some(banned) = update.banned {
+            model.banned = Set(banned);
+        }
+        if let Some(reason) = update.ban_reason {
+            model.ban_reason = Set(Some(reason));
+        }
+        if let Some(expires) = update.ban_expires {
+            model.ban_expires = Set(Some(expires));
+        }
+        if let Some(tfa) = update.two_factor_enabled {
+            model.two_factor_enabled = Set(tfa);
+        }
+        if let Some(meta) = update.metadata {
+            model.metadata = Set(meta);
+        }
         model.updated_at = Set(Utc::now());
         model.update(&self.db).await.map_err(db_err)
     }
@@ -114,9 +140,15 @@ impl UserOps for SeaOrmAuthAdapter {
 
         if let (Some(field), Some(value)) = (&params.search_field, &params.search_value) {
             match field.as_str() {
-                "email" => { query = query.filter(auth_user::Column::Email.contains(value)); }
-                "name" => { query = query.filter(auth_user::Column::Name.contains(value)); }
-                "username" => { query = query.filter(auth_user::Column::Username.contains(value)); }
+                "email" => {
+                    query = query.filter(auth_user::Column::Email.contains(value));
+                }
+                "name" => {
+                    query = query.filter(auth_user::Column::Name.contains(value));
+                }
+                "username" => {
+                    query = query.filter(auth_user::Column::Username.contains(value));
+                }
                 _ => {}
             }
         }
@@ -224,7 +256,9 @@ impl SessionOps for SeaOrmAuthAdapter {
         token: &str,
         organization_id: Option<&str>,
     ) -> AuthResult<Self::Session> {
-        let session = self.get_session(token).await?
+        let session = self
+            .get_session(token)
+            .await?
             .ok_or_else(|| AuthError::SessionNotFound)?;
         let mut model: auth_session::ActiveModel = session.into();
         model.active_organization_id = Set(organization_id.map(|s| s.to_string()));
@@ -281,21 +315,25 @@ impl AccountOps for SeaOrmAuthAdapter {
             .map_err(db_err)
     }
 
-    async fn update_account(
-        &self,
-        id: &str,
-        update: UpdateAccount,
-    ) -> AuthResult<Self::Account> {
+    async fn update_account(&self, id: &str, update: UpdateAccount) -> AuthResult<Self::Account> {
         let existing = auth_account::Entity::find_by_id(id.to_string())
             .one(&self.db)
             .await
             .map_err(db_err)?
             .ok_or_else(|| AuthError::NotFound("account".into()))?;
         let mut model: auth_account::ActiveModel = existing.into();
-        if let Some(at) = update.access_token { model.access_token = Set(Some(at)); }
-        if let Some(rt) = update.refresh_token { model.refresh_token = Set(Some(rt)); }
-        if let Some(ate) = update.access_token_expires_at { model.access_token_expires_at = Set(Some(ate)); }
-        if let Some(rte) = update.refresh_token_expires_at { model.refresh_token_expires_at = Set(Some(rte)); }
+        if let Some(at) = update.access_token {
+            model.access_token = Set(Some(at));
+        }
+        if let Some(rt) = update.refresh_token {
+            model.refresh_token = Set(Some(rt));
+        }
+        if let Some(ate) = update.access_token_expires_at {
+            model.access_token_expires_at = Set(Some(ate));
+        }
+        if let Some(rte) = update.refresh_token_expires_at {
+            model.refresh_token_expires_at = Set(Some(rte));
+        }
         model.updated_at = Set(Utc::now());
         model.update(&self.db).await.map_err(db_err)
     }
@@ -315,10 +353,7 @@ impl AccountOps for SeaOrmAuthAdapter {
 impl VerificationOps for SeaOrmAuthAdapter {
     type Verification = auth_verification::Model;
 
-    async fn create_verification(
-        &self,
-        v: CreateVerification,
-    ) -> AuthResult<Self::Verification> {
+    async fn create_verification(&self, v: CreateVerification) -> AuthResult<Self::Verification> {
         let now = Utc::now();
         let id = Uuid::new_v4().to_string();
         let model = auth_verification::ActiveModel {
@@ -406,10 +441,7 @@ impl VerificationOps for SeaOrmAuthAdapter {
 impl OrganizationOps for SeaOrmAuthAdapter {
     type Organization = auth_organization::Model;
 
-    async fn create_organization(
-        &self,
-        org: CreateOrganization,
-    ) -> AuthResult<Self::Organization> {
+    async fn create_organization(&self, org: CreateOrganization) -> AuthResult<Self::Organization> {
         let now = Utc::now();
         let id = org.id.unwrap_or_else(|| Uuid::new_v4().to_string());
         let model = auth_organization::ActiveModel {
@@ -431,10 +463,7 @@ impl OrganizationOps for SeaOrmAuthAdapter {
             .map_err(db_err)
     }
 
-    async fn get_organization_by_slug(
-        &self,
-        slug: &str,
-    ) -> AuthResult<Option<Self::Organization>> {
+    async fn get_organization_by_slug(&self, slug: &str) -> AuthResult<Option<Self::Organization>> {
         auth_organization::Entity::find()
             .filter(auth_organization::Column::Slug.eq(slug))
             .one(&self.db)
@@ -447,13 +476,23 @@ impl OrganizationOps for SeaOrmAuthAdapter {
         id: &str,
         update: UpdateOrganization,
     ) -> AuthResult<Self::Organization> {
-        let existing = self.get_organization_by_id(id).await?
+        let existing = self
+            .get_organization_by_id(id)
+            .await?
             .ok_or_else(|| AuthError::NotFound("organization".into()))?;
         let mut model: auth_organization::ActiveModel = existing.into();
-        if let Some(name) = update.name { model.name = Set(name); }
-        if let Some(slug) = update.slug { model.slug = Set(slug); }
-        if let Some(logo) = update.logo { model.logo = Set(Some(logo)); }
-        if let Some(meta) = update.metadata { model.metadata = Set(Some(meta)); }
+        if let Some(name) = update.name {
+            model.name = Set(name);
+        }
+        if let Some(slug) = update.slug {
+            model.slug = Set(slug);
+        }
+        if let Some(logo) = update.logo {
+            model.logo = Set(Some(logo));
+        }
+        if let Some(meta) = update.metadata {
+            model.metadata = Set(Some(meta));
+        }
         model.updated_at = Set(Utc::now());
         model.update(&self.db).await.map_err(db_err)
     }
@@ -466,10 +505,7 @@ impl OrganizationOps for SeaOrmAuthAdapter {
         Ok(())
     }
 
-    async fn list_user_organizations(
-        &self,
-        user_id: &str,
-    ) -> AuthResult<Vec<Self::Organization>> {
+    async fn list_user_organizations(&self, user_id: &str) -> AuthResult<Vec<Self::Organization>> {
         // Join members → organizations where member.user_id = user_id
         let members = auth_member::Entity::find()
             .filter(auth_member::Column::UserId.eq(user_id))
@@ -529,12 +565,10 @@ impl MemberOps for SeaOrmAuthAdapter {
             .map_err(db_err)
     }
 
-    async fn update_member_role(
-        &self,
-        member_id: &str,
-        role: &str,
-    ) -> AuthResult<Self::Member> {
-        let existing = self.get_member_by_id(member_id).await?
+    async fn update_member_role(&self, member_id: &str, role: &str) -> AuthResult<Self::Member> {
+        let existing = self
+            .get_member_by_id(member_id)
+            .await?
             .ok_or_else(|| AuthError::NotFound("member".into()))?;
         let mut model: auth_member::ActiveModel = existing.into();
         model.role = Set(role.to_string());
@@ -586,10 +620,7 @@ impl MemberOps for SeaOrmAuthAdapter {
 impl InvitationOps for SeaOrmAuthAdapter {
     type Invitation = auth_invitation::Model;
 
-    async fn create_invitation(
-        &self,
-        inv: CreateInvitation,
-    ) -> AuthResult<Self::Invitation> {
+    async fn create_invitation(&self, inv: CreateInvitation) -> AuthResult<Self::Invitation> {
         let id = Uuid::new_v4().to_string();
         let now = Utc::now();
         let model = auth_invitation::ActiveModel {
@@ -631,7 +662,9 @@ impl InvitationOps for SeaOrmAuthAdapter {
         id: &str,
         status: InvitationStatus,
     ) -> AuthResult<Self::Invitation> {
-        let existing = self.get_invitation_by_id(id).await?
+        let existing = self
+            .get_invitation_by_id(id)
+            .await?
             .ok_or_else(|| AuthError::NotFound("invitation".into()))?;
         let mut model: auth_invitation::ActiveModel = existing.into();
         model.status = Set(status.to_string());
@@ -664,10 +697,7 @@ impl InvitationOps for SeaOrmAuthAdapter {
 impl TwoFactorOps for SeaOrmAuthAdapter {
     type TwoFactor = auth_two_factor::Model;
 
-    async fn create_two_factor(
-        &self,
-        tf: CreateTwoFactor,
-    ) -> AuthResult<Self::TwoFactor> {
+    async fn create_two_factor(&self, tf: CreateTwoFactor) -> AuthResult<Self::TwoFactor> {
         let now = Utc::now();
         let id = Uuid::new_v4().to_string();
         let model = auth_two_factor::ActiveModel {
@@ -697,7 +727,9 @@ impl TwoFactorOps for SeaOrmAuthAdapter {
         user_id: &str,
         backup_codes: &str,
     ) -> AuthResult<Self::TwoFactor> {
-        let existing = self.get_two_factor_by_user_id(user_id).await?
+        let existing = self
+            .get_two_factor_by_user_id(user_id)
+            .await?
             .ok_or_else(|| AuthError::NotFound("two_factor".into()))?;
         let mut model: auth_two_factor::ActiveModel = existing.into();
         model.backup_codes = Set(Some(backup_codes.to_string()));
@@ -773,22 +805,36 @@ impl ApiKeyOps for SeaOrmAuthAdapter {
             .map_err(db_err)
     }
 
-    async fn update_api_key(
-        &self,
-        id: &str,
-        update: UpdateApiKey,
-    ) -> AuthResult<Self::ApiKey> {
-        let existing = self.get_api_key_by_id(id).await?
+    async fn update_api_key(&self, id: &str, update: UpdateApiKey) -> AuthResult<Self::ApiKey> {
+        let existing = self
+            .get_api_key_by_id(id)
+            .await?
             .ok_or_else(|| AuthError::NotFound("api_key".into()))?;
         let mut model: auth_api_key::ActiveModel = existing.into();
-        if let Some(name) = update.name { model.name = Set(Some(name)); }
-        if let Some(enabled) = update.enabled { model.enabled = Set(enabled); }
-        if let Some(remaining) = update.remaining { model.remaining = Set(Some(remaining)); }
-        if let Some(last_request) = update.last_request { model.last_request = Set(last_request); }
-        if let Some(request_count) = update.request_count { model.request_count = Set(Some(request_count)); }
-        if let Some(last_refill) = update.last_refill_at { model.last_refill_at = Set(last_refill); }
-        if let Some(permissions) = update.permissions { model.permissions = Set(Some(permissions)); }
-        if let Some(metadata) = update.metadata { model.metadata = Set(Some(metadata)); }
+        if let Some(name) = update.name {
+            model.name = Set(Some(name));
+        }
+        if let Some(enabled) = update.enabled {
+            model.enabled = Set(enabled);
+        }
+        if let Some(remaining) = update.remaining {
+            model.remaining = Set(Some(remaining));
+        }
+        if let Some(last_request) = update.last_request {
+            model.last_request = Set(last_request);
+        }
+        if let Some(request_count) = update.request_count {
+            model.request_count = Set(Some(request_count));
+        }
+        if let Some(last_refill) = update.last_refill_at {
+            model.last_refill_at = Set(last_refill);
+        }
+        if let Some(permissions) = update.permissions {
+            model.permissions = Set(Some(permissions));
+        }
+        if let Some(metadata) = update.metadata {
+            model.metadata = Set(Some(metadata));
+        }
         model.updated_at = Set(Utc::now().to_rfc3339());
         model.update(&self.db).await.map_err(db_err)
     }
@@ -864,12 +910,10 @@ impl PasskeyOps for SeaOrmAuthAdapter {
             .map_err(db_err)
     }
 
-    async fn update_passkey_counter(
-        &self,
-        id: &str,
-        counter: u64,
-    ) -> AuthResult<Self::Passkey> {
-        let existing = self.get_passkey_by_id(id).await?
+    async fn update_passkey_counter(&self, id: &str, counter: u64) -> AuthResult<Self::Passkey> {
+        let existing = self
+            .get_passkey_by_id(id)
+            .await?
             .ok_or_else(|| AuthError::NotFound("passkey".into()))?;
         let mut model: auth_passkey::ActiveModel = existing.into();
         model.counter = Set(counter as i64);
@@ -877,7 +921,9 @@ impl PasskeyOps for SeaOrmAuthAdapter {
     }
 
     async fn update_passkey_name(&self, id: &str, name: &str) -> AuthResult<Self::Passkey> {
-        let existing = self.get_passkey_by_id(id).await?
+        let existing = self
+            .get_passkey_by_id(id)
+            .await?
             .ok_or_else(|| AuthError::NotFound("passkey".into()))?;
         let mut model: auth_passkey::ActiveModel = existing.into();
         model.name = Set(name.to_string());

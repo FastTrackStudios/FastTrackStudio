@@ -47,7 +47,6 @@ pub struct EmailRef {
     pub snippet: Option<String>,
 
     // ── Re-fetch hints ─────────────────────────────────────────────
-
     /// Nextcloud Mail account id. Lets us scope re-fetches without
     /// scanning every account.
     pub account_id: Option<i64>,
@@ -64,7 +63,6 @@ pub struct EmailRef {
     pub nc_db_id: Option<i64>,
 
     // ── UI hints ───────────────────────────────────────────────────
-
     /// Whether the email has any attachments. Populated at link time.
     #[facet(default)]
     pub has_attachments: bool,
@@ -74,7 +72,6 @@ pub struct EmailRef {
     pub attachment_count: u32,
 
     // ── Provenance ─────────────────────────────────────────────────
-
     /// Who linked the email. "jarvis" for bot-driven links, a human
     /// username for manual links, "auto" for internal rule-based.
     pub linked_by: Option<String>,

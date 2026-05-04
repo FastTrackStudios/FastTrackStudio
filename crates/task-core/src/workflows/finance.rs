@@ -66,10 +66,7 @@ impl FireflyClient {
 
     /// Create a transaction (expense linked to a project).
     /// Returns the new transaction ID.
-    pub async fn create_transaction(
-        &self,
-        txn: &FireflyTransaction,
-    ) -> Result<String, VaultError> {
+    pub async fn create_transaction(&self, txn: &FireflyTransaction) -> Result<String, VaultError> {
         let payload = serde_json::json!({
             "transactions": [{
                 "type": "withdrawal",
@@ -141,10 +138,7 @@ impl FireflyClient {
             let attrs = &item["attributes"];
             if attrs["name"].as_str() == Some(name) {
                 return Ok(Some(FireflyBudget {
-                    id: item["id"]
-                        .as_str()
-                        .unwrap_or_default()
-                        .to_string(),
+                    id: item["id"].as_str().unwrap_or_default().to_string(),
                     name: name.to_string(),
                     amount: attrs["amount"]
                         .as_str()
@@ -210,18 +204,12 @@ fn parse_firefly_transaction(body: &serde_json::Value) -> Result<FireflyTransact
     }
     Ok(FireflyTransaction {
         id: body["data"]["id"].as_str().map(|s| s.to_string()),
-        description: txn["description"]
-            .as_str()
-            .unwrap_or_default()
-            .to_string(),
+        description: txn["description"].as_str().unwrap_or_default().to_string(),
         amount: txn["amount"]
             .as_str()
             .and_then(|s| s.parse().ok())
             .unwrap_or(0.0),
-        currency: txn["currency_code"]
-            .as_str()
-            .unwrap_or("USD")
-            .to_string(),
+        currency: txn["currency_code"].as_str().unwrap_or("USD").to_string(),
         date: txn["date"].as_str().unwrap_or_default().to_string(),
         category: txn["category_name"].as_str().map(|s| s.to_string()),
         budget: txn["budget_name"].as_str().map(|s| s.to_string()),
@@ -447,18 +435,12 @@ fn parse_invoice(data: &serde_json::Value) -> Result<Invoice, VaultError> {
 
     Ok(Invoice {
         id: data["id"].as_str().map(|s| s.to_string()),
-        client_name: data["client_id"]
-            .as_str()
-            .unwrap_or_default()
-            .to_string(),
+        client_name: data["client_id"].as_str().unwrap_or_default().to_string(),
         number: data["number"].as_str().map(|s| s.to_string()),
         date: data["date"].as_str().unwrap_or_default().to_string(),
         due_date: data["due_date"].as_str().map(|s| s.to_string()),
         amount: data["amount"].as_f64().unwrap_or(0.0),
-        currency: data["currency_id"]
-            .as_str()
-            .unwrap_or("USD")
-            .to_string(),
+        currency: data["currency_id"].as_str().unwrap_or("USD").to_string(),
         status: status_label(status_id).to_string(),
         items,
         notes: data["public_notes"].as_str().map(|s| s.to_string()),

@@ -3,8 +3,8 @@ use std::cmp::Reverse;
 
 use facet::Facet;
 
-use chrono::Datelike as _;
 use crate::task::{Priority, Status, Task};
+use chrono::Datelike as _;
 
 #[derive(Debug, Clone, Facet)]
 pub struct Query {
@@ -119,11 +119,17 @@ impl Query {
             Sort::Scheduled => results.sort_by(|a, b| nulls_last(a.scheduled, b.scheduled)),
             Sort::Title => results.sort_by(|a, b| a.title.cmp(&b.title)),
             Sort::DateCreated => results.sort_by(|a, b| nulls_last(a.date_created, b.date_created)),
-            Sort::DateModified => results.sort_by(|a, b| nulls_last(a.date_modified, b.date_modified)),
-            Sort::SortOrder => results.sort_by(|a, b| nulls_last(a.sort_order.as_deref(), b.sort_order.as_deref())),
+            Sort::DateModified => {
+                results.sort_by(|a, b| nulls_last(a.date_modified, b.date_modified))
+            }
+            Sort::SortOrder => {
+                results.sort_by(|a, b| nulls_last(a.sort_order.as_deref(), b.sort_order.as_deref()))
+            }
             Sort::Priority => results.sort_by_key(|t| std::cmp::Reverse(t.priority.weight())),
             Sort::TotalTimeLogged => results.sort_by_key(|t| Reverse(t.total_time_logged())),
-            Sort::TimeEstimate => results.sort_by(|a, b| nulls_last(a.time_estimate, b.time_estimate)),
+            Sort::TimeEstimate => {
+                results.sort_by(|a, b| nulls_last(a.time_estimate, b.time_estimate))
+            }
             Sort::Status => results.sort_by_key(|t| match t.status {
                 Status::InProgress => 0,
                 Status::Open | Status::None => 1,
@@ -176,23 +182,32 @@ impl Filter {
             Filter::Priority(p) => &task.priority == p,
             Filter::ExternalSource(src) => task.external_source.as_deref() == Some(src.as_str()),
             Filter::TitleContains(q) => task.title.to_lowercase().contains(&q.to_lowercase()),
-            Filter::DueBetween { start, end } => task.due.map(|d| {
-                let s = start.parse::<chrono::NaiveDate>().ok();
-                let e = end.parse::<chrono::NaiveDate>().ok();
-                s.map_or(true, |s| d >= s) && e.map_or(true, |e| d <= e)
-            }).unwrap_or(false),
-            Filter::ScheduledBetween { start, end } => task.scheduled.map(|d| {
-                let s = start.parse::<chrono::NaiveDate>().ok();
-                let e = end.parse::<chrono::NaiveDate>().ok();
-                s.map_or(true, |s| d >= s) && e.map_or(true, |e| d <= e)
-            }).unwrap_or(false),
+            Filter::DueBetween { start, end } => task
+                .due
+                .map(|d| {
+                    let s = start.parse::<chrono::NaiveDate>().ok();
+                    let e = end.parse::<chrono::NaiveDate>().ok();
+                    s.map_or(true, |s| d >= s) && e.map_or(true, |e| d <= e)
+                })
+                .unwrap_or(false),
+            Filter::ScheduledBetween { start, end } => task
+                .scheduled
+                .map(|d| {
+                    let s = start.parse::<chrono::NaiveDate>().ok();
+                    let e = end.parse::<chrono::NaiveDate>().ok();
+                    s.map_or(true, |s| d >= s) && e.map_or(true, |e| d <= e)
+                })
+                .unwrap_or(false),
             // r[impl query.filter.date-range]
-            Filter::CreatedBetween { start, end } => task.date_created.map(|dt| {
-                let d = dt.date_naive();
-                let s = start.parse::<chrono::NaiveDate>().ok();
-                let e = end.parse::<chrono::NaiveDate>().ok();
-                s.map_or(true, |s| d >= s) && e.map_or(true, |e| d <= e)
-            }).unwrap_or(false),
+            Filter::CreatedBetween { start, end } => task
+                .date_created
+                .map(|dt| {
+                    let d = dt.date_naive();
+                    let s = start.parse::<chrono::NaiveDate>().ok();
+                    let e = end.parse::<chrono::NaiveDate>().ok();
+                    s.map_or(true, |s| d >= s) && e.map_or(true, |e| d <= e)
+                })
+                .unwrap_or(false),
         }
     }
 }
@@ -208,14 +223,25 @@ impl Query {
 
         let Some(ref group_dim) = self.group else {
             return GroupedTasks {
-                groups: vec![TaskGroup { key: String::new(), tasks: sorted }],
+                groups: vec![TaskGroup {
+                    key: String::new(),
+                    tasks: sorted,
+                }],
             };
         };
 
         // Pre-populate ordered keys for date buckets.
         let mut buckets: Vec<(String, Vec<Task>)> = Vec::new();
         if matches!(group_dim, Group::ByDue | Group::ByScheduled) {
-            for key in ["Overdue", "Today", "Tomorrow", "This Week", "This Month", "Later", "No Date"] {
+            for key in [
+                "Overdue",
+                "Today",
+                "Tomorrow",
+                "This Week",
+                "This Month",
+                "Later",
+                "No Date",
+            ] {
                 buckets.push((key.to_string(), vec![]));
             }
         }
@@ -285,7 +311,9 @@ fn date_bucket(date: Option<chrono::NaiveDate>, today: chrono::NaiveDate) -> Str
         Some(d) if d == today => "Today".to_string(),
         Some(d) if d == today + chrono::Duration::days(1) => "Tomorrow".to_string(),
         Some(d) if d <= today + chrono::Duration::days(7) => "This Week".to_string(),
-        Some(d) if d.month() == today.month() && d.year() == today.year() => "This Month".to_string(),
+        Some(d) if d.month() == today.month() && d.year() == today.year() => {
+            "This Month".to_string()
+        }
         Some(_) => "Later".to_string(),
     }
 }

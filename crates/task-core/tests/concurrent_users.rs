@@ -5,9 +5,9 @@
 
 use std::sync::Arc;
 
-use task_core::task::{Task, Status, Priority, WikiLink};
 use task_core::project::{Project, ProjectStatus};
 use task_core::provider::{MockProvider, ProjectProvider, ProjectRegistry};
+use task_core::task::{Priority, Status, Task, WikiLink};
 
 // ── Helper: create test task ─────────────────────────────────────────────────
 
@@ -42,7 +42,10 @@ async fn five_users_create_tasks_concurrently() {
     // Seed a project
     provider
         .seed_project(
-            test_project("Shared Project", vec!["alice", "bob", "carol", "dave", "eve"]),
+            test_project(
+                "Shared Project",
+                vec!["alice", "bob", "carol", "dave", "eve"],
+            ),
             vec![],
         )
         .await;
@@ -55,11 +58,7 @@ async fn five_users_create_tasks_concurrently() {
 
         handles.push(tokio::spawn(async move {
             for task_idx in 0..10 {
-                let task = test_task(
-                    &format!("{user}-task-{task_idx}"),
-                    "Shared Project",
-                    &user,
-                );
+                let task = test_task(&format!("{user}-task-{task_idx}"), "Shared Project", &user);
                 provider
                     .save_task("Shared Project", &task)
                     .await
@@ -169,7 +168,10 @@ async fn concurrent_task_completion() {
         ));
     }
     provider
-        .seed_project(test_project("Completion Project", vec!["alice", "bob"]), tasks)
+        .seed_project(
+            test_project("Completion Project", vec!["alice", "bob"]),
+            tasks,
+        )
         .await;
 
     // 4 users completing different tasks simultaneously
@@ -180,11 +182,7 @@ async fn concurrent_task_completion() {
             // Each user completes 5 tasks (non-overlapping)
             for task_idx in 0..5 {
                 let idx = user_idx * 5 + task_idx;
-                let mut task = test_task(
-                    &format!("task-{idx}"),
-                    "Completion Project",
-                    "alice",
-                );
+                let mut task = test_task(&format!("task-{idx}"), "Completion Project", "alice");
                 task.status = Status::Done;
                 task.completed_date = Some(chrono::Local::now().date_naive());
                 provider
@@ -204,7 +202,11 @@ async fn concurrent_task_completion() {
         .await
         .unwrap()
         .unwrap();
-    let done_count = bundle.tasks.iter().filter(|t| t.status == Status::Done).count();
+    let done_count = bundle
+        .tasks
+        .iter()
+        .filter(|t| t.status == Status::Done)
+        .count();
     assert_eq!(done_count, 20, "All 20 tasks should be Done");
 }
 
@@ -306,7 +308,9 @@ async fn concurrent_writes_with_failures() {
     assert_eq!(provider.task_count().await, 10);
 
     // Enable write failures
-    provider.set_fail_writes(Some("simulated failure".into())).await;
+    provider
+        .set_fail_writes(Some("simulated failure".into()))
+        .await;
 
     // Attempt 5 more writes — should all fail
     let mut failures = 0;
@@ -317,7 +321,11 @@ async fn concurrent_writes_with_failures() {
         }
     }
     assert_eq!(failures, 5, "All writes should fail");
-    assert_eq!(provider.task_count().await, 10, "Task count should not change");
+    assert_eq!(
+        provider.task_count().await,
+        10,
+        "Task count should not change"
+    );
 
     // Disable failures — writes should work again
     provider.set_fail_writes(None).await;
@@ -342,8 +350,7 @@ async fn ten_users_mixed_operations() {
 
     let projects = ["Alpha", "Beta", "Gamma"];
     let users = [
-        "alice", "bob", "carol", "dave", "eve",
-        "frank", "grace", "hank", "iris", "jack",
+        "alice", "bob", "carol", "dave", "eve", "frank", "grace", "hank", "iris", "jack",
     ];
 
     // Phase 1: All 10 users create tasks concurrently
@@ -392,7 +399,10 @@ async fn ten_users_mixed_operations() {
         let project = projects[user_idx % 3].to_string();
 
         handles.push(tokio::spawn(async move {
-            provider.delete_task(&project, &format!("{user}-4")).await.unwrap();
+            provider
+                .delete_task(&project, &format!("{user}-4"))
+                .await
+                .unwrap();
         }));
     }
     for handle in handles {
@@ -405,7 +415,10 @@ async fn ten_users_mixed_operations() {
     // 20 tasks should be InProgress (2 per user)
     let all_bundles = provider.list_all().await.unwrap();
     let all_tasks: Vec<&Task> = all_bundles.iter().flat_map(|b| &b.tasks).collect();
-    let in_progress = all_tasks.iter().filter(|t| t.status == Status::InProgress).count();
+    let in_progress = all_tasks
+        .iter()
+        .filter(|t| t.status == Status::InProgress)
+        .count();
     assert_eq!(in_progress, 20, "20 tasks should be InProgress");
 }
 
@@ -439,7 +452,11 @@ async fn registry_tasks_for_user() {
     registry.add_arc(provider);
 
     let alice_tasks = registry.tasks_for_user("alice").await.unwrap();
-    assert_eq!(alice_tasks.len(), 3, "Alice should have 3 tasks across 2 projects");
+    assert_eq!(
+        alice_tasks.len(),
+        3,
+        "Alice should have 3 tasks across 2 projects"
+    );
 
     let bob_tasks = registry.tasks_for_user("bob").await.unwrap();
     assert_eq!(bob_tasks.len(), 1);

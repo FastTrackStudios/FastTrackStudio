@@ -5,8 +5,8 @@
 
 use rusqlite::params;
 
-use crate::service::VaultError;
 use super::sqlite::{TaskIndex, TaskRow};
+use crate::service::VaultError;
 
 /// Full-text search index (built on SQLite FTS5).
 pub struct SearchIndex;

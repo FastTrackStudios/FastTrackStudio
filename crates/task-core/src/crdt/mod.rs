@@ -12,9 +12,9 @@
 //! write lost the race.
 
 pub mod document;
-pub mod sync;
 pub mod offline;
+pub mod sync;
 
 pub use document::{CrdtDocument, DocumentSnapshot, CONFLICT_FIELDS};
-pub use sync::{ConflictEvent, CrdtSyncEngine, SyncOp};
 pub use offline::{OfflineQueue, QueuedOp, QueuedOpType};
+pub use sync::{ConflictEvent, CrdtSyncEngine, SyncOp};

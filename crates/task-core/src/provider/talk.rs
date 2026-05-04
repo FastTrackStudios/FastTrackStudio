@@ -162,9 +162,7 @@ impl TalkClient {
             .await
             .map_err(|e| VaultError::IoError(e.to_string()))?;
         if !status.is_success() {
-            return Err(VaultError::IoError(format!(
-                "talk send {status}: {body}"
-            )));
+            return Err(VaultError::IoError(format!("talk send {status}: {body}")));
         }
 
         let v: serde_json::Value = serde_json::from_str(&body)
@@ -287,11 +285,7 @@ impl CommunicationChannelProvider for TalkClient {
 }
 
 impl Room {
-    pub fn into_channel(
-        self,
-        provider: &str,
-        account: Option<&str>,
-    ) -> ChannelConversation {
+    pub fn into_channel(self, provider: &str, account: Option<&str>) -> ChannelConversation {
         ChannelConversation {
             provider: provider.to_string(),
             account: account.map(str::to_string),
@@ -458,10 +452,9 @@ mod tests {
 
     #[test]
     fn message_json_without_reply() {
-        let v: serde_json::Value = serde_json::from_str(
-            r#"{"id":7,"actorId":"cody","timestamp":0,"message":"hi"}"#,
-        )
-        .unwrap();
+        let v: serde_json::Value =
+            serde_json::from_str(r#"{"id":7,"actorId":"cody","timestamp":0,"message":"hi"}"#)
+                .unwrap();
         let m = message_from_json(&v, "t").unwrap();
         assert!(m.reply_to.is_none());
     }

@@ -8,11 +8,11 @@ use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
 
+use super::traits::*;
 use crate::project::Project;
 use crate::service::VaultError;
 use crate::task::Task;
 use crate::vault::Vault;
-use super::traits::*;
 
 /// Reads tasks from a flat Obsidian vault directory.
 ///

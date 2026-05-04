@@ -312,7 +312,9 @@ impl WebDavProvider {
         set_props: &BTreeMap<String, String>,
         remove_props: &[String],
     ) -> Result<(), VaultError> {
-        let mut body = String::from(r#"<?xml version="1.0" encoding="utf-8"?><d:propertyupdate xmlns:d="DAV:" xmlns:x="urn:task:props">"#);
+        let mut body = String::from(
+            r#"<?xml version="1.0" encoding="utf-8"?><d:propertyupdate xmlns:d="DAV:" xmlns:x="urn:task:props">"#,
+        );
         if !set_props.is_empty() {
             body.push_str("<d:set><d:prop>");
             for (name, value) in set_props {
@@ -471,8 +473,13 @@ impl WebDavProvider {
         .collect::<Vec<_>>()
         .join("/");
         let relative = relative_path(&entry.path, &self.config.projects_path)?;
-        let name = direct_child_name(&entry.path, &full_parent)
-            .or_else(|| relative.trim_matches('/').rsplit('/').next().map(str::to_string))?;
+        let name = direct_child_name(&entry.path, &full_parent).or_else(|| {
+            relative
+                .trim_matches('/')
+                .rsplit('/')
+                .next()
+                .map(str::to_string)
+        })?;
         Some(WebDavEntry {
             path: relative,
             name,
@@ -762,7 +769,12 @@ fn relative_path(href_path: &str, root_path: &str) -> Option<String> {
     let href = href_path.trim_matches('/');
     let root = root_path.trim_matches('/');
     if root.is_empty() {
-        return Some(href.rsplit_once('/').map(|(_, tail)| tail).unwrap_or(href).to_string());
+        return Some(
+            href.rsplit_once('/')
+                .map(|(_, tail)| tail)
+                .unwrap_or(href)
+                .to_string(),
+        );
     }
     if href == root {
         return Some(String::new());
@@ -1334,7 +1346,10 @@ mod tests {
             .unwrap();
         let stat = provider.stat(&file).await.unwrap().expect("stat file");
         assert_eq!(stat.kind, WebDavResourceKind::File);
-        assert_eq!(provider.read_text(&file).await.unwrap().as_deref(), Some("hello webdav"));
+        assert_eq!(
+            provider.read_text(&file).await.unwrap().as_deref(),
+            Some("hello webdav")
+        );
         provider.copy(&file, &copy, true, None).await.unwrap();
         provider.move_resource(&copy, &moved, true).await.unwrap();
         let names: Vec<_> = provider
@@ -1390,7 +1405,10 @@ mod tests {
             .expect("created project");
         assert_eq!(loaded.project.title, project.title);
         assert!(loaded.tasks.iter().any(|task| task.title == "Smoke task"));
-        provider.delete_task(&project.title, "Smoke task").await.unwrap();
+        provider
+            .delete_task(&project.title, "Smoke task")
+            .await
+            .unwrap();
         provider.remove(&project.title).await.unwrap();
     }
 }

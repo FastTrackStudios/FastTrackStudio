@@ -145,18 +145,13 @@ pub fn scan_project_vault(root: &Path) -> Vec<ProjectWithTasks> {
 }
 
 /// Save a task into a project's `tasks/` directory.
-pub fn save_project_task(
-    project_dir: &Path,
-    task: &Task,
-) -> Result<(), VaultError> {
+pub fn save_project_task(project_dir: &Path, task: &Task) -> Result<(), VaultError> {
     let tasks_dir = project_dir.join("tasks");
-    fs::create_dir_all(&tasks_dir)
-        .map_err(|e| VaultError::IoError(e.to_string()))?;
+    fs::create_dir_all(&tasks_dir).map_err(|e| VaultError::IoError(e.to_string()))?;
 
     let path = tasks_dir.join(format!("{}.md", task.title));
     let body = if path.exists() {
-        let content = fs::read_to_string(&path)
-            .map_err(|e| VaultError::IoError(e.to_string()))?;
+        let content = fs::read_to_string(&path).map_err(|e| VaultError::IoError(e.to_string()))?;
         Vault::extract_body(&content).unwrap_or("").to_string()
     } else {
         String::new()
@@ -167,14 +162,10 @@ pub fn save_project_task(
 }
 
 /// Save a project.md file in a project directory.
-pub fn save_project_metadata(
-    project_dir: &Path,
-    project: &Project,
-) -> Result<(), VaultError> {
+pub fn save_project_metadata(project_dir: &Path, project: &Project) -> Result<(), VaultError> {
     let path = project_dir.join("project.md");
     let body = if path.exists() {
-        let content = fs::read_to_string(&path)
-            .map_err(|e| VaultError::IoError(e.to_string()))?;
+        let content = fs::read_to_string(&path).map_err(|e| VaultError::IoError(e.to_string()))?;
         Vault::extract_body(&content).unwrap_or("").to_string()
     } else {
         String::new()
@@ -185,10 +176,7 @@ pub fn save_project_metadata(
 }
 
 /// Create a new project directory with project.md and tasks/ folder.
-pub fn create_project(
-    projects_root: &Path,
-    project: &Project,
-) -> Result<PathBuf, VaultError> {
+pub fn create_project(projects_root: &Path, project: &Project) -> Result<PathBuf, VaultError> {
     let project_dir = projects_root.join(&project.title);
     fs::create_dir_all(project_dir.join("tasks"))
         .map_err(|e| VaultError::IoError(e.to_string()))?;
