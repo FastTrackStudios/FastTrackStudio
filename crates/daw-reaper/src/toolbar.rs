@@ -12,9 +12,9 @@ use daw_proto::toolbar::{
 };
 use reaper_high::Reaper;
 use reaper_medium::{CommandId, MenuOrToolbarItem, PositionDescriptor, UiRefreshBehavior};
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::sync::Mutex;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 /// REAPER implementation of the ToolbarService.
 #[derive(Clone)]
@@ -35,106 +35,24 @@ impl Default for ReaperToolbar {
     }
 }
 
-// ============================================================================
-// Deferred operation queue
-// ============================================================================
-
-#[derive(Debug, Clone)]
-enum DeferredOp {
-    Add {
-        button: ToolbarButton,
-        workflow_id: String,
-    },
-    Remove {
-        target: ToolbarTarget,
-        command_name: String,
-    },
-    Update {
-        button: ToolbarButton,
-        workflow_id: String,
-    },
-    Move {
-        target: ToolbarTarget,
-        command_name: String,
-        position: u32,
-    },
-    SetIcon {
-        target: ToolbarTarget,
-        command_name: String,
-        icon: Option<ToolbarIcon>,
-    },
-    RemoveWorkflow {
-        workflow_id: String,
-    },
-}
-
 #[derive(Default)]
 struct ToolbarState {
     added_buttons: HashMap<(String, String), String>,
 }
 
 static STATE: std::sync::OnceLock<Mutex<ToolbarState>> = std::sync::OnceLock::new();
-static QUEUE: std::sync::OnceLock<Mutex<VecDeque<DeferredOp>>> = std::sync::OnceLock::new();
 
 fn state() -> &'static Mutex<ToolbarState> {
     STATE.get_or_init(|| Mutex::new(ToolbarState::default()))
-}
-
-fn queue() -> &'static Mutex<VecDeque<DeferredOp>> {
-    QUEUE.get_or_init(|| Mutex::new(VecDeque::new()))
-}
-
-fn enqueue(op: DeferredOp) {
-    if let Ok(mut q) = queue().lock() {
-        q.push_back(op);
-    }
 }
 
 // ============================================================================
 // Public API for timer callback
 // ============================================================================
 
-/// Process all deferred toolbar operations. Call from the timer callback.
-pub fn process_deferred_ops() {
-    let ops: Vec<DeferredOp> = match queue().lock() {
-        Ok(mut q) => q.drain(..).collect(),
-        Err(_) => return,
-    };
-
-    for op in ops {
-        let result = match op {
-            DeferredOp::Add {
-                button,
-                workflow_id,
-            } => add_button_immediate(&button, &workflow_id).map(|_| ()),
-            DeferredOp::Remove {
-                target,
-                command_name,
-            } => remove_button_immediate(&target, &command_name),
-            DeferredOp::Update {
-                button,
-                workflow_id,
-            } => update_button_immediate(&button, &workflow_id).map(|_| ()),
-            DeferredOp::Move {
-                target,
-                command_name,
-                position,
-            } => move_button_immediate(&target, &command_name, position).map(|_| ()),
-            DeferredOp::SetIcon {
-                target,
-                command_name,
-                icon,
-            } => set_button_icon_immediate(&target, &command_name, icon).map(|_| ()),
-            DeferredOp::RemoveWorkflow { workflow_id } => {
-                remove_workflow_buttons_immediate(&workflow_id)
-            }
-        };
-
-        if let Err(error) = result {
-            warn!(%error, "deferred toolbar operation failed");
-        }
-    }
-}
+/// Retained for bridge timer compatibility. Toolbar operations now use
+/// `main_thread::query` so callers receive the actual success/error result.
+pub fn process_deferred_ops() {}
 
 // ============================================================================
 // ToolbarTarget helpers
@@ -144,6 +62,20 @@ fn target_to_str(target: &ToolbarTarget) -> String {
     match target {
         ToolbarTarget::Main => "Main toolbar".to_string(),
         ToolbarTarget::Floating(n) => format!("Floating toolbar {}", (*n).clamp(1, 32)),
+    }
+}
+
+fn target_menu_names(target: &ToolbarTarget) -> Vec<String> {
+    match target {
+        ToolbarTarget::Main => vec![target_to_str(target)],
+        ToolbarTarget::Floating(n) => {
+            let n = (*n).clamp(1, 32);
+            vec![
+                format!("Floating toolbar {n}"),
+                format!("Floating toolbar {n} (Toolbar {n})"),
+                format!("Toolbar {n}"),
+            ]
+        }
     }
 }
 
@@ -221,25 +153,23 @@ fn add_toolbar_command_item(
 
 fn add_button_immediate(button: &ToolbarButton, workflow_id: &str) -> Result<CommandId, String> {
     let command_id = resolve_command_id(&button.command_name)?;
-    let toolbar_name = target_to_str(&button.target);
-
-    if scan_toolbar_for_command(&toolbar_name, command_id).is_none() {
+    let toolbar_name = resolve_toolbar_name_for_add(&button.target, command_id, |toolbar_name| {
         add_toolbar_command_item(
-            toolbar_name.as_str(),
+            toolbar_name,
             position_descriptor(&button.placement),
             command_id,
             button.flags,
             button.label.as_str(),
             button.icon.as_ref(),
             UiRefreshBehavior::Refresh,
-        )?;
+        )
+    })?;
 
-        info!(
-            command = %button.command_name,
-            toolbar = %toolbar_name,
-            "added toolbar button"
-        );
-    }
+    info!(
+        command = %button.command_name,
+        toolbar = %toolbar_name,
+        "added toolbar button"
+    );
 
     if let Ok(mut s) = state().lock() {
         s.added_buttons.insert(
@@ -253,7 +183,8 @@ fn add_button_immediate(button: &ToolbarButton, workflow_id: &str) -> Result<Com
 
 fn update_button_immediate(button: &ToolbarButton, workflow_id: &str) -> Result<CommandId, String> {
     let command_id = resolve_command_id(&button.command_name)?;
-    let toolbar_name = target_to_str(&button.target);
+    let toolbar_name = resolve_toolbar_name_for_command(&button.target, command_id)
+        .unwrap_or_else(|| target_to_str(&button.target));
 
     if let Some(position) = scan_toolbar_for_command(&toolbar_name, command_id) {
         let medium = Reaper::get().medium_reaper();
@@ -346,7 +277,8 @@ fn move_button_immediate(
     position: u32,
 ) -> Result<CommandId, String> {
     let command_id = resolve_command_id(command_name)?;
-    let toolbar_name = target_to_str(target);
+    let toolbar_name = resolve_toolbar_name_for_command(target, command_id)
+        .ok_or_else(|| format!("Toolbar button not found: {command_name}"))?;
     let details = get_toolbar_command_details(toolbar_name.as_str(), command_id)
         .ok_or_else(|| format!("Toolbar button not found: {command_name}"))?;
     let medium = Reaper::get().medium_reaper();
@@ -375,7 +307,8 @@ fn set_button_icon_immediate(
     icon: Option<ToolbarIcon>,
 ) -> Result<CommandId, String> {
     let command_id = resolve_command_id(command_name)?;
-    let toolbar_name = target_to_str(target);
+    let toolbar_name = resolve_toolbar_name_for_command(target, command_id)
+        .ok_or_else(|| format!("Toolbar button not found: {command_name}"))?;
     let details = get_toolbar_command_details(toolbar_name.as_str(), command_id)
         .ok_or_else(|| format!("Toolbar button not found: {command_name}"))?;
     let medium = Reaper::get().medium_reaper();
@@ -400,9 +333,12 @@ fn set_button_icon_immediate(
 
 fn remove_button_immediate(target: &ToolbarTarget, command_name: &str) -> Result<(), String> {
     let command_id = resolve_command_id(command_name)?;
-    let toolbar_name = target_to_str(target);
+    let mut removed = Vec::new();
 
-    if let Some(position) = scan_toolbar_for_command(&toolbar_name, command_id) {
+    for toolbar_name in target_menu_names(target) {
+        let Some(position) = scan_toolbar_for_command(&toolbar_name, command_id) else {
+            continue;
+        };
         Reaper::get()
             .medium_reaper()
             .delete_custom_menu_or_toolbar_item(
@@ -418,11 +354,14 @@ fn remove_button_immediate(target: &ToolbarTarget, command_name: &str) -> Result
             position,
             "removed toolbar button"
         );
+        removed.push(toolbar_name);
     }
 
     if let Ok(mut s) = state().lock() {
-        s.added_buttons
-            .remove(&(toolbar_name, command_name.to_string()));
+        for toolbar_name in removed {
+            s.added_buttons
+                .remove(&(toolbar_name, command_name.to_string()));
+        }
     }
 
     Ok(())
@@ -470,6 +409,67 @@ fn scan_toolbar_for_command(toolbar_name: &str, command_id: CommandId) -> Option
     }
 }
 
+fn resolve_toolbar_name_for_command(
+    target: &ToolbarTarget,
+    command_id: CommandId,
+) -> Option<String> {
+    target_menu_names(target)
+        .into_iter()
+        .find(|toolbar_name| scan_toolbar_for_command(toolbar_name, command_id).is_some())
+}
+
+fn resolve_toolbar_name_for_add(
+    target: &ToolbarTarget,
+    command_id: CommandId,
+    add: impl Fn(&str) -> Result<(), String>,
+) -> Result<String, String> {
+    if let Some(toolbar_name) = resolve_toolbar_name_for_command(target, command_id) {
+        return Ok(toolbar_name);
+    }
+
+    let mut errors = Vec::new();
+    for toolbar_name in target_menu_names(target) {
+        if toolbar_has_edit_me_placeholder(toolbar_name.as_str()) {
+            let _ = Reaper::get()
+                .medium_reaper()
+                .delete_custom_menu_or_toolbar_item(
+                    toolbar_name.as_str(),
+                    0,
+                    UiRefreshBehavior::NoRefresh,
+                );
+        }
+        match add(toolbar_name.as_str()) {
+            Ok(()) if scan_toolbar_for_command(toolbar_name.as_str(), command_id).is_some() => {
+                return Ok(toolbar_name);
+            }
+            Ok(()) => errors.push(format!(
+                "{toolbar_name}: add returned ok but item was not readable"
+            )),
+            Err(error) => errors.push(format!("{toolbar_name}: {error}")),
+        }
+    }
+
+    Err(format!(
+        "Failed to add readable toolbar item for {}: {}",
+        target_to_str(target),
+        errors.join("; ")
+    ))
+}
+
+fn toolbar_has_edit_me_placeholder(toolbar_name: &str) -> bool {
+    let medium = Reaper::get().medium_reaper();
+    let first = medium.get_custom_menu_or_toolbar_item(toolbar_name, 0, |item| match item {
+        Some(MenuOrToolbarItem::Command(command)) => {
+            command.command_id.get() == 41101 && command.label.to_string() == "Edit me"
+        }
+        _ => false,
+    });
+    if !first {
+        return false;
+    }
+    !medium.get_custom_menu_or_toolbar_item(toolbar_name, 1, |item| item.is_some())
+}
+
 fn command_name_for(command_id: CommandId) -> Option<String> {
     Reaper::get()
         .medium_reaper()
@@ -477,62 +477,94 @@ fn command_name_for(command_id: CommandId) -> Option<String> {
 }
 
 fn snapshot_live_toolbar(target: ToolbarTarget) -> ToolbarSnapshot {
-    let toolbar_name = target_to_str(&target);
     let medium = Reaper::get().medium_reaper();
-    let mut items = Vec::new();
-    let mut pos = 0;
+    let canonical_name = target_to_str(&target);
+    let mut best_items = Vec::new();
 
-    loop {
-        let item = medium.get_custom_menu_or_toolbar_item(toolbar_name.as_str(), pos, |item| {
-            item.map(|item| match item {
-                MenuOrToolbarItem::Separator => ToolbarItemInfo {
-                    position: pos,
-                    kind: "separator".to_string(),
-                    raw: Some("-1".to_string()),
-                    ..Default::default()
-                },
-                MenuOrToolbarItem::SubMenuStart(submenu) => ToolbarItemInfo {
-                    position: pos,
-                    kind: "submenu-start".to_string(),
-                    label: submenu.label.to_string(),
-                    raw: Some("-2".to_string()),
-                    ..Default::default()
-                },
-                MenuOrToolbarItem::SubMenuEnd => ToolbarItemInfo {
-                    position: pos,
-                    kind: "submenu-end".to_string(),
-                    raw: Some("-3".to_string()),
-                    ..Default::default()
-                },
-                MenuOrToolbarItem::Command(command) => {
-                    let command_id = command.command_id;
-                    ToolbarItemInfo {
+    for toolbar_name in target_menu_names(&target) {
+        let mut items = Vec::new();
+        let mut pos = 0;
+
+        loop {
+            let item = medium.get_custom_menu_or_toolbar_item(toolbar_name.as_str(), pos, |item| {
+                item.map(|item| match item {
+                    MenuOrToolbarItem::Separator => ToolbarItemInfo {
                         position: pos,
-                        kind: "command".to_string(),
-                        command_id: Some(command_id.get()),
-                        command_name: command_name_for(command_id),
-                        label: command.label.to_string(),
-                        flags: command.toolbar_flags,
-                        icon: command.icon_file_name.map(|name| name.to_string()),
-                        raw: None,
+                        kind: "separator".to_string(),
+                        raw: Some("-1".to_string()),
+                        ..Default::default()
+                    },
+                    MenuOrToolbarItem::SubMenuStart(submenu) => ToolbarItemInfo {
+                        position: pos,
+                        kind: "submenu-start".to_string(),
+                        label: submenu.label.to_string(),
+                        raw: Some("-2".to_string()),
+                        ..Default::default()
+                    },
+                    MenuOrToolbarItem::SubMenuEnd => ToolbarItemInfo {
+                        position: pos,
+                        kind: "submenu-end".to_string(),
+                        raw: Some("-3".to_string()),
+                        ..Default::default()
+                    },
+                    MenuOrToolbarItem::Command(command) => {
+                        let command_id = command.command_id;
+                        ToolbarItemInfo {
+                            position: pos,
+                            kind: "command".to_string(),
+                            command_id: Some(command_id.get()),
+                            command_name: command_name_for(command_id),
+                            label: command.label.to_string(),
+                            flags: command.toolbar_flags,
+                            icon: command.icon_file_name.map(|name| name.to_string()),
+                            raw: None,
+                        }
                     }
-                }
-            })
-        });
+                })
+            });
 
-        match item {
-            Some(item) => {
-                items.push(item);
-                pos += 1;
+            match item {
+                Some(item) => {
+                    items.push(item);
+                    pos += 1;
+                }
+                None => break,
             }
-            None => break,
+        }
+
+        if has_non_placeholder_items(&items) {
+            best_items = items;
+            break;
+        }
+        if best_items.is_empty() {
+            best_items = items;
         }
     }
 
     ToolbarSnapshot {
-        toolbar_name,
+        toolbar_name: canonical_name,
         source: ToolbarSnapshotSource::Live,
-        items,
+        items: best_items,
+    }
+}
+
+fn has_non_placeholder_items(items: &[ToolbarItemInfo]) -> bool {
+    items.iter().any(|item| {
+        item.command_name.is_some() || item.command_id != Some(41101) || item.label != "Edit me"
+    })
+}
+
+fn command_result(result: Result<CommandId, String>) -> ToolbarResult {
+    match result {
+        Ok(command_id) => ToolbarResult::ok(command_id.get()),
+        Err(error) => ToolbarResult::error(error),
+    }
+}
+
+fn unit_result(result: Result<(), String>) -> ToolbarResult {
+    match result {
+        Ok(()) => ToolbarResult::ok(0),
+        Err(error) => ToolbarResult::error(error),
     }
 }
 
@@ -543,36 +575,36 @@ fn snapshot_live_toolbar(target: ToolbarTarget) -> ToolbarSnapshot {
 impl ToolbarService for ReaperToolbar {
     async fn add_button(&self, button: ToolbarButton, workflow_id: String) -> ToolbarResult {
         debug!(command = %button.command_name, "toolbar add_button service call");
-        if !is_api_available() {
-            return ToolbarResult::error("Dynamic toolbar API not available");
-        }
-        enqueue(DeferredOp::Add {
-            button,
-            workflow_id,
-        });
-        ToolbarResult::ok(0)
+        crate::main_thread::query(move || {
+            if !is_api_available() {
+                return ToolbarResult::error("Dynamic toolbar API not available");
+            }
+            command_result(add_button_immediate(&button, &workflow_id))
+        })
+        .await
+        .unwrap_or_else(|| ToolbarResult::error("Main thread dispatcher not available"))
     }
 
     async fn update_button(&self, button: ToolbarButton, workflow_id: String) -> ToolbarResult {
-        if !is_api_available() {
-            return ToolbarResult::error("Dynamic toolbar API not available");
-        }
-        enqueue(DeferredOp::Update {
-            button,
-            workflow_id,
-        });
-        ToolbarResult::ok(0)
+        crate::main_thread::query(move || {
+            if !is_api_available() {
+                return ToolbarResult::error("Dynamic toolbar API not available");
+            }
+            command_result(update_button_immediate(&button, &workflow_id))
+        })
+        .await
+        .unwrap_or_else(|| ToolbarResult::error("Main thread dispatcher not available"))
     }
 
     async fn remove_button(&self, target: ToolbarTarget, command_name: String) -> ToolbarResult {
-        if !is_api_available() {
-            return ToolbarResult::ok(0);
-        }
-        enqueue(DeferredOp::Remove {
-            target,
-            command_name,
-        });
-        ToolbarResult::ok(0)
+        crate::main_thread::query(move || {
+            if !is_api_available() {
+                return ToolbarResult::ok(0);
+            }
+            unit_result(remove_button_immediate(&target, &command_name))
+        })
+        .await
+        .unwrap_or_else(|| ToolbarResult::error("Main thread dispatcher not available"))
     }
 
     async fn move_button(
@@ -582,15 +614,14 @@ impl ToolbarService for ReaperToolbar {
         position: u32,
     ) -> ToolbarResult {
         debug!(%command_name, position, "toolbar move_button service call");
-        if !is_api_available() {
-            return ToolbarResult::error("Dynamic toolbar API not available");
-        }
-        enqueue(DeferredOp::Move {
-            target,
-            command_name,
-            position,
-        });
-        ToolbarResult::ok(0)
+        crate::main_thread::query(move || {
+            if !is_api_available() {
+                return ToolbarResult::error("Dynamic toolbar API not available");
+            }
+            command_result(move_button_immediate(&target, &command_name, position))
+        })
+        .await
+        .unwrap_or_else(|| ToolbarResult::error("Main thread dispatcher not available"))
     }
 
     async fn set_button_icon(
@@ -599,27 +630,31 @@ impl ToolbarService for ReaperToolbar {
         command_name: String,
         icon: Option<ToolbarIcon>,
     ) -> ToolbarResult {
-        if !is_api_available() {
-            return ToolbarResult::error("Dynamic toolbar API not available");
-        }
-        enqueue(DeferredOp::SetIcon {
-            target,
-            command_name,
-            icon,
-        });
-        ToolbarResult::ok(0)
+        crate::main_thread::query(move || {
+            if !is_api_available() {
+                return ToolbarResult::error("Dynamic toolbar API not available");
+            }
+            command_result(set_button_icon_immediate(&target, &command_name, icon))
+        })
+        .await
+        .unwrap_or_else(|| ToolbarResult::error("Main thread dispatcher not available"))
     }
 
     async fn remove_workflow_buttons(&self, workflow_id: String) -> ToolbarResult {
-        if !is_api_available() {
-            return ToolbarResult::ok(0);
-        }
-        enqueue(DeferredOp::RemoveWorkflow { workflow_id });
-        ToolbarResult::ok(0)
+        crate::main_thread::query(move || {
+            if !is_api_available() {
+                return ToolbarResult::ok(0);
+            }
+            unit_result(remove_workflow_buttons_immediate(&workflow_id))
+        })
+        .await
+        .unwrap_or_else(|| ToolbarResult::error("Main thread dispatcher not available"))
     }
 
     async fn is_available(&self) -> bool {
-        is_api_available()
+        crate::main_thread::query(is_api_available)
+            .await
+            .unwrap_or(false)
     }
 
     async fn get_tracked_buttons(&self) -> Vec<TrackedButton> {

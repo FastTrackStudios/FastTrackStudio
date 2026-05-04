@@ -256,6 +256,7 @@ fn ensure_reaper_profile_dirs(profile: &DawProfile) -> Result<()> {
         fs::write(&profile.ini_path, "[reaper]\n")?;
     }
     patch_reaper_profile_ini(profile)?;
+    bootstrap_reaper_floating_toolbars(profile)?;
     prewarm_reaper_profile_if_needed(profile);
     install_available_daw_bridge(&user_plugins)?;
     Ok(())
@@ -273,6 +274,78 @@ fn patch_reaper_profile_ini(profile: &DawProfile) -> Result<()> {
     patch_ini_section_key(&profile.ini_path, "verchk", "lastt", &now_ts.to_string())?;
     remove_stale_project_tabs(&profile.ini_path)?;
     Ok(())
+}
+
+fn bootstrap_reaper_floating_toolbars(profile: &DawProfile) -> Result<()> {
+    let menu_path = profile.resources_dir.join("reaper-menu.ini");
+    let mut content = fs::read_to_string(&menu_path).unwrap_or_default();
+    let mut changed = false;
+
+    for toolbar in 1..=32 {
+        let section = format!("[Floating toolbar {toolbar}]");
+        if content.lines().any(|line| line.trim() == section) {
+            continue;
+        }
+        if !content.ends_with('\n') && !content.is_empty() {
+            content.push('\n');
+        }
+        content.push('\n');
+        content.push_str(&section);
+        content.push('\n');
+        content.push_str("item_0=41101 Edit me\n");
+        changed = true;
+    }
+
+    if changed {
+        if let Some(parent) = menu_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(menu_path, content)?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod launcher_tests {
+    use super::*;
+
+    fn temp_profile(name: &str) -> DawProfile {
+        let root = std::env::temp_dir().join(format!("daw-cli-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let resources_dir = root.join("Reaper");
+        DawProfile {
+            id: "test",
+            label: "Test REAPER",
+            daw: "reaper",
+            executable: "reaper".to_string(),
+            ini_path: resources_dir.join("reaper.ini"),
+            resources_dir,
+            role: "test",
+            sandboxed: false,
+        }
+    }
+
+    #[test]
+    fn bootstrap_reaper_floating_toolbars_only_adds_missing_sections() {
+        let profile = temp_profile("floating-toolbar-bootstrap");
+        fs::create_dir_all(&profile.resources_dir).unwrap();
+        let menu_path = profile.resources_dir.join("reaper-menu.ini");
+        fs::write(
+            &menu_path,
+            "[Main toolbar]\nitem_0=40023 New project...\n\n[Floating toolbar 1]\nitem_0=_FTS_EXISTING Existing\n",
+        )
+        .unwrap();
+
+        bootstrap_reaper_floating_toolbars(&profile).unwrap();
+        let content = fs::read_to_string(&menu_path).unwrap();
+
+        assert!(content.contains("[Floating toolbar 1]\nitem_0=_FTS_EXISTING Existing\n"));
+        assert!(content.contains("[Floating toolbar 2]\nitem_0=41101 Edit me\n"));
+        assert!(content.contains("[Floating toolbar 32]\nitem_0=41101 Edit me\n"));
+        assert_eq!(content.matches("[Floating toolbar 1]").count(), 1);
+
+        let _ = fs::remove_dir_all(profile.resources_dir.parent().unwrap());
+    }
 }
 
 fn prewarm_reaper_profile_if_needed(profile: &DawProfile) {
