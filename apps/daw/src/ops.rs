@@ -1227,6 +1227,25 @@ pub fn parse_toolbar_target(target: &str) -> Result<daw::service::ToolbarTarget>
             Ok(daw::service::ToolbarTarget::Main)
         }
         value => {
+            if let Some(raw) = value
+                .strip_prefix("midi toolbar ")
+                .or_else(|| value.strip_prefix("midi-toolbar-"))
+                .or_else(|| value.strip_prefix("midi_toolbar_"))
+                .or_else(|| value.strip_prefix("midi "))
+                .or_else(|| value.strip_prefix("midi-"))
+                .or_else(|| value.strip_prefix("midi_"))
+            {
+                let number = raw.parse::<u8>().map_err(|_| {
+                    eyre::eyre!(
+                        "toolbar target must be main, floating toolbar 1-32, or MIDI toolbar 1-16"
+                    )
+                })?;
+                if !(1..=16).contains(&number) {
+                    eyre::bail!("MIDI toolbar number must be between 1 and 16");
+                }
+                return Ok(daw::service::ToolbarTarget::Midi(number));
+            }
+
             let number = value
                 .strip_prefix("floating toolbar ")
                 .or_else(|| value.strip_prefix("floating-toolbar-"))
@@ -1236,7 +1255,11 @@ pub fn parse_toolbar_target(target: &str) -> Result<daw::service::ToolbarTarget>
                 .or_else(|| value.strip_prefix("floating_"))
                 .unwrap_or(value)
                 .parse::<u8>()
-                .map_err(|_| eyre::eyre!("toolbar target must be main or floating toolbar 1-32"))?;
+                .map_err(|_| {
+                    eyre::eyre!(
+                        "toolbar target must be main, floating toolbar 1-32, or MIDI toolbar 1-16"
+                    )
+                })?;
             if !(1..=32).contains(&number) {
                 eyre::bail!("floating toolbar number must be between 1 and 32");
             }
@@ -1269,6 +1292,7 @@ pub async fn toolbar_config(daw: &Daw, path: &str, target: Option<&str>) -> Resu
         let target_name = match parse_toolbar_target(target)? {
             daw::service::ToolbarTarget::Main => "Main toolbar".to_string(),
             daw::service::ToolbarTarget::Floating(n) => format!("Floating toolbar {n}"),
+            daw::service::ToolbarTarget::Midi(n) => format!("MIDI toolbar {n}"),
         };
         snapshots.retain(|snapshot| snapshot.toolbar_name == target_name);
     }

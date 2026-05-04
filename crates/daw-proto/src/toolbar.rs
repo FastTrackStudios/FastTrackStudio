@@ -16,6 +16,8 @@ pub enum ToolbarTarget {
     Main,
     /// Floating toolbar (1–32).
     Floating(u8),
+    /// MIDI toolbar (1–16).
+    Midi(u8),
 }
 
 /// Where a toolbar item should be inserted.
@@ -112,7 +114,7 @@ pub enum ToolbarSnapshotSource {
 /// A toolbar snapshot.
 #[derive(Debug, Clone, Default, Facet)]
 pub struct ToolbarSnapshot {
-    /// Toolbar name (for example, `Main toolbar` or `Floating toolbar 1`).
+    /// Toolbar name (for example, `Main toolbar`, `Floating toolbar 1`, or `MIDI toolbar 1`).
     pub toolbar_name: String,
     /// Source used to build this snapshot.
     pub source: ToolbarSnapshotSource,
@@ -188,7 +190,7 @@ pub trait ToolbarService {
 /// A tracked toolbar button entry.
 #[derive(Debug, Clone, Facet)]
 pub struct TrackedButton {
-    /// Toolbar name (e.g., "Main toolbar", "Floating toolbar 1").
+    /// Toolbar name (e.g., "Main toolbar", "Floating toolbar 1", "MIDI toolbar 1").
     pub toolbar_name: String,
     /// REAPER command name.
     pub command_name: String,

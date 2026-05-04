@@ -62,6 +62,7 @@ fn target_to_str(target: &ToolbarTarget) -> String {
     match target {
         ToolbarTarget::Main => "Main toolbar".to_string(),
         ToolbarTarget::Floating(n) => format!("Floating toolbar {}", (*n).clamp(1, 32)),
+        ToolbarTarget::Midi(n) => format!("MIDI toolbar {}", (*n).clamp(1, 16)),
     }
 }
 
@@ -76,6 +77,7 @@ fn target_menu_names(target: &ToolbarTarget) -> Vec<String> {
                 format!("Toolbar {n}"),
             ]
         }
+        ToolbarTarget::Midi(n) => vec![target_to_str(&ToolbarTarget::Midi(*n))],
     }
 }
 
@@ -90,11 +92,20 @@ fn target_from_str(value: &str) -> ToolbarTarget {
             }
         }
     }
+    if let Some(num) = value.strip_prefix("MIDI toolbar ") {
+        if let Ok(n) = num.parse::<u8>() {
+            if (1..=16).contains(&n) {
+                return ToolbarTarget::Midi(n);
+            }
+        }
+    }
     ToolbarTarget::Main
 }
 
 fn toolbar_targets() -> impl Iterator<Item = ToolbarTarget> {
-    std::iter::once(ToolbarTarget::Main).chain((1..=32).map(ToolbarTarget::Floating))
+    std::iter::once(ToolbarTarget::Main)
+        .chain((1..=32).map(ToolbarTarget::Floating))
+        .chain((1..=16).map(ToolbarTarget::Midi))
 }
 
 // ============================================================================
@@ -111,6 +122,10 @@ fn is_api_available() -> bool {
 }
 
 fn resolve_command_id(command_name: &str) -> Result<CommandId, String> {
+    if let Ok(command_id) = command_name.parse::<u32>() {
+        return Ok(CommandId::new(command_id));
+    }
+
     Reaper::get()
         .action_by_command_name(command_name)
         .command_id()

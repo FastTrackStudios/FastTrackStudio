@@ -256,7 +256,7 @@ fn ensure_reaper_profile_dirs(profile: &DawProfile) -> Result<()> {
         fs::write(&profile.ini_path, "[reaper]\n")?;
     }
     patch_reaper_profile_ini(profile)?;
-    bootstrap_reaper_floating_toolbars(profile)?;
+    bootstrap_reaper_toolbars(profile)?;
     prewarm_reaper_profile_if_needed(profile);
     install_available_daw_bridge(&user_plugins)?;
     Ok(())
@@ -276,13 +276,31 @@ fn patch_reaper_profile_ini(profile: &DawProfile) -> Result<()> {
     Ok(())
 }
 
-fn bootstrap_reaper_floating_toolbars(profile: &DawProfile) -> Result<()> {
+fn bootstrap_reaper_toolbars(profile: &DawProfile) -> Result<()> {
     let menu_path = profile.resources_dir.join("reaper-menu.ini");
     let mut content = fs::read_to_string(&menu_path).unwrap_or_default();
     let mut changed = false;
 
-    for toolbar in 1..=32 {
-        let section = format!("[Floating toolbar {toolbar}]");
+    append_missing_toolbar_sections(&mut content, "Floating toolbar", 1..=32, &mut changed);
+    append_missing_toolbar_sections(&mut content, "MIDI toolbar", 1..=16, &mut changed);
+
+    if changed {
+        if let Some(parent) = menu_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(menu_path, content)?;
+    }
+    Ok(())
+}
+
+fn append_missing_toolbar_sections(
+    content: &mut String,
+    prefix: &str,
+    range: std::ops::RangeInclusive<u8>,
+    changed: &mut bool,
+) {
+    for toolbar in range {
+        let section = format!("[{prefix} {toolbar}]");
         if content.lines().any(|line| line.trim() == section) {
             continue;
         }
@@ -293,16 +311,8 @@ fn bootstrap_reaper_floating_toolbars(profile: &DawProfile) -> Result<()> {
         content.push_str(&section);
         content.push('\n');
         content.push_str("item_0=41101 Edit me\n");
-        changed = true;
+        *changed = true;
     }
-
-    if changed {
-        if let Some(parent) = menu_path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        fs::write(menu_path, content)?;
-    }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -326,23 +336,27 @@ mod launcher_tests {
     }
 
     #[test]
-    fn bootstrap_reaper_floating_toolbars_only_adds_missing_sections() {
-        let profile = temp_profile("floating-toolbar-bootstrap");
+    fn bootstrap_reaper_toolbars_only_adds_missing_sections() {
+        let profile = temp_profile("toolbar-bootstrap");
         fs::create_dir_all(&profile.resources_dir).unwrap();
         let menu_path = profile.resources_dir.join("reaper-menu.ini");
         fs::write(
             &menu_path,
-            "[Main toolbar]\nitem_0=40023 New project...\n\n[Floating toolbar 1]\nitem_0=_FTS_EXISTING Existing\n",
+            "[Main toolbar]\nitem_0=40023 New project...\n\n[Floating toolbar 1]\nitem_0=_FTS_EXISTING Existing\n\n[MIDI toolbar 1]\nitem_0=_FTS_MIDI Existing MIDI\n",
         )
         .unwrap();
 
-        bootstrap_reaper_floating_toolbars(&profile).unwrap();
+        bootstrap_reaper_toolbars(&profile).unwrap();
         let content = fs::read_to_string(&menu_path).unwrap();
 
         assert!(content.contains("[Floating toolbar 1]\nitem_0=_FTS_EXISTING Existing\n"));
         assert!(content.contains("[Floating toolbar 2]\nitem_0=41101 Edit me\n"));
         assert!(content.contains("[Floating toolbar 32]\nitem_0=41101 Edit me\n"));
+        assert!(content.contains("[MIDI toolbar 1]\nitem_0=_FTS_MIDI Existing MIDI\n"));
+        assert!(content.contains("[MIDI toolbar 2]\nitem_0=41101 Edit me\n"));
+        assert!(content.contains("[MIDI toolbar 16]\nitem_0=41101 Edit me\n"));
         assert_eq!(content.matches("[Floating toolbar 1]").count(), 1);
+        assert_eq!(content.matches("[MIDI toolbar 1]").count(), 1);
 
         let _ = fs::remove_dir_all(profile.resources_dir.parent().unwrap());
     }
