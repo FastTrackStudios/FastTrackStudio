@@ -1,8 +1,9 @@
+use std::io::{self, IsTerminal, Read};
 use std::path::{Path, PathBuf};
 
 use clap::Subcommand;
-use dynamic_template::{auto_color, default_config, OrganizeIntoTracks};
-use eyre::{eyre, Result};
+use dynamic_template::{OrganizeIntoTracks, auto_color, default_config};
+use eyre::{Result, eyre};
 use serde::Serialize;
 
 #[derive(Subcommand)]
@@ -153,15 +154,32 @@ fn read_names(args: NameInputArgs) -> Result<Vec<String>> {
     let mut names = args.names;
 
     if let Some(path) = args.file {
-        names.extend(read_names_file(&path)?);
+        if path.as_os_str() == "-" {
+            names.extend(read_names_from_reader(io::stdin().lock())?);
+        } else {
+            names.extend(read_names_file(&path)?);
+        }
+    } else if names.is_empty() && !io::stdin().is_terminal() {
+        names.extend(read_names_from_reader(io::stdin().lock())?);
     }
 
     names.retain(|name| !name.trim().is_empty());
     if names.is_empty() {
-        return Err(eyre!("provide at least one name or --file"));
+        return Err(eyre!("provide at least one name, --file, or piped stdin"));
     }
 
     Ok(names)
+}
+
+fn read_names_from_reader<R: Read>(mut reader: R) -> Result<Vec<String>> {
+    let mut content = String::new();
+    reader.read_to_string(&mut content)?;
+    Ok(content
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(ToOwned::to_owned)
+        .collect())
 }
 
 fn read_names_file(path: &Path) -> Result<Vec<String>> {
@@ -187,6 +205,13 @@ mod tests {
         .unwrap_err();
 
         assert!(err.to_string().contains("provide at least one name"));
+    }
+
+    #[test]
+    fn read_names_from_reader_trims_blank_lines() {
+        let names = read_names_from_reader("  Kick In\n\n Snare  \n\t\nBass\n".as_bytes()).unwrap();
+
+        assert_eq!(names, vec!["Kick In", "Snare", "Bass"]);
     }
 
     #[test]

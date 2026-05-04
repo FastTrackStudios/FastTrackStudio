@@ -8,14 +8,13 @@
 //!
 //! Placed in `UserPlugins/fts-extensions/` and hot-reloaded by daw-bridge.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 use daw::Daw;
 use daw_extension_runtime::GuestOptions;
-use dynamic_template::{auto_color, default_config, OrganizeIntoTracks};
+use dynamic_template::{OrganizeIntoTracks, auto_color, default_config};
 use dynamic_template_proto::{
-    actions::dynamic_template_actions,
-    auto_color::actions::auto_color_actions,
+    actions::dynamic_template_actions, auto_color::actions::auto_color_actions,
     visibility_manager::actions::visibility_manager_actions,
 };
 use eyre::Result;
@@ -231,12 +230,13 @@ async fn handle_action(
         }
         "fts.visibility_manager.rebuild_cache" => {
             rebuild_group_cache(daw, group_cache).await?;
-            info!("[dynamic-template] Rebuilt group cache: {} entries", group_cache.len());
+            info!(
+                "[dynamic-template] Rebuilt group cache: {} entries",
+                group_cache.len()
+            );
         }
         cmd if cmd.starts_with("fts.visibility_manager.toggle_") => {
-            let group_name = cmd
-                .strip_prefix("fts.visibility_manager.toggle_")
-                .unwrap();
+            let group_name = cmd.strip_prefix("fts.visibility_manager.toggle_").unwrap();
             toggle_group_visibility(daw, group_cache, group_name).await?;
         }
 
@@ -282,7 +282,8 @@ async fn handle_track_event(
 /// Sort tracks by organizing them into a hierarchical template.
 ///
 /// If `selected_only` is true, only selected tracks are reorganized.
-/// The hierarchy is applied by renaming tracks and setting folder depths.
+/// Existing tracks are moved in-place when possible so their items, FX, and
+/// routing remain intact. Missing folder rows are created as needed.
 async fn sort_tracks(daw: &Daw, selected_only: bool) -> Result<()> {
     let project = daw.current_project().await?;
     let tracks = project.tracks();
@@ -308,38 +309,56 @@ async fn sort_tracks(daw: &Daw, selected_only: bool) -> Result<()> {
     let hierarchy = names.organize_into_tracks(&config, None)?;
 
     info!(
-        "[dynamic-template] Organized {} tracks into {} template tracks",
+        "[dynamic-template] Organized {} tracks into {} template rows",
         source_tracks.len(),
         hierarchy.tracks.len()
     );
 
-    // Apply the hierarchy to REAPER: remove old tracks, create new ones
     project.begin_undo_block("FTS: Sort tracks").await?;
 
-    // Remove the source tracks (we'll recreate them in the right order)
+    let mut available: HashMap<String, VecDeque<_>> = HashMap::new();
     for track in &source_tracks {
-        tracks
-            .remove(daw::service::TrackRef::Guid(track.guid.clone()))
-            .await?;
+        let handle = tracks
+            .by_guid(&track.guid)
+            .await?
+            .ok_or_else(|| eyre::eyre!("track disappeared while sorting: {}", track.guid))?;
+        available
+            .entry(track.name.clone())
+            .or_default()
+            .push_back(handle);
     }
 
-    // Create tracks from the hierarchy
-    for node in &hierarchy.tracks {
-        let handle = tracks.add(&node.name, None).await?;
+    let mut created = 0usize;
+    for (target_index, node) in hierarchy.tracks.iter().enumerate() {
+        let handle = if let Some(queue) = available.get_mut(&node.name) {
+            if let Some(handle) = queue.pop_front() {
+                handle.move_to_index(target_index as u32).await?;
+                handle
+            } else {
+                created += 1;
+                tracks.add(&node.name, Some(target_index as u32)).await?
+            }
+        } else {
+            created += 1;
+            tracks.add(&node.name, Some(target_index as u32)).await?
+        };
 
-        // Apply folder depth
         let depth = node.folder_depth_change.to_raw_value();
         if depth != 0 {
             handle.set_folder_depth(depth).await?;
         }
 
-        // Apply color if the hierarchy node has one
         if let Some(color) = node.color {
             handle.set_color(color).await?;
         }
     }
 
     project.end_undo_block("FTS: Sort tracks").await?;
+    info!(
+        "[dynamic-template] Applied hierarchy with {} existing tracks and {} new rows",
+        source_tracks.len(),
+        created
+    );
     Ok(())
 }
 
@@ -435,9 +454,8 @@ async fn rebuild_group_cache(daw: &Daw, cache: &mut HashMap<String, String>) -> 
     let names: Vec<String> = all_tracks.iter().map(|t| t.name.clone()).collect();
 
     let config = default_config();
-    if let Ok(structure) = dynamic_template::monarchy_sort(names, &config) {
-        collect_group_assignments(&structure, None, cache);
-    }
+    let structure = dynamic_template::monarchy_sort(names, &config)?;
+    collect_group_assignments(&structure, None, cache);
 
     Ok(())
 }
@@ -523,7 +541,10 @@ async fn toggle_group_visibility(
         .await?;
 
     let action = if new_visibility { "Showing" } else { "Hiding" };
-    info!("[dynamic-template] {action} {} {normalized} tracks", group_tracks.len());
+    info!(
+        "[dynamic-template] {action} {} {normalized} tracks",
+        group_tracks.len()
+    );
     Ok(())
 }
 
@@ -532,9 +553,7 @@ async fn show_all_tracks(daw: &Daw) -> Result<()> {
     let project = daw.current_project().await?;
     let all_tracks = project.tracks().all().await?;
 
-    project
-        .begin_undo_block("FTS: Show all tracks")
-        .await?;
+    project.begin_undo_block("FTS: Show all tracks").await?;
 
     let tracks_handle = project.tracks();
     for track in &all_tracks {
@@ -552,10 +571,7 @@ async fn show_all_tracks(daw: &Daw) -> Result<()> {
 }
 
 /// Hide all tracks that belong to a classified group.
-async fn hide_all_group_tracks(
-    daw: &Daw,
-    group_cache: &mut HashMap<String, String>,
-) -> Result<()> {
+async fn hide_all_group_tracks(daw: &Daw, group_cache: &mut HashMap<String, String>) -> Result<()> {
     if group_cache.is_empty() {
         rebuild_group_cache(daw, group_cache).await?;
     }
