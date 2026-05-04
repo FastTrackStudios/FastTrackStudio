@@ -6,7 +6,7 @@
 //! editor or via CLI output.
 //!
 //! The initial model focuses on CLI-first bookkeeping:
-//! - project/client/category/vendor attribution
+//! - project/client/deliverable/category/vendor attribution
 //! - reimbursable flag
 //! - list/show/update/delete operations
 //! - grouped reporting by project, client, and category
@@ -44,6 +44,9 @@ pub struct Expense {
     /// Owning client, if known.
     pub client: Option<WikiLink>,
 
+    /// Deliverable or work package this expense should be attributed to.
+    pub deliverable: Option<String>,
+
     /// Human category label, e.g. `travel`, `gear`, `software`.
     pub category: Option<String>,
 
@@ -55,6 +58,9 @@ pub struct Expense {
 
     /// Optional receipt URL, file reference, or note.
     pub receipt: Option<String>,
+
+    /// External transaction, PO, check, or payment reference.
+    pub reference: Option<String>,
 
     /// Whether this expense is expected to be reimbursed or passed through.
     #[facet(default)]
@@ -103,9 +109,11 @@ pub struct ExpenseCreateRequest {
     pub currency_code: Option<String>,
     pub project: Option<String>,
     pub client: Option<String>,
+    pub deliverable: Option<String>,
     pub category: Option<String>,
     pub vendor: Option<String>,
     pub receipt: Option<String>,
+    pub reference: Option<String>,
     pub reimbursable: bool,
     pub status: Option<String>,
     pub notes: Option<String>,
@@ -120,10 +128,12 @@ pub struct ExpensePatch {
     pub currency_code: Option<String>,
     pub project: Option<String>,
     pub client: Option<String>,
+    pub deliverable: Option<String>,
     pub category: Option<String>,
     pub vendor: Option<String>,
     pub description: Option<String>,
     pub receipt: Option<String>,
+    pub reference: Option<String>,
     pub reimbursable: Option<bool>,
     pub notes: Option<String>,
 }
@@ -134,6 +144,7 @@ pub struct ExpenseFilter {
     pub to: Option<NaiveDate>,
     pub project: Option<String>,
     pub client: Option<String>,
+    pub deliverable: Option<String>,
     pub category: Option<String>,
     pub vendor: Option<String>,
     pub status: Option<String>,
@@ -164,6 +175,8 @@ pub struct ExpenseReport {
     #[facet(default)]
     pub by_client: Vec<ExpenseBucket>,
     #[facet(default)]
+    pub by_deliverable: Vec<ExpenseBucket>,
+    #[facet(default)]
     pub by_category: Vec<ExpenseBucket>,
     #[facet(default)]
     pub expenses: Vec<Expense>,
@@ -183,6 +196,7 @@ impl Default for ExpenseReport {
             cancelled_cents: 0,
             by_project: Vec::new(),
             by_client: Vec::new(),
+            by_deliverable: Vec::new(),
             by_category: Vec::new(),
             expenses: Vec::new(),
         }
@@ -227,6 +241,9 @@ pub fn render_expense_body(expense: &Expense) -> String {
     if let Some(client) = &expense.client {
         let _ = writeln!(out, "**Client:** {}", client.0);
     }
+    if let Some(deliverable) = &expense.deliverable {
+        let _ = writeln!(out, "**Deliverable:** {}", deliverable);
+    }
     if let Some(category) = &expense.category {
         let _ = writeln!(out, "**Category:** {}", category);
     }
@@ -238,6 +255,9 @@ pub fn render_expense_body(expense: &Expense) -> String {
     }
     if let Some(receipt) = &expense.receipt {
         let _ = writeln!(out, "**Receipt:** {}", receipt);
+    }
+    if let Some(reference) = &expense.reference {
+        let _ = writeln!(out, "**Reference:** {}", reference);
     }
     let _ = writeln!(out);
     let _ = writeln!(out, "## Description");
@@ -285,6 +305,16 @@ pub fn matches_expense_filter(expense: &Expense, filter: &ExpenseFilter) -> bool
             return false;
         }
     }
+    if let Some(deliverable) = filter.deliverable.as_deref() {
+        if expense
+            .deliverable
+            .as_deref()
+            .map(|d| !d.eq_ignore_ascii_case(deliverable))
+            .unwrap_or(true)
+        {
+            return false;
+        }
+    }
     if let Some(category) = filter.category.as_deref() {
         if expense
             .category
@@ -325,6 +355,7 @@ pub fn build_expense_report(expenses: &[Expense], today: NaiveDate) -> ExpenseRe
 
     let mut project_totals: BTreeMap<String, ExpenseBucket> = BTreeMap::new();
     let mut client_totals: BTreeMap<String, ExpenseBucket> = BTreeMap::new();
+    let mut deliverable_totals: BTreeMap<String, ExpenseBucket> = BTreeMap::new();
     let mut category_totals: BTreeMap<String, ExpenseBucket> = BTreeMap::new();
 
     let mut items: Vec<Expense> = expenses.to_vec();
@@ -376,6 +407,15 @@ pub fn build_expense_report(expenses: &[Expense], today: NaiveDate) -> ExpenseRe
             &expense,
         );
         add_bucket(
+            &mut deliverable_totals,
+            expense
+                .deliverable
+                .as_ref()
+                .cloned()
+                .unwrap_or_else(|| "Unassigned".into()),
+            &expense,
+        );
+        add_bucket(
             &mut category_totals,
             expense
                 .category
@@ -400,6 +440,7 @@ pub fn build_expense_report(expenses: &[Expense], today: NaiveDate) -> ExpenseRe
 
     report.by_project = collect_sorted(project_totals);
     report.by_client = collect_sorted(client_totals);
+    report.by_deliverable = collect_sorted(deliverable_totals);
     report.by_category = collect_sorted(category_totals);
     report
 }
@@ -451,6 +492,7 @@ pub fn render_expense_report(report: &ExpenseReport) -> String {
 
     render_bucket("By project", &report.by_project, &mut out);
     render_bucket("By client", &report.by_client, &mut out);
+    render_bucket("By deliverable", &report.by_deliverable, &mut out);
     render_bucket("By category", &report.by_category, &mut out);
 
     if !report.expenses.is_empty() {
@@ -458,22 +500,24 @@ pub fn render_expense_report(report: &ExpenseReport) -> String {
         let _ = writeln!(out);
         let _ = writeln!(
             out,
-            "| Date | Description | Project | Client | Amount | Status |"
+            "| Date | Description | Project | Client | Deliverable | Amount | Status |"
         );
         let _ = writeln!(
             out,
-            "|------|-------------|---------|--------|-------:|--------|"
+            "|------|-------------|---------|--------|-------------|-------:|--------|"
         );
         for e in &report.expenses {
             let project = e.project.as_ref().map(|w| w.0.as_str()).unwrap_or("—");
             let client = e.client.as_ref().map(|w| w.0.as_str()).unwrap_or("—");
+            let deliverable = e.deliverable.as_deref().unwrap_or("—");
             let _ = writeln!(
                 out,
-                "| {} | {} | {} | {} | ${:.2} | {:?} |",
+                "| {} | {} | {} | {} | {} | ${:.2} | {:?} |",
                 e.date,
                 e.description,
                 project,
                 client,
+                deliverable,
                 e.amount_cents as f64 / 100.0,
                 e.status
             );
@@ -515,10 +559,12 @@ mod tests {
             currency_code: "USD".into(),
             project: Some(WikiLink("Project Alpha".into())),
             client: Some(WikiLink("Client Co".into())),
+            deliverable: Some("Site visit".into()),
             category: Some("travel".into()),
             vendor: Some("Rail".into()),
             description: "Train fare".into(),
             receipt: Some("receipt://abc".into()),
+            reference: Some("CHK-100".into()),
             reimbursable: true,
             notes: Some("Booked for site visit".into()),
             created_by: Some("cody".into()),
@@ -530,6 +576,8 @@ mod tests {
         assert!(body.contains("# Expense EXP-2026-0001"));
         assert!(body.contains("**Amount:** $123.45"));
         assert!(body.contains("**Project:** Project Alpha"));
+        assert!(body.contains("**Deliverable:** Site visit"));
+        assert!(body.contains("**Reference:** CHK-100"));
         assert!(body.contains("## Notes"));
     }
 
@@ -545,10 +593,12 @@ mod tests {
                 currency_code: "USD".into(),
                 project: Some(WikiLink("Project Alpha".into())),
                 client: Some(WikiLink("Client One".into())),
+                deliverable: Some("Site visit".into()),
                 category: Some("travel".into()),
                 vendor: Some("Rail".into()),
                 description: "Train fare".into(),
                 receipt: None,
+                reference: Some("PO-1".into()),
                 reimbursable: true,
                 notes: None,
                 created_by: None,
@@ -565,10 +615,12 @@ mod tests {
                 currency_code: "USD".into(),
                 project: Some(WikiLink("Project Alpha".into())),
                 client: Some(WikiLink("Client One".into())),
+                deliverable: Some("Post".into()),
                 category: Some("software".into()),
                 vendor: Some("GitHub".into()),
                 description: "Subscription".into(),
                 receipt: None,
+                reference: None,
                 reimbursable: false,
                 notes: None,
                 created_by: None,
@@ -585,10 +637,12 @@ mod tests {
                 currency_code: "USD".into(),
                 project: None,
                 client: None,
+                deliverable: None,
                 category: Some("travel".into()),
                 vendor: Some("Taxi".into()),
                 description: "Airport ride".into(),
                 receipt: None,
+                reference: None,
                 reimbursable: true,
                 notes: None,
                 created_by: None,
@@ -609,6 +663,8 @@ mod tests {
         assert_eq!(report.by_project.len(), 2);
         assert_eq!(report.by_project[0].name, "Project Alpha");
         assert_eq!(report.by_project[0].expense_count, 2);
+        assert_eq!(report.by_deliverable.len(), 3);
+        assert_eq!(report.by_deliverable[0].name, "Post");
         assert_eq!(report.by_category.len(), 2);
     }
 }

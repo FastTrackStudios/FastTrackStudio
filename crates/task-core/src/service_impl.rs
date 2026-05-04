@@ -2531,10 +2531,12 @@ impl VaultServiceImpl {
             currency_code: request.currency_code.unwrap_or_else(|| "USD".into()),
             project: request.project.map(crate::task::WikiLink),
             client: request.client.map(crate::task::WikiLink),
+            deliverable: request.deliverable,
             category: request.category,
             vendor: request.vendor,
             description: request.description,
             receipt: request.receipt,
+            reference: request.reference,
             reimbursable: request.reimbursable,
             notes: request.notes,
             created_by: request.actor,
@@ -2588,6 +2590,13 @@ impl VaultServiceImpl {
                 Some(crate::task::WikiLink(client))
             };
         }
+        if let Some(deliverable) = patch.deliverable {
+            expense.deliverable = if deliverable.trim().is_empty() {
+                None
+            } else {
+                Some(deliverable)
+            };
+        }
         if let Some(category) = patch.category {
             expense.category = if category.trim().is_empty() {
                 None
@@ -2610,6 +2619,13 @@ impl VaultServiceImpl {
                 None
             } else {
                 Some(receipt)
+            };
+        }
+        if let Some(reference) = patch.reference {
+            expense.reference = if reference.trim().is_empty() {
+                None
+            } else {
+                Some(reference)
             };
         }
         if let Some(reimbursable) = patch.reimbursable {
