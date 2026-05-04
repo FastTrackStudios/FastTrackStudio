@@ -8,6 +8,7 @@ use crate::calendar_event::CalendarEvent;
 use crate::expense::Expense;
 use crate::invoice::Invoice;
 use crate::project::Project;
+use crate::revenue::Revenue;
 use crate::service::VaultError;
 use crate::task::Task;
 
@@ -397,6 +398,50 @@ impl Vault {
     /// Delete an expense file by id.
     pub fn delete_expense(&self, expense_id: &str) -> Result<(), VaultError> {
         let path = self.root.join("expenses").join(format!("{expense_id}.md"));
+        if path.exists() {
+            std::fs::remove_file(&path).map_err(|e| VaultError::IoError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    // ── Revenue I/O ──────────────────────────────────────────────────────────
+
+    pub fn parse_revenue_from_md(content: &str) -> Option<Revenue> {
+        let (frontmatter, _body) = Self::split_frontmatter(content)?;
+        facet_yaml::from_str::<Revenue>(frontmatter).ok()
+    }
+
+    pub fn render_revenue_file(revenue: &Revenue, body: &str) -> Result<String, VaultError> {
+        let yaml =
+            facet_yaml::to_string(revenue).map_err(|e| VaultError::ParseError(e.to_string()))?;
+        let yaml = yaml.strip_prefix("---\n").unwrap_or(&yaml);
+        Ok(format!("---\n{}---\n{}", yaml, body))
+    }
+
+    /// Load all revenue records from the `revenue/` subdirectory.
+    pub fn load_revenues(&self) -> Vec<Revenue> {
+        let dir = self.root.join("revenue");
+        if !dir.exists() {
+            return vec![];
+        }
+        Self::walk_md_in(&dir)
+            .filter_map(|content| Self::parse_revenue_from_md(&content))
+            .collect()
+    }
+
+    /// Save revenue to `revenue/<id>.md`.
+    pub fn save_revenue(&self, revenue: &Revenue) -> Result<(), VaultError> {
+        let dir = self.root.join("revenue");
+        std::fs::create_dir_all(&dir).map_err(|e| VaultError::IoError(e.to_string()))?;
+        let path = dir.join(format!("{}.md", revenue.id));
+        let body = crate::revenue::render_revenue_body(revenue);
+        let content = Self::render_revenue_file(revenue, &body)?;
+        Self::atomic_write(&path, &content)
+    }
+
+    /// Delete a revenue file by id.
+    pub fn delete_revenue(&self, revenue_id: &str) -> Result<(), VaultError> {
+        let path = self.root.join("revenue").join(format!("{revenue_id}.md"));
         if path.exists() {
             std::fs::remove_file(&path).map_err(|e| VaultError::IoError(e.to_string()))?;
         }

@@ -12,6 +12,7 @@ pub mod module;
 pub mod people;
 pub mod project;
 pub mod query;
+pub mod revenue;
 pub mod rrule;
 pub mod task;
 pub mod team;
@@ -72,6 +73,9 @@ pub use project::{
     ProjectStats, ProjectStatus,
 };
 pub use query::{Filter, Group, GroupedTasks, Query, Sort, TaskGroup};
+pub use revenue::{
+    format_revenue_id, Revenue, RevenueBucket, RevenueCreateRequest, RevenueFilter, RevenueReport,
+};
 pub use task::{
     DependencyRelType, Priority, Reaction, RecurrenceAnchor, RelationType, Reminder,
     ReminderAnchor, Status, Task, TaskDependency, TaskRelation, TimeEntry, WikiLink,
