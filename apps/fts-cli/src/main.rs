@@ -4,6 +4,7 @@
 //! Signal (rig/patch/macro system), and Session (setlist/navigation).
 
 mod daw;
+mod dynamic_template;
 mod introspect;
 mod keyflow;
 
@@ -45,6 +46,12 @@ enum Command {
     /// Live session control (setlist navigation, playback)
     #[command(subcommand)]
     Session(session_cli::SessionCommand),
+    /// Keyflow chart import/export utilities
+    #[command(subcommand)]
+    Keyflow(keyflow::KeyflowCommand),
+    /// Dynamic Template organization utilities
+    #[command(name = "dynamic-template", subcommand)]
+    DynamicTemplate(dynamic_template::DynamicTemplateCommand),
 }
 
 #[tokio::main]
@@ -62,6 +69,8 @@ async fn main() -> Result<()> {
         Command::Daw(cmd) => daw::run(cli.socket, cmd, cli.json).await?,
         Command::Signal(cmd) => signal_cli::run(cli.db, cli.socket.clone(), cmd, cli.json).await?,
         Command::Session(cmd) => session_cli::run(cli.socket, cmd, cli.json).await?,
+        Command::Keyflow(cmd) => keyflow::run(cmd, cli.json)?,
+        Command::DynamicTemplate(cmd) => dynamic_template::run(cmd, cli.json)?,
     }
 
     Ok(())

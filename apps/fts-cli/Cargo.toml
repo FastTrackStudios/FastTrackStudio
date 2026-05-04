@@ -10,6 +10,7 @@ path = "src/main.rs"
 [dependencies]
 daw-cli.workspace = true
 daw = { workspace = true, features = ["file"] }
+dynamic-template.workspace = true
 signal-cli.workspace = true
 session-cli.workspace = true
 tokio.workspace = true

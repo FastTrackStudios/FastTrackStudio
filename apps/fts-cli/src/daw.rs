@@ -61,32 +61,9 @@ pub enum DawCommand {
     Ping,
     /// Keyflow chart import/export utilities
     #[command(subcommand)]
-    Keyflow(KeyflowCommand),
+    Keyflow(keyflow::KeyflowCommand),
     /// Introspect plugin(s) and generate JSON library entries
     Introspect(IntrospectArgs),
-}
-
-#[derive(Subcommand)]
-pub enum KeyflowCommand {
-    /// Export a Keyflow chart directly from an .RPP file without REAPER running
-    ExportRpp {
-        /// Path to the REAPER project file
-        rpp: PathBuf,
-        /// Output MIDI file path (defaults to <project>.keyflow.mid)
-        #[arg(long, short)]
-        output: Option<PathBuf>,
-        /// Parent track name to treat as the Keyflow aggregation track
-        #[arg(long)]
-        parent_track: Option<String>,
-    },
-    /// Analyze Keyflow markers, regions, item bounds, and resolved export bounds from an .RPP file
-    AnalyzeRpp {
-        /// Path to the REAPER project file
-        rpp: PathBuf,
-        /// Parent track name to treat as the Keyflow aggregation track
-        #[arg(long)]
-        parent_track: Option<String>,
-    },
 }
 
 #[derive(Args)]
@@ -245,12 +222,12 @@ pub enum ParamCommand {
 
 pub async fn run(socket: Option<PathBuf>, cmd: DawCommand, as_json: bool) -> Result<()> {
     match cmd {
-        DawCommand::Keyflow(KeyflowCommand::ExportRpp {
+        DawCommand::Keyflow(keyflow::KeyflowCommand::ExportRpp {
             rpp,
             output,
             parent_track,
         }) => keyflow::export_rpp_keyflow_chart(rpp, output, parent_track, as_json),
-        DawCommand::Keyflow(KeyflowCommand::AnalyzeRpp { rpp, parent_track }) => {
+        DawCommand::Keyflow(keyflow::KeyflowCommand::AnalyzeRpp { rpp, parent_track }) => {
             keyflow::analyze_rpp_keyflow_chart(rpp, parent_track, as_json)
         }
 

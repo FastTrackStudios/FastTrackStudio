@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use clap::Subcommand;
 use daw::file::types::item::Take;
 use daw::file::{
     read_project, MidiEvent, MidiEventType, MidiSource, MidiSourceEvent, ReaperProject, SourceType,
@@ -16,6 +17,42 @@ use serde::Serialize;
 
 const KEYFLOW_FOLDER_NAME: &str = "Keyflow";
 const TICKS_PER_QUARTER: u16 = 960;
+
+#[derive(Subcommand)]
+pub enum KeyflowCommand {
+    /// Export a Keyflow chart directly from an .RPP file without REAPER running
+    ExportRpp {
+        /// Path to the REAPER project file
+        rpp: PathBuf,
+        /// Output MIDI file path (defaults to <project>.keyflow.mid)
+        #[arg(long, short)]
+        output: Option<PathBuf>,
+        /// Parent track name to treat as the Keyflow aggregation track
+        #[arg(long)]
+        parent_track: Option<String>,
+    },
+    /// Analyze Keyflow markers, regions, item bounds, and resolved export bounds from an .RPP file
+    AnalyzeRpp {
+        /// Path to the REAPER project file
+        rpp: PathBuf,
+        /// Parent track name to treat as the Keyflow aggregation track
+        #[arg(long)]
+        parent_track: Option<String>,
+    },
+}
+
+pub fn run(cmd: KeyflowCommand, as_json: bool) -> Result<()> {
+    match cmd {
+        KeyflowCommand::ExportRpp {
+            rpp,
+            output,
+            parent_track,
+        } => export_rpp_keyflow_chart(rpp, output, parent_track, as_json),
+        KeyflowCommand::AnalyzeRpp { rpp, parent_track } => {
+            analyze_rpp_keyflow_chart(rpp, parent_track, as_json)
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 struct ExportBounds {
@@ -433,7 +470,7 @@ fn analyze_source_tracks(project: &ReaperProject, parent: &Track) -> Vec<SourceT
         })
         .collect::<Vec<_>>();
 
-    tracks.sort_by(|a, b| a.index.cmp(&b.index));
+    tracks.sort_by_key(|a| a.index);
     tracks
 }
 
