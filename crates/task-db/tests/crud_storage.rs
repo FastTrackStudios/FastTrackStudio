@@ -10,9 +10,13 @@ use task_core::client::{Client, ClientApi, ClientApiCreate};
 use task_core::cycle::{Cycle, CycleApi, CycleApiCreate, CycleStatus};
 use task_core::email::{EmailRef, EmailRefApi, EmailRefApiCreate};
 use task_core::expense::{Expense, ExpenseApi, ExpenseApiCreate};
+use task_core::integration::{
+    Integration, IntegrationApi, IntegrationApiCreate, ProjectTemplate, StatusDef, TaskTemplate,
+};
 use task_core::invoice::{Invoice, InvoiceApi, InvoiceApiCreate, InvoiceLine, InvoiceStatus};
 use task_core::location::{Location, LocationApi, LocationApiCreate, Space, VenueDefault};
 use task_core::module::{Module, ModuleApi, ModuleApiCreate, ModuleStatus};
+use task_core::people::{ContactMethod, Person, PersonApi, PersonApiCreate, ProviderRef};
 use task_core::revenue::{Revenue, RevenueApi, RevenueApiCreate};
 use task_core::task::{Task, TaskApi, TaskApiCreate};
 use task_core::team::{AccountStatus, TeamMember, TeamMemberApi, TeamMemberApiCreate};
@@ -545,4 +549,95 @@ async fn seaorm_storage_can_back_generated_email_ref_repo_models() {
     assert_eq!(loaded.message_id, "<msg-1@example.com>");
     assert_eq!(loaded.to.as_slice(), ["studio@example.com"]);
     assert_eq!(loaded.attachment_count, 2);
+}
+
+#[tokio::test]
+async fn seaorm_storage_can_back_generated_person_repo_models() {
+    let db = task_db::init_memory()
+        .await
+        .expect("initialize in-memory task database");
+    let person = Person {
+        id: Some("person-1".to_string()),
+        display_name: "Ada Lovelace".to_string(),
+        given_name: Some("Ada".to_string()),
+        family_name: Some("Lovelace".to_string()),
+        organization: Some("Analytical Engines".to_string()),
+        title: Some("Founder".to_string()),
+        contact_methods: vec![ContactMethod {
+            kind: "email".to_string(),
+            value: "ada@example.com".to_string(),
+            primary: true,
+            ..Default::default()
+        }]
+        .into(),
+        provider_refs: vec![ProviderRef {
+            provider: "carddav".to_string(),
+            uid: Some("person-1".to_string()),
+            ..Default::default()
+        }]
+        .into(),
+        ..Default::default()
+    };
+    let create: PersonApiCreate =
+        serde_json::from_value(serde_json::to_value(person).expect("serialize person seed"))
+            .expect("decode person create model");
+
+    let created = CrudStorage::<PersonApi>::create(&db, create)
+        .await
+        .expect("create person through SeaORM storage");
+    let loaded = CrudStorage::<PersonApi>::get_one(&db, created.uuid)
+        .await
+        .expect("load person through SeaORM storage");
+
+    assert_eq!(loaded.uuid, created.uuid);
+    assert_eq!(loaded.display_name, "Ada Lovelace");
+    assert_eq!(loaded.contact_methods.len(), 1);
+    assert_eq!(loaded.provider_refs[0].provider, "carddav");
+}
+
+#[tokio::test]
+async fn seaorm_storage_can_back_generated_integration_repo_models() {
+    let db = task_db::init_memory()
+        .await
+        .expect("initialize in-memory task database");
+    let integration = Integration {
+        name: "studio".to_string(),
+        statuses: vec![StatusDef {
+            name: "Tracking".to_string(),
+            is_completion: false,
+            color: Some("#0099ff".to_string()),
+        }]
+        .into(),
+        project_templates: vec![ProjectTemplate {
+            name: "Album".to_string(),
+            description: Some("Album production".to_string()),
+            tasks: vec![TaskTemplate {
+                title: "Create session".to_string(),
+                status: Some("Tracking".to_string()),
+                tags: vec!["studio".to_string()].into(),
+                ..Default::default()
+            }]
+            .into(),
+        }]
+        .into(),
+        area_conventions: vec!["Music".to_string()].into(),
+        context_conventions: vec!["studio".to_string()].into(),
+        ..Default::default()
+    };
+    let create: IntegrationApiCreate = serde_json::from_value(
+        serde_json::to_value(integration).expect("serialize integration seed"),
+    )
+    .expect("decode integration create model");
+
+    let created = CrudStorage::<IntegrationApi>::create(&db, create)
+        .await
+        .expect("create integration through SeaORM storage");
+    let loaded = CrudStorage::<IntegrationApi>::get_one(&db, created.id)
+        .await
+        .expect("load integration through SeaORM storage");
+
+    assert_eq!(loaded.id, created.id);
+    assert_eq!(loaded.name, "studio");
+    assert_eq!(loaded.statuses[0].name, "Tracking");
+    assert_eq!(loaded.project_templates[0].tasks[0].title, "Create session");
 }

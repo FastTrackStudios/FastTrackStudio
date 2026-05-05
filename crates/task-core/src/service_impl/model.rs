@@ -4641,7 +4641,7 @@ fn person_from_carddav_object(object: CardDavObject) -> Option<Person> {
         family_name: contact.family_name,
         organization: contact.organization,
         title: contact.title,
-        contact_methods,
+        contact_methods: contact_methods.into(),
         provider_refs: vec![ProviderRef {
             provider: "carddav".to_string(),
             collection: object
@@ -4653,7 +4653,8 @@ fn person_from_carddav_object(object: CardDavObject) -> Option<Person> {
             etag: object.etag,
             uid: contact.uid,
             ..Default::default()
-        }],
+        }]
+        .into(),
         notes: contact.note,
         ..Default::default()
     })
@@ -4675,7 +4676,7 @@ fn organizations_from_people(people: &[Person]) -> Vec<OrganizationRecord> {
             organizations.push(OrganizationRecord {
                 id: Some(slug_id(name)),
                 name: name.to_string(),
-                people: vec![person.display_name.clone()],
+                people: vec![person.display_name.clone()].into(),
                 ..Default::default()
             });
         }
@@ -6982,7 +6983,7 @@ mod tests {
         let orgs = organizations_from_people(&[person.clone()]);
         assert_eq!(orgs.len(), 1);
         assert_eq!(orgs[0].name, "Analytical Engines");
-        assert_eq!(orgs[0].people, vec!["Ada Lovelace"]);
+        assert_eq!(orgs[0].people.as_slice(), ["Ada Lovelace"]);
 
         let tokens = person_context_tokens(&person);
         let task = Task {
@@ -7016,8 +7017,9 @@ mod tests {
                 value: "ada@example.com".to_string(),
                 primary: true,
                 ..Default::default()
-            }],
-            provider_refs: vec![base_ref],
+            }]
+            .into(),
+            provider_refs: vec![base_ref].into(),
             ..Default::default()
         };
         let remote = Person {
@@ -7027,8 +7029,9 @@ mod tests {
                 value: "ada@analytical.example".to_string(),
                 primary: true,
                 ..Default::default()
-            }],
-            provider_refs: vec![remote_ref],
+            }]
+            .into(),
+            provider_refs: vec![remote_ref].into(),
             ..local.clone()
         };
 
@@ -7050,22 +7053,24 @@ mod tests {
         let org_local = OrganizationRecord {
             id: Some("org-1".to_string()),
             name: "Analytical Engines".to_string(),
-            people: vec!["Ada Lovelace".to_string()],
+            people: vec!["Ada Lovelace".to_string()].into(),
             provider_refs: vec![ProviderRef {
                 provider: "carddav".to_string(),
                 collection: Some("/remote.php/dav/addressbooks/users/agent/contacts/".to_string()),
                 href: Some("/remote.php/dav/addressbooks/users/agent/contacts/org.vcf".to_string()),
                 etag: Some("\"org-local\"".to_string()),
                 ..Default::default()
-            }],
+            }]
+            .into(),
             ..Default::default()
         };
         let org_remote = OrganizationRecord {
-            people: vec!["Ada Lovelace".to_string(), "Charles Babbage".to_string()],
+            people: vec!["Ada Lovelace".to_string(), "Charles Babbage".to_string()].into(),
             provider_refs: vec![ProviderRef {
                 etag: Some("\"org-remote\"".to_string()),
                 ..org_local.provider_refs[0].clone()
-            }],
+            }]
+            .into(),
             ..org_local.clone()
         };
 

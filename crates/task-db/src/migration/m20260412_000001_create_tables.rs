@@ -1,8 +1,8 @@
 use sea_orm::Schema;
 use sea_orm_migration::prelude::*;
 use task_core::{
-    asset, calendar_event, client, cycle, email, expense, invoice, location, module, project,
-    revenue, task, team, views,
+    asset, calendar_event, client, cycle, email, expense, integration, invoice, location, module,
+    people, project, revenue, task, team, views,
 };
 
 #[derive(DeriveMigrationName)]
@@ -605,6 +605,46 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
+        // ── People ─────────────────────────────────────────────────
+        manager
+            .create_table(
+                schema
+                    .create_table_from_entity(people::Entity)
+                    .if_not_exists()
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_people_display_name")
+                    .table(People::Table)
+                    .col(people::Column::DisplayName)
+                    .to_owned(),
+            )
+            .await?;
+
+        // ── Integrations ───────────────────────────────────────────
+        manager
+            .create_table(
+                schema
+                    .create_table_from_entity(integration::Entity)
+                    .if_not_exists()
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_integrations_name")
+                    .table(Integrations::Table)
+                    .col(integration::Column::Name)
+                    .to_owned(),
+            )
+            .await?;
+
         Ok(())
     }
 
@@ -620,6 +660,12 @@ impl MigrationTrait for Migration {
             .await?;
         manager
             .drop_table(Table::drop().table(EmailRefs::Table).to_owned())
+            .await?;
+        manager
+            .drop_table(Table::drop().table(People::Table).to_owned())
+            .await?;
+        manager
+            .drop_table(Table::drop().table(Integrations::Table).to_owned())
             .await?;
         manager
             .drop_table(Table::drop().table(SavedViews::Table).to_owned())
@@ -810,5 +856,15 @@ enum Modules {
 
 #[derive(DeriveIden)]
 enum EmailRefs {
+    Table,
+}
+
+#[derive(DeriveIden)]
+enum People {
+    Table,
+}
+
+#[derive(DeriveIden)]
+enum Integrations {
     Table,
 }

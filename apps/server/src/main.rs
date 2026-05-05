@@ -1076,6 +1076,18 @@ async fn handle_vox_connection(socket: WebSocket, state: AppState, auth: VoxAuth
                     ));
                     Ok(())
                 }
+                "PersonRepo" => {
+                    connection.handle_with(task_core::people::PersonRepoDispatcher::new(
+                        task_core::people::PersonRepoStorage::new(db.clone()),
+                    ));
+                    Ok(())
+                }
+                "IntegrationRepo" => {
+                    connection.handle_with(task_core::integration::IntegrationRepoDispatcher::new(
+                        task_core::integration::IntegrationRepoStorage::new(db.clone()),
+                    ));
+                    Ok(())
+                }
                 "Noop" => {
                     connection.handle_with(());
                     Ok(())
