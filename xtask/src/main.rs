@@ -13,13 +13,27 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
+    /// Run workspace tests with cargo-nextest, or opt into real REAPER tests.
+    Test {
+        /// Run the real REAPER integration harness instead of local nextest.
+        #[arg(long)]
+        reaper: bool,
+        /// Specific test name filter.
+        filter: Option<String>,
+        /// cargo-nextest profile to use for local tests.
+        #[arg(long, default_value = "default")]
+        profile: String,
+        /// Keep REAPER open after real REAPER tests complete.
+        #[arg(long)]
+        keep_open: bool,
+    },
     /// Set up the FTS-TESTING.app REAPER bundle for integration tests.
     SetupTestBundles {
         /// Recreate bundles even if they already exist.
         #[arg(long)]
         force: bool,
     },
-    /// Run REAPER integration tests (spawns REAPER, runs #[reaper_test] tests).
+    /// Run REAPER integration tests (spawns REAPER, runs `#[reaper_test]` tests).
     ReaperTest {
         /// Specific test name filter (passed to cargo test as filter).
         filter: Option<String>,
@@ -74,10 +88,39 @@ fn default_theme() -> String {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     match cli.command {
+        Cmd::Test {
+            reaper,
+            filter,
+            profile,
+            keep_open,
+        } => test(reaper, filter, profile, keep_open),
         Cmd::SetupTestBundles { force } => setup_test_bundles(force),
         Cmd::ReaperTest { filter, keep_open } => reaper_test(filter, keep_open),
         Cmd::SetupRigs { force } => setup_rigs(force),
     }
+}
+
+fn test(
+    reaper: bool,
+    filter: Option<String>,
+    profile: String,
+    keep_open: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if reaper {
+        return reaper_test(filter, keep_open);
+    }
+
+    let mut cmd = Command::new("cargo");
+    cmd.args(["nextest", "run", "--profile", &profile]);
+    if let Some(filter) = filter {
+        cmd.arg(filter);
+    }
+
+    let status = cmd.status()?;
+    if !status.success() {
+        return Err(format!("cargo nextest run failed with status {status}").into());
+    }
+    Ok(())
 }
 
 struct BundleSpec {
