@@ -93,7 +93,7 @@ impl MarkerRegion {
         // legacy end positions are floating-point timestamps > position.
         let (lane, end_position) = if tokens.len() > 10 {
             let val = tokens[10].as_number().unwrap_or(0.0);
-            if val == val.floor() && val >= 0.0 && val < 256.0 {
+            if val == val.floor() && (0.0..256.0).contains(&val) {
                 // Small non-negative integer → lane index
                 (Some(val as i32), None)
             } else if val > position {

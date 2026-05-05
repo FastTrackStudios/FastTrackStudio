@@ -22,7 +22,7 @@ pub enum StepOutput {
     Str(String),
     /// Optional string
     OptStr(Option<String>),
-    /// Vec<u8> result (raw state chunks)
+    /// `Vec<u8>` result (raw state chunks)
     Bytes(Vec<u8>),
     /// Optional bytes
     OptBytes(Option<Vec<u8>>),

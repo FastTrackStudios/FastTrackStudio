@@ -25,7 +25,7 @@ pub struct Eq8Params {
 }
 
 /// A single EQ8 band with A/B parameter sets.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Eq8Band {
     pub parameter_a: Eq8BandParameter,
     pub parameter_b: Eq8BandParameter,
@@ -54,15 +54,6 @@ impl Default for Eq8BandParameter {
             freq: 1000.0,
             gain: 0.0,
             q: 0.71,
-        }
-    }
-}
-
-impl Default for Eq8Band {
-    fn default() -> Self {
-        Self {
-            parameter_a: Eq8BandParameter::default(),
-            parameter_b: Eq8BandParameter::default(),
         }
     }
 }
@@ -103,26 +94,27 @@ fn parse_band_parameter(node: Node<'_, '_>) -> Eq8BandParameter {
 
 /// Parse EQ8 parameters from an Eq8 device XML node.
 pub fn parse(node: Node<'_, '_>) -> Eq8Params {
-    let mut params = Eq8Params::default();
-
-    params.precision = child(node, "Precision")
-        .and_then(|n| child_i32(n, "Manual"))
-        .unwrap_or(0);
-    params.mode = child(node, "Mode")
-        .and_then(|n| child_i32(n, "Manual"))
-        .unwrap_or(0);
-    params.global_gain = child(node, "GlobalGain")
-        .and_then(|n| child_f64(n, "Manual"))
-        .unwrap_or(0.0);
-    params.scale = child(node, "Scale")
-        .and_then(|n| child_f64(n, "Manual"))
-        .unwrap_or(100.0);
-    params.adaptive_q = child(node, "AdaptiveQ")
-        .and_then(|n| child_bool(n, "Manual"))
-        .unwrap_or(false);
-    params.adaptive_q_factor = child(node, "AdaptiveQFactor")
-        .and_then(|n| child_f64(n, "Manual"))
-        .unwrap_or(1.0);
+    let mut params = Eq8Params {
+        precision: child(node, "Precision")
+            .and_then(|n| child_i32(n, "Manual"))
+            .unwrap_or(0),
+        mode: child(node, "Mode")
+            .and_then(|n| child_i32(n, "Manual"))
+            .unwrap_or(0),
+        global_gain: child(node, "GlobalGain")
+            .and_then(|n| child_f64(n, "Manual"))
+            .unwrap_or(0.0),
+        scale: child(node, "Scale")
+            .and_then(|n| child_f64(n, "Manual"))
+            .unwrap_or(100.0),
+        adaptive_q: child(node, "AdaptiveQ")
+            .and_then(|n| child_bool(n, "Manual"))
+            .unwrap_or(false),
+        adaptive_q_factor: child(node, "AdaptiveQFactor")
+            .and_then(|n| child_f64(n, "Manual"))
+            .unwrap_or(1.0),
+        ..Default::default()
+    };
 
     for i in 0..8 {
         let band_tag = format!("Bands.{i}");

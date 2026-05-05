@@ -1,7 +1,7 @@
 //! Lock-free global audio state.
 //!
 //! Inspired by Helgobox's `GlobalAudioState`
-//! (https://github.com/helgoboss/helgobox, `global_audio_state.rs`).
+//! (<https://github.com/helgoboss/helgobox>, `global_audio_state.rs`).
 //!
 //! All fields are atomics — safe to read from any thread without locking.
 //! The RT audio thread calls `advance()` once per audio block to update state.
@@ -59,5 +59,11 @@ impl AudioState {
         let bs = self.block_size() as f64;
         let sr = self.sample_rate() as f64;
         if sr > 0.0 { bs / sr } else { 0.0 }
+    }
+}
+
+impl Default for AudioState {
+    fn default() -> Self {
+        Self::new()
     }
 }

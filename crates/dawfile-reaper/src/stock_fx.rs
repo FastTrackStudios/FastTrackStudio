@@ -476,7 +476,7 @@ pub struct EqBand {
 ///
 /// Band parameters are encoded into the binary state using REAPER's
 /// per-band format: type(u32) + enabled(u32) + freq(f64) + gain(f64) + bw(f64) + tail(u8).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ReaEq {
     /// EQ bands (indexed 0..N)
     pub bands: Vec<EqBand>,
@@ -484,16 +484,6 @@ pub struct ReaEq {
     pub bypassed: bool,
     /// Custom display name
     pub custom_name: Option<String>,
-}
-
-impl Default for ReaEq {
-    fn default() -> Self {
-        Self {
-            bands: vec![],
-            bypassed: false,
-            custom_name: None,
-        }
-    }
 }
 
 impl ReaEq {
@@ -1560,19 +1550,10 @@ const REAINSERT_ID: PluginIdentity = PluginIdentity {
 };
 
 /// REAPER stock hardware insert plugin.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ReaInsert {
     pub bypassed: bool,
     pub custom_name: Option<String>,
-}
-
-impl Default for ReaInsert {
-    fn default() -> Self {
-        Self {
-            bypassed: false,
-            custom_name: None,
-        }
-    }
 }
 
 impl ReaInsert {
@@ -1609,19 +1590,10 @@ const REASTREAM_ID: PluginIdentity = PluginIdentity {
 };
 
 /// REAPER stock network audio streaming plugin.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ReaStream {
     pub bypassed: bool,
     pub custom_name: Option<String>,
-}
-
-impl Default for ReaStream {
-    fn default() -> Self {
-        Self {
-            bypassed: false,
-            custom_name: None,
-        }
-    }
 }
 
 impl ReaStream {
@@ -1658,19 +1630,10 @@ const REACONTROLMIDI_ID: PluginIdentity = PluginIdentity {
 };
 
 /// REAPER stock MIDI CC control surface plugin.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ReaControlMidi {
     pub bypassed: bool,
     pub custom_name: Option<String>,
-}
-
-impl Default for ReaControlMidi {
-    fn default() -> Self {
-        Self {
-            bypassed: false,
-            custom_name: None,
-        }
-    }
 }
 
 impl ReaControlMidi {

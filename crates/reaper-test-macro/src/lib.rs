@@ -136,7 +136,7 @@ pub fn reaper_test(attr: TokenStream, item: TokenStream) -> TokenStream {
     // Validate: must be async
     if input_fn.sig.asyncness.is_none() {
         return syn::Error::new_spanned(
-            &input_fn.sig.fn_token,
+            input_fn.sig.fn_token,
             "reaper_test functions must be async",
         )
         .to_compile_error()

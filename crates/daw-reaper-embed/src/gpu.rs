@@ -219,7 +219,7 @@ impl GpuState {
 
     /// Create a GPU state that renders offscreen (no window surface).
     ///
-    /// The caller reads back rendered pixels via [`read_pixels`] and is
+    /// The caller reads back rendered pixels via [`Self::read_pixels`] and is
     /// responsible for blitting them to a window (e.g., via SWELL
     /// `StretchBltFromMem` under `WM_PAINT`). Output format is BGRA8 to
     /// match LICE's pixel layout on Linux/macOS SWELL.
@@ -322,7 +322,7 @@ impl GpuState {
     }
 
     /// Render a Vello scene to the surface (panics in offscreen mode — use
-    /// [`render_offscreen`] instead).
+    /// [`Self::render_offscreen`] instead).
     pub fn render(&mut self, scene: &Scene) -> Result<(), GpuError> {
         let surface = self
             .surface
@@ -364,7 +364,7 @@ impl GpuState {
 
     /// Render a Vello scene to the offscreen BGRA8 target (panics in surface mode).
     ///
-    /// After this returns, [`read_pixels`] can be used to copy the rendered
+    /// After this returns, [`Self::read_pixels`] can be used to copy the rendered
     /// bytes back to a CPU buffer suitable for `StretchBltFromMem`.
     pub fn render_offscreen(&mut self, scene: &Scene) -> Result<(), GpuError> {
         let target = self
@@ -494,7 +494,7 @@ fn create_offscreen_resources(
     // wgpu requires 256-byte-aligned bytes-per-row for texture→buffer copies.
     let unpadded = width * 4;
     let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
-    let row_pitch = (unpadded + align - 1) / align * align;
+    let row_pitch = unpadded.div_ceil(align) * align;
 
     let target = device.create_texture(&TextureDescriptor {
         label: Some("Offscreen Present Target"),

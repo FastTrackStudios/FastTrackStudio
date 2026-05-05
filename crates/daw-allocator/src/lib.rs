@@ -64,7 +64,7 @@
 //!
 //! # Credits
 //!
-//! Directly inspired by Helgobox (https://github.com/helgoboss/helgobox):
+//! Directly inspired by Helgobox (<https://github.com/helgoboss/helgobox>):
 //! - `HelgobossAllocator` — RT-aware GlobalAlloc with async deallocation
 //! - `SenderToRealTimeThread` / `ImportantSenderFromRtToNormalThread` — RT channels
 //! - `GlobalAudioState` — lock-free atomic audio state

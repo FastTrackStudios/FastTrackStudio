@@ -167,7 +167,7 @@ fn parse_data_path(file_ref_node: Node<'_, '_>) -> Option<PathBuf> {
 
 /// Check if bytes look like UTF-16LE (every other byte is 0x00 for ASCII range).
 fn is_utf16le(bytes: &[u8]) -> bool {
-    if bytes.len() < 4 || bytes.len() % 2 != 0 {
+    if bytes.len() < 4 || !bytes.len().is_multiple_of(2) {
         return false;
     }
     // Check first 10 code units (or fewer)
@@ -208,10 +208,10 @@ fn try_parse_mac_alias(bytes: &[u8]) -> Option<PathBuf> {
     // Try tag-based parsing for Alias v2
     if bytes.len() >= 8 {
         let version = u16::from_be_bytes([bytes[4], bytes[5]]);
-        if version == 2 {
-            if let Some(path) = parse_alias_v2_tags(bytes) {
-                return Some(path);
-            }
+        if version == 2
+            && let Some(path) = parse_alias_v2_tags(bytes)
+        {
+            return Some(path);
         }
     }
 
@@ -228,10 +228,10 @@ fn try_parse_mac_alias(bytes: &[u8]) -> Option<PathBuf> {
                 .position(|&b| b == 0)
                 .map(|p| start + p)
                 .unwrap_or(bytes.len());
-            if let Ok(path_str) = std::str::from_utf8(&bytes[start..end]) {
-                if !path_str.is_empty() {
-                    return Some(PathBuf::from(path_str));
-                }
+            if let Ok(path_str) = std::str::from_utf8(&bytes[start..end])
+                && !path_str.is_empty()
+            {
+                return Some(PathBuf::from(path_str));
             }
         }
     }
@@ -287,7 +287,7 @@ fn parse_alias_v2_tags(bytes: &[u8]) -> Option<PathBuf> {
 
         // Align to 2-byte boundary
         offset += length;
-        if offset % 2 != 0 {
+        if !offset.is_multiple_of(2) {
             offset += 1;
         }
     }
@@ -302,7 +302,7 @@ fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 }
 
 fn hex_decode(hex: &str) -> Option<Vec<u8>> {
-    if hex.len() % 2 != 0 {
+    if !hex.len().is_multiple_of(2) {
         return None;
     }
     let mut bytes = Vec::with_capacity(hex.len() / 2);

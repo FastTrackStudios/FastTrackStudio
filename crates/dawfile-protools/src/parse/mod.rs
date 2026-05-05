@@ -31,7 +31,7 @@ use crate::types::{ProToolsSession, TempoEvent};
 ///
 /// The `target_sample_rate` is the rate to convert positions to. If it matches
 /// the session rate, no conversion is applied.
-pub fn parse_session(data: &mut Vec<u8>, target_sample_rate: u32) -> PtResult<ProToolsSession> {
+pub fn parse_session(data: &mut [u8], target_sample_rate: u32) -> PtResult<ProToolsSession> {
     // Step 1: Decrypt
     let xor_type = decrypt::decrypt(data)?;
 

@@ -10,7 +10,7 @@
 
 use crate::dock_host::{DockEvent, DockHandle, DockHostService, DockKind, PanelPixels, UiEventDto};
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use vox::Tx;
 
 /// Record of a single operation invoked against [`MockDockHost`].
@@ -52,9 +52,9 @@ pub struct MockDock {
 /// operation in a `Vec<DockOp>` for assertion. Subscribers receive
 /// [`DockEvent`]s synchronously through their `Tx<DockEvent>` (the
 /// channel's own send loop runs the event home).
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct MockDockHost {
-    inner: Mutex<MockState>,
+    inner: Arc<Mutex<MockState>>,
 }
 
 #[derive(Default)]
@@ -269,7 +269,7 @@ mod tests {
         // synchronous-equivalent (no real awaits past the lock).
         let mut f = Box::pin(f);
         let waker = std::task::Waker::noop();
-        let mut cx = std::task::Context::from_waker(&waker);
+        let mut cx = std::task::Context::from_waker(waker);
         loop {
             if let std::task::Poll::Ready(v) = f.as_mut().poll(&mut cx) {
                 return v;

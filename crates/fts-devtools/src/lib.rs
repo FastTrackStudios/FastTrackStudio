@@ -199,15 +199,15 @@ pub fn status() {
             if let Ok(entries) = std::fs::read_dir(&user_plugins) {
                 for entry in entries.flatten() {
                     let path = entry.path();
-                    if path.is_file() || path.is_symlink() {
-                        if let Some(name) = path.file_name() {
-                            let name = name.to_string_lossy();
-                            if name.contains("reaper_")
-                                || name.ends_with(".so")
-                                || name.ends_with(".dylib")
-                            {
-                                print_link_status(&path);
-                            }
+                    if (path.is_file() || path.is_symlink())
+                        && let Some(name) = path.file_name()
+                    {
+                        let name = name.to_string_lossy();
+                        if name.contains("reaper_")
+                            || name.ends_with(".so")
+                            || name.ends_with(".dylib")
+                        {
+                            print_link_status(&path);
                         }
                     }
                 }

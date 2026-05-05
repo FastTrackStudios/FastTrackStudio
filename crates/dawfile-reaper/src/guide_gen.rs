@@ -97,7 +97,7 @@ pub fn generate_guide_items(project: &ReaperProject) -> (Vec<Item>, Vec<Item>, V
             let is_beat_one = {
                 let offset = pos - song_start;
                 let frac = (offset / measure_seconds).fract();
-                frac < 0.01 || frac > 0.99
+                !(0.01..=0.99).contains(&frac)
             };
             let (midi_note, velocity) = if is_beat_one {
                 (76, 120) // Hi woodblock, accent
@@ -150,9 +150,7 @@ pub fn generate_guide_items(project: &ReaperProject) -> (Vec<Item>, Vec<Item>, V
 
             let mut notes = Vec::new();
             let mut pos = count_in_start;
-            let mut beat_in_count = 0u32;
-
-            for _ in 0..total_count_beats {
+            for beat_in_count in 0..total_count_beats {
                 let measure_idx = beat_in_count / num;
                 let beat_in_measure = (beat_in_count % num) + 1;
                 let is_last_measure = measure_idx == total_measures.saturating_sub(1);
@@ -183,7 +181,6 @@ pub fn generate_guide_items(project: &ReaperProject) -> (Vec<Item>, Vec<Item>, V
                 }
 
                 pos += beat_seconds;
-                beat_in_count += 1;
             }
 
             if !notes.is_empty() {

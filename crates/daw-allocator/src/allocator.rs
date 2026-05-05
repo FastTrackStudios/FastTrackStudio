@@ -1,7 +1,7 @@
 //! RT-aware global allocator.
 //!
 //! A variation of Helgobox's `HelgobossAllocator`
-//! (https://github.com/helgoboss/helgobox, `allocator/src/lib.rs`).
+//! (<https://github.com/helgoboss/helgobox>, `allocator/src/lib.rs`).
 //!
 //! Key behavior:
 //! - Allocations always go to `System` (with debug assertion check)
@@ -47,7 +47,7 @@ pub(crate) struct AsyncDeallocState {
 /// # Credits
 ///
 /// Inspired by Helgobox's `HelgobossAllocator`
-/// (https://github.com/helgoboss/helgobox).
+/// (<https://github.com/helgoboss/helgobox>).
 pub struct FtsAllocator {
     async_state: OnceLock<AsyncDeallocState>,
 }
@@ -144,6 +144,12 @@ impl FtsAllocator {
         if crate::guards::is_allocation_forbidden() {
             crate::guards::record_violation();
         }
+    }
+}
+
+impl Default for FtsAllocator {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

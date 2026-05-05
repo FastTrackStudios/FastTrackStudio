@@ -377,16 +377,17 @@ impl Default for MultibandDynamicsParams {
 const BAND_SUFFIXES: [&str; 3] = ["Low", "Mid", "High"];
 
 pub fn parse_multiband_dynamics(node: Node<'_, '_>) -> MultibandDynamicsParams {
-    let mut params = MultibandDynamicsParams::default();
-
-    params.split_low_mid = param_f64(node, "SplitLowMid", 120.0);
-    params.split_mid_high = param_f64(node, "SplitMidHigh", 2500.0);
-    params.split_low_mid_on = param_bool(node, "SplitLowMidOn", true);
-    params.split_mid_high_on = param_bool(node, "SplitMidHighOn", true);
-    params.soft_knee = param_bool(node, "SoftKnee", false);
-    params.output_gain = param_f64(node, "OutputGain", 0.0);
-    params.global_amount = param_f64(node, "GlobalAmount", 100.0);
-    params.global_time = param_f64(node, "GlobalTime", 100.0);
+    let mut params = MultibandDynamicsParams {
+        split_low_mid: param_f64(node, "SplitLowMid", 120.0),
+        split_mid_high: param_f64(node, "SplitMidHigh", 2500.0),
+        split_low_mid_on: param_bool(node, "SplitLowMidOn", true),
+        split_mid_high_on: param_bool(node, "SplitMidHighOn", true),
+        soft_knee: param_bool(node, "SoftKnee", false),
+        output_gain: param_f64(node, "OutputGain", 0.0),
+        global_amount: param_f64(node, "GlobalAmount", 100.0),
+        global_time: param_f64(node, "GlobalTime", 100.0),
+        ..Default::default()
+    };
 
     for (i, suffix) in BAND_SUFFIXES.iter().enumerate() {
         params.bands[i] = MbdBand {

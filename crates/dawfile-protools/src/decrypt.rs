@@ -39,13 +39,13 @@ pub fn decrypt(data: &mut [u8]) -> PtResult<u8> {
     }
 
     // Decrypt from offset 0x14 onward
-    for i in ENCRYPTED_START..data.len() {
+    for (i, byte) in data.iter_mut().enumerate().skip(ENCRYPTED_START) {
         let xor_index = match xor_type {
             XOR_TYPE_OLD => i & 0xFF,
             XOR_TYPE_NEW => (i >> 12) & 0xFF,
             _ => unreachable!(),
         };
-        data[i] ^= xor_key[xor_index];
+        *byte ^= xor_key[xor_index];
     }
 
     Ok(xor_type)

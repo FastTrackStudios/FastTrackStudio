@@ -113,9 +113,11 @@ fn apply_track_items(
                 //
                 // For now we insert a minimal placeholder with the GUID and
                 // name so that a subsequent diff pass will detect it.
-                let mut item = Item::default();
-                item.item_guid = id.guid.clone();
-                item.name = id.name.clone();
+                let item = Item {
+                    item_guid: id.guid.clone(),
+                    name: id.name.clone(),
+                    ..Item::default()
+                };
                 // Apply position offset — the item's original position in
                 // the song coordinate space maps to (position + offset) in
                 // the setlist coordinate space.
@@ -216,7 +218,7 @@ fn apply_project_envelopes(
 }
 
 fn apply_envelope_list(
-    envelopes: &mut Vec<crate::types::envelope::Envelope>,
+    envelopes: &mut [crate::types::envelope::Envelope],
     env_diffs: &[EnvelopeDiff],
     options: &ApplyOptions,
 ) {
@@ -397,6 +399,7 @@ fn apply_markers_regions(
 }
 
 #[cfg(test)]
+#[allow(clippy::field_reassign_with_default)]
 mod tests {
     use super::*;
     use crate::types::marker_region::{MarkerRegion, MarkerRegionCollection};

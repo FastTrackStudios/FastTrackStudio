@@ -253,13 +253,7 @@ fn trimmed_combine_has_proper_folder_structure() {
     let mut depth = 0i32;
     for track in &project.tracks {
         // For display, show depth BEFORE folder parent opens
-        let display_depth = if track.folder.as_ref().map_or(false, |f| {
-            f.folder_state == dawfile_reaper::types::track::FolderState::FolderParent
-        }) {
-            depth
-        } else {
-            depth
-        };
+        let display_depth = depth;
         let indent_str = "  ".repeat(display_depth.max(0) as usize);
         let folder_info = track
             .folder
@@ -303,7 +297,7 @@ fn trimmed_combine_has_proper_folder_structure() {
     // Verify TRACKS is a folder parent
     let tracks_folder = project.tracks.iter().find(|t| t.name == "TRACKS").unwrap();
     assert!(
-        tracks_folder.folder.as_ref().map_or(false, |f| {
+        tracks_folder.folder.as_ref().is_some_and(|f| {
             f.folder_state == dawfile_reaper::types::track::FolderState::FolderParent
         }),
         "TRACKS should be a folder parent"
@@ -313,7 +307,7 @@ fn trimmed_combine_has_proper_folder_structure() {
     for info in &song_infos {
         if let Some(song_folder) = project.tracks.iter().find(|t| t.name == info.name) {
             assert!(
-                song_folder.folder.as_ref().map_or(false, |f| {
+                song_folder.folder.as_ref().is_some_and(|f| {
                     f.folder_state == dawfile_reaper::types::track::FolderState::FolderParent
                 }),
                 "Song '{}' should be a folder parent",

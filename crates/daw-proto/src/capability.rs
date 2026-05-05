@@ -43,87 +43,87 @@ use facet::Facet;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Facet)]
 pub enum Capability {
     /// Project lifecycle: open, save, close, metadata.
-    /// Maps to: [`ProjectService`]
+    /// Maps to: `ProjectService`
     Project,
 
     /// Transport controls: play, stop, record, position.
-    /// Maps to: [`TransportService`]
+    /// Maps to: `TransportService`
     Transport,
 
     /// Track CRUD, volume, pan, mute, solo, arm, folder hierarchy.
-    /// Maps to: [`TrackService`]
+    /// Maps to: `TrackService`
     Tracks,
 
     /// Send/receive routing, hardware outputs, channel mapping.
-    /// Maps to: [`RoutingService`]
+    /// Maps to: `RoutingService`
     TrackRouting,
 
     /// Media items on the timeline: position, length, fades, grouping.
-    /// Maps to: [`ItemService`]
+    /// Maps to: `ItemService`
     Items,
 
     /// Multi-take support within items.
-    /// Maps to: [`TakeService`]
+    /// Maps to: `TakeService`
     Takes,
 
     /// MIDI note/CC/sysex editing within takes.
-    /// Maps to: [`MidiService`]
+    /// Maps to: `MidiService`
     Midi,
 
     /// FX chain structure: plugin list, add/remove/reorder.
-    /// Maps to: [`FxService`] (chain queries, management)
+    /// Maps to: `FxService` (chain queries, management)
     FxChain,
 
     /// FX parameter/preset state: read/write plugin parameters and presets.
-    /// Maps to: [`FxService`] (parameters, presets, state chunks)
+    /// Maps to: `FxService` (parameters, presets, state chunks)
     FxState,
 
     /// Nested FX containers with parallel/serial routing.
-    /// Maps to: [`FxService`] (containers, routing mode)
+    /// Maps to: `FxService` (containers, routing mode)
     FxContainers,
 
     /// Automation envelopes: points, shapes, modes.
-    /// Maps to: [`AutomationService`]
+    /// Maps to: `AutomationService`
     Automation,
 
     /// Timeline markers.
-    /// Maps to: [`MarkerService`]
+    /// Maps to: `MarkerService`
     Markers,
 
     /// Timeline regions.
-    /// Maps to: [`RegionService`]
+    /// Maps to: `RegionService`
     Regions,
 
     /// Tempo and time signature map.
-    /// Maps to: [`TempoMapService`]
+    /// Maps to: `TempoMapService`
     TempoMap,
 
     /// Undo/redo history.
-    /// Maps to: [`ProjectService`] (undo methods)
+    /// Maps to: `ProjectService` (undo methods)
     Undo,
 
     /// Live MIDI device I/O.
-    /// Maps to: [`LiveMidiService`]
+    /// Maps to: `LiveMidiService`
     LiveMidi,
 
     /// Audio engine state, latency, I/O config.
-    /// Maps to: [`AudioEngineService`]
+    /// Maps to: `AudioEngineService`
     AudioEngine,
 
     /// Peak metering data.
-    /// Maps to: [`PeakService`]
+    /// Maps to: `PeakService`
     Peaks,
 
     /// Position/time format conversions.
-    /// Maps to: [`PositionConversionService`]
+    /// Maps to: `PositionConversionService`
     PositionConversion,
 
     /// Custom action registration and execution.
-    /// Maps to: [`ActionRegistryService`]
+    /// Maps to: `ActionRegistryService`
     ActionRegistry,
 
     /// Persistent key-value storage (ext state).
-    /// Maps to: [`ExtStateService`]
+    /// Maps to: `ExtStateService`
     ExtState,
 }
 

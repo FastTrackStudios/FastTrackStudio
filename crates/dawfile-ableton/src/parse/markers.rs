@@ -46,7 +46,7 @@ pub fn parse_scenes(scenes_node: Node<'_, '_>) -> Vec<Scene> {
 
             let annotation = child_value(scene, "Annotation").unwrap_or("").to_string();
 
-            let follow_action = child(scene, "FollowAction").and_then(|fa| {
+            let follow_action = child(scene, "FollowAction").map(|fa| {
                 let enabled = child_bool(fa, "FollowActionEnabled").unwrap_or(false);
                 let follow_time = child_f64(fa, "FollowTime").unwrap_or(4.0);
                 let is_linked = child_bool(fa, "IsLinked").unwrap_or(true);
@@ -55,7 +55,7 @@ pub fn parse_scenes(scenes_node: Node<'_, '_>) -> Vec<Scene> {
                 let action_b = child_i32(fa, "FollowActionB").unwrap_or(0);
                 let chance_a = child_i32(fa, "FollowChanceA").unwrap_or(100);
                 let chance_b = child_i32(fa, "FollowChanceB").unwrap_or(0);
-                Some(FollowAction {
+                FollowAction {
                     follow_time,
                     is_linked,
                     loop_iterations,
@@ -64,7 +64,7 @@ pub fn parse_scenes(scenes_node: Node<'_, '_>) -> Vec<Scene> {
                     chance_a,
                     chance_b,
                     enabled,
-                })
+                }
             });
 
             let time_signature_id = child_i32(scene, "TimeSignatureId").unwrap_or(-1);

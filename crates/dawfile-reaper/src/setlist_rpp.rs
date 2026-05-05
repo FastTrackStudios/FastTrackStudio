@@ -66,6 +66,7 @@ pub fn measures_to_seconds(measures: u32, bpm: f64, beats_per_measure: u32) -> f
 // ── RPP Combiner ────────────────────────────────────────────────────────────
 
 /// Options for combining RPP files.
+#[derive(Default)]
 pub struct CombineOptions {
     /// Gap between songs, specified as a number of measures.
     /// The gap duration is computed from the **next** song's tempo and time signature.
@@ -78,15 +79,6 @@ pub struct CombineOptions {
     /// everything from position 0 to the last content extent.
     /// Default: false (include everything).
     pub trim_to_bounds: bool,
-}
-
-impl Default for CombineOptions {
-    fn default() -> Self {
-        Self {
-            gap_measures: 0,
-            trim_to_bounds: false,
-        }
-    }
 }
 
 /// Compute the content extent of a project (the latest point of any content).
@@ -820,7 +812,7 @@ fn is_structural_folder(name_lower: &str, track: &Track) -> bool {
     let is_folder = track
         .folder
         .as_ref()
-        .map_or(false, |f| f.folder_state == FolderState::FolderParent);
+        .is_some_and(|f| f.folder_state == FolderState::FolderParent);
     let is_structural_name = matches!(
         name_lower,
         "click/guide" | "click + guide" | "tracks" | "keyflow" | "midi bus"
@@ -982,10 +974,12 @@ pub fn concatenate_tempo_envelopes(
                 .iter()
                 .any(|p| (p.position - song_global_start).abs() < 0.01);
             if !has_point_at_start {
-                let mut leading = TempoTimePoint::default();
-                leading.position = song_global_start;
-                leading.tempo = last_tempo;
-                leading.shape = 1;
+                let mut leading = TempoTimePoint {
+                    position: song_global_start,
+                    tempo: last_tempo,
+                    shape: 1,
+                    ..TempoTimePoint::default()
+                };
                 if let Some((_, num, denom, _)) = project.properties.tempo {
                     leading.time_signature_encoded = Some(65536 * denom + num);
                 }
@@ -1000,10 +994,12 @@ pub fn concatenate_tempo_envelopes(
             // Insert a trailing tempo marker at the song's end to freeze tempo
             let trailing_pos = song_global_start + song.duration_seconds;
             if trailing_pos > points.last().map(|p| p.position).unwrap_or(0.0) {
-                let mut trailing = TempoTimePoint::default();
-                trailing.position = trailing_pos;
-                trailing.tempo = last_tempo;
-                trailing.shape = 1;
+                let trailing = TempoTimePoint {
+                    position: trailing_pos,
+                    tempo: last_tempo,
+                    shape: 1,
+                    ..TempoTimePoint::default()
+                };
                 points.push(trailing);
             }
         }
@@ -1128,11 +1124,11 @@ pub fn generate_shell_copy(master: &ReaperProject, role: &str) -> ReaperProject 
         let is_folder_start = track
             .folder
             .as_ref()
-            .map_or(false, |f| f.folder_state == FolderState::FolderParent);
+            .is_some_and(|f| f.folder_state == FolderState::FolderParent);
         let is_folder_end = track
             .folder
             .as_ref()
-            .map_or(false, |f| f.folder_state == FolderState::LastInFolder);
+            .is_some_and(|f| f.folder_state == FolderState::LastInFolder);
 
         // Track the Click/Guide folder hierarchy
         if name_lower == "click/guide" && is_folder_start {
@@ -1274,7 +1270,7 @@ pub fn project_to_rpp_text(project: &ReaperProject) -> String {
         .map(|e| e.default_time_signature)
         .unwrap_or((4, 4));
 
-    out.push_str(&format!("<REAPER_PROJECT 0.1 \"7.0/generated\" 0\n"));
+    out.push_str("<REAPER_PROJECT 0.1 \"7.0/generated\" 0\n");
     out.push_str("  RIPPLE 0 0\n");
     out.push_str("  GROUPOVERRIDE 0 0 0 0\n");
     out.push_str("  AUTOXFADE 129\n");
@@ -1485,7 +1481,7 @@ fn write_item_rpp(out: &mut String, item: &Item, indent: usize, item_source_dir:
             }
             // Patch relative FILE paths to absolute
             if trimmed.starts_with("FILE ") {
-                if let Some(ref source_dir) = item_source_dir {
+                if let Some(source_dir) = item_source_dir {
                     // Extract the path (may be quoted)
                     let file_path = trimmed.trim_start_matches("FILE ").trim_matches('"');
                     if !PathBuf::from(file_path).is_absolute() {
@@ -1678,11 +1674,10 @@ fn write_combined_tempoenvex(out: &mut String, rpp_paths: &[PathBuf], song_infos
         // If we have tempo points AND the first one is already at the start,
         // we just force it to square shape + correct time sig. Otherwise we
         // insert a leading point from the TEMPO header.
-        let first_is_at_start = points.first().map_or(false, |pt| {
+        let first_is_at_start = points.first().is_some_and(|pt| {
             // Check if the first point is within 1ms of global_start
             let pt_pos = pt
                 .line
-                .trim()
                 .split_whitespace()
                 .nth(1)
                 .and_then(|s| s.parse::<f64>().ok())
@@ -1906,11 +1901,11 @@ pub fn concatenate_rpp_files_raw(rpp_paths: &[PathBuf], song_infos: &[SongInfo])
         }
 
         // Write song folder track
-        out.push_str(&format!("  <TRACK {{}}\n"));
+        out.push_str("  <TRACK {}\n");
         out.push_str(&format!("    NAME {:?}\n", song.name));
-        out.push_str(&format!("    ISBUS 1 0\n"));
-        out.push_str(&format!("    NCHAN 2\n"));
-        out.push_str(&format!("  >\n"));
+        out.push_str("    ISBUS 1 0\n");
+        out.push_str("    NCHAN 2\n");
+        out.push_str("  >\n");
 
         // Extract and write all TRACK blocks with offset positions and resolved paths
         let track_blocks = extract_track_blocks(&rpp_text);
@@ -1984,15 +1979,15 @@ fn extract_track_blocks(rpp: &str) -> Vec<String> {
 /// Returns `(path, trailing)` where trailing is any text after the closing quote.
 fn parse_quoted_file_path(s: &str) -> Option<(String, &str)> {
     let s = s.trim();
-    if s.starts_with('"') {
+    if let Some(stripped) = s.strip_prefix('"') {
         // Find the closing quote
-        if let Some(end) = s[1..].find('"') {
-            let path = &s[1..1 + end];
-            let trailing = s[1 + end + 1..].trim();
+        if let Some(end) = stripped.find('"') {
+            let path = &stripped[..end];
+            let trailing = stripped[end + 1..].trim();
             Some((path.to_string(), trailing))
         } else {
             // No closing quote — take everything after the opening quote
-            Some((s[1..].to_string(), ""))
+            Some((stripped.to_string(), ""))
         }
     } else {
         // Unquoted — take the first whitespace-delimited token

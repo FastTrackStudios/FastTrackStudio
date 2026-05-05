@@ -38,6 +38,12 @@ pub struct RoutedHandler {
     handlers: Vec<Arc<dyn DynHandler>>,
 }
 
+impl Default for RoutedHandler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RoutedHandler {
     pub fn new() -> Self {
         Self {

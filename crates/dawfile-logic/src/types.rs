@@ -158,7 +158,7 @@ pub struct LogicCompRange {
 
 /// A single MIDI note (or other positioned event) extracted from an EvSq chunk.
 ///
-/// The [`position_ticks`] unit is the EvSq internal clock, which differs from
+/// The `position_ticks` unit is the EvSq internal clock, which differs from
 /// the MSeq arrangement clock.  Full decoding is pending further
 /// reverse-engineering.
 #[derive(Debug, Clone)]

@@ -616,12 +616,10 @@ impl BatchOp {
 
     fn collect_project_arg_deps(&self, deps: &mut Vec<u32>) {
         // Visitor pattern — scan each sub-enum for ProjectArg::FromStep
-        macro_rules! check_project {
-            ($arg:expr) => {
-                if let ProjectArg::FromStep(n) = $arg {
-                    deps.push(*n);
-                }
-            };
+        fn check_project(arg: &ProjectArg, deps: &mut Vec<u32>) {
+            if let ProjectArg::FromStep(n) = arg {
+                deps.push(*n);
+            }
         }
 
         match self {
@@ -633,11 +631,11 @@ impl BatchOp {
                 | ProjectOp::Redo(p)
                 | ProjectOp::LastUndoLabel(p)
                 | ProjectOp::LastRedoLabel(p)
-                | ProjectOp::RulerLaneCount(p) => check_project!(p),
+                | ProjectOp::RulerLaneCount(p) => check_project(p, deps),
                 ProjectOp::EndUndoBlock(p, _, _)
                 | ProjectOp::RunCommand(p, _)
                 | ProjectOp::SetRulerLaneName(p, _, _)
-                | ProjectOp::GetRulerLaneName(p, _) => check_project!(p),
+                | ProjectOp::GetRulerLaneName(p, _) => check_project(p, deps),
                 _ => {}
             },
             // Transport ops
@@ -671,87 +669,86 @@ impl BatchOp {
                     TransportOp::SetPositionMusical(p, _, _, _)
                     | TransportOp::GotoMeasure(p, _) => p,
                 };
-                check_project!(p);
+                check_project(p, deps);
             }
             // Track ops
             BatchOp::Track(op) => {
                 let p = track_op_project_arg(op);
-                check_project!(p);
+                check_project(p, deps);
             }
             // FX ops
             BatchOp::Fx(op) => {
-                if let Some(p) = fx_op_project_arg(op) {
-                    check_project!(p);
+                if let Some(ProjectArg::FromStep(n)) = fx_op_project_arg(op) {
+                    deps.push(*n);
                 }
             }
             // Routing ops
             BatchOp::Routing(op) => {
                 let p = routing_op_project_arg(op);
-                check_project!(p);
+                check_project(p, deps);
             }
             // Item ops
             BatchOp::Item(op) => {
                 let p = item_op_project_arg(op);
-                check_project!(p);
+                check_project(p, deps);
             }
             // Take ops
             BatchOp::Take(op) => {
                 let p = take_op_project_arg(op);
-                check_project!(p);
+                check_project(p, deps);
             }
             // Automation ops
             BatchOp::Automation(op) => {
                 let p = automation_op_project_arg(op);
-                check_project!(p);
+                check_project(p, deps);
             }
             // Marker ops
             BatchOp::Marker(op) => {
                 let p = marker_op_project_arg(op);
-                check_project!(p);
+                check_project(p, deps);
             }
             // Region ops
             BatchOp::Region(op) => {
                 let p = region_op_project_arg(op);
-                check_project!(p);
+                check_project(p, deps);
             }
             // TempoMap ops
             BatchOp::TempoMap(op) => {
                 let p = tempo_map_op_project_arg(op);
-                check_project!(p);
+                check_project(p, deps);
             }
             // Midi ops - use MidiTakeLocation (literal), only CreateMidiItem has ProjectArg
-            BatchOp::Midi(op) => {
-                if let MidiOp::CreateMidiItem(p, _, _, _) = op {
-                    check_project!(p);
-                }
+            BatchOp::Midi(MidiOp::CreateMidiItem(ProjectArg::FromStep(n), _, _, _)) => {
+                deps.push(*n);
             }
             // ExtState project variants
             BatchOp::ExtState(op) => match op {
                 ExtStateOp::GetProjectExtState(p, _, _)
                 | ExtStateOp::SetProjectExtState(p, _, _, _)
                 | ExtStateOp::DeleteProjectExtState(p, _, _)
-                | ExtStateOp::HasProjectExtState(p, _, _) => check_project!(p),
+                | ExtStateOp::HasProjectExtState(p, _, _) => check_project(p, deps),
                 _ => {}
             },
             // Peak ops
             BatchOp::Peak(op) => match op {
                 PeakOp::GetTrackPeak(p, _, _) | PeakOp::GetTakePeaks(p, _, _, _) => {
-                    check_project!(p)
+                    check_project(p, deps)
                 }
             },
             // AudioAccessor ops
             BatchOp::AudioAccessor(op) => match op {
                 AudioAccessorOp::CreateTrackAccessor(p, _)
-                | AudioAccessorOp::CreateTakeAccessor(p, _, _) => check_project!(p),
+                | AudioAccessorOp::CreateTakeAccessor(p, _, _) => check_project(p, deps),
                 _ => {}
             },
             // PositionConversion ops
             BatchOp::PositionConversion(op) => {
                 let p = position_conversion_op_project_arg(op);
-                check_project!(p);
+                check_project(p, deps);
             }
             // No project args in these
-            BatchOp::LiveMidi(_)
+            BatchOp::Midi(_)
+            | BatchOp::LiveMidi(_)
             | BatchOp::AudioEngine(_)
             | BatchOp::Health(_)
             | BatchOp::ActionRegistry(_)
@@ -794,32 +791,18 @@ impl BatchOp {
                     check_track!(t);
                 }
             }
-            BatchOp::Midi(op) => {
-                if let MidiOp::CreateMidiItem(_, t, _, _) = op {
-                    check_track!(t);
-                }
-            }
-            BatchOp::Peak(op) => {
-                if let PeakOp::GetTrackPeak(_, t, _) = op {
-                    check_track!(t);
-                }
-            }
-            BatchOp::AudioAccessor(op) => {
-                if let AudioAccessorOp::CreateTrackAccessor(_, t) = op {
-                    check_track!(t);
-                }
-            }
+            BatchOp::Midi(MidiOp::CreateMidiItem(_, t, _, _)) => check_track!(t),
+            BatchOp::Peak(PeakOp::GetTrackPeak(_, t, _)) => check_track!(t),
+            BatchOp::AudioAccessor(AudioAccessorOp::CreateTrackAccessor(_, t)) => check_track!(t),
             _ => {}
         }
     }
 
     fn collect_fx_chain_arg_deps(&self, deps: &mut Vec<u32>) {
-        if let BatchOp::Fx(op) = self {
-            if let Some(c) = fx_op_chain_arg(op) {
-                if let FxChainArg::TrackFromStep(n) = c {
-                    deps.push(*n);
-                }
-            }
+        if let BatchOp::Fx(op) = self
+            && let Some(FxChainArg::TrackFromStep(n)) = fx_op_chain_arg(op)
+        {
+            deps.push(*n);
         }
     }
 }

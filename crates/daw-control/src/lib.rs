@@ -326,7 +326,7 @@ impl Daw {
             .project
             .get_current()
             .await?
-            .ok_or_else(|| Error::NoCurrentProject)?;
+            .ok_or(Error::NoCurrentProject)?;
 
         Ok(Project::new(info.guid, self.clients.clone()))
     }

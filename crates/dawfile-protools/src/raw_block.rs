@@ -1,6 +1,6 @@
 //! Raw block tree that preserves original bytes for round-trip fidelity.
 //!
-//! Unlike [`block::Block`] which extracts structured fields, [`RawBlock`]
+//! Unlike [`crate::block::Block`] which extracts structured fields, [`RawBlock`]
 //! keeps the original byte spans so that unmodified blocks can be written
 //! back verbatim. This is essential for round-trip editing: we only need
 //! to understand the blocks we modify; everything else passes through

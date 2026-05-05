@@ -289,6 +289,12 @@ impl ReaperInput {
     }
 }
 
+impl Default for ReaperInput {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl InputService for ReaperInput {
     async fn subscribe_input(&self, tx: Tx<InputEvent>) {
         let mut rx = self.state.event_tx.subscribe();

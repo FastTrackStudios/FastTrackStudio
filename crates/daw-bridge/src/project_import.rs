@@ -260,10 +260,10 @@ fn build_audio_item(item: ItemBuilder, clip: &dawfile_ableton::AudioClip) -> Ite
     let mut item = item.name(&clip.common.name);
 
     // Audio source
-    if let Some(ref sr) = clip.sample_ref {
-        if let Some(ref path) = sr.path {
-            item = item.source_wave(path.to_string_lossy().into_owned());
-        }
+    if let Some(ref sr) = clip.sample_ref
+        && let Some(ref path) = sr.path
+    {
+        item = item.source_wave(path.to_string_lossy().into_owned());
     }
 
     // Pitch
@@ -650,10 +650,10 @@ fn add_dawproject_tracks(
             }
 
             // Color
-            if let Some(ref color_hex) = track.color {
-                if let Some(color) = parse_hex_color(color_hex) {
-                    t = t.color(color);
-                }
+            if let Some(ref color_hex) = track.color
+                && let Some(color) = parse_hex_color(color_hex)
+            {
+                t = t.color(color);
             }
 
             if is_folder {
@@ -711,21 +711,21 @@ fn add_dawproject_tracks(
                                 }
 
                                 // Fades
-                                if let Some(fade_in) = clip.fade_in_time {
-                                    if fade_in > 0.0 {
-                                        item = item.fade_in(
-                                            fade_in,
-                                            dawfile_reaper::types::item::FadeCurveType::Linear,
-                                        );
-                                    }
+                                if let Some(fade_in) = clip.fade_in_time
+                                    && fade_in > 0.0
+                                {
+                                    item = item.fade_in(
+                                        fade_in,
+                                        dawfile_reaper::types::item::FadeCurveType::Linear,
+                                    );
                                 }
-                                if let Some(fade_out) = clip.fade_out_time {
-                                    if fade_out > 0.0 {
-                                        item = item.fade_out(
-                                            fade_out,
-                                            dawfile_reaper::types::item::FadeCurveType::Linear,
-                                        );
-                                    }
+                                if let Some(fade_out) = clip.fade_out_time
+                                    && fade_out > 0.0
+                                {
+                                    item = item.fade_out(
+                                        fade_out,
+                                        dawfile_reaper::types::item::FadeCurveType::Linear,
+                                    );
                                 }
 
                                 item

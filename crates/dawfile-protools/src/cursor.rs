@@ -105,6 +105,11 @@ impl<'a> Cursor<'a> {
         self.data.len()
     }
 
+    /// Return true when the underlying buffer has no bytes.
+    pub fn is_empty(&self) -> bool {
+        self.data.is_empty()
+    }
+
     /// Whether this cursor uses big-endian byte order.
     pub fn is_bigendian(&self) -> bool {
         self.is_bigendian

@@ -7,6 +7,12 @@ pub struct XmlWriter {
     indent: usize,
 }
 
+impl Default for XmlWriter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl XmlWriter {
     pub fn new() -> Self {
         Self {

@@ -174,21 +174,12 @@ pub struct ActionInfo {
 }
 
 /// Response from action-list enumeration.
-#[derive(Debug, Clone, Facet)]
+#[derive(Debug, Clone, Default, Facet)]
 pub struct ActionListResponse {
     /// Total number of actions matching the requested filter/query before limit.
     pub total_count: u32,
     /// Returned action rows after applying limit.
     pub actions: Vec<ActionInfo>,
-}
-
-impl Default for ActionListResponse {
-    fn default() -> Self {
-        Self {
-            total_count: 0,
-            actions: Vec::new(),
-        }
-    }
 }
 
 /// Detailed result from executing a REAPER action.

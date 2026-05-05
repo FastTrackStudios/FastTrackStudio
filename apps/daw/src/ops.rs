@@ -1467,6 +1467,7 @@ pub async fn screenset_list(daw: &Daw) -> Result<Value> {
     Ok(serde_json::from_str(&json)?)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn screenset_capture(
     daw: &Daw,
     id: &str,

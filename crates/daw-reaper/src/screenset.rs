@@ -212,8 +212,8 @@ unsafe fn window_rect(hwnd: raw::HWND) -> Option<ScreensetRect> {
     let width = (r.right - r.left).max(0) as u32;
     let height = (r.bottom - r.top).max(0) as u32;
     Some(ScreensetRect {
-        x: r.left as i32,
-        y: r.top as i32,
+        x: r.left,
+        y: r.top,
         width,
         height,
     })

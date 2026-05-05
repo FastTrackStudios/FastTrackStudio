@@ -3,6 +3,8 @@
 //! These types represent the parsed contents of a `.dawproject` file.
 //! They are format-specific (not yet mapped to `daw_proto` types).
 
+#![allow(clippy::large_enum_variant, clippy::should_implement_trait)]
+
 use std::path::PathBuf;
 
 // ─── Top-level ───────────────────────────────────────────────────────────────

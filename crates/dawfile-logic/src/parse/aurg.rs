@@ -31,7 +31,7 @@
 //!
 //! ## Post-name variable section
 //!
-//! Immediately after the name, [`POOLSEG_FIXED_BEFORE_CLOCK`] bytes of fixed
+//! Immediately after the name, `POOLSEG_FIXED_BEFORE_CLOCK` bytes of fixed
 //! fields precede `startClockComp`.  Confirmed offsets relative to `name_end`:
 //!
 //! | Offset | Field                    | Type   | Notes                              |

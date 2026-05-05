@@ -108,14 +108,12 @@ fn latest_alternative(bundle: &Path) -> LogicResult<PathBuf> {
             if !p.is_dir() {
                 continue;
             }
-            if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
-                if let Ok(n) = name.parse::<u32>() {
-                    // Only consider directories that actually have a ProjectData file.
-                    if p.join("ProjectData").exists() {
-                        if best.as_ref().map_or(true, |(b, _)| n > *b) {
-                            best = Some((n, p));
-                        }
-                    }
+            if let Some(name) = p.file_name().and_then(|n| n.to_str())
+                && let Ok(n) = name.parse::<u32>()
+            {
+                // Only consider directories that actually have a ProjectData file.
+                if p.join("ProjectData").exists() && best.as_ref().is_none_or(|(b, _)| n > *b) {
+                    best = Some((n, p));
                 }
             }
         }

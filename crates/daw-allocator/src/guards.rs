@@ -1,8 +1,8 @@
 //! Allocation guards for real-time safety.
 //!
 //! Inspired by Helgobox's `assert_no_alloc` / `permit_alloc` pattern
-//! (https://github.com/helgoboss/helgobox) and the `assert_no_alloc` crate
-//! (https://github.com/Windfisch/rust-assert-no-alloc).
+//! (<https://github.com/helgoboss/helgobox>) and the `assert_no_alloc` crate
+//! (<https://github.com/Windfisch/rust-assert-no-alloc>).
 //!
 //! In debug builds, `assert_no_alloc` sets a thread-local counter that the
 //! global allocator checks on every (de)allocation. If an allocation happens

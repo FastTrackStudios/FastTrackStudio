@@ -164,10 +164,10 @@ fn write_track_common(
     }
 
     // View state
-    if let Some(ref vs) = common.view_state {
-        if let Some(ref json) = vs.view_data_json {
-            w.text_element("ViewData", json)?;
-        }
+    if let Some(ref vs) = common.view_state
+        && let Some(ref json) = vs.view_data_json
+    {
+        w.text_element("ViewData", json)?;
     }
 
     Ok(())
@@ -514,10 +514,10 @@ fn write_mixer(
     w.end("Sends")?;
 
     // Session track width (note: "Sesstion" is Ableton's actual typo)
-    if let Some(vs) = view_state {
-        if let Some(width) = vs.session_track_width {
-            w.value_int("ViewStateSesstionTrackWidth", width as i64)?;
-        }
+    if let Some(vs) = view_state
+        && let Some(width) = vs.session_track_width
+    {
+        w.value_int("ViewStateSesstionTrackWidth", width as i64)?;
     }
 
     w.end("Mixer")

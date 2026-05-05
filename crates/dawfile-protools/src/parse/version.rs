@@ -60,10 +60,10 @@ pub fn parse_version(cursor: &Cursor<'_>, blocks: &[Block], xor_type: u8) -> PtR
 /// one to trust.
 fn try_block_version(cursor: &Cursor<'_>, blocks: &[Block], xor_type: u8) -> Option<u16> {
     // For old format, try VersionInfoOld first
-    if xor_type == 0x01 {
-        if let Some(v) = try_version_info_old(cursor, blocks) {
-            return Some(v);
-        }
+    if xor_type == 0x01
+        && let Some(v) = try_version_info_old(cursor, blocks)
+    {
+        return Some(v);
     }
 
     // For new format (or old format fallback), try SessionInfo
@@ -72,10 +72,10 @@ fn try_block_version(cursor: &Cursor<'_>, blocks: &[Block], xor_type: u8) -> Opt
     }
 
     // For new format, try VersionInfoOld as fallback
-    if xor_type != 0x01 {
-        if let Some(v) = try_version_info_old(cursor, blocks) {
-            return Some(v);
-        }
+    if xor_type != 0x01
+        && let Some(v) = try_version_info_old(cursor, blocks)
+    {
+        return Some(v);
     }
 
     None

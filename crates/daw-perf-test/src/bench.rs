@@ -143,7 +143,7 @@ async fn native_remove_all_tracks() {
         let project = reaper.current_project();
         while project.track_count() > 0 {
             if let Some(track) = project.track_by_index(project.track_count() - 1) {
-                let _ = project.remove_track(&track);
+                project.remove_track(&track);
             } else {
                 break;
             }

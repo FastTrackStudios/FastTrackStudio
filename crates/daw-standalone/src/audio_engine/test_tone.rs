@@ -60,9 +60,9 @@ pub fn chord(frequencies: &[f32], duration_seconds: f32, sample_rate: u32) -> De
     let gain = 0.4 / frequencies.len().max(1) as f32;
 
     for &freq in frequencies {
-        for i in 0..num_samples {
+        for (i, sample) in samples.iter_mut().enumerate().take(num_samples) {
             let t = i as f32 / sample_rate as f32;
-            samples[i] += (2.0 * std::f32::consts::PI * freq * t).sin() * gain;
+            *sample += (2.0 * std::f32::consts::PI * freq * t).sin() * gain;
         }
     }
 
@@ -80,11 +80,11 @@ pub fn click_track(bpm: f32, duration_seconds: f32, sample_rate: u32) -> Decoded
     let click_interval = (60.0 / bpm * sample_rate as f32) as usize;
     let click_length = (0.01 * sample_rate as f32) as usize; // 10ms click
 
-    for i in 0..num_samples {
+    for (i, sample) in samples.iter_mut().enumerate().take(num_samples) {
         if i % click_interval < click_length {
             // Short burst of 1kHz sine
             let t = (i % click_interval) as f32 / sample_rate as f32;
-            samples[i] = (2.0 * std::f32::consts::PI * 1000.0 * t).sin() * 0.7;
+            *sample = (2.0 * std::f32::consts::PI * 1000.0 * t).sin() * 0.7;
         }
     }
 

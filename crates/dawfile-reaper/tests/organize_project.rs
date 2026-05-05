@@ -43,11 +43,9 @@ fn organize_belief_project() {
     // Reference should contain the mix track and Stem Split
     let ref_idx = names.iter().position(|n| *n == "Reference").unwrap();
     assert!(
-        organized[ref_idx]
-            .folder
-            .as_ref()
-            .map_or(false, |f| f.folder_state
-                == dawfile_reaper::types::track::FolderState::FolderParent),
+        organized[ref_idx].folder.as_ref().is_some_and(
+            |f| f.folder_state == dawfile_reaper::types::track::FolderState::FolderParent
+        ),
         "Reference should be a folder parent"
     );
 
@@ -80,11 +78,9 @@ fn organize_belief_project() {
         // Find what's inside TRACKS — should not be empty
         let tracks_idx = names.iter().position(|n| *n == "TRACKS").unwrap();
         assert!(
-            organized[tracks_idx]
-                .folder
-                .as_ref()
-                .map_or(false, |f| f.folder_state
-                    == dawfile_reaper::types::track::FolderState::FolderParent),
+            organized[tracks_idx].folder.as_ref().is_some_and(
+                |f| f.folder_state == dawfile_reaper::types::track::FolderState::FolderParent
+            ),
             "TRACKS should be a folder parent if it exists"
         );
         println!("  Note: TRACKS folder exists (project has content tracks)");

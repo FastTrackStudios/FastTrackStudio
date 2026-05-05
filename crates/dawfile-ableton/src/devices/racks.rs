@@ -30,18 +30,10 @@ impl Default for MacroControl {
 ///
 /// Racks share the same macro control structure. The chain/branch structure is
 /// handled by the main device parser; these params capture the 16 macro knobs.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct RackParams {
     /// 16 macro control knobs.
     pub macros: [MacroControl; 16],
-}
-
-impl Default for RackParams {
-    fn default() -> Self {
-        Self {
-            macros: Default::default(),
-        }
-    }
 }
 
 pub fn parse_rack(node: Node<'_, '_>) -> RackParams {

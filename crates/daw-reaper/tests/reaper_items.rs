@@ -6,7 +6,6 @@
 //! Run with: `cargo test -p daw-reaper --test reaper_items -- --ignored --nocapture`
 
 use reaper_test::reaper_test;
-use std::time::Duration;
 
 #[reaper_test(isolated)]
 async fn item_create_basic(ctx: &reaper_test::ReaperTestContext) -> eyre::Result<()> {
@@ -66,7 +65,7 @@ async fn item_create_basic(ctx: &reaper_test::ReaperTestContext) -> eyre::Result
     ctx.log("Getting active take...");
     let take = match item.takes().active().await {
         Ok(t) => {
-            ctx.log(&format!("Active take found"));
+            ctx.log("Active take found");
             t
         }
         Err(e) => {
@@ -159,7 +158,7 @@ async fn item_create_basic(ctx: &reaper_test::ReaperTestContext) -> eyre::Result
         ctx.log("item_create_basic: PARTIAL PASS (item created, notes not persisting)");
         return Ok(()); // Don't fail — item creation works, MIDI needs more work
     }
-    assert!(notes.len() >= 1, "Should have at least 1 note");
+    assert!(!notes.is_empty(), "Should have at least 1 note");
     ctx.log(&format!(
         "Note 0: pitch={}, vel={}, start={:.1}, len={:.1}",
         notes[0].pitch, notes[0].velocity, notes[0].start_ppq, notes[0].length_ppq

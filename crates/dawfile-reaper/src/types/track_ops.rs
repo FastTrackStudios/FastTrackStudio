@@ -127,7 +127,7 @@ pub fn move_into_existing_folder(
     let is_folder = tracks[folder_idx]
         .folder
         .as_ref()
-        .map_or(false, |f| f.folder_state == FolderState::FolderParent);
+        .is_some_and(|f| f.folder_state == FolderState::FolderParent);
     if !is_folder {
         return;
     }
@@ -135,8 +135,8 @@ pub fn move_into_existing_folder(
     // Find the folder's closing track by scanning forward for matching depth
     let mut depth = 1i32;
     let mut close_idx = tracks.len();
-    for i in (folder_idx + 1)..tracks.len() {
-        let indent = tracks[i].folder.as_ref().map_or(0, |f| f.indentation);
+    for (i, track) in tracks.iter().enumerate().skip(folder_idx + 1) {
+        let indent = track.folder.as_ref().map_or(0, |f| f.indentation);
         depth += indent;
         if depth <= 0 {
             close_idx = i;
@@ -164,24 +164,19 @@ pub fn move_into_existing_folder(
     extracted.reverse();
 
     // Re-find the folder close position (indices shifted after removals)
-    let folder_pos = tracks
-        .iter()
-        .position(|t| std::ptr::eq(t, t) && false) // dummy — find by re-scanning
-        .unwrap_or(0);
-
     // Re-scan: find the folder by scanning for our folder name + FolderParent
     // (indices have shifted, so we re-scan)
     let mut insert_at = tracks.len();
     for (i, t) in tracks.iter().enumerate() {
         if t.folder
             .as_ref()
-            .map_or(false, |f| f.folder_state == FolderState::FolderParent)
+            .is_some_and(|f| f.folder_state == FolderState::FolderParent)
             && i <= folder_idx
         {
             // Found a potential folder — scan for its close
             let mut d = 1i32;
-            for j in (i + 1)..tracks.len() {
-                let ind = tracks[j].folder.as_ref().map_or(0, |f| f.indentation);
+            for (j, track) in tracks.iter().enumerate().skip(i + 1) {
+                let ind = track.folder.as_ref().map_or(0, |f| f.indentation);
                 d += ind;
                 if d <= 0 {
                     insert_at = j;
@@ -255,7 +250,7 @@ pub fn classify_track(track: &Track) -> TrackRole {
     let is_folder = track
         .folder
         .as_ref()
-        .map_or(false, |f| f.folder_state == FolderState::FolderParent);
+        .is_some_and(|f| f.folder_state == FolderState::FolderParent);
     if is_folder && STRUCTURAL_FOLDERS.iter().any(|s| lower == *s) {
         return TrackRole::Structural;
     }
@@ -388,7 +383,7 @@ pub fn organize_into_fts_hierarchy(tracks: Vec<Track>) -> Vec<Track> {
             && track
                 .folder
                 .as_ref()
-                .map_or(false, |f| f.folder_state == FolderState::FolderParent)
+                .is_some_and(|f| f.folder_state == FolderState::FolderParent)
         {
             in_reference = true;
             ref_depth = 1;
@@ -398,7 +393,7 @@ pub fn organize_into_fts_hierarchy(tracks: Vec<Track>) -> Vec<Track> {
             && track
                 .folder
                 .as_ref()
-                .map_or(false, |f| f.folder_state == FolderState::FolderParent)
+                .is_some_and(|f| f.folder_state == FolderState::FolderParent)
         {
             in_stem_split = true;
             stem_depth = 1;
@@ -557,13 +552,13 @@ mod tests {
     fn is_folder_parent(t: &Track) -> bool {
         t.folder
             .as_ref()
-            .map_or(false, |f| f.folder_state == FolderState::FolderParent)
+            .is_some_and(|f| f.folder_state == FolderState::FolderParent)
     }
 
     fn is_last_in_folder(t: &Track) -> bool {
         t.folder
             .as_ref()
-            .map_or(false, |f| f.folder_state == FolderState::LastInFolder)
+            .is_some_and(|f| f.folder_state == FolderState::LastInFolder)
     }
 
     fn indent(t: &Track) -> i32 {

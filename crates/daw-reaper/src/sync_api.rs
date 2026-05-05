@@ -238,8 +238,8 @@ impl DawMainThread {
             ReaperProjectContext::CurrentProject,
             medium.get_play_position_ex(ReaperProjectContext::CurrentProject),
         );
-        let ts_num = ts_result.time_signature.numerator.get() as u32;
-        let ts_denom = ts_result.time_signature.denominator.get() as u32;
+        let ts_num = ts_result.time_signature.numerator.get();
+        let ts_denom = ts_result.time_signature.denominator.get();
 
         Some(daw_proto::Transport {
             play_state,
@@ -481,10 +481,10 @@ impl DawMainThread {
 /// Find a track by GUID string within a project (linear scan).
 fn find_track_by_guid(project: &reaper_high::Project, guid: &str) -> Option<reaper_high::Track> {
     for i in 0..project.track_count() {
-        if let Some(track) = project.track_by_index(i) {
-            if track.guid().to_string_without_braces() == guid {
-                return Some(track);
-            }
+        if let Some(track) = project.track_by_index(i)
+            && track.guid().to_string_without_braces() == guid
+        {
+            return Some(track);
         }
     }
     None

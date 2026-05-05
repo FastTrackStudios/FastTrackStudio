@@ -260,7 +260,7 @@ impl EmbeddedView {
         self.scene.reset();
         paint_scene(
             &mut VelloScenePainter::new(&mut self.scene),
-            &*self.doc.inner(),
+            &self.doc.inner(),
             self.scale_factor as f64,
             self.width,
             self.height,

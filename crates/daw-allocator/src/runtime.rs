@@ -1,7 +1,7 @@
 //! DAW runtime — unified entry point for allocator, task dispatch, and audio state.
 //!
 //! Inspired by Helgobox's `BackboneShell` initialization sequence and
-//! `Global` singleton (https://github.com/helgoboss/helgobox).
+//! `Global` singleton (<https://github.com/helgoboss/helgobox>).
 
 use std::alloc::GlobalAlloc;
 use std::sync::OnceLock;

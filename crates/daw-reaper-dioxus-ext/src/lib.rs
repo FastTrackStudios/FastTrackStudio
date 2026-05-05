@@ -33,9 +33,8 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     info!("reaper-dioxus service starting…");
 
     // Initialize REAPER APIs
-    match HighReaper::load(context).setup() {
-        Ok(_) => info!("reaper-dioxus: REAPER API loaded"),
-        Err(_) => {} // Already loaded by another extension
+    if HighReaper::load(context).setup().is_ok() {
+        info!("reaper-dioxus: REAPER API loaded");
     }
 
     // Initialize the service registry
@@ -49,7 +48,7 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     daw_reaper_dioxus::restore_dock_state();
 
     // Register the timer that drives panel rendering
-    let session = ReaperSession::load(context);
+    let _session = ReaperSession::load(context);
     // Note: we can't hold the session — just register and drop
     // The timer callback is a static extern "C" fn
 

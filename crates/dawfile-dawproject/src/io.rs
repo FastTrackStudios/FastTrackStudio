@@ -45,10 +45,10 @@ pub fn parse_project_bytes(data: &[u8]) -> DawProjectResult<DawProject> {
     let mut project = parse::parse_project(&project_str)?;
 
     // Extract metadata.xml (optional)
-    if let Some(meta_xml) = read_zip_entry(&mut archive, "metadata.xml") {
-        if let Ok(meta_str) = String::from_utf8(meta_xml) {
-            project.metadata = parse::parse_metadata(&meta_str).ok();
-        }
+    if let Some(meta_xml) = read_zip_entry(&mut archive, "metadata.xml")
+        && let Ok(meta_str) = String::from_utf8(meta_xml)
+    {
+        project.metadata = parse::parse_metadata(&meta_str).ok();
     }
 
     Ok(project)

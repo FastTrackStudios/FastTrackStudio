@@ -48,14 +48,14 @@ pub fn parse_session_audio_clips(
         let has_stop = child_bool(slot, "HasStop").unwrap_or(true);
         for clip_data in slot.children() {
             for clip_node in clip_data.children() {
-                if clip_node.has_tag_name("AudioClip") {
-                    if let Some(clip) = parse_audio_clip(clip_node, version) {
-                        clips.push(SessionClip {
-                            slot_index,
-                            clip,
-                            has_stop,
-                        });
-                    }
+                if clip_node.has_tag_name("AudioClip")
+                    && let Some(clip) = parse_audio_clip(clip_node, version)
+                {
+                    clips.push(SessionClip {
+                        slot_index,
+                        clip,
+                        has_stop,
+                    });
                 }
             }
         }
@@ -77,14 +77,14 @@ pub fn parse_session_midi_clips(
         let has_stop = child_bool(slot, "HasStop").unwrap_or(true);
         for clip_data in slot.children() {
             for clip_node in clip_data.children() {
-                if clip_node.has_tag_name("MidiClip") {
-                    if let Some(clip) = parse_midi_clip(clip_node, version) {
-                        clips.push(SessionClip {
-                            slot_index,
-                            clip,
-                            has_stop,
-                        });
-                    }
+                if clip_node.has_tag_name("MidiClip")
+                    && let Some(clip) = parse_midi_clip(clip_node, version)
+                {
+                    clips.push(SessionClip {
+                        slot_index,
+                        clip,
+                        has_stop,
+                    });
                 }
             }
         }
@@ -112,7 +112,7 @@ fn parse_clip_common(node: Node<'_, '_>) -> ClipCommon {
         start_relative: child_f64(loop_node, "StartRelative").unwrap_or(0.0),
     });
 
-    let follow_action = child(node, "FollowAction").and_then(|fa| {
+    let follow_action = child(node, "FollowAction").map(|fa| {
         let enabled = child_bool(fa, "FollowActionEnabled").unwrap_or(false);
         let follow_time = child_f64(fa, "FollowTime").unwrap_or(4.0);
         let is_linked = child_bool(fa, "IsLinked").unwrap_or(true);
@@ -121,7 +121,7 @@ fn parse_clip_common(node: Node<'_, '_>) -> ClipCommon {
         let action_b = child_i32(fa, "FollowActionB").unwrap_or(0);
         let chance_a = child_i32(fa, "FollowChanceA").unwrap_or(100);
         let chance_b = child_i32(fa, "FollowChanceB").unwrap_or(0);
-        Some(FollowAction {
+        FollowAction {
             follow_time,
             is_linked,
             loop_iterations,
@@ -130,7 +130,7 @@ fn parse_clip_common(node: Node<'_, '_>) -> ClipCommon {
             chance_a,
             chance_b,
             enabled,
-        })
+        }
     });
 
     let envelopes = automation::parse_clip_envelopes(node);

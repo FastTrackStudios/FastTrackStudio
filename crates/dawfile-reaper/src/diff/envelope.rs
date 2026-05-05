@@ -232,7 +232,7 @@ fn diff_automation_items(
         }
     }
 
-    for (&key, _) in &new_map {
+    for &key in new_map.keys() {
         if !old_map.contains_key(&key) {
             diffs.push(AutomationItemDiff {
                 pool_index: key.0,

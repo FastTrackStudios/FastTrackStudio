@@ -1,7 +1,7 @@
 //! Mutex utility patterns for RT-adjacent code.
 //!
 //! Inspired by Helgobox's `mutex_util.rs`
-//! (https://github.com/helgoboss/helgobox).
+//! (<https://github.com/helgoboss/helgobox>).
 //!
 //! Key patterns:
 //! - **Poison recovery** — never panic on poisoned mutex, recover the inner value

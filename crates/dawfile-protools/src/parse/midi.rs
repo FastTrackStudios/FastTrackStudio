@@ -251,11 +251,7 @@ fn parse_midi_tracks(
         let start_offset = entry.offset + 9;
         let start = if start_offset + 5 <= data.len() {
             let raw_start = cursor.u40_le(start_offset);
-            let relative = if raw_start >= ZERO_TICKS {
-                raw_start - ZERO_TICKS
-            } else {
-                ZERO_TICKS - raw_start
-            };
+            let relative = raw_start.abs_diff(ZERO_TICKS);
             (relative as f64 * rate_factor) as u64
         } else {
             0
@@ -289,7 +285,7 @@ fn find_magic(data: &[u8], start: usize, end: usize) -> Option<usize> {
         .map(|p| start + p)
 }
 
-fn find_block_recursive<'a>(blocks: &'a [Block], ct: ContentType) -> Option<&'a Block> {
+fn find_block_recursive(blocks: &[Block], ct: ContentType) -> Option<&Block> {
     for block in blocks {
         if block.content_type == Some(ct) {
             return Some(block);
@@ -301,7 +297,7 @@ fn find_block_recursive<'a>(blocks: &'a [Block], ct: ContentType) -> Option<&'a 
     None
 }
 
-fn find_all_recursive<'a>(blocks: &'a [Block], ct: ContentType) -> Vec<&'a Block> {
+fn find_all_recursive(blocks: &[Block], ct: ContentType) -> Vec<&Block> {
     let mut result = Vec::new();
     for block in blocks {
         if block.content_type == Some(ct) {

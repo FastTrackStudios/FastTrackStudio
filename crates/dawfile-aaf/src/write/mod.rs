@@ -139,28 +139,27 @@ fn collect_source_entries(session: &AafSession) -> Vec<SourceEntry> {
                 source_file,
                 ..
             } = &clip.kind
+                && seen.insert(*source_mob_id)
             {
-                if seen.insert(*source_mob_id) {
-                    let edit_rate = audio_info
-                        .map(|a| EditRate {
-                            numerator: a.sample_rate as i32,
-                            denominator: 1,
-                        })
-                        .unwrap_or(EditRate {
-                            numerator: session.session_sample_rate as i32,
-                            denominator: 1,
-                        });
-                    let total_length = audio_info.map(|a| a.length_samples).unwrap_or(i64::MAX / 2);
-
-                    entries.push(SourceEntry {
-                        mob_id: MobId(*source_mob_id),
-                        source_file: source_file.clone(),
-                        audio_info: *audio_info,
-                        source_slot_id: *source_slot_id,
-                        total_length,
-                        edit_rate,
+                let edit_rate = audio_info
+                    .map(|a| EditRate {
+                        numerator: a.sample_rate as i32,
+                        denominator: 1,
+                    })
+                    .unwrap_or(EditRate {
+                        numerator: session.session_sample_rate as i32,
+                        denominator: 1,
                     });
-                }
+                let total_length = audio_info.map(|a| a.length_samples).unwrap_or(i64::MAX / 2);
+
+                entries.push(SourceEntry {
+                    mob_id: MobId(*source_mob_id),
+                    source_file: source_file.clone(),
+                    audio_info: *audio_info,
+                    source_slot_id: *source_slot_id,
+                    total_length,
+                    edit_rate,
+                });
             }
         }
     }

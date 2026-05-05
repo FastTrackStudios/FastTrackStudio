@@ -31,6 +31,7 @@ pub fn set_project_marker(
 }
 
 /// Set a project marker/region by index with color.
+#[allow(clippy::too_many_arguments)]
 pub fn set_project_marker_by_index2(
     low: &ReaperLow,
     project: ProjectContext,

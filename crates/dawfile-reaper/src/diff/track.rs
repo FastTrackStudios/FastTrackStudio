@@ -8,7 +8,7 @@ use super::{envelope, fx, item};
 use crate::types::Track;
 
 /// Track identity key — either GUID or name, depending on options.
-fn track_key<'a>(track: &'a Track, by_name: bool) -> Option<&'a str> {
+fn track_key(track: &Track, by_name: bool) -> Option<&str> {
     if by_name {
         Some(track.name.as_str())
     } else {

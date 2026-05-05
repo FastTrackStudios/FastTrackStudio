@@ -23,6 +23,7 @@ pub fn track_get_peak_hold_db(
 ///
 /// Returns the number of peaks actually read (may be less than requested).
 /// `buf` must be pre-allocated with at least `num_channels * num_samples_per_channel` elements.
+#[allow(clippy::too_many_arguments)]
 pub fn pcm_source_get_peaks(
     low: &ReaperLow,
     source: reaper_medium::PcmSource,

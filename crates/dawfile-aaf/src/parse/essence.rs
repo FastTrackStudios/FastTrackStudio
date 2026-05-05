@@ -45,7 +45,7 @@ pub fn parse_essence_descriptor(
     };
 
     // Attempt to parse audio info if we have properties.
-    let audio_info = props.as_ref().and_then(|p| parse_audio_info(p));
+    let audio_info = props.as_ref().and_then(parse_audio_info);
 
     // Parse locators (EssenceDescriptor.Locator is a vector).
     let (urls, text_paths) = if let Some(ref p) = props {
@@ -133,10 +133,10 @@ fn parse_locators(
             if let Some(url) = loc_props.string(PID_NETWORK_LOCATOR_URL) {
                 urls.push(url);
             }
-        } else if class == CLASS_TEXT_LOCATOR {
-            if let Some(name) = loc_props.string(PID_TEXT_LOCATOR_NAME) {
-                texts.push(name);
-            }
+        } else if class == CLASS_TEXT_LOCATOR
+            && let Some(name) = loc_props.string(PID_TEXT_LOCATOR_NAME)
+        {
+            texts.push(name);
         }
         // Other locator types (EmbeddedLocator, etc.) are ignored.
     }

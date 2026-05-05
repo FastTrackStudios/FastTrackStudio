@@ -310,7 +310,7 @@ impl Properties {
 
     pub fn u8(&self, pid: u16) -> Option<u8> {
         let v = &self.get(pid)?.value;
-        if v.len() >= 1 { Some(v[0]) } else { None }
+        if !v.is_empty() { Some(v[0]) } else { None }
     }
 
     pub fn u16_le(&self, pid: u16) -> Option<u16> {
@@ -497,7 +497,7 @@ impl Properties {
 
 /// Decode a null-terminated UTF-16LE byte slice to a `String`.
 fn decode_utf16le(v: &[u8]) -> Option<String> {
-    if v.len() < 2 || v.len() % 2 != 0 {
+    if v.len() < 2 || !v.len().is_multiple_of(2) {
         return None;
     }
     let words: Vec<u16> = v

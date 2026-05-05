@@ -35,25 +35,22 @@ pub fn get_regions_on_main_thread() -> Vec<Region> {
 
     for idx in 0..total_count {
         medium.enum_project_markers_3(ReaperProjectContext::CurrentProject, idx, |result| {
-            if let Some(info) = result {
-                if let Some(end_pos) = info.region_end_position {
-                    let lane = ruler_lanes::get_marker_lane(
-                        low,
-                        ReaperProjectContext::CurrentProject,
-                        idx,
-                    );
-                    regions.push(Region {
-                        id: Some(info.id.get()),
-                        time_range: TimeRange::from_seconds(info.position.get(), end_pos.get()),
-                        name: info.name.to_string(),
-                        color: {
-                            let c = info.color.to_raw();
-                            if c != 0 { Some(c as u32) } else { None }
-                        },
-                        guid: None,
-                        lane,
-                    });
-                }
+            if let Some(info) = result
+                && let Some(end_pos) = info.region_end_position
+            {
+                let lane =
+                    ruler_lanes::get_marker_lane(low, ReaperProjectContext::CurrentProject, idx);
+                regions.push(Region {
+                    id: Some(info.id.get()),
+                    time_range: TimeRange::from_seconds(info.position.get(), end_pos.get()),
+                    name: info.name.to_string(),
+                    color: {
+                        let c = info.color.to_raw();
+                        if c != 0 { Some(c as u32) } else { None }
+                    },
+                    guid: None,
+                    lane,
+                });
             }
         });
     }
@@ -108,24 +105,21 @@ impl RegionService for ReaperRegion {
 
             for idx in 0..total_count {
                 medium.enum_project_markers_3(reaper_ctx, idx, |result| {
-                    if let Some(info) = result {
-                        if let Some(end_pos) = info.region_end_position {
-                            let lane = ruler_lanes::get_marker_lane(low, reaper_ctx, idx);
-                            regions.push(Region {
-                                id: Some(info.id.get()),
-                                time_range: TimeRange::from_seconds(
-                                    info.position.get(),
-                                    end_pos.get(),
-                                ),
-                                name: info.name.to_string(),
-                                color: {
-                                    let c = info.color.to_raw();
-                                    if c != 0 { Some(c as u32) } else { None }
-                                },
-                                guid: None,
-                                lane,
-                            });
-                        }
+                    if let Some(info) = result
+                        && let Some(end_pos) = info.region_end_position
+                    {
+                        let lane = ruler_lanes::get_marker_lane(low, reaper_ctx, idx);
+                        regions.push(Region {
+                            id: Some(info.id.get()),
+                            time_range: TimeRange::from_seconds(info.position.get(), end_pos.get()),
+                            name: info.name.to_string(),
+                            color: {
+                                let c = info.color.to_raw();
+                                if c != 0 { Some(c as u32) } else { None }
+                            },
+                            guid: None,
+                            lane,
+                        });
                     }
                 });
             }
@@ -291,10 +285,11 @@ impl RegionService for ReaperRegion {
 
                 for idx in 0..total_count {
                     medium.enum_project_markers_3(reaper_ctx, idx, |result| {
-                        if let Some(info) = result {
-                            if info.region_end_position.is_some() && info.id.get() == id {
-                                ruler_lanes::set_marker_lane(low, reaper_ctx, idx, lane);
-                            }
+                        if let Some(info) = result
+                            && info.region_end_position.is_some()
+                            && info.id.get() == id
+                        {
+                            ruler_lanes::set_marker_lane(low, reaper_ctx, idx, lane);
                         }
                     });
                 }

@@ -8,6 +8,7 @@ use daw_proto::*;
 ///
 /// This is called on an async runtime thread. Each service impl internally
 /// dispatches to REAPER's main thread via `main_thread::query()`.
+#[allow(clippy::too_many_arguments)]
 pub async fn dispatch_op(
     op: &BatchOp,
     outputs: &[Option<StepOutput>],
@@ -345,13 +346,13 @@ async fn dispatch_track(
         TrackOp::SetInputMonitoring(p, t, mode) => {
             let ctx = resolve_project_arg(p, outputs)?;
             let tr = resolve_track_arg(t, outputs)?;
-            svc.set_input_monitoring(ctx, tr, mode.clone()).await;
+            svc.set_input_monitoring(ctx, tr, *mode).await;
             Ok(StepOutput::Unit)
         }
         TrackOp::SetRecordInput(p, t, input) => {
             let ctx = resolve_project_arg(p, outputs)?;
             let tr = resolve_track_arg(t, outputs)?;
-            svc.set_record_input(ctx, tr, input.clone()).await;
+            svc.set_record_input(ctx, tr, *input).await;
             Ok(StepOutput::Unit)
         }
         TrackOp::SetVolume(p, t, v) => {
@@ -713,7 +714,7 @@ async fn dispatch_fx(
             let ctx = resolve_project_arg(p, outputs)?;
             let chain = resolve_fx_chain_arg(c, outputs)?;
             result_to_output(
-                svc.set_routing_mode(ctx, chain, node_id.clone(), mode.clone())
+                svc.set_routing_mode(ctx, chain, node_id.clone(), *mode)
                     .await,
             )
         }
@@ -841,7 +842,7 @@ async fn dispatch_routing(
         RoutingOp::SetSendMode(p, t, r, mode) => {
             let ctx = resolve_project_arg(p, outputs)?;
             let tr = resolve_track_arg(t, outputs)?;
-            svc.set_send_mode(ctx, tr, r.clone(), mode.clone()).await;
+            svc.set_send_mode(ctx, tr, r.clone(), *mode).await;
             Ok(StepOutput::Unit)
         }
         RoutingOp::SetSourceChannels(p, loc, start, num) => {
@@ -966,14 +967,12 @@ async fn dispatch_item(
         }
         ItemOp::SetFadeIn(p, item, len, shape) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.set_fade_in(ctx, item.clone(), *len, shape.clone())
-                .await;
+            svc.set_fade_in(ctx, item.clone(), *len, *shape).await;
             Ok(StepOutput::Unit)
         }
         ItemOp::SetFadeOut(p, item, len, shape) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.set_fade_out(ctx, item.clone(), *len, shape.clone())
-                .await;
+            svc.set_fade_out(ctx, item.clone(), *len, *shape).await;
             Ok(StepOutput::Unit)
         }
         ItemOp::SetLoopSource(p, item, v) => {
@@ -983,8 +982,7 @@ async fn dispatch_item(
         }
         ItemOp::SetBeatAttachMode(p, item, mode) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.set_beat_attach_mode(ctx, item.clone(), mode.clone())
-                .await;
+            svc.set_beat_attach_mode(ctx, item.clone(), *mode).await;
             Ok(StepOutput::Unit)
         }
         ItemOp::SetAutoStretch(p, item, v) => {
@@ -1542,7 +1540,7 @@ async fn dispatch_live_midi(
             Ok(StepOutput::Unit)
         }
         LiveMidiOp::SendMidi(dev, msg, timing) => {
-            svc.send_midi(*dev, msg.clone(), timing.clone()).await;
+            svc.send_midi(*dev, msg.clone(), *timing).await;
             Ok(StepOutput::Unit)
         }
         LiveMidiOp::SendMidiBatch(dev, events) => {
@@ -1550,7 +1548,7 @@ async fn dispatch_live_midi(
             Ok(StepOutput::Unit)
         }
         LiveMidiOp::StuffMidiMessage(target, msg) => {
-            svc.stuff_midi_message(target.clone(), msg.clone()).await;
+            svc.stuff_midi_message(*target, msg.clone()).await;
             Ok(StepOutput::Unit)
         }
     }
@@ -1648,13 +1646,13 @@ async fn dispatch_position_conversion(
         PositionConversionOp::TimeToBeats(p, pos, mode) => {
             let ctx = resolve_project_arg(p, outputs)?;
             Ok(StepOutput::TimeToBeatsResult(
-                svc.time_to_beats(ctx, *pos, mode.clone()).await,
+                svc.time_to_beats(ctx, *pos, *mode).await,
             ))
         }
         PositionConversionOp::BeatsToTime(p, pos, mode) => {
             let ctx = resolve_project_arg(p, outputs)?;
             Ok(StepOutput::PositionInSeconds(
-                svc.beats_to_time(ctx, *pos, mode.clone()).await,
+                svc.beats_to_time(ctx, *pos, *mode).await,
             ))
         }
         PositionConversionOp::TimeToQuarterNotes(p, pos) => {

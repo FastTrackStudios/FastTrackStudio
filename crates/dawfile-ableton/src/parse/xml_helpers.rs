@@ -75,13 +75,12 @@ pub fn time_attr(node: Node<'_, '_>) -> f64 {
 pub fn collect_max_current_end(node: Node<'_, '_>) -> f64 {
     let mut max = 0.0f64;
     for descendant in node.descendants() {
-        if descendant.has_tag_name("CurrentEnd") {
-            if let Some(v) = descendant
+        if descendant.has_tag_name("CurrentEnd")
+            && let Some(v) = descendant
                 .attribute("Value")
                 .and_then(|v| v.parse::<f64>().ok())
-            {
-                max = max.max(v);
-            }
+        {
+            max = max.max(v);
         }
     }
     max

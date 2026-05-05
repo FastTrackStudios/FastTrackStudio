@@ -50,6 +50,12 @@ pub struct BatchExecutor {
     inner: Arc<BatchExecutorInner>,
 }
 
+impl Default for BatchExecutor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BatchExecutor {
     pub fn new() -> Self {
         Self {

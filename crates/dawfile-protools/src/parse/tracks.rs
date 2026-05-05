@@ -341,10 +341,10 @@ fn group_alternate_playlists(entries: Vec<TrackEntry>) -> Vec<Track> {
 /// `"OH.04"` → `"OH"`, `"kick.13"` → `"kick"`, `"snaps 1"` → `"snaps 1"`,
 /// `"Juno.dup1.cm.01"` → `"Juno.dup1.cm"` (`.cm` has letters so it's not a suffix).
 fn playlist_base_name(name: &str) -> &str {
-    if let Some(dot_pos) = name.rfind('.') {
-        if name[dot_pos + 1..].chars().all(|c| c.is_ascii_digit()) {
-            return &name[..dot_pos];
-        }
+    if let Some(dot_pos) = name.rfind('.')
+        && name[dot_pos + 1..].chars().all(|c| c.is_ascii_digit())
+    {
+        return &name[..dot_pos];
     }
     name
 }
@@ -355,16 +355,14 @@ fn playlist_base_name(name: &str) -> &str {
 ///
 /// Used to find the active `0x1054` without descending into `0x2428`/`0x2429`
 /// alternate-playlist containers.
-fn find_top_level_block<'a>(blocks: &'a [Block], ct: ContentType) -> Option<&'a Block> {
-    for block in blocks {
-        if block.content_type == Some(ct) {
-            return Some(block);
-        }
-    }
-    None
+fn find_top_level_block(blocks: &[Block], ct: ContentType) -> Option<&Block> {
+    blocks
+        .iter()
+        .find(|&block| block.content_type == Some(ct))
+        .map(|v| v as _)
 }
 
-fn find_block_recursive<'a>(blocks: &'a [Block], ct: ContentType) -> Option<&'a Block> {
+fn find_block_recursive(blocks: &[Block], ct: ContentType) -> Option<&Block> {
     for block in blocks {
         if block.content_type == Some(ct) {
             return Some(block);

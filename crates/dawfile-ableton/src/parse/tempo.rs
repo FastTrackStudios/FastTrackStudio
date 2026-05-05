@@ -17,22 +17,20 @@ use roxmltree::Node;
 pub fn parse_tempo(master_node: Node<'_, '_>) -> f64 {
     // Try: DeviceChain.Mixer.Tempo.Manual[@Value]
     if let Some(tempo_node) = descend(master_node, "DeviceChain.Mixer.Tempo") {
-        if let Some(bpm) = child_f64(tempo_node, "Manual") {
-            if (10.0..=999.0).contains(&bpm) {
-                return bpm;
-            }
+        if let Some(bpm) = child_f64(tempo_node, "Manual")
+            && (10.0..=999.0).contains(&bpm)
+        {
+            return bpm;
         }
 
         // Fallback: ArrangerAutomation.Events first FloatEvent
         if let Some(events) = descend(tempo_node, "ArrangerAutomation.Events") {
             for event in events.children() {
-                if event.has_tag_name("FloatEvent") {
-                    if let Some(bpm) = event.attribute("Value").and_then(|v| v.parse::<f64>().ok())
-                    {
-                        if (10.0..=999.0).contains(&bpm) {
-                            return bpm;
-                        }
-                    }
+                if event.has_tag_name("FloatEvent")
+                    && let Some(bpm) = event.attribute("Value").and_then(|v| v.parse::<f64>().ok())
+                    && (10.0..=999.0).contains(&bpm)
+                {
+                    return bpm;
                 }
             }
         }
@@ -62,21 +60,21 @@ pub fn parse_tempo_automation(master_node: Node<'_, '_>) -> Vec<AutomationPoint>
     }
 
     // Then check envelope-based automation (v10+)
-    if let Some(target_id) = target_id {
-        if let Some(envelopes) = descend(master_node, "AutomationEnvelopes.Envelopes") {
-            for envelope in envelopes.children() {
-                if !envelope.has_tag_name("AutomationEnvelope") {
-                    continue;
-                }
-                let pointee_id =
-                    descend(envelope, "EnvelopeTarget").and_then(|n| child_i32(n, "PointeeId"));
+    if let Some(target_id) = target_id
+        && let Some(envelopes) = descend(master_node, "AutomationEnvelopes.Envelopes")
+    {
+        for envelope in envelopes.children() {
+            if !envelope.has_tag_name("AutomationEnvelope") {
+                continue;
+            }
+            let pointee_id =
+                descend(envelope, "EnvelopeTarget").and_then(|n| child_i32(n, "PointeeId"));
 
-                if pointee_id == Some(target_id) {
-                    if let Some(events) = descend(envelope, "Automation.Events") {
-                        collect_float_events(events, &mut points);
-                    }
-                    break;
+            if pointee_id == Some(target_id) {
+                if let Some(events) = descend(envelope, "Automation.Events") {
+                    collect_float_events(events, &mut points);
                 }
+                break;
             }
         }
     }
@@ -93,22 +91,20 @@ pub fn parse_tempo_automation(master_node: Node<'_, '_>) -> Vec<AutomationPoint>
 
 fn collect_float_events(events_node: Node<'_, '_>, points: &mut Vec<AutomationPoint>) {
     for event in events_node.children() {
-        if event.has_tag_name("FloatEvent") {
-            if let (Some(time), Some(value)) = (
+        if event.has_tag_name("FloatEvent")
+            && let (Some(time), Some(value)) = (
                 event.attribute("Time").and_then(|v| v.parse::<f64>().ok()),
                 event.attribute("Value").and_then(|v| v.parse::<f64>().ok()),
-            ) {
-                let curve_control_1 =
-                    parse_curve_control(&event, "CurveControl1X", "CurveControl1Y");
-                let curve_control_2 =
-                    parse_curve_control(&event, "CurveControl2X", "CurveControl2Y");
-                points.push(AutomationPoint {
-                    time,
-                    value,
-                    curve_control_1,
-                    curve_control_2,
-                });
-            }
+            )
+        {
+            let curve_control_1 = parse_curve_control(&event, "CurveControl1X", "CurveControl1Y");
+            let curve_control_2 = parse_curve_control(&event, "CurveControl2X", "CurveControl2Y");
+            points.push(AutomationPoint {
+                time,
+                value,
+                curve_control_1,
+                curve_control_2,
+            });
         }
     }
 }
@@ -137,18 +133,18 @@ pub fn parse_time_signature(master_node: Node<'_, '_>) -> TimeSignature {
         "DeviceChain.Mixer.TimeSignature.TimeSignatures",
     ) {
         for remote_ts in ts_node.children() {
-            if remote_ts.has_tag_name("RemoteableTimeSignature") {
-                if let (Some(num), Some(den)) = (
+            if remote_ts.has_tag_name("RemoteableTimeSignature")
+                && let (Some(num), Some(den)) = (
                     child_i32(remote_ts, "Numerator"),
                     child_i32(remote_ts, "Denominator"),
-                ) {
-                    if num > 0 && den > 0 {
-                        return TimeSignature {
-                            numerator: num as u8,
-                            denominator: den as u8,
-                        };
-                    }
-                }
+                )
+                && num > 0
+                && den > 0
+            {
+                return TimeSignature {
+                    numerator: num as u8,
+                    denominator: den as u8,
+                };
             }
         }
     }
@@ -164,10 +160,10 @@ pub fn parse_time_signature(master_node: Node<'_, '_>) -> TimeSignature {
             .and_then(|p| descend(p, "ArrangerAutomation.Events"))
         {
             for event in encoded.children() {
-                if event.has_tag_name("EnumEvent") {
-                    if let Some(v) = event.attribute("Value").and_then(|v| v.parse::<u32>().ok()) {
-                        return decode_time_signature(v);
-                    }
+                if event.has_tag_name("EnumEvent")
+                    && let Some(v) = event.attribute("Value").and_then(|v| v.parse::<u32>().ok())
+                {
+                    return decode_time_signature(v);
                 }
             }
         }

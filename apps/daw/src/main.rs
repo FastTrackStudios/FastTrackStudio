@@ -41,6 +41,7 @@ struct Cli {
 }
 
 #[derive(Subcommand)]
+#[allow(clippy::enum_variant_names)]
 enum Command {
     /// Show project info
     Info,

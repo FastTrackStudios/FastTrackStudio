@@ -13,7 +13,7 @@
 //!   "+50", etc.) on niri.
 //!
 //! The selection happens once per process at first call to
-//! [`backend()`]. Same key pressed on a niri seat as on a Win32 seat
+//! `backend()`. Same key pressed on a niri seat as on a Win32 seat
 //! does The Right Thing for the local layout model — the user doesn't
 //! re-bind anything when they switch seats.
 
@@ -57,14 +57,14 @@ pub fn read_rect(window: Window) -> ScreensetRect {
 /// Move `window` by `(dx, dy)` pixels without changing its size.
 fn swell_nudge(window: Window, dx: i32, dy: i32) {
     let r = window.window_rect();
-    move_to_pixels(window, r.left as i32 + dx, r.top as i32 + dy);
+    move_to_pixels(window, r.left + dx, r.top + dy);
 }
 
 /// Resize `window` by `(dw, dh)` pixels without moving its origin.
 fn swell_grow(window: Window, dw: i32, dh: i32) {
     let r = window.window_rect();
-    let new_w = ((r.right - r.left) as i32 + dw).max(MIN_DIM);
-    let new_h = ((r.bottom - r.top) as i32 + dh).max(MIN_DIM);
+    let new_w = ((r.right - r.left) + dw).max(MIN_DIM);
+    let new_h = ((r.bottom - r.top) + dh).max(MIN_DIM);
     set_size_pixels(window, new_w, new_h);
 }
 
@@ -204,8 +204,8 @@ fn niri_grow(dw: i32, dh: i32) {
 /// geometry service.
 fn rect_to_proto(r: raw::RECT) -> ScreensetRect {
     ScreensetRect {
-        x: r.left as i32,
-        y: r.top as i32,
+        x: r.left,
+        y: r.top,
         width: (r.right - r.left).max(0) as u32,
         height: (r.bottom - r.top).max(0) as u32,
     }

@@ -85,19 +85,17 @@ fn target_from_str(value: &str) -> ToolbarTarget {
     if value == "Main toolbar" {
         return ToolbarTarget::Main;
     }
-    if let Some(num) = value.strip_prefix("Floating toolbar ") {
-        if let Ok(n) = num.parse::<u8>() {
-            if (1..=32).contains(&n) {
-                return ToolbarTarget::Floating(n);
-            }
-        }
+    if let Some(num) = value.strip_prefix("Floating toolbar ")
+        && let Ok(n) = num.parse::<u8>()
+        && (1..=32).contains(&n)
+    {
+        return ToolbarTarget::Floating(n);
     }
-    if let Some(num) = value.strip_prefix("Floating MIDI toolbar ") {
-        if let Ok(n) = num.parse::<u8>() {
-            if (1..=8).contains(&n) {
-                return ToolbarTarget::Midi(n);
-            }
-        }
+    if let Some(num) = value.strip_prefix("Floating MIDI toolbar ")
+        && let Ok(n) = num.parse::<u8>()
+        && (1..=8).contains(&n)
+    {
+        return ToolbarTarget::Midi(n);
     }
     ToolbarTarget::Main
 }

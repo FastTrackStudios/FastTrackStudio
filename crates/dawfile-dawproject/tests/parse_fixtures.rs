@@ -286,11 +286,11 @@ fn file_with_relative_path_has_internal_file() {
     for lane in &arr.lanes {
         if let LaneContent::Clips(clips) = &lane.content {
             for c in clips {
-                if let ClipContent::Audio(audio) = &c.content {
-                    if let Some(f) = &audio.file {
-                        eprintln!("   file: path={:?} external={}", f.path, f.external);
-                        found = true;
-                    }
+                if let ClipContent::Audio(audio) = &c.content
+                    && let Some(f) = &audio.file
+                {
+                    eprintln!("   file: path={:?} external={}", f.path, f.external);
+                    found = true;
                 }
             }
         }
@@ -308,12 +308,11 @@ fn file_with_absolute_path_is_external() {
     for lane in &arr.lanes {
         if let LaneContent::Clips(clips) = &lane.content {
             for c in clips {
-                if let ClipContent::Audio(audio) = &c.content {
-                    if let Some(f) = &audio.file {
-                        if f.external {
-                            external_seen = true;
-                        }
-                    }
+                if let ClipContent::Audio(audio) = &c.content
+                    && let Some(f) = &audio.file
+                    && f.external
+                {
+                    external_seen = true;
                 }
             }
         }

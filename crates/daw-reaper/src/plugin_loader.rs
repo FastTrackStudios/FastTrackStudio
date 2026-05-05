@@ -154,10 +154,10 @@ pub fn eager_load_fx_plugins() {
         let path_str = real_path.to_string_lossy().to_string();
 
         // Skip if already loaded
-        if let Ok(plugins) = loaded_plugins().lock() {
-            if plugins.iter().any(|p| p.path == path_str) {
-                continue;
-            }
+        if let Ok(plugins) = loaded_plugins().lock()
+            && plugins.iter().any(|p| p.path == path_str)
+        {
+            continue;
         }
 
         // Try to dlopen and check for FtsReaperInit (preferred) or ReaperPluginEntry (legacy)
@@ -201,10 +201,10 @@ pub fn eager_load_fx_plugins() {
 impl PluginLoaderService for ReaperPluginLoader {
     async fn load_plugin(&self, plugin_path: String) -> PluginLoadResult {
         // Check if already loaded
-        if let Ok(plugins) = loaded_plugins().lock() {
-            if plugins.iter().any(|p| p.path == plugin_path) {
-                return PluginLoadResult::AlreadyLoaded;
-            }
+        if let Ok(plugins) = loaded_plugins().lock()
+            && plugins.iter().any(|p| p.path == plugin_path)
+        {
+            return PluginLoadResult::AlreadyLoaded;
         }
 
         let ctx = match PLUGIN_CONTEXT.get() {

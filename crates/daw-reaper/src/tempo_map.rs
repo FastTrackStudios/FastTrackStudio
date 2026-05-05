@@ -619,24 +619,23 @@ impl TempoMapService for ReaperTempoMap {
             for i in 0..count {
                 if let Some(m) =
                     sw::get_tempo_marker(low, ReaperProjectContext::CurrentProject, i as i32)
+                    && m.timepos < 0.001
                 {
-                    if m.timepos < 0.001 {
-                        // Update existing marker at position 0
-                        sw::set_tempo_marker(
-                            low,
-                            ReaperProjectContext::CurrentProject,
-                            i as i32,
-                            0.0,
-                            0,
-                            0.0,
-                            m.bpm,
-                            numerator,
-                            denominator,
-                            m.lineartempo,
-                        );
-                        found_at_zero = true;
-                        break;
-                    }
+                    // Update existing marker at position 0
+                    sw::set_tempo_marker(
+                        low,
+                        ReaperProjectContext::CurrentProject,
+                        i as i32,
+                        0.0,
+                        0,
+                        0.0,
+                        m.bpm,
+                        numerator,
+                        denominator,
+                        m.lineartempo,
+                    );
+                    found_at_zero = true;
+                    break;
                 }
             }
 

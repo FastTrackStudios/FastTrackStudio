@@ -40,10 +40,10 @@ async fn wait_for_pixels(
 ) -> eyre::Result<daw_proto::dock_host::PanelPixels> {
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
-        if let Some(pixels) = dock.capture_pixels(handle).await? {
-            if !pixels.bgra.is_empty() {
-                return Ok(pixels);
-            }
+        if let Some(pixels) = dock.capture_pixels(handle).await?
+            && !pixels.bgra.is_empty()
+        {
+            return Ok(pixels);
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }

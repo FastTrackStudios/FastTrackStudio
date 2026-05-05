@@ -135,8 +135,10 @@ fn render_icon_png(size: u32, config: &IconConfig) -> Result<Vec<u8>, String> {
         Pixmap::new(size, size).ok_or_else(|| "Failed to create pixmap".to_string())?;
 
     let bg_rect = rounded_rect(margin, margin, bg_size, bg_size, corner_r);
-    let mut paint = Paint::default();
-    paint.anti_alias = true;
+    let mut paint = Paint {
+        anti_alias: true,
+        ..Default::default()
+    };
 
     // Background: dark gray with a subtle color tint (skip tint if no_tint flag set)
     let base = 0.165_f32;
@@ -182,8 +184,10 @@ fn render_icon_png(size: u32, config: &IconConfig) -> Result<Vec<u8>, String> {
     let border_color =
         Color::from_rgba(1.0, 1.0, 1.0, 0.08).ok_or_else(|| "Invalid border color".to_string())?;
     paint.set_color(border_color);
-    let mut stroke = Stroke::default();
-    stroke.width = (sz * 0.015).max(1.0);
+    let stroke = Stroke {
+        width: (sz * 0.015).max(1.0),
+        ..Default::default()
+    };
     pixmap.stroke_path(&bg_rect, &paint, &stroke, Transform::identity(), None);
 
     // ── Badge pill ──
@@ -208,8 +212,10 @@ fn render_icon_png(size: u32, config: &IconConfig) -> Result<Vec<u8>, String> {
     let badge_rect = rounded_rect(badge_x, badge_y, badge_w, badge_h, badge_radius);
 
     // Badge shadow
-    let mut shadow_paint = Paint::default();
-    shadow_paint.anti_alias = true;
+    let mut shadow_paint = Paint {
+        anti_alias: true,
+        ..Default::default()
+    };
     for offset in [2.0_f32, 1.0] {
         shadow_paint.set_color(
             Color::from_rgba(0.0, 0.0, 0.0, 0.2)
@@ -247,8 +253,17 @@ fn render_icon_png(size: u32, config: &IconConfig) -> Result<Vec<u8>, String> {
         )
         .ok_or_else(|| "Invalid badge border color".to_string())?,
     );
-    stroke.width = (sz * 0.012).max(1.0);
-    pixmap.stroke_path(&badge_rect, &paint, &stroke, Transform::identity(), None);
+    let badge_stroke = Stroke {
+        width: (sz * 0.012).max(1.0),
+        ..Default::default()
+    };
+    pixmap.stroke_path(
+        &badge_rect,
+        &paint,
+        &badge_stroke,
+        Transform::identity(),
+        None,
+    );
 
     // ── Badge text ──
     let font =

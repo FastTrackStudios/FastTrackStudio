@@ -51,34 +51,24 @@ pub struct ChannelMapping {
 
 /// MIDI source-channel selection for a route.
 #[repr(C, u8)]
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Facet)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, Facet)]
 pub enum MidiSourceChannel {
     /// Forward all MIDI channels.
+    #[default]
     All,
     /// Forward only a specific 1-based MIDI channel.
     Channel(u8),
 }
 
-impl Default for MidiSourceChannel {
-    fn default() -> Self {
-        Self::All
-    }
-}
-
 /// MIDI destination-channel remapping for a route.
 #[repr(C, u8)]
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Facet)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, Facet)]
 pub enum MidiDestinationChannel {
     /// Preserve the original MIDI channel.
+    #[default]
     Original,
     /// Force output to a specific 1-based MIDI channel.
     Channel(u8),
-}
-
-impl Default for MidiDestinationChannel {
-    fn default() -> Self {
-        Self::Original
-    }
 }
 
 /// Typed MIDI channel mapping for REAPER's MIDI send flags.

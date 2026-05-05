@@ -173,7 +173,7 @@ fn dispatch_project_sync(
             let rctx = crate::project_context::resolve_project_context(&ctx);
             let reaper_scope = scope
                 .as_ref()
-                .map(|s| crate::project::convert_undo_scope(s))
+                .map(crate::project::convert_undo_scope)
                 .unwrap_or(reaper_medium::UndoScope::All);
             medium.undo_end_block_2(rctx, label.as_str(), reaper_scope);
             Ok(StepOutput::Unit)
@@ -379,8 +379,8 @@ fn dispatch_transport_sync(
             let pos = medium.get_play_position_ex(ReaperProjectContext::CurrentProject);
             let ts = medium.time_map_2_time_to_beats(ReaperProjectContext::CurrentProject, pos);
             Ok(StepOutput::TimeSignature(TimeSignature::new(
-                ts.time_signature.numerator.get() as u32,
-                ts.time_signature.denominator.get() as u32,
+                ts.time_signature.numerator.get(),
+                ts.time_signature.denominator.get(),
             )))
         }
         TransportOp::SetPositionMusical(_p, measure, beat, subdivision) => {
@@ -557,10 +557,10 @@ fn dispatch_track_sync(op: &TrackOp, outputs: &[Option<StepOutput>]) -> Result<S
         TrackOp::ClearSelection(p) => {
             let project = proj(p, outputs)?;
             for i in 0..project.track_count() {
-                if let Some(t) = project.track_by_index(i) {
-                    if t.is_selected() {
-                        t.unselect();
-                    }
+                if let Some(t) = project.track_by_index(i)
+                    && t.is_selected()
+                {
+                    t.unselect();
                 }
             }
             Ok(StepOutput::Unit)
@@ -568,10 +568,10 @@ fn dispatch_track_sync(op: &TrackOp, outputs: &[Option<StepOutput>]) -> Result<S
         TrackOp::MuteAll(p) => {
             let project = proj(p, outputs)?;
             for i in 0..project.track_count() {
-                if let Some(t) = project.track_by_index(i) {
-                    if !t.is_muted() {
-                        t.mute(GangBehavior::DenyGang, GroupingBehavior::PreventGrouping);
-                    }
+                if let Some(t) = project.track_by_index(i)
+                    && !t.is_muted()
+                {
+                    t.mute(GangBehavior::DenyGang, GroupingBehavior::PreventGrouping);
                 }
             }
             Ok(StepOutput::Unit)
@@ -579,10 +579,10 @@ fn dispatch_track_sync(op: &TrackOp, outputs: &[Option<StepOutput>]) -> Result<S
         TrackOp::UnmuteAll(p) => {
             let project = proj(p, outputs)?;
             for i in 0..project.track_count() {
-                if let Some(t) = project.track_by_index(i) {
-                    if t.is_muted() {
-                        t.unmute(GangBehavior::DenyGang, GroupingBehavior::PreventGrouping);
-                    }
+                if let Some(t) = project.track_by_index(i)
+                    && t.is_muted()
+                {
+                    t.unmute(GangBehavior::DenyGang, GroupingBehavior::PreventGrouping);
                 }
             }
             Ok(StepOutput::Unit)
@@ -655,7 +655,7 @@ fn dispatch_marker_sync(
                         None,
                     )
                     .unwrap_or(0);
-                Ok(StepOutput::U32(idx as u32))
+                Ok(StepOutput::U32(idx))
             } else {
                 Ok(StepOutput::U32(0))
             }
@@ -724,7 +724,7 @@ fn dispatch_region_sync(
                         None,
                     )
                     .unwrap_or(0);
-                Ok(StepOutput::U32(idx as u32))
+                Ok(StepOutput::U32(idx))
             } else {
                 Ok(StepOutput::U32(0))
             }
@@ -1002,10 +1002,10 @@ fn dispatch_fx_sync(op: &FxOp, outputs: &[Option<StepOutput>]) -> Result<StepOut
         FxOp::GetParameterByName(p, c, f, name) => {
             let (_track, _chain, fx) = resolve_chain_and_fx(p, c, f, outputs)?;
             for param in fx.parameters() {
-                if let Ok(pname) = param.name() {
-                    if pname.to_str() == *name {
-                        return Ok(StepOutput::OptFxParameter(Some(build_fx_parameter(&param))));
-                    }
+                if let Ok(pname) = param.name()
+                    && pname.to_str() == *name
+                {
+                    return Ok(StepOutput::OptFxParameter(Some(build_fx_parameter(&param))));
                 }
             }
             Ok(StepOutput::OptFxParameter(None))
@@ -1020,14 +1020,14 @@ fn dispatch_fx_sync(op: &FxOp, outputs: &[Option<StepOutput>]) -> Result<StepOut
                 .fx_by_index(fx_idx)
                 .ok_or_else(|| format!("fx_by_index({}) returned None", fx_idx))?;
             for param in fx.parameters() {
-                if let Ok(pname) = param.name() {
-                    if pname.to_str() == req.name {
-                        let norm_val = reaper_medium::ReaperNormalizedFxParamValue::new(req.value);
-                        param
-                            .set_reaper_normalized_value(norm_val)
-                            .map_err(|e| format!("set_reaper_normalized_value failed: {e}"))?;
-                        return Ok(StepOutput::Unit);
-                    }
+                if let Ok(pname) = param.name()
+                    && pname.to_str() == req.name
+                {
+                    let norm_val = reaper_medium::ReaperNormalizedFxParamValue::new(req.value);
+                    param
+                        .set_reaper_normalized_value(norm_val)
+                        .map_err(|e| format!("set_reaper_normalized_value failed: {e}"))?;
+                    return Ok(StepOutput::Unit);
                 }
             }
             Err(format!("parameter '{}' not found", req.name))
@@ -1746,10 +1746,10 @@ fn dispatch_item_sync(op: &ItemOp, outputs: &[Option<StepOutput>]) -> Result<Ste
         ItemOp::DeleteItem(p, item_ref) => {
             let ctx = resolve_project_arg(p, outputs)?;
             let proj_ctx = crate::project_context::resolve_project_context(&ctx);
-            if let Some(item_ptr) = ReaperItem::resolve_item(item_ref, proj_ctx) {
-                if let Some(track) = item_sw::get_media_item_track(medium, item_ptr) {
-                    item_sw::delete_track_media_item(medium, track, item_ptr);
-                }
+            if let Some(item_ptr) = ReaperItem::resolve_item(item_ref, proj_ctx)
+                && let Some(track) = item_sw::get_media_item_track(medium, item_ptr)
+            {
+                item_sw::delete_track_media_item(medium, track, item_ptr);
             }
             Ok(StepOutput::Unit)
         }
@@ -1993,11 +1993,11 @@ fn dispatch_take_sync(op: &TakeOp, outputs: &[Option<StepOutput>]) -> Result<Ste
             let count = item_sw::count_takes(low, item_ptr);
             let mut index = 0u32;
             for i in 0..count {
-                if let Some(t) = item_sw::get_take(low, item_ptr, i) {
-                    if t == take {
-                        index = i as u32;
-                        break;
-                    }
+                if let Some(t) = item_sw::get_take(low, item_ptr, i)
+                    && t == take
+                {
+                    index = i as u32;
+                    break;
                 }
             }
             let take_data = ReaperTakeImpl::media_take_to_take(item_ptr, take, index);
@@ -2014,11 +2014,11 @@ fn dispatch_take_sync(op: &TakeOp, outputs: &[Option<StepOutput>]) -> Result<Ste
                 let count = item_sw::count_takes(low, item_ptr);
                 let mut index = 0u32;
                 for i in 0..count {
-                    if let Some(t) = item_sw::get_take(low, item_ptr, i) {
-                        if t == take {
-                            index = i as u32;
-                            break;
-                        }
+                    if let Some(t) = item_sw::get_take(low, item_ptr, i)
+                        && t == take
+                    {
+                        index = i as u32;
+                        break;
                     }
                 }
                 ReaperTakeImpl::media_take_to_take(item_ptr, take, index)
@@ -2087,10 +2087,10 @@ fn dispatch_take_sync(op: &TakeOp, outputs: &[Option<StepOutput>]) -> Result<Ste
             let proj_ctx = crate::project_context::resolve_project_context(&ctx);
             let item_ptr = ReaperItem::resolve_item(item_ref, proj_ctx)
                 .ok_or_else(|| "item not found".to_string())?;
-            if let Some(take) = ReaperTakeImpl::resolve_take(item_ptr, take_ref) {
-                if let Ok(s) = Semitones::new(*semitones) {
-                    item_sw::set_take_pitch(medium, take, s);
-                }
+            if let Some(take) = ReaperTakeImpl::resolve_take(item_ptr, take_ref)
+                && let Ok(s) = Semitones::new(*semitones)
+            {
+                item_sw::set_take_pitch(medium, take, s);
             }
             Ok(StepOutput::Unit)
         }
@@ -2184,7 +2184,7 @@ fn dispatch_midi_sync(op: &MidiOp, outputs: &[Option<StepOutput>]) -> Result<Ste
             let take = ReaperMidi::resolve_take_for_location(medium, location)
                 .ok_or_else(|| "MIDI take not found".to_string())?;
             let count_before = ReaperMidi::read_notes(medium, take).len() as u32;
-            crate::midi::add_notes_to_take_on_main_thread(take, &[note.clone()]);
+            crate::midi::add_notes_to_take_on_main_thread(take, std::slice::from_ref(note));
             Ok(StepOutput::U32(count_before))
         }
         MidiOp::AddNotes(location, notes) => {
@@ -2458,23 +2458,23 @@ fn dispatch_tempo_map_sync(
             let count = medium.count_tempo_time_sig_markers(rctx);
             let mut found_at_zero = false;
             for i in 0..count {
-                if let Some(m) = tempo_sw::get_tempo_marker(low, rctx, i as i32) {
-                    if m.timepos < 0.001 {
-                        tempo_sw::set_tempo_marker(
-                            low,
-                            rctx,
-                            i as i32,
-                            0.0,
-                            0,
-                            0.0,
-                            m.bpm,
-                            *numerator,
-                            *denominator,
-                            m.lineartempo,
-                        );
-                        found_at_zero = true;
-                        break;
-                    }
+                if let Some(m) = tempo_sw::get_tempo_marker(low, rctx, i as i32)
+                    && m.timepos < 0.001
+                {
+                    tempo_sw::set_tempo_marker(
+                        low,
+                        rctx,
+                        i as i32,
+                        0.0,
+                        0,
+                        0.0,
+                        m.bpm,
+                        *numerator,
+                        *denominator,
+                        m.lineartempo,
+                    );
+                    found_at_zero = true;
+                    break;
                 }
             }
             if !found_at_zero {

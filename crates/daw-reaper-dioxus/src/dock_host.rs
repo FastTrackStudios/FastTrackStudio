@@ -154,7 +154,7 @@ struct HostState {
 
 impl ReaperDockHost {
     pub fn new() -> Self {
-        Self::default()
+        Self
     }
 
     /// Resolve a handle back to the dock module's `&'static str` id.

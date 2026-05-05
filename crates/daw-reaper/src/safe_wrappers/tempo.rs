@@ -46,6 +46,7 @@ pub fn get_tempo_marker(
 /// Set (or add) a tempo/time-signature marker.
 ///
 /// Pass `index = -1` to add a new marker.
+#[allow(clippy::too_many_arguments)]
 pub fn set_tempo_marker(
     low: &ReaperLow,
     project: ProjectContext,

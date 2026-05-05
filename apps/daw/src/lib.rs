@@ -315,53 +315,6 @@ fn append_missing_toolbar_sections(
     }
 }
 
-#[cfg(test)]
-mod launcher_tests {
-    use super::*;
-
-    fn temp_profile(name: &str) -> DawProfile {
-        let root = std::env::temp_dir().join(format!("daw-cli-{name}-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&root);
-        let resources_dir = root.join("Reaper");
-        DawProfile {
-            id: "test",
-            label: "Test REAPER",
-            daw: "reaper",
-            executable: "reaper".to_string(),
-            ini_path: resources_dir.join("reaper.ini"),
-            resources_dir,
-            role: "test",
-            sandboxed: false,
-        }
-    }
-
-    #[test]
-    fn bootstrap_reaper_toolbars_only_adds_missing_sections() {
-        let profile = temp_profile("toolbar-bootstrap");
-        fs::create_dir_all(&profile.resources_dir).unwrap();
-        let menu_path = profile.resources_dir.join("reaper-menu.ini");
-        fs::write(
-            &menu_path,
-            "[Main toolbar]\nitem_0=40023 New project...\n\n[Floating toolbar 1]\nitem_0=_FTS_EXISTING Existing\n\n[Floating MIDI toolbar 1]\nitem_0=_FTS_MIDI Existing MIDI\n",
-        )
-        .unwrap();
-
-        bootstrap_reaper_toolbars(&profile).unwrap();
-        let content = fs::read_to_string(&menu_path).unwrap();
-
-        assert!(content.contains("[Floating toolbar 1]\nitem_0=_FTS_EXISTING Existing\n"));
-        assert!(content.contains("[Floating toolbar 2]\nitem_0=41101 Edit me\n"));
-        assert!(content.contains("[Floating toolbar 32]\nitem_0=41101 Edit me\n"));
-        assert!(content.contains("[Floating MIDI toolbar 1]\nitem_0=_FTS_MIDI Existing MIDI\n"));
-        assert!(content.contains("[Floating MIDI toolbar 2]\nitem_0=41101 Edit me\n"));
-        assert!(content.contains("[Floating MIDI toolbar 8]\nitem_0=41101 Edit me\n"));
-        assert_eq!(content.matches("[Floating toolbar 1]").count(), 1);
-        assert_eq!(content.matches("[Floating MIDI toolbar 1]").count(), 1);
-
-        let _ = fs::remove_dir_all(profile.resources_dir.parent().unwrap());
-    }
-}
-
 fn prewarm_reaper_profile_if_needed(profile: &DawProfile) {
     let needs_prewarm = fs::read_to_string(&profile.ini_path)
         .map(|content| !content.contains("[nag]"))
@@ -1105,7 +1058,7 @@ pub async fn cmd_plugins(daw: &Daw, as_json: bool) -> Result<()> {
             .collect();
         println!("{}", serde_json::to_string_pretty(&arr)?);
     } else {
-        println!("{:<4} {:<50} {}", "#", "Name", "Identifier");
+        println!("{:<4} {:<50} Identifier", "#", "Name");
         println!("{}", "\u{2500}".repeat(100));
         for (i, p) in plugins.iter().enumerate() {
             println!("{:<4} {:<50} {}", i, p.name, p.ident);
@@ -1157,7 +1110,7 @@ pub async fn cmd_params(daw: &Daw, track_arg: &str, fx_arg: &str, as_json: bool)
             params.len()
         );
         println!();
-        println!("{:>4}  {:<35}  {:>8}  {}", "#", "Name", "Value", "Display");
+        println!("{:>4}  {:<35}  {:>8}  Display", "#", "Name", "Value");
         println!("{}", "-".repeat(75));
 
         for p in &params {
@@ -1241,7 +1194,7 @@ pub async fn cmd_markers(daw: &Daw, as_json: bool) -> Result<()> {
             println!("No markers.");
             return Ok(());
         }
-        println!("{:>4}  {:<14}  {}", "ID", "Position", "Name");
+        println!("{:>4}  {:<14}  Name", "ID", "Position");
         println!("{}", "-".repeat(45));
         for m in &markers {
             println!(
@@ -1279,7 +1232,7 @@ pub async fn cmd_regions(daw: &Daw, as_json: bool) -> Result<()> {
             println!("No regions.");
             return Ok(());
         }
-        println!("{:>4}  {:<14}  {:<14}  {}", "ID", "Start", "End", "Name");
+        println!("{:>4}  {:<14}  {:<14}  Name", "ID", "Start", "End");
         println!("{}", "-".repeat(55));
         for r in &regions {
             println!(
@@ -1350,8 +1303,8 @@ pub fn cmd_profiles(as_json: bool) -> Result<()> {
     }
 
     println!(
-        "{:<18} {:<8} {:<10} {:<9} {}",
-        "PROFILE", "DAW", "ROLE", "SANDBOX", "CONFIG"
+        "{:<18} {:<8} {:<10} {:<9} CONFIG",
+        "PROFILE", "DAW", "ROLE", "SANDBOX"
     );
     for profile in profiles.as_array().into_iter().flatten() {
         println!(
@@ -1422,7 +1375,7 @@ pub async fn cmd_projects(daw: &Daw, as_json: bool) -> Result<()> {
             println!("No open projects.");
             return Ok(());
         }
-        println!("{:>3}  {:<30}  {:<38}  {}", "#", "Name", "GUID", "Path");
+        println!("{:>3}  {:<30}  {:<38}  Path", "#", "Name", "GUID");
         println!("{}", "-".repeat(100));
         for (i, p) in projects.iter().enumerate() {
             let info = p.info().await?;
@@ -1557,4 +1510,51 @@ pub async fn cmd_combine(
     println!("Total: {:.0}:{:02.0}", (total / 60.0).floor(), total % 60.0,);
 
     Ok(())
+}
+
+#[cfg(test)]
+mod launcher_tests {
+    use super::*;
+
+    fn temp_profile(name: &str) -> DawProfile {
+        let root = std::env::temp_dir().join(format!("daw-cli-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let resources_dir = root.join("Reaper");
+        DawProfile {
+            id: "test",
+            label: "Test REAPER",
+            daw: "reaper",
+            executable: "reaper".to_string(),
+            ini_path: resources_dir.join("reaper.ini"),
+            resources_dir,
+            role: "test",
+            sandboxed: false,
+        }
+    }
+
+    #[test]
+    fn bootstrap_reaper_toolbars_only_adds_missing_sections() {
+        let profile = temp_profile("toolbar-bootstrap");
+        fs::create_dir_all(&profile.resources_dir).unwrap();
+        let menu_path = profile.resources_dir.join("reaper-menu.ini");
+        fs::write(
+            &menu_path,
+            "[Main toolbar]\nitem_0=40023 New project...\n\n[Floating toolbar 1]\nitem_0=_FTS_EXISTING Existing\n\n[Floating MIDI toolbar 1]\nitem_0=_FTS_MIDI Existing MIDI\n",
+        )
+        .unwrap();
+
+        bootstrap_reaper_toolbars(&profile).unwrap();
+        let content = fs::read_to_string(&menu_path).unwrap();
+
+        assert!(content.contains("[Floating toolbar 1]\nitem_0=_FTS_EXISTING Existing\n"));
+        assert!(content.contains("[Floating toolbar 2]\nitem_0=41101 Edit me\n"));
+        assert!(content.contains("[Floating toolbar 32]\nitem_0=41101 Edit me\n"));
+        assert!(content.contains("[Floating MIDI toolbar 1]\nitem_0=_FTS_MIDI Existing MIDI\n"));
+        assert!(content.contains("[Floating MIDI toolbar 2]\nitem_0=41101 Edit me\n"));
+        assert!(content.contains("[Floating MIDI toolbar 8]\nitem_0=41101 Edit me\n"));
+        assert_eq!(content.matches("[Floating toolbar 1]").count(), 1);
+        assert_eq!(content.matches("[Floating MIDI toolbar 1]").count(), 1);
+
+        let _ = fs::remove_dir_all(profile.resources_dir.parent().unwrap());
+    }
 }

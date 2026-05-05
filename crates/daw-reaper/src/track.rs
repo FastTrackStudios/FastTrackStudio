@@ -359,7 +359,7 @@ pub(crate) fn resolve_project(ctx: &ProjectContext) -> Option<reaper_high::Proje
                 c.borrow()
                     .as_ref()
                     .filter(|(cached_guid, _)| cached_guid == guid)
-                    .map(|(_, proj)| proj.clone())
+                    .map(|(_, proj)| *proj)
             });
             if let Some(proj) = cached {
                 return Some(proj);
@@ -776,10 +776,10 @@ fn apply_hierarchy_on_main_thread(
 /// Find a track's current index by GUID.
 fn find_track_index_by_guid(proj: &Project, guid: &str) -> Option<u32> {
     for i in 0..proj.track_count() {
-        if let Some(t) = proj.track_by_index(i) {
-            if t.guid().to_string_without_braces() == guid {
-                return Some(i);
-            }
+        if let Some(t) = proj.track_by_index(i)
+            && t.guid().to_string_without_braces() == guid
+        {
+            return Some(i);
         }
     }
     None

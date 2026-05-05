@@ -48,6 +48,9 @@
 
 use std::sync::Arc;
 
+/// Tuple consumed by extension action registration.
+pub type ActionRegistrationTuple = (String, String, Arc<dyn Fn() + Send + Sync>, bool, bool);
+
 /// An action that a module registers with the DAW.
 pub struct ActionDef {
     /// Unique command ID registered with the DAW (e.g. "FTS_SESSION_NEXT_SONG").
@@ -91,7 +94,7 @@ impl ActionDef {
     }
 
     /// Convert to the tuple format used by extension action registration.
-    pub fn into_tuple(self) -> (String, String, Arc<dyn Fn() + Send + Sync>, bool, bool) {
+    pub fn into_tuple(self) -> ActionRegistrationTuple {
         (
             self.command_id,
             self.display_name,
@@ -279,9 +282,7 @@ pub enum DockPosition {
 }
 
 /// Collect all action tuples from a list of modules.
-pub fn collect_actions(
-    modules: &[Box<dyn DawModule>],
-) -> Vec<(String, String, Arc<dyn Fn() + Send + Sync>, bool, bool)> {
+pub fn collect_actions(modules: &[Box<dyn DawModule>]) -> Vec<ActionRegistrationTuple> {
     let mut all = Vec::new();
     for m in modules {
         let actions = m.actions();

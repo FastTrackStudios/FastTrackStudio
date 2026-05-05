@@ -268,6 +268,7 @@ fn parse_transition(
 
 // ─── OperationGroup ──────────────────────────────────────────────────────────
 
+#[allow(clippy::too_many_arguments)]
 fn parse_operation_group(
     store: &CfbStore,
     op_dir: &Path,

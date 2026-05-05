@@ -92,7 +92,7 @@ pub fn compare_to_golden(
         )));
     }
 
-    let refresh = std::env::var("FTS_GOLDEN_REFRESH").map_or(false, |v| v == "1");
+    let refresh = std::env::var("FTS_GOLDEN_REFRESH").is_ok_and(|v| v == "1");
 
     if !golden_path.exists() || refresh {
         if let Some(parent) = golden_path.parent() {

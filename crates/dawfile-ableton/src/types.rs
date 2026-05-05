@@ -186,7 +186,7 @@ impl std::fmt::Display for Tonic {
 // ─── Routing types ─────────────────────────────────────────────────────────
 
 /// A routing target with display strings and MPE settings.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct RoutingTarget {
     /// Routing target identifier string.
     pub target: String,
@@ -196,17 +196,6 @@ pub struct RoutingTarget {
     pub lower_display_string: String,
     /// MPE settings for this routing.
     pub mpe_settings: Option<MpeSettings>,
-}
-
-impl Default for RoutingTarget {
-    fn default() -> Self {
-        Self {
-            target: String::new(),
-            upper_display_string: String::new(),
-            lower_display_string: String::new(),
-            mpe_settings: None,
-        }
-    }
 }
 
 /// MPE (MIDI Polyphonic Expression) settings for a routing target.

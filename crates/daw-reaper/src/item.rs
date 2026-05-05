@@ -32,11 +32,10 @@ use vox::Tx;
 /// Extract a REAPER item's GUID as a braced string (e.g., "{XXXXXXXX-XXXX-...}")
 pub(crate) fn item_guid_string(medium: &reaper_medium::Reaper, item: MediaItem) -> String {
     let guid_ptr = unsafe {
-        medium.low().GetSetMediaItemInfo(
-            item.as_ptr(),
-            b"GUID\0".as_ptr() as _,
-            std::ptr::null_mut(),
-        ) as *const reaper_low::raw::GUID
+        medium
+            .low()
+            .GetSetMediaItemInfo(item.as_ptr(), c"GUID".as_ptr() as _, std::ptr::null_mut())
+            as *const reaper_low::raw::GUID
     };
     if !guid_ptr.is_null() {
         let g = unsafe { &*guid_ptr };
@@ -181,11 +180,11 @@ pub fn poll_and_broadcast_items() {
             let active_take_index = if let Some(active) = active_take {
                 let mut idx = 0u32;
                 for ti in 0..take_count {
-                    if let Some(t) = item_sw::get_take(low, item, ti as i32) {
-                        if t == active {
-                            idx = ti;
-                            break;
-                        }
+                    if let Some(t) = item_sw::get_take(low, item, ti as i32)
+                        && t == active
+                    {
+                        idx = ti;
+                        break;
                     }
                 }
                 idx
@@ -206,16 +205,16 @@ pub fn poll_and_broadcast_items() {
         }
 
         // If counts match and we have a cache, do per-item diff
-        if current_count == cached_count {
-            if let Some(prev_states) = cached_items {
-                // Compare each item
-                for (prev, curr) in prev_states.iter().zip(current_states.iter()) {
-                    emit_item_diffs(item_tx, &project_guid, prev, curr);
-                }
-                // Update cache
-                cache_guard.insert(project_guid.clone(), current_states);
-                continue;
+        if current_count == cached_count
+            && let Some(prev_states) = cached_items
+        {
+            // Compare each item
+            for (prev, curr) in prev_states.iter().zip(current_states.iter()) {
+                emit_item_diffs(item_tx, &project_guid, prev, curr);
             }
+            // Update cache
+            cache_guard.insert(project_guid.clone(), current_states);
+            continue;
         }
 
         // Count mismatch or no cache — detect creates/deletes and update everything
@@ -230,14 +229,15 @@ pub fn poll_and_broadcast_items() {
 
             // Deleted items: in prev but not in curr
             for prev in &prev_states {
-                if !prev.guid.is_empty() && !curr_guids.contains_key(prev.guid.as_str()) {
-                    if let Some(tx) = item_tx {
-                        let _ = tx.send(ItemEvent::Deleted {
-                            project_guid: project_guid.clone(),
-                            track_guid: prev.track_guid.clone(),
-                            item_guid: prev.guid.clone(),
-                        });
-                    }
+                if !prev.guid.is_empty()
+                    && !curr_guids.contains_key(prev.guid.as_str())
+                    && let Some(tx) = item_tx
+                {
+                    let _ = tx.send(ItemEvent::Deleted {
+                        project_guid: project_guid.clone(),
+                        track_guid: prev.track_guid.clone(),
+                        item_guid: prev.guid.clone(),
+                    });
                 }
             }
 
@@ -423,7 +423,7 @@ impl ReaperItem {
                 let guid_ptr = unsafe {
                     medium.low().GetSetMediaItemInfo(
                         candidate.as_ptr(),
-                        b"GUID\0".as_ptr() as _,
+                        c"GUID".as_ptr() as _,
                         std::ptr::null_mut(),
                     ) as *const reaper_low::raw::GUID
                 };
@@ -504,11 +504,11 @@ impl ReaperItem {
         let active_take_index = if let Some(active) = active_take {
             let mut found_index = 0;
             for i in 0..take_count {
-                if let Some(take) = item_sw::get_take(low, item, i as i32) {
-                    if take == active {
-                        found_index = i;
-                        break;
-                    }
+                if let Some(take) = item_sw::get_take(low, item, i as i32)
+                    && take == active
+                {
+                    found_index = i;
+                    break;
                 }
             }
             found_index
@@ -706,10 +706,9 @@ impl ItemService for ReaperItem {
             let medium = reaper.medium_reaper();
 
             if let Some(item_ptr) = Self::resolve_item(&item, ReaperProjectContext::CurrentProject)
+                && let Some(track) = item_sw::get_media_item_track(medium, item_ptr)
             {
-                if let Some(track) = item_sw::get_media_item_track(medium, item_ptr) {
-                    item_sw::delete_track_media_item(medium, track, item_ptr);
-                }
+                item_sw::delete_track_media_item(medium, track, item_ptr);
             }
         });
     }
@@ -797,10 +796,10 @@ impl ItemService for ReaperItem {
                 let Some(proj) = resolve_project(&project) else {
                     return;
                 };
-                if let Some(resolved) = resolve_track(&proj, &track) {
-                    if let Ok(raw) = resolved.raw() {
-                        item_sw::move_item_to_track(medium.low(), item_ptr, raw);
-                    }
+                if let Some(resolved) = resolve_track(&proj, &track)
+                    && let Ok(raw) = resolved.raw()
+                {
+                    item_sw::move_item_to_track(medium.low(), item_ptr, raw);
                 }
             }
         });

@@ -263,10 +263,11 @@ impl MarkerService for ReaperMarker {
 
                 for idx in 0..total_count {
                     medium.enum_project_markers_3(reaper_ctx, idx, |result| {
-                        if let Some(info) = result {
-                            if info.region_end_position.is_none() && info.id.get() == id {
-                                ruler_lanes::set_marker_lane(low, reaper_ctx, idx, lane);
-                            }
+                        if let Some(info) = result
+                            && info.region_end_position.is_none()
+                            && info.id.get() == id
+                        {
+                            ruler_lanes::set_marker_lane(low, reaper_ctx, idx, lane);
                         }
                     });
                 }

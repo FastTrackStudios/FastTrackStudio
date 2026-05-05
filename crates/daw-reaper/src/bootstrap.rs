@@ -106,10 +106,7 @@ pub unsafe fn init_from_clap_host(
     };
 
     // Initialize reaper-high
-    match HighReaper::load(context).setup() {
-        Ok(_) => {}
-        Err(_) => {} // Already initialized — that's fine
-    }
+    let _ = HighReaper::load(context).setup();
 
     // Set up TaskSupport for main-thread dispatch
     let (task_sender, task_receiver) = crossbeam_channel::unbounded();
@@ -147,6 +144,7 @@ use daw_control_sync::LocalCaller;
 ///
 /// Called by `daw::init()` — not meant to be used directly by plugins.
 /// Returns `(Daw, runtime)` or `None` if not running in REAPER.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub fn create_plugin_daw(
     raw_host_ptr: *const std::ffi::c_void,
 ) -> Option<(Daw, std::sync::Arc<tokio::runtime::Runtime>)> {
@@ -159,10 +157,10 @@ pub fn create_plugin_daw(
 
     extern "C" fn internal_timer() {
         let mw = unsafe { &*std::ptr::addr_of!(MIDDLEWARE) };
-        if let Some(m) = mw.get() {
-            if let Ok(mut mw) = m.lock() {
-                mw.run();
-            }
+        if let Some(m) = mw.get()
+            && let Ok(mut mw) = m.lock()
+        {
+            mw.run();
         }
         // Fire user timer callbacks registered via daw::register_timer()
         let cbs = unsafe { &*std::ptr::addr_of!(USER_TIMER_CALLBACKS) };

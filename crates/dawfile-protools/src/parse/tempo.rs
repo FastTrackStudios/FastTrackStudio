@@ -202,7 +202,7 @@ fn default_tempo_map(sample_rate: u32) -> Vec<TempoSegment> {
     }]
 }
 
-fn find_block_recursive<'a>(blocks: &'a [Block], ct: ContentType) -> Option<&'a Block> {
+fn find_block_recursive(blocks: &[Block], ct: ContentType) -> Option<&Block> {
     for block in blocks {
         if block.content_type == Some(ct) {
             return Some(block);

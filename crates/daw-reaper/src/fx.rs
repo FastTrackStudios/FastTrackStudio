@@ -2707,7 +2707,7 @@ impl FxService for ReaperFx {
             })?;
             let container_fx = chain.fx_by_index_untracked(raw_index);
             let value = mode.to_reaper_param();
-            fx_sw::fx_set_named_config_param(&container_fx, "parallel", &value)?;
+            fx_sw::fx_set_named_config_param(&container_fx, "parallel", value)?;
             Ok(())
         })
         .await

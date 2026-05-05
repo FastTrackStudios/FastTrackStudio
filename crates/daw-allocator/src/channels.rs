@@ -2,7 +2,7 @@
 //!
 //! Inspired by Helgobox's `SenderToRealTimeThread` and
 //! `ImportantSenderFromRtToNormalThread`
-//! (https://github.com/helgoboss/helgobox, `channels.rs`).
+//! (<https://github.com/helgoboss/helgobox>, `channels.rs`).
 //!
 //! These provide allocation-safe sending patterns for communicating with
 //! and from real-time audio threads.

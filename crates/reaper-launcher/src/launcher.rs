@@ -36,23 +36,23 @@ pub fn discover_config() -> (PathBuf, Option<String>, Vec<String>) {
             skip_next = false;
             continue;
         }
-        if arg == "--config" {
-            if let Some(path) = args.get(i + 1) {
-                config_from_cli = Some(PathBuf::from(path));
-                skip_next = true;
-                continue;
-            }
+        if arg == "--config"
+            && let Some(path) = args.get(i + 1)
+        {
+            config_from_cli = Some(PathBuf::from(path));
+            skip_next = true;
+            continue;
         }
         if let Some(path) = arg.strip_prefix("--config=") {
             config_from_cli = Some(PathBuf::from(path));
             continue;
         }
-        if arg == "--rig" {
-            if let Some(id) = args.get(i + 1) {
-                rig_id = Some(id.clone());
-                skip_next = true;
-                continue;
-            }
+        if arg == "--rig"
+            && let Some(id) = args.get(i + 1)
+        {
+            rig_id = Some(id.clone());
+            skip_next = true;
+            continue;
         }
         if let Some(id) = arg.strip_prefix("--rig=") {
             rig_id = Some(id.to_string());
@@ -139,10 +139,10 @@ pub fn launch_with_config_and_args(config: &LaunchConfig, extra_args: &[String])
         launch_with_restore(&ini, &patch_refs, config, extra_args);
     } else {
         // Simple path: patch and exec (no restore needed)
-        if !patch_refs.is_empty() {
-            if let Err(e) = ini.patch(&patch_refs) {
-                eprintln!("Warning: failed to patch reaper.ini: {e}");
-            }
+        if !patch_refs.is_empty()
+            && let Err(e) = ini.patch(&patch_refs)
+        {
+            eprintln!("Warning: failed to patch reaper.ini: {e}");
         }
         exec_reaper(config, extra_args);
     }

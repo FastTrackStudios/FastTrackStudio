@@ -14,7 +14,7 @@ fn main() {
     println!("total top-level blocks: {}", blocks.len());
 
     // Find AudioTrackList
-    fn find_recursive<'a>(blocks: &'a [block::Block], ct: ContentType) -> Option<&'a block::Block> {
+    fn find_recursive(blocks: &[block::Block], ct: ContentType) -> Option<&block::Block> {
         for b in blocks {
             if b.content_type == Some(ct) {
                 return Some(b);

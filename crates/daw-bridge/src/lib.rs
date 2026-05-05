@@ -607,9 +607,7 @@ fn register_fts_extension_action(name: &'static str, description: &'static str, 
             warn!("Failed to register gaccel for '{name}': {e:?}");
         }
     }
-    // Leak the RegisteredAction handle — these actions live for the
-    // process lifetime, no unregister path needed.
-    std::mem::forget(action);
+    let _ = action;
 }
 
 fn register_window_geometry_actions() {

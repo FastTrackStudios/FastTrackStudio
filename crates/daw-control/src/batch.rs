@@ -677,7 +677,7 @@ impl FromStepOutput for Vec<Marker> {
 impl FromStepOutput for TimeSignature {
     fn from_output(output: &StepOutput, step: u32) -> Result<Self, BatchExtractError> {
         match output {
-            StepOutput::TimeSignature(v) => Ok(v.clone()),
+            StepOutput::TimeSignature(v) => Ok(*v),
             _ => Err(BatchExtractError::TypeMismatch {
                 step,
                 expected: "TimeSignature",

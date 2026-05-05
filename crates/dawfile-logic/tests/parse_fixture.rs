@@ -293,7 +293,7 @@ fn hex_dump(data: &[u8], limit: usize) {
         }
         print!(" |");
         for &b in chunk {
-            if b >= 0x20 && b < 0x7f {
+            if (0x20..0x7f).contains(&b) {
                 print!("{}", b as char);
             } else {
                 print!(".");
@@ -471,7 +471,7 @@ fn fire_comp_structures() {
             let asc: String = row
                 .iter()
                 .map(|&b| {
-                    if b >= 0x20 && b < 0x7f {
+                    if (0x20..0x7f).contains(&b) {
                         b as char
                     } else {
                         '.'
@@ -484,11 +484,11 @@ fn fire_comp_structures() {
         let start = ci.saturating_sub(3);
         let end = (ci + 4).min(chunks.len());
         println!("  context:");
-        for j in start..end {
+        for (j, chunk) in chunks.iter().enumerate().take(end).skip(start) {
             let mark = if j == ci { " >>> " } else { "     " };
             println!(
                 "  {}[{}] {} dlen={}",
-                mark, j, chunks[j].type_name, chunks[j].data_len
+                mark, j, chunk.type_name, chunk.data_len
             );
         }
         println!();
@@ -593,10 +593,15 @@ fn fire_comp_structures() {
         let search_start = clip_ci.saturating_sub(10);
         let search_end = (clip_ci + 20).min(chunks.len());
         println!("  Context around Clip[{}]:", clip_ci);
-        for j in search_start..search_end {
+        for (j, chunk) in chunks
+            .iter()
+            .enumerate()
+            .take(search_end)
+            .skip(search_start)
+        {
             let mark = if j == clip_ci { " >>>" } else { "    " };
-            let extra = if chunks[j].tag == TAG_MSEQ {
-                let d = &chunks[j].data;
+            let extra = if chunk.tag == TAG_MSEQ {
+                let d = &chunk.data;
                 let nl = if d.len() >= 18 {
                     u16::from_le_bytes([d[16], d[17]]) as usize
                 } else {
@@ -724,7 +729,7 @@ fn fire_envi_all_names() {
             let len = c.data[0] as usize;
             if len > 0 && len < 128 && c.data.len() > len {
                 let s = &c.data[1..=len];
-                if s.iter().all(|&b| b >= 0x20 && b < 0x7f) {
+                if s.iter().all(|&b| (0x20..0x7f).contains(&b)) {
                     String::from_utf8_lossy(s).into_owned()
                 } else {
                     format!("[not-ascii len={}]", len)
@@ -826,7 +831,7 @@ fn fire_envi_name_hex() {
             let ascii: String = row
                 .iter()
                 .map(|&b| {
-                    if b >= 0x20 && b < 0x7f {
+                    if (0x20..0x7f).contains(&b) {
                         b as char
                     } else {
                         '.'

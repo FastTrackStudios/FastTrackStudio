@@ -69,7 +69,7 @@ pub fn parse_audio_files(blocks: &[Block], cursor: &Cursor<'_>, version: u16) ->
 
         // Validate type code
         let type_is_null = type_code == b"\0\0\0\0";
-        let type_is_audio = AUDIO_TYPE_CODES.iter().any(|tc| *tc == type_code);
+        let type_is_audio = AUDIO_TYPE_CODES.contains(&type_code);
 
         let is_valid = if version < 10 {
             type_is_audio
@@ -112,7 +112,7 @@ pub fn parse_audio_files(blocks: &[Block], cursor: &Cursor<'_>, version: u16) ->
 }
 
 /// Recursively find a block by content type.
-fn find_block_recursive<'a>(blocks: &'a [Block], ct: ContentType) -> Option<&'a Block> {
+fn find_block_recursive(blocks: &[Block], ct: ContentType) -> Option<&Block> {
     for block in blocks {
         if block.content_type == Some(ct) {
             return Some(block);

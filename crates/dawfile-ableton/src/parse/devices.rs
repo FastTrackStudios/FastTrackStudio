@@ -126,10 +126,10 @@ fn find_device_lists<'a, 'input>(node: Node<'a, 'input>) -> Vec<Node<'a, 'input>
         "MidiToMidiDeviceChain",
         "AudioToMidiDeviceChain",
     ] {
-        if let Some(inner_chain) = child(node, chain_name) {
-            if let Some(d) = child(inner_chain, "Devices") {
-                lists.push(d);
-            }
+        if let Some(inner_chain) = child(node, chain_name)
+            && let Some(d) = child(inner_chain, "Devices")
+        {
+            lists.push(d);
         }
     }
 
@@ -399,29 +399,29 @@ fn parse_device_id(raw: &str) -> DevicePluginId {
 /// Extract processor and controller state from a PluginDesc node.
 fn parse_plugin_states(plugin_desc: Node<'_, '_>) -> (Option<String>, Option<String>) {
     // Try VST3 path: Vst3PluginInfo > Preset > Vst3Preset > ProcessorState / ControllerState
-    if let Some(vst3_info) = child(plugin_desc, "Vst3PluginInfo") {
-        if let Some(preset) = descend(vst3_info, "Preset.Vst3Preset") {
-            let ps = child(preset, "ProcessorState")
-                .and_then(|n| n.text())
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty());
-            let cs = child(preset, "ControllerState")
-                .and_then(|n| n.text())
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty());
-            return (ps, cs);
-        }
+    if let Some(vst3_info) = child(plugin_desc, "Vst3PluginInfo")
+        && let Some(preset) = descend(vst3_info, "Preset.Vst3Preset")
+    {
+        let ps = child(preset, "ProcessorState")
+            .and_then(|n| n.text())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+        let cs = child(preset, "ControllerState")
+            .and_then(|n| n.text())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+        return (ps, cs);
     }
 
     // Try VST2 path: VstPluginInfo > Preset > VstPreset > ProcessorState
-    if let Some(vst_info) = child(plugin_desc, "VstPluginInfo") {
-        if let Some(preset) = descend(vst_info, "Preset.VstPreset") {
-            let ps = child(preset, "Buffer")
-                .and_then(|n| n.text())
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty());
-            return (ps, None);
-        }
+    if let Some(vst_info) = child(plugin_desc, "VstPluginInfo")
+        && let Some(preset) = descend(vst_info, "Preset.VstPreset")
+    {
+        let ps = child(preset, "Buffer")
+            .and_then(|n| n.text())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+        return (ps, None);
     }
 
     (None, None)

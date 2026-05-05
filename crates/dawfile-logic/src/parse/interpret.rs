@@ -11,9 +11,9 @@
 //! ```
 //!
 //! This was empirically confirmed against the `FileDecrypt.logicx` fixture:
-//! - MSeq "Untitled" at meta[4]=0 → bar 1 beat 1
-//! - MSeq "FileDecrypt" at meta[4]=262_144 → bar 2 beat 1 (1 bar = 4×65_536)
-//! - MSeq "Untitled" at meta[4]=3_932_160 → bar 16 beat 1 (15 bars = 60 beats)
+//! - MSeq "Untitled" at `meta[4]=0` -> bar 1 beat 1
+//! - MSeq "FileDecrypt" at `meta[4]=262_144` -> bar 2 beat 1 (1 bar = 4x65_536)
+//! - MSeq "Untitled" at `meta[4]=3_932_160` -> bar 16 beat 1 (15 bars = 60 beats)
 //!
 //! ## Clip type detection
 //!
@@ -447,7 +447,7 @@ fn make_take_folder_clip(
 
 // ── Clip → Track attachment ───────────────────────────────────────────────────
 
-fn attach_clips_to_tracks(tracks: &mut Vec<LogicTrack>, clips: Vec<PendingClip>) {
+fn attach_clips_to_tracks(tracks: &mut [LogicTrack], clips: Vec<PendingClip>) {
     for pending in clips {
         let track_name = pending.name.clone();
 
@@ -638,7 +638,7 @@ fn extract_name_from_envi(data: &[u8]) -> String {
         let name_end = NAME_START + name_len;
         if name_len > 0 && name_len < 128 && name_end <= data.len() {
             let candidate = &data[NAME_START..name_end];
-            if candidate.iter().all(|&b| b >= 0x20 && b <= 0x7e) {
+            if candidate.iter().all(|&b| (0x20..=0x7e).contains(&b)) {
                 return String::from_utf8_lossy(candidate).into_owned();
             }
         }

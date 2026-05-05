@@ -1098,7 +1098,7 @@ impl ActionRegistryService for ReaperActionRegistry {
 
     async fn execute_command(&self, command_id: u32) {
         main_thread::query(move || {
-            execute_main_action(&Reaper::get().medium_reaper(), CommandId::new(command_id));
+            execute_main_action(Reaper::get().medium_reaper(), CommandId::new(command_id));
         })
         .await;
     }
@@ -1108,7 +1108,7 @@ impl ActionRegistryService for ReaperActionRegistry {
             let reaper = Reaper::get();
             let medium = reaper.medium_reaper();
             if let Some(cmd_id) = named_command_lookup(&command_name) {
-                execute_main_action(&medium, cmd_id);
+                execute_main_action(medium, cmd_id);
                 true
             } else {
                 warn!("Named action not found: {}", command_name);
@@ -1265,7 +1265,7 @@ impl ActionRegistryService for ReaperActionRegistry {
             Reaper::get()
                 .main_section()
                 .with_raw(|section| {
-                    read_reaper_toggle_state(&medium, 0, SectionContext::Sec(section), command_id)
+                    read_reaper_toggle_state(medium, 0, SectionContext::Sec(section), command_id)
                 })
                 .flatten()
         })

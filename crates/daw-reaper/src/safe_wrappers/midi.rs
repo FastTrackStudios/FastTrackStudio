@@ -64,6 +64,7 @@ pub fn get_note(low: &ReaperLow, take: MediaItemTake, index: i32) -> Option<Midi
 }
 
 /// Insert a MIDI note.
+#[allow(clippy::too_many_arguments)]
 pub fn insert_note(
     low: &ReaperLow,
     take: MediaItemTake,

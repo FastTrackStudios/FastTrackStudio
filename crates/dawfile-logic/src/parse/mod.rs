@@ -3,15 +3,16 @@
 //! Parsing proceeds in three stages:
 //!
 //! 1. **Bundle** — read the directory structure, parse the two metadata plists
-//!    (`ProjectInformation.plist` and `MetaData.plist`) into [`BundleMeta`].
+//!    (`ProjectInformation.plist` and `MetaData.plist`) into
+//!    [`bundle::BundleMeta`].
 //! 2. **Chunks** — parse the binary `ProjectData` file into a flat list of
-//!    [`LogicChunk`] records.
+//!    [`crate::types::LogicChunk`] records.
 //! 3. **Interpret** — walk the chunk list and extract tracks, markers, tempo
-//!    events, and summing groups into a [`LogicSession`].
+//!    events, and summing groups into a [`crate::types::LogicSession`].
 //!
 //! Stage 3 is intentionally minimal right now: the binary payload format
 //! of individual chunk types is complex and partially reverse-engineered.
-//! The raw chunks are always surfaced in [`LogicSession::chunks`] so callers
+//! The raw chunks are always surfaced in [`crate::types::LogicSession::chunks`] so callers
 //! can inspect them directly while the interpreter is being built out.
 
 pub mod aufl;

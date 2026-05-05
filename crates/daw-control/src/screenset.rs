@@ -13,6 +13,7 @@ impl Screensets {
         Self { clients }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn capture(
         &self,
         id: &str,

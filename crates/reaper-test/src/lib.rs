@@ -22,8 +22,8 @@ use std::{
     pin::Pin,
     process::{Child, Command},
     sync::{
-        Arc, Condvar, Mutex, OnceLock,
         atomic::{AtomicU32, Ordering},
+        Arc, Condvar, Mutex, OnceLock,
     },
     time::Duration,
 };
@@ -454,26 +454,28 @@ static BATCH_POOL: Mutex<Option<BatchPool>> = Mutex::new(None);
 /// If the current batch has room, the test joins it. Otherwise, a new batch
 /// is created. The caller must call `release_batch` when the test completes.
 async fn claim_batch_tab(daw: &Daw) -> Result<Arc<BatchTab>> {
-    let mut pool = BATCH_POOL.lock().unwrap();
-    let pool = pool.get_or_insert_with(|| BatchPool {
-        current_batch: None,
-        retired_batches: Vec::new(),
-    });
+    {
+        let mut pool = BATCH_POOL.lock().unwrap();
+        let pool = pool.get_or_insert_with(|| BatchPool {
+            current_batch: None,
+            retired_batches: Vec::new(),
+        });
 
-    // Check if current batch has room
-    if let Some(ref batch) = pool.current_batch {
-        let claimed = batch.slots_claimed.fetch_add(1, Ordering::SeqCst) + 1;
-        if claimed <= BATCH_SIZE {
-            batch.active_count.fetch_add(1, Ordering::SeqCst);
-            return Ok(Arc::clone(batch));
+        // Check if current batch has room.
+        if let Some(ref batch) = pool.current_batch {
+            let claimed = batch.slots_claimed.fetch_add(1, Ordering::SeqCst) + 1;
+            if claimed <= BATCH_SIZE {
+                batch.active_count.fetch_add(1, Ordering::SeqCst);
+                return Ok(Arc::clone(batch));
+            }
+            // Batch is full — retire it and fall through to create a new one.
+            batch.slots_claimed.fetch_sub(1, Ordering::SeqCst);
+            let retired = pool.current_batch.take().unwrap();
+            pool.retired_batches.push(retired);
         }
-        // Batch is full — retire it and fall through to create a new one
-        batch.slots_claimed.fetch_sub(1, Ordering::SeqCst); // undo our claim
-        let retired = pool.current_batch.take().unwrap();
-        pool.retired_batches.push(retired);
     }
 
-    // Create a new batch tab
+    // Create a new batch tab without holding the global pool mutex.
     let project = daw
         .create_project()
         .await
@@ -493,6 +495,11 @@ async fn claim_batch_tab(daw: &Daw) -> Result<Arc<BatchTab>> {
         done_mutex: Mutex::new(()),
     });
 
+    let mut pool = BATCH_POOL.lock().unwrap();
+    let pool = pool.get_or_insert_with(|| BatchPool {
+        current_batch: None,
+        retired_batches: Vec::new(),
+    });
     pool.current_batch = Some(Arc::clone(&batch));
     Ok(batch)
 }

@@ -8,6 +8,7 @@
 //! direct X11 child window with a proper 32-bit ARGB visual as the GPU
 //! render surface, reparented into the dock panel's X11 hierarchy.
 
+#[cfg(feature = "desktop-renderer")]
 use daw_module::PanelRenderer;
 #[cfg(feature = "desktop-renderer")]
 use dioxus_embedded::{
@@ -24,7 +25,7 @@ use reaper_low::raw;
 use reaper_low::{Reaper, Swell};
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::ffi::{CString, c_void};
+use std::ffi::CString;
 use std::os::raw::c_int;
 #[cfg(all(feature = "desktop-renderer", target_os = "linux"))]
 use std::os::raw::c_ulong;
@@ -359,7 +360,7 @@ impl HasWindowHandle for RenderSurface {
             use raw_window_handle::AppKitWindowHandle;
             use std::ptr::NonNull;
             let handle = AppKitWindowHandle::new(
-                NonNull::new(self.hwnd as *mut c_void).ok_or(HandleError::Unavailable)?,
+                NonNull::new(self.hwnd as *mut std::ffi::c_void).ok_or(HandleError::Unavailable)?,
             );
             Ok(unsafe { WindowHandle::borrow_raw(RawWindowHandle::AppKit(handle)) })
         }
@@ -418,7 +419,7 @@ fn show_dock_context_menu(hwnd: raw::HWND, screen_x: i32, screen_y: i32) {
         dock_id >= 0 && !is_floating
     };
 
-    let menu = unsafe { swell.CreatePopupMenu() };
+    let menu = swell.CreatePopupMenu();
     if menu.is_null() {
         return;
     }
@@ -497,11 +498,13 @@ unsafe fn insert_menu_item(menu: raw::HMENU, id: u32, label: &str) {
     let swell = Swell::get();
     let mut label_buf: Vec<u8> = label.as_bytes().to_vec();
     label_buf.push(0);
-    let mut mi = raw::MENUITEMINFO {
-        fMask: raw::MIIM_TYPE | raw::MIIM_DATA | raw::MIIM_ID,
-        wID: id,
-        dwTypeData: label_buf.as_mut_ptr() as *mut _,
-        ..std::mem::zeroed()
+    let mut mi = unsafe {
+        raw::MENUITEMINFO {
+            fMask: raw::MIIM_TYPE | raw::MIIM_DATA | raw::MIIM_ID,
+            wID: id,
+            dwTypeData: label_buf.as_mut_ptr() as *mut _,
+            ..std::mem::zeroed()
+        }
     };
     unsafe {
         swell.InsertMenuItem(menu, -1, 1, &mut mi);
@@ -785,10 +788,10 @@ pub fn show_panel(id: PanelId) {
     assert_main_thread();
     PANELS.with(|panels| {
         let mut panels = panels.borrow_mut();
-        if let Some(panel) = panels.get_mut(id) {
-            if !panel.visible {
-                show_panel_inner(panel);
-            }
+        if let Some(panel) = panels.get_mut(id)
+            && !panel.visible
+        {
+            show_panel_inner(panel);
         }
     });
 }
@@ -798,16 +801,16 @@ pub fn hide_panel(id: PanelId) {
     assert_main_thread();
     PANELS.with(|panels| {
         let mut panels = panels.borrow_mut();
-        if let Some(panel) = panels.get_mut(id) {
-            if panel.visible {
-                hide_panel_inner(panel);
-            }
+        if let Some(panel) = panels.get_mut(id)
+            && panel.visible
+        {
+            hide_panel_inner(panel);
         }
     });
 }
 
 pub fn is_panel_visible(id: PanelId) -> bool {
-    PANELS.with(|panels| panels.borrow().get(id).map_or(false, |p| p.visible))
+    PANELS.with(|panels| panels.borrow().get(id).is_some_and(|p| p.visible))
 }
 
 /// Dispatch a synthetic UI event to a panel's EmbeddedView.
@@ -924,10 +927,8 @@ pub fn update_panels() {
                     "IsWindowVisible changed"
                 );
                 panel.last_hwnd_visible = hwnd_visible;
-                if hwnd_visible {
-                    if let Some(view) = &panel.view {
-                        view.mark_dirty();
-                    }
+                if hwnd_visible && let Some(view) = &panel.view {
+                    view.mark_dirty();
                 }
             }
 
@@ -1515,7 +1516,7 @@ fn create_desktop_parent(
     let bridge_hwnd = unsafe {
         swell().SWELL_CreateXBridgeWindow(
             hwnd,
-            &mut x_window_id as *mut c_ulong as *mut *mut c_void,
+            &mut x_window_id as *mut c_ulong as *mut *mut std::ffi::c_void,
             &rect as *const _,
         )
     };
@@ -1538,7 +1539,7 @@ fn create_desktop_parent(
     unsafe {
         let prop_key = CString::new("SWELL_XBRIDGE_KBHOOK_CHECK")?;
         let msg = raw::WM_USER as i32 + 100;
-        swell().SetProp(bridge_hwnd, prop_key.as_ptr(), msg as *mut c_void);
+        swell().SetProp(bridge_hwnd, prop_key.as_ptr(), msg as *mut std::ffi::c_void);
         swell().ShowWindow(bridge_hwnd, raw::SW_SHOW as c_int);
     }
 
@@ -1981,15 +1982,15 @@ fn panel_wndproc_inner(
         }
         WM_CHAR => {
             // Text input — send as IME commit
-            if let Some(ch) = char::from_u32(wparam as u32) {
-                if !ch.is_control() {
-                    forward_mouse_event(
-                        hwnd,
-                        blitz_traits::events::UiEvent::Ime(
-                            blitz_traits::events::BlitzImeEvent::Commit(ch.to_string()),
-                        ),
-                    );
-                }
+            if let Some(ch) = char::from_u32(wparam as u32)
+                && !ch.is_control()
+            {
+                forward_mouse_event(
+                    hwnd,
+                    blitz_traits::events::UiEvent::Ime(
+                        blitz_traits::events::BlitzImeEvent::Commit(ch.to_string()),
+                    ),
+                );
             }
             0
         }
@@ -2045,7 +2046,6 @@ fn panel_wndproc_inner(
                 && pt.y < client.bottom;
             if in_client {
                 // Content right-click — let Blitz/SWELL handle it normally.
-                let swell = swell;
                 unsafe { swell.DefWindowProc(hwnd, msg, wparam, lparam) }
             } else {
                 // Tab / non-client right-click — show our dock menu.

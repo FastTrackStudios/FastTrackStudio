@@ -161,21 +161,21 @@ pub fn parse_session(path: &Path) -> AafResult<AafSession> {
 fn find_header_dir(store: &CfbStore) -> AafResult<PathBuf> {
     let root = PathBuf::from("/");
 
-    if let Some(raw) = store.properties(&root) {
-        if let Ok(props) = Properties::parse(raw, &root) {
-            // Standard format: root IS the Header (has ContentStorage ref).
-            if props.get(PID_HEADER_CONTENT_STORAGE).is_some()
-                || props.get(PID_HEADER_CONTENT_STORAGE_AVID).is_some()
-            {
-                return Ok(root);
-            }
+    if let Some(raw) = store.properties(&root)
+        && let Ok(props) = Properties::parse(raw, &root)
+    {
+        // Standard format: root IS the Header (has ContentStorage ref).
+        if props.get(PID_HEADER_CONTENT_STORAGE).is_some()
+            || props.get(PID_HEADER_CONTENT_STORAGE_AVID).is_some()
+        {
+            return Ok(root);
+        }
 
-            // Avid format: root has PID=0x0002 pointing to the Header child.
-            if let Some(header_name) = props.strong_ref_name(0x0002) {
-                let header_dir = root.join(&header_name);
-                if store.properties(&header_dir).is_some() {
-                    return Ok(header_dir);
-                }
+        // Avid format: root has PID=0x0002 pointing to the Header child.
+        if let Some(header_name) = props.strong_ref_name(0x0002) {
+            let header_dir = root.join(&header_name);
+            if store.properties(&header_dir).is_some() {
+                return Ok(header_dir);
             }
         }
     }

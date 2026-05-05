@@ -178,7 +178,7 @@ impl TestRunner {
             .exists()
             .then(|| std::fs::read_to_string(&reaper_ini).ok())
             .flatten()
-            .map_or(true, |content| !content.contains("[nag]"));
+            .is_none_or(|content| !content.contains("[nag]"));
 
         if !needs_prewarm {
             return;
@@ -674,7 +674,7 @@ impl RunningReaper {
 
             std::thread::sleep(std::time::Duration::from_millis(300));
             let elapsed = start.elapsed().as_secs();
-            if elapsed % 5 == 0 && elapsed > 0 {
+            if elapsed.is_multiple_of(5) && elapsed > 0 {
                 print!("\r  [{elapsed}s] waiting …   ");
                 let _ = std::io::stdout().flush();
             }

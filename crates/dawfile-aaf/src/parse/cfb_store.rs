@@ -138,13 +138,13 @@ impl CfbStore {
     /// back to sorted child directories as a last resort.
     pub fn vector_elements(&self, coll_dir: &Path) -> Vec<PathBuf> {
         // Standard: try the index stream inside the collection directory.
-        if let Some(idx) = self.index_bytes(coll_dir) {
-            if let Some(keys) = parse_vector_index(idx) {
-                return keys
-                    .iter()
-                    .map(|k| coll_dir.join(format!("{:08x}", k)))
-                    .collect();
-            }
+        if let Some(idx) = self.index_bytes(coll_dir)
+            && let Some(keys) = parse_vector_index(idx)
+        {
+            return keys
+                .iter()
+                .map(|k| coll_dir.join(format!("{:08x}", k)))
+                .collect();
         }
 
         // Avid fallback: elements sit directly in the *parent* directory,
@@ -170,24 +170,20 @@ impl CfbStore {
     pub fn set_elements(&self, coll_dir: &Path) -> Vec<PathBuf> {
         const SET_ENTRY_SIZE: usize = 20; // 4 (local key) + 16 (AUID)
 
-        if let Some(idx) = self.index_bytes(coll_dir) {
-            if idx.len() >= 4 {
-                let count = u32::from_le_bytes([idx[0], idx[1], idx[2], idx[3]]) as usize;
-                let expected_len = 4 + count * SET_ENTRY_SIZE;
-                if idx.len() >= expected_len {
-                    let mut paths = Vec::with_capacity(count);
-                    for i in 0..count {
-                        let off = 4 + i * SET_ENTRY_SIZE;
-                        let key = u32::from_le_bytes([
-                            idx[off],
-                            idx[off + 1],
-                            idx[off + 2],
-                            idx[off + 3],
-                        ]);
-                        paths.push(coll_dir.join(format!("{:08x}", key)));
-                    }
-                    return paths;
+        if let Some(idx) = self.index_bytes(coll_dir)
+            && idx.len() >= 4
+        {
+            let count = u32::from_le_bytes([idx[0], idx[1], idx[2], idx[3]]) as usize;
+            let expected_len = 4 + count * SET_ENTRY_SIZE;
+            if idx.len() >= expected_len {
+                let mut paths = Vec::with_capacity(count);
+                for i in 0..count {
+                    let off = 4 + i * SET_ENTRY_SIZE;
+                    let key =
+                        u32::from_le_bytes([idx[off], idx[off + 1], idx[off + 2], idx[off + 3]]);
+                    paths.push(coll_dir.join(format!("{:08x}", key)));
                 }
+                return paths;
             }
         }
 
