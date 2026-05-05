@@ -4,6 +4,9 @@ set -euo pipefail
 HOOK_SOURCE_DIR="$(git rev-parse --show-toplevel)/hooks"
 GIT_DIR="$(git rev-parse --git-dir)"
 
+git config core.hooksPath hooks
+echo "Configured git core.hooksPath=hooks"
+
 copy_hook() {
   local src="$1"
   local dst="$2"
