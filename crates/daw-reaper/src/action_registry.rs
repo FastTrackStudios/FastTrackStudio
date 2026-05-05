@@ -38,7 +38,11 @@ use vox::Tx;
 /// the carrier type.
 struct OwnedAction {
     action: RegisteredAction,
-    gaccel_handle: Handle<reaper_low::raw::gaccel_register_t>,
+    /// `None` when REAPER itself already registered the gaccel (e.g. the
+    /// command name appeared in `reaper-menu.ini`'s Main toolbar before our
+    /// extension's spawned task ran). In that case the action is in REAPER's
+    /// list already and we never minted a handle to remove.
+    gaccel_handle: Option<Handle<reaper_low::raw::gaccel_register_t>>,
 }
 
 // SAFETY: `OwnedAction` is only mutated / dropped via main_thread::query,
@@ -252,6 +256,22 @@ fn read_shared_toggle_state(command_name: &str) -> Option<bool> {
         "1" | "true" | "on" => Some(true),
         "0" | "false" | "off" => Some(false),
         _ => None,
+    }
+}
+
+fn delete_shared_toggle_state(command_name: &str) {
+    let Ok(section) = CString::new(SHARED_TOGGLE_EXTSTATE_SECTION) else {
+        return;
+    };
+    let Ok(key) = CString::new(normalize_command_name(command_name)) else {
+        return;
+    };
+    unsafe {
+        Reaper::get().medium_reaper().low().DeleteExtState(
+            section.as_ptr(),
+            key.as_ptr(),
+            false,
+        );
     }
 }
 
@@ -732,49 +752,6 @@ impl ActionRegistryService for ReaperActionRegistry {
             let reaper = Reaper::get();
             let desc_static: &'static str = Box::leak(desc_for_query.clone().into_boxed_str());
 
-            // First check if someone else already registered this command name
-            let medium = reaper.medium_reaper();
-            if let Some(existing) = medium.named_command_lookup(format!("_{name_for_query}")) {
-                debug!(
-                    "Action '{}' already exists in REAPER (cmd_id={})",
-                    name_for_query,
-                    existing.get()
-                );
-                let already_listed = {
-                    let section = reaper.main_section();
-                    section
-                        .with_raw(|s| {
-                            (0..s.action_list_cnt()).any(|i| {
-                                s.get_action_by_index(i)
-                                    .map(|a| a.cmd() == existing)
-                                    .unwrap_or(false)
-                            })
-                        })
-                        .unwrap_or(false)
-                };
-                if !already_listed {
-                    let gaccel = OwnedGaccelRegister::without_key_binding(existing, desc_static);
-                    let mut session = reaper.medium_session();
-                    if let Err(e) = session.plugin_register_add_gaccel(gaccel) {
-                        warn!(
-                            "Failed to repair gaccel for existing action '{}': {:?}",
-                            name_for_query, e
-                        );
-                    } else {
-                        debug!(
-                            "Repaired missing gaccel for existing action '{}' (cmd_id={})",
-                            name_for_query,
-                            existing.get()
-                        );
-                    }
-                }
-                if toggleable {
-                    write_shared_toggle_state(&name_for_query, false);
-                    write_reaper_toggle_state(0, existing, false);
-                }
-                return existing.get();
-            }
-
             // register_action needs 'static string args — leak the strings
             // since actions live for the process lifetime anyway.
             let name_static: &'static str = Box::leak(name_for_query.clone().into_boxed_str());
@@ -819,11 +796,25 @@ impl ActionRegistryService for ReaperActionRegistry {
             // reaper_high::register_action only stores the command in its internal
             // map and calls plugin_register_add_command_id. It does NOT register the
             // gaccel (action list entry) when the session is already awake — that
-            // only happens during wake_up(). Since daw-bridge calls wake_up() at
-            // init time, any actions registered later by guests never appear in
-            // REAPER's action list. Fix: register the gaccel ourselves and keep
-            // the returned handle so we can unregister later.
-            let gaccel_handle = {
+            // only happens during wake_up(). It also does not deduplicate against
+            // gaccels that REAPER itself preregistered while parsing reaper-menu.ini
+            // toolbar references (REAPER allocates a cmd_id for any `_NAME` token
+            // it sees in a Main toolbar, before our extension's spawned task gets
+            // a chance to run). Skip the manual gaccel if REAPER already lists the
+            // action; otherwise register it and keep the handle for unregister.
+            let already_listed = reaper
+                .main_section()
+                .with_raw(|s| {
+                    (0..s.action_list_cnt()).any(|i| {
+                        s.get_action_by_index(i)
+                            .map(|a| a.cmd() == cmd_id)
+                            .unwrap_or(false)
+                    })
+                })
+                .unwrap_or(false);
+            let gaccel_handle = if already_listed {
+                None
+            } else {
                 let gaccel = OwnedGaccelRegister::without_key_binding(cmd_id, desc_static);
                 let mut session = reaper.medium_session();
                 match session.plugin_register_add_gaccel(gaccel) {
@@ -851,24 +842,15 @@ impl ActionRegistryService for ReaperActionRegistry {
                 name_for_query, cmd_id_val, desc_for_query
             );
 
-            // Park the RegisteredAction + gaccel handle in OWNED_ACTIONS
-            // keyed by command_name so unregister can drop them. Without
-            // a gaccel handle there's nothing to remove from REAPER's
-            // action list, but the RegisteredAction still gets tracked
-            // so its hook entry can be torn down.
-            if let Some(gaccel_handle) = gaccel_handle {
-                owned_actions().lock().unwrap().insert(
-                    name_for_query.clone(),
-                    OwnedAction {
-                        action,
-                        gaccel_handle,
-                    },
-                );
-            } else {
-                // No gaccel registered — keep the action alive but don't
-                // track it (it has nothing to tear down).
-                std::mem::forget(action);
-            }
+            // Park the RegisteredAction + (optional) gaccel handle in
+            // OWNED_ACTIONS keyed by command_name so unregister can drop them.
+            owned_actions().lock().unwrap().insert(
+                name_for_query.clone(),
+                OwnedAction {
+                    action,
+                    gaccel_handle,
+                },
+            );
 
             cmd_id_val
         })
@@ -918,36 +900,26 @@ impl ActionRegistryService for ReaperActionRegistry {
                 let owned = owned_actions().lock().unwrap().remove(&name_for_query);
                 if let Some(owned) = owned {
                     let reaper = Reaper::get();
-                    {
+                    if let Some(handle) = owned.gaccel_handle {
                         let mut session = reaper.medium_session();
-                        session.plugin_register_remove_gaccel(owned.gaccel_handle);
+                        session.plugin_register_remove_gaccel(handle);
                     }
                     // Explicit unregister of the action — drops the
-                    // command from reaper_high's command_by_id map.
+                    // command from reaper_high's command_by_id map. We
+                    // intentionally do NOT call `plugin_register("-command_id", …)`
+                    // here: REAPER's named-command allocations are sticky for
+                    // the lifetime of the process. Freeing the slot creates a
+                    // window where toolbar/menu entries still reference the old
+                    // cmd_id while a re-register would mint a new one, leaving
+                    // the toolbar pointed at a dead id. Letting the cmd_id
+                    // remain in REAPER's table means re-register rebinds the
+                    // closure to the original id (see `register_action` —
+                    // `plugin_register_add_command_id` returns the existing id
+                    // when the name is already known).
                     owned.action.unregister();
-
-                    // reaper_high adds the named-command via
-                    // `plugin_register("command_id", name)`. There is no
-                    // public wrapper for the corresponding remove yet
-                    // (reaper-medium has a TODO note). Drop the entry
-                    // ourselves via the raw low-level call: passing
-                    // `-command_id` removes the name → cmd_id mapping
-                    // so `NamedCommandLookup` returns None on a future
-                    // re-register and yields a fresh cmd_id.
-                    //
-                    // SAFETY: name_cstr lives for the duration of the
-                    // call; REAPER copies the string internally during
-                    // the unregister handshake.
-                    if let Ok(name_cstr) = std::ffi::CString::new(name_for_query.as_str()) {
-                        let low = reaper.medium_reaper().low();
-                        unsafe {
-                            low.plugin_register(
-                                c"-command_id".as_ptr(),
-                                name_cstr.as_ptr() as *mut std::os::raw::c_void,
-                            );
-                        }
-                    }
                 }
+                toggle_states().lock().unwrap().remove(&name_for_query);
+                delete_shared_toggle_state(&name_for_query);
             })
             .await;
 
