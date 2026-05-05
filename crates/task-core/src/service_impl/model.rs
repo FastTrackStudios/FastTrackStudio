@@ -3287,7 +3287,7 @@ impl VaultServiceImpl {
         projects
             .into_iter()
             .find(|p| p.title.eq_ignore_ascii_case(project_title))
-            .map(|p| p.emails)
+            .map(|p| p.emails.into_inner())
     }
 
     /// All RFC-2822 Message-Ids that are currently linked to any task or

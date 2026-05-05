@@ -8068,7 +8068,8 @@ fn seed_demo_vault(
             "project".to_string(),
             "demo".to_string(),
             "smoke".to_string(),
-        ],
+        ]
+        .into(),
         identifier: Some("DEMO".to_string()),
         lead: Some(actor.to_string()),
         default_assignee: Some(actor.to_string()),

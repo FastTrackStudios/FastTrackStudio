@@ -1,24 +1,58 @@
 // r[impl project.schema]
 use chrono::NaiveDate;
+use crudcrate::EntityToModels;
 use facet::Facet;
+use sea_orm::entity::prelude::*;
+use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
+use uuid::Uuid;
 
-use crate::task::{Status, Task, WikiLink};
+use crate::task::{EmailRefList, Status, StringList, Task, WikiLink, WikiLinkList};
 
 /// A project note in the vault.
 ///
 /// Projects live as `project.md` files (or `<Title>.md` with a `type: project`
 /// frontmatter discriminator) inside a vault.  The schema is intentionally
 /// Obsidian-compatible: every field serialises as plain YAML frontmatter.
-#[derive(Debug, Clone, PartialEq, Default, Facet)]
-pub struct Project {
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Default,
+    Facet,
+    DeriveEntityModel,
+    EntityToModels,
+    Serialize,
+    Deserialize,
+    ToSchema,
+)]
+#[sea_orm(table_name = "projects")]
+#[crudcrate(
+    api_struct = "ProjectApi",
+    generate_vox_service,
+    name_singular = "project",
+    name_plural = "projects"
+)]
+pub struct Model {
+    #[facet(default)]
+    #[sea_orm(primary_key, auto_increment = false)]
+    #[crudcrate(
+        primary_key,
+        exclude(create),
+        on_create = uuid::Uuid::new_v4()
+    )]
+    pub id: Uuid,
+    #[crudcrate(filterable, sortable, fulltext)]
     pub title: String,
+    #[crudcrate(filterable, sortable)]
     pub status: ProjectStatus,
     pub start: Option<NaiveDate>,
+    #[crudcrate(sortable)]
     pub due: Option<NaiveDate>,
     #[facet(default)]
-    pub up: Vec<WikiLink>,
+    pub up: WikiLinkList,
     #[facet(default)]
-    pub tags: Vec<String>,
+    pub tags: StringList,
     pub description: Option<String>,
     pub workflow: Option<String>,
     pub workflow_stage: Option<String>,
@@ -26,18 +60,21 @@ pub struct Project {
     // ── Extended fields (project-vault) ──────────────────────────────
     /// Organization/workspace this project belongs to (e.g. "fasttrackaudio",
     /// "fasttrackstudio", "just-friends", "personal").
+    #[crudcrate(filterable, sortable)]
     pub organization: Option<String>,
 
     /// Logical area this project belongs to (e.g. "Music", "Engineering").
+    #[crudcrate(filterable, sortable)]
     pub area: Option<String>,
 
     /// Freeform project type (e.g. "audio-production", "video", "web",
     /// "design").  Enables type-specific views and integrations.
+    #[crudcrate(filterable, sortable)]
     pub project_type: Option<String>,
 
     /// Team members working on this project.
     #[facet(default)]
-    pub team: Vec<String>,
+    pub team: StringList,
 
     /// GitHub (or other forge) repository slug, e.g. "FastTrackStudios/task".
     pub repo: Option<String>,
@@ -47,7 +84,7 @@ pub struct Project {
 
     /// References to other projects (not children — linked resources).
     #[facet(default)]
-    pub references: Vec<WikiLink>,
+    pub references: WikiLinkList,
 
     // ── Plane-inspired additions ────────────────────────────────────
     /// Short identifier for human-readable task IDs (e.g. "PRJ" → PRJ-1, PRJ-2).
@@ -79,7 +116,7 @@ pub struct Project {
 
     /// User favorites — who has bookmarked this project.
     #[facet(default)]
-    pub favorited_by: Vec<String>,
+    pub favorited_by: StringList,
 
     // ── Billing ──────────────────────────────────────────────────────
     /// Client this project is billed to (wikilink to a client note).
@@ -101,12 +138,12 @@ pub struct Project {
     /// patterns. The bot (Jarvis) reads these and does its own matching
     /// — the schema just stores the hints.
     #[facet(default)]
-    pub email_tags: Vec<String>,
+    pub email_tags: StringList,
 
     /// Emails linked to this project. Populated by the bot or manual
     /// `task email link` calls.
     #[facet(default)]
-    pub emails: Vec<crate::email::EmailRef>,
+    pub emails: EmailRefList,
 
     /// Markdown body for project notes and threaded comments.
     #[facet(skip)]
@@ -114,19 +151,34 @@ pub struct Project {
     pub body: Option<String>,
 }
 
+pub type Project = Model;
+
+#[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+pub enum Relation {}
+
+impl ActiveModelBehavior for ActiveModel {}
+
 // r[impl project.status]
-#[derive(Debug, Clone, PartialEq, Facet)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Facet, Serialize, Deserialize, ToSchema, EnumIter, DeriveActiveEnum,
+)]
+#[sea_orm(rs_type = "String", db_type = "String(StringLen::N(32))")]
 #[repr(u8)]
 pub enum ProjectStatus {
     /// The project is being planned but work hasn't started.
+    #[sea_orm(string_value = "planning")]
     Planning,
     /// Active work in progress (default).
+    #[sea_orm(string_value = "active")]
     Active,
     /// Temporarily paused.
+    #[sea_orm(string_value = "on_hold")]
     OnHold,
     /// All deliverables done.
+    #[sea_orm(string_value = "completed")]
     Completed,
     /// Shelved / no longer relevant.
+    #[sea_orm(string_value = "archived")]
     Archived,
 }
 

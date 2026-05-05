@@ -3,7 +3,9 @@ use chrono::{DateTime, NaiveDate, Utc};
 use crudcrate::EntityToModels;
 use facet::Facet;
 use sea_orm::entity::prelude::*;
-use sea_orm::sea_query::{ArrayType, ColumnType, Nullable, Value, ValueType, ValueTypeErr};
+use sea_orm::sea_query::{
+    ArrayType, ColumnType, Nullable, StringLen, Value, ValueType, ValueTypeErr,
+};
 use sea_orm::{ColIdx, QueryResult, TryGetError, TryGetable};
 use serde::{Deserialize, Serialize};
 use std::ops::{Deref, DerefMut};
@@ -357,6 +359,46 @@ impl Priority {
 #[derive(Debug, Clone, PartialEq, Default, Facet, Serialize, Deserialize, ToSchema)]
 #[facet(transparent)]
 pub struct WikiLink(pub String);
+
+impl From<WikiLink> for Value {
+    fn from(value: WikiLink) -> Self {
+        Value::String(Some(Box::new(value.0)))
+    }
+}
+
+impl Nullable for WikiLink {
+    fn null() -> Value {
+        Value::String(None)
+    }
+}
+
+impl TryGetable for WikiLink {
+    fn try_get_by<I: ColIdx>(res: &QueryResult, idx: I) -> Result<Self, TryGetError> {
+        let value: String = res.try_get_by(idx)?;
+        Ok(Self(value))
+    }
+}
+
+impl ValueType for WikiLink {
+    fn try_from(value: Value) -> Result<Self, ValueTypeErr> {
+        match value {
+            Value::String(Some(value)) => Ok(Self(*value)),
+            _ => Err(ValueTypeErr),
+        }
+    }
+
+    fn type_name() -> String {
+        stringify!(WikiLink).to_string()
+    }
+
+    fn array_type() -> ArrayType {
+        ArrayType::String
+    }
+
+    fn column_type() -> ColumnType {
+        ColumnType::String(StringLen::None)
+    }
+}
 
 /// A structured task dependency per RFC 9253.
 // r[impl task.blocked-by]
