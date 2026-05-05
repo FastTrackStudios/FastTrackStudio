@@ -357,12 +357,10 @@ fn start_unix_socket_server(acceptor: DawConnectionAcceptor) {
                             our_settings: vox::ConnectionSettings {
                                 parity: vox::Parity::Even,
                                 max_concurrent_requests: 64,
-                                initial_channel_credit: 16,
                             },
                             peer_settings: vox::ConnectionSettings {
                                 parity: vox::Parity::Odd,
                                 max_concurrent_requests: 64,
-                                initial_channel_credit: 16,
                             },
                             peer_supports_retry: true,
                             session_resume_key: None,
@@ -472,12 +470,12 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     // Initialize tracing to /tmp/daw-bridge.log
     let log_file =
         std::fs::File::create("/tmp/daw-bridge.log").expect("Failed to create /tmp/daw-bridge.log");
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| "daw_bridge=info,daw_reaper=info,warn".into());
+
     tracing_subscriber::fmt()
         .with_writer(std::sync::Mutex::new(log_file))
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive(tracing::Level::DEBUG.into()),
-        )
+        .with_env_filter(env_filter)
         .init();
 
     info!("daw-bridge starting...");

@@ -693,12 +693,10 @@ pub async fn connect(socket: Option<PathBuf>) -> Result<DawConnection> {
         our_settings: vox::ConnectionSettings {
             parity: vox::Parity::Odd,
             max_concurrent_requests: 64,
-            initial_channel_credit: 16,
         },
         peer_settings: vox::ConnectionSettings {
             parity: vox::Parity::Even,
             max_concurrent_requests: 64,
-            initial_channel_credit: 16,
         },
         peer_supports_retry: true,
         session_resume_key: None,
@@ -734,7 +732,6 @@ async fn open_daw_connection(session: &SessionHandle) -> Result<Caller> {
             ConnectionSettings {
                 parity: Parity::Odd,
                 max_concurrent_requests: 64,
-                initial_channel_credit: 16,
             },
             vec![
                 MetadataEntry {
