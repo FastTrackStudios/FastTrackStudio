@@ -4,25 +4,27 @@
 //! Used by `PluginHost` to create a local `Daw` instance without SHM.
 
 use daw_proto::{
-    ActionRegistryServiceDispatcher, AudioEngineServiceDispatcher, ExtStateServiceDispatcher,
-    FxServiceDispatcher, HealthServiceDispatcher, InputServiceDispatcher, ItemServiceDispatcher,
-    LiveMidiServiceDispatcher, MarkerServiceDispatcher, MidiAnalysisServiceDispatcher,
-    MidiServiceDispatcher, PluginLoaderServiceDispatcher, ProjectServiceDispatcher,
-    RegionServiceDispatcher, RoutingServiceDispatcher, ScreensetServiceDispatcher,
-    TakeServiceDispatcher, TempoMapServiceDispatcher, ToolbarServiceDispatcher,
-    TrackServiceDispatcher, TransportServiceDispatcher,
+    ActionRegistryServiceDispatcher, AudioEngineServiceDispatcher, DawFileServiceDispatcher,
+    ExtStateServiceDispatcher, FxServiceDispatcher, HealthServiceDispatcher,
+    InputServiceDispatcher, ItemServiceDispatcher, LiveMidiServiceDispatcher,
+    MarkerServiceDispatcher, MidiAnalysisServiceDispatcher, MidiServiceDispatcher,
+    PluginLoaderServiceDispatcher, ProjectServiceDispatcher, RegionServiceDispatcher,
+    RoutingServiceDispatcher, ScreensetServiceDispatcher, TakeServiceDispatcher,
+    TempoMapServiceDispatcher, ToolbarServiceDispatcher, TrackServiceDispatcher,
+    TransportServiceDispatcher,
 };
 
 use daw_proto::{
     action_registry_service_service_descriptor, audio_engine_service_service_descriptor,
-    ext_state_service_service_descriptor, fx_service_service_descriptor,
-    health_service_service_descriptor, input_service_service_descriptor,
-    item_service_service_descriptor, live_midi_service_service_descriptor,
-    marker_service_service_descriptor, midi_analysis_service_service_descriptor,
-    midi_service_service_descriptor, plugin_loader_service_service_descriptor,
-    project_service_service_descriptor, region_service_service_descriptor,
-    routing_service_service_descriptor, screenset_service_service_descriptor,
-    take_service_service_descriptor, tempo_map_service_service_descriptor,
+    daw_file_service_service_descriptor, ext_state_service_service_descriptor,
+    fx_service_service_descriptor, health_service_service_descriptor,
+    input_service_service_descriptor, item_service_service_descriptor,
+    live_midi_service_service_descriptor, marker_service_service_descriptor,
+    midi_analysis_service_service_descriptor, midi_service_service_descriptor,
+    plugin_loader_service_service_descriptor, project_service_service_descriptor,
+    region_service_service_descriptor, routing_service_service_descriptor,
+    screenset_service_service_descriptor, take_service_service_descriptor,
+    tempo_map_service_service_descriptor,
     toolbar_service_service_descriptor, track_service_service_descriptor,
     transport_service_service_descriptor,
 };
@@ -67,6 +69,7 @@ pub fn create_daw_handler() -> RoutedHandler {
     let input = crate::ReaperInput::new();
     let toolbar = crate::ReaperToolbar::new();
     let screenset = crate::ReaperScreenset::new();
+    let dawfile_ops = crate::DawFileOps::new();
     let plugin_loader = crate::ReaperPluginLoader::new();
     let batch = crate::batch::BatchExecutor::new();
 
@@ -150,6 +153,10 @@ pub fn create_daw_handler() -> RoutedHandler {
         .with(
             screenset_service_service_descriptor(),
             ScreensetServiceDispatcher::new(screenset),
+        )
+        .with(
+            daw_file_service_service_descriptor(),
+            DawFileServiceDispatcher::new(dawfile_ops),
         )
         .with(
             plugin_loader_service_service_descriptor(),

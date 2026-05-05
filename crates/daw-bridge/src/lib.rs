@@ -36,7 +36,8 @@ use daw::service::{
     InputServiceDispatcher, ItemServiceDispatcher, LiveMidiServiceDispatcher,
     MarkerServiceDispatcher, MidiAnalysisServiceDispatcher, MidiServiceDispatcher,
     PluginLoaderServiceDispatcher, ProjectServiceDispatcher, RegionServiceDispatcher,
-    RoutingServiceDispatcher, ScreensetServiceDispatcher, TakeServiceDispatcher,
+    DawFileServiceDispatcher, RoutingServiceDispatcher, ScreensetServiceDispatcher,
+    TakeServiceDispatcher,
     TempoMapServiceDispatcher, ToolbarServiceDispatcher, TrackServiceDispatcher,
     TransportServiceDispatcher,
 };
@@ -176,6 +177,7 @@ async fn register_daw_dispatcher() {
     let input = daw::reaper::ReaperInput::new();
     let toolbar = daw::reaper::ReaperToolbar::new();
     let screenset = daw::reaper::ReaperScreenset::new();
+    let dawfile_ops = daw::reaper::DawFileOps::new();
     let plugin_loader = daw::reaper::ReaperPluginLoader::new();
     let batch = daw::reaper::batch::BatchExecutor::new();
     let dock_host = daw_reaper_dioxus::ReaperDockHost::new();
@@ -190,7 +192,8 @@ async fn register_daw_dispatcher() {
         midi_analysis_service_service_descriptor, midi_service_service_descriptor,
         plugin_loader_service_service_descriptor, project_service_service_descriptor,
         region_service_service_descriptor, routing_service_service_descriptor,
-        screenset_service_service_descriptor, take_service_service_descriptor,
+        daw_file_service_service_descriptor, screenset_service_service_descriptor,
+        take_service_service_descriptor,
         tempo_map_service_service_descriptor, toolbar_service_service_descriptor,
         track_service_service_descriptor, transport_service_service_descriptor,
     };
@@ -276,6 +279,10 @@ async fn register_daw_dispatcher() {
         .with(
             screenset_service_service_descriptor(),
             ScreensetServiceDispatcher::new(screenset),
+        )
+        .with(
+            daw_file_service_service_descriptor(),
+            DawFileServiceDispatcher::new(dawfile_ops),
         )
         .with(
             plugin_loader_service_service_descriptor(),

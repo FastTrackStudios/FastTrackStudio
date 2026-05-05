@@ -917,16 +917,6 @@ async fn main() -> Result<()> {
         Command::Quit { pid } => {
             return daw_cli::cmd_quit(pid);
         }
-        Command::Combine {
-            ref input,
-            ref output,
-            gap,
-        } => {
-            return daw_cli::cmd_combine(input, output.as_deref(), gap);
-        }
-        Command::RppSummary { ref path } => {
-            return print_value(daw_cli::ops::rpp_summary(path)?, cli.json);
-        }
         Command::ServiceCatalog => {
             return print_value(daw_cli::ops::service_catalog(), cli.json);
         }
@@ -1468,12 +1458,18 @@ async fn main() -> Result<()> {
             daw_cli::ops::screenset_delete(&daw, &id, persist).await?,
             cli.json,
         )?,
+        Command::Combine {
+            ref input,
+            ref output,
+            gap,
+        } => daw_cli::cmd_combine(&daw, input, output.as_deref(), gap).await?,
+        Command::RppSummary { ref path } => {
+            print_value(daw_cli::ops::rpp_summary(&daw, path).await?, cli.json)?
+        }
         // Already handled above
         Command::Launch { .. }
         | Command::Profiles
         | Command::Quit { .. }
-        | Command::Combine { .. }
-        | Command::RppSummary { .. }
         | Command::ServiceCatalog => unreachable!(),
     }
 

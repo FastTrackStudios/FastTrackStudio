@@ -1,7 +1,5 @@
 //! Structured operations shared by DAW CLI commands.
 
-use std::path::{Path, PathBuf};
-
 use daw::Daw;
 use eyre::Result;
 use serde_json::{Value, json};
@@ -1513,57 +1511,54 @@ pub async fn screenset_delete(daw: &Daw, id: &str, persist: bool) -> Result<Valu
     )
 }
 
-pub fn rpp_summary(path: &str) -> Result<Value> {
-    let content = std::fs::read_to_string(path)?;
-    let project = dawfile_reaper::parse_project_text(&content)
-        .map_err(|e| eyre::eyre!("parse RPP {path}: {e}"))?;
+pub async fn rpp_summary(daw: &Daw, path: &str) -> Result<Value> {
+    let summary = daw.dawfile().summarize_project(path).await?;
+    if !summary.error.is_empty() {
+        eyre::bail!(summary.error);
+    }
     Ok(json!({
-        "path": path,
-        "version": project.version,
-        "version_string": project.version_string,
-        "track_count": project.tracks.len(),
-        "marker_count": project.markers_regions.markers.len(),
-        "region_count": project.markers_regions.regions.len(),
-        "tracks": project.tracks.iter().map(|t| json!({
+        "path": summary.path,
+        "version": summary.version,
+        "version_string": summary.version_string,
+        "track_count": summary.track_count,
+        "marker_count": summary.marker_count,
+        "region_count": summary.region_count,
+        "tracks": summary.tracks.iter().map(|t| json!({
             "name": t.name,
-            "items": t.items.len(),
-            "fx_count": t.fx_chain.as_ref().map(|fx| fx.plugin_count()).unwrap_or(0),
+            "items": t.item_count,
+            "fx_count": t.fx_count,
         })).collect::<Vec<_>>(),
     }))
 }
 
-pub fn combine_rpl(input: &str, output: Option<&str>, gap_measures: u32) -> Result<Value> {
-    use dawfile_reaper::setlist_rpp::{self, CombineOptions};
-
-    let input_path = Path::new(input);
-    if !input_path.exists() {
-        eyre::bail!("Input file not found: {}", input);
+pub async fn combine_rpl(
+    daw: &Daw,
+    input: &str,
+    output: Option<&str>,
+    gap_measures: u32,
+) -> Result<Value> {
+    let result = daw
+        .dawfile()
+        .combine_setlist(
+            input,
+            output.unwrap_or(""),
+            daw::service::CombineSetlistOptions { gap_measures },
+        )
+        .await?;
+    if !result.error.is_empty() {
+        eyre::bail!(result.error);
     }
-
-    let output_path = output.map(PathBuf::from).unwrap_or_else(|| {
-        let stem = input_path.file_stem().unwrap_or_default();
-        let parent = input_path.parent().unwrap_or(Path::new("."));
-        parent.join(format!("{}.RPP", stem.to_string_lossy()))
-    });
-
-    let options = CombineOptions {
-        gap_measures,
-        trim_to_bounds: false,
-    };
-    let (combined, song_infos) = setlist_rpp::combine_rpl(input_path, &options)?;
-    std::fs::write(&output_path, &combined)?;
-
     Ok(json!({
-        "input": input,
-        "output": output_path.display().to_string(),
-        "song_count": song_infos.len(),
-        "gap_measures": gap_measures,
-        "songs": song_infos.iter().enumerate().map(|(i, info)| json!({
-            "index": i + 1,
-            "name": info.name,
-            "global_start_seconds": info.global_start_seconds,
-            "duration_seconds": info.duration_seconds,
+        "input": result.input,
+        "output": result.output,
+        "song_count": result.song_count,
+        "gap_measures": result.gap_measures,
+        "songs": result.songs.iter().map(|s| json!({
+            "index": s.index,
+            "name": s.name,
+            "global_start_seconds": s.global_start_seconds,
+            "duration_seconds": s.duration_seconds,
         })).collect::<Vec<_>>(),
-        "total_seconds": song_infos.last().map(|info| info.global_start_seconds + info.duration_seconds).unwrap_or(0.0),
+        "total_seconds": result.total_seconds,
     }))
 }

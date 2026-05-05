@@ -1521,8 +1521,13 @@ pub async fn cmd_remove_track(daw: &Daw, track_arg: &str) -> Result<()> {
 // ── File Operations ──────────────────────────────────────────────────────────
 
 // r[impl cli.combine]
-pub fn cmd_combine(input: &str, output: Option<&str>, gap_measures: u32) -> Result<()> {
-    let summary = ops::combine_rpl(input, output, gap_measures)?;
+pub async fn cmd_combine(
+    daw: &Daw,
+    input: &str,
+    output: Option<&str>,
+    gap_measures: u32,
+) -> Result<()> {
+    let summary = ops::combine_rpl(daw, input, output, gap_measures).await?;
     let song_count = summary["song_count"].as_u64().unwrap_or(0);
     let output_path = summary["output"].as_str().unwrap_or("<unknown>");
 
@@ -1532,7 +1537,7 @@ pub fn cmd_combine(input: &str, output: Option<&str>, gap_measures: u32) -> Resu
         println!("Gap: {} measure(s) between songs", gap_measures);
     }
     println!();
-    let mut total = 0.0;
+    let mut total: f64 = 0.0;
     for song in summary["songs"].as_array().into_iter().flatten() {
         let index = song["index"].as_u64().unwrap_or(0);
         let name = song["name"].as_str().unwrap_or("<unnamed>");
