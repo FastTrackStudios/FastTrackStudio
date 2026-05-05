@@ -8,9 +8,11 @@ use task_core::calendar_event::{
 };
 use task_core::client::{Client, ClientApi, ClientApiCreate};
 use task_core::cycle::{Cycle, CycleApi, CycleApiCreate, CycleStatus};
+use task_core::email::{EmailRef, EmailRefApi, EmailRefApiCreate};
 use task_core::expense::{Expense, ExpenseApi, ExpenseApiCreate};
 use task_core::invoice::{Invoice, InvoiceApi, InvoiceApiCreate, InvoiceLine, InvoiceStatus};
 use task_core::location::{Location, LocationApi, LocationApiCreate, Space, VenueDefault};
+use task_core::module::{Module, ModuleApi, ModuleApiCreate, ModuleStatus};
 use task_core::revenue::{Revenue, RevenueApi, RevenueApiCreate};
 use task_core::task::{Task, TaskApi, TaskApiCreate};
 use task_core::team::{AccountStatus, TeamMember, TeamMemberApi, TeamMemberApiCreate};
@@ -476,4 +478,71 @@ async fn seaorm_storage_can_back_generated_location_repo_models() {
     assert_eq!(loaded.name, "Studio A");
     assert_eq!(loaded.spaces.len(), 1);
     assert_eq!(loaded.spaces[0].name, "Vocal Booth");
+}
+
+#[tokio::test]
+async fn seaorm_storage_can_back_generated_module_repo_models() {
+    let db = task_db::init_memory()
+        .await
+        .expect("initialize in-memory task database");
+    let module = Module {
+        title: "Storage migration".to_string(),
+        description: Some("Move remaining models to generated repos".to_string()),
+        lead: Some("cody".to_string()),
+        members: vec!["agent".to_string(), "cody".to_string()].into(),
+        tasks: vec!["TASK-d9k".to_string()].into(),
+        status: ModuleStatus::InProgress,
+        sort_order: Some(1.0),
+        ..Default::default()
+    };
+    let create: ModuleApiCreate =
+        serde_json::from_value(serde_json::to_value(module).expect("serialize module seed"))
+            .expect("decode module create model");
+
+    let created = CrudStorage::<ModuleApi>::create(&db, create)
+        .await
+        .expect("create module through SeaORM storage");
+    let loaded = CrudStorage::<ModuleApi>::get_one(&db, created.id)
+        .await
+        .expect("load module through SeaORM storage");
+
+    assert_eq!(loaded.id, created.id);
+    assert_eq!(loaded.title, "Storage migration");
+    assert_eq!(loaded.status, ModuleStatus::InProgress);
+    assert_eq!(loaded.members.as_slice(), ["agent", "cody"]);
+}
+
+#[tokio::test]
+async fn seaorm_storage_can_back_generated_email_ref_repo_models() {
+    let db = task_db::init_memory()
+        .await
+        .expect("initialize in-memory task database");
+    let email = EmailRef {
+        message_id: "<msg-1@example.com>".to_string(),
+        subject: "Mix notes".to_string(),
+        from: "Client <client@example.com>".to_string(),
+        to: vec!["studio@example.com".to_string()].into(),
+        date: chrono::DateTime::parse_from_rfc3339("2026-05-04T15:00:00Z")
+            .expect("valid email date")
+            .to_utc(),
+        has_attachments: true,
+        attachment_count: 2,
+        user_tags: vec!["client".to_string()].into(),
+        ..Default::default()
+    };
+    let create: EmailRefApiCreate =
+        serde_json::from_value(serde_json::to_value(email).expect("serialize email ref seed"))
+            .expect("decode email ref create model");
+
+    let created = CrudStorage::<EmailRefApi>::create(&db, create)
+        .await
+        .expect("create email ref through SeaORM storage");
+    let loaded = CrudStorage::<EmailRefApi>::get_one(&db, created.uuid)
+        .await
+        .expect("load email ref through SeaORM storage");
+
+    assert_eq!(loaded.uuid, created.uuid);
+    assert_eq!(loaded.message_id, "<msg-1@example.com>");
+    assert_eq!(loaded.to.as_slice(), ["studio@example.com"]);
+    assert_eq!(loaded.attachment_count, 2);
 }

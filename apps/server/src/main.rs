@@ -1064,6 +1064,18 @@ async fn handle_vox_connection(socket: WebSocket, state: AppState, auth: VoxAuth
                     ));
                     Ok(())
                 }
+                "ModuleRepo" => {
+                    connection.handle_with(task_core::module::ModuleRepoDispatcher::new(
+                        task_core::module::ModuleRepoStorage::new(db.clone()),
+                    ));
+                    Ok(())
+                }
+                "EmailRefRepo" => {
+                    connection.handle_with(task_core::email::EmailRefRepoDispatcher::new(
+                        task_core::email::EmailRefRepoStorage::new(db.clone()),
+                    ));
+                    Ok(())
+                }
                 "Noop" => {
                     connection.handle_with(());
                     Ok(())
