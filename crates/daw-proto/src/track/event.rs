@@ -38,3 +38,9 @@ pub enum TrackEvent {
         new_index: u32,
     },
 }
+
+// SelfRef compatibility: TrackEvent has no lifetime parameters, so Ref<'a> = Self.
+#[allow(unsafe_code)]
+unsafe impl vox_types::Reborrow for TrackEvent {
+    type Ref<'a> = TrackEvent;
+}

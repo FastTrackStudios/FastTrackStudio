@@ -320,3 +320,9 @@ pub trait ActionRegistryService {
     /// Returns `None` if the action is not registered or not toggleable.
     async fn get_toggle_state(&self, command_name: String) -> Option<bool>;
 }
+
+// SelfRef compatibility: ActionEvent has no lifetime parameters, so Ref<'a> = Self.
+#[allow(unsafe_code)]
+unsafe impl vox_types::Reborrow for ActionEvent {
+    type Ref<'a> = ActionEvent;
+}

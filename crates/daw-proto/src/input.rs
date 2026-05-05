@@ -200,3 +200,9 @@ pub trait InputService {
     /// - Numeric IDs: `"40044"` (undo)
     async fn execute_action(&self, action_id: String);
 }
+
+// SelfRef compatibility: InputEvent has no lifetime parameters, so Ref<'a> = Self.
+#[allow(unsafe_code)]
+unsafe impl vox_types::Reborrow for InputEvent {
+    type Ref<'a> = InputEvent;
+}
