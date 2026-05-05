@@ -43,6 +43,10 @@ pub enum PanelId {
     Inspector,
     KeyboardVisualizer,
 
+    // Sync panels
+    SyncStatus,
+    SyncSettings,
+
     // Test / development panels
     SnapshotTest,
 }
@@ -87,6 +91,8 @@ impl PanelId {
             Self::Navigator => "navigator",
             Self::Inspector => "inspector",
             Self::KeyboardVisualizer => "keyboard-visualizer",
+            Self::SyncStatus => "sync-status",
+            Self::SyncSettings => "sync-settings",
             Self::SnapshotTest => "snapshot-test",
         }
     }
@@ -119,6 +125,8 @@ impl PanelId {
             "navigator" => Some(Self::Navigator),
             "inspector" => Some(Self::Inspector),
             "keyboard-visualizer" => Some(Self::KeyboardVisualizer),
+            "sync-status" => Some(Self::SyncStatus),
+            "sync-settings" => Some(Self::SyncSettings),
             "snapshot-test" => Some(Self::SnapshotTest),
             _ => None,
         }
@@ -155,6 +163,7 @@ impl PanelId {
                 | Self::TrackControlPanel
                 | Self::ArrangementView => "DAW",
                 Self::Navigator | Self::Inspector | Self::KeyboardVisualizer => "Utility",
+                Self::SyncStatus | Self::SyncSettings => "Sync",
                 Self::SnapshotTest => "Signal",
             };
 
@@ -216,6 +225,8 @@ impl PanelId {
             Self::Navigator => "Navigator",
             Self::Inspector => "Inspector",
             Self::KeyboardVisualizer => "Keyboard Visualizer",
+            Self::SyncStatus => "Sync Status",
+            Self::SyncSettings => "Sync Settings",
             Self::SnapshotTest => "Snapshot Test",
         }
     }
@@ -247,6 +258,8 @@ impl PanelId {
             Self::Navigator => "compass",
             Self::Inspector => "search",
             Self::KeyboardVisualizer => "keyboard",
+            Self::SyncStatus => "radio",
+            Self::SyncSettings => "settings-2",
             Self::SnapshotTest => "camera",
         }
     }
@@ -277,6 +290,8 @@ impl PanelId {
             Self::Navigator,
             Self::Inspector,
             Self::KeyboardVisualizer,
+            Self::SyncStatus,
+            Self::SyncSettings,
             Self::SnapshotTest,
             Self::Settings,
         ]
