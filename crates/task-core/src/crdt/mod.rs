@@ -15,6 +15,6 @@ pub mod document;
 pub mod offline;
 pub mod sync;
 
-pub use document::{CrdtDocument, DocumentSnapshot, CONFLICT_FIELDS};
+pub use document::{CONFLICT_FIELDS, CrdtDocument, DocumentSnapshot};
 pub use offline::{OfflineQueue, QueuedOp, QueuedOpType};
 pub use sync::{ConflictEvent, CrdtSyncEngine, SyncOp};

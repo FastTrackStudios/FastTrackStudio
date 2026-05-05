@@ -51,15 +51,15 @@ pub use channel::{
     ChannelConversation, ChannelMessage, ChannelSendMessageRequest, CommunicationChannelProvider,
 };
 pub use github::{
-    build_sync_plan, format_sync_result, parse_repo, resolve_token, GitHubConfig, GitHubSync,
-    GitHubSyncResult, SyncAction, SyncPlan,
+    GitHubConfig, GitHubSync, GitHubSyncResult, SyncAction, SyncPlan, build_sync_plan,
+    format_sync_result, parse_repo, resolve_token,
 };
 pub use mail::{
     MailAccount, MailAttachment, MailClient, MailConfig, MailMessage, MailMessageDetail, MailTag,
     Mailbox,
 };
 #[cfg(feature = "server")]
-pub use mail_watch::{watch_idle, ImapWatchConfig, WatchEvent};
+pub use mail_watch::{ImapWatchConfig, WatchEvent, watch_idle};
 pub use mock::MockProvider;
 pub use nextcloud::{NextcloudConfig, NextcloudProvider};
 pub use talk::{Message as TalkMessage, Room as TalkRoom, TalkClient, TalkConfig};

@@ -1,26 +1,26 @@
 use chrono::{DateTime, NaiveDate, TimeZone, Utc};
 use clap::{Parser, Subcommand};
 use task_core::asset::{
-    render_asset_body, AssetCreateRequest, AssetFilter, AssetMaintenanceRequest, AssetPatch,
-    AssetRepairRequest, AssetReserveRequest,
+    AssetCreateRequest, AssetFilter, AssetMaintenanceRequest, AssetPatch, AssetRepairRequest,
+    AssetReserveRequest, render_asset_body,
 };
 use task_core::expense::{
-    render_expense_body, render_expense_report, ExpenseCreateRequest, ExpenseFilter, ExpensePatch,
+    ExpenseCreateRequest, ExpenseFilter, ExpensePatch, render_expense_body, render_expense_report,
 };
 use task_core::index::{ChangeRow, ConflictRow};
 use task_core::revenue::{
-    render_revenue_body, render_revenue_report, RevenueCreateRequest, RevenueFilter,
+    RevenueCreateRequest, RevenueFilter, render_revenue_body, render_revenue_report,
 };
-use task_core::workflows::{parse_comments, render_comments, Comment};
+use task_core::workflows::{Comment, parse_comments, render_comments};
 use task_core::{
-    build_agent_plan, create_project, save_project_task, BusinessFinanceReport, CalendarEvent,
-    CalendarEventPatch, CalendarEventStatus, CardDavSyncCollectionRequest, ChannelConversation,
-    ChannelMessage, ChannelSendMessageRequest, Client, Filter, InboxCaptureRequest, InboxItem,
-    InboxPromoteRequest, Invoice, Location, OperatingModelReport, OrganizationContext,
-    OrganizationRecord, Person, PersonContext, Priority, Project, ProjectKnowledgeContext,
-    ProviderSyncState, Query, RelationType, ReviewReport, Sort, Space, Status, SyncStats,
-    SystemCapabilities, SystemHealth, Task, TaskRelation, TimeEntry, TimeEntryContext,
-    TimeEntryFilter, VaultServiceImpl, VenueDefault, WikiLink,
+    BusinessFinanceReport, CalendarEvent, CalendarEventPatch, CalendarEventStatus,
+    CardDavSyncCollectionRequest, ChannelConversation, ChannelMessage, ChannelSendMessageRequest,
+    Client, Filter, InboxCaptureRequest, InboxItem, InboxPromoteRequest, Invoice, Location,
+    OperatingModelReport, OrganizationContext, OrganizationRecord, Person, PersonContext, Priority,
+    Project, ProjectKnowledgeContext, ProviderSyncState, Query, RelationType, ReviewReport, Sort,
+    Space, Status, SyncStats, SystemCapabilities, SystemHealth, Task, TaskRelation, TimeEntry,
+    TimeEntryContext, TimeEntryFilter, VaultServiceImpl, VenueDefault, WikiLink, build_agent_plan,
+    create_project, save_project_task,
 };
 
 #[derive(Parser)]
@@ -9088,7 +9088,9 @@ fn print_channel_rooms_json(rooms: &[ChannelConversation]) {
             escape_json(&r.name),
             escape_json(&r.kind),
             r.participant_count,
-            r.last_activity.map(|n| n.to_string()).unwrap_or_else(|| "null".into()),
+            r.last_activity
+                .map(|n| n.to_string())
+                .unwrap_or_else(|| "null".into()),
             opt_json(r.last_message.as_deref()),
         );
     }
@@ -9294,7 +9296,9 @@ fn time_entries_json(entries: &[TimeEntryContext]) -> String {
 }
 
 fn print_time_entries_csv(entries: &[task_core::TimeEntryContext]) {
-    println!("entry_id,task,projects,client,user,start,end,minutes,billable,rate_cents,billable_amount_cents,tags,description,invoiced_at,invoice_ninja_invoice_id");
+    println!(
+        "entry_id,task,projects,client,user,start,end,minutes,billable,rate_cents,billable_amount_cents,tags,description,invoiced_at,invoice_ninja_invoice_id"
+    );
     for ctx in entries {
         let e = &ctx.entry;
         let end = e
@@ -10344,8 +10348,12 @@ fn print_mail_messages_json(messages: &[task_core::provider::MailMessage]) {
             m.date,
             opt_json(m.preview.as_deref()),
             m.mailbox_id,
-            m.account_id.map(|n| n.to_string()).unwrap_or_else(|| "null".into()),
-            m.imap_uid.map(|n| n.to_string()).unwrap_or_else(|| "null".into()),
+            m.account_id
+                .map(|n| n.to_string())
+                .unwrap_or_else(|| "null".into()),
+            m.imap_uid
+                .map(|n| n.to_string())
+                .unwrap_or_else(|| "null".into()),
             m.has_attachments,
             m.attachment_count,
         );

@@ -32,13 +32,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use loro::PeerID;
-use tokio::sync::{broadcast, mpsc, RwLock};
+use tokio::sync::{RwLock, broadcast, mpsc};
 
 use crate::service::VaultError;
 use crate::task::Task;
 use crate::vault::Vault;
 
-use super::document::{CrdtDocument, DocumentSnapshot, CONFLICT_FIELDS};
+use super::document::{CONFLICT_FIELDS, CrdtDocument, DocumentSnapshot};
 
 /// An operation broadcast to connected clients.
 #[derive(Debug, Clone)]

@@ -246,11 +246,7 @@ impl TimeEntry {
         match self.end_time {
             Some(end) => {
                 let mins = (end - self.start_time).num_minutes();
-                if mins > 0 {
-                    mins as u32
-                } else {
-                    0
-                }
+                if mins > 0 { mins as u32 } else { 0 }
             }
             None => 0,
         }
@@ -259,11 +255,7 @@ impl TimeEntry {
     /// Elapsed minutes for a running timer, measured from `now`.
     pub fn elapsed_minutes(&self, now: DateTime<Utc>) -> u32 {
         let mins = (now - self.start_time).num_minutes();
-        if mins > 0 {
-            mins as u32
-        } else {
-            0
-        }
+        if mins > 0 { mins as u32 } else { 0 }
     }
 
     /// Billable amount in cents, given a resolved rate (cents/hour).

@@ -3,21 +3,21 @@ use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
 
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use chrono::{DateTime, Datelike, NaiveDate, Utc};
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
 use crate::asset::{
+    Asset, AssetConflict, AssetCreateRequest, AssetFilter, AssetMaintenanceRecord,
+    AssetMaintenanceRequest, AssetPatch, AssetRepairRequest, AssetRepairResponse, AssetReport,
+    AssetReservationRecord, AssetReservationResponse, AssetReserveRequest, AssetStatus,
     build_asset_report, collect_asset_conflicts, conflicts_for_reservation, format_asset_id,
-    matches_asset_filter, parse_asset_status, Asset, AssetConflict, AssetCreateRequest,
-    AssetFilter, AssetMaintenanceRecord, AssetMaintenanceRequest, AssetPatch, AssetRepairRequest,
-    AssetRepairResponse, AssetReport, AssetReservationRecord, AssetReservationResponse,
-    AssetReserveRequest, AssetStatus,
+    matches_asset_filter, parse_asset_status,
 };
 use crate::expense::{
-    build_expense_report, format_expense_id, matches_expense_filter, parse_expense_status, Expense,
-    ExpenseCreateRequest, ExpenseFilter, ExpensePatch, ExpenseReport, ExpenseStatus,
+    Expense, ExpenseCreateRequest, ExpenseFilter, ExpensePatch, ExpenseReport, ExpenseStatus,
+    build_expense_report, format_expense_id, matches_expense_filter, parse_expense_status,
 };
 use crate::index::TaskIndex;
 use crate::location::{Location, Space, VenueDefault};
@@ -26,8 +26,8 @@ use crate::people::{
     PersonContext, ProviderConflict, ProviderConflictField, ProviderRef,
 };
 use crate::project::{
-    next_task as find_next_task, project_dashboard as build_project_dashboard, Project,
-    ProjectDashboardEntry, ProjectStats,
+    Project, ProjectDashboardEntry, ProjectStats, next_task as find_next_task,
+    project_dashboard as build_project_dashboard,
 };
 use crate::provider::{
     ChannelConversation, ChannelMessage, ChannelSendMessageRequest, CommunicationChannelProvider,
@@ -35,8 +35,8 @@ use crate::provider::{
 };
 use crate::query::Query;
 use crate::revenue::{
-    build_revenue_report, format_revenue_id, matches_revenue_filter, Revenue, RevenueCreateRequest,
-    RevenueFilter, RevenueReport,
+    Revenue, RevenueCreateRequest, RevenueFilter, RevenueReport, build_revenue_report,
+    format_revenue_id, matches_revenue_filter,
 };
 use crate::rrule;
 use crate::service::{
@@ -59,7 +59,7 @@ use crate::service::{
 };
 use crate::task::{Priority, Status, Task, WikiLink};
 use crate::vault::Vault;
-use crate::watch::{start_watch, WatchHandle};
+use crate::watch::{WatchHandle, start_watch};
 
 /// A named vault source with its role in the system.
 #[derive(Debug, Clone)]
@@ -6604,10 +6604,12 @@ mod tests {
         assert_eq!(promoted.kind, "commitment");
         assert_eq!(promoted.status, "planned");
         assert_eq!(promoted.scheduled.as_deref(), Some("2026-05-01"));
-        assert!(promoted
-            .projects
-            .iter()
-            .any(|project| project == "Operations"));
+        assert!(
+            promoted
+                .projects
+                .iter()
+                .any(|project| project == "Operations")
+        );
         assert!(!promoted.tags.iter().any(|tag| tag == "inbox"));
         assert!(svc.list_inbox_items().await.is_empty());
 
@@ -6652,11 +6654,13 @@ mod tests {
                 .map(|task| task.0.as_str()),
             Some(response.task.title.as_str())
         );
-        assert!(response
-            .asset
-            .linked_tasks
-            .iter()
-            .any(|task| task.0 == response.task.title));
+        assert!(
+            response
+                .asset
+                .linked_tasks
+                .iter()
+                .any(|task| task.0 == response.task.title)
+        );
 
         let tasks = svc.list_tasks().await;
         assert_eq!(tasks.len(), 1);
@@ -6818,38 +6822,54 @@ mod tests {
             .unwrap();
 
         let report = svc.daily_review_report().await;
-        assert!(report
-            .inbox
-            .iter()
-            .any(|item| item.title == "Loose capture"));
-        assert!(report
-            .commitments
-            .iter()
-            .any(|task| task.title == "Client commitment"));
-        assert!(report
-            .due_today
-            .iter()
-            .any(|task| task.title == "Client commitment"));
-        assert!(report
-            .waiting
-            .iter()
-            .any(|task| task.title == "Waiting on vendor"));
-        assert!(report
-            .someday
-            .iter()
-            .any(|task| task.title == "Someday cabin idea"));
-        assert!(report
-            .overdue
-            .iter()
-            .any(|task| task.title == "Overdue tax thing"));
-        assert!(report
-            .unscheduled
-            .iter()
-            .any(|task| task.title == "Unscheduled stale thing"));
-        assert!(report
-            .stale
-            .iter()
-            .any(|task| task.title == "Unscheduled stale thing"));
+        assert!(
+            report
+                .inbox
+                .iter()
+                .any(|item| item.title == "Loose capture")
+        );
+        assert!(
+            report
+                .commitments
+                .iter()
+                .any(|task| task.title == "Client commitment")
+        );
+        assert!(
+            report
+                .due_today
+                .iter()
+                .any(|task| task.title == "Client commitment")
+        );
+        assert!(
+            report
+                .waiting
+                .iter()
+                .any(|task| task.title == "Waiting on vendor")
+        );
+        assert!(
+            report
+                .someday
+                .iter()
+                .any(|task| task.title == "Someday cabin idea")
+        );
+        assert!(
+            report
+                .overdue
+                .iter()
+                .any(|task| task.title == "Overdue tax thing")
+        );
+        assert!(
+            report
+                .unscheduled
+                .iter()
+                .any(|task| task.title == "Unscheduled stale thing")
+        );
+        assert!(
+            report
+                .stale
+                .iter()
+                .any(|task| task.title == "Unscheduled stale thing")
+        );
 
         let _ = std::fs::remove_dir_all(vault);
     }
@@ -6877,10 +6897,12 @@ mod tests {
         assert_eq!(person.id.as_deref(), Some("person-1"));
         assert_eq!(person.display_name, "Ada Lovelace");
         assert_eq!(person.organization.as_deref(), Some("Analytical Engines"));
-        assert!(person
-            .contact_methods
-            .iter()
-            .any(|method| method.kind == "email" && method.value == "ada@example.com"));
+        assert!(
+            person
+                .contact_methods
+                .iter()
+                .any(|method| method.kind == "email" && method.value == "ada@example.com")
+        );
 
         let orgs = organizations_from_people(&[person.clone()]);
         assert_eq!(orgs.len(), 1);
@@ -6943,10 +6965,12 @@ mod tests {
         assert_eq!(conflict.local_etag.as_deref(), Some("\"local\""));
         assert_eq!(conflict.remote_etag.as_deref(), Some("\"remote\""));
         assert!(conflict.fields.iter().any(|field| field.field == "title"));
-        assert!(conflict
-            .fields
-            .iter()
-            .any(|field| field.field == "contact_methods"));
+        assert!(
+            conflict
+                .fields
+                .iter()
+                .any(|field| field.field == "contact_methods")
+        );
 
         let org_local = OrganizationRecord {
             id: Some("org-1".to_string()),
@@ -6973,10 +6997,12 @@ mod tests {
         let org_conflict =
             organization_provider_conflicts(&org_local, &org_remote).expect("org conflict");
         assert_eq!(org_conflict.entity_type, "organization");
-        assert!(org_conflict
-            .fields
-            .iter()
-            .any(|field| field.field == "people"));
+        assert!(
+            org_conflict
+                .fields
+                .iter()
+                .any(|field| field.field == "people")
+        );
     }
 
     #[test]
@@ -7148,10 +7174,11 @@ mod tests {
         }));
         assert!(plan.safe_to_run);
         assert!(plan.items.iter().any(|item| item.provider == "caldav"));
-        assert!(plan
-            .items
-            .iter()
-            .any(|item| item.provider == "nextcloud-talk"));
+        assert!(
+            plan.items
+                .iter()
+                .any(|item| item.provider == "nextcloud-talk")
+        );
         assert!(plan.items.iter().all(|item| !item.destructive));
 
         let missing = build_sync_plan(None);

@@ -43,38 +43,38 @@ pub mod caldav;
 pub mod crdt;
 
 pub use agent::{
-    build_agent_plan, AgentPlan, AgentPlanEdge, AgentPlanNode, AgentPlanNodeKind,
-    AgentPlanNodeStatus,
+    AgentPlan, AgentPlanEdge, AgentPlanNode, AgentPlanNodeKind, AgentPlanNodeStatus,
+    build_agent_plan,
 };
 pub use asset::{
-    format_asset_id, Asset, AssetBucket, AssetConflict, AssetCreateRequest, AssetFilter,
-    AssetMaintenanceRecord, AssetMaintenanceRequest, AssetPatch, AssetRepairRequest,
-    AssetRepairResponse, AssetReport, AssetReservationRecord, AssetReservationResponse,
-    AssetReserveRequest, AssetStatus,
+    Asset, AssetBucket, AssetConflict, AssetCreateRequest, AssetFilter, AssetMaintenanceRecord,
+    AssetMaintenanceRequest, AssetPatch, AssetRepairRequest, AssetRepairResponse, AssetReport,
+    AssetReservationRecord, AssetReservationResponse, AssetReserveRequest, AssetStatus,
+    format_asset_id,
 };
 pub use calendar_event::{CalendarEvent, CalendarEventStatus};
-pub use capture::{parse_capture, CaptureInput};
-pub use client::{resolve_rate, Client};
+pub use capture::{CaptureInput, parse_capture};
+pub use client::{Client, resolve_rate};
 pub use cycle::{Cycle, CycleStatus};
 pub use email::EmailRef;
 pub use expense::{
-    format_expense_id, Expense, ExpenseBucket, ExpenseCreateRequest, ExpensePatch, ExpenseReport,
-    ExpenseStatus,
+    Expense, ExpenseBucket, ExpenseCreateRequest, ExpensePatch, ExpenseReport, ExpenseStatus,
+    format_expense_id,
 };
-pub use invoice::{format_invoice_id, Invoice, InvoiceLine, InvoiceStatus, Payment};
-pub use location::{render_location_body, Location, Space, VenueDefault};
+pub use invoice::{Invoice, InvoiceLine, InvoiceStatus, Payment, format_invoice_id};
+pub use location::{Location, Space, VenueDefault, render_location_body};
 pub use module::{Module, ModuleStatus};
 pub use people::{
     CommunicationRef, ContactMethod, OrganizationContext, OrganizationRecord, Person,
     PersonContext, ProviderConflict, ProviderConflictField, ProviderRef, Relationship,
 };
 pub use project::{
-    next_task, project_dashboard, Project, ProjectDashboardBucket, ProjectDashboardEntry,
-    ProjectStats, ProjectStatus,
+    Project, ProjectDashboardBucket, ProjectDashboardEntry, ProjectStats, ProjectStatus, next_task,
+    project_dashboard,
 };
 pub use query::{Filter, Group, GroupedTasks, Query, Sort, TaskGroup};
 pub use revenue::{
-    format_revenue_id, Revenue, RevenueBucket, RevenueCreateRequest, RevenueFilter, RevenueReport,
+    Revenue, RevenueBucket, RevenueCreateRequest, RevenueFilter, RevenueReport, format_revenue_id,
 };
 pub use task::{
     DependencyRelType, Priority, Reaction, RecurrenceAnchor, RelationType, Reminder,
@@ -84,11 +84,11 @@ pub use views::{SavedView, ViewDisplay, ViewFilters};
 
 #[cfg(feature = "server")]
 pub use integration::{
-    list_integrations, load_integration, Integration, ProjectTemplate, StatusDef, TaskTemplate,
+    Integration, ProjectTemplate, StatusDef, TaskTemplate, list_integrations, load_integration,
 };
 #[cfg(feature = "server")]
 pub use project_vault::{
-    create_project, save_project_metadata, save_project_task, scan_project_vault, ProjectWithTasks,
+    ProjectWithTasks, create_project, save_project_metadata, save_project_task, scan_project_vault,
 };
 #[cfg(feature = "server")]
 pub use provider::{
@@ -99,36 +99,36 @@ pub use provider::{
 };
 #[cfg(feature = "server")]
 pub use service::{
+    ActivityService, ActivityServiceDispatcher, BusinessFinanceClientSummary,
+    BusinessFinanceReport, CalDavCalendarInfo, CalDavDeleteObjectRequest, CalDavDiscovery,
+    CalDavFreeBusyInterval, CalDavFreeBusyRequest, CalDavMultigetRequest, CalDavObject,
+    CalDavPutObjectRequest, CalDavScheduleRequest, CalDavScheduleResponse,
+    CalDavSyncCollectionRequest, CalDavSyncCollectionResponse, CalendarEventPatch, CalendarService,
+    CalendarServiceDispatcher, CardDavAddressBookInfo, CardDavContact, CardDavDeleteObjectRequest,
+    CardDavDiscovery, CardDavMultigetRequest, CardDavObject, CardDavPutObjectRequest,
+    CardDavSyncCollectionRequest, CardDavSyncCollectionResponse, ClientService,
+    ClientServiceDispatcher, ConversationService, ConversationServiceDispatcher, EmailLinkRequest,
+    EmailLinkResponse, EmailListRequest, EmailUnlinkRequest, FileCopyMoveRequest, FileEntry,
+    FileReadResponse, FileService, FileServiceDispatcher, FileWriteRequest, HealthCheck,
+    InboxCaptureRequest, InboxItem, InboxPromoteRequest, InboxService, InboxServiceDispatcher,
+    InvoiceAgingBucket, InvoiceCreateRequest, InvoicePaymentRequest, InvoiceService,
+    InvoiceServiceDispatcher, MailCreateMailboxRequest, MailCreateTagRequest, MailDeleteTagRequest,
+    MailListMessagesRequest, MailMessageTagRequest, MailMoveMessageRequest, MailService,
+    MailServiceDispatcher, NextcloudCapability, OperatingAreaStatus, OperatingGoal,
+    OperatingModelReport, OperatingRoutine, OperatingService, OperatingServiceDispatcher,
+    PeopleService, PeopleServiceDispatcher, ProjectFileSummary, ProjectKnowledgeContext,
+    ProjectPatch, ProjectService, ProjectServiceDispatcher, ProviderSyncState, RemoteDeckBoard,
+    RemoteDeckStack, ReviewReport, SyncPlan, SyncPlanItem, SyncStats, SystemCapabilities,
+    SystemHealth, SystemService, SystemServiceDispatcher, TaskService, TaskServiceDispatcher,
+    TimeEntryContext, TimeEntryFilter, TimeEntryPatch, TimeLogRequest, TimeService,
+    TimeServiceDispatcher, TimeStartRequest, TimedTaskEntry, VaultCapability, VaultError,
     activity_service_service_descriptor, calendar_service_service_descriptor,
     client_service_service_descriptor, conversation_service_service_descriptor,
     file_service_service_descriptor, inbox_service_service_descriptor,
     invoice_service_service_descriptor, mail_service_service_descriptor,
     operating_service_service_descriptor, people_service_service_descriptor,
     project_service_service_descriptor, system_service_service_descriptor,
-    task_service_service_descriptor, time_service_service_descriptor, ActivityService,
-    ActivityServiceDispatcher, BusinessFinanceClientSummary, BusinessFinanceReport,
-    CalDavCalendarInfo, CalDavDeleteObjectRequest, CalDavDiscovery, CalDavFreeBusyInterval,
-    CalDavFreeBusyRequest, CalDavMultigetRequest, CalDavObject, CalDavPutObjectRequest,
-    CalDavScheduleRequest, CalDavScheduleResponse, CalDavSyncCollectionRequest,
-    CalDavSyncCollectionResponse, CalendarEventPatch, CalendarService, CalendarServiceDispatcher,
-    CardDavAddressBookInfo, CardDavContact, CardDavDeleteObjectRequest, CardDavDiscovery,
-    CardDavMultigetRequest, CardDavObject, CardDavPutObjectRequest, CardDavSyncCollectionRequest,
-    CardDavSyncCollectionResponse, ClientService, ClientServiceDispatcher, ConversationService,
-    ConversationServiceDispatcher, EmailLinkRequest, EmailLinkResponse, EmailListRequest,
-    EmailUnlinkRequest, FileCopyMoveRequest, FileEntry, FileReadResponse, FileService,
-    FileServiceDispatcher, FileWriteRequest, HealthCheck, InboxCaptureRequest, InboxItem,
-    InboxPromoteRequest, InboxService, InboxServiceDispatcher, InvoiceAgingBucket,
-    InvoiceCreateRequest, InvoicePaymentRequest, InvoiceService, InvoiceServiceDispatcher,
-    MailCreateMailboxRequest, MailCreateTagRequest, MailDeleteTagRequest, MailListMessagesRequest,
-    MailMessageTagRequest, MailMoveMessageRequest, MailService, MailServiceDispatcher,
-    NextcloudCapability, OperatingAreaStatus, OperatingGoal, OperatingModelReport,
-    OperatingRoutine, OperatingService, OperatingServiceDispatcher, PeopleService,
-    PeopleServiceDispatcher, ProjectFileSummary, ProjectKnowledgeContext, ProjectPatch,
-    ProjectService, ProjectServiceDispatcher, ProviderSyncState, RemoteDeckBoard, RemoteDeckStack,
-    ReviewReport, SyncPlan, SyncPlanItem, SyncStats, SystemCapabilities, SystemHealth,
-    SystemService, SystemServiceDispatcher, TaskService, TaskServiceDispatcher, TimeEntryContext,
-    TimeEntryFilter, TimeEntryPatch, TimeLogRequest, TimeService, TimeServiceDispatcher,
-    TimeStartRequest, TimedTaskEntry, VaultCapability, VaultError,
+    task_service_service_descriptor, time_service_service_descriptor,
 };
 #[cfg(feature = "server")]
 pub use service_impl::{VaultKind, VaultServiceImpl, VaultSource};
@@ -140,5 +140,5 @@ pub use watch::WatchHandle;
 #[cfg(feature = "caldav")]
 #[cfg(feature = "realtime")]
 pub use caldav::{
-    ics_to_task, task_to_ics, task_to_vtodo, vtodo_to_task, CalDavClient, CalDavConfig,
+    CalDavClient, CalDavConfig, ics_to_task, task_to_ics, task_to_vtodo, vtodo_to_task,
 };

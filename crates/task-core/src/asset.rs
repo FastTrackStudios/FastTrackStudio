@@ -756,11 +756,15 @@ mod tests {
 
         let conflicts = conflicts_for_reservation(&asset, &reservation);
         assert_eq!(conflicts.len(), 2);
-        assert!(conflicts
-            .iter()
-            .any(|conflict| conflict.reason == "asset needs repair"));
-        assert!(conflicts
-            .iter()
-            .any(|conflict| conflict.reason.contains("Show A")));
+        assert!(
+            conflicts
+                .iter()
+                .any(|conflict| conflict.reason == "asset needs repair")
+        );
+        assert!(
+            conflicts
+                .iter()
+                .any(|conflict| conflict.reason.contains("Show A"))
+        );
     }
 }

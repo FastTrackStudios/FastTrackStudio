@@ -6,7 +6,7 @@
 
 #[cfg(feature = "realtime")]
 mod crdt_tests {
-    use task_core::crdt::{CrdtDocument, CONFLICT_FIELDS};
+    use task_core::crdt::{CONFLICT_FIELDS, CrdtDocument};
     use task_core::task::{Priority, Status, Task};
 
     fn base_task() -> Task {

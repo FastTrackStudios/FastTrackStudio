@@ -5,7 +5,7 @@
 
 use std::path::Path;
 
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 
 use crate::service::{ProviderSyncState, VaultError};
 use crate::task::Task;

@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use axum::extract::ws::{Message as AxumWsMessage, WebSocket};
 use axum::extract::{Path as AxumPath, Query, State, WebSocketUpgrade};
-use axum::http::{header, HeaderMap, StatusCode};
+use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
@@ -14,16 +14,16 @@ use better_auth_core::{CreateMember, CreateOrganization, CreateUser};
 use chrono::Utc;
 use serde::Serialize;
 use serde_json::json;
+use task_core::VaultServiceImpl;
 use task_core::crdt::{CrdtSyncEngine, SyncOp};
 use task_core::workflows::{
-    parse_download_portal, DownloadBundle, DownloadPortal, PortalVisibility,
+    DownloadBundle, DownloadPortal, PortalVisibility, parse_download_portal,
 };
-use task_core::VaultServiceImpl;
+use task_db::SeaOrmAuthAdapter;
 use task_db::entities::auth::{auth_member, auth_organization, auth_session};
 use task_db::sea_orm::{
     self, ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set,
 };
-use task_db::SeaOrmAuthAdapter;
 use tokio::sync::{mpsc, oneshot};
 use tower_http::cors::CorsLayer;
 use tracing::{info, warn};
@@ -817,7 +817,7 @@ async fn handle_crdt_request(
             let bytes = match decode_b64(data) {
                 Ok(bytes) => bytes,
                 Err(e) => {
-                    return Some(json!({"type": "error", "id": id, "path": path, "error": e}))
+                    return Some(json!({"type": "error", "id": id, "path": path, "error": e}));
                 }
             };
             match engine.apply_remote_update(path, &bytes).await {
@@ -1442,7 +1442,7 @@ async fn portal_file(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("failed to read portal: {e}"),
             )
-                .into_response()
+                .into_response();
         }
     };
     let Some(portal) = parse_download_portal(&content).filter(|portal| portal.slug == slug) else {
@@ -1521,7 +1521,7 @@ fn load_portal(state: &AppState, slug: &str) -> Result<DownloadPortal, Response>
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("failed to read portal: {e}"),
             )
-                .into_response())
+                .into_response());
         }
     };
 

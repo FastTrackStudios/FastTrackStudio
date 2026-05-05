@@ -89,7 +89,7 @@ fn service_descriptors() -> Vec<&'static vox_types::ServiceDescriptor> {
 }
 
 fn build_obsidian_plugin(workspace_root: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    use xshell::{cmd, Shell};
+    use xshell::{Shell, cmd};
 
     let plugin_dir = workspace_root
         .join("integrations")

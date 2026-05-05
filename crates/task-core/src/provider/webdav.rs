@@ -973,10 +973,12 @@ mod tests {
         assert_eq!(loaded.tasks.len(), 1);
         assert_eq!(loaded.tasks[0].title, task.title);
         assert_eq!(loaded.tasks[0].body, task.body);
-        assert!(loaded.tasks[0]
-            .projects
-            .iter()
-            .any(|link| link.0 == project.title));
+        assert!(
+            loaded.tasks[0]
+                .projects
+                .iter()
+                .any(|link| link.0 == project.title)
+        );
 
         let stat = provider
             .stat(&format!("{}/tasks/{}.md", project.title, task.title))

@@ -3376,10 +3376,12 @@ END:VCALENDAR"#;
             .list_stacks(board.id)
             .await
             .expect("list deck stacks after create");
-        assert!(stacks
-            .iter()
-            .flat_map(|stack| stack.cards.iter())
-            .any(|card| card.id == card_id));
+        assert!(
+            stacks
+                .iter()
+                .flat_map(|stack| stack.cards.iter())
+                .any(|card| card.id == card_id)
+        );
         client
             .delete_card(board.id, stack.id, card_id)
             .await

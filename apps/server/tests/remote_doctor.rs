@@ -40,14 +40,18 @@ async fn authenticated_system_service_reports_capabilities_and_health() {
         .expect("SystemService capabilities should return");
     assert_eq!(capabilities.package, "task-server");
     assert_eq!(capabilities.protocol_version, 1);
-    assert!(capabilities
-        .services
-        .iter()
-        .any(|svc| svc == "SystemService"));
-    assert!(capabilities
-        .features
-        .iter()
-        .any(|feature| feature == "webdav-files"));
+    assert!(
+        capabilities
+            .services
+            .iter()
+            .any(|svc| svc == "SystemService")
+    );
+    assert!(
+        capabilities
+            .features
+            .iter()
+            .any(|feature| feature == "webdav-files")
+    );
     assert!(capabilities.vault.exists);
 
     let health = timeout(Duration::from_secs(10), system.health(false))
@@ -150,9 +154,11 @@ async fn authenticated_core_services_smoke_over_vox() {
     assert_eq!(captured.priority, "high");
     assert_eq!(captured.source.as_deref(), Some("e2e"));
     let inbox_items = service_call("list_inbox", inbox_service.list_inbox()).await;
-    assert!(inbox_items
-        .iter()
-        .any(|item| item.id == captured.id && item.title == captured.title));
+    assert!(
+        inbox_items
+            .iter()
+            .any(|item| item.id == captured.id && item.title == captured.title)
+    );
     let promoted = service_call(
         "promote",
         inbox_service.promote(InboxPromoteRequest {
@@ -170,10 +176,12 @@ async fn authenticated_core_services_smoke_over_vox() {
     .await;
     assert_eq!(promoted.kind, "commitment");
     assert_eq!(promoted.status, "planned");
-    assert!(promoted
-        .projects
-        .iter()
-        .any(|project| project == "E2E Project"));
+    assert!(
+        promoted
+            .projects
+            .iter()
+            .any(|project| project == "E2E Project")
+    );
     assert!(promoted.tags.iter().any(|tag| tag == "review"));
     assert!(!promoted.tags.iter().any(|tag| tag == "inbox"));
     assert_eq!(promoted.due.as_deref(), Some("2026-05-01"));
@@ -201,15 +209,19 @@ async fn authenticated_core_services_smoke_over_vox() {
 
     let daily_review = service_call("daily_review", inbox_service.daily_review()).await;
     assert!(daily_review.inbox.is_empty());
-    assert!(daily_review
-        .commitments
-        .iter()
-        .any(|task| task.title == promoted.title));
+    assert!(
+        daily_review
+            .commitments
+            .iter()
+            .any(|task| task.title == promoted.title)
+    );
     let weekly_review = service_call("weekly_review", inbox_service.weekly_review()).await;
-    assert!(weekly_review
-        .commitments
-        .iter()
-        .any(|task| task.title == promoted.title));
+    assert!(
+        weekly_review
+            .commitments
+            .iter()
+            .any(|task| task.title == promoted.title)
+    );
 
     let tasks = service_call("list_tasks", task_service.list_tasks()).await;
     let seeded = tasks
@@ -281,23 +293,29 @@ async fn authenticated_core_services_smoke_over_vox() {
             >= 1
     );
     let projects = service_call("list_projects", project_service.list_projects()).await;
-    assert!(projects
-        .iter()
-        .any(|project| project.title == "E2E Project"));
+    assert!(
+        projects
+            .iter()
+            .any(|project| project.title == "E2E Project")
+    );
     let next_task = service_call(
         "next_task",
         project_service.next_task("E2E Project".to_string()),
     )
     .await;
     let next_task = next_task.expect("E2E project should have a next task");
-    assert!(next_task
-        .projects
-        .iter()
-        .any(|project| project.0 == "E2E Project"));
+    assert!(
+        next_task
+            .projects
+            .iter()
+            .any(|project| project.0 == "E2E Project")
+    );
 
-    assert!(service_call("active_timer", time_service.active_timer())
-        .await
-        .is_none());
+    assert!(
+        service_call("active_timer", time_service.active_timer())
+            .await
+            .is_none()
+    );
     let timer = service_call(
         "start_timer",
         time_service.start_timer(TimeStartRequest {
@@ -310,9 +328,11 @@ async fn authenticated_core_services_smoke_over_vox() {
     )
     .await;
     assert!(timer.is_running());
-    assert!(service_call("active_timer", time_service.active_timer())
-        .await
-        .is_some());
+    assert!(
+        service_call("active_timer", time_service.active_timer())
+            .await
+            .is_some()
+    );
     let stopped = service_call(
         "stop_timer",
         time_service.stop_timer(Some(created.title.clone())),
@@ -415,9 +435,11 @@ async fn authenticated_core_services_smoke_over_vox() {
         calendar_service.events_between(event_start.to_rfc3339(), event_end.to_rfc3339()),
     )
     .await;
-    assert!(events
-        .iter()
-        .any(|candidate| candidate.title == updated_event.title));
+    assert!(
+        events
+            .iter()
+            .any(|candidate| candidate.title == updated_event.title)
+    );
     let due = service_call(
         "tasks_due_by",
         calendar_service.tasks_due_by("2026-05-02".to_string()),
@@ -430,9 +452,11 @@ async fn authenticated_core_services_smoke_over_vox() {
     )
     .await;
     assert!(scheduled.iter().any(|task| task.title == created.title));
-    assert!(service_call("sync_status", calendar_service.sync_status())
-        .await
-        .is_none());
+    assert!(
+        service_call("sync_status", calendar_service.sync_status())
+            .await
+            .is_none()
+    );
 
     let activity = service_call("recent_activity", activity_service.recent_activity(20)).await;
     assert!(activity.len() <= 20);
