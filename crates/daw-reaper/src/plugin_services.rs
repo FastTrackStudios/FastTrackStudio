@@ -11,7 +11,7 @@ use daw_proto::{
     PluginLoaderServiceDispatcher, ProjectServiceDispatcher, RegionServiceDispatcher,
     RoutingServiceDispatcher, ScreensetServiceDispatcher, TakeServiceDispatcher,
     TempoMapServiceDispatcher, ToolbarServiceDispatcher, TrackServiceDispatcher,
-    TransportServiceDispatcher,
+    TransportServiceDispatcher, WindowGeometryServiceDispatcher,
 };
 
 use daw_proto::{
@@ -24,7 +24,7 @@ use daw_proto::{
     plugin_loader_service_service_descriptor, project_service_service_descriptor,
     region_service_service_descriptor, routing_service_service_descriptor,
     screenset_service_service_descriptor, take_service_service_descriptor,
-    tempo_map_service_service_descriptor,
+    tempo_map_service_service_descriptor, window_geometry_service_service_descriptor,
     toolbar_service_service_descriptor, track_service_service_descriptor,
     transport_service_service_descriptor,
 };
@@ -70,6 +70,7 @@ pub fn create_daw_handler() -> RoutedHandler {
     let toolbar = crate::ReaperToolbar::new();
     let screenset = crate::ReaperScreenset::new();
     let dawfile_ops = crate::DawFileOps::new();
+    let window_geometry = crate::ReaperWindowGeometry::new();
     let plugin_loader = crate::ReaperPluginLoader::new();
     let batch = crate::batch::BatchExecutor::new();
 
@@ -157,6 +158,10 @@ pub fn create_daw_handler() -> RoutedHandler {
         .with(
             daw_file_service_service_descriptor(),
             DawFileServiceDispatcher::new(dawfile_ops),
+        )
+        .with(
+            window_geometry_service_service_descriptor(),
+            WindowGeometryServiceDispatcher::new(window_geometry),
         )
         .with(
             plugin_loader_service_service_descriptor(),

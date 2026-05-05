@@ -16,7 +16,8 @@ mod routed_handler;
 static ALLOCATOR: daw_allocator::FtsAllocator = daw_allocator::FtsAllocator::new();
 
 use fragile::Fragile;
-use reaper_high::{MainTaskMiddleware, Reaper as HighReaper};
+use reaper_high::{ActionKind, MainTaskMiddleware, Reaper as HighReaper};
+use reaper_medium::OwnedGaccelRegister;
 use reaper_low::PluginContext;
 use reaper_macros::reaper_extension_plugin;
 use reaper_medium::ReaperSession;
@@ -37,7 +38,7 @@ use daw::service::{
     MarkerServiceDispatcher, MidiAnalysisServiceDispatcher, MidiServiceDispatcher,
     PluginLoaderServiceDispatcher, ProjectServiceDispatcher, RegionServiceDispatcher,
     DawFileServiceDispatcher, RoutingServiceDispatcher, ScreensetServiceDispatcher,
-    TakeServiceDispatcher,
+    TakeServiceDispatcher, WindowGeometryServiceDispatcher,
     TempoMapServiceDispatcher, ToolbarServiceDispatcher, TrackServiceDispatcher,
     TransportServiceDispatcher,
 };
@@ -178,6 +179,7 @@ async fn register_daw_dispatcher() {
     let toolbar = daw::reaper::ReaperToolbar::new();
     let screenset = daw::reaper::ReaperScreenset::new();
     let dawfile_ops = daw::reaper::DawFileOps::new();
+    let window_geometry = daw::reaper::ReaperWindowGeometry::new();
     let plugin_loader = daw::reaper::ReaperPluginLoader::new();
     let batch = daw::reaper::batch::BatchExecutor::new();
     let dock_host = daw_reaper_dioxus::ReaperDockHost::new();
@@ -193,7 +195,7 @@ async fn register_daw_dispatcher() {
         plugin_loader_service_service_descriptor, project_service_service_descriptor,
         region_service_service_descriptor, routing_service_service_descriptor,
         daw_file_service_service_descriptor, screenset_service_service_descriptor,
-        take_service_service_descriptor,
+        take_service_service_descriptor, window_geometry_service_service_descriptor,
         tempo_map_service_service_descriptor, toolbar_service_service_descriptor,
         track_service_service_descriptor, transport_service_service_descriptor,
     };
@@ -283,6 +285,10 @@ async fn register_daw_dispatcher() {
         .with(
             daw_file_service_service_descriptor(),
             DawFileServiceDispatcher::new(dawfile_ops),
+        )
+        .with(
+            window_geometry_service_service_descriptor(),
+            WindowGeometryServiceDispatcher::new(window_geometry),
         )
         .with(
             plugin_loader_service_service_descriptor(),
@@ -558,6 +564,118 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
 
     drop(session);
 
+    register_window_geometry_actions();
+
     info!("daw-bridge initialized successfully");
     Ok(())
+}
+
+/// Register the FTS window-geometry REAPER actions (nudge / grow).
+///
+/// All actions target [`WindowTarget::Focused`], so the user picks the
+/// target by clicking before pressing the binding. Step size is hard-coded
+/// at 10 px for nudges and 50 px for resizes; that matches REAPER's own
+/// "Nudge" actions and is a comfortable single-tap step at typical DPI.
+/// Tweaking step size is a follow-up — easiest path is per-extension
+/// ExtState read inside each action's closure.
+///
+/// Mirrors the gaccel-after-register_action fix used by the action
+/// registry service: `reaper.register_action` only registers a gaccel
+/// during `wake_up`, so post-wake_up registrations need a manual
+/// `plugin_register_add_gaccel` call to actually appear in REAPER's
+/// action list (issue #15 / SWS toolbar pre-allocation interaction).
+fn register_fts_extension_action(name: &'static str, description: &'static str, op: fn()) {
+    let high = HighReaper::get();
+    let action = high.register_action(name, description, None, op, ActionKind::NotToggleable);
+    let cmd_id = action.command_id();
+
+    // If REAPER already lists this cmd_id (e.g. it preregistered the name
+    // from a toolbar), don't double-register the gaccel.
+    let already_listed = high
+        .main_section()
+        .with_raw(|s| {
+            (0..s.action_list_cnt())
+                .any(|i| s.get_action_by_index(i).map(|a| a.cmd() == cmd_id).unwrap_or(false))
+        })
+        .unwrap_or(false);
+    if !already_listed {
+        let gaccel = OwnedGaccelRegister::without_key_binding(cmd_id, description);
+        let mut session = high.medium_session();
+        if let Err(e) = session.plugin_register_add_gaccel(gaccel) {
+            warn!("Failed to register gaccel for '{name}': {e:?}");
+        }
+    }
+    // Leak the RegisteredAction handle — these actions live for the
+    // process lifetime, no unregister path needed.
+    std::mem::forget(action);
+}
+
+fn register_window_geometry_actions() {
+    use daw::reaper::window_geometry as wg;
+    use daw_proto::WindowTarget;
+
+    const NUDGE_STEP: i32 = 10;
+    const GROW_STEP: i32 = 50;
+
+    fn nudge(dx: i32, dy: i32) {
+        if let Some(window) = wg::resolve_target(WindowTarget::Focused) {
+            wg::nudge(window, dx, dy);
+        }
+    }
+    fn grow(dw: i32, dh: i32) {
+        if let Some(window) = wg::resolve_target(WindowTarget::Focused) {
+            wg::grow(window, dw, dh);
+        }
+    }
+
+    let actions: &[(&'static str, &'static str, fn())] = &[
+        (
+            "FTS_WINDOW_NUDGE_LEFT",
+            "FTS: Nudge focused window left",
+            || nudge(-NUDGE_STEP, 0),
+        ),
+        (
+            "FTS_WINDOW_NUDGE_RIGHT",
+            "FTS: Nudge focused window right",
+            || nudge(NUDGE_STEP, 0),
+        ),
+        (
+            "FTS_WINDOW_NUDGE_UP",
+            "FTS: Nudge focused window up",
+            || nudge(0, -NUDGE_STEP),
+        ),
+        (
+            "FTS_WINDOW_NUDGE_DOWN",
+            "FTS: Nudge focused window down",
+            || nudge(0, NUDGE_STEP),
+        ),
+        (
+            "FTS_WINDOW_GROW_WIDER",
+            "FTS: Grow focused window wider",
+            || grow(GROW_STEP, 0),
+        ),
+        (
+            "FTS_WINDOW_GROW_NARROWER",
+            "FTS: Shrink focused window narrower",
+            || grow(-GROW_STEP, 0),
+        ),
+        (
+            "FTS_WINDOW_GROW_TALLER",
+            "FTS: Grow focused window taller",
+            || grow(0, GROW_STEP),
+        ),
+        (
+            "FTS_WINDOW_GROW_SHORTER",
+            "FTS: Shrink focused window shorter",
+            || grow(0, -GROW_STEP),
+        ),
+    ];
+
+    for (name, desc, action) in actions {
+        register_fts_extension_action(name, desc, *action);
+    }
+    info!(
+        "Registered {} window-geometry actions (FTS_WINDOW_*)",
+        actions.len()
+    );
 }

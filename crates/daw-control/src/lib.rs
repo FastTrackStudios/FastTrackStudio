@@ -135,6 +135,7 @@ pub(crate) use daw_proto::RegionServiceClient;
 pub(crate) use daw_proto::RoutingServiceClient;
 pub(crate) use daw_proto::DawFileServiceClient;
 pub(crate) use daw_proto::ScreensetServiceClient;
+pub(crate) use daw_proto::WindowGeometryServiceClient;
 pub(crate) use daw_proto::TakeServiceClient;
 pub(crate) use daw_proto::TempoMapServiceClient;
 pub(crate) use daw_proto::TrackServiceClient;
@@ -166,6 +167,7 @@ mod regions;
 mod routing;
 mod dawfile;
 mod screenset;
+mod window_geometry;
 mod tempo_map;
 mod toolbar;
 mod tracks;
@@ -191,6 +193,7 @@ pub use self::regions::Regions;
 pub use self::routing::{HardwareOutputs, Receives, RouteHandle, Sends};
 pub use self::dawfile::DawFile;
 pub use self::screenset::Screensets;
+pub use self::window_geometry::WindowGeometry;
 pub use self::tempo_map::TempoMap;
 pub use self::toolbar::Toolbar;
 pub use self::tracks::{TrackHandle, Tracks};
@@ -214,6 +217,7 @@ pub struct DawClients {
     pub(crate) routing: RoutingServiceClient,
     pub(crate) screenset: ScreensetServiceClient,
     pub(crate) dawfile: DawFileServiceClient,
+    pub(crate) window_geometry: WindowGeometryServiceClient,
     pub(crate) automation: AutomationServiceClient,
     pub(crate) live_midi: LiveMidiServiceClient,
     pub(crate) midi: MidiServiceClient,
@@ -246,6 +250,7 @@ impl DawClients {
             routing: RoutingServiceClient::new(handle.clone()),
             screenset: ScreensetServiceClient::new(handle.clone()),
             dawfile: DawFileServiceClient::new(handle.clone()),
+            window_geometry: WindowGeometryServiceClient::new(handle.clone()),
             automation: AutomationServiceClient::new(handle.clone()),
             live_midi: LiveMidiServiceClient::new(handle.clone()),
             midi: MidiServiceClient::new(handle.clone()),
@@ -575,6 +580,12 @@ impl Daw {
     /// combine). Pure-function operations — no REAPER context required.
     pub fn dawfile(&self) -> DawFile {
         DawFile::new(self.clients.clone())
+    }
+
+    /// Access the window geometry service — drives nudge / resize /
+    /// re-position of REAPER windows for keyboard-bindable layout edits.
+    pub fn window_geometry(&self) -> WindowGeometry {
+        WindowGeometry::new(self.clients.clone())
     }
 
     pub fn plugin_loader(&self) -> PluginLoader {

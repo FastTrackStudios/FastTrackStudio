@@ -96,6 +96,10 @@ reaper-medium = { git = "https://github.com/FastTrackStudios/reaper-rs.git", bra
 reaper-high = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
 reaper-macros = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
 
+# swell-ui from FTS reaper-lib — typed Window/Hwnd wrappers around SWELL.
+# Used by daw-reaper for nudge / resize / center geometry actions.
+swell-ui = { git = "https://github.com/FastTrackStudios/reaper-lib.git", branch = "main" }
+
 # UI
 dioxus = "0.7.2"
 

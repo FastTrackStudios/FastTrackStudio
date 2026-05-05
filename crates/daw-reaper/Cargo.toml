@@ -36,6 +36,11 @@ facet-json.workspace = true
 # Cross-platform monitor topology enumeration for screenset capture.
 display-info = "0.5"
 
+# Typed SWELL Window/Hwnd wrappers from FTS reaper-lib. Used by the
+# window-geometry helpers (nudge / resize / center) so our action set
+# rides on the same primitives the rest of FTS's reaper-side UIs use.
+swell-ui.workspace = true
+
 [dev-dependencies]
 daw-control = { path = "../daw-control" }
 daw-proto = { path = "../daw-proto" }
