@@ -21,43 +21,95 @@
 //! When Nextcloud is connected, claimed members sync with Nextcloud users.
 //! Placeholder members can still exist without Nextcloud accounts.
 
+use crudcrate::EntityToModels;
 use facet::Facet;
+use sea_orm::entity::prelude::*;
+use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
+use uuid::Uuid;
+
+use crate::task::StringList;
 
 /// Account claim status.
-#[derive(Debug, Clone, PartialEq, Default, Facet)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Facet, Serialize, Deserialize, ToSchema, EnumIter, DeriveActiveEnum,
+)]
+#[sea_orm(rs_type = "String", db_type = "String(StringLen::N(32))")]
 #[repr(u8)]
 pub enum AccountStatus {
     /// No auth account — placeholder created by admin.
-    #[default]
+    #[sea_orm(string_value = "placeholder")]
     Placeholder,
     /// Invitation sent but not yet accepted.
+    #[sea_orm(string_value = "invited")]
     Invited,
     /// Account claimed by a real user.
+    #[sea_orm(string_value = "claimed")]
     Claimed,
     /// Disabled / deactivated.
+    #[sea_orm(string_value = "disabled")]
     Disabled,
 }
 
+impl Default for AccountStatus {
+    fn default() -> Self {
+        AccountStatus::Placeholder
+    }
+}
+
 /// A team member — either a real user or a placeholder awaiting claim.
-#[derive(Debug, Clone, PartialEq, Default, Facet)]
-pub struct TeamMember {
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Default,
+    Facet,
+    DeriveEntityModel,
+    EntityToModels,
+    Serialize,
+    Deserialize,
+    ToSchema,
+)]
+#[sea_orm(table_name = "team_members")]
+#[crudcrate(
+    api_struct = "TeamMemberApi",
+    generate_vox_service,
+    name_singular = "team member",
+    name_plural = "team members"
+)]
+pub struct Model {
+    #[facet(default)]
+    #[sea_orm(primary_key, auto_increment = false)]
+    #[crudcrate(
+        primary_key,
+        exclude(create),
+        on_create = uuid::Uuid::new_v4()
+    )]
+    pub uuid: Uuid,
+
     /// Internal username / handle (e.g. "james"). Immutable once created.
     /// Used for @mentions, assignments, and URL slugs.
+    #[crudcrate(filterable, sortable, fulltext)]
     pub username: String,
 
     /// Display name (e.g. "James Rodriguez").
+    #[crudcrate(filterable, sortable, fulltext)]
     pub name: String,
 
     /// Role in the organization (e.g. "Session Drummer").
+    #[crudcrate(filterable, sortable)]
     pub role: String,
 
     /// Department (e.g. "music", "engineering", "events").
+    #[crudcrate(filterable, sortable)]
     pub department: String,
 
     /// Email — may be empty for placeholders.
+    #[crudcrate(filterable, sortable)]
     pub email: String,
 
     /// Current account status.
+    #[crudcrate(filterable, sortable)]
     pub status: AccountStatus,
 
     /// Auth user ID — set when the account is claimed.
@@ -71,6 +123,7 @@ pub struct TeamMember {
     pub created_by: Option<String>,
 
     /// Nextcloud user ID — for sync with Nextcloud APIs.
+    #[crudcrate(filterable, sortable)]
     pub nextcloud_id: Option<String>,
 
     /// Avatar URL or path.
@@ -82,8 +135,15 @@ pub struct TeamMember {
     /// Usernames that this member was previously known as
     /// (from merged placeholder accounts).
     #[facet(default)]
-    pub aliases: Vec<String>,
+    pub aliases: StringList,
 }
+
+pub type TeamMember = Model;
+
+#[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+pub enum Relation {}
+
+impl ActiveModelBehavior for ActiveModel {}
 
 impl TeamMember {
     /// Create a new placeholder team member.
@@ -210,7 +270,7 @@ mod tests {
 
         // Merge the old placeholder username
         real_james.merge_alias("james-temp");
-        assert_eq!(real_james.aliases, vec!["james-temp"]);
+        assert_eq!(real_james.aliases.as_slice(), ["james-temp"]);
 
         // Now any reference to "james-temp" in tasks/comments
         // resolves to this account

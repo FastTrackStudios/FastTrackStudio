@@ -2,13 +2,17 @@ use crudcrate::{
     ApiError, ApplyUpdate, CreateResource, CrudModel, CrudService, CrudStorage, InMemoryQuery,
     InMemoryStorage, ResourceIdentity,
 };
+use task_core::asset::{Asset, AssetApi, AssetApiCreate, AssetStatus};
 use task_core::calendar_event::{
     CalendarEvent, CalendarEventApi, CalendarEventApiCreate, CalendarEventStatus,
 };
 use task_core::client::{Client, ClientApi, ClientApiCreate};
 use task_core::expense::{Expense, ExpenseApi, ExpenseApiCreate};
+use task_core::invoice::{Invoice, InvoiceApi, InvoiceApiCreate, InvoiceLine, InvoiceStatus};
 use task_core::revenue::{Revenue, RevenueApi, RevenueApiCreate};
 use task_core::task::{Task, TaskApi, TaskApiCreate};
+use task_core::team::{AccountStatus, TeamMember, TeamMemberApi, TeamMemberApiCreate};
+use task_core::views::{SavedView, SavedViewApi, SavedViewApiCreate, ViewDisplay, ViewFilters};
 use uuid::Uuid;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -243,4 +247,154 @@ async fn seaorm_storage_can_back_generated_calendar_event_repo_models() {
     assert_eq!(loaded.title, "Planning session");
     assert_eq!(loaded.status, CalendarEventStatus::Tentative);
     assert_eq!(loaded.attendees.len(), 2);
+}
+
+#[tokio::test]
+async fn seaorm_storage_can_back_generated_team_member_repo_models() {
+    let db = task_db::init_memory()
+        .await
+        .expect("initialize in-memory task database");
+    let member = TeamMember {
+        username: "james".to_string(),
+        name: "James Rodriguez".to_string(),
+        role: "Session Drummer".to_string(),
+        department: "music".to_string(),
+        email: "james@example.com".to_string(),
+        status: AccountStatus::Invited,
+        aliases: vec!["james-temp".to_string()].into(),
+        ..Default::default()
+    };
+    let create: TeamMemberApiCreate = serde_json::from_value(
+        serde_json::to_value(member).expect("serialize team member create seed"),
+    )
+    .expect("decode team member create model");
+
+    let created = CrudStorage::<TeamMemberApi>::create(&db, create)
+        .await
+        .expect("create team member through SeaORM storage");
+    let loaded = CrudStorage::<TeamMemberApi>::get_one(&db, created.uuid)
+        .await
+        .expect("load team member through SeaORM storage");
+
+    assert_eq!(loaded.uuid, created.uuid);
+    assert_eq!(loaded.username, "james");
+    assert_eq!(loaded.status, AccountStatus::Invited);
+    assert_eq!(loaded.aliases.as_slice(), ["james-temp"]);
+}
+
+#[tokio::test]
+async fn seaorm_storage_can_back_generated_saved_view_repo_models() {
+    let db = task_db::init_memory()
+        .await
+        .expect("initialize in-memory task database");
+    let view = SavedView {
+        title: "Urgent work".to_string(),
+        project: Some("Album".to_string()),
+        filters: ViewFilters {
+            status: vec!["open".to_string()],
+            priority: vec!["urgent".to_string(), "high".to_string()],
+            ..Default::default()
+        },
+        display: ViewDisplay {
+            layout: Some("kanban".to_string()),
+            group_by: Some("status".to_string()),
+            visible_properties: vec!["assignee".to_string(), "due".to_string()],
+            ..Default::default()
+        },
+        is_shared: true,
+        ..Default::default()
+    };
+    let create: SavedViewApiCreate =
+        serde_json::from_value(serde_json::to_value(view).expect("serialize saved view seed"))
+            .expect("decode saved view create model");
+
+    let created = CrudStorage::<SavedViewApi>::create(&db, create)
+        .await
+        .expect("create saved view through SeaORM storage");
+    let loaded = CrudStorage::<SavedViewApi>::get_one(&db, created.id)
+        .await
+        .expect("load saved view through SeaORM storage");
+
+    assert_eq!(loaded.id, created.id);
+    assert_eq!(loaded.title, "Urgent work");
+    assert_eq!(loaded.filters.priority, ["urgent", "high"]);
+    assert_eq!(loaded.display.layout.as_deref(), Some("kanban"));
+}
+
+#[tokio::test]
+async fn seaorm_storage_can_back_generated_asset_repo_models() {
+    let db = task_db::init_memory()
+        .await
+        .expect("initialize in-memory task database");
+    let asset = Asset {
+        id: "AST-2026-0001".to_string(),
+        number: 1,
+        name: "Shure SM58".to_string(),
+        status: AssetStatus::InUse,
+        manufacturer: Some("Shure".to_string()),
+        category: Some("audio".to_string()),
+        organization: Some("FastTrack".to_string()),
+        cost_cents: Some(9_999),
+        linked_tasks: vec![task_core::task::WikiLink("Repair mic".to_string())].into(),
+        ..Default::default()
+    };
+    let create: AssetApiCreate =
+        serde_json::from_value(serde_json::to_value(asset).expect("serialize asset seed"))
+            .expect("decode asset create model");
+
+    let created = CrudStorage::<AssetApi>::create(&db, create)
+        .await
+        .expect("create asset through SeaORM storage");
+    let loaded = CrudStorage::<AssetApi>::get_one(&db, created.uuid)
+        .await
+        .expect("load asset through SeaORM storage");
+
+    assert_eq!(loaded.uuid, created.uuid);
+    assert_eq!(loaded.id, "AST-2026-0001");
+    assert_eq!(loaded.name, "Shure SM58");
+    assert_eq!(loaded.status, AssetStatus::InUse);
+    assert_eq!(loaded.linked_tasks.len(), 1);
+}
+
+#[tokio::test]
+async fn seaorm_storage_can_back_generated_invoice_repo_models() {
+    let db = task_db::init_memory()
+        .await
+        .expect("initialize in-memory task database");
+    let invoice = Invoice {
+        id: "INV-2026-0001".to_string(),
+        number: 1,
+        status: InvoiceStatus::Sent,
+        client: task_core::task::WikiLink("Acme Records".to_string()),
+        issue_date: chrono::NaiveDate::from_ymd_opt(2026, 5, 4).expect("valid issue date"),
+        due_date: chrono::NaiveDate::from_ymd_opt(2026, 6, 3).expect("valid due date"),
+        currency_code: "USD".to_string(),
+        line_items: vec![InvoiceLine {
+            id: "line-1".to_string(),
+            task_title: "Mix".to_string(),
+            description: "Album mix".to_string(),
+            hours: 2.0,
+            rate_cents: 10_000,
+            ..Default::default()
+        }]
+        .into(),
+        entry_ids: vec!["entry-1".to_string()].into(),
+        ..Default::default()
+    };
+    let create: InvoiceApiCreate =
+        serde_json::from_value(serde_json::to_value(invoice).expect("serialize invoice seed"))
+            .expect("decode invoice create model");
+
+    let created = CrudStorage::<InvoiceApi>::create(&db, create)
+        .await
+        .expect("create invoice through SeaORM storage");
+    let loaded = CrudStorage::<InvoiceApi>::get_one(&db, created.uuid)
+        .await
+        .expect("load invoice through SeaORM storage");
+
+    assert_eq!(loaded.uuid, created.uuid);
+    assert_eq!(loaded.id, "INV-2026-0001");
+    assert_eq!(loaded.status, InvoiceStatus::Sent);
+    assert_eq!(loaded.line_items.len(), 1);
+    assert_eq!(loaded.line_items[0].description, "Album mix");
 }

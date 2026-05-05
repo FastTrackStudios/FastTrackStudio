@@ -1028,6 +1028,30 @@ async fn handle_vox_connection(socket: WebSocket, state: AppState, auth: VoxAuth
                     );
                     Ok(())
                 }
+                "TeamMemberRepo" => {
+                    connection.handle_with(task_core::team::TeamMemberRepoDispatcher::new(
+                        task_core::team::TeamMemberRepoStorage::new(db.clone()),
+                    ));
+                    Ok(())
+                }
+                "SavedViewRepo" => {
+                    connection.handle_with(task_core::views::SavedViewRepoDispatcher::new(
+                        task_core::views::SavedViewRepoStorage::new(db.clone()),
+                    ));
+                    Ok(())
+                }
+                "AssetRepo" => {
+                    connection.handle_with(task_core::asset::AssetRepoDispatcher::new(
+                        task_core::asset::AssetRepoStorage::new(db.clone()),
+                    ));
+                    Ok(())
+                }
+                "InvoiceRepo" => {
+                    connection.handle_with(task_core::invoice::InvoiceRepoDispatcher::new(
+                        task_core::invoice::InvoiceRepoStorage::new(db.clone()),
+                    ));
+                    Ok(())
+                }
                 "Noop" => {
                     connection.handle_with(());
                     Ok(())

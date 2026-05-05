@@ -1,6 +1,8 @@
 use sea_orm::Schema;
 use sea_orm_migration::prelude::*;
-use task_core::{calendar_event, client, expense, project, revenue, task};
+use task_core::{
+    asset, calendar_event, client, expense, invoice, project, revenue, task, team, views,
+};
 
 #[derive(DeriveMigrationName)]
 pub struct Migration;
@@ -197,6 +199,96 @@ impl MigrationTrait for Migration {
                     .table(CalendarEvents::Table)
                     .col(calendar_event::Column::ExternalSource)
                     .col(calendar_event::Column::ExternalId)
+                    .to_owned(),
+            )
+            .await?;
+
+        // ── Team members ───────────────────────────────────────────
+        manager
+            .create_table(
+                schema
+                    .create_table_from_entity(team::Entity)
+                    .if_not_exists()
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_team_members_username")
+                    .table(TeamMembers::Table)
+                    .col(team::Column::Username)
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_team_members_status")
+                    .table(TeamMembers::Table)
+                    .col(team::Column::Status)
+                    .to_owned(),
+            )
+            .await?;
+
+        // ── Assets ─────────────────────────────────────────────────
+        manager
+            .create_table(
+                schema
+                    .create_table_from_entity(asset::Entity)
+                    .if_not_exists()
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_assets_name")
+                    .table(Assets::Table)
+                    .col(asset::Column::Name)
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_assets_status")
+                    .table(Assets::Table)
+                    .col(asset::Column::Status)
+                    .to_owned(),
+            )
+            .await?;
+
+        // ── Invoices ────────────────────────────────────────────────
+        manager
+            .create_table(
+                schema
+                    .create_table_from_entity(invoice::Entity)
+                    .if_not_exists()
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_invoices_id")
+                    .table(Invoices::Table)
+                    .col(invoice::Column::Id)
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_invoices_status")
+                    .table(Invoices::Table)
+                    .col(invoice::Column::Status)
                     .to_owned(),
             )
             .await?;
@@ -415,48 +507,19 @@ impl MigrationTrait for Migration {
         // ── Saved Views ─────────────────────────────────────────────
         manager
             .create_table(
-                Table::create()
-                    .table(SavedViews::Table)
+                schema
+                    .create_table_from_entity(views::Entity)
                     .if_not_exists()
-                    .col(
-                        ColumnDef::new(SavedViews::Id)
-                            .uuid()
-                            .not_null()
-                            .primary_key(),
-                    )
-                    .col(ColumnDef::new(SavedViews::Title).string_len(255).not_null())
-                    .col(ColumnDef::new(SavedViews::Description).text())
-                    .col(ColumnDef::new(SavedViews::Project).string_len(255))
-                    .col(
-                        ColumnDef::new(SavedViews::Filters)
-                            .json()
-                            .not_null()
-                            .default("{}"),
-                    )
-                    .col(
-                        ColumnDef::new(SavedViews::Display)
-                            .json()
-                            .not_null()
-                            .default("{}"),
-                    )
-                    .col(ColumnDef::new(SavedViews::CreatedBy).string_len(100))
-                    .col(
-                        ColumnDef::new(SavedViews::IsShared)
-                            .boolean()
-                            .not_null()
-                            .default(false),
-                    )
-                    .col(ColumnDef::new(SavedViews::SortOrder).double())
-                    .col(
-                        ColumnDef::new(SavedViews::CreatedAt)
-                            .timestamp_with_time_zone()
-                            .not_null(),
-                    )
-                    .col(
-                        ColumnDef::new(SavedViews::UpdatedAt)
-                            .timestamp_with_time_zone()
-                            .not_null(),
-                    )
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_saved_views_title")
+                    .table(SavedViews::Table)
+                    .col(views::Column::Title)
                     .to_owned(),
             )
             .await?;
@@ -527,6 +590,15 @@ impl MigrationTrait for Migration {
             .drop_table(Table::drop().table(Comments::Table).to_owned())
             .await?;
         manager
+            .drop_table(Table::drop().table(Invoices::Table).to_owned())
+            .await?;
+        manager
+            .drop_table(Table::drop().table(Assets::Table).to_owned())
+            .await?;
+        manager
+            .drop_table(Table::drop().table(TeamMembers::Table).to_owned())
+            .await?;
+        manager
             .drop_table(Table::drop().table(CalendarEvents::Table).to_owned())
             .await?;
         manager
@@ -577,6 +649,21 @@ enum Revenues {
 
 #[derive(DeriveIden)]
 enum CalendarEvents {
+    Table,
+}
+
+#[derive(DeriveIden)]
+enum TeamMembers {
+    Table,
+}
+
+#[derive(DeriveIden)]
+enum Assets {
+    Table,
+}
+
+#[derive(DeriveIden)]
+enum Invoices {
     Table,
 }
 
@@ -654,17 +741,6 @@ enum Notifications {
 #[derive(DeriveIden)]
 enum SavedViews {
     Table,
-    Id,
-    Title,
-    Description,
-    Project,
-    Filters,
-    Display,
-    CreatedBy,
-    IsShared,
-    SortOrder,
-    CreatedAt,
-    UpdatedAt,
 }
 
 #[derive(DeriveIden)]

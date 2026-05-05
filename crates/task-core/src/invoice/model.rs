@@ -19,22 +19,162 @@
 //! the schema. Rendering converts to dollars for display only.
 
 use chrono::{DateTime, NaiveDate, Utc};
+use crudcrate::EntityToModels;
 use facet::Facet;
+use sea_orm::entity::prelude::*;
+use sea_orm::sea_query::{ArrayType, ColumnType, Nullable, Value, ValueType, ValueTypeErr};
+use sea_orm::{ColIdx, QueryResult, TryGetError, TryGetable};
+use serde::{Deserialize, Serialize};
+use std::ops::{Deref, DerefMut};
+use utoipa::ToSchema;
+use uuid::Uuid;
 
-use crate::task::WikiLink;
+use crate::task::{StringList, WikiLink};
+
+macro_rules! json_vec_type {
+    ($name:ident, $item:ty) => {
+        #[derive(Debug, Clone, PartialEq, Facet, Serialize, Deserialize, ToSchema)]
+        #[facet(transparent)]
+        #[serde(transparent)]
+        pub struct $name(pub Vec<$item>);
+
+        impl Default for $name {
+            fn default() -> Self {
+                Self(Vec::new())
+            }
+        }
+
+        impl Deref for $name {
+            type Target = Vec<$item>;
+
+            fn deref(&self) -> &Self::Target {
+                &self.0
+            }
+        }
+
+        impl DerefMut for $name {
+            fn deref_mut(&mut self) -> &mut Self::Target {
+                &mut self.0
+            }
+        }
+
+        impl From<Vec<$item>> for $name {
+            fn from(value: Vec<$item>) -> Self {
+                Self(value)
+            }
+        }
+
+        impl IntoIterator for $name {
+            type Item = $item;
+            type IntoIter = std::vec::IntoIter<$item>;
+
+            fn into_iter(self) -> Self::IntoIter {
+                self.0.into_iter()
+            }
+        }
+
+        impl<'a> IntoIterator for &'a $name {
+            type Item = &'a $item;
+            type IntoIter = std::slice::Iter<'a, $item>;
+
+            fn into_iter(self) -> Self::IntoIter {
+                self.0.iter()
+            }
+        }
+
+        impl From<$name> for Value {
+            fn from(value: $name) -> Self {
+                Value::Json(Some(Box::new(
+                    serde_json::to_value(value.0).unwrap_or(serde_json::Value::Array(Vec::new())),
+                )))
+            }
+        }
+
+        impl Nullable for $name {
+            fn null() -> Value {
+                Value::Json(None)
+            }
+        }
+
+        impl TryGetable for $name {
+            fn try_get_by<I: ColIdx>(res: &QueryResult, idx: I) -> Result<Self, TryGetError> {
+                let value: serde_json::Value = res.try_get_by(idx)?;
+                let items = serde_json::from_value(value).map_err(|err| {
+                    TryGetError::DbErr(sea_orm::DbErr::Type(format!(
+                        "failed to deserialize JSON array: {err}"
+                    )))
+                })?;
+                Ok(Self(items))
+            }
+        }
+
+        impl ValueType for $name {
+            fn try_from(value: Value) -> Result<Self, ValueTypeErr> {
+                match value {
+                    Value::Json(Some(value)) => serde_json::from_value(*value)
+                        .map(Self)
+                        .map_err(|_| ValueTypeErr),
+                    _ => Err(ValueTypeErr),
+                }
+            }
+
+            fn type_name() -> String {
+                stringify!($name).to_string()
+            }
+
+            fn array_type() -> ArrayType {
+                ArrayType::Json
+            }
+
+            fn column_type() -> ColumnType {
+                ColumnType::Json
+            }
+        }
+    };
+}
 
 /// An invoice billed to a client.
-#[derive(Debug, Clone, PartialEq, Default, Facet)]
-pub struct Invoice {
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Default,
+    Facet,
+    DeriveEntityModel,
+    EntityToModels,
+    Serialize,
+    Deserialize,
+    ToSchema,
+)]
+#[sea_orm(table_name = "invoices")]
+#[crudcrate(
+    api_struct = "InvoiceApi",
+    generate_vox_service,
+    name_singular = "invoice",
+    name_plural = "invoices"
+)]
+pub struct Model {
+    #[facet(default)]
+    #[sea_orm(primary_key, auto_increment = false)]
+    #[crudcrate(
+        primary_key,
+        exclude(create),
+        on_create = uuid::Uuid::new_v4()
+    )]
+    pub uuid: Uuid,
+
     /// Human-readable id, e.g. "INV-2026-0001". Also the file stem under
     /// `invoices/`. Generated at create-time from the year + next_sequence.
+    #[crudcrate(filterable, sortable, fulltext)]
     pub id: String,
 
     /// Monotonic sequence within a company-year scope. Used to build the id
     /// and to order invoices chronologically.
+    #[crudcrate(sortable)]
     pub number: u32,
 
     /// Where the invoice sits in the lifecycle.
+    #[crudcrate(filterable, sortable)]
     pub status: InvoiceStatus,
 
     /// Client this invoice bills. Stored as a wikilink so it resolves to
@@ -42,19 +182,22 @@ pub struct Invoice {
     pub client: WikiLink,
 
     /// Date the invoice was issued (usually the create date).
+    #[crudcrate(filterable, sortable)]
     pub issue_date: NaiveDate,
 
     /// Payment due date. Derived from client.payment_terms_days at create
     /// time but stored explicitly so it survives later client edits.
+    #[crudcrate(filterable, sortable)]
     pub due_date: NaiveDate,
 
     /// ISO 4217 currency code (e.g. "USD"). Inherited from the client.
     #[facet(default)]
+    #[crudcrate(filterable, sortable)]
     pub currency_code: String,
 
     /// Line items. One per (task, rate) pair.
     #[facet(default)]
-    pub line_items: Vec<InvoiceLine>,
+    pub line_items: InvoiceLineList,
 
     /// Invoice-level tax rate as a percentage (e.g. 8.5 for 8.5%). Applied
     /// to the subtotal after discounts. We keep a single slot rather than
@@ -77,14 +220,14 @@ pub struct Invoice {
     /// Payments received against this invoice. Running balance =
     /// total_cents() − payments.sum(amount_cents).
     #[facet(default)]
-    pub payments: Vec<Payment>,
+    pub payments: PaymentList,
 
     /// IDs of the TimeEntries this invoice bills. Used to prevent
     /// double-billing — `VaultServiceImpl::mark_entries_invoiced` flips
     /// `TimeEntry.invoiced_at` on each of these after the invoice is
     /// created.
     #[facet(default)]
-    pub entry_ids: Vec<String>,
+    pub entry_ids: StringList,
 
     /// When the invoice was marked Sent (via `task invoice send`).
     pub sent_at: Option<DateTime<Utc>>,
@@ -105,9 +248,16 @@ pub struct Invoice {
     pub date_modified: Option<DateTime<Utc>>,
 }
 
+pub type Invoice = Model;
+
+#[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+pub enum Relation {}
+
+impl ActiveModelBehavior for ActiveModel {}
+
 /// One billable line on an invoice. For time-based invoicing,
 /// `hours` × `rate_cents` = `subtotal_cents`.
-#[derive(Debug, Clone, PartialEq, Default, Facet)]
+#[derive(Debug, Clone, PartialEq, Default, Facet, Serialize, Deserialize, ToSchema)]
 pub struct InvoiceLine {
     /// Stable id for audit trails and edits.
     pub id: String,
@@ -150,8 +300,10 @@ impl InvoiceLine {
     }
 }
 
+json_vec_type!(InvoiceLineList, InvoiceLine);
+
 /// A payment received against an invoice.
-#[derive(Debug, Clone, PartialEq, Default, Facet)]
+#[derive(Debug, Clone, PartialEq, Default, Facet, Serialize, Deserialize, ToSchema)]
 pub struct Payment {
     pub id: String,
     /// Cents received.
@@ -167,25 +319,37 @@ pub struct Payment {
     pub notes: Option<String>,
 }
 
+json_vec_type!(PaymentList, Payment);
+
 /// Invoice lifecycle. `Void` is reserved for a future "issued but
 /// rescinded" state; for now cancellation is handled via
 /// `Invoice.cancelled_at`.
-#[derive(Debug, Clone, PartialEq, Facet)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Facet, Serialize, Deserialize, ToSchema, EnumIter, DeriveActiveEnum,
+)]
+#[sea_orm(rs_type = "String", db_type = "String(StringLen::N(32))")]
 #[repr(u8)]
 pub enum InvoiceStatus {
     /// Created but not sent.
+    #[sea_orm(string_value = "draft")]
     Draft,
     /// Sent to the client — awaiting payment.
+    #[sea_orm(string_value = "sent")]
     Sent,
     /// Some but not all of the balance has been paid.
+    #[sea_orm(string_value = "partially_paid")]
     PartiallyPaid,
     /// Fully paid.
+    #[sea_orm(string_value = "paid")]
     Paid,
     /// Past due_date, not paid in full.
+    #[sea_orm(string_value = "overdue")]
     Overdue,
     /// Cancelled / nullified.
+    #[sea_orm(string_value = "cancelled")]
     Cancelled,
     /// Paid then refunded.
+    #[sea_orm(string_value = "refunded")]
     Refunded,
 }
 
@@ -417,7 +581,7 @@ mod tests {
             client: WikiLink("Acme".into()),
             issue_date: chrono::NaiveDate::from_ymd_opt(2026, 4, 17).unwrap(),
             due_date: chrono::NaiveDate::from_ymd_opt(2026, 5, 17).unwrap(),
-            line_items: vec![sample_line(2.0, 10_000), sample_line(1.0, 20_000)],
+            line_items: vec![sample_line(2.0, 10_000), sample_line(1.0, 20_000)].into(),
             tax_rate_percent: Some(10.0),
             discount_percent: Some(5.0),
             ..Default::default()
@@ -438,7 +602,7 @@ mod tests {
         line_gst.tax_rate_percent = Some(5.0);
         let inv = Invoice {
             tax_rate_percent: Some(10.0),
-            line_items: vec![line_gst, sample_line(1.0, 10_000)],
+            line_items: vec![line_gst, sample_line(1.0, 10_000)].into(),
             ..Default::default()
         };
         // line 1: $100 × 5% = $5
@@ -449,13 +613,14 @@ mod tests {
     #[test]
     fn balance_reflects_payments() {
         let inv = Invoice {
-            line_items: vec![sample_line(1.0, 10_000)],
+            line_items: vec![sample_line(1.0, 10_000)].into(),
             payments: vec![Payment {
                 id: "p1".into(),
                 amount_cents: 6_000,
                 received_at: Utc::now(),
                 ..Default::default()
-            }],
+            }]
+            .into(),
             ..Default::default()
         };
         assert_eq!(inv.total_cents(), 10_000);
@@ -470,7 +635,7 @@ mod tests {
         // Draft: not sent, no payments.
         let inv = Invoice {
             due_date: chrono::NaiveDate::from_ymd_opt(2026, 5, 17).unwrap(),
-            line_items: vec![sample_line(1.0, 10_000)],
+            line_items: vec![sample_line(1.0, 10_000)].into(),
             ..Default::default()
         };
         assert_eq!(inv.derive_status(today), InvoiceStatus::Draft);

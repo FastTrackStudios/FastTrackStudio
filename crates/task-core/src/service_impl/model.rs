@@ -1873,6 +1873,7 @@ impl VaultServiceImpl {
 
         let now = Utc::now();
         let invoice = crate::invoice::Invoice {
+            uuid: Uuid::new_v4(),
             id: id.clone(),
             number,
             status: crate::invoice::InvoiceStatus::Draft,
@@ -1884,14 +1885,14 @@ impl VaultServiceImpl {
             } else {
                 client.currency_code.clone()
             },
-            line_items,
+            line_items: line_items.into(),
             tax_rate_percent,
             discount_percent,
             po_number,
             public_notes,
             private_notes: None,
-            payments: Vec::new(),
-            entry_ids: entry_ids.clone(),
+            payments: Vec::new().into(),
+            entry_ids: entry_ids.clone().into(),
             sent_at: None,
             paid_at: None,
             cancelled_at: None,
@@ -2177,6 +2178,7 @@ impl VaultServiceImpl {
         let number = self.next_asset_number(now.year()).await?;
         let id = format_asset_id(now.year(), number);
         let asset = Asset {
+            uuid: Uuid::new_v4(),
             id,
             number,
             name: request.name,
@@ -2197,10 +2199,10 @@ impl VaultServiceImpl {
             purchase_date: request.purchase_date,
             warranty_until: request.warranty_until,
             vendor: request.vendor,
-            cost_cents: request.cost_cents,
-            maintenance: Vec::new(),
-            reservations: Vec::new(),
-            linked_tasks: Vec::new(),
+            cost_cents: request.cost_cents.map(|value| value as i64),
+            maintenance: Vec::new().into(),
+            reservations: Vec::new().into(),
+            linked_tasks: Vec::new().into(),
             notes: request.notes,
             created_by: request.actor,
             date_created: Some(now),
@@ -2292,7 +2294,7 @@ impl VaultServiceImpl {
             asset.vendor = if v.trim().is_empty() { None } else { Some(v) };
         }
         if let Some(v) = patch.cost_cents {
-            asset.cost_cents = v;
+            asset.cost_cents = v.map(|value| value as i64);
         }
         if let Some(v) = patch.notes {
             asset.notes = if v.trim().is_empty() { None } else { Some(v) };
@@ -2335,7 +2337,7 @@ impl VaultServiceImpl {
             issue: request.issue,
             vendor: request.vendor,
             contact: request.contact,
-            cost_cents: request.cost_cents,
+            cost_cents: request.cost_cents.map(|value| value as i64),
             warranty: request.warranty,
             rma: request.rma,
             task: request.task.map(WikiLink),
@@ -2402,7 +2404,7 @@ impl VaultServiceImpl {
             issue: request.title,
             vendor: request.vendor,
             contact: request.contact,
-            cost_cents: request.cost_cents,
+            cost_cents: request.cost_cents.map(|value| value as i64),
             warranty: request.warranty,
             rma: request.rma,
             task: Some(task_link),
@@ -7200,7 +7202,8 @@ mod tests {
                 hours: 2.0,
                 rate_cents: 10_000,
                 ..Default::default()
-            }],
+            }]
+            .into(),
             ..Default::default()
         };
 

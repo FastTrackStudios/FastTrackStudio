@@ -6,38 +6,192 @@
 //! maintenance context, and repair history summaries.
 
 use chrono::{DateTime, NaiveDate, Utc};
+use crudcrate::EntityToModels;
 use facet::Facet;
+use sea_orm::entity::prelude::*;
+use sea_orm::sea_query::{ArrayType, ColumnType, Nullable, Value, ValueType, ValueTypeErr};
+use sea_orm::{ColIdx, QueryResult, TryGetError, TryGetable};
+use serde::{Deserialize, Serialize};
+use std::ops::{Deref, DerefMut};
+use utoipa::ToSchema;
+use uuid::Uuid;
 
 use crate::task::WikiLink;
 
+macro_rules! json_vec_type {
+    ($name:ident, $item:ty) => {
+        #[derive(Debug, Clone, PartialEq, Facet, Serialize, Deserialize, ToSchema)]
+        #[facet(transparent)]
+        #[serde(transparent)]
+        pub struct $name(pub Vec<$item>);
+
+        impl Default for $name {
+            fn default() -> Self {
+                Self(Vec::new())
+            }
+        }
+
+        impl Deref for $name {
+            type Target = Vec<$item>;
+
+            fn deref(&self) -> &Self::Target {
+                &self.0
+            }
+        }
+
+        impl DerefMut for $name {
+            fn deref_mut(&mut self) -> &mut Self::Target {
+                &mut self.0
+            }
+        }
+
+        impl From<Vec<$item>> for $name {
+            fn from(value: Vec<$item>) -> Self {
+                Self(value)
+            }
+        }
+
+        impl IntoIterator for $name {
+            type Item = $item;
+            type IntoIter = std::vec::IntoIter<$item>;
+
+            fn into_iter(self) -> Self::IntoIter {
+                self.0.into_iter()
+            }
+        }
+
+        impl<'a> IntoIterator for &'a $name {
+            type Item = &'a $item;
+            type IntoIter = std::slice::Iter<'a, $item>;
+
+            fn into_iter(self) -> Self::IntoIter {
+                self.0.iter()
+            }
+        }
+
+        impl<'a> IntoIterator for &'a mut $name {
+            type Item = &'a mut $item;
+            type IntoIter = std::slice::IterMut<'a, $item>;
+
+            fn into_iter(self) -> Self::IntoIter {
+                self.0.iter_mut()
+            }
+        }
+
+        impl From<$name> for Value {
+            fn from(value: $name) -> Self {
+                Value::Json(Some(Box::new(
+                    serde_json::to_value(value.0).unwrap_or(serde_json::Value::Array(Vec::new())),
+                )))
+            }
+        }
+
+        impl Nullable for $name {
+            fn null() -> Value {
+                Value::Json(None)
+            }
+        }
+
+        impl TryGetable for $name {
+            fn try_get_by<I: ColIdx>(res: &QueryResult, idx: I) -> Result<Self, TryGetError> {
+                let value: serde_json::Value = res.try_get_by(idx)?;
+                let items = serde_json::from_value(value).map_err(|err| {
+                    TryGetError::DbErr(sea_orm::DbErr::Type(format!(
+                        "failed to deserialize JSON array: {err}"
+                    )))
+                })?;
+                Ok(Self(items))
+            }
+        }
+
+        impl ValueType for $name {
+            fn try_from(value: Value) -> Result<Self, ValueTypeErr> {
+                match value {
+                    Value::Json(Some(value)) => serde_json::from_value(*value)
+                        .map(Self)
+                        .map_err(|_| ValueTypeErr),
+                    _ => Err(ValueTypeErr),
+                }
+            }
+
+            fn type_name() -> String {
+                stringify!($name).to_string()
+            }
+
+            fn array_type() -> ArrayType {
+                ArrayType::Json
+            }
+
+            fn column_type() -> ColumnType {
+                ColumnType::Json
+            }
+        }
+    };
+}
+
 /// A tracked equipment / inventory record.
-#[derive(Debug, Clone, PartialEq, Default, Facet)]
-pub struct Asset {
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Default,
+    Facet,
+    DeriveEntityModel,
+    EntityToModels,
+    Serialize,
+    Deserialize,
+    ToSchema,
+)]
+#[sea_orm(table_name = "assets")]
+#[crudcrate(
+    api_struct = "AssetApi",
+    generate_vox_service,
+    name_singular = "asset",
+    name_plural = "assets"
+)]
+pub struct Model {
+    #[facet(default)]
+    #[sea_orm(primary_key, auto_increment = false)]
+    #[crudcrate(
+        primary_key,
+        exclude(create),
+        on_create = uuid::Uuid::new_v4()
+    )]
+    pub uuid: Uuid,
+
     /// Stable id, e.g. `AST-2026-0001`.
+    #[crudcrate(filterable, sortable, fulltext)]
     pub id: String,
 
     /// Monotonic yearly sequence number.
+    #[crudcrate(sortable)]
     pub number: u32,
 
     /// Human-readable asset name.
+    #[crudcrate(filterable, sortable, fulltext)]
     pub name: String,
 
     /// Lifecycle state for the asset.
+    #[crudcrate(filterable, sortable)]
     pub status: AssetStatus,
 
     /// Manufacturer / brand.
+    #[crudcrate(filterable, sortable)]
     pub manufacturer: Option<String>,
 
     /// Product model / series.
     pub model: Option<String>,
 
     /// Serial number / asset tag.
+    #[crudcrate(filterable, sortable)]
     pub serial_number: Option<String>,
 
     /// Broad inventory category, e.g. `audio`, `video`, `network`, `lighting`.
+    #[crudcrate(filterable, sortable)]
     pub category: Option<String>,
 
     /// Owning org / workspace.
+    #[crudcrate(filterable, sortable)]
     pub organization: Option<String>,
 
     /// Current location (venue / building / site / room).
@@ -50,6 +204,7 @@ pub struct Asset {
     pub rack_or_case: Option<String>,
 
     /// Who or what this asset is currently assigned to.
+    #[crudcrate(filterable, sortable)]
     pub assigned_to: Option<String>,
 
     /// Purchase date.
@@ -62,19 +217,20 @@ pub struct Asset {
     pub vendor: Option<String>,
 
     /// Cost in cents.
-    pub cost_cents: Option<u64>,
+    #[crudcrate(sortable)]
+    pub cost_cents: Option<i64>,
 
     /// Maintenance / repair log entries.
     #[facet(default)]
-    pub maintenance: Vec<AssetMaintenanceRecord>,
+    pub maintenance: AssetMaintenanceList,
 
     /// Event / booking / project reservations using this asset.
     #[facet(default)]
-    pub reservations: Vec<AssetReservationRecord>,
+    pub reservations: AssetReservationList,
 
     /// Links to task records for repair / maintenance work.
     #[facet(default)]
-    pub linked_tasks: Vec<WikiLink>,
+    pub linked_tasks: AssetWikiLinkList,
 
     /// Free-form notes.
     pub notes: Option<String>,
@@ -91,42 +247,65 @@ pub struct Asset {
     pub body: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Default, Facet)]
+pub type Asset = Model;
+
+#[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+pub enum Relation {}
+
+impl ActiveModelBehavior for ActiveModel {}
+
+#[derive(
+    Debug, Clone, PartialEq, Eq, Facet, Serialize, Deserialize, ToSchema, EnumIter, DeriveActiveEnum,
+)]
+#[sea_orm(rs_type = "String", db_type = "String(StringLen::N(32))")]
 #[repr(u8)]
 pub enum AssetStatus {
     /// Available for use.
-    #[default]
+    #[sea_orm(string_value = "available")]
     Available,
     /// Currently in use.
+    #[sea_orm(string_value = "in_use")]
     InUse,
     /// Reserved for a future booking / project.
+    #[sea_orm(string_value = "reserved")]
     Reserved,
     /// Needs repair.
+    #[sea_orm(string_value = "needs_repair")]
     NeedsRepair,
     /// Under repair / service.
+    #[sea_orm(string_value = "in_repair")]
     InRepair,
     /// Maintenance is due.
+    #[sea_orm(string_value = "maintenance_due")]
     MaintenanceDue,
     /// No longer active / retired.
+    #[sea_orm(string_value = "retired")]
     Retired,
     /// Missing or unaccounted for.
+    #[sea_orm(string_value = "lost")]
     Lost,
 }
 
-#[derive(Debug, Clone, PartialEq, Default, Facet)]
+impl Default for AssetStatus {
+    fn default() -> Self {
+        AssetStatus::Available
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Default, Facet, Serialize, Deserialize, ToSchema)]
 pub struct AssetMaintenanceRecord {
     pub date: NaiveDate,
     pub issue: String,
     pub vendor: Option<String>,
     pub contact: Option<String>,
-    pub cost_cents: Option<u64>,
+    pub cost_cents: Option<i64>,
     pub warranty: bool,
     pub rma: Option<String>,
     pub task: Option<WikiLink>,
     pub notes: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Default, Facet)]
+#[derive(Debug, Clone, PartialEq, Default, Facet, Serialize, Deserialize, ToSchema)]
 pub struct AssetReservationRecord {
     pub id: String,
     pub reference: WikiLink,
@@ -135,6 +314,10 @@ pub struct AssetReservationRecord {
     pub reserved_by: Option<String>,
     pub notes: Option<String>,
 }
+
+json_vec_type!(AssetMaintenanceList, AssetMaintenanceRecord);
+json_vec_type!(AssetReservationList, AssetReservationRecord);
+json_vec_type!(AssetWikiLinkList, WikiLink);
 
 #[derive(Debug, Clone, Default, Facet)]
 pub struct AssetCreateRequest {
@@ -634,6 +817,7 @@ mod tests {
     #[test]
     fn renders_asset_body_with_key_fields() {
         let asset = Asset {
+            uuid: Uuid::new_v4(),
             id: "AST-2026-0001".into(),
             number: 1,
             name: "Shure SM58".into(),
@@ -661,13 +845,15 @@ mod tests {
                 rma: Some("RMA-123".into()),
                 task: Some(WikiLink("Fix mic".into())),
                 notes: Some("Handled before show".into()),
-            }],
+            }]
+            .into(),
             reservations: vec![AssetReservationRecord {
                 id: "res-1".into(),
                 reference: WikiLink("Show Night".into()),
                 ..Default::default()
-            }],
-            linked_tasks: vec![WikiLink("Repair mic".into())],
+            }]
+            .into(),
+            linked_tasks: vec![WikiLink("Repair mic".into())].into(),
             notes: Some("Keep as spare if possible".into()),
             created_by: Some("cody".into()),
             date_created: None,
@@ -743,7 +929,8 @@ mod tests {
                 starts_at: Some(start),
                 ends_at: Some(end),
                 ..Default::default()
-            }],
+            }]
+            .into(),
             ..Default::default()
         };
         let reservation = AssetReservationRecord {

@@ -1597,6 +1597,7 @@ dependencies = [
  "facet 0.46.0",
  "thiserror 2.0.18",
  "vox 0.4.0",
+ "vox-types 0.4.0",
 ]
 
 [[package]]
