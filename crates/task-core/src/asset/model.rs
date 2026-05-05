@@ -259,9 +259,11 @@ impl ActiveModelBehavior for ActiveModel {}
 )]
 #[sea_orm(rs_type = "String", db_type = "String(StringLen::N(32))")]
 #[repr(u8)]
+#[derive(Default)]
 pub enum AssetStatus {
     /// Available for use.
     #[sea_orm(string_value = "available")]
+    #[default]
     Available,
     /// Currently in use.
     #[sea_orm(string_value = "in_use")]
@@ -284,12 +286,6 @@ pub enum AssetStatus {
     /// Missing or unaccounted for.
     #[sea_orm(string_value = "lost")]
     Lost,
-}
-
-impl Default for AssetStatus {
-    fn default() -> Self {
-        AssetStatus::Available
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Facet, Serialize, Deserialize, ToSchema)]
@@ -606,7 +602,7 @@ pub fn matches_asset_filter(asset: &Asset, filter: &AssetFilter) -> bool {
         }
     }
     if filter.status.as_deref().is_some_and(|wanted| {
-        parse_asset_status(wanted).map_or(true, |parsed| parsed != asset.status)
+        parse_asset_status(wanted).is_none_or(|parsed| parsed != asset.status)
     }) {
         return false;
     }

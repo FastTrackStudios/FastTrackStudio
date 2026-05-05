@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 /// Generate a VTODO .ics string from a Task.
 fn task_to_ics_inline(task: &Task) -> String {
     let uid = task.id_ref();
-    let safe_uid = uid.replace(' ', "-").replace('/', "-");
+    let safe_uid = uid.replace([' ', '/'], "-");
     let now = Utc::now().format("%Y%m%dT%H%M%SZ");
     let status_str = match task.status {
         Status::None | Status::Open | Status::Planned => "NEEDS-ACTION",
@@ -159,10 +159,7 @@ fn ics_to_task_inline(ics: &str) -> Option<Task> {
             // Extract CN= value as assignee
             if let Some(cn_start) = line.find("CN=") {
                 let rest = &line[cn_start + 3..];
-                let cn = rest
-                    .split(|c: char| c == ':' || c == ';')
-                    .next()
-                    .unwrap_or("");
+                let cn = rest.split([':', ';']).next().unwrap_or("");
                 if !cn.is_empty() {
                     task.assignee = Some(cn.to_string());
                 }
@@ -202,7 +199,7 @@ fn ics_to_task_inline(ics: &str) -> Option<Task> {
 
 fn event_to_ics_inline(event: &CalendarEvent) -> String {
     let uid = event.id.as_deref().unwrap_or(&event.title);
-    let safe_uid = uid.replace(' ', "-").replace('/', "-");
+    let safe_uid = uid.replace([' ', '/'], "-");
     let now = Utc::now().format("%Y%m%dT%H%M%SZ");
     let status = match event.status {
         CalendarEventStatus::Confirmed => "CONFIRMED",
@@ -248,7 +245,7 @@ fn event_to_ics_inline(event: &CalendarEvent) -> String {
     if let Some(location) = &event.location {
         lines.push(format!("LOCATION:{}", escape_ics_text(location)));
     }
-    if let Some(description) = event.description.as_ref().or_else(|| {
+    if let Some(description) = event.description.as_ref().or({
         if event.body.is_empty() {
             None
         } else {
@@ -319,10 +316,7 @@ fn ics_to_event_inline(ics: &str) -> Option<CalendarEvent> {
         } else if line.starts_with("ATTENDEE") {
             if let Some(cn_start) = line.find("CN=") {
                 let rest = &line[cn_start + 3..];
-                let cn = rest
-                    .split(|c: char| c == ':' || c == ';')
-                    .next()
-                    .unwrap_or("");
+                let cn = rest.split([':', ';']).next().unwrap_or("");
                 if !cn.is_empty() {
                     event.attendees.push(cn.to_string());
                 }
@@ -869,7 +863,7 @@ impl NextcloudSync {
         if_none_match: Option<&str>,
     ) -> Result<(), VaultError> {
         let uid = task.id_ref();
-        let safe_uid = uid.replace(' ', "-").replace('/', "-");
+        let safe_uid = uid.replace([' ', '/'], "-");
         let url = format!(
             "{}/remote.php/dav/calendars/{}/{}/{}.ics",
             self.base_url, self.username, calendar, safe_uid
@@ -974,7 +968,7 @@ impl NextcloudSync {
         uid: &str,
         if_match: Option<&str>,
     ) -> Result<(), VaultError> {
-        let safe_uid = uid.replace(' ', "-").replace('/', "-");
+        let safe_uid = uid.replace([' ', '/'], "-");
         let url = format!(
             "{}/remote.php/dav/calendars/{}/{}/{}.ics",
             self.base_url, self.username, calendar, safe_uid
@@ -1018,7 +1012,7 @@ impl NextcloudSync {
         if_none_match: Option<&str>,
     ) -> Result<(), VaultError> {
         let uid = event.id.as_deref().unwrap_or(&event.title);
-        let safe_uid = uid.replace(' ', "-").replace('/', "-");
+        let safe_uid = uid.replace([' ', '/'], "-");
         let url = format!(
             "{}/remote.php/dav/calendars/{}/{}/{}.ics",
             self.base_url, self.username, calendar, safe_uid
@@ -1111,7 +1105,7 @@ impl NextcloudSync {
         uid: &str,
         if_match: Option<&str>,
     ) -> Result<(), VaultError> {
-        let safe_uid = uid.replace(' ', "-").replace('/', "-");
+        let safe_uid = uid.replace([' ', '/'], "-");
         let url = format!(
             "{}/remote.php/dav/calendars/{}/{}/{}.ics",
             self.base_url, self.username, calendar, safe_uid

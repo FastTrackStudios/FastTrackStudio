@@ -64,7 +64,7 @@ pub fn generate_bundles_local(
             let pattern = project_root.join(&rule.pattern);
             let _pattern_str = pattern.to_string_lossy();
 
-            if let Ok(entries) = glob_files(&project_root, &rule.pattern) {
+            if let Ok(entries) = glob_files(project_root, &rule.pattern) {
                 let dest_dir = if let Some(ref cat) = rule.category {
                     bundle_dir.join(cat)
                 } else {

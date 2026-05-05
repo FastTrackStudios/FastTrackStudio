@@ -1835,6 +1835,7 @@ enum AgentCommands {
 }
 
 #[derive(Subcommand)]
+#[allow(clippy::large_enum_variant)]
 enum ProjectCommands {
     /// List all projects
     List {
@@ -3274,6 +3275,7 @@ fn apply_remote_project_patch(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_new_task(
     title: String,
     priority: Option<String>,
@@ -3960,7 +3962,7 @@ async fn run_remote_invoice_command(
             let invoice = service
                 .record_invoice_payment(task_core::InvoicePaymentRequest {
                     invoice_id: id,
-                    amount_cents: amount.try_into()?,
+                    amount_cents: amount,
                     method: if method.is_empty() {
                         None
                     } else {
@@ -4095,14 +4097,12 @@ async fn run_remote_expense_command(
                 }
             }
         }
-        ExpenseCommands::Show { id, md, json } => {
+        ExpenseCommands::Show { id, md: _, json } => {
             let expense = remote_find_expense_with_client(&repo, &id)
                 .await?
                 .ok_or_else(|| eyre::eyre!("Expense not found: {id}"))?;
             if json {
                 println!("{}", facet_json::to_string(&expense).unwrap_or_default());
-            } else if md {
-                println!("{}", render_expense_body(&expense));
             } else {
                 println!("{}", render_expense_body(&expense));
             }
@@ -5660,7 +5660,7 @@ fn print_projects_table(projects: &[Project]) {
         return;
     }
     let name_w = projects.iter().map(|p| p.title.len()).max().unwrap_or(10) + 2;
-    println!("{:<name_w$}  {:<10}  {}", "NAME", "STATE", "DUE");
+    println!("{:<name_w$}  {:<10}  DUE", "NAME", "STATE");
     println!("{}", "─".repeat(name_w + 20));
     for p in projects {
         let state = format!("{:?}", p.status);
@@ -5714,8 +5714,7 @@ fn print_project_dashboard(entries: &[task_core::ProjectDashboardEntry], json: b
         .map(|entry| entry.project.title.len())
         .max()
         .unwrap_or(10)
-        .max(10)
-        .min(36)
+        .clamp(10, 36)
         + 2;
     let next_w = entries
         .iter()
@@ -5728,13 +5727,12 @@ fn print_project_dashboard(entries: &[task_core::ProjectDashboardEntry], json: b
         })
         .max()
         .unwrap_or(12)
-        .max(12)
-        .min(32)
+        .clamp(12, 32)
         + 2;
 
     println!(
-        "{:<name_w$}  {:<10}  {:<next_w$}  {:<16}  {:<5}  {:<4}  {}",
-        "PROJECT", "BUCKET", "NEXT", "PROGRESS", "OPEN", "OVD", "DUE"
+        "{:<name_w$}  {:<10}  {:<next_w$}  {:<16}  {:<5}  {:<4}  DUE",
+        "PROJECT", "BUCKET", "NEXT", "PROGRESS", "OPEN", "OVD"
     );
     println!("{}", "─".repeat(name_w + next_w + 45));
 
@@ -5812,8 +5810,8 @@ fn print_sync_plan(plan: &task_core::SyncPlan, json: bool) {
         println!("warning: {warning}");
     }
     println!(
-        "{:<18}  {:<18}  {:<14}  {:<13}  {}",
-        "PROVIDER", "OPERATION", "DIRECTION", "CONFIGURED", "COLLECTION"
+        "{:<18}  {:<18}  {:<14}  {:<13}  COLLECTION",
+        "PROVIDER", "OPERATION", "DIRECTION", "CONFIGURED"
     );
     println!("{}", "─".repeat(88));
     for item in &plan.items {
@@ -6236,8 +6234,7 @@ fn print_channel_rooms_table(rooms: &[ChannelConversation]) {
         .map(|r| r.name.len())
         .max()
         .unwrap_or(10)
-        .max(10)
-        .min(40);
+        .clamp(10, 40);
     println!(
         "{:<name_w$}  {:<22}  {:>7}  {:<12}  ID",
         "NAME", "LAST ACTIVITY (UTC)", "PEOPLE", "KIND",
@@ -6414,8 +6411,7 @@ fn print_time_entries_table(entries: &[task_core::TimeEntryContext]) {
         .map(|c| c.task_title.len())
         .max()
         .unwrap_or(10)
-        .max(5)
-        .min(35);
+        .clamp(5, 35);
     println!(
         "{:<title_w$}  {:<19}  {:>6}  {:<8}  {:<12}  {:<18}  ID",
         "TASK", "START (UTC)", "MIN", "BILLABLE", "USER", "PROJECTS",
@@ -6672,8 +6668,7 @@ fn print_report_table(rows: &[ReportRow]) {
         .map(|r| r.0.len())
         .max()
         .unwrap_or(5)
-        .max(5)
-        .min(40);
+        .clamp(5, 40);
     println!(
         "{:<key_w$}  {:>8}  {:>10}  {:>7}",
         "GROUP", "HOURS", "BILLABLE", "COUNT",
@@ -6715,11 +6710,10 @@ fn print_activity_table(rows: &[ChangeRow]) {
         .map(|r| r.entity_id.len())
         .max()
         .unwrap_or(5)
-        .max(5)
-        .min(35);
+        .clamp(5, 35);
     println!(
-        "{:<19}  {:<6}  {:<id_w$}  {:<12}  {:<10}  {}",
-        "WHEN (UTC)", "KIND", "ENTITY", "FIELD", "BY", "CHANGE",
+        "{:<19}  {:<6}  {:<id_w$}  {:<12}  {:<10}  CHANGE",
+        "WHEN (UTC)", "KIND", "ENTITY", "FIELD", "BY",
     );
     println!("{}", "─".repeat(id_w + 62));
     for r in rows {
@@ -6855,8 +6849,7 @@ fn print_calendar_events_table(events: &[CalendarEvent]) {
         .map(|e| e.title.len())
         .max()
         .unwrap_or(10)
-        .max(10)
-        .min(36);
+        .clamp(10, 36);
     println!(
         "{:<title_w$}  {:<19}  {:<19}  {:<10}  ID",
         "TITLE", "START (UTC)", "END (UTC)", "STATUS",
@@ -7869,8 +7862,7 @@ fn print_clients_table(clients: &[task_core::Client]) {
         .map(|c| c.name.len())
         .max()
         .unwrap_or(10)
-        .max(10)
-        .min(35);
+        .clamp(10, 35);
     println!(
         "{:<name_w$}  {:>10}  {:<4}  {:<25}  IN ID",
         "NAME", "RATE/HR", "CCY", "EMAIL",
@@ -8032,12 +8024,11 @@ fn print_tasks_table(tasks: &[Task]) {
         .map(|t| t.title.len())
         .max()
         .unwrap_or(5)
-        .max(5)
-        .min(45);
+        .clamp(5, 45);
 
     println!(
-        "{:<title_w$}  {:<12}  {:<8}  {:<12}  {}",
-        "TITLE", "STATUS", "PRIORITY", "DUE", "URGENCY"
+        "{:<title_w$}  {:<12}  {:<8}  {:<12}  URGENCY",
+        "TITLE", "STATUS", "PRIORITY", "DUE"
     );
     println!("{}", "─".repeat(title_w + 48));
 
@@ -8105,11 +8096,10 @@ fn print_inbox_items(items: &[InboxItem], json: bool) {
         .map(|item| item.title.len())
         .max()
         .unwrap_or(5)
-        .max(5)
-        .min(48);
+        .clamp(5, 48);
     println!(
-        "{:<title_w$}  {:<12}  {:<8}  {:<12}  {}",
-        "TITLE", "KIND", "PRIORITY", "DUE", "SOURCE"
+        "{:<title_w$}  {:<12}  {:<8}  {:<12}  SOURCE",
+        "TITLE", "KIND", "PRIORITY", "DUE"
     );
     println!("{}", "─".repeat(title_w + 48));
     for item in items {

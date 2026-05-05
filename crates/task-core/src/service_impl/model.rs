@@ -997,6 +997,7 @@ impl VaultServiceImpl {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn record_provider_sync_state(
         &self,
         provider: &str,
@@ -1700,6 +1701,7 @@ impl VaultServiceImpl {
     ///   work on one task appears as separate lines.
     /// - Due date defaults to `issue_date + client.payment_terms_days` or
     ///   `issue_date + 30` if terms are unset.
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_invoice_from_entries(
         &self,
         client_name: &str,
@@ -3163,6 +3165,7 @@ impl VaultServiceImpl {
     }
 
     /// Log a completed time entry manually (for back-dating or bulk import).
+    #[allow(clippy::too_many_arguments)]
     pub async fn log_time(
         &self,
         task_ref: &str,
@@ -3371,6 +3374,7 @@ impl VaultServiceImpl {
 
     /// Manually record a conflict (used by agents / the future sync
     /// subscriber). Returns the new row id.
+    #[allow(clippy::too_many_arguments)]
     pub async fn record_conflict(
         &self,
         entity_type: &str,
@@ -3839,8 +3843,7 @@ fn build_operating_model_report(
                 goal_tasks: area_tasks.iter().filter(|task| is_goal_task(task)).count() as u32,
                 next_action: area_tasks
                     .iter()
-                    .filter(|task| is_review_actionable(task) && !is_waiting_task(task))
-                    .next()
+                    .find(|task| is_review_actionable(task) && !is_waiting_task(task))
                     .map(|task| (*task).clone()),
             }
         })
@@ -4068,10 +4071,7 @@ fn build_finance_report(
         .iter()
         .map(|entry| entry.entry.duration_minutes())
         .sum::<u32>();
-    let unbilled_cents = unbilled_entries
-        .iter()
-        .map(|entry| time_entry_cents(entry))
-        .sum::<u64>();
+    let unbilled_cents = unbilled_entries.iter().map(time_entry_cents).sum::<u64>();
     let invoiced_cents = invoices
         .iter()
         .map(|invoice| invoice.total_cents())
@@ -5056,10 +5056,10 @@ impl crate::service::MailService for VaultServiceImpl {
         match request.target_type.as_str() {
             "task" => VaultServiceImpl::emails_for_task(self, &request.reference)
                 .await
-                .ok_or_else(|| VaultError::NotFound(request.reference)),
+                .ok_or(VaultError::NotFound(request.reference)),
             "project" => VaultServiceImpl::emails_for_project(self, &request.reference)
                 .await
-                .ok_or_else(|| VaultError::NotFound(request.reference)),
+                .ok_or(VaultError::NotFound(request.reference)),
             other => Err(VaultError::ParseError(format!(
                 "target_type must be 'task' or 'project', got '{other}'"
             ))),
@@ -6343,7 +6343,7 @@ mod tests {
                 .any(|method| method.kind == "email" && method.value == "ada@example.com")
         );
 
-        let orgs = organizations_from_people(&[person.clone()]);
+        let orgs = organizations_from_people(std::slice::from_ref(&person));
         assert_eq!(orgs.len(), 1);
         assert_eq!(orgs[0].name, "Analytical Engines");
         assert_eq!(orgs[0].people.as_slice(), ["Ada Lovelace"]);

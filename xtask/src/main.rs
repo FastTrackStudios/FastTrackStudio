@@ -75,7 +75,6 @@ fn service_descriptors() -> Vec<&'static vox_types::ServiceDescriptor> {
         task_core::task_service_service_descriptor(),
         task_core::project_service_service_descriptor(),
         task_core::time_service_service_descriptor(),
-        task_core::client_service_service_descriptor(),
         task_core::people_service_service_descriptor(),
         task_core::conversation_service_service_descriptor(),
         task_core::operating_service_service_descriptor(),

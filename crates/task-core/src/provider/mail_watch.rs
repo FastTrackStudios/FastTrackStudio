@@ -221,7 +221,7 @@ fn build_tls_config(config: &ImapWatchConfig) -> Result<rustls::ClientConfig, Va
             .dangerous()
             .with_custom_certificate_verifier(verifier)
             .with_no_client_auth();
-        return Ok(cfg);
+        Ok(cfg)
     } else {
         let mut roots = rustls::RootCertStore::empty();
         // Fall back to system/webpki roots via rustls-native-certs equivalent.
@@ -231,7 +231,7 @@ fn build_tls_config(config: &ImapWatchConfig) -> Result<rustls::ClientConfig, Va
         let cfg = ClientConfig::builder()
             .with_root_certificates(roots)
             .with_no_client_auth();
-        return Ok(cfg);
+        Ok(cfg)
     }
 }
 

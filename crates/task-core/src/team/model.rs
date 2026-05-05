@@ -36,9 +36,11 @@ use crate::task::StringList;
 )]
 #[sea_orm(rs_type = "String", db_type = "String(StringLen::N(32))")]
 #[repr(u8)]
+#[derive(Default)]
 pub enum AccountStatus {
     /// No auth account — placeholder created by admin.
     #[sea_orm(string_value = "placeholder")]
+    #[default]
     Placeholder,
     /// Invitation sent but not yet accepted.
     #[sea_orm(string_value = "invited")]
@@ -49,12 +51,6 @@ pub enum AccountStatus {
     /// Disabled / deactivated.
     #[sea_orm(string_value = "disabled")]
     Disabled,
-}
-
-impl Default for AccountStatus {
-    fn default() -> Self {
-        AccountStatus::Placeholder
-    }
 }
 
 /// A team member — either a real user or a placeholder awaiting claim.

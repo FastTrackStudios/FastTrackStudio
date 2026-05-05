@@ -164,12 +164,14 @@ impl ActiveModelBehavior for ActiveModel {}
 )]
 #[sea_orm(rs_type = "String", db_type = "String(StringLen::N(32))")]
 #[repr(u8)]
+#[derive(Default)]
 pub enum ProjectStatus {
     /// The project is being planned but work hasn't started.
     #[sea_orm(string_value = "planning")]
     Planning,
     /// Active work in progress (default).
     #[sea_orm(string_value = "active")]
+    #[default]
     Active,
     /// Temporarily paused.
     #[sea_orm(string_value = "on_hold")]
@@ -180,12 +182,6 @@ pub enum ProjectStatus {
     /// Shelved / no longer relevant.
     #[sea_orm(string_value = "archived")]
     Archived,
-}
-
-impl Default for ProjectStatus {
-    fn default() -> Self {
-        ProjectStatus::Active
-    }
 }
 
 impl Project {

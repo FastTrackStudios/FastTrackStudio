@@ -1654,6 +1654,7 @@ async fn portal_file(
         .into_response()
 }
 
+#[allow(clippy::result_large_err)]
 fn load_portal(state: &AppState, slug: &str) -> Result<DownloadPortal, Response> {
     if !safe_slug(slug) {
         return Err((StatusCode::BAD_REQUEST, "invalid portal slug").into_response());
@@ -1886,6 +1887,7 @@ fn is_audio_file(file: &task_core::workflows::BundleFile) -> bool {
             })
 }
 
+#[allow(clippy::result_large_err)]
 fn authorize_portal(
     portal: &DownloadPortal,
     query: &std::collections::HashMap<String, String>,

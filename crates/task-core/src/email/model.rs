@@ -31,13 +31,8 @@ use uuid::Uuid;
 #[derive(Debug, Clone, PartialEq, Facet, Serialize, Deserialize, ToSchema)]
 #[facet(transparent)]
 #[serde(transparent)]
+#[derive(Default)]
 pub struct EmailStringList(pub Vec<String>);
-
-impl Default for EmailStringList {
-    fn default() -> Self {
-        Self(Vec::new())
-    }
-}
 
 impl Deref for EmailStringList {
     type Target = Vec<String>;

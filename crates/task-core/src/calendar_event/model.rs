@@ -86,17 +86,13 @@ impl ActiveModelBehavior for ActiveModel {}
 )]
 #[sea_orm(rs_type = "String", db_type = "String(StringLen::N(32))")]
 #[repr(u8)]
+#[derive(Default)]
 pub enum CalendarEventStatus {
     #[sea_orm(string_value = "confirmed")]
+    #[default]
     Confirmed,
     #[sea_orm(string_value = "tentative")]
     Tentative,
     #[sea_orm(string_value = "cancelled")]
     Cancelled,
-}
-
-impl Default for CalendarEventStatus {
-    fn default() -> Self {
-        CalendarEventStatus::Confirmed
-    }
 }

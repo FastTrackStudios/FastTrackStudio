@@ -435,7 +435,7 @@ impl GitHubSync {
         });
 
         let resp = self
-            .auth(self.http.post(&self.issues_url()))
+            .auth(self.http.post(self.issues_url()))
             .json(&body)
             .send()
             .await

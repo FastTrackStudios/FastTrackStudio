@@ -287,10 +287,12 @@ pub struct Model {
 )]
 #[sea_orm(rs_type = "String", db_type = "String(StringLen::N(32))")]
 #[repr(u8)]
+#[derive(Default)]
 pub enum Status {
     #[sea_orm(string_value = "none")]
     None,
     #[sea_orm(string_value = "open")]
+    #[default]
     Open,
     #[sea_orm(string_value = "in_progress")]
     InProgress,
@@ -306,12 +308,6 @@ pub enum Status {
     Archived,
 }
 
-impl Default for Status {
-    fn default() -> Self {
-        Status::Open
-    }
-}
-
 impl Status {
     pub fn is_completion(&self) -> bool {
         matches!(self, Status::Done)
@@ -324,8 +320,10 @@ impl Status {
 )]
 #[sea_orm(rs_type = "String", db_type = "String(StringLen::N(16))")]
 #[repr(u8)]
+#[derive(Default)]
 pub enum Priority {
     #[sea_orm(string_value = "none")]
+    #[default]
     None,
     #[sea_orm(string_value = "low")]
     Low,
@@ -335,12 +333,6 @@ pub enum Priority {
     High,
     #[sea_orm(string_value = "urgent")]
     Urgent,
-}
-
-impl Default for Priority {
-    fn default() -> Self {
-        Priority::None
-    }
 }
 
 impl Priority {
@@ -412,17 +404,13 @@ pub struct TaskDependency {
 
 #[derive(Debug, Clone, PartialEq, Facet, Serialize, Deserialize, ToSchema)]
 #[repr(u8)]
+#[derive(Default)]
 pub enum DependencyRelType {
+    #[default]
     FinishToStart,
     FinishToFinish,
     StartToStart,
     StartToFinish,
-}
-
-impl Default for DependencyRelType {
-    fn default() -> Self {
-        DependencyRelType::FinishToStart
-    }
 }
 
 /// A logged work session.
@@ -502,19 +490,15 @@ impl TimeEntry {
 )]
 #[sea_orm(rs_type = "String", db_type = "String(StringLen::N(16))")]
 #[repr(u8)]
+#[derive(Default)]
 pub enum RecurrenceAnchor {
     /// Next occurrence from scheduled date — fixed calendar.
     #[sea_orm(string_value = "scheduled")]
+    #[default]
     Scheduled,
     /// Next occurrence from completion date — flexible.
     #[sea_orm(string_value = "completion")]
     Completion,
-}
-
-impl Default for RecurrenceAnchor {
-    fn default() -> Self {
-        RecurrenceAnchor::Scheduled
-    }
 }
 
 // r[impl task.reminders]
@@ -744,13 +728,11 @@ impl Model {
                         title: rest.to_string(),
                         done: false,
                     })
-                } else if let Some(rest) = trimmed.strip_prefix("- [x] ") {
-                    Some(Subtask {
+                } else {
+                    trimmed.strip_prefix("- [x] ").map(|rest| Subtask {
                         title: rest.to_string(),
                         done: true,
                     })
-                } else {
-                    None
                 }
             })
             .collect()

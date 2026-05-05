@@ -329,9 +329,11 @@ json_vec_type!(PaymentList, Payment);
 )]
 #[sea_orm(rs_type = "String", db_type = "String(StringLen::N(32))")]
 #[repr(u8)]
+#[derive(Default)]
 pub enum InvoiceStatus {
     /// Created but not sent.
     #[sea_orm(string_value = "draft")]
+    #[default]
     Draft,
     /// Sent to the client — awaiting payment.
     #[sea_orm(string_value = "sent")]
@@ -351,12 +353,6 @@ pub enum InvoiceStatus {
     /// Paid then refunded.
     #[sea_orm(string_value = "refunded")]
     Refunded,
-}
-
-impl Default for InvoiceStatus {
-    fn default() -> Self {
-        InvoiceStatus::Draft
-    }
 }
 
 impl Invoice {

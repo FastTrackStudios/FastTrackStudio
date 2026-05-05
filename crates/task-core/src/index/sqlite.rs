@@ -335,6 +335,7 @@ impl TaskIndex {
     ///
     /// `kind` is a short tag: "concurrent" (CRDT heads disagree on a field),
     /// "timer" (two running timers on the same task), "manual" (user flagged).
+    #[allow(clippy::too_many_arguments)]
     pub fn record_conflict(
         &self,
         entity_type: &str,
@@ -445,6 +446,7 @@ impl TaskIndex {
     }
 
     /// Record a change for the audit trail.
+    #[allow(clippy::too_many_arguments)]
     pub fn record_change(
         &self,
         entity_type: &str,

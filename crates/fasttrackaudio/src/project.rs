@@ -13,7 +13,7 @@ pub enum MusicProjectError {
 }
 
 /// A music project that tracks production progress plus song assets.
-#[derive(Clone, PartialEq, Facet)]
+#[derive(Clone, Default, PartialEq, Facet)]
 pub struct MusicProject {
     pub id: MusicProjectId,
     pub title: String,
@@ -43,24 +43,6 @@ impl std::fmt::Debug for MusicProject {
             .field("daw_project_path", &self.daw_project_path)
             .field("notes", &self.notes)
             .finish()
-    }
-}
-
-impl Default for MusicProject {
-    fn default() -> Self {
-        Self {
-            id: MusicProjectId::new(),
-            title: String::new(),
-            artist: None,
-            step: MusicProjectStep::default(),
-            chart_text: None,
-            chart: None,
-            sections: Vec::new(),
-            tempo_bpm: None,
-            time_signature: None,
-            daw_project_path: None,
-            notes: Vec::new(),
-        }
     }
 }
 

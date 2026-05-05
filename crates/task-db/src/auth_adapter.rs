@@ -85,7 +85,7 @@ impl UserOps for SeaOrmAuthAdapter {
         let existing = self
             .get_user_by_id(id)
             .await?
-            .ok_or_else(|| AuthError::UserNotFound)?;
+            .ok_or(AuthError::UserNotFound)?;
         let mut model: auth_user::ActiveModel = existing.into();
         if let Some(email) = update.email {
             model.email = Set(Some(email));
@@ -259,7 +259,7 @@ impl SessionOps for SeaOrmAuthAdapter {
         let session = self
             .get_session(token)
             .await?
-            .ok_or_else(|| AuthError::SessionNotFound)?;
+            .ok_or(AuthError::SessionNotFound)?;
         let mut model: auth_session::ActiveModel = session.into();
         model.active_organization_id = Set(organization_id.map(|s| s.to_string()));
         model.updated_at = Set(Utc::now());

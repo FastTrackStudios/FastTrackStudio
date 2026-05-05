@@ -19,13 +19,8 @@ use uuid::Uuid;
 #[derive(Debug, Clone, PartialEq, Facet, Serialize, Deserialize, ToSchema)]
 #[facet(transparent)]
 #[serde(transparent)]
+#[derive(Default)]
 pub struct CycleTaskList(pub Vec<String>);
-
-impl Default for CycleTaskList {
-    fn default() -> Self {
-        Self(Vec::new())
-    }
-}
 
 impl Deref for CycleTaskList {
     type Target = Vec<String>;
@@ -166,8 +161,10 @@ impl ActiveModelBehavior for ActiveModel {}
 )]
 #[sea_orm(rs_type = "String", db_type = "String(StringLen::N(32))")]
 #[repr(u8)]
+#[derive(Default)]
 pub enum CycleStatus {
     #[sea_orm(string_value = "planned")]
+    #[default]
     Planned,
     #[sea_orm(string_value = "active")]
     Active,
@@ -175,12 +172,6 @@ pub enum CycleStatus {
     Completed,
     #[sea_orm(string_value = "cancelled")]
     Cancelled,
-}
-
-impl Default for CycleStatus {
-    fn default() -> Self {
-        CycleStatus::Planned
-    }
 }
 
 impl Cycle {

@@ -403,10 +403,9 @@ impl NextcloudProvider {
                 && segment
                     .chars()
                     .all(|c| c.is_alphanumeric() || c == '_' || c == '-' || c == '.')
+                && !users.contains(&segment.to_string())
             {
-                if !users.contains(&segment.to_string()) {
-                    users.push(segment.to_string());
-                }
+                users.push(segment.to_string());
             }
         }
 
@@ -537,7 +536,7 @@ impl ProjectProvider for NextcloudProvider {
                                 format!(r#"{{"title":"{}","order":{}}}"#, stack_name, i);
                             let _ = self
                                 .http
-                                .post(&format!(
+                                .post(format!(
                                     "{}/index.php/apps/deck/api/v1.0/boards/{}/stacks",
                                     self.config.url, board_id
                                 ))
@@ -558,7 +557,7 @@ impl ProjectProvider for NextcloudProvider {
                                 );
                                 let _ = self
                                     .http
-                                    .post(&format!(
+                                    .post(format!(
                                         "{}/index.php/apps/deck/api/v1.0/boards/{}/acl",
                                         self.config.url, board_id
                                     ))

@@ -135,9 +135,11 @@ impl ActiveModelBehavior for ActiveModel {}
 )]
 #[sea_orm(rs_type = "String", db_type = "String(StringLen::N(32))")]
 #[repr(u8)]
+#[derive(Default)]
 pub enum ExpenseStatus {
     /// Created locally but not yet reviewed.
     #[sea_orm(string_value = "draft")]
+    #[default]
     Draft,
     /// Ready for reimbursement / allocation.
     #[sea_orm(string_value = "open")]
@@ -148,12 +150,6 @@ pub enum ExpenseStatus {
     /// Cancelled / voided.
     #[sea_orm(string_value = "cancelled")]
     Cancelled,
-}
-
-impl Default for ExpenseStatus {
-    fn default() -> Self {
-        ExpenseStatus::Draft
-    }
 }
 
 impl Expense {

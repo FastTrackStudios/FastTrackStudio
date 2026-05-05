@@ -36,15 +36,10 @@ pub fn start_watch(root: &Path, counter: watch::Sender<u64>) -> notify::Result<W
 
     // Debounce thread: coalesce rapid events into a single notification.
     std::thread::spawn(move || {
-        loop {
-            match rx.recv() {
-                Ok(()) => {
-                    // Drain additional events within the debounce window.
-                    while rx.recv_timeout(DEBOUNCE).is_ok() {}
-                    counter.send_modify(|v| *v += 1);
-                }
-                Err(_) => break, // sender dropped → watcher was dropped
-            }
+        while let Ok(()) = rx.recv() {
+            // Drain additional events within the debounce window.
+            while rx.recv_timeout(DEBOUNCE).is_ok() {}
+            counter.send_modify(|v| *v += 1);
         }
     });
 

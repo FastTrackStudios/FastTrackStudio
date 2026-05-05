@@ -153,17 +153,18 @@ impl CrdtDocument {
     /// Build a fresh `Task` from the current doc state.
     pub fn to_task(&self) -> Task {
         let meta = self.doc.get_map(META_ID);
-        let mut task = Task::default();
-
-        task.title = get_string(&meta, "title").unwrap_or_default();
-        task.id = get_string(&meta, "id")
-            .and_then(|id| uuid::Uuid::parse_str(&id).ok())
-            .unwrap_or_else(uuid::Uuid::new_v4);
-        task.assignee = get_string(&meta, "assignee");
-        task.created_by = get_string(&meta, "created_by");
-        task.external_source = get_string(&meta, "external_source");
-        task.external_id = get_string(&meta, "external_id");
-        task.recurrence = get_string(&meta, "recurrence");
+        let mut task = Task {
+            title: get_string(&meta, "title").unwrap_or_default(),
+            id: get_string(&meta, "id")
+                .and_then(|id| uuid::Uuid::parse_str(&id).ok())
+                .unwrap_or_else(uuid::Uuid::new_v4),
+            assignee: get_string(&meta, "assignee"),
+            created_by: get_string(&meta, "created_by"),
+            external_source: get_string(&meta, "external_source"),
+            external_id: get_string(&meta, "external_id"),
+            recurrence: get_string(&meta, "recurrence"),
+            ..Default::default()
+        };
 
         if let Some(s) = get_string(&meta, "status") {
             task.status = parse_status(&s);

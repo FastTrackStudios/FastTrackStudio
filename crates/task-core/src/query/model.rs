@@ -187,7 +187,7 @@ impl Filter {
                 .map(|d| {
                     let s = start.parse::<chrono::NaiveDate>().ok();
                     let e = end.parse::<chrono::NaiveDate>().ok();
-                    s.map_or(true, |s| d >= s) && e.map_or(true, |e| d <= e)
+                    s.is_none_or(|s| d >= s) && e.is_none_or(|e| d <= e)
                 })
                 .unwrap_or(false),
             Filter::ScheduledBetween { start, end } => task
@@ -195,7 +195,7 @@ impl Filter {
                 .map(|d| {
                     let s = start.parse::<chrono::NaiveDate>().ok();
                     let e = end.parse::<chrono::NaiveDate>().ok();
-                    s.map_or(true, |s| d >= s) && e.map_or(true, |e| d <= e)
+                    s.is_none_or(|s| d >= s) && e.is_none_or(|e| d <= e)
                 })
                 .unwrap_or(false),
             // r[impl query.filter.date-range]
@@ -205,7 +205,7 @@ impl Filter {
                     let d = dt.date_naive();
                     let s = start.parse::<chrono::NaiveDate>().ok();
                     let e = end.parse::<chrono::NaiveDate>().ok();
-                    s.map_or(true, |s| d >= s) && e.map_or(true, |e| d <= e)
+                    s.is_none_or(|s| d >= s) && e.is_none_or(|e| d <= e)
                 })
                 .unwrap_or(false),
         }

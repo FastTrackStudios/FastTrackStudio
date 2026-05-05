@@ -224,9 +224,9 @@ fn base64_decode(s: &str) -> Vec<u8> {
         .collect();
 
     for chunk in chars.chunks(4) {
-        let n = (chunk[0] as u32) << 18
-            | chunk.get(1).copied().unwrap_or(0) as u32 * 4096
-            | chunk.get(2).copied().unwrap_or(0) as u32 * 64
+        let n = ((chunk[0] as u32) << 18)
+            | ((chunk.get(1).copied().unwrap_or(0) as u32) * 4096)
+            | ((chunk.get(2).copied().unwrap_or(0) as u32) * 64)
             | chunk.get(3).copied().unwrap_or(0) as u32;
         result.push((n >> 16) as u8);
         if chunk.len() > 2 {

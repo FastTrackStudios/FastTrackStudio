@@ -95,10 +95,7 @@ impl CalDavClient {
 
     /// Push a task to the remote calendar as a VTODO.
     pub async fn push_task(&self, task: &Task) -> Result<(), VaultError> {
-        let uid = task
-            .id
-            .as_deref()
-            .ok_or_else(|| VaultError::ParseError("Task has no ID".into()))?;
+        let uid = task.id.to_string();
 
         let url = format!("{}/{}.ics", self.calendar_url(), uid);
         let ics = task_to_ics(task);
@@ -153,28 +150,24 @@ impl CalDavClient {
         // Build a map of remote tasks by UID
         let mut remote_map: std::collections::HashMap<String, Task> = remote_tasks
             .into_iter()
-            .filter_map(|t| t.id.clone().map(|id| (id, t)))
+            .map(|t| (t.id.to_string(), t))
             .collect();
 
         let mut merged: Vec<Task> = Vec::new();
 
         // For each local task with an ID, check if remote has a newer version
         for local in local_tasks {
-            if let Some(ref id) = local.id {
-                if let Some(remote) = remote_map.remove(id) {
-                    // Both exist — keep whichever was modified more recently
-                    let merged_task = match (local.date_modified, remote.date_modified) {
-                        (Some(lm), Some(rm)) if rm > lm => remote,
-                        _ => local.clone(),
-                    };
-                    merged.push(merged_task);
-                } else {
-                    // Only local — push to remote
-                    self.push_task(local).await?;
-                    merged.push(local.clone());
-                }
+            let id = local.id.to_string();
+            if let Some(remote) = remote_map.remove(&id) {
+                // Both exist — keep whichever was modified more recently
+                let merged_task = match (local.date_modified, remote.date_modified) {
+                    (Some(lm), Some(rm)) if rm > lm => remote,
+                    _ => local.clone(),
+                };
+                merged.push(merged_task);
             } else {
-                // No ID — local only, not synced
+                // Only local — push to remote
+                self.push_task(local).await?;
                 merged.push(local.clone());
             }
         }
@@ -195,11 +188,9 @@ impl CalDavClient {
             .map_err(|e| VaultError::IoError(e.to_string()))?;
 
         for task in &tasks {
-            if let Some(ref id) = task.id {
-                let path = self.config.cache_dir.join(format!("{}.ics", id));
-                let ics = task_to_ics(task);
-                std::fs::write(&path, ics).map_err(|e| VaultError::IoError(e.to_string()))?;
-            }
+            let path = self.config.cache_dir.join(format!("{}.ics", task.id));
+            let ics = task_to_ics(task);
+            std::fs::write(&path, ics).map_err(|e| VaultError::IoError(e.to_string()))?;
         }
 
         Ok(tasks)

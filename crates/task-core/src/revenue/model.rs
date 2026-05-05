@@ -346,7 +346,7 @@ mod tests {
             id: "REV-2026-0001".into(),
             number: 1,
             date: NaiveDate::from_ymd_opt(2026, 5, 4).unwrap(),
-            amount_cents: 250_00,
+            amount_cents: 25_000,
             currency_code: "USD".into(),
             project: Some(WikiLink("Album".into())),
             client: Some(WikiLink("Client".into())),
@@ -364,7 +364,7 @@ mod tests {
             }
         ));
         let report = build_revenue_report(&revenues, &[], revenues[0].date);
-        assert_eq!(report.recognized_cents, 250_00);
+        assert_eq!(report.recognized_cents, 25_000);
         assert_eq!(report.by_project[0].name, "Album");
     }
 }

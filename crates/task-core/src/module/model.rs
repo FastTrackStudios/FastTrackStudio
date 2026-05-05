@@ -19,13 +19,8 @@ use uuid::Uuid;
 #[derive(Debug, Clone, PartialEq, Facet, Serialize, Deserialize, ToSchema)]
 #[facet(transparent)]
 #[serde(transparent)]
+#[derive(Default)]
 pub struct ModuleStringList(pub Vec<String>);
-
-impl Default for ModuleStringList {
-    fn default() -> Self {
-        Self(Vec::new())
-    }
-}
 
 impl Deref for ModuleStringList {
     type Target = Vec<String>;
@@ -166,8 +161,10 @@ impl ActiveModelBehavior for ActiveModel {}
 )]
 #[sea_orm(rs_type = "String", db_type = "String(StringLen::N(32))")]
 #[repr(u8)]
+#[derive(Default)]
 pub enum ModuleStatus {
     #[sea_orm(string_value = "backlog")]
+    #[default]
     Backlog,
     #[sea_orm(string_value = "planned")]
     Planned,
@@ -179,10 +176,4 @@ pub enum ModuleStatus {
     Completed,
     #[sea_orm(string_value = "cancelled")]
     Cancelled,
-}
-
-impl Default for ModuleStatus {
-    fn default() -> Self {
-        ModuleStatus::Backlog
-    }
 }

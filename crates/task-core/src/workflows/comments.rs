@@ -97,10 +97,7 @@ impl TimeRef {
 /// Parse a timecode string like "2:34" or "2:30–2:36" or "1:23:45–1:24:00".
 pub fn parse_timecode(s: &str) -> Option<TimeRef> {
     // Split on en-dash, em-dash, or hyphen (but not if it looks like negative number)
-    let parts: Vec<&str> = s
-        .splitn(2, |c: char| c == '–' || c == '—' || c == '-')
-        .map(|p| p.trim())
-        .collect();
+    let parts: Vec<&str> = s.splitn(2, ['–', '—', '-']).map(|p| p.trim()).collect();
 
     let start = parse_time_str(parts[0])?;
 
@@ -265,7 +262,7 @@ pub fn comments_at_time(comments: &[Comment], time_seconds: f64) -> Vec<&Comment
         .filter(|c| {
             c.time_ref
                 .as_ref()
-                .map_or(false, |tr| tr.contains(time_seconds))
+                .is_some_and(|tr| tr.contains(time_seconds))
         })
         .collect()
 }

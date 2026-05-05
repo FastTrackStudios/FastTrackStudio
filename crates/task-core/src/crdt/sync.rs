@@ -42,6 +42,7 @@ use super::document::{CONFLICT_FIELDS, CrdtDocument, DocumentSnapshot};
 
 /// An operation broadcast to connected clients.
 #[derive(Debug, Clone)]
+#[allow(clippy::large_enum_variant)]
 pub enum SyncOp {
     /// A metadata field changed on a task.
     FieldChanged {

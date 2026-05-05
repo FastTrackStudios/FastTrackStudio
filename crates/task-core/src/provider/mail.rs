@@ -521,7 +521,7 @@ fn parse_message(v: &serde_json::Value, mailbox_id: i64) -> Option<MailMessage> 
         .get("from")
         .and_then(|arr| arr.as_array())
         .and_then(|arr| arr.first())
-        .and_then(|a| format_address(a))
+        .and_then(format_address)
         .or_else(|| v.get("from").and_then(|s| s.as_str()).map(String::from))
         .unwrap_or_default();
     let to = v

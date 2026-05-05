@@ -79,11 +79,7 @@ impl S3Provider {
     /// Full URL for an object key.
     fn object_url(&self, key: &str) -> String {
         // Percent-encode each path segment to handle spaces and special chars.
-        let encoded: String = key
-            .split('/')
-            .map(|seg| urlenccode(seg))
-            .collect::<Vec<_>>()
-            .join("/");
+        let encoded: String = key.split('/').map(urlenccode).collect::<Vec<_>>().join("/");
         format!("{}/{}", self.bucket_url(), encoded)
     }
 

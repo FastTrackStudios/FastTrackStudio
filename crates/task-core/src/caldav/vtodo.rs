@@ -6,6 +6,7 @@
 
 use chrono::{NaiveDate, Utc};
 use icalendar::{Calendar, CalendarComponent, Component, EventLike, Todo, TodoStatus};
+use uuid::Uuid;
 
 use crate::task::{Priority, Status, Task, WikiLink};
 
@@ -16,9 +17,7 @@ pub fn task_to_vtodo(task: &Task) -> Todo {
     let mut todo = Todo::new();
 
     // UID
-    if let Some(ref id) = task.id {
-        todo.uid(id);
-    }
+    todo.uid(&task.id.to_string());
 
     // SUMMARY
     todo.summary(&task.title);
@@ -142,40 +141,38 @@ pub fn task_to_ics(task: &Task) -> String {
 
 /// Convert an iCalendar `Todo` (VTODO) to a vault-core `Task`.
 pub fn vtodo_to_task(todo: &Todo) -> Task {
-    let mut task = Task::default();
-
-    // UID → id
-    task.id = todo.property_value("UID").map(|s| s.to_string());
-
-    // SUMMARY → title
-    task.title = todo
-        .property_value("SUMMARY")
-        .unwrap_or("Untitled")
-        .to_string();
-
-    // STATUS
-    task.status = todo
-        .get_status()
-        .map(|s| ical_to_status(&s))
-        .unwrap_or(Status::Open);
-
-    // PRIORITY
-    task.priority = todo
-        .property_value("PRIORITY")
-        .and_then(|s| s.parse::<u8>().ok())
-        .map(ical_priority_to_priority)
-        .unwrap_or(Priority::None);
-
-    // DUE
-    task.due = todo.get_due().and_then(|d| d.try_into().ok());
-
-    // DTSTART → scheduled
-    task.scheduled = todo
-        .property_value("DTSTART")
-        .and_then(|s| NaiveDate::parse_from_str(s, "%Y%m%d").ok());
-
-    // COMPLETED
-    task.completed_date = todo.get_completed().map(|dt| dt.date_naive());
+    let mut task = Task {
+        // UID → id
+        id: todo
+            .property_value("UID")
+            .and_then(|uid| Uuid::parse_str(uid).ok())
+            .unwrap_or_else(Uuid::new_v4),
+        // SUMMARY → title
+        title: todo
+            .property_value("SUMMARY")
+            .unwrap_or("Untitled")
+            .to_string(),
+        // STATUS
+        status: todo
+            .get_status()
+            .map(|s| ical_to_status(&s))
+            .unwrap_or(Status::Open),
+        // PRIORITY
+        priority: todo
+            .property_value("PRIORITY")
+            .and_then(|s| s.parse::<u8>().ok())
+            .map(ical_priority_to_priority)
+            .unwrap_or(Priority::None),
+        // DUE
+        due: todo.get_due().map(Into::into),
+        // DTSTART → scheduled
+        scheduled: todo
+            .property_value("DTSTART")
+            .and_then(|s| NaiveDate::parse_from_str(s, "%Y%m%d").ok()),
+        // COMPLETED
+        completed_date: todo.get_completed().map(|dt| dt.date_naive()),
+        ..Default::default()
+    };
 
     // CATEGORIES → tags (stored in multi_properties)
     if let Some(props) = todo.multi_properties().get("CATEGORIES") {
