@@ -2,9 +2,9 @@
 //!
 //! ## Architecture
 //!
-//! - **Markdown files** = source of truth for content (bodies, notes, lyrics)
-//! - **Database** = operational index for metadata, relations, comments, notifications
-//! - **Sync**: file changes → DB update, DB changes → file regeneration
+//! - **SQLite/SeaORM** = source of truth for generated CRUD resources
+//! - **Markdown files** = compatibility/import surface for vault-oriented workflows
+//! - **Sync**: compatibility services can project file changes into the database
 
 pub mod auth_adapter;
 pub mod entities;

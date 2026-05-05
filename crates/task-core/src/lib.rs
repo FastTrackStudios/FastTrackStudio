@@ -16,7 +16,6 @@ pub mod people;
 pub mod project;
 pub mod query;
 pub mod reaction;
-pub mod repo_adapters;
 pub mod revenue;
 pub mod rrule;
 pub mod task;
