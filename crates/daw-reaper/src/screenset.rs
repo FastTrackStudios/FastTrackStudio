@@ -4,8 +4,9 @@ use std::ffi::CString;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use daw_proto::{
-    CaptureScreensetRequest, Screenset, ScreensetMonitor, ScreensetOptions, ScreensetRect,
-    ScreensetResult, ScreensetScope, ScreensetService, ScreensetSummary, ScreensetWindow,
+    CaptureScreensetRequest, Screenset, ScreensetKind, ScreensetMonitor, ScreensetOptions,
+    ScreensetRect, ScreensetResult, ScreensetScope, ScreensetSelection, ScreensetService,
+    ScreensetSummary, ScreensetTrackVisibility, ScreensetWindow,
 };
 use display_info::DisplayInfo;
 use reaper_high::Reaper;
@@ -47,10 +48,17 @@ fn summary_for(screenset: &Screenset) -> ScreensetSummary {
         id: screenset.id.clone(),
         name: screenset.name.clone(),
         description: screenset.description.clone(),
+        kind: screenset.kind,
         updated_at_unix: screenset.updated_at_unix,
         tags: screenset.tags.clone(),
         window_count: screenset.windows.len() as u32,
         monitor_count: screenset.monitors.len() as u32,
+        track_visibility_count: screenset.track_visibility.len() as u32,
+        selected_track_count: screenset
+            .selection
+            .as_ref()
+            .map(|s| s.selected_track_guids.len() as u32)
+            .unwrap_or(0),
         action_count: screenset.actions_on_apply.len() as u32,
     }
 }
@@ -252,6 +260,101 @@ fn capture_main_window(monitors: &[ScreensetMonitor]) -> Option<ScreensetWindow>
     })
 }
 
+/// Capture every track's TCP/MCP visibility for the current project.
+fn capture_track_visibility() -> Vec<ScreensetTrackVisibility> {
+    use reaper_medium::TrackArea;
+    let project = Reaper::get().current_project();
+    project
+        .tracks()
+        .map(|t| ScreensetTrackVisibility {
+            guid: t.guid().to_string_with_braces(),
+            name: t
+                .name()
+                .map(|s| s.to_str().to_string())
+                .unwrap_or_default(),
+            visible_in_tcp: t.is_shown(TrackArea::Tcp),
+            visible_in_mixer: t.is_shown(TrackArea::Mcp),
+        })
+        .collect()
+}
+
+/// Restore TCP/MCP visibility from a captured map. Tracks not present in
+/// the snapshot are left as-is (not silently hidden).
+fn apply_track_visibility(rows: &[ScreensetTrackVisibility]) {
+    use reaper_medium::TrackArea;
+    let project = Reaper::get().current_project();
+    let by_guid: std::collections::HashMap<&str, &ScreensetTrackVisibility> =
+        rows.iter().map(|r| (r.guid.as_str(), r)).collect();
+    for track in project.tracks() {
+        let guid = track.guid().to_string_with_braces();
+        let Some(row) = by_guid.get(guid.as_str()) else {
+            continue;
+        };
+        track.set_shown(TrackArea::Tcp, row.visible_in_tcp);
+        track.set_shown(TrackArea::Mcp, row.visible_in_mixer);
+    }
+}
+
+/// Capture the current track selection and project loop / time selection.
+fn capture_selection() -> ScreensetSelection {
+    let project = Reaper::get().current_project();
+    let selected: Vec<String> = project
+        .tracks()
+        .filter(|t| t.is_selected())
+        .map(|t| t.guid().to_string_with_braces())
+        .collect();
+    let medium = Reaper::get().medium_reaper();
+    let mut start = 0.0_f64;
+    let mut end = 0.0_f64;
+    unsafe {
+        medium.low().GetSet_LoopTimeRange2(
+            ProjectContext::CurrentProject.to_raw(),
+            false, // is_set
+            false, // is_loop
+            &mut start,
+            &mut end,
+            false, // allow_autoseek_beats
+        );
+    }
+    ScreensetSelection {
+        selected_track_guids: selected,
+        time_start_seconds: start,
+        time_end_seconds: end,
+    }
+}
+
+/// Restore track selection and project time selection from a captured
+/// [`ScreensetSelection`]. Tracks not in the selection list are deselected.
+fn apply_selection(selection: &ScreensetSelection) {
+    let project = Reaper::get().current_project();
+    let wanted: std::collections::HashSet<&str> = selection
+        .selected_track_guids
+        .iter()
+        .map(|s| s.as_str())
+        .collect();
+    for track in project.tracks() {
+        let guid = track.guid().to_string_with_braces();
+        if wanted.contains(guid.as_str()) {
+            track.select();
+        } else {
+            track.unselect();
+        }
+    }
+    let medium = Reaper::get().medium_reaper();
+    let mut start = selection.time_start_seconds;
+    let mut end = selection.time_end_seconds;
+    unsafe {
+        medium.low().GetSet_LoopTimeRange2(
+            ProjectContext::CurrentProject.to_raw(),
+            true,  // is_set
+            false, // is_loop
+            &mut start,
+            &mut end,
+            false,
+        );
+    }
+}
+
 /// Apply a window's stored geometry. Currently we only restore position +
 /// size for the REAPER main window; per-panel placement requires the dock
 /// host adapter (handled separately via `dock_layout_blob`).
@@ -299,11 +402,23 @@ fn resolve_command_id(command: &str) -> Result<CommandId, String> {
 fn apply_screenset_immediate(id: &str) -> Result<String, String> {
     validate_id(id)?;
     let screenset = load_screenset(id).ok_or_else(|| format!("screenset not found: {id}"))?;
-    // Restore window geometry first so any actions that paint into the
-    // restored layout (e.g. "show mixer") observe the new positions.
-    for window in &screenset.windows {
-        if let Err(err) = apply_main_window(window) {
-            tracing::warn!("apply window '{}': {err}", window.id);
+    // Restore the per-kind state first so any post-apply actions
+    // (e.g. "show mixer") observe the new layout/visibility.
+    match screenset.kind {
+        ScreensetKind::Window => {
+            for window in &screenset.windows {
+                if let Err(err) = apply_main_window(window) {
+                    tracing::warn!("apply window '{}': {err}", window.id);
+                }
+            }
+        }
+        ScreensetKind::TrackSet => {
+            apply_track_visibility(&screenset.track_visibility);
+        }
+        ScreensetKind::SelectionSet => {
+            if let Some(selection) = &screenset.selection {
+                apply_selection(selection);
+            }
         }
     }
     let reaper = Reaper::get().medium_reaper();
@@ -318,25 +433,37 @@ fn apply_screenset_immediate(id: &str) -> Result<String, String> {
 impl ScreensetService for ReaperScreenset {
     async fn capture_screenset(&self, request: CaptureScreensetRequest) -> ScreensetResult {
         main_thread::query(move || {
-            let monitors = capture_monitors();
-            let mut windows = Vec::new();
-            if let Some(main) = capture_main_window(&monitors) {
-                windows.push(main);
-            }
-            let screenset = Screenset {
+            let mut screenset = Screenset {
                 id: request.id,
                 name: request.name,
                 description: request.description,
+                kind: request.kind,
                 schema_version: 1,
                 updated_at_unix: now_unix(),
                 tags: request.tags,
-                monitors,
-                windows,
-                // The dock-layout blob is owned by the dock host adapter and
-                // attached separately by callers that have access to it.
-                dock_layout_blob: Vec::new(),
                 actions_on_apply: request.actions_on_apply,
+                ..Default::default()
             };
+            match request.kind {
+                ScreensetKind::Window => {
+                    let monitors = capture_monitors();
+                    let mut windows = Vec::new();
+                    if let Some(main) = capture_main_window(&monitors) {
+                        windows.push(main);
+                    }
+                    screenset.monitors = monitors;
+                    screenset.windows = windows;
+                    // The dock-layout blob is owned by the dock host adapter
+                    // and attached separately by callers that have access
+                    // to it.
+                }
+                ScreensetKind::TrackSet => {
+                    screenset.track_visibility = capture_track_visibility();
+                }
+                ScreensetKind::SelectionSet => {
+                    screenset.selection = Some(capture_selection());
+                }
+            }
             match save_screenset_immediate(screenset, request.options) {
                 Ok(id) => ScreensetResult::ok(id),
                 Err(err) => ScreensetResult::error(err),

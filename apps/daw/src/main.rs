@@ -2,7 +2,25 @@
 
 use std::path::PathBuf;
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
+
+/// CLI flag form of [`daw::service::ScreensetKind`].
+#[derive(Copy, Clone, Debug, ValueEnum)]
+enum ScreensetKindArg {
+    Window,
+    TrackSet,
+    SelectionSet,
+}
+
+impl From<ScreensetKindArg> for daw::service::ScreensetKind {
+    fn from(arg: ScreensetKindArg) -> Self {
+        match arg {
+            ScreensetKindArg::Window => daw::service::ScreensetKind::Window,
+            ScreensetKindArg::TrackSet => daw::service::ScreensetKind::TrackSet,
+            ScreensetKindArg::SelectionSet => daw::service::ScreensetKind::SelectionSet,
+        }
+    }
+}
 use daw_cli::cli_values::{OnOff, ToolbarIconKindValue, TrackColor, TrackFolderDepth, TrackName};
 use eyre::Result;
 use serde_json::Value;
@@ -618,6 +636,11 @@ enum Command {
         /// Description
         #[arg(long)]
         description: Option<String>,
+        /// What to capture: window (windows + monitors + dock layout),
+        /// track-set (track TCP/MCP visibility), or selection-set (track
+        /// selection + time selection). Defaults to `window`.
+        #[arg(long, value_enum, default_value_t = ScreensetKindArg::Window)]
+        kind: ScreensetKindArg,
         /// Tag; may be passed multiple times
         #[arg(long = "tag")]
         tags: Vec<String>,
@@ -1432,6 +1455,7 @@ async fn main() -> Result<()> {
             id,
             name,
             description,
+            kind,
             tags,
             actions_on_apply,
             persist,
@@ -1441,6 +1465,7 @@ async fn main() -> Result<()> {
                 &id,
                 name.as_deref(),
                 description.as_deref(),
+                kind.into(),
                 tags,
                 actions_on_apply,
                 persist,

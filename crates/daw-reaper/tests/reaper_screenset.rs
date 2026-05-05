@@ -8,7 +8,7 @@
 //!
 //!   cargo xtask reaper-test -- reaper_screenset
 
-use daw_proto::{ScreensetOptions, ScreensetScope};
+use daw_proto::{ScreensetKind, ScreensetOptions, ScreensetScope};
 use reaper_test::reaper_test;
 
 #[reaper_test(isolated)]
@@ -19,6 +19,7 @@ async fn capture_records_main_window_geometry(ctx: &ReaperTestContext) -> eyre::
             "fts_test_capture_main",
             "Capture Main",
             "test capture",
+            ScreensetKind::Window,
             Vec::<String>::new(),
             Vec::<String>::new(),
             ScreensetOptions {
@@ -79,6 +80,7 @@ async fn apply_restores_main_window_position(ctx: &ReaperTestContext) -> eyre::R
             "fts_test_apply_baseline",
             "Apply Baseline",
             "",
+            ScreensetKind::Window,
             Vec::<String>::new(),
             Vec::<String>::new(),
             opts.clone(),
@@ -113,5 +115,130 @@ async fn apply_restores_main_window_position(ctx: &ReaperTestContext) -> eyre::R
     for id in ["fts_test_apply_baseline", "fts_test_apply_shifted"] {
         let _ = screensets.delete(id, opts.clone()).await?;
     }
+    Ok(())
+}
+
+#[reaper_test(isolated)]
+async fn track_set_round_trips_visibility(ctx: &ReaperTestContext) -> eyre::Result<()> {
+    let opts = ScreensetOptions {
+        scope: ScreensetScope::Global,
+        persist: false,
+    };
+    let project = ctx.daw.current_project().await?;
+    let tracks = project.tracks();
+
+    // Create a known surface: three tracks with stable names so we can
+    // assert on visibility round-tripping per-track.
+    let _a = tracks.add("vis_a", None).await?;
+    let b = tracks.add("vis_b", None).await?;
+    let _c = tracks.add("vis_c", None).await?;
+    // Hide vis_b from the mixer; that's the bit we'll capture and re-apply.
+    b.set_visible_in_mixer(false).await?;
+
+    let screensets = ctx.daw.screensets();
+    screensets
+        .capture(
+            "fts_test_trackset_capture",
+            "TrackSet Capture",
+            "",
+            ScreensetKind::TrackSet,
+            Vec::<String>::new(),
+            Vec::<String>::new(),
+            opts.clone(),
+        )
+        .await?;
+    let snap = screensets
+        .get("fts_test_trackset_capture", opts.clone())
+        .await?
+        .unwrap();
+    assert_eq!(snap.kind, ScreensetKind::TrackSet);
+    let row = snap
+        .track_visibility
+        .iter()
+        .find(|r| r.name == "vis_b")
+        .expect("captured trackset must include vis_b");
+    assert!(row.visible_in_tcp);
+    assert!(!row.visible_in_mixer);
+
+    // Flip vis_b back to visible, then apply — it must end up hidden again.
+    b.set_visible_in_mixer(true).await?;
+    let result = screensets
+        .apply("fts_test_trackset_capture", opts.clone())
+        .await?;
+    assert!(result.ok, "apply should succeed: {:?}", result.error);
+
+    let restored = tracks.all().await?;
+    let restored_b = restored
+        .iter()
+        .find(|t| t.name == "vis_b")
+        .expect("vis_b track survived apply");
+    assert!(restored_b.visible_in_tcp);
+    assert!(!restored_b.visible_in_mixer);
+
+    let _ = screensets
+        .delete("fts_test_trackset_capture", opts.clone())
+        .await?;
+    Ok(())
+}
+
+#[reaper_test(isolated)]
+async fn selection_set_round_trips_track_selection(
+    ctx: &ReaperTestContext,
+) -> eyre::Result<()> {
+    let opts = ScreensetOptions {
+        scope: ScreensetScope::Global,
+        persist: false,
+    };
+    let project = ctx.daw.current_project().await?;
+    let tracks = project.tracks();
+    let a = tracks.add("sel_a", None).await?;
+    let _b = tracks.add("sel_b", None).await?;
+    let c = tracks.add("sel_c", None).await?;
+    tracks.clear_selection().await?;
+    a.select().await?;
+    c.select().await?;
+
+    let screensets = ctx.daw.screensets();
+    screensets
+        .capture(
+            "fts_test_selectionset_capture",
+            "SelectionSet Capture",
+            "",
+            ScreensetKind::SelectionSet,
+            Vec::<String>::new(),
+            Vec::<String>::new(),
+            opts.clone(),
+        )
+        .await?;
+    let snap = screensets
+        .get("fts_test_selectionset_capture", opts.clone())
+        .await?
+        .unwrap();
+    let selection = snap
+        .selection
+        .clone()
+        .expect("selection set must populate selection");
+    assert_eq!(selection.selected_track_guids.len(), 2);
+
+    // Deselect everything, then apply — selection on a + c must come back.
+    tracks.clear_selection().await?;
+    let result = screensets
+        .apply("fts_test_selectionset_capture", opts.clone())
+        .await?;
+    assert!(result.ok, "apply should succeed: {:?}", result.error);
+
+    let after = tracks.all().await?;
+    let selected_names: std::collections::HashSet<&str> = after
+        .iter()
+        .filter(|t| t.selected)
+        .map(|t| t.name.as_str())
+        .collect();
+    assert!(selected_names.contains("sel_a"));
+    assert!(selected_names.contains("sel_c"));
+    assert!(!selected_names.contains("sel_b"));
+
+    let _ = screensets
+        .delete("fts_test_selectionset_capture", opts.clone())
+        .await?;
     Ok(())
 }
