@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 vox.workspace = true
+vox-types.workspace = true
 actions-proto.workspace = true
 facet.workspace = true
 daw.workspace = true

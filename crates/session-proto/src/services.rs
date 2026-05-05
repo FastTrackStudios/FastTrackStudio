@@ -438,3 +438,9 @@ pub struct AudioLatencyInfo {
     /// Whether audio engine is running
     pub is_running: bool,
 }
+
+// SelfRef compatibility: SetlistEvent has no lifetime parameters, so Ref<'a> = Self.
+#[allow(unsafe_code)]
+unsafe impl vox_types::Reborrow for SetlistEvent {
+    type Ref<'a> = SetlistEvent;
+}
