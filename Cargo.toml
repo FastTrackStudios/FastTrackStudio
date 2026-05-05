@@ -37,12 +37,12 @@ daw-extension-runtime = { git = "https://github.com/FastTrackStudios/daw.git", b
 reaper-test = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
 
 # ── Vox service framework (fork with wasm32 fix) ─────────────────────
-vox = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-vox-stream = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-vox-websocket = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
+vox = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
+vox-stream = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
+vox-websocket = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
 
 # ── Facet reflection ────────────────────────────────────────────────
-facet = { version = "0.44" }
+facet = { version = "0.46" }
 
 # ── Keyflow (sibling repo — facade pattern) ─────────────────────────
 keyflow = { git = "https://github.com/FastTrackStudios/keyflow.git", branch = "main" }
@@ -109,18 +109,16 @@ reaper-test = { path = "../daw/crates/reaper-test" }
 #
 # Redirect transitive deps on upstream vox to our fork (wasm32 fix)
 [patch."https://github.com/bearcove/vox.git"]
-vox = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-vox-core = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-vox-types = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-vox-postcard = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-vox-stream = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-vox-websocket = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-vox-shm = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-vox-schema = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-vox-service-macros = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-vox-codegen = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-vox-inprocess = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-shm-primitives = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
+vox = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
+vox-core = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
+vox-types = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
+vox-postcard = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
+vox-stream = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
+vox-websocket = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
+vox-schema = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
+vox-service-macros = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
+vox-codegen = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
+vox-inprocess = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
 
 # ── Vendored patches ──────────────────────────────────────────────────
 # moire: unify crates.io moire with the git rev that vox pulls in,
