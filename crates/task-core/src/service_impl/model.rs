@@ -1576,7 +1576,7 @@ impl VaultServiceImpl {
             event.venue = venue;
         }
         if let Some(spaces) = patch.spaces {
-            event.spaces = spaces;
+            event.spaces = spaces.into();
         }
         if let Some(start) = patch.start {
             event.start = start;
@@ -1594,7 +1594,7 @@ impl VaultServiceImpl {
             event.recurrence = recurrence;
         }
         if let Some(attendees) = patch.attendees {
-            event.attendees = attendees;
+            event.attendees = attendees.into();
         }
         if let Some(body) = patch.body {
             event.body = body;
@@ -2675,6 +2675,7 @@ impl VaultServiceImpl {
             .and_then(parse_expense_status)
             .unwrap_or(ExpenseStatus::Draft);
         let expense = Expense {
+            uuid: Uuid::new_v4(),
             id,
             number,
             status,
@@ -2841,6 +2842,7 @@ impl VaultServiceImpl {
         let date = request.date.unwrap_or_else(|| now.date_naive());
         let number = self.next_revenue_number(date.year()).await?;
         let revenue = Revenue {
+            uuid: Uuid::new_v4(),
             id: format_revenue_id(date.year(), number),
             number,
             date,

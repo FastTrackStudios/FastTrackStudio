@@ -12,30 +12,68 @@
 //! - grouped reporting by project, client, and category
 
 use chrono::{DateTime, NaiveDate, Utc};
+use crudcrate::EntityToModels;
 use facet::Facet;
+use sea_orm::entity::prelude::*;
+use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
+use uuid::Uuid;
 
 use crate::task::WikiLink;
 
 /// A recorded expense backed by `expenses/<id>.md`.
-#[derive(Debug, Clone, PartialEq, Default, Facet)]
-pub struct Expense {
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Default,
+    Facet,
+    DeriveEntityModel,
+    EntityToModels,
+    Serialize,
+    Deserialize,
+    ToSchema,
+)]
+#[sea_orm(table_name = "expenses")]
+#[crudcrate(
+    api_struct = "ExpenseApi",
+    generate_vox_service,
+    name_singular = "expense",
+    name_plural = "expenses"
+)]
+pub struct Model {
+    #[facet(default)]
+    #[sea_orm(primary_key, auto_increment = false)]
+    #[crudcrate(
+        primary_key,
+        exclude(create),
+        on_create = uuid::Uuid::new_v4()
+    )]
+    pub uuid: Uuid,
+
     /// Human-readable id, e.g. `EXP-2026-0001`.
+    #[crudcrate(filterable, sortable, fulltext)]
     pub id: String,
 
     /// Monotonic yearly sequence used to build the id.
+    #[crudcrate(sortable)]
     pub number: u32,
 
     /// Lifecycle state for the expense.
+    #[crudcrate(filterable, sortable)]
     pub status: ExpenseStatus,
 
     /// Expense date.
+    #[crudcrate(filterable, sortable)]
     pub date: NaiveDate,
 
     /// Amount in cents.
-    pub amount_cents: u64,
+    #[crudcrate(sortable)]
+    pub amount_cents: i64,
 
     /// ISO 4217 currency code, e.g. `USD`.
     #[facet(default)]
+    #[crudcrate(filterable, sortable)]
     pub currency_code: String,
 
     /// Owning project, if known.
@@ -48,12 +86,15 @@ pub struct Expense {
     pub deliverable: Option<String>,
 
     /// Human category label, e.g. `travel`, `gear`, `software`.
+    #[crudcrate(filterable, sortable)]
     pub category: Option<String>,
 
     /// Vendor / merchant name.
+    #[crudcrate(filterable, sortable)]
     pub vendor: Option<String>,
 
     /// Short description of the spend.
+    #[crudcrate(fulltext)]
     pub description: String,
 
     /// Optional receipt URL, file reference, or note.
@@ -64,6 +105,7 @@ pub struct Expense {
 
     /// Whether this expense is expected to be reimbursed or passed through.
     #[facet(default)]
+    #[crudcrate(filterable)]
     pub reimbursable: bool,
 
     /// Free-form notes.
@@ -81,22 +123,41 @@ pub struct Expense {
     pub body: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Default, Facet)]
+pub type Expense = Model;
+
+#[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+pub enum Relation {}
+
+impl ActiveModelBehavior for ActiveModel {}
+
+#[derive(
+    Debug, Clone, PartialEq, Eq, Facet, Serialize, Deserialize, ToSchema, EnumIter, DeriveActiveEnum,
+)]
+#[sea_orm(rs_type = "String", db_type = "String(StringLen::N(32))")]
 #[repr(u8)]
 pub enum ExpenseStatus {
     /// Created locally but not yet reviewed.
-    #[default]
+    #[sea_orm(string_value = "draft")]
     Draft,
     /// Ready for reimbursement / allocation.
+    #[sea_orm(string_value = "open")]
     Open,
     /// Recorded as reimbursed or paid.
+    #[sea_orm(string_value = "paid")]
     Paid,
     /// Cancelled / voided.
+    #[sea_orm(string_value = "cancelled")]
     Cancelled,
 }
 
+impl Default for ExpenseStatus {
+    fn default() -> Self {
+        ExpenseStatus::Draft
+    }
+}
+
 impl Expense {
-    pub fn total_cents(&self) -> u64 {
+    pub fn total_cents(&self) -> i64 {
         self.amount_cents
     }
 }
@@ -104,7 +165,7 @@ impl Expense {
 #[derive(Debug, Clone, Default, Facet)]
 pub struct ExpenseCreateRequest {
     pub description: String,
-    pub amount_cents: u64,
+    pub amount_cents: i64,
     pub date: Option<NaiveDate>,
     pub currency_code: Option<String>,
     pub project: Option<String>,
@@ -124,7 +185,7 @@ pub struct ExpenseCreateRequest {
 pub struct ExpensePatch {
     pub status: Option<String>,
     pub date: Option<String>,
-    pub amount_cents: Option<u64>,
+    pub amount_cents: Option<i64>,
     pub currency_code: Option<String>,
     pub project: Option<String>,
     pub client: Option<String>,
@@ -155,8 +216,8 @@ pub struct ExpenseFilter {
 pub struct ExpenseBucket {
     pub name: String,
     pub expense_count: u32,
-    pub amount_cents: u64,
-    pub reimbursable_cents: u64,
+    pub amount_cents: i64,
+    pub reimbursable_cents: i64,
 }
 
 #[derive(Debug, Clone, Facet)]
@@ -164,12 +225,12 @@ pub struct ExpenseReport {
     pub generated_at: DateTime<Utc>,
     pub today: String,
     pub expense_count: u32,
-    pub total_cents: u64,
-    pub reimbursable_cents: u64,
-    pub paid_cents: u64,
-    pub open_cents: u64,
-    pub draft_cents: u64,
-    pub cancelled_cents: u64,
+    pub total_cents: i64,
+    pub reimbursable_cents: i64,
+    pub paid_cents: i64,
+    pub open_cents: i64,
+    pub draft_cents: i64,
+    pub cancelled_cents: i64,
     #[facet(default)]
     pub by_project: Vec<ExpenseBucket>,
     #[facet(default)]
@@ -551,6 +612,7 @@ mod tests {
     #[test]
     fn renders_body_with_key_fields() {
         let expense = Expense {
+            uuid: Uuid::new_v4(),
             id: "EXP-2026-0001".into(),
             number: 1,
             status: ExpenseStatus::Open,
@@ -585,6 +647,7 @@ mod tests {
     fn builds_a_rollup_report_with_buckets() {
         let expenses = vec![
             Expense {
+                uuid: Uuid::new_v4(),
                 id: "EXP-2026-0001".into(),
                 number: 1,
                 status: ExpenseStatus::Open,
@@ -607,6 +670,7 @@ mod tests {
                 body: String::new(),
             },
             Expense {
+                uuid: Uuid::new_v4(),
                 id: "EXP-2026-0002".into(),
                 number: 2,
                 status: ExpenseStatus::Paid,
@@ -629,6 +693,7 @@ mod tests {
                 body: String::new(),
             },
             Expense {
+                uuid: Uuid::new_v4(),
                 id: "EXP-2026-0003".into(),
                 number: 3,
                 status: ExpenseStatus::Draft,

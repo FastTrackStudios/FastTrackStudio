@@ -1,6 +1,6 @@
 use sea_orm::Schema;
 use sea_orm_migration::prelude::*;
-use task_core::{project, task};
+use task_core::{calendar_event, client, expense, project, revenue, task};
 
 #[derive(DeriveMigrationName)]
 pub struct Migration;
@@ -86,6 +86,117 @@ impl MigrationTrait for Migration {
                     .name("idx_tasks_assignee")
                     .table(Tasks::Table)
                     .col(task::Column::Assignee)
+                    .to_owned(),
+            )
+            .await?;
+
+        // ── Clients ─────────────────────────────────────────────────
+        manager
+            .create_table(
+                schema
+                    .create_table_from_entity(client::Entity)
+                    .if_not_exists()
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_clients_name")
+                    .table(Clients::Table)
+                    .col(client::Column::Name)
+                    .to_owned(),
+            )
+            .await?;
+
+        // ── Expenses ────────────────────────────────────────────────
+        manager
+            .create_table(
+                schema
+                    .create_table_from_entity(expense::Entity)
+                    .if_not_exists()
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_expenses_date")
+                    .table(Expenses::Table)
+                    .col(expense::Column::Date)
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_expenses_status")
+                    .table(Expenses::Table)
+                    .col(expense::Column::Status)
+                    .to_owned(),
+            )
+            .await?;
+
+        // ── Revenues ────────────────────────────────────────────────
+        manager
+            .create_table(
+                schema
+                    .create_table_from_entity(revenue::Entity)
+                    .if_not_exists()
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_revenues_date")
+                    .table(Revenues::Table)
+                    .col(revenue::Column::Date)
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_revenues_invoice_id")
+                    .table(Revenues::Table)
+                    .col(revenue::Column::InvoiceId)
+                    .to_owned(),
+            )
+            .await?;
+
+        // ── Calendar events ────────────────────────────────────────
+        manager
+            .create_table(
+                schema
+                    .create_table_from_entity(calendar_event::Entity)
+                    .if_not_exists()
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_calendar_events_start")
+                    .table(CalendarEvents::Table)
+                    .col(calendar_event::Column::Start)
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_calendar_events_external")
+                    .table(CalendarEvents::Table)
+                    .col(calendar_event::Column::ExternalSource)
+                    .col(calendar_event::Column::ExternalId)
                     .to_owned(),
             )
             .await?;
@@ -416,6 +527,18 @@ impl MigrationTrait for Migration {
             .drop_table(Table::drop().table(Comments::Table).to_owned())
             .await?;
         manager
+            .drop_table(Table::drop().table(CalendarEvents::Table).to_owned())
+            .await?;
+        manager
+            .drop_table(Table::drop().table(Revenues::Table).to_owned())
+            .await?;
+        manager
+            .drop_table(Table::drop().table(Expenses::Table).to_owned())
+            .await?;
+        manager
+            .drop_table(Table::drop().table(Clients::Table).to_owned())
+            .await?;
+        manager
             .drop_table(Table::drop().table(Tasks::Table).to_owned())
             .await?;
         manager
@@ -434,6 +557,26 @@ enum Projects {
 
 #[derive(DeriveIden)]
 enum Tasks {
+    Table,
+}
+
+#[derive(DeriveIden)]
+enum Clients {
+    Table,
+}
+
+#[derive(DeriveIden)]
+enum Expenses {
+    Table,
+}
+
+#[derive(DeriveIden)]
+enum Revenues {
+    Table,
+}
+
+#[derive(DeriveIden)]
+enum CalendarEvents {
     Table,
 }
 

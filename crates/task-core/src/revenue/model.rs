@@ -1,27 +1,68 @@
 //! Revenue attribution — markdown-backed realized income ledger.
 
 use chrono::{DateTime, NaiveDate, Utc};
+use crudcrate::EntityToModels;
 use facet::Facet;
+use sea_orm::entity::prelude::*;
+use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
+use uuid::Uuid;
 
 use crate::invoice::Invoice;
 use crate::task::WikiLink;
 
-#[derive(Debug, Clone, PartialEq, Default, Facet)]
-pub struct Revenue {
-    pub id: String,
-    pub number: u32,
-    pub date: NaiveDate,
-    pub amount_cents: u64,
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Default,
+    Facet,
+    DeriveEntityModel,
+    EntityToModels,
+    Serialize,
+    Deserialize,
+    ToSchema,
+)]
+#[sea_orm(table_name = "revenues")]
+#[crudcrate(
+    api_struct = "RevenueApi",
+    generate_vox_service,
+    name_singular = "revenue",
+    name_plural = "revenues"
+)]
+pub struct Model {
     #[facet(default)]
+    #[sea_orm(primary_key, auto_increment = false)]
+    #[crudcrate(
+        primary_key,
+        exclude(create),
+        on_create = uuid::Uuid::new_v4()
+    )]
+    pub uuid: Uuid,
+
+    #[crudcrate(filterable, sortable, fulltext)]
+    pub id: String,
+    #[crudcrate(sortable)]
+    pub number: u32,
+    #[crudcrate(filterable, sortable)]
+    pub date: NaiveDate,
+    #[crudcrate(sortable)]
+    pub amount_cents: i64,
+    #[facet(default)]
+    #[crudcrate(filterable, sortable)]
     pub currency_code: String,
     pub project: Option<WikiLink>,
     pub client: Option<WikiLink>,
     pub deliverable: Option<String>,
+    #[crudcrate(filterable, sortable)]
     pub invoice_id: Option<String>,
     pub invoice_line_id: Option<String>,
+    #[crudcrate(filterable, sortable)]
     pub category: Option<String>,
+    #[crudcrate(filterable, sortable)]
     pub payment_method: Option<String>,
     pub payment_reference: Option<String>,
+    #[crudcrate(fulltext)]
     pub description: String,
     pub notes: Option<String>,
     pub created_by: Option<String>,
@@ -32,10 +73,17 @@ pub struct Revenue {
     pub body: String,
 }
 
+pub type Revenue = Model;
+
+#[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+pub enum Relation {}
+
+impl ActiveModelBehavior for ActiveModel {}
+
 #[derive(Debug, Clone, Default, Facet)]
 pub struct RevenueCreateRequest {
     pub description: String,
-    pub amount_cents: u64,
+    pub amount_cents: i64,
     pub date: Option<NaiveDate>,
     pub currency_code: Option<String>,
     pub project: Option<String>,
@@ -65,7 +113,7 @@ pub struct RevenueFilter {
 pub struct RevenueBucket {
     pub name: String,
     pub revenue_count: u32,
-    pub recognized_cents: u64,
+    pub recognized_cents: i64,
 }
 
 #[derive(Debug, Clone, Facet)]
@@ -73,9 +121,9 @@ pub struct RevenueReport {
     pub generated_at: DateTime<Utc>,
     pub today: String,
     pub revenue_count: u32,
-    pub recognized_cents: u64,
-    pub invoice_paid_cents: u64,
-    pub unattributed_invoice_paid_cents: u64,
+    pub recognized_cents: i64,
+    pub invoice_paid_cents: i64,
+    pub unattributed_invoice_paid_cents: i64,
     #[facet(default)]
     pub by_project: Vec<RevenueBucket>,
     #[facet(default)]
@@ -213,7 +261,7 @@ pub fn build_revenue_report(
         today: today.to_string(),
         revenue_count: revenues.len() as u32,
         recognized_cents: revenues.iter().map(|r| r.amount_cents).sum(),
-        invoice_paid_cents: invoices.iter().map(|i| i.paid_cents()).sum(),
+        invoice_paid_cents: invoices.iter().map(|i| i.paid_cents() as i64).sum(),
         ..RevenueReport::default()
     };
     report.unattributed_invoice_paid_cents = report
@@ -262,13 +310,13 @@ pub fn build_revenue_report(
     report
 }
 
-fn add_bucket(map: &mut std::collections::BTreeMap<String, (u32, u64)>, name: &str, amount: u64) {
+fn add_bucket(map: &mut std::collections::BTreeMap<String, (u32, i64)>, name: &str, amount: i64) {
     let entry = map.entry(name.to_string()).or_default();
     entry.0 += 1;
     entry.1 += amount;
 }
 
-fn buckets(map: std::collections::BTreeMap<String, (u32, u64)>) -> Vec<RevenueBucket> {
+fn buckets(map: std::collections::BTreeMap<String, (u32, i64)>) -> Vec<RevenueBucket> {
     map.into_iter()
         .map(|(name, (revenue_count, recognized_cents))| RevenueBucket {
             name,

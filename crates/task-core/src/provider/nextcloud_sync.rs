@@ -2875,7 +2875,7 @@ mod tests {
             end: Some(end),
             status: CalendarEventStatus::Tentative,
             recurrence: Some("FREQ=WEEKLY;COUNT=2".to_string()),
-            attendees: vec!["agent".to_string(), "codywright".to_string()],
+            attendees: vec!["agent".to_string(), "codywright".to_string()].into(),
             date_created: Some(start),
             date_modified: Some(end),
             ..Default::default()

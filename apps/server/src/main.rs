@@ -1002,6 +1002,32 @@ async fn handle_vox_connection(socket: WebSocket, state: AppState, auth: VoxAuth
                     ));
                     Ok(())
                 }
+                "ClientRepo" => {
+                    connection.handle_with(task_core::client::ClientRepoDispatcher::new(
+                        task_core::client::ClientRepoStorage::new(db.clone()),
+                    ));
+                    Ok(())
+                }
+                "ExpenseRepo" => {
+                    connection.handle_with(task_core::expense::ExpenseRepoDispatcher::new(
+                        task_core::expense::ExpenseRepoStorage::new(db.clone()),
+                    ));
+                    Ok(())
+                }
+                "RevenueRepo" => {
+                    connection.handle_with(task_core::revenue::RevenueRepoDispatcher::new(
+                        task_core::revenue::RevenueRepoStorage::new(db.clone()),
+                    ));
+                    Ok(())
+                }
+                "CalendarEventRepo" => {
+                    connection.handle_with(
+                        task_core::calendar_event::CalendarEventRepoDispatcher::new(
+                            task_core::calendar_event::CalendarEventRepoStorage::new(db.clone()),
+                        ),
+                    );
+                    Ok(())
+                }
                 "Noop" => {
                     connection.handle_with(());
                     Ok(())

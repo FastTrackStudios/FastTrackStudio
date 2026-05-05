@@ -374,8 +374,8 @@ impl Nullable for WikiLink {
 
 impl TryGetable for WikiLink {
     fn try_get_by<I: ColIdx>(res: &QueryResult, idx: I) -> Result<Self, TryGetError> {
-        let value: String = res.try_get_by(idx)?;
-        Ok(Self(value))
+        let value: Option<String> = res.try_get_by(idx)?;
+        Ok(Self(value.unwrap_or_default()))
     }
 }
 
