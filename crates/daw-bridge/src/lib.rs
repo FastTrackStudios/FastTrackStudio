@@ -471,6 +471,13 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     // Store plugin context for PluginLoaderService before REAPER consumes it
     daw::reaper::set_plugin_context(context);
 
+    // Install SWELL function pointers for cross-platform window/menu APIs
+    // (used by the FTS Extensions menu hook, the input TranslateAccel
+    // handler, and the screenset window-geometry capture / apply path).
+    // `make_available_globally` is idempotent in practice — repeated loads
+    // would just race the OnceLock, so we ignore the result.
+    let _ = reaper_low::Swell::make_available_globally(reaper_low::Swell::load(context));
+
     // Initialize REAPER high-level API
     match HighReaper::load(context).setup() {
         Ok(_) => {

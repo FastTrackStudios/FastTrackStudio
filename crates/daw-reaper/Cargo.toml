@@ -33,6 +33,9 @@ daw-control-sync = { path = "../daw-control-sync" }
 eyre.workspace = true
 facet-json.workspace = true
 
+# Cross-platform monitor topology enumeration for screenset capture.
+display-info = "0.5"
+
 [dev-dependencies]
 daw-control = { path = "../daw-control" }
 daw-proto = { path = "../daw-proto" }
