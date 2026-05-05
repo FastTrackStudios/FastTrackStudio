@@ -998,6 +998,12 @@ async fn handle_vox_connection(socket: WebSocket, state: AppState, auth: VoxAuth
                     ));
                     Ok(())
                 }
+                "ProjectRepo" => {
+                    connection.handle_with(task_core::project::ProjectRepoDispatcher::new(
+                        service.project_repo(),
+                    ));
+                    Ok(())
+                }
                 "TaskService" => {
                     connection.handle_with(task_core::TaskServiceDispatcher::new(
                         service.as_ref().clone(),

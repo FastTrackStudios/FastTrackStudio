@@ -13,7 +13,7 @@ use crate::client::Client;
 use crate::expense::Expense;
 use crate::invoice::Invoice;
 use crate::location::Location;
-use crate::project::Project;
+use crate::project::{Project, ProjectApi, ProjectApiCreate, ProjectApiList, ProjectApiUpdate};
 use crate::revenue::Revenue;
 use crate::service::VaultError;
 use crate::task::{Task, TaskApi, TaskApiCreate, TaskApiList, TaskApiUpdate};
@@ -110,7 +110,92 @@ impl CrudStorage<TaskApi> for VaultStorage {
     }
 
     async fn total_count(&self, query: Self::Query) -> Result<u64, ApiError> {
-        Ok(self.get_all(query).await?.len() as u64)
+        Ok(CrudStorage::<TaskApi>::get_all(self, query).await?.len() as u64)
+    }
+}
+
+#[async_trait]
+impl CrudStorage<ProjectApi> for VaultStorage {
+    type Query = InMemoryQuery<uuid::Uuid>;
+
+    async fn get_one(&self, id: uuid::Uuid) -> Result<ProjectApi, ApiError> {
+        self.vault
+            .read()
+            .await
+            .load_projects()
+            .into_iter()
+            .find(|project| project.id == id)
+            .map(ProjectApi::from)
+            .ok_or_else(|| ApiError::not_found("project", Some(id.to_string())))
+    }
+
+    async fn get_all(&self, query: Self::Query) -> Result<Vec<ProjectApiList>, ApiError> {
+        let id_filter = query
+            .ids
+            .map(|ids| ids.into_iter().collect::<std::collections::HashSet<_>>());
+        let offset = usize::try_from(query.offset).unwrap_or(usize::MAX);
+        let limit = usize::try_from(query.limit).unwrap_or(usize::MAX);
+
+        let projects = self.vault.read().await.load_projects();
+        let iter = projects
+            .into_iter()
+            .filter(|project| {
+                id_filter
+                    .as_ref()
+                    .is_none_or(|ids| ids.contains(&project.id))
+            })
+            .skip(offset)
+            .map(ProjectApiList::from);
+
+        if query.limit == 0 {
+            Ok(iter.collect())
+        } else {
+            Ok(iter.take(limit).collect())
+        }
+    }
+
+    async fn create(&self, data: ProjectApiCreate) -> Result<ProjectApi, ApiError> {
+        let mut project = project_from_create(data)?;
+        if project.id == uuid::Uuid::nil() {
+            project.id = uuid::Uuid::new_v4();
+        }
+        self.vault
+            .read()
+            .await
+            .save_project(&project)
+            .map_err(vault_error_to_api)?;
+        Ok(ProjectApi::from(project))
+    }
+
+    async fn update(&self, id: uuid::Uuid, data: ProjectApiUpdate) -> Result<ProjectApi, ApiError> {
+        let vault = self.vault.read().await;
+        let mut project = vault
+            .load_projects()
+            .into_iter()
+            .find(|project| project.id == id)
+            .ok_or_else(|| ApiError::not_found("project", Some(id.to_string())))?;
+        project = apply_project_update(project, data)?;
+        project.id = id;
+        vault.save_project(&project).map_err(vault_error_to_api)?;
+        Ok(ProjectApi::from(project))
+    }
+
+    async fn delete(&self, id: uuid::Uuid) -> Result<uuid::Uuid, ApiError> {
+        let vault = self.vault.read().await;
+        let project = vault
+            .load_projects()
+            .into_iter()
+            .find(|project| project.id == id)
+            .ok_or_else(|| ApiError::not_found("project", Some(id.to_string())))?;
+        let path = vault.project_path(&project.title);
+        if path.exists() {
+            std::fs::remove_file(&path).map_err(|e| ApiError::internal(e.to_string(), None))?;
+        }
+        Ok(id)
+    }
+
+    async fn total_count(&self, query: Self::Query) -> Result<u64, ApiError> {
+        Ok(CrudStorage::<ProjectApi>::get_all(self, query).await?.len() as u64)
     }
 }
 
@@ -301,6 +386,9 @@ impl Vault {
     pub fn parse_project_from_md(content: &str) -> Option<Project> {
         let (frontmatter, body) = Self::split_frontmatter(content)?;
         let mut project = facet_yaml::from_str::<Project>(frontmatter).ok()?;
+        if project.id == uuid::Uuid::nil() {
+            project.id = project_id_for_title(&project.title);
+        }
         project.body = Some(body.to_string());
         Some(project)
     }
@@ -694,6 +782,31 @@ fn apply_task_update(task: Task, data: TaskApiUpdate) -> Result<Task, ApiError> 
         .map_err(|e| ApiError::bad_request(format!("invalid task update payload: {e}")))
 }
 
+fn project_from_create(data: ProjectApiCreate) -> Result<Project, ApiError> {
+    let mut base = serde_json::to_value(Project::default()).map_err(|e| {
+        ApiError::internal("failed to serialize default project", Some(e.to_string()))
+    })?;
+    merge_json_object(
+        &mut base,
+        serde_json::to_value(data)
+            .map_err(|e| ApiError::bad_request(format!("invalid project create payload: {e}")))?,
+    )?;
+    serde_json::from_value(base)
+        .map_err(|e| ApiError::bad_request(format!("invalid project create payload: {e}")))
+}
+
+fn apply_project_update(project: Project, data: ProjectApiUpdate) -> Result<Project, ApiError> {
+    let mut base = serde_json::to_value(project)
+        .map_err(|e| ApiError::internal("failed to serialize project", Some(e.to_string())))?;
+    merge_json_object(
+        &mut base,
+        serde_json::to_value(data)
+            .map_err(|e| ApiError::bad_request(format!("invalid project update payload: {e}")))?,
+    )?;
+    serde_json::from_value(base)
+        .map_err(|e| ApiError::bad_request(format!("invalid project update payload: {e}")))
+}
+
 fn merge_json_object(
     base: &mut serde_json::Value,
     patch: serde_json::Value,
@@ -719,6 +832,13 @@ fn vault_error_to_api(error: VaultError) -> ApiError {
         VaultError::ParseError(message) => ApiError::bad_request(message),
         VaultError::IoError(message) => ApiError::internal(message, None),
     }
+}
+
+fn project_id_for_title(title: &str) -> uuid::Uuid {
+    uuid::Uuid::new_v5(
+        &uuid::Uuid::NAMESPACE_URL,
+        format!("task-core:project:{title}").as_bytes(),
+    )
 }
 
 fn safe_file_name(title: &str) -> String {

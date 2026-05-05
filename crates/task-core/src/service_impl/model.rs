@@ -395,6 +395,10 @@ impl VaultServiceImpl {
         crate::task::TaskRepoStorage::new(self.task_storage.clone())
     }
 
+    pub fn project_repo(&self) -> crate::project::ProjectRepoStorage<VaultStorage> {
+        crate::project::ProjectRepoStorage::new(self.task_storage.clone())
+    }
+
     pub async fn urgency_score(&self, task: Task) -> i32 {
         task.urgency_score()
     }
@@ -697,9 +701,12 @@ impl VaultServiceImpl {
     /// Create a project in the shared project vault's Projects/ directory.
     pub async fn create_project(
         &self,
-        project: Project,
+        mut project: Project,
         vault_name: Option<&str>,
     ) -> Result<Project, VaultError> {
+        if project.id == Uuid::nil() {
+            project.id = Uuid::new_v4();
+        }
         if let Some(name) = vault_name {
             let extras = self.extra_vaults.read().await;
             let src = extras
@@ -5505,6 +5512,7 @@ impl crate::service::SystemService for VaultServiceImpl {
             min_server_version: "0.1.0".into(),
             services: vec![
                 "TaskRepo".into(),
+                "ProjectRepo".into(),
                 "TaskService".into(),
                 "InboxService".into(),
                 "ProjectService".into(),
