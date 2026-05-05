@@ -19,14 +19,14 @@ dynamic-template = { path = "crates/dynamic-template" }
 monarchy = { git = "https://github.com/FastTrackStudios/monarchy.git", branch = "main" }
 
 # Facet reflection framework — matches monarchy's facet version
-facet = "0.44"
-facet-core = "0.44"
-facet-format = "0.44"
-facet-json = "0.44"
-facet-value = "0.44"
+facet = "0.46"
+facet-core = "0.46"
+facet-format = "0.47"
+facet-json = "0.46"
+facet-value = "0.46"
 
 # ROAM service framework (pinned — latest main needs peeps sub-crates not yet published)
-vox = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
+vox = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
 
 # Sibling repos
 daw = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
