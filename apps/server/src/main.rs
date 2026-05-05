@@ -16,6 +16,9 @@ use serde::Serialize;
 use serde_json::json;
 use task_core::VaultServiceImpl;
 use task_core::crdt::{CrdtSyncEngine, SyncOp};
+use task_core::service::{
+    HealthCheck, NextcloudCapability, SystemCapabilities, SystemHealth, VaultCapability,
+};
 use task_core::workflows::{
     DownloadBundle, DownloadPortal, PortalVisibility, parse_download_portal,
 };
@@ -45,7 +48,6 @@ struct AppState {
     info: ServerInfo,
     db: sea_orm::DatabaseConnection,
     crdt: Option<Arc<CrdtSyncEngine>>,
-    vault_service: Option<Arc<VaultServiceImpl>>,
     vault_root: Option<String>,
 }
 
@@ -177,7 +179,6 @@ async fn main() -> eyre::Result<()> {
 
     let state = AppState {
         crdt,
-        vault_service,
         vault_root: vault_path.clone(),
         db,
         info: info_payload,
@@ -974,8 +975,8 @@ async fn handle_vox_connection(socket: WebSocket, state: AppState, auth: VoxAuth
         "Vox WebSocket client connected"
     );
 
-    let service = state.vault_service.clone();
     let db = state.db.clone();
+    let info = state.info.clone();
 
     let request_auth = auth.clone();
     let factory = vox::acceptor_fn(
@@ -1160,80 +1161,9 @@ async fn handle_vox_connection(socket: WebSocket, state: AppState, auth: VoxAuth
                     ));
                     Ok(())
                 }
-                _ if service.is_none() => {
-                    warn!(
-                        service = request.service(),
-                        "Vox service requires TASK_VAULT compatibility service"
-                    );
-                    Err(vec![])
-                }
-                "InboxService" => {
-                    let service = service.as_ref().expect("service checked above");
-                    connection.handle_with(task_core::InboxServiceDispatcher::new(
-                        service.as_ref().clone(),
-                    ));
-                    Ok(())
-                }
-                "TimeService" => {
-                    let service = service.as_ref().expect("service checked above");
-                    connection.handle_with(task_core::TimeServiceDispatcher::new(
-                        service.as_ref().clone(),
-                    ));
-                    Ok(())
-                }
-                "PeopleService" => {
-                    let service = service.as_ref().expect("service checked above");
-                    connection.handle_with(task_core::PeopleServiceDispatcher::new(
-                        service.as_ref().clone(),
-                    ));
-                    Ok(())
-                }
-                "ConversationService" => {
-                    let service = service.as_ref().expect("service checked above");
-                    connection.handle_with(task_core::ConversationServiceDispatcher::new(
-                        service.as_ref().clone(),
-                    ));
-                    Ok(())
-                }
-                "OperatingService" => {
-                    let service = service.as_ref().expect("service checked above");
-                    connection.handle_with(task_core::OperatingServiceDispatcher::new(
-                        service.as_ref().clone(),
-                    ));
-                    Ok(())
-                }
-                "InvoiceService" => {
-                    let service = service.as_ref().expect("service checked above");
-                    connection.handle_with(task_core::InvoiceServiceDispatcher::new(
-                        service.as_ref().clone(),
-                    ));
-                    Ok(())
-                }
-                "ActivityService" => {
-                    let service = service.as_ref().expect("service checked above");
-                    connection.handle_with(task_core::ActivityServiceDispatcher::new(
-                        service.as_ref().clone(),
-                    ));
-                    Ok(())
-                }
-                "MailService" => {
-                    let service = service.as_ref().expect("service checked above");
-                    connection.handle_with(task_core::MailServiceDispatcher::new(
-                        service.as_ref().clone(),
-                    ));
-                    Ok(())
-                }
-                "FileService" => {
-                    let service = service.as_ref().expect("service checked above");
-                    connection.handle_with(task_core::FileServiceDispatcher::new(
-                        service.as_ref().clone(),
-                    ));
-                    Ok(())
-                }
                 "SystemService" => {
-                    let service = service.as_ref().expect("service checked above");
                     connection.handle_with(task_core::SystemServiceDispatcher::new(
-                        service.as_ref().clone(),
+                        ServerSystemService::new(info.clone()),
                     ));
                     Ok(())
                 }
@@ -1266,6 +1196,83 @@ async fn handle_vox_connection(socket: WebSocket, state: AppState, auth: VoxAuth
         organization_id = %auth.organization_id,
         "Vox WebSocket client disconnected"
     );
+}
+
+#[derive(Clone)]
+struct ServerSystemService {
+    info: ServerInfo,
+}
+
+impl ServerSystemService {
+    fn new(info: ServerInfo) -> Self {
+        Self { info }
+    }
+}
+
+impl task_core::service::SystemService for ServerSystemService {
+    async fn capabilities(&self) -> SystemCapabilities {
+        SystemCapabilities {
+            package: "task-server".into(),
+            version: env!("CARGO_PKG_VERSION").into(),
+            protocol_version: 1,
+            min_cli_version: "0.1.0".into(),
+            min_server_version: "0.1.0".into(),
+            services: vec![
+                "TaskRepo".into(),
+                "ProjectRepo".into(),
+                "ClientRepo".into(),
+                "ExpenseRepo".into(),
+                "RevenueRepo".into(),
+                "CalendarEventRepo".into(),
+                "TeamMemberRepo".into(),
+                "SavedViewRepo".into(),
+                "AssetRepo".into(),
+                "InvoiceRepo".into(),
+                "CycleRepo".into(),
+                "LocationRepo".into(),
+                "ModuleRepo".into(),
+                "EmailRefRepo".into(),
+                "PersonRepo".into(),
+                "IntegrationRepo".into(),
+                "ActivityRepo".into(),
+                "CommentRepo".into(),
+                "ReactionRepo".into(),
+                "NotificationRepo".into(),
+                "TaskRelationRepo".into(),
+                "TaskService".into(),
+                "ProjectService".into(),
+                "ExpenseService".into(),
+                "CalendarService".into(),
+                "SystemService".into(),
+            ],
+            features: vec![
+                "sqlite".into(),
+                "sea-orm".into(),
+                "generated-repos".into(),
+                "vox".into(),
+                "auth".into(),
+            ],
+            nextcloud: NextcloudCapability::default(),
+            vault: VaultCapability::default(),
+        }
+    }
+
+    async fn health(&self, deep: bool) -> SystemHealth {
+        SystemHealth {
+            ok: true,
+            degraded: false,
+            deep,
+            checks: vec![HealthCheck {
+                name: "sqlite".into(),
+                code: "SQLITE_OK".into(),
+                severity: "ok".into(),
+                ok: true,
+                configured: true,
+                detail: format!("database configured as {}", self.info.db),
+                hint: None,
+            }],
+        }
+    }
 }
 
 async fn authenticate_vox_request(

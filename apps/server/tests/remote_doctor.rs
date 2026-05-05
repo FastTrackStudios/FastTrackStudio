@@ -50,16 +50,16 @@ async fn authenticated_system_service_reports_capabilities_and_health() {
         capabilities
             .features
             .iter()
-            .any(|feature| feature == "webdav-files")
+            .any(|feature| feature == "generated-repos")
     );
-    assert!(capabilities.vault.exists);
+    assert!(!capabilities.vault.exists);
 
     let health = timeout(Duration::from_secs(10), system.health(false))
         .await
         .expect("SystemService health should not time out")
         .expect("SystemService health should return");
     assert!(!health.deep);
-    assert!(health.checks.iter().any(|check| check.code == "VAULT_OK"));
+    assert!(health.checks.iter().any(|check| check.code == "SQLITE_OK"));
 
     server.stop().await;
 }
