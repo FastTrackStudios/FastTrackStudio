@@ -6167,6 +6167,8 @@ dependencies = [
  "clap",
  "eyre",
  "facet-json",
+ "serde",
+ "serde_json",
  "task-core",
  "tokio",
  "uuid",

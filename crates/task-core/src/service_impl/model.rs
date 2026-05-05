@@ -4911,26 +4911,14 @@ fn priority_label(priority: &Priority) -> &'static str {
 // ── Vox service trait implementations ────────────────────────────────────────
 
 impl crate::service::TaskService for VaultServiceImpl {
-    async fn list_tasks(&self) -> Vec<Task> {
-        self.list_tasks().await
-    }
     async fn execute_query(&self, query: Query) -> Vec<Task> {
         self.execute_query(query).await
     }
     async fn urgency_score(&self, task: Task) -> i32 {
         self.urgency_score(task).await
     }
-    async fn create_task(&self, task: Task) -> Result<Task, VaultError> {
-        self.create_task(task).await
-    }
-    async fn update_task(&self, task: Task) -> Result<Task, VaultError> {
-        self.update_task(task).await
-    }
     async fn complete_task(&self, title: String) -> Result<Task, VaultError> {
         self.complete_task(title).await
-    }
-    async fn delete_task(&self, title: String) -> Result<(), VaultError> {
-        self.delete_task(title).await
     }
     async fn search_tasks(&self, query: String) -> Vec<Task> {
         self.search_tasks(query).await
@@ -4977,18 +4965,6 @@ impl crate::service::OperatingService for VaultServiceImpl {
 }
 
 impl crate::service::ProjectService for VaultServiceImpl {
-    async fn list_projects(&self) -> Vec<Project> {
-        self.list_projects().await
-    }
-    async fn update_project(
-        &self,
-        title: String,
-        patch: ProjectPatch,
-        actor: Option<String>,
-    ) -> Result<Project, VaultError> {
-        self.update_project_as(&title, patch, actor.as_deref())
-            .await
-    }
     async fn project_stats(&self, project_title: String) -> ProjectStats {
         self.project_stats(project_title).await
     }
@@ -5082,23 +5058,6 @@ impl crate::service::TimeService for VaultServiceImpl {
     }
 }
 
-impl crate::service::ClientService for VaultServiceImpl {
-    async fn list_clients(&self) -> Vec<crate::client::Client> {
-        VaultServiceImpl::list_clients(self).await
-    }
-
-    async fn save_client(
-        &self,
-        client: crate::client::Client,
-    ) -> Result<crate::client::Client, VaultError> {
-        VaultServiceImpl::save_client(self, client).await
-    }
-
-    async fn find_client(&self, name: String) -> Option<crate::client::Client> {
-        VaultServiceImpl::find_client(self, &name).await
-    }
-}
-
 impl crate::service::PeopleService for VaultServiceImpl {
     async fn list_people(&self, addressbook: Option<String>) -> Result<Vec<Person>, VaultError> {
         self.list_people_from_carddav(addressbook).await
@@ -5147,31 +5106,6 @@ impl crate::service::PeopleService for VaultServiceImpl {
 }
 
 impl crate::service::ExpenseService for VaultServiceImpl {
-    async fn create_expense(&self, request: ExpenseCreateRequest) -> Result<Expense, VaultError> {
-        VaultServiceImpl::create_expense(self, request).await
-    }
-
-    async fn list_expenses(&self, filter: ExpenseFilter) -> Vec<Expense> {
-        VaultServiceImpl::list_expenses(self, filter).await
-    }
-
-    async fn get_expense(&self, expense_id: String) -> Option<Expense> {
-        VaultServiceImpl::get_expense(self, &expense_id).await
-    }
-
-    async fn update_expense(
-        &self,
-        expense_id: String,
-        patch: ExpensePatch,
-        actor: Option<String>,
-    ) -> Result<Expense, VaultError> {
-        VaultServiceImpl::update_expense(self, &expense_id, patch, actor.as_deref()).await
-    }
-
-    async fn delete_expense(&self, expense_id: String) -> Result<(), VaultError> {
-        VaultServiceImpl::delete_expense(self, &expense_id).await
-    }
-
     async fn expense_report(&self, filter: ExpenseFilter) -> ExpenseReport {
         VaultServiceImpl::expense_report(self, filter).await
     }
@@ -5195,14 +5129,6 @@ impl crate::service::InvoiceService for VaultServiceImpl {
             request.actor.as_deref(),
         )
         .await
-    }
-
-    async fn list_invoices(&self) -> Vec<crate::invoice::Invoice> {
-        VaultServiceImpl::list_invoices(self).await
-    }
-
-    async fn get_invoice(&self, invoice_id: String) -> Option<crate::invoice::Invoice> {
-        VaultServiceImpl::get_invoice(self, &invoice_id).await
     }
 
     async fn finance_report(&self) -> BusinessFinanceReport {
@@ -5513,15 +5439,34 @@ impl crate::service::SystemService for VaultServiceImpl {
             services: vec![
                 "TaskRepo".into(),
                 "ProjectRepo".into(),
+                "ClientRepo".into(),
+                "ExpenseRepo".into(),
+                "InvoiceRepo".into(),
+                "CalendarEventRepo".into(),
+                "RevenueRepo".into(),
+                "TeamMemberRepo".into(),
+                "SavedViewRepo".into(),
+                "AssetRepo".into(),
+                "CycleRepo".into(),
+                "LocationRepo".into(),
+                "ModuleRepo".into(),
+                "EmailRefRepo".into(),
+                "PersonRepo".into(),
+                "IntegrationRepo".into(),
+                "ActivityRepo".into(),
+                "CommentRepo".into(),
+                "ReactionRepo".into(),
+                "NotificationRepo".into(),
+                "TaskRelationRepo".into(),
                 "TaskService".into(),
                 "InboxService".into(),
                 "ProjectService".into(),
                 "TimeService".into(),
-                "ClientService".into(),
                 "PeopleService".into(),
                 "ConversationService".into(),
                 "OperatingService".into(),
                 "InvoiceService".into(),
+                "ExpenseService".into(),
                 "ActivityService".into(),
                 "MailService".into(),
                 "CalendarService".into(),
@@ -5802,25 +5747,6 @@ impl crate::service::CalendarService for VaultServiceImpl {
             .map_err(|e| VaultError::ParseError(e.to_string()))?
             .to_utc();
         Ok(self.calendar_events_between(from, to).await)
-    }
-
-    async fn create_event(
-        &self,
-        event: crate::CalendarEvent,
-    ) -> Result<crate::CalendarEvent, VaultError> {
-        self.create_calendar_event(event).await
-    }
-
-    async fn update_event(
-        &self,
-        event_ref: String,
-        patch: CalendarEventPatch,
-    ) -> Result<crate::CalendarEvent, VaultError> {
-        self.update_calendar_event(&event_ref, patch).await
-    }
-
-    async fn delete_event(&self, event_ref: String) -> Result<(), VaultError> {
-        self.delete_calendar_event(&event_ref).await
     }
 
     async fn trigger_sync(&self) -> Result<SyncStats, VaultError> {

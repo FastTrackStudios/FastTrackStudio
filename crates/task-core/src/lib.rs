@@ -1,20 +1,25 @@
+pub mod activity;
 pub mod agent;
 pub mod asset;
 pub mod calendar_event;
 pub mod capture;
 pub mod client;
+pub mod comment;
 pub mod cycle;
 pub mod email;
 pub mod expense;
 pub mod invoice;
 pub mod location;
 pub mod module;
+pub mod notification;
 pub mod people;
 pub mod project;
 pub mod query;
+pub mod reaction;
 pub mod revenue;
 pub mod rrule;
 pub mod task;
+pub mod task_relation;
 pub mod team;
 pub mod views;
 pub mod workflows;
@@ -42,6 +47,7 @@ pub mod caldav;
 #[cfg(feature = "realtime")]
 pub mod crdt;
 
+pub use activity::Activity;
 pub use agent::{
     AgentPlan, AgentPlanEdge, AgentPlanNode, AgentPlanNodeKind, AgentPlanNodeStatus,
     build_agent_plan,
@@ -55,6 +61,7 @@ pub use asset::{
 pub use calendar_event::{CalendarEvent, CalendarEventStatus};
 pub use capture::{CaptureInput, parse_capture};
 pub use client::{Client, resolve_rate};
+pub use comment::Comment;
 pub use cycle::{Cycle, CycleStatus};
 pub use email::EmailRef;
 pub use expense::{
@@ -64,6 +71,7 @@ pub use expense::{
 pub use invoice::{Invoice, InvoiceLine, InvoiceStatus, Payment, format_invoice_id};
 pub use location::{Location, Space, VenueDefault, render_location_body};
 pub use module::{Module, ModuleStatus};
+pub use notification::Notification;
 pub use people::{
     CommunicationRef, ContactMethod, OrganizationContext, OrganizationRecord, Person,
     PersonContext, ProviderConflict, ProviderConflictField, ProviderRef, Relationship,
@@ -73,6 +81,7 @@ pub use project::{
     project_dashboard,
 };
 pub use query::{Filter, Group, GroupedTasks, Query, Sort, TaskGroup};
+pub use reaction::Reaction as EntityReaction;
 pub use revenue::{
     Revenue, RevenueBucket, RevenueCreateRequest, RevenueFilter, RevenueReport, format_revenue_id,
 };
@@ -80,6 +89,7 @@ pub use task::{
     DependencyRelType, Priority, Reaction, RecurrenceAnchor, RelationType, Reminder,
     ReminderAnchor, Status, Task, TaskDependency, TaskRelation, TimeEntry, WikiLink,
 };
+pub use task_relation::TaskRelation as TaskRelationEntity;
 pub use views::{SavedView, ViewDisplay, ViewFilters};
 
 #[cfg(feature = "server")]
@@ -106,9 +116,9 @@ pub use service::{
     CalDavSyncCollectionRequest, CalDavSyncCollectionResponse, CalendarEventPatch, CalendarService,
     CalendarServiceDispatcher, CardDavAddressBookInfo, CardDavContact, CardDavDeleteObjectRequest,
     CardDavDiscovery, CardDavMultigetRequest, CardDavObject, CardDavPutObjectRequest,
-    CardDavSyncCollectionRequest, CardDavSyncCollectionResponse, ClientService,
-    ClientServiceDispatcher, ConversationService, ConversationServiceDispatcher, EmailLinkRequest,
-    EmailLinkResponse, EmailListRequest, EmailUnlinkRequest, FileCopyMoveRequest, FileEntry,
+    CardDavSyncCollectionRequest, CardDavSyncCollectionResponse, ConversationService,
+    ConversationServiceDispatcher, EmailLinkRequest, EmailLinkResponse, EmailListRequest,
+    EmailUnlinkRequest, ExpenseService, ExpenseServiceDispatcher, FileCopyMoveRequest, FileEntry,
     FileReadResponse, FileService, FileServiceDispatcher, FileWriteRequest, HealthCheck,
     InboxCaptureRequest, InboxItem, InboxPromoteRequest, InboxService, InboxServiceDispatcher,
     InvoiceAgingBucket, InvoiceCreateRequest, InvoicePaymentRequest, InvoiceService,
@@ -123,7 +133,7 @@ pub use service::{
     TimeEntryContext, TimeEntryFilter, TimeEntryPatch, TimeLogRequest, TimeService,
     TimeServiceDispatcher, TimeStartRequest, TimedTaskEntry, VaultCapability, VaultError,
     activity_service_service_descriptor, calendar_service_service_descriptor,
-    client_service_service_descriptor, conversation_service_service_descriptor,
+    conversation_service_service_descriptor, expense_service_service_descriptor,
     file_service_service_descriptor, inbox_service_service_descriptor,
     invoice_service_service_descriptor, mail_service_service_descriptor,
     operating_service_service_descriptor, people_service_service_descriptor,
@@ -131,7 +141,10 @@ pub use service::{
     task_service_service_descriptor, time_service_service_descriptor,
 };
 #[cfg(feature = "server")]
-pub use service_impl::{VaultKind, VaultServiceImpl, VaultSource};
+pub use service_impl::{
+    CalendarBusinessService, ExpenseBusinessService, ProjectBusinessService, TaskBusinessService,
+    VaultKind, VaultServiceImpl, VaultSource,
+};
 #[cfg(feature = "server")]
 pub use vault::Vault;
 #[cfg(feature = "server")]

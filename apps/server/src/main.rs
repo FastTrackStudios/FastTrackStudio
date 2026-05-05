@@ -1088,8 +1088,76 @@ async fn handle_vox_connection(socket: WebSocket, state: AppState, auth: VoxAuth
                     ));
                     Ok(())
                 }
+                "ActivityRepo" => {
+                    connection.handle_with(task_core::activity::ActivityRepoDispatcher::new(
+                        task_core::activity::ActivityRepoStorage::new(db.clone()),
+                    ));
+                    Ok(())
+                }
+                "CommentRepo" => {
+                    connection.handle_with(task_core::comment::CommentRepoDispatcher::new(
+                        task_core::comment::CommentRepoStorage::new(db.clone()),
+                    ));
+                    Ok(())
+                }
+                "ReactionRepo" => {
+                    connection.handle_with(task_core::reaction::ReactionRepoDispatcher::new(
+                        task_core::reaction::ReactionRepoStorage::new(db.clone()),
+                    ));
+                    Ok(())
+                }
+                "NotificationRepo" => {
+                    connection.handle_with(
+                        task_core::notification::NotificationRepoDispatcher::new(
+                            task_core::notification::NotificationRepoStorage::new(db.clone()),
+                        ),
+                    );
+                    Ok(())
+                }
+                "TaskRelationRepo" => {
+                    connection.handle_with(
+                        task_core::task_relation::TaskRelationRepoDispatcher::new(
+                            task_core::task_relation::TaskRelationRepoStorage::new(db.clone()),
+                        ),
+                    );
+                    Ok(())
+                }
                 "Noop" => {
                     connection.handle_with(());
+                    Ok(())
+                }
+                "TaskService" => {
+                    connection.handle_with(task_core::TaskServiceDispatcher::new(
+                        task_core::TaskBusinessService::new(task_core::task::TaskRepoStorage::new(
+                            db.clone(),
+                        )),
+                    ));
+                    Ok(())
+                }
+                "ProjectService" => {
+                    connection.handle_with(task_core::ProjectServiceDispatcher::new(
+                        task_core::ProjectBusinessService::new(
+                            task_core::project::ProjectRepoStorage::new(db.clone()),
+                            task_core::task::TaskRepoStorage::new(db.clone()),
+                        ),
+                    ));
+                    Ok(())
+                }
+                "ExpenseService" => {
+                    connection.handle_with(task_core::ExpenseServiceDispatcher::new(
+                        task_core::ExpenseBusinessService::new(
+                            task_core::expense::ExpenseRepoStorage::new(db.clone()),
+                        ),
+                    ));
+                    Ok(())
+                }
+                "CalendarService" => {
+                    connection.handle_with(task_core::CalendarServiceDispatcher::new(
+                        task_core::CalendarBusinessService::new(
+                            task_core::task::TaskRepoStorage::new(db.clone()),
+                            task_core::calendar_event::CalendarEventRepoStorage::new(db.clone()),
+                        ),
+                    ));
                     Ok(())
                 }
                 _ if service.is_none() => {
@@ -1099,13 +1167,6 @@ async fn handle_vox_connection(socket: WebSocket, state: AppState, auth: VoxAuth
                     );
                     Err(vec![])
                 }
-                "TaskService" => {
-                    let service = service.as_ref().expect("service checked above");
-                    connection.handle_with(task_core::TaskServiceDispatcher::new(
-                        service.as_ref().clone(),
-                    ));
-                    Ok(())
-                }
                 "InboxService" => {
                     let service = service.as_ref().expect("service checked above");
                     connection.handle_with(task_core::InboxServiceDispatcher::new(
@@ -1113,23 +1174,9 @@ async fn handle_vox_connection(socket: WebSocket, state: AppState, auth: VoxAuth
                     ));
                     Ok(())
                 }
-                "ProjectService" => {
-                    let service = service.as_ref().expect("service checked above");
-                    connection.handle_with(task_core::ProjectServiceDispatcher::new(
-                        service.as_ref().clone(),
-                    ));
-                    Ok(())
-                }
                 "TimeService" => {
                     let service = service.as_ref().expect("service checked above");
                     connection.handle_with(task_core::TimeServiceDispatcher::new(
-                        service.as_ref().clone(),
-                    ));
-                    Ok(())
-                }
-                "ClientService" => {
-                    let service = service.as_ref().expect("service checked above");
-                    connection.handle_with(task_core::ClientServiceDispatcher::new(
                         service.as_ref().clone(),
                     ));
                     Ok(())
@@ -1172,13 +1219,6 @@ async fn handle_vox_connection(socket: WebSocket, state: AppState, auth: VoxAuth
                 "MailService" => {
                     let service = service.as_ref().expect("service checked above");
                     connection.handle_with(task_core::MailServiceDispatcher::new(
-                        service.as_ref().clone(),
-                    ));
-                    Ok(())
-                }
-                "CalendarService" => {
-                    let service = service.as_ref().expect("service checked above");
-                    connection.handle_with(task_core::CalendarServiceDispatcher::new(
                         service.as_ref().clone(),
                     ));
                     Ok(())

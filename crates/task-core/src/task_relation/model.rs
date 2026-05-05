@@ -37,17 +37,19 @@ pub struct Model {
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
     #[sea_orm(
-        belongs_to = "super::task::Entity",
+        belongs_to = "crate::task::Entity",
         from = "Column::IssueId",
-        to = "super::task::Column::Id"
+        to = "crate::task::Column::Id"
     )]
     SourceTask,
     #[sea_orm(
-        belongs_to = "super::task::Entity",
+        belongs_to = "crate::task::Entity",
         from = "Column::RelatedIssueId",
-        to = "super::task::Column::Id"
+        to = "crate::task::Column::Id"
     )]
     RelatedTask,
 }
 
 impl ActiveModelBehavior for ActiveModel {}
+
+pub type TaskRelation = Model;

@@ -58,11 +58,13 @@ pub struct Model {
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
     #[sea_orm(
-        belongs_to = "super::task::Entity",
+        belongs_to = "crate::task::Entity",
         from = "Column::EntityId",
-        to = "super::task::Column::Id"
+        to = "crate::task::Column::Id"
     )]
     Task,
 }
 
 impl ActiveModelBehavior for ActiveModel {}
+
+pub type Comment = Model;

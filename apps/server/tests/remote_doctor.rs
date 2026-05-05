@@ -5,11 +5,11 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::{fmt::Debug, future::Future};
 
 use chrono::{TimeZone, Utc};
+use serde::{Serialize, de::DeserializeOwned};
 use task_core::{
-    CalendarEvent, CalendarEventPatch, CalendarEventStatus, Client, Filter, InboxCaptureRequest,
-    InboxPromoteRequest, InvoiceCreateRequest, InvoicePaymentRequest, Priority, Project,
-    ProjectPatch, Query, Sort, Status, Task, TimeEntryFilter, TimeLogRequest, TimeStartRequest,
-    WikiLink,
+    CalendarEvent, CalendarEventStatus, Client, Filter, InboxCaptureRequest, InboxPromoteRequest,
+    InvoiceCreateRequest, InvoicePaymentRequest, Priority, Project, Query, Sort, Status, Task,
+    TimeEntryFilter, TimeLogRequest, TimeStartRequest, WikiLink,
 };
 use tokio::net::{TcpListener, TcpStream};
 use tokio::process::{Child, Command};
@@ -92,10 +92,15 @@ async fn authenticated_core_services_smoke_over_vox() {
     let vox_url = format!("ws://{bind_addr}/vox?token={TEST_TOKEN}&organization_id=org_fts");
 
     let task_service: task_core::service::TaskServiceClient = connect_service(&vox_url).await;
+    let task_repo: task_core::task::TaskRepoClient = connect_service(&vox_url).await;
+    let project_repo: task_core::project::ProjectRepoClient = connect_service(&vox_url).await;
+    let client_repo: task_core::client::ClientRepoClient = connect_service(&vox_url).await;
+    let invoice_repo: task_core::invoice::InvoiceRepoClient = connect_service(&vox_url).await;
+    let calendar_event_repo: task_core::calendar_event::CalendarEventRepoClient =
+        connect_service(&vox_url).await;
     let inbox_service: task_core::service::InboxServiceClient = connect_service(&vox_url).await;
     let project_service: task_core::service::ProjectServiceClient = connect_service(&vox_url).await;
     let time_service: task_core::service::TimeServiceClient = connect_service(&vox_url).await;
-    let client_service: task_core::service::ClientServiceClient = connect_service(&vox_url).await;
     let people_service: task_core::service::PeopleServiceClient = connect_service(&vox_url).await;
     let conversation_service: task_core::service::ConversationServiceClient =
         connect_service(&vox_url).await;
@@ -110,26 +115,27 @@ async fn authenticated_core_services_smoke_over_vox() {
     let mail_service: task_core::service::MailServiceClient = connect_service(&vox_url).await;
 
     let client = service_call(
-        "save_client",
-        client_service.save_client(Client {
+        "create_client",
+        client_repo.create_client(model_to_api(&Client {
             name: "E2E Client".to_string(),
             default_hourly_rate: Some(12_000),
             currency_code: "USD".to_string(),
             email: Some("billing@example.com".to_string()),
             ..Default::default()
-        }),
+        })),
     )
     .await;
+    let client: Client = api_to_model(client);
     assert_eq!(client.name, "E2E Client");
-    assert_eq!(
-        service_call(
-            "find_client",
-            client_service.find_client("E2E Client".to_string())
-        )
-        .await
-        .map(|client| client.name),
-        Some("E2E Client".to_string())
-    );
+    let clients: Vec<Client> = service_call(
+        "list_clients",
+        client_repo.list_clients(None, None, None, Some(100)),
+    )
+    .await
+    .into_iter()
+    .map(api_to_model)
+    .collect();
+    assert!(clients.iter().any(|client| client.name == "E2E Client"));
     assert!(service_error("list_people", people_service.list_people(None)).await);
     assert!(
         service_error(
@@ -190,7 +196,7 @@ async fn authenticated_core_services_smoke_over_vox() {
 
     let created = service_call(
         "create_task",
-        task_service.create_task(Task {
+        task_repo.create_task(model_to_api(&Task {
             title: "E2E remote task".to_string(),
             status: Status::Open,
             priority: Priority::High,
@@ -200,9 +206,10 @@ async fn authenticated_core_services_smoke_over_vox() {
             scheduled: Some(chrono::NaiveDate::from_ymd_opt(2026, 5, 1).unwrap()),
             body: "Created through authenticated Vox e2e.".to_string(),
             ..Default::default()
-        }),
+        })),
     )
     .await;
+    let created: Task = api_to_model(created);
     assert_eq!(created.title, "E2E remote task");
     assert_ne!(created.id, uuid::Uuid::nil());
     assert!(created.date_created.is_some());
@@ -224,7 +231,14 @@ async fn authenticated_core_services_smoke_over_vox() {
             .any(|task| task.title == promoted.title)
     );
 
-    let tasks = service_call("list_tasks", task_service.list_tasks()).await;
+    let tasks: Vec<Task> = service_call(
+        "list_tasks",
+        task_repo.list_tasks(None, None, None, Some(100)),
+    )
+    .await
+    .into_iter()
+    .map(api_to_model)
+    .collect();
     let seeded = tasks
         .iter()
         .find(|task| task.title == "E2E seeded task")
@@ -260,18 +274,16 @@ async fn authenticated_core_services_smoke_over_vox() {
 
     let project = service_call(
         "update_project",
-        project_service.update_project(
-            "E2E Project".to_string(),
-            ProjectPatch {
-                client: Some("E2E Client".to_string()),
-                default_rate: Some(15_000),
-                add_tag: vec!["e2e".to_string()],
-                ..Default::default()
-            },
-            Some("agent".to_string()),
-        ),
+        project_repo.create_project(model_to_api(&Project {
+            title: "E2E Project".to_string(),
+            client: Some(WikiLink("E2E Client".to_string())),
+            default_rate: Some(15_000),
+            tags: vec!["e2e".to_string()].into(),
+            ..Default::default()
+        })),
     )
     .await;
+    let project: Project = api_to_model(project);
     assert_eq!(project.title, "E2E Project");
     assert_eq!(
         project.client.as_ref().map(|client| client.0.as_str()),
@@ -293,7 +305,14 @@ async fn authenticated_core_services_smoke_over_vox() {
         .total()
             >= 1
     );
-    let projects = service_call("list_projects", project_service.list_projects()).await;
+    let projects: Vec<Project> = service_call(
+        "list_projects",
+        project_repo.list_projects(None, None, None, Some(100)),
+    )
+    .await
+    .into_iter()
+    .map(api_to_model)
+    .collect();
     assert!(
         projects
             .iter()
@@ -386,7 +405,14 @@ async fn authenticated_core_services_smoke_over_vox() {
     .await;
     assert_eq!(invoice.client.0, "E2E Client");
     assert!(invoice.total_cents() >= 20_000);
-    let invoices = service_call("list_invoices", invoice_service.list_invoices()).await;
+    let invoices: Vec<task_core::Invoice> = service_call(
+        "list_invoices",
+        invoice_repo.list_invoices(None, None, None, Some(100)),
+    )
+    .await
+    .into_iter()
+    .map(api_to_model)
+    .collect();
     assert!(invoices.iter().any(|candidate| candidate.id == invoice.id));
     let paid = service_call(
         "record_invoice_payment",
@@ -406,7 +432,7 @@ async fn authenticated_core_services_smoke_over_vox() {
     let event_end = Utc.with_ymd_and_hms(2026, 4, 30, 16, 0, 0).unwrap();
     let event = service_call(
         "create_event",
-        calendar_service.create_event(CalendarEvent {
+        calendar_event_repo.create_calendar_event(model_to_api(&CalendarEvent {
             title: "E2E calendar event".to_string(),
             description: Some("Remote calendar event".to_string()),
             location: Some("Remote".to_string()),
@@ -414,22 +440,24 @@ async fn authenticated_core_services_smoke_over_vox() {
             end: Some(event_end),
             status: CalendarEventStatus::Confirmed,
             ..Default::default()
-        }),
+        })),
     )
     .await;
+    let event: CalendarEvent = api_to_model(event);
     assert!(event.id.is_some());
     let updated_event = service_call(
         "update_event",
-        calendar_service.update_event(
-            event.id.clone().expect("created event should have id"),
-            CalendarEventPatch {
-                title: Some("E2E calendar event updated".to_string()),
-                status: Some(CalendarEventStatus::Tentative),
-                ..Default::default()
-            },
+        calendar_event_repo.update_calendar_event(
+            event.uuid.to_string(),
+            model_to_api(&CalendarEvent {
+                title: "E2E calendar event updated".to_string(),
+                status: CalendarEventStatus::Tentative,
+                ..event.clone()
+            }),
         ),
     )
     .await;
+    let updated_event: CalendarEvent = api_to_model(updated_event);
     assert_eq!(updated_event.title, "E2E calendar event updated");
     let events = service_call(
         "events_between",
@@ -481,7 +509,7 @@ async fn authenticated_core_services_smoke_over_vox() {
     assert_eq!(completed.status, Status::Done);
     service_call(
         "delete_event",
-        calendar_service.delete_event(updated_event.id.expect("updated event should have id")),
+        calendar_event_repo.delete_calendar_event(updated_event.uuid.to_string()),
     )
     .await;
 
@@ -496,6 +524,24 @@ where
         .await
         .expect("Vox connection should not time out")
         .expect("Vox connection should establish")
+}
+
+fn model_to_api<T, U>(value: &T) -> U
+where
+    T: Serialize,
+    U: DeserializeOwned,
+{
+    serde_json::from_value(serde_json::to_value(value).expect("serialize model"))
+        .expect("deserialize api model")
+}
+
+fn api_to_model<T, U>(value: T) -> U
+where
+    T: Serialize,
+    U: DeserializeOwned,
+{
+    serde_json::from_value(serde_json::to_value(value).expect("serialize api model"))
+        .expect("deserialize model")
 }
 
 async fn service_call<T, E, F>(name: &str, future: F) -> T

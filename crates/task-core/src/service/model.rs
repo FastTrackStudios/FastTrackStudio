@@ -6,9 +6,8 @@
 use chrono::{DateTime, Utc};
 
 use crate::calendar_event::{CalendarEvent, CalendarEventStatus};
-use crate::client::Client;
 use crate::email::EmailRef;
-use crate::expense::{Expense, ExpenseCreateRequest, ExpenseFilter, ExpensePatch, ExpenseReport};
+use crate::expense::{ExpenseFilter, ExpenseReport};
 use crate::index::{ChangeRow, ConflictRow};
 use crate::invoice::Invoice;
 use crate::people::{
@@ -25,26 +24,14 @@ use crate::task::{Task, TimeEntry};
 
 #[vox::service]
 pub trait TaskService {
-    /// Return all tasks in the vault.
-    async fn list_tasks(&self) -> Vec<Task>;
-
     /// Execute a query and return matching tasks sorted by the query's sort.
     async fn execute_query(&self, query: Query) -> Vec<Task>;
 
     /// Compute the urgency score for a single task.
     async fn urgency_score(&self, task: Task) -> i32;
 
-    /// Create a new task. Returns the created task with generated id/dates filled in.
-    async fn create_task(&self, task: Task) -> Result<Task, VaultError>;
-
-    /// Update an existing task. Returns the updated task.
-    async fn update_task(&self, task: Task) -> Result<Task, VaultError>;
-
     /// Mark a task complete. Handles recurrence logic and sets completedDate.
     async fn complete_task(&self, title: String) -> Result<Task, VaultError>;
-
-    /// Delete a task by title.
-    async fn delete_task(&self, title: String) -> Result<(), VaultError>;
 
     /// Search tasks by text query (uses FTS5 index).
     async fn search_tasks(&self, query: String) -> Vec<Task>;
@@ -79,17 +66,6 @@ pub trait InboxService {
 
 #[vox::service]
 pub trait ProjectService {
-    /// Return all projects in the vault.
-    async fn list_projects(&self) -> Vec<Project>;
-
-    /// Update project metadata.
-    async fn update_project(
-        &self,
-        title: String,
-        patch: ProjectPatch,
-        actor: Option<String>,
-    ) -> Result<Project, VaultError>;
-
     /// Return task count stats for a project.
     async fn project_stats(&self, project_title: String) -> ProjectStats;
 
@@ -145,13 +121,6 @@ pub trait TimeService {
 }
 
 #[vox::service]
-pub trait ClientService {
-    async fn list_clients(&self) -> Vec<Client>;
-    async fn save_client(&self, client: Client) -> Result<Client, VaultError>;
-    async fn find_client(&self, name: String) -> Option<Client>;
-}
-
-#[vox::service]
 pub trait PeopleService {
     /// Sync CardDAV contacts and return normalized people.
     async fn list_people(&self, addressbook: Option<String>) -> Result<Vec<Person>, VaultError>;
@@ -204,8 +173,6 @@ pub trait InvoiceService {
         request: InvoiceCreateRequest,
     ) -> Result<Invoice, VaultError>;
 
-    async fn list_invoices(&self) -> Vec<Invoice>;
-    async fn get_invoice(&self, invoice_id: String) -> Option<Invoice>;
     async fn finance_report(&self) -> BusinessFinanceReport;
     async fn send_invoice(
         &self,
@@ -226,26 +193,6 @@ pub trait InvoiceService {
 
 #[vox::service]
 pub trait ExpenseService {
-    /// Create a new expense entry.
-    async fn create_expense(&self, request: ExpenseCreateRequest) -> Result<Expense, VaultError>;
-
-    /// Return all expenses matching the filter, newest first.
-    async fn list_expenses(&self, filter: ExpenseFilter) -> Vec<Expense>;
-
-    /// Return a single expense by id.
-    async fn get_expense(&self, expense_id: String) -> Option<Expense>;
-
-    /// Update an expense.
-    async fn update_expense(
-        &self,
-        expense_id: String,
-        patch: ExpensePatch,
-        actor: Option<String>,
-    ) -> Result<Expense, VaultError>;
-
-    /// Delete an expense by id.
-    async fn delete_expense(&self, expense_id: String) -> Result<(), VaultError>;
-
     /// Return a roll-up expense report.
     async fn expense_report(&self, filter: ExpenseFilter) -> ExpenseReport;
 }
@@ -330,19 +277,6 @@ pub trait CalendarService {
         from: String,
         to: String,
     ) -> Result<Vec<CalendarEvent>, VaultError>;
-
-    /// Create a first-class calendar event.
-    async fn create_event(&self, event: CalendarEvent) -> Result<CalendarEvent, VaultError>;
-
-    /// Update mutable calendar event fields by id or title.
-    async fn update_event(
-        &self,
-        event_ref: String,
-        patch: CalendarEventPatch,
-    ) -> Result<CalendarEvent, VaultError>;
-
-    /// Delete a calendar event by id or title.
-    async fn delete_event(&self, event_ref: String) -> Result<(), VaultError>;
 
     /// Trigger a Nextcloud sync cycle. Returns sync stats.
     async fn trigger_sync(&self) -> Result<SyncStats, VaultError>;

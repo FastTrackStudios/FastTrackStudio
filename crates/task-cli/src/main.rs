@@ -1,5 +1,6 @@
-use chrono::{DateTime, NaiveDate, TimeZone, Utc};
+use chrono::{DateTime, Datelike, NaiveDate, TimeZone, Utc};
 use clap::{Parser, Subcommand};
+use serde::{Serialize, de::DeserializeOwned};
 use task_core::asset::{
     AssetCreateRequest, AssetFilter, AssetMaintenanceRequest, AssetPatch, AssetRepairRequest,
     AssetReserveRequest, render_asset_body,
@@ -2906,11 +2907,18 @@ async fn main() -> eyre::Result<()> {
         } => {
             let now = chrono::Utc::now();
             let email = task_core::EmailRef {
+                uuid: Uuid::new_v4(),
                 message_id: message_id.clone(),
                 subject: subject.unwrap_or_default(),
                 from: from.unwrap_or_default(),
                 to: to_recipients
-                    .map(|s| s.split(',').map(|t| t.trim().to_string()).collect())
+                    .map(|s| {
+                        s.split(',')
+                            .map(|t| t.trim().to_string())
+                            .filter(|t| !t.is_empty())
+                            .collect::<Vec<_>>()
+                            .into()
+                    })
                     .unwrap_or_default(),
                 date: date
                     .as_deref()
@@ -2927,7 +2935,13 @@ async fn main() -> eyre::Result<()> {
                 linked_by: actor.clone(),
                 linked_at: Some(now),
                 user_tags: tags
-                    .map(|s| s.split(',').map(|t| t.trim().to_string()).collect())
+                    .map(|s| {
+                        s.split(',')
+                            .map(|t| t.trim().to_string())
+                            .filter(|t| !t.is_empty())
+                            .collect::<Vec<_>>()
+                            .into()
+                    })
                     .unwrap_or_default(),
             };
             match to.as_str() {
@@ -3935,7 +3949,7 @@ async fn main() -> eyre::Result<()> {
                 all_day,
                 status: parse_calendar_status(&status)?,
                 recurrence,
-                attendees: attendee,
+                attendees: attendee.into(),
                 ..CalendarEvent::default()
             };
             let created = svc.create_calendar_event(event).await?;
@@ -4380,6 +4394,32 @@ impl RemoteVoxConfig {
         })
     }
 
+    async fn task_repo(&self) -> eyre::Result<task_core::task::TaskRepoClient> {
+        self.connect().await
+    }
+
+    async fn project_repo(&self) -> eyre::Result<task_core::project::ProjectRepoClient> {
+        self.connect().await
+    }
+
+    async fn client_repo(&self) -> eyre::Result<task_core::client::ClientRepoClient> {
+        self.connect().await
+    }
+
+    async fn expense_repo(&self) -> eyre::Result<task_core::expense::ExpenseRepoClient> {
+        self.connect().await
+    }
+
+    async fn invoice_repo(&self) -> eyre::Result<task_core::invoice::InvoiceRepoClient> {
+        self.connect().await
+    }
+
+    async fn calendar_event_repo(
+        &self,
+    ) -> eyre::Result<task_core::calendar_event::CalendarEventRepoClient> {
+        self.connect().await
+    }
+
     async fn task(&self) -> eyre::Result<task_core::service::TaskServiceClient> {
         self.connect().await
     }
@@ -4393,10 +4433,6 @@ impl RemoteVoxConfig {
     }
 
     async fn time(&self) -> eyre::Result<task_core::service::TimeServiceClient> {
-        self.connect().await
-    }
-
-    async fn client(&self) -> eyre::Result<task_core::service::ClientServiceClient> {
         self.connect().await
     }
 
@@ -4468,10 +4504,10 @@ async fn run_remote_command(
             all,
             json,
         } => {
-            let client = remote.task().await?;
             let tasks = if all {
-                client.list_tasks().await?
+                remote_list_tasks_with_client(&remote.task_repo().await?).await?
             } else {
+                let client = remote.task().await?;
                 let mut filters = Vec::new();
                 if let Some(s) = status {
                     let st = parse_status(&s).ok_or_else(|| eyre::eyre!("Unknown status: {s}"))?;
@@ -4544,7 +4580,8 @@ async fn run_remote_command(
                 assignee,
                 actor.map(str::to_string),
             )?;
-            let created = remote.task().await?.create_task(task).await?;
+            let create: task_core::task::TaskApiCreate = model_to_api(&task)?;
+            let created: Task = api_to_model(remote.task_repo().await?.create_task(create).await?)?;
             println!("Created: {}", created.title);
             println!("  id:  {}", created.id);
             if let Some(d) = created.due {
@@ -4749,7 +4786,7 @@ async fn run_remote_command(
                 recurrence,
                 body,
             )?;
-            let updated = remote.task().await?.update_task(task).await?;
+            let updated = remote_update_task_with_client(&remote.task_repo().await?, &task).await?;
             if json {
                 println!("{}", facet_json::to_string(&updated).unwrap_or_default());
             } else {
@@ -4758,28 +4795,28 @@ async fn run_remote_command(
         }
 
         Commands::Delete { reference, hard } => {
-            let client = remote.task().await?;
+            let client = remote.task_repo().await?;
             if hard {
                 let task = remote_find_task_with_client(&client, &reference).await?;
-                client.delete_task(task.title.clone()).await?;
+                client.delete_task(task.id.to_string()).await?;
                 println!("Deleted (hard): {}", task.title);
             } else {
                 let mut task = remote_find_task_with_client(&client, &reference).await?;
                 task.deleted_at = Some(chrono::Utc::now());
-                let updated = client.update_task(task).await?;
+                let updated = remote_update_task_with_client(&client, &task).await?;
                 println!("Deleted (soft): {}", updated.title);
             }
         }
 
         Commands::Assign { reference, user } => {
-            let client = remote.task().await?;
+            let client = remote.task_repo().await?;
             let mut task = remote_find_task_with_client(&client, &reference).await?;
             task.assignee = if user == "clear" || user.is_empty() {
                 None
             } else {
                 Some(user)
             };
-            let updated = client.update_task(task).await?;
+            let updated = remote_update_task_with_client(&client, &task).await?;
             match &updated.assignee {
                 Some(u) => println!("Assigned '{}' → {u}", updated.title),
                 None => println!("Unassigned '{}'", updated.title),
@@ -4817,7 +4854,7 @@ async fn run_remote_command(
         }
 
         Commands::Link { from, to, kind } => {
-            let client = remote.task().await?;
+            let client = remote.task_repo().await?;
             let mut source = remote_find_task_with_client(&client, &from).await?;
             let target = remote_find_task_with_client(&client, &to).await?;
             let rt = parse_relation_kind(&kind)?;
@@ -4831,14 +4868,14 @@ async fn run_remote_command(
                     target: target_ref,
                     relation_type: rt,
                 });
-                client.update_task(source).await?;
+                remote_update_task_with_client(&client, &source).await?;
             }
             println!("Linked '{from}' --{kind}--> '{to}'.");
         }
 
         Commands::React { reference, emoji } => {
             let user = require_actor(&actor.map(str::to_string))?;
-            let client = remote.task().await?;
+            let client = remote.task_repo().await?;
             let mut task = remote_find_task_with_client(&client, &reference).await?;
             if let Some(e) = emoji.strip_prefix("clear:") {
                 let before = task.reactions.len();
@@ -4846,7 +4883,7 @@ async fn run_remote_command(
                 if task.reactions.len() == before {
                     eyre::bail!("No {e} reaction from @{user} to remove");
                 }
-                client.update_task(task).await?;
+                remote_update_task_with_client(&client, &task).await?;
                 println!("Removed {e} from @{user}.");
             } else {
                 if !task
@@ -4858,7 +4895,7 @@ async fn run_remote_command(
                         emoji: emoji.clone(),
                         user: user.clone(),
                     });
-                    client.update_task(task).await?;
+                    remote_update_task_with_client(&client, &task).await?;
                 }
                 println!("Reacted {emoji} from @{user}.");
             }
@@ -4868,11 +4905,11 @@ async fn run_remote_command(
             let who = user
                 .or_else(|| actor.map(str::to_string))
                 .ok_or_else(|| eyre::eyre!("Specify a user or set --as-user/TASK_USER."))?;
-            let client = remote.task().await?;
+            let client = remote.task_repo().await?;
             let mut task = remote_find_task_with_client(&client, &reference).await?;
             if !task.subscribers.contains(&who) {
                 task.subscribers.push(who.clone());
-                client.update_task(task).await?;
+                remote_update_task_with_client(&client, &task).await?;
             }
             println!("@{who} subscribed.");
         }
@@ -4881,12 +4918,12 @@ async fn run_remote_command(
             let who = user
                 .or_else(|| actor.map(str::to_string))
                 .ok_or_else(|| eyre::eyre!("Specify a user or set --as-user/TASK_USER."))?;
-            let client = remote.task().await?;
+            let client = remote.task_repo().await?;
             let mut task = remote_find_task_with_client(&client, &reference).await?;
             let before = task.subscribers.len();
             task.subscribers.retain(|u| u != &who);
             if task.subscribers.len() != before {
-                client.update_task(task).await?;
+                remote_update_task_with_client(&client, &task).await?;
             }
             println!("@{who} unsubscribed.");
         }
@@ -4920,10 +4957,7 @@ async fn run_remote_command(
         Commands::Project { command } => run_remote_project_command(remote, actor, command).await?,
         Commands::Client { command } => run_remote_client_command(remote, command).await?,
         Commands::Invoice { command } => run_remote_invoice_command(remote, actor, command).await?,
-        Commands::Expense { command } => {
-            let client: task_core::service::ExpenseServiceClient = remote.connect().await?;
-            run_remote_expense_command(&client, actor, command).await?
-        }
+        Commands::Expense { command } => run_remote_expense_command(remote, actor, command).await?,
         Commands::Revenue { .. } => {
             eyre::bail!("revenue commands are currently supported only in local vault mode")
         }
@@ -5013,16 +5047,462 @@ async fn run_remote_command(
 }
 
 async fn remote_find_task(remote: &RemoteVoxConfig, reference: &str) -> eyre::Result<Task> {
-    let client = remote.task().await?;
+    let client = remote.task_repo().await?;
     remote_find_task_with_client(&client, reference).await
 }
 
 async fn remote_find_task_with_client(
-    client: &task_core::service::TaskServiceClient,
+    client: &task_core::task::TaskRepoClient,
     reference: &str,
 ) -> eyre::Result<Task> {
-    let tasks = client.list_tasks().await?;
+    let tasks = remote_list_tasks_with_client(client).await?;
     find_task_in(tasks, reference)
+}
+
+async fn remote_list_tasks_with_client(
+    client: &task_core::task::TaskRepoClient,
+) -> eyre::Result<Vec<Task>> {
+    client
+        .list_tasks(None, None, None, Some(10_000))
+        .await?
+        .into_iter()
+        .map(api_to_model)
+        .collect()
+}
+
+async fn remote_update_task_with_client(
+    client: &task_core::task::TaskRepoClient,
+    task: &Task,
+) -> eyre::Result<Task> {
+    let update: task_core::task::TaskApiUpdate = model_to_api(task)?;
+    let updated = client.update_task(task.id.to_string(), update).await?;
+    api_to_model(updated)
+}
+
+async fn remote_list_projects_with_client(
+    client: &task_core::project::ProjectRepoClient,
+) -> eyre::Result<Vec<Project>> {
+    client
+        .list_projects(None, None, None, Some(10_000))
+        .await?
+        .into_iter()
+        .map(api_to_model)
+        .collect()
+}
+
+async fn remote_find_project_with_client(
+    client: &task_core::project::ProjectRepoClient,
+    reference: &str,
+) -> eyre::Result<Project> {
+    remote_list_projects_with_client(client)
+        .await?
+        .into_iter()
+        .find(|project| project.title.eq_ignore_ascii_case(reference))
+        .ok_or_else(|| eyre::eyre!("Project not found: {reference}"))
+}
+
+async fn remote_update_project_with_client(
+    client: &task_core::project::ProjectRepoClient,
+    project: &Project,
+) -> eyre::Result<Project> {
+    let update: task_core::project::ProjectApiUpdate = model_to_api(project)?;
+    let updated = client
+        .update_project(project.id.to_string(), update)
+        .await?;
+    api_to_model(updated)
+}
+
+async fn remote_list_clients_with_client(
+    client: &task_core::client::ClientRepoClient,
+) -> eyre::Result<Vec<Client>> {
+    client
+        .list_clients(None, None, None, Some(10_000))
+        .await?
+        .into_iter()
+        .map(api_to_model)
+        .collect()
+}
+
+async fn remote_find_client_with_client(
+    client: &task_core::client::ClientRepoClient,
+    name: &str,
+) -> eyre::Result<Option<Client>> {
+    Ok(remote_list_clients_with_client(client)
+        .await?
+        .into_iter()
+        .find(|client| client.name.eq_ignore_ascii_case(name)))
+}
+
+async fn remote_save_client_with_client(
+    client: &task_core::client::ClientRepoClient,
+    item: &Client,
+) -> eyre::Result<Client> {
+    if item.id == Uuid::nil() {
+        let create: task_core::client::ClientApiCreate = model_to_api(item)?;
+        api_to_model(client.create_client(create).await?)
+    } else {
+        let update: task_core::client::ClientApiUpdate = model_to_api(item)?;
+        api_to_model(client.update_client(item.id.to_string(), update).await?)
+    }
+}
+
+async fn remote_list_invoices_with_client(
+    client: &task_core::invoice::InvoiceRepoClient,
+) -> eyre::Result<Vec<Invoice>> {
+    client
+        .list_invoices(None, None, None, Some(10_000))
+        .await?
+        .into_iter()
+        .map(api_to_model)
+        .collect()
+}
+
+async fn remote_find_invoice_with_client(
+    client: &task_core::invoice::InvoiceRepoClient,
+    id: &str,
+) -> eyre::Result<Option<Invoice>> {
+    Ok(remote_list_invoices_with_client(client)
+        .await?
+        .into_iter()
+        .find(|invoice| invoice.id.eq_ignore_ascii_case(id) || invoice.uuid.to_string() == id))
+}
+
+async fn remote_list_expenses_with_client(
+    client: &task_core::expense::ExpenseRepoClient,
+) -> eyre::Result<Vec<task_core::Expense>> {
+    client
+        .list_expenses(None, None, None, Some(10_000))
+        .await?
+        .into_iter()
+        .map(api_to_model)
+        .collect()
+}
+
+async fn remote_find_expense_with_client(
+    client: &task_core::expense::ExpenseRepoClient,
+    id: &str,
+) -> eyre::Result<Option<task_core::Expense>> {
+    Ok(remote_list_expenses_with_client(client)
+        .await?
+        .into_iter()
+        .find(|expense| expense.id.eq_ignore_ascii_case(id) || expense.uuid.to_string() == id))
+}
+
+async fn remote_list_calendar_events_with_client(
+    client: &task_core::calendar_event::CalendarEventRepoClient,
+) -> eyre::Result<Vec<CalendarEvent>> {
+    client
+        .list_calendar_events(None, None, None, Some(10_000))
+        .await?
+        .into_iter()
+        .map(api_to_model)
+        .collect()
+}
+
+async fn remote_find_calendar_event_with_client(
+    client: &task_core::calendar_event::CalendarEventRepoClient,
+    reference: &str,
+) -> eyre::Result<CalendarEvent> {
+    remote_list_calendar_events_with_client(client)
+        .await?
+        .into_iter()
+        .find(|event| {
+            event.uuid.to_string() == reference
+                || event.id.as_deref() == Some(reference)
+                || event.title.eq_ignore_ascii_case(reference)
+        })
+        .ok_or_else(|| eyre::eyre!("Calendar event not found: {reference}"))
+}
+
+async fn remote_update_calendar_event_with_client(
+    client: &task_core::calendar_event::CalendarEventRepoClient,
+    event: &CalendarEvent,
+) -> eyre::Result<CalendarEvent> {
+    let update: task_core::calendar_event::CalendarEventApiUpdate = model_to_api(event)?;
+    api_to_model(
+        client
+            .update_calendar_event(event.uuid.to_string(), update)
+            .await?,
+    )
+}
+
+async fn remote_create_expense_with_client(
+    client: &task_core::expense::ExpenseRepoClient,
+    request: ExpenseCreateRequest,
+) -> eyre::Result<task_core::Expense> {
+    let now = Utc::now();
+    let date = request.date.unwrap_or_else(|| now.date_naive());
+    let number = remote_list_expenses_with_client(client)
+        .await?
+        .into_iter()
+        .filter(|expense| expense.date.year() == date.year())
+        .map(|expense| expense.number)
+        .max()
+        .unwrap_or(0)
+        + 1;
+    let expense = task_core::Expense {
+        uuid: Uuid::new_v4(),
+        id: task_core::expense::format_expense_id(date.year(), number),
+        number,
+        status: request
+            .status
+            .as_deref()
+            .and_then(task_core::expense::parse_expense_status)
+            .unwrap_or(task_core::ExpenseStatus::Draft),
+        date,
+        amount_cents: request.amount_cents,
+        currency_code: request.currency_code.unwrap_or_else(|| "USD".into()),
+        project: request.project.map(WikiLink),
+        client: request.client.map(WikiLink),
+        deliverable: request.deliverable,
+        category: request.category,
+        vendor: request.vendor,
+        description: request.description,
+        receipt: request.receipt,
+        reference: request.reference,
+        reimbursable: request.reimbursable,
+        notes: request.notes,
+        created_by: request.actor,
+        date_created: Some(now),
+        date_modified: Some(now),
+        body: String::new(),
+    };
+    let create: task_core::expense::ExpenseApiCreate = model_to_api(&expense)?;
+    api_to_model(client.create_expense(create).await?)
+}
+
+async fn remote_update_expense_with_client(
+    client: &task_core::expense::ExpenseRepoClient,
+    id: &str,
+    patch: ExpensePatch,
+) -> eyre::Result<task_core::Expense> {
+    let mut expense = remote_find_expense_with_client(client, id)
+        .await?
+        .ok_or_else(|| eyre::eyre!("Expense not found: {id}"))?;
+    if let Some(status) = patch.status.as_deref() {
+        expense.status = task_core::expense::parse_expense_status(status)
+            .ok_or_else(|| eyre::eyre!("invalid expense status: {status}"))?;
+    }
+    if let Some(date) = patch.date.as_deref() {
+        expense.date = date.parse::<NaiveDate>()?;
+    }
+    if let Some(amount) = patch.amount_cents {
+        expense.amount_cents = amount;
+    }
+    if let Some(currency) = patch.currency_code {
+        expense.currency_code = currency;
+    }
+    if let Some(project) = patch.project {
+        expense.project = if project.trim().is_empty() {
+            None
+        } else {
+            Some(WikiLink(project))
+        };
+    }
+    if let Some(client_name) = patch.client {
+        expense.client = if client_name.trim().is_empty() {
+            None
+        } else {
+            Some(WikiLink(client_name))
+        };
+    }
+    if let Some(value) = patch.deliverable {
+        expense.deliverable = if value.trim().is_empty() {
+            None
+        } else {
+            Some(value)
+        };
+    }
+    if let Some(value) = patch.category {
+        expense.category = if value.trim().is_empty() {
+            None
+        } else {
+            Some(value)
+        };
+    }
+    if let Some(value) = patch.vendor {
+        expense.vendor = if value.trim().is_empty() {
+            None
+        } else {
+            Some(value)
+        };
+    }
+    if let Some(value) = patch.description {
+        expense.description = value;
+    }
+    if let Some(value) = patch.receipt {
+        expense.receipt = if value.trim().is_empty() {
+            None
+        } else {
+            Some(value)
+        };
+    }
+    if let Some(value) = patch.reference {
+        expense.reference = if value.trim().is_empty() {
+            None
+        } else {
+            Some(value)
+        };
+    }
+    if let Some(value) = patch.reimbursable {
+        expense.reimbursable = value;
+    }
+    if let Some(value) = patch.notes {
+        expense.notes = if value.trim().is_empty() {
+            None
+        } else {
+            Some(value)
+        };
+    }
+    expense.date_modified = Some(Utc::now());
+    let update: task_core::expense::ExpenseApiUpdate = model_to_api(&expense)?;
+    api_to_model(
+        client
+            .update_expense(expense.uuid.to_string(), update)
+            .await?,
+    )
+}
+
+fn apply_remote_project_patch(
+    project: &mut Project,
+    patch: task_core::ProjectPatch,
+) -> eyre::Result<()> {
+    if let Some(status) = patch.status {
+        project.status = parse_project_status(&status)
+            .ok_or_else(|| eyre::eyre!("Unknown project status: {status}"))?;
+    }
+    if let Some(value) = patch.description {
+        project.description = if value.is_empty() || value == "clear" {
+            None
+        } else {
+            Some(value)
+        };
+    }
+    if let Some(value) = patch.body {
+        project.body = if value.is_empty() || value == "clear" {
+            None
+        } else {
+            Some(value)
+        };
+    }
+    if let Some(value) = patch.area {
+        project.area = if value.is_empty() || value == "clear" {
+            None
+        } else {
+            Some(value)
+        };
+    }
+    if let Some(value) = patch.organization {
+        project.organization = if value.is_empty() || value == "clear" {
+            None
+        } else {
+            Some(value)
+        };
+    }
+    if let Some(value) = patch.project_type {
+        project.project_type = if value.is_empty() || value == "clear" {
+            None
+        } else {
+            Some(value)
+        };
+    }
+    if let Some(value) = patch.workflow {
+        project.workflow = if value.is_empty() || value == "clear" {
+            None
+        } else {
+            Some(value)
+        };
+    }
+    if let Some(value) = patch.workflow_stage {
+        project.workflow_stage = if value.is_empty() || value == "clear" {
+            None
+        } else {
+            Some(value)
+        };
+    }
+    if let Some(value) = patch.identifier {
+        project.identifier = if value.is_empty() || value == "clear" {
+            None
+        } else {
+            Some(value)
+        };
+    }
+    if let Some(value) = patch.lead {
+        project.lead = if value.is_empty() || value == "clear" {
+            None
+        } else {
+            Some(value)
+        };
+    }
+    if let Some(value) = patch.default_assignee {
+        project.default_assignee = if value.is_empty() || value == "clear" {
+            None
+        } else {
+            Some(value)
+        };
+    }
+    if let Some(value) = patch.emoji {
+        project.emoji = if value.is_empty() || value == "clear" {
+            None
+        } else {
+            Some(value)
+        };
+    }
+    if let Some(value) = patch.repo {
+        project.repo = if value.is_empty() || value == "clear" {
+            None
+        } else {
+            Some(value)
+        };
+    }
+    if let Some(value) = patch.dev_path {
+        project.dev_path = if value.is_empty() || value == "clear" {
+            None
+        } else {
+            Some(value)
+        };
+    }
+    if let Some(value) = patch.client {
+        project.client = if value.is_empty() || value == "clear" {
+            None
+        } else {
+            Some(WikiLink(value))
+        };
+    }
+    if let Some(value) = patch.default_rate {
+        project.default_rate = if value == 0 { None } else { Some(value) };
+    }
+    if let Some(value) = patch.due {
+        project.due = parse_optional_date(&value)?;
+    }
+    if let Some(value) = patch.start {
+        project.start = parse_optional_date(&value)?;
+    }
+    for value in patch.remove_tag {
+        project.tags.retain(|tag| tag != &value);
+    }
+    for value in patch.add_tag {
+        if !project.tags.contains(&value) {
+            project.tags.push(value);
+        }
+    }
+    for value in patch.remove_email_tag {
+        project.email_tags.retain(|tag| tag != &value);
+    }
+    for value in patch.add_email_tag {
+        if !project.email_tags.contains(&value) {
+            project.email_tags.push(value);
+        }
+    }
+    for value in patch.remove_team {
+        project.team.retain(|member| member != &value);
+    }
+    for value in patch.add_team {
+        if !project.team.contains(&value) {
+            project.team.push(value);
+        }
+    }
+    Ok(())
 }
 
 fn build_new_task(
@@ -5077,6 +5557,22 @@ fn build_new_task(
         created_by: actor,
         ..Task::default()
     })
+}
+
+fn model_to_api<T, U>(value: &T) -> eyre::Result<U>
+where
+    T: Serialize,
+    U: DeserializeOwned,
+{
+    serde_json::from_value(serde_json::to_value(value)?).map_err(Into::into)
+}
+
+fn api_to_model<T, U>(value: T) -> eyre::Result<U>
+where
+    T: Serialize,
+    U: DeserializeOwned,
+{
+    serde_json::from_value(serde_json::to_value(value)?).map_err(Into::into)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -5161,7 +5657,7 @@ async fn run_remote_comment_command(
     actor: Option<&str>,
     command: CommentCommands,
 ) -> eyre::Result<()> {
-    let client = remote.task().await?;
+    let client = remote.task_repo().await?;
     match command {
         CommentCommands::Add {
             reference,
@@ -5191,7 +5687,7 @@ async fn run_remote_comment_command(
             let mut comments = parse_comments(&task.body);
             comments.push(new_comment.clone());
             task.body = splice_comments(&task.body, &comments);
-            client.update_task(task).await?;
+            remote_update_task_with_client(&client, &task).await?;
             println!("Comment added ({}).", new_comment.id);
         }
         CommentCommands::List { reference, json } => {
@@ -5227,7 +5723,7 @@ async fn run_remote_comment_command(
             };
             comments.push(new_comment.clone());
             task.body = splice_comments(&task.body, &comments);
-            client.update_task(task).await?;
+            remote_update_task_with_client(&client, &task).await?;
             println!("Reply added ({}).", new_comment.id);
         }
         CommentCommands::Resolve {
@@ -5243,7 +5739,7 @@ async fn run_remote_comment_command(
             c.resolved = true;
             c.resolved_by = Some(resolver);
             task.body = splice_comments(&task.body, &comments);
-            client.update_task(task).await?;
+            remote_update_task_with_client(&client, &task).await?;
             println!("Resolved comment {comment_id}.");
         }
         CommentCommands::Reopen {
@@ -5258,7 +5754,7 @@ async fn run_remote_comment_command(
             c.resolved = false;
             c.resolved_by = None;
             task.body = splice_comments(&task.body, &comments);
-            client.update_task(task).await?;
+            remote_update_task_with_client(&client, &task).await?;
             println!("Reopened comment {comment_id}.");
         }
     }
@@ -5270,10 +5766,11 @@ async fn run_remote_project_command(
     actor: Option<&str>,
     command: ProjectCommands,
 ) -> eyre::Result<()> {
-    let client = remote.project().await?;
+    let service = remote.project().await?;
+    let repo = remote.project_repo().await?;
     match command {
         ProjectCommands::List { json } => {
-            let projects = client.list_projects().await?;
+            let projects = remote_list_projects_with_client(&repo).await?;
             if json {
                 println!("{}", projects_json(&projects));
             } else {
@@ -5281,11 +5778,11 @@ async fn run_remote_project_command(
             }
         }
         ProjectCommands::Dashboard { json } => {
-            let dashboard = client.project_dashboard().await?;
+            let dashboard = service.project_dashboard().await?;
             print_project_dashboard(&dashboard, json);
         }
         ProjectCommands::Stats { name, json } => {
-            let stats = client.project_stats(name.clone()).await?;
+            let stats = service.project_stats(name.clone()).await?;
             if json {
                 println!("{}", facet_json::to_string(&stats).unwrap_or_default());
             } else {
@@ -5298,7 +5795,7 @@ async fn run_remote_project_command(
                 }
             }
         }
-        ProjectCommands::Next { name, json } => match client.next_task(name.clone()).await? {
+        ProjectCommands::Next { name, json } => match service.next_task(name.clone()).await? {
             Some(task) => {
                 if json {
                     println!("{}", facet_json::to_string(&task).unwrap_or_default());
@@ -5316,7 +5813,7 @@ async fn run_remote_project_command(
             }
         },
         ProjectCommands::Tasks { name, json } => {
-            let tasks = client.tasks_for_project(name).await?;
+            let tasks = service.tasks_for_project(name).await?;
             if json {
                 print_tasks_json(&tasks);
             } else {
@@ -5329,19 +5826,14 @@ async fn run_remote_project_command(
             depth,
             json,
         } => {
-            let context = client.project_context(name, files, depth).await?;
+            let context = service.project_context(name, files, depth).await?;
             print_project_context(context.as_ref(), json);
         }
         ProjectCommands::Comment {
             command: ProjectCommentCommands::Add { project, body },
         } => {
             let author = require_actor(&actor.map(str::to_string))?;
-            let mut project_item = client
-                .list_projects()
-                .await?
-                .into_iter()
-                .find(|p| p.title.eq_ignore_ascii_case(&project))
-                .ok_or_else(|| eyre::eyre!("Project not found: {project}"))?;
+            let mut project_item = remote_find_project_with_client(&repo, &project).await?;
             let now = chrono::Local::now().naive_local();
             let mentions = Comment::extract_mentions(&body);
             let comments = parse_comments(project_item.body.as_deref().unwrap_or(""));
@@ -5359,27 +5851,13 @@ async fn run_remote_project_command(
                 project_item.body.as_deref().unwrap_or(""),
                 &comments,
             ));
-            client
-                .update_project(
-                    project_item.title.clone(),
-                    task_core::ProjectPatch {
-                        body: project_item.body.clone(),
-                        ..Default::default()
-                    },
-                    actor.map(str::to_string),
-                )
-                .await?;
+            remote_update_project_with_client(&repo, &project_item).await?;
             println!("Comment added ({}).", new_comment.id);
         }
         ProjectCommands::Comment {
             command: ProjectCommentCommands::List { project, json },
         } => {
-            let project_item = client
-                .list_projects()
-                .await?
-                .into_iter()
-                .find(|p| p.title.eq_ignore_ascii_case(&project))
-                .ok_or_else(|| eyre::eyre!("Project not found: {project}"))?;
+            let project_item = remote_find_project_with_client(&repo, &project).await?;
             let comments = parse_comments(project_item.body.as_deref().unwrap_or(""));
             if json {
                 print_comments_json(&comments);
@@ -5396,12 +5874,7 @@ async fn run_remote_project_command(
                 },
         } => {
             let author = require_actor(&actor.map(str::to_string))?;
-            let mut project_item = client
-                .list_projects()
-                .await?
-                .into_iter()
-                .find(|p| p.title.eq_ignore_ascii_case(&project))
-                .ok_or_else(|| eyre::eyre!("Project not found: {project}"))?;
+            let mut project_item = remote_find_project_with_client(&repo, &project).await?;
             let mut comments = parse_comments(project_item.body.as_deref().unwrap_or(""));
             if !comments.iter().any(|c| c.id == parent_id) {
                 eyre::bail!("No comment with id {parent_id} on project {project}");
@@ -5422,16 +5895,7 @@ async fn run_remote_project_command(
                 project_item.body.as_deref().unwrap_or(""),
                 &comments,
             ));
-            client
-                .update_project(
-                    project_item.title.clone(),
-                    task_core::ProjectPatch {
-                        body: project_item.body.clone(),
-                        ..Default::default()
-                    },
-                    actor.map(str::to_string),
-                )
-                .await?;
+            remote_update_project_with_client(&repo, &project_item).await?;
             println!("Reply added ({}).", new_comment.id);
         }
         ProjectCommands::Comment {
@@ -5442,12 +5906,7 @@ async fn run_remote_project_command(
                 },
         } => {
             let resolver = require_actor(&actor.map(str::to_string))?;
-            let mut project_item = client
-                .list_projects()
-                .await?
-                .into_iter()
-                .find(|p| p.title.eq_ignore_ascii_case(&project))
-                .ok_or_else(|| eyre::eyre!("Project not found: {project}"))?;
+            let mut project_item = remote_find_project_with_client(&repo, &project).await?;
             let mut comments = parse_comments(project_item.body.as_deref().unwrap_or(""));
             let Some(c) = comments.iter_mut().find(|c| c.id == comment_id) else {
                 eyre::bail!("No comment with id {comment_id}");
@@ -5458,16 +5917,7 @@ async fn run_remote_project_command(
                 project_item.body.as_deref().unwrap_or(""),
                 &comments,
             ));
-            client
-                .update_project(
-                    project_item.title.clone(),
-                    task_core::ProjectPatch {
-                        body: project_item.body.clone(),
-                        ..Default::default()
-                    },
-                    actor.map(str::to_string),
-                )
-                .await?;
+            remote_update_project_with_client(&repo, &project_item).await?;
             println!("Resolved comment {comment_id}.");
         }
         ProjectCommands::Comment {
@@ -5477,12 +5927,7 @@ async fn run_remote_project_command(
                     comment_id,
                 },
         } => {
-            let mut project_item = client
-                .list_projects()
-                .await?
-                .into_iter()
-                .find(|p| p.title.eq_ignore_ascii_case(&project))
-                .ok_or_else(|| eyre::eyre!("Project not found: {project}"))?;
+            let mut project_item = remote_find_project_with_client(&repo, &project).await?;
             let mut comments = parse_comments(project_item.body.as_deref().unwrap_or(""));
             let Some(c) = comments.iter_mut().find(|c| c.id == comment_id) else {
                 eyre::bail!("No comment with id {comment_id}");
@@ -5493,16 +5938,7 @@ async fn run_remote_project_command(
                 project_item.body.as_deref().unwrap_or(""),
                 &comments,
             ));
-            client
-                .update_project(
-                    project_item.title.clone(),
-                    task_core::ProjectPatch {
-                        body: project_item.body.clone(),
-                        ..Default::default()
-                    },
-                    actor.map(str::to_string),
-                )
-                .await?;
+            remote_update_project_with_client(&repo, &project_item).await?;
             println!("Reopened comment {comment_id}.");
         }
         ProjectCommands::Edit {
@@ -5517,7 +5953,7 @@ async fn run_remote_project_command(
             lead,
             default_assignee,
             emoji,
-            repo,
+            repo: project_repo_url,
             dev_path,
             project_type,
             workflow,
@@ -5545,7 +5981,7 @@ async fn run_remote_project_command(
                 lead,
                 default_assignee,
                 emoji,
-                repo,
+                repo: project_repo_url,
                 dev_path,
                 client: project_client,
                 default_rate,
@@ -5558,9 +5994,9 @@ async fn run_remote_project_command(
                 add_team,
                 remove_team,
             };
-            let updated = client
-                .update_project(name, patch, actor.map(str::to_string))
-                .await?;
+            let mut project = remote_find_project_with_client(&repo, &name).await?;
+            apply_remote_project_patch(&mut project, patch)?;
+            let updated = remote_update_project_with_client(&repo, &project).await?;
             if json {
                 println!("{}", facet_json::to_string(&updated).unwrap_or_default());
             } else {
@@ -5568,7 +6004,7 @@ async fn run_remote_project_command(
             }
         }
         ProjectCommands::Show { name, json } => {
-            let projects = client.list_projects().await?;
+            let projects = remote_list_projects_with_client(&repo).await?;
             let project = projects
                 .into_iter()
                 .find(|p| p.title.eq_ignore_ascii_case(&name))
@@ -5587,7 +6023,7 @@ async fn run_remote_client_command(
     remote: &RemoteVoxConfig,
     command: ClientCommands,
 ) -> eyre::Result<()> {
-    let client = remote.client().await?;
+    let client = remote.client_repo().await?;
     match command {
         ClientCommands::Add {
             name,
@@ -5599,7 +6035,7 @@ async fn run_remote_client_command(
             phone,
             invoice_ninja_id,
         } => {
-            let existing = client.find_client(name.clone()).await?;
+            let existing = remote_find_client_with_client(&client, &name).await?;
             let mut item = existing.unwrap_or_else(|| task_core::Client {
                 name: name.clone(),
                 ..Default::default()
@@ -5625,7 +6061,7 @@ async fn run_remote_client_command(
             if let Some(id) = invoice_ninja_id {
                 item.invoice_ninja_id = Some(id);
             }
-            let saved = client.save_client(item).await?;
+            let saved = remote_save_client_with_client(&client, &item).await?;
             println!(
                 "Saved client '{}' (rate {}¢/hr).",
                 saved.name,
@@ -5633,7 +6069,7 @@ async fn run_remote_client_command(
             );
         }
         ClientCommands::List { json } => {
-            let clients = client.list_clients().await?;
+            let clients = remote_list_clients_with_client(&client).await?;
             if json {
                 print_clients_json(&clients);
             } else {
@@ -5641,8 +6077,7 @@ async fn run_remote_client_command(
             }
         }
         ClientCommands::Show { name, json } => {
-            let item = client
-                .find_client(name.clone())
+            let item = remote_find_client_with_client(&client, &name)
                 .await?
                 .ok_or_else(|| eyre::eyre!("Client not found: {name}"))?;
             if json {
@@ -5660,7 +6095,8 @@ async fn run_remote_invoice_command(
     actor: Option<&str>,
     command: InvoiceCommands,
 ) -> eyre::Result<()> {
-    let client = remote.invoice().await?;
+    let service = remote.invoice().await?;
+    let repo = remote.invoice_repo().await?;
     match command {
         InvoiceCommands::Create {
             client: client_name,
@@ -5673,7 +6109,7 @@ async fn run_remote_invoice_command(
             notes,
             json,
         } => {
-            let invoice = client
+            let invoice = service
                 .create_invoice_from_entries(task_core::InvoiceCreateRequest {
                     client_name,
                     from: from.as_deref().map(parse_date_start).transpose()?,
@@ -5698,8 +6134,7 @@ async fn run_remote_invoice_command(
             year,
             json,
         } => {
-            let invoices: Vec<task_core::Invoice> = client
-                .list_invoices()
+            let invoices: Vec<task_core::Invoice> = remote_list_invoices_with_client(&repo)
                 .await?
                 .into_iter()
                 .filter(|i| match &status {
@@ -5722,12 +6157,11 @@ async fn run_remote_invoice_command(
             }
         }
         InvoiceCommands::Report { json } => {
-            let report = client.finance_report().await?;
+            let report = service.finance_report().await?;
             print_finance_report(&report, json);
         }
         InvoiceCommands::Show { id, md, json } => {
-            let invoice = client
-                .get_invoice(id.clone())
+            let invoice = remote_find_invoice_with_client(&repo, &id)
                 .await?
                 .ok_or_else(|| eyre::eyre!("Invoice not found: {id}"))?;
             if json {
@@ -5739,7 +6173,7 @@ async fn run_remote_invoice_command(
             }
         }
         InvoiceCommands::Send { id } => {
-            let invoice = client.send_invoice(id, actor.map(str::to_string)).await?;
+            let invoice = service.send_invoice(id, actor.map(str::to_string)).await?;
             println!(
                 "Sent invoice {} — ${:.2} due {}.",
                 invoice.id,
@@ -5754,10 +6188,10 @@ async fn run_remote_invoice_command(
             reference,
             notes,
         } => {
-            let invoice = client
+            let invoice = service
                 .record_invoice_payment(task_core::InvoicePaymentRequest {
                     invoice_id: id,
-                    amount_cents: amount,
+                    amount_cents: amount.try_into()?,
                     method: if method.is_empty() {
                         None
                     } else {
@@ -5777,7 +6211,7 @@ async fn run_remote_invoice_command(
             );
         }
         InvoiceCommands::Cancel { id, reason } => {
-            let invoice = client
+            let invoice = service
                 .cancel_invoice(id, reason, actor.map(str::to_string))
                 .await?;
             println!("Cancelled invoice {}.", invoice.id);
@@ -5817,7 +6251,7 @@ async fn run_expense_command(
             let expense = svc
                 .create_expense(ExpenseCreateRequest {
                     description,
-                    amount_cents: amount,
+                    amount_cents: amount.try_into()?,
                     date: date.as_deref().map(parse_date).transpose()?,
                     currency_code: currency,
                     project,
@@ -5951,7 +6385,7 @@ async fn run_expense_command(
                     ExpensePatch {
                         status,
                         date,
-                        amount_cents: amount,
+                        amount_cents: amount.map(i64::try_from).transpose()?,
                         currency_code: currency,
                         project,
                         client: client_name,
@@ -6031,7 +6465,7 @@ async fn run_revenue_command(
             let revenue = svc
                 .create_revenue(RevenueCreateRequest {
                     description,
-                    amount_cents: amount,
+                    amount_cents: amount.try_into()?,
                     date: date.as_deref().map(parse_date).transpose()?,
                     currency_code: currency,
                     project,
@@ -6182,7 +6616,7 @@ async fn run_location_command(
                     access_notes,
                     parking_load_in,
                     network_power,
-                    tags: tag,
+                    tags: tag.into(),
                     body: body.unwrap_or_default(),
                     ..Location::default()
                 })
@@ -6273,7 +6707,7 @@ async fn run_location_command(
                         access_notes,
                         parking_load_in,
                         network_power,
-                        tags: tag,
+                        tags: tag.into(),
                         body: body.unwrap_or_default(),
                         ..Location::default()
                     },
@@ -6300,7 +6734,7 @@ async fn run_location_command(
                         name,
                         capacity,
                         notes,
-                        tags: tag,
+                        tags: tag.into(),
                         ..Space::default()
                     },
                 )
@@ -6784,10 +7218,12 @@ async fn run_asset_command(
 }
 
 async fn run_remote_expense_command(
-    client: &task_core::service::ExpenseServiceClient,
+    remote: &RemoteVoxConfig,
     actor: Option<&str>,
     command: ExpenseCommands,
 ) -> eyre::Result<()> {
+    let service: task_core::service::ExpenseServiceClient = remote.connect().await?;
+    let repo = remote.expense_repo().await?;
     let parse_date = |s: &str| -> eyre::Result<NaiveDate> {
         s.parse::<NaiveDate>()
             .map_err(|_| eyre::eyre!("Invalid date: {s}"))
@@ -6811,10 +7247,11 @@ async fn run_remote_expense_command(
             notes,
             json,
         } => {
-            let expense = client
-                .create_expense(ExpenseCreateRequest {
+            let expense = remote_create_expense_with_client(
+                &repo,
+                ExpenseCreateRequest {
                     description,
-                    amount_cents: amount,
+                    amount_cents: amount.try_into()?,
                     date: date.as_deref().map(parse_date).transpose()?,
                     currency_code: currency,
                     project,
@@ -6828,8 +7265,9 @@ async fn run_remote_expense_command(
                     status,
                     notes,
                     actor: actor.map(str::to_string),
-                })
-                .await?;
+                },
+            )
+            .await?;
             if json {
                 println!("{}", facet_json::to_string(&expense).unwrap_or_default());
             } else {
@@ -6864,7 +7302,11 @@ async fn run_remote_expense_command(
                 status,
                 reimbursable_only,
             };
-            let expenses = client.list_expenses(filter).await?;
+            let expenses: Vec<_> = remote_list_expenses_with_client(&repo)
+                .await?
+                .into_iter()
+                .filter(|expense| task_core::expense::matches_expense_filter(expense, &filter))
+                .collect();
             if json {
                 println!("{}", facet_json::to_string(&expenses).unwrap_or_default());
             } else if expenses.is_empty() {
@@ -6882,8 +7324,7 @@ async fn run_remote_expense_command(
             }
         }
         ExpenseCommands::Show { id, md, json } => {
-            let expense = client
-                .get_expense(id.clone())
+            let expense = remote_find_expense_with_client(&repo, &id)
                 .await?
                 .ok_or_else(|| eyre::eyre!("Expense not found: {id}"))?;
             if json {
@@ -6917,7 +7358,7 @@ async fn run_remote_expense_command(
                 status,
                 reimbursable_only,
             };
-            let report = client.expense_report(filter).await?;
+            let report = service.expense_report(filter).await?;
             if json {
                 println!("{}", facet_json::to_string(&report).unwrap_or_default());
             } else {
@@ -6942,28 +7383,27 @@ async fn run_remote_expense_command(
             notes,
             json,
         } => {
-            let expense = client
-                .update_expense(
-                    id,
-                    ExpensePatch {
-                        status,
-                        date,
-                        amount_cents: amount,
-                        currency_code: currency,
-                        project,
-                        client: client_name,
-                        deliverable,
-                        category,
-                        vendor,
-                        description,
-                        receipt,
-                        reference,
-                        reimbursable,
-                        notes,
-                    },
-                    actor.map(str::to_string),
-                )
-                .await?;
+            let expense = remote_update_expense_with_client(
+                &repo,
+                &id,
+                ExpensePatch {
+                    status,
+                    date,
+                    amount_cents: amount.map(i64::try_from).transpose()?,
+                    currency_code: currency,
+                    project,
+                    client: client_name,
+                    deliverable,
+                    category,
+                    vendor,
+                    description,
+                    receipt,
+                    reference,
+                    reimbursable,
+                    notes,
+                },
+            )
+            .await?;
             if json {
                 println!("{}", facet_json::to_string(&expense).unwrap_or_default());
             } else {
@@ -6972,7 +7412,10 @@ async fn run_remote_expense_command(
             }
         }
         ExpenseCommands::Delete { id } => {
-            client.delete_expense(id.clone()).await?;
+            let expense = remote_find_expense_with_client(&repo, &id)
+                .await?
+                .ok_or_else(|| eyre::eyre!("Expense not found: {id}"))?;
+            repo.delete_expense(expense.uuid.to_string()).await?;
             println!("Deleted expense {id}.");
         }
     }
@@ -7167,6 +7610,7 @@ async fn run_remote_calendar_command(
     command: CalendarCommands,
 ) -> eyre::Result<()> {
     let client = remote.calendar().await?;
+    let repo = remote.calendar_event_repo().await?;
     match command {
         CalendarCommands::List { from, to, json } => {
             let events =
@@ -7210,10 +7654,11 @@ async fn run_remote_calendar_command(
                 all_day,
                 status: parse_calendar_status(&status)?,
                 recurrence,
-                attendees: attendee,
+                attendees: attendee.into(),
                 ..CalendarEvent::default()
             };
-            let created = client.create_event(event).await?;
+            let create: task_core::calendar_event::CalendarEventApiCreate = model_to_api(&event)?;
+            let created: CalendarEvent = api_to_model(repo.create_calendar_event(create).await?)?;
             if json {
                 println!("{}", facet_json::to_string(&created).unwrap_or_default());
             } else {
@@ -7251,7 +7696,9 @@ async fn run_remote_calendar_command(
                 attendees,
                 body,
             )?;
-            let updated = client.update_event(reference, patch).await?;
+            let mut event = remote_find_calendar_event_with_client(&repo, &reference).await?;
+            apply_remote_calendar_patch(&mut event, patch);
+            let updated = remote_update_calendar_event_with_client(&repo, &event).await?;
             if json {
                 println!("{}", facet_json::to_string(&updated).unwrap_or_default());
             } else {
@@ -7259,7 +7706,8 @@ async fn run_remote_calendar_command(
             }
         }
         CalendarCommands::Delete { reference } => {
-            client.delete_event(reference.clone()).await?;
+            let event = remote_find_calendar_event_with_client(&repo, &reference).await?;
+            repo.delete_calendar_event(event.uuid.to_string()).await?;
             println!("Deleted calendar event: {reference}");
         }
         CalendarCommands::Carddav { command } => match command {
@@ -7564,6 +8012,7 @@ async fn run_remote_email_link_command(
         } => {
             let now = chrono::Utc::now();
             let email = task_core::EmailRef {
+                uuid: Uuid::new_v4(),
                 message_id: message_id.clone(),
                 subject: subject.unwrap_or_default(),
                 from: from.unwrap_or_default(),
@@ -7572,7 +8021,8 @@ async fn run_remote_email_link_command(
                         s.split(',')
                             .map(|t| t.trim().to_string())
                             .filter(|t| !t.is_empty())
-                            .collect()
+                            .collect::<Vec<_>>()
+                            .into()
                     })
                     .unwrap_or_default(),
                 date: date
@@ -7594,7 +8044,8 @@ async fn run_remote_email_link_command(
                         s.split(',')
                             .map(|t| t.trim().to_string())
                             .filter(|t| !t.is_empty())
-                            .collect()
+                            .collect::<Vec<_>>()
+                            .into()
                     })
                     .unwrap_or_default(),
             };
@@ -7927,9 +8378,8 @@ async fn run_github_command_remote(
             let token_val =
                 github::resolve_token(token.as_deref()).map_err(|e| eyre::eyre!("{e}"))?;
 
-            // Fetch tasks via remote Vox service.
-            let task_client = remote.task().await?;
-            let all_tasks = task_client.list_tasks().await?;
+            let task_client = remote.task_repo().await?;
+            let all_tasks = remote_list_tasks_with_client(&task_client).await?;
             let gh_tasks: Vec<_> = all_tasks
                 .into_iter()
                 .filter(|t| t.external_source.as_deref() == Some("github"))
@@ -8475,6 +8925,46 @@ fn build_calendar_patch(
     })
 }
 
+fn apply_remote_calendar_patch(event: &mut CalendarEvent, patch: CalendarEventPatch) {
+    if let Some(value) = patch.title {
+        event.title = value;
+    }
+    if let Some(value) = patch.description {
+        event.description = value;
+    }
+    if let Some(value) = patch.location {
+        event.location = value;
+    }
+    if let Some(value) = patch.venue {
+        event.venue = value;
+    }
+    if let Some(value) = patch.spaces {
+        event.spaces = value.into();
+    }
+    if let Some(value) = patch.start {
+        event.start = value;
+    }
+    if let Some(value) = patch.end {
+        event.end = value;
+    }
+    if let Some(value) = patch.all_day {
+        event.all_day = value;
+    }
+    if let Some(value) = patch.status {
+        event.status = value;
+    }
+    if let Some(value) = patch.recurrence {
+        event.recurrence = value;
+    }
+    if let Some(value) = patch.attendees {
+        event.attendees = value.into();
+    }
+    if let Some(value) = patch.body {
+        event.body = value;
+    }
+    event.date_modified = Some(Utc::now());
+}
+
 fn print_projects_table(projects: &[Project]) {
     if projects.is_empty() {
         println!("No projects found.");
@@ -8661,18 +9151,19 @@ async fn run_remote_agent_command(
             conflict_limit,
             include_completed,
         } => {
-            let task_client = remote.task().await?;
-            let project_client = remote.project().await?;
-            let client_client = remote.client().await?;
-            let invoice_client = remote.invoice().await?;
+            let task_repo = remote.task_repo().await?;
+            let task_service = remote.task().await?;
+            let project_repo = remote.project_repo().await?;
+            let client_repo = remote.client_repo().await?;
+            let invoice_repo = remote.invoice_repo().await?;
             let calendar_client = remote.calendar().await?;
             let time_client = remote.time().await?;
             let activity_client = remote.activity().await?;
 
             let tasks = if include_completed {
-                task_client.list_tasks().await?
+                remote_list_tasks_with_client(&task_repo).await?
             } else {
-                task_client
+                task_service
                     .execute_query(Query {
                         filters: vec![
                             Filter::NotComplete,
@@ -8685,9 +9176,9 @@ async fn run_remote_agent_command(
                     })
                     .await?
             };
-            let projects = project_client.list_projects().await?;
-            let clients = client_client.list_clients().await?;
-            let invoices = invoice_client.list_invoices().await?;
+            let projects = remote_list_projects_with_client(&project_repo).await?;
+            let clients = remote_list_clients_with_client(&client_repo).await?;
+            let invoices = remote_list_invoices_with_client(&invoice_repo).await?;
             let calendar_events = calendar_client
                 .events_between("1970-01-01T00:00:00Z".into(), "9999-12-31T23:59:59Z".into())
                 .await?;
@@ -8719,28 +9210,29 @@ async fn run_remote_agent_command(
             });
         }
         AgentCommands::Task { reference } => {
-            let client = remote.task().await?;
-            let tasks = client.list_tasks().await?;
+            let client = remote.task_repo().await?;
+            let tasks = remote_list_tasks_with_client(&client).await?;
             let task = find_task_in(tasks, &reference)?;
             println!("{}", facet_json::to_string(&task).unwrap_or_default());
         }
         AgentCommands::Plan { reference } => {
-            let client = remote.task().await?;
-            let tasks = client.list_tasks().await?;
+            let client = remote.task_repo().await?;
+            let tasks = remote_list_tasks_with_client(&client).await?;
             let task = find_task_in(tasks, &reference)?;
             let plan = build_agent_plan(&task);
             println!("{}", facet_json::to_string(&plan).unwrap_or_default());
         }
         AgentCommands::Project { name } => {
-            let project_client = remote.project().await?;
-            let projects = project_client.list_projects().await?;
+            let project_service = remote.project().await?;
+            let project_repo = remote.project_repo().await?;
+            let projects = remote_list_projects_with_client(&project_repo).await?;
             let project = projects
                 .into_iter()
                 .find(|p| p.title.eq_ignore_ascii_case(&name))
                 .ok_or_else(|| eyre::eyre!("Project not found: {name}"))?;
-            let stats = project_client.project_stats(name.clone()).await?;
-            let next = project_client.next_task(name.clone()).await?;
-            let tasks = project_client.tasks_for_project(name).await?;
+            let stats = project_service.project_stats(name.clone()).await?;
+            let next = project_service.next_task(name.clone()).await?;
+            let tasks = project_service.tasks_for_project(name).await?;
             println!(
                 "{{\"project\":{},\"stats\":{},\"next_task\":{},\"tasks\":{}}}",
                 facet_json::to_string(&project).unwrap_or_default(),
@@ -10041,6 +10533,17 @@ fn parse_status(s: &str) -> Option<Status> {
         "done" => Some(Status::Done),
         "cancelled" | "canceled" => Some(Status::Cancelled),
         "archived" => Some(Status::Archived),
+        _ => None,
+    }
+}
+
+fn parse_project_status(s: &str) -> Option<task_core::project::ProjectStatus> {
+    match s.to_lowercase().replace(['-', '_', ' '], "").as_str() {
+        "planning" => Some(task_core::project::ProjectStatus::Planning),
+        "active" => Some(task_core::project::ProjectStatus::Active),
+        "onhold" | "hold" => Some(task_core::project::ProjectStatus::OnHold),
+        "completed" | "done" => Some(task_core::project::ProjectStatus::Completed),
+        "archived" => Some(task_core::project::ProjectStatus::Archived),
         _ => None,
     }
 }
