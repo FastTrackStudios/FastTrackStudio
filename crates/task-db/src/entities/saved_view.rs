@@ -1,6 +1,5 @@
 //! Saved view entity — persistent filter/sort/display configurations.
 
-use crudcrate::CRUDResource;
 use crudcrate::EntityToModels;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};

@@ -1,6 +1,5 @@
 //! Task relation entity — typed relationships between tasks.
 
-use crudcrate::CRUDResource;
 use crudcrate::EntityToModels;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};

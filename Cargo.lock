@@ -1193,7 +1193,7 @@ checksum = "d0a5c400df2834b80a4c3327b3aad3a4c4cd4de0629063962b03235697506a28"
 [[package]]
 name = "crudcrate"
 version = "0.7.2"
-source = "git+https://github.com/FastTrackStudios/crudcrate?rev=4394c9112086718c68fe2ad6a914fd7123cc9515#4394c9112086718c68fe2ad6a914fd7123cc9515"
+source = "git+https://github.com/FastTrackStudios/crudcrate?rev=e7f88004674bdfe3e87af3d015aa2cd0666080b2#e7f88004674bdfe3e87af3d015aa2cd0666080b2"
 dependencies = [
  "async-trait",
  "axum",
@@ -1213,7 +1213,7 @@ dependencies = [
 [[package]]
 name = "crudcrate-derive"
 version = "0.7.2"
-source = "git+https://github.com/FastTrackStudios/crudcrate?rev=4394c9112086718c68fe2ad6a914fd7123cc9515#4394c9112086718c68fe2ad6a914fd7123cc9515"
+source = "git+https://github.com/FastTrackStudios/crudcrate?rev=e7f88004674bdfe3e87af3d015aa2cd0666080b2#e7f88004674bdfe3e87af3d015aa2cd0666080b2"
 dependencies = [
  "convert_case 0.8.0",
  "heck 0.5.0",

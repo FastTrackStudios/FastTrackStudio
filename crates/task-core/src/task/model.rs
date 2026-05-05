@@ -1,6 +1,6 @@
 // r[impl task.schema]
 use chrono::{DateTime, NaiveDate, Utc};
-use crudcrate::{CRUDResource, EntityToModels};
+use crudcrate::EntityToModels;
 use facet::Facet;
 use sea_orm::entity::prelude::*;
 use sea_orm::sea_query::{ArrayType, ColumnType, Nullable, Value, ValueType, ValueTypeErr};

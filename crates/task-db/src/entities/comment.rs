@@ -1,6 +1,5 @@
 //! Comment entity — threaded comments with timecode ranges.
 
-use crudcrate::CRUDResource;
 use crudcrate::EntityToModels;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
