@@ -147,7 +147,7 @@ pub fn use_fx_browser_subscription() {
                 loop {
                     match rx.recv().await {
                         Ok(Some(event_ref)) => {
-                            match &*event_ref {
+                            match event_ref.get() {
                                 FxEvent::ParameterChanged {
                                     fx_guid: event_guid,
                                     param_index,

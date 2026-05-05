@@ -978,7 +978,7 @@ impl TrackBuilder {
 
     /// Add a stock REAPER FX plugin to the track's FX chain.
     ///
-    /// Accepts any type implementing [`StockFx`](crate::stock_fx::StockFx),
+    /// Accepts any type implementing [`StockFx`],
     /// such as `ReaComp`, `ReaEq`, `ReaGate`, etc.
     ///
     /// # Example

@@ -59,7 +59,7 @@ impl ActionRegistry {
     /// Register a toggleable REAPER action (on/off state shown in action list).
     ///
     /// Returns the numeric command ID assigned by REAPER, or 0 on failure.
-    /// Use [`set_toggle_state`] to update the on/off indicator.
+    /// Use [`Self::set_toggle_state`] to update the on/off indicator.
     pub async fn register_toggle(
         &self,
         command_name: &str,

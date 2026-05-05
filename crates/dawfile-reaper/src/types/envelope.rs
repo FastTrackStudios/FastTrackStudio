@@ -449,7 +449,7 @@ impl EnvelopePoint {
     }
 
     /// Create a new envelope point from tokens
-    /// Expected format: PT position value shape [time_sig] [selected] [unknown] [bezier_tension]
+    /// Expected format: `PT position value shape [time_sig] [selected] [unknown] [bezier_tension]`
     pub fn from_tokens(tokens: &[Token]) -> Result<Self, String> {
         if tokens.len() < 4 {
             return Err(format!(

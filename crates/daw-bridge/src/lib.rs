@@ -344,11 +344,11 @@ fn start_unix_socket_server(acceptor: DawConnectionAcceptor) {
                             role: vox::SessionRole::Acceptor,
                             our_settings: vox::ConnectionSettings {
                                 parity: vox::Parity::Even,
-                                max_concurrent_requests: 64,
-                            },
+                                max_concurrent_requests: 64, initial_channel_credit: 16,
+        },
                             peer_settings: vox::ConnectionSettings {
                                 parity: vox::Parity::Odd,
-                                max_concurrent_requests: 64,
+                                max_concurrent_requests: 64, initial_channel_credit: 16,
                             },
                             peer_supports_retry: true,
                             session_resume_key: None,

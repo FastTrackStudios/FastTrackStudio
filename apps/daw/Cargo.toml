@@ -24,7 +24,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 serde_json.workspace = true
 serde.workspace = true
 facet.workspace = true
-facet-json = { version = "0.44" }
+facet-json.workspace = true
 libc = "0.2"
 dawfile-reaper = { path = "../../crates/dawfile-reaper" }
 

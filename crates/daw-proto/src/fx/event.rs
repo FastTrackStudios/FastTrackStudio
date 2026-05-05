@@ -89,3 +89,9 @@ pub enum FxEvent {
     /// individual add/remove/move events (e.g., bulk restructuring).
     TreeStructureChanged { context: FxChainContext },
 }
+
+// FxEvent has no lifetime parameters, so Ref<'a> = Self is trivially sound.
+#[allow(unsafe_code)]
+unsafe impl vox_types::Reborrow for FxEvent {
+    type Ref<'a> = FxEvent;
+}

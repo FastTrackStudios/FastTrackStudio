@@ -60,12 +60,11 @@ impl LocalCaller {
                 role: vox::SessionRole::Acceptor,
                 our_settings: ConnectionSettings {
                     parity: Parity::Even,
-                    max_concurrent_requests: 64,
-                },
+                    max_concurrent_requests: 64, initial_channel_credit: 16,
+        },
                 peer_settings: ConnectionSettings {
                     parity: Parity::Odd,
-                    max_concurrent_requests: 64,
-                },
+                    max_concurrent_requests: 64, initial_channel_credit: 16, },
                 peer_supports_retry: true,
                 session_resume_key: None,
                 peer_resume_key: None,
@@ -93,12 +92,11 @@ impl LocalCaller {
             role: vox::SessionRole::Initiator,
             our_settings: ConnectionSettings {
                 parity: Parity::Odd,
-                max_concurrent_requests: 64,
-            },
+                max_concurrent_requests: 64, initial_channel_credit: 16,
+        },
             peer_settings: ConnectionSettings {
                 parity: Parity::Even,
-                max_concurrent_requests: 64,
-            },
+                max_concurrent_requests: 64, initial_channel_credit: 16, },
             peer_supports_retry: true,
             session_resume_key: None,
             peer_resume_key: None,
@@ -120,8 +118,7 @@ impl LocalCaller {
             .open_connection(
                 ConnectionSettings {
                     parity: Parity::Odd,
-                    max_concurrent_requests: 64,
-                },
+                    max_concurrent_requests: 64, initial_channel_credit: 16, },
                 vec![
                     MetadataEntry {
                         key: Cow::Borrowed("vox-service"),

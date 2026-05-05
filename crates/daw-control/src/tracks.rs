@@ -20,7 +20,7 @@ use vox::Rx;
 /// ```no_run
 /// use daw_control::Daw;
 ///
-/// # async fn example(handle: vox::ErasedCaller) -> daw_control::Result<()> {
+/// # async fn example(handle: vox::Caller) -> daw_control::Result<()> {
 /// let daw = Daw::new(handle);
 /// let project = daw.current_project().await?;
 /// let tracks = project.tracks();
@@ -266,7 +266,7 @@ impl std::fmt::Debug for Tracks {
 /// ```no_run
 /// use daw_control::Daw;
 ///
-/// # async fn example(handle: vox::ErasedCaller) -> daw_control::Result<()> {
+/// # async fn example(handle: vox::Caller) -> daw_control::Result<()> {
 /// let daw = Daw::new(handle);
 /// let project = daw.current_project().await?;
 ///
