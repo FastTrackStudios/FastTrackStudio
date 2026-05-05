@@ -4612,24 +4612,6 @@ fn priority_label(priority: &Priority) -> &'static str {
 
 // ── Vox service trait implementations ────────────────────────────────────────
 
-impl crate::service::TaskService for VaultServiceImpl {
-    async fn execute_query(&self, query: Query) -> Vec<Task> {
-        self.execute_query(query).await
-    }
-    async fn urgency_score(&self, task: Task) -> i32 {
-        self.urgency_score(task).await
-    }
-    async fn complete_task(&self, title: String) -> Result<Task, VaultError> {
-        self.complete_task(title).await
-    }
-    async fn search_tasks(&self, query: String) -> Vec<Task> {
-        self.search_tasks(query).await
-    }
-    async fn tasks_for_user(&self, username: String) -> Vec<Task> {
-        self.tasks_for_user(username).await
-    }
-}
-
 impl crate::service::InboxService for VaultServiceImpl {
     async fn capture(&self, request: InboxCaptureRequest) -> Result<InboxItem, VaultError> {
         self.capture_inbox(request).await
@@ -4663,31 +4645,6 @@ impl crate::service::InboxService for VaultServiceImpl {
 impl crate::service::OperatingService for VaultServiceImpl {
     async fn operating_model(&self) -> OperatingModelReport {
         self.operating_model_report().await
-    }
-}
-
-impl crate::service::ProjectService for VaultServiceImpl {
-    async fn project_stats(&self, project_title: String) -> ProjectStats {
-        self.project_stats(project_title).await
-    }
-    async fn project_dashboard(&self) -> Vec<ProjectDashboardEntry> {
-        VaultServiceImpl::project_dashboard(self).await
-    }
-    async fn next_task(&self, project_title: String) -> Option<Task> {
-        self.next_task(project_title).await
-    }
-    async fn tasks_for_project(&self, project_title: String) -> Vec<Task> {
-        self.tasks_for_project(project_title).await
-    }
-
-    async fn project_context(
-        &self,
-        project_title: String,
-        include_files: bool,
-        depth: String,
-    ) -> Result<Option<ProjectKnowledgeContext>, VaultError> {
-        self.project_knowledge_context(project_title, include_files, depth)
-            .await
     }
 }
 
@@ -4804,12 +4761,6 @@ impl crate::service::PeopleService for VaultServiceImpl {
         remote: OrganizationRecord,
     ) -> Result<Option<ProviderConflict>, VaultError> {
         Ok(organization_provider_conflicts(&local, &remote))
-    }
-}
-
-impl crate::service::ExpenseService for VaultServiceImpl {
-    async fn expense_report(&self, filter: ExpenseFilter) -> ExpenseReport {
-        VaultServiceImpl::expense_report(self, filter).await
     }
 }
 
@@ -5416,118 +5367,6 @@ impl crate::service::SystemService for VaultServiceImpl {
         }
 
         system_health(deep, checks)
-    }
-}
-
-impl crate::service::CalendarService for VaultServiceImpl {
-    async fn tasks_due_by(&self, date: String) -> Vec<Task> {
-        self.tasks_due_by(date).await
-    }
-
-    async fn scheduled_between(&self, from: String, to: String) -> Result<Vec<Task>, VaultError> {
-        let from = chrono::NaiveDate::parse_from_str(&from, "%Y-%m-%d")
-            .map_err(|e| VaultError::ParseError(e.to_string()))?;
-        let to = chrono::NaiveDate::parse_from_str(&to, "%Y-%m-%d")
-            .map_err(|e| VaultError::ParseError(e.to_string()))?;
-        Ok(self
-            .stored_tasks()
-            .await
-            .into_iter()
-            .filter(|task| task.scheduled.map_or(false, |d| d >= from && d <= to))
-            .collect())
-    }
-
-    async fn events_between(
-        &self,
-        from: String,
-        to: String,
-    ) -> Result<Vec<crate::CalendarEvent>, VaultError> {
-        let from = chrono::DateTime::parse_from_rfc3339(&from)
-            .map_err(|e| VaultError::ParseError(e.to_string()))?
-            .to_utc();
-        let to = chrono::DateTime::parse_from_rfc3339(&to)
-            .map_err(|e| VaultError::ParseError(e.to_string()))?
-            .to_utc();
-        Ok(self.calendar_events_between(from, to).await)
-    }
-
-    async fn trigger_sync(&self) -> Result<SyncStats, VaultError> {
-        self.trigger_sync().await
-    }
-    async fn sync_status(&self) -> Option<SyncStats> {
-        self.sync_status().await
-    }
-    async fn sync_plan(&self) -> SyncPlan {
-        self.sync_plan().await
-    }
-    async fn discover_caldav(&self) -> Result<CalDavDiscovery, VaultError> {
-        VaultServiceImpl::discover_caldav(self).await
-    }
-    async fn discover_carddav(&self) -> Result<CardDavDiscovery, VaultError> {
-        VaultServiceImpl::discover_carddav(self).await
-    }
-    async fn calendar_multiget(
-        &self,
-        request: CalDavMultigetRequest,
-    ) -> Result<Vec<CalDavObject>, VaultError> {
-        VaultServiceImpl::calendar_multiget(self, request).await
-    }
-    async fn calendar_sync_collection(
-        &self,
-        request: CalDavSyncCollectionRequest,
-    ) -> Result<CalDavSyncCollectionResponse, VaultError> {
-        VaultServiceImpl::calendar_sync_collection(self, request).await
-    }
-    async fn addressbook_multiget(
-        &self,
-        request: CardDavMultigetRequest,
-    ) -> Result<Vec<CardDavObject>, VaultError> {
-        VaultServiceImpl::addressbook_multiget(self, request).await
-    }
-    async fn addressbook_sync_collection(
-        &self,
-        request: CardDavSyncCollectionRequest,
-    ) -> Result<CardDavSyncCollectionResponse, VaultError> {
-        VaultServiceImpl::addressbook_sync_collection(self, request).await
-    }
-    async fn put_calendar_object(&self, request: CalDavPutObjectRequest) -> Result<(), VaultError> {
-        VaultServiceImpl::put_calendar_object(self, request).await
-    }
-    async fn delete_calendar_object(
-        &self,
-        request: CalDavDeleteObjectRequest,
-    ) -> Result<(), VaultError> {
-        VaultServiceImpl::delete_calendar_object(self, request).await
-    }
-    async fn put_addressbook_object(
-        &self,
-        request: CardDavPutObjectRequest,
-    ) -> Result<(), VaultError> {
-        VaultServiceImpl::put_addressbook_object(self, request).await
-    }
-    async fn delete_addressbook_object(
-        &self,
-        request: CardDavDeleteObjectRequest,
-    ) -> Result<(), VaultError> {
-        VaultServiceImpl::delete_addressbook_object(self, request).await
-    }
-    async fn send_calendar_schedule(
-        &self,
-        request: CalDavScheduleRequest,
-    ) -> Result<CalDavScheduleResponse, VaultError> {
-        VaultServiceImpl::send_calendar_schedule(self, request).await
-    }
-    async fn calendar_free_busy(
-        &self,
-        request: CalDavFreeBusyRequest,
-    ) -> Result<Vec<CalDavFreeBusyInterval>, VaultError> {
-        VaultServiceImpl::calendar_free_busy(self, request).await
-    }
-    async fn list_deck_boards(&self) -> Result<Vec<RemoteDeckBoard>, VaultError> {
-        self.list_remote_deck_boards().await
-    }
-    async fn list_deck_stacks(&self, board_id: u64) -> Result<Vec<RemoteDeckStack>, VaultError> {
-        self.list_remote_deck_stacks(board_id).await
     }
 }
 
