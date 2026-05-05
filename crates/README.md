@@ -1,69 +1,57 @@
-# DAW Cells
+# DAW Crates
 
-This directory contains the DAW (Digital Audio Workstation) protocol and implementations for roam.
+This directory contains the DAW protocol, control wrappers, REAPER
+implementation, bridge extension, and facade crates used by FastTrackStudio.
+The current service transport is vox.
 
 ## Architecture
 
-The DAW system is split into multiple crates following clean separation of concerns:
+The DAW system is split into multiple crates with explicit ownership:
 
 ```
-daw/
-├── daw-proto/      # Pure protocol definitions (services + types)
-├── daw-control/    # Ergonomic Rust API wrapper (reaper-rs style)
-├── daw-reaper/     # REAPER DAW implementation
-└── daw-standalone/ # Standalone/mock implementation
+daw-proto          # Vox service traits, generated clients, shared types
+daw-control        # Ergonomic async Rust API over a vox Caller
+daw-control-sync   # Blocking/local helpers, including in-process LocalCaller
+daw-reaper         # REAPER service implementations
+daw-bridge         # REAPER extension exposing daw-reaper over a Unix socket
+daw-standalone     # Reference/mock service implementation
+daw                # Public facade crate for consumers
+apps/daw           # `daw` CLI, a thin service client
 ```
 
 ## Crates
 
 ### `daw-proto` - Protocol Definitions
 
-**Pure, functional protocol layer** - no global state, no opinions.
+`daw-proto` is the shared service contract. It owns the vox service traits,
+request/response types, event types, and generated clients for services such as
+transport, tracks, project, FX, markers, regions, batch operations, dock host,
+action registry, toolbar, and FTS screensets.
 
-Contains:
-- Service trait definitions (`TransportService`, `TrackService`, `ProjectService`, etc.)
-- Data types (`Transport`, `Track`, `Position`, `Tempo`, etc.)
-- Update types for streaming (`TransportUpdate`, `TrackUpdate`, etc.)
-
-Used by:
-- ✅ Server implementations (`daw-reaper`, `daw-standalone`)
-- ✅ Client wrapper (`daw-control`)
-- ✅ Code generation (TypeScript, Swift, etc.)
-- ✅ Anyone needing the raw protocol
+This crate stays implementation-agnostic. Service implementations live in
+`daw-reaper` and `daw-standalone`; higher-level Rust ergonomics live in
+`daw-control` and the `daw` facade.
 
 Example:
 ```rust
-use daw_proto::{TransportService, TransportServiceClient};
+use daw_proto::TransportServiceClient;
 
-// Direct usage of protocol (verbose but pure)
-let client = TransportServiceClient::new(handle);
-client.play(Some(project_id)).await?;
+let transport = TransportServiceClient::new(handle);
+transport.play(None).await?;
 ```
 
 ### `daw-control` - Ergonomic API Wrapper
 
-**Reaper-RS style hierarchical API** for Rust consumers.
-
-Provides:
-- Global singleton pattern (`Daw::init()`, like `Reaper::get()`)
-- Lightweight handles (`Project`, `Transport`, `Track`)
-- Beautiful hierarchical navigation
-- Zero-cost abstractions (handles are just IDs)
-
-Used by:
-- ✅ Desktop app (Dioxus host)
-- ✅ CLI tools
-- ✅ Test utilities
-- ✅ Any Rust code consuming the DAW
+`daw-control` provides a reaper-rs-style async API for Rust consumers. It wraps
+the raw service clients in lightweight handles such as `Daw`, `Project`,
+`Transport`, `Track`, and `FxChain`.
 
 Example:
 ```rust
 use daw_control::Daw;
 
-// Initialize once at startup
 Daw::init(handle)?;
 
-// Beautiful API (like reaper-rs!)
 let project = Daw::current_project().await?;
 project.transport().play().await?;
 
@@ -73,45 +61,76 @@ track.set_volume(0.8).await?;
 
 ### `daw-reaper` - REAPER Implementation
 
-**Server-side implementation** for REAPER DAW.
+`daw-reaper` implements the `daw-proto` service traits against REAPER through
+the project's pinned `reaper-rs` fork. It owns the main-thread dispatch bridge,
+REAPER-safe wrappers, service state, broadcaster initialization, and direct
+in-process APIs such as `DawMainThread`.
 
-Contains:
-- Service implementations (`TransportServiceImpl`, `TrackServiceImpl`, etc.)
-- REAPER callback handlers (`IReaperControlSurface`)
-- State management and broadcasting
-- Integration with `reaper-rs`
+Async vox requests that arrive on worker threads are routed back to REAPER's
+main thread where required.
 
-Uses:
-- `daw-proto` for service definitions
-- `reaper-rs` for REAPER API access
-- `tokio::sync::broadcast` for reactive updates
+### `daw-bridge` - REAPER Extension Socket Bridge
+
+`daw-bridge` is the REAPER extension that composes the `daw-reaper` service
+implementations into a routed vox handler. It binds a Unix socket at
+`/tmp/fts-daw-{pid}.sock` by default, or the path supplied in `FTS_SOCKET`.
+
+External processes use this bridge:
+
+```bash
+daw --socket /tmp/fts-daw-12345.sock transport
+daw tracks --json
+```
+
+When no `--socket` is provided, `apps/daw` discovers live `/tmp/fts-daw-*.sock`
+files and connects to the newest instance.
+
+### `apps/daw` - CLI Client
+
+The `daw` binary is intentionally thin. It discovers or receives a socket,
+establishes a vox session, builds a `daw-control` handle, and maps commands to
+service calls. It is useful for scripts, tests, and operator diagnostics, but
+it should not become a second implementation of DAW behavior.
+
+### `daw-bridge` vs. Integrated Extensions
+
+Out-of-process tools use the Unix socket served by `daw-bridge`. Code that is
+already loaded inside REAPER should prefer local access:
+
+- `daw::init(raw_host_context)` for DAW-aware plugins.
+- `daw::main_thread_daw()` for synchronous REAPER-main-thread work.
+- `daw-control-sync::LocalCaller` for in-process vox service dispatch without a socket.
+
+This keeps integrated extensions off the socket path while preserving the same
+service contracts used by external clients.
 
 ### `daw-standalone` - Standalone Implementation
 
-**Mock/test implementation** for development without REAPER.
+`daw-standalone` is the mock/reference implementation for tests and development
+without REAPER.
 
-Contains:
-- Simulated DAW state
-- Mock implementations of all services
-- Useful for testing and development
+### `daw` - Public Facade
+
+The facade is the public API surface for the DAW domain. External crates should
+prefer `daw` and its feature-gated modules instead of depending directly on
+internal implementation crates.
 
 ## Design Philosophy
 
 ### Separation of Concerns
 
-**Protocol (daw-proto):**
-- 100% pure definitions
-- No global state
-- No implementation opinions
-- Language-agnostic (can be code-generated)
+**Protocol (`daw-proto`):**
+- Service contracts and shared types only
+- No REAPER-specific implementation state
+- Stable names for code generation and external tooling
 
-**Control (daw-control):**
+**Control (`daw-control` / `daw-control-sync`):**
 - Ergonomic Rust wrapper
 - Adds convenience, not functionality
-- Optional - can use `daw-proto` directly
-- Follows reaper-rs patterns
+- Supports socket-backed callers and local in-process callers
+- Follows reaper-rs-style handles
 
-**Implementations (daw-reaper, daw-standalone):**
+**Implementations (`daw-reaper`, `daw-standalone`):**
 - Implement the protocol
 - Handle DAW-specific details
 - Manage internal state
@@ -136,139 +155,30 @@ let project = Daw::current_project().await?;
 project.tracks().get("track-1").await?.set_volume(0.8).await?;
 ```
 
-### Reactive Streaming
+### Streaming
 
-All services support streaming for real-time updates:
+Services that expose live state use vox channels for streaming updates:
 
 ```rust
-// Subscribe to transport updates (60fps playhead)
 let mut updates = project.transport().subscribe().await?;
 while let Some(update) = updates.next().await {
     println!("Position: {:?}", update.state.playhead_position);
 }
 ```
 
-Implementation uses:
-- `tokio::sync::broadcast` for efficient multi-client streaming
-- `Arc<T>` for zero-copy message sharing
-- Optional project IDs (None = current project)
+### FTS Screensets
 
-## Usage Examples
+FTS screensets are named, host-managed workspace snapshots exposed through
+`ScreensetService`. They are separate from REAPER's built-in numbered screenset
+slots and support the current universal screenset model:
 
-### Desktop App (Host)
+- `Window` captures window, dock, monitor, and panel layout state.
+- `TrackSet` captures TCP/MCP visibility by stable track GUID.
+- `SelectionSet` captures selected tracks plus loop/time selection.
 
-```rust
-use daw_control::Daw;
-use dioxus::prelude::*;
-
-#[tokio::main]
-async fn main() {
-    // Connect to REAPER extension via the DAW service socket
-    let handle = daw_control_sync::DawSync::connect_to_service().await.unwrap();
-    Daw::init(handle).unwrap();
-    
-    dioxus::launch(App);
-}
-
-fn App() -> Element {
-    let mut transport_state = use_signal(|| None);
-    
-    use_effect(move || async move {
-        let project = Daw::current_project().await.ok()?;
-        let mut updates = project.transport().subscribe().await.ok()?;
-        
-        while let Some(update) = updates.next().await {
-            transport_state.set(Some(update.state));
-        }
-    });
-    
-    rsx! {
-        if let Some(state) = transport_state() {
-            div { "Playing: {state.is_playing()}" }
-            div { "Position: {state.playhead_position:?}" }
-        }
-    }
-}
-```
-
-### CLI Tool
-
-```rust
-use daw_control::Daw;
-
-#[tokio::main]
-async fn main() -> eyre::Result<()> {
-    // Connect to DAW
-    let handle = roam::connect("unix:///tmp/fts-daw.sock").await?;
-    Daw::init(handle)?;
-    
-    // Control transport
-    let project = Daw::current_project().await?;
-    
-    println!("Playing...");
-    project.transport().play().await?;
-    
-    tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-    
-    println!("Stopped");
-    project.transport().stop().await?;
-    
-    Ok(())
-}
-```
-
-### REAPER Extension (Server)
-
-```rust
-use daw_proto::{TransportService, Transport};
-use roam::{Context, Tx};
-
-pub struct ReaperTransportService {
-    state: Arc<RwLock<Transport>>,
-    broadcast_tx: broadcast::Sender<Arc<TransportUpdate>>,
-}
-
-impl TransportService for ReaperTransportService {
-    async fn play(&self, _cx: &Context, project_id: Option<String>) {
-        let project = match project_id {
-            Some(id) => find_project(&id)?,
-            None => Reaper::get().current_project(),
-        };
-        
-        project.play();
-    }
-    
-    async fn subscribe(&self, _cx: &Context, project_id: Option<String>, updates: Tx<TransportUpdate>) {
-        let mut rx = self.broadcast_tx.subscribe();
-        
-        loop {
-            match rx.recv().await {
-                Ok(update) => {
-                    if updates.send(&*update).await.is_err() {
-                        break;
-                    }
-                }
-                _ => break,
-            }
-        }
-    }
-}
-```
-
-## Future Work
-
-- [ ] Add `TrackService` and track handles
-- [ ] Add `FxService` for plugin control
-- [ ] Add `ItemService` for media items
-- [ ] Add `EnvelopeService` for automation
-- [ ] Add `MarkerService` for markers/regions
-- [ ] Generate TypeScript client bindings
-- [ ] Generate Swift client bindings
-- [ ] Add bidirectional streaming support
-- [ ] Add batch operations for efficiency
+The CLI exposes these through `daw screensets`, `daw screenset-capture`,
+`daw screenset-apply`, and related commands.
 
 ## See Also
 
 - [reaper-rs](https://github.com/helgoboss/reaper-rs) - Inspiration for API design
-- [roam](../../reference/roam) - RPC framework
-- [dodeca](../../reference/dodeca) - Example of multi-service architecture
