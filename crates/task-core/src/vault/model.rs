@@ -183,7 +183,20 @@ impl Vault {
 
     pub fn parse_task_from_md(content: &str) -> Option<Task> {
         let (frontmatter, body) = Self::split_frontmatter(content)?;
-        let mut task = facet_yaml::from_str::<Task>(frontmatter).ok()?;
+        let mut task = serde_yaml::from_str::<Task>(frontmatter).ok()?;
+        if task.id == uuid::Uuid::nil() {
+            if let Some(id) = frontmatter_string(frontmatter, "id") {
+                match uuid::Uuid::parse_str(&id) {
+                    Ok(uuid) => task.id = uuid,
+                    Err(_) => {
+                        if task.external_id.is_none() {
+                            task.external_id = Some(id);
+                        }
+                        task.id = uuid::Uuid::new_v4();
+                    }
+                }
+            }
+        }
         task.body = body.to_string();
         Some(task)
     }
@@ -527,7 +540,7 @@ impl Vault {
 
     pub fn render_task_file(task: &Task, body: &str) -> Result<String, VaultError> {
         let yaml =
-            facet_yaml::to_string(task).map_err(|e| VaultError::ParseError(e.to_string()))?;
+            serde_yaml::to_string(task).map_err(|e| VaultError::ParseError(e.to_string()))?;
         let yaml = yaml.strip_prefix("---\n").unwrap_or(&yaml);
         // Use provided body, or fall back to task.body
         let body = if body.is_empty() { &task.body } else { body };
@@ -562,4 +575,12 @@ impl Vault {
 
 fn safe_file_name(title: &str) -> String {
     title.replace('/', "-")
+}
+
+fn frontmatter_string(frontmatter: &str, key: &str) -> Option<String> {
+    let prefix = format!("{key}:");
+    frontmatter.lines().find_map(|line| {
+        let value = line.trim().strip_prefix(&prefix)?.trim();
+        Some(value.trim_matches('"').trim_matches('\'').to_string())
+    })
 }

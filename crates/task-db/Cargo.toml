@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+task-core = { path = "../task-core", default-features = false, features = ["db"] }
 sea-orm.workspace = true
 sea-orm-migration.workspace = true
 crudcrate.workspace = true
@@ -22,3 +23,6 @@ tracing.workspace = true
 async-trait = "0.1"
 facet.workspace = true
 better-auth-core = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }

@@ -234,7 +234,7 @@ impl TaskIndex {
 
     /// Index a task from a parsed .md file.
     pub fn index_task(&self, task: &Task, file_path: &str) -> Result<(), VaultError> {
-        let id = task.id.as_deref().unwrap_or(&task.title);
+        let id = task.id_ref();
         let status = format!("{:?}", task.status);
         let priority = format!("{:?}", task.priority);
         let urgency = task.urgency_score();
@@ -768,14 +768,14 @@ mod tests {
         let index = TaskIndex::in_memory().unwrap();
 
         let task = Task {
-            id: Some("test-1".into()),
+            id: uuid::Uuid::parse_str("00000000-0000-4000-8000-000000000201").unwrap(),
             title: "Fix auth bug".into(),
             status: Status::InProgress,
             priority: Priority::High,
             assignee: Some("codywright".into()),
             due: chrono::NaiveDate::from_ymd_opt(2026, 4, 15),
-            projects: vec![WikiLink("Task App".into())],
-            tags: vec!["backend".into()],
+            projects: vec![WikiLink("Task App".into())].into(),
+            tags: vec!["backend".into()].into(),
             ..Default::default()
         };
 

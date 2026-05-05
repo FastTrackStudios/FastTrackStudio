@@ -162,7 +162,7 @@ pub fn build_agent_plan(task: &Task) -> AgentPlan {
 
     AgentPlan {
         task_title: task.title.clone(),
-        task_id: task.id.clone(),
+        task_id: Some(task.id_ref()),
         blocked_by,
         nodes,
         edges,
@@ -266,7 +266,7 @@ mod tests {
             status: Status::Open,
             priority: Priority::Normal,
             body: body.into(),
-            blocked_by,
+            blocked_by: blocked_by.into(),
             ..Default::default()
         }
     }

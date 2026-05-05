@@ -105,9 +105,7 @@ impl CrdtDocument {
         let _ = meta.insert("title", task.title.as_str());
         let _ = meta.insert("status", format!("{:?}", task.status));
         let _ = meta.insert("priority", format!("{:?}", task.priority));
-        if let Some(v) = &task.id {
-            let _ = meta.insert("id", v.as_str());
-        }
+        let _ = meta.insert("id", task.id.to_string());
         if let Some(v) = &task.assignee {
             let _ = meta.insert("assignee", v.as_str());
         }
@@ -158,7 +156,9 @@ impl CrdtDocument {
         let mut task = Task::default();
 
         task.title = get_string(&meta, "title").unwrap_or_default();
-        task.id = get_string(&meta, "id");
+        task.id = get_string(&meta, "id")
+            .and_then(|id| uuid::Uuid::parse_str(&id).ok())
+            .unwrap_or_else(uuid::Uuid::new_v4);
         task.assignee = get_string(&meta, "assignee");
         task.created_by = get_string(&meta, "created_by");
         task.external_source = get_string(&meta, "external_source");
@@ -181,12 +181,13 @@ impl CrdtDocument {
             task.time_estimate = Some(n as u32);
         }
 
-        task.tags = read_string_list(&self.doc.get_list(TAGS_ID));
+        task.tags = read_string_list(&self.doc.get_list(TAGS_ID)).into();
         task.projects = read_string_list(&self.doc.get_list(PROJECTS_ID))
             .into_iter()
             .map(WikiLink)
-            .collect();
-        task.contexts = read_string_list(&self.doc.get_list(CONTEXTS_ID));
+            .collect::<Vec<_>>()
+            .into();
+        task.contexts = read_string_list(&self.doc.get_list(CONTEXTS_ID)).into();
         task.body = self.doc.get_text(BODY_ID).to_string();
 
         task
@@ -354,14 +355,14 @@ mod tests {
 
     fn make_task() -> Task {
         Task {
-            id: Some("t-1".into()),
+            id: uuid::Uuid::parse_str("00000000-0000-4000-8000-000000000401").unwrap(),
             title: "Mix track".into(),
             status: Status::Open,
             priority: Priority::High,
             assignee: Some("cody".into()),
-            tags: vec!["urgent".into(), "audio".into()],
-            projects: vec![WikiLink("Album".into())],
-            contexts: vec!["studio".into()],
+            tags: vec!["urgent".into(), "audio".into()].into(),
+            projects: vec![WikiLink("Album".into())].into(),
+            contexts: vec!["studio".into()].into(),
             due: chrono::NaiveDate::from_ymd_opt(2026, 4, 20),
             body: "## Subtasks\n- [ ] Low end\n- [ ] Vocals".into(),
             ..Default::default()
@@ -376,10 +377,10 @@ mod tests {
         assert_eq!(t.status, Status::Open);
         assert_eq!(t.priority, Priority::High);
         assert_eq!(t.assignee.as_deref(), Some("cody"));
-        assert_eq!(t.tags, vec!["urgent".to_string(), "audio".into()]);
+        assert_eq!(t.tags.to_vec(), vec!["urgent".to_string(), "audio".into()]);
         assert_eq!(t.projects.len(), 1);
         assert_eq!(t.projects[0].0, "Album");
-        assert_eq!(t.contexts, vec!["studio".to_string()]);
+        assert_eq!(t.contexts.to_vec(), vec!["studio".to_string()]);
         assert_eq!(t.due, chrono::NaiveDate::from_ymd_opt(2026, 4, 20));
         assert!(t.body.contains("Low end"));
     }

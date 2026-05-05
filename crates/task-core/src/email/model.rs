@@ -19,11 +19,13 @@
 
 use chrono::{DateTime, Utc};
 use facet::Facet;
+use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
 /// A reference to an email that lives in Nextcloud Mail (or any IMAP server
 /// NC Mail has configured). Stored on [`Task`](crate::task::Task) and
 /// [`Project`](crate::project::Project) frontmatter under `emails:`.
-#[derive(Debug, Clone, PartialEq, Default, Facet)]
+#[derive(Debug, Clone, PartialEq, Default, Facet, Serialize, Deserialize, ToSchema)]
 pub struct EmailRef {
     /// RFC 2822 `Message-ID` — the canonical, survives-folder-moves key.
     /// Store with or without the angle brackets; resolve functions should

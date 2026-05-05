@@ -328,7 +328,7 @@ mod tests {
             title: title.to_string(),
             status,
             priority: crate::task::Priority::Normal,
-            projects: vec![WikiLink(project.to_string())],
+            projects: vec![WikiLink(project.to_string())].into(),
             due: due.map(|days| today + chrono::Duration::days(days)),
             ..Default::default()
         }

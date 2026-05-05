@@ -13,13 +13,13 @@ use task_core::task::{Priority, Status, Task, WikiLink};
 
 fn test_task(title: &str, project: &str, assignee: &str) -> Task {
     Task {
-        id: Some(format!("id-{}", title.replace(' ', "-"))),
+        id: uuid::Uuid::new_v4(),
         title: title.to_string(),
         status: Status::Open,
         priority: Priority::Normal,
         assignee: Some(assignee.to_string()),
-        projects: vec![WikiLink(project.to_string())],
-        tags: vec!["test".to_string()],
+        projects: vec![WikiLink(project.to_string())].into(),
+        tags: vec!["test".to_string()].into(),
         ..Default::default()
     }
 }

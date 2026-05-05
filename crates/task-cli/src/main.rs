@@ -22,6 +22,7 @@ use task_core::{
     TimeEntryContext, TimeEntryFilter, VaultServiceImpl, VenueDefault, WikiLink, build_agent_plan,
     create_project, save_project_task,
 };
+use uuid::Uuid;
 
 #[derive(Parser)]
 #[command(name = "task", about = "Task management CLI", version)]
@@ -2174,9 +2175,12 @@ async fn main() -> eyre::Result<()> {
                             .map_err(|e| eyre::eyre!("{e}"))
                     })
                     .transpose()?,
-                projects: project.map(|p| vec![WikiLink(p)]).unwrap_or_default(),
-                contexts: context.map(|c| vec![c]).unwrap_or_default(),
-                tags: tag.map(|t| vec![t]).unwrap_or_default(),
+                projects: project
+                    .map(|p| vec![WikiLink(p)])
+                    .unwrap_or_default()
+                    .into(),
+                contexts: context.map(|c| vec![c]).unwrap_or_default().into(),
+                tags: tag.map(|t| vec![t]).unwrap_or_default().into(),
                 recurrence,
                 assignee,
                 created_by: actor.clone(),
@@ -2185,7 +2189,7 @@ async fn main() -> eyre::Result<()> {
 
             let created = svc.create_task(task).await?;
             println!("Created: {}", created.title);
-            println!("  id:  {}", created.id.as_deref().unwrap_or("—"));
+            println!("  id:  {}", created.id);
             if let Some(d) = created.due {
                 println!("  due: {d}");
             }
@@ -3218,7 +3222,7 @@ async fn main() -> eyre::Result<()> {
             let target = find_task(&svc, &to).await?;
             let rt = parse_relation_kind(&kind)?;
             // Dedup: don't add the same (target, kind) twice.
-            let target_ref = target.id.clone().unwrap_or_else(|| target.title.clone());
+            let target_ref = target.id.to_string();
             let already = source
                 .relations
                 .iter()
@@ -4113,7 +4117,7 @@ async fn find_task(svc: &VaultServiceImpl, reference: &str) -> eyre::Result<Task
     let tasks = svc.list_tasks().await;
     tasks
         .into_iter()
-        .find(|t| t.id.as_deref() == Some(reference) || t.title.eq_ignore_ascii_case(reference))
+        .find(|t| t.matches_reference(reference))
         .ok_or_else(|| eyre::eyre!("Task not found: {reference}"))
 }
 
@@ -4542,7 +4546,7 @@ async fn run_remote_command(
             )?;
             let created = remote.task().await?.create_task(task).await?;
             println!("Created: {}", created.title);
-            println!("  id:  {}", created.id.as_deref().unwrap_or("—"));
+            println!("  id:  {}", created.id);
             if let Some(d) = created.due {
                 println!("  due: {d}");
             }
@@ -4817,7 +4821,7 @@ async fn run_remote_command(
             let mut source = remote_find_task_with_client(&client, &from).await?;
             let target = remote_find_task_with_client(&client, &to).await?;
             let rt = parse_relation_kind(&kind)?;
-            let target_ref = target.id.clone().unwrap_or_else(|| target.title.clone());
+            let target_ref = target.id.to_string();
             let already = source
                 .relations
                 .iter()
@@ -5062,9 +5066,12 @@ fn build_new_task(
                     .map_err(|e| eyre::eyre!("{e}"))
             })
             .transpose()?,
-        projects: project.map(|p| vec![WikiLink(p)]).unwrap_or_default(),
-        contexts: context.map(|c| vec![c]).unwrap_or_default(),
-        tags: tag.map(|t| vec![t]).unwrap_or_default(),
+        projects: project
+            .map(|p| vec![WikiLink(p)])
+            .unwrap_or_default()
+            .into(),
+        contexts: context.map(|c| vec![c]).unwrap_or_default().into(),
+        tags: tag.map(|t| vec![t]).unwrap_or_default().into(),
         recurrence,
         assignee,
         created_by: actor,
@@ -6672,11 +6679,7 @@ async fn run_asset_command(
                     println!("{}", facet_json::to_string(&response).unwrap_or_default());
                 } else {
                     println!("Opened repair task for asset {}.", response.asset.id);
-                    println!(
-                        "Task: {} ({})",
-                        response.task.title,
-                        response.task.id.as_deref().unwrap_or("no id")
-                    );
+                    println!("Task: {} ({})", response.task.title, response.task.id);
                     println!("{}", render_asset_body(&response.asset));
                 }
             }
@@ -8081,12 +8084,12 @@ fn seed_demo_vault(
 
     let tasks = vec![
         Task {
-            id: Some("demo-task-capture-inbox".to_string()),
+            id: Uuid::parse_str("00000000-0000-4000-8000-000000000101").unwrap(),
             title: "Demo capture inbox item".to_string(),
             status: Status::Planned,
             priority: Priority::High,
-            projects: vec![project_link.clone()],
-            tags: vec!["demo".to_string(), "inbox".to_string()],
+            projects: vec![project_link.clone()].into(),
+            tags: vec!["demo".to_string(), "inbox".to_string()].into(),
             assignee: Some(actor.to_string()),
             created_by: Some(actor.to_string()),
             date_created: Some(created),
@@ -8095,16 +8098,17 @@ fn seed_demo_vault(
             ..Default::default()
         },
         Task {
-            id: Some("demo-task-billable-work".to_string()),
+            id: Uuid::parse_str("00000000-0000-4000-8000-000000000102").unwrap(),
             title: "Demo billable work item".to_string(),
             status: Status::InProgress,
             priority: Priority::Normal,
-            projects: vec![project_link.clone()],
+            projects: vec![project_link.clone()].into(),
             tags: vec![
                 "demo".to_string(),
                 "time".to_string(),
                 "invoice".to_string(),
-            ],
+            ]
+            .into(),
             assignee: Some(actor.to_string()),
             created_by: Some(actor.to_string()),
             date_created: Some(created),
@@ -8119,18 +8123,19 @@ fn seed_demo_vault(
                 billable_rate: Some(12_000),
                 tags: vec!["demo".to_string()],
                 ..Default::default()
-            }],
+            }]
+            .into(),
             body: "Provides a stable time-entry fixture for reports and invoice smoke tests."
                 .to_string(),
             ..Default::default()
         },
         Task {
-            id: Some("demo-task-review-invoice".to_string()),
+            id: Uuid::parse_str("00000000-0000-4000-8000-000000000103").unwrap(),
             title: "Demo review invoice lifecycle".to_string(),
             status: Status::Open,
             priority: Priority::Normal,
-            projects: vec![project_link],
-            tags: vec!["demo".to_string(), "invoice".to_string()],
+            projects: vec![project_link].into(),
+            tags: vec!["demo".to_string(), "invoice".to_string()].into(),
             assignee: Some(actor.to_string()),
             created_by: Some(actor.to_string()),
             date_created: Some(created),
@@ -8818,7 +8823,7 @@ async fn run_remote_agent_command(
 fn find_task_in(tasks: Vec<Task>, reference: &str) -> eyre::Result<Task> {
     tasks
         .into_iter()
-        .find(|t| t.id.as_deref() == Some(reference) || t.title.eq_ignore_ascii_case(reference))
+        .find(|t| t.matches_reference(reference))
         .ok_or_else(|| eyre::eyre!("Task not found: {reference}"))
 }
 
@@ -11270,9 +11275,7 @@ fn print_task_detail(task: &Task) {
     if !task.tags.is_empty() {
         println!("Tags:     {}", task.tags.join(", "));
     }
-    if let Some(id) = &task.id {
-        println!("ID:       {id}");
-    }
+    println!("ID:       {}", task.id);
     if task.is_overdue() {
         println!("⚠ OVERDUE");
     }

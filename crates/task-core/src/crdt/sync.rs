@@ -459,7 +459,7 @@ mod tests {
 
     fn doc_with(peer: PeerID, title: &str) -> CrdtDocument {
         let t = Task {
-            id: Some("t-1".into()),
+            id: uuid::Uuid::parse_str("00000000-0000-4000-8000-000000000402").unwrap(),
             title: title.into(),
             status: Status::Open,
             priority: Priority::Normal,

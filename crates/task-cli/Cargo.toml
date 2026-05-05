@@ -15,3 +15,4 @@ chrono.workspace = true
 eyre.workspace = true
 clap = { version = "4", features = ["derive", "env"] }
 facet-json.workspace = true
+uuid.workspace = true

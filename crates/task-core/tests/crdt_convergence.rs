@@ -11,7 +11,7 @@ mod crdt_tests {
 
     fn base_task() -> Task {
         Task {
-            id: Some("shared".into()),
+            id: uuid::Uuid::parse_str("00000000-0000-4000-8000-000000000701").unwrap(),
             title: "Shared task".into(),
             status: Status::Open,
             priority: Priority::Normal,

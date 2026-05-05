@@ -308,14 +308,14 @@ mod tests {
     #[test]
     fn roundtrip_basic_task() {
         let task = Task {
-            id: Some("test-uid-123".into()),
+            id: uuid::Uuid::parse_str("00000000-0000-4000-8000-000000000601").unwrap(),
             title: "Buy groceries".into(),
             status: Status::Open,
             priority: Priority::High,
             due: NaiveDate::from_ymd_opt(2026, 4, 15),
-            tags: vec!["errands".into(), "shopping".into()],
-            contexts: vec!["home".into()],
-            projects: vec![WikiLink("Personal".into())],
+            tags: vec!["errands".into(), "shopping".into()].into(),
+            contexts: vec!["home".into()].into(),
+            projects: vec![WikiLink("Personal".into())].into(),
             time_estimate: Some(30),
             ..Default::default()
         };
@@ -328,8 +328,8 @@ mod tests {
         assert_eq!(parsed.title, "Buy groceries");
         assert_eq!(parsed.status, Status::Open);
         assert_eq!(parsed.priority, Priority::High);
-        assert_eq!(parsed.tags, vec!["errands", "shopping"]);
-        assert_eq!(parsed.id, Some("test-uid-123".into()));
+        assert_eq!(parsed.tags.to_vec(), vec!["errands", "shopping"]);
+        assert_eq!(parsed.id, task.id);
     }
 
     #[test]

@@ -156,7 +156,7 @@ rev = "d01afa40d79227a4a2de85b50e76849300890766"
 
 [workspace.dependencies.crudcrate]
 git = "https://github.com/FastTrackStudios/crudcrate"
-rev = "d2b49419cdd9d6ffbdf6fb2a8aed019ee9cf68ca"
+rev = "4394c9112086718c68fe2ad6a914fd7123cc9515"
 features = ["derive"]
 
 [workspace.dependencies.argon2]

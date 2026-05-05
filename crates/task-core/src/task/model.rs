@@ -1,24 +1,190 @@
 // r[impl task.schema]
 use chrono::{DateTime, NaiveDate, Utc};
+use crudcrate::{CRUDResource, EntityToModels};
 use facet::Facet;
+use sea_orm::entity::prelude::*;
+use sea_orm::sea_query::{ArrayType, ColumnType, Nullable, Value, ValueType, ValueTypeErr};
+use sea_orm::{ColIdx, QueryResult, TryGetError, TryGetable};
+use serde::{Deserialize, Serialize};
+use std::ops::{Deref, DerefMut};
+use utoipa::ToSchema;
+use uuid::Uuid;
+
+macro_rules! json_vec_type {
+    ($name:ident, $item:ty) => {
+        #[derive(Debug, Clone, PartialEq, Facet, Serialize, Deserialize, ToSchema)]
+        #[serde(transparent)]
+        pub struct $name(pub Vec<$item>);
+
+        impl Default for $name {
+            fn default() -> Self {
+                Self(Vec::new())
+            }
+        }
+
+        impl $name {
+            pub fn into_inner(self) -> Vec<$item> {
+                self.0
+            }
+        }
+
+        impl Deref for $name {
+            type Target = Vec<$item>;
+
+            fn deref(&self) -> &Self::Target {
+                &self.0
+            }
+        }
+
+        impl DerefMut for $name {
+            fn deref_mut(&mut self) -> &mut Self::Target {
+                &mut self.0
+            }
+        }
+
+        impl From<Vec<$item>> for $name {
+            fn from(value: Vec<$item>) -> Self {
+                Self(value)
+            }
+        }
+
+        impl FromIterator<$item> for $name {
+            fn from_iter<I: IntoIterator<Item = $item>>(iter: I) -> Self {
+                Self(iter.into_iter().collect())
+            }
+        }
+
+        impl IntoIterator for $name {
+            type Item = $item;
+            type IntoIter = std::vec::IntoIter<$item>;
+
+            fn into_iter(self) -> Self::IntoIter {
+                self.0.into_iter()
+            }
+        }
+
+        impl<'a> IntoIterator for &'a $name {
+            type Item = &'a $item;
+            type IntoIter = std::slice::Iter<'a, $item>;
+
+            fn into_iter(self) -> Self::IntoIter {
+                self.0.iter()
+            }
+        }
+
+        impl<'a> IntoIterator for &'a mut $name {
+            type Item = &'a mut $item;
+            type IntoIter = std::slice::IterMut<'a, $item>;
+
+            fn into_iter(self) -> Self::IntoIter {
+                self.0.iter_mut()
+            }
+        }
+
+        impl From<$name> for Value {
+            fn from(value: $name) -> Self {
+                Value::Json(Some(Box::new(
+                    serde_json::to_value(value.0).unwrap_or(serde_json::Value::Array(Vec::new())),
+                )))
+            }
+        }
+
+        impl Nullable for $name {
+            fn null() -> Value {
+                Value::Json(None)
+            }
+        }
+
+        impl TryGetable for $name {
+            fn try_get_by<I: ColIdx>(res: &QueryResult, idx: I) -> Result<Self, TryGetError> {
+                let value: serde_json::Value = res.try_get_by(idx)?;
+                let items = serde_json::from_value(value).map_err(|err| {
+                    TryGetError::DbErr(sea_orm::DbErr::Type(format!(
+                        "failed to deserialize JSON array: {err}"
+                    )))
+                })?;
+                Ok(Self(items))
+            }
+        }
+
+        impl ValueType for $name {
+            fn try_from(value: Value) -> Result<Self, ValueTypeErr> {
+                match value {
+                    Value::Json(Some(value)) => serde_json::from_value(*value)
+                        .map(Self)
+                        .map_err(|_| ValueTypeErr),
+                    _ => Err(ValueTypeErr),
+                }
+            }
+
+            fn type_name() -> String {
+                stringify!($name).to_string()
+            }
+
+            fn array_type() -> ArrayType {
+                ArrayType::Json
+            }
+
+            fn column_type() -> ColumnType {
+                ColumnType::Json
+            }
+        }
+    };
+}
+
+json_vec_type!(StringList, String);
+json_vec_type!(WikiLinkList, WikiLink);
+json_vec_type!(TimeEntryList, TimeEntry);
+json_vec_type!(TaskDependencyList, TaskDependency);
+json_vec_type!(ReminderList, Reminder);
+json_vec_type!(TaskRelationList, TaskRelation);
+json_vec_type!(ReactionList, Reaction);
+json_vec_type!(EmailRefList, crate::email::EmailRef);
 
 /// A TaskNotes-compatible task stored as a vault .md file.
-#[derive(Debug, Clone, PartialEq, Default, Facet)]
-pub struct Task {
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Default,
+    Facet,
+    DeriveEntityModel,
+    EntityToModels,
+    Serialize,
+    Deserialize,
+    ToSchema,
+)]
+#[sea_orm(table_name = "tasks")]
+#[crudcrate(
+    api_struct = "TaskApi",
+    generate_vox_service,
+    name_singular = "task",
+    name_plural = "tasks"
+)]
+pub struct Model {
     // r[impl task.id]
     #[facet(default)]
-    pub id: Option<String>,
+    #[sea_orm(primary_key, auto_increment = false)]
+    #[crudcrate(
+        primary_key,
+        exclude(create),
+        on_create = uuid::Uuid::new_v4()
+    )]
+    pub id: Uuid,
+    #[crudcrate(filterable, sortable, fulltext)]
     pub title: String,
+    #[crudcrate(filterable, sortable)]
     pub status: Status,
+    #[crudcrate(filterable, sortable)]
     pub priority: Priority,
     #[facet(default)]
-    pub projects: Vec<WikiLink>,
+    pub projects: WikiLinkList,
     #[facet(default)]
-    pub contexts: Vec<String>,
+    pub contexts: StringList,
     #[facet(default)]
-    pub tags: Vec<String>,
+    pub tags: StringList,
     #[facet(default)]
-    pub areas: Vec<WikiLink>,
+    pub areas: WikiLinkList,
     pub due: Option<NaiveDate>,
     pub scheduled: Option<NaiveDate>,
     pub start: Option<NaiveDate>,
@@ -28,33 +194,35 @@ pub struct Task {
     pub completed_date: Option<NaiveDate>,
     pub time_estimate: Option<u32>,
     #[facet(default)]
-    pub time_entries: Vec<TimeEntry>,
+    pub time_entries: TimeEntryList,
     pub pomodoro_count: Option<u32>,
     pub recurrence: Option<String>,
     pub recurrence_anchor: RecurrenceAnchor,
     #[facet(default)]
-    pub completed_instances: Vec<String>,
+    pub completed_instances: StringList,
     #[facet(default)]
-    pub skipped_instances: Vec<String>,
+    pub skipped_instances: StringList,
     #[facet(default)]
-    pub blocked_by: Vec<TaskDependency>,
+    pub blocked_by: TaskDependencyList,
     #[facet(default)]
-    pub blocking: Vec<WikiLink>,
+    pub blocking: WikiLinkList,
     #[facet(default)]
-    pub reminders: Vec<Reminder>,
+    pub reminders: ReminderList,
     pub sort_order: Option<String>,
     pub external_id: Option<String>,
     pub external_source: Option<String>,
 
     // ── Collaboration fields ─────────────────────────────────────────
     /// Who this task is assigned to (username, e.g. "codywright").
+    #[crudcrate(filterable)]
     pub assignee: Option<String>,
 
     /// Multiple assignees (in addition to primary assignee).
     #[facet(default)]
-    pub assignees: Vec<String>,
+    pub assignees: StringList,
 
     /// Who created this task.
+    #[crudcrate(filterable)]
     pub created_by: Option<String>,
 
     // ── Sequence ID (human-readable, per-project) ───────────────────
@@ -63,22 +231,23 @@ pub struct Task {
 
     // ── Type ────────────────────────────────────────────────────────
     /// Issue type: task, bug, story, epic, feature, chore, etc.
+    #[crudcrate(filterable)]
     pub issue_type: Option<String>,
 
     // ── Relations ───────────────────────────────────────────────────
     /// Rich relations to other tasks.
     #[facet(default)]
-    pub relations: Vec<TaskRelation>,
+    pub relations: TaskRelationList,
 
     // ── Subscribers / watchers ──────────────────────────────────────
     /// Users watching this task for updates.
     #[facet(default)]
-    pub subscribers: Vec<String>,
+    pub subscribers: StringList,
 
     // ── Reactions ───────────────────────────────────────────────────
     /// Emoji reactions on this task (e.g. "👍:cody", "🎉:amy").
     #[facet(default)]
-    pub reactions: Vec<Reaction>,
+    pub reactions: ReactionList,
 
     // ── Soft deletion ───────────────────────────────────────────────
     /// Soft delete timestamp. If set, this task is "deleted" but recoverable.
@@ -87,6 +256,7 @@ pub struct Task {
     // ── Draft ───────────────────────────────────────────────────────
     /// Whether this is a draft (work-in-progress, not yet visible to team).
     #[facet(default)]
+    #[crudcrate(filterable)]
     pub is_draft: bool,
 
     // ── Email routing ────────────────────────────────────────────────
@@ -95,12 +265,12 @@ pub struct Task {
     /// sender patterns. The bot (Jarvis) reads these and does its own
     /// matching.
     #[facet(default)]
-    pub email_tags: Vec<String>,
+    pub email_tags: StringList,
 
     /// Emails linked to this task. Reference-only, body stays in
     /// Nextcloud Mail.
     #[facet(default)]
-    pub emails: Vec<crate::email::EmailRef>,
+    pub emails: EmailRefList,
 
     // ── Content ──────────────────────────────────────────────────────
     /// Markdown body content (after frontmatter).
@@ -110,16 +280,27 @@ pub struct Task {
 }
 
 // r[impl task.status]
-#[derive(Debug, Clone, PartialEq, Facet)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Facet, Serialize, Deserialize, ToSchema, EnumIter, DeriveActiveEnum,
+)]
+#[sea_orm(rs_type = "String", db_type = "String(StringLen::N(32))")]
 #[repr(u8)]
 pub enum Status {
+    #[sea_orm(string_value = "none")]
     None,
+    #[sea_orm(string_value = "open")]
     Open,
+    #[sea_orm(string_value = "in_progress")]
     InProgress,
+    #[sea_orm(string_value = "on_hold")]
     OnHold,
+    #[sea_orm(string_value = "planned")]
     Planned,
+    #[sea_orm(string_value = "done")]
     Done,
+    #[sea_orm(string_value = "cancelled")]
     Cancelled,
+    #[sea_orm(string_value = "archived")]
     Archived,
 }
 
@@ -136,13 +317,21 @@ impl Status {
 }
 
 // r[impl task.priority]
-#[derive(Debug, Clone, PartialEq, Facet)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Facet, Serialize, Deserialize, ToSchema, EnumIter, DeriveActiveEnum,
+)]
+#[sea_orm(rs_type = "String", db_type = "String(StringLen::N(16))")]
 #[repr(u8)]
 pub enum Priority {
+    #[sea_orm(string_value = "none")]
     None,
+    #[sea_orm(string_value = "low")]
     Low,
+    #[sea_orm(string_value = "normal")]
     Normal,
+    #[sea_orm(string_value = "high")]
     High,
+    #[sea_orm(string_value = "urgent")]
     Urgent,
 }
 
@@ -165,13 +354,13 @@ impl Priority {
 }
 
 /// A wikilink reference `[[Note Name]]`
-#[derive(Debug, Clone, PartialEq, Default, Facet)]
+#[derive(Debug, Clone, PartialEq, Default, Facet, Serialize, Deserialize, ToSchema)]
 #[facet(transparent)]
 pub struct WikiLink(pub String);
 
 /// A structured task dependency per RFC 9253.
 // r[impl task.blocked-by]
-#[derive(Debug, Clone, PartialEq, Facet)]
+#[derive(Debug, Clone, PartialEq, Facet, Serialize, Deserialize, ToSchema)]
 pub struct TaskDependency {
     pub uid: String,
     pub reltype: DependencyRelType,
@@ -179,7 +368,7 @@ pub struct TaskDependency {
     pub gap: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Facet)]
+#[derive(Debug, Clone, PartialEq, Facet, Serialize, Deserialize, ToSchema)]
 #[repr(u8)]
 pub enum DependencyRelType {
     FinishToStart,
@@ -200,7 +389,7 @@ impl Default for DependencyRelType {
 /// is set and the duration can be computed. Billable rate is stored in cents per
 /// hour (matches solidtime's integer-money convention; no floats).
 // r[impl task.time.entries]
-#[derive(Debug, Clone, PartialEq, Default, Facet)]
+#[derive(Debug, Clone, PartialEq, Default, Facet, Serialize, Deserialize, ToSchema)]
 pub struct TimeEntry {
     /// Stable unique ID — required for CRDT merging of the time-entry list.
     #[facet(default)]
@@ -266,12 +455,17 @@ impl TimeEntry {
 }
 
 // r[impl task.recurrence.anchor]
-#[derive(Debug, Clone, PartialEq, Facet)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Facet, Serialize, Deserialize, ToSchema, EnumIter, DeriveActiveEnum,
+)]
+#[sea_orm(rs_type = "String", db_type = "String(StringLen::N(16))")]
 #[repr(u8)]
 pub enum RecurrenceAnchor {
     /// Next occurrence from scheduled date — fixed calendar.
+    #[sea_orm(string_value = "scheduled")]
     Scheduled,
     /// Next occurrence from completion date — flexible.
+    #[sea_orm(string_value = "completion")]
     Completion,
 }
 
@@ -282,7 +476,7 @@ impl Default for RecurrenceAnchor {
 }
 
 // r[impl task.reminders]
-#[derive(Debug, Clone, PartialEq, Facet)]
+#[derive(Debug, Clone, PartialEq, Facet, Serialize, Deserialize, ToSchema)]
 #[repr(C)]
 pub enum Reminder {
     Relative {
@@ -299,7 +493,7 @@ pub enum Reminder {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Facet)]
+#[derive(Debug, Clone, PartialEq, Facet, Serialize, Deserialize, ToSchema)]
 #[repr(u8)]
 pub enum ReminderAnchor {
     Due,
@@ -315,7 +509,7 @@ pub enum ReminderAnchor {
 ///   - target: "[[Other Task]]"
 ///     relation_type: BlockedBy
 /// ```
-#[derive(Debug, Clone, PartialEq, Default, Facet)]
+#[derive(Debug, Clone, PartialEq, Default, Facet, Serialize, Deserialize, ToSchema)]
 pub struct TaskRelation {
     /// The related task (wiki-link or ID).
     pub target: String,
@@ -324,7 +518,7 @@ pub struct TaskRelation {
 }
 
 /// Relationship types between tasks (bidirectional pairs).
-#[derive(Debug, Clone, PartialEq, Default, Facet)]
+#[derive(Debug, Clone, PartialEq, Default, Facet, Serialize, Deserialize, ToSchema)]
 #[repr(u8)]
 pub enum RelationType {
     /// This task is blocked by the target.
@@ -353,7 +547,7 @@ pub enum RelationType {
 // ── Reactions ───────────────────────────────────────────────────────────────
 
 /// An emoji reaction on a task or comment.
-#[derive(Debug, Clone, PartialEq, Default, Facet)]
+#[derive(Debug, Clone, PartialEq, Default, Facet, Serialize, Deserialize, ToSchema)]
 pub struct Reaction {
     /// Emoji (unicode, e.g. "👍", "🎉", "🔥").
     pub emoji: String,
@@ -361,7 +555,20 @@ pub struct Reaction {
     pub user: String,
 }
 
-impl Task {
+#[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+pub enum Relation {}
+
+impl ActiveModelBehavior for ActiveModel {}
+
+impl Model {
+    pub fn id_ref(&self) -> String {
+        self.id.to_string()
+    }
+
+    pub fn matches_reference(&self, reference: &str) -> bool {
+        self.id.to_string() == reference || self.title.eq_ignore_ascii_case(reference)
+    }
+
     // r[impl task.urgency]
     pub fn urgency_score(&self) -> i32 {
         let priority_weight = self.priority.weight();
@@ -540,7 +747,7 @@ mod tests {
 
     #[test]
     fn subtask_parsing() {
-        let task = Task {
+        let task = Model {
             body: "## Checklist\n- [x] Done thing\n- [ ] Not done\n- [x] Also done\nSome other text\n- [ ] Another".into(),
             ..Default::default()
         };
@@ -551,7 +758,7 @@ mod tests {
 
     #[test]
     fn no_subtasks() {
-        let task = Task {
+        let task = Model {
             body: "Just some notes".into(),
             ..Default::default()
         };
@@ -587,12 +794,25 @@ mod tests {
         assert!(running.is_running());
         assert_eq!(running.duration_minutes(), 0);
 
-        let task = Task {
-            time_entries: vec![finished, running.clone()],
+        let task = Model {
+            time_entries: vec![finished, running.clone()].into(),
             ..Default::default()
         };
         assert!(task.running_timer().is_some());
         // Only the finished billable entry contributes.
         assert_eq!(task.billable_amount_cents(10_000), 18_000);
+    }
+
+    #[test]
+    fn facet_json_serializes_task() {
+        let task = Model {
+            title: "Serializable task".into(),
+            tags: vec!["wire".to_string()].into(),
+            projects: vec![WikiLink("Project".into())].into(),
+            ..Default::default()
+        };
+
+        let json = facet_json::to_string(&task).expect("task should serialize");
+        assert!(json.contains("Serializable task"));
     }
 }

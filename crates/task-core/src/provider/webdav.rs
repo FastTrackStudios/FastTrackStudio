@@ -952,7 +952,7 @@ mod tests {
         let task = Task {
             title: "Write WebDAV integration test".into(),
             body: "Verify real HTTP WebDAV CRUD.".into(),
-            projects: vec![WikiLink(project.title.clone())],
+            projects: vec![WikiLink(project.title.clone())].into(),
             ..Default::default()
         };
 

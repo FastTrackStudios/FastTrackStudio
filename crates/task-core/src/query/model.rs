@@ -280,7 +280,7 @@ fn group_keys(group: &Group, task: &Task, today: chrono::NaiveDate) -> Vec<Strin
             if task.contexts.is_empty() {
                 vec!["—".to_string()]
             } else {
-                task.contexts.clone()
+                task.contexts.to_vec()
             }
         }
         Group::ByArea => {
@@ -294,7 +294,7 @@ fn group_keys(group: &Group, task: &Task, today: chrono::NaiveDate) -> Vec<Strin
             if task.tags.is_empty() {
                 vec!["—".to_string()]
             } else {
-                task.tags.clone()
+                task.tags.to_vec()
             }
         }
         Group::ByStatus => vec![status_label(&task.status).to_string()],

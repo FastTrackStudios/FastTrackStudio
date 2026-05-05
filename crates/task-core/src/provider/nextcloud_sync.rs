@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 
 /// Generate a VTODO .ics string from a Task.
 fn task_to_ics_inline(task: &Task) -> String {
-    let uid = task.id.as_deref().unwrap_or(&task.title);
+    let uid = task.id_ref();
     let safe_uid = uid.replace(' ', "-").replace('/', "-");
     let now = Utc::now().format("%Y%m%dT%H%M%SZ");
     let status_str = match task.status {
@@ -116,7 +116,10 @@ fn ics_to_task_inline(ics: &str) -> Option<Task> {
     for line in ics.lines() {
         let line = line.trim_end_matches('\r');
         if let Some(val) = line.strip_prefix("UID:") {
-            task.id = Some(val.to_string());
+            task.id = uuid::Uuid::parse_str(val).unwrap_or_else(|_| uuid::Uuid::new_v4());
+            if uuid::Uuid::parse_str(val).is_err() {
+                task.external_id = Some(val.to_string());
+            }
         } else if let Some(val) = line.strip_prefix("SUMMARY:") {
             task.title = val.to_string();
         } else if let Some(val) = line.strip_prefix("STATUS:") {
@@ -865,7 +868,7 @@ impl NextcloudSync {
         if_match: Option<&str>,
         if_none_match: Option<&str>,
     ) -> Result<(), VaultError> {
-        let uid = task.id.as_deref().unwrap_or(&task.title);
+        let uid = task.id_ref();
         let safe_uid = uid.replace(' ', "-").replace('/', "-");
         let url = format!(
             "{}/remote.php/dav/calendars/{}/{}/{}.ics",
@@ -2816,7 +2819,7 @@ mod tests {
             .unwrap()
             .to_utc();
         let task = Task {
-            id: Some("calendar-tracking-1".to_string()),
+            id: uuid::Uuid::parse_str("00000000-0000-4000-8000-000000000301").unwrap(),
             title: "Calendar tracked task".to_string(),
             status: Status::InProgress,
             priority: Priority::High,
@@ -2824,9 +2827,9 @@ mod tests {
             scheduled: chrono::NaiveDate::from_ymd_opt(2026, 4, 30),
             date_created: Some(created),
             date_modified: Some(modified),
-            tags: vec!["calendar".to_string(), "sync".to_string()],
-            projects: vec![WikiLink("Personal".to_string())],
-            contexts: vec!["office".to_string()],
+            tags: vec!["calendar".to_string(), "sync".to_string()].into(),
+            projects: vec![WikiLink("Personal".to_string())].into(),
+            contexts: vec!["office".to_string()].into(),
             time_estimate: Some(45),
             assignee: Some("agent".to_string()),
             recurrence: Some("FREQ=WEEKLY;BYDAY=WE".to_string()),
@@ -2944,7 +2947,7 @@ mod tests {
         };
         let event_ics = escape_xml(&event_to_ics_inline(&event));
         let task = Task {
-            id: Some("task-1".to_string()),
+            id: uuid::Uuid::parse_str("00000000-0000-4000-8000-000000000302").unwrap(),
             title: "Calendar task".to_string(),
             ..Default::default()
         };

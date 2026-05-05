@@ -14,6 +14,7 @@ base64 = "0.22"
 
 axum = { version = "0.8", features = ["ws"] }
 chrono.workspace = true
+uuid.workspace = true
 hostname = "0.4"
 futures.workspace = true
 tower-http = { version = "0.6", features = ["cors"] }

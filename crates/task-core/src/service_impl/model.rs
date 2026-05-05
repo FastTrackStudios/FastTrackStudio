@@ -387,8 +387,8 @@ impl VaultServiceImpl {
 
     // r[impl api.service.create-task]
     pub async fn create_task(&self, mut task: Task) -> Result<Task, VaultError> {
-        if task.id.is_none() {
-            task.id = Some(Uuid::new_v4().to_string());
+        if task.id == Uuid::nil() {
+            task.id = Uuid::new_v4();
         }
         let now = Utc::now();
         task.date_created = Some(now);
@@ -421,13 +421,13 @@ impl VaultServiceImpl {
         push_unique(&mut tags, "inbox".to_string());
 
         let task = Task {
-            id: Some(Uuid::new_v4().to_string()),
+            id: Uuid::new_v4(),
             title,
             status: Status::Open,
             priority: parsed.priority.unwrap_or(Priority::Normal),
-            projects: parsed.projects,
-            contexts: parsed.contexts,
-            tags,
+            projects: parsed.projects.into(),
+            contexts: parsed.contexts.into(),
+            tags: tags.into(),
             due: parsed.due,
             issue_type: Some(kind),
             created_by: request.actor,
@@ -555,17 +555,8 @@ impl VaultServiceImpl {
         // Snapshot the prior state for diffing. Lookup prefers id; if the
         // task has none, fall back to title match.
         let vault = self.vault.read().await;
-        let prior = if let Some(id) = task.id.as_deref() {
-            vault
-                .load_tasks()
-                .into_iter()
-                .find(|t| t.id.as_deref() == Some(id))
-        } else {
-            vault
-                .load_tasks()
-                .into_iter()
-                .find(|t| t.title == task.title)
-        };
+        let prior_id = task.id;
+        let prior = vault.load_tasks().into_iter().find(|t| t.id == prior_id);
 
         task.date_modified = Some(Utc::now());
         vault.save_task(&task)?;
@@ -1646,11 +1637,7 @@ impl VaultServiceImpl {
                         if let Err(e) = self
                             .record_conflict(
                                 "task",
-                                local
-                                    .id
-                                    .as_deref()
-                                    .or(remote.id.as_deref())
-                                    .unwrap_or(&local.title),
+                                &local.id_ref(),
                                 conflict.field,
                                 conflict.local_value.as_deref(),
                                 conflict.remote_value.as_deref(),
@@ -2367,7 +2354,7 @@ impl VaultServiceImpl {
                 title: request.title.clone(),
                 status: Status::Open,
                 priority: Priority::Normal,
-                tags: vec!["asset".into(), "repair".into()],
+                tags: vec!["asset".into(), "repair".into()].into(),
                 body: request.notes.clone().unwrap_or_default(),
                 created_by: request.actor.clone(),
                 ..Task::default()
@@ -3093,7 +3080,7 @@ impl VaultServiceImpl {
         let tasks = vault.load_tasks();
         let mut task = tasks
             .into_iter()
-            .find(|t| t.id.as_deref() == Some(task_ref) || t.title.eq_ignore_ascii_case(task_ref))
+            .find(|t| t.matches_reference(task_ref))
             .ok_or_else(|| VaultError::NotFound(task_ref.to_string()))?;
 
         let bare = email.bare_message_id().to_lowercase();
@@ -3109,10 +3096,10 @@ impl VaultServiceImpl {
 
         if let Ok(guard) = self.index.lock() {
             if let Some(ref idx) = *guard {
-                let id = task.id.as_deref().unwrap_or(task.title.as_str());
+                let id = task.id_ref();
                 let _ = idx.record_change(
                     "task",
-                    id,
+                    &id,
                     Some("email:linked"),
                     None,
                     task.emails.last().map(|e| e.message_id.as_str()),
@@ -3176,7 +3163,7 @@ impl VaultServiceImpl {
         let tasks = vault.load_tasks();
         let mut task = tasks
             .into_iter()
-            .find(|t| t.id.as_deref() == Some(task_ref) || t.title.eq_ignore_ascii_case(task_ref))
+            .find(|t| t.matches_reference(task_ref))
             .ok_or_else(|| VaultError::NotFound(task_ref.to_string()))?;
 
         let target = strip_angle_brackets(message_id).to_lowercase();
@@ -3193,10 +3180,10 @@ impl VaultServiceImpl {
 
         if let Ok(guard) = self.index.lock() {
             if let Some(ref idx) = *guard {
-                let id = task.id.as_deref().unwrap_or(task.title.as_str());
+                let id = task.id_ref();
                 let _ = idx.record_change(
                     "task",
-                    id,
+                    &id,
                     Some("email:unlinked"),
                     Some(message_id),
                     None,
@@ -3255,8 +3242,8 @@ impl VaultServiceImpl {
         let tasks = self.vault.read().await.load_tasks();
         tasks
             .into_iter()
-            .find(|t| t.id.as_deref() == Some(task_ref) || t.title.eq_ignore_ascii_case(task_ref))
-            .map(|t| t.emails)
+            .find(|t| t.matches_reference(task_ref))
+            .map(|t| t.emails.into_inner())
     }
 
     /// List emails linked to a project.
@@ -3354,7 +3341,7 @@ impl VaultServiceImpl {
 
         let mut task = tasks
             .into_iter()
-            .find(|t| t.id.as_deref() == Some(task_ref) || t.title.eq_ignore_ascii_case(task_ref))
+            .find(|t| t.matches_reference(task_ref))
             .ok_or_else(|| VaultError::NotFound(task_ref.to_string()))?;
 
         let entry = crate::task::TimeEntry {
@@ -3393,10 +3380,7 @@ impl VaultServiceImpl {
         let tasks = vault.load_tasks();
 
         let target = tasks.into_iter().find(|t| match task_ref {
-            Some(r) => {
-                (t.id.as_deref() == Some(r) || t.title.eq_ignore_ascii_case(r))
-                    && t.running_timer().is_some()
-            }
+            Some(r) => t.matches_reference(r) && t.running_timer().is_some(),
             None => t.running_timer().is_some(),
         });
 
@@ -3449,7 +3433,7 @@ impl VaultServiceImpl {
         let tasks = vault.load_tasks();
         let mut task = tasks
             .into_iter()
-            .find(|t| t.id.as_deref() == Some(task_ref) || t.title.eq_ignore_ascii_case(task_ref))
+            .find(|t| t.matches_reference(task_ref))
             .ok_or_else(|| VaultError::NotFound(task_ref.to_string()))?;
 
         let entry = crate::task::TimeEntry {
@@ -3513,8 +3497,7 @@ impl VaultServiceImpl {
         let mut out = Vec::new();
         for t in &tasks {
             if let Some(ref r) = filter.task_ref {
-                let matches =
-                    t.id.as_deref() == Some(r.as_str()) || t.title.eq_ignore_ascii_case(r);
+                let matches = t.matches_reference(r);
                 if !matches {
                     continue;
                 }
@@ -3803,7 +3786,7 @@ impl VaultServiceImpl {
     ) {
         if let Ok(guard) = self.index.lock() {
             if let Some(ref index) = *guard {
-                let id = task.id.as_deref().unwrap_or(task.title.as_str());
+                let id = task.id_ref();
                 // Include the entry id in the new_value so the audit row is
                 // self-describing.
                 let payload = match new_value {
@@ -3812,7 +3795,7 @@ impl VaultServiceImpl {
                 };
                 let _ = index.record_change(
                     "task",
-                    id,
+                    &id,
                     Some(field),
                     old_value,
                     Some(&payload),
@@ -3889,7 +3872,7 @@ fn normalize_inbox_kind(kind: Option<&str>) -> String {
 
 fn inbox_item_from_task(task: &Task) -> InboxItem {
     InboxItem {
-        id: task.id.clone(),
+        id: Some(task.id_ref()),
         title: task.title.clone(),
         kind: task
             .issue_type
@@ -3902,8 +3885,8 @@ fn inbox_item_from_task(task: &Task) -> InboxItem {
             .iter()
             .map(|project| project.0.clone())
             .collect(),
-        tags: task.tags.clone(),
-        contexts: task.contexts.clone(),
+        tags: task.tags.to_vec(),
+        contexts: task.contexts.to_vec(),
         due: task.due.map(|date| date.to_string()),
         scheduled: task.scheduled.map(|date| date.to_string()),
         assignee: task.assignee.clone(),
@@ -3920,10 +3903,7 @@ fn dedupe_tasks(tasks: Vec<Task>) -> Vec<Task> {
     let mut seen = HashSet::new();
     tasks
         .into_iter()
-        .filter(|task| match task.id.as_ref() {
-            Some(id) => seen.insert(id.clone()),
-            None => true,
-        })
+        .filter(|task| seen.insert(task.id))
         .collect()
 }
 
@@ -4776,7 +4756,7 @@ fn slug_id(value: &str) -> String {
 }
 
 fn task_matches_reference(task: &Task, reference: &str) -> bool {
-    task.id.as_deref() == Some(reference) || task.title.eq_ignore_ascii_case(reference)
+    task.matches_reference(reference)
 }
 
 fn push_unique<T: PartialEq>(items: &mut Vec<T>, item: T) {
@@ -6230,16 +6210,13 @@ struct TaskSyncConflict {
 }
 
 fn task_sync_key(task: &Task) -> String {
-    task.id
-        .as_deref()
-        .map(|id| format!("id:{id}"))
-        .unwrap_or_else(|| format!("title:{}", task.title))
+    format!("id:{}", task.id)
 }
 
 fn find_matching_local_task<'a>(remote: &Task, local_tasks: &'a [Task]) -> Option<&'a Task> {
     local_tasks
         .iter()
-        .find(|local| (remote.id.is_some() && local.id == remote.id) || local.title == remote.title)
+        .find(|local| local.id == remote.id || local.title == remote.title)
 }
 
 fn remote_is_newer(local: &Task, remote: &Task) -> bool {
@@ -6397,7 +6374,7 @@ fn record_task_diff(
     actor: Option<&str>,
     file_path: &str,
 ) {
-    let id = new.id.as_deref().or(Some(new.title.as_str())).unwrap();
+    let id = new.id_ref();
 
     // Scalar fields worth surfacing in the activity feed.
     let mut rows: Vec<(&str, Option<String>, Option<String>)> = Vec::new();
@@ -6480,7 +6457,7 @@ fn record_task_diff(
     for (field, from, to) in rows {
         let _ = index.record_change(
             "task",
-            id,
+            &id,
             Some(field),
             from.as_deref(),
             to.as_deref(),
@@ -6574,7 +6551,12 @@ mod tests {
             .await
             .load_tasks()
             .into_iter()
-            .find(|task| task.id == captured.id)
+            .find(|task| {
+                captured
+                    .id
+                    .as_deref()
+                    .is_some_and(|id| task.matches_reference(id))
+            })
             .unwrap();
         deleted_capture.deleted_at = Some(Utc::now());
         svc.update_task(deleted_capture.clone()).await.unwrap();
@@ -6734,11 +6716,11 @@ mod tests {
     async fn list_tasks_deduplicates_records_with_same_stable_id() {
         let vault = temp_vault();
         let svc = VaultServiceImpl::new(&vault);
-        let duplicate_id = "task-duplicate-id".to_string();
+        let duplicate_id = Uuid::parse_str("00000000-0000-4000-8000-000000000501").unwrap();
 
         for title in ["Duplicate A", "Duplicate B"] {
             svc.create_task(Task {
-                id: Some(duplicate_id.clone()),
+                id: duplicate_id,
                 title: title.to_string(),
                 status: Status::Open,
                 ..Default::default()
@@ -6749,10 +6731,7 @@ mod tests {
 
         let listed = svc.list_tasks().await;
         assert_eq!(
-            listed
-                .iter()
-                .filter(|task| task.id.as_deref() == Some(&duplicate_id))
-                .count(),
+            listed.iter().filter(|task| task.id == duplicate_id).count(),
             1,
             "task list should not emit duplicate logical tasks with the same stable id"
         );
@@ -6761,7 +6740,7 @@ mod tests {
         assert_eq!(
             queried
                 .iter()
-                .filter(|task| task.id.as_deref() == Some(&duplicate_id))
+                .filter(|task| task.id == duplicate_id)
                 .count(),
             1,
             "query output should not emit duplicate logical tasks with the same stable id"
@@ -6780,7 +6759,7 @@ mod tests {
         for task in [
             Task {
                 title: "Loose capture".to_string(),
-                tags: vec!["inbox".to_string()],
+                tags: vec!["inbox".to_string()].into(),
                 issue_type: Some("inbox".to_string()),
                 ..Default::default()
             },
@@ -6799,7 +6778,7 @@ mod tests {
             Task {
                 title: "Someday cabin idea".to_string(),
                 issue_type: Some("idea".to_string()),
-                tags: vec!["someday".to_string()],
+                tags: vec!["someday".to_string()].into(),
                 ..Default::default()
             },
             Task {
@@ -6814,7 +6793,7 @@ mod tests {
             .read()
             .await
             .save_task(&Task {
-                id: Some("stale-review-task".to_string()),
+                id: Uuid::parse_str("00000000-0000-4000-8000-000000000502").unwrap(),
                 title: "Unscheduled stale thing".to_string(),
                 date_modified: Some(modified_at(&format!("{old}T00:00:00Z"))),
                 ..Default::default()
@@ -7013,35 +6992,35 @@ mod tests {
             Task {
                 title: "Grow consulting revenue".to_string(),
                 issue_type: Some("goal".to_string()),
-                areas: vec![WikiLink("Business".to_string())],
-                projects: vec![WikiLink("Consulting".to_string())],
+                areas: vec![WikiLink("Business".to_string())].into(),
+                projects: vec![WikiLink("Consulting".to_string())].into(),
                 due: Some(today + chrono::Duration::days(30)),
                 ..Default::default()
             },
             Task {
                 title: "Send proposal".to_string(),
-                areas: vec![WikiLink("Business".to_string())],
-                projects: vec![WikiLink("Consulting".to_string())],
+                areas: vec![WikiLink("Business".to_string())].into(),
+                projects: vec![WikiLink("Consulting".to_string())].into(),
                 due: Some(today),
                 ..Default::default()
             },
             Task {
                 title: "Weekly planning".to_string(),
                 issue_type: Some("routine".to_string()),
-                areas: vec![WikiLink("Personal".to_string())],
+                areas: vec![WikiLink("Personal".to_string())].into(),
                 recurrence: Some("FREQ=WEEKLY".to_string()),
                 ..Default::default()
             },
             Task {
                 title: "Exercise".to_string(),
                 issue_type: Some("habit".to_string()),
-                areas: vec![WikiLink("Health".to_string())],
+                areas: vec![WikiLink("Health".to_string())].into(),
                 recurrence: Some("FREQ=DAILY".to_string()),
                 ..Default::default()
             },
             Task {
                 title: "Old admin".to_string(),
-                areas: vec![WikiLink("Business".to_string())],
+                areas: vec![WikiLink("Business".to_string())].into(),
                 date_modified: Some(modified_at(&format!("{old}T00:00:00Z"))),
                 ..Default::default()
             },
@@ -7189,34 +7168,34 @@ mod tests {
     #[test]
     fn caldav_conflict_detection_blocks_same_field_overwrite() {
         let local = Task {
-            id: Some("task-1".to_string()),
+            id: Uuid::parse_str("00000000-0000-4000-8000-000000000503").unwrap(),
             title: "Shared task".to_string(),
             status: Status::InProgress,
             priority: Priority::Normal,
             date_modified: Some(modified_at("2026-04-29T10:00:00Z")),
-            projects: vec![WikiLink("Personal".to_string())],
+            projects: vec![WikiLink("Personal".to_string())].into(),
             ..Default::default()
         };
         let remote = Task {
-            id: Some("task-1".to_string()),
+            id: Uuid::parse_str("00000000-0000-4000-8000-000000000503").unwrap(),
             title: "Shared task".to_string(),
             status: Status::Done,
             priority: Priority::Normal,
             date_modified: Some(modified_at("2026-04-29T10:05:00Z")),
-            projects: vec![WikiLink("Personal".to_string())],
+            projects: vec![WikiLink("Personal".to_string())].into(),
             ..Default::default()
         };
 
         let conflicts = task_sync_conflicts(&local, &remote);
         assert_eq!(conflicts.len(), 1);
         assert_eq!(conflicts[0].field, "status");
-        assert_eq!(task_sync_key(&local), "id:task-1");
+        assert_eq!(task_sync_key(&local), format!("id:{}", local.id));
     }
 
     #[test]
     fn caldav_remote_newer_without_field_delta_is_not_a_conflict() {
         let local = Task {
-            id: Some("task-2".to_string()),
+            id: Uuid::parse_str("00000000-0000-4000-8000-000000000504").unwrap(),
             title: "Same task".to_string(),
             status: Status::Open,
             priority: Priority::High,
