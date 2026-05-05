@@ -150,6 +150,69 @@ impl Location {
     }
 }
 
+pub fn render_location_body(location: &Location) -> String {
+    use std::fmt::Write;
+
+    let mut out = String::new();
+    let _ = writeln!(out, "# {}", location.name);
+    let _ = writeln!(out);
+    if let Some(venue_type) = &location.venue_type {
+        let _ = writeln!(out, "**Type:** {venue_type}");
+    }
+    if let Some(address1) = &location.address1 {
+        let _ = writeln!(out, "**Address:** {address1}");
+    }
+    if location.city.is_some() || location.state.is_some() || location.postal_code.is_some() {
+        let locality = [
+            location.city.as_deref(),
+            location.state.as_deref(),
+            location.postal_code.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(", ");
+        let _ = writeln!(out, "**Locality:** {locality}");
+    }
+    if let Some(contact) = &location.contact_name {
+        let _ = writeln!(out, "**Contact:** {contact}");
+    }
+    if let Some(email) = &location.contact_email {
+        let _ = writeln!(out, "**Email:** {email}");
+    }
+    if let Some(phone) = &location.contact_phone {
+        let _ = writeln!(out, "**Phone:** {phone}");
+    }
+    if !location.spaces.is_empty() {
+        let _ = writeln!(out);
+        let _ = writeln!(out, "## Spaces");
+        for space in &location.spaces {
+            let _ = writeln!(
+                out,
+                "- {}{}",
+                space.name,
+                space
+                    .capacity
+                    .map(|capacity| format!(" ({capacity})"))
+                    .unwrap_or_default()
+            );
+        }
+    }
+    if !location.default_files.is_empty() {
+        let _ = writeln!(out);
+        let _ = writeln!(out, "## Defaults");
+        for default in &location.default_files {
+            let label = default.label.as_deref().unwrap_or(&default.kind);
+            let _ = writeln!(out, "- {}: {}", label, default.path);
+        }
+    }
+    if !location.body.is_empty() {
+        let _ = writeln!(out);
+        let _ = write!(out, "{}", location.body);
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -16,10 +16,11 @@ use task_core::{
     build_agent_plan, create_project, save_project_task, BusinessFinanceReport, CalendarEvent,
     CalendarEventPatch, CalendarEventStatus, CardDavSyncCollectionRequest, ChannelConversation,
     ChannelMessage, ChannelSendMessageRequest, Client, Filter, InboxCaptureRequest, InboxItem,
-    InboxPromoteRequest, Invoice, OperatingModelReport, OrganizationContext, OrganizationRecord,
-    Person, PersonContext, Priority, Project, ProjectKnowledgeContext, ProviderSyncState, Query,
-    RelationType, ReviewReport, Sort, Status, SyncStats, SystemCapabilities, SystemHealth, Task,
-    TaskRelation, TimeEntry, TimeEntryContext, TimeEntryFilter, VaultServiceImpl, WikiLink,
+    InboxPromoteRequest, Invoice, Location, OperatingModelReport, OrganizationContext,
+    OrganizationRecord, Person, PersonContext, Priority, Project, ProjectKnowledgeContext,
+    ProviderSyncState, Query, RelationType, ReviewReport, Sort, Space, Status, SyncStats,
+    SystemCapabilities, SystemHealth, Task, TaskRelation, TimeEntry, TimeEntryContext,
+    TimeEntryFilter, VaultServiceImpl, VenueDefault, WikiLink,
 };
 
 #[derive(Parser)]
@@ -272,6 +273,11 @@ enum Commands {
     Asset {
         #[command(subcommand)]
         command: AssetCommands,
+    },
+    /// Reusable venues, locations, spaces, and default files
+    Location {
+        #[command(subcommand)]
+        command: LocationCommands,
     },
     /// Nextcloud Talk — conversational surface for bots and humans
     Talk {
@@ -1348,6 +1354,132 @@ enum AssetRepairCommands {
 }
 
 #[derive(Subcommand)]
+enum LocationCommands {
+    /// Create a reusable location / venue record
+    Add {
+        name: String,
+        #[arg(long = "type")]
+        venue_type: Option<String>,
+        #[arg(long)]
+        address1: Option<String>,
+        #[arg(long)]
+        address2: Option<String>,
+        #[arg(long)]
+        city: Option<String>,
+        #[arg(long)]
+        state: Option<String>,
+        #[arg(long = "postal-code")]
+        postal_code: Option<String>,
+        #[arg(long = "country")]
+        country_code: Option<String>,
+        #[arg(long = "contact-name")]
+        contact_name: Option<String>,
+        #[arg(long = "contact-email")]
+        contact_email: Option<String>,
+        #[arg(long = "contact-phone")]
+        contact_phone: Option<String>,
+        #[arg(long = "access-notes")]
+        access_notes: Option<String>,
+        #[arg(long = "parking-load-in")]
+        parking_load_in: Option<String>,
+        #[arg(long = "network-power")]
+        network_power: Option<String>,
+        #[arg(long)]
+        tag: Vec<String>,
+        #[arg(long)]
+        body: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// List reusable locations
+    List {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show one location by id or name
+    Show {
+        reference: String,
+        #[arg(long = "defaults-for")]
+        defaults_for: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Update mutable location fields
+    Update {
+        reference: String,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long = "type")]
+        venue_type: Option<String>,
+        #[arg(long)]
+        address1: Option<String>,
+        #[arg(long)]
+        address2: Option<String>,
+        #[arg(long)]
+        city: Option<String>,
+        #[arg(long)]
+        state: Option<String>,
+        #[arg(long = "postal-code")]
+        postal_code: Option<String>,
+        #[arg(long = "country")]
+        country_code: Option<String>,
+        #[arg(long = "contact-name")]
+        contact_name: Option<String>,
+        #[arg(long = "contact-email")]
+        contact_email: Option<String>,
+        #[arg(long = "contact-phone")]
+        contact_phone: Option<String>,
+        #[arg(long = "access-notes")]
+        access_notes: Option<String>,
+        #[arg(long = "parking-load-in")]
+        parking_load_in: Option<String>,
+        #[arg(long = "network-power")]
+        network_power: Option<String>,
+        #[arg(long)]
+        tag: Vec<String>,
+        #[arg(long)]
+        body: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Add or replace a space under a location
+    SpaceAdd {
+        location: String,
+        name: String,
+        #[arg(long)]
+        capacity: Option<u32>,
+        #[arg(long)]
+        notes: Option<String>,
+        #[arg(long)]
+        tag: Vec<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// List spaces under a location
+    SpaceList {
+        location: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Add or replace a venue/space default file
+    DefaultAdd {
+        location: String,
+        #[arg(long)]
+        space: Option<String>,
+        #[arg(long)]
+        kind: String,
+        #[arg(long)]
+        path: String,
+        #[arg(long)]
+        label: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Delete a location by id or name
+    Delete { reference: String },
+}
+
+#[derive(Subcommand)]
 enum TalkCommands {
     /// List rooms the user is a member of
     Rooms {
@@ -1572,6 +1704,10 @@ enum CalendarCommands {
         #[arg(long)]
         location: Option<String>,
         #[arg(long)]
+        venue: Option<String>,
+        #[arg(long)]
+        space: Vec<String>,
+        #[arg(long)]
         all_day: bool,
         /// confirmed, tentative, or cancelled
         #[arg(long, default_value = "confirmed")]
@@ -1597,6 +1733,10 @@ enum CalendarCommands {
         description: Option<String>,
         #[arg(long)]
         location: Option<String>,
+        #[arg(long)]
+        venue: Option<String>,
+        #[arg(long)]
+        space: Vec<String>,
         #[arg(long)]
         all_day: Option<bool>,
         /// confirmed, tentative, or cancelled
@@ -2453,6 +2593,7 @@ async fn main() -> eyre::Result<()> {
         Commands::Talk { .. } => unreachable!("handled above"),
         Commands::Nc { .. } => unreachable!("handled above"),
         Commands::Asset { command } => run_asset_command(&svc, actor.as_deref(), command).await?,
+        Commands::Location { command } => run_location_command(&svc, command).await?,
 
         Commands::Client {
             command:
@@ -3770,6 +3911,8 @@ async fn main() -> eyre::Result<()> {
                     end,
                     description,
                     location,
+                    venue,
+                    space,
                     all_day,
                     status,
                     recurrence,
@@ -3781,6 +3924,8 @@ async fn main() -> eyre::Result<()> {
                 title,
                 description,
                 location,
+                venue: venue.map(WikiLink),
+                spaces: space.into_iter().map(WikiLink).collect(),
                 start: parse_datetime(&start)?,
                 end: end.as_deref().map(parse_datetime).transpose()?,
                 all_day,
@@ -3807,6 +3952,8 @@ async fn main() -> eyre::Result<()> {
                     end,
                     description,
                     location,
+                    venue,
+                    space,
                     all_day,
                     status,
                     recurrence,
@@ -3819,8 +3966,18 @@ async fn main() -> eyre::Result<()> {
                 title,
                 description: description.map(optional_string_field),
                 location: location.map(optional_string_field),
-                venue: None,
-                spaces: None,
+                venue: venue.map(|venue| {
+                    if venue == "clear" || venue.is_empty() {
+                        None
+                    } else {
+                        Some(WikiLink(venue))
+                    }
+                }),
+                spaces: if space.is_empty() {
+                    None
+                } else {
+                    Some(space.into_iter().map(WikiLink).collect())
+                },
                 start: start.as_deref().map(parse_datetime).transpose()?,
                 end: match end {
                     Some(s) if s == "clear" || s.is_empty() => Some(None),
@@ -4768,6 +4925,9 @@ async fn run_remote_command(
         }
         Commands::Asset { .. } => {
             eyre::bail!("asset commands are currently supported only in local vault mode")
+        }
+        Commands::Location { .. } => {
+            eyre::bail!("location commands are currently supported only in local vault mode")
         }
         Commands::Start {
             reference,
@@ -5975,6 +6135,225 @@ async fn run_revenue_command(
     Ok(())
 }
 
+async fn run_location_command(
+    svc: &VaultServiceImpl,
+    command: LocationCommands,
+) -> eyre::Result<()> {
+    match command {
+        LocationCommands::Add {
+            name,
+            venue_type,
+            address1,
+            address2,
+            city,
+            state,
+            postal_code,
+            country_code,
+            contact_name,
+            contact_email,
+            contact_phone,
+            access_notes,
+            parking_load_in,
+            network_power,
+            tag,
+            body,
+            json,
+        } => {
+            let location = svc
+                .save_location_record(Location {
+                    name,
+                    venue_type,
+                    address1,
+                    address2,
+                    city,
+                    state,
+                    postal_code,
+                    country_code,
+                    contact_name,
+                    contact_email,
+                    contact_phone,
+                    access_notes,
+                    parking_load_in,
+                    network_power,
+                    tags: tag,
+                    body: body.unwrap_or_default(),
+                    ..Location::default()
+                })
+                .await?;
+            if json {
+                println!("{}", facet_json::to_string(&location).unwrap_or_default());
+            } else {
+                println!("Created location {}.", location.name);
+                println!("{}", task_core::render_location_body(&location));
+            }
+        }
+        LocationCommands::List { json } => {
+            let locations = svc.list_locations().await;
+            if json {
+                println!("{}", facet_json::to_string(&locations).unwrap_or_default());
+            } else if locations.is_empty() {
+                println!("No locations.");
+            } else {
+                for location in locations {
+                    println!(
+                        "{}  {:<12}  spaces:{}",
+                        location.name,
+                        location.venue_type.as_deref().unwrap_or("-"),
+                        location.spaces.len()
+                    );
+                }
+            }
+        }
+        LocationCommands::Show {
+            reference,
+            defaults_for,
+            json,
+        } => {
+            let location = svc
+                .get_location(&reference)
+                .await
+                .ok_or_else(|| eyre::eyre!("Location not found: {reference}"))?;
+            if json {
+                println!("{}", facet_json::to_string(&location).unwrap_or_default());
+            } else if let Some(space) = defaults_for {
+                for default in location.effective_defaults(Some(&space)) {
+                    println!(
+                        "{}  {}  {}",
+                        default.kind,
+                        default.path,
+                        default.label.as_deref().unwrap_or("-")
+                    );
+                }
+            } else {
+                println!("{}", task_core::render_location_body(&location));
+            }
+        }
+        LocationCommands::Update {
+            reference,
+            name,
+            venue_type,
+            address1,
+            address2,
+            city,
+            state,
+            postal_code,
+            country_code,
+            contact_name,
+            contact_email,
+            contact_phone,
+            access_notes,
+            parking_load_in,
+            network_power,
+            tag,
+            body,
+            json,
+        } => {
+            let location = svc
+                .update_location_record(
+                    &reference,
+                    Location {
+                        name: name.unwrap_or_default(),
+                        venue_type,
+                        address1,
+                        address2,
+                        city,
+                        state,
+                        postal_code,
+                        country_code,
+                        contact_name,
+                        contact_email,
+                        contact_phone,
+                        access_notes,
+                        parking_load_in,
+                        network_power,
+                        tags: tag,
+                        body: body.unwrap_or_default(),
+                        ..Location::default()
+                    },
+                )
+                .await?;
+            if json {
+                println!("{}", facet_json::to_string(&location).unwrap_or_default());
+            } else {
+                println!("Updated location {}.", location.name);
+            }
+        }
+        LocationCommands::SpaceAdd {
+            location,
+            name,
+            capacity,
+            notes,
+            tag,
+            json,
+        } => {
+            let location = svc
+                .add_location_space(
+                    &location,
+                    Space {
+                        name,
+                        capacity,
+                        notes,
+                        tags: tag,
+                        ..Space::default()
+                    },
+                )
+                .await?;
+            if json {
+                println!("{}", facet_json::to_string(&location).unwrap_or_default());
+            } else {
+                println!("Saved space for {}.", location.name);
+            }
+        }
+        LocationCommands::SpaceList { location, json } => {
+            let location = svc
+                .get_location(&location)
+                .await
+                .ok_or_else(|| eyre::eyre!("Location not found: {location}"))?;
+            if json {
+                println!(
+                    "{}",
+                    facet_json::to_string(&location.spaces).unwrap_or_default()
+                );
+            } else if location.spaces.is_empty() {
+                println!("No spaces.");
+            } else {
+                for space in location.spaces {
+                    println!(
+                        "{}  capacity:{}",
+                        space.name,
+                        space
+                            .capacity
+                            .map(|capacity| capacity.to_string())
+                            .unwrap_or_else(|| "-".into())
+                    );
+                }
+            }
+        }
+        LocationCommands::DefaultAdd {
+            location,
+            space,
+            kind,
+            path,
+            label,
+            json,
+        } => {
+            let location = svc
+                .add_location_default(&location, VenueDefault { kind, path, label }, space)
+                .await?;
+            if json {
+                println!("{}", facet_json::to_string(&location).unwrap_or_default());
+            } else {
+                println!("Saved default for {}.", location.name);
+            }
+        }
+        LocationCommands::Delete { reference } => {
+            svc.delete_location_record(&reference).await?;
+            println!("Deleted location {reference}.");
+        }
+    }
+    Ok(())
+}
+
 async fn run_asset_command(
     svc: &VaultServiceImpl,
     actor: Option<&str>,
@@ -6809,6 +7188,8 @@ async fn run_remote_calendar_command(
             end,
             description,
             location,
+            venue,
+            space,
             all_day,
             status,
             recurrence,
@@ -6819,6 +7200,8 @@ async fn run_remote_calendar_command(
                 title,
                 description,
                 location,
+                venue: venue.map(WikiLink),
+                spaces: space.into_iter().map(WikiLink).collect(),
                 start: parse_datetime(&start)?,
                 end: end.as_deref().map(parse_datetime).transpose()?,
                 all_day,
@@ -6842,6 +7225,8 @@ async fn run_remote_calendar_command(
             end,
             description,
             location,
+            venue,
+            space,
             all_day,
             status,
             recurrence,
@@ -6855,6 +7240,8 @@ async fn run_remote_calendar_command(
                 end,
                 description,
                 location,
+                venue,
+                space,
                 all_day,
                 status,
                 recurrence,
@@ -8032,6 +8419,8 @@ fn build_calendar_patch(
     end: Option<String>,
     description: Option<String>,
     location: Option<String>,
+    venue: Option<String>,
+    space: Vec<String>,
     all_day: Option<bool>,
     status: Option<String>,
     recurrence: Option<String>,
@@ -8042,8 +8431,18 @@ fn build_calendar_patch(
         title,
         description: description.map(optional_string_field),
         location: location.map(optional_string_field),
-        venue: None,
-        spaces: None,
+        venue: venue.map(|venue| {
+            if venue == "clear" || venue.is_empty() {
+                None
+            } else {
+                Some(WikiLink(venue))
+            }
+        }),
+        spaces: if space.is_empty() {
+            None
+        } else {
+            Some(space.into_iter().map(WikiLink).collect())
+        },
         start: start.as_deref().map(parse_datetime).transpose()?,
         end: match end {
             Some(s) if s == "clear" || s.is_empty() => Some(None),

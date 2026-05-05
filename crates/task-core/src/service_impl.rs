@@ -20,6 +20,7 @@ use crate::expense::{
     ExpenseCreateRequest, ExpenseFilter, ExpensePatch, ExpenseReport, ExpenseStatus,
 };
 use crate::index::TaskIndex;
+use crate::location::{Location, Space, VenueDefault};
 use crate::people::{
     CommunicationRef, ContactMethod, OrganizationContext, OrganizationRecord, Person,
     PersonContext, ProviderConflict, ProviderConflictField, ProviderRef,
@@ -2491,6 +2492,139 @@ impl VaultServiceImpl {
         let today = Utc::now().date_naive();
         let assets = self.list_assets(filter).await;
         build_asset_report(&assets, today)
+    }
+
+    pub async fn list_locations(&self) -> Vec<Location> {
+        let mut locations = self.vault.read().await.load_locations();
+        locations.retain(|location| !location.is_deleted());
+        locations.sort_by(|a, b| a.name.cmp(&b.name));
+        locations
+    }
+
+    pub async fn get_location(&self, reference: &str) -> Option<Location> {
+        self.vault
+            .read()
+            .await
+            .load_locations()
+            .into_iter()
+            .find(|location| {
+                location.id.as_deref() == Some(reference)
+                    || location.name.eq_ignore_ascii_case(reference)
+            })
+    }
+
+    pub async fn save_location_record(
+        &self,
+        mut location: Location,
+    ) -> Result<Location, VaultError> {
+        let now = Utc::now();
+        if location.id.as_deref().unwrap_or("").is_empty() {
+            location.id = Some(Uuid::new_v4().to_string());
+        }
+        if location.date_created.is_none() {
+            location.date_created = Some(now);
+        }
+        location.date_modified = Some(now);
+        self.vault.read().await.save_location(&location)?;
+        Ok(location)
+    }
+
+    pub async fn update_location_record(
+        &self,
+        reference: &str,
+        mut patch: Location,
+    ) -> Result<Location, VaultError> {
+        let mut location = self
+            .get_location(reference)
+            .await
+            .ok_or_else(|| VaultError::NotFound(reference.to_string()))?;
+        if !patch.name.trim().is_empty() {
+            location.name = patch.name;
+        }
+        macro_rules! patch_opt {
+            ($field:ident) => {
+                if patch.$field.is_some() {
+                    location.$field = patch.$field.take();
+                }
+            };
+        }
+        patch_opt!(address1);
+        patch_opt!(address2);
+        patch_opt!(city);
+        patch_opt!(state);
+        patch_opt!(postal_code);
+        patch_opt!(country_code);
+        patch_opt!(contact_name);
+        patch_opt!(contact_email);
+        patch_opt!(contact_phone);
+        patch_opt!(access_notes);
+        patch_opt!(parking_load_in);
+        patch_opt!(network_power);
+        patch_opt!(venue_type);
+        if !patch.tags.is_empty() {
+            location.tags = patch.tags;
+        }
+        if !patch.body.is_empty() {
+            location.body = patch.body;
+        }
+        self.save_location_record(location).await
+    }
+
+    pub async fn add_location_space(
+        &self,
+        reference: &str,
+        mut space: Space,
+    ) -> Result<Location, VaultError> {
+        let mut location = self
+            .get_location(reference)
+            .await
+            .ok_or_else(|| VaultError::NotFound(reference.to_string()))?;
+        if space.id.as_deref().unwrap_or("").is_empty() {
+            space.id = Some(Uuid::new_v4().to_string());
+        }
+        if let Some(existing) = location
+            .spaces
+            .iter_mut()
+            .find(|existing| existing.name.eq_ignore_ascii_case(&space.name))
+        {
+            *existing = space;
+        } else {
+            location.spaces.push(space);
+        }
+        self.save_location_record(location).await
+    }
+
+    pub async fn add_location_default(
+        &self,
+        reference: &str,
+        default: VenueDefault,
+        space_name: Option<String>,
+    ) -> Result<Location, VaultError> {
+        let mut location = self
+            .get_location(reference)
+            .await
+            .ok_or_else(|| VaultError::NotFound(reference.to_string()))?;
+        if let Some(space_name) = space_name {
+            let Some(space) = location
+                .spaces
+                .iter_mut()
+                .find(|space| space.name.eq_ignore_ascii_case(&space_name))
+            else {
+                return Err(VaultError::NotFound(space_name));
+            };
+            space.default_files.retain(|item| item.kind != default.kind);
+            space.default_files.push(default);
+        } else {
+            location
+                .default_files
+                .retain(|item| item.kind != default.kind);
+            location.default_files.push(default);
+        }
+        self.save_location_record(location).await
+    }
+
+    pub async fn delete_location_record(&self, reference: &str) -> Result<(), VaultError> {
+        self.vault.read().await.delete_location(reference)
     }
 
     pub async fn list_expenses(&self, filter: ExpenseFilter) -> Vec<Expense> {
