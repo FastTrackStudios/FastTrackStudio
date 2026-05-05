@@ -31,6 +31,8 @@ use std::os::raw::c_ulong;
 use std::ptr;
 #[cfg(all(feature = "desktop-renderer", target_os = "linux"))]
 use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(all(feature = "desktop-renderer", target_os = "linux"))]
+use std::time::{Duration, Instant};
 
 use crate::embedded::EmbeddedView;
 
@@ -91,6 +93,8 @@ struct LivePanel {
     desktop_view: Option<DioxusDesktopEmbeddedView>,
     #[cfg(all(feature = "desktop-renderer", target_os = "linux"))]
     desktop_parent: Option<LinuxDesktopParent>,
+    #[cfg(all(feature = "desktop-renderer", target_os = "linux"))]
+    desktop_poll_stats: DesktopPollStats,
     visible: bool,
     contexts: Vec<Box<dyn FnOnce()>>,
     /// Track failed init attempts to avoid infinite retry spam.
@@ -111,6 +115,15 @@ struct LivePanel {
     /// suppresses global hotkeys while typing. Matches reaimgui's
     /// gdk_window.cpp:146-147 / cocoa_window.mm:211-218 class-swap dance.
     wants_text_input: bool,
+}
+
+#[cfg(all(feature = "desktop-renderer", target_os = "linux"))]
+#[derive(Default)]
+struct DesktopPollStats {
+    window_started_at: Option<Instant>,
+    last_poll_at: Option<Instant>,
+    poll_count: u32,
+    max_gap: Duration,
 }
 
 #[cfg(all(feature = "desktop-renderer", target_os = "linux"))]
@@ -596,6 +609,8 @@ pub fn register_panel(
         desktop_view: None,
         #[cfg(all(feature = "desktop-renderer", target_os = "linux"))]
         desktop_parent: None,
+        #[cfg(all(feature = "desktop-renderer", target_os = "linux"))]
+        desktop_poll_stats: DesktopPollStats::default(),
         visible: false,
         contexts,
         init_attempts: 0,
@@ -725,6 +740,8 @@ fn register_panel_with_renderer(
         desktop_view: None,
         #[cfg(target_os = "linux")]
         desktop_parent: None,
+        #[cfg(target_os = "linux")]
+        desktop_poll_stats: DesktopPollStats::default(),
         visible: false,
         contexts,
         init_attempts: 0,
@@ -947,6 +964,8 @@ pub fn update_panels() {
                         );
                     }
                     desktop_view.poll();
+                    #[cfg(all(feature = "desktop-renderer", target_os = "linux"))]
+                    record_desktop_poll(panel, "reaper_timer");
                     continue;
                 }
 
@@ -1027,10 +1046,6 @@ fn update_desktop_panel_fast(hwnd: raw::HWND) {
             return;
         }
 
-        let Some(desktop_view) = &mut panel.desktop_view else {
-            return;
-        };
-
         let hwnd_visible = unsafe { swell.IsWindowVisible(panel.hwnd) };
         if !hwnd_visible {
             return;
@@ -1051,14 +1066,22 @@ fn update_desktop_panel_fast(hwnd: raw::HWND) {
             return;
         }
 
-        if let Err(err) = desktop_view.set_bounds(to_desktop_rect(EmbeddedBounds::new(0, 0, w, h)))
         {
-            tracing::debug!(
-                panel = panel.config.id,
-                "Failed to resize desktop webview panel from SWELL fast tick: {err}"
-            );
+            let Some(desktop_view) = &mut panel.desktop_view else {
+                return;
+            };
+
+            if let Err(err) =
+                desktop_view.set_bounds(to_desktop_rect(EmbeddedBounds::new(0, 0, w, h)))
+            {
+                tracing::debug!(
+                    panel = panel.config.id,
+                    "Failed to resize desktop webview panel from SWELL fast tick: {err}"
+                );
+            }
+            desktop_view.poll();
         }
-        desktop_view.poll();
+        record_desktop_poll(panel, "swell_timer");
     });
 }
 
@@ -1147,6 +1170,76 @@ pub fn restore_dock_state() {
 // Internal helpers
 // ---------------------------------------------------------------------------
 
+#[cfg(all(feature = "desktop-renderer", target_os = "linux"))]
+fn start_desktop_fast_timer(panel: &mut LivePanel, reason: &'static str) {
+    if panel.renderer != PanelRenderer::Desktop {
+        return;
+    }
+
+    panel.desktop_poll_stats = DesktopPollStats::default();
+    unsafe {
+        swell().SetTimer(panel.hwnd, DESKTOP_FAST_TIMER_ID, 16, None);
+    }
+    tracing::info!(
+        panel = panel.config.id,
+        reason,
+        interval_ms = 16,
+        "Started SWELL fast timer for desktop Dioxus panel"
+    );
+}
+
+#[cfg(all(feature = "desktop-renderer", target_os = "linux"))]
+fn stop_desktop_fast_timer(panel: &mut LivePanel, reason: &'static str) {
+    if panel.renderer != PanelRenderer::Desktop {
+        return;
+    }
+
+    unsafe {
+        swell().KillTimer(panel.hwnd, DESKTOP_FAST_TIMER_ID);
+    }
+    panel.desktop_poll_stats = DesktopPollStats::default();
+    tracing::info!(
+        panel = panel.config.id,
+        reason,
+        "Stopped SWELL fast timer for desktop Dioxus panel"
+    );
+}
+
+#[cfg(all(feature = "desktop-renderer", target_os = "linux"))]
+fn record_desktop_poll(panel: &mut LivePanel, source: &'static str) {
+    let now = Instant::now();
+    let stats = &mut panel.desktop_poll_stats;
+    let started_at = *stats.window_started_at.get_or_insert(now);
+    if let Some(last_poll_at) = stats.last_poll_at {
+        stats.max_gap = stats
+            .max_gap
+            .max(now.saturating_duration_since(last_poll_at));
+    }
+    stats.last_poll_at = Some(now);
+    stats.poll_count += 1;
+
+    let elapsed = now.saturating_duration_since(started_at);
+    if elapsed >= Duration::from_secs(5) {
+        let poll_count = stats.poll_count;
+        let avg_ms = elapsed.as_secs_f64() * 1000.0 / poll_count as f64;
+        let max_gap_ms = stats.max_gap.as_secs_f64() * 1000.0;
+        tracing::info!(
+            panel = panel.config.id,
+            source,
+            polls = poll_count,
+            avg_ms,
+            max_gap_ms,
+            "Desktop renderer poll cadence"
+        );
+        *stats = DesktopPollStats {
+            window_started_at: Some(now),
+            last_poll_at: Some(now),
+            poll_count: 0,
+            max_gap: Duration::ZERO,
+        };
+    }
+}
+
 fn show_panel_inner(panel: &mut LivePanel) {
     let reaper = reaper();
 
@@ -1185,9 +1278,7 @@ fn hide_panel_inner(panel: &mut LivePanel) {
     unsafe {
         reaper.DockWindowRemove(panel.hwnd);
         #[cfg(all(feature = "desktop-renderer", target_os = "linux"))]
-        if panel.renderer == PanelRenderer::Desktop {
-            swell.KillTimer(panel.hwnd, DESKTOP_FAST_TIMER_ID);
-        }
+        stop_desktop_fast_timer(panel, "hide");
         swell.ShowWindow(panel.hwnd, raw::SW_HIDE as c_int);
     }
 
@@ -1361,13 +1452,7 @@ fn create_desktop_view(
     }
     panel.desktop_view = Some(view);
     #[cfg(target_os = "linux")]
-    unsafe {
-        swell().SetTimer(panel.hwnd, DESKTOP_FAST_TIMER_ID, 16, None);
-        tracing::info!(
-            panel = panel.config.id,
-            "Started SWELL fast timer for desktop Dioxus panel"
-        );
-    }
+    start_desktop_fast_timer(panel, "create");
     Ok(())
 }
 
@@ -1985,9 +2070,7 @@ fn panel_wndproc_inner(
                         #[cfg(all(feature = "desktop-renderer", target_os = "linux"))]
                         if panel.renderer == PanelRenderer::Desktop && panel.desktop_view.is_some()
                         {
-                            unsafe {
-                                swell().SetTimer(panel.hwnd, DESKTOP_FAST_TIMER_ID, 16, None);
-                            }
+                            start_desktop_fast_timer(panel, "show");
                         }
                         if let Some(view) = &panel.view {
                             view.mark_dirty();
@@ -1995,11 +2078,7 @@ fn panel_wndproc_inner(
                     } else {
                         // Keep the view alive for instant re-show; just stop rendering.
                         #[cfg(all(feature = "desktop-renderer", target_os = "linux"))]
-                        if panel.renderer == PanelRenderer::Desktop {
-                            unsafe {
-                                swell().KillTimer(panel.hwnd, DESKTOP_FAST_TIMER_ID);
-                            }
-                        }
+                        stop_desktop_fast_timer(panel, "showwindow_hide");
                         panel.visible = false;
                     }
                     tracing::info!(showing, panel = panel.config.id, "WM_SHOWWINDOW");
@@ -2026,11 +2105,7 @@ fn panel_wndproc_inner(
             if let Some((_id, mut panel)) = taken {
                 panel.view = None;
                 #[cfg(all(feature = "desktop-renderer", target_os = "linux"))]
-                if panel.renderer == PanelRenderer::Desktop {
-                    unsafe {
-                        swell().KillTimer(panel.hwnd, DESKTOP_FAST_TIMER_ID);
-                    }
-                }
+                stop_desktop_fast_timer(&mut panel, "destroy");
                 let reaper = reaper();
                 // Unregister screenset callback before destroying the HWND —
                 // otherwise REAPER may call us back with a dead param.
