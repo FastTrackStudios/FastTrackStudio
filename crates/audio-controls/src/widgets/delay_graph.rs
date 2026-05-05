@@ -38,16 +38,16 @@ impl NoteValue {
 /// Parameters for the delay effect.
 #[derive(Clone, PartialEq, Debug)]
 pub struct DelayParams {
-    pub time_left: f32,      // 1-2000 ms
-    pub time_right: f32,     // 1-2000 ms
-    pub feedback: f32,       // 0-100%
-    pub mix: f32,            // 0-100%
-    pub ping_pong: bool,     // Alternating L/R
-    pub sync: bool,          // Tempo sync
+    pub time_left: f32,  // 1-2000 ms
+    pub time_right: f32, // 1-2000 ms
+    pub feedback: f32,   // 0-100%
+    pub mix: f32,        // 0-100%
+    pub ping_pong: bool, // Alternating L/R
+    pub sync: bool,      // Tempo sync
     pub note_value: NoteValue,
-    pub low_cut: f32,        // 20-500 Hz
-    pub high_cut: f32,       // 1000-20000 Hz
-    pub modulation: f32,     // 0-100%
+    pub low_cut: f32,    // 20-500 Hz
+    pub high_cut: f32,   // 1000-20000 Hz
+    pub modulation: f32, // 0-100%
 }
 
 impl Default for DelayParams {
@@ -70,8 +70,8 @@ impl Default for DelayParams {
 /// Real-time metering data for the delay.
 #[derive(Clone, Default, Debug, PartialEq)]
 pub struct DelayMetering {
-    pub tap_levels: Vec<f32>,  // Level of each tap (up to 8 taps, 0-1)
-    pub current_tap: usize,    // Currently playing tap index
+    pub tap_levels: Vec<f32>, // Level of each tap (up to 8 taps, 0-1)
+    pub current_tap: usize,   // Currently playing tap index
 }
 
 // =============================================================================
@@ -112,7 +112,8 @@ pub fn DelayGraph(props: DelayGraphProps) -> Element {
         ((params.feedback / 100.0) * max_taps as f32).max(1.0) as usize
     } else {
         1
-    }.min(max_taps);
+    }
+    .min(max_taps);
 
     // Calculate tap levels with decay
     let feedback_factor = params.feedback / 100.0;
@@ -281,8 +282,8 @@ pub fn DelayGraph(props: DelayGraphProps) -> Element {
 // DelayWidget - Full widget with controls
 // =============================================================================
 
-use crate::widgets::knob::Knob;
 use crate::theming::{ThemeContext, ThemeProvider};
+use crate::widgets::knob::Knob;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct DelayWidgetProps {
@@ -330,9 +331,21 @@ pub fn DelayWidget(props: DelayWidgetProps) -> Element {
     });
 
     // Value formatters
-    let format_ms = |v: f32| if v >= 1000.0 { format!("{:.1}s", v / 1000.0) } else { format!("{v:.0}ms") };
+    let format_ms = |v: f32| {
+        if v >= 1000.0 {
+            format!("{:.1}s", v / 1000.0)
+        } else {
+            format!("{v:.0}ms")
+        }
+    };
     let format_percent = |v: f32| format!("{v:.0}%");
-    let format_hz = |v: f32| if v >= 1000.0 { format!("{:.1}k", v / 1000.0) } else { format!("{v:.0}Hz") };
+    let format_hz = |v: f32| {
+        if v >= 1000.0 {
+            format!("{:.1}k", v / 1000.0)
+        } else {
+            format!("{v:.0}Hz")
+        }
+    };
 
     // Knob sizes
     let large_knob = 56_u32;

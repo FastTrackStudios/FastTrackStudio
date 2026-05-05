@@ -709,9 +709,13 @@ pub fn concatenate_tracks(projects: &[ReaperProject], songs: &[SongInfo]) -> Vec
 
         eprintln!(
             "[combine] {}: {} source items, {} structural skipped, {}/{} items before/after trim (local {:.1}..{:.1})",
-            song.name, source_items, skipped_structural,
-            items_before_trim, items_after_trim,
-            song.local_start, local_end,
+            song.name,
+            source_items,
+            skipped_structural,
+            items_before_trim,
+            items_after_trim,
+            song.local_start,
+            local_end,
         );
 
         // Split song content into regular tracks vs reference tracks
@@ -2131,7 +2135,7 @@ fn classify_lane(name: &str, is_region: bool) -> u32 {
     match upper.as_str() {
         "SONGSTART" | "SONGEND" | "COUNT-IN" | "COUNT IN" | "COUNTIN" => return LANE_MARKS,
         "=START" | "=END" | "PREROLL" | "=PREROLL" | "POSTROLL" | "=POSTROLL" => {
-            return LANE_START_END
+            return LANE_START_END;
         }
         _ => {}
     }
@@ -2226,7 +2230,7 @@ fn classify_marker_lane_for_raw(marker_line: &str) -> u32 {
     match upper.as_str() {
         "SONGSTART" | "SONGEND" | "COUNT-IN" | "COUNT IN" | "COUNTIN" => return LANE_MARKS,
         "=START" | "=END" | "PREROLL" | "=PREROLL" | "POSTROLL" | "=POSTROLL" => {
-            return LANE_START_END
+            return LANE_START_END;
         }
         _ => {}
     }

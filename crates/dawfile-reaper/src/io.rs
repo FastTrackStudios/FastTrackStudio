@@ -15,14 +15,14 @@ use crate::convert::{
     daw_track_to_rpp_track_chunk, fx_chain_to_tree, rpp_tracks_to_daw_tracks, tree_to_fx_chain,
 };
 use crate::primitives::{RppBlock, RppBlockContent, Token};
-use crate::rpp_tree::{read_rpp, read_rpp_chunk, write_rpp, RChunk};
+use crate::rpp_tree::{RChunk, read_rpp, read_rpp_chunk, write_rpp};
 use crate::types::serialize::RppSerialize;
 use crate::types::track::{
     FolderSettings, FolderState, MonitorMode, MuteSoloSettings, RecordMode, RecordSettings,
     Track as RppTrack, TrackSoloState, VolPanSettings,
 };
 use crate::types::{DecodeOptions, FxChain, ReaperProject};
-use crate::{parse_rpp_file, RppParseError, RppResult};
+use crate::{RppParseError, RppResult, parse_rpp_file};
 
 /// Parse a full project text into typed [`ReaperProject`].
 // r[impl rpp.parse.project]

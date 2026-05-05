@@ -2,7 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use dawfile_reaper::{parse_rpp_file, DecodeOptions, ReaperProject, TrackParseOptions};
+use dawfile_reaper::{DecodeOptions, ReaperProject, TrackParseOptions, parse_rpp_file};
 
 #[derive(Clone, Copy)]
 struct Scenario {

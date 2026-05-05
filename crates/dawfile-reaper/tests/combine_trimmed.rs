@@ -184,8 +184,14 @@ fn trimmed_combine_song_starts_on_measure_boundaries() {
             let dist = (pt.position - info.global_start_seconds).abs();
             println!(
                 "  {i}. {} @ {:.2}s — nearest PT at {:.2}s (dist={:.2}s, {:.1} BPM) expect {} BPM {}/{}",
-                info.name, info.global_start_seconds, pt.position, dist, pt.tempo,
-                expect.original_tempo, expect.original_time_sig.0, expect.original_time_sig.1,
+                info.name,
+                info.global_start_seconds,
+                pt.position,
+                dist,
+                pt.tempo,
+                expect.original_tempo,
+                expect.original_time_sig.0,
+                expect.original_time_sig.1,
             );
         }
     }
@@ -497,7 +503,8 @@ fn trimmed_combine_items_trimmed_to_bounds() {
     assert!(
         overshoot_items.is_empty(),
         "No items should extend more than 1s past the last song's end ({:.1}s). Found {} items overshooting.",
-        total_end, overshoot_items.len()
+        total_end,
+        overshoot_items.len()
     );
 
     // No items should start before position 0

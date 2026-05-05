@@ -281,8 +281,17 @@ mod tests {
 
                 let segment_beats = segment_duration * effective_tempo / 60.0;
 
-                println!("  Segment {:.3}s to {:.3}s: {:.3}s at {:.1} BPM ({}/{} time) = {:.1} effective BPM = {:.3} beats", 
-                         last_time, point_time, segment_duration, current_tempo, current_time_sig.0, current_time_sig.1, effective_tempo, segment_beats);
+                println!(
+                    "  Segment {:.3}s to {:.3}s: {:.3}s at {:.1} BPM ({}/{} time) = {:.1} effective BPM = {:.3} beats",
+                    last_time,
+                    point_time,
+                    segment_duration,
+                    current_tempo,
+                    current_time_sig.0,
+                    current_time_sig.1,
+                    effective_tempo,
+                    segment_beats
+                );
 
                 // Add beats to current position
                 current_beat_fraction += segment_beats;
@@ -343,8 +352,17 @@ mod tests {
 
                 let segment_beats = segment_duration * effective_tempo / 60.0;
 
-                println!("  Final segment {:.3}s to {:.3}s: {:.3}s at {:.1} BPM ({}/{} time) = {:.1} effective BPM = {:.3} beats", 
-                         last_time, time_seconds, segment_duration, current_tempo, current_time_sig.0, current_time_sig.1, effective_tempo, segment_beats);
+                println!(
+                    "  Final segment {:.3}s to {:.3}s: {:.3}s at {:.1} BPM ({}/{} time) = {:.1} effective BPM = {:.3} beats",
+                    last_time,
+                    time_seconds,
+                    segment_duration,
+                    current_tempo,
+                    current_time_sig.0,
+                    current_time_sig.1,
+                    effective_tempo,
+                    segment_beats
+                );
 
                 // Add final beats to current position
                 current_beat_fraction += segment_beats;
@@ -387,8 +405,17 @@ mod tests {
 
             let segment_beats = segment_duration * effective_tempo / 60.0;
 
-            println!("  Final segment {:.3}s to {:.3}s: {:.3}s at {:.1} BPM ({}/{} time) = {:.1} effective BPM = {:.3} beats",
-                     last_time, time_seconds, segment_duration, current_tempo, current_time_sig.0, current_time_sig.1, effective_tempo, segment_beats);
+            println!(
+                "  Final segment {:.3}s to {:.3}s: {:.3}s at {:.1} BPM ({}/{} time) = {:.1} effective BPM = {:.3} beats",
+                last_time,
+                time_seconds,
+                segment_duration,
+                current_tempo,
+                current_time_sig.0,
+                current_time_sig.1,
+                effective_tempo,
+                segment_beats
+            );
 
             // Add final beats to current position
             current_beat_fraction += segment_beats;

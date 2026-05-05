@@ -344,7 +344,9 @@ impl AutomationItem {
 
 impl fmt::Display for AutomationItem {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "POOLEDENVINST {} {:.6} {:.6} {:.6} {:.6} {} {:.6} {:.6} {} {:.6} {:.6} {} {} {:.6} {:.6} {}",
+        write!(
+            f,
+            "POOLEDENVINST {} {:.6} {:.6} {:.6} {:.6} {} {:.6} {:.6} {} {:.6} {:.6} {} {} {:.6} {:.6} {}",
             self.pool_index,
             self.position,
             self.length,
@@ -830,8 +832,12 @@ mod tests {
         assert_eq!(points[1].unknown_field_6, Some(0));
         assert_eq!(points[1].bezier_tension, Some(0.3030303));
 
-        println!("✅ Successfully parsed {} extension blocks, {} automation items, and {} envelope points from raw RPP!", 
-                 extension_data.len(), automation_items.len(), points.len());
+        println!(
+            "✅ Successfully parsed {} extension blocks, {} automation items, and {} envelope points from raw RPP!",
+            extension_data.len(),
+            automation_items.len(),
+            points.len()
+        );
     }
 
     #[test]
@@ -973,7 +979,11 @@ my_extension "some data with spaces"
         assert_eq!(ext.parmname, "my_extension");
         assert_eq!(ext.string_data, "\"some extension data\"");
 
-        println!("✅ Successfully parsed {} extension blocks, {} automation items, and {} envelope points!", 
-                 extension_data.len(), automation_items.len(), points.len());
+        println!(
+            "✅ Successfully parsed {} extension blocks, {} automation items, and {} envelope points!",
+            extension_data.len(),
+            automation_items.len(),
+            points.len()
+        );
     }
 }

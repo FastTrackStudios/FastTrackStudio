@@ -1,7 +1,7 @@
 //! Top-level DAW API entry point
 
-use crate::{DawConnection, Project};
 use crate::Result;
+use crate::{DawConnection, Project};
 
 /// Main DAW API entry point (like `Reaper`)
 ///
@@ -48,7 +48,8 @@ impl Daw {
     /// # };
     /// ```
     pub fn init(handle: vox::session::ConnectionHandle) -> Result<()> {
-        DawConnection::init_globally(handle).map_err(|_| Error::Other("DAW already initialized".to_string()))
+        DawConnection::init_globally(handle)
+            .map_err(|_| Error::Other("DAW already initialized".to_string()))
     }
 
     /// Get the current/active project
