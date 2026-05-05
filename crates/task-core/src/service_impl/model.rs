@@ -18,8 +18,7 @@ use crate::asset::{
     matches_asset_filter, parse_asset_status,
 };
 use crate::expense::{
-    Expense, ExpenseCreateRequest, ExpenseFilter, ExpensePatch, ExpenseReport, ExpenseStatus,
-    build_expense_report, format_expense_id, matches_expense_filter, parse_expense_status,
+    Expense, ExpenseFilter, ExpenseReport, build_expense_report, matches_expense_filter,
 };
 use crate::index::TaskIndex;
 use crate::location::{Location, Space, VenueDefault};
@@ -59,7 +58,7 @@ use crate::service::{
     TimeEntryContext, TimeEntryFilter, TimeEntryPatch, TimeLogRequest, TimeStartRequest,
     TimedTaskEntry, VaultCapability, VaultError,
 };
-use crate::task::{Priority, Status, Task, TaskApi, TaskApiCreate, TaskApiUpdate, WikiLink};
+use crate::task::{Priority, Status, Task, TaskApi, TaskApiCreate, WikiLink};
 use crate::vault::{Vault, VaultStorage};
 use crate::watch::{WatchHandle, start_watch};
 
@@ -377,7 +376,7 @@ impl VaultServiceImpl {
     }
 
     // r[impl api.service.list-tasks]
-    pub async fn list_tasks(&self) -> Vec<Task> {
+    async fn stored_tasks(&self) -> Vec<Task> {
         // r[impl query.execute.snapshot]
         match CrudStorage::<TaskApi>::get_all(&self.task_storage, InMemoryQuery::all()).await {
             Ok(tasks) => dedupe_tasks(tasks.into_iter().filter_map(task_from_json_model).collect()),
@@ -396,7 +395,7 @@ impl VaultServiceImpl {
     }
 
     // r[impl api.service.create-task]
-    pub async fn create_task(&self, mut task: Task) -> Result<Task, VaultError> {
+    async fn store_new_task(&self, mut task: Task) -> Result<Task, VaultError> {
         let now = Utc::now();
         task.date_created = Some(now);
         task.date_modified = Some(now);
@@ -494,7 +493,7 @@ impl VaultServiceImpl {
 
     pub async fn operating_model_report(&self) -> OperatingModelReport {
         let tasks = self.vault.read().await.load_tasks();
-        let projects = self.list_projects().await;
+        let projects = self.stored_projects().await;
         let events = self.list_calendar_events().await;
         build_operating_model_report(tasks, projects, events)
     }
@@ -554,46 +553,6 @@ impl VaultServiceImpl {
         }
         Ok(inbox_item_from_task(&task))
     }
-
-    // r[impl api.service.update-task]
-    pub async fn update_task(&self, task: Task) -> Result<Task, VaultError> {
-        self.update_task_as(task, None).await
-    }
-
-    /// Update a task and emit audit rows for every changed scalar field.
-    /// The `actor` is stamped on each change row so the activity feed can
-    /// show who made the edit.
-    pub async fn update_task_as(
-        &self,
-        mut task: Task,
-        actor: Option<&str>,
-    ) -> Result<Task, VaultError> {
-        // Snapshot the prior state for diffing. Lookup prefers id; if the
-        // task has none, fall back to title match.
-        let vault = self.vault.read().await;
-        let prior_id = task.id;
-        let prior = vault.load_tasks().into_iter().find(|t| t.id == prior_id);
-
-        task.date_modified = Some(Utc::now());
-        drop(vault);
-        let update = task_to_update_model(&task)?;
-        let updated = CrudStorage::<TaskApi>::update(&self.task_storage, prior_id, update)
-            .await
-            .map_err(api_error_to_vault)?;
-        let task = task_from_api(updated)?;
-
-        let file_path = format!("{}.md", task.title);
-        if let Ok(guard) = self.index.lock() {
-            if let Some(ref index) = *guard {
-                let _ = index.index_task(&task, &file_path);
-                if let Some(ref old) = prior {
-                    record_task_diff(index, old, &task, actor, &file_path);
-                }
-            }
-        }
-        Ok(task)
-    }
-
     // r[impl api.service.complete-task]
     pub async fn complete_task(&self, title: String) -> Result<Task, VaultError> {
         self.complete_task_as(title, None).await
@@ -656,7 +615,7 @@ impl VaultServiceImpl {
     // ── Projects ─────────────────────────────────────────────────────
 
     // r[impl api.service.list-projects]
-    pub async fn list_projects(&self) -> Vec<Project> {
+    async fn stored_projects(&self) -> Vec<Project> {
         let mut projects = self.vault.read().await.load_projects();
 
         // Also load from extra vaults (shared project vaults).
@@ -676,20 +635,6 @@ impl VaultServiceImpl {
 
         projects
     }
-
-    /// List projects from a specific vault source by name.
-    pub async fn list_projects_from(&self, vault_name: &str) -> Vec<Project> {
-        let extras = self.extra_vaults.read().await;
-        let Some(src) = extras.iter().find(|s| s.name == vault_name) else {
-            return vec![];
-        };
-        let vault = Vault::new(&src.root);
-        match src.kind {
-            VaultKind::Projects => vault.load_projects_in("Projects"),
-            VaultKind::Personal => vault.load_projects(),
-        }
-    }
-
     /// Create a project in the shared project vault's Projects/ directory.
     pub async fn create_project(
         &self,
@@ -724,8 +669,8 @@ impl VaultServiceImpl {
     }
 
     pub async fn project_dashboard(&self) -> Vec<ProjectDashboardEntry> {
-        let projects = self.list_projects().await;
-        let tasks = self.list_tasks().await;
+        let projects = self.stored_projects().await;
+        let tasks = self.stored_tasks().await;
         build_project_dashboard(&projects, &tasks)
     }
 
@@ -734,46 +679,6 @@ impl VaultServiceImpl {
         let tasks = self.vault.read().await.load_tasks();
         find_next_task(&project_title, &tasks).cloned()
     }
-
-    pub async fn delete_task(&self, title: String) -> Result<(), VaultError> {
-        self.delete_task_as(title, None).await
-    }
-
-    /// Delete a task and emit an audit row tagged with the acting user.
-    pub async fn delete_task_as(
-        &self,
-        title: String,
-        actor: Option<&str>,
-    ) -> Result<(), VaultError> {
-        let task = self
-            .vault
-            .read()
-            .await
-            .load_tasks()
-            .into_iter()
-            .find(|task| task.matches_reference(&title))
-            .ok_or_else(|| VaultError::NotFound(title.clone()))?;
-        let task_title = task.title.clone();
-        let task_id = task.id;
-        CrudStorage::<TaskApi>::delete(&self.task_storage, task_id)
-            .await
-            .map_err(api_error_to_vault)?;
-        if let Ok(guard) = self.index.lock() {
-            if let Some(ref index) = *guard {
-                let _ = index.record_change(
-                    "task",
-                    &task_title,
-                    Some("deleted"),
-                    Some("present"),
-                    Some("deleted"),
-                    actor,
-                    Some(&format!("{}.md", task_title)),
-                );
-            }
-        }
-        Ok(())
-    }
-
     pub async fn search_tasks(&self, query: String) -> Vec<Task> {
         // Try index first — extract matching titles under the mutex, then drop it
         // before hitting any .await so the MutexGuard doesn't cross an await point.
@@ -839,7 +744,7 @@ impl VaultServiceImpl {
         depth: String,
     ) -> Result<Option<ProjectKnowledgeContext>, VaultError> {
         let project = self
-            .list_projects()
+            .stored_projects()
             .await
             .into_iter()
             .find(|project| project.title.eq_ignore_ascii_case(&project_title));
@@ -913,7 +818,7 @@ impl VaultServiceImpl {
             &config.password,
         );
 
-        let local_tasks = self.list_tasks().await;
+        let local_tasks = self.stored_tasks().await;
         let mut blocked_calendar_push = std::collections::HashSet::new();
 
         match sync.pull_tasks_from_calendar(&config.calendar).await {
@@ -1327,7 +1232,7 @@ impl VaultServiceImpl {
         };
         let tokens = person_context_tokens(&person);
         let tasks = self.vault.read().await.load_tasks();
-        let projects = self.list_projects().await;
+        let projects = self.stored_projects().await;
         let events = self.list_calendar_events().await;
         let mut communications = communication_refs_for_tokens(&tasks, &events, &tokens);
         communications.extend(self.channel_communication_refs_for_tokens(&tokens).await);
@@ -1368,7 +1273,7 @@ impl VaultServiceImpl {
             .collect();
         let tokens = organization_context_tokens(&organization, &org_people);
         let tasks = self.vault.read().await.load_tasks();
-        let projects = self.list_projects().await;
+        let projects = self.stored_projects().await;
         let events = self.list_calendar_events().await;
         let mut communications = communication_refs_for_tokens(&tasks, &events, &tokens);
         communications.extend(self.channel_communication_refs_for_tokens(&tokens).await);
@@ -1749,7 +1654,7 @@ impl VaultServiceImpl {
 
     async fn ensure_project_from_remote(&self, project: &Project) -> Result<(), VaultError> {
         let exists = self
-            .list_projects()
+            .stored_projects()
             .await
             .into_iter()
             .any(|p| p.title == project.title);
@@ -1937,7 +1842,7 @@ impl VaultServiceImpl {
         Ok(max + 1)
     }
 
-    pub async fn list_invoices(&self) -> Vec<crate::invoice::Invoice> {
+    async fn stored_invoices(&self) -> Vec<crate::invoice::Invoice> {
         let mut invoices = self.vault.read().await.load_invoices();
         // Refresh derived status for display (non-destructive — the file
         // still has whatever we last wrote).
@@ -1948,20 +1853,10 @@ impl VaultServiceImpl {
         invoices.sort_by(|a, b| b.number.cmp(&a.number));
         invoices
     }
-
-    pub async fn get_invoice(&self, invoice_id: &str) -> Option<crate::invoice::Invoice> {
-        self.vault
-            .read()
-            .await
-            .load_invoices()
-            .into_iter()
-            .find(|i| i.id.eq_ignore_ascii_case(invoice_id))
-    }
-
     pub async fn finance_report(&self) -> BusinessFinanceReport {
         let today = chrono::Local::now().date_naive();
         let time_entries = self.list_time_entries(TimeEntryFilter::default()).await;
-        let invoices = self.list_invoices().await;
+        let invoices = self.stored_invoices().await;
         build_finance_report(time_entries, invoices, today)
     }
 
@@ -2124,22 +2019,6 @@ impl VaultServiceImpl {
         }
         Ok(invoice)
     }
-
-    async fn next_expense_number(&self, year: i32) -> Result<u32, VaultError> {
-        let prefix = format!("EXP-{year:04}-");
-        let max = self
-            .vault
-            .read()
-            .await
-            .load_expenses()
-            .into_iter()
-            .filter(|expense| expense.id.starts_with(&prefix))
-            .map(|expense| expense.number)
-            .max()
-            .unwrap_or(0);
-        Ok(max + 1)
-    }
-
     async fn next_asset_number(&self, year: i32) -> Result<u32, VaultError> {
         let prefix = format!("AST-{year:04}-");
         let max = self
@@ -2383,7 +2262,7 @@ impl VaultServiceImpl {
             .ok_or_else(|| VaultError::NotFound(asset_id.to_string()))?;
 
         let task = self
-            .create_task(Task {
+            .store_new_task(Task {
                 title: request.title.clone(),
                 status: Status::Open,
                 priority: Priority::Normal,
@@ -2650,177 +2529,15 @@ impl VaultServiceImpl {
         self.vault.read().await.delete_location(reference)
     }
 
-    pub async fn list_expenses(&self, filter: ExpenseFilter) -> Vec<Expense> {
+    async fn stored_expenses(&self, filter: ExpenseFilter) -> Vec<Expense> {
         let mut expenses = self.vault.read().await.load_expenses();
         expenses.retain(|expense| matches_expense_filter(expense, &filter));
         expenses.sort_by(|a, b| b.date.cmp(&a.date).then_with(|| b.number.cmp(&a.number)));
         expenses
     }
-
-    pub async fn get_expense(&self, expense_id: &str) -> Option<Expense> {
-        self.vault
-            .read()
-            .await
-            .load_expenses()
-            .into_iter()
-            .find(|expense| expense.id.eq_ignore_ascii_case(expense_id))
-    }
-
-    pub async fn create_expense(
-        &self,
-        request: ExpenseCreateRequest,
-    ) -> Result<Expense, VaultError> {
-        let now = Utc::now();
-        let date = request.date.unwrap_or_else(|| now.date_naive());
-        let number = self.next_expense_number(date.year()).await?;
-        let id = format_expense_id(date.year(), number);
-        let status = request
-            .status
-            .as_deref()
-            .and_then(parse_expense_status)
-            .unwrap_or(ExpenseStatus::Draft);
-        let expense = Expense {
-            uuid: Uuid::new_v4(),
-            id,
-            number,
-            status,
-            date,
-            amount_cents: request.amount_cents,
-            currency_code: request.currency_code.unwrap_or_else(|| "USD".into()),
-            project: request.project.map(crate::task::WikiLink),
-            client: request.client.map(crate::task::WikiLink),
-            deliverable: request.deliverable,
-            category: request.category,
-            vendor: request.vendor,
-            description: request.description,
-            receipt: request.receipt,
-            reference: request.reference,
-            reimbursable: request.reimbursable,
-            notes: request.notes,
-            created_by: request.actor,
-            date_created: Some(now),
-            date_modified: Some(now),
-            body: String::new(),
-        };
-        self.vault.read().await.save_expense(&expense)?;
-        Ok(expense)
-    }
-
-    pub async fn update_expense(
-        &self,
-        expense_id: &str,
-        patch: ExpensePatch,
-        actor: Option<&str>,
-    ) -> Result<Expense, VaultError> {
-        let vault = self.vault.read().await;
-        let mut expense = vault
-            .load_expenses()
-            .into_iter()
-            .find(|expense| expense.id.eq_ignore_ascii_case(expense_id))
-            .ok_or_else(|| VaultError::NotFound(expense_id.to_string()))?;
-        let now = Utc::now();
-        if let Some(status) = patch.status.as_deref() {
-            expense.status = parse_expense_status(status).ok_or_else(|| {
-                VaultError::ParseError(format!("invalid expense status: {status}"))
-            })?;
-        }
-        if let Some(date) = patch.date.as_deref() {
-            expense.date = NaiveDate::parse_from_str(date, "%Y-%m-%d")
-                .map_err(|e| VaultError::ParseError(e.to_string()))?;
-        }
-        if let Some(amount) = patch.amount_cents {
-            expense.amount_cents = amount;
-        }
-        if let Some(currency) = patch.currency_code {
-            expense.currency_code = currency;
-        }
-        if let Some(project) = patch.project {
-            expense.project = if project.trim().is_empty() {
-                None
-            } else {
-                Some(crate::task::WikiLink(project))
-            };
-        }
-        if let Some(client) = patch.client {
-            expense.client = if client.trim().is_empty() {
-                None
-            } else {
-                Some(crate::task::WikiLink(client))
-            };
-        }
-        if let Some(deliverable) = patch.deliverable {
-            expense.deliverable = if deliverable.trim().is_empty() {
-                None
-            } else {
-                Some(deliverable)
-            };
-        }
-        if let Some(category) = patch.category {
-            expense.category = if category.trim().is_empty() {
-                None
-            } else {
-                Some(category)
-            };
-        }
-        if let Some(vendor) = patch.vendor {
-            expense.vendor = if vendor.trim().is_empty() {
-                None
-            } else {
-                Some(vendor)
-            };
-        }
-        if let Some(description) = patch.description {
-            expense.description = description;
-        }
-        if let Some(receipt) = patch.receipt {
-            expense.receipt = if receipt.trim().is_empty() {
-                None
-            } else {
-                Some(receipt)
-            };
-        }
-        if let Some(reference) = patch.reference {
-            expense.reference = if reference.trim().is_empty() {
-                None
-            } else {
-                Some(reference)
-            };
-        }
-        if let Some(reimbursable) = patch.reimbursable {
-            expense.reimbursable = reimbursable;
-        }
-        if let Some(notes) = patch.notes {
-            expense.notes = if notes.trim().is_empty() {
-                None
-            } else {
-                Some(notes)
-            };
-        }
-        expense.date_modified = Some(now);
-        vault.save_expense(&expense)?;
-        if let Ok(guard) = self.index.lock() {
-            if let Some(ref idx) = *guard {
-                let _ = idx.record_change(
-                    "expense",
-                    &expense.id,
-                    Some("update"),
-                    None,
-                    None,
-                    actor,
-                    Some(&format!("expenses/{}.md", expense.id)),
-                );
-            }
-        }
-        Ok(expense)
-    }
-
-    pub async fn delete_expense(&self, expense_id: &str) -> Result<(), VaultError> {
-        self.vault.read().await.delete_expense(expense_id)
-    }
-
     pub async fn expense_report(&self, filter: ExpenseFilter) -> ExpenseReport {
         let today = Utc::now().date_naive();
-        let expenses = self.list_expenses(filter).await;
+        let expenses = self.stored_expenses(filter).await;
         build_expense_report(&expenses, today)
     }
 
@@ -2935,7 +2652,7 @@ impl VaultServiceImpl {
 
     /// Find a project by case-insensitive title match.
     pub async fn find_project(&self, title: &str) -> Option<Project> {
-        self.list_projects()
+        self.stored_projects()
             .await
             .into_iter()
             .find(|p| p.title.eq_ignore_ascii_case(title))
@@ -3324,14 +3041,6 @@ impl VaultServiceImpl {
         }
         set
     }
-
-    // ── Clients ─────────────────────────────────────────────────────────────
-
-    /// List all clients from the vault's `clients/` directory.
-    pub async fn list_clients(&self) -> Vec<crate::client::Client> {
-        self.vault.read().await.load_clients()
-    }
-
     /// Create or update a client note.
     pub async fn save_client(
         &self,
@@ -3950,13 +3659,6 @@ fn task_to_create_model(task: &Task) -> Result<TaskApiCreate, VaultError> {
         .and_then(serde_json::from_value)
         .map_err(|e| VaultError::ParseError(format!("failed to build task create model: {e}")))
 }
-
-fn task_to_update_model(task: &Task) -> Result<TaskApiUpdate, VaultError> {
-    serde_json::to_value(task)
-        .and_then(serde_json::from_value)
-        .map_err(|e| VaultError::ParseError(format!("failed to build task update model: {e}")))
-}
-
 fn task_from_api(task: TaskApi) -> Result<Task, VaultError> {
     task_from_json_model(task)
         .ok_or_else(|| VaultError::ParseError("failed to decode task repo model".to_string()))
@@ -5728,7 +5430,7 @@ impl crate::service::CalendarService for VaultServiceImpl {
         let to = chrono::NaiveDate::parse_from_str(&to, "%Y-%m-%d")
             .map_err(|e| VaultError::ParseError(e.to_string()))?;
         Ok(self
-            .list_tasks()
+            .stored_tasks()
             .await
             .into_iter()
             .filter(|task| task.scheduled.map_or(false, |d| d >= from && d <= to))
@@ -6386,110 +6088,6 @@ fn calendar_event_conflicts(local: &crate::CalendarEvent, remote: &crate::Calend
         _ => false,
     }
 }
-
-/// Diff two versions of a task and write one audit row per changed scalar
-/// field. Lists (tags/projects/contexts) emit one row tagged with the diff
-/// summary rather than per-element rows — noisy enough as one entry.
-fn record_task_diff(
-    index: &crate::index::TaskIndex,
-    old: &Task,
-    new: &Task,
-    actor: Option<&str>,
-    file_path: &str,
-) {
-    let id = new.id_ref();
-
-    // Scalar fields worth surfacing in the activity feed.
-    let mut rows: Vec<(&str, Option<String>, Option<String>)> = Vec::new();
-    if old.title != new.title {
-        rows.push(("title", Some(old.title.clone()), Some(new.title.clone())));
-    }
-    if old.status != new.status {
-        rows.push((
-            "status",
-            Some(format!("{:?}", old.status)),
-            Some(format!("{:?}", new.status)),
-        ));
-    }
-    if old.priority != new.priority {
-        rows.push((
-            "priority",
-            Some(format!("{:?}", old.priority)),
-            Some(format!("{:?}", new.priority)),
-        ));
-    }
-    if old.assignee != new.assignee {
-        rows.push(("assignee", old.assignee.clone(), new.assignee.clone()));
-    }
-    if old.due != new.due {
-        rows.push((
-            "due",
-            old.due.map(|d| d.to_string()),
-            new.due.map(|d| d.to_string()),
-        ));
-    }
-    if old.scheduled != new.scheduled {
-        rows.push((
-            "scheduled",
-            old.scheduled.map(|d| d.to_string()),
-            new.scheduled.map(|d| d.to_string()),
-        ));
-    }
-    if old.recurrence != new.recurrence {
-        rows.push(("recurrence", old.recurrence.clone(), new.recurrence.clone()));
-    }
-    if old.deleted_at.is_some() != new.deleted_at.is_some() {
-        rows.push((
-            "deleted_at",
-            old.deleted_at.map(|d| d.to_rfc3339()),
-            new.deleted_at.map(|d| d.to_rfc3339()),
-        ));
-    }
-
-    // List fields as one summary row each, naming the net diff.
-    if old.tags != new.tags {
-        rows.push(("tags", Some(old.tags.join(",")), Some(new.tags.join(","))));
-    }
-    if old.projects != new.projects {
-        rows.push((
-            "projects",
-            Some(
-                old.projects
-                    .iter()
-                    .map(|p| p.0.as_str())
-                    .collect::<Vec<_>>()
-                    .join(","),
-            ),
-            Some(
-                new.projects
-                    .iter()
-                    .map(|p| p.0.as_str())
-                    .collect::<Vec<_>>()
-                    .join(","),
-            ),
-        ));
-    }
-    if old.contexts != new.contexts {
-        rows.push((
-            "contexts",
-            Some(old.contexts.join(",")),
-            Some(new.contexts.join(",")),
-        ));
-    }
-
-    for (field, from, to) in rows {
-        let _ = index.record_change(
-            "task",
-            &id,
-            Some(field),
-            from.as_deref(),
-            to.as_deref(),
-            actor,
-            Some(file_path),
-        );
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -6582,14 +6180,14 @@ mod tests {
             })
             .unwrap();
         deleted_capture.deleted_at = Some(Utc::now());
-        svc.update_task(deleted_capture.clone()).await.unwrap();
+        svc.vault.read().await.save_task(&deleted_capture).unwrap();
         assert!(
             svc.list_inbox_items().await.is_empty(),
             "soft-deleted inbox captures should be hidden by default"
         );
 
         deleted_capture.deleted_at = None;
-        svc.update_task(deleted_capture).await.unwrap();
+        svc.vault.read().await.save_task(&deleted_capture).unwrap();
 
         let promoted = svc
             .promote_inbox(InboxPromoteRequest {
@@ -6667,7 +6265,7 @@ mod tests {
                 .any(|task| task.0 == response.task.title)
         );
 
-        let tasks = svc.list_tasks().await;
+        let tasks = svc.stored_tasks().await;
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].title, "Replace loose XLR connector");
         assert!(tasks[0].tags.iter().any(|tag| tag == "repair"));
@@ -6742,7 +6340,7 @@ mod tests {
         let duplicate_id = Uuid::parse_str("00000000-0000-4000-8000-000000000501").unwrap();
 
         for title in ["Duplicate A", "Duplicate B"] {
-            svc.create_task(Task {
+            svc.store_new_task(Task {
                 id: duplicate_id,
                 title: title.to_string(),
                 status: Status::Open,
@@ -6752,7 +6350,7 @@ mod tests {
             .unwrap();
         }
 
-        let listed = svc.list_tasks().await;
+        let listed = svc.stored_tasks().await;
         assert_eq!(
             listed.iter().filter(|task| task.id == duplicate_id).count(),
             1,
@@ -6810,7 +6408,7 @@ mod tests {
                 ..Default::default()
             },
         ] {
-            svc.create_task(task).await.unwrap();
+            svc.store_new_task(task).await.unwrap();
         }
         svc.vault
             .read()
