@@ -56,13 +56,13 @@ fts-dsp = { path = "../FTS-Plugins/crates/fts-dsp" }
 cpal = "0.17"
 
 # ── Facet reflection ─────────────────────────────────────────────────
-facet = { version = "0.44" }
-facet-styx = { version = "2.0" }
-facet-toml = { version = "0.44" }
+facet = { version = "0.46" }
+facet-styx = { version = "3.0" }
+facet-toml = { version = "0.46" }
 
 # ── ROAM service framework (latest main) ─────────────────────────────
-vox = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-ur-taking-me-with-you = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
+vox = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
+ur-taking-me-with-you = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
 
 # ── DAW facade crate (sibling repo — single public API surface) ──────
 daw = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
@@ -170,21 +170,21 @@ blitz-traits = { git = "https://github.com/FastTrackStudios/blitz.git", rev = "a
 
 # Redirect bearcove/vox.git transitive deps to the FTS fork (fixes noisy eprintln! debug logs).
 [patch."https://github.com/bearcove/vox.git"]
-vox = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-vox-core = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-vox-types = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-vox-postcard = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-vox-stream = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-vox-websocket = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-vox-shm = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-vox-schema = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-vox-service-macros = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-vox-macros-core = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-vox-macros-parse = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-vox-codegen = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-vox-inprocess = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-shm-primitives = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-facet-cbor = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
+vox = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
+vox-core = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
+vox-types = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
+vox-postcard = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
+vox-stream = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
+vox-websocket = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
+vox-shm = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
+vox-schema = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
+vox-service-macros = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
+vox-macros-core = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
+vox-macros-parse = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
+vox-codegen = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
+vox-inprocess = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
+shm-primitives = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
+facet-cbor = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
 
 # ── Vendored patches ──────────────────────────────────────────────────
 # moire: FTS fork — tolerates broken frame-pointer chains on NixOS glibc.
