@@ -13,15 +13,163 @@
 //! overridden per event/date.
 
 use chrono::{DateTime, Utc};
+use crudcrate::EntityToModels;
 use facet::Facet;
+use sea_orm::entity::prelude::*;
+use sea_orm::sea_query::{ArrayType, ColumnType, Nullable, Value, ValueType, ValueTypeErr};
+use sea_orm::{ColIdx, QueryResult, TryGetError, TryGetable};
+use serde::{Deserialize, Serialize};
+use std::ops::{Deref, DerefMut};
+use utoipa::ToSchema;
+use uuid::Uuid;
+
+macro_rules! json_vec_type {
+    ($name:ident, $item:ty) => {
+        #[derive(Debug, Clone, PartialEq, Facet, Serialize, Deserialize, ToSchema)]
+        #[facet(transparent)]
+        #[serde(transparent)]
+        pub struct $name(pub Vec<$item>);
+
+        impl Default for $name {
+            fn default() -> Self {
+                Self(Vec::new())
+            }
+        }
+
+        impl Deref for $name {
+            type Target = Vec<$item>;
+
+            fn deref(&self) -> &Self::Target {
+                &self.0
+            }
+        }
+
+        impl DerefMut for $name {
+            fn deref_mut(&mut self) -> &mut Self::Target {
+                &mut self.0
+            }
+        }
+
+        impl From<Vec<$item>> for $name {
+            fn from(value: Vec<$item>) -> Self {
+                Self(value)
+            }
+        }
+
+        impl IntoIterator for $name {
+            type Item = $item;
+            type IntoIter = std::vec::IntoIter<$item>;
+
+            fn into_iter(self) -> Self::IntoIter {
+                self.0.into_iter()
+            }
+        }
+
+        impl<'a> IntoIterator for &'a $name {
+            type Item = &'a $item;
+            type IntoIter = std::slice::Iter<'a, $item>;
+
+            fn into_iter(self) -> Self::IntoIter {
+                self.0.iter()
+            }
+        }
+
+        impl<'a> IntoIterator for &'a mut $name {
+            type Item = &'a mut $item;
+            type IntoIter = std::slice::IterMut<'a, $item>;
+
+            fn into_iter(self) -> Self::IntoIter {
+                self.0.iter_mut()
+            }
+        }
+
+        impl From<$name> for Value {
+            fn from(value: $name) -> Self {
+                Value::Json(Some(Box::new(
+                    serde_json::to_value(value.0).unwrap_or(serde_json::Value::Array(Vec::new())),
+                )))
+            }
+        }
+
+        impl Nullable for $name {
+            fn null() -> Value {
+                Value::Json(None)
+            }
+        }
+
+        impl TryGetable for $name {
+            fn try_get_by<I: ColIdx>(res: &QueryResult, idx: I) -> Result<Self, TryGetError> {
+                let value: serde_json::Value = res.try_get_by(idx)?;
+                let items = serde_json::from_value(value).map_err(|err| {
+                    TryGetError::DbErr(sea_orm::DbErr::Type(format!(
+                        "failed to deserialize JSON array: {err}"
+                    )))
+                })?;
+                Ok(Self(items))
+            }
+        }
+
+        impl ValueType for $name {
+            fn try_from(value: Value) -> Result<Self, ValueTypeErr> {
+                match value {
+                    Value::Json(Some(value)) => serde_json::from_value(*value)
+                        .map(Self)
+                        .map_err(|_| ValueTypeErr),
+                    _ => Err(ValueTypeErr),
+                }
+            }
+
+            fn type_name() -> String {
+                stringify!($name).to_string()
+            }
+
+            fn array_type() -> ArrayType {
+                ArrayType::Json
+            }
+
+            fn column_type() -> ColumnType {
+                ColumnType::Json
+            }
+        }
+    };
+}
 
 /// A reusable venue/location record.
-#[derive(Debug, Clone, PartialEq, Default, Facet)]
-pub struct Location {
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Default,
+    Facet,
+    DeriveEntityModel,
+    EntityToModels,
+    Serialize,
+    Deserialize,
+    ToSchema,
+)]
+#[sea_orm(table_name = "locations")]
+#[crudcrate(
+    api_struct = "LocationApi",
+    generate_vox_service,
+    name_singular = "location",
+    name_plural = "locations"
+)]
+pub struct Model {
+    #[facet(default)]
+    #[sea_orm(primary_key, auto_increment = false)]
+    #[crudcrate(
+        primary_key,
+        exclude(create),
+        on_create = uuid::Uuid::new_v4()
+    )]
+    pub uuid: Uuid,
+
     /// Stable identifier (UUID v4), auto-generated on create.
+    #[crudcrate(filterable, sortable)]
     pub id: Option<String>,
 
     /// Human-readable name, also used as the file stem.
+    #[crudcrate(filterable, sortable, fulltext)]
     pub name: String,
 
     // ── Address ─────────────────────────────────────────────────────
@@ -48,22 +196,23 @@ pub struct Location {
 
     // ── Venue type ──────────────────────────────────────────────────
     /// Freeform type tag: studio, live-venue, church, rehearsal, remote, etc.
+    #[crudcrate(filterable, sortable)]
     pub venue_type: Option<String>,
 
     // ── Defaults ────────────────────────────────────────────────────
     /// Default files associated with this venue (stage plot, input list, etc.).
     /// Each entry is a relative path or WikiLink to a file in the vault.
     #[facet(default)]
-    pub default_files: Vec<VenueDefault>,
+    pub default_files: VenueDefaultList,
 
     // ── Bookable spaces ─────────────────────────────────────────────
     /// Sub-locations within this venue (rooms, stages, studios).
     #[facet(default)]
-    pub spaces: Vec<Space>,
+    pub spaces: SpaceList,
 
     // ── Tags ────────────────────────────────────────────────────────
     #[facet(default)]
-    pub tags: Vec<String>,
+    pub tags: LocationTagList,
 
     // ── Bookkeeping ─────────────────────────────────────────────────
     pub date_created: Option<DateTime<Utc>>,
@@ -76,8 +225,15 @@ pub struct Location {
     pub body: String,
 }
 
+pub type Location = Model;
+
+#[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+pub enum Relation {}
+
+impl ActiveModelBehavior for ActiveModel {}
+
 /// A bookable sub-location inside a venue (room, stage, studio, booth).
-#[derive(Debug, Clone, PartialEq, Default, Facet)]
+#[derive(Debug, Clone, PartialEq, Default, Facet, Serialize, Deserialize, ToSchema)]
 pub struct Space {
     /// Stable identifier (UUID v4).
     pub id: Option<String>,
@@ -93,14 +249,14 @@ pub struct Space {
 
     /// Space-specific default files (overrides or extends venue defaults).
     #[facet(default)]
-    pub default_files: Vec<VenueDefault>,
+    pub default_files: VenueDefaultList,
 
     #[facet(default)]
-    pub tags: Vec<String>,
+    pub tags: LocationTagList,
 }
 
 /// A default file/resource associated with a venue or space.
-#[derive(Debug, Clone, PartialEq, Default, Facet)]
+#[derive(Debug, Clone, PartialEq, Default, Facet, Serialize, Deserialize, ToSchema)]
 pub struct VenueDefault {
     /// What kind of default: stage_plot, input_list, patch_list,
     /// setlist, personnel, schedule, diagram, file, etc.
@@ -112,6 +268,10 @@ pub struct VenueDefault {
     /// Optional label for display.
     pub label: Option<String>,
 }
+
+json_vec_type!(VenueDefaultList, VenueDefault);
+json_vec_type!(SpaceList, Space);
+json_vec_type!(LocationTagList, String);
 
 impl Location {
     pub fn is_deleted(&self) -> bool {
@@ -240,7 +400,8 @@ mod tests {
                     name: "Green Room".into(),
                     ..Default::default()
                 },
-            ],
+            ]
+            .into(),
             ..Default::default()
         };
         assert!(loc.find_space("studio a").is_some());
@@ -257,7 +418,8 @@ mod tests {
                 id: Some("abc-123".into()),
                 name: "Main Stage".into(),
                 ..Default::default()
-            }],
+            }]
+            .into(),
             ..Default::default()
         };
         assert!(loc.find_space_by_id("abc-123").is_some());
@@ -279,7 +441,8 @@ mod tests {
                     path: "inputs.md".into(),
                     label: None,
                 },
-            ],
+            ]
+            .into(),
             ..Default::default()
         };
         let defaults = loc.effective_defaults(None);
@@ -301,16 +464,19 @@ mod tests {
                     path: "venue-inputs.md".into(),
                     label: None,
                 },
-            ],
+            ]
+            .into(),
             spaces: vec![Space {
                 name: "Main Stage".into(),
                 default_files: vec![VenueDefault {
                     kind: "stage_plot".into(),
                     path: "main-stage.pdf".into(),
                     label: Some("Main Stage Plot".into()),
-                }],
+                }]
+                .into(),
                 ..Default::default()
-            }],
+            }]
+            .into(),
             ..Default::default()
         };
         let defaults = loc.effective_defaults(Some("Main Stage"));
@@ -331,7 +497,8 @@ mod tests {
                 kind: "diagram".into(),
                 path: "layout.png".into(),
                 label: None,
-            }],
+            }]
+            .into(),
             ..Default::default()
         };
         let defaults = loc.effective_defaults(Some("No Such Room"));
@@ -358,13 +525,15 @@ mod tests {
                 capacity: Some(500),
                 notes: Some("Main worship space".into()),
                 ..Default::default()
-            }],
+            }]
+            .into(),
             default_files: vec![VenueDefault {
                 kind: "stage_plot".into(),
                 path: "[[FBC Stage Plot]]".into(),
                 label: Some("Default stage plot".into()),
-            }],
-            tags: vec!["church".into(), "nashville".into()],
+            }]
+            .into(),
+            tags: vec!["church".into(), "nashville".into()].into(),
             ..Default::default()
         };
 
@@ -395,8 +564,9 @@ mod tests {
                 kind: "patch_list".into(),
                 path: "studio-b-patch.md".into(),
                 label: None,
-            }],
-            tags: vec!["recording".into()],
+            }]
+            .into(),
+            tags: vec!["recording".into()].into(),
         };
 
         let yaml = facet_yaml::to_string(&space).expect("serialize");

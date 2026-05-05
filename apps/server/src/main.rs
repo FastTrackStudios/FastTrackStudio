@@ -1052,6 +1052,18 @@ async fn handle_vox_connection(socket: WebSocket, state: AppState, auth: VoxAuth
                     ));
                     Ok(())
                 }
+                "CycleRepo" => {
+                    connection.handle_with(task_core::cycle::CycleRepoDispatcher::new(
+                        task_core::cycle::CycleRepoStorage::new(db.clone()),
+                    ));
+                    Ok(())
+                }
+                "LocationRepo" => {
+                    connection.handle_with(task_core::location::LocationRepoDispatcher::new(
+                        task_core::location::LocationRepoStorage::new(db.clone()),
+                    ));
+                    Ok(())
+                }
                 "Noop" => {
                     connection.handle_with(());
                     Ok(())

@@ -7,8 +7,10 @@ use task_core::calendar_event::{
     CalendarEvent, CalendarEventApi, CalendarEventApiCreate, CalendarEventStatus,
 };
 use task_core::client::{Client, ClientApi, ClientApiCreate};
+use task_core::cycle::{Cycle, CycleApi, CycleApiCreate, CycleStatus};
 use task_core::expense::{Expense, ExpenseApi, ExpenseApiCreate};
 use task_core::invoice::{Invoice, InvoiceApi, InvoiceApiCreate, InvoiceLine, InvoiceStatus};
+use task_core::location::{Location, LocationApi, LocationApiCreate, Space, VenueDefault};
 use task_core::revenue::{Revenue, RevenueApi, RevenueApiCreate};
 use task_core::task::{Task, TaskApi, TaskApiCreate};
 use task_core::team::{AccountStatus, TeamMember, TeamMemberApi, TeamMemberApiCreate};
@@ -397,4 +399,81 @@ async fn seaorm_storage_can_back_generated_invoice_repo_models() {
     assert_eq!(loaded.status, InvoiceStatus::Sent);
     assert_eq!(loaded.line_items.len(), 1);
     assert_eq!(loaded.line_items[0].description, "Album mix");
+}
+
+#[tokio::test]
+async fn seaorm_storage_can_back_generated_cycle_repo_models() {
+    let db = task_db::init_memory()
+        .await
+        .expect("initialize in-memory task database");
+    let cycle = Cycle {
+        title: "May Sprint".to_string(),
+        description: Some("Core migration work".to_string()),
+        start_date: chrono::NaiveDate::from_ymd_opt(2026, 5, 1),
+        end_date: chrono::NaiveDate::from_ymd_opt(2026, 5, 15),
+        owned_by: Some("cody".to_string()),
+        tasks: vec!["TASK-d9k".to_string()].into(),
+        status: CycleStatus::Active,
+        total_tasks: Some(4),
+        completed_tasks: Some(2),
+        ..Default::default()
+    };
+    let create: CycleApiCreate =
+        serde_json::from_value(serde_json::to_value(cycle).expect("serialize cycle seed"))
+            .expect("decode cycle create model");
+
+    let created = CrudStorage::<CycleApi>::create(&db, create)
+        .await
+        .expect("create cycle through SeaORM storage");
+    let loaded = CrudStorage::<CycleApi>::get_one(&db, created.id)
+        .await
+        .expect("load cycle through SeaORM storage");
+
+    assert_eq!(loaded.id, created.id);
+    assert_eq!(loaded.title, "May Sprint");
+    assert_eq!(loaded.status, CycleStatus::Active);
+    assert_eq!(loaded.tasks.as_slice(), ["TASK-d9k"]);
+}
+
+#[tokio::test]
+async fn seaorm_storage_can_back_generated_location_repo_models() {
+    let db = task_db::init_memory()
+        .await
+        .expect("initialize in-memory task database");
+    let location = Location {
+        id: Some("venue-1".to_string()),
+        name: "Studio A".to_string(),
+        city: Some("Los Angeles".to_string()),
+        state: Some("CA".to_string()),
+        venue_type: Some("studio".to_string()),
+        tags: vec!["recording".to_string()].into(),
+        spaces: vec![Space {
+            name: "Vocal Booth".to_string(),
+            capacity: Some(2),
+            default_files: vec![VenueDefault {
+                kind: "input_list".to_string(),
+                path: "Inputs.md".to_string(),
+                ..Default::default()
+            }]
+            .into(),
+            ..Default::default()
+        }]
+        .into(),
+        ..Default::default()
+    };
+    let create: LocationApiCreate =
+        serde_json::from_value(serde_json::to_value(location).expect("serialize location seed"))
+            .expect("decode location create model");
+
+    let created = CrudStorage::<LocationApi>::create(&db, create)
+        .await
+        .expect("create location through SeaORM storage");
+    let loaded = CrudStorage::<LocationApi>::get_one(&db, created.uuid)
+        .await
+        .expect("load location through SeaORM storage");
+
+    assert_eq!(loaded.uuid, created.uuid);
+    assert_eq!(loaded.name, "Studio A");
+    assert_eq!(loaded.spaces.len(), 1);
+    assert_eq!(loaded.spaces[0].name, "Vocal Booth");
 }

@@ -2538,6 +2538,9 @@ impl VaultServiceImpl {
         mut location: Location,
     ) -> Result<Location, VaultError> {
         let now = Utc::now();
+        if location.uuid == Uuid::nil() {
+            location.uuid = Uuid::new_v4();
+        }
         if location.id.as_deref().unwrap_or("").is_empty() {
             location.id = Some(Uuid::new_v4().to_string());
         }

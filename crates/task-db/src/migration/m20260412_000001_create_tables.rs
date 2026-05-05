@@ -1,7 +1,8 @@
 use sea_orm::Schema;
 use sea_orm_migration::prelude::*;
 use task_core::{
-    asset, calendar_event, client, expense, invoice, project, revenue, task, team, views,
+    asset, calendar_event, client, cycle, expense, invoice, location, project, revenue, task, team,
+    views,
 };
 
 #[derive(DeriveMigrationName)]
@@ -527,39 +528,39 @@ impl MigrationTrait for Migration {
         // ── Cycles ──────────────────────────────────────────────────
         manager
             .create_table(
-                Table::create()
-                    .table(Cycles::Table)
+                schema
+                    .create_table_from_entity(cycle::Entity)
                     .if_not_exists()
-                    .col(ColumnDef::new(Cycles::Id).uuid().not_null().primary_key())
-                    .col(ColumnDef::new(Cycles::Title).string_len(255).not_null())
-                    .col(ColumnDef::new(Cycles::Description).text())
-                    .col(ColumnDef::new(Cycles::Project).string_len(255).not_null())
-                    .col(
-                        ColumnDef::new(Cycles::Status)
-                            .string_len(50)
-                            .not_null()
-                            .default("Planned"),
-                    )
-                    .col(ColumnDef::new(Cycles::OwnedBy).string_len(100))
-                    .col(ColumnDef::new(Cycles::StartDate).date())
-                    .col(ColumnDef::new(Cycles::EndDate).date())
-                    .col(
-                        ColumnDef::new(Cycles::Tasks)
-                            .json()
-                            .not_null()
-                            .default("[]"),
-                    )
-                    .col(ColumnDef::new(Cycles::SortOrder).double())
-                    .col(
-                        ColumnDef::new(Cycles::CreatedAt)
-                            .timestamp_with_time_zone()
-                            .not_null(),
-                    )
-                    .col(
-                        ColumnDef::new(Cycles::UpdatedAt)
-                            .timestamp_with_time_zone()
-                            .not_null(),
-                    )
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_cycles_status")
+                    .table(Cycles::Table)
+                    .col(cycle::Column::Status)
+                    .to_owned(),
+            )
+            .await?;
+
+        // ── Locations ───────────────────────────────────────────────
+        manager
+            .create_table(
+                schema
+                    .create_table_from_entity(location::Entity)
+                    .if_not_exists()
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_locations_name")
+                    .table(Locations::Table)
+                    .col(location::Column::Name)
                     .to_owned(),
             )
             .await?;
@@ -570,6 +571,9 @@ impl MigrationTrait for Migration {
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         manager
             .drop_table(Table::drop().table(Cycles::Table).to_owned())
+            .await?;
+        manager
+            .drop_table(Table::drop().table(Locations::Table).to_owned())
             .await?;
         manager
             .drop_table(Table::drop().table(SavedViews::Table).to_owned())
@@ -746,16 +750,9 @@ enum SavedViews {
 #[derive(DeriveIden)]
 enum Cycles {
     Table,
-    Id,
-    Title,
-    Description,
-    Project,
-    Status,
-    OwnedBy,
-    StartDate,
-    EndDate,
-    Tasks,
-    SortOrder,
-    CreatedAt,
-    UpdatedAt,
+}
+
+#[derive(DeriveIden)]
+enum Locations {
+    Table,
 }
