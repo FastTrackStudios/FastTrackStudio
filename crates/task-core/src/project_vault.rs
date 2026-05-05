@@ -164,7 +164,9 @@ pub fn save_project_task(project_dir: &Path, task: &Task) -> Result<(), VaultErr
 /// Save a project.md file in a project directory.
 pub fn save_project_metadata(project_dir: &Path, project: &Project) -> Result<(), VaultError> {
     let path = project_dir.join("project.md");
-    let body = if path.exists() {
+    let body = if let Some(body) = project.body.as_ref() {
+        body.clone()
+    } else if path.exists() {
         let content = fs::read_to_string(&path).map_err(|e| VaultError::IoError(e.to_string()))?;
         Vault::extract_body(&content).unwrap_or("").to_string()
     } else {

@@ -371,7 +371,8 @@ impl ProjectProvider for S3Provider {
 
     async fn update_project(&self, project: &Project) -> Result<(), VaultError> {
         let key = self.project_key(&project.title);
-        let content = Vault::render_project_file(project, "")?;
+        let body = project.body.as_deref().unwrap_or("");
+        let content = Vault::render_project_file(project, body)?;
         self.s3_put(&key, &content).await
     }
 

@@ -581,7 +581,11 @@ impl RunningServer {
             .env("TASK_VAULT", fixture.vault_path())
             .env("TASK_SEED_DEMO", "1")
             .env("TASK_TEST_SESSION_TOKEN", TEST_TOKEN)
-            .env_remove("TASK_NEXTCLOUD_CONFIG")
+            .env("HOME", fixture.root.as_os_str())
+            .env(
+                "TASK_NEXTCLOUD_CONFIG",
+                fixture.root.join("missing-nextcloud.toml"),
+            )
             .env_remove("NEXTCLOUD_URL")
             .env_remove("NEXTCLOUD_USERNAME")
             .env_remove("NEXTCLOUD_PASSWORD")

@@ -1247,6 +1247,7 @@ pub struct TimedTaskEntry {
 pub struct ProjectPatch {
     pub status: Option<String>,
     pub description: Option<String>,
+    pub body: Option<String>,
     pub area: Option<String>,
     pub organization: Option<String>,
     pub project_type: Option<String>,

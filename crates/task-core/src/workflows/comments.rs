@@ -334,8 +334,14 @@ pub fn parse_comments(body: &str) -> Vec<Comment> {
                     }
                 }
 
-                let body_text = cursor.trim_start_matches(':').trim().to_string();
-                let resolved = body_text.ends_with('✅') || body_text.contains(" ✅");
+                let raw_body = cursor.trim_start_matches(':').trim();
+                let (body_text, resolved) = if let Some(stripped) = raw_body.strip_suffix(" ✅") {
+                    (stripped.trim_end().to_string(), true)
+                } else if let Some(stripped) = raw_body.strip_suffix('✅') {
+                    (stripped.trim_end().to_string(), true)
+                } else {
+                    (raw_body.to_string(), false)
+                };
                 let mentions = Comment::extract_mentions(&body_text);
                 let id = Comment::generate_id(&author, date, &body_text);
 
@@ -495,6 +501,60 @@ mod tests {
     fn extract_mentions() {
         let mentions = Comment::extract_mentions("Hey @cody and @amy check this out @carter!");
         assert_eq!(mentions, vec!["cody", "amy", "carter"]);
+    }
+
+    #[test]
+    fn project_comment_roundtrip_reply_resolve_reopen() {
+        let stamp = NaiveDate::from_ymd_opt(2026, 5, 3)
+            .unwrap()
+            .and_hms_opt(0, 0, 0)
+            .unwrap();
+
+        let intro = "Project overview\n\n";
+
+        let top_level = Comment {
+            id: Comment::generate_id("cody", Some(stamp), "Kickoff with @amy"),
+            author: "cody".into(),
+            body: "Kickoff with @amy".into(),
+            created_at: Some(stamp),
+            mentions: Comment::extract_mentions("Kickoff with @amy"),
+            ..Default::default()
+        };
+
+        let mut comments = vec![top_level.clone()];
+        let body = format!("{intro}{}", render_comments(&comments));
+        let parsed = parse_comments(&body);
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].mentions, vec!["amy"]);
+        assert_eq!(parsed[0].id, top_level.id);
+
+        let reply = Comment {
+            id: Comment::generate_id("amy", Some(stamp), "Looks good"),
+            author: "amy".into(),
+            body: "Looks good".into(),
+            created_at: Some(stamp),
+            reply_to: Some(parsed[0].id.clone()),
+            mentions: Vec::new(),
+            ..Default::default()
+        };
+        comments.push(reply);
+        let body = format!("{intro}{}", render_comments(&comments));
+        let parsed = parse_comments(&body);
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed[1].reply_to.as_deref(), Some(parsed[0].id.as_str()));
+
+        let mut resolved = parsed.clone();
+        resolved[0].resolved = true;
+        let body = format!("{intro}{}", render_comments(&resolved));
+        let reparsed = parse_comments(&body);
+        assert!(reparsed[0].resolved);
+        assert!(body.contains("✅"));
+
+        let mut reopened = reparsed.clone();
+        reopened[0].resolved = false;
+        let body = format!("{intro}{}", render_comments(&reopened));
+        let reparsed = parse_comments(&body);
+        assert!(!reparsed[0].resolved);
     }
 
     #[test]

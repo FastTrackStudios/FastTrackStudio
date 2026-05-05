@@ -656,7 +656,8 @@ impl ProjectProvider for WebDavProvider {
             Some(content) => Vault::extract_body(&content).unwrap_or("").to_string(),
             None => String::new(),
         };
-        let content = Vault::render_project_file(project, &body)?;
+        let body = project.body.as_deref().unwrap_or(&body);
+        let content = Vault::render_project_file(project, body)?;
         self.put(&path, &content).await
     }
 

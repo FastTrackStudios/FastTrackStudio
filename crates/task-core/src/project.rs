@@ -107,6 +107,11 @@ pub struct Project {
     /// `task email link` calls.
     #[facet(default)]
     pub emails: Vec<crate::email::EmailRef>,
+
+    /// Markdown body for project notes and threaded comments.
+    #[facet(skip)]
+    #[facet(default)]
+    pub body: Option<String>,
 }
 
 // r[impl project.status]

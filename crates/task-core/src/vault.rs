@@ -104,7 +104,9 @@ impl Vault {
     /// Write a project back to the vault. Creates the file if missing, preserves body.
     pub fn save_project(&self, project: &Project) -> Result<(), VaultError> {
         let path = self.project_path(&project.title);
-        let body = if path.exists() {
+        let body = if let Some(body) = project.body.as_ref() {
+            body.clone()
+        } else if path.exists() {
             let content =
                 fs::read_to_string(&path).map_err(|e| VaultError::IoError(e.to_string()))?;
             Self::extract_body(&content).unwrap_or("").to_string()
@@ -120,7 +122,9 @@ impl Vault {
     pub fn save_project_in(&self, subdir: &str, project: &Project) -> Result<(), VaultError> {
         let dir = self.root.join(subdir);
         let path = dir.join(format!("{}/project.md", project.title));
-        let body = if path.exists() {
+        let body = if let Some(body) = project.body.as_ref() {
+            body.clone()
+        } else if path.exists() {
             let content =
                 fs::read_to_string(&path).map_err(|e| VaultError::IoError(e.to_string()))?;
             Self::extract_body(&content).unwrap_or("").to_string()
@@ -173,8 +177,10 @@ impl Vault {
     }
 
     pub fn parse_project_from_md(content: &str) -> Option<Project> {
-        let (frontmatter, _body) = Self::split_frontmatter(content)?;
-        facet_yaml::from_str::<Project>(frontmatter).ok()
+        let (frontmatter, body) = Self::split_frontmatter(content)?;
+        let mut project = facet_yaml::from_str::<Project>(frontmatter).ok()?;
+        project.body = Some(body.to_string());
+        Some(project)
     }
 
     pub fn parse_client_from_md(content: &str) -> Option<Client> {

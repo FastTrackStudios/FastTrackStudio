@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "apps/server",
+    "crates/fasttrackaudio",
     "crates/task-core",
     "crates/task-cli",
     "crates/task-db",
@@ -62,6 +63,12 @@ version = "0.46"
 
 [workspace.dependencies.facet-yaml]
 version = "0.46"
+
+[workspace.dependencies.daw]
+path = "../FastTrackStudio/daw/crates/daw"
+
+[workspace.dependencies.keyflow]
+path = "../FastTrackStudio/keyflow/crates/keyflow"
 
 [workspace.dependencies.lumen-blocks]
 git = "https://github.com/Leaf-Computer/lumen-blocks.git"
@@ -287,6 +294,11 @@ features = ["gen_secret", "otpauth"]
 [profile.wasm-dev]
 opt-level = 1
 inherits = "dev"
+
+# Use the local FastTrackStudio input_actions checkout during development so
+# dependent crates share the same updated vox/facet stack.
+[patch."https://github.com/FastTrackStudios/input_actions.git"]
+actions-proto = { path = "../FastTrackStudio/input_actions/crates/actions-proto" }
 
 [patch.crates-io.moire]
 git = "https://github.com/bearcove/moire"

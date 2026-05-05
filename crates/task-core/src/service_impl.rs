@@ -2817,6 +2817,7 @@ impl VaultServiceImpl {
         }
 
         diff_opt_string!(description, "description");
+        diff_opt_string!(body, "body");
         diff_opt_string!(area, "area");
         diff_opt_string!(organization, "organization");
         diff_opt_string!(project_type, "type");

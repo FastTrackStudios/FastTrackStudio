@@ -1739,6 +1739,11 @@ enum ProjectCommands {
         #[arg(long)]
         json: bool,
     },
+    /// Threaded comments on a project
+    Comment {
+        #[command(subcommand)]
+        command: ProjectCommentCommands,
+    },
     /// Edit project fields — status, client, rate, email_tags, etc.
     Edit {
         name: String,
@@ -1800,6 +1805,33 @@ enum ProjectCommands {
         #[arg(long)]
         json: bool,
     },
+}
+
+#[derive(Subcommand)]
+enum ProjectCommentCommands {
+    /// Add a comment to a project
+    Add {
+        project: String,
+        #[arg(long)]
+        body: String,
+    },
+    /// List comments on a project
+    List {
+        project: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Reply to an existing project comment by id
+    Reply {
+        project: String,
+        parent_id: String,
+        #[arg(long)]
+        body: String,
+    },
+    /// Mark a project comment resolved (by id)
+    Resolve { project: String, comment_id: String },
+    /// Unresolve a project comment
+    Reopen { project: String, comment_id: String },
 }
 
 #[tokio::main]
@@ -3231,6 +3263,188 @@ async fn main() -> eyre::Result<()> {
 
         Commands::Project {
             command:
+                ProjectCommands::Comment {
+                    command: ProjectCommentCommands::Add { project, body },
+                },
+        } => {
+            let author = require_actor(&actor)?;
+            let mut project = svc
+                .find_project(&project)
+                .await
+                .ok_or_else(|| eyre::eyre!("Project not found: {project}"))?;
+            let now = chrono::Local::now().naive_local();
+            let mentions = Comment::extract_mentions(&body);
+            let comments = parse_comments(project.body.as_deref().unwrap_or(""));
+            let new_comment = Comment {
+                id: Comment::generate_id(&author, Some(now), &body),
+                author,
+                body,
+                created_at: Some(now),
+                mentions,
+                ..Default::default()
+            };
+            let mut comments = comments;
+            comments.push(new_comment.clone());
+            project.body = Some(splice_comments(
+                project.body.as_deref().unwrap_or(""),
+                &comments,
+            ));
+            svc.update_project_as(
+                &project.title,
+                task_core::ProjectPatch {
+                    body: project.body.clone(),
+                    ..Default::default()
+                },
+                actor.as_deref(),
+            )
+            .await?;
+            println!("Comment added ({}).", new_comment.id);
+        }
+
+        Commands::Project {
+            command:
+                ProjectCommands::Comment {
+                    command: ProjectCommentCommands::List { project, json },
+                },
+        } => {
+            let project = svc
+                .find_project(&project)
+                .await
+                .ok_or_else(|| eyre::eyre!("Project not found: {project}"))?;
+            let comments = parse_comments(project.body.as_deref().unwrap_or(""));
+            if json {
+                print_comments_json(&comments);
+            } else {
+                print_comments_table(&comments);
+            }
+        }
+
+        Commands::Project {
+            command:
+                ProjectCommands::Comment {
+                    command:
+                        ProjectCommentCommands::Reply {
+                            project,
+                            parent_id,
+                            body,
+                        },
+                },
+        } => {
+            let author = require_actor(&actor)?;
+            let mut project = svc
+                .find_project(&project)
+                .await
+                .ok_or_else(|| eyre::eyre!("Project not found: {project}"))?;
+            let mut comments = parse_comments(project.body.as_deref().unwrap_or(""));
+            if !comments.iter().any(|c| c.id == parent_id) {
+                eyre::bail!(
+                    "No comment with id {parent_id} on project {}",
+                    project.title
+                );
+            }
+            let now = chrono::Local::now().naive_local();
+            let mentions = Comment::extract_mentions(&body);
+            let new_comment = Comment {
+                id: Comment::generate_id(&author, Some(now), &body),
+                author,
+                body,
+                created_at: Some(now),
+                reply_to: Some(parent_id),
+                mentions,
+                ..Default::default()
+            };
+            comments.push(new_comment.clone());
+            project.body = Some(splice_comments(
+                project.body.as_deref().unwrap_or(""),
+                &comments,
+            ));
+            svc.update_project_as(
+                &project.title,
+                task_core::ProjectPatch {
+                    body: project.body.clone(),
+                    ..Default::default()
+                },
+                actor.as_deref(),
+            )
+            .await?;
+            println!("Reply added ({}).", new_comment.id);
+        }
+
+        Commands::Project {
+            command:
+                ProjectCommands::Comment {
+                    command:
+                        ProjectCommentCommands::Resolve {
+                            project,
+                            comment_id,
+                        },
+                },
+        } => {
+            let resolver = require_actor(&actor)?;
+            let mut project = svc
+                .find_project(&project)
+                .await
+                .ok_or_else(|| eyre::eyre!("Project not found: {project}"))?;
+            let mut comments = parse_comments(project.body.as_deref().unwrap_or(""));
+            let Some(c) = comments.iter_mut().find(|c| c.id == comment_id) else {
+                eyre::bail!("No comment with id {comment_id}");
+            };
+            c.resolved = true;
+            c.resolved_by = Some(resolver);
+            project.body = Some(splice_comments(
+                project.body.as_deref().unwrap_or(""),
+                &comments,
+            ));
+            svc.update_project_as(
+                &project.title,
+                task_core::ProjectPatch {
+                    body: project.body.clone(),
+                    ..Default::default()
+                },
+                actor.as_deref(),
+            )
+            .await?;
+            println!("Resolved comment {comment_id}.");
+        }
+
+        Commands::Project {
+            command:
+                ProjectCommands::Comment {
+                    command:
+                        ProjectCommentCommands::Reopen {
+                            project,
+                            comment_id,
+                        },
+                },
+        } => {
+            let mut project = svc
+                .find_project(&project)
+                .await
+                .ok_or_else(|| eyre::eyre!("Project not found: {project}"))?;
+            let mut comments = parse_comments(project.body.as_deref().unwrap_or(""));
+            let Some(c) = comments.iter_mut().find(|c| c.id == comment_id) else {
+                eyre::bail!("No comment with id {comment_id}");
+            };
+            c.resolved = false;
+            c.resolved_by = None;
+            project.body = Some(splice_comments(
+                project.body.as_deref().unwrap_or(""),
+                &comments,
+            ));
+            svc.update_project_as(
+                &project.title,
+                task_core::ProjectPatch {
+                    body: project.body.clone(),
+                    ..Default::default()
+                },
+                actor.as_deref(),
+            )
+            .await?;
+            println!("Reopened comment {comment_id}.");
+        }
+
+        Commands::Project {
+            command:
                 ProjectCommands::Edit {
                     name,
                     status,
@@ -3262,6 +3476,7 @@ async fn main() -> eyre::Result<()> {
             let patch = task_core::ProjectPatch {
                 status,
                 description,
+                body: None,
                 area,
                 organization,
                 project_type,
@@ -4950,6 +5165,179 @@ async fn run_remote_project_command(
             let context = client.project_context(name, files, depth).await?;
             print_project_context(context.as_ref(), json);
         }
+        ProjectCommands::Comment {
+            command: ProjectCommentCommands::Add { project, body },
+        } => {
+            let author = require_actor(&actor.map(str::to_string))?;
+            let mut project_item = client
+                .list_projects()
+                .await?
+                .into_iter()
+                .find(|p| p.title.eq_ignore_ascii_case(&project))
+                .ok_or_else(|| eyre::eyre!("Project not found: {project}"))?;
+            let now = chrono::Local::now().naive_local();
+            let mentions = Comment::extract_mentions(&body);
+            let comments = parse_comments(project_item.body.as_deref().unwrap_or(""));
+            let new_comment = Comment {
+                id: Comment::generate_id(&author, Some(now), &body),
+                author,
+                body,
+                created_at: Some(now),
+                mentions,
+                ..Default::default()
+            };
+            let mut comments = comments;
+            comments.push(new_comment.clone());
+            project_item.body = Some(splice_comments(
+                project_item.body.as_deref().unwrap_or(""),
+                &comments,
+            ));
+            client
+                .update_project(
+                    project_item.title.clone(),
+                    task_core::ProjectPatch {
+                        body: project_item.body.clone(),
+                        ..Default::default()
+                    },
+                    actor.map(str::to_string),
+                )
+                .await?;
+            println!("Comment added ({}).", new_comment.id);
+        }
+        ProjectCommands::Comment {
+            command: ProjectCommentCommands::List { project, json },
+        } => {
+            let project_item = client
+                .list_projects()
+                .await?
+                .into_iter()
+                .find(|p| p.title.eq_ignore_ascii_case(&project))
+                .ok_or_else(|| eyre::eyre!("Project not found: {project}"))?;
+            let comments = parse_comments(project_item.body.as_deref().unwrap_or(""));
+            if json {
+                print_comments_json(&comments);
+            } else {
+                print_comments_table(&comments);
+            }
+        }
+        ProjectCommands::Comment {
+            command:
+                ProjectCommentCommands::Reply {
+                    project,
+                    parent_id,
+                    body,
+                },
+        } => {
+            let author = require_actor(&actor.map(str::to_string))?;
+            let mut project_item = client
+                .list_projects()
+                .await?
+                .into_iter()
+                .find(|p| p.title.eq_ignore_ascii_case(&project))
+                .ok_or_else(|| eyre::eyre!("Project not found: {project}"))?;
+            let mut comments = parse_comments(project_item.body.as_deref().unwrap_or(""));
+            if !comments.iter().any(|c| c.id == parent_id) {
+                eyre::bail!("No comment with id {parent_id} on project {project}");
+            }
+            let now = chrono::Local::now().naive_local();
+            let mentions = Comment::extract_mentions(&body);
+            let new_comment = Comment {
+                id: Comment::generate_id(&author, Some(now), &body),
+                author,
+                body,
+                created_at: Some(now),
+                reply_to: Some(parent_id),
+                mentions,
+                ..Default::default()
+            };
+            comments.push(new_comment.clone());
+            project_item.body = Some(splice_comments(
+                project_item.body.as_deref().unwrap_or(""),
+                &comments,
+            ));
+            client
+                .update_project(
+                    project_item.title.clone(),
+                    task_core::ProjectPatch {
+                        body: project_item.body.clone(),
+                        ..Default::default()
+                    },
+                    actor.map(str::to_string),
+                )
+                .await?;
+            println!("Reply added ({}).", new_comment.id);
+        }
+        ProjectCommands::Comment {
+            command:
+                ProjectCommentCommands::Resolve {
+                    project,
+                    comment_id,
+                },
+        } => {
+            let resolver = require_actor(&actor.map(str::to_string))?;
+            let mut project_item = client
+                .list_projects()
+                .await?
+                .into_iter()
+                .find(|p| p.title.eq_ignore_ascii_case(&project))
+                .ok_or_else(|| eyre::eyre!("Project not found: {project}"))?;
+            let mut comments = parse_comments(project_item.body.as_deref().unwrap_or(""));
+            let Some(c) = comments.iter_mut().find(|c| c.id == comment_id) else {
+                eyre::bail!("No comment with id {comment_id}");
+            };
+            c.resolved = true;
+            c.resolved_by = Some(resolver);
+            project_item.body = Some(splice_comments(
+                project_item.body.as_deref().unwrap_or(""),
+                &comments,
+            ));
+            client
+                .update_project(
+                    project_item.title.clone(),
+                    task_core::ProjectPatch {
+                        body: project_item.body.clone(),
+                        ..Default::default()
+                    },
+                    actor.map(str::to_string),
+                )
+                .await?;
+            println!("Resolved comment {comment_id}.");
+        }
+        ProjectCommands::Comment {
+            command:
+                ProjectCommentCommands::Reopen {
+                    project,
+                    comment_id,
+                },
+        } => {
+            let mut project_item = client
+                .list_projects()
+                .await?
+                .into_iter()
+                .find(|p| p.title.eq_ignore_ascii_case(&project))
+                .ok_or_else(|| eyre::eyre!("Project not found: {project}"))?;
+            let mut comments = parse_comments(project_item.body.as_deref().unwrap_or(""));
+            let Some(c) = comments.iter_mut().find(|c| c.id == comment_id) else {
+                eyre::bail!("No comment with id {comment_id}");
+            };
+            c.resolved = false;
+            c.resolved_by = None;
+            project_item.body = Some(splice_comments(
+                project_item.body.as_deref().unwrap_or(""),
+                &comments,
+            ));
+            client
+                .update_project(
+                    project_item.title.clone(),
+                    task_core::ProjectPatch {
+                        body: project_item.body.clone(),
+                        ..Default::default()
+                    },
+                    actor.map(str::to_string),
+                )
+                .await?;
+            println!("Reopened comment {comment_id}.");
+        }
         ProjectCommands::Edit {
             name,
             status,
@@ -4980,6 +5368,7 @@ async fn run_remote_project_command(
             let patch = task_core::ProjectPatch {
                 status,
                 description,
+                body: None,
                 area,
                 organization,
                 project_type,
