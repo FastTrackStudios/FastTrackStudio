@@ -1,17 +1,15 @@
-//! Dynamic Template domain SHM guest process.
+//! Dynamic Template integrated REAPER extension.
 //!
-//! Connects to REAPER via daw-bridge SHM and manages dynamic template state:
-//! auto-color classification, visibility manager, and template sorting.
-//!
-//! Registers dynamic-template-domain actions with REAPER and handles their
-//! execution locally when triggered. The host (daw-bridge) is domain-agnostic.
-//!
-//! Placed in `UserPlugins/fts-extensions/` and hot-reloaded by daw-bridge.
+//! Loaded directly by REAPER from `UserPlugins/`. Manages auto-color
+//! classification, visibility manager, and template sorting — registers the
+//! corresponding actions and handles their triggers in-process.
 
+use std::cell::OnceCell;
 use std::collections::HashMap;
+use std::error::Error;
 
 use daw::Daw;
-use daw_extension_runtime::GuestOptions;
+use daw_extension_runtime::ExtensionRuntime;
 use dynamic_template::{auto_color, default_config, OrganizeIntoTracks};
 use dynamic_template_proto::{
     actions::dynamic_template_actions,
@@ -19,42 +17,80 @@ use dynamic_template_proto::{
     visibility_manager::actions::visibility_manager_actions,
 };
 use eyre::Result;
+use fragile::Fragile;
+use reaper_low::PluginContext;
+use reaper_macros::reaper_extension_plugin;
 use tracing::{info, warn};
 
-fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
-        )
-        .init();
-
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()?;
-
-    rt.block_on(run())
+thread_local! {
+    static APP: OnceCell<Fragile<DynamicTemplateExtension>> = const { OnceCell::new() };
 }
 
-async fn run() -> Result<()> {
+struct DynamicTemplateExtension {
+    runtime: ExtensionRuntime,
+}
+
+impl DynamicTemplateExtension {
+    fn new(context: PluginContext) -> Result<Self> {
+        let runtime = ExtensionRuntime::new(context)?;
+        let daw = runtime.build_daw()?;
+
+        runtime.spawn(async move {
+            if let Err(e) = run(daw).await {
+                warn!("[dynamic-template] event loop ended: {e}");
+            }
+        });
+
+        Ok(Self { runtime })
+    }
+
+    fn timer(&self) {
+        self.runtime.process_tasks();
+    }
+}
+
+extern "C" fn timer_callback() {
+    APP.with(|cell| {
+        if let Some(app) = cell.get() {
+            app.get().timer();
+        }
+    });
+}
+
+#[reaper_extension_plugin]
+fn plugin_main(context: PluginContext) -> std::result::Result<(), Box<dyn Error>> {
+    init_tracing();
+    info!("dynamic-template-extension starting");
+
+    let app = DynamicTemplateExtension::new(context).map_err(|e| -> Box<dyn Error> { e.into() })?;
+    app.runtime.add_timer(timer_callback).map_err(|e| -> Box<dyn Error> { e.into() })?;
+
+    let stored = APP.with(|cell| cell.set(Fragile::new(app)).is_ok());
+    if !stored {
+        return Err("dynamic-template-extension already initialized".into());
+    }
+
+    info!("dynamic-template-extension loaded");
+    Ok(())
+}
+
+fn init_tracing() {
+    let Ok(log_file) = std::fs::File::create("/tmp/dynamic-template-extension.log") else {
+        return;
+    };
+    let subscriber = tracing_subscriber::fmt()
+        .with_writer(std::sync::Mutex::new(log_file))
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::from_default_env()
+                .add_directive(tracing::Level::INFO.into()),
+        )
+        .finish();
+    let _ = tracing::subscriber::set_global_default(subscriber);
+}
+
+async fn run(daw: Daw) -> Result<()> {
     let pid = std::process::id();
-    info!("[dynamic-template:{pid}] Dynamic Template extension starting");
-
-    let daw = daw_extension_runtime::connect(GuestOptions {
-        role: "dynamic-template",
-        ..Default::default()
-    })
-    .await?;
-
-    info!("[dynamic-template:{pid}] Connected to REAPER via SHM");
-
-    // Signal that we're alive — tests read this to verify the extension connected
-    daw.ext_state()
-        .set("FTS_DYNAMIC_TEMPLATE_EXT", "status", "ready", false)
-        .await?;
-    daw.ext_state()
-        .set("FTS_DYNAMIC_TEMPLATE_EXT", "pid", &pid.to_string(), false)
-        .await?;
-    info!("[dynamic-template:{pid}] Health beacon written");
+    info!("[dynamic-template:{pid}] runtime started");
 
     // Register dynamic-template-domain actions with REAPER.
     // Action definitions live in dynamic-template-proto — single source of truth.
@@ -67,7 +103,7 @@ async fn run() -> Result<()> {
         if cmd_id == 0 {
             warn!("[dynamic-template:{pid}] Failed to register action: {cmd_name}");
         } else {
-            info!("[dynamic-template:{pid}] Registered {cmd_name} (cmd_id={cmd_id})");
+            tracing::debug!("[dynamic-template:{pid}] Registered {cmd_name} (cmd_id={cmd_id})");
         }
     }
 
@@ -78,7 +114,7 @@ async fn run() -> Result<()> {
         if cmd_id == 0 {
             warn!("[dynamic-template:{pid}] Failed to register action: {cmd_name}");
         } else {
-            info!("[dynamic-template:{pid}] Registered {cmd_name} (cmd_id={cmd_id})");
+            tracing::debug!("[dynamic-template:{pid}] Registered {cmd_name} (cmd_id={cmd_id})");
         }
     }
 
@@ -89,7 +125,7 @@ async fn run() -> Result<()> {
         if cmd_id == 0 {
             warn!("[dynamic-template:{pid}] Failed to register action: {cmd_name}");
         } else {
-            info!("[dynamic-template:{pid}] Registered {cmd_name} (cmd_id={cmd_id})");
+            tracing::debug!("[dynamic-template:{pid}] Registered {cmd_name} (cmd_id={cmd_id})");
         }
     }
     info!("[dynamic-template:{pid}] All dynamic-template actions registered");
@@ -98,63 +134,34 @@ async fn run() -> Result<()> {
     let mut action_rx = registry.subscribe_actions().await?;
     info!("[dynamic-template:{pid}] Subscribed to action events");
 
-    // Subscribe to track events for auto-color (re-classify when tracks change).
-    let project = daw.current_project().await?;
-    let mut track_rx = project.tracks().subscribe().await?;
-    info!("[dynamic-template:{pid}] Subscribed to track events");
-
     // Track whether auto-color is currently enabled (for toggle action)
     let mut auto_color_enabled = false;
 
     // Cache: track name → group name, rebuilt on classify operations
     let mut group_cache: HashMap<String, String> = HashMap::new();
 
-    // Event loop — handle action triggers and track changes from REAPER
-    loop {
-        tokio::select! {
-            result = action_rx.recv() => {
-                match result {
-                    Ok(Some(event)) => {
-                        match &*event {
-                            daw::service::ActionEvent::Triggered { command_name } => {
-                                if let Err(e) = handle_action(
-                                    command_name,
-                                    &daw,
-                                    &mut auto_color_enabled,
-                                    &mut group_cache,
-                                ).await {
-                                    warn!("[dynamic-template] Action {command_name} failed: {e}");
-                                }
-                            }
-                        }
-                    }
-                    Ok(None) | Err(_) => {
-                        info!("[dynamic-template:{pid}] Action event stream ended");
-                        break;
-                    }
-                }
-            }
-            result = track_rx.recv() => {
-                match result {
-                    Ok(Some(event)) => {
-                        if let Err(e) = handle_track_event(
-                            &*event,
-                            &daw,
-                            auto_color_enabled,
-                            &mut group_cache,
-                        ).await {
-                            warn!("[dynamic-template] Track event handler failed: {e}");
-                        }
-                    }
-                    Ok(None) | Err(_) => {
-                        info!("[dynamic-template:{pid}] Track event stream ended");
-                        break;
-                    }
+    // Event loop — handle action triggers from REAPER.
+    // (Track event subscription was dropped during the vox 0.46 migration:
+    // TrackEvent doesn't impl Reborrow so SelfRef::get isn't available. Auto-color
+    // re-application on track changes will be re-wired once that lands.)
+    while let Ok(Some(event)) = action_rx.recv().await {
+        match event.get() {
+            daw::service::ActionEvent::Triggered { command_name } => {
+                if let Err(e) = handle_action(
+                    command_name.as_str(),
+                    &daw,
+                    &mut auto_color_enabled,
+                    &mut group_cache,
+                )
+                .await
+                {
+                    warn!("[dynamic-template] Action {command_name} failed: {e}");
                 }
             }
         }
     }
 
+    info!("[dynamic-template:{pid}] action event stream ended");
     Ok(())
 }
 

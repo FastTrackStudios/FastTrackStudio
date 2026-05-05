@@ -367,6 +367,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 extension_log: std::path::PathBuf::from("/tmp/daw-bridge.log"),
                 timeout_secs,
                 keep_open,
+                headless: !keep_open,
                 ci,
                 extension_whitelist: vec![],
             };

@@ -112,8 +112,9 @@ fn DesktopShell() -> Element {
             let web_registry = gateway::web_client_registry();
 
             while let Ok(Some(event_ref)) = rx.recv().await {
-                web_registry.broadcast(&event_ref).await;
-                session_ui::apply_setlist_event(&event_ref);
+                let event = event_ref.get();
+                web_registry.broadcast(event).await;
+                session_ui::apply_setlist_event(event);
             }
 
             poll_handle.abort();

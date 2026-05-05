@@ -6,7 +6,7 @@
 use std::path::{Path, PathBuf};
 
 use daw::sync::LocalCaller;
-use daw::{Daw, ErasedCaller};
+use daw::{Caller, Daw};
 use eyre::{bail, Result};
 use session::{
     SetlistServiceClient, SetlistServiceDispatcher, SetlistServiceImpl,
@@ -74,7 +74,7 @@ pub async fn connect_to_reaper() -> Result<()> {
     let setlist = SetlistServiceImpl::new();
 
     let local = LocalCaller::new(SetlistServiceDispatcher::new(setlist)).await?;
-    let client = SetlistServiceClient::new(local.erased_caller());
+    let client = SetlistServiceClient::new(local.caller());
 
     client
         .build_from_open_projects()
@@ -87,7 +87,7 @@ pub async fn connect_to_reaper() -> Result<()> {
     Ok(())
 }
 
-async fn discover_and_connect() -> Result<ErasedCaller> {
+async fn discover_and_connect() -> Result<Caller> {
     let sockets = discover_sockets();
     if sockets.is_empty() {
         bail!(
@@ -148,31 +148,37 @@ fn is_process_alive(pid: u32) -> bool {
         .unwrap_or(false)
 }
 
-async fn connect_to_daw(path: &Path) -> eyre::Result<ErasedCaller> {
+async fn connect_to_daw(path: &Path) -> eyre::Result<Caller> {
     let stream = tokio::net::UnixStream::connect(path).await?;
     let link = vox_stream::StreamLink::unix(stream);
     let handshake_result = initiator_handshake_result(64);
-    let (_root_caller, session) =
-        vox::initiator_conduit(vox::BareConduit::new(link), handshake_result)
-            .establish::<vox::DriverCaller>(())
-            .await?;
+    let root = vox::initiator_conduit(vox::BareConduit::new(link), handshake_result)
+        .establish::<vox::NoopClient>()
+        .await?;
+    let session = root
+        .session
+        .clone()
+        .ok_or_else(|| eyre::eyre!("root session missing handle"))?;
 
     let conn = session
         .open_connection(
             vox::ConnectionSettings {
                 parity: vox::Parity::Odd,
                 max_concurrent_requests: 64,
+                initial_channel_credit: 16,
             },
             vec![vox::MetadataEntry {
-                key: "role",
-                value: vox::MetadataValue::String("fasttrackstudio-desktop"),
+                key: std::borrow::Cow::Borrowed("role"),
+                value: vox::MetadataValue::String(std::borrow::Cow::Borrowed(
+                    "fasttrackstudio-desktop",
+                )),
                 flags: vox::MetadataFlags::NONE,
             }],
         )
         .await?;
 
     let mut driver = vox::Driver::new(conn, ());
-    let caller = ErasedCaller::new(driver.caller());
+    let caller = Caller::new(driver.caller());
     moire::task::spawn(async move { driver.run().await });
 
     Ok(caller)
@@ -184,16 +190,19 @@ fn initiator_handshake_result(max_concurrent_requests: u32) -> vox::HandshakeRes
         our_settings: vox::ConnectionSettings {
             parity: vox::Parity::Odd,
             max_concurrent_requests,
+            initial_channel_credit: 16,
         },
         peer_settings: vox::ConnectionSettings {
             parity: vox::Parity::Even,
             max_concurrent_requests,
+            initial_channel_credit: 16,
         },
         peer_supports_retry: true,
         session_resume_key: None,
         peer_resume_key: None,
         our_schema: vec![],
         peer_schema: vec![],
+        peer_metadata: vec![],
     }
 }
 

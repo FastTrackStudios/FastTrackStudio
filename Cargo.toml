@@ -7,9 +7,6 @@ members = [
     "crates/dynamic-template/dynamic-template-extension",
     "crates/input/input-extension",
     "crates/keyflow/keyflow-extension",
-    "crates/reaper/input-reaper",
-    "crates/reaper/reaper-embed",
-    "crates/reaper/swell-ui",
     "crates/shared/installer-core",
     "crates/shared/utils",
     "crates/shared/vox-discover",
@@ -39,18 +36,18 @@ repository = "https://github.com/FastTrackStudios/FastTrackStudio"
 authors = ["FastTrack Studio"]
 
 [workspace.dependencies]
-# Facet ecosystem - use crates.io 0.44.x to match git main branch
-facet = { version = "0.44" }
-facet-core = { version = "0.44" }
-facet-default = { version = "0.44" }
-facet-format = { version = "0.44" }
-facet-json = { version = "0.44" }
-facet-postcard = { version = "0.44" }
-facet-pretty = { version = "0.44" }
-facet-toml = { version = "0.44" }
-facet-value = { version = "0.44" }
-facet-yaml = { version = "0.44" }
-facet-styx = { version = "2.0" }
+# Facet ecosystem - 0.46 (matches sibling repos and Codys-Wright/vox 5ce8cdd9)
+facet = { version = "0.46" }
+facet-core = { version = "0.46" }
+facet-default = { version = "0.46" }
+facet-format = { version = "0.47" }
+facet-json = { version = "0.46" }
+facet-postcard = { version = "0.46" }
+facet-pretty = { version = "0.46" }
+facet-toml = { version = "0.46" }
+facet-value = { version = "0.46" }
+facet-yaml = { version = "0.46" }
+facet-styx = { version = "3.0" }
 
 # Common dependencies
 serde = { version = "1.0", features = ["derive"] }
@@ -71,22 +68,16 @@ futures = "0.3"
 clap = { version = "4", features = ["derive"] }
 
 # Vox crates — using FTS fork (fixes wasm32 compilation)
-vox = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-vox-codegen = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-vox-core = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-vox-hash = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-vox-schema = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-vox-service-macros = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-vox-inprocess = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-vox-stream = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-vox-task-local = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-vox-tracing = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-vox-websocket = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-vox-local = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-vox-http-bridge = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-subject-rust = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-ur-taking-me-with-you = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b", features = ["tokio"] }
-shm-primitives = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
+vox = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
+vox-codegen = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
+vox-core = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
+vox-schema = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
+vox-inprocess = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
+vox-stream = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
+vox-websocket = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
+vox-local = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
+subject-rust = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
+ur-taking-me-with-you = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9", features = ["tokio"] }
 
 # Instrumentation
 moire = { version = "1.0", features = ["diagnostics"] }
@@ -118,7 +109,6 @@ actions-standalone = { git = "https://github.com/FastTrackStudios/input_actions.
 actions-keybindings = { git = "https://github.com/FastTrackStudios/input_actions.git", branch = "main" }
 input-dioxus = { git = "https://github.com/FastTrackStudios/input_actions.git", branch = "main" }
 input = { git = "https://github.com/FastTrackStudios/input_actions.git", branch = "main" }
-input-reaper = { path = "crates/reaper/input-reaper" }
 
 # Dynamic template (sibling repo)
 color-palette = { git = "https://github.com/FastTrackStudios/dynamic-template.git", branch = "main" }
@@ -159,9 +149,9 @@ reaper-medium = { git = "https://github.com/FastTrackStudios/reaper-rs.git", bra
 reaper-high = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
 reaper-macros = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
 reaper-common-types = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes", features = ["palette"] }
-# FTS REAPER crates (in-workspace)
-swell-ui = { path = "crates/reaper/swell-ui" }
-reaper-embed = { path = "crates/reaper/reaper-embed" }
+# FTS REAPER crates (shared reaper-lib repo)
+swell-ui = { path = "../reaper-lib/crates/swell-ui" }
+reaper-embed = { path = "../reaper-lib/crates/reaper-embed" }
 reaper-test = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
 reaper-test-macro = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
 reaper-launcher = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
@@ -212,18 +202,15 @@ pollster = "0.4"
 
 # Redirect bearcove/vox.git transitive deps to the FTS fork (fixes wasm32 compilation).
 [patch."https://github.com/bearcove/vox.git"]
-vox = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-vox-core = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-vox-types = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-vox-postcard = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-vox-stream = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-vox-websocket = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-vox-shm = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-vox-schema = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-vox-service-macros = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-vox-codegen = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-vox-inprocess = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-shm-primitives = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
+vox = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
+vox-core = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
+vox-types = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
+vox-postcard = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
+vox-stream = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
+vox-websocket = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
+vox-schema = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
+vox-codegen = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
+vox-inprocess = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
 
 # ── Vendored patches ──────────────────────────────────────────────────
 # moire: unify crates.io moire with the git rev that vox pulls in,
