@@ -38,6 +38,7 @@ reaper-test = { git = "https://github.com/FastTrackStudios/daw.git", branch = "m
 
 # ── Vox service framework (fork with wasm32 fix) ─────────────────────
 vox = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
+vox-types = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
 vox-stream = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
 vox-websocket = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
 
