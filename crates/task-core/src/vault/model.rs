@@ -385,7 +385,7 @@ impl Vault {
 
     pub fn parse_project_from_md(content: &str) -> Option<Project> {
         let (frontmatter, body) = Self::split_frontmatter(content)?;
-        let mut project = facet_yaml::from_str::<Project>(frontmatter).ok()?;
+        let mut project = serde_yaml::from_str::<Project>(frontmatter).ok()?;
         if project.id == uuid::Uuid::nil() {
             project.id = project_id_for_title(&project.title);
         }
@@ -734,7 +734,7 @@ impl Vault {
 
     pub fn render_project_file(project: &Project, body: &str) -> Result<String, VaultError> {
         let yaml =
-            facet_yaml::to_string(project).map_err(|e| VaultError::ParseError(e.to_string()))?;
+            serde_yaml::to_string(project).map_err(|e| VaultError::ParseError(e.to_string()))?;
         let yaml = yaml.strip_prefix("---\n").unwrap_or(&yaml);
         Ok(format!("---\n{}---\n{}", yaml, body))
     }
