@@ -1,6 +1,11 @@
 // r[impl task.file]
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use async_trait::async_trait;
+use crudcrate::{ApiError, CrudStorage, InMemoryQuery};
+use tokio::sync::RwLock;
 
 use crate::asset::Asset;
 use crate::calendar_event::CalendarEvent;
@@ -11,10 +16,102 @@ use crate::location::Location;
 use crate::project::Project;
 use crate::revenue::Revenue;
 use crate::service::VaultError;
-use crate::task::Task;
+use crate::task::{Task, TaskApi, TaskApiCreate, TaskApiList, TaskApiUpdate};
 
 pub struct Vault {
     pub root: PathBuf,
+}
+
+#[derive(Clone)]
+pub struct VaultStorage {
+    vault: Arc<RwLock<Vault>>,
+}
+
+impl VaultStorage {
+    pub fn new(vault: Arc<RwLock<Vault>>) -> Self {
+        Self { vault }
+    }
+}
+
+#[async_trait]
+impl CrudStorage<TaskApi> for VaultStorage {
+    type Query = InMemoryQuery<uuid::Uuid>;
+
+    async fn get_one(&self, id: uuid::Uuid) -> Result<TaskApi, ApiError> {
+        self.vault
+            .read()
+            .await
+            .load_tasks()
+            .into_iter()
+            .find(|task| task.id == id)
+            .map(TaskApi::from)
+            .ok_or_else(|| ApiError::not_found("task", Some(id.to_string())))
+    }
+
+    async fn get_all(&self, query: Self::Query) -> Result<Vec<TaskApiList>, ApiError> {
+        let id_filter = query
+            .ids
+            .map(|ids| ids.into_iter().collect::<std::collections::HashSet<_>>());
+        let offset = usize::try_from(query.offset).unwrap_or(usize::MAX);
+        let limit = usize::try_from(query.limit).unwrap_or(usize::MAX);
+
+        let tasks = self.vault.read().await.load_tasks();
+        let iter = tasks
+            .into_iter()
+            .filter(|task| id_filter.as_ref().is_none_or(|ids| ids.contains(&task.id)))
+            .skip(offset)
+            .map(TaskApiList::from);
+
+        if query.limit == 0 {
+            Ok(iter.collect())
+        } else {
+            Ok(iter.take(limit).collect())
+        }
+    }
+
+    async fn create(&self, data: TaskApiCreate) -> Result<TaskApi, ApiError> {
+        let mut task = task_from_create(data)?;
+        if task.id == uuid::Uuid::nil() {
+            task.id = uuid::Uuid::new_v4();
+        }
+        self.vault
+            .read()
+            .await
+            .save_task(&task)
+            .map_err(vault_error_to_api)?;
+        Ok(TaskApi::from(task))
+    }
+
+    async fn update(&self, id: uuid::Uuid, data: TaskApiUpdate) -> Result<TaskApi, ApiError> {
+        let vault = self.vault.read().await;
+        let mut task = vault
+            .load_tasks()
+            .into_iter()
+            .find(|task| task.id == id)
+            .ok_or_else(|| ApiError::not_found("task", Some(id.to_string())))?;
+        task = apply_task_update(task, data)?;
+        task.id = id;
+        vault.save_task(&task).map_err(vault_error_to_api)?;
+        Ok(TaskApi::from(task))
+    }
+
+    async fn delete(&self, id: uuid::Uuid) -> Result<uuid::Uuid, ApiError> {
+        let vault = self.vault.read().await;
+        let task = vault
+            .load_tasks()
+            .into_iter()
+            .find(|task| task.id == id)
+            .ok_or_else(|| ApiError::not_found("task", Some(id.to_string())))?;
+        let path = vault.task_path(&task.title);
+        if path.exists() {
+            std::fs::remove_file(&path).map_err(|e| ApiError::internal(e.to_string(), None))?;
+        }
+        Ok(id)
+    }
+
+    async fn total_count(&self, query: Self::Query) -> Result<u64, ApiError> {
+        Ok(self.get_all(query).await?.len() as u64)
+    }
 }
 
 impl Vault {
@@ -570,6 +667,57 @@ impl Vault {
 
     pub fn extract_body(content: &str) -> Option<&str> {
         Self::split_frontmatter(content).map(|(_, body)| body)
+    }
+}
+
+fn task_from_create(data: TaskApiCreate) -> Result<Task, ApiError> {
+    let mut base = serde_json::to_value(Task::default())
+        .map_err(|e| ApiError::internal("failed to serialize default task", Some(e.to_string())))?;
+    merge_json_object(
+        &mut base,
+        serde_json::to_value(data)
+            .map_err(|e| ApiError::bad_request(format!("invalid task create payload: {e}")))?,
+    )?;
+    serde_json::from_value(base)
+        .map_err(|e| ApiError::bad_request(format!("invalid task create payload: {e}")))
+}
+
+fn apply_task_update(task: Task, data: TaskApiUpdate) -> Result<Task, ApiError> {
+    let mut base = serde_json::to_value(task)
+        .map_err(|e| ApiError::internal("failed to serialize task", Some(e.to_string())))?;
+    merge_json_object(
+        &mut base,
+        serde_json::to_value(data)
+            .map_err(|e| ApiError::bad_request(format!("invalid task update payload: {e}")))?,
+    )?;
+    serde_json::from_value(base)
+        .map_err(|e| ApiError::bad_request(format!("invalid task update payload: {e}")))
+}
+
+fn merge_json_object(
+    base: &mut serde_json::Value,
+    patch: serde_json::Value,
+) -> Result<(), ApiError> {
+    let Some(base_obj) = base.as_object_mut() else {
+        return Err(ApiError::internal(
+            "task serialization did not produce an object",
+            None,
+        ));
+    };
+    let serde_json::Value::Object(patch_obj) = patch else {
+        return Err(ApiError::bad_request("task payload must be an object"));
+    };
+    for (key, value) in patch_obj {
+        base_obj.insert(key, value);
+    }
+    Ok(())
+}
+
+fn vault_error_to_api(error: VaultError) -> ApiError {
+    match error {
+        VaultError::NotFound(id) => ApiError::not_found("task", Some(id)),
+        VaultError::ParseError(message) => ApiError::bad_request(message),
+        VaultError::IoError(message) => ApiError::internal(message, None),
     }
 }
 

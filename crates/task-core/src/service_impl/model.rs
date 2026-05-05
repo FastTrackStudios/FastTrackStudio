@@ -5,6 +5,8 @@ use std::sync::Arc;
 
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use chrono::{DateTime, Datelike, NaiveDate, Utc};
+use crudcrate::{CrudStorage, InMemoryQuery};
+use serde::Serialize;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
@@ -57,8 +59,8 @@ use crate::service::{
     TimeEntryContext, TimeEntryFilter, TimeEntryPatch, TimeLogRequest, TimeStartRequest,
     TimedTaskEntry, VaultCapability, VaultError,
 };
-use crate::task::{Priority, Status, Task, WikiLink};
-use crate::vault::Vault;
+use crate::task::{Priority, Status, Task, TaskApi, TaskApiCreate, TaskApiUpdate, WikiLink};
+use crate::vault::{Vault, VaultStorage};
 use crate::watch::{WatchHandle, start_watch};
 
 /// A named vault source with its role in the system.
@@ -288,6 +290,7 @@ pub struct VaultServiceImpl {
     /// The primary vault root (personal or first-registered vault).
     root: std::path::PathBuf,
     vault: Arc<RwLock<Vault>>,
+    task_storage: VaultStorage,
     /// SQLite index for fast queries; `None` when unavailable (e.g. WASM).
     pub index: Arc<std::sync::Mutex<Option<TaskIndex>>>,
     /// Additional vault sources beyond the primary.
@@ -325,8 +328,12 @@ impl VaultServiceImpl {
             }
         };
 
+        let vault = Arc::new(RwLock::new(Vault::new(&root)));
+        let task_storage = VaultStorage::new(Arc::clone(&vault));
+
         Self {
-            vault: Arc::new(RwLock::new(Vault::new(&root))),
+            vault,
+            task_storage,
             root,
             index: Arc::new(std::sync::Mutex::new(index)),
             extra_vaults: Arc::new(RwLock::new(Vec::new())),
@@ -372,7 +379,10 @@ impl VaultServiceImpl {
     // r[impl api.service.list-tasks]
     pub async fn list_tasks(&self) -> Vec<Task> {
         // r[impl query.execute.snapshot]
-        dedupe_tasks(self.vault.read().await.load_tasks())
+        match CrudStorage::<TaskApi>::get_all(&self.task_storage, InMemoryQuery::all()).await {
+            Ok(tasks) => dedupe_tasks(tasks.into_iter().filter_map(task_from_json_model).collect()),
+            Err(_) => dedupe_tasks(self.vault.read().await.load_tasks()),
+        }
     }
 
     // r[impl api.service.execute-query]
@@ -387,13 +397,19 @@ impl VaultServiceImpl {
 
     // r[impl api.service.create-task]
     pub async fn create_task(&self, mut task: Task) -> Result<Task, VaultError> {
-        if task.id == Uuid::nil() {
-            task.id = Uuid::new_v4();
-        }
         let now = Utc::now();
         task.date_created = Some(now);
         task.date_modified = Some(now);
-        self.vault.read().await.save_task(&task)?;
+        let task = if task.id == Uuid::nil() {
+            let create = task_to_create_model(&task)?;
+            let created = CrudStorage::<TaskApi>::create(&self.task_storage, create)
+                .await
+                .map_err(api_error_to_vault)?;
+            task_from_api(created)?
+        } else {
+            self.vault.read().await.save_task(&task)?;
+            task
+        };
         if let Ok(guard) = self.index.lock() {
             if let Some(ref index) = *guard {
                 let _ = index.index_task(&task, &format!("{}.md", task.title));
@@ -559,7 +575,12 @@ impl VaultServiceImpl {
         let prior = vault.load_tasks().into_iter().find(|t| t.id == prior_id);
 
         task.date_modified = Some(Utc::now());
-        vault.save_task(&task)?;
+        drop(vault);
+        let update = task_to_update_model(&task)?;
+        let updated = CrudStorage::<TaskApi>::update(&self.task_storage, prior_id, update)
+            .await
+            .map_err(api_error_to_vault)?;
+        let task = task_from_api(updated)?;
 
         let file_path = format!("{}.md", task.title);
         if let Ok(guard) = self.index.lock() {
@@ -721,26 +742,33 @@ impl VaultServiceImpl {
         title: String,
         actor: Option<&str>,
     ) -> Result<(), VaultError> {
-        let path = self.root.join(format!("{}.md", title));
-        if path.exists() {
-            std::fs::remove_file(&path).map_err(|e| VaultError::IoError(e.to_string()))?;
-            if let Ok(guard) = self.index.lock() {
-                if let Some(ref index) = *guard {
-                    let _ = index.record_change(
-                        "task",
-                        &title,
-                        Some("deleted"),
-                        Some("present"),
-                        Some("deleted"),
-                        actor,
-                        Some(&format!("{}.md", title)),
-                    );
-                }
+        let task = self
+            .vault
+            .read()
+            .await
+            .load_tasks()
+            .into_iter()
+            .find(|task| task.matches_reference(&title))
+            .ok_or_else(|| VaultError::NotFound(title.clone()))?;
+        let task_title = task.title.clone();
+        let task_id = task.id;
+        CrudStorage::<TaskApi>::delete(&self.task_storage, task_id)
+            .await
+            .map_err(api_error_to_vault)?;
+        if let Ok(guard) = self.index.lock() {
+            if let Some(ref index) = *guard {
+                let _ = index.record_change(
+                    "task",
+                    &task_title,
+                    Some("deleted"),
+                    Some("present"),
+                    Some("deleted"),
+                    actor,
+                    Some(&format!("{}.md", task_title)),
+                );
             }
-            Ok(())
-        } else {
-            Err(VaultError::NotFound(title))
         }
+        Ok(())
     }
 
     pub async fn search_tasks(&self, query: String) -> Vec<Task> {
@@ -3905,6 +3933,62 @@ fn dedupe_tasks(tasks: Vec<Task>) -> Vec<Task> {
         .into_iter()
         .filter(|task| seen.insert(task.id))
         .collect()
+}
+
+fn task_to_create_model(task: &Task) -> Result<TaskApiCreate, VaultError> {
+    serde_json::to_value(task)
+        .and_then(serde_json::from_value)
+        .map_err(|e| VaultError::ParseError(format!("failed to build task create model: {e}")))
+}
+
+fn task_to_update_model(task: &Task) -> Result<TaskApiUpdate, VaultError> {
+    serde_json::to_value(task)
+        .and_then(serde_json::from_value)
+        .map_err(|e| VaultError::ParseError(format!("failed to build task update model: {e}")))
+}
+
+fn task_from_api(task: TaskApi) -> Result<Task, VaultError> {
+    task_from_json_model(task)
+        .ok_or_else(|| VaultError::ParseError("failed to decode task repo model".to_string()))
+}
+
+fn task_from_json_model<T>(task: T) -> Option<Task>
+where
+    T: Serialize,
+{
+    let mut base = serde_json::to_value(Task::default()).ok()?;
+    let patch = serde_json::to_value(task).ok()?;
+    merge_json_value(&mut base, patch)?;
+    serde_json::from_value(base).ok()
+}
+
+fn merge_json_value(base: &mut serde_json::Value, patch: serde_json::Value) -> Option<()> {
+    let base = base.as_object_mut()?;
+    let serde_json::Value::Object(patch) = patch else {
+        return None;
+    };
+    for (key, value) in patch {
+        base.insert(key, value);
+    }
+    Some(())
+}
+
+fn api_error_to_vault(error: crudcrate::ApiError) -> VaultError {
+    match error {
+        crudcrate::ApiError::NotFound { id, .. } => {
+            VaultError::NotFound(id.unwrap_or_else(|| "task".to_string()))
+        }
+        crudcrate::ApiError::BadRequest { message }
+        | crudcrate::ApiError::Conflict { message }
+        | crudcrate::ApiError::Unauthorized { message }
+        | crudcrate::ApiError::Forbidden { message }
+        | crudcrate::ApiError::Custom { message, .. } => VaultError::ParseError(message),
+        crudcrate::ApiError::ValidationFailed { errors } => {
+            VaultError::ParseError(errors.join("; "))
+        }
+        crudcrate::ApiError::Database { message, .. }
+        | crudcrate::ApiError::Internal { message, .. } => VaultError::IoError(message),
+    }
 }
 
 fn is_inbox_task(task: &Task) -> bool {

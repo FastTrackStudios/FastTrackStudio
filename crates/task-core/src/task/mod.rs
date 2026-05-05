@@ -5,9 +5,6 @@
 
 pub mod model;
 
-pub use model::{
-    DependencyRelType, Model, Priority, Reaction, RecurrenceAnchor, RelationType, Reminder,
-    ReminderAnchor, Status, TaskDependency, TaskRelation, TimeEntry, WikiLink,
-};
+pub use model::*;
 
 pub type Task = Model;
