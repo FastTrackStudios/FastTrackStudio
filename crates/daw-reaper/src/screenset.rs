@@ -160,7 +160,11 @@ fn save_screenset_immediate(
 /// resolution is good enough for the laptop ↔ multi-monitor switch case.
 fn monitor_id(name: &str, width: u32, height: u32) -> String {
     let trimmed = name.trim();
-    let safe = if trimmed.is_empty() { "display" } else { trimmed };
+    let safe = if trimmed.is_empty() {
+        "display"
+    } else {
+        trimmed
+    };
     format!("{safe}@{width}x{height}")
 }
 
@@ -245,9 +249,7 @@ fn capture_main_window(monitors: &[ScreensetMonitor]) -> Option<ScreensetWindow>
         return None;
     }
     let bounds = unsafe { window_rect(hwnd) };
-    let monitor_id = bounds
-        .as_ref()
-        .and_then(|rect| monitor_for(rect, monitors));
+    let monitor_id = bounds.as_ref().and_then(|rect| monitor_for(rect, monitors));
     Some(ScreensetWindow {
         id: MAIN_WINDOW_ID.to_string(),
         title: "REAPER".to_string(),
@@ -268,10 +270,7 @@ fn capture_track_visibility() -> Vec<ScreensetTrackVisibility> {
         .tracks()
         .map(|t| ScreensetTrackVisibility {
             guid: t.guid().to_string_with_braces(),
-            name: t
-                .name()
-                .map(|s| s.to_str().to_string())
-                .unwrap_or_default(),
+            name: t.name().map(|s| s.to_str().to_string()).unwrap_or_default(),
             visible_in_tcp: t.is_shown(TrackArea::Tcp),
             visible_in_mixer: t.is_shown(TrackArea::Mcp),
         })

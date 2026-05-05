@@ -46,10 +46,6 @@ impl WindowGeometry {
         target: WindowTarget,
         rect: ScreensetRect,
     ) -> crate::Result<WindowGeometryResult> {
-        Ok(self
-            .clients
-            .window_geometry
-            .set_rect(target, rect)
-            .await?)
+        Ok(self.clients.window_geometry.set_rect(target, rect).await?)
     }
 }

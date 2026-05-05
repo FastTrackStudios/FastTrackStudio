@@ -3,7 +3,7 @@
 //! Handles the top-level REAPER_PROJECT structure and coordinates
 //! parsing of the entire RPP file.
 
-use nom::{IResult, Parser, bytes::complete::tag, character::complete::space0, combinator::map};
+use nom::{bytes::complete::tag, character::complete::space0, combinator::map, IResult, Parser};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 

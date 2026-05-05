@@ -25,7 +25,7 @@ pub mod project;
 pub mod token;
 
 // Re-export the main types for convenience
-pub use block::{BlockType, RppBlock, RppBlockContent, parse_blocks};
+pub use block::{parse_blocks, BlockType, RppBlock, RppBlockContent};
 pub use fast_project::parse_rpp_fast;
-pub use project::{RppProject, parse_project_header, parse_rpp};
+pub use project::{parse_project_header, parse_rpp, RppProject};
 pub use token::{QuoteType, Token};

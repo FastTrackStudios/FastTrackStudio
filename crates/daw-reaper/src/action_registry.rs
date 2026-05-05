@@ -267,11 +267,10 @@ fn delete_shared_toggle_state(command_name: &str) {
         return;
     };
     unsafe {
-        Reaper::get().medium_reaper().low().DeleteExtState(
-            section.as_ptr(),
-            key.as_ptr(),
-            false,
-        );
+        Reaper::get()
+            .medium_reaper()
+            .low()
+            .DeleteExtState(section.as_ptr(), key.as_ptr(), false);
     }
 }
 

@@ -24,9 +24,9 @@ use daw_proto::{
     plugin_loader_service_service_descriptor, project_service_service_descriptor,
     region_service_service_descriptor, routing_service_service_descriptor,
     screenset_service_service_descriptor, take_service_service_descriptor,
-    tempo_map_service_service_descriptor, window_geometry_service_service_descriptor,
-    toolbar_service_service_descriptor, track_service_service_descriptor,
-    transport_service_service_descriptor,
+    tempo_map_service_service_descriptor, toolbar_service_service_descriptor,
+    track_service_service_descriptor, transport_service_service_descriptor,
+    window_geometry_service_service_descriptor,
 };
 
 use daw_proto::batch::{BatchServiceDispatcher, batch_service_service_descriptor};

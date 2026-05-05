@@ -109,7 +109,9 @@ async fn apply_restores_main_window_position(ctx: &ReaperTestContext) -> eyre::R
     // round-trip case that *can* be verified end-to-end is exercised by
     // floating panels in the per-panel screenset tests (added once the dock
     // host adapter wires its layout blob into screenset capture).
-    let result = screensets.apply("fts_test_apply_shifted", opts.clone()).await?;
+    let result = screensets
+        .apply("fts_test_apply_shifted", opts.clone())
+        .await?;
     assert!(result.ok, "apply should succeed: {:?}", result.error);
 
     for id in ["fts_test_apply_baseline", "fts_test_apply_shifted"] {
@@ -182,9 +184,7 @@ async fn track_set_round_trips_visibility(ctx: &ReaperTestContext) -> eyre::Resu
 }
 
 #[reaper_test(isolated)]
-async fn selection_set_round_trips_track_selection(
-    ctx: &ReaperTestContext,
-) -> eyre::Result<()> {
+async fn selection_set_round_trips_track_selection(ctx: &ReaperTestContext) -> eyre::Result<()> {
     let opts = ScreensetOptions {
         scope: ScreensetScope::Global,
         persist: false,

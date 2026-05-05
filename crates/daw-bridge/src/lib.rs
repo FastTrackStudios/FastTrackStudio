@@ -17,9 +17,9 @@ static ALLOCATOR: daw_allocator::FtsAllocator = daw_allocator::FtsAllocator::new
 
 use fragile::Fragile;
 use reaper_high::{ActionKind, MainTaskMiddleware, Reaper as HighReaper};
-use reaper_medium::OwnedGaccelRegister;
 use reaper_low::PluginContext;
 use reaper_macros::reaper_extension_plugin;
+use reaper_medium::OwnedGaccelRegister;
 use reaper_medium::ReaperSession;
 use std::cell::RefCell;
 use std::error::Error;
@@ -33,14 +33,13 @@ use routed_handler::{DawConnectionAcceptor, RoutedHandler};
 // Service dispatchers for method ID routing
 use daw::service::{
     ActionRegistryServiceDispatcher, AudioEngineServiceDispatcher, BatchServiceDispatcher,
-    ExtStateServiceDispatcher, FxServiceDispatcher, HealthServiceDispatcher,
-    InputServiceDispatcher, ItemServiceDispatcher, LiveMidiServiceDispatcher,
-    MarkerServiceDispatcher, MidiAnalysisServiceDispatcher, MidiServiceDispatcher,
-    PluginLoaderServiceDispatcher, ProjectServiceDispatcher, RegionServiceDispatcher,
-    DawFileServiceDispatcher, RoutingServiceDispatcher, ScreensetServiceDispatcher,
-    TakeServiceDispatcher, WindowGeometryServiceDispatcher,
-    TempoMapServiceDispatcher, ToolbarServiceDispatcher, TrackServiceDispatcher,
-    TransportServiceDispatcher,
+    DawFileServiceDispatcher, ExtStateServiceDispatcher, FxServiceDispatcher,
+    HealthServiceDispatcher, InputServiceDispatcher, ItemServiceDispatcher,
+    LiveMidiServiceDispatcher, MarkerServiceDispatcher, MidiAnalysisServiceDispatcher,
+    MidiServiceDispatcher, PluginLoaderServiceDispatcher, ProjectServiceDispatcher,
+    RegionServiceDispatcher, RoutingServiceDispatcher, ScreensetServiceDispatcher,
+    TakeServiceDispatcher, TempoMapServiceDispatcher, ToolbarServiceDispatcher,
+    TrackServiceDispatcher, TransportServiceDispatcher, WindowGeometryServiceDispatcher,
 };
 
 // ============================================================================
@@ -187,17 +186,17 @@ async fn register_daw_dispatcher() {
     // Import service descriptor functions for method_id routing
     use daw::service::{
         action_registry_service_service_descriptor, audio_engine_service_service_descriptor,
-        batch_service_service_descriptor, ext_state_service_service_descriptor,
-        fx_service_service_descriptor, health_service_service_descriptor,
-        input_service_service_descriptor, item_service_service_descriptor,
-        live_midi_service_service_descriptor, marker_service_service_descriptor,
-        midi_analysis_service_service_descriptor, midi_service_service_descriptor,
-        plugin_loader_service_service_descriptor, project_service_service_descriptor,
-        region_service_service_descriptor, routing_service_service_descriptor,
-        daw_file_service_service_descriptor, screenset_service_service_descriptor,
-        take_service_service_descriptor, window_geometry_service_service_descriptor,
-        tempo_map_service_service_descriptor, toolbar_service_service_descriptor,
-        track_service_service_descriptor, transport_service_service_descriptor,
+        batch_service_service_descriptor, daw_file_service_service_descriptor,
+        ext_state_service_service_descriptor, fx_service_service_descriptor,
+        health_service_service_descriptor, input_service_service_descriptor,
+        item_service_service_descriptor, live_midi_service_service_descriptor,
+        marker_service_service_descriptor, midi_analysis_service_service_descriptor,
+        midi_service_service_descriptor, plugin_loader_service_service_descriptor,
+        project_service_service_descriptor, region_service_service_descriptor,
+        routing_service_service_descriptor, screenset_service_service_descriptor,
+        take_service_service_descriptor, tempo_map_service_service_descriptor,
+        toolbar_service_service_descriptor, track_service_service_descriptor,
+        transport_service_service_descriptor, window_geometry_service_service_descriptor,
     };
 
     // Compose all 16 service dispatchers via RoutedHandler
@@ -357,11 +356,13 @@ fn start_unix_socket_server(acceptor: DawConnectionAcceptor) {
                             role: vox::SessionRole::Acceptor,
                             our_settings: vox::ConnectionSettings {
                                 parity: vox::Parity::Even,
-                                max_concurrent_requests: 64, initial_channel_credit: 16,
-        },
+                                max_concurrent_requests: 64,
+                                initial_channel_credit: 16,
+                            },
                             peer_settings: vox::ConnectionSettings {
                                 parity: vox::Parity::Odd,
-                                max_concurrent_requests: 64, initial_channel_credit: 16,
+                                max_concurrent_requests: 64,
+                                initial_channel_credit: 16,
                             },
                             peer_supports_retry: true,
                             session_resume_key: None,
@@ -594,8 +595,11 @@ fn register_fts_extension_action(name: &'static str, description: &'static str, 
     let already_listed = high
         .main_section()
         .with_raw(|s| {
-            (0..s.action_list_cnt())
-                .any(|i| s.get_action_by_index(i).map(|a| a.cmd() == cmd_id).unwrap_or(false))
+            (0..s.action_list_cnt()).any(|i| {
+                s.get_action_by_index(i)
+                    .map(|a| a.cmd() == cmd_id)
+                    .unwrap_or(false)
+            })
         })
         .unwrap_or(false);
     if !already_listed {

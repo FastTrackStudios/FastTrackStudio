@@ -70,11 +70,7 @@ fn resolve_combine_output(input: &Path, requested: &str) -> PathBuf {
     parent.join(format!("{}.RPP", stem.to_string_lossy()))
 }
 
-fn combine(
-    input: &str,
-    output: &str,
-    options: &CombineSetlistOptions,
-) -> CombineSetlistResult {
+fn combine(input: &str, output: &str, options: &CombineSetlistOptions) -> CombineSetlistResult {
     use dawfile_reaper::setlist_rpp::{self, CombineOptions};
 
     let mut result = CombineSetlistResult {

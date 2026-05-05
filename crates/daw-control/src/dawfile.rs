@@ -23,7 +23,10 @@ impl DawFile {
     }
 
     /// Summarize a `.RPP` project file at `path`.
-    pub async fn summarize_project(&self, path: impl Into<String>) -> crate::Result<ProjectSummary> {
+    pub async fn summarize_project(
+        &self,
+        path: impl Into<String>,
+    ) -> crate::Result<ProjectSummary> {
         Ok(self.clients.dawfile.summarize_project(path.into()).await?)
     }
 

@@ -42,6 +42,7 @@ pub mod action_registry;
 pub mod audio_accessor;
 pub mod audio_engine;
 pub mod automation;
+pub mod dawfile_service;
 pub mod ext_state;
 pub mod fx;
 pub mod health;
@@ -61,14 +62,13 @@ pub mod ptr_validation;
 pub mod region;
 pub mod resource;
 pub mod routing;
-pub mod dawfile_service;
 pub mod screenset;
-pub mod window_geometry;
 pub mod tempo_map;
 pub mod toolbar;
 pub mod track;
 pub mod transport;
 pub mod ui;
+pub mod window_geometry;
 
 // Re-export the main types
 pub use action_registry::{
@@ -77,6 +77,7 @@ pub use action_registry::{
 pub use audio_accessor::ReaperAudioAccessor;
 pub use audio_engine::ReaperAudioEngine;
 pub use automation::ReaperAutomation;
+pub use dawfile_service::DawFileOps;
 pub use ext_state::ReaperExtState;
 pub use fx::ReaperFx;
 pub use health::ReaperHealth;
@@ -92,13 +93,12 @@ pub use position_conversion::ReaperPositionConversion;
 pub use project::ReaperProject;
 pub use region::ReaperRegion;
 pub use routing::ReaperRouting;
-pub use dawfile_service::DawFileOps;
 pub use screenset::ReaperScreenset;
-pub use window_geometry::ReaperWindowGeometry;
 pub use tempo_map::ReaperTempoMap;
 pub use toolbar::ReaperToolbar;
 pub use track::ReaperTrack;
 pub use transport::ReaperTransport;
+pub use window_geometry::ReaperWindowGeometry;
 
 // Re-export the main thread bridge and transport broadcaster functions
 pub use main_thread::set_task_support;

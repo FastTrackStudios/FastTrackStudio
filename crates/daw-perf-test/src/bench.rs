@@ -73,11 +73,13 @@ async fn connect_to_daw_bridge() -> eyre::Result<Daw> {
         role: vox::SessionRole::Initiator,
         our_settings: vox::ConnectionSettings {
             parity: vox::Parity::Odd,
-            max_concurrent_requests: 64, initial_channel_credit: 16,
+            max_concurrent_requests: 64,
+            initial_channel_credit: 16,
         },
         peer_settings: vox::ConnectionSettings {
             parity: vox::Parity::Even,
-            max_concurrent_requests: 64, initial_channel_credit: 16,
+            max_concurrent_requests: 64,
+            initial_channel_credit: 16,
         },
         peer_supports_retry: true,
         session_resume_key: None,

@@ -430,7 +430,11 @@ impl RChunk {
                 if !Self::in_lua_range(i, start_index, end_index) {
                     return None;
                 }
-                if filter(child) { Some(child) } else { None }
+                if filter(child) {
+                    Some(child)
+                } else {
+                    None
+                }
             })
             .collect()
     }

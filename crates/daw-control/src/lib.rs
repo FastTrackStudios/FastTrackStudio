@@ -120,6 +120,7 @@ use std::sync::Arc;
 pub(crate) use daw_proto::ActionRegistryServiceClient;
 pub(crate) use daw_proto::AudioEngineServiceClient;
 pub(crate) use daw_proto::AutomationServiceClient;
+pub(crate) use daw_proto::DawFileServiceClient;
 pub(crate) use daw_proto::ExtStateServiceClient;
 pub(crate) use daw_proto::FxServiceClient;
 pub(crate) use daw_proto::HealthServiceClient;
@@ -133,12 +134,11 @@ pub(crate) use daw_proto::PositionConversionServiceClient;
 pub(crate) use daw_proto::ProjectServiceClient;
 pub(crate) use daw_proto::RegionServiceClient;
 pub(crate) use daw_proto::RoutingServiceClient;
-pub(crate) use daw_proto::DawFileServiceClient;
 pub(crate) use daw_proto::ScreensetServiceClient;
-pub(crate) use daw_proto::WindowGeometryServiceClient;
 pub(crate) use daw_proto::TakeServiceClient;
 pub(crate) use daw_proto::TempoMapServiceClient;
 pub(crate) use daw_proto::TrackServiceClient;
+pub(crate) use daw_proto::WindowGeometryServiceClient;
 pub(crate) use daw_proto::batch::BatchServiceClient;
 pub(crate) use daw_proto::dock_host::DockHostServiceClient;
 pub(crate) use daw_proto::plugin_loader::PluginLoaderServiceClient;
@@ -153,6 +153,7 @@ mod action_registry;
 mod audio_engine;
 mod automation;
 pub mod batch;
+mod dawfile;
 mod dock_host;
 mod ext_state;
 mod fx;
@@ -165,13 +166,12 @@ mod plugin_loader;
 mod project;
 mod regions;
 mod routing;
-mod dawfile;
 mod screenset;
-mod window_geometry;
 mod tempo_map;
 mod toolbar;
 mod tracks;
 mod transport;
+mod window_geometry;
 
 pub use self::action_registry::ActionRegistry;
 pub use self::audio_engine::AudioEngine;
@@ -179,6 +179,7 @@ pub use self::automation::{EnvelopeHandle, Envelopes};
 pub use self::batch::{
     BatchBuilder, BatchExtractError, BatchResponseExt, FromStepOutput, StepHandle,
 };
+pub use self::dawfile::DawFile;
 pub use self::dock_host::DockHost;
 pub use self::ext_state::ExtState;
 pub use self::fx::{FxChain, FxHandle, FxParamHandle};
@@ -191,13 +192,12 @@ pub use self::plugin_loader::PluginLoader;
 pub use self::project::Project;
 pub use self::regions::Regions;
 pub use self::routing::{HardwareOutputs, Receives, RouteHandle, Sends};
-pub use self::dawfile::DawFile;
 pub use self::screenset::Screensets;
-pub use self::window_geometry::WindowGeometry;
 pub use self::tempo_map::TempoMap;
 pub use self::toolbar::Toolbar;
 pub use self::tracks::{TrackHandle, Tracks};
 pub use self::transport::Transport;
+pub use self::window_geometry::WindowGeometry;
 
 /// Service clients for a DAW connection
 #[derive(Clone)]
