@@ -7,6 +7,7 @@ use crate::calendar_event::CalendarEvent;
 use crate::client::Client;
 use crate::expense::Expense;
 use crate::invoice::Invoice;
+use crate::location::Location;
 use crate::project::Project;
 use crate::revenue::Revenue;
 use crate::service::VaultError;
@@ -57,6 +58,17 @@ impl Vault {
         }
         Self::walk_md_in(&dir)
             .filter_map(|content| Self::parse_asset_from_md(&content))
+            .collect()
+    }
+
+    /// Load all reusable location / venue records.
+    pub fn load_locations(&self) -> Vec<Location> {
+        let dir = self.root.join("locations");
+        if !dir.exists() {
+            return vec![];
+        }
+        Self::walk_md_in(&dir)
+            .filter_map(|content| Self::parse_location_from_md(&content))
             .collect()
     }
 
@@ -195,6 +207,13 @@ impl Vault {
         Some(event)
     }
 
+    pub fn parse_location_from_md(content: &str) -> Option<Location> {
+        let (frontmatter, body) = Self::split_frontmatter(content)?;
+        let mut location = facet_yaml::from_str::<Location>(frontmatter).ok()?;
+        location.body = body.to_string();
+        Some(location)
+    }
+
     pub fn render_calendar_event_file(
         event: &CalendarEvent,
         body: &str,
@@ -221,6 +240,53 @@ impl Vault {
         };
         let content = Self::render_calendar_event_file(event, &body)?;
         Self::atomic_write(&path, &content)
+    }
+
+    pub fn render_location_file(location: &Location, body: &str) -> Result<String, VaultError> {
+        let yaml =
+            facet_yaml::to_string(location).map_err(|e| VaultError::ParseError(e.to_string()))?;
+        let yaml = yaml.strip_prefix("---\n").unwrap_or(&yaml);
+        let body = if body.is_empty() {
+            &location.body
+        } else {
+            body
+        };
+        Ok(format!("---\n{}---\n{}", yaml, body))
+    }
+
+    pub fn save_location(&self, location: &Location) -> Result<(), VaultError> {
+        let dir = self.root.join("locations");
+        std::fs::create_dir_all(&dir).map_err(|e| VaultError::IoError(e.to_string()))?;
+        let path = dir.join(format!("{}.md", safe_file_name(&location.name)));
+        let body = if !location.body.is_empty() {
+            location.body.clone()
+        } else if path.exists() {
+            let content =
+                fs::read_to_string(&path).map_err(|e| VaultError::IoError(e.to_string()))?;
+            Self::extract_body(&content).unwrap_or("").to_string()
+        } else {
+            crate::location::render_location_body(location)
+        };
+        let content = Self::render_location_file(location, &body)?;
+        Self::atomic_write(&path, &content)
+    }
+
+    pub fn delete_location(&self, reference: &str) -> Result<(), VaultError> {
+        for location in self.load_locations() {
+            if location.id.as_deref() == Some(reference)
+                || location.name.eq_ignore_ascii_case(reference)
+            {
+                let path = self
+                    .root
+                    .join("locations")
+                    .join(format!("{}.md", safe_file_name(&location.name)));
+                if path.exists() {
+                    std::fs::remove_file(&path).map_err(|e| VaultError::IoError(e.to_string()))?;
+                }
+                return Ok(());
+            }
+        }
+        Err(VaultError::NotFound(reference.to_string()))
     }
 
     pub fn delete_calendar_event(&self, event_id: &str) -> Result<(), VaultError> {
