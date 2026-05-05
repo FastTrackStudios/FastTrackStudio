@@ -22,18 +22,18 @@ actions-reaper = { path = "crates/actions-reaper" }
 input = { path = "crates/input" }
 input-dioxus = { path = "crates/input-dioxus" }
 
-# Roam RPC framework (pinned — latest main needs peeps sub-crates not yet published)
-vox = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
+# Roam RPC framework (pinned to the current FTS fork)
+vox = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
 
-# Facet reflection - use crates.io 0.43.x to match vox's constraint
-facet = { version = "0.44" }
-facet-core = { version = "0.44" }
-facet-format = { version = "0.44" }
-facet-json = { version = "0.44" }
-facet-postcard = { version = "0.44" }
-facet-pretty = { version = "0.44" }
-facet-value = { version = "0.44" }
-facet-yaml = { version = "0.44" }
+# Facet reflection — align the whole stack to the current 0.46 line.
+facet = { version = "0.46" }
+facet-core = { version = "0.46" }
+facet-format = { version = "0.47" }
+facet-json = { version = "0.46" }
+facet-postcard = { version = "0.46" }
+facet-pretty = { version = "0.46" }
+facet-value = { version = "0.46" }
+facet-yaml = { version = "0.46" }
 
 # REAPER bindings (FTS fork with v7.63 ruler lane APIs)
 reaper-high = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }

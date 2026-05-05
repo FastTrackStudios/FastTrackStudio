@@ -27,7 +27,7 @@ use actions_proto::{
     ActionDefinition, ActionEvent, ActionId, ActionResult, ActionsService,
     ActionsServiceDispatcher, DefinesActionsClient,
 };
-use vox::ErasedCaller;
+use vox::Caller;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
@@ -66,7 +66,7 @@ impl ActionsRegistry {
     ///
     /// This queries the cell for its actions and caches them.
     /// Emits an `ActionEvent::Added` event.
-    pub async fn register_cell(&self, cell_name: &str, handle: ErasedCaller) {
+    pub async fn register_cell(&self, cell_name: &str, handle: Caller) {
         let client = DefinesActionsClient::new(handle);
 
         // Query the cell for its actions

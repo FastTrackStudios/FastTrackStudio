@@ -6,7 +6,7 @@ use actions_proto::{ActionDefinition, LocalActionImplementation, LocalActionRegi
 use actions_registry::ActionsRegistry;
 use reaper_high::{ActionKind, Reaper, RegisteredAction};
 use reaper_medium::CommandId;
-use vox::ErasedCaller;
+use vox::Caller;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, OnceLock};
 use tracing::{debug, info, warn};
@@ -157,7 +157,7 @@ pub struct MenuActionDef {
 ///
 /// This queries the cell for actions via `DefinesActions::get_actions()` and
 /// registers each action with REAPER's action system.
-pub async fn register_cell(cell_name: &str, handle: ErasedCaller) {
+pub async fn register_cell(cell_name: &str, handle: Caller) {
     let registry = match get_registry() {
         Some(r) => r,
         None => {
