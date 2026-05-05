@@ -8,7 +8,7 @@ version = "0.1.0"
 dependencies = [
  "convert_case 0.6.0",
  "facet 0.46.0",
- "vox",
+ "vox 0.4.0",
 ]
 
 [[package]]
@@ -17,7 +17,7 @@ version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1b5d307320b3181d6d7954e663bd7c774a838b8220fe0593c86d9fb09f498b4b"
 dependencies = [
- "gimli",
+ "gimli 0.32.3",
 ]
 
 [[package]]
@@ -184,6 +184,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3d036a3c4ab069c7b410a2ce876bd74808d2d0888a82667669f8e783a898bf1"
 dependencies = [
  "derive_arbitrary",
+]
+
+[[package]]
+name = "arc-swap"
+version = "1.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a3a1fd6f75306b68087b831f025c712524bcb19aad54e557b1129cfa0a2b207"
+dependencies = [
+ "rustversion",
 ]
 
 [[package]]
@@ -800,6 +809,9 @@ name = "bumpalo"
 version = "3.20.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5d20789868f4b01b2f2caec9f5c4e0213b41e3e5702a50157d699ae31ced2fcb"
+dependencies = [
+ "allocator-api2",
+]
 
 [[package]]
 name = "bytecheck"
@@ -1128,6 +1140,173 @@ dependencies = [
 ]
 
 [[package]]
+name = "cranelift-assembler-x64"
+version = "0.131.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f8628cc4ba7f88a9205a7ee42327697abc61195a1e3d92cfae172d6a946e722e"
+dependencies = [
+ "cranelift-assembler-x64-meta",
+]
+
+[[package]]
+name = "cranelift-assembler-x64-meta"
+version = "0.131.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d582754487e6c9a065a91c42ccf1bdd8d5977af33468dac5ae9bec0ce88acb3e"
+dependencies = [
+ "cranelift-srcgen",
+]
+
+[[package]]
+name = "cranelift-bforest"
+version = "0.131.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fb59c81ace12ee7c33074db7903d4d75d1f40b28cd3e8e6f491de57b29129eb9"
+dependencies = [
+ "cranelift-entity",
+ "wasmtime-internal-core",
+]
+
+[[package]]
+name = "cranelift-bitset"
+version = "0.131.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f25c06993a681be9cf3140798a3d4ac5bec955e7444416a2fdc87fda8567285d"
+dependencies = [
+ "wasmtime-internal-core",
+]
+
+[[package]]
+name = "cranelift-codegen"
+version = "0.131.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "27b61f95c5a211918f5d336254a61a488b36a5818de47a868e8c4658dce9cccc"
+dependencies = [
+ "bumpalo",
+ "cranelift-assembler-x64",
+ "cranelift-bforest",
+ "cranelift-bitset",
+ "cranelift-codegen-meta",
+ "cranelift-codegen-shared",
+ "cranelift-control",
+ "cranelift-entity",
+ "cranelift-isle",
+ "gimli 0.33.0",
+ "hashbrown 0.16.1",
+ "libm",
+ "log",
+ "regalloc2",
+ "rustc-hash",
+ "serde",
+ "smallvec 1.15.1",
+ "target-lexicon",
+ "wasmtime-internal-core",
+]
+
+[[package]]
+name = "cranelift-codegen-meta"
+version = "0.131.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b85aa822fce72080d041d7c2cf7c3f5c6ecdea7afae68379ba4ef85269c4fa5"
+dependencies = [
+ "cranelift-assembler-x64-meta",
+ "cranelift-codegen-shared",
+ "cranelift-srcgen",
+ "heck 0.5.0",
+]
+
+[[package]]
+name = "cranelift-codegen-shared"
+version = "0.131.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "833eb9fc89326cd072cc19e96892f09b5692c0dfe17cd4da2858ba30c2cd85c0"
+
+[[package]]
+name = "cranelift-control"
+version = "0.131.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9d005320f487e6e8a3edcc7f2fd4f43fcc9946d1013bf206ea649789ac1617fc"
+dependencies = [
+ "arbitrary",
+]
+
+[[package]]
+name = "cranelift-entity"
+version = "0.131.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5e62ef34c6e720f347a79ece043e8584e242d168911da640bac654a33a6aaaf5"
+dependencies = [
+ "cranelift-bitset",
+ "wasmtime-internal-core",
+]
+
+[[package]]
+name = "cranelift-frontend"
+version = "0.131.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dfa2ad00399dd47e7e7e33cb1dc23b0e39ed9dcd01e8f026fc37af91655031b8"
+dependencies = [
+ "cranelift-codegen",
+ "log",
+ "smallvec 1.15.1",
+ "target-lexicon",
+]
+
+[[package]]
+name = "cranelift-isle"
+version = "0.131.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "02c51975ed217b4e8e5a7fd11e9ec83a96104bdff311dddcb505d1d8a9fd7fc6"
+
+[[package]]
+name = "cranelift-jit"
+version = "0.131.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4070d2acc5c976887c10c273d38dd2bebebb472fd1ba65fa17b548adf5f56350"
+dependencies = [
+ "anyhow",
+ "cranelift-codegen",
+ "cranelift-control",
+ "cranelift-entity",
+ "cranelift-module",
+ "cranelift-native",
+ "libc",
+ "log",
+ "region",
+ "target-lexicon",
+ "wasmtime-internal-jit-icache-coherence",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "cranelift-module"
+version = "0.131.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "052a396328dbc7dadc29d1bd27d4aa57d9e9e493ead8ef6e2ab3b75c1bf9644c"
+dependencies = [
+ "anyhow",
+ "cranelift-codegen",
+ "cranelift-control",
+]
+
+[[package]]
+name = "cranelift-native"
+version = "0.131.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f9b1889e00da9729d8f8525f3c12998ded86ea709058ff844ebe00b97548de0e"
+dependencies = [
+ "cranelift-codegen",
+ "libc",
+ "target-lexicon",
+]
+
+[[package]]
+name = "cranelift-srcgen"
+version = "0.131.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d5a8f82fd5124f009f72167e60139245cd3b56cfd4b53050f22110c48c5f4da1"
+
+[[package]]
 name = "crc"
 version = "3.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1375,7 +1554,7 @@ dependencies = [
  "futures",
  "serde",
  "serde_json",
- "vox",
+ "vox 0.3.1",
 ]
 
 [[package]]
@@ -1390,7 +1569,7 @@ dependencies = [
  "futures",
  "serde",
  "serde_json",
- "vox",
+ "vox 0.3.1",
 ]
 
 [[package]]
@@ -1417,7 +1596,7 @@ dependencies = [
  "actions-proto",
  "facet 0.46.0",
  "thiserror 2.0.18",
- "vox",
+ "vox 0.3.1",
 ]
 
 [[package]]
@@ -1428,7 +1607,7 @@ dependencies = [
  "actions-proto",
  "facet 0.46.0",
  "thiserror 2.0.18",
- "vox",
+ "vox 0.3.1",
 ]
 
 [[package]]
@@ -1779,6 +1958,16 @@ dependencies = [
 name = "facet-cbor"
 version = "0.3.1"
 source = "git+https://github.com/Codys-Wright/vox?rev=ccb46b5416100d38430cb082d71bf0377428c241#ccb46b5416100d38430cb082d71bf0377428c241"
+dependencies = [
+ "facet 0.46.0",
+ "facet-core 0.46.0",
+ "facet-reflect 0.46.0",
+]
+
+[[package]]
+name = "facet-cbor"
+version = "0.3.3"
+source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110a605f72abe42a81f0069aeda0b3"
 dependencies = [
  "facet 0.46.0",
  "facet-core 0.46.0",
@@ -2378,10 +2567,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0de51e6874e94e7bf76d726fc5d13ba782deca734ff60d5bb2fb2607c7406555"
 dependencies = [
  "cfg-if",
+ "js-sys",
  "libc",
  "r-efi 6.0.0",
  "wasip2",
  "wasip3",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -2399,6 +2590,18 @@ name = "gimli"
 version = "0.32.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e629b9b98ef3dd8afe6ca2bd0f89306cec16d43d907889945bc5d6687f2f13c7"
+
+[[package]]
+name = "gimli"
+version = "0.33.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0bf7f043f89559805f8c7cacc432749b2fa0d0a0a9ee46ce47164ed5ba7f126c"
+dependencies = [
+ "fnv",
+ "hashbrown 0.16.1",
+ "indexmap 2.14.0",
+ "stable_deref_trait",
+]
 
 [[package]]
 name = "glob"
@@ -3185,7 +3388,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tracing",
  "uuid",
- "vox",
+ "vox 0.4.0",
 ]
 
 [[package]]
@@ -3497,6 +3700,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "mach2"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d640282b302c0bb0a2a8e0233ead9035e3bed871f0b7e81fe4a1ec829765db44"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "matchers"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3581,15 +3793,30 @@ name = "moire"
 version = "1.0.0"
 source = "git+https://github.com/bearcove/moire?rev=13eac79#13eac79c1b128282dd792a611319d0a1016ad15d"
 dependencies = [
- "moire-macros-noop",
- "moire-tokio",
- "moire-wasm",
+ "moire-macros-noop 1.0.0",
+ "moire-tokio 1.0.0",
+ "moire-wasm 1.0.0",
+]
+
+[[package]]
+name = "moire"
+version = "1.0.1"
+source = "git+https://github.com/bearcove/moire?rev=cf162e7#cf162e7be775dd6a22317fa4fef1309e6c0a9d69"
+dependencies = [
+ "moire-macros-noop 1.0.1",
+ "moire-tokio 1.0.1",
+ "moire-wasm 1.0.1",
 ]
 
 [[package]]
 name = "moire-macros-noop"
 version = "1.0.0"
 source = "git+https://github.com/bearcove/moire?rev=13eac79#13eac79c1b128282dd792a611319d0a1016ad15d"
+
+[[package]]
+name = "moire-macros-noop"
+version = "1.0.1"
+source = "git+https://github.com/bearcove/moire?rev=cf162e7#cf162e7be775dd6a22317fa4fef1309e6c0a9d69"
 
 [[package]]
 name = "moire-runtime"
@@ -3600,10 +3827,26 @@ dependencies = [
  "facet 0.46.0",
  "facet-json",
  "facet-value",
- "moire-trace-capture",
- "moire-trace-types",
- "moire-types",
- "moire-wire",
+ "moire-trace-capture 1.0.0",
+ "moire-trace-types 1.0.0",
+ "moire-types 1.0.0",
+ "moire-wire 1.0.0",
+ "tokio",
+]
+
+[[package]]
+name = "moire-runtime"
+version = "1.0.1"
+source = "git+https://github.com/bearcove/moire?rev=cf162e7#cf162e7be775dd6a22317fa4fef1309e6c0a9d69"
+dependencies = [
+ "ctor",
+ "facet 0.46.0",
+ "facet-json",
+ "facet-value",
+ "moire-trace-capture 1.0.1",
+ "moire-trace-types 1.0.1",
+ "moire-types 1.0.1",
+ "moire-wire 1.0.1",
  "tokio",
 ]
 
@@ -3612,8 +3855,19 @@ name = "moire-tokio"
 version = "1.0.0"
 source = "git+https://github.com/bearcove/moire?rev=13eac79#13eac79c1b128282dd792a611319d0a1016ad15d"
 dependencies = [
- "moire-runtime",
- "moire-types",
+ "moire-runtime 1.0.0",
+ "moire-types 1.0.0",
+ "parking_lot",
+ "tokio",
+]
+
+[[package]]
+name = "moire-tokio"
+version = "1.0.1"
+source = "git+https://github.com/bearcove/moire?rev=cf162e7#cf162e7be775dd6a22317fa4fef1309e6c0a9d69"
+dependencies = [
+ "moire-runtime 1.0.1",
+ "moire-types 1.0.1",
  "parking_lot",
  "tokio",
 ]
@@ -3624,7 +3878,16 @@ version = "1.0.0"
 source = "git+https://github.com/bearcove/moire?rev=13eac79#13eac79c1b128282dd792a611319d0a1016ad15d"
 dependencies = [
  "libc",
- "moire-trace-types",
+ "moire-trace-types 1.0.0",
+]
+
+[[package]]
+name = "moire-trace-capture"
+version = "1.0.1"
+source = "git+https://github.com/bearcove/moire?rev=cf162e7#cf162e7be775dd6a22317fa4fef1309e6c0a9d69"
+dependencies = [
+ "libc",
+ "moire-trace-types 1.0.1",
 ]
 
 [[package]]
@@ -3636,13 +3899,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "moire-trace-types"
+version = "1.0.1"
+source = "git+https://github.com/bearcove/moire?rev=cf162e7#cf162e7be775dd6a22317fa4fef1309e6c0a9d69"
+dependencies = [
+ "facet 0.46.0",
+]
+
+[[package]]
 name = "moire-types"
 version = "1.0.0"
 source = "git+https://github.com/bearcove/moire?rev=13eac79#13eac79c1b128282dd792a611319d0a1016ad15d"
 dependencies = [
  "facet 0.46.0",
  "facet-value",
- "moire-trace-types",
+ "moire-trace-types 1.0.0",
+]
+
+[[package]]
+name = "moire-types"
+version = "1.0.1"
+source = "git+https://github.com/bearcove/moire?rev=cf162e7#cf162e7be775dd6a22317fa4fef1309e6c0a9d69"
+dependencies = [
+ "facet 0.46.0",
+ "facet-value",
+ "moire-trace-types 1.0.1",
 ]
 
 [[package]]
@@ -3656,7 +3937,22 @@ dependencies = [
  "futures-channel",
  "futures-util",
  "gloo-timers",
- "moire-types",
+ "moire-types 1.0.0",
+ "wasm-bindgen-futures",
+]
+
+[[package]]
+name = "moire-wasm"
+version = "1.0.1"
+source = "git+https://github.com/bearcove/moire?rev=cf162e7#cf162e7be775dd6a22317fa4fef1309e6c0a9d69"
+dependencies = [
+ "async-channel 2.5.0",
+ "async-lock",
+ "event-listener 5.4.1",
+ "futures-channel",
+ "futures-util",
+ "gloo-timers",
+ "moire-types 1.0.1",
  "wasm-bindgen-futures",
 ]
 
@@ -3667,8 +3963,19 @@ source = "git+https://github.com/bearcove/moire?rev=13eac79#13eac79c1b128282dd79
 dependencies = [
  "facet 0.46.0",
  "facet-json",
- "moire-trace-types",
- "moire-types",
+ "moire-trace-types 1.0.0",
+ "moire-types 1.0.0",
+]
+
+[[package]]
+name = "moire-wire"
+version = "1.0.1"
+source = "git+https://github.com/bearcove/moire?rev=cf162e7#cf162e7be775dd6a22317fa4fef1309e6c0a9d69"
+dependencies = [
+ "facet 0.46.0",
+ "facet-json",
+ "moire-trace-types 1.0.1",
+ "moire-types 1.0.1",
 ]
 
 [[package]]
@@ -3690,6 +3997,12 @@ dependencies = [
  "tagptr",
  "uuid",
 ]
+
+[[package]]
+name = "museair"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bb41311b1064dea78399acd92ca903b13be1120eef0a8555803da792e2c50511"
 
 [[package]]
 name = "music-catalog"
@@ -4635,6 +4948,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "regalloc2"
+version = "0.15.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "de2c52737737f8609e94f975dee22854a2d5c125772d4b1cf292120f4d45c186"
+dependencies = [
+ "allocator-api2",
+ "bumpalo",
+ "hashbrown 0.17.0",
+ "log",
+ "rustc-hash",
+ "smallvec 1.15.1",
+]
+
+[[package]]
 name = "regex"
 version = "1.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4662,6 +4989,18 @@ name = "regex-syntax"
 version = "0.8.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dc897dd8d9e8bd1ed8cdad82b5966c3e0ecae09fb1907d58efaa013543185d0a"
+
+[[package]]
+name = "region"
+version = "3.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e6b6ebd13bc009aef9cd476c1310d49ac354d36e240cf1bd753290f3dc7199a7"
+dependencies = [
+ "bitflags 1.3.2",
+ "libc",
+ "mach2",
+ "windows-sys 0.52.0",
+]
 
 [[package]]
 name = "rend"
@@ -5814,6 +6153,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
 
 [[package]]
+name = "target-lexicon"
+version = "0.13.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "adb6935a6f5c20170eeceb1a3835a49e12e19d792f6dd344ccc76a985ca5a6ca"
+
+[[package]]
 name = "task-cli"
 version = "0.1.0"
 dependencies = [
@@ -5824,7 +6169,7 @@ dependencies = [
  "task-core",
  "tokio",
  "uuid",
- "vox",
+ "vox 0.3.1",
 ]
 
 [[package]]
@@ -5867,8 +6212,8 @@ dependencies = [
  "tracing",
  "utoipa",
  "uuid",
- "vox",
- "vox-core",
+ "vox 0.3.1",
+ "vox-core 0.3.1",
  "walkdir",
 ]
 
@@ -5895,7 +6240,7 @@ dependencies = [
  "utoipa",
  "utoipa-axum",
  "uuid",
- "vox",
+ "vox 0.3.1",
 ]
 
 [[package]]
@@ -5921,7 +6266,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
- "vox",
+ "vox 0.3.1",
 ]
 
 [[package]]
@@ -6602,18 +6947,37 @@ dependencies = [
  "facet 0.46.0",
  "facet-pretty",
  "facet-reflect 0.46.0",
- "moire",
+ "moire 1.0.0",
  "rustls",
  "rustls-pemfile",
  "tokio",
  "tokio-rustls",
  "tracing",
- "vox-core",
- "vox-postcard",
- "vox-service-macros",
- "vox-stream",
- "vox-types",
+ "vox-core 0.3.1",
+ "vox-postcard 0.3.1",
+ "vox-service-macros 0.3.1",
+ "vox-stream 0.3.1",
+ "vox-types 0.3.1",
  "vox-websocket",
+]
+
+[[package]]
+name = "vox"
+version = "0.4.0"
+source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110a605f72abe42a81f0069aeda0b3"
+dependencies = [
+ "facet 0.46.0",
+ "facet-pretty",
+ "facet-reflect 0.46.0",
+ "moire 1.0.1",
+ "tokio",
+ "tracing",
+ "vox-core 0.4.0",
+ "vox-jit",
+ "vox-postcard 0.4.0",
+ "vox-service-macros 0.4.0",
+ "vox-stream 0.4.0",
+ "vox-types 0.4.0",
 ]
 
 [[package]]
@@ -6621,10 +6985,10 @@ name = "vox-codegen"
 version = "0.3.1"
 source = "git+https://github.com/Codys-Wright/vox?rev=ccb46b5416100d38430cb082d71bf0377428c241#ccb46b5416100d38430cb082d71bf0377428c241"
 dependencies = [
- "facet-cbor",
+ "facet-cbor 0.3.1",
  "facet-core 0.46.0",
  "heck 0.5.0",
- "vox-types",
+ "vox-types 0.3.1",
 ]
 
 [[package]]
@@ -6633,19 +6997,83 @@ version = "0.3.1"
 source = "git+https://github.com/Codys-Wright/vox?rev=ccb46b5416100d38430cb082d71bf0377428c241#ccb46b5416100d38430cb082d71bf0377428c241"
 dependencies = [
  "facet 0.46.0",
- "facet-cbor",
+ "facet-cbor 0.3.1",
  "facet-core 0.46.0",
  "facet-error",
  "facet-reflect 0.46.0",
  "getrandom 0.3.4",
- "moire",
+ "moire 1.0.0",
  "smallvec 1.15.1",
  "tokio",
  "tracing",
- "vox-postcard",
- "vox-types",
+ "vox-postcard 0.3.1",
+ "vox-types 0.3.1",
  "wasm-bindgen-futures",
  "zerocopy",
+]
+
+[[package]]
+name = "vox-core"
+version = "0.4.0"
+source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110a605f72abe42a81f0069aeda0b3"
+dependencies = [
+ "facet 0.46.0",
+ "facet-cbor 0.3.3",
+ "facet-core 0.46.0",
+ "facet-error",
+ "facet-reflect 0.46.0",
+ "futures-util",
+ "getrandom 0.4.2",
+ "moire 1.0.1",
+ "smallvec 1.15.1",
+ "tokio",
+ "tracing",
+ "vox-jit",
+ "vox-postcard 0.4.0",
+ "vox-types 0.4.0",
+ "wasm-bindgen-futures",
+ "zerocopy",
+]
+
+[[package]]
+name = "vox-jit"
+version = "0.4.0"
+source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110a605f72abe42a81f0069aeda0b3"
+dependencies = [
+ "arc-swap",
+ "cranelift-codegen",
+ "cranelift-frontend",
+ "cranelift-jit",
+ "cranelift-module",
+ "cranelift-native",
+ "facet 0.46.0",
+ "facet-core 0.46.0",
+ "libc",
+ "museair",
+ "vox-jit-abi",
+ "vox-jit-cal",
+ "vox-postcard 0.4.0",
+ "vox-schema 0.4.0",
+]
+
+[[package]]
+name = "vox-jit-abi"
+version = "0.4.0"
+source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110a605f72abe42a81f0069aeda0b3"
+dependencies = [
+ "arc-swap",
+ "facet-core 0.46.0",
+ "museair",
+ "vox-jit-cal",
+]
+
+[[package]]
+name = "vox-jit-cal"
+version = "0.4.0"
+source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110a605f72abe42a81f0069aeda0b3"
+dependencies = [
+ "facet 0.46.0",
+ "facet-core 0.46.0",
 ]
 
 [[package]]
@@ -6657,13 +7085,34 @@ dependencies = [
  "heck 0.5.0",
  "proc-macro2",
  "quote",
- "vox-macros-parse",
+ "vox-macros-parse 0.3.1",
+]
+
+[[package]]
+name = "vox-macros-core"
+version = "0.4.0"
+source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110a605f72abe42a81f0069aeda0b3"
+dependencies = [
+ "facet-cargo-toml",
+ "heck 0.5.0",
+ "proc-macro2",
+ "quote",
+ "vox-macros-parse 0.4.0",
 ]
 
 [[package]]
 name = "vox-macros-parse"
 version = "0.3.1"
 source = "git+https://github.com/Codys-Wright/vox?rev=ccb46b5416100d38430cb082d71bf0377428c241#ccb46b5416100d38430cb082d71bf0377428c241"
+dependencies = [
+ "proc-macro2",
+ "unsynn",
+]
+
+[[package]]
+name = "vox-macros-parse"
+version = "0.4.0"
+source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110a605f72abe42a81f0069aeda0b3"
 dependencies = [
  "proc-macro2",
  "unsynn",
@@ -6678,7 +7127,20 @@ dependencies = [
  "facet 0.46.0",
  "facet-core 0.46.0",
  "facet-reflect 0.46.0",
- "vox-schema",
+ "vox-schema 0.3.1",
+]
+
+[[package]]
+name = "vox-postcard"
+version = "0.4.0"
+source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110a605f72abe42a81f0069aeda0b3"
+dependencies = [
+ "facet 0.46.0",
+ "facet-core 0.46.0",
+ "facet-reflect 0.46.0",
+ "vox-jit-abi",
+ "vox-jit-cal",
+ "vox-schema 0.4.0",
 ]
 
 [[package]]
@@ -6688,7 +7150,19 @@ source = "git+https://github.com/Codys-Wright/vox?rev=ccb46b5416100d38430cb082d7
 dependencies = [
  "blake3",
  "facet 0.46.0",
- "facet-cbor",
+ "facet-cbor 0.3.1",
+ "facet-core 0.46.0",
+ "indexmap 2.14.0",
+]
+
+[[package]]
+name = "vox-schema"
+version = "0.4.0"
+source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110a605f72abe42a81f0069aeda0b3"
+dependencies = [
+ "blake3",
+ "facet 0.46.0",
+ "facet-cbor 0.3.3",
  "facet-core 0.46.0",
  "indexmap 2.14.0",
 ]
@@ -6699,7 +7173,16 @@ version = "0.3.1"
 source = "git+https://github.com/Codys-Wright/vox?rev=ccb46b5416100d38430cb082d71bf0377428c241#ccb46b5416100d38430cb082d71bf0377428c241"
 dependencies = [
  "proc-macro2",
- "vox-macros-core",
+ "vox-macros-core 0.3.1",
+]
+
+[[package]]
+name = "vox-service-macros"
+version = "0.4.0"
+source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110a605f72abe42a81f0069aeda0b3"
+dependencies = [
+ "proc-macro2",
+ "vox-macros-core 0.4.0",
 ]
 
 [[package]]
@@ -6708,10 +7191,22 @@ version = "0.3.1"
 source = "git+https://github.com/Codys-Wright/vox?rev=ccb46b5416100d38430cb082d71bf0377428c241#ccb46b5416100d38430cb082d71bf0377428c241"
 dependencies = [
  "libc",
- "moire",
+ "moire 1.0.0",
  "tokio",
- "vox-core",
- "vox-types",
+ "vox-core 0.3.1",
+ "vox-types 0.3.1",
+]
+
+[[package]]
+name = "vox-stream"
+version = "0.4.0"
+source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110a605f72abe42a81f0069aeda0b3"
+dependencies = [
+ "libc",
+ "moire 1.0.1",
+ "tokio",
+ "vox-core 0.4.0",
+ "vox-types 0.4.0",
 ]
 
 [[package]]
@@ -6722,19 +7217,44 @@ dependencies = [
  "bitflags 2.11.1",
  "blake3",
  "facet 0.46.0",
- "facet-cbor",
+ "facet-cbor 0.3.1",
  "facet-core 0.46.0",
  "facet-path 0.46.0",
  "facet-reflect 0.46.0",
  "futures-channel",
  "heck 0.5.0",
  "indexmap 2.14.0",
- "moire",
+ "moire 1.0.0",
  "smallvec 1.15.1",
  "structstruck",
  "tokio",
- "vox-postcard",
- "vox-schema",
+ "vox-postcard 0.3.1",
+ "vox-schema 0.3.1",
+]
+
+[[package]]
+name = "vox-types"
+version = "0.4.0"
+source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110a605f72abe42a81f0069aeda0b3"
+dependencies = [
+ "bitflags 2.11.1",
+ "blake3",
+ "bytes",
+ "facet 0.46.0",
+ "facet-cbor 0.3.3",
+ "facet-core 0.46.0",
+ "facet-path 0.46.0",
+ "facet-reflect 0.46.0",
+ "futures-channel",
+ "heck 0.5.0",
+ "indexmap 2.14.0",
+ "moire 1.0.1",
+ "smallvec 1.15.1",
+ "structstruck",
+ "tokio",
+ "vox-jit",
+ "vox-postcard 0.4.0",
+ "vox-schema 0.4.0",
 ]
 
 [[package]]
@@ -6748,8 +7268,8 @@ dependencies = [
  "js-sys",
  "tokio",
  "tokio-tungstenite 0.26.2",
- "vox-core",
- "vox-types",
+ "vox-core 0.3.1",
+ "vox-types 0.3.1",
  "wasm-bindgen",
  "web-sys",
 ]
@@ -6891,6 +7411,28 @@ dependencies = [
  "hashbrown 0.15.5",
  "indexmap 2.14.0",
  "semver",
+]
+
+[[package]]
+name = "wasmtime-internal-core"
+version = "44.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8f2c7fa6523647262bfb4095dbdf4087accefe525813e783f81a0c682f418ce4"
+dependencies = [
+ "hashbrown 0.16.1",
+ "libm",
+]
+
+[[package]]
+name = "wasmtime-internal-jit-icache-coherence"
+version = "44.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a1859e920871515d324fb9757c3e448d6ed1512ca6ccdff14b6e016505d6ada"
+dependencies = [
+ "cfg-if",
+ "libc",
+ "wasmtime-internal-core",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -7401,7 +7943,7 @@ version = "0.1.0"
 dependencies = [
  "task-core",
  "vox-codegen",
- "vox-types",
+ "vox-types 0.3.1",
  "xshell",
 ]
 

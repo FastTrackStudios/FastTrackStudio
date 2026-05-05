@@ -391,14 +391,6 @@ impl VaultServiceImpl {
         query.execute(&tasks).into_iter().cloned().collect()
     }
 
-    pub fn task_repo(&self) -> crate::task::TaskRepoStorage<VaultStorage> {
-        crate::task::TaskRepoStorage::new(self.task_storage.clone())
-    }
-
-    pub fn project_repo(&self) -> crate::project::ProjectRepoStorage<VaultStorage> {
-        crate::project::ProjectRepoStorage::new(self.task_storage.clone())
-    }
-
     pub async fn urgency_score(&self, task: Task) -> i32 {
         task.urgency_score()
     }

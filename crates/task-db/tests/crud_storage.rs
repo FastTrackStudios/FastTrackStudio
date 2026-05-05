@@ -2,6 +2,7 @@ use crudcrate::{
     ApiError, ApplyUpdate, CreateResource, CrudModel, CrudService, CrudStorage, InMemoryQuery,
     InMemoryStorage, ResourceIdentity,
 };
+use task_core::task::{Task, TaskApi, TaskApiCreate};
 use uuid::Uuid;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -84,4 +85,28 @@ async fn crudcrate_storage_can_back_task_resources_without_seaorm() {
         .await
         .expect("list in memory tasks");
     assert_eq!(listed, vec![updated]);
+}
+
+#[tokio::test]
+async fn seaorm_storage_can_back_generated_task_repo_models() {
+    let db = task_db::init_memory()
+        .await
+        .expect("initialize in-memory task database");
+    let task = Task {
+        title: "SQLite backed task".to_string(),
+        ..Default::default()
+    };
+    let create: TaskApiCreate =
+        serde_json::from_value(serde_json::to_value(task).expect("serialize task create seed"))
+            .expect("decode task create model");
+
+    let created = CrudStorage::<TaskApi>::create(&db, create)
+        .await
+        .expect("create task through SeaORM storage");
+    let loaded = CrudStorage::<TaskApi>::get_one(&db, created.id)
+        .await
+        .expect("load task through SeaORM storage");
+
+    assert_eq!(loaded.id, created.id);
+    assert_eq!(loaded.title, "SQLite backed task");
 }

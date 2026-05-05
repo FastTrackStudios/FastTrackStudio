@@ -974,10 +974,8 @@ async fn handle_vox_connection(socket: WebSocket, state: AppState, auth: VoxAuth
         "Vox WebSocket client connected"
     );
 
-    let Some(service) = state.vault_service.clone() else {
-        warn!("Vox connection rejected because TASK_VAULT is not configured");
-        return;
-    };
+    let service = state.vault_service.clone();
+    let db = state.db.clone();
 
     let request_auth = auth.clone();
     let factory = vox::acceptor_fn(
@@ -994,102 +992,123 @@ async fn handle_vox_connection(socket: WebSocket, state: AppState, auth: VoxAuth
             match request.service() {
                 "TaskRepo" => {
                     connection.handle_with(task_core::task::TaskRepoDispatcher::new(
-                        service.task_repo(),
+                        task_core::task::TaskRepoStorage::new(db.clone()),
                     ));
                     Ok(())
                 }
                 "ProjectRepo" => {
                     connection.handle_with(task_core::project::ProjectRepoDispatcher::new(
-                        service.project_repo(),
+                        task_core::project::ProjectRepoStorage::new(db.clone()),
                     ));
                     Ok(())
                 }
+                "Noop" => {
+                    connection.handle_with(());
+                    Ok(())
+                }
+                _ if service.is_none() => {
+                    warn!(
+                        service = request.service(),
+                        "Vox service requires TASK_VAULT compatibility service"
+                    );
+                    Err(vec![])
+                }
                 "TaskService" => {
+                    let service = service.as_ref().expect("service checked above");
                     connection.handle_with(task_core::TaskServiceDispatcher::new(
                         service.as_ref().clone(),
                     ));
                     Ok(())
                 }
                 "InboxService" => {
+                    let service = service.as_ref().expect("service checked above");
                     connection.handle_with(task_core::InboxServiceDispatcher::new(
                         service.as_ref().clone(),
                     ));
                     Ok(())
                 }
                 "ProjectService" => {
+                    let service = service.as_ref().expect("service checked above");
                     connection.handle_with(task_core::ProjectServiceDispatcher::new(
                         service.as_ref().clone(),
                     ));
                     Ok(())
                 }
                 "TimeService" => {
+                    let service = service.as_ref().expect("service checked above");
                     connection.handle_with(task_core::TimeServiceDispatcher::new(
                         service.as_ref().clone(),
                     ));
                     Ok(())
                 }
                 "ClientService" => {
+                    let service = service.as_ref().expect("service checked above");
                     connection.handle_with(task_core::ClientServiceDispatcher::new(
                         service.as_ref().clone(),
                     ));
                     Ok(())
                 }
                 "PeopleService" => {
+                    let service = service.as_ref().expect("service checked above");
                     connection.handle_with(task_core::PeopleServiceDispatcher::new(
                         service.as_ref().clone(),
                     ));
                     Ok(())
                 }
                 "ConversationService" => {
+                    let service = service.as_ref().expect("service checked above");
                     connection.handle_with(task_core::ConversationServiceDispatcher::new(
                         service.as_ref().clone(),
                     ));
                     Ok(())
                 }
                 "OperatingService" => {
+                    let service = service.as_ref().expect("service checked above");
                     connection.handle_with(task_core::OperatingServiceDispatcher::new(
                         service.as_ref().clone(),
                     ));
                     Ok(())
                 }
                 "InvoiceService" => {
+                    let service = service.as_ref().expect("service checked above");
                     connection.handle_with(task_core::InvoiceServiceDispatcher::new(
                         service.as_ref().clone(),
                     ));
                     Ok(())
                 }
                 "ActivityService" => {
+                    let service = service.as_ref().expect("service checked above");
                     connection.handle_with(task_core::ActivityServiceDispatcher::new(
                         service.as_ref().clone(),
                     ));
                     Ok(())
                 }
                 "MailService" => {
+                    let service = service.as_ref().expect("service checked above");
                     connection.handle_with(task_core::MailServiceDispatcher::new(
                         service.as_ref().clone(),
                     ));
                     Ok(())
                 }
                 "CalendarService" => {
+                    let service = service.as_ref().expect("service checked above");
                     connection.handle_with(task_core::CalendarServiceDispatcher::new(
                         service.as_ref().clone(),
                     ));
                     Ok(())
                 }
                 "FileService" => {
+                    let service = service.as_ref().expect("service checked above");
                     connection.handle_with(task_core::FileServiceDispatcher::new(
                         service.as_ref().clone(),
                     ));
                     Ok(())
                 }
                 "SystemService" => {
+                    let service = service.as_ref().expect("service checked above");
                     connection.handle_with(task_core::SystemServiceDispatcher::new(
                         service.as_ref().clone(),
                     ));
-                    Ok(())
-                }
-                "Noop" => {
-                    connection.handle_with(());
                     Ok(())
                 }
                 other => {

@@ -1,4 +1,6 @@
+use sea_orm::Schema;
 use sea_orm_migration::prelude::*;
+use task_core::{project, task};
 
 #[derive(DeriveMigrationName)]
 pub struct Migration;
@@ -6,58 +8,14 @@ pub struct Migration;
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        let schema = Schema::new(manager.get_database_backend());
+
         // ── Projects ────────────────────────────────────────────────
         manager
             .create_table(
-                Table::create()
-                    .table(Projects::Table)
+                schema
+                    .create_table_from_entity(project::Entity)
                     .if_not_exists()
-                    .col(ColumnDef::new(Projects::Id).uuid().not_null().primary_key())
-                    .col(ColumnDef::new(Projects::Title).string_len(255).not_null())
-                    .col(ColumnDef::new(Projects::Slug).string_len(255).not_null())
-                    .col(
-                        ColumnDef::new(Projects::Status)
-                            .string_len(50)
-                            .not_null()
-                            .default("Active"),
-                    )
-                    .col(ColumnDef::new(Projects::ProjectType).string_len(100))
-                    .col(ColumnDef::new(Projects::Description).text())
-                    .col(ColumnDef::new(Projects::Area).string_len(100))
-                    .col(ColumnDef::new(Projects::Identifier).string_len(12))
-                    .col(ColumnDef::new(Projects::NextSequence).integer().default(1))
-                    .col(ColumnDef::new(Projects::ParentSlug).string_len(255))
-                    .col(ColumnDef::new(Projects::Lead).string_len(100))
-                    .col(ColumnDef::new(Projects::DefaultAssignee).string_len(100))
-                    .col(ColumnDef::new(Projects::Emoji).string_len(10))
-                    .col(ColumnDef::new(Projects::Organization).string_len(100))
-                    .col(
-                        ColumnDef::new(Projects::Team)
-                            .json()
-                            .not_null()
-                            .default("[]"),
-                    )
-                    .col(
-                        ColumnDef::new(Projects::References)
-                            .json()
-                            .not_null()
-                            .default("[]"),
-                    )
-                    .col(ColumnDef::new(Projects::Due).date())
-                    .col(ColumnDef::new(Projects::Start).date())
-                    .col(ColumnDef::new(Projects::FilePath).text())
-                    .col(ColumnDef::new(Projects::DeletedAt).timestamp_with_time_zone())
-                    .col(ColumnDef::new(Projects::ArchivedAt).timestamp_with_time_zone())
-                    .col(
-                        ColumnDef::new(Projects::CreatedAt)
-                            .timestamp_with_time_zone()
-                            .not_null(),
-                    )
-                    .col(
-                        ColumnDef::new(Projects::UpdatedAt)
-                            .timestamp_with_time_zone()
-                            .not_null(),
-                    )
                     .to_owned(),
             )
             .await?;
@@ -65,10 +23,9 @@ impl MigrationTrait for Migration {
         manager
             .create_index(
                 Index::create()
-                    .name("idx_projects_slug")
+                    .name("idx_projects_title")
                     .table(Projects::Table)
-                    .col(Projects::Slug)
-                    .unique()
+                    .col(project::Column::Title)
                     .to_owned(),
             )
             .await?;
@@ -76,9 +33,9 @@ impl MigrationTrait for Migration {
         manager
             .create_index(
                 Index::create()
-                    .name("idx_projects_parent")
+                    .name("idx_projects_status")
                     .table(Projects::Table)
-                    .col(Projects::ParentSlug)
+                    .col(project::Column::Status)
                     .to_owned(),
             )
             .await?;
@@ -88,7 +45,7 @@ impl MigrationTrait for Migration {
                 Index::create()
                     .name("idx_projects_organization")
                     .table(Projects::Table)
-                    .col(Projects::Organization)
+                    .col(project::Column::Organization)
                     .to_owned(),
             )
             .await?;
@@ -96,60 +53,9 @@ impl MigrationTrait for Migration {
         // ── Tasks ───────────────────────────────────────────────────
         manager
             .create_table(
-                Table::create()
-                    .table(Tasks::Table)
+                schema
+                    .create_table_from_entity(task::Entity)
                     .if_not_exists()
-                    .col(ColumnDef::new(Tasks::Id).uuid().not_null().primary_key())
-                    .col(ColumnDef::new(Tasks::SequenceId).integer())
-                    .col(ColumnDef::new(Tasks::Title).string_len(255).not_null())
-                    .col(
-                        ColumnDef::new(Tasks::Status)
-                            .string_len(50)
-                            .not_null()
-                            .default("Open"),
-                    )
-                    .col(
-                        ColumnDef::new(Tasks::Priority)
-                            .string_len(50)
-                            .not_null()
-                            .default("Normal"),
-                    )
-                    .col(ColumnDef::new(Tasks::IssueType).string_len(50))
-                    .col(ColumnDef::new(Tasks::Project).string_len(255))
-                    .col(ColumnDef::new(Tasks::Assignee).string_len(100))
-                    .col(
-                        ColumnDef::new(Tasks::Assignees)
-                            .json()
-                            .not_null()
-                            .default("[]"),
-                    )
-                    .col(ColumnDef::new(Tasks::CreatedBy).string_len(100))
-                    .col(ColumnDef::new(Tasks::Due).date())
-                    .col(ColumnDef::new(Tasks::Scheduled).date())
-                    .col(ColumnDef::new(Tasks::Start).date())
-                    .col(ColumnDef::new(Tasks::CompletedDate).date())
-                    .col(ColumnDef::new(Tasks::Tags).json().not_null().default("[]"))
-                    .col(ColumnDef::new(Tasks::TimeEstimate).integer())
-                    .col(ColumnDef::new(Tasks::SortOrder).double())
-                    .col(ColumnDef::new(Tasks::Body).text())
-                    .col(ColumnDef::new(Tasks::FilePath).text())
-                    .col(
-                        ColumnDef::new(Tasks::IsDraft)
-                            .boolean()
-                            .not_null()
-                            .default(false),
-                    )
-                    .col(ColumnDef::new(Tasks::DeletedAt).timestamp_with_time_zone())
-                    .col(
-                        ColumnDef::new(Tasks::CreatedAt)
-                            .timestamp_with_time_zone()
-                            .not_null(),
-                    )
-                    .col(
-                        ColumnDef::new(Tasks::UpdatedAt)
-                            .timestamp_with_time_zone()
-                            .not_null(),
-                    )
                     .to_owned(),
             )
             .await?;
@@ -157,9 +63,9 @@ impl MigrationTrait for Migration {
         manager
             .create_index(
                 Index::create()
-                    .name("idx_tasks_project")
+                    .name("idx_tasks_title")
                     .table(Tasks::Table)
-                    .col(Tasks::Project)
+                    .col(task::Column::Title)
                     .to_owned(),
             )
             .await?;
@@ -169,7 +75,7 @@ impl MigrationTrait for Migration {
                 Index::create()
                     .name("idx_tasks_status")
                     .table(Tasks::Table)
-                    .col(Tasks::Status)
+                    .col(task::Column::Status)
                     .to_owned(),
             )
             .await?;
@@ -179,7 +85,7 @@ impl MigrationTrait for Migration {
                 Index::create()
                     .name("idx_tasks_assignee")
                     .table(Tasks::Table)
-                    .col(Tasks::Assignee)
+                    .col(task::Column::Assignee)
                     .to_owned(),
             )
             .await?;
@@ -524,57 +430,11 @@ impl MigrationTrait for Migration {
 #[derive(DeriveIden)]
 enum Projects {
     Table,
-    Id,
-    Title,
-    Slug,
-    Status,
-    ProjectType,
-    Description,
-    Area,
-    Identifier,
-    NextSequence,
-    ParentSlug,
-    Lead,
-    DefaultAssignee,
-    Emoji,
-    Organization,
-    Team,
-    References,
-    Due,
-    Start,
-    FilePath,
-    DeletedAt,
-    ArchivedAt,
-    CreatedAt,
-    UpdatedAt,
 }
 
 #[derive(DeriveIden)]
 enum Tasks {
     Table,
-    Id,
-    SequenceId,
-    Title,
-    Status,
-    Priority,
-    IssueType,
-    Project,
-    Assignee,
-    Assignees,
-    CreatedBy,
-    Due,
-    Scheduled,
-    Start,
-    CompletedDate,
-    Tags,
-    TimeEstimate,
-    SortOrder,
-    Body,
-    FilePath,
-    IsDraft,
-    DeletedAt,
-    CreatedAt,
-    UpdatedAt,
 }
 
 #[derive(DeriveIden)]
