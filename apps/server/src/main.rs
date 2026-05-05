@@ -992,6 +992,12 @@ async fn handle_vox_connection(socket: WebSocket, state: AppState, auth: VoxAuth
                 "Vox service accepted"
             );
             match request.service() {
+                "TaskRepo" => {
+                    connection.handle_with(task_core::task::TaskRepoDispatcher::new(
+                        service.task_repo(),
+                    ));
+                    Ok(())
+                }
                 "TaskService" => {
                     connection.handle_with(task_core::TaskServiceDispatcher::new(
                         service.as_ref().clone(),

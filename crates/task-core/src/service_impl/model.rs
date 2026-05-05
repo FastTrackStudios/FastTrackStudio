@@ -391,6 +391,10 @@ impl VaultServiceImpl {
         query.execute(&tasks).into_iter().cloned().collect()
     }
 
+    pub fn task_repo(&self) -> crate::task::TaskRepoStorage<VaultStorage> {
+        crate::task::TaskRepoStorage::new(self.task_storage.clone())
+    }
+
     pub async fn urgency_score(&self, task: Task) -> i32 {
         task.urgency_score()
     }
@@ -5500,6 +5504,7 @@ impl crate::service::SystemService for VaultServiceImpl {
             min_cli_version: "0.1.0".into(),
             min_server_version: "0.1.0".into(),
             services: vec![
+                "TaskRepo".into(),
                 "TaskService".into(),
                 "InboxService".into(),
                 "ProjectService".into(),
