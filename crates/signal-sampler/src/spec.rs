@@ -416,6 +416,25 @@ pub struct ZoneSpec {
     /// Pitch fine-tune in cents. Default 0.
     #[facet(default)]
     pub tune_cents: f32,
+    /// Microphone / output-bus identifier — references a `MicSpec.id` in the
+    /// containing `LibrarySpec.mics`. Empty string means the zone is
+    /// mic-agnostic (single-mic libraries / synth zones).
+    ///
+    /// Multi-mic libraries (drum kits, multi-position orchestral) declare
+    /// each mic in `LibrarySpec.mics` and tag each zone with the matching
+    /// `mic`. The engine fires the matching zone for **every active mic**
+    /// at note-on; each mic is routed to its own output bus.
+    ///
+    /// Many zones will share the same `(key_min, key_max, vel_min, vel_max,
+    /// rr_index)` and differ only by `mic` — these form a "multi-mic group".
+    #[facet(default)]
+    pub mic: String,
+    /// Articulation identifier for percussion / multi-articulation libraries
+    /// (e.g. drum kit "Hit" / "Sidestick" / "Flam"). Empty = no articulation
+    /// distinction. Articulation switching is a Layer-level concern; this
+    /// field just tags the source so the importer / UI can group zones.
+    #[facet(default)]
+    pub articulation: String,
 }
 
 // ── Wavetables ───────────────────────────────────────────────────────────────
