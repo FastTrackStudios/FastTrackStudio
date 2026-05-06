@@ -141,9 +141,9 @@ pub use service::{
 };
 #[cfg(feature = "server")]
 pub use service_impl::{
-    ActivityServiceImpl, CalendarServiceImpl, ExpenseServiceImpl, InboxServiceImpl,
-    InvoiceServiceImpl, OperatingServiceImpl, PeopleServiceImpl, ProjectServiceImpl,
-    TaskServiceImpl, TimeServiceImpl,
+    ActivityServiceImpl, CalendarServiceImpl, ConversationServiceImpl, ExpenseServiceImpl,
+    InboxServiceImpl, InvoiceServiceImpl, MailServiceImpl, OperatingServiceImpl, PeopleServiceImpl,
+    ProjectServiceImpl, TaskServiceImpl, TimeServiceImpl,
 };
 #[cfg(feature = "server")]
 pub use vault::Vault;

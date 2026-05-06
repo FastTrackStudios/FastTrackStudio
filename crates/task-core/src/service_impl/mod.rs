@@ -1,16 +1,20 @@
 pub mod activity;
 pub mod business;
+pub mod conversation;
 pub(crate) mod helpers;
 pub mod inbox;
 pub mod invoice;
+pub mod mail;
 pub mod operating;
 pub mod people;
 pub mod time;
 
 pub use activity::ActivityServiceImpl;
 pub use business::*;
+pub use conversation::ConversationServiceImpl;
 pub use inbox::InboxServiceImpl;
 pub use invoice::InvoiceServiceImpl;
+pub use mail::MailServiceImpl;
 pub use operating::OperatingServiceImpl;
 pub use people::PeopleServiceImpl;
 pub use time::TimeServiceImpl;
