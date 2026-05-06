@@ -791,6 +791,14 @@ async fn handle_vox_connection(socket: WebSocket, state: AppState, auth: VoxAuth
                     ));
                     Ok(())
                 }
+                "TimeService" => {
+                    connection.handle_with(task_core::TimeServiceDispatcher::new(
+                        task_core::TimeServiceImpl::new(task_core::task::TaskRepoStorage::new(
+                            db.clone(),
+                        )),
+                    ));
+                    Ok(())
+                }
                 "SystemService" => {
                     connection.handle_with(task_core::SystemServiceDispatcher::new(
                         ServerSystemService::new(info.clone()),
@@ -875,6 +883,7 @@ impl task_core::service::SystemService for ServerSystemService {
                 "CalendarService".into(),
                 "InboxService".into(),
                 "OperatingService".into(),
+                "TimeService".into(),
                 "SystemService".into(),
             ],
             features: vec![
