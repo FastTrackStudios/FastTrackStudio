@@ -66,6 +66,15 @@ pub struct LibrarySpec {
     /// keymap is encoded in patch metadata rather than filenames.
     #[facet(default)]
     pub zones: Vec<ZoneSpec>,
+
+    /// Wavetables exposed by this library, for the synth side of Signal.
+    ///
+    /// Sampler engine ignores these; future synth/oscillator engine consumes
+    /// them. Stored alongside zones in the same `LibrarySpec` so a single
+    /// `.styx` can describe a hybrid library (e.g. Omnisphere-style sampled
+    /// soundsources + wavetable bank).
+    #[facet(default)]
+    pub wavetables: Vec<WavetableSpec>,
 }
 
 impl LibrarySpec {
@@ -407,6 +416,36 @@ pub struct ZoneSpec {
     /// Pitch fine-tune in cents. Default 0.
     #[facet(default)]
     pub tune_cents: f32,
+}
+
+// ── Wavetables ───────────────────────────────────────────────────────────────
+
+/// One wavetable file in the library — a single-cycle waveform morphing
+/// across `frame_count` frames of `cycle_length` samples each.
+///
+/// Sample data lives in the file referenced by `file`, in raw little-endian
+/// IEEE 754 32-bit float (mono) — the same format Spectrasonics' `.stmwf`
+/// files and standard wavetable WAVs (Serum / Vital `clm `-tagged) use after
+/// stripping their RIFF header.
+#[derive(Debug, Clone, Facet)]
+pub struct WavetableSpec {
+    /// Wavetable file path, relative to the library's `samples_root`.
+    /// Either a raw `.stmwf` (no header) or a 32-bit float WAV with a
+    /// Serum-style `clm ` chunk declaring the cycle length.
+    pub file: String,
+    /// Number of frames (single-cycle waveforms) in the bank.
+    pub frame_count: u32,
+    /// Samples per frame. Almost always 2048 (Spectrasonics, Serum, Vital).
+    pub cycle_length: u32,
+    /// Optional human label (e.g. `"Waldorf R30 00"`).
+    #[facet(default)]
+    pub label: String,
+    /// Optional category (e.g. `"Classic Waveforms"`, `"Analog Timbres"`).
+    #[facet(default)]
+    pub category: String,
+    /// Per-wavetable gain in dB. Default 0.
+    #[facet(default)]
+    pub gain_db: f32,
 }
 
 impl ZoneSpec {
