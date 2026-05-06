@@ -799,6 +799,30 @@ async fn handle_vox_connection(socket: WebSocket, state: AppState, auth: VoxAuth
                     ));
                     Ok(())
                 }
+                "InvoiceService" => {
+                    connection.handle_with(task_core::InvoiceServiceDispatcher::new(
+                        task_core::InvoiceServiceImpl::new(
+                            task_core::invoice::InvoiceRepoStorage::new(db.clone()),
+                        ),
+                    ));
+                    Ok(())
+                }
+                "ActivityService" => {
+                    connection.handle_with(task_core::ActivityServiceDispatcher::new(
+                        task_core::ActivityServiceImpl::new(
+                            task_core::activity::ActivityRepoStorage::new(db.clone()),
+                        ),
+                    ));
+                    Ok(())
+                }
+                "PeopleService" => {
+                    connection.handle_with(task_core::PeopleServiceDispatcher::new(
+                        task_core::PeopleServiceImpl::new(
+                            task_core::people::PersonRepoStorage::new(db.clone()),
+                        ),
+                    ));
+                    Ok(())
+                }
                 "SystemService" => {
                     connection.handle_with(task_core::SystemServiceDispatcher::new(
                         ServerSystemService::new(info.clone()),
