@@ -781,6 +781,14 @@ async fn handle_vox_connection(socket: WebSocket, state: AppState, auth: VoxAuth
                     ));
                     Ok(())
                 }
+                "ActivityService" => {
+                    connection.handle_with(task_core::ActivityServiceDispatcher::new(
+                        task_core::ActivityServiceImpl::new(
+                            task_core::activity::ActivityRepoStorage::new(db.clone()),
+                        ),
+                    ));
+                    Ok(())
+                }
                 "SystemService" => {
                     connection.handle_with(task_core::SystemServiceDispatcher::new(
                         ServerSystemService::new(info.clone()),
