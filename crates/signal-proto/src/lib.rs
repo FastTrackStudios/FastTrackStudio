@@ -75,6 +75,7 @@ pub mod override_policy;
 pub mod overrides;
 pub mod plugin_block;
 pub mod profile;
+pub mod synth_blocks;
 pub mod rack;
 pub mod resolve;
 pub mod rig;
@@ -106,8 +107,8 @@ pub mod modulation {
 // ─── Re-exports from ids ────────────────────────────────────────
 
 pub use ids::{
-    seed_id, IdFactory, ModulePresetId, ModuleSnapshotId, PresetId, RuntimeIdFactory, SnapshotId,
-    SEED_UUID_NS,
+    IdFactory, ModulePresetId, ModuleSnapshotId, PresetId, RuntimeIdFactory, SEED_UUID_NS,
+    SnapshotId, seed_id,
 };
 
 // ─── Re-exports from model ──────────────────────────────────────

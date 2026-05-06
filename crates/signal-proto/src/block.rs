@@ -23,6 +23,13 @@ pub enum BlockCategory {
     Time,
     Special,
     Other,
+    /// Sound generation: oscillators, samplers, wavetables, granular,
+    /// tonewheel, formant, additive, FM operators, …
+    Synthesis,
+    /// Envelopes (amp / filter / mod / multi-segment / loopable).
+    Envelope,
+    /// Step sequencers and arpeggiators.
+    Sequencer,
 }
 
 impl BlockCategory {
@@ -39,6 +46,9 @@ impl BlockCategory {
             Self::Time,
             Self::Special,
             Self::Other,
+            Self::Synthesis,
+            Self::Envelope,
+            Self::Sequencer,
         ]
     }
 
@@ -54,6 +64,9 @@ impl BlockCategory {
             Self::Time => "time",
             Self::Special => "special",
             Self::Other => "other",
+            Self::Synthesis => "synthesis",
+            Self::Envelope => "envelope",
+            Self::Sequencer => "sequencer",
         }
     }
 
@@ -69,6 +82,9 @@ impl BlockCategory {
             Self::Time => "Time",
             Self::Special => "Special",
             Self::Other => "Other",
+            Self::Synthesis => "Synthesis",
+            Self::Envelope => "Envelope",
+            Self::Sequencer => "Sequencer",
         }
     }
 }
@@ -262,6 +278,44 @@ block_types! {
 
     // ── Catch-all ───────────────────────────────────────────────
     Custom,        "custom",         Other,    ("#A8A29E", "#FAFAF9", "#78716C");
+
+    // ── Synthesis (sound generation) ────────────────────────────
+    // Modeled after Spectrasonics SynthMaster (`<OSC>`, `<MULTISAMPLE>`, …).
+    // Runtime impls live in signal-synth-blocks (TODO crate) — declarations
+    // here register the type so the proto layer can route patches and so the
+    // import pipeline can target them by name. See:
+    //   docs/content/spectrasonics-corpus-params.md  (empirical params)
+    //   docs/content/spectrasonics-to-signal-mapping.md  (domain mapping)
+    Oscillator,    "oscillator",     Synthesis, ("#10B981", "#ECFDF5", "#059669");
+    Sampler,       "sampler",        Synthesis, ("#10B981", "#ECFDF5", "#059669");
+    Wavetable,     "wavetable",      Synthesis, ("#14B8A6", "#F0FDFA", "#0D9488");
+    Granular,      "granular",       Synthesis, ("#14B8A6", "#F0FDFA", "#0D9488");
+    FmOperator,    "fm-operator",    Synthesis, ("#0D9488", "#F0FDFA", "#0F766E"), as "FM Operator";
+    Harmonic,      "harmonic",       Synthesis, ("#22C55E", "#F0FDF4", "#16A34A");
+    Tonewheel,     "tonewheel",      Synthesis, ("#65A30D", "#F7FEE7", "#4D7C0F");
+    Formant,       "formant",        Synthesis, ("#84CC16", "#F7FEE7", "#65A30D");
+    Dfs,           "dfs",            Synthesis, ("#10B981", "#ECFDF5", "#047857"), as "Dynamic FM";
+    Noise,         "noise",          Synthesis, ("#94A3B8", "#F8FAFC", "#64748B");
+
+    // ── Envelopes ───────────────────────────────────────────────
+    // Generic: an envelope Block can be wired as amp / filter / mod target
+    // by patch routing. Multiseg supports the Spectrasonics multi-segment
+    // shape (5+ stages with curves & loop points; see <MOD_ENV2_2>).
+    Envelope,      "envelope",       Envelope,  ("#7C3AED", "#F5F3FF", "#6D28D9");
+    MultisegEnvelope, "multiseg-envelope", Envelope, ("#7C3AED", "#F5F3FF", "#6D28D9"), as "Multiseg Envelope";
+
+    // ── Modulation sources & routing (joining existing category) ─
+    Lfo,           "lfo",            Modulation, ("#A78BFA", "#F5F3FF", "#8B5CF6"), as "LFO";
+    ModMatrix,     "mod-matrix",     Modulation, ("#7C3AED", "#F5F3FF", "#5B21B6"), as "Mod Matrix";
+    Macro,         "macro",          Modulation, ("#7C3AED", "#F5F3FF", "#5B21B6");
+    Unison,        "unison",         Modulation, ("#A855F7", "#FAF5FF", "#9333EA");
+
+    // ── Sequencer ───────────────────────────────────────────────
+    StepSeq,       "step-seq",       Sequencer, ("#F59E0B", "#FFFBEB", "#D97706"), as "Step Sequencer";
+    Arpeggiator,   "arpeggiator",    Sequencer, ("#F59E0B", "#FFFBEB", "#D97706");
+
+    // ── Synth-side drive (joining existing Drive category) ──────
+    Waveshaper,    "waveshaper",     Drive,    ("#DC2626", "#FEF2F2", "#B91C1C");
 }
 
 impl BlockType {
@@ -290,7 +344,7 @@ mod tests {
 
     #[test]
     fn block_type_count() {
-        assert_eq!(ALL_BLOCK_TYPES.len(), 33);
+        assert_eq!(ALL_BLOCK_TYPES.len(), 52);
     }
 
     #[test]
@@ -390,7 +444,7 @@ mod tests {
     #[test]
     fn block_category_all_covers_every_category() {
         let all = BlockCategory::all();
-        assert_eq!(all.len(), 10);
+        assert_eq!(all.len(), 13);
         for &bt in ALL_BLOCK_TYPES {
             assert!(
                 all.contains(&bt.category()),
