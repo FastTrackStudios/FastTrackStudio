@@ -53,6 +53,19 @@ pub struct LibrarySpec {
 
     /// Keyswitch and CC58 articulation switching.
     pub keyswitch: Option<KeyswitchSpec>,
+
+    /// Explicit zone map — sample-per-(key range × velocity range × RR slot).
+    ///
+    /// When non-empty, the engine plays in **zone mode**: every note-on looks
+    /// up matching zones by `key_min..=key_max` and `vel_min..=vel_max`,
+    /// RR-cycles within the matching set, and uses each zone's `root_key`,
+    /// `gain_db`, and `tune_cents` for playback. This bypasses the
+    /// section/articulation/dynamic filename-convention path entirely.
+    ///
+    /// Used by Spectrasonics-style libraries (Omnisphere, Trilian) where the
+    /// keymap is encoded in patch metadata rather than filenames.
+    #[facet(default)]
+    pub zones: Vec<ZoneSpec>,
 }
 
 impl LibrarySpec {
@@ -67,14 +80,12 @@ impl LibrarySpec {
 
     /// Parse from styx format.
     pub fn from_styx(s: &str) -> Result<Self, SamplerError> {
-        facet_styx::from_str(s)
-            .map_err(|e| SamplerError::SpecParse(e.to_string()))
+        facet_styx::from_str(s).map_err(|e| SamplerError::SpecParse(e.to_string()))
     }
 
     /// Parse from TOML format.
     pub fn from_toml(s: &str) -> Result<Self, SamplerError> {
-        facet_toml::from_str(s)
-            .map_err(|e| SamplerError::SpecParse(e.to_string()))
+        facet_toml::from_str(s).map_err(|e| SamplerError::SpecParse(e.to_string()))
     }
 
     /// Look up an articulation by its `id` field.
@@ -263,7 +274,10 @@ impl LegatoEngineSpec {
     /// to the expressive mode if flat zones are absent.
     pub fn primary_mode(&self) -> Option<LegatoModeSpec> {
         if !self.zones.is_empty() {
-            Some(LegatoModeSpec { enabled_cc58_range: None, zones: self.zones.clone() })
+            Some(LegatoModeSpec {
+                enabled_cc58_range: None,
+                zones: self.zones.clone(),
+            })
         } else {
             self.expressive.clone()
         }
@@ -294,7 +308,8 @@ pub struct LegatoZoneSpec {
 impl LegatoModeSpec {
     /// Look up the pre-delay for a given MIDI velocity.
     pub fn delay_for_velocity(&self, vel: u8) -> Option<u32> {
-        self.zones.iter()
+        self.zones
+            .iter()
             .find(|z| vel >= z.vel_range[0] && vel <= z.vel_range[1])
             .map(|z| z.delay_ms)
     }
@@ -360,6 +375,50 @@ impl KeyswitchSpec {
     }
 }
 
+// ── Zones ────────────────────────────────────────────────────────────────────
+
+/// One sample placed at a specific (key range × velocity range × RR slot).
+///
+/// Multiple zones may match the same `(note, velocity)`; the engine treats
+/// them as a round-robin group and cycles by `rr_index`.
+#[derive(Debug, Clone, Facet)]
+pub struct ZoneSpec {
+    /// Sample file path, relative to the library's `samples_root`.
+    pub file: String,
+    /// Lowest MIDI note in the zone (inclusive).
+    pub key_min: u8,
+    /// Highest MIDI note in the zone (inclusive).
+    pub key_max: u8,
+    /// Root MIDI note: pitch at which the sample plays back unchanged.
+    pub root_key: u8,
+    /// Lowest MIDI velocity in the zone (inclusive). Default 0.
+    #[facet(default)]
+    pub vel_min: u8,
+    /// Highest MIDI velocity in the zone (inclusive). Default 127.
+    #[facet(default)]
+    pub vel_max: u8,
+    /// Round-robin slot index (0-based). Zones with the same key/vel range
+    /// but different `rr_index` form one round-robin group.
+    #[facet(default)]
+    pub rr_index: u32,
+    /// Per-zone gain in dB. Default 0.
+    #[facet(default)]
+    pub gain_db: f32,
+    /// Pitch fine-tune in cents. Default 0.
+    #[facet(default)]
+    pub tune_cents: f32,
+}
+
+impl ZoneSpec {
+    /// Whether this zone contains the given `(note, velocity)`.
+    pub fn contains(&self, note: u8, velocity: u8) -> bool {
+        note >= self.key_min
+            && note <= self.key_max
+            && velocity >= self.vel_min
+            && velocity <= self.vel_max
+    }
+}
+
 /// Parse a range string like `"0-5"` into `(lo, hi)`.
 pub fn parse_range(s: &str) -> Option<(u8, u8)> {
     let (a, b) = s.split_once('-')?;
@@ -373,9 +432,17 @@ mod tests {
     fn specs_dir() -> std::path::PathBuf {
         // Prefer the sample-collector repo next to signal, fall back to a local specs/ dir.
         let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-        let signal_root = std::path::Path::new(&manifest).parent().unwrap().parent().unwrap();
+        let signal_root = std::path::Path::new(&manifest)
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap();
         let sc_specs = signal_root.parent().unwrap().join("sample-collector/specs");
-        if sc_specs.exists() { sc_specs } else { signal_root.join("specs") }
+        if sc_specs.exists() {
+            sc_specs
+        } else {
+            signal_root.join("specs")
+        }
     }
 
     #[test]
@@ -388,14 +455,25 @@ mod tests {
     #[test]
     fn load_css_spec_styx() {
         let path = specs_dir().join("cinematic-strings.styx");
-        if !path.exists() { return; }
+        if !path.exists() {
+            return;
+        }
         let spec = LibrarySpec::from_file(&path).expect("parse CSS styx spec");
         assert_eq!(spec.sections.len(), 5);
         assert!(spec.articulations.len() > 10);
         let le = spec.legato_engine.as_ref().unwrap();
-        assert_eq!(le.expressive.as_ref().unwrap().delay_for_velocity(30), Some(333));
-        assert_eq!(le.expressive.as_ref().unwrap().delay_for_velocity(80), Some(250));
-        assert_eq!(le.expressive.as_ref().unwrap().delay_for_velocity(110), Some(100));
+        assert_eq!(
+            le.expressive.as_ref().unwrap().delay_for_velocity(30),
+            Some(333)
+        );
+        assert_eq!(
+            le.expressive.as_ref().unwrap().delay_for_velocity(80),
+            Some(250)
+        );
+        assert_eq!(
+            le.expressive.as_ref().unwrap().delay_for_velocity(110),
+            Some(100)
+        );
         let ks = spec.keyswitch.as_ref().unwrap();
         assert_eq!(ks.cc58_function(0), Some("Sustain: Low Latency Legato"));
         assert_eq!(ks.cc58_function(88), Some("Con Sordino On"));
