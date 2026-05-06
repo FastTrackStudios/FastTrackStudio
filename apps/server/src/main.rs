@@ -789,6 +789,14 @@ async fn handle_vox_connection(socket: WebSocket, state: AppState, auth: VoxAuth
                     ));
                     Ok(())
                 }
+                "PeopleService" => {
+                    connection.handle_with(task_core::PeopleServiceDispatcher::new(
+                        task_core::PeopleServiceImpl::new(
+                            task_core::people::PersonRepoStorage::new(db.clone()),
+                        ),
+                    ));
+                    Ok(())
+                }
                 "SystemService" => {
                     connection.handle_with(task_core::SystemServiceDispatcher::new(
                         ServerSystemService::new(info.clone()),
