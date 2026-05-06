@@ -111,7 +111,6 @@ async fn authenticated_core_services_smoke_over_vox() {
         connect_service(&vox_url).await;
     let activity_service: task_core::service::ActivityServiceClient =
         connect_service(&vox_url).await;
-    let file_service: task_core::service::FileServiceClient = connect_service(&vox_url).await;
     let mail_service: task_core::service::MailServiceClient = connect_service(&vox_url).await;
 
     let client = service_call(
@@ -492,13 +491,6 @@ async fn authenticated_core_services_smoke_over_vox() {
     let conflicts = service_call("list_conflicts", activity_service.list_conflicts(true, 20)).await;
     assert!(conflicts.len() <= 20);
 
-    assert!(
-        service_error(
-            "stat_file",
-            file_service.stat_file("missing.txt".to_string())
-        )
-        .await
-    );
     assert!(service_error("list_accounts", mail_service.list_accounts()).await);
 
     let completed = service_call(

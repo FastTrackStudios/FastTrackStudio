@@ -1,26 +1,19 @@
 use std::sync::Arc;
 
 use axum::extract::ws::{Message as AxumWsMessage, WebSocket};
-use axum::extract::{Path as AxumPath, Query, State, WebSocketUpgrade};
-use axum::http::{HeaderMap, StatusCode, header};
-use axum::response::{Html, IntoResponse, Response};
+use axum::extract::{Query, State, WebSocketUpgrade};
+use axum::http::{HeaderMap, StatusCode};
+use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
-use base64::Engine as _;
 use better_auth::AxumIntegration;
 use better_auth_core::adapters::{MemberOps, OrganizationOps, UserOps};
 use better_auth_core::config::AuthConfig;
 use better_auth_core::{CreateMember, CreateOrganization, CreateUser};
 use chrono::Utc;
 use serde::Serialize;
-use serde_json::json;
-use task_core::VaultServiceImpl;
-use task_core::crdt::{CrdtSyncEngine, SyncOp};
 use task_core::service::{
     HealthCheck, NextcloudCapability, SystemCapabilities, SystemHealth, VaultCapability,
-};
-use task_core::workflows::{
-    DownloadBundle, DownloadPortal, PortalVisibility, parse_download_portal,
 };
 use task_db::SeaOrmAuthAdapter;
 use task_db::entities::auth::{auth_member, auth_organization, auth_session};
@@ -39,7 +32,6 @@ struct ServerInfo {
     id: String,
     public_base_url: String,
     db: String,
-    vault_enabled: bool,
     demo_seeded: bool,
 }
 
@@ -47,8 +39,6 @@ struct ServerInfo {
 struct AppState {
     info: ServerInfo,
     db: sea_orm::DatabaseConnection,
-    crdt: Option<Arc<CrdtSyncEngine>>,
-    vault_root: Option<String>,
 }
 
 #[derive(Clone, Serialize)]
@@ -57,7 +47,6 @@ struct ServerRoute {
     server_name: String,
     base_url: String,
     vox_url: String,
-    crdt_url: String,
     local: bool,
 }
 
@@ -70,7 +59,6 @@ struct OrganizationRoute {
     server_name: String,
     server_url: String,
     vox_url: String,
-    crdt_url: String,
     local: bool,
 }
 
@@ -130,40 +118,12 @@ async fn main() -> eyre::Result<()> {
     );
     info!("Auth system initialized (better-auth)");
 
-    let vault_path = std::env::var("TASK_VAULT")
-        .ok()
-        .or_else(|| std::env::var("VAULT_ROOT").ok());
-    let (crdt, vault_service) = if let Some(path) = vault_path.as_deref() {
-        let peer = std::env::var("TASK_PEER_ID")
-            .ok()
-            .and_then(|s| s.parse::<u64>().ok())
-            .unwrap_or_else(|| {
-                let mut hash = 1469598103934665603u64;
-                for b in server_id.as_bytes() {
-                    hash ^= *b as u64;
-                    hash = hash.wrapping_mul(1099511628211);
-                }
-                hash
-            });
-        let engine = Arc::new(CrdtSyncEngine::new(std::path::Path::new(path), peer));
-        let service = Arc::new(VaultServiceImpl::new(path));
-        spawn_crdt_conflict_persister(engine.clone(), service.clone());
-        spawn_crdt_file_watch_bridge(engine.clone(), service.clone());
-        info!(vault = %path, peer, "Loro CRDT engine enabled");
-        (Some(engine), Some(service))
-    } else {
-        info!("TASK_VAULT is not set; Loro CRDT endpoint will report disabled");
-        (None, None)
-    };
-
-    let vault_enabled = vault_service.is_some();
     let demo_seeded = env_truthy_default("TASK_SEED_DEMO", true);
     let info_payload = ServerInfo {
         name: server_name.clone(),
         id: server_id,
         public_base_url: auth_base_url.clone(),
         db: db_label,
-        vault_enabled,
         demo_seeded,
     };
 
@@ -178,8 +138,6 @@ async fn main() -> eyre::Result<()> {
     }
 
     let state = AppState {
-        crdt,
-        vault_root: vault_path.clone(),
         db,
         info: info_payload,
     };
@@ -189,20 +147,11 @@ async fn main() -> eyre::Result<()> {
     let app = Router::new()
         // Vox WebSocket RPC — typed service calls over WebSocket
         .route("/vox", get(vox_ws_handler))
-        // Loro CRDT sync — realtime task document replication
-        .route("/crdt", get(crdt_ws_handler))
         // Minimal HTTP metadata endpoints; domain operations go through Vox.
         .route("/api/info", get(server_info))
         .route("/api/servers", get(server_routes))
         .route("/api/organizations/routes", get(organization_routes))
-        .route("/api/crdt/status", get(crdt_status))
         .route("/api/health", get(health))
-        .route("/portal/{slug}", get(portal_page))
-        .route("/portal/{slug}/{bundle_id}", get(portal_bundle_page))
-        .route(
-            "/portal/{slug}/{bundle_id}/file/{file_index}",
-            get(portal_file),
-        )
         .layer(CorsLayer::permissive());
 
     // Mount better-auth routes under /api/auth
@@ -610,343 +559,6 @@ async fn seed_test_session(db: &sea_orm::DatabaseConnection, token: &str) {
     if let Err(e) = session.insert(db).await {
         warn!(error = %e, "Failed to seed TASK_TEST_SESSION_TOKEN session");
     }
-}
-
-// ── Loro CRDT sync ───────────────────────────────────────────────────────────
-
-async fn crdt_status(State(state): State<AppState>) -> Json<serde_json::Value> {
-    match state.crdt.as_ref() {
-        Some(engine) => Json(json!({
-            "enabled": true,
-            "peer": engine.local_peer().to_string(),
-            "loaded_documents": engine.loaded_count().await,
-        })),
-        None => Json(json!({
-            "enabled": false,
-            "reason": "TASK_VAULT is not set",
-        })),
-    }
-}
-
-async fn crdt_ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| handle_crdt_connection(socket, state))
-}
-
-async fn handle_crdt_connection(socket: WebSocket, state: AppState) {
-    let Some(engine) = state.crdt.clone() else {
-        return;
-    };
-
-    info!("Loro CRDT WebSocket client connected");
-
-    use futures::{SinkExt, StreamExt};
-    let (mut ws_tx, mut ws_rx) = socket.split();
-    let mut sync_rx = engine.subscribe();
-    let mut conflict_rx = engine.subscribe_conflicts();
-
-    let ready = json!({
-        "type": "ready",
-        "peer": engine.local_peer().to_string(),
-        "protocol": "task.loro.v1",
-    });
-    let _ = ws_tx
-        .send(axum::extract::ws::Message::Text(ready.to_string().into()))
-        .await;
-
-    loop {
-        tokio::select! {
-            msg = ws_rx.next() => {
-                match msg {
-                    Some(Ok(msg)) => match msg {
-                    axum::extract::ws::Message::Text(text) => {
-                        let response = handle_crdt_request(&engine, &text).await;
-                        if let Some(response) = response {
-                            let _ = ws_tx.send(axum::extract::ws::Message::Text(response.to_string().into())).await;
-                        }
-                    }
-                    axum::extract::ws::Message::Binary(data) => {
-                        if let Ok(text) = std::str::from_utf8(&data) {
-                            let response = handle_crdt_request(&engine, text).await;
-                            if let Some(response) = response {
-                                let _ = ws_tx.send(axum::extract::ws::Message::Text(response.to_string().into())).await;
-                            }
-                        }
-                    }
-                    axum::extract::ws::Message::Ping(data) => {
-                        let _ = ws_tx.send(axum::extract::ws::Message::Pong(data)).await;
-                    }
-                    axum::extract::ws::Message::Close(_) => break,
-                    _ => {}
-                    },
-                    Some(Err(e)) => {
-                        warn!(error = %e, "Loro CRDT WebSocket receive error");
-                        break;
-                    }
-                    None => break,
-                };
-            }
-            recv = sync_rx.recv() => {
-                match recv {
-                    Ok(op) => {
-                        let event = sync_op_to_json(op);
-                        let _ = ws_tx.send(axum::extract::ws::Message::Text(event.to_string().into())).await;
-                    }
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
-                        let event = json!({"type": "lagged", "skipped": skipped});
-                        let _ = ws_tx.send(axum::extract::ws::Message::Text(event.to_string().into())).await;
-                    }
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                }
-            }
-            recv = conflict_rx.recv() => {
-                match recv {
-                    Ok(conflict) => {
-                        let event = json!({
-                            "type": "conflict",
-                            "path": conflict.file_path,
-                            "field": conflict.field,
-                            "losing_value": conflict.losing_value,
-                            "winning_value": conflict.winning_value,
-                            "losing_peer": conflict.losing_peer.map(|p| p.to_string()),
-                            "winning_peer": conflict.winning_peer.map(|p| p.to_string()),
-                        });
-                        let _ = ws_tx.send(axum::extract::ws::Message::Text(event.to_string().into())).await;
-                    }
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
-                        let event = json!({"type": "conflict_lagged", "skipped": skipped});
-                        let _ = ws_tx.send(axum::extract::ws::Message::Text(event.to_string().into())).await;
-                    }
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                }
-            }
-            else => break,
-        }
-    }
-
-    info!("Loro CRDT WebSocket client disconnected");
-}
-
-async fn handle_crdt_request(
-    engine: &Arc<CrdtSyncEngine>,
-    text: &str,
-) -> Option<serde_json::Value> {
-    let request: serde_json::Value = match serde_json::from_str(text) {
-        Ok(v) => v,
-        Err(e) => return Some(json!({"type": "error", "error": format!("invalid JSON: {e}")})),
-    };
-
-    let id = request
-        .get("id")
-        .cloned()
-        .unwrap_or(serde_json::Value::Null);
-    let kind = request.get("type").and_then(|t| t.as_str()).unwrap_or("");
-    let path = request
-        .get("path")
-        .and_then(|p| p.as_str())
-        .unwrap_or("")
-        .trim_start_matches('/');
-
-    match kind {
-        "hello" => Some(json!({
-            "type": "ready",
-            "id": id,
-            "peer": engine.local_peer().to_string(),
-            "protocol": "task.loro.v1",
-        })),
-        "snapshot" => {
-            if path.is_empty() {
-                return Some(json!({"type": "error", "id": id, "error": "missing path"}));
-            }
-            match engine.export_snapshot(path).await {
-                Ok(Some(bytes)) => {
-                    let task = engine.task(path).await.map(task_to_crdt_json);
-                    Some(json!({
-                        "type": "snapshot",
-                        "id": id,
-                        "path": path,
-                        "data": encode_b64(&bytes),
-                        "task": task,
-                    }))
-                }
-                Ok(None) => Some(
-                    json!({"type": "error", "id": id, "path": path, "error": "document not found"}),
-                ),
-                Err(e) => {
-                    Some(json!({"type": "error", "id": id, "path": path, "error": e.to_string()}))
-                }
-            }
-        }
-        "task" => {
-            if path.is_empty() {
-                return Some(json!({"type": "error", "id": id, "error": "missing path"}));
-            }
-            let task = engine.task(path).await.map(task_to_crdt_json);
-            Some(json!({"type": "task", "id": id, "path": path, "task": task}))
-        }
-        "field" => {
-            let field = request.get("field").and_then(|f| f.as_str()).unwrap_or("");
-            let value = request.get("value").and_then(|v| v.as_str()).unwrap_or("");
-            if path.is_empty() || field.is_empty() {
-                return Some(json!({"type": "error", "id": id, "error": "missing path or field"}));
-            }
-            match engine.apply_field_change(path, field, value).await {
-                Ok(()) => Some(json!({"type": "ok", "id": id, "path": path})),
-                Err(e) => {
-                    Some(json!({"type": "error", "id": id, "path": path, "error": e.to_string()}))
-                }
-            }
-        }
-        "body" => {
-            let body = request.get("body").and_then(|b| b.as_str()).unwrap_or("");
-            if path.is_empty() {
-                return Some(json!({"type": "error", "id": id, "error": "missing path"}));
-            }
-            match engine.apply_body_change(path, body).await {
-                Ok(()) => Some(json!({"type": "ok", "id": id, "path": path})),
-                Err(e) => {
-                    Some(json!({"type": "error", "id": id, "path": path, "error": e.to_string()}))
-                }
-            }
-        }
-        "update" => {
-            let Some(data) = request.get("data").and_then(|d| d.as_str()) else {
-                return Some(json!({"type": "error", "id": id, "error": "missing data"}));
-            };
-            if path.is_empty() {
-                return Some(json!({"type": "error", "id": id, "error": "missing path"}));
-            }
-            let bytes = match decode_b64(data) {
-                Ok(bytes) => bytes,
-                Err(e) => {
-                    return Some(json!({"type": "error", "id": id, "path": path, "error": e}));
-                }
-            };
-            match engine.apply_remote_update(path, &bytes).await {
-                Ok(()) => Some(json!({"type": "ok", "id": id, "path": path})),
-                Err(e) => {
-                    Some(json!({"type": "error", "id": id, "path": path, "error": e.to_string()}))
-                }
-            }
-        }
-        "subscribe" => Some(json!({"type": "ok", "id": id, "subscribed": true})),
-        _ => Some(
-            json!({"type": "error", "id": id, "error": format!("unknown CRDT message type: {kind}")}),
-        ),
-    }
-}
-
-fn sync_op_to_json(op: SyncOp) -> serde_json::Value {
-    match op {
-        SyncOp::FieldChanged {
-            file_path,
-            field,
-            value,
-            peer,
-        } => json!({
-            "type": "field_changed",
-            "path": file_path,
-            "field": field,
-            "value": value,
-            "peer": peer.map(|p| p.to_string()),
-        }),
-        SyncOp::DocUpdate { file_path, update } => json!({
-            "type": "doc_update",
-            "path": file_path,
-            "data": encode_b64(&update),
-        }),
-        SyncOp::TaskCreated { file_path, task } => json!({
-            "type": "task_created",
-            "path": file_path,
-            "task": task_to_crdt_json(task),
-        }),
-        SyncOp::TaskDeleted { file_path } => json!({
-            "type": "task_deleted",
-            "path": file_path,
-        }),
-        SyncOp::Refresh => json!({"type": "refresh"}),
-    }
-}
-
-fn task_to_crdt_json(task: task_core::Task) -> serde_json::Value {
-    json!({
-        "id": task.id,
-        "title": task.title,
-        "status": format!("{:?}", task.status),
-        "priority": format!("{:?}", task.priority),
-        "projects": task.projects.into_iter().map(|p| p.0).collect::<Vec<_>>(),
-        "contexts": task.contexts,
-        "tags": task.tags,
-        "due": task.due.map(|d| d.to_string()),
-        "scheduled": task.scheduled.map(|d| d.to_string()),
-        "assignee": task.assignee,
-        "body": task.body,
-    })
-}
-
-fn encode_b64(bytes: &[u8]) -> String {
-    base64::engine::general_purpose::STANDARD.encode(bytes)
-}
-
-fn decode_b64(data: &str) -> Result<Vec<u8>, String> {
-    base64::engine::general_purpose::STANDARD
-        .decode(data)
-        .map_err(|e| format!("invalid base64: {e}"))
-}
-
-fn spawn_crdt_conflict_persister(
-    engine: Arc<CrdtSyncEngine>,
-    vault_service: Arc<VaultServiceImpl>,
-) {
-    tokio::spawn(async move {
-        let mut conflicts = engine.subscribe_conflicts();
-        while let Ok(conflict) = conflicts.recv().await {
-            let winning_peer = conflict.winning_peer.map(|p| p.to_string());
-            let losing_peer = conflict.losing_peer.map(|p| p.to_string());
-            let result = vault_service
-                .record_conflict(
-                    "task",
-                    &conflict.file_path,
-                    &conflict.field,
-                    conflict.winning_value.as_deref(),
-                    conflict.losing_value.as_deref(),
-                    winning_peer.as_deref(),
-                    losing_peer.as_deref(),
-                    Some(&conflict.file_path),
-                    "concurrent",
-                )
-                .await;
-            if let Err(e) = result {
-                warn!(path = %conflict.file_path, field = %conflict.field, error = %e, "failed to persist CRDT conflict");
-            }
-        }
-    });
-}
-
-fn spawn_crdt_file_watch_bridge(engine: Arc<CrdtSyncEngine>, vault_service: Arc<VaultServiceImpl>) {
-    tokio::spawn(async move {
-        let handles = vault_service.watch_all().await;
-        for handle in &handles {
-            if let Err(e) = handle {
-                warn!(error = %e, "failed to start CRDT file watcher");
-            }
-        }
-
-        if let Err(e) = engine.rescan_vault().await {
-            warn!(error = %e, "initial CRDT vault scan failed");
-        }
-
-        let mut changes = vault_service.subscribe();
-        loop {
-            if changes.changed().await.is_err() {
-                break;
-            }
-            if let Err(e) = engine.rescan_vault().await {
-                warn!(error = %e, "CRDT vault rescan failed");
-            }
-        }
-
-        drop(handles);
-    });
 }
 
 // ── Vox WebSocket handler ────────────────────────────────────────────────────
@@ -1558,445 +1170,6 @@ async fn server_routes(State(state): State<AppState>) -> Json<Vec<ServerRoute>> 
     Json(vec![route_for_server(&state.info)])
 }
 
-async fn portal_page(
-    State(state): State<AppState>,
-    AxumPath(slug): AxumPath<String>,
-    Query(query): Query<std::collections::HashMap<String, String>>,
-) -> Response {
-    match load_portal(&state, &slug) {
-        Ok(portal) => render_portal_response(&portal, None, &query),
-        Err(response) => response,
-    }
-}
-
-async fn portal_bundle_page(
-    State(state): State<AppState>,
-    AxumPath((slug, bundle_id)): AxumPath<(String, String)>,
-    Query(query): Query<std::collections::HashMap<String, String>>,
-) -> Response {
-    match load_portal(&state, &slug) {
-        Ok(portal) => render_portal_response(&portal, Some(&bundle_id), &query),
-        Err(response) => response,
-    }
-}
-
-async fn portal_file(
-    State(state): State<AppState>,
-    AxumPath((slug, bundle_id, file_index)): AxumPath<(String, String, usize)>,
-    Query(query): Query<std::collections::HashMap<String, String>>,
-) -> Response {
-    let Some(root) = state.vault_root.as_deref() else {
-        return (
-            StatusCode::SERVICE_UNAVAILABLE,
-            "TASK_VAULT is not configured",
-        )
-            .into_response();
-    };
-    if !safe_slug(&slug) || !safe_slug(&bundle_id) {
-        return (StatusCode::BAD_REQUEST, "invalid portal path").into_response();
-    }
-
-    let Some(portal_path) = find_portal_file(std::path::Path::new(root), &slug) else {
-        return (StatusCode::NOT_FOUND, "portal not found").into_response();
-    };
-    let content = match std::fs::read_to_string(&portal_path) {
-        Ok(content) => content,
-        Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("failed to read portal: {e}"),
-            )
-                .into_response();
-        }
-    };
-    let Some(portal) = parse_download_portal(&content).filter(|portal| portal.slug == slug) else {
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "portal frontmatter is invalid",
-        )
-            .into_response();
-    };
-    if let Err(response) = authorize_portal(&portal, &query) {
-        return response;
-    }
-
-    let Some(bundle) = portal.bundles.iter().find(|bundle| bundle.id == bundle_id) else {
-        return (StatusCode::NOT_FOUND, "bundle not found").into_response();
-    };
-    let Some(file) = bundle.files.get(file_index) else {
-        return (StatusCode::NOT_FOUND, "file not found").into_response();
-    };
-    let Some(project_root) = project_root_for_portal(&portal_path) else {
-        return (StatusCode::INTERNAL_SERVER_ERROR, "invalid portal location").into_response();
-    };
-    let Some(relative_path) = safe_project_relative_path(&file.source) else {
-        return (StatusCode::BAD_REQUEST, "invalid file source").into_response();
-    };
-    let path = project_root.join(relative_path);
-    let bytes = match std::fs::read(&path) {
-        Ok(bytes) => bytes,
-        Err(_) => return (StatusCode::NOT_FOUND, "file not found").into_response(),
-    };
-    let display_name = file.dest.as_deref().unwrap_or_else(|| {
-        path.file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("download")
-    });
-    let mime = file
-        .mime_type
-        .as_deref()
-        .filter(|mime| !mime.is_empty())
-        .unwrap_or_else(|| guess_mime_type(display_name));
-
-    (
-        [
-            (header::CONTENT_TYPE, mime.to_string()),
-            (
-                header::CONTENT_DISPOSITION,
-                format!("inline; filename=\"{}\"", header_escape(display_name)),
-            ),
-        ],
-        bytes,
-    )
-        .into_response()
-}
-
-#[allow(clippy::result_large_err)]
-fn load_portal(state: &AppState, slug: &str) -> Result<DownloadPortal, Response> {
-    if !safe_slug(slug) {
-        return Err((StatusCode::BAD_REQUEST, "invalid portal slug").into_response());
-    }
-
-    let Some(root) = state.vault_root.as_deref() else {
-        return Err((
-            StatusCode::SERVICE_UNAVAILABLE,
-            "TASK_VAULT is not configured",
-        )
-            .into_response());
-    };
-
-    let Some(path) = find_portal_file(std::path::Path::new(root), slug) else {
-        return Err((StatusCode::NOT_FOUND, "portal not found").into_response());
-    };
-
-    let content = match std::fs::read_to_string(&path) {
-        Ok(content) => content,
-        Err(e) => {
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("failed to read portal: {e}"),
-            )
-                .into_response());
-        }
-    };
-
-    parse_download_portal(&content)
-        .filter(|portal| portal.slug == slug)
-        .ok_or_else(|| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "portal frontmatter is invalid",
-            )
-                .into_response()
-        })
-}
-
-fn find_portal_file(root: &std::path::Path, slug: &str) -> Option<std::path::PathBuf> {
-    let mut stack = vec![root.to_path_buf()];
-    while let Some(dir) = stack.pop() {
-        let entries = std::fs::read_dir(&dir).ok()?;
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                if path.file_name().and_then(|name| name.to_str()) == Some("target") {
-                    continue;
-                }
-                stack.push(path);
-                continue;
-            }
-
-            if path.file_name().and_then(|name| name.to_str()) != Some("portal.md") {
-                continue;
-            }
-
-            let content = std::fs::read_to_string(&path).ok()?;
-            if parse_download_portal(&content).is_some_and(|portal| portal.slug == slug) {
-                return Some(path);
-            }
-        }
-    }
-    None
-}
-
-fn render_portal_response(
-    portal: &DownloadPortal,
-    selected_bundle_id: Option<&str>,
-    query: &std::collections::HashMap<String, String>,
-) -> Response {
-    if !portal.published {
-        return (StatusCode::NOT_FOUND, "portal is not published").into_response();
-    }
-
-    if portal
-        .expires
-        .is_some_and(|expires| expires < Utc::now().date_naive())
-    {
-        return (StatusCode::GONE, "portal has expired").into_response();
-    }
-
-    if let Some(password) = portal.password.as_deref() {
-        let provided = query
-            .get("password")
-            .or_else(|| query.get("p"))
-            .map(String::as_str);
-        if provided != Some(password) {
-            return (StatusCode::UNAUTHORIZED, Html(render_password_page(portal))).into_response();
-        }
-    }
-
-    let selected =
-        selected_bundle_id.and_then(|id| portal.bundles.iter().find(|bundle| bundle.id == id));
-    if selected_bundle_id.is_some() && selected.is_none() {
-        return (StatusCode::NOT_FOUND, "bundle not found").into_response();
-    }
-
-    Html(render_portal_html(portal, selected)).into_response()
-}
-
-fn render_password_page(portal: &DownloadPortal) -> String {
-    format!(
-        "<!doctype html><html><head><meta charset=\"utf-8\"><title>{}</title>{}</head><body><main class=\"card\"><h1>{}</h1><p>This portal is password protected.</p><form><input name=\"password\" type=\"password\" autofocus><button type=\"submit\">Open portal</button></form></main></body></html>",
-        html_escape(&portal.title),
-        portal_css(),
-        html_escape(&portal.title),
-    )
-}
-
-fn render_portal_html(portal: &DownloadPortal, selected: Option<&DownloadBundle>) -> String {
-    let mut html = format!(
-        "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>{}</title>{}</head><body><main><header><p class=\"eyebrow\">{}</p><h1>{}</h1><p>{}</p></header>",
-        html_escape(&portal.title),
-        portal_css(),
-        html_escape(&portal.event),
-        html_escape(&portal.title),
-        html_escape(&portal.message),
-    );
-
-    html.push_str("<section class=\"grid\">");
-    for bundle in &portal.bundles {
-        html.push_str(&render_bundle_card(
-            portal,
-            bundle,
-            selected.is_some_and(|chosen| chosen.id == bundle.id),
-        ));
-    }
-    html.push_str("</section>");
-
-    if let Some(bundle) = selected {
-        html.push_str(&render_bundle_detail(portal, bundle, &portal.visibility));
-    }
-
-    html.push_str("</main></body></html>");
-    html
-}
-
-fn render_bundle_card(portal: &DownloadPortal, bundle: &DownloadBundle, selected: bool) -> String {
-    let selected_class = if selected { " selected" } else { "" };
-    let icon = bundle.icon.as_deref().unwrap_or("📦");
-    let group = bundle.group.as_deref().unwrap_or("General");
-    format!(
-        "<a class=\"bundle{}\" href=\"/portal/{}/{}\"><span class=\"icon\">{}</span><span><strong>{}</strong><small>{}</small></span></a>",
-        selected_class,
-        url_path_segment(&portal.slug),
-        url_path_segment(&bundle.id),
-        html_escape(icon),
-        html_escape(&bundle.name),
-        html_escape(group),
-    )
-}
-
-fn render_bundle_detail(
-    portal: &DownloadPortal,
-    bundle: &DownloadBundle,
-    visibility: &PortalVisibility,
-) -> String {
-    let mut html = format!(
-        "<section class=\"card\"><h2>{}</h2>",
-        html_escape(&bundle.name)
-    );
-    if !bundle.notes.is_empty() {
-        html.push_str(&format!("<p>{}</p>", html_escape(&bundle.notes)));
-    }
-
-    if let Some(url) = bundle.direct_url.as_deref() {
-        html.push_str(&format!(
-            "<p><a class=\"button\" href=\"{}\">Open download share</a></p>",
-            html_escape(url)
-        ));
-    }
-
-    html.push_str("<h3>Files</h3><ul>");
-    for (index, file) in bundle.files.iter().enumerate() {
-        let category = file.category.as_deref().unwrap_or("Files");
-        let dest = file.dest.as_deref().unwrap_or(&file.source);
-        let file_url = format!(
-            "/portal/{}/{}/file/{}",
-            url_path_segment(&portal.slug),
-            url_path_segment(&bundle.id),
-            index
-        );
-        html.push_str(&format!(
-            "<li><a href=\"{}\" download>{}</a><small>{}</small>{}</li>",
-            html_escape(&file_url),
-            html_escape(dest),
-            html_escape(category),
-            render_audio_preview(file, &file_url),
-        ));
-    }
-    if bundle.files.is_empty() {
-        html.push_str("<li>No explicit files listed yet.</li>");
-    }
-    html.push_str("</ul>");
-
-    if matches!(visibility, PortalVisibility::BrowseAll) {
-        html.push_str("<p class=\"hint\">Other roles are browseable, but download access is scoped to each role share.</p>");
-    }
-    html.push_str("</section>");
-    html
-}
-
-fn render_audio_preview(file: &task_core::workflows::BundleFile, file_url: &str) -> String {
-    if is_audio_file(file) {
-        format!(
-            "<audio controls preload=\"metadata\" src=\"{}\"></audio>",
-            html_escape(file_url)
-        )
-    } else {
-        String::new()
-    }
-}
-
-fn is_audio_file(file: &task_core::workflows::BundleFile) -> bool {
-    file.mime_type
-        .as_deref()
-        .is_some_and(|mime| mime.starts_with("audio/"))
-        || file
-            .dest
-            .as_deref()
-            .unwrap_or(&file.source)
-            .rsplit('.')
-            .next()
-            .is_some_and(|ext| {
-                matches!(
-                    ext.to_ascii_lowercase().as_str(),
-                    "aac" | "aif" | "aiff" | "flac" | "m4a" | "mp3" | "ogg" | "opus" | "wav"
-                )
-            })
-}
-
-#[allow(clippy::result_large_err)]
-fn authorize_portal(
-    portal: &DownloadPortal,
-    query: &std::collections::HashMap<String, String>,
-) -> Result<(), Response> {
-    if !portal.published {
-        return Err((StatusCode::NOT_FOUND, "portal is not published").into_response());
-    }
-    if portal
-        .expires
-        .is_some_and(|expires| expires < Utc::now().date_naive())
-    {
-        return Err((StatusCode::GONE, "portal has expired").into_response());
-    }
-    if let Some(password) = portal.password.as_deref() {
-        let provided = query
-            .get("password")
-            .or_else(|| query.get("p"))
-            .map(String::as_str);
-        if provided != Some(password) {
-            return Err(
-                (StatusCode::UNAUTHORIZED, Html(render_password_page(portal))).into_response(),
-            );
-        }
-    }
-    Ok(())
-}
-
-fn project_root_for_portal(portal_path: &std::path::Path) -> Option<std::path::PathBuf> {
-    let parent = portal_path.parent()?;
-    if parent.file_name().and_then(|name| name.to_str()) == Some("downloads") {
-        parent.parent().map(std::path::Path::to_path_buf)
-    } else {
-        Some(parent.to_path_buf())
-    }
-}
-
-fn safe_project_relative_path(source: &str) -> Option<std::path::PathBuf> {
-    let path = std::path::Path::new(source);
-    if path.is_absolute() {
-        return None;
-    }
-    let mut safe = std::path::PathBuf::new();
-    for component in path.components() {
-        match component {
-            std::path::Component::Normal(part) => safe.push(part),
-            std::path::Component::CurDir => {}
-            _ => return None,
-        }
-    }
-    (!safe.as_os_str().is_empty()).then_some(safe)
-}
-
-fn guess_mime_type(name: &str) -> &'static str {
-    match name
-        .rsplit('.')
-        .next()
-        .unwrap_or_default()
-        .to_ascii_lowercase()
-        .as_str()
-    {
-        "mp3" => "audio/mpeg",
-        "wav" => "audio/wav",
-        "flac" => "audio/flac",
-        "m4a" => "audio/mp4",
-        "ogg" => "audio/ogg",
-        "pdf" => "application/pdf",
-        "txt" | "md" => "text/plain; charset=utf-8",
-        _ => "application/octet-stream",
-    }
-}
-
-fn header_escape(value: &str) -> String {
-    value.replace(['\\', '"', '\r', '\n'], "_")
-}
-
-fn portal_css() -> &'static str {
-    "<style>body{margin:0;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#0b1020;color:#edf2ff}main{max-width:1100px;margin:0 auto;padding:48px 20px}.eyebrow{color:#8fb4ff;text-transform:uppercase;letter-spacing:.12em}h1{font-size:clamp(2rem,6vw,4rem);margin:.2em 0}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin:32px 0}.bundle,.card{background:#151d35;border:1px solid #2f3b61;border-radius:18px;padding:20px;color:inherit;text-decoration:none}.bundle{display:flex;gap:14px;align-items:center}.bundle:hover,.selected{border-color:#8fb4ff;background:#1b2748}.icon{font-size:2rem}.bundle small{display:block;color:#aab6d3}.button{display:inline-block;background:#8fb4ff;color:#071022;padding:12px 16px;border-radius:12px;text-decoration:none;font-weight:700}input,button{font:inherit;padding:12px;border-radius:10px;border:0}button{background:#8fb4ff;color:#071022;font-weight:700}li{margin:.6em 0}.hint{color:#aab6d3}</style>"
-}
-
-fn safe_slug(value: &str) -> bool {
-    !value.is_empty()
-        && value
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'))
-}
-
-fn url_path_segment(value: &str) -> String {
-    value
-        .replace('%', "%25")
-        .replace('/', "%2F")
-        .replace(' ', "%20")
-}
-
-fn html_escape(value: &str) -> String {
-    value
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&#39;")
-}
-
 async fn organization_routes(State(state): State<AppState>) -> Json<Vec<OrganizationRoute>> {
     let orgs = match auth_organization::Entity::find()
         .order_by_asc(auth_organization::Column::Slug)
@@ -2035,7 +1208,6 @@ async fn organization_routes(State(state): State<AppState>) -> Json<Vec<Organiza
                 slug: org.slug,
                 name: org.name,
                 vox_url: ws_url(&server_url, "/vox"),
-                crdt_url: ws_url(&server_url, "/crdt"),
                 local: server_id == state.info.id,
                 server_id,
                 server_name,
@@ -2053,7 +1225,6 @@ fn route_for_server(info: &ServerInfo) -> ServerRoute {
         server_id: info.id.clone(),
         server_name: info.name.clone(),
         vox_url: ws_url(&base_url, "/vox"),
-        crdt_url: ws_url(&base_url, "/crdt"),
         base_url,
         local: true,
     }
@@ -2100,43 +1271,6 @@ mod tests {
             extract_session_token(&headers, &std::collections::HashMap::new()).as_deref(),
             Some("cookie-token")
         );
-    }
-
-    #[test]
-    fn escapes_portal_html_and_url_segments() {
-        assert_eq!(
-            html_escape("Tom & <Jerry> \"quote\""),
-            "Tom &amp; &lt;Jerry&gt; &quot;quote&quot;"
-        );
-        assert_eq!(url_path_segment("a b/c%"), "a%20b%2Fc%25");
-        assert!(safe_slug("campus-jax_2026"));
-        assert!(!safe_slug("../secret"));
-    }
-
-    #[test]
-    fn renders_audio_files_with_preview_and_download_links() {
-        let portal = DownloadPortal {
-            slug: "campus-jax".to_string(),
-            ..Default::default()
-        };
-        let bundle = DownloadBundle {
-            id: "vocals".to_string(),
-            name: "Vocalists".to_string(),
-            files: vec![task_core::workflows::BundleFile {
-                source: "audio/reference mix.mp3".to_string(),
-                dest: Some("Reference Mix.mp3".to_string()),
-                category: Some("Audio".to_string()),
-                mime_type: Some("audio/mpeg".to_string()),
-                ..Default::default()
-            }],
-            ..Default::default()
-        };
-
-        let html = render_bundle_detail(&portal, &bundle, &PortalVisibility::BrowseAll);
-
-        assert!(html.contains("<audio controls"));
-        assert!(html.contains("/portal/campus-jax/vocals/file/0"));
-        assert!(html.contains("download"));
     }
 
     #[test]

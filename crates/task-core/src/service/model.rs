@@ -358,33 +358,6 @@ pub trait CalendarService {
 }
 
 #[vox::service]
-pub trait FileService {
-    /// List files/directories under the configured Nextcloud project root.
-    async fn list_files(&self, path: String, depth: String) -> Result<Vec<FileEntry>, VaultError>;
-
-    /// Return metadata for one file/directory.
-    async fn stat_file(&self, path: String) -> Result<Option<FileEntry>, VaultError>;
-
-    /// Read a file as base64 content.
-    async fn read_file(&self, path: String) -> Result<Option<FileReadResponse>, VaultError>;
-
-    /// Write a file from base64 content.
-    async fn write_file(&self, request: FileWriteRequest) -> Result<(), VaultError>;
-
-    /// Create a directory.
-    async fn create_dir(&self, path: String) -> Result<(), VaultError>;
-
-    /// Delete a file or directory.
-    async fn delete_file(&self, path: String) -> Result<(), VaultError>;
-
-    /// Copy a file or directory.
-    async fn copy_file(&self, request: FileCopyMoveRequest) -> Result<(), VaultError>;
-
-    /// Move or rename a file or directory.
-    async fn move_file(&self, request: FileCopyMoveRequest) -> Result<(), VaultError>;
-}
-
-#[vox::service]
 pub trait SystemService {
     /// Fast live capability snapshot for this task-server instance.
     async fn capabilities(&self) -> SystemCapabilities;
