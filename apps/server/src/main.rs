@@ -781,6 +781,16 @@ async fn handle_vox_connection(socket: WebSocket, state: AppState, auth: VoxAuth
                     ));
                     Ok(())
                 }
+                "OperatingService" => {
+                    connection.handle_with(task_core::OperatingServiceDispatcher::new(
+                        task_core::OperatingServiceImpl::new(
+                            task_core::task::TaskRepoStorage::new(db.clone()),
+                            task_core::project::ProjectRepoStorage::new(db.clone()),
+                            task_core::calendar_event::CalendarEventRepoStorage::new(db.clone()),
+                        ),
+                    ));
+                    Ok(())
+                }
                 "SystemService" => {
                     connection.handle_with(task_core::SystemServiceDispatcher::new(
                         ServerSystemService::new(info.clone()),
@@ -864,6 +874,7 @@ impl task_core::service::SystemService for ServerSystemService {
                 "ExpenseService".into(),
                 "CalendarService".into(),
                 "InboxService".into(),
+                "OperatingService".into(),
                 "SystemService".into(),
             ],
             features: vec![
