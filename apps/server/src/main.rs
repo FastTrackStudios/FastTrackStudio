@@ -741,7 +741,7 @@ async fn handle_vox_connection(socket: WebSocket, state: AppState, auth: VoxAuth
                 }
                 "TaskService" => {
                     connection.handle_with(task_core::TaskServiceDispatcher::new(
-                        task_core::TaskBusinessService::new(task_core::task::TaskRepoStorage::new(
+                        task_core::TaskServiceImpl::new(task_core::task::TaskRepoStorage::new(
                             db.clone(),
                         )),
                     ));
@@ -749,7 +749,7 @@ async fn handle_vox_connection(socket: WebSocket, state: AppState, auth: VoxAuth
                 }
                 "ProjectService" => {
                     connection.handle_with(task_core::ProjectServiceDispatcher::new(
-                        task_core::ProjectBusinessService::new(
+                        task_core::ProjectServiceImpl::new(
                             task_core::project::ProjectRepoStorage::new(db.clone()),
                             task_core::task::TaskRepoStorage::new(db.clone()),
                         ),
@@ -758,7 +758,7 @@ async fn handle_vox_connection(socket: WebSocket, state: AppState, auth: VoxAuth
                 }
                 "ExpenseService" => {
                     connection.handle_with(task_core::ExpenseServiceDispatcher::new(
-                        task_core::ExpenseBusinessService::new(
+                        task_core::ExpenseServiceImpl::new(
                             task_core::expense::ExpenseRepoStorage::new(db.clone()),
                         ),
                     ));
@@ -766,7 +766,7 @@ async fn handle_vox_connection(socket: WebSocket, state: AppState, auth: VoxAuth
                 }
                 "CalendarService" => {
                     connection.handle_with(task_core::CalendarServiceDispatcher::new(
-                        task_core::CalendarBusinessService::new(
+                        task_core::CalendarServiceImpl::new(
                             task_core::task::TaskRepoStorage::new(db.clone()),
                             task_core::calendar_event::CalendarEventRepoStorage::new(db.clone()),
                         ),

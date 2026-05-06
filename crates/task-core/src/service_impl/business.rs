@@ -22,34 +22,34 @@ use crate::service::{
 use crate::task::{Status, Task, TaskApi, TaskApiList, TaskApiUpdate, TaskRepo};
 
 #[derive(Clone)]
-pub struct TaskBusinessService<R> {
+pub struct TaskServiceImpl<R> {
     task_repo: R,
 }
 
 #[derive(Clone)]
-pub struct ProjectBusinessService<P, T> {
+pub struct ProjectServiceImpl<P, T> {
     project_repo: P,
     task_repo: T,
 }
 
 #[derive(Clone)]
-pub struct ExpenseBusinessService<R> {
+pub struct ExpenseServiceImpl<R> {
     expense_repo: R,
 }
 
 #[derive(Clone)]
-pub struct CalendarBusinessService<T, E> {
+pub struct CalendarServiceImpl<T, E> {
     task_repo: T,
     event_repo: E,
 }
 
-impl<R> TaskBusinessService<R> {
+impl<R> TaskServiceImpl<R> {
     pub fn new(task_repo: R) -> Self {
         Self { task_repo }
     }
 }
 
-impl<P, T> ProjectBusinessService<P, T> {
+impl<P, T> ProjectServiceImpl<P, T> {
     pub fn new(project_repo: P, task_repo: T) -> Self {
         Self {
             project_repo,
@@ -58,13 +58,13 @@ impl<P, T> ProjectBusinessService<P, T> {
     }
 }
 
-impl<R> ExpenseBusinessService<R> {
+impl<R> ExpenseServiceImpl<R> {
     pub fn new(expense_repo: R) -> Self {
         Self { expense_repo }
     }
 }
 
-impl<T, E> CalendarBusinessService<T, E> {
+impl<T, E> CalendarServiceImpl<T, E> {
     pub fn new(task_repo: T, event_repo: E) -> Self {
         Self {
             task_repo,
@@ -73,7 +73,7 @@ impl<T, E> CalendarBusinessService<T, E> {
     }
 }
 
-impl<R> TaskBusinessService<R>
+impl<R> TaskServiceImpl<R>
 where
     R: TaskRepo,
 {
@@ -97,7 +97,7 @@ where
     }
 }
 
-impl<P, T> ProjectBusinessService<P, T>
+impl<P, T> ProjectServiceImpl<P, T>
 where
     P: ProjectRepo,
     T: TaskRepo,
@@ -123,7 +123,7 @@ where
     }
 }
 
-impl<R> ExpenseBusinessService<R>
+impl<R> ExpenseServiceImpl<R>
 where
     R: ExpenseRepo,
 {
@@ -138,7 +138,7 @@ where
     }
 }
 
-impl<T, E> CalendarBusinessService<T, E>
+impl<T, E> CalendarServiceImpl<T, E>
 where
     T: TaskRepo,
     E: CalendarEventRepo,
@@ -164,7 +164,7 @@ where
     }
 }
 
-impl<R> TaskService for TaskBusinessService<R>
+impl<R> TaskService for TaskServiceImpl<R>
 where
     R: TaskRepo,
 {
@@ -218,7 +218,7 @@ where
     }
 }
 
-impl<P, T> ProjectService for ProjectBusinessService<P, T>
+impl<P, T> ProjectService for ProjectServiceImpl<P, T>
 where
     P: ProjectRepo,
     T: TaskRepo,
@@ -303,7 +303,7 @@ where
     }
 }
 
-impl<R> ExpenseService for ExpenseBusinessService<R>
+impl<R> ExpenseService for ExpenseServiceImpl<R>
 where
     R: ExpenseRepo,
 {
@@ -319,7 +319,7 @@ where
     }
 }
 
-impl<T, E> CalendarService for CalendarBusinessService<T, E>
+impl<T, E> CalendarService for CalendarServiceImpl<T, E>
 where
     T: TaskRepo,
     E: CalendarEventRepo,
