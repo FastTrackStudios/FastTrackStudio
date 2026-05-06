@@ -773,6 +773,12 @@ async fn handle_vox_connection(socket: WebSocket, state: AppState, auth: VoxAuth
                     ));
                     Ok(())
                 }
+                "ConversationService" => {
+                    connection.handle_with(task_core::ConversationServiceDispatcher::new(
+                        task_core::ConversationServiceImpl::new(),
+                    ));
+                    Ok(())
+                }
                 "SystemService" => {
                     connection.handle_with(task_core::SystemServiceDispatcher::new(
                         ServerSystemService::new(info.clone()),
