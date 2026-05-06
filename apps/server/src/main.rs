@@ -779,6 +779,14 @@ async fn handle_vox_connection(socket: WebSocket, state: AppState, auth: VoxAuth
                     ));
                     Ok(())
                 }
+                "MailService" => {
+                    connection.handle_with(task_core::MailServiceDispatcher::new(
+                        task_core::MailServiceImpl::new(
+                            task_core::email::EmailRefRepoStorage::new(db.clone()),
+                        ),
+                    ));
+                    Ok(())
+                }
                 "SystemService" => {
                     connection.handle_with(task_core::SystemServiceDispatcher::new(
                         ServerSystemService::new(info.clone()),
