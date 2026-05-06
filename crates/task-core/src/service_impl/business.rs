@@ -1,5 +1,4 @@
-use serde::{Serialize, de::DeserializeOwned};
-
+use super::helpers::{convert_model, convert_ref, provider_not_configured};
 use crate::calendar_event::{CalendarEvent, CalendarEventApiList, CalendarEventRepo};
 use crate::expense::{
     Expense, ExpenseApiList, ExpenseFilter, ExpenseRepo, ExpenseReport, build_expense_report,
@@ -483,36 +482,4 @@ where
     async fn list_deck_stacks(&self, _board_id: u64) -> Result<Vec<RemoteDeckStack>, VaultError> {
         Err(provider_not_configured("Deck stacks"))
     }
-}
-
-fn provider_not_configured(operation: &str) -> VaultError {
-    VaultError::IoError(format!(
-        "{operation} requires a provider adapter; sqlite repositories only provide local read/query behavior"
-    ))
-}
-
-fn convert_ref<T, U>(value: &T) -> Result<U, VaultError>
-where
-    T: Serialize,
-    U: DeserializeOwned,
-{
-    serde_json::from_value(
-        serde_json::to_value(value).map_err(|err| {
-            VaultError::ParseError(format!("failed to serialize repo model: {err}"))
-        })?,
-    )
-    .map_err(|err| VaultError::ParseError(format!("failed to deserialize repo model: {err}")))
-}
-
-fn convert_model<T, U>(value: T) -> Result<U, VaultError>
-where
-    T: Serialize,
-    U: DeserializeOwned,
-{
-    serde_json::from_value(
-        serde_json::to_value(value).map_err(|err| {
-            VaultError::ParseError(format!("failed to serialize repo model: {err}"))
-        })?,
-    )
-    .map_err(|err| VaultError::ParseError(format!("failed to deserialize repo model: {err}")))
 }
