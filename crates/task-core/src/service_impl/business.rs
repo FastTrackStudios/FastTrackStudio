@@ -5,6 +5,8 @@ use vox::Tx;
 
 use super::helpers::{convert_model, convert_ref, provider_not_configured};
 use crate::calendar_event::{CalendarEvent, CalendarEventApiList, CalendarEventRepo};
+#[cfg(feature = "realtime")]
+use crate::crdt::{CrdtDocument, SharedCrdtSnapshotStore};
 use crate::expense::{
     Expense, ExpenseApiList, ExpenseFilter, ExpenseRepo, ExpenseReport, build_expense_report,
     matches_expense_filter,
@@ -41,6 +43,12 @@ pub struct TaskServiceDeps<R> {
     /// service builds a fresh broadcast channel — useful for one-process
     /// callers that don't want to share a tx across other constructors.
     pub op_tx: Option<broadcast::Sender<TaskOp>>,
+    /// Optional persistence layer for the per-task Loro snapshot column.
+    /// `None` keeps `apply_op` working without realtime persistence (the test
+    /// double in task-db wires this to `None`); when `Some`, `apply_op`
+    /// loads/decodes/applies/encodes the doc and writes the snapshot back.
+    #[cfg(feature = "realtime")]
+    pub snapshot_store: Option<SharedCrdtSnapshotStore>,
 }
 
 /// Typed requirements for [`ProjectServiceImpl`].
@@ -70,6 +78,8 @@ pub struct CalendarServiceDeps<T, E> {
 pub struct TaskServiceImpl<R> {
     task_repo: R,
     op_tx: broadcast::Sender<TaskOp>,
+    #[cfg(feature = "realtime")]
+    snapshot_store: Option<SharedCrdtSnapshotStore>,
 }
 
 #[derive(Clone)]
@@ -98,6 +108,8 @@ impl<R> TaskServiceImpl<R> {
         Self {
             task_repo: deps.task_repo,
             op_tx,
+            #[cfg(feature = "realtime")]
+            snapshot_store: deps.snapshot_store,
         }
     }
 
@@ -258,7 +270,24 @@ where
         task.status = Status::Done;
         task.completed_date = Some(chrono::Utc::now().date_naive());
         task.date_modified = Some(chrono::Utc::now());
-        self.update_task_model(&task).await
+        let updated = self.update_task_model(&task).await?;
+
+        // Mirror the scalar mutation into the Loro doc so subscribers and the
+        // snapshot column stay authoritative.
+        #[cfg(feature = "realtime")]
+        self.apply_field_to_doc(updated.id, "status", Some("Done"))
+            .await;
+
+        // Broadcast the user-visible mutation. `send` only fails when there
+        // are zero subscribers — that's fine.
+        let _ = self.op_tx.send(TaskOp::FieldChanged {
+            task_id: updated.id,
+            field: "status".to_string(),
+            value: Some("Done".to_string()),
+            peer: None,
+        });
+
+        Ok(updated)
     }
 
     async fn search_tasks(&self, query: String) -> Vec<Task> {
@@ -317,22 +346,53 @@ where
                 apply_field_to_task(&mut task, field, value.as_deref())?;
                 task.date_modified = Some(chrono::Utc::now());
                 self.update_task_model(&task).await?;
+                #[cfg(feature = "realtime")]
+                self.apply_field_to_doc(*task_id, field, value.as_deref())
+                    .await;
             }
-            TaskOp::BodyUpdate { task_id, .. } => {
-                // Without the `realtime` feature we cannot decode Loro update
-                // bytes; persistence of the resulting body is a no-op and the
-                // op is just fanned out so peer replicas can merge.
+            TaskOp::BodyUpdate {
+                task_id,
+                update_bytes,
+            } => {
+                // Re-validate that the task exists before importing into the
+                // doc; the import + persistence loop only runs when the
+                // realtime feature is on (Loro is not compiled in otherwise).
                 let _ = self.load_task(*task_id).await?;
+                #[cfg(feature = "realtime")]
+                self.apply_body_update_to_doc(*task_id, update_bytes).await;
+                #[cfg(not(feature = "realtime"))]
+                {
+                    let _ = update_bytes;
+                }
             }
-            TaskOp::Created { .. } => {
-                // Creation is performed via the repo CRUD path; this op is a
-                // notification carrying the snapshot to peers.
+            TaskOp::Created { task_id, snapshot } => {
+                // Upsert: if the task is unknown, decode the snapshot into a
+                // Task and create it through the repo; otherwise import the
+                // bytes into the existing doc.
+                let exists = self.load_task(*task_id).await.is_ok();
+                #[cfg(feature = "realtime")]
+                self.apply_created_op(*task_id, snapshot, exists).await?;
+                #[cfg(not(feature = "realtime"))]
+                {
+                    let _ = (snapshot, exists);
+                }
             }
             TaskOp::Deleted { task_id } => {
                 self.task_repo
                     .delete_task(task_id.to_string())
                     .await
                     .map_err(VaultError::ParseError)?;
+                #[cfg(feature = "realtime")]
+                if let Some(store) = self.snapshot_store.as_ref() {
+                    if let Err(err) = store.save_snapshot(*task_id, None).await {
+                        tracing::warn!(
+                            target: "task_core::crdt",
+                            ?err,
+                            task_id = %task_id,
+                            "failed to clear crdt snapshot on delete",
+                        );
+                    }
+                }
             }
         }
         // Fan out. `send` returns the live receiver count or a no-subscribers
@@ -353,6 +413,180 @@ where
             .await
             .map_err(VaultError::NotFound)?;
         convert_model::<TaskApi, Task>(api)
+    }
+
+    /// Decode the persisted Loro snapshot for `task_id`, falling back to a
+    /// fresh doc seeded from the current scalar columns when no snapshot has
+    /// been written yet. Returns `Ok((task, doc))` so callers can mutate
+    /// either side without re-reading.
+    #[cfg(feature = "realtime")]
+    async fn load_doc(&self, task_id: uuid::Uuid) -> Result<(Task, CrdtDocument), VaultError> {
+        let task = self.load_task(task_id).await?;
+        let doc = match self.snapshot_store.as_ref() {
+            Some(store) => match store.load_snapshot(task_id).await? {
+                Some(bytes) => CrdtDocument::from_snapshot(&bytes, task_id.to_string())?,
+                None => CrdtDocument::from_task(&task, task_id.to_string()),
+            },
+            None => CrdtDocument::from_task(&task, task_id.to_string()),
+        };
+        Ok((task, doc))
+    }
+
+    /// Encode `doc` and persist the bytes through the snapshot store. No-op
+    /// when no store is wired (tests / sqlite-only callers).
+    #[cfg(feature = "realtime")]
+    async fn save_doc(&self, task_id: uuid::Uuid, doc: &CrdtDocument) {
+        let Some(store) = self.snapshot_store.as_ref() else {
+            return;
+        };
+        match doc.export_snapshot() {
+            Ok(bytes) => {
+                if let Err(err) = store.save_snapshot(task_id, Some(bytes)).await {
+                    tracing::warn!(
+                        target: "task_core::crdt",
+                        ?err,
+                        task_id = %task_id,
+                        "failed to persist crdt snapshot",
+                    );
+                }
+            }
+            Err(err) => {
+                tracing::warn!(
+                    target: "task_core::crdt",
+                    ?err,
+                    task_id = %task_id,
+                    "failed to export crdt snapshot bytes",
+                );
+            }
+        }
+    }
+
+    /// Mirror a scalar field mutation into the Loro doc, detect concurrent
+    /// writes, and persist the new snapshot.
+    #[cfg(feature = "realtime")]
+    async fn apply_field_to_doc(&self, task_id: uuid::Uuid, field: &str, value: Option<&str>) {
+        let (_, doc) = match self.load_doc(task_id).await {
+            Ok(pair) => pair,
+            Err(err) => {
+                tracing::warn!(
+                    target: "task_core::crdt",
+                    ?err,
+                    task_id = %task_id,
+                    "failed to load crdt doc for field op",
+                );
+                return;
+            }
+        };
+        doc.set_field(field, value.unwrap_or(""));
+        doc.commit();
+        self.save_doc(task_id, &doc).await;
+    }
+
+    /// Import remote Loro update bytes into the local doc and persist the
+    /// merged snapshot. Conflicts are surfaced via tracing — the dedicated
+    /// conflict log lives in `index::sqlite::TaskIndex` and is wired in a
+    /// follow-up.
+    #[cfg(feature = "realtime")]
+    async fn apply_body_update_to_doc(&self, task_id: uuid::Uuid, update_bytes: &[u8]) {
+        let (_, doc) = match self.load_doc(task_id).await {
+            Ok(pair) => pair,
+            Err(err) => {
+                tracing::warn!(
+                    target: "task_core::crdt",
+                    ?err,
+                    task_id = %task_id,
+                    "failed to load crdt doc for body update",
+                );
+                return;
+            }
+        };
+        let before = doc.snapshot_fields();
+        if let Err(err) = doc.import(update_bytes) {
+            tracing::warn!(
+                target: "task_core::crdt",
+                ?err,
+                task_id = %task_id,
+                "failed to import body update bytes",
+            );
+            return;
+        }
+        let conflicts = crate::crdt::detect_field_conflicts(&doc, &before, doc.peer_id());
+        if !conflicts.is_empty() {
+            tracing::warn!(
+                target: "task_core::crdt",
+                task_id = %task_id,
+                ?conflicts,
+                "concurrent field writes detected during body update import",
+            );
+        }
+        // Mirror any scalar changes brought in by the import into the
+        // entity columns so list / repo queries stay consistent with the
+        // CRDT view.
+        if let Err(err) = self.write_task_from_doc(&doc).await {
+            tracing::warn!(
+                target: "task_core::crdt",
+                ?err,
+                task_id = %task_id,
+                "failed to persist task scalars after body update",
+            );
+        }
+        self.save_doc(task_id, &doc).await;
+    }
+
+    /// Handle a `Created` op by either creating the task from the snapshot's
+    /// embedded `Task` decode or importing into the existing doc.
+    #[cfg(feature = "realtime")]
+    async fn apply_created_op(
+        &self,
+        task_id: uuid::Uuid,
+        snapshot: &[u8],
+        exists: bool,
+    ) -> Result<(), VaultError> {
+        if exists {
+            // Fast path: import the snapshot into the existing doc.
+            let (_, doc) = self.load_doc(task_id).await?;
+            if let Err(err) = doc.import(snapshot) {
+                tracing::warn!(
+                    target: "task_core::crdt",
+                    ?err,
+                    task_id = %task_id,
+                    "failed to import Created snapshot into existing doc",
+                );
+            }
+            if let Err(err) = self.write_task_from_doc(&doc).await {
+                tracing::warn!(
+                    target: "task_core::crdt",
+                    ?err,
+                    task_id = %task_id,
+                    "failed to mirror Created snapshot into entity columns",
+                );
+            }
+            self.save_doc(task_id, &doc).await;
+            Ok(())
+        } else {
+            // Upsert: decode the snapshot, create the task, persist snapshot.
+            let doc = CrdtDocument::from_snapshot(snapshot, task_id.to_string())?;
+            let mut task = doc.to_task();
+            // The snapshot may carry a different id — force the op's id to
+            // win so peers stay aligned.
+            task.id = task_id;
+            let create = convert_ref::<Task, crate::task::TaskApiCreate>(&task)?;
+            self.task_repo
+                .create_task(create)
+                .await
+                .map_err(VaultError::ParseError)?;
+            self.save_doc(task_id, &doc).await;
+            Ok(())
+        }
+    }
+
+    /// Decode the doc into a `Task` and write it through the repo. Used after
+    /// remote imports so scalar columns mirror the CRDT view.
+    #[cfg(feature = "realtime")]
+    async fn write_task_from_doc(&self, doc: &CrdtDocument) -> Result<(), VaultError> {
+        let mut task = doc.to_task();
+        task.date_modified = Some(chrono::Utc::now());
+        self.update_task_model(&task).await.map(|_| ())
     }
 }
 

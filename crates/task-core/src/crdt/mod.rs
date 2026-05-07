@@ -13,8 +13,10 @@
 
 pub mod document;
 pub mod offline;
+pub mod snapshot_store;
 pub mod sync;
 
 pub use document::{CONFLICT_FIELDS, CrdtDocument, DocumentSnapshot};
 pub use offline::{OfflineQueue, QueuedOp, QueuedOpType};
+pub use snapshot_store::{CrdtSnapshotStore, SeaOrmCrdtSnapshotStore, SharedCrdtSnapshotStore};
 pub use sync::{ConflictEvent, DetectedConflict, SyncOp, detect_field_conflicts};

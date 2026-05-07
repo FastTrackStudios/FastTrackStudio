@@ -12,31 +12,66 @@
 //! follow-up.
 
 use chrono::Utc;
+use tokio::sync::broadcast;
 use uuid::Uuid;
 
 use crate::service::{
-    TimeEntryContext, TimeEntryFilter, TimeEntryPatch, TimeLogRequest, TimeService,
+    TaskOp, TimeEntryContext, TimeEntryFilter, TimeEntryPatch, TimeLogRequest, TimeService,
     TimeStartRequest, TimedTaskEntry, VaultError,
 };
 use crate::task::{Task, TaskApi, TaskApiList, TaskApiUpdate, TaskRepo, TimeEntry};
 
 use super::helpers::{convert_model, convert_ref};
 
+/// Capacity used when the caller does not provide a shared op channel. Mirrors
+/// the value in `business.rs` so a stand-alone `TimeServiceImpl` still
+/// supports broadcast subscribers.
+const TASK_OP_CHANNEL_CAPACITY: usize = 256;
+
 /// Typed requirements for [`TimeServiceImpl`].
 pub struct TimeServiceDeps<R> {
     pub task_repo: R,
+    /// Optional shared broadcast sender so time-entry mutations show up on
+    /// the same `TaskService::subscribe` stream that scalar field changes do.
+    /// `None` builds a dead-end channel — useful for tests / sqlite-only
+    /// callers that don't watch ops.
+    pub op_tx: Option<broadcast::Sender<TaskOp>>,
 }
 
 #[derive(Clone)]
 pub struct TimeServiceImpl<R> {
     task_repo: R,
+    op_tx: broadcast::Sender<TaskOp>,
 }
 
 impl<R> TimeServiceImpl<R> {
     pub fn new(deps: TimeServiceDeps<R>) -> Self {
+        let op_tx = deps
+            .op_tx
+            .unwrap_or_else(|| broadcast::channel(TASK_OP_CHANNEL_CAPACITY).0);
         Self {
             task_repo: deps.task_repo,
+            op_tx,
         }
+    }
+
+    /// Borrow the broadcast sender so callers (e.g. tests) can subscribe
+    /// directly without going through `TaskService::subscribe`.
+    pub fn op_sender(&self) -> &broadcast::Sender<TaskOp> {
+        &self.op_tx
+    }
+
+    fn broadcast_time_entries_change(&self, task_id: Uuid) {
+        // Time-entry mutations don't fit any of the scalar `FieldChanged`
+        // entries; we still want subscribers to know the task changed so they
+        // can refresh. Carrying the field name `time_entries` with a `None`
+        // value is the agreed signal — clients reload on receipt.
+        let _ = self.op_tx.send(TaskOp::FieldChanged {
+            task_id,
+            field: "time_entries".to_string(),
+            value: None,
+            peer: None,
+        });
     }
 }
 
@@ -98,7 +133,8 @@ where
         };
         task.time_entries.push(entry.clone());
         task.date_modified = Some(Utc::now());
-        self.update_task_model(&task).await?;
+        let updated = self.update_task_model(&task).await?;
+        self.broadcast_time_entries_change(updated.id);
         Ok(entry)
     }
 
@@ -129,7 +165,8 @@ where
 
         let stopped = task.time_entries[idx].clone();
         let title = task.title.clone();
-        self.update_task_model(&task).await?;
+        let updated = self.update_task_model(&task).await?;
+        self.broadcast_time_entries_change(updated.id);
         Ok(TimedTaskEntry {
             task_title: title,
             entry: stopped,
@@ -159,7 +196,8 @@ where
         };
         task.time_entries.push(entry.clone());
         task.date_modified = Some(Utc::now());
-        self.update_task_model(&task).await?;
+        let updated = self.update_task_model(&task).await?;
+        self.broadcast_time_entries_change(updated.id);
         Ok(entry)
     }
 
@@ -277,7 +315,8 @@ where
             let after = entry.clone();
             t.date_modified = Some(Utc::now());
             let title = t.title.clone();
-            self.update_task_model(&t).await?;
+            let updated = self.update_task_model(&t).await?;
+            self.broadcast_time_entries_change(updated.id);
             return Ok(TimedTaskEntry {
                 task_title: title,
                 entry: after,
@@ -296,7 +335,8 @@ where
             if t.time_entries.iter().any(|e| e.id == entry_id) {
                 t.time_entries.retain(|e| e.id != entry_id);
                 t.date_modified = Some(Utc::now());
-                self.update_task_model(&t).await?;
+                let updated = self.update_task_model(&t).await?;
+                self.broadcast_time_entries_change(updated.id);
                 return Ok(());
             }
         }

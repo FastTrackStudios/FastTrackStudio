@@ -6132,6 +6132,7 @@ dependencies = [
  "crudcrate",
  "facet 0.46.0",
  "hyper",
+ "loro",
  "sea-orm",
  "sea-orm-migration",
  "serde",

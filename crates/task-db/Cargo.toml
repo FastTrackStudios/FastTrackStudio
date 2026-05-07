@@ -26,3 +26,8 @@ better-auth-core = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }
+loro = "1.10"
+# Enable realtime features for the integration tests so the apply_op /
+# snapshot persistence path is exercised against the in-memory db. The
+# library build above intentionally stays narrow (db-only).
+task-core = { path = "../task-core", default-features = false, features = ["db", "realtime"] }

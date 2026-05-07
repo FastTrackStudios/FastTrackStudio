@@ -703,6 +703,9 @@ impl ServerContext {
         task_core::TaskServiceImpl::new(task_core::service_impl::TaskServiceDeps {
             task_repo: task_core::task::TaskRepoStorage::new(self.db.clone()),
             op_tx: Some(self.task_op_tx.clone()),
+            snapshot_store: Some(task_core::crdt::SeaOrmCrdtSnapshotStore::shared(
+                self.db.clone(),
+            )),
         })
     }
 
@@ -770,6 +773,7 @@ impl ServerContext {
     {
         task_core::TimeServiceImpl::new(task_core::service_impl::TimeServiceDeps {
             task_repo: task_core::task::TaskRepoStorage::new(self.db.clone()),
+            op_tx: Some(self.task_op_tx.clone()),
         })
     }
 

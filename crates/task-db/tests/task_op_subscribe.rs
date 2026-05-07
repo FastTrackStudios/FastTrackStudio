@@ -34,6 +34,7 @@ async fn apply_op_persists_field_change_and_fans_out() {
     let service = TaskServiceImpl::new(TaskServiceDeps {
         task_repo: TaskRepoStorage::new(db.clone()),
         op_tx: None,
+        snapshot_store: Some(task_core::crdt::SeaOrmCrdtSnapshotStore::shared(db.clone())),
     });
     let mut rx = service.op_sender().subscribe();
 
@@ -95,6 +96,7 @@ async fn apply_op_succeeds_with_no_subscribers() {
     let service = TaskServiceImpl::new(TaskServiceDeps {
         task_repo: TaskRepoStorage::new(db.clone()),
         op_tx: None,
+        snapshot_store: Some(task_core::crdt::SeaOrmCrdtSnapshotStore::shared(db.clone())),
     });
 
     // No subscribers — apply_op must not error.
@@ -107,6 +109,70 @@ async fn apply_op_succeeds_with_no_subscribers() {
         })
         .await
         .expect("apply_op must tolerate zero subscribers");
+}
+
+#[tokio::test]
+async fn apply_op_body_update_persists_crdt_snapshot() {
+    use task_core::crdt::{CrdtDocument, CrdtSnapshotStore, SeaOrmCrdtSnapshotStore};
+
+    let db = task_db::init_memory()
+        .await
+        .expect("initialize in-memory task database");
+
+    // Seed a task and an initial snapshot built off its scalar columns.
+    let task = Task {
+        title: "Body update test".into(),
+        body: "## Subtasks\n- [ ] alpha\n- [ ] beta".into(),
+        ..Default::default()
+    };
+    let create: TaskApiCreate =
+        serde_json::from_value(serde_json::to_value(&task).expect("serialize task create seed"))
+            .expect("decode task create model");
+    let created = crudcrate::CrudStorage::<task_core::task::TaskApi>::create(&db, create)
+        .await
+        .expect("create task");
+
+    let store = SeaOrmCrdtSnapshotStore::new(db.clone());
+
+    // Build a remote doc that ticks off the first subtask, export an update,
+    // and feed the bytes through apply_op as a BodyUpdate.
+    let local_seed = Task {
+        id: created.id,
+        title: created.title.clone(),
+        body: "## Subtasks\n- [ ] alpha\n- [ ] beta".into(),
+        ..Default::default()
+    };
+    let remote = CrdtDocument::from_task(&local_seed, created.id.to_string());
+    remote.set_peer_id(99).unwrap();
+    remote.set_body("## Subtasks\n- [x] alpha\n- [ ] beta");
+    remote.commit();
+    let update_bytes = remote
+        .export_updates_since(&loro::VersionVector::new())
+        .expect("export update bytes");
+
+    let service = TaskServiceImpl::new(TaskServiceDeps {
+        task_repo: TaskRepoStorage::new(db.clone()),
+        op_tx: None,
+        snapshot_store: Some(SeaOrmCrdtSnapshotStore::shared(db.clone())),
+    });
+
+    service
+        .apply_op(TaskOp::BodyUpdate {
+            task_id: created.id,
+            update_bytes,
+        })
+        .await
+        .expect("apply_op(BodyUpdate) should succeed");
+
+    // Snapshot column must now be populated.
+    let bytes = store
+        .load_snapshot(created.id)
+        .await
+        .expect("load snapshot")
+        .expect("snapshot bytes should be persisted");
+    let reloaded = CrdtDocument::from_snapshot(&bytes, created.id.to_string())
+        .expect("decode persisted snapshot");
+    assert!(reloaded.get_body().contains("[x] alpha"));
 }
 
 #[tokio::test]
