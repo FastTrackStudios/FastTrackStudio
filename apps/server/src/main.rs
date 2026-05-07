@@ -232,6 +232,35 @@ fn mail_client_from_env() -> Option<task_core::provider::MailClient> {
     }
 }
 
+/// Build a `TalkClient` from environment if all required vars are set.
+///
+/// Required: `TASK_TALK_URL`, `TASK_TALK_USERNAME`, `TASK_TALK_PASSWORD`.
+fn talk_client_from_env() -> Option<task_core::provider::TalkClient> {
+    let url = std::env::var("TASK_TALK_URL").ok();
+    let username = std::env::var("TASK_TALK_USERNAME").ok();
+    let password = std::env::var("TASK_TALK_PASSWORD").ok();
+    match (url, username, password) {
+        (Some(url), Some(username), Some(password)) => {
+            info!(target: "talk", "TalkClient configured for {url}");
+            Some(task_core::provider::TalkClient::new(
+                task_core::provider::TalkConfig {
+                    url,
+                    username,
+                    password,
+                },
+            ))
+        }
+        (None, None, None) => None,
+        _ => {
+            warn!(
+                target: "talk",
+                "TASK_TALK_URL/USERNAME/PASSWORD partially set — Talk provider not configured"
+            );
+            None
+        }
+    }
+}
+
 fn env_truthy_default(name: &str, default: bool) -> bool {
     std::env::var(name)
         .map(|v| match v.to_ascii_lowercase().as_str() {
@@ -626,6 +655,11 @@ async fn handle_vox_connection(socket: WebSocket, state: AppState, auth: VoxAuth
     // `reqwest::Client` shared across services on this connection.
     let mail_client: Option<Arc<task_core::provider::MailClient>> =
         mail_client_from_env().map(Arc::new);
+    let talk_provider: Option<Arc<dyn task_core::provider::CommunicationChannelProvider>> =
+        talk_client_from_env().map(|c| {
+            let arc: Arc<dyn task_core::provider::CommunicationChannelProvider> = Arc::new(c);
+            arc
+        });
 
     let request_auth = auth.clone();
     let factory = vox::acceptor_fn(
@@ -862,7 +896,9 @@ async fn handle_vox_connection(socket: WebSocket, state: AppState, auth: VoxAuth
                 }
                 "ConversationService" => {
                     connection.handle_with(task_core::ConversationServiceDispatcher::new(
-                        task_core::ConversationServiceImpl::new(),
+                        task_core::ConversationServiceImpl::with_shared_provider(
+                            talk_provider.clone(),
+                        ),
                     ));
                     Ok(())
                 }
