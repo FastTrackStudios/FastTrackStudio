@@ -96,6 +96,20 @@ struct LivePanel {
     desktop_parent: Option<LinuxDesktopParent>,
     #[cfg(all(feature = "desktop-renderer", target_os = "linux"))]
     desktop_poll_stats: DesktopPollStats,
+    /// BGRA8 pixel buffer pulled from the offscreen WebView's Cairo
+    /// surface each tick. Blitted into this panel's HWND under
+    /// `WM_PAINT` via `StretchBltFromMem`. Tightly packed (no row
+    /// padding) — `desktop_render_size` is its (width, height).
+    #[cfg(all(feature = "desktop-renderer", target_os = "linux"))]
+    desktop_readback: Vec<u8>,
+    #[cfg(all(feature = "desktop-renderer", target_os = "linux"))]
+    desktop_render_size: (u32, u32),
+    /// True on the frame after a fresh offscreen frame has been copied
+    /// into `desktop_readback`. The update loop calls
+    /// `InvalidateRect` so SWELL posts a `WM_PAINT` that drains the
+    /// flag and blits.
+    #[cfg(all(feature = "desktop-renderer", target_os = "linux"))]
+    desktop_needs_blit: bool,
     visible: bool,
     contexts: Vec<Box<dyn FnOnce()>>,
     /// Track failed init attempts to avoid infinite retry spam.
@@ -612,6 +626,12 @@ pub fn register_panel(
         desktop_parent: None,
         #[cfg(all(feature = "desktop-renderer", target_os = "linux"))]
         desktop_poll_stats: DesktopPollStats::default(),
+        #[cfg(all(feature = "desktop-renderer", target_os = "linux"))]
+        desktop_readback: Vec::new(),
+        #[cfg(all(feature = "desktop-renderer", target_os = "linux"))]
+        desktop_render_size: (0, 0),
+        #[cfg(all(feature = "desktop-renderer", target_os = "linux"))]
+        desktop_needs_blit: false,
         visible: false,
         contexts,
         init_attempts: 0,
@@ -743,6 +763,12 @@ fn register_panel_with_renderer(
         desktop_parent: None,
         #[cfg(target_os = "linux")]
         desktop_poll_stats: DesktopPollStats::default(),
+        #[cfg(all(feature = "desktop-renderer", target_os = "linux"))]
+        desktop_readback: Vec::new(),
+        #[cfg(all(feature = "desktop-renderer", target_os = "linux"))]
+        desktop_render_size: (0, 0),
+        #[cfg(all(feature = "desktop-renderer", target_os = "linux"))]
+        desktop_needs_blit: false,
         visible: false,
         contexts,
         init_attempts: 0,
@@ -964,7 +990,20 @@ pub fn update_panels() {
                     }
                     desktop_view.poll();
                     #[cfg(all(feature = "desktop-renderer", target_os = "linux"))]
-                    record_desktop_poll(panel, "misc_timer");
+                    {
+                        record_desktop_poll(panel, "misc_timer");
+                        // Pull a fresh BGRA frame from the offscreen
+                        // GtkOffscreenWindow's Cairo surface into our
+                        // readback buffer. SWELL then blits it inside
+                        // the WM_PAINT handler below — same shape as
+                        // the Native (Blitz) renderer's offscreen
+                        // path.
+                        if read_desktop_offscreen_surface(panel, w, h) {
+                            unsafe {
+                                swell.InvalidateRect(panel.hwnd, std::ptr::null(), 0);
+                            }
+                        }
+                    }
                     continue;
                 }
 
@@ -1323,10 +1362,21 @@ fn create_desktop_view(
         "Creating desktop renderer parent"
     );
     let parent = create_desktop_parent(panel.hwnd, width, height)?;
-    let config = DioxusDesktopEmbeddedConfig::default()
+    let mut config = DioxusDesktopEmbeddedConfig::default()
         .with_bounds(to_desktop_rect(EmbeddedBounds::new(0, 0, width, height)))
         .with_devtools(false)
         .with_disable_drag_drop_handler(true);
+    // Linux: render into a `gtk::OffscreenWindow` (no X11 child window
+    // inside the parent). Avoids the toplevel-faking in wry's normal
+    // `build_as_child` path, which corrupts `_NET_ACTIVE_WINDOW` and
+    // causes WebKit's WebProcess to spawn its own Wayland surface
+    // (focus thief). Per-tick we read the rendered Cairo surface and
+    // blit into the SWELL panel HWND ourselves — same pipeline as the
+    // Native (Blitz) renderer's `EmbeddedView::new_offscreen`.
+    #[cfg(target_os = "linux")]
+    {
+        config = config.with_linux_offscreen(true);
+    }
 
     let dom = VirtualDom::new(panel.config.app);
     tracing::info!(
@@ -1454,6 +1504,66 @@ fn create_desktop_parent(
         bridge_hwnd,
         parent,
     })
+}
+
+/// Pull a fresh BGRA frame from the desktop renderer's offscreen
+/// GtkOffscreenWindow into the panel's `desktop_readback` buffer.
+///
+/// Returns `true` if a fresh frame was copied (and the caller should
+/// call `InvalidateRect` to schedule a `WM_PAINT`). Returns `false` if
+/// no surface is available yet (early in init), the panel isn't using
+/// the offscreen path, or the readback target dimensions are zero.
+///
+/// We allocate a fresh `cairo::ImageSurface` per call sized to the
+/// current panel rect, paint the offscreen window's surface into it
+/// (handles arbitrary cairo formats / strides), then copy the tightly-
+/// packed pixel rows into `desktop_readback`. Cairo `ARgb32` is
+/// little-endian native, which on x86_64 is BGRA byte order in memory
+/// — exactly what SWELL `StretchBltFromMem` expects, no swizzle.
+#[cfg(all(feature = "desktop-renderer", target_os = "linux"))]
+fn read_desktop_offscreen_surface(panel: &mut LivePanel, width: u32, height: u32) -> bool {
+    use dioxus_embedded::desktop::wry::gtk::cairo::{Context, Format, ImageSurface};
+    let Some(view) = panel.desktop_view.as_ref() else {
+        return false;
+    };
+    if width == 0 || height == 0 {
+        return false;
+    }
+    let Some(src) = view.cairo_surface() else {
+        return false;
+    };
+    let Ok(mut dst) = ImageSurface::create(Format::ARgb32, width as i32, height as i32) else {
+        return false;
+    };
+    {
+        let Ok(ctx) = Context::new(&dst) else {
+            return false;
+        };
+        if ctx.set_source_surface(&src, 0.0, 0.0).is_err() {
+            return false;
+        }
+        if ctx.paint().is_err() {
+            return false;
+        }
+    }
+    let stride = dst.stride() as usize;
+    let row_bytes = width as usize * 4;
+    let Ok(data) = dst.data() else {
+        return false;
+    };
+    let needed = row_bytes * height as usize;
+    if panel.desktop_readback.len() != needed {
+        panel.desktop_readback.resize(needed, 0);
+    }
+    for y in 0..height as usize {
+        let src_off = y * stride;
+        let dst_off = y * row_bytes;
+        panel.desktop_readback[dst_off..dst_off + row_bytes]
+            .copy_from_slice(&data[src_off..src_off + row_bytes]);
+    }
+    panel.desktop_render_size = (width, height);
+    panel.desktop_needs_blit = true;
+    true
 }
 
 /// Set the `_XEMBED_INFO` property on the given X11 window so wry's
@@ -1740,9 +1850,18 @@ fn panel_wndproc_inner(
             }
 
             // Pull view dims + pixel bytes under PANELS borrow, then blit.
+            // Native (Blitz) panels read from `EmbeddedView`'s readback;
+            // desktop-renderer panels read from `desktop_readback` populated
+            // earlier this tick by `read_desktop_offscreen_surface`.
             let blit_info = PANELS.with(|panels| {
                 let panels = panels.borrow();
                 let panel = panels.values().find(|p| p.hwnd == hwnd)?;
+                #[cfg(all(feature = "desktop-renderer", target_os = "linux"))]
+                if !panel.desktop_readback.is_empty() {
+                    let (w, h) = panel.desktop_render_size;
+                    let ptr = panel.desktop_readback.as_ptr();
+                    return Some((ptr, w as c_int, h as c_int));
+                }
                 let view = panel.view.as_ref()?;
                 let pixels = view.bgra_pixels()?;
                 let (w, h) = view.size();
