@@ -146,6 +146,12 @@ pub struct MicSpec {
     /// `"blended"` (pre-mixed stereo bus) or `"separate"` (individual channel).
     #[facet(default)]
     pub kind: String,
+    /// Whether this mic loads automatically when the library is opened.
+    /// At most one mic per library should be marked `default`. Other mics
+    /// stay unloaded until explicitly requested — saves RAM in libraries
+    /// with many mic positions (CSS = 5, MM2 = 7).
+    #[facet(default)]
+    pub default: bool,
 }
 
 // ── Dynamics ─────────────────────────────────────────────────────────────────
@@ -435,6 +441,22 @@ pub struct ZoneSpec {
     /// field just tags the source so the importer / UI can group zones.
     #[facet(default)]
     pub articulation: String,
+    /// Dynamic layer label for CC1-crossfade sustains (`"ppp"`, `"p"`, `"mf"`,
+    /// `"ff"`, `"fff"` …). Empty = velocity drives dynamics directly (drums,
+    /// short notes).
+    ///
+    /// CSS / Cinematic Studio sustains use CC1 to crossfade between sampled
+    /// layers; multiple zones share the same `(key, vel_range, rr, mic,
+    /// articulation)` and differ only by `dynamic`. The engine uses the
+    /// library's `DynamicsSpec.cc1_layers_*` ranges to pick which 1–2 zones
+    /// play simultaneously and at what gain, based on current CC1.
+    #[facet(default)]
+    pub dynamic: String,
+    /// Direction for legato transitions (`"up"` / `"down"`). Empty = not a
+    /// directional transition. Maps to the `direction` discriminator the
+    /// existing filename-based scanner already uses.
+    #[facet(default)]
+    pub direction: String,
 }
 
 // ── Wavetables ───────────────────────────────────────────────────────────────
