@@ -1,16 +1,22 @@
 //! Server-side `MailService` implementation.
 //!
-//! The bulk of the API requires a live IMAP / Nextcloud Mail provider that
-//! is not yet wired into this codebase. Those operations return
-//! `VaultError::IoError("provider not configured: <op>")` so clients (CLI,
-//! UI) get a clean per-operation error instead of `Unknown Vox service`.
+//! When a `MailClient` is injected, every read/write op delegates to the
+//! Nextcloud Mail provider. When no client is configured, the surface
+//! returns `VaultError::IoError("provider not configured: <op>")` so
+//! clients (CLI, UI) get a clean per-operation error instead of
+//! `Unknown Vox service`.
 //!
-//! `linked_message_ids` is the one op we can satisfy from the local SQLite
-//! `email_refs` table via `EmailRefRepo` — every row is by construction a
-//! linked email, so we just project `message_id`.
+//! `linked_message_ids` is the one op we can satisfy from the local
+//! SQLite `email_refs` table via the held `EmailRefRepo` — every row is
+//! by construction a linked email, so we just project `message_id`.
+//! `link_email`, `unlink_email`, `list_linked_emails` still need a
+//! task/project FK on `email_refs` they don't currently have, so they
+//! return a uniform error until the schema is extended.
+
+use std::sync::Arc;
 
 use crate::email::EmailRef;
-use crate::provider::{MailAccount, MailMessage, MailMessageDetail, MailTag, Mailbox};
+use crate::provider::{MailAccount, MailClient, MailMessage, MailMessageDetail, MailTag, Mailbox};
 use crate::service::{
     EmailLinkRequest, EmailLinkResponse, EmailListRequest, EmailUnlinkRequest,
     MailCreateMailboxRequest, MailCreateTagRequest, MailDeleteTagRequest, MailListMessagesRequest,
@@ -25,11 +31,32 @@ fn provider_not_configured(op: &str) -> VaultError {
 #[derive(Clone)]
 pub struct MailServiceImpl<R> {
     email_repo: R,
+    client: Option<Arc<MailClient>>,
 }
 
 impl<R> MailServiceImpl<R> {
+    /// Build the service with no provider configured. Every provider-backed
+    /// op will return `provider_not_configured`.
     pub fn new(email_repo: R) -> Self {
-        Self { email_repo }
+        Self {
+            email_repo,
+            client: None,
+        }
+    }
+
+    /// Build the service with a live `MailClient` injected. Provider-backed
+    /// ops will delegate to it.
+    pub fn new_with_client(email_repo: R, client: MailClient) -> Self {
+        Self {
+            email_repo,
+            client: Some(Arc::new(client)),
+        }
+    }
+
+    /// Build the service from a pre-shared `Arc<MailClient>` — useful when
+    /// the caller wants to keep one client for many connections.
+    pub fn with_shared_client(email_repo: R, client: Option<Arc<MailClient>>) -> Self {
+        Self { email_repo, client }
     }
 }
 
@@ -38,61 +65,111 @@ where
     R: Clone + Send + Sync + 'static,
 {
     async fn list_accounts(&self) -> Result<Vec<MailAccount>, VaultError> {
-        Err(provider_not_configured("list_accounts"))
+        match &self.client {
+            Some(c) => c.list_accounts().await,
+            None => Err(provider_not_configured("list_accounts")),
+        }
     }
 
-    async fn list_mailboxes(&self, _account_id: i64) -> Result<Vec<Mailbox>, VaultError> {
-        Err(provider_not_configured("list_mailboxes"))
+    async fn list_mailboxes(&self, account_id: i64) -> Result<Vec<Mailbox>, VaultError> {
+        match &self.client {
+            Some(c) => c.list_mailboxes(account_id).await,
+            None => Err(provider_not_configured("list_mailboxes")),
+        }
     }
 
     async fn list_messages(
         &self,
-        _request: MailListMessagesRequest,
+        request: MailListMessagesRequest,
     ) -> Result<Vec<MailMessage>, VaultError> {
-        Err(provider_not_configured("list_messages"))
+        match &self.client {
+            Some(c) => {
+                c.list_messages(
+                    request.mailbox_id,
+                    request.filter.as_deref(),
+                    request.limit,
+                    request.cursor.as_deref(),
+                )
+                .await
+            }
+            None => Err(provider_not_configured("list_messages")),
+        }
     }
 
-    async fn get_message(&self, _id: i64) -> Result<MailMessageDetail, VaultError> {
-        Err(provider_not_configured("get_message"))
+    async fn get_message(&self, id: i64) -> Result<MailMessageDetail, VaultError> {
+        match &self.client {
+            Some(c) => c.get_message(id).await,
+            None => Err(provider_not_configured("get_message")),
+        }
     }
 
-    async fn get_body(&self, _id: i64) -> Result<String, VaultError> {
-        Err(provider_not_configured("get_body"))
+    async fn get_body(&self, id: i64) -> Result<String, VaultError> {
+        match &self.client {
+            Some(c) => c.get_body(id).await,
+            None => Err(provider_not_configured("get_body")),
+        }
     }
 
     async fn create_mailbox(
         &self,
-        _request: MailCreateMailboxRequest,
+        request: MailCreateMailboxRequest,
     ) -> Result<Mailbox, VaultError> {
-        Err(provider_not_configured("create_mailbox"))
+        match &self.client {
+            Some(c) => c.create_mailbox(request.account_id, &request.name).await,
+            None => Err(provider_not_configured("create_mailbox")),
+        }
     }
 
-    async fn delete_mailbox(&self, _mailbox_id: i64) -> Result<(), VaultError> {
-        Err(provider_not_configured("delete_mailbox"))
+    async fn delete_mailbox(&self, mailbox_id: i64) -> Result<(), VaultError> {
+        match &self.client {
+            Some(c) => c.delete_mailbox(mailbox_id).await,
+            None => Err(provider_not_configured("delete_mailbox")),
+        }
     }
 
-    async fn move_message(&self, _request: MailMoveMessageRequest) -> Result<(), VaultError> {
-        Err(provider_not_configured("move_message"))
+    async fn move_message(&self, request: MailMoveMessageRequest) -> Result<(), VaultError> {
+        match &self.client {
+            Some(c) => {
+                c.move_message(request.message_id, request.dest_folder_id)
+                    .await
+            }
+            None => Err(provider_not_configured("move_message")),
+        }
     }
 
     async fn list_tags(&self) -> Result<Vec<MailTag>, VaultError> {
-        Err(provider_not_configured("list_tags"))
+        match &self.client {
+            Some(c) => c.list_tags().await,
+            None => Err(provider_not_configured("list_tags")),
+        }
     }
 
-    async fn create_tag(&self, _request: MailCreateTagRequest) -> Result<MailTag, VaultError> {
-        Err(provider_not_configured("create_tag"))
+    async fn create_tag(&self, request: MailCreateTagRequest) -> Result<MailTag, VaultError> {
+        match &self.client {
+            Some(c) => c.create_tag(&request.display_name, &request.color).await,
+            None => Err(provider_not_configured("create_tag")),
+        }
     }
 
-    async fn delete_tag(&self, _request: MailDeleteTagRequest) -> Result<(), VaultError> {
-        Err(provider_not_configured("delete_tag"))
+    async fn delete_tag(&self, request: MailDeleteTagRequest) -> Result<(), VaultError> {
+        match &self.client {
+            Some(c) => c.delete_tag(request.account_id, request.tag_id).await,
+            None => Err(provider_not_configured("delete_tag")),
+        }
     }
 
-    async fn set_tag(&self, _request: MailMessageTagRequest) -> Result<(), VaultError> {
-        Err(provider_not_configured("set_tag"))
+    async fn set_tag(&self, request: MailMessageTagRequest) -> Result<(), VaultError> {
+        match &self.client {
+            Some(c) => c.set_tag(request.message_id, &request.imap_label).await,
+            None => Err(provider_not_configured("set_tag")),
+        }
     }
 
-    async fn remove_tag(&self, _request: MailMessageTagRequest) -> Result<(), VaultError> {
-        Err(provider_not_configured("remove_tag"))
+    async fn remove_tag(&self, request: MailMessageTagRequest) -> Result<(), VaultError> {
+        match &self.client {
+            Some(c) => c.remove_tag(request.message_id, &request.imap_label).await,
+            None => Err(provider_not_configured("remove_tag")),
+        }
     }
 
     async fn link_email(

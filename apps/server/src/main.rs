@@ -201,6 +201,37 @@ fn redact_db_url(url: &str) -> String {
     }
 }
 
+/// Build a `MailClient` from environment if all required vars are set.
+///
+/// Required: `TASK_MAIL_URL`, `TASK_MAIL_USERNAME`, `TASK_MAIL_PASSWORD`.
+/// Returns `None` (with a `warn` if any vars were partially set) so the
+/// service can fall back to the `provider_not_configured` surface.
+fn mail_client_from_env() -> Option<task_core::provider::MailClient> {
+    let url = std::env::var("TASK_MAIL_URL").ok();
+    let username = std::env::var("TASK_MAIL_USERNAME").ok();
+    let password = std::env::var("TASK_MAIL_PASSWORD").ok();
+    match (url, username, password) {
+        (Some(url), Some(username), Some(password)) => {
+            info!(target: "mail", "MailClient configured for {url}");
+            Some(task_core::provider::MailClient::new(
+                task_core::provider::MailConfig {
+                    url,
+                    username,
+                    password,
+                },
+            ))
+        }
+        (None, None, None) => None,
+        _ => {
+            warn!(
+                target: "mail",
+                "TASK_MAIL_URL/USERNAME/PASSWORD partially set — Mail provider not configured"
+            );
+            None
+        }
+    }
+}
+
 fn env_truthy_default(name: &str, default: bool) -> bool {
     std::env::var(name)
         .map(|v| match v.to_ascii_lowercase().as_str() {
@@ -590,6 +621,12 @@ async fn handle_vox_connection(socket: WebSocket, state: AppState, auth: VoxAuth
     let db = state.db.clone();
     let info = state.info.clone();
 
+    // Build provider clients once per WS connection from env. Cloning the
+    // Arc into the per-service factory closure keeps a single underlying
+    // `reqwest::Client` shared across services on this connection.
+    let mail_client: Option<Arc<task_core::provider::MailClient>> =
+        mail_client_from_env().map(Arc::new);
+
     let request_auth = auth.clone();
     let factory = vox::acceptor_fn(
         move |request: &vox::ConnectionRequest,
@@ -831,8 +868,9 @@ async fn handle_vox_connection(socket: WebSocket, state: AppState, auth: VoxAuth
                 }
                 "MailService" => {
                     connection.handle_with(task_core::MailServiceDispatcher::new(
-                        task_core::MailServiceImpl::new(
+                        task_core::MailServiceImpl::with_shared_client(
                             task_core::email::EmailRefRepoStorage::new(db.clone()),
+                            mail_client.clone(),
                         ),
                     ));
                     Ok(())
