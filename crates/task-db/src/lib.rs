@@ -9,6 +9,7 @@
 pub mod auth_adapter;
 pub mod entities;
 pub mod migration;
+pub mod seed;
 
 pub use auth_adapter::SeaOrmAuthAdapter;
 

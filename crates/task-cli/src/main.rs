@@ -7,6 +7,7 @@ use commands::calendar::CalendarCommands;
 use commands::client::ClientCommands;
 use commands::comment::CommentCommands;
 use commands::conflict::ConflictCommands;
+use commands::demo::DemoCommands;
 use commands::email::EmailCommands;
 use commands::expense::ExpenseCommands;
 use commands::github::GithubCommands;
@@ -308,6 +309,11 @@ pub(crate) enum Commands {
     Github {
         #[command(subcommand)]
         command: GithubCommands,
+    },
+    /// Demo seed mode — explain how to populate fixture data.
+    Demo {
+        #[command(subcommand)]
+        command: DemoCommands,
     },
     /// Asset inventory and maintenance tracking
     Asset {
@@ -1200,6 +1206,9 @@ pub(crate) async fn run_remote_command(
             // GitHub sync is self-contained — doesn't need the remote Vox service.
             // We still need local tasks for plan/sync, so fetch them via remote.
             commands::github::run_github_command_remote(remote, command).await?;
+        }
+        Commands::Demo { command } => {
+            commands::demo::run(command);
         }
         Commands::Project { command } => {
             commands::project::run_remote_project_command(remote, actor, command).await?

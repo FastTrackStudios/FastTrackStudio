@@ -132,6 +132,18 @@ async fn main() -> eyre::Result<()> {
         if let Ok(token) = std::env::var("TASK_TEST_SESSION_TOKEN") {
             seed_test_session(&db, &token).await;
         }
+        match task_db::seed::seed_demo_data(&db).await {
+            Ok(summary) => info!(
+                projects = summary.projects_created,
+                tasks = summary.tasks_created,
+                events = summary.calendar_events_created,
+                people = summary.people_created,
+                comments = summary.comments_created,
+                unchanged = summary.total_unchanged(),
+                "Demo data seeded"
+            ),
+            Err(e) => warn!(error = %e, "Demo data seed failed"),
+        }
         info!("Auth mock data seeded");
     } else {
         info!("Demo seed disabled by TASK_SEED_DEMO=0");
