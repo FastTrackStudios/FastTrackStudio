@@ -1,0 +1,23 @@
+[package]
+name = "daw-wpe-webkit"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "WPE WebKit bindings for the Linux desktop renderer (Phase 2 / #19). Renders into a buffer the host owns via wpebackend-fdo + DMA-buf — no separate WebKit X11 surface, no Wayland surface promotion. Linux-only."
+
+[lib]
+path = "src/lib.rs"
+
+[features]
+default = []
+
+[dependencies]
+tracing = { workspace = true }
+
+[build-dependencies]
+bindgen = "0.71"
+pkg-config = "0.3"
+
+[lints.rust]
+unsafe_code = "allow"
