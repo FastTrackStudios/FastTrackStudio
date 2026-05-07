@@ -1,4 +1,5 @@
 pub mod activity;
+pub mod attachment;
 pub mod business;
 pub mod conversation;
 pub(crate) mod helpers;
@@ -10,6 +11,7 @@ pub mod people;
 pub mod time;
 
 pub use activity::{ActivityServiceDeps, ActivityServiceImpl};
+pub use attachment::{AttachmentServiceDeps, AttachmentServiceImpl};
 pub use business::*;
 pub use conversation::{ConversationServiceDeps, ConversationServiceImpl};
 pub use inbox::{InboxServiceDeps, InboxServiceImpl};

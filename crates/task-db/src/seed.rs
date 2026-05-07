@@ -16,6 +16,7 @@ use sea_orm::{ActiveValue::Set, DatabaseConnection, DbErr, EntityTrait};
 use uuid::Uuid;
 
 use task_core::activity;
+use task_core::attachment;
 use task_core::calendar_event::{self, CalendarEventStatus};
 use task_core::comment;
 use task_core::cycle::{self, CycleStatus, CycleTaskList};
@@ -78,6 +79,8 @@ pub struct DemoSeedSummary {
     pub invoices_unchanged: usize,
     pub email_refs_created: usize,
     pub email_refs_unchanged: usize,
+    pub attachments_created: usize,
+    pub attachments_unchanged: usize,
 }
 
 impl DemoSeedSummary {
@@ -95,6 +98,7 @@ impl DemoSeedSummary {
             + self.expenses_created
             + self.invoices_created
             + self.email_refs_created
+            + self.attachments_created
     }
 
     pub fn total_unchanged(&self) -> usize {
@@ -111,6 +115,7 @@ impl DemoSeedSummary {
             + self.expenses_unchanged
             + self.invoices_unchanged
             + self.email_refs_unchanged
+            + self.attachments_unchanged
     }
 }
 
@@ -134,6 +139,7 @@ pub async fn seed_demo_data(db: &DatabaseConnection) -> Result<DemoSeedSummary, 
     seed_expenses(db, &mut summary).await?;
     seed_invoices(db, &mut summary).await?;
     seed_email_refs(db, &mut summary).await?;
+    seed_attachments(db, &mut summary).await?;
     Ok(summary)
 }
 
@@ -141,6 +147,17 @@ pub async fn seed_demo_data(db: &DatabaseConnection) -> Result<DemoSeedSummary, 
 pub async fn reset_demo_data(db: &DatabaseConnection) -> Result<DemoSeedSummary, DbErr> {
     let mut summary = DemoSeedSummary::default();
 
+    for key in ATTACHMENT_KEYS {
+        let id = demo_id(key);
+        if attachment::Entity::delete_by_id(id)
+            .exec(db)
+            .await?
+            .rows_affected
+            > 0
+        {
+            summary.attachments_created += 1;
+        }
+    }
     for key in EMAIL_REF_KEYS {
         let id = demo_id(key);
         if email::Entity::delete_by_id(id)
@@ -393,6 +410,13 @@ const EXPENSE_KEYS: &[&str] = &[
 ];
 
 const INVOICE_KEYS: &[&str] = &["invoice:montreal-mar", "invoice:tom-ep-feb-paid"];
+
+const ATTACHMENT_KEYS: &[&str] = &[
+    "attachment:montreal-master-wav",
+    "attachment:montreal-stems-zip",
+    "attachment:tom-ep-mix-notes-pdf",
+    "attachment:tour-stage-plot-png",
+];
 
 const EMAIL_REF_KEYS: &[&str] = &[
     "email:fix-auth-stack-trace",
@@ -2139,6 +2163,100 @@ async fn seed_email_refs(
         } else {
             email::Entity::insert(e).exec(db).await?;
             summary.email_refs_created += 1;
+        }
+    }
+    Ok(())
+}
+
+// ── Attachment fixtures ─────────────────────────────────────────────────────
+
+async fn seed_attachments(
+    db: &DatabaseConnection,
+    summary: &mut DemoSeedSummary,
+) -> Result<(), DbErr> {
+    let now = Utc::now();
+    let mix_master = demo_id("task:billable-mix-mastering");
+    let track_seq = demo_id("task:montreal-track-sequencing");
+    let tom_mixing = demo_id("task:tom-ep-mixing-collab");
+    let tour_stage = demo_id("task:tour-stage-plot");
+
+    let attachments = [
+        attachment::ActiveModel {
+            id: Set(demo_id("attachment:montreal-master-wav")),
+            owner_id: Set(mix_master),
+            owner_type: Set("task".to_string()),
+            source: Set("nextcloud".to_string()),
+            path: Set("Projects/Montreal Album/masters/master-v3.wav".to_string()),
+            label: Set(Some("master-v3.wav".to_string())),
+            mime: Set(Some("audio/wav".to_string())),
+            size_bytes: Set(Some(48_123_456)),
+            checksum: Set(Some(
+                "9f0c3f2c2b6e5b48b7c0a8d8f9a3b1e8d5c4a2b1e0f9d8c7b6a5f4e3d2c1b0a9".to_string(),
+            )),
+            uploader: Set(Some("cody".to_string())),
+            created_at: Set(now - Duration::days(2)),
+            updated_at: Set(now - Duration::days(2)),
+        },
+        attachment::ActiveModel {
+            id: Set(demo_id("attachment:montreal-stems-zip")),
+            owner_id: Set(track_seq),
+            owner_type: Set("task".to_string()),
+            source: Set("nextcloud".to_string()),
+            path: Set("Projects/Montreal Album/stems/stems-bundle.zip".to_string()),
+            label: Set(Some("stems-bundle.zip".to_string())),
+            mime: Set(Some("application/zip".to_string())),
+            size_bytes: Set(Some(312_456_789)),
+            checksum: Set(Some(
+                "1a2b3c4d5e6f70819293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f9".to_string(),
+            )),
+            uploader: Set(Some("amy".to_string())),
+            created_at: Set(now - Duration::days(4)),
+            updated_at: Set(now - Duration::days(4)),
+        },
+        attachment::ActiveModel {
+            id: Set(demo_id("attachment:tom-ep-mix-notes-pdf")),
+            owner_id: Set(tom_mixing),
+            owner_type: Set("task".to_string()),
+            source: Set("nextcloud".to_string()),
+            path: Set("Projects/Tom EP/notes/mix-notes-feb.pdf".to_string()),
+            label: Set(Some("Mix notes — Feb".to_string())),
+            mime: Set(Some("application/pdf".to_string())),
+            size_bytes: Set(Some(184_320)),
+            checksum: Set(Some(
+                "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210".to_string(),
+            )),
+            uploader: Set(Some("tom".to_string())),
+            created_at: Set(now - Duration::days(1)),
+            updated_at: Set(now - Duration::days(1)),
+        },
+        attachment::ActiveModel {
+            id: Set(demo_id("attachment:tour-stage-plot-png")),
+            owner_id: Set(tour_stage),
+            owner_type: Set("task".to_string()),
+            source: Set("nextcloud".to_string()),
+            path: Set("Projects/JF Tour 2026/plots/stage-plot-v1.png".to_string()),
+            label: Set(Some("stage-plot-v1.png".to_string())),
+            mime: Set(Some("image/png".to_string())),
+            size_bytes: Set(Some(2_456_789)),
+            checksum: Set(Some(
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_string(),
+            )),
+            uploader: Set(Some("bri".to_string())),
+            created_at: Set(now - Duration::hours(8)),
+            updated_at: Set(now - Duration::hours(8)),
+        },
+    ];
+
+    for a in attachments {
+        let id = match &a.id {
+            Set(v) => *v,
+            _ => unreachable!(),
+        };
+        if attachment::Entity::find_by_id(id).one(db).await?.is_some() {
+            summary.attachments_unchanged += 1;
+        } else {
+            attachment::Entity::insert(a).exec(db).await?;
+            summary.attachments_created += 1;
         }
     }
     Ok(())

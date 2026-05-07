@@ -116,6 +116,11 @@ async fn seed_demo_data_covers_every_entity_flavor() {
         "want >= 3 email refs, got {}",
         s.email_refs_created
     );
+    assert!(
+        s.attachments_created >= 3,
+        "want >= 3 attachments, got {}",
+        s.attachments_created
+    );
 }
 
 #[tokio::test]

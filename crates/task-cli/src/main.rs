@@ -3,6 +3,7 @@ mod shared;
 
 use commands::agent::AgentCommands;
 use commands::asset::AssetCommands;
+use commands::attachment::AttachmentCommands;
 use commands::calendar::CalendarCommands;
 use commands::client::ClientCommands;
 use commands::comment::CommentCommands;
@@ -319,6 +320,11 @@ pub(crate) enum Commands {
     Asset {
         #[command(subcommand)]
         command: AssetCommands,
+    },
+    /// File attachments — upload/list/download/delete files hung off entities
+    Attachment {
+        #[command(subcommand)]
+        command: AttachmentCommands,
     },
     /// Reusable venues, locations, spaces, and default files
     Location {
@@ -1227,6 +1233,9 @@ pub(crate) async fn run_remote_command(
         }
         Commands::Asset { command } => {
             commands::asset::run_remote_asset_command(remote, actor, command).await?
+        }
+        Commands::Attachment { command } => {
+            commands::attachment::run_remote_attachment_command(remote, actor, command).await?
         }
         Commands::Location { .. } => {
             eyre::bail!("location commands are currently supported only in local vault mode")

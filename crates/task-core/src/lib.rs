@@ -1,6 +1,7 @@
 pub mod activity;
 pub mod agent;
 pub mod asset;
+pub mod attachment;
 pub mod calendar_event;
 pub mod capture;
 pub mod client;
@@ -52,6 +53,7 @@ pub use asset::{
     AssetReservationRecord, AssetReservationResponse, AssetReserveRequest, AssetStatus,
     format_asset_id,
 };
+pub use attachment::{Attachment, DEFAULT_ATTACHMENT_SOURCE, default_remote_path, label_from_path};
 pub use calendar_event::{CalendarEvent, CalendarEventStatus};
 pub use capture::{CaptureInput, parse_capture};
 pub use client::{Client, resolve_rate};
@@ -97,7 +99,8 @@ pub use provider::{
 };
 #[cfg(feature = "server")]
 pub use service::{
-    ActivityService, ActivityServiceDispatcher, BusinessFinanceClientSummary,
+    ActivityService, ActivityServiceDispatcher, AttachmentDownloadResponse, AttachmentService,
+    AttachmentServiceDispatcher, AttachmentUploadRequest, BusinessFinanceClientSummary,
     BusinessFinanceReport, CalDavCalendarInfo, CalDavDeleteObjectRequest, CalDavDiscovery,
     CalDavFreeBusyInterval, CalDavFreeBusyRequest, CalDavMultigetRequest, CalDavObject,
     CalDavPutObjectRequest, CalDavScheduleRequest, CalDavScheduleResponse,
@@ -119,19 +122,19 @@ pub use service::{
     SystemService, SystemServiceDispatcher, TaskService, TaskServiceDispatcher, TimeEntryContext,
     TimeEntryFilter, TimeEntryPatch, TimeLogRequest, TimeService, TimeServiceDispatcher,
     TimeStartRequest, TimedTaskEntry, VaultCapability, VaultError,
-    activity_service_service_descriptor, calendar_service_service_descriptor,
-    conversation_service_service_descriptor, expense_service_service_descriptor,
-    inbox_service_service_descriptor, invoice_service_service_descriptor,
-    mail_service_service_descriptor, operating_service_service_descriptor,
-    people_service_service_descriptor, project_service_service_descriptor,
-    system_service_service_descriptor, task_service_service_descriptor,
-    time_service_service_descriptor,
+    activity_service_service_descriptor, attachment_service_service_descriptor,
+    calendar_service_service_descriptor, conversation_service_service_descriptor,
+    expense_service_service_descriptor, inbox_service_service_descriptor,
+    invoice_service_service_descriptor, mail_service_service_descriptor,
+    operating_service_service_descriptor, people_service_service_descriptor,
+    project_service_service_descriptor, system_service_service_descriptor,
+    task_service_service_descriptor, time_service_service_descriptor,
 };
 #[cfg(feature = "server")]
 pub use service_impl::{
-    ActivityServiceImpl, CalendarServiceImpl, ConversationServiceImpl, ExpenseServiceImpl,
-    InboxServiceImpl, InvoiceServiceImpl, MailServiceImpl, OperatingServiceImpl, PeopleServiceImpl,
-    ProjectServiceImpl, TaskServiceImpl, TimeServiceImpl,
+    ActivityServiceImpl, AttachmentServiceImpl, CalendarServiceImpl, ConversationServiceImpl,
+    ExpenseServiceImpl, InboxServiceImpl, InvoiceServiceImpl, MailServiceImpl,
+    OperatingServiceImpl, PeopleServiceImpl, ProjectServiceImpl, TaskServiceImpl, TimeServiceImpl,
 };
 
 #[cfg(feature = "caldav")]

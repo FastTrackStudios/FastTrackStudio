@@ -407,6 +407,93 @@ impl NextcloudSync {
         format!("{}{}", self.addressbook_collection_url(addressbook), href)
     }
 
+    /// Resolve a generic WebDAV path against the Nextcloud user's `files`
+    /// root. Absolute URLs and absolute paths bypass the prefix.
+    fn webdav_files_url(&self, path: &str) -> String {
+        if path.starts_with("http://") || path.starts_with("https://") {
+            return path.to_string();
+        }
+        if path.starts_with('/') {
+            return format!("{}{}", self.base_url, path);
+        }
+        let trimmed = path.trim_start_matches('/');
+        format!(
+            "{}/remote.php/dav/files/{}/{}",
+            self.base_url, self.username, trimmed
+        )
+    }
+
+    /// PUT raw bytes into a Nextcloud user file. Returns the server-issued
+    /// ETag when present so callers can reconcile concurrent writes.
+    pub async fn webdav_put(
+        &self,
+        path: &str,
+        bytes: &[u8],
+        if_match: Option<&str>,
+    ) -> Result<Option<String>, VaultError> {
+        let url = self.webdav_files_url(path);
+        let mut req = self
+            .auth(self.http.put(&url))
+            .header("Content-Type", "application/octet-stream");
+        if let Some(etag) = if_match {
+            req = req.header("If-Match", etag);
+        }
+        let resp = req
+            .body(bytes.to_vec())
+            .send()
+            .await
+            .map_err(|e| VaultError::IoError(format!("WebDAV PUT: {e}")))?;
+        let status = resp.status();
+        if !status.is_success() {
+            return Err(VaultError::IoError(format!("WebDAV PUT {url}: {status}")));
+        }
+        Ok(resp
+            .headers()
+            .get(reqwest::header::ETAG)
+            .and_then(|v| v.to_str().ok())
+            .map(|v| v.to_string()))
+    }
+
+    /// GET raw bytes from a Nextcloud user file.
+    pub async fn webdav_get(&self, path: &str) -> Result<Vec<u8>, VaultError> {
+        let url = self.webdav_files_url(path);
+        let resp = self
+            .auth(self.http.get(&url))
+            .send()
+            .await
+            .map_err(|e| VaultError::IoError(format!("WebDAV GET: {e}")))?;
+        let status = resp.status();
+        if status.as_u16() == 404 {
+            return Err(VaultError::NotFound(format!("WebDAV GET {url}: 404")));
+        }
+        if !status.is_success() {
+            return Err(VaultError::IoError(format!("WebDAV GET {url}: {status}")));
+        }
+        let bytes = resp
+            .bytes()
+            .await
+            .map_err(|e| VaultError::IoError(format!("WebDAV GET body: {e}")))?;
+        Ok(bytes.to_vec())
+    }
+
+    /// DELETE a Nextcloud user file. 404 is treated as success — the row
+    /// can still be dropped.
+    pub async fn webdav_delete(&self, path: &str) -> Result<(), VaultError> {
+        let url = self.webdav_files_url(path);
+        let resp = self
+            .auth(self.http.delete(&url))
+            .send()
+            .await
+            .map_err(|e| VaultError::IoError(format!("WebDAV DELETE: {e}")))?;
+        let status = resp.status();
+        if !status.is_success() && status.as_u16() != 404 {
+            return Err(VaultError::IoError(format!(
+                "WebDAV DELETE {url}: {status}"
+            )));
+        }
+        Ok(())
+    }
+
     pub async fn discover_calendars(&self) -> Result<CalDavDiscovery, VaultError> {
         let root = format!("{}/remote.php/dav/", self.base_url);
         let principal_body = r#"<?xml version="1.0" encoding="utf-8"?>

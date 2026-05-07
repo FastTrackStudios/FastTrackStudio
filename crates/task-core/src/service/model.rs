@@ -7,6 +7,7 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 use vox::Tx;
 
+use crate::attachment::Attachment;
 use crate::calendar_event::{CalendarEvent, CalendarEventStatus};
 use crate::email::EmailRef;
 use crate::expense::{ExpenseFilter, ExpenseReport};
@@ -285,6 +286,54 @@ pub trait ActivityService {
         resolver: Option<String>,
         how: String,
     ) -> Result<(), VaultError>;
+}
+
+#[vox::service]
+pub trait AttachmentService {
+    /// List every attachment hung off a given owner entity (task/project/etc).
+    async fn list_for_entity(
+        &self,
+        owner_type: String,
+        owner_id: Uuid,
+    ) -> Result<Vec<Attachment>, VaultError>;
+
+    /// Upload bytes to the configured provider (when applicable) and persist
+    /// the metadata row. The bytes parameter currently carries the full file;
+    /// chunked streaming via `Tx<Vec<u8>>` is a planned follow-up.
+    async fn upload(&self, request: AttachmentUploadRequest) -> Result<Attachment, VaultError>;
+
+    /// Load metadata + bytes for an attachment. Returns
+    /// `provider_not_configured` when the row is provider-backed but the
+    /// provider isn't wired into the server.
+    async fn download(&self, id: Uuid) -> Result<AttachmentDownloadResponse, VaultError>;
+
+    /// Drop the attachment row; if it's provider-backed, also DELETE the
+    /// remote object on a best-effort basis.
+    async fn delete(&self, id: Uuid) -> Result<(), VaultError>;
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct AttachmentUploadRequest {
+    /// Owner entity type — "task" / "project" / "comment" / "calendar_event"
+    /// / "person".
+    pub owner_type: String,
+    pub owner_id: Uuid,
+    /// Provider-relative path. Defaulted by the service when empty.
+    pub path: String,
+    pub label: Option<String>,
+    pub mime: Option<String>,
+    /// File bytes. The full payload travels in one frame today; chunked
+    /// streaming via `Tx<Vec<u8>>` is a planned follow-up.
+    pub bytes: Vec<u8>,
+    pub uploader: Option<String>,
+    /// Storage source — defaults to `nextcloud` when empty.
+    pub source: String,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct AttachmentDownloadResponse {
+    pub metadata: Attachment,
+    pub bytes: Vec<u8>,
 }
 
 #[vox::service]

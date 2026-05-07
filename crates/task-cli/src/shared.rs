@@ -303,6 +303,12 @@ impl RemoteVoxConfig {
         self.connect().await
     }
 
+    pub(crate) async fn attachment(
+        &self,
+    ) -> eyre::Result<task_core::service::AttachmentServiceClient> {
+        self.connect().await
+    }
+
     pub(crate) async fn connect<C>(&self) -> eyre::Result<C>
     where
         C: vox::FromVoxSession,

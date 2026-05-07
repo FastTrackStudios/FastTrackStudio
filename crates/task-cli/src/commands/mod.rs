@@ -1,5 +1,6 @@
 pub(crate) mod agent;
 pub(crate) mod asset;
+pub(crate) mod attachment;
 pub(crate) mod calendar;
 pub(crate) mod client;
 pub(crate) mod comment;

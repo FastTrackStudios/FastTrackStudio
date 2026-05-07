@@ -828,6 +828,17 @@ impl ServerContext {
         })
     }
 
+    fn attachment_service(
+        &self,
+    ) -> task_core::AttachmentServiceImpl<
+        task_core::attachment::AttachmentRepoStorage<sea_orm::DatabaseConnection>,
+    > {
+        task_core::AttachmentServiceImpl::new(task_core::service_impl::AttachmentServiceDeps {
+            repo: task_core::attachment::AttachmentRepoStorage::new(self.db.clone()),
+            nextcloud: self.nextcloud.clone(),
+        })
+    }
+
     fn conversation_service(&self) -> task_core::ConversationServiceImpl {
         task_core::ConversationServiceImpl::new(task_core::service_impl::ConversationServiceDeps {
             provider: self.talk.clone(),
@@ -1011,6 +1022,12 @@ async fn handle_vox_connection(socket: WebSocket, state: AppState, auth: VoxAuth
                     );
                     Ok(())
                 }
+                "AttachmentRepo" => {
+                    connection.handle_with(task_core::attachment::AttachmentRepoDispatcher::new(
+                        task_core::attachment::AttachmentRepoStorage::new(db.clone()),
+                    ));
+                    Ok(())
+                }
                 "Noop" => {
                     connection.handle_with(());
                     Ok(())
@@ -1081,6 +1098,12 @@ async fn handle_vox_connection(socket: WebSocket, state: AppState, auth: VoxAuth
                 "MailService" => {
                     connection
                         .handle_with(task_core::MailServiceDispatcher::new(ctx.mail_service()));
+                    Ok(())
+                }
+                "AttachmentService" => {
+                    connection.handle_with(task_core::AttachmentServiceDispatcher::new(
+                        ctx.attachment_service(),
+                    ));
                     Ok(())
                 }
                 "SystemService" => {
@@ -1161,6 +1184,8 @@ impl task_core::service::SystemService for ServerSystemService {
                 "ReactionRepo".into(),
                 "NotificationRepo".into(),
                 "TaskRelationRepo".into(),
+                "AttachmentRepo".into(),
+                "AttachmentService".into(),
                 "TaskService".into(),
                 "ProjectService".into(),
                 "ExpenseService".into(),
