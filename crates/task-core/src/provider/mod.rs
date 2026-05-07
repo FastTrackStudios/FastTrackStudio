@@ -36,7 +36,6 @@ pub(crate) struct LiveNextcloudCredentials {
     pub url: String,
     pub username: String,
     pub password: String,
-    pub projects_path: String,
     pub calendar: String,
     pub event_calendar: Option<String>,
 }
@@ -64,8 +63,6 @@ pub(crate) fn live_nextcloud_credentials() -> LiveNextcloudCredentials {
             "live Nextcloud tests require NEXTCLOUD_PASSWORD, NEXTCLOUD_PASSWORD_FILE, \
              or [nextcloud].password_file in TASK_NEXTCLOUD_CONFIG / ~/.config/task/nextcloud.toml",
         );
-    let projects_path = env_or_toml("NEXTCLOUD_PROJECTS_PATH", &file_cfg, "projects_path")
-        .unwrap_or_else(|| "Projects/".to_string());
     let calendar = env_or_toml("NEXTCLOUD_CALENDAR", &file_cfg, "calendar")
         .unwrap_or_else(|| "tasks".to_string())
         .to_ascii_lowercase();
@@ -77,7 +74,6 @@ pub(crate) fn live_nextcloud_credentials() -> LiveNextcloudCredentials {
         url,
         username,
         password,
-        projects_path,
         calendar,
         event_calendar,
     }
