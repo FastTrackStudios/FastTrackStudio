@@ -577,6 +577,32 @@ async fn vox_ws_handler(
     }
 }
 
+/// Build an `Arc<NextcloudSync>` from `TASK_NEXTCLOUD_*` environment variables.
+///
+/// Returns `None` (and the `addressbook=Some(_)` / CalDAV/CardDAV protocol ops
+/// will cleanly surface `provider_not_configured`) unless all three of
+/// `TASK_NEXTCLOUD_BASE_URL`, `TASK_NEXTCLOUD_USERNAME`, and
+/// `TASK_NEXTCLOUD_APP_PASSWORD` are set.
+fn build_nextcloud_provider() -> Option<Arc<task_core::NextcloudSync>> {
+    let base_url = std::env::var("TASK_NEXTCLOUD_BASE_URL")
+        .ok()
+        .filter(|value| !value.is_empty())?;
+    let username = std::env::var("TASK_NEXTCLOUD_USERNAME")
+        .ok()
+        .filter(|value| !value.is_empty())?;
+    let password = std::env::var("TASK_NEXTCLOUD_APP_PASSWORD")
+        .ok()
+        .filter(|value| !value.is_empty())?;
+    info!(
+        base_url = %base_url,
+        username = %username,
+        "Nextcloud provider configured for CalDAV/CardDAV"
+    );
+    Some(Arc::new(task_core::NextcloudSync::new(
+        &base_url, &username, &password,
+    )))
+}
+
 async fn handle_vox_connection(socket: WebSocket, state: AppState, auth: VoxAuthContext) {
     info!(
         user_id = %auth.user_id,
@@ -589,6 +615,7 @@ async fn handle_vox_connection(socket: WebSocket, state: AppState, auth: VoxAuth
 
     let db = state.db.clone();
     let info = state.info.clone();
+    let nextcloud_provider = build_nextcloud_provider();
 
     let request_auth = auth.clone();
     let factory = vox::acceptor_fn(
@@ -765,12 +792,16 @@ async fn handle_vox_connection(socket: WebSocket, state: AppState, auth: VoxAuth
                     Ok(())
                 }
                 "CalendarService" => {
-                    connection.handle_with(task_core::CalendarServiceDispatcher::new(
-                        task_core::CalendarServiceImpl::new(
-                            task_core::task::TaskRepoStorage::new(db.clone()),
-                            task_core::calendar_event::CalendarEventRepoStorage::new(db.clone()),
+                    let task_repo = task_core::task::TaskRepoStorage::new(db.clone());
+                    let event_repo =
+                        task_core::calendar_event::CalendarEventRepoStorage::new(db.clone());
+                    let svc = match nextcloud_provider.clone() {
+                        Some(provider) => task_core::CalendarServiceImpl::with_provider(
+                            task_repo, event_repo, provider,
                         ),
-                    ));
+                        None => task_core::CalendarServiceImpl::new(task_repo, event_repo),
+                    };
+                    connection.handle_with(task_core::CalendarServiceDispatcher::new(svc));
                     Ok(())
                 }
                 "InboxService" => {
@@ -816,11 +847,14 @@ async fn handle_vox_connection(socket: WebSocket, state: AppState, auth: VoxAuth
                     Ok(())
                 }
                 "PeopleService" => {
-                    connection.handle_with(task_core::PeopleServiceDispatcher::new(
-                        task_core::PeopleServiceImpl::new(
-                            task_core::people::PersonRepoStorage::new(db.clone()),
-                        ),
-                    ));
+                    let people_repo = task_core::people::PersonRepoStorage::new(db.clone());
+                    let svc = match nextcloud_provider.clone() {
+                        Some(provider) => {
+                            task_core::PeopleServiceImpl::with_provider(people_repo, provider)
+                        }
+                        None => task_core::PeopleServiceImpl::new(people_repo),
+                    };
+                    connection.handle_with(task_core::PeopleServiceDispatcher::new(svc));
                     Ok(())
                 }
                 "ConversationService" => {

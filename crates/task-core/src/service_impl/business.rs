@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use super::helpers::{convert_model, convert_ref, provider_not_configured};
 use crate::calendar_event::{CalendarEvent, CalendarEventApiList, CalendarEventRepo};
 use crate::expense::{
@@ -8,6 +10,7 @@ use crate::project::{
     Project, ProjectApiList, ProjectDashboardEntry, ProjectRepo, ProjectStats,
     next_task as find_next_task, project_dashboard as build_project_dashboard,
 };
+use crate::provider::NextcloudSync;
 use crate::query::Query;
 use crate::service::{
     CalDavDeleteObjectRequest, CalDavDiscovery, CalDavFreeBusyInterval, CalDavFreeBusyRequest,
@@ -40,6 +43,7 @@ pub struct ExpenseServiceImpl<R> {
 pub struct CalendarServiceImpl<T, E> {
     task_repo: T,
     event_repo: E,
+    provider: Option<Arc<NextcloudSync>>,
 }
 
 impl<R> TaskServiceImpl<R> {
@@ -68,7 +72,30 @@ impl<T, E> CalendarServiceImpl<T, E> {
         Self {
             task_repo,
             event_repo,
+            provider: None,
         }
+    }
+
+    /// Construct a `CalendarServiceImpl` that delegates CalDAV/CardDAV/Deck
+    /// protocol operations to the supplied Nextcloud provider client.
+    pub fn with_provider(task_repo: T, event_repo: E, provider: Arc<NextcloudSync>) -> Self {
+        Self {
+            task_repo,
+            event_repo,
+            provider: Some(provider),
+        }
+    }
+
+    /// Inject (or replace) the Nextcloud provider client.
+    pub fn set_provider(&mut self, provider: Option<Arc<NextcloudSync>>) {
+        self.provider = provider;
+    }
+
+    fn provider(&self, op: &str) -> Result<&NextcloudSync, VaultError> {
+        self.provider
+            .as_ref()
+            .map(Arc::as_ref)
+            .ok_or_else(|| provider_not_configured(op))
     }
 }
 
@@ -398,88 +425,158 @@ where
     }
 
     async fn discover_caldav(&self) -> Result<CalDavDiscovery, VaultError> {
-        Err(provider_not_configured("CalDAV discovery"))
+        self.provider("CalDAV discovery")?
+            .discover_calendars()
+            .await
     }
 
     async fn discover_carddav(&self) -> Result<CardDavDiscovery, VaultError> {
-        Err(provider_not_configured("CardDAV discovery"))
+        self.provider("CardDAV discovery")?
+            .discover_addressbooks()
+            .await
     }
 
     async fn calendar_multiget(
         &self,
-        _request: CalDavMultigetRequest,
+        request: CalDavMultigetRequest,
     ) -> Result<Vec<CalDavObject>, VaultError> {
-        Err(provider_not_configured("CalDAV multiget"))
+        self.provider("CalDAV multiget")?
+            .calendar_multiget(&request.calendar, &request.hrefs)
+            .await
     }
 
     async fn calendar_sync_collection(
         &self,
-        _request: CalDavSyncCollectionRequest,
+        request: CalDavSyncCollectionRequest,
     ) -> Result<CalDavSyncCollectionResponse, VaultError> {
-        Err(provider_not_configured("CalDAV sync collection"))
+        self.provider("CalDAV sync collection")?
+            .sync_calendar_collection(&request.calendar, request.sync_token.as_deref())
+            .await
     }
 
     async fn addressbook_multiget(
         &self,
-        _request: CardDavMultigetRequest,
+        request: CardDavMultigetRequest,
     ) -> Result<Vec<CardDavObject>, VaultError> {
-        Err(provider_not_configured("CardDAV multiget"))
+        self.provider("CardDAV multiget")?
+            .addressbook_multiget(&request.addressbook, &request.hrefs)
+            .await
     }
 
     async fn addressbook_sync_collection(
         &self,
-        _request: CardDavSyncCollectionRequest,
+        request: CardDavSyncCollectionRequest,
     ) -> Result<CardDavSyncCollectionResponse, VaultError> {
-        Err(provider_not_configured("CardDAV sync collection"))
+        self.provider("CardDAV sync collection")?
+            .sync_addressbook_collection(&request.addressbook, request.sync_token.as_deref())
+            .await
     }
 
-    async fn put_calendar_object(
-        &self,
-        _request: CalDavPutObjectRequest,
-    ) -> Result<(), VaultError> {
-        Err(provider_not_configured("CalDAV put object"))
+    async fn put_calendar_object(&self, request: CalDavPutObjectRequest) -> Result<(), VaultError> {
+        self.provider("CalDAV put object")?
+            .put_calendar_object(
+                &request.calendar,
+                &request.href,
+                &request.calendar_data,
+                request.if_match.as_deref(),
+                request.if_none_match.as_deref(),
+            )
+            .await
     }
 
     async fn delete_calendar_object(
         &self,
-        _request: CalDavDeleteObjectRequest,
+        request: CalDavDeleteObjectRequest,
     ) -> Result<(), VaultError> {
-        Err(provider_not_configured("CalDAV delete object"))
+        self.provider("CalDAV delete object")?
+            .delete_calendar_object(
+                &request.calendar,
+                &request.href,
+                request.if_match.as_deref(),
+            )
+            .await
     }
 
     async fn put_addressbook_object(
         &self,
-        _request: CardDavPutObjectRequest,
+        request: CardDavPutObjectRequest,
     ) -> Result<(), VaultError> {
-        Err(provider_not_configured("CardDAV put object"))
+        self.provider("CardDAV put object")?
+            .put_addressbook_object(
+                &request.addressbook,
+                &request.href,
+                &request.address_data,
+                request.if_match.as_deref(),
+                request.if_none_match.as_deref(),
+            )
+            .await
     }
 
     async fn delete_addressbook_object(
         &self,
-        _request: CardDavDeleteObjectRequest,
+        request: CardDavDeleteObjectRequest,
     ) -> Result<(), VaultError> {
-        Err(provider_not_configured("CardDAV delete object"))
+        self.provider("CardDAV delete object")?
+            .delete_addressbook_object(
+                &request.addressbook,
+                &request.href,
+                request.if_match.as_deref(),
+            )
+            .await
     }
 
     async fn send_calendar_schedule(
         &self,
-        _request: CalDavScheduleRequest,
+        request: CalDavScheduleRequest,
     ) -> Result<CalDavScheduleResponse, VaultError> {
-        Err(provider_not_configured("CalDAV schedule"))
+        let provider = self.provider("CalDAV schedule")?;
+        let outbox = match request.outbox_url.as_deref() {
+            Some(url) if !url.is_empty() => url.to_string(),
+            _ => provider
+                .discover_calendars()
+                .await?
+                .schedule_outbox_url
+                .ok_or_else(|| {
+                    VaultError::IoError(
+                        "CalDAV schedule outbox URL not configured on the principal".into(),
+                    )
+                })?,
+        };
+        provider
+            .send_calendar_schedule(&outbox, &request.calendar_data)
+            .await
     }
 
     async fn calendar_free_busy(
         &self,
-        _request: CalDavFreeBusyRequest,
+        request: CalDavFreeBusyRequest,
     ) -> Result<Vec<CalDavFreeBusyInterval>, VaultError> {
-        Err(provider_not_configured("CalDAV free busy"))
+        self.provider("CalDAV free busy")?
+            .calendar_free_busy(&request.calendar, request.start, request.end)
+            .await
     }
 
     async fn list_deck_boards(&self) -> Result<Vec<RemoteDeckBoard>, VaultError> {
-        Err(provider_not_configured("Deck boards"))
+        let boards = self.provider("Deck boards")?.list_boards().await?;
+        Ok(boards
+            .into_iter()
+            .map(|board| RemoteDeckBoard {
+                id: board.id,
+                title: board.title,
+                archived: board.archived,
+            })
+            .collect())
     }
 
-    async fn list_deck_stacks(&self, _board_id: u64) -> Result<Vec<RemoteDeckStack>, VaultError> {
-        Err(provider_not_configured("Deck stacks"))
+    async fn list_deck_stacks(&self, board_id: u64) -> Result<Vec<RemoteDeckStack>, VaultError> {
+        let stacks = self.provider("Deck stacks")?.list_stacks(board_id).await?;
+        Ok(stacks
+            .into_iter()
+            .map(|stack| RemoteDeckStack {
+                card_count: stack.cards.len() as u32,
+                id: stack.id,
+                title: stack.title,
+            })
+            .collect())
     }
 }
