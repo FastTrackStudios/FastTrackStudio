@@ -605,23 +605,18 @@ impl TestFixture {
     }
 
     fn seed_task(&self, task: Task) {
-        let content =
-            task_core::Vault::render_task_file(&task, &task.body).expect("seed task should render");
-        std::fs::write(
-            self.vault_path().join(format!("{}.md", task.title)),
-            content,
-        )
-        .expect("seed task should be written");
+        // The markdown seed pathway has been removed alongside the Vault
+        // layer. The task-server's persistence boundary is now SQLite via
+        // SeaORM, so this fixture method is a no-op kept for the (currently
+        // ignored) full-services smoke test until it's rewritten to seed
+        // through the repo services directly.
+        let _ = task;
+        let _ = self.vault_path();
     }
 
     fn seed_project(&self, project: Project) {
-        let content = task_core::Vault::render_project_file(&project, "")
-            .expect("seed project should render");
-        std::fs::write(
-            self.vault_path().join(format!("{}.md", project.title)),
-            content,
-        )
-        .expect("seed project should be written");
+        let _ = project;
+        let _ = self.vault_path();
     }
 }
 

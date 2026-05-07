@@ -7,7 +7,6 @@ use commands::calendar::CalendarCommands;
 use commands::client::ClientCommands;
 use commands::comment::CommentCommands;
 use commands::conflict::ConflictCommands;
-use commands::demo::DemoCommands;
 use commands::email::EmailCommands;
 use commands::expense::ExpenseCommands;
 use commands::github::GithubCommands;
@@ -17,7 +16,7 @@ use commands::operating::OperatingCommands;
 use commands::people::PeopleCommands;
 use commands::project::ProjectCommands;
 use commands::server::ServerCommands;
-use commands::talk::{NcCommands, TalkCommands};
+use commands::talk::TalkCommands;
 use commands::time::TimeCommands;
 
 use chrono::{DateTime, Datelike, NaiveDate, TimeZone, Utc};
@@ -47,9 +46,8 @@ use task_core::{
     Client, Filter, InboxCaptureRequest, InboxItem, InboxPromoteRequest, Invoice,
     OperatingModelReport, OrganizationContext, OrganizationRecord, Person, PersonContext, Priority,
     Project, ProjectKnowledgeContext, ProviderSyncState, Query, RelationType, ReviewReport, Sort,
-    Status, SyncStats, SystemCapabilities, SystemHealth, Task, TaskRelation, TimeEntry,
-    TimeEntryContext, TimeEntryFilter, WikiLink, build_agent_plan, create_project,
-    save_project_task,
+    Status, SyncStats, SystemCapabilities, SystemHealth, Task, TaskRelation, TimeEntryContext,
+    TimeEntryFilter, WikiLink, build_agent_plan,
 };
 use uuid::Uuid;
 
@@ -338,16 +336,6 @@ pub(crate) enum Commands {
     Email {
         #[command(subcommand)]
         command: EmailCommands,
-    },
-    /// Nextcloud instance queries (read-only smoke tests)
-    Nc {
-        #[command(subcommand)]
-        command: NcCommands,
-    },
-    /// Demo data and smoke-test fixture generation
-    Demo {
-        #[command(subcommand)]
-        command: DemoCommands,
     },
     /// Start a timer on a task (fails if another is running)
     Start {
@@ -642,10 +630,6 @@ async fn main() -> eyre::Result<()> {
             return commands::talk::run_talk(talk, actor).await;
         }
     }
-    // Nc smoke-test commands — same deal, no vault.
-    if let Commands::Nc { command: nc } = command {
-        return commands::talk::run_nc(nc, actor).await;
-    }
     if let Commands::Agent {
         command: AgentCommands::Capabilities,
     } = command
@@ -708,15 +692,7 @@ async fn main() -> eyre::Result<()> {
         return run_remote_command(&remote, actor.as_deref(), command).await;
     }
 
-    let vault_path = vault.ok_or_else(|| {
-        eyre::eyre!("No vault specified. Use --vault <path> or set TASK_VAULT env var.")
-    })?;
-
-    if let Commands::Demo { command } = command {
-        return commands::demo::run_demo_command(&vault_path, command, actor.as_deref());
-    }
-
-    let _ = vault_path;
+    let _ = vault;
     let _ = actor;
     let _ = command;
     eyre::bail!(
@@ -1298,14 +1274,6 @@ pub(crate) async fn run_remote_command(
         },
         Commands::Email { command } => {
             commands::email::run_remote_email_command(remote, actor, command).await?
-        }
-        Commands::Demo { .. } => {
-            return Err(eyre::eyre!(
-                "demo commands seed local vault files; omit --server and pass --vault or TASK_VAULT"
-            ));
-        }
-        Commands::Nc { .. } => {
-            unreachable!("handled before remote dispatch")
         }
     }
     Ok(())
@@ -4004,57 +3972,6 @@ pub(crate) fn truncate(s: &str, max: usize) -> String {
 mod tests {
     use super::*;
     use crate::shared::normalize_vox_url;
-
-    #[test]
-    fn seeds_deterministic_demo_vault_files() {
-        let root = std::env::temp_dir().join(format!(
-            "task-demo-seed-test-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&root).unwrap();
-
-        let summary = crate::commands::demo::seed_demo_vault(
-            &root,
-            "Acme Org",
-            "Acme Client",
-            "Demo Smoke Project",
-            Some("tester"),
-        )
-        .unwrap();
-
-        assert_eq!(summary.project, "Demo Smoke Project");
-        assert_eq!(summary.files.len(), 7);
-        let project_file = root.join("Demo Smoke Project").join("project.md");
-        let billable_task = root
-            .join("Demo Smoke Project")
-            .join("tasks")
-            .join("Demo billable work item.md");
-        let inbox_file = root.join("inbox").join("demo-capture.md");
-        let invoice_file = root.join("invoices").join("demo-invoice.md");
-        let event_file = root.join("calendar").join("demo-event.md");
-
-        for path in [
-            &project_file,
-            &billable_task,
-            &inbox_file,
-            &invoice_file,
-            &event_file,
-        ] {
-            assert!(path.exists(), "expected seeded file {}", path.display());
-        }
-        let billable = std::fs::read_to_string(&billable_task).unwrap();
-        assert!(billable.contains("demo-time-entry-billable"));
-        assert!(billable.contains("Deterministic billable smoke-test work"));
-        let invoice = std::fs::read_to_string(&invoice_file).unwrap();
-        assert!(invoice.contains("client: \"[[Acme Client]]\""));
-        assert!(invoice.contains("total_cents: 18000"));
-
-        std::fs::remove_dir_all(&root).unwrap();
-    }
 
     #[test]
     fn normalizes_server_urls_to_vox_websocket_endpoint() {

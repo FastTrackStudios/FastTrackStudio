@@ -685,46 +685,6 @@ impl TaskIndex {
             .query_row("SELECT COUNT(*) FROM tasks", [], |row| row.get(0))
             .map_err(|e| VaultError::IoError(e.to_string()))
     }
-
-    // ── Rebuild ──────────────────────────────────────────────────────
-
-    /// Rebuild the entire index from a directory of .md files.
-    pub fn rebuild_from_dir(&self, root: &Path) -> Result<RebuildStats, VaultError> {
-        self.clear()?;
-
-        let mut stats = RebuildStats::default();
-
-        for entry in walkdir::WalkDir::new(root)
-            .follow_links(false)
-            .into_iter()
-            .filter_map(|e| e.ok())
-            .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("md"))
-        {
-            let path = entry.path();
-            let content = match std::fs::read_to_string(path) {
-                Ok(c) => c,
-                Err(_) => continue,
-            };
-
-            let rel_path = path
-                .strip_prefix(root)
-                .unwrap_or(path)
-                .to_string_lossy()
-                .to_string();
-
-            // Try parsing as task
-            if let Some(task) = crate::vault::Vault::parse_task_from_md(&content) {
-                if !task.title.is_empty() {
-                    self.index_task(&task, &rel_path)?;
-                    stats.tasks += 1;
-                }
-            }
-
-            stats.files_scanned += 1;
-        }
-
-        Ok(stats)
-    }
 }
 
 // ── Row types ────────────────────────────────────────────────────────────────
@@ -776,13 +736,6 @@ pub struct ConflictRow {
     pub file_path: Option<String>,
     pub resolved: Option<String>,
     pub resolved_by: Option<String>,
-}
-
-/// Stats from a rebuild operation.
-#[derive(Debug, Clone, Default)]
-pub struct RebuildStats {
-    pub files_scanned: usize,
-    pub tasks: usize,
 }
 
 #[cfg(test)]

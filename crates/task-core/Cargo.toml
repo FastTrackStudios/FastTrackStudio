@@ -7,7 +7,7 @@ edition.workspace = true
 # "server" enables the async vault, service trait, and service implementation.
 # Disable it for wasm32 builds (obsidian-plugin) to avoid tokio/mio.
 default = ["server"]
-server = ["dep:tokio", "dep:walkdir", "dep:vox", "dep:vox-core", "dep:notify", "dep:toml", "dep:async-trait", "dep:tracing", "dep:reqwest", "dep:rusqlite", "dep:base64", "dep:async-imap", "dep:rustls", "dep:tokio-rustls", "dep:rustls-pki-types", "dep:rustls-pemfile", "dep:tokio-util", "dep:futures"]
+server = ["dep:tokio", "dep:vox", "dep:vox-core", "dep:toml", "dep:async-trait", "dep:tracing", "dep:reqwest", "dep:rusqlite", "dep:base64", "dep:async-imap", "dep:rustls", "dep:tokio-rustls", "dep:rustls-pki-types", "dep:rustls-pemfile", "dep:tokio-util", "dep:futures"]
 # Kept for downstream compatibility; persistence definitions are always present.
 db = ["server"]
 # "caldav" enables CalDAV sync and VTODO conversion.
@@ -42,12 +42,9 @@ uuid.workspace = true
 vox     = { workspace = true, optional = true }
 vox-core = { workspace = true, optional = true }
 tokio   = { workspace = true, optional = true }
-walkdir = { version = "2", optional = true }
 tracing = { workspace = true, optional = true }
-notify  = { version = "7", optional = true }
 toml    = { version = "0.8", optional = true }
 serde.workspace = true
-serde_yaml = "0.9"
 rusqlite = { version = "0.32", optional = true, features = ["bundled"] }
 
 # CalDAV sync (optional)

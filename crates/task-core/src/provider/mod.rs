@@ -1,52 +1,19 @@
-//! Storage-agnostic project provider system.
+//! Network providers used by the SeaORM-backed services.
 //!
-//! The `ProjectProvider` trait abstracts how projects and tasks are stored,
-//! allowing the same task management logic to work across:
-//!
-//! - Local filesystem (NFS mounts, local directories)
-//! - Obsidian vaults (personal task files)
-//! - S3-compatible object storage (AWS S3, MinIO, R2)
-//! - WebDAV / Nextcloud file shares
-//! - Git repositories
-//!
-//! Each provider reads/writes the same `project.md` + `tasks/*.md` format,
-//! just on different storage backends.
-//!
-//! # Architecture
-//!
-//! ```text
-//! ProjectRegistry
-//!   ├── LocalProvider      /mnt/starcommand/Projects/
-//!   ├── VaultProvider      ~/Documents/The Observatory/TaskNotes/
-//!   ├── S3Provider         s3://fasttrack-projects/
-//!   ├── WebDavProvider     https://cloud.example.com/remote.php/dav/
-//!   └── GitProvider        github.com/FastTrackStudios/projects
-//! ```
+//! After the markdown-as-canonical layer was removed, the surviving providers
+//! are network clients (CalDAV/CardDAV/Deck via [`NextcloudSync`], IMAP/JMAP
+//! via [`MailClient`], Talk via [`TalkClient`]) plus the GitHub sync helpers.
+//! There is no longer a generic `ProjectProvider` trait — the persistence
+//! boundary is SQLite via crudcrate-generated repos.
 
 pub mod channel;
 pub mod github;
-mod local;
 pub mod mail;
 #[cfg(feature = "server")]
 pub mod mail_watch;
-mod nextcloud;
 pub mod nextcloud_sync;
-mod registry;
-mod s3;
 pub mod talk;
-mod traits;
-mod vault;
-mod webdav;
 
-pub use local::LocalProvider;
-pub use registry::ProjectRegistry;
-pub use s3::{S3Config, S3Provider};
-pub use traits::*;
-pub use vault::VaultProvider;
-pub use webdav::{
-    WebDavConfig, WebDavEntry, WebDavLock, WebDavProvider, WebDavPutOptions, WebDavResourceKind,
-};
-pub mod mock;
 pub use channel::{
     ChannelConversation, ChannelMessage, ChannelSendMessageRequest, CommunicationChannelProvider,
 };
@@ -60,8 +27,6 @@ pub use mail::{
 };
 #[cfg(feature = "server")]
 pub use mail_watch::{ImapWatchConfig, WatchEvent, watch_idle};
-pub use mock::MockProvider;
-pub use nextcloud::{NextcloudConfig, NextcloudProvider};
 pub use nextcloud_sync::NextcloudSync;
 pub use talk::{Message as TalkMessage, Room as TalkRoom, TalkClient, TalkConfig};
 

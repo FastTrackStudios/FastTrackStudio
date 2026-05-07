@@ -75,12 +75,6 @@ impl CrdtDocument {
         me
     }
 
-    /// Parse raw `.md` content and build a document from the resulting task.
-    pub fn from_md(content: &str, file_path: impl Into<String>) -> Option<Self> {
-        let task = crate::vault::Vault::parse_task_from_md(content)?;
-        Some(Self::from_task(&task, file_path))
-    }
-
     /// Set the peer ID. Must be unique per device — collisions silently corrupt
     /// history. Caller is responsible for choosing stable IDs.
     pub fn set_peer_id(&self, peer: PeerID) -> Result<(), VaultError> {
@@ -192,13 +186,6 @@ impl CrdtDocument {
         task.body = self.doc.get_text(BODY_ID).to_string();
 
         task
-    }
-
-    /// Render back to `.md` file content.
-    pub fn to_md(&self) -> Result<String, VaultError> {
-        let task = self.to_task();
-        let body = self.doc.get_text(BODY_ID).to_string();
-        crate::vault::Vault::render_task_file(&task, &body)
     }
 
     // ── Field-level edits ────────────────────────────────────────────────────

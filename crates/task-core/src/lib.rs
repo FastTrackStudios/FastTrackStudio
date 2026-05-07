@@ -29,17 +29,11 @@ pub mod index;
 #[cfg(feature = "server")]
 pub mod integration;
 #[cfg(feature = "server")]
-pub mod project_vault;
-#[cfg(feature = "server")]
 pub mod provider;
 #[cfg(feature = "server")]
 pub mod service;
 #[cfg(feature = "server")]
 pub mod service_impl;
-#[cfg(feature = "server")]
-pub mod vault;
-#[cfg(feature = "server")]
-pub mod watch;
 
 #[cfg(feature = "caldav")]
 pub mod caldav;
@@ -97,15 +91,9 @@ pub use integration::{
     Integration, ProjectTemplate, StatusDef, TaskTemplate, list_integrations, load_integration,
 };
 #[cfg(feature = "server")]
-pub use project_vault::{
-    ProjectWithTasks, create_project, save_project_metadata, save_project_task, scan_project_vault,
-};
-#[cfg(feature = "server")]
 pub use provider::{
     ChannelConversation, ChannelMessage, ChannelSendMessageRequest, CommunicationChannelProvider,
-    LocalProvider, NextcloudConfig, NextcloudProvider, NextcloudSync, ProjectBundle,
-    ProjectProvider, ProjectRegistry, ProviderEvent, ProviderInfo, S3Config, S3Provider,
-    VaultProvider, WebDavConfig, WebDavProvider,
+    NextcloudSync,
 };
 #[cfg(feature = "server")]
 pub use service::{
@@ -145,10 +133,6 @@ pub use service_impl::{
     InboxServiceImpl, InvoiceServiceImpl, MailServiceImpl, OperatingServiceImpl, PeopleServiceImpl,
     ProjectServiceImpl, TaskServiceImpl, TimeServiceImpl,
 };
-#[cfg(feature = "server")]
-pub use vault::Vault;
-#[cfg(feature = "server")]
-pub use watch::WatchHandle;
 
 #[cfg(feature = "caldav")]
 #[cfg(feature = "realtime")]

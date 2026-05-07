@@ -8,8 +8,6 @@
 
 use std::path::Path;
 
-use crate::service::VaultError;
-
 #[derive(Debug, Clone)]
 pub struct QueuedOp {
     pub timestamp: String,
@@ -68,35 +66,6 @@ impl OfflineQueue {
         let ops = std::mem::take(&mut self.ops);
         self.save();
         ops
-    }
-
-    /// Replay every queued op against the sync engine.
-    pub async fn replay(
-        &mut self,
-        engine: &super::sync::CrdtSyncEngine,
-    ) -> Result<usize, VaultError> {
-        let ops = self.drain();
-        let count = ops.len();
-
-        for op in ops {
-            match op.op {
-                QueuedOpType::FieldChange { field, value } => {
-                    engine
-                        .apply_field_change(&op.file_path, &field, &value)
-                        .await?;
-                }
-                QueuedOpType::LoroUpdate { update } => {
-                    engine.apply_remote_update(&op.file_path, &update).await?;
-                }
-                QueuedOpType::Snapshot { data } => {
-                    // Snapshots replay via the same import path — Loro
-                    // auto-detects snapshot vs updates.
-                    engine.apply_remote_update(&op.file_path, &data).await?;
-                }
-            }
-        }
-
-        Ok(count)
     }
 
     fn save(&self) {
