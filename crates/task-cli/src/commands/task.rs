@@ -166,3 +166,106 @@ pub(crate) fn apply_task_update(task: &mut Task, input: TaskUpdateInput) -> eyre
     }
     Ok(())
 }
+
+/// `task watch` — subscribe to live task ops via Vox and print them as they
+/// arrive. Streams until the connection is closed (Ctrl-C).
+pub(crate) async fn run_watch(
+    remote: &crate::shared::RemoteVoxConfig,
+    task_id: Option<String>,
+    project: Option<String>,
+    json: bool,
+) -> eyre::Result<()> {
+    use task_core::service::{TaskOp, TaskSubscriptionFilter};
+
+    let task_id = match task_id {
+        Some(s) => Some(
+            uuid::Uuid::parse_str(s.trim()).map_err(|e| eyre::eyre!("invalid --task-id: {e}"))?,
+        ),
+        None => None,
+    };
+    let filter = TaskSubscriptionFilter {
+        task_id,
+        project: project.filter(|s| !s.is_empty()),
+    };
+
+    let client = remote.task().await?;
+    let (tx, mut rx) = vox::channel::<TaskOp>();
+    let subscribe = tokio::spawn(async move { client.subscribe(filter, tx).await });
+
+    eprintln!("Watching task ops on {}…", remote.display_url);
+    while let Ok(Some(op)) = rx.recv().await {
+        let op = op.get();
+        if json {
+            println!("{}", task_op_to_json_line(op));
+        } else {
+            println!("{}", format_task_op(op));
+        }
+    }
+    let _ = subscribe.await;
+    Ok(())
+}
+
+fn format_task_op(op: &task_core::service::TaskOp) -> String {
+    use task_core::service::TaskOp;
+    match op {
+        TaskOp::FieldChanged {
+            task_id,
+            field,
+            value,
+            peer,
+        } => {
+            let val = value.as_deref().unwrap_or("<cleared>");
+            match peer {
+                Some(p) => format!("{task_id}  field {field} = {val}  (peer={p})"),
+                None => format!("{task_id}  field {field} = {val}"),
+            }
+        }
+        TaskOp::BodyUpdate {
+            task_id,
+            update_bytes,
+        } => format!("{task_id}  body update ({} bytes)", update_bytes.len()),
+        TaskOp::Created { task_id, snapshot } => {
+            format!("{task_id}  created (snapshot {} bytes)", snapshot.len())
+        }
+        TaskOp::Deleted { task_id } => format!("{task_id}  deleted"),
+    }
+}
+
+fn task_op_to_json_line(op: &task_core::service::TaskOp) -> String {
+    use task_core::service::TaskOp;
+    match op {
+        TaskOp::FieldChanged {
+            task_id,
+            field,
+            value,
+            peer,
+        } => serde_json::json!({
+            "kind": "field_changed",
+            "task_id": task_id,
+            "field": field,
+            "value": value,
+            "peer": peer,
+        })
+        .to_string(),
+        TaskOp::BodyUpdate {
+            task_id,
+            update_bytes,
+        } => serde_json::json!({
+            "kind": "body_update",
+            "task_id": task_id,
+            "update_bytes_len": update_bytes.len(),
+        })
+        .to_string(),
+        TaskOp::Created { task_id, snapshot } => serde_json::json!({
+            "kind": "created",
+            "task_id": task_id,
+            "snapshot_len": snapshot.len(),
+        })
+        .to_string(),
+        TaskOp::Deleted { task_id } => serde_json::json!({
+            "kind": "deleted",
+            "task_id": task_id,
+        })
+        .to_string(),
+    }
+}

@@ -281,6 +281,18 @@ pub(crate) enum Commands {
         #[arg(long, short = 'n')]
         limit: Option<usize>,
     },
+    /// Subscribe to live task ops streamed from the Vox server
+    Watch {
+        /// Restrict to a single task id
+        #[arg(long)]
+        task_id: Option<String>,
+        /// Restrict to a project (matched by project title)
+        #[arg(long)]
+        project: Option<String>,
+        /// Output ops as JSON Lines
+        #[arg(long)]
+        json: bool,
+    },
     /// Trigger a Nextcloud sync cycle and print stats
     Sync {
         #[arg(long)]
@@ -1064,6 +1076,14 @@ pub(crate) async fn run_remote_command(
             } else {
                 print_tasks_table(&tasks);
             }
+        }
+
+        Commands::Watch {
+            task_id,
+            project,
+            json,
+        } => {
+            commands::task::run_watch(remote, task_id, project, json).await?;
         }
 
         Commands::Search { query, json, limit } => {

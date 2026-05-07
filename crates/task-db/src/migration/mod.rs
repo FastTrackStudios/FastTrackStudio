@@ -2,6 +2,7 @@ pub use sea_orm_migration::prelude::*;
 
 mod m20260412_000001_create_tables;
 mod m20260412_000002_create_auth_tables;
+mod m20260506_000003_add_task_crdt_snapshot;
 
 pub struct Migrator;
 
@@ -11,6 +12,7 @@ impl MigratorTrait for Migrator {
         vec![
             Box::new(m20260412_000001_create_tables::Migration),
             Box::new(m20260412_000002_create_auth_tables::Migration),
+            Box::new(m20260506_000003_add_task_crdt_snapshot::Migration),
         ]
     }
 }

@@ -675,10 +675,14 @@ struct ServerContext {
     nextcloud: Option<Arc<task_core::NextcloudSync>>,
     mail: Option<Arc<task_core::provider::MailClient>>,
     talk: Option<Arc<dyn task_core::provider::CommunicationChannelProvider>>,
+    /// Shared broadcast channel for live task ops. One sender per server
+    /// instance so subscribers across Vox connections see the same stream.
+    task_op_tx: tokio::sync::broadcast::Sender<task_core::service::TaskOp>,
 }
 
 impl ServerContext {
     fn from_env(db: sea_orm::DatabaseConnection, info: ServerInfo) -> Self {
+        let (task_op_tx, _) = tokio::sync::broadcast::channel(256);
         Self {
             db,
             info,
@@ -688,6 +692,7 @@ impl ServerContext {
                 let arc: Arc<dyn task_core::provider::CommunicationChannelProvider> = Arc::new(c);
                 arc
             }),
+            task_op_tx,
         }
     }
 
@@ -697,6 +702,7 @@ impl ServerContext {
     {
         task_core::TaskServiceImpl::new(task_core::service_impl::TaskServiceDeps {
             task_repo: task_core::task::TaskRepoStorage::new(self.db.clone()),
+            op_tx: Some(self.task_op_tx.clone()),
         })
     }
 

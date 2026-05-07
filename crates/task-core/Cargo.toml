@@ -7,7 +7,7 @@ edition.workspace = true
 # "server" enables the async vault, service trait, and service implementation.
 # Disable it for wasm32 builds (obsidian-plugin) to avoid tokio/mio.
 default = ["server"]
-server = ["dep:tokio", "dep:vox", "dep:vox-core", "dep:toml", "dep:async-trait", "dep:tracing", "dep:reqwest", "dep:rusqlite", "dep:base64", "dep:async-imap", "dep:rustls", "dep:tokio-rustls", "dep:rustls-pki-types", "dep:rustls-pemfile", "dep:tokio-util", "dep:futures"]
+server = ["dep:tokio", "dep:vox", "dep:vox-core", "dep:vox-types", "dep:toml", "dep:async-trait", "dep:tracing", "dep:reqwest", "dep:rusqlite", "dep:base64", "dep:async-imap", "dep:rustls", "dep:tokio-rustls", "dep:rustls-pki-types", "dep:rustls-pemfile", "dep:tokio-util", "dep:futures"]
 # Kept for downstream compatibility; persistence definitions are always present.
 db = ["server"]
 # "caldav" enables CalDAV sync and VTODO conversion.
@@ -41,6 +41,7 @@ uuid.workspace = true
 # Server-only — not compiled for wasm32
 vox     = { workspace = true, optional = true }
 vox-core = { workspace = true, optional = true }
+vox-types = { workspace = true, optional = true }
 tokio   = { workspace = true, optional = true }
 tracing = { workspace = true, optional = true }
 toml    = { version = "0.8", optional = true }

@@ -4,6 +4,8 @@
 //! only the APIs they need while still sharing one implementation.
 
 use chrono::{DateTime, Utc};
+use uuid::Uuid;
+use vox::Tx;
 
 use crate::calendar_event::{CalendarEvent, CalendarEventStatus};
 use crate::email::EmailRef;
@@ -38,6 +40,77 @@ pub trait TaskService {
 
     /// Get tasks assigned to a specific user.
     async fn tasks_for_user(&self, username: String) -> Vec<Task>;
+
+    /// Subscribe to live task ops on this server. The server forwards
+    /// matching `TaskOp`s into `output` until either the receiver disconnects
+    /// or the subscription is dropped.
+    async fn subscribe(&self, filter: TaskSubscriptionFilter, output: Tx<TaskOp>);
+
+    /// Apply one CRDT op to the server's authoritative state, persist the
+    /// resulting task (and its CRDT snapshot when the realtime feature is
+    /// enabled), and broadcast the op to subscribers.
+    async fn apply_op(&self, op: TaskOp) -> Result<(), VaultError>;
+}
+
+/// Filter applied server-side to ops fanned out via [`TaskService::subscribe`].
+///
+/// All fields are AND-combined. `None`/empty means "match anything".
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct TaskSubscriptionFilter {
+    /// Restrict to ops on a single task.
+    pub task_id: Option<Uuid>,
+    /// Restrict to tasks that include this project (matched by project title).
+    pub project: Option<String>,
+}
+
+/// One CRDT operation suitable for streaming over Vox to subscribers.
+///
+/// The wire format is intentionally narrow: scalar field changes, raw Loro
+/// update bytes for body/list edits, and create/delete bookends. Body edits
+/// are carried as raw Loro update payloads so peers can merge them without
+/// re-encoding the surrounding `Task`.
+#[derive(Debug, Clone, facet::Facet)]
+#[repr(u8)]
+pub enum TaskOp {
+    /// A scalar metadata field changed.
+    FieldChanged {
+        task_id: Uuid,
+        field: String,
+        value: Option<String>,
+        peer: Option<u64>,
+    } = 0,
+    /// Raw Loro update bytes — body edits and other container-level mutations.
+    BodyUpdate {
+        task_id: Uuid,
+        update_bytes: Vec<u8>,
+    } = 1,
+    /// A new task was created. `snapshot` is a full Loro snapshot.
+    Created { task_id: Uuid, snapshot: Vec<u8> } = 2,
+    /// A task was deleted (soft or hard).
+    Deleted { task_id: Uuid } = 3,
+}
+
+impl TaskOp {
+    /// The task id this op targets.
+    pub fn task_id(&self) -> Uuid {
+        match self {
+            TaskOp::FieldChanged { task_id, .. }
+            | TaskOp::BodyUpdate { task_id, .. }
+            | TaskOp::Created { task_id, .. }
+            | TaskOp::Deleted { task_id } => *task_id,
+        }
+    }
+}
+
+// SAFETY: `TaskOp` has no lifetime parameters; `Ref<'a> = TaskOp` is sound
+// because the type is fully owned and 'static. This is the same pattern the
+// vox primitives (`String`, `i64`, …) use to enable `SelfRef::get()`.
+unsafe impl vox_types::Reborrow for TaskOp {
+    type Ref<'a> = TaskOp;
+}
+
+unsafe impl vox_types::Reborrow for TaskSubscriptionFilter {
+    type Ref<'a> = TaskSubscriptionFilter;
 }
 
 #[vox::service]

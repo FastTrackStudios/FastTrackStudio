@@ -1,5 +1,8 @@
 use std::sync::Arc;
 
+use tokio::sync::broadcast;
+use vox::Tx;
+
 use super::helpers::{convert_model, convert_ref, provider_not_configured};
 use crate::calendar_event::{CalendarEvent, CalendarEventApiList, CalendarEventRepo};
 use crate::expense::{
@@ -19,13 +22,25 @@ use crate::service::{
     CalendarService, CardDavDeleteObjectRequest, CardDavDiscovery, CardDavMultigetRequest,
     CardDavObject, CardDavPutObjectRequest, CardDavSyncCollectionRequest,
     CardDavSyncCollectionResponse, ExpenseService, ProjectKnowledgeContext, ProjectService,
-    RemoteDeckBoard, RemoteDeckStack, SyncPlan, SyncStats, TaskService, VaultError,
+    RemoteDeckBoard, RemoteDeckStack, SyncPlan, SyncStats, TaskOp, TaskService,
+    TaskSubscriptionFilter, VaultError,
 };
 use crate::task::{Status, Task, TaskApi, TaskApiList, TaskApiUpdate, TaskRepo};
+
+/// Default broadcast channel capacity for in-process task op fan-out.
+///
+/// 256 buffers a moderate burst per subscriber without unbounded memory; if a
+/// slow subscriber falls behind the broadcast layer reports `RecvError::Lagged`
+/// and the subscriber re-syncs on its own.
+const TASK_OP_CHANNEL_CAPACITY: usize = 256;
 
 /// Typed requirements for [`TaskServiceImpl`].
 pub struct TaskServiceDeps<R> {
     pub task_repo: R,
+    /// Optional broadcast sender for live `TaskOp` fan-out. When `None`, the
+    /// service builds a fresh broadcast channel — useful for one-process
+    /// callers that don't want to share a tx across other constructors.
+    pub op_tx: Option<broadcast::Sender<TaskOp>>,
 }
 
 /// Typed requirements for [`ProjectServiceImpl`].
@@ -54,6 +69,7 @@ pub struct CalendarServiceDeps<T, E> {
 #[derive(Clone)]
 pub struct TaskServiceImpl<R> {
     task_repo: R,
+    op_tx: broadcast::Sender<TaskOp>,
 }
 
 #[derive(Clone)]
@@ -76,9 +92,19 @@ pub struct CalendarServiceImpl<T, E> {
 
 impl<R> TaskServiceImpl<R> {
     pub fn new(deps: TaskServiceDeps<R>) -> Self {
+        let op_tx = deps
+            .op_tx
+            .unwrap_or_else(|| broadcast::channel(TASK_OP_CHANNEL_CAPACITY).0);
         Self {
             task_repo: deps.task_repo,
+            op_tx,
         }
+    }
+
+    /// Borrow the broadcast sender so callers (e.g. tests, peer servers) can
+    /// fan in additional ops without going through `apply_op`.
+    pub fn op_sender(&self) -> &broadcast::Sender<TaskOp> {
+        &self.op_tx
     }
 }
 
@@ -259,6 +285,173 @@ where
             })
             .collect()
     }
+
+    async fn subscribe(&self, filter: TaskSubscriptionFilter, output: Tx<TaskOp>) {
+        let mut rx = self.op_tx.subscribe();
+        loop {
+            match rx.recv().await {
+                Ok(op) => {
+                    if !matches_filter(&op, &filter, &self.task_repo).await {
+                        continue;
+                    }
+                    if output.send(op).await.is_err() {
+                        break;
+                    }
+                }
+                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(broadcast::error::RecvError::Closed) => break,
+            }
+        }
+        let _ = output.close(Default::default()).await;
+    }
+
+    async fn apply_op(&self, op: TaskOp) -> Result<(), VaultError> {
+        match &op {
+            TaskOp::FieldChanged {
+                task_id,
+                field,
+                value,
+                ..
+            } => {
+                let mut task = self.load_task(*task_id).await?;
+                apply_field_to_task(&mut task, field, value.as_deref())?;
+                task.date_modified = Some(chrono::Utc::now());
+                self.update_task_model(&task).await?;
+            }
+            TaskOp::BodyUpdate { task_id, .. } => {
+                // Without the `realtime` feature we cannot decode Loro update
+                // bytes; persistence of the resulting body is a no-op and the
+                // op is just fanned out so peer replicas can merge.
+                let _ = self.load_task(*task_id).await?;
+            }
+            TaskOp::Created { .. } => {
+                // Creation is performed via the repo CRUD path; this op is a
+                // notification carrying the snapshot to peers.
+            }
+            TaskOp::Deleted { task_id } => {
+                self.task_repo
+                    .delete_task(task_id.to_string())
+                    .await
+                    .map_err(VaultError::ParseError)?;
+            }
+        }
+        // Fan out. `send` returns the live receiver count or a no-subscribers
+        // error; either is fine.
+        let _ = self.op_tx.send(op);
+        Ok(())
+    }
+}
+
+impl<R> TaskServiceImpl<R>
+where
+    R: TaskRepo,
+{
+    async fn load_task(&self, id: uuid::Uuid) -> Result<Task, VaultError> {
+        let api = self
+            .task_repo
+            .get_task(id.to_string())
+            .await
+            .map_err(VaultError::NotFound)?;
+        convert_model::<TaskApi, Task>(api)
+    }
+}
+
+async fn matches_filter<R>(op: &TaskOp, filter: &TaskSubscriptionFilter, repo: &R) -> bool
+where
+    R: TaskRepo,
+{
+    if let Some(task_id) = filter.task_id {
+        if op.task_id() != task_id {
+            return false;
+        }
+    }
+    let Some(project) = filter.project.as_deref() else {
+        return true;
+    };
+    let Ok(api) = repo.get_task(op.task_id().to_string()).await else {
+        return false;
+    };
+    let Ok(task) = convert_model::<TaskApi, Task>(api) else {
+        return false;
+    };
+    task.projects.iter().any(|p| p.0 == project)
+}
+
+fn parse_status_label(s: &str) -> Option<Status> {
+    Some(match s {
+        "Open" | "open" => Status::Open,
+        "InProgress" | "in_progress" => Status::InProgress,
+        "OnHold" | "on_hold" => Status::OnHold,
+        "Planned" | "planned" => Status::Planned,
+        "Done" | "done" => Status::Done,
+        "Cancelled" | "cancelled" => Status::Cancelled,
+        "Archived" | "archived" => Status::Archived,
+        "None" | "none" => Status::None,
+        _ => return None,
+    })
+}
+
+fn parse_priority_label(s: &str) -> Option<crate::task::Priority> {
+    use crate::task::Priority;
+    Some(match s {
+        "None" | "none" => Priority::None,
+        "Low" | "low" => Priority::Low,
+        "Normal" | "normal" => Priority::Normal,
+        "High" | "high" => Priority::High,
+        "Urgent" | "urgent" => Priority::Urgent,
+        _ => return None,
+    })
+}
+
+fn apply_field_to_task(
+    task: &mut Task,
+    field: &str,
+    value: Option<&str>,
+) -> Result<(), VaultError> {
+    let parse_err =
+        |what: &str, raw: &str| VaultError::ParseError(format!("invalid {what} value '{raw}'"));
+    match field {
+        "title" => {
+            task.title = value.unwrap_or_default().to_string();
+        }
+        "status" => {
+            let raw = value.unwrap_or("Open");
+            task.status = parse_status_label(raw).ok_or_else(|| parse_err("status", raw))?;
+        }
+        "priority" => {
+            let raw = value.unwrap_or("None");
+            task.priority = parse_priority_label(raw).ok_or_else(|| parse_err("priority", raw))?;
+        }
+        "assignee" => task.assignee = value.map(str::to_string),
+        "due" => {
+            task.due = match value {
+                Some(raw) => Some(raw.parse().map_err(|_| parse_err("due", raw))?),
+                None => None,
+            };
+        }
+        "scheduled" => {
+            task.scheduled = match value {
+                Some(raw) => Some(raw.parse().map_err(|_| parse_err("scheduled", raw))?),
+                None => None,
+            };
+        }
+        "recurrence" => task.recurrence = value.map(str::to_string),
+        "time_estimate" => {
+            task.time_estimate = match value {
+                Some(raw) => Some(raw.parse().map_err(|_| parse_err("time_estimate", raw))?),
+                None => None,
+            };
+        }
+        "external_id" => task.external_id = value.map(str::to_string),
+        "external_source" => task.external_source = value.map(str::to_string),
+        "created_by" => task.created_by = value.map(str::to_string),
+        other => {
+            return Err(VaultError::ParseError(format!(
+                "unknown task field '{other}'"
+            )));
+        }
+    }
+    Ok(())
 }
 
 impl<P, T> ProjectService for ProjectServiceImpl<P, T>
