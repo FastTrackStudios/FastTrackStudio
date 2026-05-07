@@ -9,21 +9,43 @@
 //! Conflict detection is pure: it compares two snapshots of the same
 //! provider-backed entity and reports the changed fields.
 
+use std::sync::Arc;
+
 use super::helpers::{convert_model, provider_not_configured};
 use crate::people::{
-    ContactMethod, OrganizationContext, OrganizationRecord, Person, PersonApiList, PersonContext,
-    PersonRepo, ProviderConflict, ProviderConflictField, ProviderRef,
+    ContactMethod, ContactMethodList, OrganizationContext, OrganizationRecord, Person,
+    PersonApiList, PersonContext, PersonRepo, ProviderConflict, ProviderConflictField, ProviderRef,
+    ProviderRefList,
 };
-use crate::service::{PeopleService, VaultError};
+use crate::provider::NextcloudSync;
+use crate::service::{CardDavContact, PeopleService, VaultError};
 
 #[derive(Clone)]
 pub struct PeopleServiceImpl<R> {
     people_repo: R,
+    provider: Option<Arc<NextcloudSync>>,
 }
 
 impl<R> PeopleServiceImpl<R> {
     pub fn new(people_repo: R) -> Self {
-        Self { people_repo }
+        Self {
+            people_repo,
+            provider: None,
+        }
+    }
+
+    /// Construct a `PeopleServiceImpl` that delegates `addressbook=Some(..)`
+    /// CardDAV operations to the supplied Nextcloud provider client.
+    pub fn with_provider(people_repo: R, provider: Arc<NextcloudSync>) -> Self {
+        Self {
+            people_repo,
+            provider: Some(provider),
+        }
+    }
+
+    /// Inject (or replace) the Nextcloud provider client.
+    pub fn set_provider(&mut self, provider: Option<Arc<NextcloudSync>>) {
+        self.provider = provider;
     }
 }
 
@@ -40,6 +62,52 @@ where
             .map(convert_model::<PersonApiList, Person>)
             .collect()
     }
+
+    /// Resolve `addressbook` against discovery, then sync the collection and
+    /// convert the returned vCards into [`Person`] records.
+    async fn fetch_provider_people(
+        &self,
+        provider: &NextcloudSync,
+        addressbook: &str,
+    ) -> Result<Vec<Person>, VaultError> {
+        let discovery = provider.discover_addressbooks().await?;
+        let resolved = discovery
+            .addressbooks
+            .iter()
+            .find(|book| {
+                book.name.eq_ignore_ascii_case(addressbook)
+                    || book
+                        .display_name
+                        .as_deref()
+                        .map(|d| d.eq_ignore_ascii_case(addressbook))
+                        .unwrap_or(false)
+                    || book.href == addressbook
+            })
+            .map(|book| {
+                if book.href.is_empty() {
+                    book.name.clone()
+                } else {
+                    book.href.clone()
+                }
+            })
+            .unwrap_or_else(|| addressbook.to_string());
+
+        let collection = provider
+            .sync_addressbook_collection(&resolved, None)
+            .await?;
+        Ok(collection
+            .objects
+            .into_iter()
+            .filter(|object| !object.deleted)
+            .filter_map(|object| {
+                let href = object.href.clone();
+                let etag = object.etag.clone();
+                object
+                    .contact
+                    .map(|contact| person_from_card_contact(contact, &resolved, &href, etag))
+            })
+            .collect())
+    }
 }
 
 impl<R> PeopleService for PeopleServiceImpl<R>
@@ -47,10 +115,12 @@ where
     R: PersonRepo,
 {
     async fn list_people(&self, addressbook: Option<String>) -> Result<Vec<Person>, VaultError> {
-        // We don't actually scope by addressbook yet — the column isn't
-        // on the local model. Surface that to keep callers honest.
-        if addressbook.is_some() {
-            return Err(provider_not_configured("list_people (addressbook scoped)"));
+        if let Some(book) = addressbook {
+            let provider = self
+                .provider
+                .as_ref()
+                .ok_or_else(|| provider_not_configured("list_people (addressbook scoped)"))?;
+            return self.fetch_provider_people(provider, &book).await;
         }
         self.list_person_models().await
     }
@@ -59,10 +129,12 @@ where
         &self,
         addressbook: Option<String>,
     ) -> Result<Vec<OrganizationRecord>, VaultError> {
-        if addressbook.is_some() {
-            return Err(provider_not_configured(
-                "list_organizations (addressbook scoped)",
-            ));
+        if let Some(book) = addressbook {
+            let provider = self.provider.as_ref().ok_or_else(|| {
+                provider_not_configured("list_organizations (addressbook scoped)")
+            })?;
+            let people = self.fetch_provider_people(provider, &book).await?;
+            return Ok(group_people_by_organization(people));
         }
         // Group locally-cached people by their `organization` field.
         let mut groups = std::collections::BTreeMap::<String, OrganizationRecord>::new();
@@ -91,14 +163,16 @@ where
         reference: String,
         addressbook: Option<String>,
     ) -> Result<Option<PersonContext>, VaultError> {
-        if addressbook.is_some() {
-            return Err(provider_not_configured(
-                "person_context (addressbook scoped)",
-            ));
-        }
-        let person = self
-            .list_person_models()
-            .await?
+        let people = if let Some(book) = addressbook {
+            let provider = self
+                .provider
+                .as_ref()
+                .ok_or_else(|| provider_not_configured("person_context (addressbook scoped)"))?;
+            self.fetch_provider_people(provider, &book).await?
+        } else {
+            self.list_person_models().await?
+        };
+        let person = people
             .into_iter()
             .find(|person| person_matches(person, &reference));
         Ok(person.map(|person| PersonContext {
@@ -112,12 +186,14 @@ where
         reference: String,
         addressbook: Option<String>,
     ) -> Result<Option<OrganizationContext>, VaultError> {
-        if addressbook.is_some() {
-            return Err(provider_not_configured(
-                "organization_context (addressbook scoped)",
-            ));
-        }
-        let people = self.list_person_models().await?;
+        let people = if let Some(book) = addressbook {
+            let provider = self.provider.as_ref().ok_or_else(|| {
+                provider_not_configured("organization_context (addressbook scoped)")
+            })?;
+            self.fetch_provider_people(provider, &book).await?
+        } else {
+            self.list_person_models().await?
+        };
         let members: Vec<Person> = people
             .into_iter()
             .filter(|person| {
@@ -162,6 +238,99 @@ where
     ) -> Result<Option<ProviderConflict>, VaultError> {
         Ok(organization_provider_conflicts(&local, &remote))
     }
+}
+
+/// Convert a CardDAV vCard contact into a local [`Person`] record.
+fn person_from_card_contact(
+    contact: CardDavContact,
+    collection: &str,
+    href: &str,
+    etag: Option<String>,
+) -> Person {
+    let display_name = contact.full_name.clone().unwrap_or_else(|| {
+        match (
+            contact.given_name.as_deref(),
+            contact.family_name.as_deref(),
+        ) {
+            (Some(given), Some(family)) => format!("{given} {family}"),
+            (Some(given), None) => given.to_string(),
+            (None, Some(family)) => family.to_string(),
+            (None, None) => contact.uid.clone().unwrap_or_else(|| "Unknown".to_string()),
+        }
+    });
+
+    let mut methods: Vec<ContactMethod> = Vec::new();
+    for (idx, email) in contact.emails.iter().enumerate() {
+        methods.push(ContactMethod {
+            kind: "email".into(),
+            value: email.clone(),
+            label: None,
+            primary: idx == 0,
+        });
+    }
+    for (idx, phone) in contact.phones.iter().enumerate() {
+        methods.push(ContactMethod {
+            kind: "phone".into(),
+            value: phone.clone(),
+            label: None,
+            primary: contact.emails.is_empty() && idx == 0,
+        });
+    }
+    for url in &contact.urls {
+        methods.push(ContactMethod {
+            kind: "url".into(),
+            value: url.clone(),
+            label: None,
+            primary: false,
+        });
+    }
+
+    let provider_ref = ProviderRef {
+        provider: "nextcloud".to_string(),
+        account: None,
+        collection: Some(collection.to_string()),
+        href: Some(href.to_string()),
+        etag,
+        uid: contact.uid.clone(),
+    };
+
+    Person {
+        uuid: uuid::Uuid::new_v4(),
+        id: contact.uid,
+        display_name,
+        given_name: contact.given_name,
+        family_name: contact.family_name,
+        organization: contact.organization,
+        title: contact.title,
+        contact_methods: ContactMethodList::from(methods),
+        provider_refs: ProviderRefList::from(vec![provider_ref]),
+        notes: contact.note,
+        follow_up_on: None,
+        last_contacted_at: None,
+    }
+}
+
+/// Group a list of people by their `organization` field.
+fn group_people_by_organization(people: Vec<Person>) -> Vec<OrganizationRecord> {
+    let mut groups = std::collections::BTreeMap::<String, OrganizationRecord>::new();
+    for person in people {
+        let Some(org_name) = person
+            .organization
+            .as_ref()
+            .map(|name| name.trim().to_string())
+            .filter(|name| !name.is_empty())
+        else {
+            continue;
+        };
+        let entry = groups
+            .entry(org_name.clone())
+            .or_insert_with(|| OrganizationRecord {
+                name: org_name,
+                ..Default::default()
+            });
+        entry.people.push(person.display_name.clone());
+    }
+    groups.into_values().collect()
 }
 
 fn person_matches(person: &Person, reference: &str) -> bool {

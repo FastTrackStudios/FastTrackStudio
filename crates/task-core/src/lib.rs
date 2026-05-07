@@ -103,9 +103,9 @@ pub use project_vault::{
 #[cfg(feature = "server")]
 pub use provider::{
     ChannelConversation, ChannelMessage, ChannelSendMessageRequest, CommunicationChannelProvider,
-    LocalProvider, NextcloudConfig, NextcloudProvider, ProjectBundle, ProjectProvider,
-    ProjectRegistry, ProviderEvent, ProviderInfo, S3Config, S3Provider, VaultProvider,
-    WebDavConfig, WebDavProvider,
+    LocalProvider, NextcloudConfig, NextcloudProvider, NextcloudSync, ProjectBundle,
+    ProjectProvider, ProjectRegistry, ProviderEvent, ProviderInfo, S3Config, S3Provider,
+    VaultProvider, WebDavConfig, WebDavProvider,
 };
 #[cfg(feature = "server")]
 pub use service::{
