@@ -457,6 +457,16 @@ pub struct ZoneSpec {
     /// existing filename-based scanner already uses.
     #[facet(default)]
     pub direction: String,
+    /// Section identifier for multi-section libraries (orchestral with
+    /// 1v/2v/Va/Ce/Ba; CS Brass with French Horn/Trombone/etc; Pacific
+    /// with Cello/Violin/Viola/etc). References a `SectionSpec.id`. Empty
+    /// = single-section library (most synths, drums where pieces are
+    /// already split per file).
+    ///
+    /// Multi-section libraries fold all sections into one styx, with each
+    /// zone tagged. The Layer determines which section's zones to play.
+    #[facet(default)]
+    pub section: String,
 }
 
 // ── Wavetables ───────────────────────────────────────────────────────────────
