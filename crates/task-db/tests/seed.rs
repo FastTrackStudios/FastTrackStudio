@@ -50,13 +50,13 @@ async fn seed_demo_data_covers_every_entity_flavor() {
     let db = task_db::init_memory().await.expect("init in-memory db");
     let s = seed_demo_data(&db).await.expect("seed");
     assert!(
-        s.projects_created >= 6,
-        "want >= 6 projects, got {}",
+        s.projects_created >= 8,
+        "want >= 8 projects (incl. cross-org), got {}",
         s.projects_created
     );
     assert!(
-        s.tasks_created >= 15,
-        "want >= 15 tasks, got {}",
+        s.tasks_created >= 25,
+        "want >= 25 tasks, got {}",
         s.tasks_created
     );
     assert!(

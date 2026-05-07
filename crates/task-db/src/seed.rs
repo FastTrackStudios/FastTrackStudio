@@ -28,6 +28,18 @@ use task_core::task::{
 /// running `reset_demo_data` first.
 pub const DEMO_NAMESPACE: Uuid = Uuid::from_u128(0x0d_e7_5e_ed_0d_e7_5e_ed_0d_e7_5e_ed_0d_e7_5e_ed);
 
+// Org slugs match the auth-seed organizations in `apps/server/src/main.rs`
+// (`seed_auth_data`). Cross-org collaboration is modeled by shared usernames
+// across `Project::team` and `Task::assignees` — e.g. cody is a member of all
+// five orgs, tom is in fta/fts/jf/tbm, marcus is in fta/tbm. A project
+// owned by org A with assignees from org B + B's also-member-of-A users
+// is a cross-org collab.
+const ORG_FTA: &str = "fasttrackaudio";
+const ORG_FTS: &str = "fasttrackstudio";
+const ORG_JF: &str = "just-friends";
+const ORG_TBM: &str = "tombrooksmusic";
+const ORG_PERSONAL: &str = "personal";
+
 /// Per-entity counts for a seed run.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct DemoSeedSummary {
@@ -142,31 +154,47 @@ const PROJECT_KEYS: &[&str] = &[
     "project:on-hold-r-and-d",
     "project:archived-2024",
     "project:personal-todo",
+    // Cross-org collaborations
+    "project:tom-solo-ep",
+    "project:band-tour-2026",
 ];
 
 const TASK_KEYS: &[&str] = &[
-    // Active, varied
+    // Task App (FTS) — cody/tom/kai/luna
     "task:fix-auth-bug",
     "task:design-portal-ui",
     "task:write-readme",
     "task:write-tests",
-    "task:onboard-codywright",
-    "task:overdue-tax-filing",
-    "task:due-today-call-client",
+    "task:onboard-luna",
     "task:scheduled-future-deploy",
     "task:running-timer-perf-pass",
-    "task:billable-mix-mastering",
     "task:weekly-recurring-standup",
-    // Inbox bucket
+    // Montreal Album (FTA) — cody/amy/carter
+    "task:billable-mix-mastering",
+    "task:due-today-call-client",
+    "task:montreal-track-sequencing",
+    // Personal (PERSONAL) — cody only
+    "task:overdue-tax-filing",
+    "task:body-rich-spec",
+    // Inbox bucket — unrouted, no project
     "task:inbox-misc-idea",
     "task:inbox-research-loro",
     // Done
     "task:done-publish-blog",
     "task:done-q1-review",
-    // Cancelled / archived
+    // Cancelled
     "task:cancelled-old-spike",
-    // Body content
-    "task:body-rich-spec",
+    // Tom solo EP (TBM, cross-org) — cody contributing as fta engineer
+    "task:tom-ep-tracking-bass",
+    "task:tom-ep-mixing-collab",
+    "task:tom-ep-master-prep",
+    // JF Tour 2026 (cross-org) — bri lead, tom + amy + carter from other orgs
+    "task:tour-book-venues",
+    "task:tour-stage-plot",
+    "task:tour-merch-design",
+    // Venue prep (JF) — bri lead
+    "task:venue-input-list",
+    "task:venue-runner-coordination",
 ];
 
 const CALENDAR_EVENT_KEYS: &[&str] = &[
@@ -198,19 +226,22 @@ async fn seed_projects(
     let today = Utc::now().date_naive();
 
     let projects = [
+        // FastTrackStudio (software org) — Task App, led by cody, Tom is a
+        // contributor though his primary org is FTA. tom + cody overlap into
+        // both fta/fts so this is a clean intra-org collaboration.
         {
             let mut p = project_base("project:task-app", "Task App", ProjectStatus::Active);
             p.description = Set(Some(
                 "The task management system this codebase is.".to_string(),
             ));
             p.area = Set(Some("Engineering".to_string()));
-            p.organization = Set(Some("FastTrack Studios".to_string()));
+            p.organization = Set(Some(ORG_FTS.to_string()));
             p.project_type = Set(Some("Product".to_string()));
             p.workflow = Set(Some("kanban".to_string()));
             p.workflow_stage = Set(Some("In Progress".to_string()));
             p.identifier = Set(Some("TASK".to_string()));
-            p.lead = Set(Some("codywright".to_string()));
-            p.default_assignee = Set(Some("codywright".to_string()));
+            p.lead = Set(Some("cody".to_string()));
+            p.default_assignee = Set(Some("cody".to_string()));
             p.emoji = Set(Some("🛠".to_string()));
             p.start = Set(Some(today - Duration::days(120)));
             p.due = Set(Some(today + Duration::days(60)));
@@ -219,11 +250,14 @@ async fn seed_projects(
                 "product".to_string(),
             ]));
             p.team = Set(StringList::from(vec![
-                "codywright".to_string(),
-                "amywright".to_string(),
+                "cody".to_string(),
+                "tom".to_string(),
+                "kai".to_string(),
+                "luna".to_string(),
             ]));
             p
         },
+        // FastTrackAudio (music) — Montreal Album, billable. cody/amy/carter.
         {
             let mut p = project_base(
                 "project:fasttrack-album",
@@ -234,13 +268,26 @@ async fn seed_projects(
                 "Audio production: mastering + sequencing.".to_string(),
             ));
             p.area = Set(Some("Music".to_string()));
+            p.organization = Set(Some(ORG_FTA.to_string()));
             p.project_type = Set(Some("Audio".to_string()));
+            p.lead = Set(Some("cody".to_string()));
+            p.default_assignee = Set(Some("cody".to_string()));
             p.emoji = Set(Some("🎧".to_string()));
             p.start = Set(Some(today - Duration::days(45)));
             p.due = Set(Some(today + Duration::days(30)));
-            p.tags = Set(StringList::from(vec!["billable".to_string()]));
+            p.tags = Set(StringList::from(vec![
+                "billable".to_string(),
+                "client-work".to_string(),
+            ]));
+            p.team = Set(StringList::from(vec![
+                "cody".to_string(),
+                "amy".to_string(),
+                "carter".to_string(),
+            ]));
             p
         },
+        // Just Friends (band) — venue prep. Cross-org by nature: cody/amy/
+        // carter/tom/bri are all in jf, but tom's primary is fta + tbm.
         {
             let mut p = project_base(
                 "project:venue-prep",
@@ -248,12 +295,23 @@ async fn seed_projects(
                 ProjectStatus::Active,
             );
             p.area = Set(Some("Operations".to_string()));
+            p.organization = Set(Some(ORG_JF.to_string()));
             p.project_type = Set(Some("Event".to_string()));
+            p.lead = Set(Some("bri".to_string()));
+            p.default_assignee = Set(Some("bri".to_string()));
             p.emoji = Set(Some("🎤".to_string()));
             p.start = Set(Some(today));
             p.due = Set(Some(today + Duration::days(14)));
+            p.team = Set(StringList::from(vec![
+                "cody".to_string(),
+                "amy".to_string(),
+                "carter".to_string(),
+                "tom".to_string(),
+                "bri".to_string(),
+            ]));
             p
         },
+        // FTS — research spike, on hold.
         {
             let mut p = project_base(
                 "project:on-hold-r-and-d",
@@ -261,9 +319,16 @@ async fn seed_projects(
                 ProjectStatus::OnHold,
             );
             p.area = Set(Some("Engineering".to_string()));
+            p.organization = Set(Some(ORG_FTS.to_string()));
+            p.lead = Set(Some("cody".to_string()));
             p.description = Set(Some("Loro CRDT integration exploration.".to_string()));
+            p.team = Set(StringList::from(vec![
+                "cody".to_string(),
+                "kai".to_string(),
+            ]));
             p
         },
+        // FTS — archived retro from last quarter.
         {
             let mut p = project_base(
                 "project:archived-2024",
@@ -271,8 +336,10 @@ async fn seed_projects(
                 ProjectStatus::Archived,
             );
             p.area = Set(Some("Operations".to_string()));
+            p.organization = Set(Some(ORG_FTS.to_string()));
             p
         },
+        // Personal — single-member.
         {
             let mut p = project_base(
                 "project:personal-todo",
@@ -280,7 +347,71 @@ async fn seed_projects(
                 ProjectStatus::Active,
             );
             p.area = Set(Some("Personal".to_string()));
+            p.organization = Set(Some(ORG_PERSONAL.to_string()));
+            p.lead = Set(Some("cody".to_string()));
             p.emoji = Set(Some("📝".to_string()));
+            p.team = Set(StringList::from(vec!["cody".to_string()]));
+            p
+        },
+        // ── Cross-org collaboration #1 ─────────────────────────────────────
+        // TomBrooksMusic owns this solo EP; cody (primary: fta) and marcus
+        // (primary: fta) collaborate as engineers. Both are members of tbm
+        // through the auth org-membership table, so this is genuine cross-org
+        // work — fta engineers contracted into tbm's release.
+        {
+            let mut p = project_base(
+                "project:tom-solo-ep",
+                "Tom Brooks: Solo EP",
+                ProjectStatus::Active,
+            );
+            p.area = Set(Some("Music".to_string()));
+            p.organization = Set(Some(ORG_TBM.to_string()));
+            p.project_type = Set(Some("Audio".to_string()));
+            p.lead = Set(Some("tom".to_string()));
+            p.default_assignee = Set(Some("tom".to_string()));
+            p.emoji = Set(Some("🎸".to_string()));
+            p.start = Set(Some(today - Duration::days(20)));
+            p.due = Set(Some(today + Duration::days(45)));
+            p.tags = Set(StringList::from(vec![
+                "billable".to_string(),
+                "cross-org".to_string(),
+            ]));
+            p.team = Set(StringList::from(vec![
+                "tom".to_string(),
+                "cody".to_string(),
+                "marcus".to_string(),
+            ]));
+            p
+        },
+        // ── Cross-org collaboration #2 ─────────────────────────────────────
+        // Just Friends planning a 2026 tour — coordinates across fta (cody/amy/
+        // carter handling stage/sound) and tbm (tom doing setlist/logistics).
+        // Bri (jf-only, tour manager) leads.
+        {
+            let mut p = project_base(
+                "project:band-tour-2026",
+                "Just Friends 2026 Tour",
+                ProjectStatus::Active,
+            );
+            p.area = Set(Some("Operations".to_string()));
+            p.organization = Set(Some(ORG_JF.to_string()));
+            p.project_type = Set(Some("Event".to_string()));
+            p.lead = Set(Some("bri".to_string()));
+            p.default_assignee = Set(Some("bri".to_string()));
+            p.emoji = Set(Some("🚐".to_string()));
+            p.start = Set(Some(today + Duration::days(30)));
+            p.due = Set(Some(today + Duration::days(180)));
+            p.tags = Set(StringList::from(vec![
+                "tour".to_string(),
+                "cross-org".to_string(),
+            ]));
+            p.team = Set(StringList::from(vec![
+                "bri".to_string(),
+                "cody".to_string(),
+                "amy".to_string(),
+                "carter".to_string(),
+                "tom".to_string(),
+            ]));
             p
         },
     ];
@@ -332,7 +463,7 @@ async fn seed_tasks(db: &DatabaseConnection, summary: &mut DemoSeedSummary) -> R
             Some("Task App"),
             vec!["backend", "bug"],
             Some(today + Duration::days(2)),
-            Some("codywright"),
+            Some("cody"),
             now,
         ),
         task_active(
@@ -343,7 +474,7 @@ async fn seed_tasks(db: &DatabaseConnection, summary: &mut DemoSeedSummary) -> R
             Some("Task App"),
             vec!["design"],
             Some(today + Duration::days(5)),
-            Some("amywright"),
+            Some("amy"),
             now,
         ),
         task_active(
@@ -354,7 +485,7 @@ async fn seed_tasks(db: &DatabaseConnection, summary: &mut DemoSeedSummary) -> R
             Some("Task App"),
             vec!["docs"],
             None,
-            Some("codywright"),
+            Some("cody"),
             now,
         ),
         task_active(
@@ -365,18 +496,18 @@ async fn seed_tasks(db: &DatabaseConnection, summary: &mut DemoSeedSummary) -> R
             Some("Task App"),
             vec!["testing"],
             Some(today + Duration::days(3)),
-            Some("codywright"),
+            Some("cody"),
             now,
         ),
         task_active(
-            "task:onboard-codywright",
-            "Onboard new dev",
+            "task:onboard-luna",
+            "Onboard Luna (FTS new hire)",
             Priority::Normal,
             Status::Open,
             Some("Task App"),
             vec!["ops"],
             Some(today + Duration::days(7)),
-            None,
+            Some("tom"),
             now,
         ),
         // Overdue
@@ -388,7 +519,7 @@ async fn seed_tasks(db: &DatabaseConnection, summary: &mut DemoSeedSummary) -> R
             Some("Personal Todos"),
             vec!["finance"],
             Some(today - Duration::days(3)),
-            Some("codywright"),
+            Some("cody"),
             now,
         ),
         // Due today
@@ -400,7 +531,7 @@ async fn seed_tasks(db: &DatabaseConnection, summary: &mut DemoSeedSummary) -> R
             Some("Montreal Album"),
             vec!["billable"],
             Some(today),
-            Some("codywright"),
+            Some("cody"),
             now,
         ),
         // Scheduled future
@@ -413,7 +544,7 @@ async fn seed_tasks(db: &DatabaseConnection, summary: &mut DemoSeedSummary) -> R
                 Some("Task App"),
                 vec!["release"],
                 None,
-                Some("codywright"),
+                Some("cody"),
                 now,
             );
             t.scheduled = Set(Some(today + Duration::days(10)));
@@ -429,12 +560,12 @@ async fn seed_tasks(db: &DatabaseConnection, summary: &mut DemoSeedSummary) -> R
                 Some("Task App"),
                 vec!["perf"],
                 None,
-                Some("codywright"),
+                Some("cody"),
                 now,
             );
             t.time_entries = Set(TimeEntryList::from(vec![TimeEntry {
                 id: "te-perf-pass-1".to_string(),
-                user: Some("codywright".to_string()),
+                user: Some("cody".to_string()),
                 start_time: now - Duration::minutes(45),
                 end_time: None,
                 ..Default::default()
@@ -451,12 +582,12 @@ async fn seed_tasks(db: &DatabaseConnection, summary: &mut DemoSeedSummary) -> R
                 Some("Montreal Album"),
                 vec!["billable", "audio"],
                 Some(today + Duration::days(4)),
-                Some("codywright"),
+                Some("cody"),
                 now,
             );
             t.time_entries = Set(TimeEntryList::from(vec![TimeEntry {
                 id: "te-mastering-1".to_string(),
-                user: Some("codywright".to_string()),
+                user: Some("cody".to_string()),
                 start_time: now - Duration::hours(3),
                 end_time: Some(now - Duration::hours(1)),
                 billable: true,
@@ -476,7 +607,7 @@ async fn seed_tasks(db: &DatabaseConnection, summary: &mut DemoSeedSummary) -> R
                 Some("Task App"),
                 vec!["recurring"],
                 None,
-                Some("codywright"),
+                Some("cody"),
                 now,
             );
             t.recurrence = Set(Some("FREQ=WEEKLY;BYDAY=MO".to_string()));
@@ -524,7 +655,7 @@ async fn seed_tasks(db: &DatabaseConnection, summary: &mut DemoSeedSummary) -> R
                 Some("Task App"),
                 vec!["docs"],
                 None,
-                Some("codywright"),
+                Some("cody"),
                 now,
             );
             t.completed_date = Set(Some(today - Duration::days(2)));
@@ -539,7 +670,7 @@ async fn seed_tasks(db: &DatabaseConnection, summary: &mut DemoSeedSummary) -> R
                 Some("Personal Todos"),
                 vec![],
                 None,
-                Some("codywright"),
+                Some("cody"),
                 now,
             );
             t.completed_date = Set(Some(today - Duration::days(14)));
@@ -553,17 +684,18 @@ async fn seed_tasks(db: &DatabaseConnection, summary: &mut DemoSeedSummary) -> R
             Some("CRDT Research Spike"),
             now,
         ),
-        // Rich body
+        // Rich body — kept on personal projects so it doesn't clutter the
+        // Task App project tasks list.
         {
             let mut t = task_active(
                 "task:body-rich-spec",
                 "Write spec: realtime sync v2",
                 Priority::High,
                 Status::InProgress,
-                Some("Task App"),
+                Some("Personal Todos"),
                 vec!["spec"],
                 Some(today + Duration::days(7)),
-                Some("codywright"),
+                Some("cody"),
                 now,
             );
             t.body = Set(
@@ -571,6 +703,123 @@ async fn seed_tasks(db: &DatabaseConnection, summary: &mut DemoSeedSummary) -> R
             );
             t
         },
+        // ── Montreal Album: more depth ─────────────────────────────────────
+        task_active(
+            "task:montreal-track-sequencing",
+            "Sequence album tracklist",
+            Priority::Normal,
+            Status::Open,
+            Some("Montreal Album"),
+            vec!["billable", "audio"],
+            Some(today + Duration::days(10)),
+            Some("amy"),
+            now,
+        ),
+        // ── Tom Solo EP (TBM, cross-org) ───────────────────────────────────
+        // tom = lead, cody (fta) tracks bass, marcus (fta) co-mixes.
+        task_active(
+            "task:tom-ep-tracking-bass",
+            "Track bass for Tom's EP",
+            Priority::Normal,
+            Status::InProgress,
+            Some("Tom Brooks: Solo EP"),
+            vec!["billable", "cross-org", "audio"],
+            Some(today + Duration::days(7)),
+            Some("cody"),
+            now,
+        ),
+        {
+            let mut t = task_active(
+                "task:tom-ep-mixing-collab",
+                "Mix passes — split with Marcus",
+                Priority::Normal,
+                Status::Open,
+                Some("Tom Brooks: Solo EP"),
+                vec!["billable", "cross-org", "audio"],
+                Some(today + Duration::days(20)),
+                Some("marcus"),
+                now,
+            );
+            t.assignees = Set(StringList::from(vec![
+                "marcus".to_string(),
+                "cody".to_string(),
+            ]));
+            t.subscribers = Set(StringList::from(vec!["tom".to_string()]));
+            t
+        },
+        task_active(
+            "task:tom-ep-master-prep",
+            "Prepare reference mixes for mastering",
+            Priority::Low,
+            Status::Open,
+            Some("Tom Brooks: Solo EP"),
+            vec!["cross-org", "audio"],
+            Some(today + Duration::days(35)),
+            Some("tom"),
+            now,
+        ),
+        // ── JF 2026 Tour (cross-org) ───────────────────────────────────────
+        task_active(
+            "task:tour-book-venues",
+            "Book 12-city tour venues",
+            Priority::High,
+            Status::InProgress,
+            Some("Just Friends 2026 Tour"),
+            vec!["tour", "ops"],
+            Some(today + Duration::days(21)),
+            Some("bri"),
+            now,
+        ),
+        {
+            let mut t = task_active(
+                "task:tour-stage-plot",
+                "Draft stage plot + input list",
+                Priority::Normal,
+                Status::Open,
+                Some("Just Friends 2026 Tour"),
+                vec!["tour", "audio"],
+                Some(today + Duration::days(40)),
+                Some("carter"),
+                now,
+            );
+            // Carter (jf+fta) is lead, but cody (fta) reviews; subscribe him.
+            t.subscribers = Set(StringList::from(vec!["cody".to_string()]));
+            t
+        },
+        task_active(
+            "task:tour-merch-design",
+            "Design tour merch (shirts, posters)",
+            Priority::Low,
+            Status::Open,
+            Some("Just Friends 2026 Tour"),
+            vec!["tour", "design"],
+            Some(today + Duration::days(60)),
+            Some("amy"),
+            now,
+        ),
+        // ── Venue prep (JF) ────────────────────────────────────────────────
+        task_active(
+            "task:venue-input-list",
+            "Confirm Campus Jax input list",
+            Priority::High,
+            Status::InProgress,
+            Some("Campus Jax Show Prep"),
+            vec!["audio"],
+            Some(today + Duration::days(3)),
+            Some("carter"),
+            now,
+        ),
+        task_active(
+            "task:venue-runner-coordination",
+            "Coordinate day-of runners + load-in",
+            Priority::Normal,
+            Status::Open,
+            Some("Campus Jax Show Prep"),
+            vec!["ops"],
+            Some(today + Duration::days(7)),
+            Some("bri"),
+            now,
+        ),
     ];
 
     for t in tasks {
@@ -625,7 +874,7 @@ fn task_active(
         reminders: Set(ReminderList::default()),
         assignee: Set(assignee.map(str::to_string)),
         assignees: Set(StringList::default()),
-        created_by: Set(Some("codywright".to_string())),
+        created_by: Set(Some("cody".to_string())),
         relations: Set(TaskRelationList::default()),
         subscribers: Set(StringList::default()),
         reactions: Set(Default::default()),
@@ -677,8 +926,8 @@ async fn seed_calendar_events(
             all_day: Set(false),
             status: Set(CalendarEventStatus::Confirmed),
             attendees: Set(StringList::from(vec![
-                "codywright".to_string(),
-                "amywright".to_string(),
+                "cody".to_string(),
+                "amy".to_string(),
             ])),
             spaces: Set(WikiLinkList::default()),
             date_created: Set(Some(now)),
@@ -789,7 +1038,7 @@ async fn seed_people(db: &DatabaseConnection, summary: &mut DemoSeedSummary) -> 
     let people = [
         people::ActiveModel {
             uuid: Set(demo_id("person:cody-wright")),
-            id: Set(Some("codywright".to_string())),
+            id: Set(Some("cody".to_string())),
             display_name: Set("Cody Wright".to_string()),
             given_name: Set(Some("Cody".to_string())),
             family_name: Set(Some("Wright".to_string())),
@@ -815,7 +1064,7 @@ async fn seed_people(db: &DatabaseConnection, summary: &mut DemoSeedSummary) -> 
         },
         people::ActiveModel {
             uuid: Set(demo_id("person:amy-wright")),
-            id: Set(Some("amywright".to_string())),
+            id: Set(Some("amy".to_string())),
             display_name: Set("Amy Wright".to_string()),
             given_name: Set(Some("Amy".to_string())),
             family_name: Set(Some("Wright".to_string())),
@@ -890,7 +1139,7 @@ async fn seed_comments(
             id: Set(demo_id("comment:auth-bug-1")),
             entity_id: Set(auth_bug_id),
             entity_type: Set("task".to_string()),
-            author: Set("codywright".to_string()),
+            author: Set("cody".to_string()),
             body: Set("Repro'd: session cookie expires after 1h instead of 24h.".to_string()),
             time_start: Set(None),
             time_end: Set(None),
@@ -907,7 +1156,7 @@ async fn seed_comments(
             id: Set(demo_id("comment:auth-bug-2-reply")),
             entity_id: Set(auth_bug_id),
             entity_type: Set("task".to_string()),
-            author: Set("amywright".to_string()),
+            author: Set("amy".to_string()),
             body: Set("Likely the JWT exp claim — taking a look now.".to_string()),
             time_start: Set(None),
             time_end: Set(None),
@@ -924,13 +1173,13 @@ async fn seed_comments(
             id: Set(demo_id("comment:design-resolved")),
             entity_id: Set(design_id),
             entity_type: Set("task".to_string()),
-            author: Set("amywright".to_string()),
+            author: Set("amy".to_string()),
             body: Set("Mocks attached, signed off.".to_string()),
             time_start: Set(None),
             time_end: Set(None),
             reply_to: Set(None),
             resolved: Set(true),
-            resolved_by: Set(Some("codywright".to_string())),
+            resolved_by: Set(Some("cody".to_string())),
             mentions: Set(serde_json::json!([]).into()),
             external_id: Set(None),
             deleted_at: Set(None),
