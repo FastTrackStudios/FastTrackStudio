@@ -62,6 +62,7 @@ pub use mail::{
 pub use mail_watch::{ImapWatchConfig, WatchEvent, watch_idle};
 pub use mock::MockProvider;
 pub use nextcloud::{NextcloudConfig, NextcloudProvider};
+pub use nextcloud_sync::NextcloudSync;
 pub use talk::{Message as TalkMessage, Room as TalkRoom, TalkClient, TalkConfig};
 
 #[cfg(test)]
