@@ -15,6 +15,33 @@ pub struct TaskIndex {
     pub(crate) conn: Connection,
 }
 
+/// Typed payload for [`TaskIndex::record_change`].
+#[derive(Debug, Clone, Copy)]
+pub struct ChangeRecord<'a> {
+    pub entity_type: &'a str,
+    pub entity_id: &'a str,
+    pub field: Option<&'a str>,
+    pub old_value: Option<&'a str>,
+    pub new_value: Option<&'a str>,
+    pub changed_by: Option<&'a str>,
+    pub file_path: Option<&'a str>,
+}
+
+/// Typed payload for [`TaskIndex::record_conflict`].
+#[derive(Debug, Clone, Copy)]
+pub struct ConflictRecord<'a> {
+    pub entity_type: &'a str,
+    pub entity_id: &'a str,
+    pub field: &'a str,
+    pub winning_value: Option<&'a str>,
+    pub losing_value: Option<&'a str>,
+    pub winning_actor: Option<&'a str>,
+    pub losing_actor: Option<&'a str>,
+    pub file_path: Option<&'a str>,
+    /// Short tag: "concurrent" / "timer" / "manual".
+    pub kind: &'a str,
+}
+
 impl TaskIndex {
     /// Open or create an index database.
     pub fn open(path: &Path) -> Result<Self, VaultError> {
@@ -335,19 +362,18 @@ impl TaskIndex {
     ///
     /// `kind` is a short tag: "concurrent" (CRDT heads disagree on a field),
     /// "timer" (two running timers on the same task), "manual" (user flagged).
-    #[allow(clippy::too_many_arguments)]
-    pub fn record_conflict(
-        &self,
-        entity_type: &str,
-        entity_id: &str,
-        field: &str,
-        winning_value: Option<&str>,
-        losing_value: Option<&str>,
-        winning_actor: Option<&str>,
-        losing_actor: Option<&str>,
-        file_path: Option<&str>,
-        kind: &str,
-    ) -> Result<i64, VaultError> {
+    pub fn record_conflict(&self, record: ConflictRecord<'_>) -> Result<i64, VaultError> {
+        let ConflictRecord {
+            entity_type,
+            entity_id,
+            field,
+            winning_value,
+            losing_value,
+            winning_actor,
+            losing_actor,
+            file_path,
+            kind,
+        } = record;
         self.conn
             .execute(
                 "INSERT INTO changes (
@@ -446,17 +472,16 @@ impl TaskIndex {
     }
 
     /// Record a change for the audit trail.
-    #[allow(clippy::too_many_arguments)]
-    pub fn record_change(
-        &self,
-        entity_type: &str,
-        entity_id: &str,
-        field: Option<&str>,
-        old_value: Option<&str>,
-        new_value: Option<&str>,
-        changed_by: Option<&str>,
-        file_path: Option<&str>,
-    ) -> Result<(), VaultError> {
+    pub fn record_change(&self, record: ChangeRecord<'_>) -> Result<(), VaultError> {
+        let ChangeRecord {
+            entity_type,
+            entity_id,
+            field,
+            old_value,
+            new_value,
+            changed_by,
+            file_path,
+        } = record;
         self.conn
             .execute(
                 "INSERT INTO changes (entity_type, entity_id, field, old_value, new_value, changed_by, file_path)
@@ -805,15 +830,15 @@ mod tests {
         let index = TaskIndex::in_memory().unwrap();
 
         index
-            .record_change(
-                "task",
-                "test-1",
-                Some("status"),
-                Some("Open"),
-                Some("Done"),
-                Some("codywright"),
-                Some("tasks/test.md"),
-            )
+            .record_change(ChangeRecord {
+                entity_type: "task",
+                entity_id: "test-1",
+                field: Some("status"),
+                old_value: Some("Open"),
+                new_value: Some("Done"),
+                changed_by: Some("codywright"),
+                file_path: Some("tasks/test.md"),
+            })
             .unwrap();
 
         let changes = index.recent_changes(10).unwrap();
@@ -828,17 +853,17 @@ mod tests {
         let index = TaskIndex::in_memory().unwrap();
 
         let id = index
-            .record_conflict(
-                "task",
-                "t-42",
-                "assignee",
-                Some("codywright"),
-                Some("amy"),
-                Some("hermes"),
-                Some("tommy"),
-                Some("tasks/Fix bug.md"),
-                "concurrent",
-            )
+            .record_conflict(ConflictRecord {
+                entity_type: "task",
+                entity_id: "t-42",
+                field: "assignee",
+                winning_value: Some("codywright"),
+                losing_value: Some("amy"),
+                winning_actor: Some("hermes"),
+                losing_actor: Some("tommy"),
+                file_path: Some("tasks/Fix bug.md"),
+                kind: "concurrent",
+            })
             .unwrap();
 
         let open = index.list_conflicts(true, 10).unwrap();

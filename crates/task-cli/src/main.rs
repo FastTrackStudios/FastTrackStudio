@@ -1,5 +1,5 @@
 use chrono::{DateTime, Datelike, NaiveDate, TimeZone, Utc};
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 use serde::{Serialize, de::DeserializeOwned};
 use task_core::expense::{
     ExpenseCreateRequest, ExpenseFilter, ExpensePatch, render_expense_body, render_expense_report,
@@ -1841,7 +1841,6 @@ enum AgentCommands {
 }
 
 #[derive(Subcommand)]
-#[allow(clippy::large_enum_variant)]
 enum ProjectCommands {
     /// List all projects
     List {
@@ -1887,66 +1886,72 @@ enum ProjectCommands {
         command: ProjectCommentCommands,
     },
     /// Edit project fields — status, client, rate, email_tags, etc.
-    Edit {
-        name: String,
-        #[arg(long)]
-        status: Option<String>,
-        #[arg(long)]
-        description: Option<String>,
-        #[arg(long)]
-        area: Option<String>,
-        #[arg(long)]
-        organization: Option<String>,
-        /// Pass "clear" to remove.
-        #[arg(long)]
-        client: Option<String>,
-        /// Billable rate in cents/hr; 0 clears.
-        #[arg(long)]
-        default_rate: Option<u32>,
-        #[arg(long)]
-        identifier: Option<String>,
-        #[arg(long)]
-        lead: Option<String>,
-        #[arg(long)]
-        default_assignee: Option<String>,
-        #[arg(long)]
-        emoji: Option<String>,
-        #[arg(long)]
-        repo: Option<String>,
-        #[arg(long)]
-        dev_path: Option<String>,
-        #[arg(long)]
-        project_type: Option<String>,
-        #[arg(long)]
-        workflow: Option<String>,
-        #[arg(long)]
-        workflow_stage: Option<String>,
-        /// YYYY-MM-DD or "clear"
-        #[arg(long)]
-        due: Option<String>,
-        #[arg(long)]
-        start: Option<String>,
-        #[arg(long)]
-        add_tag: Vec<String>,
-        #[arg(long)]
-        remove_tag: Vec<String>,
-        #[arg(long)]
-        add_email_tag: Vec<String>,
-        #[arg(long)]
-        remove_email_tag: Vec<String>,
-        #[arg(long)]
-        add_team: Vec<String>,
-        #[arg(long)]
-        remove_team: Vec<String>,
-        #[arg(long)]
-        json: bool,
-    },
+    Edit(Box<ProjectEditArgs>),
     /// Show a single project
     Show {
         name: String,
         #[arg(long)]
         json: bool,
     },
+}
+
+/// Arguments for `ProjectCommands::Edit`. Boxed inside the variant so
+/// the [`ProjectCommands`] enum doesn't blow up its size — every other
+/// variant only carries a name + a `--json` flag.
+#[derive(Args)]
+struct ProjectEditArgs {
+    pub name: String,
+    #[arg(long)]
+    pub status: Option<String>,
+    #[arg(long)]
+    pub description: Option<String>,
+    #[arg(long)]
+    pub area: Option<String>,
+    #[arg(long)]
+    pub organization: Option<String>,
+    /// Pass "clear" to remove.
+    #[arg(long)]
+    pub client: Option<String>,
+    /// Billable rate in cents/hr; 0 clears.
+    #[arg(long)]
+    pub default_rate: Option<u32>,
+    #[arg(long)]
+    pub identifier: Option<String>,
+    #[arg(long)]
+    pub lead: Option<String>,
+    #[arg(long)]
+    pub default_assignee: Option<String>,
+    #[arg(long)]
+    pub emoji: Option<String>,
+    #[arg(long)]
+    pub repo: Option<String>,
+    #[arg(long)]
+    pub dev_path: Option<String>,
+    #[arg(long)]
+    pub project_type: Option<String>,
+    #[arg(long)]
+    pub workflow: Option<String>,
+    #[arg(long)]
+    pub workflow_stage: Option<String>,
+    /// YYYY-MM-DD or "clear"
+    #[arg(long)]
+    pub due: Option<String>,
+    #[arg(long)]
+    pub start: Option<String>,
+    #[arg(long)]
+    pub add_tag: Vec<String>,
+    #[arg(long)]
+    pub remove_tag: Vec<String>,
+    #[arg(long)]
+    pub add_email_tag: Vec<String>,
+    #[arg(long)]
+    pub remove_email_tag: Vec<String>,
+    #[arg(long)]
+    pub add_team: Vec<String>,
+    #[arg(long)]
+    pub remove_team: Vec<String>,
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Subcommand)]
@@ -2347,7 +2352,7 @@ async fn run_remote_command(
             recurrence,
             assignee,
         } => {
-            let task = build_new_task(
+            let task = build_new_task(NewTaskInput {
                 title,
                 priority,
                 status,
@@ -2358,8 +2363,8 @@ async fn run_remote_command(
                 tag,
                 recurrence,
                 assignee,
-                actor.map(str::to_string),
-            )?;
+                actor: actor.map(str::to_string),
+            })?;
             let create: task_core::task::TaskApiCreate = model_to_api(&task)?;
             let created: Task = api_to_model(remote.task_repo().await?.create_task(create).await?)?;
             println!("Created: {}", created.title);
@@ -2551,20 +2556,22 @@ async fn run_remote_command(
             let mut task = remote_find_task(remote, &reference).await?;
             apply_task_update(
                 &mut task,
-                title,
-                status,
-                priority,
-                due,
-                scheduled,
-                assignee,
-                add_tag,
-                remove_tag,
-                add_project,
-                remove_project,
-                add_context,
-                remove_context,
-                recurrence,
-                body,
+                TaskUpdateInput {
+                    title,
+                    status,
+                    priority,
+                    due,
+                    scheduled,
+                    assignee,
+                    add_tag,
+                    remove_tag,
+                    add_project,
+                    remove_project,
+                    add_context,
+                    remove_context,
+                    recurrence,
+                    body,
+                },
             )?;
             let updated = remote_update_task_with_client(&remote.task_repo().await?, &task).await?;
             if json {
@@ -3283,8 +3290,8 @@ fn apply_remote_project_patch(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
-fn build_new_task(
+/// Typed inputs for [`build_new_task`].
+struct NewTaskInput {
     title: String,
     priority: Option<String>,
     status: Option<String>,
@@ -3296,7 +3303,22 @@ fn build_new_task(
     recurrence: Option<String>,
     assignee: Option<String>,
     actor: Option<String>,
-) -> eyre::Result<Task> {
+}
+
+fn build_new_task(input: NewTaskInput) -> eyre::Result<Task> {
+    let NewTaskInput {
+        title,
+        priority,
+        status,
+        due,
+        scheduled,
+        project,
+        context,
+        tag,
+        recurrence,
+        assignee,
+        actor,
+    } = input;
     Ok(Task {
         title,
         priority: priority
@@ -3354,9 +3376,8 @@ where
     model_to_api(&value)
 }
 
-#[allow(clippy::too_many_arguments)]
-fn apply_task_update(
-    task: &mut Task,
+/// Typed inputs for [`apply_task_update`].
+struct TaskUpdateInput {
     title: Option<String>,
     status: Option<String>,
     priority: Option<String>,
@@ -3371,7 +3392,25 @@ fn apply_task_update(
     remove_context: Vec<String>,
     recurrence: Option<String>,
     body: Option<String>,
-) -> eyre::Result<()> {
+}
+
+fn apply_task_update(task: &mut Task, input: TaskUpdateInput) -> eyre::Result<()> {
+    let TaskUpdateInput {
+        title,
+        status,
+        priority,
+        due,
+        scheduled,
+        assignee,
+        add_tag,
+        remove_tag,
+        add_project,
+        remove_project,
+        add_context,
+        remove_context,
+        recurrence,
+        body,
+    } = input;
     if let Some(t) = title {
         task.title = t;
     }
@@ -3720,33 +3759,34 @@ async fn run_remote_project_command(
             remote_update_project_with_client(&repo, &project_item).await?;
             println!("Reopened comment {comment_id}.");
         }
-        ProjectCommands::Edit {
-            name,
-            status,
-            description,
-            area,
-            organization,
-            client: project_client,
-            default_rate,
-            identifier,
-            lead,
-            default_assignee,
-            emoji,
-            repo: project_repo_url,
-            dev_path,
-            project_type,
-            workflow,
-            workflow_stage,
-            due,
-            start,
-            add_tag,
-            remove_tag,
-            add_email_tag,
-            remove_email_tag,
-            add_team,
-            remove_team,
-            json,
-        } => {
+        ProjectCommands::Edit(args) => {
+            let ProjectEditArgs {
+                name,
+                status,
+                description,
+                area,
+                organization,
+                client: project_client,
+                default_rate,
+                identifier,
+                lead,
+                default_assignee,
+                emoji,
+                repo: project_repo_url,
+                dev_path,
+                project_type,
+                workflow,
+                workflow_stage,
+                due,
+                start,
+                add_tag,
+                remove_tag,
+                add_email_tag,
+                remove_email_tag,
+                add_team,
+                remove_team,
+                json,
+            } = *args;
             let patch = task_core::ProjectPatch {
                 status,
                 description,
@@ -4501,7 +4541,7 @@ async fn run_remote_calendar_command(
             body,
             json,
         } => {
-            let patch = build_calendar_patch(
+            let patch = build_calendar_patch(CalendarPatchInput {
                 title,
                 start,
                 end,
@@ -4514,7 +4554,7 @@ async fn run_remote_calendar_command(
                 recurrence,
                 attendees,
                 body,
-            )?;
+            })?;
             let mut event = remote_find_calendar_event_with_client(&repo, &reference).await?;
             apply_remote_calendar_patch(&mut event, patch);
             let updated = remote_update_calendar_event_with_client(&repo, &event).await?;
@@ -6165,8 +6205,8 @@ async fn remote_find_calendar_event(
         .ok_or_else(|| eyre::eyre!("Calendar event not found: {reference}"))
 }
 
-#[allow(clippy::too_many_arguments)]
-fn build_calendar_patch(
+/// Typed inputs for [`build_calendar_patch`].
+struct CalendarPatchInput {
     title: Option<String>,
     start: Option<String>,
     end: Option<String>,
@@ -6179,7 +6219,23 @@ fn build_calendar_patch(
     recurrence: Option<String>,
     attendees: Option<String>,
     body: Option<String>,
-) -> eyre::Result<CalendarEventPatch> {
+}
+
+fn build_calendar_patch(input: CalendarPatchInput) -> eyre::Result<CalendarEventPatch> {
+    let CalendarPatchInput {
+        title,
+        start,
+        end,
+        description,
+        location,
+        venue,
+        space,
+        all_day,
+        status,
+        recurrence,
+        attendees,
+        body,
+    } = input;
     Ok(CalendarEventPatch {
         title,
         description: description.map(optional_string_field),

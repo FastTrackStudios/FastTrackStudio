@@ -41,8 +41,11 @@ use crate::vault::Vault;
 use super::document::{CONFLICT_FIELDS, CrdtDocument, DocumentSnapshot};
 
 /// An operation broadcast to connected clients.
+///
+/// `TaskCreated` boxes its `Task` so the enum stays small — the other
+/// variants are byte-cheap (a `Vec<u8>` body update plus some `String`s)
+/// and shouldn't pay the size of the full Task struct on every clone.
 #[derive(Debug, Clone)]
-#[allow(clippy::large_enum_variant)]
 pub enum SyncOp {
     /// A metadata field changed on a task.
     FieldChanged {
@@ -55,7 +58,7 @@ pub enum SyncOp {
     /// Raw Loro update bytes — body edits and anything else.
     DocUpdate { file_path: String, update: Vec<u8> },
     /// A new task was created.
-    TaskCreated { file_path: String, task: Task },
+    TaskCreated { file_path: String, task: Box<Task> },
     /// A task was deleted.
     TaskDeleted { file_path: String },
     /// Full refresh — file was rewritten out-of-band.
@@ -185,7 +188,7 @@ impl CrdtSyncEngine {
         if was_new {
             let _ = self.broadcast_tx.send(SyncOp::TaskCreated {
                 file_path: rel_path.to_string(),
-                task,
+                task: Box::new(task),
             });
         } else {
             let _ = self.broadcast_tx.send(SyncOp::Refresh);
