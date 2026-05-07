@@ -1,3 +1,5 @@
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+use task_core::{notification, task};
 use task_db::seed::{reset_demo_data, seed_demo_data};
 
 #[tokio::test]
@@ -74,4 +76,90 @@ async fn seed_demo_data_covers_every_entity_flavor() {
         "want >= 3 comments, got {}",
         s.comments_created
     );
+    assert!(
+        s.reactions_created >= 3,
+        "want >= 3 reactions, got {}",
+        s.reactions_created
+    );
+    assert!(
+        s.notifications_created >= 3,
+        "want >= 3 notifications, got {}",
+        s.notifications_created
+    );
+    assert!(
+        s.saved_views_created >= 2,
+        "want >= 2 saved views, got {}",
+        s.saved_views_created
+    );
+    assert!(
+        s.cycles_created >= 1,
+        "want >= 1 cycle, got {}",
+        s.cycles_created
+    );
+    assert!(
+        s.activities_created >= 10,
+        "want >= 10 activity rows, got {}",
+        s.activities_created
+    );
+    assert!(
+        s.expenses_created >= 5,
+        "want >= 5 expenses, got {}",
+        s.expenses_created
+    );
+    assert!(
+        s.invoices_created >= 2,
+        "want >= 2 invoices, got {}",
+        s.invoices_created
+    );
+    assert!(
+        s.email_refs_created >= 3,
+        "want >= 3 email refs, got {}",
+        s.email_refs_created
+    );
+}
+
+#[tokio::test]
+async fn seed_demo_data_invariants() {
+    let db = task_db::init_memory().await.expect("init in-memory db");
+    seed_demo_data(&db).await.expect("seed");
+
+    // At least one Done task.
+    let done_count = task::Entity::find()
+        .filter(task::Column::Status.eq(task::Status::Done))
+        .all(&db)
+        .await
+        .expect("query done tasks")
+        .len();
+    assert!(done_count >= 1, "want >= 1 Done task, got {done_count}");
+
+    // At least one Cancelled task.
+    let cancelled_count = task::Entity::find()
+        .filter(task::Column::Status.eq(task::Status::Cancelled))
+        .all(&db)
+        .await
+        .expect("query cancelled tasks")
+        .len();
+    assert!(
+        cancelled_count >= 1,
+        "want >= 1 Cancelled task, got {cancelled_count}"
+    );
+
+    // At least one task with a running timer (TimeEntry with end_time = None).
+    let tasks = task::Entity::find()
+        .all(&db)
+        .await
+        .expect("query all tasks");
+    let running = tasks
+        .iter()
+        .any(|t| t.time_entries.iter().any(|e| e.end_time.is_none()));
+    assert!(running, "want at least one task with a running timer");
+
+    // Unread notification count > 0.
+    let unread = notification::Entity::find()
+        .filter(notification::Column::ReadAt.is_null())
+        .all(&db)
+        .await
+        .expect("query unread notifications")
+        .len();
+    assert!(unread >= 1, "want >= 1 unread notification, got {unread}");
 }

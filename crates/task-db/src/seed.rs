@@ -15,14 +15,23 @@ use chrono::{Duration, NaiveDate, Utc};
 use sea_orm::{ActiveValue::Set, DatabaseConnection, DbErr, EntityTrait};
 use uuid::Uuid;
 
+use task_core::activity;
 use task_core::calendar_event::{self, CalendarEventStatus};
 use task_core::comment;
+use task_core::cycle::{self, CycleStatus, CycleTaskList};
+use task_core::email;
+use task_core::email::EmailStringList;
+use task_core::expense::{self, ExpenseStatus};
+use task_core::invoice::{self, InvoiceLine, InvoiceLineList, InvoiceStatus, Payment, PaymentList};
+use task_core::notification;
 use task_core::people::{self, ContactMethod, ContactMethodList, ProviderRef, ProviderRefList};
 use task_core::project::{self, ProjectStatus};
+use task_core::reaction;
 use task_core::task::{
     self, EmailRefList, Priority, RecurrenceAnchor, ReminderList, Status, StringList,
     TaskDependencyList, TaskRelationList, TimeEntry, TimeEntryList, WikiLink, WikiLinkList,
 };
+use task_core::views::{self, ViewDisplay, ViewFilters};
 
 /// Namespace for demo-data UUID derivation. Stable; do not change without
 /// running `reset_demo_data` first.
@@ -53,6 +62,22 @@ pub struct DemoSeedSummary {
     pub people_unchanged: usize,
     pub comments_created: usize,
     pub comments_unchanged: usize,
+    pub reactions_created: usize,
+    pub reactions_unchanged: usize,
+    pub notifications_created: usize,
+    pub notifications_unchanged: usize,
+    pub saved_views_created: usize,
+    pub saved_views_unchanged: usize,
+    pub cycles_created: usize,
+    pub cycles_unchanged: usize,
+    pub activities_created: usize,
+    pub activities_unchanged: usize,
+    pub expenses_created: usize,
+    pub expenses_unchanged: usize,
+    pub invoices_created: usize,
+    pub invoices_unchanged: usize,
+    pub email_refs_created: usize,
+    pub email_refs_unchanged: usize,
 }
 
 impl DemoSeedSummary {
@@ -62,6 +87,14 @@ impl DemoSeedSummary {
             + self.calendar_events_created
             + self.people_created
             + self.comments_created
+            + self.reactions_created
+            + self.notifications_created
+            + self.saved_views_created
+            + self.cycles_created
+            + self.activities_created
+            + self.expenses_created
+            + self.invoices_created
+            + self.email_refs_created
     }
 
     pub fn total_unchanged(&self) -> usize {
@@ -70,6 +103,14 @@ impl DemoSeedSummary {
             + self.calendar_events_unchanged
             + self.people_unchanged
             + self.comments_unchanged
+            + self.reactions_unchanged
+            + self.notifications_unchanged
+            + self.saved_views_unchanged
+            + self.cycles_unchanged
+            + self.activities_unchanged
+            + self.expenses_unchanged
+            + self.invoices_unchanged
+            + self.email_refs_unchanged
     }
 }
 
@@ -85,6 +126,14 @@ pub async fn seed_demo_data(db: &DatabaseConnection) -> Result<DemoSeedSummary, 
     seed_calendar_events(db, &mut summary).await?;
     seed_people(db, &mut summary).await?;
     seed_comments(db, &mut summary).await?;
+    seed_reactions(db, &mut summary).await?;
+    seed_notifications(db, &mut summary).await?;
+    seed_saved_views(db, &mut summary).await?;
+    seed_cycles(db, &mut summary).await?;
+    seed_activities(db, &mut summary).await?;
+    seed_expenses(db, &mut summary).await?;
+    seed_invoices(db, &mut summary).await?;
+    seed_email_refs(db, &mut summary).await?;
     Ok(summary)
 }
 
@@ -92,6 +141,94 @@ pub async fn seed_demo_data(db: &DatabaseConnection) -> Result<DemoSeedSummary, 
 pub async fn reset_demo_data(db: &DatabaseConnection) -> Result<DemoSeedSummary, DbErr> {
     let mut summary = DemoSeedSummary::default();
 
+    for key in EMAIL_REF_KEYS {
+        let id = demo_id(key);
+        if email::Entity::delete_by_id(id)
+            .exec(db)
+            .await?
+            .rows_affected
+            > 0
+        {
+            summary.email_refs_created += 1;
+        }
+    }
+    for key in INVOICE_KEYS {
+        let id = demo_id(key);
+        if invoice::Entity::delete_by_id(id)
+            .exec(db)
+            .await?
+            .rows_affected
+            > 0
+        {
+            summary.invoices_created += 1;
+        }
+    }
+    for key in EXPENSE_KEYS {
+        let id = demo_id(key);
+        if expense::Entity::delete_by_id(id)
+            .exec(db)
+            .await?
+            .rows_affected
+            > 0
+        {
+            summary.expenses_created += 1;
+        }
+    }
+    for key in ACTIVITY_KEYS {
+        let id = demo_id(key);
+        if activity::Entity::delete_by_id(id)
+            .exec(db)
+            .await?
+            .rows_affected
+            > 0
+        {
+            summary.activities_created += 1;
+        }
+    }
+    for key in CYCLE_KEYS {
+        let id = demo_id(key);
+        if cycle::Entity::delete_by_id(id)
+            .exec(db)
+            .await?
+            .rows_affected
+            > 0
+        {
+            summary.cycles_created += 1;
+        }
+    }
+    for key in SAVED_VIEW_KEYS {
+        let id = demo_id(key);
+        if views::Entity::delete_by_id(id)
+            .exec(db)
+            .await?
+            .rows_affected
+            > 0
+        {
+            summary.saved_views_created += 1;
+        }
+    }
+    for key in NOTIFICATION_KEYS {
+        let id = demo_id(key);
+        if notification::Entity::delete_by_id(id)
+            .exec(db)
+            .await?
+            .rows_affected
+            > 0
+        {
+            summary.notifications_created += 1;
+        }
+    }
+    for key in REACTION_KEYS {
+        let id = demo_id(key);
+        if reaction::Entity::delete_by_id(id)
+            .exec(db)
+            .await?
+            .rows_affected
+            > 0
+        {
+            summary.reactions_created += 1;
+        }
+    }
     for key in COMMENT_KEYS {
         let id = demo_id(key);
         if comment::Entity::delete_by_id(id)
@@ -215,6 +352,52 @@ const COMMENT_KEYS: &[&str] = &[
     "comment:auth-bug-1",
     "comment:auth-bug-2-reply",
     "comment:design-resolved",
+];
+
+const REACTION_KEYS: &[&str] = &[
+    "reaction:fix-auth-thumbs-cody",
+    "reaction:design-portal-fire-amy",
+    "reaction:billable-mix-tada-cody",
+    "reaction:auth-bug-comment-thumbs-cody",
+];
+
+const NOTIFICATION_KEYS: &[&str] = &[
+    "notification:assigned-fix-auth",
+    "notification:mentioned-design-portal",
+    "notification:overdue-tax-filing",
+];
+
+const SAVED_VIEW_KEYS: &[&str] = &["view:my-today", "view:inbox-triage"];
+
+const CYCLE_KEYS: &[&str] = &["cycle:sprint-2026-w19"];
+
+const ACTIVITY_KEYS: &[&str] = &[
+    "activity:fix-auth-created",
+    "activity:fix-auth-status-inprogress",
+    "activity:design-portal-created",
+    "activity:design-portal-resolved",
+    "activity:billable-mix-time-logged",
+    "activity:done-publish-blog-completed",
+    "activity:done-q1-review-completed",
+    "activity:tour-book-venues-priority",
+    "activity:venue-input-list-created",
+    "activity:running-timer-perf-pass-started",
+];
+
+const EXPENSE_KEYS: &[&str] = &[
+    "expense:montreal-studio-rental",
+    "expense:montreal-mastering-software",
+    "expense:tour-van-deposit",
+    "expense:tour-printed-merch",
+    "expense:misc-coffee-meeting",
+];
+
+const INVOICE_KEYS: &[&str] = &["invoice:montreal-mar", "invoice:tom-ep-feb-paid"];
+
+const EMAIL_REF_KEYS: &[&str] = &[
+    "email:fix-auth-stack-trace",
+    "email:montreal-client-revisions",
+    "email:tour-venue-confirmation",
 ];
 
 // ── Project fixtures ────────────────────────────────────────────────────────
@@ -1198,6 +1381,764 @@ async fn seed_comments(
         } else {
             comment::Entity::insert(c).exec(db).await?;
             summary.comments_created += 1;
+        }
+    }
+    Ok(())
+}
+
+// ── Reaction fixtures ───────────────────────────────────────────────────────
+
+async fn seed_reactions(
+    db: &DatabaseConnection,
+    summary: &mut DemoSeedSummary,
+) -> Result<(), DbErr> {
+    let now = Utc::now();
+    let auth_bug = demo_id("task:fix-auth-bug");
+    let design = demo_id("task:design-portal-ui");
+    let billable = demo_id("task:billable-mix-mastering");
+    let auth_comment = demo_id("comment:auth-bug-1");
+
+    let reactions = [
+        reaction::ActiveModel {
+            id: Set(demo_id("reaction:fix-auth-thumbs-cody")),
+            entity_id: Set(auth_bug),
+            entity_type: Set("task".to_string()),
+            emoji: Set("👍".to_string()),
+            user: Set("cody".to_string()),
+            created_at: Set(now - Duration::hours(2)),
+        },
+        reaction::ActiveModel {
+            id: Set(demo_id("reaction:design-portal-fire-amy")),
+            entity_id: Set(design),
+            entity_type: Set("task".to_string()),
+            emoji: Set("🔥".to_string()),
+            user: Set("amy".to_string()),
+            created_at: Set(now - Duration::hours(3)),
+        },
+        reaction::ActiveModel {
+            id: Set(demo_id("reaction:billable-mix-tada-cody")),
+            entity_id: Set(billable),
+            entity_type: Set("task".to_string()),
+            emoji: Set("🎉".to_string()),
+            user: Set("cody".to_string()),
+            created_at: Set(now - Duration::hours(1)),
+        },
+        reaction::ActiveModel {
+            id: Set(demo_id("reaction:auth-bug-comment-thumbs-cody")),
+            entity_id: Set(auth_comment),
+            entity_type: Set("comment".to_string()),
+            emoji: Set("👍".to_string()),
+            user: Set("amy".to_string()),
+            created_at: Set(now - Duration::hours(4)),
+        },
+    ];
+
+    for r in reactions {
+        let id = match &r.id {
+            Set(v) => *v,
+            _ => unreachable!(),
+        };
+        if reaction::Entity::find_by_id(id).one(db).await?.is_some() {
+            summary.reactions_unchanged += 1;
+        } else {
+            reaction::Entity::insert(r).exec(db).await?;
+            summary.reactions_created += 1;
+        }
+    }
+    Ok(())
+}
+
+// ── Notification fixtures ───────────────────────────────────────────────────
+
+async fn seed_notifications(
+    db: &DatabaseConnection,
+    summary: &mut DemoSeedSummary,
+) -> Result<(), DbErr> {
+    let now = Utc::now();
+    let auth_bug = demo_id("task:fix-auth-bug");
+    let design = demo_id("task:design-portal-ui");
+    let overdue_tax = demo_id("task:overdue-tax-filing");
+
+    let notifications = [
+        // Unread — assignment notification
+        notification::ActiveModel {
+            id: Set(demo_id("notification:assigned-fix-auth")),
+            recipient: Set("cody".to_string()),
+            kind: Set("assigned".to_string()),
+            message: Set("You were assigned: Fix login session timeout".to_string()),
+            actor: Set(Some("amy".to_string())),
+            entity_id: Set(Some(auth_bug)),
+            entity_type: Set(Some("task".to_string())),
+            project: Set(Some("Task App".to_string())),
+            read_at: Set(None),
+            snoozed_till: Set(None),
+            created_at: Set(now - Duration::hours(8)),
+        },
+        // Read
+        notification::ActiveModel {
+            id: Set(demo_id("notification:mentioned-design-portal")),
+            recipient: Set("cody".to_string()),
+            kind: Set("mention".to_string()),
+            message: Set("Amy mentioned you in: Design portal landing page".to_string()),
+            actor: Set(Some("amy".to_string())),
+            entity_id: Set(Some(design)),
+            entity_type: Set(Some("task".to_string())),
+            project: Set(Some("Task App".to_string())),
+            read_at: Set(Some(now - Duration::hours(20))),
+            snoozed_till: Set(None),
+            created_at: Set(now - Duration::days(1)),
+        },
+        // Read — system overdue reminder
+        notification::ActiveModel {
+            id: Set(demo_id("notification:overdue-tax-filing")),
+            recipient: Set("cody".to_string()),
+            kind: Set("overdue".to_string()),
+            message: Set("Task is overdue: File quarterly taxes".to_string()),
+            actor: Set(None),
+            entity_id: Set(Some(overdue_tax)),
+            entity_type: Set(Some("task".to_string())),
+            project: Set(Some("Personal Todos".to_string())),
+            read_at: Set(Some(now - Duration::hours(2))),
+            snoozed_till: Set(None),
+            created_at: Set(now - Duration::days(2)),
+        },
+    ];
+
+    for n in notifications {
+        let id = match &n.id {
+            Set(v) => *v,
+            _ => unreachable!(),
+        };
+        if notification::Entity::find_by_id(id)
+            .one(db)
+            .await?
+            .is_some()
+        {
+            summary.notifications_unchanged += 1;
+        } else {
+            notification::Entity::insert(n).exec(db).await?;
+            summary.notifications_created += 1;
+        }
+    }
+    Ok(())
+}
+
+// ── Saved-view fixtures ─────────────────────────────────────────────────────
+
+async fn seed_saved_views(
+    db: &DatabaseConnection,
+    summary: &mut DemoSeedSummary,
+) -> Result<(), DbErr> {
+    let now = Utc::now();
+    let today = now.date_naive().to_string();
+
+    let my_today_filters = ViewFilters {
+        assignee: vec!["cody".to_string()],
+        status: vec!["open".to_string(), "in_progress".to_string()],
+        due_before: Some(today.clone()),
+        ..Default::default()
+    };
+    let my_today_display = ViewDisplay {
+        layout: Some("list".to_string()),
+        order_by: Some("priority".to_string()),
+        order_direction: Some("desc".to_string()),
+        ..Default::default()
+    };
+
+    let inbox_filters = ViewFilters {
+        tags: vec!["inbox".to_string()],
+        ..Default::default()
+    };
+    let inbox_display = ViewDisplay {
+        layout: Some("list".to_string()),
+        order_by: Some("created".to_string()),
+        order_direction: Some("desc".to_string()),
+        ..Default::default()
+    };
+
+    let saved_views = [
+        views::ActiveModel {
+            id: Set(demo_id("view:my-today")),
+            title: Set("My Today".to_string()),
+            description: Set(Some(
+                "Open + in-progress tasks assigned to me, due today or earlier.".to_string(),
+            )),
+            project: Set(None),
+            filters: Set(my_today_filters),
+            display: Set(my_today_display),
+            created_by: Set(Some("cody".to_string())),
+            is_shared: Set(false),
+            sort_order: Set(Some(1.0)),
+            created_at: Set(now - Duration::days(30)),
+            updated_at: Set(now - Duration::days(1)),
+        },
+        views::ActiveModel {
+            id: Set(demo_id("view:inbox-triage")),
+            title: Set("Inbox Triage".to_string()),
+            description: Set(Some(
+                "Untriaged inbox items needing project routing.".to_string(),
+            )),
+            project: Set(None),
+            filters: Set(inbox_filters),
+            display: Set(inbox_display),
+            created_by: Set(Some("cody".to_string())),
+            is_shared: Set(true),
+            sort_order: Set(Some(2.0)),
+            created_at: Set(now - Duration::days(60)),
+            updated_at: Set(now - Duration::days(7)),
+        },
+    ];
+
+    for v in saved_views {
+        let id = match &v.id {
+            Set(value) => *value,
+            _ => unreachable!(),
+        };
+        if views::Entity::find_by_id(id).one(db).await?.is_some() {
+            summary.saved_views_unchanged += 1;
+        } else {
+            views::Entity::insert(v).exec(db).await?;
+            summary.saved_views_created += 1;
+        }
+    }
+    Ok(())
+}
+
+// ── Cycle fixtures ──────────────────────────────────────────────────────────
+
+async fn seed_cycles(db: &DatabaseConnection, summary: &mut DemoSeedSummary) -> Result<(), DbErr> {
+    let today = Utc::now().date_naive();
+    let cycles = [cycle::ActiveModel {
+        id: Set(demo_id("cycle:sprint-2026-w19")),
+        title: Set("Sprint 2026-W19".to_string()),
+        description: Set(Some(
+            "Mid-quarter sprint focused on auth + portal UI.".to_string(),
+        )),
+        start_date: Set(Some(today - Duration::days(7))),
+        end_date: Set(Some(today + Duration::days(7))),
+        owned_by: Set(Some("cody".to_string())),
+        tasks: Set(CycleTaskList::from(vec![
+            "Fix login session timeout".to_string(),
+            "Design portal landing page".to_string(),
+            "Add integration tests for realtime".to_string(),
+            "Profile slow query path".to_string(),
+        ])),
+        status: Set(CycleStatus::Active),
+        total_tasks: Set(Some(4)),
+        completed_tasks: Set(Some(0)),
+        sort_order: Set(Some(1.0)),
+    }];
+
+    for c in cycles {
+        let id = match &c.id {
+            Set(value) => *value,
+            _ => unreachable!(),
+        };
+        if cycle::Entity::find_by_id(id).one(db).await?.is_some() {
+            summary.cycles_unchanged += 1;
+        } else {
+            cycle::Entity::insert(c).exec(db).await?;
+            summary.cycles_created += 1;
+        }
+    }
+    Ok(())
+}
+
+// ── Activity-log fixtures ───────────────────────────────────────────────────
+
+async fn seed_activities(
+    db: &DatabaseConnection,
+    summary: &mut DemoSeedSummary,
+) -> Result<(), DbErr> {
+    let now = Utc::now();
+    let auth_bug = demo_id("task:fix-auth-bug");
+    let design = demo_id("task:design-portal-ui");
+    let billable = demo_id("task:billable-mix-mastering");
+    let done_blog = demo_id("task:done-publish-blog");
+    let done_q1 = demo_id("task:done-q1-review");
+    let tour_book = demo_id("task:tour-book-venues");
+    let venue_input = demo_id("task:venue-input-list");
+    let perf_pass = demo_id("task:running-timer-perf-pass");
+
+    let activities = [
+        activity::ActiveModel {
+            id: Set(demo_id("activity:fix-auth-created")),
+            entity_id: Set(auth_bug),
+            entity_type: Set("task".to_string()),
+            verb: Set("created".to_string()),
+            field: Set(None),
+            old_value: Set(None),
+            new_value: Set(None),
+            actor: Set(Some("cody".to_string())),
+            created_at: Set(now - Duration::days(6)),
+        },
+        activity::ActiveModel {
+            id: Set(demo_id("activity:fix-auth-status-inprogress")),
+            entity_id: Set(auth_bug),
+            entity_type: Set("task".to_string()),
+            verb: Set("updated".to_string()),
+            field: Set(Some("status".to_string())),
+            old_value: Set(Some("open".to_string())),
+            new_value: Set(Some("in_progress".to_string())),
+            actor: Set(Some("cody".to_string())),
+            created_at: Set(now - Duration::days(5)),
+        },
+        activity::ActiveModel {
+            id: Set(demo_id("activity:design-portal-created")),
+            entity_id: Set(design),
+            entity_type: Set("task".to_string()),
+            verb: Set("created".to_string()),
+            field: Set(None),
+            old_value: Set(None),
+            new_value: Set(None),
+            actor: Set(Some("amy".to_string())),
+            created_at: Set(now - Duration::days(4)),
+        },
+        activity::ActiveModel {
+            id: Set(demo_id("activity:design-portal-resolved")),
+            entity_id: Set(design),
+            entity_type: Set("task".to_string()),
+            verb: Set("commented".to_string()),
+            field: Set(None),
+            old_value: Set(None),
+            new_value: Set(Some("Mocks attached, signed off.".to_string())),
+            actor: Set(Some("amy".to_string())),
+            created_at: Set(now - Duration::days(1)),
+        },
+        activity::ActiveModel {
+            id: Set(demo_id("activity:billable-mix-time-logged")),
+            entity_id: Set(billable),
+            entity_type: Set("task".to_string()),
+            verb: Set("time_logged".to_string()),
+            field: Set(Some("time_entries".to_string())),
+            old_value: Set(None),
+            new_value: Set(Some("120m".to_string())),
+            actor: Set(Some("cody".to_string())),
+            created_at: Set(now - Duration::hours(2)),
+        },
+        activity::ActiveModel {
+            id: Set(demo_id("activity:done-publish-blog-completed")),
+            entity_id: Set(done_blog),
+            entity_type: Set("task".to_string()),
+            verb: Set("completed".to_string()),
+            field: Set(Some("status".to_string())),
+            old_value: Set(Some("in_progress".to_string())),
+            new_value: Set(Some("done".to_string())),
+            actor: Set(Some("cody".to_string())),
+            created_at: Set(now - Duration::days(2)),
+        },
+        activity::ActiveModel {
+            id: Set(demo_id("activity:done-q1-review-completed")),
+            entity_id: Set(done_q1),
+            entity_type: Set("task".to_string()),
+            verb: Set("completed".to_string()),
+            field: Set(Some("status".to_string())),
+            old_value: Set(Some("open".to_string())),
+            new_value: Set(Some("done".to_string())),
+            actor: Set(Some("cody".to_string())),
+            created_at: Set(now - Duration::days(7)),
+        },
+        activity::ActiveModel {
+            id: Set(demo_id("activity:tour-book-venues-priority")),
+            entity_id: Set(tour_book),
+            entity_type: Set("task".to_string()),
+            verb: Set("updated".to_string()),
+            field: Set(Some("priority".to_string())),
+            old_value: Set(Some("normal".to_string())),
+            new_value: Set(Some("high".to_string())),
+            actor: Set(Some("bri".to_string())),
+            created_at: Set(now - Duration::days(3)),
+        },
+        activity::ActiveModel {
+            id: Set(demo_id("activity:venue-input-list-created")),
+            entity_id: Set(venue_input),
+            entity_type: Set("task".to_string()),
+            verb: Set("created".to_string()),
+            field: Set(None),
+            old_value: Set(None),
+            new_value: Set(None),
+            actor: Set(Some("carter".to_string())),
+            created_at: Set(now - Duration::days(2)),
+        },
+        activity::ActiveModel {
+            id: Set(demo_id("activity:running-timer-perf-pass-started")),
+            entity_id: Set(perf_pass),
+            entity_type: Set("task".to_string()),
+            verb: Set("time_started".to_string()),
+            field: Set(Some("time_entries".to_string())),
+            old_value: Set(None),
+            new_value: Set(Some("running".to_string())),
+            actor: Set(Some("cody".to_string())),
+            created_at: Set(now - Duration::minutes(45)),
+        },
+    ];
+
+    for a in activities {
+        let id = match &a.id {
+            Set(value) => *value,
+            _ => unreachable!(),
+        };
+        if activity::Entity::find_by_id(id).one(db).await?.is_some() {
+            summary.activities_unchanged += 1;
+        } else {
+            activity::Entity::insert(a).exec(db).await?;
+            summary.activities_created += 1;
+        }
+    }
+    Ok(())
+}
+
+// ── Expense fixtures ────────────────────────────────────────────────────────
+
+async fn seed_expenses(
+    db: &DatabaseConnection,
+    summary: &mut DemoSeedSummary,
+) -> Result<(), DbErr> {
+    let now = Utc::now();
+    let today = now.date_naive();
+
+    let expenses = [
+        expense::ActiveModel {
+            uuid: Set(demo_id("expense:montreal-studio-rental")),
+            id: Set("EXP-2026-0001".to_string()),
+            number: Set(1),
+            status: Set(ExpenseStatus::Open),
+            date: Set(today - Duration::days(10)),
+            amount_cents: Set(85000),
+            currency_code: Set("USD".to_string()),
+            project: Set(Some(WikiLink("Montreal Album".to_string()))),
+            client: Set(None),
+            deliverable: Set(None),
+            category: Set(Some("studio".to_string())),
+            vendor: Set(Some("Eastside Audio".to_string())),
+            description: Set("Studio day rate — vocals tracking".to_string()),
+            receipt: Set(None),
+            reference: Set(None),
+            reimbursable: Set(true),
+            notes: Set(None),
+            created_by: Set(Some("cody".to_string())),
+            date_created: Set(Some(now - Duration::days(10))),
+            date_modified: Set(Some(now - Duration::days(10))),
+            body: Set(String::new()),
+        },
+        expense::ActiveModel {
+            uuid: Set(demo_id("expense:montreal-mastering-software")),
+            id: Set("EXP-2026-0002".to_string()),
+            number: Set(2),
+            status: Set(ExpenseStatus::Paid),
+            date: Set(today - Duration::days(20)),
+            amount_cents: Set(29900),
+            currency_code: Set("USD".to_string()),
+            project: Set(Some(WikiLink("Montreal Album".to_string()))),
+            client: Set(None),
+            deliverable: Set(None),
+            category: Set(Some("software".to_string())),
+            vendor: Set(Some("FabFilter".to_string())),
+            description: Set("Pro-L 2 mastering limiter license".to_string()),
+            receipt: Set(None),
+            reference: Set(Some("CC-2025-1129".to_string())),
+            reimbursable: Set(false),
+            notes: Set(None),
+            created_by: Set(Some("cody".to_string())),
+            date_created: Set(Some(now - Duration::days(20))),
+            date_modified: Set(Some(now - Duration::days(20))),
+            body: Set(String::new()),
+        },
+        expense::ActiveModel {
+            uuid: Set(demo_id("expense:tour-van-deposit")),
+            id: Set("EXP-2026-0003".to_string()),
+            number: Set(3),
+            status: Set(ExpenseStatus::Open),
+            date: Set(today - Duration::days(2)),
+            amount_cents: Set(150000),
+            currency_code: Set("USD".to_string()),
+            project: Set(Some(WikiLink("Just Friends 2026 Tour".to_string()))),
+            client: Set(None),
+            deliverable: Set(None),
+            category: Set(Some("travel".to_string())),
+            vendor: Set(Some("Sprinter Rentals".to_string())),
+            description: Set("Sprinter van deposit (3 weeks)".to_string()),
+            receipt: Set(None),
+            reference: Set(None),
+            reimbursable: Set(true),
+            notes: Set(None),
+            created_by: Set(Some("bri".to_string())),
+            date_created: Set(Some(now - Duration::days(2))),
+            date_modified: Set(Some(now - Duration::days(2))),
+            body: Set(String::new()),
+        },
+        expense::ActiveModel {
+            uuid: Set(demo_id("expense:tour-printed-merch")),
+            id: Set("EXP-2026-0004".to_string()),
+            number: Set(4),
+            status: Set(ExpenseStatus::Draft),
+            date: Set(today),
+            amount_cents: Set(67500),
+            currency_code: Set("USD".to_string()),
+            project: Set(Some(WikiLink("Just Friends 2026 Tour".to_string()))),
+            client: Set(None),
+            deliverable: Set(None),
+            category: Set(Some("merch".to_string())),
+            vendor: Set(Some("Threadhouse".to_string())),
+            description: Set("Tour t-shirt run — 100 units".to_string()),
+            receipt: Set(None),
+            reference: Set(None),
+            reimbursable: Set(true),
+            notes: Set(Some("Awaiting design approval.".to_string())),
+            created_by: Set(Some("amy".to_string())),
+            date_created: Set(Some(now)),
+            date_modified: Set(Some(now)),
+            body: Set(String::new()),
+        },
+        expense::ActiveModel {
+            uuid: Set(demo_id("expense:misc-coffee-meeting")),
+            id: Set("EXP-2026-0005".to_string()),
+            number: Set(5),
+            status: Set(ExpenseStatus::Cancelled),
+            date: Set(today - Duration::days(15)),
+            amount_cents: Set(2400),
+            currency_code: Set("USD".to_string()),
+            project: Set(None),
+            client: Set(None),
+            deliverable: Set(None),
+            category: Set(Some("meals".to_string())),
+            vendor: Set(Some("Workshop Cafe".to_string())),
+            description: Set("Coffee meeting — duplicate entry".to_string()),
+            receipt: Set(None),
+            reference: Set(None),
+            reimbursable: Set(false),
+            notes: Set(Some(
+                "Voided — already filed under expense 0001.".to_string(),
+            )),
+            created_by: Set(Some("cody".to_string())),
+            date_created: Set(Some(now - Duration::days(15))),
+            date_modified: Set(Some(now - Duration::days(14))),
+            body: Set(String::new()),
+        },
+    ];
+
+    for e in expenses {
+        let id = match &e.uuid {
+            Set(value) => *value,
+            _ => unreachable!(),
+        };
+        if expense::Entity::find_by_id(id).one(db).await?.is_some() {
+            summary.expenses_unchanged += 1;
+        } else {
+            expense::Entity::insert(e).exec(db).await?;
+            summary.expenses_created += 1;
+        }
+    }
+    Ok(())
+}
+
+// ── Invoice fixtures ────────────────────────────────────────────────────────
+
+async fn seed_invoices(
+    db: &DatabaseConnection,
+    summary: &mut DemoSeedSummary,
+) -> Result<(), DbErr> {
+    let now = Utc::now();
+    let today = now.date_naive();
+
+    let montreal_lines = InvoiceLineList::from(vec![
+        InvoiceLine {
+            id: "line-1".to_string(),
+            task_title: "Master track 3".to_string(),
+            description: "Mastering pass + reference compare".to_string(),
+            hours: 2.0,
+            rate_cents: 15000,
+            tax_rate_percent: None,
+            discount_percent: None,
+        },
+        InvoiceLine {
+            id: "line-2".to_string(),
+            task_title: "Sequence album tracklist".to_string(),
+            description: "Sequencing + crossfade prep".to_string(),
+            hours: 1.5,
+            rate_cents: 15000,
+            tax_rate_percent: None,
+            discount_percent: None,
+        },
+    ]);
+
+    let tom_ep_lines = InvoiceLineList::from(vec![InvoiceLine {
+        id: "line-1".to_string(),
+        task_title: "Track bass for Tom's EP".to_string(),
+        description: "Bass tracking + edits".to_string(),
+        hours: 6.0,
+        rate_cents: 12000,
+        tax_rate_percent: None,
+        discount_percent: None,
+    }]);
+
+    let tom_ep_payment = PaymentList::from(vec![Payment {
+        id: "pay-1".to_string(),
+        amount_cents: 72000,
+        received_at: now - Duration::days(10),
+        method: "ach".to_string(),
+        reference: Some("ACH-20260214".to_string()),
+        recorded_by: Some("cody".to_string()),
+        notes: None,
+    }]);
+
+    let invoices = [
+        invoice::ActiveModel {
+            uuid: Set(demo_id("invoice:montreal-mar")),
+            id: Set("INV-2026-0001".to_string()),
+            number: Set(1),
+            status: Set(InvoiceStatus::Sent),
+            client: Set(WikiLink("Montreal Records".to_string())),
+            issue_date: Set(today - Duration::days(5)),
+            due_date: Set(today + Duration::days(25)),
+            currency_code: Set("USD".to_string()),
+            line_items: Set(montreal_lines),
+            tax_rate_percent: Set(None),
+            discount_percent: Set(None),
+            po_number: Set(None),
+            public_notes: Set(Some("Net 30. Thanks for the work!".to_string())),
+            private_notes: Set(None),
+            payments: Set(PaymentList::default()),
+            entry_ids: Set(StringList::from(vec!["te-mastering-1".to_string()])),
+            sent_at: Set(Some(now - Duration::days(5))),
+            paid_at: Set(None),
+            cancelled_at: Set(None),
+            cancelled_reason: Set(None),
+            created_by: Set(Some("cody".to_string())),
+            date_created: Set(Some(now - Duration::days(5))),
+            date_modified: Set(Some(now - Duration::days(5))),
+        },
+        invoice::ActiveModel {
+            uuid: Set(demo_id("invoice:tom-ep-feb-paid")),
+            id: Set("INV-2026-0002".to_string()),
+            number: Set(2),
+            status: Set(InvoiceStatus::Paid),
+            client: Set(WikiLink("TomBrooksMusic".to_string())),
+            issue_date: Set(today - Duration::days(40)),
+            due_date: Set(today - Duration::days(10)),
+            currency_code: Set("USD".to_string()),
+            line_items: Set(tom_ep_lines),
+            tax_rate_percent: Set(None),
+            discount_percent: Set(None),
+            po_number: Set(None),
+            public_notes: Set(None),
+            private_notes: Set(None),
+            payments: Set(tom_ep_payment),
+            entry_ids: Set(StringList::default()),
+            sent_at: Set(Some(now - Duration::days(40))),
+            paid_at: Set(Some(now - Duration::days(10))),
+            cancelled_at: Set(None),
+            cancelled_reason: Set(None),
+            created_by: Set(Some("cody".to_string())),
+            date_created: Set(Some(now - Duration::days(40))),
+            date_modified: Set(Some(now - Duration::days(10))),
+        },
+    ];
+
+    for inv in invoices {
+        let id = match &inv.uuid {
+            Set(value) => *value,
+            _ => unreachable!(),
+        };
+        if invoice::Entity::find_by_id(id).one(db).await?.is_some() {
+            summary.invoices_unchanged += 1;
+        } else {
+            invoice::Entity::insert(inv).exec(db).await?;
+            summary.invoices_created += 1;
+        }
+    }
+    Ok(())
+}
+
+// ── Email-ref fixtures ──────────────────────────────────────────────────────
+
+async fn seed_email_refs(
+    db: &DatabaseConnection,
+    summary: &mut DemoSeedSummary,
+) -> Result<(), DbErr> {
+    let now = Utc::now();
+    let emails = [
+        email::ActiveModel {
+            uuid: Set(demo_id("email:fix-auth-stack-trace")),
+            message_id: Set("<auth-bug-trace@fasttrackstudio.com>".to_string()),
+            subject: Set("[bug] Auth session timeout — stack trace".to_string()),
+            from: Set("amy@fasttrackstudio.com".to_string()),
+            to: Set(EmailStringList::from(vec![
+                "cody@fasttrackstudio.com".to_string(),
+            ])),
+            date: Set(now - Duration::days(2)),
+            snippet: Set(Some(
+                "Reproduced again this morning — stack trace attached.".to_string(),
+            )),
+            account_id: Set(Some(1)),
+            mailbox: Set(Some("INBOX".to_string())),
+            imap_uid: Set(Some(1042)),
+            nc_db_id: Set(Some(9001)),
+            has_attachments: Set(true),
+            attachment_count: Set(1),
+            linked_by: Set(Some("amy".to_string())),
+            linked_at: Set(Some(now - Duration::days(2))),
+            user_tags: Set(EmailStringList::from(vec!["bug".to_string()])),
+        },
+        email::ActiveModel {
+            uuid: Set(demo_id("email:montreal-client-revisions")),
+            message_id: Set("<mtl-revisions-2@montrealrecords.com>".to_string()),
+            subject: Set("Montreal Album — round 2 revisions".to_string()),
+            from: Set("a&r@montrealrecords.com".to_string()),
+            to: Set(EmailStringList::from(vec![
+                "cody@fasttrackaudio.com".to_string(),
+            ])),
+            date: Set(now - Duration::days(3)),
+            snippet: Set(Some(
+                "A few notes on track 3 — see timestamps below.".to_string(),
+            )),
+            account_id: Set(Some(1)),
+            mailbox: Set(Some("Clients/Montreal".to_string())),
+            imap_uid: Set(Some(204)),
+            nc_db_id: Set(Some(9002)),
+            has_attachments: Set(false),
+            attachment_count: Set(0),
+            linked_by: Set(Some("cody".to_string())),
+            linked_at: Set(Some(now - Duration::days(3))),
+            user_tags: Set(EmailStringList::from(vec![
+                "client".to_string(),
+                "billable".to_string(),
+            ])),
+        },
+        email::ActiveModel {
+            uuid: Set(demo_id("email:tour-venue-confirmation")),
+            message_id: Set("<venue-confirm-9281@campusjax.com>".to_string()),
+            subject: Set("Campus Jax — show confirmation".to_string()),
+            from: Set("booking@campusjax.com".to_string()),
+            to: Set(EmailStringList::from(vec![
+                "bri@fasttrackstudio.com".to_string(),
+            ])),
+            date: Set(now - Duration::days(1)),
+            snippet: Set(Some(
+                "Confirmed for the date — load-in starts at 4pm.".to_string(),
+            )),
+            account_id: Set(Some(1)),
+            mailbox: Set(Some("INBOX".to_string())),
+            imap_uid: Set(Some(2008)),
+            nc_db_id: Set(Some(9003)),
+            has_attachments: Set(false),
+            attachment_count: Set(0),
+            linked_by: Set(Some("bri".to_string())),
+            linked_at: Set(Some(now - Duration::days(1))),
+            user_tags: Set(EmailStringList::from(vec!["tour".to_string()])),
+        },
+    ];
+
+    for e in emails {
+        let id = match &e.uuid {
+            Set(value) => *value,
+            _ => unreachable!(),
+        };
+        if email::Entity::find_by_id(id).one(db).await?.is_some() {
+            summary.email_refs_unchanged += 1;
+        } else {
+            email::Entity::insert(e).exec(db).await?;
+            summary.email_refs_created += 1;
         }
     }
     Ok(())
