@@ -20,6 +20,15 @@ use crate::people::{
 use crate::provider::NextcloudSync;
 use crate::service::{CardDavContact, PeopleService, VaultError};
 
+/// Typed requirements for [`PeopleServiceImpl`].
+///
+/// `provider = None` skips the CardDAV path; `addressbook=Some(..)` ops
+/// then return `provider_not_configured` instead of hitting the network.
+pub struct PeopleServiceDeps<R> {
+    pub people_repo: R,
+    pub provider: Option<Arc<NextcloudSync>>,
+}
+
 #[derive(Clone)]
 pub struct PeopleServiceImpl<R> {
     people_repo: R,
@@ -27,25 +36,11 @@ pub struct PeopleServiceImpl<R> {
 }
 
 impl<R> PeopleServiceImpl<R> {
-    pub fn new(people_repo: R) -> Self {
+    pub fn new(deps: PeopleServiceDeps<R>) -> Self {
         Self {
-            people_repo,
-            provider: None,
+            people_repo: deps.people_repo,
+            provider: deps.provider,
         }
-    }
-
-    /// Construct a `PeopleServiceImpl` that delegates `addressbook=Some(..)`
-    /// CardDAV operations to the supplied Nextcloud provider client.
-    pub fn with_provider(people_repo: R, provider: Arc<NextcloudSync>) -> Self {
-        Self {
-            people_repo,
-            provider: Some(provider),
-        }
-    }
-
-    /// Inject (or replace) the Nextcloud provider client.
-    pub fn set_provider(&mut self, provider: Option<Arc<NextcloudSync>>) {
-        self.provider = provider;
     }
 }
 

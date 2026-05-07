@@ -23,6 +23,34 @@ use crate::service::{
 };
 use crate::task::{Status, Task, TaskApi, TaskApiList, TaskApiUpdate, TaskRepo};
 
+/// Typed requirements for [`TaskServiceImpl`].
+pub struct TaskServiceDeps<R> {
+    pub task_repo: R,
+}
+
+/// Typed requirements for [`ProjectServiceImpl`].
+pub struct ProjectServiceDeps<P, T> {
+    pub project_repo: P,
+    pub task_repo: T,
+}
+
+/// Typed requirements for [`ExpenseServiceImpl`].
+pub struct ExpenseServiceDeps<R> {
+    pub expense_repo: R,
+}
+
+/// Typed requirements for [`CalendarServiceImpl`].
+///
+/// `provider = None` makes the CalDAV/CardDAV/Deck protocol ops return
+/// `provider_not_configured`; the local repo-driven ops
+/// (`tasks_due_by`, `scheduled_between`, `events_between`) work either
+/// way.
+pub struct CalendarServiceDeps<T, E> {
+    pub task_repo: T,
+    pub event_repo: E,
+    pub provider: Option<Arc<NextcloudSync>>,
+}
+
 #[derive(Clone)]
 pub struct TaskServiceImpl<R> {
     task_repo: R,
@@ -47,48 +75,37 @@ pub struct CalendarServiceImpl<T, E> {
 }
 
 impl<R> TaskServiceImpl<R> {
-    pub fn new(task_repo: R) -> Self {
-        Self { task_repo }
+    pub fn new(deps: TaskServiceDeps<R>) -> Self {
+        Self {
+            task_repo: deps.task_repo,
+        }
     }
 }
 
 impl<P, T> ProjectServiceImpl<P, T> {
-    pub fn new(project_repo: P, task_repo: T) -> Self {
+    pub fn new(deps: ProjectServiceDeps<P, T>) -> Self {
         Self {
-            project_repo,
-            task_repo,
+            project_repo: deps.project_repo,
+            task_repo: deps.task_repo,
         }
     }
 }
 
 impl<R> ExpenseServiceImpl<R> {
-    pub fn new(expense_repo: R) -> Self {
-        Self { expense_repo }
+    pub fn new(deps: ExpenseServiceDeps<R>) -> Self {
+        Self {
+            expense_repo: deps.expense_repo,
+        }
     }
 }
 
 impl<T, E> CalendarServiceImpl<T, E> {
-    pub fn new(task_repo: T, event_repo: E) -> Self {
+    pub fn new(deps: CalendarServiceDeps<T, E>) -> Self {
         Self {
-            task_repo,
-            event_repo,
-            provider: None,
+            task_repo: deps.task_repo,
+            event_repo: deps.event_repo,
+            provider: deps.provider,
         }
-    }
-
-    /// Construct a `CalendarServiceImpl` that delegates CalDAV/CardDAV/Deck
-    /// protocol operations to the supplied Nextcloud provider client.
-    pub fn with_provider(task_repo: T, event_repo: E, provider: Arc<NextcloudSync>) -> Self {
-        Self {
-            task_repo,
-            event_repo,
-            provider: Some(provider),
-        }
-    }
-
-    /// Inject (or replace) the Nextcloud provider client.
-    pub fn set_provider(&mut self, provider: Option<Arc<NextcloudSync>>) {
-        self.provider = provider;
     }
 
     fn provider(&self, op: &str) -> Result<&NextcloudSync, VaultError> {

@@ -663,6 +663,163 @@ fn build_nextcloud_provider() -> Option<Arc<task_core::NextcloudSync>> {
     )))
 }
 
+/// Layer-style dependency container for the Vox factory. Holds the DB
+/// handle plus every optional provider client built from env. Each
+/// service factory method below assembles the matching `*ServiceDeps`
+/// and constructs the `*ServiceImpl` — analogous to an effect-ts
+/// `Layer` resolving a service's required dependencies.
+#[derive(Clone)]
+struct ServerContext {
+    db: sea_orm::DatabaseConnection,
+    info: ServerInfo,
+    nextcloud: Option<Arc<task_core::NextcloudSync>>,
+    mail: Option<Arc<task_core::provider::MailClient>>,
+    talk: Option<Arc<dyn task_core::provider::CommunicationChannelProvider>>,
+}
+
+impl ServerContext {
+    fn from_env(db: sea_orm::DatabaseConnection, info: ServerInfo) -> Self {
+        Self {
+            db,
+            info,
+            nextcloud: build_nextcloud_provider(),
+            mail: mail_client_from_env().map(Arc::new),
+            talk: talk_client_from_env().map(|c| {
+                let arc: Arc<dyn task_core::provider::CommunicationChannelProvider> = Arc::new(c);
+                arc
+            }),
+        }
+    }
+
+    fn task_service(
+        &self,
+    ) -> task_core::TaskServiceImpl<task_core::task::TaskRepoStorage<sea_orm::DatabaseConnection>>
+    {
+        task_core::TaskServiceImpl::new(task_core::service_impl::TaskServiceDeps {
+            task_repo: task_core::task::TaskRepoStorage::new(self.db.clone()),
+        })
+    }
+
+    fn project_service(
+        &self,
+    ) -> task_core::ProjectServiceImpl<
+        task_core::project::ProjectRepoStorage<sea_orm::DatabaseConnection>,
+        task_core::task::TaskRepoStorage<sea_orm::DatabaseConnection>,
+    > {
+        task_core::ProjectServiceImpl::new(task_core::service_impl::ProjectServiceDeps {
+            project_repo: task_core::project::ProjectRepoStorage::new(self.db.clone()),
+            task_repo: task_core::task::TaskRepoStorage::new(self.db.clone()),
+        })
+    }
+
+    fn expense_service(
+        &self,
+    ) -> task_core::ExpenseServiceImpl<
+        task_core::expense::ExpenseRepoStorage<sea_orm::DatabaseConnection>,
+    > {
+        task_core::ExpenseServiceImpl::new(task_core::service_impl::ExpenseServiceDeps {
+            expense_repo: task_core::expense::ExpenseRepoStorage::new(self.db.clone()),
+        })
+    }
+
+    fn calendar_service(
+        &self,
+    ) -> task_core::CalendarServiceImpl<
+        task_core::task::TaskRepoStorage<sea_orm::DatabaseConnection>,
+        task_core::calendar_event::CalendarEventRepoStorage<sea_orm::DatabaseConnection>,
+    > {
+        task_core::CalendarServiceImpl::new(task_core::service_impl::CalendarServiceDeps {
+            task_repo: task_core::task::TaskRepoStorage::new(self.db.clone()),
+            event_repo: task_core::calendar_event::CalendarEventRepoStorage::new(self.db.clone()),
+            provider: self.nextcloud.clone(),
+        })
+    }
+
+    fn inbox_service(
+        &self,
+    ) -> task_core::InboxServiceImpl<task_core::task::TaskRepoStorage<sea_orm::DatabaseConnection>>
+    {
+        task_core::InboxServiceImpl::new(task_core::service_impl::InboxServiceDeps {
+            task_repo: task_core::task::TaskRepoStorage::new(self.db.clone()),
+        })
+    }
+
+    fn operating_service(
+        &self,
+    ) -> task_core::OperatingServiceImpl<
+        task_core::task::TaskRepoStorage<sea_orm::DatabaseConnection>,
+        task_core::project::ProjectRepoStorage<sea_orm::DatabaseConnection>,
+        task_core::calendar_event::CalendarEventRepoStorage<sea_orm::DatabaseConnection>,
+    > {
+        task_core::OperatingServiceImpl::new(task_core::service_impl::OperatingServiceDeps {
+            task_repo: task_core::task::TaskRepoStorage::new(self.db.clone()),
+            project_repo: task_core::project::ProjectRepoStorage::new(self.db.clone()),
+            event_repo: task_core::calendar_event::CalendarEventRepoStorage::new(self.db.clone()),
+        })
+    }
+
+    fn time_service(
+        &self,
+    ) -> task_core::TimeServiceImpl<task_core::task::TaskRepoStorage<sea_orm::DatabaseConnection>>
+    {
+        task_core::TimeServiceImpl::new(task_core::service_impl::TimeServiceDeps {
+            task_repo: task_core::task::TaskRepoStorage::new(self.db.clone()),
+        })
+    }
+
+    fn invoice_service(
+        &self,
+    ) -> task_core::InvoiceServiceImpl<
+        task_core::invoice::InvoiceRepoStorage<sea_orm::DatabaseConnection>,
+    > {
+        task_core::InvoiceServiceImpl::new(task_core::service_impl::InvoiceServiceDeps {
+            invoice_repo: task_core::invoice::InvoiceRepoStorage::new(self.db.clone()),
+        })
+    }
+
+    fn activity_service(
+        &self,
+    ) -> task_core::ActivityServiceImpl<
+        task_core::activity::ActivityRepoStorage<sea_orm::DatabaseConnection>,
+    > {
+        task_core::ActivityServiceImpl::new(task_core::service_impl::ActivityServiceDeps {
+            activity_repo: task_core::activity::ActivityRepoStorage::new(self.db.clone()),
+        })
+    }
+
+    fn people_service(
+        &self,
+    ) -> task_core::PeopleServiceImpl<
+        task_core::people::PersonRepoStorage<sea_orm::DatabaseConnection>,
+    > {
+        task_core::PeopleServiceImpl::new(task_core::service_impl::PeopleServiceDeps {
+            people_repo: task_core::people::PersonRepoStorage::new(self.db.clone()),
+            provider: self.nextcloud.clone(),
+        })
+    }
+
+    fn conversation_service(&self) -> task_core::ConversationServiceImpl {
+        task_core::ConversationServiceImpl::new(task_core::service_impl::ConversationServiceDeps {
+            provider: self.talk.clone(),
+        })
+    }
+
+    fn mail_service(
+        &self,
+    ) -> task_core::MailServiceImpl<
+        task_core::email::EmailRefRepoStorage<sea_orm::DatabaseConnection>,
+    > {
+        task_core::MailServiceImpl::new(task_core::service_impl::MailServiceDeps {
+            email_repo: task_core::email::EmailRefRepoStorage::new(self.db.clone()),
+            client: self.mail.clone(),
+        })
+    }
+
+    fn system_service(&self) -> ServerSystemService {
+        ServerSystemService::new(self.info.clone())
+    }
+}
+
 async fn handle_vox_connection(socket: WebSocket, state: AppState, auth: VoxAuthContext) {
     info!(
         user_id = %auth.user_id,
@@ -674,19 +831,10 @@ async fn handle_vox_connection(socket: WebSocket, state: AppState, auth: VoxAuth
     );
 
     let db = state.db.clone();
-    let info = state.info.clone();
-    let nextcloud_provider = build_nextcloud_provider();
-
-    // Build provider clients once per WS connection from env. Cloning the
-    // Arc into the per-service factory closure keeps a single underlying
-    // `reqwest::Client` shared across services on this connection.
-    let mail_client: Option<Arc<task_core::provider::MailClient>> =
-        mail_client_from_env().map(Arc::new);
-    let talk_provider: Option<Arc<dyn task_core::provider::CommunicationChannelProvider>> =
-        talk_client_from_env().map(|c| {
-            let arc: Arc<dyn task_core::provider::CommunicationChannelProvider> = Arc::new(c);
-            arc
-        });
+    // Build the typed dependency container once per WS connection.
+    // `ServerContext` reads env-derived providers (Nextcloud, IMAP, Talk)
+    // and exposes per-service factories the Vox arms below call.
+    let ctx = ServerContext::from_env(state.db.clone(), state.info.clone());
 
     let request_auth = auth.clone();
     let factory = vox::acceptor_fn(
@@ -838,116 +986,76 @@ async fn handle_vox_connection(socket: WebSocket, state: AppState, auth: VoxAuth
                     Ok(())
                 }
                 "TaskService" => {
-                    connection.handle_with(task_core::TaskServiceDispatcher::new(
-                        task_core::TaskServiceImpl::new(task_core::task::TaskRepoStorage::new(
-                            db.clone(),
-                        )),
-                    ));
+                    connection
+                        .handle_with(task_core::TaskServiceDispatcher::new(ctx.task_service()));
                     Ok(())
                 }
                 "ProjectService" => {
                     connection.handle_with(task_core::ProjectServiceDispatcher::new(
-                        task_core::ProjectServiceImpl::new(
-                            task_core::project::ProjectRepoStorage::new(db.clone()),
-                            task_core::task::TaskRepoStorage::new(db.clone()),
-                        ),
+                        ctx.project_service(),
                     ));
                     Ok(())
                 }
                 "ExpenseService" => {
                     connection.handle_with(task_core::ExpenseServiceDispatcher::new(
-                        task_core::ExpenseServiceImpl::new(
-                            task_core::expense::ExpenseRepoStorage::new(db.clone()),
-                        ),
+                        ctx.expense_service(),
                     ));
                     Ok(())
                 }
                 "CalendarService" => {
-                    let task_repo = task_core::task::TaskRepoStorage::new(db.clone());
-                    let event_repo =
-                        task_core::calendar_event::CalendarEventRepoStorage::new(db.clone());
-                    let svc = match nextcloud_provider.clone() {
-                        Some(provider) => task_core::CalendarServiceImpl::with_provider(
-                            task_repo, event_repo, provider,
-                        ),
-                        None => task_core::CalendarServiceImpl::new(task_repo, event_repo),
-                    };
-                    connection.handle_with(task_core::CalendarServiceDispatcher::new(svc));
+                    connection.handle_with(task_core::CalendarServiceDispatcher::new(
+                        ctx.calendar_service(),
+                    ));
                     Ok(())
                 }
                 "InboxService" => {
-                    connection.handle_with(task_core::InboxServiceDispatcher::new(
-                        task_core::InboxServiceImpl::new(task_core::task::TaskRepoStorage::new(
-                            db.clone(),
-                        )),
-                    ));
+                    connection
+                        .handle_with(task_core::InboxServiceDispatcher::new(ctx.inbox_service()));
                     Ok(())
                 }
                 "OperatingService" => {
                     connection.handle_with(task_core::OperatingServiceDispatcher::new(
-                        task_core::OperatingServiceImpl::new(
-                            task_core::task::TaskRepoStorage::new(db.clone()),
-                            task_core::project::ProjectRepoStorage::new(db.clone()),
-                            task_core::calendar_event::CalendarEventRepoStorage::new(db.clone()),
-                        ),
+                        ctx.operating_service(),
                     ));
                     Ok(())
                 }
                 "TimeService" => {
-                    connection.handle_with(task_core::TimeServiceDispatcher::new(
-                        task_core::TimeServiceImpl::new(task_core::task::TaskRepoStorage::new(
-                            db.clone(),
-                        )),
-                    ));
+                    connection
+                        .handle_with(task_core::TimeServiceDispatcher::new(ctx.time_service()));
                     Ok(())
                 }
                 "InvoiceService" => {
                     connection.handle_with(task_core::InvoiceServiceDispatcher::new(
-                        task_core::InvoiceServiceImpl::new(
-                            task_core::invoice::InvoiceRepoStorage::new(db.clone()),
-                        ),
+                        ctx.invoice_service(),
                     ));
                     Ok(())
                 }
                 "ActivityService" => {
                     connection.handle_with(task_core::ActivityServiceDispatcher::new(
-                        task_core::ActivityServiceImpl::new(
-                            task_core::activity::ActivityRepoStorage::new(db.clone()),
-                        ),
+                        ctx.activity_service(),
                     ));
                     Ok(())
                 }
                 "PeopleService" => {
-                    let people_repo = task_core::people::PersonRepoStorage::new(db.clone());
-                    let svc = match nextcloud_provider.clone() {
-                        Some(provider) => {
-                            task_core::PeopleServiceImpl::with_provider(people_repo, provider)
-                        }
-                        None => task_core::PeopleServiceImpl::new(people_repo),
-                    };
-                    connection.handle_with(task_core::PeopleServiceDispatcher::new(svc));
+                    connection.handle_with(task_core::PeopleServiceDispatcher::new(
+                        ctx.people_service(),
+                    ));
                     Ok(())
                 }
                 "ConversationService" => {
                     connection.handle_with(task_core::ConversationServiceDispatcher::new(
-                        task_core::ConversationServiceImpl::with_shared_provider(
-                            talk_provider.clone(),
-                        ),
+                        ctx.conversation_service(),
                     ));
                     Ok(())
                 }
                 "MailService" => {
-                    connection.handle_with(task_core::MailServiceDispatcher::new(
-                        task_core::MailServiceImpl::with_shared_client(
-                            task_core::email::EmailRefRepoStorage::new(db.clone()),
-                            mail_client.clone(),
-                        ),
-                    ));
+                    connection
+                        .handle_with(task_core::MailServiceDispatcher::new(ctx.mail_service()));
                     Ok(())
                 }
                 "SystemService" => {
                     connection.handle_with(task_core::SystemServiceDispatcher::new(
-                        ServerSystemService::new(info.clone()),
+                        ctx.system_service(),
                     ));
                     Ok(())
                 }

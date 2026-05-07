@@ -7,6 +7,13 @@ use crate::task::{Task, TaskApiList, TaskRepo};
 
 use super::helpers::{build_operating_model_report, convert_model};
 
+/// Typed requirements for [`OperatingServiceImpl`].
+pub struct OperatingServiceDeps<T, P, E> {
+    pub task_repo: T,
+    pub project_repo: P,
+    pub event_repo: E,
+}
+
 #[derive(Clone)]
 pub struct OperatingServiceImpl<T, P, E> {
     task_repo: T,
@@ -15,11 +22,11 @@ pub struct OperatingServiceImpl<T, P, E> {
 }
 
 impl<T, P, E> OperatingServiceImpl<T, P, E> {
-    pub fn new(task_repo: T, project_repo: P, event_repo: E) -> Self {
+    pub fn new(deps: OperatingServiceDeps<T, P, E>) -> Self {
         Self {
-            task_repo,
-            project_repo,
-            event_repo,
+            task_repo: deps.task_repo,
+            project_repo: deps.project_repo,
+            event_repo: deps.event_repo,
         }
     }
 }

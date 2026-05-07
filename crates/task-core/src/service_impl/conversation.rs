@@ -17,27 +17,22 @@ fn provider_not_configured(op: &str) -> VaultError {
     VaultError::IoError(format!("provider not configured: {op}"))
 }
 
+/// Typed requirements for [`ConversationServiceImpl`].
+#[derive(Default)]
+pub struct ConversationServiceDeps {
+    pub provider: Option<Arc<dyn CommunicationChannelProvider>>,
+}
+
 #[derive(Clone, Default)]
 pub struct ConversationServiceImpl {
     provider: Option<Arc<dyn CommunicationChannelProvider>>,
 }
 
 impl ConversationServiceImpl {
-    /// Build the service with no provider configured.
-    pub fn new() -> Self {
-        Self { provider: None }
-    }
-
-    /// Build the service backed by a live channel provider (Talk, Matrix, …).
-    pub fn new_with_provider(provider: Arc<dyn CommunicationChannelProvider>) -> Self {
+    pub fn new(deps: ConversationServiceDeps) -> Self {
         Self {
-            provider: Some(provider),
+            provider: deps.provider,
         }
-    }
-
-    /// Build the service from a possibly-absent shared provider.
-    pub fn with_shared_provider(provider: Option<Arc<dyn CommunicationChannelProvider>>) -> Self {
-        Self { provider }
     }
 }
 

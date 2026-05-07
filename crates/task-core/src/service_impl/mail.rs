@@ -28,6 +28,16 @@ fn provider_not_configured(op: &str) -> VaultError {
     VaultError::IoError(format!("provider not configured: {op}"))
 }
 
+/// Typed requirements for [`MailServiceImpl`].
+///
+/// `client = None` makes every provider-backed op return
+/// `provider_not_configured`; `email_repo` powers the local-only ops
+/// (`linked_message_ids`).
+pub struct MailServiceDeps<R> {
+    pub email_repo: R,
+    pub client: Option<Arc<MailClient>>,
+}
+
 #[derive(Clone)]
 pub struct MailServiceImpl<R> {
     email_repo: R,
@@ -35,28 +45,11 @@ pub struct MailServiceImpl<R> {
 }
 
 impl<R> MailServiceImpl<R> {
-    /// Build the service with no provider configured. Every provider-backed
-    /// op will return `provider_not_configured`.
-    pub fn new(email_repo: R) -> Self {
+    pub fn new(deps: MailServiceDeps<R>) -> Self {
         Self {
-            email_repo,
-            client: None,
+            email_repo: deps.email_repo,
+            client: deps.client,
         }
-    }
-
-    /// Build the service with a live `MailClient` injected. Provider-backed
-    /// ops will delegate to it.
-    pub fn new_with_client(email_repo: R, client: MailClient) -> Self {
-        Self {
-            email_repo,
-            client: Some(Arc::new(client)),
-        }
-    }
-
-    /// Build the service from a pre-shared `Arc<MailClient>` — useful when
-    /// the caller wants to keep one client for many connections.
-    pub fn with_shared_client(email_repo: R, client: Option<Arc<MailClient>>) -> Self {
-        Self { email_repo, client }
     }
 }
 

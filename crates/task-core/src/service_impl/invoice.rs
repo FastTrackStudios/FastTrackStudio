@@ -22,14 +22,21 @@ use crate::service::{
     InvoicePaymentRequest, InvoiceService, TimeEntryContext, VaultError,
 };
 
+/// Typed requirements for [`InvoiceServiceImpl`].
+pub struct InvoiceServiceDeps<R> {
+    pub invoice_repo: R,
+}
+
 #[derive(Clone)]
 pub struct InvoiceServiceImpl<R> {
     invoice_repo: R,
 }
 
 impl<R> InvoiceServiceImpl<R> {
-    pub fn new(invoice_repo: R) -> Self {
-        Self { invoice_repo }
+    pub fn new(deps: InvoiceServiceDeps<R>) -> Self {
+        Self {
+            invoice_repo: deps.invoice_repo,
+        }
     }
 }
 

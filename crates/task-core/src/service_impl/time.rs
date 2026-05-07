@@ -22,14 +22,21 @@ use crate::task::{Task, TaskApi, TaskApiList, TaskApiUpdate, TaskRepo, TimeEntry
 
 use super::helpers::{convert_model, convert_ref};
 
+/// Typed requirements for [`TimeServiceImpl`].
+pub struct TimeServiceDeps<R> {
+    pub task_repo: R,
+}
+
 #[derive(Clone)]
 pub struct TimeServiceImpl<R> {
     task_repo: R,
 }
 
 impl<R> TimeServiceImpl<R> {
-    pub fn new(task_repo: R) -> Self {
-        Self { task_repo }
+    pub fn new(deps: TimeServiceDeps<R>) -> Self {
+        Self {
+            task_repo: deps.task_repo,
+        }
     }
 }
 

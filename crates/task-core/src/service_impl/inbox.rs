@@ -19,14 +19,21 @@ use super::helpers::{
     task_matches_reference,
 };
 
+/// Typed requirements for [`InboxServiceImpl`].
+pub struct InboxServiceDeps<R> {
+    pub task_repo: R,
+}
+
 #[derive(Clone)]
 pub struct InboxServiceImpl<R> {
     task_repo: R,
 }
 
 impl<R> InboxServiceImpl<R> {
-    pub fn new(task_repo: R) -> Self {
-        Self { task_repo }
+    pub fn new(deps: InboxServiceDeps<R>) -> Self {
+        Self {
+            task_repo: deps.task_repo,
+        }
     }
 }
 

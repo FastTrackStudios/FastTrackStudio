@@ -14,14 +14,21 @@ use crate::activity::{Activity, ActivityApiList, ActivityRepo};
 use crate::index::{ChangeRow, ConflictRow};
 use crate::service::{ActivityService, ProviderSyncState, VaultError};
 
+/// Typed requirements for [`ActivityServiceImpl`].
+pub struct ActivityServiceDeps<R> {
+    pub activity_repo: R,
+}
+
 #[derive(Clone)]
 pub struct ActivityServiceImpl<R> {
     activity_repo: R,
 }
 
 impl<R> ActivityServiceImpl<R> {
-    pub fn new(activity_repo: R) -> Self {
-        Self { activity_repo }
+    pub fn new(deps: ActivityServiceDeps<R>) -> Self {
+        Self {
+            activity_repo: deps.activity_repo,
+        }
     }
 }
 
