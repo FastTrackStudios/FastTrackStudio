@@ -3351,7 +3351,7 @@ where
     T: Serialize,
     U: DeserializeOwned,
 {
-    serde_json::from_value(serde_json::to_value(value)?).map_err(Into::into)
+    model_to_api(&value)
 }
 
 #[allow(clippy::too_many_arguments)]
