@@ -8,12 +8,12 @@
 //! - MIDI events with E/e prefix
 
 use nom::{
+    IResult, Parser,
     branch::alt,
     bytes::complete::{tag, take_while, take_while1},
     character::complete::{one_of, space0, space1},
     combinator::{map, opt, recognize},
     sequence::{delimited, preceded},
-    IResult, Parser,
 };
 use serde::{Deserialize, Serialize};
 use std::fmt;

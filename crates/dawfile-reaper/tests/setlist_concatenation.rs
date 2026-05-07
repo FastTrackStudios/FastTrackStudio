@@ -3,12 +3,12 @@
 //! Uses the builder API to construct song projects programmatically,
 //! then validates concatenation, shell copies, and role setlists.
 
+use dawfile_reaper::ReaperProject;
 use dawfile_reaper::builder::{MarkerBuilder, ReaperProjectBuilder};
 use dawfile_reaper::setlist_rpp::{
     self, build_song_infos_from_projects, concatenate_projects, measures_to_seconds,
     resolve_song_bounds,
 };
-use dawfile_reaper::ReaperProject;
 use std::path::PathBuf;
 
 fn fixture_path(name: &str) -> PathBuf {
@@ -325,11 +325,13 @@ fn parse_song_b() {
     assert_eq!(bounds.end, 18.0);
 
     // Has Solo Section region
-    assert!(project
-        .markers_regions
-        .all
-        .iter()
-        .any(|m| m.name == "Solo Section" && m.end_position.is_some()));
+    assert!(
+        project
+            .markers_regions
+            .all
+            .iter()
+            .any(|m| m.name == "Solo Section" && m.end_position.is_some())
+    );
 
     println!(
         "Song B: {} tracks, bounds {:.1}→{:.1}s",

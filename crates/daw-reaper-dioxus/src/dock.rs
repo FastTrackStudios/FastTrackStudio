@@ -152,8 +152,6 @@ const DEFAULT_CLASS: &str = "FTSDioxusPanel\0";
 
 #[cfg(all(feature = "desktop-renderer", target_os = "linux"))]
 static GTK_INITIALIZED: AtomicBool = AtomicBool::new(false);
-#[cfg(all(feature = "desktop-renderer", target_os = "linux"))]
-const DESKTOP_FAST_TIMER_ID: usize = 0x4654_5301;
 
 // ---------------------------------------------------------------------------
 // Global registry (thread-local, main thread only)
@@ -966,7 +964,7 @@ pub fn update_panels() {
                     }
                     desktop_view.poll();
                     #[cfg(all(feature = "desktop-renderer", target_os = "linux"))]
-                    record_desktop_poll(panel, "reaper_timer");
+                    record_desktop_poll(panel, "misc_timer");
                     continue;
                 }
 
@@ -1014,75 +1012,6 @@ pub fn update_panels() {
                 }
             }
         }
-    });
-}
-
-/// Drive one already-created desktop webview panel from its SWELL window timer.
-#[cfg(all(feature = "desktop-renderer", target_os = "linux"))]
-fn update_desktop_panel_fast(hwnd: raw::HWND) {
-    #[cfg(debug_assertions)]
-    assert_main_thread();
-
-    if UPDATING_PANELS.with(|c| c.replace(true)) {
-        return;
-    }
-
-    struct Guard;
-    impl Drop for Guard {
-        fn drop(&mut self) {
-            UPDATING_PANELS.with(|c| c.set(false));
-        }
-    }
-    let _guard = Guard;
-
-    PANELS.with(|panels| {
-        let mut panels = panels.borrow_mut();
-        let swell = swell();
-
-        let Some(panel) = panels.values_mut().find(|panel| panel.hwnd == hwnd) else {
-            return;
-        };
-
-        if !panel.visible {
-            return;
-        }
-
-        let hwnd_visible = unsafe { swell.IsWindowVisible(panel.hwnd) };
-        if !hwnd_visible {
-            return;
-        }
-
-        let mut rect = raw::RECT {
-            left: 0,
-            top: 0,
-            right: 0,
-            bottom: 0,
-        };
-        unsafe {
-            swell.GetClientRect(panel.hwnd, &mut rect);
-        }
-        let w = (rect.right - rect.left).unsigned_abs();
-        let h = (rect.bottom - rect.top).unsigned_abs();
-        if w == 0 || h == 0 {
-            return;
-        }
-
-        {
-            let Some(desktop_view) = &mut panel.desktop_view else {
-                return;
-            };
-
-            if let Err(err) =
-                desktop_view.set_bounds(to_desktop_rect(EmbeddedBounds::new(0, 0, w, h)))
-            {
-                tracing::debug!(
-                    panel = panel.config.id,
-                    "Failed to resize desktop webview panel from SWELL fast tick: {err}"
-                );
-            }
-            desktop_view.poll();
-        }
-        record_desktop_poll(panel, "swell_timer");
     });
 }
 
@@ -1172,41 +1101,6 @@ pub fn restore_dock_state() {
 // ---------------------------------------------------------------------------
 
 #[cfg(all(feature = "desktop-renderer", target_os = "linux"))]
-fn start_desktop_fast_timer(panel: &mut LivePanel, reason: &'static str) {
-    if panel.renderer != PanelRenderer::Desktop {
-        return;
-    }
-
-    panel.desktop_poll_stats = DesktopPollStats::default();
-    unsafe {
-        swell().SetTimer(panel.hwnd, DESKTOP_FAST_TIMER_ID, 16, None);
-    }
-    tracing::info!(
-        panel = panel.config.id,
-        reason,
-        interval_ms = 16,
-        "Started SWELL fast timer for desktop Dioxus panel"
-    );
-}
-
-#[cfg(all(feature = "desktop-renderer", target_os = "linux"))]
-fn stop_desktop_fast_timer(panel: &mut LivePanel, reason: &'static str) {
-    if panel.renderer != PanelRenderer::Desktop {
-        return;
-    }
-
-    unsafe {
-        swell().KillTimer(panel.hwnd, DESKTOP_FAST_TIMER_ID);
-    }
-    panel.desktop_poll_stats = DesktopPollStats::default();
-    tracing::info!(
-        panel = panel.config.id,
-        reason,
-        "Stopped SWELL fast timer for desktop Dioxus panel"
-    );
-}
-
-#[cfg(all(feature = "desktop-renderer", target_os = "linux"))]
 fn record_desktop_poll(panel: &mut LivePanel, source: &'static str) {
     let now = Instant::now();
     let stats = &mut panel.desktop_poll_stats;
@@ -1278,8 +1172,6 @@ fn hide_panel_inner(panel: &mut LivePanel) {
     // DockWindowRemove is safe to call even when not docked.
     unsafe {
         reaper.DockWindowRemove(panel.hwnd);
-        #[cfg(all(feature = "desktop-renderer", target_os = "linux"))]
-        stop_desktop_fast_timer(panel, "hide");
         swell.ShowWindow(panel.hwnd, raw::SW_HIDE as c_int);
     }
 
@@ -1452,8 +1344,6 @@ fn create_desktop_view(
         panel.desktop_parent = Some(parent);
     }
     panel.desktop_view = Some(view);
-    #[cfg(target_os = "linux")]
-    start_desktop_fast_timer(panel, "create");
     Ok(())
 }
 
@@ -1543,11 +1433,68 @@ fn create_desktop_parent(
         swell().ShowWindow(bridge_hwnd, raw::SW_SHOW as c_int);
     }
 
+    // Advertise XEMBED protocol support on the SWELL bridge X window so
+    // wry's `GtkPlug`-based child mode can complete the XEMBED handshake.
+    // Without this property GTK silently treats the plug as un-embedded
+    // and the WebView never gets mapped → black panel.
+    //
+    // _XEMBED_INFO format (per XEMBED 0.5 spec):
+    //   [0] CARD32 version = 0
+    //   [1] CARD32 flags   = XEMBED_MAPPED (1) — signals the plug should
+    //                        be mapped/visible in the socket
+    if let Err(e) = advertise_xembed(x_window_id) {
+        tracing::warn!(
+            x_window_id,
+            "Failed to set _XEMBED_INFO on SWELL bridge window: {e}"
+        );
+    }
+
     let parent = unsafe { ParentWindow::from_xlib_window(x_window_id as u64)? };
     Ok(LinuxDesktopParent {
         bridge_hwnd,
         parent,
     })
+}
+
+/// Set the `_XEMBED_INFO` property on the given X11 window so wry's
+/// `GtkPlug` child mode treats this window as an XEMBED-capable socket.
+///
+/// Reuses the X display already opened by GTK (via `XOpenDisplay(NULL)`)
+/// — opening a second display would not see the same property writes
+/// from GTK's perspective.
+#[cfg(all(feature = "desktop-renderer", target_os = "linux"))]
+fn advertise_xembed(x_window_id: c_ulong) -> Result<(), Box<dyn std::error::Error>> {
+    use std::os::raw::{c_int, c_long, c_uchar};
+
+    const XEMBED_VERSION: c_long = 0;
+    const XEMBED_MAPPED: c_long = 1;
+    const PROP_MODE_REPLACE: c_int = 0;
+    const FORMAT_32: c_int = 32;
+
+    let xlib = x11_dl::xlib::Xlib::open()?;
+    // Pass null to share GTK's default display.
+    let display = unsafe { (xlib.XOpenDisplay)(std::ptr::null()) };
+    if display.is_null() {
+        return Err("XOpenDisplay returned null".into());
+    }
+    let atom_name = CString::new("_XEMBED_INFO")?;
+    let atom = unsafe { (xlib.XInternAtom)(display, atom_name.as_ptr(), 0) };
+    let info: [c_long; 2] = [XEMBED_VERSION, XEMBED_MAPPED];
+    unsafe {
+        (xlib.XChangeProperty)(
+            display,
+            x_window_id,
+            atom,
+            atom,
+            FORMAT_32,
+            PROP_MODE_REPLACE,
+            info.as_ptr() as *const c_uchar,
+            info.len() as c_int,
+        );
+        (xlib.XFlush)(display);
+        (xlib.XCloseDisplay)(display);
+    }
+    Ok(())
 }
 
 #[cfg(all(feature = "desktop-renderer", target_os = "linux"))]
@@ -1864,10 +1811,11 @@ fn panel_wndproc_inner(
                 WM_MBUTTONDOWN => blitz_traits::events::MouseEventButton::Auxiliary,
                 _ => blitz_traits::events::MouseEventButton::Main,
             };
-            // Capture mouse for drag support + take keyboard focus
+            // Capture mouse for drag support — released on WM_LBUTTONUP so
+            // REAPER's normal click-routing keeps working when the pointer
+            // moves outside the panel.
             unsafe {
                 swell().SetCapture(hwnd);
-                swell().SetFocus(hwnd);
             }
             forward_mouse_event(
                 hwnd,
@@ -1878,6 +1826,28 @@ fn panel_wndproc_inner(
                     blitz_traits::events::MouseEventButtons::Primary,
                 )),
             );
+            // Only steal keyboard focus when the click landed on a
+            // focusable element (text input, contenteditable). Without
+            // this guard, clicking any button or empty area would lock
+            // keyboard input to the panel until something forced focus
+            // elsewhere — on Linux SWELL there's no Win32-style
+            // MA_ACTIVATE auto-restore, so REAPER's main UI would never
+            // get focus back from a normal click. Now non-input clicks
+            // leave focus where REAPER had it.
+            let needs_focus = PANELS.with(|panels| {
+                panels
+                    .borrow()
+                    .values()
+                    .find(|p| p.hwnd == hwnd)
+                    .and_then(|p| p.view.as_ref())
+                    .map(|v| v.focused_is_text_input())
+                    .unwrap_or(false)
+            });
+            if needs_focus {
+                unsafe {
+                    swell().SetFocus(hwnd);
+                }
+            }
             0
         }
         // Right-click: forward to Blitz AND fall through to DefWindowProc so
@@ -1906,6 +1876,9 @@ fn panel_wndproc_inner(
                 WM_MBUTTONUP => blitz_traits::events::MouseEventButton::Auxiliary,
                 _ => blitz_traits::events::MouseEventButton::Main,
             };
+            // Release the drag-capture taken on LBUTTONDOWN so REAPER's
+            // global click routing resumes for the next event.
+            swell().ReleaseCapture();
             forward_mouse_event(
                 hwnd,
                 blitz_traits::events::UiEvent::PointerUp(mouse_pointer_event(
@@ -2054,11 +2027,6 @@ fn panel_wndproc_inner(
             }
         }
         WM_SIZE => 0,
-        #[cfg(all(feature = "desktop-renderer", target_os = "linux"))]
-        raw::WM_TIMER if wparam == DESKTOP_FAST_TIMER_ID => {
-            update_desktop_panel_fast(hwnd);
-            0
-        }
         WM_SHOWWINDOW => {
             let showing = wparam != 0;
             PANELS.with(|panels| {
@@ -2067,18 +2035,11 @@ fn panel_wndproc_inner(
                     if showing {
                         panel.visible = true;
                         panel.init_attempts = 0;
-                        #[cfg(all(feature = "desktop-renderer", target_os = "linux"))]
-                        if panel.renderer == PanelRenderer::Desktop && panel.desktop_view.is_some()
-                        {
-                            start_desktop_fast_timer(panel, "show");
-                        }
                         if let Some(view) = &panel.view {
                             view.mark_dirty();
                         }
                     } else {
                         // Keep the view alive for instant re-show; just stop rendering.
-                        #[cfg(all(feature = "desktop-renderer", target_os = "linux"))]
-                        stop_desktop_fast_timer(panel, "showwindow_hide");
                         panel.visible = false;
                     }
                     tracing::info!(showing, panel = panel.config.id, "WM_SHOWWINDOW");
@@ -2102,10 +2063,9 @@ fn panel_wndproc_inner(
                     .map(|(id, _)| *id);
                 id.and_then(|id| panels.remove(id).map(|p| (id, p)))
             });
-            if let Some((_id, mut panel)) = taken {
+            if let Some((_id, panel)) = taken {
+                let mut panel = panel;
                 panel.view = None;
-                #[cfg(all(feature = "desktop-renderer", target_os = "linux"))]
-                stop_desktop_fast_timer(&mut panel, "destroy");
                 let reaper = reaper();
                 // Unregister screenset callback before destroying the HWND —
                 // otherwise REAPER may call us back with a dead param.

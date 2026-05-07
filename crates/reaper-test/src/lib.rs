@@ -22,8 +22,8 @@ use std::{
     pin::Pin,
     process::{Child, Command},
     sync::{
-        atomic::{AtomicU32, Ordering},
         Arc, Condvar, Mutex, OnceLock,
+        atomic::{AtomicU32, Ordering},
     },
     time::Duration,
 };

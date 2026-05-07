@@ -12,7 +12,15 @@ name = "reaper_daw_dioxus"
 path = "src/lib.rs"
 
 [dependencies]
-daw-reaper-dioxus = { path = "../daw-reaper-dioxus" }
+daw = { workspace = true, features = ["reaper", "reaper-ui-desktop-renderer"] }
+daw-extension-runtime.workspace = true
+daw-module = { path = "../daw-module" }
+daw-reaper-dioxus = { path = "../daw-reaper-dioxus", features = ["desktop-renderer"] }
+daw-ui = { workspace = true, default-features = false, features = ["reaper-test-panels"] }
+crossbeam-channel = "0.5"
+eyre = "0.6"
+fragile.workspace = true
+vox.workspace = true
 reaper-low.workspace = true
 reaper-medium.workspace = true
 reaper-high.workspace = true

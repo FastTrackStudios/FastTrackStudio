@@ -60,6 +60,9 @@ daw-allocator = { path = "crates/daw-allocator" }
 daw-extension-runtime = { path = "crates/daw-extension-runtime" }
 # Dev tooling — REAPER extension install/symlink helpers (for xtask use)
 fts-devtools = { path = "crates/fts-devtools" }
+# FTS design system — used by `daw-ui`'s `reaper-test-panels` feature so the
+# Native vs Desktop renderer demo panels can ship from this repo.
+fts-ui = { git = "https://github.com/FastTrackStudios/fts-ui.git", rev = "d9f01261cb59708300cc5b31fa7fe6bd766a66aa" }
 # NOTE: daw-proto, daw-control, daw-control-sync, daw-reaper, daw-standalone,
 # dawfile-reaper are INTERNAL. Access them through the `daw` facade crate.
 
@@ -173,6 +176,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # [patch."https://github.com/FastTrackStudios/monarchy.git"]
 # monarchy = { path = "../monarchy/crates/monarchy" }
 
+[patch."https://github.com/FastTrackStudios/fts-ui.git"]
+fts-ui = { path = "../fts-ui/crates/fts-ui" }
+
 # ── Patch remote daw.git refs from transitive deps (e.g. keyflow) ────
 [patch."https://github.com/FastTrackStudios/daw.git"]
 daw-proto = { path = "crates/daw-proto" }
@@ -229,6 +235,14 @@ moire-wasm = { git = "https://github.com/FastTrackStudios/moire.git", rev = "7a2
 moire-wire = { git = "https://github.com/FastTrackStudios/moire.git", rev = "7a2f1dc" }
 
 [patch.crates-io]
+# Wry: vendored fork at ../forks/wry pinned to v0.53.5 with a Linux fix
+# that uses `GtkPlug` (XEMBED) for `build_as_child` instead of faking a
+# `gtk::Window::Toplevel` over a foreign GdkWindow. The upstream path
+# corrupts the X session's `_NET_ACTIVE_WINDOW` and breaks focus/grab
+# routing whenever the host (REAPER, VST host, etc.) doesn't own a real
+# GTK toplevel. See the dock.rs WebKit panel embedding path.
+wry = { path = "../forks/wry" }
+
 dioxus = { path = "/home/cody/Development/Dioxus/dioxus/packages/dioxus" }
 dioxus-asset-resolver = { path = "/home/cody/Development/Dioxus/dioxus/packages/asset-resolver" }
 dioxus-cli-config = { path = "/home/cody/Development/Dioxus/dioxus/packages/cli-config" }

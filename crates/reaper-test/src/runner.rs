@@ -45,6 +45,21 @@ pub struct TestPackage {
     pub test_binary: Option<String>,
 }
 
+/// A cdylib extension package to build and install into REAPER's UserPlugins.
+pub struct ExtensionPackage {
+    /// Cargo package name to build.
+    pub package: String,
+    /// Built library stem without `lib` prefix or platform suffix.
+    ///
+    /// For a crate with `[lib] name = "reaper_fts_extensions"`, this should be
+    /// `"reaper_fts_extensions"` even if the Cargo package is `"fts-extensions"`.
+    pub lib_stem: String,
+    /// Filename to install under REAPER's UserPlugins directory.
+    pub plugin_name: String,
+    /// Build with `--release`.
+    pub release: bool,
+}
+
 /// A running REAPER process, ready for tests.
 pub struct RunningReaper {
     child: Child,
@@ -133,21 +148,122 @@ impl TestRunner {
         package: &str,
         lib_name: &str,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        println!("── Building {package} (release) ──");
-        let status = Command::new("cargo")
-            .args(["build", "-p", package, "--release"])
-            .current_dir(workspace)
-            .status()?;
+        self.install_extension_package(
+            workspace,
+            &ExtensionPackage {
+                package: package.to_string(),
+                lib_stem: package.replace('-', "_"),
+                plugin_name: lib_name.to_string(),
+                release: true,
+            },
+        )
+    }
+
+    /// Build and install a consumer extension package into the resources dir.
+    pub fn install_extension_package(
+        &self,
+        workspace: &Path,
+        extension: &ExtensionPackage,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let package = &extension.package;
+        let profile_label = if extension.release {
+            "release"
+        } else {
+            "debug"
+        };
+        println!("── Building {package} ({profile_label}) ──");
+        let mut cmd = Command::new("cargo");
+        cmd.args(["build", "-p", package]);
+        if extension.release {
+            cmd.arg("--release");
+        }
+        let status = cmd.current_dir(workspace).status()?;
         if !status.success() {
             return Err(format!("Failed to build {package}").into());
         }
 
-        // Derive the .so name from the package name (replace hyphens with underscores)
-        let so_stem = package.replace('-', "_");
-        let lib_path = workspace.join(format!("target/release/lib{so_stem}.so"));
+        let lib_path = workspace
+            .join("target")
+            .join(profile_label)
+            .join(format!("lib{}.so", extension.lib_stem));
         let plugins_dir = self.resources_dir.join("UserPlugins");
-        install_plugin(&lib_path, lib_name, &plugins_dir)?;
+        install_plugin(&lib_path, &extension.plugin_name, &plugins_dir)?;
         Ok(())
+    }
+
+    /// Build and install the DAW bridge plus all supplied consumer extensions.
+    pub fn install_test_extensions(
+        &self,
+        daw_workspace: &Path,
+        consumer_workspace: &Path,
+        extensions: &[ExtensionPackage],
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        self.install_daw_bridge(daw_workspace)?;
+        for extension in extensions {
+            self.install_extension_package(consumer_workspace, extension)?;
+        }
+        Ok(())
+    }
+
+    /// Build integration test binaries without running them.
+    pub fn build_test_packages(
+        &self,
+        workspace: &Path,
+        packages: &[TestPackage],
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        section(self.ci, "reaper-test: build test binaries");
+        for package in packages {
+            println!("Building test binaries for {}...", package.package);
+            let mut cmd = Command::new("cargo");
+            cmd.args(["test", "-p", &package.package]);
+            if !package.features.is_empty() {
+                cmd.arg("--features");
+                cmd.arg(package.features.join(","));
+            }
+            if let Some(ref test_binary) = package.test_binary {
+                cmd.args(["--test", test_binary]);
+            }
+            cmd.arg("--no-run");
+
+            let status = cmd.current_dir(workspace).status()?;
+            if !status.success() {
+                return Err(
+                    format!("Failed to build test binaries for {}", package.package).into(),
+                );
+            }
+        }
+        end_section(self.ci);
+        Ok(())
+    }
+
+    /// Run the standard REAPER integration-test lifecycle.
+    ///
+    /// This handles stale socket cleanup, REAPER prewarm, ini patching, spawning
+    /// REAPER, waiting for the DAW socket, executing test packages, stopping
+    /// REAPER unless `FTS_KEEP_OPEN=1`, and final socket cleanup.
+    pub fn run_reaper_tests(
+        &self,
+        packages: &[TestPackage],
+        filter: Option<&str>,
+    ) -> Result<bool, Box<dyn std::error::Error>> {
+        self.clean_stale_sockets();
+        self.prewarm_reaper();
+        self.patch_ini();
+
+        let mut reaper = self.spawn_reaper()?;
+        reaper.wait_for_socket(self)?;
+
+        let tests_passed = self.run_tests(&mut reaper, packages, filter)?;
+
+        if !tests_passed {
+            reaper.report_failure(self);
+        }
+        if !self.keep_open {
+            reaper.stop(self);
+        }
+        self.clean_stale_sockets();
+
+        Ok(tests_passed)
     }
 
     /// Remove all stale `fts-daw-*.sock` and `fts-daw-*.bootstrap.sock` files from `/tmp`.

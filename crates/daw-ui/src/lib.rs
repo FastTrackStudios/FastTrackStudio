@@ -14,6 +14,9 @@ pub mod panel_registration;
 pub mod prelude;
 pub mod signals;
 
+#[cfg(feature = "reaper-test-panels")]
+pub mod test_panels;
+
 // Re-exports for desktop app
 pub use components::arrangement_view::ArrangementView;
 pub use components::fx_chain_tree::FxChainTree;
