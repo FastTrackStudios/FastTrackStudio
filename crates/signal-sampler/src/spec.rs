@@ -75,6 +75,19 @@ pub struct LibrarySpec {
     /// soundsources + wavetable bank).
     #[facet(default)]
     pub wavetables: Vec<WavetableSpec>,
+
+    /// Groove loops with tempo + slice metadata (Stylus RMX-style).
+    ///
+    /// Each `GrooveSpec` is a single audio file (a loop) at a fixed BPM,
+    /// with a list of slice positions in original-tempo sample frames.
+    /// At runtime the engine time-stretches the loop to host tempo and
+    /// MIDI keys can either play the whole loop or trigger individual
+    /// slices.
+    ///
+    /// Sampler engine ignores these; future `GrooveBlock` runtime
+    /// consumes them.
+    #[facet(default)]
+    pub grooves: Vec<GrooveSpec>,
 }
 
 impl LibrarySpec {
@@ -467,6 +480,83 @@ pub struct ZoneSpec {
     /// zone tagged. The Layer determines which section's zones to play.
     #[facet(default)]
     pub section: String,
+    /// Variant identifier for libraries that ship multiple processed copies
+    /// of the same drum / sample set — typically `"Mixed"` (pre-bounced /
+    /// EQ'd) vs `"Unmixed"` (raw multi-mic stems).
+    ///
+    /// Empty = single-variant library. When non-empty, multiple zones
+    /// share the same `(key, vel, RR, mic, articulation)` and differ only
+    /// by `variant`; the engine picks one at patch load. Used by
+    /// GetGoodDrums Luke Holland and Thomas Pridgen kits.
+    #[facet(default)]
+    pub variant: String,
+}
+
+// ── Grooves (Stylus RMX-style loops with slices) ─────────────────────────────
+
+/// One groove loop at a fixed BPM with optional slice markers.
+///
+/// Maps to one `<LOOP>` in a Stylus RMX `data.xml` sidecar (one audio
+/// file). The companion `<COMBOCHILD>` virtual stems can either be folded
+/// into separate `GrooveSpec`s or modeled as views over the same audio
+/// (engine-side decision; not represented at the spec layer).
+#[derive(Debug, Clone, Facet)]
+pub struct GrooveSpec {
+    /// Loop file path, relative to `samples_root`. Currently AIFF for
+    /// Stylus RMX; format-agnostic in principle.
+    pub file: String,
+    /// Native tempo in BPM. The engine time-stretches by `host_bpm /
+    /// bpm` to match the host.
+    pub bpm: f32,
+    /// Phrase length in bars. Empty/zero = unknown; engine falls back
+    /// to the audio file duration.
+    #[facet(default)]
+    pub bars: u8,
+    /// Time signature numerator (default 4).
+    #[facet(default)]
+    pub time_sig_num: u8,
+    /// Time signature denominator (default 4).
+    #[facet(default)]
+    pub time_sig_den: u8,
+    /// Display name (often differs from `file` — Stylus uses spaces and
+    /// stem labels in the loop name, while the audio file may use a
+    /// terser stem identifier).
+    #[facet(default)]
+    pub label: String,
+    /// Original-tempo sample positions of every slice. Each slice maps
+    /// to one MIDI key starting at `slice_base_note` (default C2 = 36).
+    #[facet(default)]
+    pub slices: Vec<SliceMarker>,
+    /// MIDI note that the first slice (slices[0]) maps to. Defaults
+    /// to 36 (C2) — Stylus RMX's standard slice base.
+    #[facet(default)]
+    pub slice_base_note: u8,
+    /// Optional category / mood tags.
+    #[facet(default)]
+    pub tags: Vec<String>,
+    /// Stem name within a multi-stem suite (e.g. `"Combo"`, `"Beat"`,
+    /// `"Scuba"`). Empty for single-stem grooves.
+    #[facet(default)]
+    pub stem: String,
+    /// Suite name — groups stems together. Empty for un-grouped loops.
+    #[facet(default)]
+    pub suite: String,
+}
+
+/// One slice marker inside a [`GrooveSpec`].
+#[derive(Debug, Clone, Copy, PartialEq, Facet)]
+pub struct SliceMarker {
+    /// Inclusive start sample offset in original-tempo frames.
+    pub begin: u32,
+    /// Exclusive end sample offset in original-tempo frames.
+    pub end: u32,
+    /// Slice "class" — Spectrasonics's classification (0 = unmapped /
+    /// generic; nonzero = authored kick/snare/etc class).
+    #[facet(default)]
+    pub class: u8,
+    /// Spectrasonics-specific modifier flag. Treat as opaque for now.
+    #[facet(default)]
+    pub mod_flag: u8,
 }
 
 // ── Wavetables ───────────────────────────────────────────────────────────────
