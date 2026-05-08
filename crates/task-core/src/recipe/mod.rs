@@ -16,7 +16,5 @@
 
 pub mod model;
 
-pub use model::{
-    ActiveModel, Column, Entity, Model, Model as Recipe, RecipeApi, RecipeApiCreate, RecipeApiList,
-    RecipeApiUpdate, RecipeIngredientSpec, RecipeStepSpec,
-};
+pub use model::Model as Recipe;
+pub use model::*;

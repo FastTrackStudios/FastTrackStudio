@@ -865,6 +865,14 @@ impl ServerContext {
         )
     }
 
+    fn cooking_service(&self) -> task_core::service_impl::CookingServiceImpl {
+        task_core::service_impl::CookingServiceImpl::new(
+            task_core::service_impl::CookingServiceDeps {
+                db: self.db.clone(),
+            },
+        )
+    }
+
     fn conversation_service(&self) -> task_core::ConversationServiceImpl {
         task_core::ConversationServiceImpl::new(task_core::service_impl::ConversationServiceDeps {
             provider: self.talk.clone(),
@@ -1156,6 +1164,70 @@ async fn handle_vox_connection(socket: WebSocket, state: AppState, auth: VoxAuth
                     ));
                     Ok(())
                 }
+                "CookingService" => {
+                    connection.handle_with(task_core::CookingServiceDispatcher::new(
+                        ctx.cooking_service(),
+                    ));
+                    Ok(())
+                }
+                "RecipeRepo" => {
+                    connection.handle_with(task_core::recipe::RecipeRepoDispatcher::new(
+                        task_core::recipe::RecipeRepoStorage::new(db.clone()),
+                    ));
+                    Ok(())
+                }
+                "RecipeIngredientRepo" => {
+                    connection.handle_with(
+                        task_core::recipe_ingredient::RecipeIngredientRepoDispatcher::new(
+                            task_core::recipe_ingredient::RecipeIngredientRepoStorage::new(
+                                db.clone(),
+                            ),
+                        ),
+                    );
+                    Ok(())
+                }
+                "RecipeStepRepo" => {
+                    connection.handle_with(task_core::recipe_step::RecipeStepRepoDispatcher::new(
+                        task_core::recipe_step::RecipeStepRepoStorage::new(db.clone()),
+                    ));
+                    Ok(())
+                }
+                "CookbookRepo" => {
+                    connection.handle_with(task_core::cookbook::CookbookRepoDispatcher::new(
+                        task_core::cookbook::CookbookRepoStorage::new(db.clone()),
+                    ));
+                    Ok(())
+                }
+                "CookbookRecipeRepo" => {
+                    connection.handle_with(
+                        task_core::cookbook_recipe::CookbookRecipeRepoDispatcher::new(
+                            task_core::cookbook_recipe::CookbookRecipeRepoStorage::new(db.clone()),
+                        ),
+                    );
+                    Ok(())
+                }
+                "MealPlanEntryRepo" => {
+                    connection.handle_with(task_core::meal_plan::MealPlanEntryRepoDispatcher::new(
+                        task_core::meal_plan::MealPlanEntryRepoStorage::new(db.clone()),
+                    ));
+                    Ok(())
+                }
+                "ShoppingListRepo" => {
+                    connection.handle_with(
+                        task_core::shopping_list::ShoppingListRepoDispatcher::new(
+                            task_core::shopping_list::ShoppingListRepoStorage::new(db.clone()),
+                        ),
+                    );
+                    Ok(())
+                }
+                "ShoppingListItemRepo" => {
+                    connection.handle_with(
+                        task_core::shopping_list::ShoppingListItemRepoDispatcher::new(
+                            task_core::shopping_list::ShoppingListItemRepoStorage::new(db.clone()),
+                        ),
+                    );
+                    Ok(())
+                }
                 "SystemService" => {
                     connection.handle_with(task_core::SystemServiceDispatcher::new(
                         ctx.system_service(),
@@ -1244,6 +1316,15 @@ impl task_core::service::SystemService for ServerSystemService {
                 "OperatingService".into(),
                 "TimeService".into(),
                 "AudioProductionService".into(),
+                "CookingService".into(),
+                "RecipeRepo".into(),
+                "RecipeIngredientRepo".into(),
+                "RecipeStepRepo".into(),
+                "CookbookRepo".into(),
+                "CookbookRecipeRepo".into(),
+                "MealPlanEntryRepo".into(),
+                "ShoppingListRepo".into(),
+                "ShoppingListItemRepo".into(),
                 "SystemService".into(),
             ],
             features: vec![

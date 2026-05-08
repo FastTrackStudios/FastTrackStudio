@@ -8,7 +8,5 @@
 
 pub mod model;
 
-pub use model::{
-    ActiveModel, Column, Entity, MealPlanEntryApi, MealPlanEntryApiCreate, MealPlanEntryApiList,
-    MealPlanEntryApiUpdate, MealType, Model, Model as MealPlanEntry,
-};
+pub use model::Model as MealPlanEntry;
+pub use model::*;

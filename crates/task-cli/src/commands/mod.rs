@@ -6,6 +6,7 @@ pub(crate) mod calendar;
 pub(crate) mod client;
 pub(crate) mod comment;
 pub(crate) mod conflict;
+pub(crate) mod cooking;
 pub(crate) mod demo;
 pub(crate) mod email;
 pub(crate) mod expense;

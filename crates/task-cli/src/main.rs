@@ -9,6 +9,7 @@ use commands::calendar::CalendarCommands;
 use commands::client::ClientCommands;
 use commands::comment::CommentCommands;
 use commands::conflict::ConflictCommands;
+use commands::cooking::CookCommands;
 use commands::demo::DemoCommands;
 use commands::email::EmailCommands;
 use commands::expense::ExpenseCommands;
@@ -336,6 +337,11 @@ pub(crate) enum Commands {
     Audio {
         #[command(subcommand)]
         command: AudioCommands,
+    },
+    /// Cooking / meal-prep workflow — recipes, cookbooks, meal plans, shopping lists
+    Cook {
+        #[command(subcommand)]
+        command: CookCommands,
     },
     /// Reusable venues, locations, spaces, and default files
     Location {
@@ -1250,6 +1256,9 @@ pub(crate) async fn run_remote_command(
         }
         Commands::Attachment { command } => {
             commands::attachment::run_remote_attachment_command(remote, actor, command).await?
+        }
+        Commands::Cook { command } => {
+            commands::cooking::run_remote_cook_command(remote, actor, command).await?
         }
         Commands::Audio { command } => {
             commands::audio::run_remote_audio_command(remote, actor, command).await?
