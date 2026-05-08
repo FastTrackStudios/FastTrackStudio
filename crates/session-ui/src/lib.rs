@@ -69,10 +69,9 @@ pub use layouts::{PerformanceLayout, PerformanceSidebar, TransportPanel};
 pub use panel_registration::register_panels;
 pub use shell::{ConnectionBadge, SessionShell};
 pub use signals::{
-    ChartAreaBounds, LatencyAction, LatencyInfo, LatencyMeasurement, LatencyTracker,
-    PerfChartViewport, Session, TransportState, ACTIVE_INDICES, ACTIVE_PLAYBACK_IS_PLAYING,
-    ACTIVE_PLAYBACK_MUSICAL, AUDIO_LATENCY_SECONDS, CHART_AREA_BOUNDS, LATENCY_INFO,
-    LATENCY_TRACKER, PERF_CHART_BASE_SCALE, PERF_CHART_CLICK, PERF_CHART_HOVER,
-    PERF_CHART_VIEWPORT, PLAYBACK_STATE, SETLIST_STRUCTURE, SHOW_CHART_SPLIT, SONG_CHARTS,
-    SONG_TRANSPORT,
+    ACTIVE_INDICES, ACTIVE_PLAYBACK_IS_PLAYING, ACTIVE_PLAYBACK_MUSICAL, AUDIO_LATENCY_SECONDS,
+    CHART_AREA_BOUNDS, ChartAreaBounds, LATENCY_INFO, LATENCY_TRACKER, LatencyAction, LatencyInfo,
+    LatencyMeasurement, LatencyTracker, PERF_CHART_BASE_SCALE, PERF_CHART_CLICK, PERF_CHART_HOVER,
+    PERF_CHART_VIEWPORT, PLAYBACK_STATE, PerfChartViewport, SETLIST_STRUCTURE, SHOW_CHART_SPLIT,
+    SONG_CHARTS, SONG_TRANSPORT, Session, TransportState,
 };

@@ -3,7 +3,7 @@
 //! Provides the session UI (performance view, transport, setlist navigation) without
 //! the full fts-control app. Runs session services in-process via LocalServices.
 
-use dioxus::desktop::{tao::window::WindowBuilder, Config};
+use dioxus::desktop::{Config, tao::window::WindowBuilder};
 use dioxus::prelude::*;
 
 use session_ui::{ConnectionState, Session, SessionShell};

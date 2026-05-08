@@ -7,11 +7,10 @@ use std::path::{Path, PathBuf};
 
 use daw::sync::LocalCaller;
 use daw::{Daw, ErasedCaller};
-use eyre::{bail, Result};
+use eyre::{Result, bail};
 use session::{
-    SetlistServiceClient, SetlistServiceDispatcher, SetlistServiceImpl,
-    SongServiceDispatcher, SongServiceImpl,
-    setlist_service_service_descriptor, song_service_service_descriptor,
+    SetlistServiceClient, SetlistServiceDispatcher, SetlistServiceImpl, SongServiceDispatcher,
+    SongServiceImpl, setlist_service_service_descriptor, song_service_service_descriptor,
 };
 use session_ui::Session;
 
@@ -40,8 +39,7 @@ pub async fn start_gateway() -> Result<gateway::GatewayInfo> {
             SongServiceDispatcher::new(song),
         );
 
-    let bind_addr = std::env::var("GATEWAY_WS_ADDR")
-        .unwrap_or_else(|_| "0.0.0.0:3030".to_string());
+    let bind_addr = std::env::var("GATEWAY_WS_ADDR").unwrap_or_else(|_| "0.0.0.0:3030".to_string());
     let static_dir = std::env::var("GATEWAY_WS_STATIC_DIR")
         .ok()
         .or_else(discover_web_static_dir);
@@ -51,13 +49,8 @@ pub async fn start_gateway() -> Result<gateway::GatewayInfo> {
 
     let (info_tx, info_rx) = tokio::sync::oneshot::channel();
     tokio::spawn(async move {
-        if let Err(e) = gateway::start_gateway(
-            handler,
-            &bind_addr,
-            static_dir.as_deref(),
-            info_tx,
-        )
-        .await
+        if let Err(e) =
+            gateway::start_gateway(handler, &bind_addr, static_dir.as_deref(), info_tx).await
         {
             tracing::error!("WebSocket gateway error: {e}");
         }
@@ -225,9 +218,7 @@ fn initiator_handshake_result(max_concurrent_requests: u32) -> vox::HandshakeRes
 ///
 /// Paths are resolved relative to the cargo workspace root.
 fn discover_web_static_dir() -> Option<String> {
-    let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()?
-        .parent()?;
+    let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR")).parent()?.parent()?;
 
     let candidates = [
         workspace_root.join("target/dx/session-web/release/web/public"),

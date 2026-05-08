@@ -22,7 +22,7 @@ use vox_websocket::WsLink;
 
 use crate::web_client_handler::WebClientHandler;
 use session_ui::{
-    ConnectionState, Session, ACTIVE_INDICES, PLAYBACK_STATE, SETLIST_STRUCTURE, SONG_CHARTS,
+    ACTIVE_INDICES, ConnectionState, PLAYBACK_STATE, SETLIST_STRUCTURE, SONG_CHARTS, Session,
 };
 use wasm_bindgen::prelude::*;
 
