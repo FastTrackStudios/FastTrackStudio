@@ -1733,6 +1733,18 @@ pub trait CookingService {
         id: Uuid,
         on_date: Option<chrono::NaiveDate>,
     ) -> Result<crate::recipe::RecipeApi, VaultError>;
+    /// Mealie-style URL import. Fetches the page, runs schema.org
+    /// JSON-LD + OpenGraph extractors, and persists the result via
+    /// `create_recipe`. Image bytes are not fetched in this bead — the
+    /// `image_url` is stored as-is on the recipe row.
+    async fn import_recipe(
+        &self,
+        request: ImportRecipeRequest,
+    ) -> Result<RecipeWithDetails, VaultError>;
+    /// Same fetch+parse pipeline as `import_recipe`, without the
+    /// database insert. Returns the assembled `CreateRecipeRequest` as
+    /// JSON so callers can review it before committing.
+    async fn preview_recipe_import(&self, url: String) -> Result<RecipeImportPreview, VaultError>;
 
     // Cookbooks
     async fn list_cookbooks(
@@ -1833,6 +1845,16 @@ pub struct CreateRecipeRequest {
     pub servings: Option<u32>,
     pub source_url: Option<String>,
     pub created_by: Option<String>,
+    /// Original image URL — populated by the recipe importer. Stored
+    /// as-is on the recipe row; byte fetch + Nextcloud PUT is deferred.
+    pub image_url: Option<String>,
+    /// Free-form yield string ("12 cookies", "1 loaf"). When provided
+    /// alongside `servings`, both are persisted.
+    pub yield_label: Option<String>,
+    /// Optional JSON-encoded object that will be merged into the
+    /// recipe row's `properties` blob (cuisine, category, keywords,
+    /// …). Empty/`None` leaves `properties` as the default `{}`.
+    pub properties_json: Option<String>,
     /// JSON-encoded `Vec<RecipeIngredientSpec>`. Empty string means
     /// "no ingredients".
     pub ingredients_json: String,
@@ -1885,6 +1907,32 @@ pub struct GenerateShoppingListRequest {
     pub organization: Option<String>,
     pub from_date: chrono::NaiveDate,
     pub to_date: chrono::NaiveDate,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct ImportRecipeRequest {
+    /// Source URL to fetch and parse.
+    pub url: String,
+    /// Owning organization — applied to the persisted recipe.
+    pub organization: Option<String>,
+    /// Author/created_by — applied to the persisted recipe when the
+    /// schema.org metadata didn't surface its own author.
+    pub created_by: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct RecipeImportPreview {
+    /// JSON-encoded [`CreateRecipeRequest`] — exactly what would have
+    /// been passed to [`CookingService::create_recipe`].
+    pub draft_json: String,
+    /// Final URL (after any redirects) the importer fetched.
+    pub source_url: String,
+    /// Which strategy populated the draft: `"json-ld"` or
+    /// `"opengraph"`.
+    pub strategy: String,
+    /// Free-form warnings. JSON-encoded `Vec<String>` for transport
+    /// simplicity.
+    pub warnings_json: String,
 }
 
 #[derive(Debug, Clone, Default, facet::Facet)]

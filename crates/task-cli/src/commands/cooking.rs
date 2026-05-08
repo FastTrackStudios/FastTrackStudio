@@ -9,8 +9,8 @@ use clap::{Args, Subcommand};
 use task_core::recipe::{RecipeApi, RecipeIngredientSpec, RecipeStepSpec};
 use task_core::service::{
     AddShoppingItemRequest, CookbookWithRecipes, CookingServiceClient, CreateRecipeRequest,
-    GenerateShoppingListRequest, MealPlanRangeRequest, RecipeWithDetails, SetMealPlanEntryRequest,
-    ShoppingListWithItems,
+    GenerateShoppingListRequest, ImportRecipeRequest, MealPlanRangeRequest, RecipeWithDetails,
+    SetMealPlanEntryRequest, ShoppingListWithItems,
 };
 use uuid::Uuid;
 
@@ -64,6 +64,19 @@ pub(crate) enum RecipeCommands {
         recipe: String,
         #[arg(long)]
         date: Option<String>,
+    },
+    /// Mealie-style import from a URL (schema.org JSON-LD + OpenGraph
+    /// fallback). Use `--dry-run` to preview without persisting.
+    Import {
+        url: String,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        organization: Option<String>,
+        #[arg(long = "created-by")]
+        created_by: Option<String>,
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -265,6 +278,9 @@ async fn run_recipe(
                 servings: args.servings,
                 source_url: None,
                 created_by: actor.map(str::to_string),
+                image_url: None,
+                yield_label: None,
+                properties_json: None,
                 ingredients_json: serde_json::to_string(&ingredients)?,
                 steps_json: serde_json::to_string(&steps)?,
             };
@@ -285,6 +301,57 @@ async fn run_recipe(
                 updated.name,
                 updated.rating.unwrap_or(0.0)
             );
+        }
+        RecipeCommands::Import {
+            url,
+            dry_run,
+            organization,
+            created_by,
+            json,
+        } => {
+            if dry_run {
+                let preview = client
+                    .preview_recipe_import(url)
+                    .await
+                    .map_err(|e| eyre::eyre!("preview_recipe_import: {e}"))?;
+                if json {
+                    println!("{}", preview.draft_json);
+                } else {
+                    println!("Strategy: {}", preview.strategy);
+                    println!("Source:   {}", preview.source_url);
+                    let warnings: Vec<String> =
+                        serde_json::from_str(&preview.warnings_json).unwrap_or_default();
+                    if !warnings.is_empty() {
+                        println!("Warnings:");
+                        for w in &warnings {
+                            println!("  - {w}");
+                        }
+                    }
+                    let pretty: serde_json::Value = serde_json::from_str(&preview.draft_json)
+                        .unwrap_or(serde_json::Value::Null);
+                    println!(
+                        "Draft:\n{}",
+                        serde_json::to_string_pretty(&pretty).unwrap_or(preview.draft_json)
+                    );
+                }
+            } else {
+                let detail = client
+                    .import_recipe(ImportRecipeRequest {
+                        url,
+                        organization,
+                        created_by: created_by.or_else(|| actor.map(str::to_string)),
+                    })
+                    .await
+                    .map_err(|e| eyre::eyre!("import_recipe: {e}"))?;
+                if json {
+                    print_recipe_detail(&detail, true)?;
+                } else {
+                    println!(
+                        "Imported '{}' (id={}, slug={})",
+                        detail.recipe.name, detail.recipe.id, detail.recipe.slug
+                    );
+                }
+            }
         }
         RecipeCommands::Made { recipe, date } => {
             let id = resolve_recipe_id(client, &recipe).await?;
@@ -575,49 +642,11 @@ fn parse_date(s: &str) -> eyre::Result<NaiveDate> {
         .map_err(|e| eyre::eyre!("invalid date '{s}' (want YYYY-MM-DD): {e}"))
 }
 
-/// Tiny ingredient parser:
-/// - `"1.5 cup olive oil"` → quantity=1.5, unit="cup", food="olive oil".
-/// - `"2 eggs"` → quantity=2.0, unit=None, food="eggs".
-/// - `"salt"` → quantity=None, unit=None, food="salt".
-///
-/// Heuristic: first whitespace token is treated as quantity if it parses
-/// as `f64`; second token is a unit if there's a third, otherwise it's
-/// part of the food. Not a Mealie-grade parser — it's deliberately
-/// minimal.
+/// Thin wrapper around [`task_core::recipe_ingredient::parse_ingredient_line`]
+/// kept so the call sites read naturally (`parse_ingredient(line)` rather
+/// than the longer free-function path).
 fn parse_ingredient(spec: &str) -> RecipeIngredientSpec {
-    let trimmed = spec.trim();
-    if trimmed.is_empty() {
-        return RecipeIngredientSpec {
-            food: String::new(),
-            ..Default::default()
-        };
-    }
-    let mut parts = trimmed.split_whitespace();
-    let first = parts.next().unwrap_or("");
-    if let Ok(q) = first.parse::<f64>() {
-        let rest: Vec<&str> = parts.collect();
-        if rest.len() >= 2 {
-            let unit = rest[0].to_string();
-            let food = rest[1..].join(" ");
-            RecipeIngredientSpec {
-                quantity: Some(q),
-                unit: Some(unit),
-                food,
-                ..Default::default()
-            }
-        } else {
-            RecipeIngredientSpec {
-                quantity: Some(q),
-                food: rest.join(" "),
-                ..Default::default()
-            }
-        }
-    } else {
-        RecipeIngredientSpec {
-            food: trimmed.to_string(),
-            ..Default::default()
-        }
-    }
+    task_core::recipe_ingredient::parse_ingredient_line(spec)
 }
 
 async fn resolve_recipe_id(client: &CookingServiceClient, reference: &str) -> eyre::Result<Uuid> {

@@ -3240,6 +3240,7 @@ async fn seed_cooking(db: &DatabaseConnection, summary: &mut DemoSeedSummary) ->
             servings: Set(Some(fix.servings)),
             yield_label: Set(None),
             source_url: Set(None),
+            image_url: Set(None),
             rating: Set(None),
             last_made: Set(None),
             notes: Set(None),

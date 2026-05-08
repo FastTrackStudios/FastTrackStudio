@@ -133,6 +133,9 @@ async fn create_recipe_round_trips_children() {
             servings: Some(2),
             source_url: None,
             created_by: Some("cody".into()),
+            image_url: None,
+            yield_label: None,
+            properties_json: None,
             ingredients_json: serde_json::to_string(&ingredients).unwrap(),
             steps_json: serde_json::to_string(&steps).unwrap(),
         })

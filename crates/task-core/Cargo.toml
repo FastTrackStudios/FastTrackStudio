@@ -7,7 +7,7 @@ edition.workspace = true
 # "server" enables the async vault, service trait, and service implementation.
 # Disable it for wasm32 builds (obsidian-plugin) to avoid tokio/mio.
 default = ["server"]
-server = ["dep:tokio", "dep:vox", "dep:vox-core", "dep:vox-types", "dep:toml", "dep:async-trait", "dep:tracing", "dep:reqwest", "dep:rusqlite", "dep:base64", "dep:async-imap", "dep:rustls", "dep:tokio-rustls", "dep:rustls-pki-types", "dep:rustls-pemfile", "dep:tokio-util", "dep:futures", "dep:sha2"]
+server = ["dep:tokio", "dep:vox", "dep:vox-core", "dep:vox-types", "dep:toml", "dep:async-trait", "dep:tracing", "dep:reqwest", "dep:rusqlite", "dep:base64", "dep:async-imap", "dep:rustls", "dep:tokio-rustls", "dep:rustls-pki-types", "dep:rustls-pemfile", "dep:tokio-util", "dep:futures", "dep:sha2", "dep:scraper"]
 # Kept for downstream compatibility; persistence definitions are always present.
 db = ["server"]
 # "caldav" enables CalDAV sync and VTODO conversion.
@@ -76,6 +76,10 @@ loro = { version = "1.10", optional = true }
 
 # SHA-256 — used for attachment checksums (server-side).
 sha2 = { workspace = true, optional = true }
+
+# HTML parser — used by the recipe-import workflow (JSON-LD + OpenGraph
+# extraction). Pure Rust, no Python sidecar.
+scraper = { version = "0.20", optional = true }
 
 # Database entity derives
 sea-orm.workspace = true

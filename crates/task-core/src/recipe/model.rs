@@ -53,6 +53,10 @@ pub struct Model {
     /// `servings` doesn't capture the unit.
     pub yield_label: Option<String>,
     pub source_url: Option<String>,
+    /// Original image URL captured by the recipe importer
+    /// (`schema.org` `image` or `og:image`). Bytes are not fetched in
+    /// this bead; deferred to a follow-up that PUTs them to Nextcloud.
+    pub image_url: Option<String>,
     /// 0.0..=5.0 — service-side validates the range.
     pub rating: Option<f32>,
     pub last_made: Option<NaiveDate>,

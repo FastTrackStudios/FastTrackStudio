@@ -29,8 +29,8 @@ use crate::recipe_ingredient::{self, RecipeIngredientApi};
 use crate::recipe_step::{self, RecipeStepApi};
 use crate::service::{
     AddShoppingItemRequest, CookbookWithRecipes, CookingService, CreateRecipeRequest,
-    GenerateShoppingListRequest, MealPlanRangeRequest, RecipePatch, RecipeWithDetails,
-    SetMealPlanEntryRequest, ShoppingListWithItems, VaultError,
+    GenerateShoppingListRequest, ImportRecipeRequest, MealPlanRangeRequest, RecipeImportPreview,
+    RecipePatch, RecipeWithDetails, SetMealPlanEntryRequest, ShoppingListWithItems, VaultError,
 };
 use crate::shopping_list::{self, ShoppingListApi, ShoppingListItemApi};
 
@@ -162,6 +162,45 @@ fn ingredient_active_for(
     }
 }
 
+/// Serde-friendly mirror of [`CreateRecipeRequest`] used to expose the
+/// importer's draft as JSON in [`RecipeImportPreview`]. The on-the-wire
+/// type itself is `facet::Facet` only (Vox transport), so we project it
+/// through this struct when we need a stable JSON shape.
+#[derive(serde::Serialize)]
+struct DraftView<'a> {
+    name: &'a str,
+    description: Option<&'a str>,
+    organization: Option<&'a str>,
+    prep_time_minutes: Option<u32>,
+    cook_time_minutes: Option<u32>,
+    servings: Option<u32>,
+    source_url: Option<&'a str>,
+    created_by: Option<&'a str>,
+    image_url: Option<&'a str>,
+    yield_label: Option<&'a str>,
+    properties_json: Option<&'a str>,
+    ingredients_json: &'a str,
+    steps_json: &'a str,
+}
+
+fn serialize_draft(req: &CreateRecipeRequest) -> DraftView<'_> {
+    DraftView {
+        name: req.name.as_str(),
+        description: req.description.as_deref(),
+        organization: req.organization.as_deref(),
+        prep_time_minutes: req.prep_time_minutes,
+        cook_time_minutes: req.cook_time_minutes,
+        servings: req.servings,
+        source_url: req.source_url.as_deref(),
+        created_by: req.created_by.as_deref(),
+        image_url: req.image_url.as_deref(),
+        yield_label: req.yield_label.as_deref(),
+        properties_json: req.properties_json.as_deref(),
+        ingredients_json: req.ingredients_json.as_str(),
+        steps_json: req.steps_json.as_str(),
+    }
+}
+
 fn step_active_for(
     recipe_id: Uuid,
     spec: &RecipeStepSpec,
@@ -251,6 +290,21 @@ impl CookingService for CookingServiceImpl {
             _ => None,
         };
 
+        let properties = match request.properties_json.as_deref() {
+            Some(s) if !s.trim().is_empty() => {
+                let value: serde_json::Value =
+                    serde_json::from_str(s).map_err(|e| parse(e, "properties_json"))?;
+                if !value.is_object() {
+                    return Err(parse(
+                        "expected JSON object",
+                        "properties_json must encode an object",
+                    ));
+                }
+                JsonObject::from_value(value)
+            }
+            _ => JsonObject::default(),
+        };
+
         let active = recipe::ActiveModel {
             id: Set(recipe_id),
             name: Set(request.name.clone()),
@@ -261,13 +315,14 @@ impl CookingService for CookingServiceImpl {
             cook_time_minutes: Set(request.cook_time_minutes),
             total_time_minutes: Set(total),
             servings: Set(request.servings),
-            yield_label: Set(None),
+            yield_label: Set(request.yield_label),
             source_url: Set(request.source_url),
+            image_url: Set(request.image_url),
             rating: Set(None),
             last_made: Set(None),
             notes: Set(None),
             created_by: Set(request.created_by),
-            properties: Set(JsonObject::default()),
+            properties: Set(properties),
             created_at: Set(now),
             updated_at: Set(now),
         };
@@ -460,6 +515,44 @@ impl CookingService for CookingServiceImpl {
             .await
             .map_err(|e| io(e, "mark_made"))?;
         recipe_to_api(saved)
+    }
+
+    async fn import_recipe(
+        &self,
+        request: ImportRecipeRequest,
+    ) -> Result<RecipeWithDetails, VaultError> {
+        let importer = crate::recipe_import::RecipeImporter::new();
+        let result = importer
+            .import(&request.url)
+            .await
+            .map_err(|e| parse(e, "recipe import"))?;
+        let mut draft = result.draft;
+        draft.organization = request.organization;
+        if draft.created_by.is_none() {
+            draft.created_by = request.created_by;
+        }
+        if draft.source_url.is_none() {
+            draft.source_url = Some(result.source_url);
+        }
+        self.create_recipe(draft).await
+    }
+
+    async fn preview_recipe_import(&self, url: String) -> Result<RecipeImportPreview, VaultError> {
+        let importer = crate::recipe_import::RecipeImporter::new();
+        let result = importer
+            .import(&url)
+            .await
+            .map_err(|e| parse(e, "recipe import"))?;
+        let draft_json = serde_json::to_string(&serialize_draft(&result.draft))
+            .map_err(|e| io(e, "serialize draft"))?;
+        let warnings_json =
+            serde_json::to_string(&result.warnings).map_err(|e| io(e, "serialize warnings"))?;
+        Ok(RecipeImportPreview {
+            draft_json,
+            source_url: result.source_url,
+            strategy: result.strategy.as_str().to_string(),
+            warnings_json,
+        })
     }
 
     // ── Cookbooks ───────────────────────────────────────────────────

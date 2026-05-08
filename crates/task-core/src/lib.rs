@@ -41,6 +41,8 @@ pub mod integration;
 #[cfg(feature = "server")]
 pub mod provider;
 #[cfg(feature = "server")]
+pub mod recipe_import;
+#[cfg(feature = "server")]
 pub mod service;
 #[cfg(feature = "server")]
 pub mod service_impl;
