@@ -59,7 +59,11 @@ pub fn dispatch_op_sync(
         BatchOp::AudioAccessor(op) => {
             dispatch_audio_accessor_sync(op, outputs, services.audio_accessor_svc)
         }
-        BatchOp::MidiAnalysis(op) => dispatch_midi_analysis_sync(op),
+        BatchOp::MidiAnalysis(_) => Err(
+            "MidiAnalysisService is no longer dispatched from daw-reaper batch — \
+             register the keyflow-daw-analysis impl externally and call it directly."
+                .to_string(),
+        ),
         // Services not yet sync-optimized — return error so caller falls back
         _ => Err(format!(
             "sync dispatch not implemented for {:?}",
@@ -2725,57 +2729,5 @@ fn dispatch_audio_accessor_sync(
     }
 }
 
-// =============================================================================
-// MIDI Analysis dispatch
-// =============================================================================
-
-fn dispatch_midi_analysis_sync(op: &MidiAnalysisOp) -> Result<StepOutput, String> {
-    use crate::ReaperMidiAnalysis;
-
-    match op {
-        MidiAnalysisOp::SourceFingerprint(req) => {
-            let project = ReaperMidiAnalysis::resolve_project(&req.project)
-                .ok_or_else(|| "Project not found".to_string())?;
-            let track = ReaperMidiAnalysis::find_track_by_tag(&project, req.track_tag.as_deref())
-                .ok_or_else(|| {
-                let tag = req.track_tag.as_deref().unwrap_or("<none>");
-                format!("No track matched tag '{}'", tag)
-            })?;
-            let track_name = track
-                .name()
-                .map(|name| name.to_str().to_string())
-                .unwrap_or_else(|| "Unnamed Track".to_string());
-            let (take, item_start_time) = ReaperMidiAnalysis::get_first_midi_take(&track)
-                .ok_or_else(|| format!("Track '{}' has no MIDI take", track_name))?;
-            let notes = ReaperMidiAnalysis::read_keyflow_notes(take);
-            if notes.is_empty() {
-                return Err("No MIDI notes found".to_string());
-            }
-            let item_start_tick = ReaperMidiAnalysis::time_to_tick(project, item_start_time);
-            let import_notes = ReaperMidiAnalysis::import_notes(&notes, item_start_tick);
-            let markers = ReaperMidiAnalysis::gather_markers(project);
-            Ok(StepOutput::ResultString(Ok(
-                ReaperMidiAnalysis::make_source_fingerprint(&track_name, &import_notes, &markers),
-            )))
-        }
-        MidiAnalysisOp::GenerateChartData(req) => {
-            let project = ReaperMidiAnalysis::resolve_project(&req.project)
-                .ok_or_else(|| "Project not found".to_string())?;
-            let track = ReaperMidiAnalysis::find_track_by_tag(&project, req.track_tag.as_deref())
-                .ok_or_else(|| {
-                let tag = req.track_tag.as_deref().unwrap_or("<none>");
-                format!("No track matched tag '{}'", tag)
-            })?;
-            let track_name = track
-                .name()
-                .map(|name| name.to_str().to_string())
-                .unwrap_or_else(|| "Unnamed Track".to_string());
-            let (take, item_start_time) = ReaperMidiAnalysis::get_first_midi_take(&track)
-                .ok_or_else(|| format!("Track '{}' has no MIDI take", track_name))?;
-            let notes = ReaperMidiAnalysis::read_keyflow_notes(take);
-            Ok(StepOutput::ResultMidiChartData(
-                ReaperMidiAnalysis::build_chart_data(project, track_name, notes, item_start_time),
-            ))
-        }
-    }
-}
+// MIDI analysis dispatch lives in `keyflow-daw-analysis` now (out-of-tree).
+// Calls hit the stub arm in `dispatch_sync` returning an error string.

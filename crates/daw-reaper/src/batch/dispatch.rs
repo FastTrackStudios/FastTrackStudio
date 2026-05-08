@@ -34,7 +34,6 @@ pub async fn dispatch_op(
     peak_svc: &crate::ReaperPeak,
     resource_svc: &crate::resource::ReaperResource,
     audio_accessor_svc: &crate::ReaperAudioAccessor,
-    midi_analysis_svc: &crate::ReaperMidiAnalysis,
 ) -> Result<StepOutput, String> {
     match op {
         BatchOp::Project(op) => dispatch_project(op, outputs, project_svc).await,
@@ -64,7 +63,11 @@ pub async fn dispatch_op(
         BatchOp::AudioAccessor(op) => {
             dispatch_audio_accessor(op, outputs, audio_accessor_svc).await
         }
-        BatchOp::MidiAnalysis(op) => dispatch_midi_analysis(op, midi_analysis_svc).await,
+        BatchOp::MidiAnalysis(_) => Err(
+            "MidiAnalysisService is no longer dispatched from daw-reaper batch — \
+             register the keyflow-daw-analysis impl externally and call it directly."
+                .to_string(),
+        ),
     }
 }
 
@@ -1884,25 +1887,6 @@ async fn dispatch_audio_accessor(
             svc.destroy_accessor(id.clone()).await;
             Ok(StepOutput::Unit)
         }
-    }
-}
-
-// =============================================================================
-// MIDI analysis dispatch
-// =============================================================================
-
-async fn dispatch_midi_analysis(
-    op: &MidiAnalysisOp,
-    svc: &crate::ReaperMidiAnalysis,
-) -> Result<StepOutput, String> {
-    use daw_proto::MidiAnalysisService;
-    match op {
-        MidiAnalysisOp::SourceFingerprint(req) => Ok(StepOutput::ResultString(
-            svc.source_fingerprint(req.clone()).await,
-        )),
-        MidiAnalysisOp::GenerateChartData(req) => Ok(StepOutput::ResultMidiChartData(
-            svc.generate_chart_data(req.clone()).await,
-        )),
     }
 }
 

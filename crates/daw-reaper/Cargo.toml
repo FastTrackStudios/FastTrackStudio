@@ -15,7 +15,6 @@ vox.workspace = true
 tracing.workspace = true
 tokio.workspace = true
 moire.workspace = true
-keyflow = { workspace = true, features = ["engraver", "midi-import"] }
 
 # RPP chunk parsing/serialization for chunk-based FX manipulation
 dawfile-reaper = { path = "../dawfile-reaper" }

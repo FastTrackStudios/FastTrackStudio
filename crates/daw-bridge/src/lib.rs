@@ -35,11 +35,11 @@ use daw::service::{
     ActionRegistryServiceDispatcher, AudioEngineServiceDispatcher, BatchServiceDispatcher,
     DawFileServiceDispatcher, ExtStateServiceDispatcher, FxServiceDispatcher,
     HealthServiceDispatcher, InputServiceDispatcher, ItemServiceDispatcher,
-    LiveMidiServiceDispatcher, MarkerServiceDispatcher, MidiAnalysisServiceDispatcher,
-    MidiServiceDispatcher, PluginLoaderServiceDispatcher, ProjectServiceDispatcher,
-    RegionServiceDispatcher, RoutingServiceDispatcher, ScreensetServiceDispatcher,
-    TakeServiceDispatcher, TempoMapServiceDispatcher, ToolbarServiceDispatcher,
-    TrackServiceDispatcher, TransportServiceDispatcher, WindowGeometryServiceDispatcher,
+    LiveMidiServiceDispatcher, MarkerServiceDispatcher, MidiServiceDispatcher,
+    PluginLoaderServiceDispatcher, ProjectServiceDispatcher, RegionServiceDispatcher,
+    RoutingServiceDispatcher, ScreensetServiceDispatcher, TakeServiceDispatcher,
+    TempoMapServiceDispatcher, ToolbarServiceDispatcher, TrackServiceDispatcher,
+    TransportServiceDispatcher, WindowGeometryServiceDispatcher,
 };
 
 // ============================================================================
@@ -164,7 +164,6 @@ async fn register_daw_dispatcher() {
     let tempo_map = daw::reaper::ReaperTempoMap::new();
     let audio_engine = daw::reaper::ReaperAudioEngine::new();
     let midi = daw::reaper::ReaperMidi::new();
-    let midi_analysis = daw::reaper::ReaperMidiAnalysis::new();
     let fx = daw::reaper::ReaperFx::new();
     let track = daw::reaper::ReaperTrack::new();
     let routing = daw::reaper::ReaperRouting::new();
@@ -191,13 +190,13 @@ async fn register_daw_dispatcher() {
         ext_state_service_service_descriptor, fx_service_service_descriptor,
         health_service_service_descriptor, input_service_service_descriptor,
         item_service_service_descriptor, live_midi_service_service_descriptor,
-        marker_service_service_descriptor, midi_analysis_service_service_descriptor,
-        midi_service_service_descriptor, plugin_loader_service_service_descriptor,
-        project_service_service_descriptor, region_service_service_descriptor,
-        routing_service_service_descriptor, screenset_service_service_descriptor,
-        take_service_service_descriptor, tempo_map_service_service_descriptor,
-        toolbar_service_service_descriptor, track_service_service_descriptor,
-        transport_service_service_descriptor, window_geometry_service_service_descriptor,
+        marker_service_service_descriptor, midi_service_service_descriptor,
+        plugin_loader_service_service_descriptor, project_service_service_descriptor,
+        region_service_service_descriptor, routing_service_service_descriptor,
+        screenset_service_service_descriptor, take_service_service_descriptor,
+        tempo_map_service_service_descriptor, toolbar_service_service_descriptor,
+        track_service_service_descriptor, transport_service_service_descriptor,
+        window_geometry_service_service_descriptor,
     };
 
     // Compose all 16 service dispatchers via RoutedHandler
@@ -230,10 +229,9 @@ async fn register_daw_dispatcher() {
             midi_service_service_descriptor(),
             MidiServiceDispatcher::new(midi),
         )
-        .with(
-            midi_analysis_service_service_descriptor(),
-            MidiAnalysisServiceDispatcher::new(midi_analysis),
-        )
+        // MidiAnalysisService is registered out-of-tree by `keyflow-daw-
+        // analysis` (loaded via fts-extensions); see daw-reaper a823b67
+        // for the cycle that prevents in-tree registration.
         .with(
             fx_service_service_descriptor(),
             FxServiceDispatcher::new(fx),

@@ -85,7 +85,6 @@ nih_plug = { git = "https://github.com/FastTrackStudios/nih-plug.git", branch = 
 
 # Sibling repos
 actions-proto = { git = "https://github.com/FastTrackStudios/input_actions.git", branch = "main" }
-keyflow = { git = "https://github.com/FastTrackStudios/keyflow.git", branch = "main" }
 dock-dioxus = { git = "https://github.com/FastTrackStudios/dock-dioxus.git", branch = "main", default-features = false }
 dock-proto = { git = "https://github.com/FastTrackStudios/dock-dioxus.git", branch = "main" }
 

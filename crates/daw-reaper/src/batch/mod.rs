@@ -41,7 +41,6 @@ struct BatchExecutorInner {
     peak_svc: crate::ReaperPeak,
     resource_svc: crate::resource::ReaperResource,
     audio_accessor_svc: crate::ReaperAudioAccessor,
-    midi_analysis_svc: crate::ReaperMidiAnalysis,
 }
 
 /// Batch executor that holds all service implementations behind an Arc for Clone.
@@ -82,7 +81,6 @@ impl BatchExecutor {
                 peak_svc: crate::ReaperPeak::new(),
                 resource_svc: crate::resource::ReaperResource::new(),
                 audio_accessor_svc: crate::ReaperAudioAccessor::new(),
-                midi_analysis_svc: crate::ReaperMidiAnalysis::new(),
             }),
         }
     }
@@ -263,7 +261,6 @@ impl BatchExecutor {
                 &s.peak_svc,
                 &s.resource_svc,
                 &s.audio_accessor_svc,
-                &s.midi_analysis_svc,
             )
             .await;
 

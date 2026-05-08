@@ -112,10 +112,6 @@ impl StandaloneMidi {
         }
     }
 
-    pub(crate) fn shared_takes(&self) -> Arc<RwLock<Vec<TakeMidiData>>> {
-        self.takes.clone()
-    }
-
     fn project_key(project: &ProjectContext) -> String {
         match project {
             ProjectContext::Current => "current".to_string(),

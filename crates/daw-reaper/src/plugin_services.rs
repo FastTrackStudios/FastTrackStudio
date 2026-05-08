@@ -8,11 +8,11 @@ use daw_proto::{
     ActionRegistryServiceDispatcher, AudioEngineServiceDispatcher, DawFileServiceDispatcher,
     ExtStateServiceDispatcher, FxServiceDispatcher, HealthServiceDispatcher,
     InputServiceDispatcher, ItemServiceDispatcher, LiveMidiServiceDispatcher,
-    MarkerServiceDispatcher, MidiAnalysisServiceDispatcher, MidiServiceDispatcher,
-    PluginLoaderServiceDispatcher, ProjectServiceDispatcher, RegionServiceDispatcher,
-    RoutingServiceDispatcher, ScreensetServiceDispatcher, TakeServiceDispatcher,
-    TempoMapServiceDispatcher, ToolbarServiceDispatcher, TrackServiceDispatcher,
-    TransportServiceDispatcher, WindowGeometryServiceDispatcher,
+    MarkerServiceDispatcher, MidiServiceDispatcher, PluginLoaderServiceDispatcher,
+    ProjectServiceDispatcher, RegionServiceDispatcher, RoutingServiceDispatcher,
+    ScreensetServiceDispatcher, TakeServiceDispatcher, TempoMapServiceDispatcher,
+    ToolbarServiceDispatcher, TrackServiceDispatcher, TransportServiceDispatcher,
+    WindowGeometryServiceDispatcher,
 };
 
 use daw_proto::{
@@ -21,13 +21,12 @@ use daw_proto::{
     fx_service_service_descriptor, health_service_service_descriptor,
     input_service_service_descriptor, item_service_service_descriptor,
     live_midi_service_service_descriptor, marker_service_service_descriptor,
-    midi_analysis_service_service_descriptor, midi_service_service_descriptor,
-    plugin_loader_service_service_descriptor, project_service_service_descriptor,
-    region_service_service_descriptor, routing_service_service_descriptor,
-    screenset_service_service_descriptor, take_service_service_descriptor,
-    tempo_map_service_service_descriptor, toolbar_service_service_descriptor,
-    track_service_service_descriptor, transport_service_service_descriptor,
-    window_geometry_service_service_descriptor,
+    midi_service_service_descriptor, plugin_loader_service_service_descriptor,
+    project_service_service_descriptor, region_service_service_descriptor,
+    routing_service_service_descriptor, screenset_service_service_descriptor,
+    take_service_service_descriptor, tempo_map_service_service_descriptor,
+    toolbar_service_service_descriptor, track_service_service_descriptor,
+    transport_service_service_descriptor, window_geometry_service_service_descriptor,
 };
 
 use daw_proto::batch::{BatchServiceDispatcher, batch_service_service_descriptor};
@@ -57,7 +56,6 @@ pub fn create_daw_handler() -> RoutedHandler {
     let tempo_map = crate::ReaperTempoMap::new();
     let audio_engine = crate::ReaperAudioEngine::new();
     let midi = crate::ReaperMidi::new();
-    let midi_analysis = crate::ReaperMidiAnalysis::new();
     let fx = crate::ReaperFx::new();
     let track = crate::ReaperTrack::new();
     let routing = crate::ReaperRouting::new();
@@ -105,10 +103,11 @@ pub fn create_daw_handler() -> RoutedHandler {
             midi_service_service_descriptor(),
             MidiServiceDispatcher::new(midi),
         )
-        .with(
-            midi_analysis_service_service_descriptor(),
-            MidiAnalysisServiceDispatcher::new(midi_analysis),
-        )
+        // NOTE: MidiAnalysisService is no longer registered here. The impl
+        // (chord detection, chart generation) lives in keyflow as the
+        // `keyflow-daw-analysis` crate; fts-extensions plugs it in via
+        // `RoutedHandler::with(...)` after calling `create_daw_handler()`.
+        // This breaks the daw → daw-reaper → keyflow → daw cycle.
         .with(
             fx_service_service_descriptor(),
             FxServiceDispatcher::new(fx),
