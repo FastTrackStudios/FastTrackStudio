@@ -298,9 +298,26 @@ impl RegionService for ReaperRegion {
         id
     }
 
-    async fn set_region_lane(&self, _project: ProjectContext, _id: u32, _lane: Option<u32>) {
-        // TODO: Implement once GetRegionOrMarkerInfo_Value FFI wrappers are available
-        debug!("ReaperRegion: set_region_lane not yet implemented");
+    async fn set_region_lane(&self, _project: ProjectContext, id: u32, lane: Option<u32>) {
+        debug!("ReaperRegion: set_region_lane id={id} lane={lane:?}");
+        main_thread::run(move || {
+            let reaper = reaper_high::Reaper::get();
+            let medium = reaper.medium_reaper();
+            let low = medium.low();
+            let reaper_ctx = ReaperProjectContext::CurrentProject;
+            let total_count = medium.count_project_markers(reaper_ctx).total_count;
+            let lane_value = lane.unwrap_or(0);
+            for idx in 0..total_count {
+                medium.enum_project_markers_3(reaper_ctx, idx, |result| {
+                    if let Some(info) = result
+                        && info.region_end_position.is_some()
+                        && info.id.get() == id
+                    {
+                        ruler_lanes::set_marker_lane(low, reaper_ctx, idx, lane_value);
+                    }
+                });
+            }
+        });
     }
 
     async fn get_regions_in_lane(&self, project: ProjectContext, lane: u32) -> Vec<Region> {

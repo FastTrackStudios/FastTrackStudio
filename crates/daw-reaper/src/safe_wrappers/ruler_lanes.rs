@@ -18,6 +18,12 @@ pub fn supports_ruler_lanes() -> bool {
 ///
 /// `idx` is the 0-based enumeration index (same as used with `EnumProjectMarkers3`).
 /// Returns `None` if the API is unavailable or the marker doesn't exist.
+///
+/// **API quirk:** REAPER's docs note that `I_LANENUMBER` "can be set,
+/// but returned value is read-only" — the value returned here is the
+/// *displayed* lane index recomputed from layout, not the value most
+/// recently passed to [`set_marker_lane`]. Don't use this to round-
+/// trip user-set lane assignments.
 pub fn get_marker_lane(low: &ReaperLow, project: ProjectContext, idx: u32) -> Option<u32> {
     let get_marker = low.pointers().GetRegionOrMarker?;
     let get_info = low.pointers().GetRegionOrMarkerInfo_Value?;
