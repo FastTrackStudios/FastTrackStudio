@@ -8,8 +8,8 @@ use crate::prelude::*;
 use session_proto::{SetlistEvent, SongTransportState};
 
 use crate::signals::{
-    TransportState, ACTIVE_INDICES, ACTIVE_PLAYBACK_IS_PLAYING, ACTIVE_PLAYBACK_MUSICAL,
-    PLAYBACK_STATE, SETLIST_STRUCTURE, SONG_CHARTS, SONG_TRANSPORT,
+    ACTIVE_INDICES, ACTIVE_PLAYBACK_IS_PLAYING, ACTIVE_PLAYBACK_MUSICAL, PLAYBACK_STATE,
+    SETLIST_STRUCTURE, SONG_CHARTS, SONG_TRANSPORT, TransportState,
 };
 
 /// Apply a single `SetlistEvent` to the global UI signals.
@@ -67,8 +67,7 @@ pub fn apply_setlist_event(event: &SetlistEvent) {
 fn apply_transport_update(transports: &[SongTransportState]) {
     let active_song_index = ACTIVE_INDICES.read().song_index;
 
-    let mut transport_updates: Vec<(usize, TransportState)> =
-        Vec::with_capacity(transports.len());
+    let mut transport_updates: Vec<(usize, TransportState)> = Vec::with_capacity(transports.len());
     let mut active_transport_update = None;
 
     {

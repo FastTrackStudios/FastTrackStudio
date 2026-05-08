@@ -26,10 +26,11 @@ session = { path = "crates/session" }
 session-proto = { path = "crates/session-proto" }
 session-ui = { path = "crates/session-ui", default-features = false }
 
-# ── DAW domain (sibling repo — facade crate) ────────────────────────
-# NOTE: daw-proto, daw-control, daw-control-sync, daw-reaper, daw-standalone,
-# dawfile-reaper are INTERNAL. Access them through the `daw` facade crate.
-# Use features: sync, reaper, standalone, file
+# ── DAW domain ───────────────────────────────────────────────────────
+# `daw` is the facade — types/handles/services for the DAW domain. The
+# extension-runtime crate is a documented public sibling (couldn't fold
+# into the facade — cycle through daw-reaper → keyflow → daw). It's
+# only needed by the in-process REAPER extension binary in this repo.
 daw = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
 daw-extension-runtime = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
 
@@ -90,13 +91,19 @@ eyre = "0.6"
 [patch."https://github.com/FastTrackStudios/daw.git"]
 daw = { path = "../daw/crates/daw" }
 daw-extension-runtime = { path = "../daw/crates/daw-extension-runtime" }
+reaper-launcher = { path = "../daw/crates/reaper-launcher" }
+fts-devtools = { path = "../daw/crates/fts-devtools" }
 reaper-test = { path = "../daw/crates/reaper-test" }
 #
-# [patch."https://github.com/FastTrackStudios/keyflow.git"]
-# keyflow = { path = "../keyflow/crates/keyflow" }
+[patch."https://github.com/FastTrackStudios/keyflow.git"]
+keyflow = { path = "../keyflow/crates/keyflow" }
+keyflow-proto = { path = "../keyflow/crates/keyflow-proto" }
+keyflow-text = { path = "../keyflow/crates/keyflow-text" }
+engraver = { path = "../keyflow/crates/engraver" }
+engraver-proto = { path = "../keyflow/crates/engraver-proto" }
 #
-# [patch."https://github.com/FastTrackStudios/input_actions.git"]
-# actions-proto = { path = "../input_actions/crates/actions-proto" }
+[patch."https://github.com/FastTrackStudios/input_actions.git"]
+actions-proto = { path = "../input_actions/crates/actions-proto" }
 #
 # [patch."https://github.com/FastTrackStudios/dock-dioxus.git"]
 # dock-dioxus = { path = "../dock-dioxus/crates/dock-dioxus" }
