@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
-use crate::task::{WikiLink, WikiLinkList};
+use crate::task::{JsonProperties, WikiLink, WikiLinkList};
 
 /// A first-class calendar event backed by iCalendar VEVENT.
 #[derive(
@@ -69,6 +69,16 @@ pub struct Model {
     pub external_id: Option<String>,
     #[crudcrate(filterable, sortable)]
     pub external_source: Option<String>,
+    /// Workflow-defined frontmatter keys. Free-form `key → value` map
+    /// stored as JSON. Excluded from list responses to keep them lean;
+    /// fetched via single-entity get or PropertyService.
+    #[crudcrate(exclude(list))]
+    #[facet(skip)]
+    #[facet(default)]
+    #[serde(default)]
+    #[sea_orm(column_type = "Json", default_value = "{}")]
+    pub properties: JsonProperties,
+
     #[facet(skip)]
     #[facet(default)]
     pub body: String,

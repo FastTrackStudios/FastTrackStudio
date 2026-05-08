@@ -4,6 +4,8 @@ use crudcrate::EntityToModels;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
+use crate::task::JsonProperties;
+
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, EntityToModels, Serialize, Deserialize)]
 #[sea_orm(table_name = "comments")]
 #[crudcrate(
@@ -45,6 +47,14 @@ pub struct Model {
 
     /// Nextcloud Deck comment ID for sync.
     pub external_id: Option<String>,
+
+    /// Workflow-defined frontmatter keys. Free-form `key → value` map
+    /// stored as JSON. Excluded from list responses to keep them lean;
+    /// fetched via single-entity get or PropertyService.
+    #[crudcrate(exclude(list))]
+    #[serde(default)]
+    #[sea_orm(column_type = "Json", default_value = "{}")]
+    pub properties: JsonProperties,
 
     pub deleted_at: Option<chrono::DateTime<chrono::Utc>>,
 

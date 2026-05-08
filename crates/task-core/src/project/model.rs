@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
-use crate::task::{EmailRefList, Status, StringList, Task, WikiLink, WikiLinkList};
+use crate::task::{EmailRefList, JsonProperties, Status, StringList, Task, WikiLink, WikiLinkList};
 
 /// A project note in the vault.
 ///
@@ -107,6 +107,16 @@ pub struct Model {
 
     /// Auto-archive tasks completed longer than N months ago (0 = disabled).
     pub archive_in_months: Option<u32>,
+
+    /// Workflow-defined frontmatter keys. Free-form `key → value` map
+    /// stored as JSON. Excluded from list responses to keep them lean;
+    /// fetched via single-entity get or PropertyService.
+    #[crudcrate(exclude(list))]
+    #[facet(skip)]
+    #[facet(default)]
+    #[serde(default)]
+    #[sea_orm(column_type = "Json", default_value = "{}")]
+    pub properties: JsonProperties,
 
     /// Soft deletion timestamp.
     pub deleted_at: Option<chrono::DateTime<chrono::Utc>>,
