@@ -187,6 +187,15 @@ pub struct Model {
     pub follow_up_on: Option<NaiveDate>,
     #[crudcrate(sortable)]
     pub last_contacted_at: Option<DateTime<Utc>>,
+
+    /// Obsidian-style frontmatter sidecar: flat key→value map of
+    /// extension properties not modeled as first-class columns.
+    #[crudcrate(exclude(list))]
+    #[facet(skip)]
+    #[facet(default)]
+    #[sea_orm(column_type = "Json")]
+    #[serde(default)]
+    pub properties: crate::property::JsonObject,
 }
 
 pub type Person = Model;
@@ -194,7 +203,14 @@ pub type Person = Model;
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {}
 
-impl ActiveModelBehavior for ActiveModel {}
+impl ActiveModelBehavior for ActiveModel {
+    fn new() -> Self {
+        Self {
+            properties: sea_orm::ActiveValue::Set(crate::property::JsonObject::default()),
+            ..<Self as sea_orm::ActiveModelTrait>::default()
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Default, Facet)]
 pub struct OrganizationRecord {

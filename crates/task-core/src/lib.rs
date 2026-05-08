@@ -15,6 +15,7 @@ pub mod module;
 pub mod notification;
 pub mod people;
 pub mod project;
+pub mod property;
 pub mod query;
 pub mod reaction;
 pub mod revenue;
@@ -76,6 +77,7 @@ pub use project::{
     Project, ProjectDashboardBucket, ProjectDashboardEntry, ProjectStats, ProjectStatus, next_task,
     project_dashboard,
 };
+pub use property::{PropertyDefinition, PropertyKind};
 pub use query::{Filter, Group, GroupedTasks, Query, Sort, TaskGroup};
 pub use reaction::Reaction as EntityReaction;
 pub use revenue::{

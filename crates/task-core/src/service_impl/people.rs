@@ -302,6 +302,7 @@ fn person_from_card_contact(
         notes: contact.note,
         follow_up_on: None,
         last_contacted_at: None,
+        properties: crate::property::JsonObject::default(),
     }
 }
 

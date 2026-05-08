@@ -214,6 +214,15 @@ pub struct Model {
     #[facet(default)]
     pub tags: LocationTagList,
 
+    /// Obsidian-style frontmatter sidecar: flat key→value map of
+    /// extension properties not modeled as first-class columns.
+    #[crudcrate(exclude(list))]
+    #[facet(skip)]
+    #[facet(default)]
+    #[sea_orm(column_type = "Json")]
+    #[serde(default)]
+    pub properties: crate::property::JsonObject,
+
     // ── Bookkeeping ─────────────────────────────────────────────────
     pub date_created: Option<DateTime<Utc>>,
     pub date_modified: Option<DateTime<Utc>>,
@@ -230,7 +239,14 @@ pub type Location = Model;
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {}
 
-impl ActiveModelBehavior for ActiveModel {}
+impl ActiveModelBehavior for ActiveModel {
+    fn new() -> Self {
+        Self {
+            properties: sea_orm::ActiveValue::Set(crate::property::JsonObject::default()),
+            ..<Self as sea_orm::ActiveModelTrait>::default()
+        }
+    }
+}
 
 /// A bookable sub-location inside a venue (room, stage, studio, booth).
 #[derive(Debug, Clone, PartialEq, Default, Facet, Serialize, Deserialize, ToSchema)]
