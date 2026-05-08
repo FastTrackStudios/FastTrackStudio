@@ -2069,7 +2069,6 @@ version = "0.1.0"
 dependencies = [
  "daw-control",
  "daw-control-sync",
- "daw-extension-runtime",
  "daw-module",
  "daw-proto",
  "daw-reaper",
