@@ -14,7 +14,7 @@
 use chrono::{Duration, NaiveDate, Utc};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, DatabaseConnection, DbErr, EntityTrait,
-    QueryFilter, QueryOrder,
+    PaginatorTrait, QueryFilter, QueryOrder,
 };
 use uuid::Uuid;
 
@@ -24,6 +24,7 @@ use task_core::calendar_event::{self, CalendarEventStatus};
 use task_core::comment;
 use task_core::cookbook;
 use task_core::cookbook_recipe;
+use task_core::cooking_session::{self, CookingSessionStatus, StepState};
 use task_core::cycle::{self, CycleStatus, CycleTaskList};
 use task_core::email;
 use task_core::email::EmailStringList;
@@ -127,6 +128,8 @@ pub struct DemoSeedSummary {
     pub pantry_items_unchanged: usize,
     pub food_logs_created: usize,
     pub food_logs_unchanged: usize,
+    pub cooking_sessions_created: usize,
+    pub cooking_sessions_unchanged: usize,
 }
 
 impl DemoSeedSummary {
@@ -157,6 +160,7 @@ impl DemoSeedSummary {
             + self.locations_created
             + self.pantry_items_created
             + self.food_logs_created
+            + self.cooking_sessions_created
     }
 
     pub fn total_unchanged(&self) -> usize {
@@ -186,6 +190,7 @@ impl DemoSeedSummary {
             + self.locations_unchanged
             + self.pantry_items_unchanged
             + self.food_logs_unchanged
+            + self.cooking_sessions_unchanged
     }
 }
 
@@ -224,6 +229,7 @@ pub async fn seed_demo_data(db: &DatabaseConnection) -> Result<DemoSeedSummary, 
     backfill_recipe_ingredient_food_ids(db).await?;
     recompute_demo_recipe_nutrition(db).await?;
     seed_food_logs(db, &mut summary).await?;
+    seed_cooking_sessions(db, &mut summary).await?;
     Ok(summary)
 }
 
@@ -413,6 +419,19 @@ pub async fn reset_demo_data(db: &DatabaseConnection) -> Result<DemoSeedSummary,
             > 0
         {
             summary.tracks_created += 1;
+        }
+    }
+
+    // Cooking sessions delete before recipes (soft FK on recipe_id).
+    for key in COOKING_SESSION_KEYS {
+        let id = demo_id(key);
+        if cooking_session::Entity::delete_by_id(id)
+            .exec(db)
+            .await?
+            .rows_affected
+            > 0
+        {
+            summary.cooking_sessions_created += 1;
         }
     }
 
@@ -698,6 +717,11 @@ const MEAL_PLAN_KEYS: &[&str] = &[
 ];
 
 const SHOPPING_LIST_KEYS: &[&str] = &["shop:this-week"];
+
+const COOKING_SESSION_KEYS: &[&str] = &[
+    "cooking-session:active-carbonara",
+    "cooking-session:completed-greek-salad",
+];
 
 const FOOD_LOG_KEYS: &[&str] = &[
     "food_log:day0-breakfast-eggs",
@@ -4854,4 +4878,138 @@ fn slugify(value: &str) -> String {
         .collect::<String>()
         .trim_matches('-')
         .to_string()
+}
+
+/// Seed two cooking-session fixtures:
+///   1. Active mid-recipe — Carbonara, mise en place 2/5, on step 1, step 0
+///      completed, step 1 timer running (started 3 min ago).
+///   2. Completed — Greek Salad from yesterday, all ingredients gathered,
+///      all steps completed.
+async fn seed_cooking_sessions(
+    db: &DatabaseConnection,
+    summary: &mut DemoSeedSummary,
+) -> Result<(), DbErr> {
+    let now = Utc::now();
+    let yesterday_complete = now - Duration::days(1) - Duration::hours(5);
+
+    // ── Active Carbonara session ───────────────────────────────
+    let carbonara_id = demo_id("recipe:weeknight-carbonara");
+    let session_id_active = demo_id("cooking-session:active-carbonara");
+    if cooking_session::Entity::find_by_id(session_id_active)
+        .one(db)
+        .await?
+        .is_none()
+    {
+        if let Some(carbonara) = recipe::Entity::find_by_id(carbonara_id).one(db).await? {
+            let ing_count = recipe_ingredient::Entity::find()
+                .filter(recipe_ingredient::Column::RecipeId.eq(carbonara_id))
+                .count(db)
+                .await? as usize;
+            let step_count = recipe_step::Entity::find()
+                .filter(recipe_step::Column::RecipeId.eq(carbonara_id))
+                .count(db)
+                .await? as usize;
+            let mut mise = vec![false; ing_count];
+            for slot in mise.iter_mut().take(2.min(ing_count)) {
+                *slot = true;
+            }
+            let mut steps = vec![StepState::default(); step_count];
+            let started_at = now - Duration::minutes(8);
+            if step_count >= 1 {
+                steps[0] = StepState {
+                    started_at: Some(started_at),
+                    paused_at: None,
+                    pause_offset_seconds: 0,
+                    completed_at: Some(started_at + Duration::minutes(4)),
+                };
+            }
+            if step_count >= 2 {
+                steps[1] = StepState {
+                    started_at: Some(now - Duration::minutes(3)),
+                    paused_at: None,
+                    pause_offset_seconds: 0,
+                    completed_at: None,
+                };
+            }
+            let active = cooking_session::ActiveModel {
+                id: Set(session_id_active),
+                recipe_id: Set(carbonara_id),
+                recipe_name_snapshot: Set(carbonara.name.clone()),
+                status: Set(CookingSessionStatus::Active),
+                current_step_index: Set(1),
+                scaled_servings: Set(carbonara.servings),
+                mise_en_place_state: Set(cooking_session::mise_en_place_to_json(&mise)),
+                step_states: Set(cooking_session::step_states_to_json(&steps)),
+                notes: Set(None),
+                started_at: Set(started_at),
+                completed_at: Set(None),
+                organization: Set(carbonara.organization.clone()),
+                created_by: Set(Some("cody".to_string())),
+                properties: Set(JsonObject::default()),
+                created_at: Set(started_at),
+                updated_at: Set(now),
+            };
+            cooking_session::Entity::insert(active).exec(db).await?;
+            summary.cooking_sessions_created += 1;
+        }
+    } else {
+        summary.cooking_sessions_unchanged += 1;
+    }
+
+    // ── Completed Greek Salad session ──────────────────────────
+    let greek_id = demo_id("recipe:greek-salad");
+    let session_id_done = demo_id("cooking-session:completed-greek-salad");
+    if cooking_session::Entity::find_by_id(session_id_done)
+        .one(db)
+        .await?
+        .is_none()
+    {
+        if let Some(greek) = recipe::Entity::find_by_id(greek_id).one(db).await? {
+            let ing_count = recipe_ingredient::Entity::find()
+                .filter(recipe_ingredient::Column::RecipeId.eq(greek_id))
+                .count(db)
+                .await? as usize;
+            let step_count = recipe_step::Entity::find()
+                .filter(recipe_step::Column::RecipeId.eq(greek_id))
+                .count(db)
+                .await? as usize;
+            let mise = vec![true; ing_count];
+            let started = yesterday_complete - Duration::minutes(20);
+            let steps: Vec<StepState> = (0..step_count)
+                .map(|i| {
+                    let s = started + Duration::minutes(i as i64 * 4);
+                    StepState {
+                        started_at: Some(s),
+                        paused_at: None,
+                        pause_offset_seconds: 0,
+                        completed_at: Some(s + Duration::minutes(3)),
+                    }
+                })
+                .collect();
+            let active = cooking_session::ActiveModel {
+                id: Set(session_id_done),
+                recipe_id: Set(greek_id),
+                recipe_name_snapshot: Set(greek.name.clone()),
+                status: Set(CookingSessionStatus::Completed),
+                current_step_index: Set(step_count.saturating_sub(1) as i32),
+                scaled_servings: Set(greek.servings),
+                mise_en_place_state: Set(cooking_session::mise_en_place_to_json(&mise)),
+                step_states: Set(cooking_session::step_states_to_json(&steps)),
+                notes: Set(Some("Family loved the feta this time.".to_string())),
+                started_at: Set(started),
+                completed_at: Set(Some(yesterday_complete)),
+                organization: Set(greek.organization.clone()),
+                created_by: Set(Some("cody".to_string())),
+                properties: Set(JsonObject::default()),
+                created_at: Set(started),
+                updated_at: Set(yesterday_complete),
+            };
+            cooking_session::Entity::insert(active).exec(db).await?;
+            summary.cooking_sessions_created += 1;
+        }
+    } else {
+        summary.cooking_sessions_unchanged += 1;
+    }
+
+    Ok(())
 }

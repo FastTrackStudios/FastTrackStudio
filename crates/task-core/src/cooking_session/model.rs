@@ -2,13 +2,13 @@
 //! of a recipe.
 //!
 //! State machine:
-//! - `Active`     — session is in progress, user is checking off mise en
-//!                   place or stepping through.
-//! - `Paused`     — reserved for future "pause the whole session" flow;
-//!                   per-step pauses use `step_states[i].paused_at`.
-//! - `Completed`  — user finished the recipe; optionally generates a
-//!                   FoodLog row + updates `Recipe.last_made`.
-//! - `Abandoned`  — user gave up; no FoodLog row, no last_made update.
+//! - `Active` — session is in progress, user is checking off mise en
+//!   place or stepping through.
+//! - `Paused` — reserved for future "pause the whole session" flow;
+//!   per-step pauses use `step_states[i].paused_at`.
+//! - `Completed` — user finished the recipe; optionally generates a
+//!   FoodLog row + updates `Recipe.last_made`.
+//! - `Abandoned` — user gave up; no FoodLog row, no last_made update.
 //!
 //! `current_step_index` uses `-1` to represent "before the first step"
 //! (mise en place phase) so the UI has a single linear cursor.

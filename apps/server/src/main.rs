@@ -1320,6 +1320,14 @@ async fn handle_vox_connection(socket: WebSocket, state: AppState, auth: VoxAuth
                     ));
                     Ok(())
                 }
+                "CookingSessionRepo" => {
+                    connection.handle_with(
+                        task_core::cooking_session::CookingSessionRepoDispatcher::new(
+                            task_core::cooking_session::CookingSessionRepoStorage::new(db.clone()),
+                        ),
+                    );
+                    Ok(())
+                }
                 "ShoppingListRepo" => {
                     connection.handle_with(
                         task_core::shopping_list::ShoppingListRepoDispatcher::new(
@@ -1438,6 +1446,7 @@ impl task_core::service::SystemService for ServerSystemService {
                 "CookbookRepo".into(),
                 "CookbookRecipeRepo".into(),
                 "MealPlanEntryRepo".into(),
+                "CookingSessionRepo".into(),
                 "ShoppingListRepo".into(),
                 "ShoppingListItemRepo".into(),
                 "SystemService".into(),

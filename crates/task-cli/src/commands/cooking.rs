@@ -10,12 +10,14 @@ use task_core::food::FoodApi;
 use task_core::food_product::FoodProductApi;
 use task_core::recipe::{RecipeApi, RecipeIngredientSpec, RecipeStepSpec};
 use task_core::service::{
-    AddShoppingItemRequest, AddToPantryRequest, BarcodeLookupRequest, ConsumeFromPantryRequest,
-    CookbookWithRecipes, CookingServiceClient, CreateFoodProductRequest, CreateFoodRequest,
+    AddShoppingItemRequest, AddToPantryRequest, BarcodeLookupRequest,
+    CompleteCookingSessionRequest, ConsumeFromPantryRequest, CookbookWithRecipes,
+    CookingServiceClient, CookingSessionView, CreateFoodProductRequest, CreateFoodRequest,
     CreateRecipeRequest, FoodServiceClient, GenerateShoppingListFromMissingRequest,
-    GenerateShoppingListRequest, ImportRecipeRequest, MealPlanRangeRequest, PantryItemPatch,
-    PantryListRequest, PantryServiceClient, RecipeWithDetails, SetMealPlanEntryRequest,
-    ShoppingListWithItems,
+    GenerateShoppingListRequest, ImportRecipeRequest, MarkIngredientGatheredRequest,
+    MealPlanRangeRequest, NavigateStepRequest, PantryItemPatch, PantryListRequest,
+    PantryServiceClient, RecipeWithDetails, SetMealPlanEntryRequest, ShoppingListWithItems,
+    StartCookingSessionRequest, StepTimerActionRequest,
 };
 use uuid::Uuid;
 
@@ -68,6 +70,95 @@ pub(crate) enum CookCommands {
         #[command(subcommand)]
         command: NutritionCommands,
     },
+    /// Interactive cooking sessions — mise en place, step navigation,
+    /// timers, recipe scaling.
+    Session {
+        #[command(subcommand)]
+        command: SessionCommands,
+    },
+}
+
+// ── Session ─────────────────────────────────────────────────────────
+
+#[derive(Subcommand)]
+pub(crate) enum SessionCommands {
+    /// Begin an interactive cooking session for a recipe.
+    Start {
+        recipe: String,
+        #[arg(long)]
+        servings: Option<u32>,
+        #[arg(long)]
+        organization: Option<String>,
+        #[arg(long = "created-by")]
+        created_by: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show a session view by id.
+    Show {
+        session: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// List all currently-active sessions.
+    ListActive {
+        #[arg(long)]
+        organization: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Move the current step cursor (next / previous / jump-to).
+    Step {
+        session: String,
+        #[arg(long, conflicts_with_all = ["previous", "jump_to"])]
+        next: bool,
+        #[arg(long, conflicts_with_all = ["next", "jump_to"])]
+        previous: bool,
+        #[arg(long = "jump-to")]
+        jump_to: Option<i32>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Per-step timer action: start / pause / resume / complete / reset.
+    Timer {
+        session: String,
+        #[arg(long)]
+        action: String,
+        #[arg(long = "step")]
+        step: Option<i32>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Toggle a mise-en-place ingredient checkbox.
+    Ingredient {
+        session: String,
+        #[arg(long)]
+        index: u32,
+        #[arg(long, conflicts_with = "uncheck")]
+        check: bool,
+        #[arg(long, conflicts_with = "check")]
+        uncheck: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Mark the session complete; optionally auto-log the meal.
+    Complete {
+        session: String,
+        #[arg(long = "log-meal")]
+        log_meal: bool,
+        #[arg(long)]
+        servings: Option<u32>,
+        #[arg(long = "meal-type")]
+        meal_type: Option<String>,
+        #[arg(long)]
+        date: Option<String>,
+        #[arg(long)]
+        actor: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Mark the session abandoned (no log, no last_made update).
+    Abandon { session: String },
 }
 
 // ── Log ─────────────────────────────────────────────────────────────
@@ -407,6 +498,14 @@ pub(crate) enum RecipeCommands {
         #[arg(long)]
         json: bool,
     },
+    /// Linearly scale a recipe's ingredients to a target serving count.
+    Scale {
+        recipe: String,
+        #[arg(long)]
+        servings: u32,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Args)]
@@ -606,6 +705,10 @@ pub(crate) async fn run_remote_cook_command(
             run_log(&client, actor, command).await
         }
         CookCommands::Nutrition { command } => run_nutrition(remote, command).await,
+        CookCommands::Session { command } => {
+            let client = remote.cooking().await?;
+            run_session(&client, command).await
+        }
     }
 }
 
@@ -1314,8 +1417,266 @@ async fn run_recipe(
                 }
             }
         }
+        RecipeCommands::Scale {
+            recipe,
+            servings,
+            json,
+        } => {
+            let id = resolve_recipe_id(client, &recipe).await?;
+            let view = client
+                .scale_recipe(id, servings)
+                .await
+                .map_err(|e| eyre::eyre!("scale_recipe: {e}"))?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&view.scaled_ingredients_json)?
+                );
+            } else {
+                println!(
+                    "{}: {} -> {} servings (x{:.3})",
+                    view.recipe_name,
+                    view.source_servings
+                        .map(|n| n.to_string())
+                        .unwrap_or_else(|| "?".to_string()),
+                    view.target_servings,
+                    view.multiplier
+                );
+                for w in &view.warnings {
+                    println!("  warn: {w}");
+                }
+                let pretty: serde_json::Value =
+                    serde_json::from_str(&view.scaled_ingredients_json).unwrap_or_default();
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&pretty).unwrap_or(view.scaled_ingredients_json)
+                );
+            }
+        }
     }
     let _ = actor;
+    Ok(())
+}
+
+// ── Session handlers ────────────────────────────────────────────────
+
+async fn run_session(client: &CookingServiceClient, command: SessionCommands) -> eyre::Result<()> {
+    match command {
+        SessionCommands::Start {
+            recipe,
+            servings,
+            organization,
+            created_by,
+            json,
+        } => {
+            let recipe_id = resolve_recipe_id(client, &recipe).await?;
+            let view = client
+                .start_cooking_session(StartCookingSessionRequest {
+                    recipe_id,
+                    scaled_servings: servings,
+                    organization,
+                    created_by,
+                })
+                .await
+                .map_err(|e| eyre::eyre!("start_cooking_session: {e}"))?;
+            print_session(&view, json)?;
+        }
+        SessionCommands::Show { session, json } => {
+            let id = Uuid::parse_str(&session)?;
+            let view = client
+                .get_cooking_session(id)
+                .await
+                .map_err(|e| eyre::eyre!("get_cooking_session: {e}"))?
+                .ok_or_else(|| eyre::eyre!("cooking session not found: {session}"))?;
+            print_session(&view, json)?;
+        }
+        SessionCommands::ListActive { organization, json } => {
+            let rows = client
+                .list_active_cooking_sessions(organization)
+                .await
+                .map_err(|e| eyre::eyre!("list_active_cooking_sessions: {e}"))?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&rows)?);
+            } else if rows.is_empty() {
+                println!("(no active sessions)");
+            } else {
+                for s in rows {
+                    println!(
+                        "{}  {}  step {} started {}",
+                        s.id, s.recipe_name_snapshot, s.current_step_index, s.started_at
+                    );
+                }
+            }
+        }
+        SessionCommands::Step {
+            session,
+            next,
+            previous,
+            jump_to,
+            json,
+        } => {
+            let session_id = Uuid::parse_str(&session)?;
+            let direction = if next {
+                "next"
+            } else if previous {
+                "previous"
+            } else if jump_to.is_some() {
+                "jump"
+            } else {
+                return Err(eyre::eyre!(
+                    "must pass --next, --previous, or --jump-to <i32>"
+                ));
+            };
+            let view = client
+                .navigate_step(NavigateStepRequest {
+                    session_id,
+                    direction: direction.to_string(),
+                    jump_to,
+                })
+                .await
+                .map_err(|e| eyre::eyre!("navigate_step: {e}"))?;
+            print_session(&view, json)?;
+        }
+        SessionCommands::Timer {
+            session,
+            action,
+            step,
+            json,
+        } => {
+            let session_id = Uuid::parse_str(&session)?;
+            let view = client
+                .step_timer_action(StepTimerActionRequest {
+                    session_id,
+                    step_index: step,
+                    action,
+                })
+                .await
+                .map_err(|e| eyre::eyre!("step_timer_action: {e}"))?;
+            print_session(&view, json)?;
+        }
+        SessionCommands::Ingredient {
+            session,
+            index,
+            check,
+            uncheck,
+            json,
+        } => {
+            let session_id = Uuid::parse_str(&session)?;
+            let gathered = if check {
+                true
+            } else if uncheck {
+                false
+            } else {
+                return Err(eyre::eyre!("pass --check or --uncheck"));
+            };
+            let view = client
+                .mark_ingredient_gathered(MarkIngredientGatheredRequest {
+                    session_id,
+                    ingredient_index: index,
+                    gathered,
+                })
+                .await
+                .map_err(|e| eyre::eyre!("mark_ingredient_gathered: {e}"))?;
+            print_session(&view, json)?;
+        }
+        SessionCommands::Complete {
+            session,
+            log_meal,
+            servings,
+            meal_type,
+            date,
+            actor,
+            json,
+        } => {
+            let session_id = Uuid::parse_str(&session)?;
+            let log_date = match date {
+                Some(s) => Some(parse_date(&s)?),
+                None => None,
+            };
+            let view = client
+                .complete_cooking_session(CompleteCookingSessionRequest {
+                    session_id,
+                    log_meal,
+                    servings_eaten: servings,
+                    meal_type,
+                    log_date,
+                    actor,
+                })
+                .await
+                .map_err(|e| eyre::eyre!("complete_cooking_session: {e}"))?;
+            print_session(&view, json)?;
+        }
+        SessionCommands::Abandon { session } => {
+            let id = Uuid::parse_str(&session)?;
+            let view = client
+                .abandon_cooking_session(id)
+                .await
+                .map_err(|e| eyre::eyre!("abandon_cooking_session: {e}"))?;
+            println!(
+                "Session {} abandoned (recipe: {})",
+                view.session.id, view.session.recipe_name_snapshot
+            );
+        }
+    }
+    Ok(())
+}
+
+fn print_session(view: &CookingSessionView, json: bool) -> eyre::Result<()> {
+    if json {
+        // CookingSessionView is facet::Facet but not serde::Serialize;
+        // assemble a JSON shape from its fields by hand so callers can
+        // pipe / consume it.
+        let payload = serde_json::json!({
+            "session": view.session,
+            "scaled_ingredients": serde_json::from_str::<serde_json::Value>(&view.scaled_ingredients_json).unwrap_or(serde_json::Value::Null),
+            "steps": serde_json::from_str::<serde_json::Value>(&view.steps_json).unwrap_or(serde_json::Value::Null),
+            "step_states": serde_json::from_str::<serde_json::Value>(&view.step_states_json).unwrap_or(serde_json::Value::Null),
+            "mise_en_place": serde_json::from_str::<serde_json::Value>(&view.mise_en_place_json).unwrap_or(serde_json::Value::Null),
+            "ungathered_count": view.ungathered_count,
+        });
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+    let s = &view.session;
+    println!(
+        "Session {}  recipe: {}  status: {}",
+        s.id,
+        s.recipe_name_snapshot,
+        s.status.as_str()
+    );
+    if let Some(srv) = s.scaled_servings {
+        println!("  servings: {srv}");
+    }
+    let total_ings = view.mise_en_place_json.matches("true").count()
+        + view.mise_en_place_json.matches("false").count();
+    let gathered = total_ings - view.ungathered_count as usize;
+    println!("  mise en place: {} of {} gathered", gathered, total_ings);
+    let steps: serde_json::Value =
+        serde_json::from_str(&view.steps_json).unwrap_or(serde_json::Value::Array(vec![]));
+    let total_steps = steps.as_array().map(|a| a.len()).unwrap_or(0);
+    if s.current_step_index < 0 {
+        println!("  Phase: mise en place (before step 1 of {total_steps})");
+    } else {
+        let idx = s.current_step_index as usize;
+        let step_text = steps
+            .get(idx)
+            .and_then(|s| s.get("text"))
+            .and_then(|t| t.as_str())
+            .unwrap_or("");
+        let duration = steps
+            .get(idx)
+            .and_then(|s| s.get("duration_minutes"))
+            .and_then(|d| d.as_u64());
+        println!(
+            "  Step {} of {}: {}{}",
+            idx + 1,
+            total_steps,
+            step_text,
+            duration
+                .map(|d| format!(" ({d} min timer)"))
+                .unwrap_or_default()
+        );
+    }
     Ok(())
 }
 
