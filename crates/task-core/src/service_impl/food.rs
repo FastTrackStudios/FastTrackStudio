@@ -4,7 +4,9 @@
 //! escape hatch for manually wiring an ingredient row to a Food after
 //! the auto name-match on recipe insert missed it.
 
-use chrono::Utc;
+use std::sync::Arc;
+
+use chrono::{Duration, Utc};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, Set,
 };
@@ -13,27 +15,35 @@ use uuid::Uuid;
 use crate::food::{self, FoodAliasList, FoodApi};
 use crate::food_product::{self, FoodProductApi};
 use crate::property::JsonObject;
+use crate::provider::{OpenFoodFactsClient, OpenFoodFactsProduct};
 use crate::recipe_ingredient;
 use crate::service::{
-    CreateFoodProductRequest, CreateFoodRequest, FoodPatch, FoodProductPatch, FoodService,
-    VaultError,
+    BarcodeLookupRequest, CreateFoodProductRequest, CreateFoodRequest, FoodPatch, FoodProductPatch,
+    FoodService, VaultError,
 };
 
-use super::helpers::convert_model;
+use super::helpers::{convert_model, provider_not_configured};
 
 /// Typed dependencies for [`FoodServiceImpl`].
 pub struct FoodServiceDeps {
     pub db: DatabaseConnection,
+    /// Optional Open Food Facts client. `None` means barcode lookups
+    /// will surface `provider_not_configured("openfoodfacts")`.
+    pub openfoodfacts: Option<Arc<OpenFoodFactsClient>>,
 }
 
 #[derive(Clone)]
 pub struct FoodServiceImpl {
     db: DatabaseConnection,
+    openfoodfacts: Option<Arc<OpenFoodFactsClient>>,
 }
 
 impl FoodServiceImpl {
     pub fn new(deps: FoodServiceDeps) -> Self {
-        Self { db: deps.db }
+        Self {
+            db: deps.db,
+            openfoodfacts: deps.openfoodfacts,
+        }
     }
 }
 
@@ -331,6 +341,113 @@ impl FoodService for FoodServiceImpl {
         product_to_api(saved)
     }
 
+    async fn lookup_food_product_by_barcode(
+        &self,
+        request: BarcodeLookupRequest,
+    ) -> Result<Option<FoodProductApi>, VaultError> {
+        let barcode = request.barcode.trim().to_string();
+        if barcode.is_empty() {
+            return Err(VaultError::ParseError("barcode is empty".to_string()));
+        }
+        let max_age_hours = if request.max_age_hours == 0 {
+            None
+        } else {
+            Some(i64::from(request.max_age_hours))
+        };
+
+        // 1. Cache lookup.
+        let cached =
+            find_product_row_by_barcode(&self.db, request.organization.as_deref(), &barcode)
+                .await?;
+        if let Some(row) = &cached {
+            if let (Some(synced_at), Some(hours)) = (row.last_synced_at, max_age_hours) {
+                if Utc::now() - synced_at < Duration::hours(hours) {
+                    return Ok(Some(product_to_api(row.clone())?));
+                }
+            }
+        }
+
+        // 2. Provider check.
+        let client = match self.openfoodfacts.as_ref() {
+            Some(c) => c.clone(),
+            None => return Err(provider_not_configured("openfoodfacts")),
+        };
+
+        let fetched = client
+            .lookup(&barcode)
+            .await
+            .map_err(|err| VaultError::ParseError(format!("openfoodfacts: {err}")))?;
+
+        let Some(product) = fetched else {
+            return Ok(None);
+        };
+
+        // 3. Resolve / create the parent Food row.
+        let food_id = resolve_food_id_for_product(
+            &self.db,
+            request.organization.as_deref(),
+            &product,
+            request.auto_create_food,
+        )
+        .await?;
+
+        // 4. Upsert the FoodProduct row.
+        let now = Utc::now();
+        let nutrition_obj = product.nutrition.to_json_object();
+        let display_name = product
+            .product_name
+            .clone()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| product.barcode.clone());
+
+        let saved = if let Some(existing) = cached {
+            let mut active: food_product::ActiveModel = existing.into();
+            active.food_id = Set(food_id);
+            active.brand = Set(product.brands.clone());
+            active.name = Set(display_name);
+            active.package_size_g = Set(product.package_size_g);
+            if let Some(label) = product.quantity_label.clone() {
+                active.package_size_label = Set(Some(label));
+            }
+            active.source = Set("openfoodfacts".to_string());
+            active.external_id = Set(Some(product.barcode.clone()));
+            active.nutrition_per_100g = Set(nutrition_obj);
+            active.image_url = Set(product.image_url.clone());
+            active.last_synced_at = Set(Some(now));
+            active.organization = Set(request.organization.clone());
+            active.updated_at = Set(now);
+            active
+                .update(&self.db)
+                .await
+                .map_err(|e| io(e, "update food_product"))?
+        } else {
+            let active = food_product::ActiveModel {
+                id: Set(Uuid::new_v4()),
+                food_id: Set(food_id),
+                barcode: Set(Some(barcode.clone())),
+                brand: Set(product.brands.clone()),
+                name: Set(display_name),
+                package_size_g: Set(product.package_size_g),
+                package_size_label: Set(product.quantity_label.clone()),
+                source: Set("openfoodfacts".to_string()),
+                external_id: Set(Some(product.barcode.clone())),
+                nutrition_per_100g: Set(nutrition_obj),
+                image_url: Set(product.image_url.clone()),
+                last_synced_at: Set(Some(now)),
+                organization: Set(request.organization.clone()),
+                properties: Set(JsonObject::default()),
+                created_at: Set(now),
+                updated_at: Set(now),
+            };
+            active
+                .insert(&self.db)
+                .await
+                .map_err(|e| io(e, "insert food_product"))?
+        };
+
+        Ok(Some(product_to_api(saved)?))
+    }
+
     async fn link_recipe_ingredient(
         &self,
         recipe_ingredient_id: Uuid,
@@ -361,4 +478,87 @@ impl FoodService for FoodServiceImpl {
             .map_err(|e| io(e, "link_recipe_ingredient"))?;
         Ok(())
     }
+}
+
+/// Look up an existing FoodProduct row scoped to `(organization, barcode)`.
+/// Used by [`FoodServiceImpl::lookup_food_product_by_barcode`] to drive
+/// the cache TTL + upsert path.
+async fn find_product_row_by_barcode(
+    db: &DatabaseConnection,
+    organization: Option<&str>,
+    barcode: &str,
+) -> Result<Option<food_product::Model>, VaultError> {
+    let mut q =
+        food_product::Entity::find().filter(food_product::Column::Barcode.eq(barcode.to_string()));
+    q = match organization {
+        Some(org) => q.filter(food_product::Column::Organization.eq(org.to_string())),
+        None => q.filter(food_product::Column::Organization.is_null()),
+    };
+    q.one(db)
+        .await
+        .map_err(|e| io(e, "find_product_row_by_barcode"))
+}
+
+/// Resolve a Food row for an Open Food Facts product. Walks
+/// `product_name` → `categories[0]` → optional auto-create with the
+/// product's nutrition copied as the canonical 100g facts.
+async fn resolve_food_id_for_product(
+    db: &DatabaseConnection,
+    organization: Option<&str>,
+    product: &OpenFoodFactsProduct,
+    auto_create: bool,
+) -> Result<Uuid, VaultError> {
+    if let Some(name) = product.product_name.as_deref() {
+        if let Some(hit) = food::find_food_by_name(db, organization, name)
+            .await
+            .map_err(|e| io(e, "find_food_by_name"))?
+        {
+            return Ok(hit.id);
+        }
+    }
+    if let Some(category) = product.categories.first() {
+        if let Some(hit) = food::find_food_by_name(db, organization, category)
+            .await
+            .map_err(|e| io(e, "find_food_by_name (category)"))?
+        {
+            return Ok(hit.id);
+        }
+    }
+    if !auto_create {
+        return Err(VaultError::ParseError(
+            "no matching food; create one manually or pass auto_create_food = true".to_string(),
+        ));
+    }
+    let canonical = product
+        .categories
+        .first()
+        .cloned()
+        .or_else(|| product.product_name.clone())
+        .unwrap_or_else(|| product.barcode.clone());
+    let nutrition_json = serde_json::to_value(&product.nutrition)
+        .map(crate::property::JsonObject::from_value)
+        .unwrap_or_default();
+    let now = Utc::now();
+    let active = food::ActiveModel {
+        id: Set(Uuid::new_v4()),
+        name: Set(canonical.clone()),
+        aliases: Set(FoodAliasList::default()),
+        category: Set(None),
+        default_unit: Set(None),
+        organization: Set(organization.map(str::to_string)),
+        nutrition_per_100g: Set(nutrition_json),
+        notes: Set(Some(format!(
+            "auto-created from Open Food Facts barcode {}",
+            product.barcode
+        ))),
+        properties: Set(JsonObject::default()),
+        created_by: Set(Some("openfoodfacts-import".to_string())),
+        created_at: Set(now),
+        updated_at: Set(now),
+    };
+    let saved = active
+        .insert(db)
+        .await
+        .map_err(|e| io(e, "auto-create food"))?;
+    Ok(saved.id)
 }

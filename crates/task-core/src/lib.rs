@@ -128,7 +128,7 @@ pub use service::{
     ActivityService, ActivityServiceDispatcher, AddShoppingItemRequest, AddTrackRequest,
     AttachmentDownloadResponse, AttachmentService, AttachmentServiceDispatcher,
     AttachmentUploadRequest, AudioProductionService, AudioProductionServiceDispatcher,
-    BusinessFinanceClientSummary, BusinessFinanceReport, CalDavCalendarInfo,
+    BarcodeLookupRequest, BusinessFinanceClientSummary, BusinessFinanceReport, CalDavCalendarInfo,
     CalDavDeleteObjectRequest, CalDavDiscovery, CalDavFreeBusyInterval, CalDavFreeBusyRequest,
     CalDavMultigetRequest, CalDavObject, CalDavPutObjectRequest, CalDavScheduleRequest,
     CalDavScheduleResponse, CalDavSyncCollectionRequest, CalDavSyncCollectionResponse,

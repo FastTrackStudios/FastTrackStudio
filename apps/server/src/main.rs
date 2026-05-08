@@ -657,6 +657,44 @@ async fn vox_ws_handler(
     }
 }
 
+/// Build an `Arc<OpenFoodFactsClient>` from optional environment variables.
+///
+/// The Open Food Facts API requires no credentials, so the client is
+/// always constructed by default. To disable barcode lookups (and force
+/// a `provider_not_configured` surface), set `TASK_OPENFOODFACTS_DISABLE`
+/// to a truthy value.
+///
+/// Optional overrides:
+///   * `TASK_OPENFOODFACTS_BASE_URL` — useful when pointing at the
+///     sibling Open Beauty / Open Pet Food Facts hosts, or a local
+///     mirror.
+///   * `TASK_OPENFOODFACTS_USER_AGENT` — override the default
+///     `task-server/<version> (+repo url)` identifier.
+fn build_openfoodfacts_provider() -> Option<Arc<task_core::provider::OpenFoodFactsClient>> {
+    if env_truthy_default("TASK_OPENFOODFACTS_DISABLE", false) {
+        info!(target: "openfoodfacts", "Open Food Facts disabled via TASK_OPENFOODFACTS_DISABLE");
+        return None;
+    }
+    let base_url = std::env::var("TASK_OPENFOODFACTS_BASE_URL")
+        .ok()
+        .filter(|value| !value.is_empty());
+    let user_agent = std::env::var("TASK_OPENFOODFACTS_USER_AGENT")
+        .ok()
+        .filter(|value| !value.is_empty());
+    let client =
+        task_core::provider::OpenFoodFactsClient::new(task_core::provider::OpenFoodFactsConfig {
+            base_url,
+            user_agent,
+        });
+    info!(
+        target: "openfoodfacts",
+        base_url = %client.base_url(),
+        user_agent = %client.user_agent(),
+        "Open Food Facts barcode lookup enabled",
+    );
+    Some(Arc::new(client))
+}
+
 /// Build an `Arc<NextcloudSync>` from `TASK_NEXTCLOUD_*` environment variables.
 ///
 /// Returns `None` (and the `addressbook=Some(_)` / CalDAV/CardDAV protocol ops
@@ -695,6 +733,7 @@ struct ServerContext {
     nextcloud: Option<Arc<task_core::NextcloudSync>>,
     mail: Option<Arc<task_core::provider::MailClient>>,
     talk: Option<Arc<dyn task_core::provider::CommunicationChannelProvider>>,
+    openfoodfacts: Option<Arc<task_core::provider::OpenFoodFactsClient>>,
     /// Shared broadcast channel for live task ops. One sender per server
     /// instance so subscribers across Vox connections see the same stream.
     task_op_tx: tokio::sync::broadcast::Sender<task_core::service::TaskOp>,
@@ -712,6 +751,7 @@ impl ServerContext {
                 let arc: Arc<dyn task_core::provider::CommunicationChannelProvider> = Arc::new(c);
                 arc
             }),
+            openfoodfacts: build_openfoodfacts_provider(),
             task_op_tx,
         }
     }
@@ -876,6 +916,7 @@ impl ServerContext {
     fn food_service(&self) -> task_core::service_impl::FoodServiceImpl {
         task_core::service_impl::FoodServiceImpl::new(task_core::service_impl::FoodServiceDeps {
             db: self.db.clone(),
+            openfoodfacts: self.openfoodfacts.clone(),
         })
     }
 

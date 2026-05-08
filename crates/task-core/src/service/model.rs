@@ -2018,6 +2018,24 @@ pub trait FoodService {
         recipe_ingredient_id: Uuid,
         food_id: Uuid,
     ) -> Result<(), VaultError>;
+
+    /// Look up a product by barcode through the Open Food Facts cache.
+    ///
+    /// Caching policy:
+    ///   1. Hit local FoodProduct cache by `(organization, barcode)`.
+    ///      If found AND `last_synced_at` is within `max_age_hours`,
+    ///      return that row.
+    ///   2. Otherwise call the Open Food Facts client. On hit, upsert
+    ///      the FoodProduct row, resolving `food_id` by name match (or
+    ///      auto-creating a Food when `auto_create_food = true`).
+    ///   3. On miss (`Ok(None)` from OFF) return `Ok(None)` without
+    ///      writing.
+    ///   4. When the provider isn't configured, returns
+    ///      `provider_not_configured("openfoodfacts")`.
+    async fn lookup_food_product_by_barcode(
+        &self,
+        request: BarcodeLookupRequest,
+    ) -> Result<Option<crate::food_product::FoodProductApi>, VaultError>;
 }
 
 #[derive(Debug, Clone, Default, facet::Facet)]
@@ -2057,6 +2075,25 @@ pub struct CreateFoodProductRequest {
     pub nutrition_json: Option<String>,
     pub image_url: Option<String>,
     pub organization: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct BarcodeLookupRequest {
+    pub barcode: String,
+    pub organization: Option<String>,
+    /// Cache TTL. Default: 7 days. Pass 0 to force a fresh lookup.
+    pub max_age_hours: u32,
+    /// When the client returns a product whose `product_name` doesn't
+    /// resolve to an existing Food (via name + alias match), behavior:
+    ///   true  → auto-create a generic Food using a sanitized
+    ///           `categories[0]` or `product_name` fallback.
+    ///   false → return `ParseError("no matching food; create one
+    ///           manually or pass auto_create_food = true")`.
+    pub auto_create_food: bool,
+    /// Optional override; when None, the env-derived UA is used. Kept
+    /// for callers that want per-request UAs (testing, contact
+    /// substitution).
+    pub user_agent_override: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, facet::Facet)]

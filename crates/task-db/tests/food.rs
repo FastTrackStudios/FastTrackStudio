@@ -30,7 +30,10 @@ async fn seed_populates_food_catalog() {
 async fn find_food_by_name_hits_canonical_and_alias_in_org() {
     let db = task_db::init_memory().await.expect("init db");
     seed_demo_data(&db).await.expect("seed");
-    let svc = FoodServiceImpl::new(FoodServiceDeps { db: db.clone() });
+    let svc = FoodServiceImpl::new(FoodServiceDeps {
+        db: db.clone(),
+        openfoodfacts: None,
+    });
 
     // Canonical name.
     let hit = svc
@@ -58,7 +61,10 @@ async fn find_food_by_name_hits_canonical_and_alias_in_org() {
 #[tokio::test]
 async fn create_food_dedups_aliases_case_insensitively() {
     let db = task_db::init_memory().await.expect("init db");
-    let svc = FoodServiceImpl::new(FoodServiceDeps { db: db.clone() });
+    let svc = FoodServiceImpl::new(FoodServiceDeps {
+        db: db.clone(),
+        openfoodfacts: None,
+    });
     let created = svc
         .create_food(CreateFoodRequest {
             name: "Tahini".to_string(),
@@ -86,7 +92,10 @@ async fn create_food_dedups_aliases_case_insensitively() {
 async fn add_food_alias_is_idempotent() {
     let db = task_db::init_memory().await.expect("init db");
     seed_demo_data(&db).await.expect("seed");
-    let svc = FoodServiceImpl::new(FoodServiceDeps { db: db.clone() });
+    let svc = FoodServiceImpl::new(FoodServiceDeps {
+        db: db.clone(),
+        openfoodfacts: None,
+    });
     // The seeded olive-oil already has alias "evoo".
     let oil = svc
         .find_food_by_name(Some(ORG_PERSONAL.to_string()), "olive oil".into())
@@ -160,7 +169,10 @@ async fn link_recipe_ingredient_populates_food_id() {
     let db = task_db::init_memory().await.expect("init db");
     seed_demo_data(&db).await.expect("seed");
     let cook = CookingServiceImpl::new(CookingServiceDeps { db: db.clone() });
-    let svc = FoodServiceImpl::new(FoodServiceDeps { db: db.clone() });
+    let svc = FoodServiceImpl::new(FoodServiceDeps {
+        db: db.clone(),
+        openfoodfacts: None,
+    });
 
     let detail = cook
         .create_recipe(CreateRecipeRequest {
@@ -243,7 +255,10 @@ async fn nutrition_facts_scale_and_sum() {
 async fn product_lookup_by_barcode_is_org_scoped() {
     let db = task_db::init_memory().await.expect("init db");
     seed_demo_data(&db).await.expect("seed");
-    let svc = FoodServiceImpl::new(FoodServiceDeps { db: db.clone() });
+    let svc = FoodServiceImpl::new(FoodServiceDeps {
+        db: db.clone(),
+        openfoodfacts: None,
+    });
 
     // Create a product with a barcode then look it up.
     let foods = svc
