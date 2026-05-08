@@ -61,6 +61,33 @@ async fn delete_middle_send_preserves_others(
 }
 
 #[reaper_test(isolated)]
+async fn send_resolvable_by_destination(ctx: &reaper_test::ReaperTestContext) -> eyre::Result<()> {
+    let project = ctx.project().clone();
+    let tracks = project.tracks();
+    let src = tracks.add("Send Source", None).await?;
+    let target = tracks.add("Target", None).await?;
+    let other = tracks.add("Other", None).await?;
+
+    src.sends().add_to(other.guid()).await?;
+    src.sends().add_to(target.guid()).await?;
+
+    let by_dest = src
+        .sends()
+        .by_destination(target.guid())
+        .await?
+        .ok_or_else(|| eyre::eyre!("by_destination should resolve the target send"))?;
+    // Ensure the handle reads back the right destination via .info().
+    let info = by_dest.info().await?;
+    assert_eq!(
+        info.dest_track_guid.as_deref(),
+        Some(target.guid()),
+        "by_destination route should point at the requested track"
+    );
+
+    Ok(())
+}
+
+#[reaper_test(isolated)]
 async fn send_appears_as_receive_on_destination(
     ctx: &reaper_test::ReaperTestContext,
 ) -> eyre::Result<()> {

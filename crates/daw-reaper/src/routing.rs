@@ -342,6 +342,50 @@ pub fn find_project_by_name(name: &str) -> Option<Project> {
 // ============================================================================
 
 /// Convert a REAPER TrackRoute to a daw-proto TrackRoute
+/// Resolve a [`RouteRef`] to a concrete enumeration index on a track.
+///
+/// `RouteRef::Index(i)` returns `Some(i)`. `RouteRef::ByDestination`
+/// walks the appropriate list (sends or receives — hardware outputs
+/// have no destination track) and returns the index of the first
+/// route whose partner track matches the destination's GUID.
+pub(crate) fn resolve_route_index(
+    proj: &reaper_high::Project,
+    reaper_track: &reaper_high::Track,
+    route_type: RouteType,
+    route: &RouteRef,
+) -> Option<u32> {
+    match route {
+        RouteRef::Index(idx) => Some(*idx),
+        RouteRef::ByDestination(dest) => {
+            if matches!(route_type, RouteType::HardwareOutput) {
+                warn!("ByDestination is not meaningful for HardwareOutput routes");
+                return None;
+            }
+            let dest_track = resolve_track(proj, dest)?;
+            let dest_guid = dest_track.guid().to_string_without_braces();
+            let count = match route_type {
+                RouteType::Send => reaper_track.typed_send_count(SendPartnerType::Track),
+                RouteType::Receive => reaper_track.receive_count(),
+                RouteType::HardwareOutput => unreachable!(),
+            };
+            for i in 0..count {
+                let route = match route_type {
+                    RouteType::Send => reaper_track.typed_send_by_index(SendPartnerType::Track, i),
+                    RouteType::Receive => reaper_track.receive_by_index(i),
+                    RouteType::HardwareOutput => unreachable!(),
+                };
+                let Some(route) = route else { continue };
+                if let Some(reaper_high::TrackRoutePartner::Track(t)) = route.partner()
+                    && t.guid().to_string_without_braces() == dest_guid
+                {
+                    return Some(i);
+                }
+            }
+            None
+        }
+    }
+}
+
 pub(crate) fn convert_track_route(
     reaper_route: &ReaperTrackRoute,
     route_type: RouteType,
@@ -601,14 +645,8 @@ impl RoutingService for ReaperRouting {
             let proj = resolve_project(&project)?;
             let reaper_track = resolve_track(&proj, &location.track)?;
 
-            let route_index = match &location.route {
-                RouteRef::Index(idx) => *idx,
-                RouteRef::ByDestination(_dest) => {
-                    // TODO: Search by destination
-                    warn!("ByDestination lookup not yet implemented");
-                    return None;
-                }
-            };
+            let route_index =
+                resolve_route_index(&proj, &reaper_track, location.route_type, &location.route)?;
 
             let reaper_route = match location.route_type {
                 RouteType::Send => {
@@ -713,12 +751,10 @@ impl RoutingService for ReaperRouting {
                 return;
             };
 
-            let route_index = match &location.route {
-                RouteRef::Index(idx) => *idx,
-                RouteRef::ByDestination(_) => {
-                    warn!("ByDestination removal not yet implemented");
-                    return;
-                }
+            let Some(route_index) =
+                resolve_route_index(&proj, &reaper_track, location.route_type, &location.route)
+            else {
+                return;
             };
 
             let (category, actual_index) = match location.route_type {
@@ -758,9 +794,10 @@ impl RoutingService for ReaperRouting {
                 return;
             };
 
-            let route_index = match &location.route {
-                RouteRef::Index(idx) => *idx,
-                RouteRef::ByDestination(_) => return,
+            let Some(route_index) =
+                resolve_route_index(&proj, &reaper_track, location.route_type, &location.route)
+            else {
+                return;
             };
 
             let reaper_route = match location.route_type {
@@ -807,9 +844,10 @@ impl RoutingService for ReaperRouting {
                 return;
             };
 
-            let route_index = match &location.route {
-                RouteRef::Index(idx) => *idx,
-                RouteRef::ByDestination(_) => return,
+            let Some(route_index) =
+                resolve_route_index(&proj, &reaper_track, location.route_type, &location.route)
+            else {
+                return;
             };
 
             let reaper_route = match location.route_type {
@@ -857,9 +895,10 @@ impl RoutingService for ReaperRouting {
                 return;
             };
 
-            let route_index = match &location.route {
-                RouteRef::Index(idx) => *idx,
-                RouteRef::ByDestination(_) => return,
+            let Some(route_index) =
+                resolve_route_index(&proj, &reaper_track, location.route_type, &location.route)
+            else {
+                return;
             };
 
             let reaper_route = match location.route_type {
@@ -908,9 +947,10 @@ impl RoutingService for ReaperRouting {
                 return;
             };
 
-            let route_index = match &location.route {
-                RouteRef::Index(idx) => *idx,
-                RouteRef::ByDestination(_) => return,
+            let Some(route_index) =
+                resolve_route_index(&proj, &reaper_track, location.route_type, &location.route)
+            else {
+                return;
             };
 
             let reaper_route = match location.route_type {
@@ -955,9 +995,10 @@ impl RoutingService for ReaperRouting {
                 return;
             };
 
-            let route_index = match &location.route {
-                RouteRef::Index(idx) => *idx,
-                RouteRef::ByDestination(_) => return,
+            let Some(route_index) =
+                resolve_route_index(&proj, &reaper_track, location.route_type, &location.route)
+            else {
+                return;
             };
 
             let reaper_route = match location.route_type {
@@ -1013,9 +1054,10 @@ impl RoutingService for ReaperRouting {
                 return;
             };
 
-            let route_index = match &route {
-                RouteRef::Index(idx) => *idx,
-                RouteRef::ByDestination(_) => return,
+            let Some(route_index) =
+                resolve_route_index(&proj, &reaper_track, RouteType::Send, &route)
+            else {
+                return;
             };
 
             let hw_count = reaper_track.typed_send_count(SendPartnerType::HardwareOutput);
@@ -1061,9 +1103,10 @@ impl RoutingService for ReaperRouting {
                 return;
             };
 
-            let route_index = match &location.route {
-                RouteRef::Index(idx) => *idx,
-                RouteRef::ByDestination(_) => return,
+            let Some(route_index) =
+                resolve_route_index(&proj, &reaper_track, location.route_type, &location.route)
+            else {
+                return;
             };
 
             // route_index for Send is already send-category-local
@@ -1110,9 +1153,10 @@ impl RoutingService for ReaperRouting {
                 return;
             };
 
-            let route_index = match &location.route {
-                RouteRef::Index(idx) => *idx,
-                RouteRef::ByDestination(_) => return,
+            let Some(route_index) =
+                resolve_route_index(&proj, &reaper_track, location.route_type, &location.route)
+            else {
+                return;
             };
 
             // route_index for Send is already send-category-local

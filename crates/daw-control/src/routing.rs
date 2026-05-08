@@ -69,6 +69,27 @@ impl Sends {
         }))
     }
 
+    /// Get the send pointing at the given destination track GUID, if
+    /// any. Resolves via the service's `ByDestination` lookup.
+    pub async fn by_destination(&self, dest_track_guid: &str) -> Result<Option<RouteHandle>> {
+        let dest = TrackRef::Guid(dest_track_guid.to_string());
+        let location = RouteLocation::send(self.track_ref(), RouteRef::ByDestination(dest.clone()));
+        let route = self
+            .clients
+            .routing
+            .get_route(self.context(), location)
+            .await?;
+        Ok(route.map(|_| {
+            RouteHandle::new(
+                self.track_guid.clone(),
+                RouteType::Send,
+                RouteRef::ByDestination(dest),
+                self.project_id.clone(),
+                self.clients.clone(),
+            )
+        }))
+    }
+
     // =========================================================================
     // Streaming
     // =========================================================================
