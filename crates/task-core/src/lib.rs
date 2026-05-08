@@ -6,11 +6,14 @@ pub mod calendar_event;
 pub mod capture;
 pub mod client;
 pub mod comment;
+pub mod cookbook;
+pub mod cookbook_recipe;
 pub mod cycle;
 pub mod email;
 pub mod expense;
 pub mod invoice;
 pub mod location;
+pub mod meal_plan;
 pub mod module;
 pub mod notification;
 pub mod people;
@@ -18,8 +21,12 @@ pub mod project;
 pub mod property;
 pub mod query;
 pub mod reaction;
+pub mod recipe;
+pub mod recipe_ingredient;
+pub mod recipe_step;
 pub mod revenue;
 pub mod rrule;
+pub mod shopping_list;
 pub mod task;
 pub mod task_relation;
 pub mod team;
@@ -60,6 +67,8 @@ pub use calendar_event::{CalendarEvent, CalendarEventStatus};
 pub use capture::{CaptureInput, parse_capture};
 pub use client::{Client, resolve_rate};
 pub use comment::Comment;
+pub use cookbook::{Cookbook, CookbookApi};
+pub use cookbook_recipe::{CookbookRecipe, CookbookRecipeApi};
 pub use cycle::{Cycle, CycleStatus};
 pub use email::EmailRef;
 pub use expense::{
@@ -68,6 +77,7 @@ pub use expense::{
 };
 pub use invoice::{Invoice, InvoiceLine, InvoiceStatus, Payment, format_invoice_id};
 pub use location::{Location, Space, VenueDefault, render_location_body};
+pub use meal_plan::{MealPlanEntry, MealPlanEntryApi, MealType};
 pub use module::{Module, ModuleStatus};
 pub use notification::Notification;
 pub use people::{
@@ -81,9 +91,13 @@ pub use project::{
 pub use property::{PropertyDefinition, PropertyKind};
 pub use query::{Filter, Group, GroupedTasks, Query, Sort, TaskGroup};
 pub use reaction::Reaction as EntityReaction;
+pub use recipe::{Recipe, RecipeApi, RecipeIngredientSpec, RecipeStepSpec};
+pub use recipe_ingredient::{RecipeIngredient, RecipeIngredientApi};
+pub use recipe_step::{RecipeStep, RecipeStepApi};
 pub use revenue::{
     Revenue, RevenueBucket, RevenueCreateRequest, RevenueFilter, RevenueReport, format_revenue_id,
 };
+pub use shopping_list::{ShoppingList, ShoppingListApi, ShoppingListItem, ShoppingListItemApi};
 pub use task::{
     DependencyRelType, Priority, Reaction, RecurrenceAnchor, RelationType, Reminder,
     ReminderAnchor, Status, Task, TaskDependency, TaskRelation, TimeEntry, WikiLink,

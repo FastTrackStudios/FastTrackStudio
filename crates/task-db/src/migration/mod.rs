@@ -13,6 +13,7 @@ mod m20260507_000006_add_asset_properties;
 mod m20260507_000007_add_location_properties;
 mod m20260507_000008_create_property_definitions;
 mod m20260507_000009_create_tracks;
+mod m20260507_000010_create_cooking_tables;
 
 pub struct Migrator;
 
@@ -33,6 +34,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260507_000007_add_location_properties::Migration),
             Box::new(m20260507_000008_create_property_definitions::Migration),
             Box::new(m20260507_000009_create_tracks::Migration),
+            Box::new(m20260507_000010_create_cooking_tables::Migration),
         ]
     }
 }
