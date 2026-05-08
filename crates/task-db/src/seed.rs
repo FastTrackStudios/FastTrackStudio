@@ -31,11 +31,13 @@ use task_core::invoice::{self, InvoiceLine, InvoiceLineList, InvoiceStatus, Paym
 use task_core::notification;
 use task_core::people::{self, ContactMethod, ContactMethodList, ProviderRef, ProviderRefList};
 use task_core::project::{self, ProjectStatus};
+use task_core::property::JsonObject;
 use task_core::reaction;
 use task_core::task::{
     self, EmailRefList, Priority, RecurrenceAnchor, ReminderList, Status, StringList,
     TaskDependencyList, TaskRelationList, TimeEntry, TimeEntryList, WikiLink, WikiLinkList,
 };
+use task_core::track::{self, TrackStatus};
 use task_core::views::{self, ViewDisplay, ViewFilters};
 
 /// Namespace for demo-data UUID derivation. Stable; do not change without
@@ -87,6 +89,8 @@ pub struct DemoSeedSummary {
     pub attachments_unchanged: usize,
     pub integrations_created: usize,
     pub integrations_unchanged: usize,
+    pub tracks_created: usize,
+    pub tracks_unchanged: usize,
 }
 
 impl DemoSeedSummary {
@@ -106,6 +110,7 @@ impl DemoSeedSummary {
             + self.email_refs_created
             + self.attachments_created
             + self.integrations_created
+            + self.tracks_created
     }
 
     pub fn total_unchanged(&self) -> usize {
@@ -124,6 +129,7 @@ impl DemoSeedSummary {
             + self.email_refs_unchanged
             + self.attachments_unchanged
             + self.integrations_unchanged
+            + self.tracks_unchanged
     }
 }
 
@@ -149,6 +155,7 @@ pub async fn seed_demo_data(db: &DatabaseConnection) -> Result<DemoSeedSummary, 
     seed_email_refs(db, &mut summary).await?;
     seed_attachments(db, &mut summary).await?;
     seed_integrations(db, &mut summary).await?;
+    seed_tracks(db, &mut summary).await?;
     Ok(summary)
 }
 
@@ -305,6 +312,17 @@ pub async fn reset_demo_data(db: &DatabaseConnection) -> Result<DemoSeedSummary,
             summary.tasks_created += 1;
         }
     }
+    for key in TRACK_KEYS {
+        let id = demo_id(key);
+        if track::Entity::delete_by_id(id)
+            .exec(db)
+            .await?
+            .rows_affected
+            > 0
+        {
+            summary.tracks_created += 1;
+        }
+    }
     for key in PROJECT_KEYS {
         let id = demo_id(key);
         if project::Entity::delete_by_id(id)
@@ -442,6 +460,23 @@ const EMAIL_REF_KEYS: &[&str] = &[
     "email:fix-auth-stack-trace",
     "email:montreal-client-revisions",
     "email:tour-venue-confirmation",
+];
+
+const TRACK_KEYS: &[&str] = &[
+    // Montreal Album (project:fasttrack-album) — 8 tracks
+    "track:montreal-headlights",
+    "track:montreal-saint-laurent",
+    "track:montreal-tundra",
+    "track:montreal-plateau",
+    "track:montreal-rue-de-bleury",
+    "track:montreal-mile-end",
+    "track:montreal-notre-dame",
+    "track:montreal-outremont",
+    // Tom Solo EP (project:tom-solo-ep) — 4 tracks
+    "track:tom-drive-south",
+    "track:tom-slow-burn",
+    "track:tom-sundown",
+    "track:tom-half-light",
 ];
 
 const INTEGRATION_KEYS: &[&str] = &[
@@ -2582,4 +2617,324 @@ fn integration_active_full(
             context_conventions.iter().map(|s| s.to_string()).collect(),
         )),
     }
+}
+
+// ── Track fixtures ──────────────────────────────────────────────────────────
+
+async fn seed_tracks(db: &DatabaseConnection, summary: &mut DemoSeedSummary) -> Result<(), DbErr> {
+    let montreal = demo_id("project:fasttrack-album");
+    let tom_ep = demo_id("project:tom-solo-ep");
+
+    // (key, project_id, sequence, title, status, bpm, key, artist, lead,
+    //  revision, genre, mood, with_paths, approved_by)
+    type Spec<'a> = (
+        &'a str,         // key
+        Uuid,            // project_id
+        u32,             // sequence
+        &'a str,         // title
+        TrackStatus,     // status
+        f64,             // bpm
+        &'a str,         // musical key
+        &'a str,         // artist
+        &'a str,         // created_by
+        i32,             // revision_number
+        &'a str,         // genre
+        &'a str,         // mood
+        bool,            // with_paths (daw + stems + reference_url)
+        Option<&'a str>, // approved_by (sets status to Approved + properties)
+    );
+
+    let specs: &[Spec] = &[
+        // Montreal Album
+        (
+            "track:montreal-headlights",
+            montreal,
+            1,
+            "Headlights",
+            TrackStatus::Mastering,
+            96.5,
+            "Em",
+            "Just Friends",
+            "cody",
+            3,
+            "indie rock",
+            "introspective",
+            true,
+            None,
+        ),
+        (
+            "track:montreal-saint-laurent",
+            montreal,
+            2,
+            "Saint Laurent",
+            TrackStatus::Mixing,
+            124.0,
+            "F#m",
+            "Just Friends",
+            "cody",
+            2,
+            "indie rock",
+            "energetic",
+            false,
+            None,
+        ),
+        (
+            "track:montreal-tundra",
+            montreal,
+            3,
+            "Tundra",
+            TrackStatus::Mixing,
+            88.0,
+            "Dm",
+            "Just Friends",
+            "cody",
+            1,
+            "indie rock",
+            "melancholic",
+            false,
+            None,
+        ),
+        (
+            "track:montreal-plateau",
+            montreal,
+            4,
+            "Plateau",
+            TrackStatus::Mastering,
+            110.5,
+            "C",
+            "Just Friends",
+            "cody",
+            2,
+            "indie rock",
+            "uplifting",
+            false,
+            None,
+        ),
+        (
+            "track:montreal-rue-de-bleury",
+            montreal,
+            5,
+            "Rue de Bleury",
+            TrackStatus::Tracking,
+            76.0,
+            "Bm",
+            "Just Friends",
+            "cody",
+            0,
+            "indie rock",
+            "introspective",
+            false,
+            None,
+        ),
+        (
+            "track:montreal-mile-end",
+            montreal,
+            6,
+            "Mile End",
+            TrackStatus::Mixing,
+            92.0,
+            "G",
+            "Just Friends",
+            "cody",
+            1,
+            "indie rock",
+            "warm",
+            false,
+            None,
+        ),
+        (
+            "track:montreal-notre-dame",
+            montreal,
+            7,
+            "Notre-Dame",
+            TrackStatus::Editing,
+            67.0,
+            "Am",
+            "Just Friends",
+            "cody",
+            0,
+            "indie rock",
+            "reverent",
+            false,
+            None,
+        ),
+        (
+            "track:montreal-outremont",
+            montreal,
+            8,
+            "Outremont",
+            TrackStatus::Composing,
+            132.0,
+            "E",
+            "Just Friends",
+            "cody",
+            0,
+            "indie rock",
+            "driving",
+            false,
+            None,
+        ),
+        // Tom Solo EP
+        (
+            "track:tom-drive-south",
+            tom_ep,
+            1,
+            "Drive South",
+            TrackStatus::Approved,
+            102.0,
+            "A",
+            "Tom Brooks",
+            "tom",
+            4,
+            "americana",
+            "wistful",
+            true,
+            Some("tom"),
+        ),
+        (
+            "track:tom-slow-burn",
+            tom_ep,
+            2,
+            "Slow Burn",
+            TrackStatus::Mastering,
+            78.5,
+            "Cm",
+            "Tom Brooks",
+            "tom",
+            3,
+            "americana",
+            "smouldering",
+            false,
+            None,
+        ),
+        (
+            "track:tom-sundown",
+            tom_ep,
+            3,
+            "Sundown",
+            TrackStatus::Mixing,
+            95.0,
+            "D",
+            "Tom Brooks",
+            "tom",
+            2,
+            "americana",
+            "warm",
+            false,
+            None,
+        ),
+        (
+            "track:tom-half-light",
+            tom_ep,
+            4,
+            "Half Light",
+            TrackStatus::Tracking,
+            88.0,
+            "F",
+            "Tom Brooks",
+            "tom",
+            0,
+            "americana",
+            "tender",
+            false,
+            None,
+        ),
+    ];
+
+    let now = Utc::now();
+    for spec in specs {
+        let (
+            key,
+            project_id,
+            sequence,
+            title,
+            status,
+            bpm,
+            musical_key,
+            artist,
+            created_by,
+            revision,
+            genre,
+            mood,
+            with_paths,
+            approved_by,
+        ) = *spec;
+
+        let id = demo_id(key);
+        if track::Entity::find_by_id(id).one(db).await?.is_some() {
+            summary.tracks_unchanged += 1;
+            continue;
+        }
+
+        let mut props = serde_json::Map::new();
+        props.insert(
+            "genre".to_string(),
+            serde_json::Value::String(genre.to_string()),
+        );
+        props.insert(
+            "mood".to_string(),
+            serde_json::Value::String(mood.to_string()),
+        );
+        if let Some(actor) = approved_by {
+            props.insert(
+                "approved_by".to_string(),
+                serde_json::Value::String(actor.to_string()),
+            );
+            props.insert(
+                "approved_at".to_string(),
+                serde_json::Value::String(now.to_rfc3339()),
+            );
+        }
+
+        let (daw, stems, reference) = if with_paths {
+            (
+                Some(format!("Projects/{title}/{title}.als")),
+                Some(format!("Projects/{title}/stems")),
+                Some(format!("https://reference.example/{}", slugify(title))),
+            )
+        } else {
+            (None, None, None)
+        };
+
+        let active = track::ActiveModel {
+            id: Set(id),
+            project_id: Set(project_id),
+            title: Set(title.to_string()),
+            sequence: Set(sequence),
+            status: Set(status),
+            bpm: Set(Some(bpm)),
+            key: Set(Some(musical_key.to_string())),
+            duration_ms: Set(None),
+            time_signature: Set(Some("4/4".to_string())),
+            daw_session_path: Set(daw),
+            stems_path: Set(stems),
+            reference_url: Set(reference),
+            isrc: Set(None),
+            artist: Set(Some(artist.to_string())),
+            notes: Set(None),
+            revision_number: Set(revision),
+            created_by: Set(Some(created_by.to_string())),
+            properties: Set(JsonObject::from_value(serde_json::Value::Object(props))),
+            created_at: Set(now),
+            updated_at: Set(now),
+        };
+        track::Entity::insert(active).exec(db).await?;
+        summary.tracks_created += 1;
+    }
+    Ok(())
+}
+
+fn slugify(value: &str) -> String {
+    value
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>()
+        .trim_matches('-')
+        .to_string()
 }

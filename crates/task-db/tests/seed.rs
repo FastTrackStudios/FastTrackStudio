@@ -121,6 +121,11 @@ async fn seed_demo_data_covers_every_entity_flavor() {
         "want >= 3 attachments, got {}",
         s.attachments_created
     );
+    assert!(
+        s.tracks_created >= 12,
+        "want >= 12 tracks, got {}",
+        s.tracks_created
+    );
 }
 
 #[tokio::test]

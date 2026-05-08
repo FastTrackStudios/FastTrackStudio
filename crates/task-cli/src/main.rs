@@ -4,6 +4,7 @@ mod shared;
 use commands::agent::AgentCommands;
 use commands::asset::AssetCommands;
 use commands::attachment::AttachmentCommands;
+use commands::audio::AudioCommands;
 use commands::calendar::CalendarCommands;
 use commands::client::ClientCommands;
 use commands::comment::CommentCommands;
@@ -330,6 +331,11 @@ pub(crate) enum Commands {
     Attachment {
         #[command(subcommand)]
         command: AttachmentCommands,
+    },
+    /// Audio production workflow — tracks, mixes, masters
+    Audio {
+        #[command(subcommand)]
+        command: AudioCommands,
     },
     /// Reusable venues, locations, spaces, and default files
     Location {
@@ -1244,6 +1250,9 @@ pub(crate) async fn run_remote_command(
         }
         Commands::Attachment { command } => {
             commands::attachment::run_remote_attachment_command(remote, actor, command).await?
+        }
+        Commands::Audio { command } => {
+            commands::audio::run_remote_audio_command(remote, actor, command).await?
         }
         Commands::Location { .. } => {
             eyre::bail!("location commands are currently supported only in local vault mode")

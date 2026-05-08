@@ -23,6 +23,7 @@ pub mod rrule;
 pub mod task;
 pub mod task_relation;
 pub mod team;
+pub mod track;
 pub mod views;
 pub mod workflows;
 
@@ -88,6 +89,7 @@ pub use task::{
     ReminderAnchor, Status, Task, TaskDependency, TaskRelation, TimeEntry, WikiLink,
 };
 pub use task_relation::TaskRelation as TaskRelationEntity;
+pub use track::{Track, TrackApi, TrackStatus};
 pub use views::{SavedView, ViewDisplay, ViewFilters};
 
 #[cfg(feature = "server")]
@@ -101,8 +103,9 @@ pub use provider::{
 };
 #[cfg(feature = "server")]
 pub use service::{
-    ActivityService, ActivityServiceDispatcher, AttachmentDownloadResponse, AttachmentService,
-    AttachmentServiceDispatcher, AttachmentUploadRequest, BusinessFinanceClientSummary,
+    ActivityService, ActivityServiceDispatcher, AddTrackRequest, AttachmentDownloadResponse,
+    AttachmentService, AttachmentServiceDispatcher, AttachmentUploadRequest,
+    AudioProductionService, AudioProductionServiceDispatcher, BusinessFinanceClientSummary,
     BusinessFinanceReport, CalDavCalendarInfo, CalDavDeleteObjectRequest, CalDavDiscovery,
     CalDavFreeBusyInterval, CalDavFreeBusyRequest, CalDavMultigetRequest, CalDavObject,
     CalDavPutObjectRequest, CalDavScheduleRequest, CalDavScheduleResponse,
@@ -122,12 +125,13 @@ pub use service::{
     ProjectPatch, ProjectService, ProjectServiceDispatcher, ProjectTypeService,
     ProjectTypeServiceDispatcher, ProjectTypeSpec, ProjectTypeView, PropertyDefinitionView,
     PropertyService, PropertyServiceDispatcher, ProviderSyncState, RemoteDeckBoard,
-    RemoteDeckStack, ReviewReport, SyncPlan, SyncPlanItem, SyncStats, SystemCapabilities,
-    SystemHealth, SystemService, SystemServiceDispatcher, TaskService, TaskServiceDispatcher,
-    TemplateService, TemplateServiceDispatcher, TemplateView, TimeEntryContext, TimeEntryFilter,
-    TimeEntryPatch, TimeLogRequest, TimeService, TimeServiceDispatcher, TimeStartRequest,
-    TimedTaskEntry, VaultCapability, VaultError, activity_service_service_descriptor,
-    attachment_service_service_descriptor, calendar_service_service_descriptor,
+    RemoteDeckStack, ReviewReport, SubmitMixRequest, SyncPlan, SyncPlanItem, SyncStats,
+    SystemCapabilities, SystemHealth, SystemService, SystemServiceDispatcher, TaskService,
+    TaskServiceDispatcher, TemplateService, TemplateServiceDispatcher, TemplateView,
+    TimeEntryContext, TimeEntryFilter, TimeEntryPatch, TimeLogRequest, TimeService,
+    TimeServiceDispatcher, TimeStartRequest, TimedTaskEntry, TrackPatch, VaultCapability,
+    VaultError, activity_service_service_descriptor, attachment_service_service_descriptor,
+    audio_production_service_service_descriptor, calendar_service_service_descriptor,
     conversation_service_service_descriptor, expense_service_service_descriptor,
     inbox_service_service_descriptor, invoice_service_service_descriptor,
     mail_service_service_descriptor, operating_service_service_descriptor,
@@ -138,10 +142,11 @@ pub use service::{
 };
 #[cfg(feature = "server")]
 pub use service_impl::{
-    ActivityServiceImpl, AttachmentServiceImpl, CalendarServiceImpl, ConversationServiceImpl,
-    ExpenseServiceImpl, InboxServiceImpl, InvoiceServiceImpl, MailServiceImpl,
-    OperatingServiceImpl, PeopleServiceImpl, ProjectServiceImpl, ProjectTypeServiceImpl,
-    PropertyServiceImpl, TaskServiceImpl, TemplateServiceImpl, TimeServiceImpl,
+    ActivityServiceImpl, AttachmentServiceImpl, AudioProductionServiceImpl, CalendarServiceImpl,
+    ConversationServiceImpl, ExpenseServiceImpl, InboxServiceImpl, InvoiceServiceImpl,
+    MailServiceImpl, OperatingServiceImpl, PeopleServiceImpl, ProjectServiceImpl,
+    ProjectTypeServiceImpl, PropertyServiceImpl, TaskServiceImpl, TemplateServiceImpl,
+    TimeServiceImpl,
 };
 
 #[cfg(feature = "caldav")]

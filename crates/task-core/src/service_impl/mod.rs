@@ -1,5 +1,6 @@
 pub mod activity;
 pub mod attachment;
+pub mod audio_production;
 pub mod business;
 pub mod conversation;
 pub(crate) mod helpers;
@@ -15,6 +16,7 @@ pub mod time;
 
 pub use activity::{ActivityServiceDeps, ActivityServiceImpl};
 pub use attachment::{AttachmentServiceDeps, AttachmentServiceImpl};
+pub use audio_production::{AudioProductionServiceDeps, AudioProductionServiceImpl};
 pub use business::*;
 pub use conversation::{ConversationServiceDeps, ConversationServiceImpl};
 pub use inbox::{InboxServiceDeps, InboxServiceImpl};

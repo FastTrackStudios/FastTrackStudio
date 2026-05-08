@@ -857,6 +857,14 @@ impl ServerContext {
         })
     }
 
+    fn audio_production_service(&self) -> task_core::AudioProductionServiceImpl {
+        task_core::AudioProductionServiceImpl::new(
+            task_core::service_impl::AudioProductionServiceDeps {
+                db: self.db.clone(),
+            },
+        )
+    }
+
     fn conversation_service(&self) -> task_core::ConversationServiceImpl {
         task_core::ConversationServiceImpl::new(task_core::service_impl::ConversationServiceDeps {
             provider: self.talk.clone(),
@@ -1142,6 +1150,12 @@ async fn handle_vox_connection(socket: WebSocket, state: AppState, auth: VoxAuth
                     ));
                     Ok(())
                 }
+                "AudioProductionService" => {
+                    connection.handle_with(task_core::AudioProductionServiceDispatcher::new(
+                        ctx.audio_production_service(),
+                    ));
+                    Ok(())
+                }
                 "SystemService" => {
                     connection.handle_with(task_core::SystemServiceDispatcher::new(
                         ctx.system_service(),
@@ -1229,6 +1243,7 @@ impl task_core::service::SystemService for ServerSystemService {
                 "InboxService".into(),
                 "OperatingService".into(),
                 "TimeService".into(),
+                "AudioProductionService".into(),
                 "SystemService".into(),
             ],
             features: vec![

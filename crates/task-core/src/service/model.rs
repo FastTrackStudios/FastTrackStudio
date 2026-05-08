@@ -24,6 +24,7 @@ use crate::provider::{
 use crate::query::Query;
 use crate::task::WikiLink;
 use crate::task::{Task, TimeEntry};
+use crate::track::TrackApi;
 
 #[vox::service]
 pub trait TaskService {
@@ -685,6 +686,93 @@ pub struct MaterializeResult {
     pub created_project: bool,
     pub created_task_count: u32,
     pub unchanged_task_count: u32,
+}
+
+/// Specialized workflow service for the `audio-production` integration.
+///
+/// Tracks are first-class workflow deliverables: ordered, status-bearing
+/// rows hung off a project. The service drives the production workflow
+/// (Composing → Demo → Tracking → Editing → Mixing → Mastering →
+/// Approved → Released), encapsulates revision bookkeeping for mix
+/// submissions, and links optional mix-bounce attachments via the
+/// existing attachment infrastructure.
+#[vox::service]
+pub trait AudioProductionService {
+    /// Tracks belonging to a project, ordered by sequence.
+    async fn list_tracks(&self, project_id: Uuid) -> Result<Vec<TrackApi>, VaultError>;
+
+    /// One track by id.
+    async fn get_track(&self, id: Uuid) -> Result<Option<TrackApi>, VaultError>;
+
+    /// Append a track to a project. Sequence auto-increments past the
+    /// highest existing sequence in that project when omitted.
+    async fn add_track(&self, request: AddTrackRequest) -> Result<TrackApi, VaultError>;
+
+    /// Apply a partial update.
+    async fn update_track(&self, id: Uuid, patch: TrackPatch) -> Result<TrackApi, VaultError>;
+
+    /// Move a track to a new status. Validates the transition is one of
+    /// the known [`TrackStatus`](crate::track::TrackStatus) values;
+    /// returns `ParseError` on unknown.
+    async fn transition_status(&self, id: Uuid, new_status: String)
+    -> Result<TrackApi, VaultError>;
+
+    /// Mark a track as submitted for mix review:
+    /// - Status becomes `Mixing` (kept as `Mastering` if already there).
+    /// - `revision_number` increments.
+    /// - When a `mix_path` is supplied, an `attachment` row is inserted
+    ///   with `owner_type = "track"`, `source = "nextcloud"`, and the
+    ///   given path. Bytes are NOT uploaded — that flows through
+    ///   [`AttachmentService::upload`] separately.
+    async fn submit_mix(&self, request: SubmitMixRequest) -> Result<TrackApi, VaultError>;
+
+    /// Approve a mix — sets status to `Approved` and stamps
+    /// `approved_by` / `approved_at` (RFC3339) into the track's
+    /// `properties` blob so it's reachable through `PropertyService`.
+    async fn approve_mix(&self, id: Uuid, actor: String) -> Result<TrackApi, VaultError>;
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct AddTrackRequest {
+    pub project_id: Uuid,
+    pub title: String,
+    /// Optional. If omitted, the service appends after the current max.
+    pub sequence: Option<u32>,
+    pub bpm: Option<f64>,
+    pub key: Option<String>,
+    pub artist: Option<String>,
+    pub created_by: Option<String>,
+}
+
+/// Free-form patch — only `Some(_)` fields are applied.
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct TrackPatch {
+    pub title: Option<String>,
+    pub sequence: Option<u32>,
+    pub bpm: Option<f64>,
+    pub key: Option<String>,
+    pub duration_ms: Option<i64>,
+    pub time_signature: Option<String>,
+    pub daw_session_path: Option<String>,
+    pub stems_path: Option<String>,
+    pub reference_url: Option<String>,
+    pub isrc: Option<String>,
+    pub artist: Option<String>,
+    pub notes: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct SubmitMixRequest {
+    pub track_id: Uuid,
+    /// Free-text mix notes, captured on the attachment label when no
+    /// dedicated label is supplied.
+    pub notes: Option<String>,
+    /// Path to record as the new mix-bounce attachment. Set to `None`
+    /// when there's no bounce to attach.
+    pub mix_path: Option<String>,
+    pub mix_label: Option<String>,
+    pub mix_mime: Option<String>,
+    pub uploader: Option<String>,
 }
 
 #[vox::service]
