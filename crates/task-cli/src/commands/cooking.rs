@@ -10,10 +10,12 @@ use task_core::food::FoodApi;
 use task_core::food_product::FoodProductApi;
 use task_core::recipe::{RecipeApi, RecipeIngredientSpec, RecipeStepSpec};
 use task_core::service::{
-    AddShoppingItemRequest, BarcodeLookupRequest, CookbookWithRecipes, CookingServiceClient,
-    CreateFoodProductRequest, CreateFoodRequest, CreateRecipeRequest, FoodServiceClient,
-    GenerateShoppingListRequest, ImportRecipeRequest, MealPlanRangeRequest, RecipeWithDetails,
-    SetMealPlanEntryRequest, ShoppingListWithItems,
+    AddShoppingItemRequest, AddToPantryRequest, BarcodeLookupRequest, ConsumeFromPantryRequest,
+    CookbookWithRecipes, CookingServiceClient, CreateFoodProductRequest, CreateFoodRequest,
+    CreateRecipeRequest, FoodServiceClient, GenerateShoppingListFromMissingRequest,
+    GenerateShoppingListRequest, ImportRecipeRequest, MealPlanRangeRequest, PantryItemPatch,
+    PantryListRequest, PantryServiceClient, RecipeWithDetails, SetMealPlanEntryRequest,
+    ShoppingListWithItems,
 };
 use uuid::Uuid;
 
@@ -50,6 +52,11 @@ pub(crate) enum CookCommands {
     Product {
         #[command(subcommand)]
         command: ProductCommands,
+    },
+    /// Pantry stock + low-stock + expiring queries.
+    Pantry {
+        #[command(subcommand)]
+        command: PantryCommands,
     },
 }
 
@@ -145,6 +152,109 @@ pub(crate) enum ProductCommands {
     },
 }
 
+// ── Pantry ──────────────────────────────────────────────────────────
+
+#[derive(Subcommand)]
+pub(crate) enum PantryCommands {
+    List {
+        #[arg(long)]
+        organization: Option<String>,
+        #[arg(long)]
+        location: Option<String>,
+        #[arg(long = "expiring-within-days")]
+        expiring_within_days: Option<u32>,
+        #[arg(long = "low-stock")]
+        low_stock: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    Show {
+        pantry_item: String,
+        #[arg(long)]
+        json: bool,
+    },
+    Add {
+        #[arg(long)]
+        barcode: Option<String>,
+        #[arg(long)]
+        food: Option<String>,
+        #[arg(long = "food-id")]
+        food_id: Option<String>,
+        #[arg(long = "product-id")]
+        product_id: Option<String>,
+        #[arg(long)]
+        location: Option<String>,
+        #[arg(long)]
+        quantity: f64,
+        #[arg(long)]
+        unit: String,
+        #[arg(long)]
+        expiration: Option<String>,
+        #[arg(long = "min-stock")]
+        min_stock: Option<f64>,
+        #[arg(long)]
+        purchased: Option<String>,
+        #[arg(long)]
+        organization: Option<String>,
+        #[arg(long)]
+        notes: Option<String>,
+        #[arg(long = "allow-manual-product")]
+        allow_manual_product: bool,
+    },
+    Consume {
+        #[arg(long)]
+        food: Option<String>,
+        #[arg(long = "food-id")]
+        food_id: Option<String>,
+        #[arg(long = "product-id")]
+        product_id: Option<String>,
+        #[arg(long = "pantry-item-id")]
+        pantry_item_id: Option<String>,
+        #[arg(long)]
+        amount: f64,
+        #[arg(long)]
+        unit: String,
+        #[arg(long)]
+        organization: Option<String>,
+        #[arg(long)]
+        notes: Option<String>,
+    },
+    Update {
+        pantry_item: String,
+        #[arg(long)]
+        quantity: Option<f64>,
+        #[arg(long)]
+        unit: Option<String>,
+        #[arg(long)]
+        location: Option<String>,
+        #[arg(long)]
+        expiration: Option<String>,
+        #[arg(long = "opened-at")]
+        opened_at: Option<String>,
+        #[arg(long = "min-stock")]
+        min_stock: Option<f64>,
+        #[arg(long)]
+        notes: Option<String>,
+    },
+    Delete {
+        pantry_item: String,
+    },
+    Expiring {
+        #[arg(long)]
+        organization: Option<String>,
+        #[arg(long = "within-days", default_value_t = 7)]
+        within_days: u32,
+        #[arg(long)]
+        json: bool,
+    },
+    LowStock {
+        #[arg(long)]
+        organization: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
 // ── Recipe ──────────────────────────────────────────────────────────
 
 #[derive(Subcommand)]
@@ -180,6 +290,17 @@ pub(crate) enum RecipeCommands {
         organization: Option<String>,
         #[arg(long = "created-by")]
         created_by: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Match recipes against current pantry stock. Use
+    /// `--include-partial` to also list recipes missing some
+    /// ingredients.
+    WhatCanICook {
+        #[arg(long)]
+        organization: Option<String>,
+        #[arg(long = "include-partial")]
+        include_partial: bool,
         #[arg(long)]
         json: bool,
     },
@@ -301,6 +422,17 @@ pub(crate) enum ShopCommands {
         #[arg(long)]
         organization: Option<String>,
     },
+    /// Generate a list with only the ingredients NOT already in the
+    /// pantry across the given meal-plan date range.
+    GenerateFromMissing {
+        list: String,
+        #[arg(long)]
+        from: String,
+        #[arg(long)]
+        to: String,
+        #[arg(long)]
+        organization: Option<String>,
+    },
     Add {
         list: String,
         #[arg(long)]
@@ -330,7 +462,7 @@ pub(crate) async fn run_remote_cook_command(
     match command {
         CookCommands::Recipe { command } => {
             let client = remote.cooking().await?;
-            run_recipe(&client, actor, command).await
+            run_recipe(&client, remote, actor, command).await
         }
         CookCommands::Cookbook { command } => {
             let client = remote.cooking().await?;
@@ -342,7 +474,7 @@ pub(crate) async fn run_remote_cook_command(
         }
         CookCommands::Shop { command } => {
             let client = remote.cooking().await?;
-            run_shop(&client, command).await
+            run_shop(&client, remote, command).await
         }
         CookCommands::Food { command } => {
             let client = remote.food().await?;
@@ -351,6 +483,11 @@ pub(crate) async fn run_remote_cook_command(
         CookCommands::Product { command } => {
             let client = remote.food().await?;
             run_product(&client, command).await
+        }
+        CookCommands::Pantry { command } => {
+            let pantry_client = remote.pantry().await?;
+            let cooking_client = remote.cooking().await?;
+            run_pantry(&pantry_client, &cooking_client, command).await
         }
     }
 }
@@ -660,6 +797,7 @@ fn print_products(products: &[FoodProductApi], json: bool) -> eyre::Result<()> {
 
 async fn run_recipe(
     client: &CookingServiceClient,
+    remote: &RemoteVoxConfig,
     actor: Option<&str>,
     command: RecipeCommands,
 ) -> eyre::Result<()> {
@@ -797,7 +935,46 @@ async fn run_recipe(
                     .unwrap_or_else(|| "—".to_string())
             );
         }
+        RecipeCommands::WhatCanICook {
+            organization,
+            include_partial,
+            json,
+        } => {
+            let pantry_client = remote.pantry().await?;
+            let matches = pantry_client
+                .recipes_i_can_cook(organization)
+                .await
+                .map_err(|e| eyre::eyre!("recipes_i_can_cook: {e}"))?;
+            let filtered: Vec<_> = matches
+                .into_iter()
+                .filter(|m| include_partial || m.matched_ingredients == m.total_ingredients)
+                .collect();
+            if json {
+                println!("{}", serde_json::to_string_pretty(&filtered)?);
+            } else if filtered.is_empty() {
+                println!("(no recipes match the current pantry)");
+            } else {
+                for m in &filtered {
+                    let tag = if m.matched_ingredients == m.total_ingredients {
+                        "FULL"
+                    } else {
+                        "partial"
+                    };
+                    println!(
+                        "[{tag}] {}  ({}/{})  {}",
+                        m.recipe_name, m.matched_ingredients, m.total_ingredients, m.recipe_id
+                    );
+                    if !m.unmatched_food_lines.is_empty() {
+                        println!("   missing: {}", m.unmatched_food_lines.join(", "));
+                    }
+                    for w in &m.warnings {
+                        println!("   warn: {w}");
+                    }
+                }
+            }
+        }
     }
+    let _ = actor;
     Ok(())
 }
 
@@ -962,7 +1139,11 @@ async fn run_plan(
 
 // ── Shop handlers ───────────────────────────────────────────────────
 
-async fn run_shop(client: &CookingServiceClient, command: ShopCommands) -> eyre::Result<()> {
+async fn run_shop(
+    client: &CookingServiceClient,
+    remote: &RemoteVoxConfig,
+    command: ShopCommands,
+) -> eyre::Result<()> {
     match command {
         ShopCommands::List { json } => {
             let lists = client
@@ -1017,6 +1198,30 @@ async fn run_shop(client: &CookingServiceClient, command: ShopCommands) -> eyre:
                 .generate_from_meal_plan(request)
                 .await
                 .map_err(|e| eyre::eyre!("generate_from_meal_plan: {e}"))?;
+            print_shopping_list_detail(&detail, false)?;
+        }
+        ShopCommands::GenerateFromMissing {
+            list,
+            from,
+            to,
+            organization,
+        } => {
+            let id = resolve_shopping_list_id(client, &list).await?;
+            let pantry_client = remote.pantry().await?;
+            let returned = pantry_client
+                .generate_shopping_list_from_missing(GenerateShoppingListFromMissingRequest {
+                    list_id: id,
+                    organization,
+                    from_date: parse_date(&from)?,
+                    to_date: parse_date(&to)?,
+                })
+                .await
+                .map_err(|e| eyre::eyre!("generate_shopping_list_from_missing: {e}"))?;
+            let detail = client
+                .get_shopping_list(returned)
+                .await
+                .map_err(|e| eyre::eyre!("get_shopping_list: {e}"))?
+                .ok_or_else(|| eyre::eyre!("shopping list not found: {returned}"))?;
             print_shopping_list_detail(&detail, false)?;
         }
         ShopCommands::Add {
@@ -1274,4 +1479,259 @@ fn print_shopping_list_detail(detail: &ShoppingListWithItems, json: bool) -> eyr
         println!("    {mark} {qty}{unit}{food}  ({id})");
     }
     Ok(())
+}
+
+// ── Pantry handlers ─────────────────────────────────────────────────
+
+fn parse_optional_date(s: Option<&str>) -> eyre::Result<Option<NaiveDate>> {
+    match s {
+        Some(v) => Ok(Some(parse_date(v)?)),
+        None => Ok(None),
+    }
+}
+
+async fn run_pantry(
+    pantry: &PantryServiceClient,
+    cooking: &CookingServiceClient,
+    command: PantryCommands,
+) -> eyre::Result<()> {
+    let _ = cooking;
+    match command {
+        PantryCommands::List {
+            organization,
+            location,
+            expiring_within_days,
+            low_stock,
+            json,
+        } => {
+            let location_id = match location {
+                Some(l) if !l.is_empty() => Some(Uuid::parse_str(&l).map_err(|_| {
+                    eyre::eyre!("--location must be a UUID at the CLI; resolve via task cook pantry list output")
+                })?),
+                _ => None,
+            };
+            let rows = pantry
+                .list_pantry_items(PantryListRequest {
+                    organization,
+                    location_id,
+                    low_stock_only: low_stock,
+                    expiring_within_days,
+                })
+                .await
+                .map_err(|e| eyre::eyre!("list_pantry_items: {e}"))?;
+            print_pantry_rows(&rows, json)?;
+        }
+        PantryCommands::Show { pantry_item, json } => {
+            let id = Uuid::parse_str(&pantry_item)
+                .map_err(|_| eyre::eyre!("pantry-item must be a UUID"))?;
+            let row = pantry
+                .get_pantry_item(id)
+                .await
+                .map_err(|e| eyre::eyre!("get_pantry_item: {e}"))?
+                .ok_or_else(|| eyre::eyre!("pantry item not found: {id}"))?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&row)?);
+            } else {
+                print_pantry_row(&row);
+            }
+        }
+        PantryCommands::Add {
+            barcode,
+            food,
+            food_id,
+            product_id,
+            location,
+            quantity,
+            unit,
+            expiration,
+            min_stock,
+            purchased,
+            organization,
+            notes,
+            allow_manual_product,
+        } => {
+            let request = AddToPantryRequest {
+                organization,
+                barcode,
+                food_name: food,
+                food_id: food_id
+                    .map(|s| Uuid::parse_str(&s))
+                    .transpose()
+                    .map_err(|e| eyre::eyre!("--food-id: {e}"))?,
+                product_id: product_id
+                    .map(|s| Uuid::parse_str(&s))
+                    .transpose()
+                    .map_err(|e| eyre::eyre!("--product-id: {e}"))?,
+                location_id: match location {
+                    Some(l) => Some(
+                        Uuid::parse_str(&l)
+                            .map_err(|_| eyre::eyre!("--location must be a UUID at the CLI"))?,
+                    ),
+                    None => None,
+                },
+                quantity,
+                unit,
+                expiration_date: parse_optional_date(expiration.as_deref())?,
+                min_stock,
+                purchased_at: parse_optional_date(purchased.as_deref())?,
+                notes,
+                allow_manual_product,
+            };
+            let row = pantry
+                .add_to_pantry(request)
+                .await
+                .map_err(|e| eyre::eyre!("add_to_pantry: {e}"))?;
+            println!("Added pantry item {} ({})", row.id, row.unit);
+        }
+        PantryCommands::Consume {
+            food,
+            food_id,
+            product_id,
+            pantry_item_id,
+            amount,
+            unit,
+            organization,
+            notes,
+        } => {
+            let mut food_id_uuid = food_id
+                .map(|s| Uuid::parse_str(&s))
+                .transpose()
+                .map_err(|e| eyre::eyre!("--food-id: {e}"))?;
+            // Name → food_id is a luxury here; prompt callers to use
+            // --food-id when they have multiple candidates.
+            if food_id_uuid.is_none() {
+                if let Some(name) = food.as_deref() {
+                    food_id_uuid = Some(Uuid::parse_str(name).map_err(|_| {
+                        eyre::eyre!("--food expects a UUID at the CLI; pass --food-id")
+                    })?);
+                }
+            }
+            let request = ConsumeFromPantryRequest {
+                organization,
+                food_id: food_id_uuid,
+                product_id: product_id
+                    .map(|s| Uuid::parse_str(&s))
+                    .transpose()
+                    .map_err(|e| eyre::eyre!("--product-id: {e}"))?,
+                pantry_item_id: pantry_item_id
+                    .map(|s| Uuid::parse_str(&s))
+                    .transpose()
+                    .map_err(|e| eyre::eyre!("--pantry-item-id: {e}"))?,
+                amount,
+                unit,
+                notes,
+            };
+            let result = pantry
+                .consume_from_pantry(request)
+                .await
+                .map_err(|e| eyre::eyre!("consume_from_pantry: {e}"))?;
+            match result {
+                Some(row) => println!("Remaining: {} {}  ({})", row.quantity, row.unit, row.id),
+                None => println!("Depleted (row removed)."),
+            }
+        }
+        PantryCommands::Update {
+            pantry_item,
+            quantity,
+            unit,
+            location,
+            expiration,
+            opened_at,
+            min_stock,
+            notes,
+        } => {
+            let id = Uuid::parse_str(&pantry_item)
+                .map_err(|_| eyre::eyre!("pantry-item must be a UUID"))?;
+            let location_id = match location {
+                Some(l) => Some(
+                    Uuid::parse_str(&l)
+                        .map_err(|_| eyre::eyre!("--location must be a UUID at the CLI"))?,
+                ),
+                None => None,
+            };
+            let opened = match opened_at {
+                Some(s) => Some(
+                    chrono::DateTime::parse_from_rfc3339(&s)
+                        .map_err(|e| eyre::eyre!("--opened-at: {e}"))?
+                        .with_timezone(&chrono::Utc),
+                ),
+                None => None,
+            };
+            let patch = PantryItemPatch {
+                quantity,
+                unit,
+                location_id,
+                expiration_date: parse_optional_date(expiration.as_deref())?,
+                opened_at: opened,
+                min_stock,
+                notes,
+            };
+            let row = pantry
+                .update_pantry_item(id, patch)
+                .await
+                .map_err(|e| eyre::eyre!("update_pantry_item: {e}"))?;
+            println!(
+                "Updated {} → quantity {} {}",
+                row.id, row.quantity, row.unit
+            );
+        }
+        PantryCommands::Delete { pantry_item } => {
+            let id = Uuid::parse_str(&pantry_item)
+                .map_err(|_| eyre::eyre!("pantry-item must be a UUID"))?;
+            pantry
+                .delete_pantry_item(id)
+                .await
+                .map_err(|e| eyre::eyre!("delete_pantry_item: {e}"))?;
+            println!("Deleted {id}");
+        }
+        PantryCommands::Expiring {
+            organization,
+            within_days,
+            json,
+        } => {
+            let rows = pantry
+                .expiring_soon(organization, within_days)
+                .await
+                .map_err(|e| eyre::eyre!("expiring_soon: {e}"))?;
+            print_pantry_rows(&rows, json)?;
+        }
+        PantryCommands::LowStock { organization, json } => {
+            let rows = pantry
+                .low_stock(organization)
+                .await
+                .map_err(|e| eyre::eyre!("low_stock: {e}"))?;
+            print_pantry_rows(&rows, json)?;
+        }
+    }
+    Ok(())
+}
+
+fn print_pantry_rows(rows: &[task_core::pantry::PantryItemApi], json: bool) -> eyre::Result<()> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(rows)?);
+        return Ok(());
+    }
+    if rows.is_empty() {
+        println!("(no pantry items)");
+        return Ok(());
+    }
+    for r in rows {
+        print_pantry_row(r);
+    }
+    Ok(())
+}
+
+fn print_pantry_row(r: &task_core::pantry::PantryItemApi) {
+    let exp = r
+        .expiration_date
+        .map(|d| d.to_string())
+        .unwrap_or_else(|| "—".to_string());
+    let min = r
+        .min_stock
+        .map(|m| format!("min={m}"))
+        .unwrap_or_else(|| "—".to_string());
+    println!(
+        "{}  {} {}  exp={}  {}  ({})",
+        r.id, r.quantity, r.unit, exp, min, r.id
+    );
 }

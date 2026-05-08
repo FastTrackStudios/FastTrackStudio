@@ -17,6 +17,7 @@ mod m20260507_000010_create_cooking_tables;
 mod m20260507_000011_add_recipe_image_url;
 mod m20260507_000012_create_food_tables;
 mod m20260507_000013_add_recipe_ingredient_food_id;
+mod m20260507_000014_create_pantry_items;
 
 pub struct Migrator;
 
@@ -41,6 +42,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260507_000011_add_recipe_image_url::Migration),
             Box::new(m20260507_000012_create_food_tables::Migration),
             Box::new(m20260507_000013_add_recipe_ingredient_food_id::Migration),
+            Box::new(m20260507_000014_create_pantry_items::Migration),
         ]
     }
 }

@@ -2106,6 +2106,161 @@ pub struct FoodProductPatch {
     pub image_url: Option<String>,
 }
 
+// ── Pantry ──────────────────────────────────────────────────────────
+
+/// Pantry stock management — branded products, generic foods, and the
+/// "what can I cook tonight?" + "what should I buy?" matchers built on
+/// top of [`FoodService`] and [`CookingService`].
+#[vox::service]
+pub trait PantryService {
+    /// All pantry items for an organization. Server-side filters: location,
+    /// low-stock-only, expiring within N days.
+    async fn list_pantry_items(
+        &self,
+        request: PantryListRequest,
+    ) -> Result<Vec<crate::pantry::PantryItemApi>, VaultError>;
+
+    async fn get_pantry_item(
+        &self,
+        id: Uuid,
+    ) -> Result<Option<crate::pantry::PantryItemApi>, VaultError>;
+
+    /// Add stock. The service resolves food_id / product_id:
+    ///   - When `barcode` is set: resolve via the OpenFoodFacts cache (or
+    ///     fresh fetch). Sets product_id; food_id copied from the resolved
+    ///     FoodProduct.
+    ///   - When `food_name` is set: name-match the catalog. Sets food_id.
+    ///   - When `food_id` / `product_id` is set directly: bypass resolution.
+    async fn add_to_pantry(
+        &self,
+        request: AddToPantryRequest,
+    ) -> Result<crate::pantry::PantryItemApi, VaultError>;
+
+    /// Decrement quantity by `amount`. When the resulting quantity drops
+    /// to <= 0, the row is deleted (returns `Ok(None)`). Pass a negative
+    /// amount to add to an existing row.
+    async fn consume_from_pantry(
+        &self,
+        request: ConsumeFromPantryRequest,
+    ) -> Result<Option<crate::pantry::PantryItemApi>, VaultError>;
+
+    async fn update_pantry_item(
+        &self,
+        id: Uuid,
+        patch: PantryItemPatch,
+    ) -> Result<crate::pantry::PantryItemApi, VaultError>;
+
+    async fn delete_pantry_item(&self, id: Uuid) -> Result<(), VaultError>;
+
+    /// "What's expiring in the next N days?" Sorted ascending by
+    /// expiration_date.
+    async fn expiring_soon(
+        &self,
+        organization: Option<String>,
+        within_days: u32,
+    ) -> Result<Vec<crate::pantry::PantryItemApi>, VaultError>;
+
+    /// Items below their min_stock threshold. Items without min_stock are
+    /// skipped.
+    async fn low_stock(
+        &self,
+        organization: Option<String>,
+    ) -> Result<Vec<crate::pantry::PantryItemApi>, VaultError>;
+
+    /// Recipes whose every `food_id`-linked ingredient has matching pantry
+    /// stock. Recipes with no `food_id` ingredients are skipped (the
+    /// matcher would produce false positives). Returns matches and partial
+    /// matches; callers filter by `matched == total`.
+    async fn recipes_i_can_cook(
+        &self,
+        organization: Option<String>,
+    ) -> Result<Vec<RecipeMatchView>, VaultError>;
+
+    /// Generate a shopping list of ingredients NOT in the pantry, pulled
+    /// from a meal-plan range. Same as
+    /// `CookingService::generate_from_meal_plan` but skips ingredients
+    /// the pantry already covers (food_id-keyed match, same-unit check).
+    /// Returns the list id.
+    async fn generate_shopping_list_from_missing(
+        &self,
+        request: GenerateShoppingListFromMissingRequest,
+    ) -> Result<Uuid, VaultError>;
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct PantryListRequest {
+    pub organization: Option<String>,
+    pub location_id: Option<Uuid>,
+    pub low_stock_only: bool,
+    pub expiring_within_days: Option<u32>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct AddToPantryRequest {
+    pub organization: Option<String>,
+    pub barcode: Option<String>,
+    pub food_name: Option<String>,
+    pub food_id: Option<Uuid>,
+    pub product_id: Option<Uuid>,
+    pub location_id: Option<Uuid>,
+    pub quantity: f64,
+    pub unit: String,
+    pub expiration_date: Option<chrono::NaiveDate>,
+    pub min_stock: Option<f64>,
+    pub purchased_at: Option<chrono::NaiveDate>,
+    pub notes: Option<String>,
+    /// When `barcode` is set and the OFF lookup returns `Ok(None)` and
+    /// this is true, create a manual FoodProduct shell with just the
+    /// barcode + a placeholder name (= barcode). Use sparingly — the
+    /// product is incomplete metadata-wise but at least tracked.
+    pub allow_manual_product: bool,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct ConsumeFromPantryRequest {
+    pub organization: Option<String>,
+    pub food_id: Option<Uuid>,
+    pub product_id: Option<Uuid>,
+    /// Identifies which pantry row to decrement when there are multiple
+    /// matches (e.g. olive oil in shelf and back-stock); when None the
+    /// service resolves to the row closest to expiration.
+    pub pantry_item_id: Option<Uuid>,
+    pub amount: f64,
+    pub unit: String,
+    pub notes: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct PantryItemPatch {
+    pub quantity: Option<f64>,
+    pub unit: Option<String>,
+    pub location_id: Option<Uuid>,
+    pub expiration_date: Option<chrono::NaiveDate>,
+    pub opened_at: Option<DateTime<Utc>>,
+    pub min_stock: Option<f64>,
+    pub notes: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct GenerateShoppingListFromMissingRequest {
+    pub list_id: Uuid,
+    pub organization: Option<String>,
+    pub from_date: chrono::NaiveDate,
+    pub to_date: chrono::NaiveDate,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet, serde::Serialize, serde::Deserialize)]
+pub struct RecipeMatchView {
+    pub recipe_id: Uuid,
+    pub recipe_name: String,
+    pub total_ingredients: u32,
+    pub matched_ingredients: u32,
+    /// Ingredient text the matcher couldn't resolve to a pantry hit.
+    pub unmatched_food_lines: Vec<String>,
+    /// Unit-mismatch notes, etc.
+    pub warnings: Vec<String>,
+}
+
 /// Errors returned by vault operations.
 #[derive(Debug, facet::Facet, thiserror::Error)]
 #[repr(C)]

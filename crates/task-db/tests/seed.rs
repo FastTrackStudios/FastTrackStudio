@@ -156,6 +156,43 @@ async fn seed_demo_data_covers_every_entity_flavor() {
         "want >= 5 food products, got {}",
         s.food_products_created
     );
+    assert!(
+        s.locations_created >= 3,
+        "want >= 3 pantry-storage locations, got {}",
+        s.locations_created
+    );
+    assert!(
+        s.pantry_items_created >= 12,
+        "want >= 12 pantry items, got {}",
+        s.pantry_items_created
+    );
+
+    // Pantry should have at least one expiring-soon item (within 7 days).
+    use chrono::Duration as ChronoDuration;
+    let today = chrono::Utc::now().date_naive();
+    let cutoff = today + ChronoDuration::days(7);
+    let expiring = task_core::pantry::Entity::find()
+        .filter(task_core::pantry::Column::ExpirationDate.is_not_null())
+        .filter(task_core::pantry::Column::ExpirationDate.gte(today))
+        .filter(task_core::pantry::Column::ExpirationDate.lte(cutoff))
+        .all(&db)
+        .await
+        .expect("expiring");
+    assert!(
+        !expiring.is_empty(),
+        "want >= 1 pantry item expiring within 7 days"
+    );
+
+    // And at least one below-min-stock row.
+    let low = task_core::pantry::Entity::find()
+        .filter(task_core::pantry::Column::MinStock.is_not_null())
+        .all(&db)
+        .await
+        .expect("low")
+        .into_iter()
+        .filter(|r| r.min_stock.map(|m| r.quantity <= m).unwrap_or(false))
+        .count();
+    assert!(low >= 1, "want >= 1 below-min-stock pantry item");
 
     // The auto-link on recipe insert should hit > half the seeded
     // ingredients across the demo recipes.

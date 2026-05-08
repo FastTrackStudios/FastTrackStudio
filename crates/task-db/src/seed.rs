@@ -35,8 +35,11 @@ use task_core::integration::{
     TaskTemplate, TaskTemplateList,
 };
 use task_core::invoice::{self, InvoiceLine, InvoiceLineList, InvoiceStatus, Payment, PaymentList};
+use task_core::location;
+use task_core::location::{LocationTagList, SpaceList, VenueDefaultList};
 use task_core::meal_plan::{self, MealType};
 use task_core::notification;
+use task_core::pantry;
 use task_core::people::{self, ContactMethod, ContactMethodList, ProviderRef, ProviderRefList};
 use task_core::project::{self, ProjectStatus};
 use task_core::property::JsonObject;
@@ -117,6 +120,10 @@ pub struct DemoSeedSummary {
     pub shopping_lists_unchanged: usize,
     pub shopping_list_items_created: usize,
     pub shopping_list_items_unchanged: usize,
+    pub locations_created: usize,
+    pub locations_unchanged: usize,
+    pub pantry_items_created: usize,
+    pub pantry_items_unchanged: usize,
 }
 
 impl DemoSeedSummary {
@@ -144,6 +151,8 @@ impl DemoSeedSummary {
             + self.meal_plan_entries_created
             + self.shopping_lists_created
             + self.shopping_list_items_created
+            + self.locations_created
+            + self.pantry_items_created
     }
 
     pub fn total_unchanged(&self) -> usize {
@@ -170,10 +179,12 @@ impl DemoSeedSummary {
             + self.meal_plan_entries_unchanged
             + self.shopping_lists_unchanged
             + self.shopping_list_items_unchanged
+            + self.locations_unchanged
+            + self.pantry_items_unchanged
     }
 }
 
-fn demo_id(key: &str) -> Uuid {
+pub fn demo_id(key: &str) -> Uuid {
     Uuid::new_v5(&DEMO_NAMESPACE, key.as_bytes())
 }
 
@@ -201,6 +212,8 @@ pub async fn seed_demo_data(db: &DatabaseConnection) -> Result<DemoSeedSummary, 
     seed_foods(db, &mut summary).await?;
     seed_cooking(db, &mut summary).await?;
     seed_food_products(db, &mut summary).await?;
+    seed_locations(db, &mut summary).await?;
+    seed_pantry(db, &mut summary).await?;
     // Backfill `food_id` on any pre-existing recipe_ingredient rows
     // (idempotent: only updates rows whose food_id is currently NULL).
     backfill_recipe_ingredient_food_ids(db).await?;
@@ -210,6 +223,30 @@ pub async fn seed_demo_data(db: &DatabaseConnection) -> Result<DemoSeedSummary, 
 /// Delete every row created by [`seed_demo_data`] (by deterministic id).
 pub async fn reset_demo_data(db: &DatabaseConnection) -> Result<DemoSeedSummary, DbErr> {
     let mut summary = DemoSeedSummary::default();
+
+    // Pantry first — soft FKs to foods/products/locations.
+    for key in PANTRY_KEYS {
+        let id = demo_id(key);
+        if pantry::Entity::delete_by_id(id)
+            .exec(db)
+            .await?
+            .rows_affected
+            > 0
+        {
+            summary.pantry_items_created += 1;
+        }
+    }
+    for key in LOCATION_KEYS {
+        let id = demo_id(key);
+        if location::Entity::delete_by_id(id)
+            .exec(db)
+            .await?
+            .rows_affected
+            > 0
+        {
+            summary.locations_created += 1;
+        }
+    }
 
     for key in INTEGRATION_KEYS {
         let id = demo_id(key);
@@ -641,6 +678,28 @@ const MEAL_PLAN_KEYS: &[&str] = &[
 ];
 
 const SHOPPING_LIST_KEYS: &[&str] = &["shop:this-week"];
+
+const LOCATION_KEYS: &[&str] = &[
+    "location:pantry-shelf",
+    "location:refrigerator",
+    "location:freezer",
+];
+
+const PANTRY_KEYS: &[&str] = &[
+    "pantry:olive-oil-shelf",
+    "pantry:kosher-salt-shelf",
+    "pantry:flour-shelf",
+    "pantry:sugar-shelf",
+    "pantry:garlic-powder-shelf",
+    "pantry:paprika-shelf",
+    "pantry:soy-sauce-shelf",
+    "pantry:eggs-fridge",
+    "pantry:butter-fridge",
+    "pantry:feta-fridge",
+    "pantry:milk-fridge",
+    "pantry:chicken-thighs-freezer",
+    "pantry:ground-beef-freezer",
+];
 
 /// Cody's pantry-relevant catalog. Mix of pantry staples, produce,
 /// dairy, protein, and spices. Each Food carries category +
@@ -4161,6 +4220,242 @@ async fn seed_food_products(
         };
         food_product::Entity::insert(active).exec(db).await?;
         summary.food_products_created += 1;
+    }
+    Ok(())
+}
+
+async fn seed_locations(
+    db: &DatabaseConnection,
+    summary: &mut DemoSeedSummary,
+) -> Result<(), DbErr> {
+    let now = Utc::now();
+    let locations: &[(&str, &str)] = &[
+        ("location:pantry-shelf", "Pantry Shelf"),
+        ("location:refrigerator", "Refrigerator"),
+        ("location:freezer", "Freezer"),
+    ];
+    for (key, name) in locations {
+        let id = demo_id(key);
+        if location::Entity::find_by_id(id).one(db).await?.is_some() {
+            summary.locations_unchanged += 1;
+            continue;
+        }
+        let active = location::ActiveModel {
+            uuid: Set(id),
+            id: Set(Some(id.to_string())),
+            name: Set((*name).to_string()),
+            address1: Set(None),
+            address2: Set(None),
+            city: Set(None),
+            state: Set(None),
+            postal_code: Set(None),
+            country_code: Set(None),
+            contact_name: Set(None),
+            contact_email: Set(None),
+            contact_phone: Set(None),
+            access_notes: Set(None),
+            parking_load_in: Set(None),
+            network_power: Set(None),
+            // `pantry-storage` distinguishes these from real venues; the
+            // pantry surfaces filter on this string.
+            venue_type: Set(Some("pantry-storage".to_string())),
+            default_files: Set(VenueDefaultList::default()),
+            spaces: Set(SpaceList::default()),
+            tags: Set(LocationTagList::default()),
+            properties: Set(JsonObject::default()),
+            date_created: Set(Some(now)),
+            date_modified: Set(Some(now)),
+            deleted_at: Set(None),
+            body: Set(String::new()),
+        };
+        location::Entity::insert(active).exec(db).await?;
+        summary.locations_created += 1;
+    }
+    Ok(())
+}
+
+async fn seed_pantry(db: &DatabaseConnection, summary: &mut DemoSeedSummary) -> Result<(), DbErr> {
+    let now = Utc::now();
+    let today = now.date_naive();
+    let pantry_shelf = demo_id("location:pantry-shelf");
+    let fridge = demo_id("location:refrigerator");
+    let freezer = demo_id("location:freezer");
+
+    struct Fix {
+        key: &'static str,
+        food_key: &'static str,
+        product_key: Option<&'static str>,
+        location_id: Uuid,
+        quantity: f64,
+        unit: &'static str,
+        expiration_offset_days: Option<i64>,
+        min_stock: Option<f64>,
+    }
+    let pantry_shelf_id = pantry_shelf;
+    let fridge_id = fridge;
+    let freezer_id = freezer;
+    let fixtures: &[Fix] = &[
+        Fix {
+            key: "pantry:olive-oil-shelf",
+            food_key: "food:olive-oil",
+            product_key: Some("food_product:bertolli-evoo-500ml"),
+            location_id: pantry_shelf_id,
+            quantity: 500.0,
+            unit: "ml",
+            expiration_offset_days: Some(365),
+            min_stock: Some(100.0),
+        },
+        Fix {
+            key: "pantry:kosher-salt-shelf",
+            food_key: "food:kosher-salt",
+            product_key: None,
+            location_id: pantry_shelf_id,
+            quantity: 1.0,
+            unit: "kg",
+            expiration_offset_days: None,
+            min_stock: Some(0.2),
+        },
+        Fix {
+            key: "pantry:flour-shelf",
+            food_key: "food:all-purpose-flour",
+            product_key: None,
+            location_id: pantry_shelf_id,
+            quantity: 2.0,
+            unit: "kg",
+            expiration_offset_days: Some(180),
+            min_stock: Some(0.5),
+        },
+        Fix {
+            key: "pantry:sugar-shelf",
+            food_key: "food:white-sugar",
+            product_key: None,
+            location_id: pantry_shelf_id,
+            quantity: 1.5,
+            unit: "kg",
+            expiration_offset_days: None,
+            min_stock: Some(0.5),
+        },
+        Fix {
+            key: "pantry:garlic-powder-shelf",
+            food_key: "food:garlic-powder",
+            product_key: None,
+            location_id: pantry_shelf_id,
+            quantity: 80.0,
+            unit: "g",
+            expiration_offset_days: Some(540),
+            min_stock: Some(20.0),
+        },
+        Fix {
+            key: "pantry:paprika-shelf",
+            food_key: "food:smoked-paprika",
+            product_key: None,
+            location_id: pantry_shelf_id,
+            quantity: 60.0,
+            unit: "g",
+            expiration_offset_days: Some(540),
+            min_stock: Some(20.0),
+        },
+        // Low-stock fixture: quantity <= min_stock so the low-stock
+        // report has something to surface.
+        Fix {
+            key: "pantry:soy-sauce-shelf",
+            food_key: "food:soy-sauce",
+            product_key: None,
+            location_id: pantry_shelf_id,
+            quantity: 50.0,
+            unit: "ml",
+            expiration_offset_days: Some(365),
+            min_stock: Some(100.0),
+        },
+        // Expiring-soon fixture (5 days).
+        Fix {
+            key: "pantry:eggs-fridge",
+            food_key: "food:eggs",
+            product_key: Some("food_product:vital-farms-eggs-dozen"),
+            location_id: fridge_id,
+            quantity: 12.0,
+            unit: "piece",
+            expiration_offset_days: Some(5),
+            min_stock: Some(4.0),
+        },
+        Fix {
+            key: "pantry:butter-fridge",
+            food_key: "food:butter",
+            product_key: None,
+            location_id: fridge_id,
+            quantity: 454.0,
+            unit: "g",
+            expiration_offset_days: Some(45),
+            min_stock: Some(100.0),
+        },
+        Fix {
+            key: "pantry:feta-fridge",
+            food_key: "food:feta-cheese",
+            product_key: None,
+            location_id: fridge_id,
+            quantity: 200.0,
+            unit: "g",
+            expiration_offset_days: Some(20),
+            min_stock: None,
+        },
+        Fix {
+            key: "pantry:milk-fridge",
+            food_key: "food:whole-milk",
+            product_key: None,
+            location_id: fridge_id,
+            quantity: 1.0,
+            unit: "l",
+            expiration_offset_days: Some(10),
+            min_stock: Some(0.5),
+        },
+        Fix {
+            key: "pantry:chicken-thighs-freezer",
+            food_key: "food:chicken-thigh",
+            product_key: None,
+            location_id: freezer_id,
+            quantity: 1.0,
+            unit: "kg",
+            expiration_offset_days: Some(60),
+            min_stock: Some(0.5),
+        },
+        Fix {
+            key: "pantry:ground-beef-freezer",
+            food_key: "food:ground-beef",
+            product_key: None,
+            location_id: freezer_id,
+            quantity: 0.5,
+            unit: "kg",
+            expiration_offset_days: Some(45),
+            min_stock: Some(0.5),
+        },
+    ];
+
+    for f in fixtures {
+        let id = demo_id(f.key);
+        if pantry::Entity::find_by_id(id).one(db).await?.is_some() {
+            summary.pantry_items_unchanged += 1;
+            continue;
+        }
+        let expiration = f.expiration_offset_days.map(|d| today + Duration::days(d));
+        let active = pantry::ActiveModel {
+            id: Set(id),
+            food_id: Set(Some(demo_id(f.food_key))),
+            product_id: Set(f.product_key.map(demo_id)),
+            location_id: Set(Some(f.location_id)),
+            quantity: Set(f.quantity),
+            unit: Set(f.unit.to_string()),
+            expiration_date: Set(expiration),
+            opened_at: Set(None),
+            min_stock: Set(f.min_stock),
+            purchased_at: Set(Some(today - Duration::days(2))),
+            notes: Set(None),
+            organization: Set(Some(ORG_PERSONAL.to_string())),
+            properties: Set(JsonObject::default()),
+            created_at: Set(now),
+            updated_at: Set(now),
+        };
+        pantry::Entity::insert(active).exec(db).await?;
+        summary.pantry_items_created += 1;
     }
     Ok(())
 }

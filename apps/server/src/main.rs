@@ -920,6 +920,15 @@ impl ServerContext {
         })
     }
 
+    fn pantry_service(&self) -> task_core::service_impl::PantryServiceImpl {
+        task_core::service_impl::PantryServiceImpl::new(
+            task_core::service_impl::PantryServiceDeps {
+                db: self.db.clone(),
+                openfoodfacts: self.openfoodfacts.clone(),
+            },
+        )
+    }
+
     fn conversation_service(&self) -> task_core::ConversationServiceImpl {
         task_core::ConversationServiceImpl::new(task_core::service_impl::ConversationServiceDeps {
             provider: self.talk.clone(),
@@ -1222,6 +1231,18 @@ async fn handle_vox_connection(socket: WebSocket, state: AppState, auth: VoxAuth
                         .handle_with(task_core::FoodServiceDispatcher::new(ctx.food_service()));
                     Ok(())
                 }
+                "PantryService" => {
+                    connection.handle_with(task_core::PantryServiceDispatcher::new(
+                        ctx.pantry_service(),
+                    ));
+                    Ok(())
+                }
+                "PantryItemRepo" => {
+                    connection.handle_with(task_core::pantry::PantryItemRepoDispatcher::new(
+                        task_core::pantry::PantryItemRepoStorage::new(db.clone()),
+                    ));
+                    Ok(())
+                }
                 "FoodRepo" => {
                     connection.handle_with(task_core::food::FoodRepoDispatcher::new(
                         task_core::food::FoodRepoStorage::new(db.clone()),
@@ -1386,6 +1407,8 @@ impl task_core::service::SystemService for ServerSystemService {
                 "FoodService".into(),
                 "FoodRepo".into(),
                 "FoodProductRepo".into(),
+                "PantryService".into(),
+                "PantryItemRepo".into(),
                 "RecipeRepo".into(),
                 "RecipeIngredientRepo".into(),
                 "RecipeStepRepo".into(),
