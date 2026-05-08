@@ -782,47 +782,48 @@ pub fn update_panels() {
             let w = (rect.right - rect.left).unsigned_abs();
             let h = (rect.bottom - rect.top).unsigned_abs();
 
-            if w > 0 && h > 0 {
-                if let Some(view) = &mut panel.view {
-                    let (cur_w, cur_h) = view.size();
-                    if w != cur_w || h != cur_h {
-                        view.resize(w, h);
+            if w > 0
+                && h > 0
+                && let Some(view) = &mut panel.view
+            {
+                let (cur_w, cur_h) = view.size();
+                if w != cur_w || h != cur_h {
+                    view.resize(w, h);
+                }
+
+                // Cursor polling hack removed — WM_MOUSEMOVE reaches our
+                // wndproc directly now that we render offscreen instead
+                // of via an X11 child that absorbed events.
+
+                // Belt-and-braces for REAPER <6.29 (pre-hwnd_info): swap
+                // the SWELL class to TEXT_INPUT_CLASS while a text field
+                // has focus so REAPER suppresses global hotkeys. The
+                // hwnd_info hook already does this on 6.29+; this is
+                // extra insurance for older versions.
+                let wants = view.focused_is_text_input();
+                if wants != panel.wants_text_input {
+                    panel.wants_text_input = wants;
+                    let class = if wants {
+                        TEXT_INPUT_CLASS
+                    } else {
+                        DEFAULT_CLASS
+                    };
+                    unsafe {
+                        swell.SWELL_SetClassName(
+                            panel.hwnd,
+                            class.as_ptr() as *const std::os::raw::c_char,
+                        );
                     }
+                    tracing::trace!(panel = panel.config.id, wants, "SWELL class swap");
+                }
 
-                    // Cursor polling hack removed — WM_MOUSEMOVE reaches our
-                    // wndproc directly now that we render offscreen instead
-                    // of via an X11 child that absorbed events.
+                view.update();
 
-                    // Belt-and-braces for REAPER <6.29 (pre-hwnd_info): swap
-                    // the SWELL class to TEXT_INPUT_CLASS while a text field
-                    // has focus so REAPER suppresses global hotkeys. The
-                    // hwnd_info hook already does this on 6.29+; this is
-                    // extra insurance for older versions.
-                    let wants = view.focused_is_text_input();
-                    if wants != panel.wants_text_input {
-                        panel.wants_text_input = wants;
-                        let class = if wants {
-                            TEXT_INPUT_CLASS
-                        } else {
-                            DEFAULT_CLASS
-                        };
-                        unsafe {
-                            swell.SWELL_SetClassName(
-                                panel.hwnd,
-                                class.as_ptr() as *const std::os::raw::c_char,
-                            );
-                        }
-                        tracing::trace!(panel = panel.config.id, wants, "SWELL class swap");
-                    }
-
-                    view.update();
-
-                    // In offscreen mode, a completed frame means new pixels
-                    // are ready; tell SWELL to post WM_PAINT so we can blit.
-                    if view.take_needs_blit() {
-                        unsafe {
-                            swell.InvalidateRect(panel.hwnd, std::ptr::null(), 0);
-                        }
+                // In offscreen mode, a completed frame means new pixels
+                // are ready; tell SWELL to post WM_PAINT so we can blit.
+                if view.take_needs_blit() {
+                    unsafe {
+                        swell.InvalidateRect(panel.hwnd, std::ptr::null(), 0);
                     }
                 }
             }
