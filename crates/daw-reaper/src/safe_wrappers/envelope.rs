@@ -10,7 +10,10 @@
 //! All functions take `&Reaper` (low-level) so callers don't have to
 //! re-deref the pointer chain. Pointers (`MediaTrack`, `TrackEnvelope`)
 //! are passed through unchanged — REAPER guarantees their stability for
-//! the lifetime of the project.
+//! the lifetime of the project. Each function null-checks before
+//! dereffing, so passing dangling/null pointers is defined behavior
+//! (returns `None` / `false` / `0`).
+#![allow(clippy::not_unsafe_ptr_arg_deref)]
 
 use reaper_low::Reaper;
 use reaper_low::raw::{MediaTrack, TrackEnvelope};
