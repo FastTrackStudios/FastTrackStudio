@@ -58,6 +58,109 @@ pub(crate) enum CookCommands {
         #[command(subcommand)]
         command: PantryCommands,
     },
+    /// Daily food log (nutrition diary).
+    Log {
+        #[command(subcommand)]
+        command: LogCommands,
+    },
+    /// Recipe + daily / weekly nutrition aggregates.
+    Nutrition {
+        #[command(subcommand)]
+        command: NutritionCommands,
+    },
+}
+
+// ── Log ─────────────────────────────────────────────────────────────
+
+#[derive(Subcommand)]
+pub(crate) enum LogCommands {
+    /// Add a food log entry. Provide quantity + unit + food, or use
+    /// `--barcode` / `--food-id` / `--product-id` for catalog lookups.
+    Add {
+        /// Quantity (e.g. `2`).
+        quantity: f64,
+        /// Unit (e.g. `g`, `cup`, `oz`).
+        unit: String,
+        /// Free-form food name (`scrambled eggs`).
+        food: Option<String>,
+        #[arg(long)]
+        date: Option<String>,
+        #[arg(long, default_value = "other")]
+        meal: String,
+        #[arg(long)]
+        barcode: Option<String>,
+        #[arg(long = "food-id")]
+        food_id: Option<String>,
+        #[arg(long = "product-id")]
+        product_id: Option<String>,
+        #[arg(long)]
+        organization: Option<String>,
+        #[arg(long)]
+        notes: Option<String>,
+    },
+    /// List log rows.
+    Show {
+        #[arg(long)]
+        date: Option<String>,
+        #[arg(long)]
+        from: Option<String>,
+        #[arg(long)]
+        to: Option<String>,
+        #[arg(long)]
+        organization: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Edit a log row.
+    Update {
+        log_id: String,
+        #[arg(long = "quantity-grams")]
+        quantity_grams: Option<f64>,
+        #[arg(long)]
+        kcal: Option<f64>,
+        #[arg(long)]
+        protein: Option<f64>,
+        #[arg(long)]
+        carbs: Option<f64>,
+        #[arg(long)]
+        fat: Option<f64>,
+        #[arg(long)]
+        notes: Option<String>,
+    },
+    Delete {
+        log_id: String,
+    },
+}
+
+// ── Nutrition ───────────────────────────────────────────────────────
+
+#[derive(Subcommand)]
+pub(crate) enum NutritionCommands {
+    /// Sum every log row for today.
+    Today {
+        #[arg(long)]
+        organization: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Per-day breakdown for a 7-day window.
+    Week {
+        #[arg(long)]
+        from: Option<String>,
+        #[arg(long)]
+        organization: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Print a recipe's cached nutrition_summary; with `--recompute` it
+    /// is re-aggregated first.
+    Recipe {
+        recipe: String,
+        #[arg(long)]
+        recompute: bool,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 // ── Food ────────────────────────────────────────────────────────────
@@ -392,6 +495,15 @@ pub(crate) enum PlanCommands {
     Delete {
         entry_id: String,
     },
+    /// Mark a meal-plan entry as cooked: snapshots nutrition into a
+    /// FoodLog row.
+    MarkCooked {
+        entry_id: String,
+        #[arg(long)]
+        servings: Option<u32>,
+        #[arg(long)]
+        actor: Option<String>,
+    },
 }
 
 // ── Shop ────────────────────────────────────────────────────────────
@@ -489,7 +601,236 @@ pub(crate) async fn run_remote_cook_command(
             let cooking_client = remote.cooking().await?;
             run_pantry(&pantry_client, &cooking_client, command).await
         }
+        CookCommands::Log { command } => {
+            let client = remote.nutrition().await?;
+            run_log(&client, actor, command).await
+        }
+        CookCommands::Nutrition { command } => run_nutrition(remote, command).await,
     }
+}
+
+// ── Log handlers ────────────────────────────────────────────────────
+
+fn parse_date_or_today(value: Option<String>) -> eyre::Result<NaiveDate> {
+    match value {
+        Some(s) => NaiveDate::parse_from_str(&s, "%Y-%m-%d")
+            .map_err(|e| eyre::eyre!("invalid date '{s}': {e}")),
+        None => Ok(chrono::Local::now().date_naive()),
+    }
+}
+
+async fn run_log(
+    client: &task_core::service::NutritionServiceClient,
+    actor: Option<&str>,
+    command: LogCommands,
+) -> eyre::Result<()> {
+    use task_core::service::{FoodLogPatch, LogFoodRequest, LogListRequest};
+    match command {
+        LogCommands::Add {
+            quantity,
+            unit,
+            food,
+            date,
+            meal,
+            barcode,
+            food_id,
+            product_id,
+            organization,
+            notes,
+        } => {
+            let date = parse_date_or_today(date)?;
+            let req = LogFoodRequest {
+                date,
+                meal_type: meal,
+                organization,
+                food_id: food_id.as_deref().map(Uuid::parse_str).transpose()?,
+                food_name: food,
+                product_id: product_id.as_deref().map(Uuid::parse_str).transpose()?,
+                barcode,
+                quantity,
+                unit,
+                notes,
+                created_by: actor.map(str::to_string),
+            };
+            let row = client
+                .log_food(req)
+                .await
+                .map_err(|e| eyre::eyre!("log_food: {e}"))?;
+            println!("logged: {} ({:?} kcal)", row.food_name, row.kcal);
+        }
+        LogCommands::Show {
+            date,
+            from,
+            to,
+            organization,
+            json,
+        } => {
+            let from_date = match (date.clone(), from) {
+                (Some(d), _) | (None, Some(d)) => NaiveDate::parse_from_str(&d, "%Y-%m-%d")?,
+                _ => chrono::Local::now().date_naive(),
+            };
+            let to_date = match (date, to) {
+                (Some(d), _) => NaiveDate::parse_from_str(&d, "%Y-%m-%d")?,
+                (_, Some(d)) => NaiveDate::parse_from_str(&d, "%Y-%m-%d")?,
+                _ => from_date,
+            };
+            let rows = client
+                .list_log(LogListRequest {
+                    organization,
+                    from_date,
+                    to_date,
+                })
+                .await
+                .map_err(|e| eyre::eyre!("list_log: {e}"))?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&rows)?);
+            } else {
+                for r in &rows {
+                    println!(
+                        "{}  {:?}  {}  {:.1}g  kcal={:?}",
+                        r.date, r.meal_type, r.food_name, r.quantity_grams, r.kcal
+                    );
+                }
+                println!("({} rows)", rows.len());
+            }
+        }
+        LogCommands::Update {
+            log_id,
+            quantity_grams,
+            kcal,
+            protein,
+            carbs,
+            fat,
+            notes,
+        } => {
+            let id = Uuid::parse_str(&log_id)?;
+            let row = client
+                .update_log(
+                    id,
+                    FoodLogPatch {
+                        quantity_grams,
+                        kcal,
+                        protein_g: protein,
+                        carbs_g: carbs,
+                        fat_g: fat,
+                        notes,
+                    },
+                )
+                .await
+                .map_err(|e| eyre::eyre!("update_log: {e}"))?;
+            println!("updated: {}", row.id);
+        }
+        LogCommands::Delete { log_id } => {
+            let id = Uuid::parse_str(&log_id)?;
+            client
+                .delete_log(id)
+                .await
+                .map_err(|e| eyre::eyre!("delete_log: {e}"))?;
+            println!("deleted {id}");
+        }
+    }
+    Ok(())
+}
+
+async fn run_nutrition(remote: &RemoteVoxConfig, command: NutritionCommands) -> eyre::Result<()> {
+    match command {
+        NutritionCommands::Today { organization, json } => {
+            let client = remote.nutrition().await?;
+            let date = chrono::Local::now().date_naive();
+            let totals = client
+                .daily_totals(organization, date)
+                .await
+                .map_err(|e| eyre::eyre!("daily_totals: {e}"))?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&totals)?);
+            } else {
+                println!(
+                    "{}: kcal={:.0} P={:.1}g C={:.1}g F={:.1}g  ({} rows)",
+                    totals.date,
+                    totals.kcal,
+                    totals.protein_g,
+                    totals.carbs_g,
+                    totals.fat_g,
+                    totals.log_count,
+                );
+            }
+        }
+        NutritionCommands::Week {
+            from,
+            organization,
+            json,
+        } => {
+            let client = remote.nutrition().await?;
+            let from_date = parse_date_or_today(from)?;
+            let summary = client
+                .weekly_summary(organization, from_date)
+                .await
+                .map_err(|e| eyre::eyre!("weekly_summary: {e}"))?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&summary)?);
+            } else {
+                for d in &summary.days {
+                    println!(
+                        "{}: kcal={:.0} P={:.1}g C={:.1}g F={:.1}g",
+                        d.date, d.kcal, d.protein_g, d.carbs_g, d.fat_g
+                    );
+                }
+                let a = &summary.averages;
+                println!(
+                    "avg/day: kcal={:.0} P={:.1}g C={:.1}g F={:.1}g",
+                    a.kcal, a.protein_g, a.carbs_g, a.fat_g
+                );
+            }
+        }
+        NutritionCommands::Recipe {
+            recipe,
+            recompute,
+            json,
+        } => {
+            let client = remote.cooking().await?;
+            let id = if let Ok(uuid) = Uuid::parse_str(&recipe) {
+                uuid
+            } else {
+                resolve_recipe_id(&client, &recipe).await?
+            };
+            if recompute {
+                let view = client
+                    .recompute_recipe_nutrition(id)
+                    .await
+                    .map_err(|e| eyre::eyre!("recompute_recipe_nutrition: {e}"))?;
+                if json {
+                    println!("{}", serde_json::to_string_pretty(&view)?);
+                } else {
+                    println!("recipe: {} ({})", view.recipe_name, view.recipe_id);
+                    println!("total: {}", view.total_json);
+                    if let Some(p) = &view.per_serving_json {
+                        println!("per serving: {p}");
+                    }
+                    for w in &view.warnings {
+                        println!("warning: {w}");
+                    }
+                }
+                return Ok(());
+            }
+            let recipe_with = client
+                .get_recipe(id)
+                .await
+                .map_err(|e| eyre::eyre!("get_recipe: {e}"))?
+                .ok_or_else(|| eyre::eyre!("recipe not found: {id}"))?;
+            // RecipeApi doesn't carry nutrition_summary in list; we just
+            // print the recipe id + name and ask the user to recompute.
+            if json {
+                println!("{}", serde_json::to_string_pretty(&recipe_with.recipe)?);
+            } else {
+                println!(
+                    "recipe: {} ({})",
+                    recipe_with.recipe.name, recipe_with.recipe.id
+                );
+                println!("(use --recompute to refresh and print the nutrition summary)");
+            }
+        }
+    }
+    Ok(())
 }
 
 // ── Food handlers ───────────────────────────────────────────────────
@@ -1132,6 +1473,25 @@ async fn run_plan(
                 .await
                 .map_err(|e| eyre::eyre!("delete_meal_plan_entry: {e}"))?;
             println!("Deleted.");
+        }
+        PlanCommands::MarkCooked {
+            entry_id,
+            servings,
+            actor: explicit_actor,
+        } => {
+            let id = Uuid::parse_str(&entry_id)?;
+            let req = task_core::service::MarkMealPlanCookedRequest {
+                meal_plan_entry_id: id,
+                servings_consumed: servings,
+                created_by: explicit_actor.or_else(|| actor.map(str::to_string)),
+            };
+            let ids = client
+                .mark_meal_plan_cooked(req)
+                .await
+                .map_err(|e| eyre::eyre!("mark_meal_plan_cooked: {e}"))?;
+            for log_id in ids {
+                println!("food_log: {log_id}");
+            }
         }
     }
     Ok(())

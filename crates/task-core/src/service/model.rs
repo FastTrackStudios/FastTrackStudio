@@ -1835,7 +1835,7 @@ pub trait CookingService {
     ) -> Result<Vec<Uuid>, VaultError>;
 }
 
-#[derive(Debug, Clone, Default, facet::Facet)]
+#[derive(Debug, Clone, Default, facet::Facet, serde::Serialize, serde::Deserialize)]
 pub struct AggregatedNutritionView {
     pub recipe_id: Uuid,
     pub recipe_name: String,
@@ -2388,7 +2388,7 @@ pub struct FoodLogPatch {
     pub notes: Option<String>,
 }
 
-#[derive(Debug, Clone, Default, facet::Facet)]
+#[derive(Debug, Clone, Default, facet::Facet, serde::Serialize, serde::Deserialize)]
 pub struct DailyTotalsView {
     pub date: chrono::NaiveDate,
     pub kcal: f64,
@@ -2400,7 +2400,7 @@ pub struct DailyTotalsView {
     pub log_count: u32,
 }
 
-#[derive(Debug, Clone, Default, facet::Facet)]
+#[derive(Debug, Clone, Default, facet::Facet, serde::Serialize, serde::Deserialize)]
 pub struct WeeklySummaryView {
     pub days: Vec<DailyTotalsView>,
     /// `averages.date` is the `from_date` (sentinel — ignore).
