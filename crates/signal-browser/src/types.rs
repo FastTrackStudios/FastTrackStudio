@@ -1,14 +1,14 @@
 //! Type definitions for the collection browser.
 
+use signal::SignalChain;
 use signal::metadata::Metadata as MetadataModel;
 use signal::rig::RigType;
 use signal::tagging::{TagCategory, TagSet};
-use signal::SignalChain;
 
 // region: --- Navigation & Sort
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum NavCategory {
+pub enum NavCategory {
     Presets,
     Engines,
     Layers,
@@ -34,20 +34,10 @@ impl NavCategory {
             Self::Blocks => "Blocks",
         }
     }
-
-    pub fn accent(self) -> &'static str {
-        match self {
-            Self::Presets => "from-amber-500 via-orange-400 to-red-500",
-            Self::Engines => "from-rose-500 via-pink-400 to-fuchsia-500",
-            Self::Layers => "from-emerald-500 via-teal-400 to-cyan-500",
-            Self::Modules => "from-blue-500 via-indigo-400 to-violet-500",
-            Self::Blocks => "from-orange-500 via-amber-400 to-yellow-500",
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum SortMode {
+pub enum SortMode {
     Name,
     NameDesc,
     Variants,
@@ -90,7 +80,7 @@ impl SortMode {
 // region: --- Column & Detail
 
 #[derive(Clone, PartialEq)]
-pub(super) struct ColumnItem {
+pub struct ColumnItem {
     pub id: String,
     pub name: String,
     pub subtitle: Option<String>,
@@ -107,7 +97,7 @@ pub(super) struct ColumnItem {
 }
 
 #[derive(Clone, PartialEq)]
-pub(super) struct DetailParam {
+pub struct DetailParam {
     pub name: String,
     pub value: f32,
 }
@@ -139,7 +129,7 @@ pub struct EngineFlowData {
 
 /// Nested detail data for the detail panel.
 #[derive(Clone, PartialEq, Default)]
-pub(super) struct DetailData {
+pub struct DetailData {
     /// Standalone parameters (block snapshots).
     pub params: Vec<DetailParam>,
     /// Raw signal chain for grid rendering (module snapshots).
@@ -154,7 +144,7 @@ pub(super) struct DetailData {
 
 // region: --- Constants
 
-pub(super) const RIG_TYPES: &[RigType] = &[
+pub const RIG_TYPES: &[RigType] = &[
     RigType::Guitar,
     RigType::Bass,
     RigType::Keys,
@@ -164,7 +154,7 @@ pub(super) const RIG_TYPES: &[RigType] = &[
 ];
 
 /// The filterable tag categories shown as chip filters in the toolbar.
-pub(super) const FILTER_CATEGORIES: &[TagCategory] = &[
+pub const FILTER_CATEGORIES: &[TagCategory] = &[
     TagCategory::Tone,
     TagCategory::Character,
     TagCategory::Genre,
@@ -178,3 +168,43 @@ pub(super) const FILTER_CATEGORIES: &[TagCategory] = &[
 ];
 
 // endregion: --- Constants
+
+// region: --- GridSlot (headless data type)
+
+/// A single cell in the grid. Pure data — rendered by signal-ui's
+/// `DynamicGridView`, but built up by the headless conversion functions
+/// in `grid_conversion`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GridSlot {
+    pub id: uuid::Uuid,
+    pub block_type: signal::BlockType,
+    pub block_preset_name: Option<String>,
+    pub plugin_name: Option<String>,
+    /// Grid column position (0-indexed).
+    pub col: usize,
+    /// Grid row position (0-indexed).
+    pub row: usize,
+    /// Module group key — slots with the same key are grouped visually.
+    pub module_group: Option<String>,
+    /// Module type for coloring the group container.
+    pub module_type: Option<signal::ModuleType>,
+    /// Layer group key — modules within the same layer share this key.
+    pub layer_group: Option<String>,
+    /// Engine group key — layers within the same engine share this key.
+    pub engine_group: Option<String>,
+    /// True when the block has no plugin loaded yet (template placeholder).
+    pub is_template: bool,
+    /// True when the block is bypassed (signal passes through unprocessed).
+    pub bypassed: bool,
+    /// Phantom slot — participates in layout (group bounds, grid sizing)
+    /// but does not render a visible cell. Used for dry pass-through lanes.
+    pub is_phantom: bool,
+    /// Resolved block parameters (name, value 0..1) for the inspector panel.
+    pub parameters: Vec<(String, f32)>,
+    /// Preset ID this block was loaded from (for save-back). `None` for inline/template blocks.
+    pub preset_id: Option<String>,
+    /// Snapshot ID this block was loaded from. `None` for default snapshots or inline blocks.
+    pub snapshot_id: Option<String>,
+}
+
+// endregion: --- GridSlot

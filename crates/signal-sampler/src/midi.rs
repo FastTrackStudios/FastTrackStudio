@@ -7,31 +7,44 @@
 use crate::SamplerError;
 
 const NOTE_NAMES: &[(&str, u8)] = &[
-    ("C",  0), ("C#", 1), ("Db", 1),
-    ("D",  2), ("D#", 3), ("Eb", 3),
-    ("E",  4),
-    ("F",  5), ("F#", 6), ("Gb", 6),
-    ("G",  7), ("G#", 8), ("Ab", 8),
-    ("A",  9), ("A#", 10), ("Bb", 10),
-    ("B",  11),
+    ("C", 0),
+    ("C#", 1),
+    ("Db", 1),
+    ("D", 2),
+    ("D#", 3),
+    ("Eb", 3),
+    ("E", 4),
+    ("F", 5),
+    ("F#", 6),
+    ("Gb", 6),
+    ("G", 7),
+    ("G#", 8),
+    ("Ab", 8),
+    ("A", 9),
+    ("A#", 10),
+    ("Bb", 10),
+    ("B", 11),
 ];
 
 /// Parse a note name like "G2", "C#4", "A#-1" to a MIDI note number.
 /// Middle C (C4) = 60.
 pub fn note_name_to_midi(name: &str) -> Result<u8, SamplerError> {
     // Split into pitch class + octave:  e.g. "C#" + "4"
-    let (pc, oct_str) = if name.len() >= 2 && (name.as_bytes()[1] == b'#' || name.as_bytes()[1] == b'b') {
-        (&name[..2], &name[2..])
-    } else {
-        (&name[..1], &name[1..])
-    };
+    let (pc, oct_str) =
+        if name.len() >= 2 && (name.as_bytes()[1] == b'#' || name.as_bytes()[1] == b'b') {
+            (&name[..2], &name[2..])
+        } else {
+            (&name[..1], &name[1..])
+        };
 
-    let semitone = NOTE_NAMES.iter()
+    let semitone = NOTE_NAMES
+        .iter()
         .find(|(n, _)| n.eq_ignore_ascii_case(pc))
         .map(|(_, s)| *s)
         .ok_or_else(|| SamplerError::BadNoteName(name.to_string()))?;
 
-    let octave: i32 = oct_str.parse()
+    let octave: i32 = oct_str
+        .parse()
         .map_err(|_| SamplerError::BadNoteName(name.to_string()))?;
 
     let midi = (octave + 1) * 12 + semitone as i32;
@@ -45,7 +58,9 @@ pub fn note_name_to_midi(name: &str) -> Result<u8, SamplerError> {
 /// Convert a MIDI note number to its standard name in the note grid.
 /// Returns e.g. "G#" for note class 8.
 pub fn midi_to_note_class(midi: u8) -> &'static str {
-    const CLASSES: &[&str] = &["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+    const CLASSES: &[&str] = &[
+        "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
+    ];
     CLASSES[(midi % 12) as usize]
 }
 
@@ -60,12 +75,7 @@ pub fn midi_to_octave(midi: u8) -> i32 {
 /// describing which pitch classes are sampled. The function finds the closest
 /// note in the grid (in semitone distance) across all octaves within the range
 /// `[lowest, highest]`, then returns that MIDI note number.
-pub fn nearest_grid_note(
-    target: u8,
-    grid: &[String],
-    lowest: u8,
-    highest: u8,
-) -> u8 {
+pub fn nearest_grid_note(target: u8, grid: &[String], lowest: u8, highest: u8) -> u8 {
     let mut best = lowest;
     let mut best_dist = u8::MAX;
 
@@ -80,7 +90,9 @@ pub fn nearest_grid_note(
             }
         }
         candidate = candidate.saturating_add(1);
-        if candidate == 0 { break; } // overflow guard
+        if candidate == 0 {
+            break;
+        } // overflow guard
     }
     best
 }
@@ -101,7 +113,10 @@ mod tests {
     #[test]
     fn test_nearest_grid() {
         // G whole-tone grid (CSS violins)
-        let grid: Vec<String> = ["G","A","B","C#","D#","F"].iter().map(|s| s.to_string()).collect();
+        let grid: Vec<String> = ["G", "A", "B", "C#", "D#", "F"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
         // G2 = 43, A2 = 45, B2 = 47
         let lowest = note_name_to_midi("G2").unwrap();
         let highest = note_name_to_midi("C#6").unwrap();

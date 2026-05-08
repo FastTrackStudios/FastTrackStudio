@@ -3,10 +3,12 @@ members = [
     "apps/cli",
     "apps/desktop",
     "apps/mobile",
+    "apps/tui",
     "crates/macromod",
     "crates/nam-manager",
     "crates/signal",
     "crates/signal-audio",
+    "crates/signal-browser",
     "crates/signal-controller",
     "crates/signal-daw-bridge",
     "crates/signal-extension",
@@ -38,6 +40,8 @@ signal-desktop = { path = "apps/desktop" }
 signal-mobile = { path = "apps/mobile" }
 # UI crate (Dioxus components with feature flags)
 signal-ui = { path = "crates/signal-ui", default-features = false }
+# Headless browser data layer (no Dioxus) — consumed by signal-ui and future TUI/CLI.
+signal-browser = { path = "crates/signal-browser" }
 # NOTE: signal-proto, signal-controller, signal-live, signal-storage,
 # signal-import, signal-daw-bridge, nam-manager are INTERNAL.
 # Access them through the `signal` facade crate.
@@ -47,12 +51,12 @@ macromod       = { path = "crates/macromod" }
 signal-audio   = { path = "crates/signal-audio" }
 signal-sampler = { path = "crates/signal-sampler" }
 
-# ── DSP crates (FTS-Plugins) ─────────────────────────────────────────
+# ── DSP crates (split FTS plugin repos) ───────────────────────────────
 # Using local paths directly (same as [patch] overrides) to avoid
 # git submodule fetch issues with stale nih-plug submodule rev.
-eq-dsp = { path = "../FTS-Plugins/crates/fts-eq/eq-dsp" }
-comp-dsp = { path = "../FTS-Plugins/crates/fts-comp/comp-dsp" }
-fts-dsp = { path = "../FTS-Plugins/crates/fts-dsp" }
+eq-dsp = { path = "../Plugins/FTS-EQ/crates/eq-dsp" }
+comp-dsp = { path = "../Plugins/FTS-Comp/crates/comp-dsp" }
+fts-dsp = { path = "../Plugins/FTS-Audiocore/crates/fts-dsp" }
 cpal = "0.17"
 
 # ── Facet reflection ─────────────────────────────────────────────────
@@ -90,10 +94,11 @@ nih_plug = { git = "https://github.com/FastTrackStudios/nih-plug.git", branch = 
 # everywhere. Use open_standalone_with_state() in signal-desktop and
 # create_dioxus_editor_with_state() in fts-signal-plugin.
 nih_plug_dioxus = { git = "https://github.com/FastTrackStudios/nih-plug.git", branch = "reaper-embed-ui" }
-fts-plugin-core = { path = "../FTS-Plugins/crates/fts-plugin-core", default-features = false }
-audio-gui = { path = "../FTS-Plugins/crates/audio-gui" }
+fts-plugin-core = { path = "../Plugins/FTS-Audiocore/crates/fts-plugin-core", default-features = false }
+audio-gui = { path = "../Plugins/FTS-Audiocore/crates/audio-gui" }
 atomic_float = "1"
 crossbeam-channel = "0.5"
+midir = "0.10"
 
 # ── UI ────────────────────────────────────────────────────────────────
 dioxus = "=0.7.3"
@@ -144,18 +149,17 @@ clap = { version = "4", features = ["derive"] }
 # [patch."https://github.com/FastTrackStudios/fts-ui.git"]
 # fts-ui = { path = "../fts-ui/crates/fts-ui" }
 #
-# ── FTS-Plugins local overrides ─────────────────────────────────────────
+# ── Split FTS plugin repo local overrides ───────────────────────────────
 [patch."https://github.com/FastTrackStudios/FTS-Plugins.git"]
-eq-dsp = { path = "../FTS-Plugins/crates/fts-eq/eq-dsp" }
-comp-dsp = { path = "../FTS-Plugins/crates/fts-comp/comp-dsp" }
-fts-dsp = { path = "../FTS-Plugins/crates/fts-dsp" }
-audio-gui = { path = "../FTS-Plugins/crates/audio-gui" }
-fts-plugin-core = { path = "../FTS-Plugins/crates/fts-plugin-core" }
+eq-dsp = { path = "../Plugins/FTS-EQ/crates/eq-dsp" }
+comp-dsp = { path = "../Plugins/FTS-Comp/crates/comp-dsp" }
+fts-dsp = { path = "../Plugins/FTS-Audiocore/crates/fts-dsp" }
+audio-gui = { path = "../Plugins/FTS-Audiocore/crates/audio-gui" }
+fts-plugin-core = { path = "../Plugins/FTS-Audiocore/crates/fts-plugin-core" }
 
 # ── nih-plug unification ────────────────────────────────────────────────
 [patch."https://github.com/FastTrackStudios/nih-plug.git"]
-nih_plug = { path = "../FTS-Plugins/forks/nih-plug" }
-nih_plug_dioxus = { path = "../FTS-Plugins/forks/nih-plug/nih_plug_dioxus" }
+nih_plug = { path = "../forks/nih-plug" }
 
 # ── Blitz patches (FTS fork with post-processing support) ──────────────
 # Required by nih_plug_dioxus / audio-gui for embedded plugin UIs.

@@ -49,6 +49,9 @@ pub enum VoiceKind {
     Release,
     /// Short note (one-shot — plays to completion regardless of note-off).
     Short,
+    /// Zone-mode voice (Spectrasonics-style explicit-zone libraries).
+    /// Held until note-off, then released over `release_frames`.
+    Zoned,
 }
 
 // ── Voice ─────────────────────────────────────────────────────────────────────
@@ -99,6 +102,33 @@ impl Voice {
         release_frames: usize,
     ) -> Self {
         let rate = 2.0f64.powf(semitone_offset as f64 / 12.0);
+        Self {
+            data,
+            position: 0.0,
+            rate,
+            gain,
+            target_gain: gain,
+            gain_ramp_frames: 0,
+            state: VoiceState::Playing,
+            kind,
+            note,
+            release_frames,
+        }
+    }
+
+    /// Create a voice with an explicit playback rate.
+    ///
+    /// Used by the zone-mode path (Spectrasonics-style libraries) where pitch
+    /// shifting combines an integer semitone offset (note - root_key) with a
+    /// per-zone fine-tune in cents. Caller computes `rate = 2^(total_cents/1200)`.
+    pub fn with_rate(
+        data: Arc<SampleData>,
+        note: u8,
+        kind: VoiceKind,
+        rate: f64,
+        gain: f32,
+        release_frames: usize,
+    ) -> Self {
         Self {
             data,
             position: 0.0,
@@ -179,7 +209,9 @@ impl Voice {
 
         let frac = (self.position - frame_idx as f64) as f32;
         let (l0, r0) = self.data.frame(frame_idx);
-        let (l1, r1) = self.data.frame((frame_idx + 1).min(self.data.num_frames - 1));
+        let (l1, r1) = self
+            .data
+            .frame((frame_idx + 1).min(self.data.num_frames - 1));
 
         let l = l0 + (l1 - l0) * frac;
         let r = r0 + (r1 - r0) * frac;
@@ -202,7 +234,9 @@ impl Voice {
             output[i * 2] += l;
             output[i * 2 + 1] += r;
             rendered += 1;
-            if self.is_done() { break; }
+            if self.is_done() {
+                break;
+            }
         }
         rendered
     }
@@ -220,7 +254,9 @@ pub struct VoicePool {
 
 impl VoicePool {
     pub fn new() -> Self {
-        Self { voices: Vec::with_capacity(MAX_VOICES) }
+        Self {
+            voices: Vec::with_capacity(MAX_VOICES),
+        }
     }
 
     /// Add a voice, stealing the oldest if at capacity.
@@ -230,7 +266,11 @@ impl VoicePool {
 
         if self.voices.len() >= MAX_VOICES {
             // Steal: silence the oldest non-release voice
-            if let Some(idx) = self.voices.iter().position(|v| v.kind != VoiceKind::Release) {
+            if let Some(idx) = self
+                .voices
+                .iter()
+                .position(|v| v.kind != VoiceKind::Release)
+            {
                 self.voices.remove(idx);
             } else {
                 self.voices.remove(0);
@@ -263,7 +303,9 @@ impl VoicePool {
                 )
             {
                 v.ramp_gain(0.0, fade_frames);
-                v.state = VoiceState::Releasing { frames_remaining: fade_frames };
+                v.state = VoiceState::Releasing {
+                    frames_remaining: fade_frames,
+                };
             }
         }
     }
@@ -276,7 +318,9 @@ impl VoicePool {
         self.voices.retain(|v| !v.is_done());
     }
 
-    pub fn active_count(&self) -> usize { self.voices.len() }
+    pub fn active_count(&self) -> usize {
+        self.voices.len()
+    }
 
     /// Mutable iterator over all active voices (used by engine for CC1 updates).
     pub fn voices_mut(&mut self) -> &mut Vec<Voice> {

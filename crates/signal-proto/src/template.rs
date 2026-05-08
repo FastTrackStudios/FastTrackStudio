@@ -798,7 +798,7 @@ impl Templateable for crate::Module {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{seed_id, ModuleType};
+    use crate::{ModuleType, seed_id};
 
     type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
 

@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use signal::BlockType;
 
-use super::grid_model::{BlockWidget, GridBlock, GridJack, SignalFlowGrid, GRID_COLS, GRID_ROWS};
+use super::grid_model::{BlockWidget, GRID_COLS, GRID_ROWS, GridBlock, GridJack, SignalFlowGrid};
 
 use audio_controls::widgets::{
     CompressorGraph, CompressorParams, EqBand, EqBandShape, EqGraph, GateGraph, GateParams, Knob,

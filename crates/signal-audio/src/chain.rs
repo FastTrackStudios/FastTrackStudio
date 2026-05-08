@@ -3,9 +3,9 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
-use eq_dsp::filter_type::FilterType;
-use eq_dsp::EqChain;
 use comp_dsp::CompChain;
+use eq_dsp::EqChain;
+use eq_dsp::filter_type::FilterType;
 use fts_dsp::{AudioConfig, Processor};
 
 /// Shared EQ + Compressor processing chain.

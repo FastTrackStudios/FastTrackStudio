@@ -3,12 +3,12 @@
 //! Stereo passthrough that controls other FX on the same track.
 
 use std::num::NonZeroU32;
-use std::sync::atomic::{AtomicI32, AtomicU32, AtomicU8, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicI32, AtomicU8, AtomicU32, Ordering};
 
 use atomic_float::AtomicF32;
 use fts_plugin_core::prelude::*;
-use tracing_subscriber::{fmt, EnvFilter};
+use tracing_subscriber::{EnvFilter, fmt};
 
 use crate::param_queue::{self, ParamQueueConsumer, ParamQueueProducer};
 use signal_proto::ParamWriteRequest;
@@ -40,21 +40,19 @@ pub struct MacroBank {
 }
 
 /// The available macro banks. Add more as needed.
-pub static MACRO_BANKS: &[MacroBank] = &[
-    MacroBank {
-        name: "Default",
-        slots: [
-            MacroSlotConfig { name: "Macro 1" },
-            MacroSlotConfig { name: "Macro 2" },
-            MacroSlotConfig { name: "Macro 3" },
-            MacroSlotConfig { name: "Macro 4" },
-            MacroSlotConfig { name: "Macro 5" },
-            MacroSlotConfig { name: "Macro 6" },
-            MacroSlotConfig { name: "Macro 7" },
-            MacroSlotConfig { name: "Macro 8" },
-        ],
-    },
-];
+pub static MACRO_BANKS: &[MacroBank] = &[MacroBank {
+    name: "Default",
+    slots: [
+        MacroSlotConfig { name: "Macro 1" },
+        MacroSlotConfig { name: "Macro 2" },
+        MacroSlotConfig { name: "Macro 3" },
+        MacroSlotConfig { name: "Macro 4" },
+        MacroSlotConfig { name: "Macro 5" },
+        MacroSlotConfig { name: "Macro 6" },
+        MacroSlotConfig { name: "Macro 7" },
+        MacroSlotConfig { name: "Macro 8" },
+    ],
+}];
 
 // ── Parameters ──────────────────────────────────────────────────────
 
@@ -101,8 +99,14 @@ impl Default for ControllerParams {
 impl ControllerParams {
     pub fn macros(&self) -> [&FloatParam; NUM_MACROS] {
         [
-            &self.macro_0, &self.macro_1, &self.macro_2, &self.macro_3,
-            &self.macro_4, &self.macro_5, &self.macro_6, &self.macro_7,
+            &self.macro_0,
+            &self.macro_1,
+            &self.macro_2,
+            &self.macro_3,
+            &self.macro_4,
+            &self.macro_5,
+            &self.macro_6,
+            &self.macro_7,
         ]
     }
 
@@ -138,7 +142,9 @@ impl ControllerUiState {
             pending_write_count: AtomicU32::new(0),
             shm_connected: AtomicU32::new(0),
             macro_activity: std::array::from_fn(|_| AtomicF32::new(0.0)),
-            macro_labels: std::sync::RwLock::new(std::array::from_fn(|i| format!("Macro {}", i + 1))),
+            macro_labels: std::sync::RwLock::new(std::array::from_fn(|i| {
+                format!("Macro {}", i + 1)
+            })),
             macro_colors: std::sync::RwLock::new(std::array::from_fn(|_| String::new())),
             config_loaded: std::sync::atomic::AtomicBool::new(false),
             requested_scene: AtomicI32::new(-1),
@@ -148,10 +154,14 @@ impl ControllerUiState {
 
     pub fn macro_ptrs(&self) -> [ParamPtr; NUM_MACROS] {
         [
-            self.params.macro_0.as_ptr(), self.params.macro_1.as_ptr(),
-            self.params.macro_2.as_ptr(), self.params.macro_3.as_ptr(),
-            self.params.macro_4.as_ptr(), self.params.macro_5.as_ptr(),
-            self.params.macro_6.as_ptr(), self.params.macro_7.as_ptr(),
+            self.params.macro_0.as_ptr(),
+            self.params.macro_1.as_ptr(),
+            self.params.macro_2.as_ptr(),
+            self.params.macro_3.as_ptr(),
+            self.params.macro_4.as_ptr(),
+            self.params.macro_5.as_ptr(),
+            self.params.macro_6.as_ptr(),
+            self.params.macro_7.as_ptr(),
         ]
     }
 
@@ -225,10 +235,14 @@ impl FtsSignalController {
 
     fn read_macros(&self) -> [f32; NUM_MACROS] {
         [
-            self.params.macro_0.value(), self.params.macro_1.value(),
-            self.params.macro_2.value(), self.params.macro_3.value(),
-            self.params.macro_4.value(), self.params.macro_5.value(),
-            self.params.macro_6.value(), self.params.macro_7.value(),
+            self.params.macro_0.value(),
+            self.params.macro_1.value(),
+            self.params.macro_2.value(),
+            self.params.macro_3.value(),
+            self.params.macro_4.value(),
+            self.params.macro_5.value(),
+            self.params.macro_6.value(),
+            self.params.macro_7.value(),
         ]
     }
 }
@@ -315,11 +329,11 @@ impl Plugin for FtsSignalController {
         // ── 2. Process MIDI note events for scene switching ────────
         while let Some(event) = context.next_event() {
             if let NoteEvent::NoteOn { note, .. } = event {
-                if note >= SCENE_SWITCH_BASE_NOTE
-                    && note < SCENE_SWITCH_BASE_NOTE + MAX_SCENES
-                {
+                if note >= SCENE_SWITCH_BASE_NOTE && note < SCENE_SWITCH_BASE_NOTE + MAX_SCENES {
                     let scene = (note - SCENE_SWITCH_BASE_NOTE + 1) as i32;
-                    self.ui_state.requested_scene.store(scene, Ordering::Relaxed);
+                    self.ui_state
+                        .requested_scene
+                        .store(scene, Ordering::Relaxed);
                 }
             }
         }

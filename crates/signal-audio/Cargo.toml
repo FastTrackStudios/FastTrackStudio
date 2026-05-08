@@ -11,4 +11,6 @@ eq-dsp.workspace = true
 comp-dsp.workspace = true
 fts-dsp.workspace = true
 cpal = "0.17"
+midir.workspace = true
+crossbeam-channel.workspace = true
 tracing.workspace = true

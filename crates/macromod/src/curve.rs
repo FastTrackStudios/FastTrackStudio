@@ -44,10 +44,7 @@ pub struct MultiPointCurve {
 impl Default for MultiPointCurve {
     fn default() -> Self {
         Self {
-            points: vec![
-                CurvePoint::new(0.0, 0.0),
-                CurvePoint::new(1.0, 1.0),
-            ],
+            points: vec![CurvePoint::new(0.0, 0.0), CurvePoint::new(1.0, 1.0)],
         }
     }
 }
@@ -56,10 +53,7 @@ impl MultiPointCurve {
     /// Create a curve from min/max values (equivalent to the classic binding).
     pub fn min_max(min: f64, max: f64) -> Self {
         Self {
-            points: vec![
-                CurvePoint::new(0.0, min),
-                CurvePoint::new(1.0, max),
-            ],
+            points: vec![CurvePoint::new(0.0, min), CurvePoint::new(1.0, max)],
         }
     }
 

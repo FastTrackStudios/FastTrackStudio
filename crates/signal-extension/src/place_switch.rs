@@ -71,10 +71,8 @@ async fn place_switch(daw: &Daw, level: SwitchLevel) -> Result<()> {
     let all_tracks = tracks.all().await?;
 
     // Build a guid → Track lookup
-    let track_by_guid: std::collections::HashMap<&str, &daw::service::Track> = all_tracks
-        .iter()
-        .map(|t| (t.guid.as_str(), t))
-        .collect();
+    let track_by_guid: std::collections::HashMap<&str, &daw::service::Track> =
+        all_tracks.iter().map(|t| (t.guid.as_str(), t)).collect();
 
     // Find the selected track info
     let selected_info = track_by_guid
@@ -184,16 +182,10 @@ async fn find_section_and_controller(
         if let Some(parent_guid) = &current.parent_guid {
             let parent_handle = tracks.by_guid(parent_guid).await?;
             if let Some(ref parent) = parent_handle {
-                if let Some(count_str) =
-                    parent.get_ext_state("fts_signal", "scene_count").await?
-                {
+                if let Some(count_str) = parent.get_ext_state("fts_signal", "scene_count").await? {
                     if count_str.parse::<u32>().is_ok() {
                         // Current track is the section, parent is the controller
-                        let index = find_section_index(
-                            &current.guid,
-                            parent_guid,
-                            all_tracks,
-                        )?;
+                        let index = find_section_index(&current.guid, parent_guid, all_tracks)?;
                         return Ok((index, current.name.clone(), parent_guid.clone()));
                     }
                 }
@@ -201,15 +193,12 @@ async fn find_section_and_controller(
         }
 
         // Walk up to parent
-        let parent_guid = current
-            .parent_guid
-            .as_deref()
-            .ok_or_else(|| {
-                eyre::eyre!(
-                    "Could not find a section in parent chain of '{}'",
-                    selected.name
-                )
-            })?;
+        let parent_guid = current.parent_guid.as_deref().ok_or_else(|| {
+            eyre::eyre!(
+                "Could not find a section in parent chain of '{}'",
+                selected.name
+            )
+        })?;
 
         current = track_map
             .get(parent_guid)
@@ -243,11 +232,8 @@ async fn find_song_and_rig(
                         if count_str.parse::<u32>().is_ok() {
                             // This folder's parent is the rig. Find our index
                             // among folder siblings (songs).
-                            let index = find_folder_child_index(
-                                &current.guid,
-                                parent_guid,
-                                all_tracks,
-                            )?;
+                            let index =
+                                find_folder_child_index(&current.guid, parent_guid, all_tracks)?;
                             return Ok((index, current.name.clone(), parent_guid.clone()));
                         }
                     }
@@ -256,15 +242,12 @@ async fn find_song_and_rig(
         }
 
         // Walk up to parent
-        let parent_guid = current
-            .parent_guid
-            .as_deref()
-            .ok_or_else(|| {
-                eyre::eyre!(
-                    "Could not find a song folder in parent chain of '{}'",
-                    selected.name
-                )
-            })?;
+        let parent_guid = current.parent_guid.as_deref().ok_or_else(|| {
+            eyre::eyre!(
+                "Could not find a song folder in parent chain of '{}'",
+                selected.name
+            )
+        })?;
 
         current = track_map
             .get(parent_guid)
@@ -289,7 +272,9 @@ fn find_section_index(
             section_index += 1;
         }
     }
-    Err(eyre::eyre!("Track not found among sections of parent {parent_guid}"))
+    Err(eyre::eyre!(
+        "Track not found among sections of parent {parent_guid}"
+    ))
 }
 
 /// Find the 0-based index of a track among folder-only siblings of a parent.
@@ -308,7 +293,9 @@ fn find_folder_child_index(
             folder_index += 1;
         }
     }
-    Err(eyre::eyre!("Track not found among folder siblings of parent {parent_guid}"))
+    Err(eyre::eyre!(
+        "Track not found among folder siblings of parent {parent_guid}"
+    ))
 }
 
 /// Find a track's color by name.

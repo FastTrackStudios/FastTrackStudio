@@ -39,10 +39,7 @@ pub async fn generate_scene_midi_items(daw: &Daw) -> Result<()> {
             None => continue,
         };
 
-        if let Some(count_str) = track
-            .get_ext_state("fts_signal", "scene_count")
-            .await?
-        {
+        if let Some(count_str) = track.get_ext_state("fts_signal", "scene_count").await? {
             if let Ok(count) = count_str.parse::<u32>() {
                 scene_count = count;
                 profile_name = track_info.name.clone();
@@ -52,8 +49,9 @@ pub async fn generate_scene_midi_items(daw: &Daw) -> Result<()> {
         }
     }
 
-    let profile_track = profile_track
-        .ok_or_else(|| eyre::eyre!("No profile folder found (missing fts_signal/scene_count ext_state)"))?;
+    let profile_track = profile_track.ok_or_else(|| {
+        eyre::eyre!("No profile folder found (missing fts_signal/scene_count ext_state)")
+    })?;
 
     info!(
         "[scene-midi] Found profile '{}' with {scene_count} scenes",
@@ -109,8 +107,8 @@ pub async fn generate_scene_midi_items(daw: &Daw) -> Result<()> {
         // The note pitch identifies the scene. Velocity 100.
         let midi_notes = vec![daw::service::MidiNoteCreate::new(
             note,
-            100,     // velocity
-            0.0,     // start_ppq (relative to item start)
+            100,           // velocity
+            0.0,           // start_ppq (relative to item start)
             beats_per_bar, // length in quarter notes = full bar
         )];
 

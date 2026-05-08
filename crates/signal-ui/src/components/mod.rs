@@ -53,7 +53,7 @@ pub use star_rating::{PresetRatingBadge, StarRating, StarRatingInput};
 
 // Re-exports: block colors
 pub use block_colors::{
-    block_bypassed_style, block_color, block_instance_color, block_style, BlockColor,
+    BlockColor, block_bypassed_style, block_color, block_instance_color, block_style,
 };
 
 // Re-exports: scene tiles
@@ -82,6 +82,10 @@ pub use signal_flow_grid_view::{
     EngineGridData, LayerGridData, ModuleBrowserModal, ModuleCategory, ModuleChainGridData,
     SignalFlowGridView,
 };
+
+// Piano keyboard + waterfall
+pub mod piano;
+pub use piano::{MiniKeyboard, Piano, WaterfallNote, WaterfallState};
 
 // Re-exports: node graph
 pub use node_graph::{

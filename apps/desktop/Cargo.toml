@@ -10,15 +10,13 @@ name = "signal-desktop"
 path = "src/main.rs"
 
 [features]
-# Enable the `dev` feature to use the WebKit/WRY renderer via `dioxus::desktop`.
-# This is ONLY for rapid prototyping with `dx serve` — it enables hot-reloading
-# of RSX templates and instant feedback on layout/styling changes.
+# `dev` enables the WebKit/WRY renderer via `dioxus::desktop` for hot-reload
+# development with `dx serve`.  It is the DEFAULT so that plain `dx serve`
+# works without extra flags (dx 0.7.x doesn't read `features` from Dioxus.toml).
 #
-#   dx serve --features dev
-#
-# The production/plugin renderer uses `nih_plug_dioxus` (Blitz/wgpu), which
-# guarantees identical rendering in both standalone and VST3/CLAP contexts.
-# RSX components are renderer-agnostic, so dev → prod divergence is minimal.
+# Production / nix builds pass `--no-default-features` to use the
+# `nih_plug_dioxus` Blitz/wgpu renderer — the same pipeline as fts-signal-plugin.
+default = ["dev"]
 dev = ["dioxus/desktop"]
 
 [dependencies]

@@ -52,7 +52,9 @@ static STATE: Mutex<SceneState> = Mutex::new(SceneState {
 });
 
 pub fn poll() {
-    let Ok(mut state) = STATE.try_lock() else { return };
+    let Ok(mut state) = STATE.try_lock() else {
+        return;
+    };
 
     state.tick_count += 1;
 
@@ -66,21 +68,36 @@ pub fn poll() {
         scan_controllers(&mut state);
     }
 
-    let Some(daw) = daw::main_thread_daw() else { return };
+    let Some(daw) = daw::main_thread_daw() else {
+        return;
+    };
 
-    let Some(transport) = daw.transport_state() else { return };
+    let Some(transport) = daw.transport_state() else {
+        return;
+    };
     let is_playing = transport.play_state == daw::service::PlayState::Playing
         || transport.play_state == daw::service::PlayState::Recording;
     let position = if is_playing {
-        transport.playhead_position.time.as_ref().map(|t| t.as_seconds())
+        transport
+            .playhead_position
+            .time
+            .as_ref()
+            .map(|t| t.as_seconds())
     } else {
-        transport.edit_position.time.as_ref().map(|t| t.as_seconds())
+        transport
+            .edit_position
+            .time
+            .as_ref()
+            .map(|t| t.as_seconds())
     };
     let Some(position) = position else { return };
 
     for ctrl in &mut state.controllers {
         // Find the timeline entry at the current position
-        let entry = ctrl.timeline.iter().find(|e| position >= e.start && position < e.end);
+        let entry = ctrl
+            .timeline
+            .iter()
+            .find(|e| position >= e.start && position < e.end);
         let target_name = entry.map(|e| e.name.as_str()).unwrap_or("");
 
         // Skip if nothing changed
@@ -97,12 +114,19 @@ pub fn poll() {
                 daw.set_send_muted(&ctrl.input_track_guid, send_idx, true);
             }
             if !old.is_empty() {
-                info!("[scene-timer] '{}' → (none) — all sends muted (was '{}')", ctrl.name, old);
+                info!(
+                    "[scene-timer] '{}' → (none) — all sends muted (was '{}')",
+                    ctrl.name, old
+                );
             }
         } else if let Some(&target_send_idx) = ctrl.name_to_send_index.get(target_name) {
             // Active scene — unmute the target send, mute all others
             for (_, &send_idx) in &ctrl.name_to_send_index {
-                daw.set_send_muted(&ctrl.input_track_guid, send_idx, send_idx != target_send_idx);
+                daw.set_send_muted(
+                    &ctrl.input_track_guid,
+                    send_idx,
+                    send_idx != target_send_idx,
+                );
             }
             info!(
                 "[scene-timer] '{}' → '{}' (send {}, was '{}')",
@@ -128,11 +152,15 @@ pub fn invalidate() {
 fn scan_controllers(state: &mut SceneState) {
     state.controllers.clear();
 
-    let Some(daw) = daw::main_thread_daw() else { return };
+    let Some(daw) = daw::main_thread_daw() else {
+        return;
+    };
     let all_tracks = daw.track_list();
 
     for track_info in &all_tracks {
-        if !track_info.is_folder { continue; }
+        if !track_info.is_folder {
+            continue;
+        }
 
         // Check for scene_count
         match daw.track_get_ext_state(&track_info.guid, SCENE_COUNT_SECTION, SCENE_COUNT_KEY) {
@@ -155,17 +183,24 @@ fn scan_controllers(state: &mut SceneState) {
             })
             .unwrap_or_else(|| {
                 // Fallback: first non-folder child of parent (or self)
-                let search_parent = track_info.parent_guid.as_deref().unwrap_or(&track_info.guid);
-                all_tracks.iter()
+                let search_parent = track_info
+                    .parent_guid
+                    .as_deref()
+                    .unwrap_or(&track_info.guid);
+                all_tracks
+                    .iter()
                     .find(|t| t.parent_guid.as_deref() == Some(search_parent) && !t.is_folder)
                     .map(|t| t.guid.clone())
                     .unwrap_or_default()
             });
 
-        if input_track_guid.is_empty() { continue; }
+        if input_track_guid.is_empty() {
+            continue;
+        }
 
         // Collect this controller's child track GUIDs (sections that belong to this song/rig)
-        let child_guids: Vec<&str> = all_tracks.iter()
+        let child_guids: Vec<&str> = all_tracks
+            .iter()
             .filter(|t| t.parent_guid.as_deref() == Some(&*track_info.guid) && !t.is_folder)
             .map(|t| t.guid.as_str())
             .collect();
@@ -198,7 +233,11 @@ fn scan_controllers(state: &mut SceneState) {
             track_info.name,
             input_track_guid,
             name_to_send_index.len(),
-            name_to_send_index.keys().cloned().collect::<Vec<_>>().join(", "),
+            name_to_send_index
+                .keys()
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", "),
             timeline.len(),
         );
 
@@ -212,7 +251,10 @@ fn scan_controllers(state: &mut SceneState) {
         });
     }
 
-    info!("[scene-timer] Scan complete: {} controller(s)", state.controllers.len());
+    info!(
+        "[scene-timer] Scan complete: {} controller(s)",
+        state.controllers.len()
+    );
 }
 
 fn read_item_timeline(daw: &daw::reaper::DawMainThread, track_guid: &str) -> Vec<TimelineEntry> {

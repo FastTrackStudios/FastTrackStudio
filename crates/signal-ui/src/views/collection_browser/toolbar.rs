@@ -5,7 +5,7 @@ use fts_ui::prelude::*;
 use signal::tagging::TagCategory;
 
 use super::detail_panel::{tag_category_label, tag_display_value};
-use super::types::{NavCategory, SortMode};
+use signal_browser::types::{NavCategory, SortMode};
 
 // region: --- Toolbar
 

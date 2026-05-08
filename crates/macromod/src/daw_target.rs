@@ -35,11 +35,7 @@ impl DawParamTarget {
         }
     }
 
-    pub fn input_fx(
-        track_guid: impl Into<String>,
-        fx_index: u32,
-        param_index: u32,
-    ) -> Self {
+    pub fn input_fx(track_guid: impl Into<String>, fx_index: u32, param_index: u32) -> Self {
         Self {
             track_guid: track_guid.into(),
             fx_index,

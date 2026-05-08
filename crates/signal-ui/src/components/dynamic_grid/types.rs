@@ -3,42 +3,10 @@
 use signal::block::BlockColor;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Grid slot — the signal equivalent of CompositionSlot
+// Grid slot — re-exported from signal-browser (headless data type)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// A single cell in the grid. Replaces legacy `CompositionSlot`.
-#[derive(Debug, Clone, PartialEq)]
-pub struct GridSlot {
-    pub id: uuid::Uuid,
-    pub block_type: signal::BlockType,
-    pub block_preset_name: Option<String>,
-    pub plugin_name: Option<String>,
-    /// Grid column position (0-indexed).
-    pub col: usize,
-    /// Grid row position (0-indexed).
-    pub row: usize,
-    /// Module group key — slots with the same key are grouped visually.
-    pub module_group: Option<String>,
-    /// Module type for coloring the group container.
-    pub module_type: Option<signal::ModuleType>,
-    /// Layer group key — modules within the same layer share this key.
-    pub layer_group: Option<String>,
-    /// Engine group key — layers within the same engine share this key.
-    pub engine_group: Option<String>,
-    /// True when the block has no plugin loaded yet (template placeholder).
-    pub is_template: bool,
-    /// True when the block is bypassed (signal passes through unprocessed).
-    pub bypassed: bool,
-    /// Phantom slot — participates in layout (group bounds, grid sizing)
-    /// but does not render a visible cell. Used for dry pass-through lanes.
-    pub is_phantom: bool,
-    /// Resolved block parameters (name, value 0..1) for the inspector panel.
-    pub parameters: Vec<(String, f32)>,
-    /// Preset ID this block was loaded from (for save-back). `None` for inline/template blocks.
-    pub preset_id: Option<String>,
-    /// Snapshot ID this block was loaded from. `None` for default snapshots or inline blocks.
-    pub snapshot_id: Option<String>,
-}
+pub use signal_browser::GridSlot;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Block visual state

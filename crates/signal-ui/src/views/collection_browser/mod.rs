@@ -9,35 +9,53 @@
 //! | Engines  | Engines for rig type      | Layers for engine | —              |
 //! | Modules  | Module types (color dots) | Presets for type  | —              |
 //! | Blocks   | Block types (color dots)  | Presets for type  | Snapshots      |
+//!
+//! Data fetching, type definitions, and grid conversion live in the
+//! headless `signal-browser` crate. This module only owns rendering.
 
-mod data_fetching;
 mod detail_panel;
-mod grid_conversion;
 mod inspector;
+mod rig_grid_panel;
 mod toolbar;
-mod types;
 
 use dioxus::prelude::*;
 use fts_ui::prelude::*;
 use signal::rig::RigType;
 use signal::tagging::TagSet;
-use signal::{BlockType, ALL_BLOCK_TYPES, ALL_MODULE_TYPES};
+use signal::{ALL_BLOCK_TYPES, ALL_MODULE_TYPES, BlockType};
 
-use data_fetching::{
+use signal_browser::data_fetching::{
     build_param_lookup, fetch_col2, fetch_col3, resolve_layer_detail, resolve_scene_detail,
 };
-use detail_panel::{
-    collect_available_tags, filter_and_sort, find_detail, rig_type_display, DetailPanel,
+use signal_browser::grid_conversion::ParamLookup;
+use signal_browser::types::{
+    ColumnItem, DetailData, DetailParam, NavCategory, RIG_TYPES, SortMode,
 };
-use grid_conversion::ParamLookup;
-use toolbar::Toolbar;
-use types::{ColumnItem, DetailData, DetailParam, NavCategory, SortMode, RIG_TYPES};
 
-// Re-export public API types used by grid_conversion (needed by other views).
-pub use data_fetching::rig_type_to_engine_type;
-pub use grid_conversion::ParamLookup as EngineParamLookup;
-pub use grid_conversion::{engines_to_grid_slots, RigGridPanel};
-pub use types::{EngineFlowData, LayerFlowData, ModuleChainData};
+use detail_panel::{
+    DetailPanel, collect_available_tags, filter_and_sort, find_detail, rig_type_display,
+};
+use toolbar::Toolbar;
+
+// Re-export public API types used by other views.
+pub use rig_grid_panel::RigGridPanel;
+pub use signal_browser::data_fetching::rig_type_to_engine_type;
+pub use signal_browser::grid_conversion::{
+    ParamLookup as EngineParamLookup, engines_to_grid_slots,
+};
+pub use signal_browser::types::{EngineFlowData, LayerFlowData, ModuleChainData};
+
+/// Tailwind accent gradient classes for each `NavCategory`.
+/// Lives in signal-ui so signal-browser stays headless.
+fn nav_accent(cat: NavCategory) -> &'static str {
+    match cat {
+        NavCategory::Presets => "from-amber-500 via-orange-400 to-red-500",
+        NavCategory::Engines => "from-rose-500 via-pink-400 to-fuchsia-500",
+        NavCategory::Layers => "from-emerald-500 via-teal-400 to-cyan-500",
+        NavCategory::Modules => "from-blue-500 via-indigo-400 to-violet-500",
+        NavCategory::Blocks => "from-orange-500 via-amber-400 to-yellow-500",
+    }
+}
 
 /// Payload emitted when the user picks an item in "assign" mode.
 /// Maps to the corresponding `PatchTarget` variant.
@@ -59,9 +77,6 @@ pub enum BrowserAssignment {
 
 /// Public API: resolve a rig scene into engine flow data and parameter lookup
 /// for rendering in `RigGridPanel`.
-///
-/// Loads the rig, finds the matching scene, resolves engines + params.
-/// Returns `None` if the rig or scene is not found.
 pub async fn resolve_scene_engines(
     signal: &signal::Signal,
     rig_id: &str,
@@ -72,10 +87,6 @@ pub async fn resolve_scene_engines(
 
 /// Public API: resolve a layer variant into engine flow data and parameter lookup
 /// for rendering in `RigGridPanel`.
-///
-/// Loads the layer, resolves module chains for the given variant (or default),
-/// wraps them in a synthetic `EngineFlowData`.
-/// Returns `None` if the layer or variant is not found.
 pub async fn resolve_layer_engines(
     signal: &signal::Signal,
     layer_id: &str,
@@ -131,28 +142,21 @@ pub fn CollectionBrowser(props: CollectionBrowserProps) -> Element {
     let mut col4_items = use_signal(Vec::<ColumnItem>::new);
     let mut col4_selected = use_signal(|| None::<usize>);
 
-    // Track the selected col2 item's ID for lazy scene resolution.
     let mut col2_current_id = use_signal(String::new);
 
-    // Cache of raw Preset objects from the last Blocks col3 fetch.
-    // Used by col4 to look up snapshots without re-querying the DB.
     let mut block_presets_cache = use_signal(Vec::<signal::Preset>::new);
 
-    // Pre-resolved block parameters for the detail grid inspector.
     let mut param_lookup = use_signal(ParamLookup::new);
 
-    // Search / sort / filter state
     let mut search_text = use_signal(String::new);
     let mut sort_mode = use_signal(|| SortMode::Name);
     let mut active_tag_filters = use_signal(Vec::<String>::new);
     let mut show_tag_panel = use_signal(|| false);
 
-    // Folder expansion state for Col 4 grouped snapshots.
     let mut expanded_folders = use_signal(std::collections::HashSet::<String>::new);
 
     let nav_memo = use_memo(move || nav());
 
-    // Auto-fetch col2 when nav or rig_type changes.
     {
         let signal = signal.clone();
         use_effect(move || {
@@ -170,18 +174,15 @@ pub fn CollectionBrowser(props: CollectionBrowserProps) -> Element {
             active_tag_filters.set(Vec::new());
             spawn(async move {
                 let items = fetch_col2(&signal, category, rt).await;
-                // Auto-select the first item so detail panel is populated on load.
                 if !items.is_empty() && category == NavCategory::Presets {
                     let first_id = items[0].id.clone();
                     let first_tag = items[0].tag;
                     col2_selected.set(Some(0));
                     col2_current_id.set(first_id.clone());
                     let (v, presets) = fetch_col3(&signal, category, &first_id, first_tag).await;
-                    // Auto-select first scene too
                     if !v.is_empty() {
                         col3_selected.set(Some(0));
                     }
-                    // Resolve block parameters for the detail grid
                     let params = build_param_lookup(&signal, &v).await;
                     param_lookup.set(params);
                     col3_items.set(v);
@@ -195,10 +196,8 @@ pub fn CollectionBrowser(props: CollectionBrowserProps) -> Element {
     let current_nav = nav_memo();
     let current_rt = rig_type();
 
-    // Track which column has keyboard focus (2, 3, or 4).
     let mut focus_col = use_signal(|| 2u8);
 
-    // Apply search + tag filter + sort to col2 items.
     let all_col2 = filter_and_sort(
         &col2_items(),
         &search_text(),
@@ -210,7 +209,6 @@ pub fn CollectionBrowser(props: CollectionBrowserProps) -> Element {
 
     let has_col4 = current_nav == NavCategory::Blocks;
 
-    // Detail panel: deepest selection
     let (detail_name, detail_meta, detail_data) = find_detail(
         &all_col4,
         col4_selected(),
@@ -235,10 +233,9 @@ pub fn CollectionBrowser(props: CollectionBrowserProps) -> Element {
         NavCategory::Blocks => "Presets",
     };
 
-    let accent = current_nav.accent();
+    let accent = nav_accent(current_nav);
     let show_type_dots = current_nav == NavCategory::Blocks || current_nav == NavCategory::Modules;
 
-    // Compute available tags from the unfiltered col2 items for the tag panel.
     let available_tags = collect_available_tags(&col2_items());
     let current_sort = sort_mode();
     let current_search = search_text();
@@ -319,7 +316,6 @@ pub fn CollectionBrowser(props: CollectionBrowserProps) -> Element {
                         }
                     }
                     Key::Enter => {
-                        // Trigger click on selected item in focused column
                         match focus_col() {
                             2 => {
                                 if let Some(idx) = col2_selected() {
@@ -349,7 +345,6 @@ pub fn CollectionBrowser(props: CollectionBrowserProps) -> Element {
                         }
                     }
                     Key::Escape => {
-                        // Go back: clear selection in focused column
                         match focus_col() {
                             4 => {
                                 col4_selected.set(None);
@@ -545,8 +540,6 @@ pub fn CollectionBrowser(props: CollectionBrowserProps) -> Element {
                                         onclick: move |_| {
                                             col3_selected.set(Some(cidx));
                                             col4_selected.set(None);
-                                            // Lazy scene resolution: if this is a Presets scene
-                                            // that wasn't resolved eagerly, resolve it now.
                                             if current_nav == NavCategory::Presets && child_engines_empty {
                                                 let signal = signal.clone();
                                                 let rig_id = col2_current_id().clone();
@@ -568,7 +561,6 @@ pub fn CollectionBrowser(props: CollectionBrowserProps) -> Element {
                                                 let items = col3_items();
                                                 if let Some(item) = items.get(cidx) {
                                                     let item_id = &item.id;
-                                                    // Look up snapshots from cached presets (default + additional)
                                                     let cached = block_presets_cache();
                                                     let snap_items = cached.iter()
                                                         .find(|p| p.id().to_string() == *item_id)
@@ -580,7 +572,6 @@ pub fn CollectionBrowser(props: CollectionBrowserProps) -> Element {
                                                                 let folder = s.metadata().folder.clone();
                                                                 let has_state_data = s.state_data().is_some();
                                                                 let subtitle = if has_state_data {
-                                                                    // Imported preset — show description or folder instead of default block params
                                                                     s.metadata().description.clone()
                                                                         .or_else(|| folder.clone())
                                                                 } else {
@@ -611,7 +602,6 @@ pub fn CollectionBrowser(props: CollectionBrowserProps) -> Element {
                                                         })
                                                         .unwrap_or_default();
                                                     col4_items.set(snap_items);
-                                                    // Reset expanded folders when switching presets
                                                     expanded_folders.set(std::collections::HashSet::new());
                                                 }
                                             }
@@ -638,8 +628,6 @@ pub fn CollectionBrowser(props: CollectionBrowserProps) -> Element {
 
                 // ── Col 4: Snapshots (only for Blocks), grouped by folder ──
                 if has_col4 {
-                    // Build folder groups: (folder_name, [(flat_idx, item)])
-                    // Ungrouped items (no folder) come first, then sorted folder groups.
                     {
                         let mut ungrouped: Vec<(usize, &ColumnItem)> = Vec::new();
                         let mut folders: std::collections::BTreeMap<String, Vec<(usize, &ColumnItem)>> =
@@ -652,7 +640,6 @@ pub fn CollectionBrowser(props: CollectionBrowserProps) -> Element {
                         }
                         let has_folders = !folders.is_empty();
                         let current_expanded = expanded_folders();
-                        // Pre-collect all folder names for the expand-all closure
                         let all_folder_keys: std::collections::HashSet<String> =
                             folders.keys().cloned().collect();
 
@@ -686,7 +673,6 @@ pub fn CollectionBrowser(props: CollectionBrowserProps) -> Element {
                                         }
                                     }
 
-                                    // Ungrouped items first (no folder)
                                     for (didx, item) in ungrouped.iter() {
                                         {
                                             let didx = *didx;
@@ -713,14 +699,12 @@ pub fn CollectionBrowser(props: CollectionBrowserProps) -> Element {
                                         }
                                     }
 
-                                    // Folder groups
                                     for (folder_name, folder_items) in folders.iter() {
                                         {
                                             let is_expanded = current_expanded.contains(folder_name);
                                             let fname = folder_name.clone();
                                             let count = folder_items.len();
                                             rsx! {
-                                                // Folder header
                                                 button {
                                                     key: "folder-{fname}",
                                                     class: "w-full text-left px-3 py-1.5 flex items-center gap-1.5 border-b border-border/50 bg-card/30",
@@ -739,7 +723,6 @@ pub fn CollectionBrowser(props: CollectionBrowserProps) -> Element {
                                                     span { class: "text-xs font-medium text-muted-foreground truncate flex-1", "{folder_name}" }
                                                     span { class: "text-[10px] text-muted-foreground flex-shrink-0", "{count}" }
                                                 }
-                                                // Folder children (indented)
                                                 if is_expanded {
                                                     for (didx, item) in folder_items.iter() {
                                                         {
@@ -791,11 +774,9 @@ pub fn CollectionBrowser(props: CollectionBrowserProps) -> Element {
 
             // Status bar
             {
-                // Resolve current selection into an assignable target
                 let assignment = {
                     match current_nav {
                         NavCategory::Presets => {
-                            // Rig scene: need col2 (rig) + col3 (scene) selected
                             if let (Some(c2), Some(c3)) = (col2_selected(), col3_selected()) {
                                 let c2_items = &all_col2;
                                 let c3_items = &all_col3;
@@ -813,7 +794,6 @@ pub fn CollectionBrowser(props: CollectionBrowserProps) -> Element {
                                 if let Some(preset_item) = c3_items.get(c3) {
                                     let preset_id = preset_item.id.clone();
                                     if let Some(c4) = col4_selected() {
-                                        // Specific snapshot selected
                                         let c4_items = &all_col4;
                                         if let Some(snap_item) = c4_items.get(c4) {
                                             Some(BrowserAssignment::BlockSnapshot {
@@ -822,7 +802,6 @@ pub fn CollectionBrowser(props: CollectionBrowserProps) -> Element {
                                             })
                                         } else { None }
                                     } else {
-                                        // No snapshot selected — use default snapshot
                                         let cached = block_presets_cache();
                                         let default_snap_id = cached.iter()
                                             .find(|p| p.id().to_string() == preset_id)

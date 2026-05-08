@@ -7,10 +7,10 @@ use dioxus::prelude::*;
 use fts_ui::prelude::*;
 use signal::block::BlockCategory;
 use signal::defaults::{
-    archetype_label, archetype_seed_slug, archetype_x_templates, NDSP_ARCHETYPE_X_PLUGIN_NAMES,
+    NDSP_ARCHETYPE_X_PLUGIN_NAMES, archetype_label, archetype_seed_slug, archetype_x_templates,
 };
 use signal::plugin_block::PluginBlockDef;
-use signal::{BlockType, ModuleType, ALL_BLOCK_TYPES};
+use signal::{ALL_BLOCK_TYPES, BlockType, ModuleType};
 use uuid::Uuid;
 
 use super::layout::module_type_color;

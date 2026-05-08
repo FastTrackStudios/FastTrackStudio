@@ -122,8 +122,7 @@ impl LearnState {
             }
             // Remove the binding entirely if no points remain
             if binding.curve.is_empty() {
-                self.pending_bindings
-                    .retain(|b| &b.target != target);
+                self.pending_bindings.retain(|b| &b.target != target);
             }
             Ok(())
         } else {
@@ -170,22 +169,16 @@ mod tests {
         state.set_last_touched(target_a());
 
         // Set min
-        state
-            .set_point(0.0, 0.1, "Gain", "ReaComp")
-            .unwrap();
+        state.set_point(0.0, 0.1, "Gain", "ReaComp").unwrap();
         assert_eq!(state.pending_bindings.len(), 1);
         assert_eq!(state.pending_bindings[0].curve.len(), 1);
 
         // Set max
-        state
-            .set_point(1.0, 0.9, "Gain", "ReaComp")
-            .unwrap();
+        state.set_point(1.0, 0.9, "Gain", "ReaComp").unwrap();
         assert_eq!(state.pending_bindings[0].curve.len(), 2);
 
         // Set midpoint
-        state
-            .set_point(0.5, 0.4, "Gain", "ReaComp")
-            .unwrap();
+        state.set_point(0.5, 0.4, "Gain", "ReaComp").unwrap();
         assert_eq!(state.pending_bindings[0].curve.len(), 3);
     }
 
@@ -195,14 +188,10 @@ mod tests {
         state.arm("macro-1");
 
         state.set_last_touched(target_a());
-        state
-            .set_point(0.0, 0.1, "Gain", "ReaComp")
-            .unwrap();
+        state.set_point(0.0, 0.1, "Gain", "ReaComp").unwrap();
 
         state.set_last_touched(target_b());
-        state
-            .set_point(0.0, 0.5, "Freq", "ReaEQ")
-            .unwrap();
+        state.set_point(0.0, 0.5, "Freq", "ReaEQ").unwrap();
 
         assert_eq!(state.pending_bindings.len(), 2);
     }
@@ -219,12 +208,8 @@ mod tests {
         let mut state = LearnState::default();
         state.arm("macro-1");
         state.set_last_touched(target_a());
-        state
-            .set_point(0.0, 0.0, "Gain", "ReaComp")
-            .unwrap();
-        state
-            .set_point(1.0, 1.0, "Gain", "ReaComp")
-            .unwrap();
+        state.set_point(0.0, 0.0, "Gain", "ReaComp").unwrap();
+        state.set_point(1.0, 1.0, "Gain", "ReaComp").unwrap();
 
         let bindings = state.disarm();
         assert_eq!(bindings.len(), 1);

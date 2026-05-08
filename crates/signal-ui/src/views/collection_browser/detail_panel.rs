@@ -3,11 +3,11 @@
 use dioxus::prelude::*;
 use signal::metadata::Metadata as MetadataModel;
 
-use super::grid_conversion::{
-    engines_to_grid_slots, module_chains_to_grid_slots, signal_chain_to_grid_slots, ParamLookup,
-    RigGridPanel,
+use super::rig_grid_panel::RigGridPanel;
+use signal_browser::grid_conversion::{
+    ParamLookup, engines_to_grid_slots, module_chains_to_grid_slots, signal_chain_to_grid_slots,
 };
-use super::types::{ColumnItem, DetailData, DetailParam, SortMode};
+use signal_browser::types::{ColumnItem, DetailData, DetailParam, SortMode};
 
 // region: --- Detail panel component
 
@@ -210,7 +210,7 @@ pub(super) fn filter_and_sort(
 pub(super) fn collect_available_tags(
     items: &[ColumnItem],
 ) -> Vec<(signal::tagging::TagCategory, Vec<String>)> {
-    use super::types::FILTER_CATEGORIES;
+    use signal_browser::types::FILTER_CATEGORIES;
     use std::collections::BTreeMap;
     let mut by_cat: BTreeMap<signal::tagging::TagCategory, Vec<String>> = BTreeMap::new();
     for item in items {

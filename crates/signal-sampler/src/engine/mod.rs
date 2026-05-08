@@ -34,9 +34,9 @@ pub mod voice;
 
 use std::collections::HashMap;
 
-use crate::spec::{ArticulationKind, Cc1Layer};
 use crate::PlayerPatch;
-use cache::SampleCache;
+use crate::spec::{ArticulationKind, Cc1Layer};
+use cache::{PreloadStats, SampleCache};
 use filter::BiquadFilter;
 use rr::RrCounters;
 use voice::{Voice, VoiceKind, VoicePool};
@@ -49,8 +49,17 @@ const CC1_RAMP_MS: u32 = 20;
 /// Default release fade on note-off for sustain voices (ms).
 const RELEASE_MS: u32 = 500;
 
+/// Short de-click fade for sample-playback instruments that have explicit
+/// release/noise samples. The tone should stop on key-up; this only avoids a pop.
+const KEY_UP_DECLICK_MS: u32 = 5;
+
 /// Default legato crossfade — old sustain ramps out over this many ms.
 const LEGATO_FADE_MS: u32 = 30;
+
+/// Keyscape Rhodes release/mechanical samples are only appropriate for firm
+/// key releases. Triggering them on every note-off makes normal playing clicky.
+const RELEASE_SAMPLE_VELOCITY_MIN: u8 = 124;
+const RELEASE_SAMPLE_GAIN: f32 = 0.25;
 
 // ── Legato state ──────────────────────────────────────────────────────────────
 
@@ -104,6 +113,8 @@ pub struct SampleEngine {
 
     /// Notes currently held down: MIDI note → velocity.
     held_notes: HashMap<u8, u8>,
+    /// Note-off velocities captured while the sustain pedal is held.
+    deferred_note_off_velocities: HashMap<u8, u8>,
 
     /// Legato pre-delay countdown.
     legato_state: LegatoState,
@@ -117,6 +128,11 @@ pub struct SampleEngine {
     cc1_ramp_frames: usize,
     /// Default release duration (frames) for sustain voices.
     release_frames: usize,
+
+    /// Round-robin counter for zone mode. Increments on every zoned note-on
+    /// regardless of (note, velocity) so RR cycling within a matching zone set
+    /// behaves as expected when the same key is repeatedly struck.
+    zone_rr_counter: usize,
 }
 
 impl SampleEngine {
@@ -139,16 +155,22 @@ impl SampleEngine {
             .articulations
             .iter()
             .find(|a| a.kind == ArticulationKind::Sustain)
+            .or_else(|| patch.spec.articulations.first())
             .map(|a| a.id.clone())
             .unwrap_or_default();
 
         let legato_fade_frames = ms_to_frames(LEGATO_FADE_MS, sample_rate);
         let cc1_ramp_frames = ms_to_frames(CC1_RAMP_MS, sample_rate);
         let release_frames = ms_to_frames(RELEASE_MS, sample_rate);
+        let cache = if let Some(pack) = patch.pack.clone() {
+            SampleCache::with_pack(pack)
+        } else {
+            SampleCache::with_prepared(patch.prepared_cache_dir.as_deref())
+        };
 
         Self {
             patch,
-            cache: SampleCache::new(),
+            cache,
             voices: VoicePool::new(),
             rr: RrCounters::new(),
             sample_rate,
@@ -164,11 +186,68 @@ impl SampleEngine {
             legato_expressive: false, // default: low-latency mode
             sord_filter: BiquadFilter::lowpass(filter::SORD_FC, filter::SORD_Q, sample_rate),
             held_notes: HashMap::new(),
+            deferred_note_off_velocities: HashMap::new(),
             legato_state: LegatoState::Idle,
             legato_fade_frames,
             cc1_ramp_frames,
             release_frames,
+            zone_rr_counter: 0,
         }
+    }
+
+    /// Cheap clone of the underlying sample cache. Hand this to a
+    /// background thread to populate the cache without blocking the
+    /// audio thread.
+    pub fn cache_handle(&self) -> SampleCache {
+        self.cache.clone_handle()
+    }
+
+    /// Owned copy of every sample path the patch references — lets a
+    /// background-preloader thread iterate without borrowing the engine.
+    pub fn sample_paths_owned(&self) -> Vec<std::path::PathBuf> {
+        self.patch.sample_paths().cloned().collect()
+    }
+
+    /// Sample paths ordered for "middle-out" preload — closest to
+    /// `center` (middle C if you pass 60) first, extremes last. Grooves +
+    /// wavetables are appended at the end. Use this when feeding the
+    /// background preloader so the most-played range becomes audible first.
+    pub fn sample_paths_centered(&self, center: u8) -> Vec<std::path::PathBuf> {
+        self.patch.sample_paths_centered(center)
+    }
+
+    /// How many of `total_samples()` are currently decoded into the cache.
+    pub fn loaded_sample_count(&self) -> usize {
+        self.cache.len()
+    }
+
+    /// Total number of samples the patch references (loaded or not).
+    pub fn total_sample_count(&self) -> usize {
+        self.patch.total_samples()
+    }
+
+    /// Read-only access to the engine's underlying [`PlayerPatch`] — used
+    /// by callers that need to inspect the loaded library spec (tags,
+    /// instrument, sections) for things like preload prioritization.
+    pub fn patch(&self) -> &crate::PlayerPatch {
+        &self.patch
+    }
+
+    /// Decode all indexed samples into the cache before live playback.
+    pub fn preload_samples(&mut self) -> PreloadStats {
+        let start = std::time::Instant::now();
+        let total = self.patch.total_samples();
+        let stats = self
+            .cache
+            .preload(self.patch.sample_paths().map(|p| p.as_path()));
+        tracing::info!(
+            "signal-sampler: preloaded {}/{} samples ({:.1} MiB PCM) in {:.2}s",
+            self.cache.len(),
+            total,
+            stats.bytes as f64 / 1024.0 / 1024.0,
+            start.elapsed().as_secs_f64()
+        );
+        stats
     }
 
     // ── Configuration ─────────────────────────────────────────────────────────
@@ -232,6 +311,11 @@ impl SampleEngine {
             return;
         }
 
+        if self.patch.is_zoned() {
+            self.note_on_zoned(note, velocity);
+            return;
+        }
+
         // Legzero: same note re-trigger while sustain pedal is held.
         let legzero = self.cc64_held && self.held_notes.contains_key(&note);
 
@@ -239,6 +323,7 @@ impl SampleEngine {
         let other_held = self.held_notes.keys().any(|&n| n != note);
 
         self.held_notes.insert(note, velocity);
+        self.deferred_note_off_velocities.remove(&note);
 
         let artic_id = self.articulation.clone();
         let artic_kind = self
@@ -278,12 +363,67 @@ impl SampleEngine {
 
     /// Process a MIDI note-off event.
     pub fn note_off(&mut self, note: u8) {
+        self.note_off_with_velocity(note, self.cc1);
+    }
+
+    pub fn note_off_with_velocity(&mut self, note: u8, release_velocity: u8) {
+        if self.patch.is_zoned() {
+            // Zone mode: no sustain pedal handling, no release samples,
+            // no legato. Just trigger the standard release fade.
+            self.voices.note_off(note);
+            return;
+        }
         if self.cc64_held {
             // Sustain pedal held — defer release.
+            self.deferred_note_off_velocities
+                .insert(note, release_velocity);
+            tracing::debug!(note, release_velocity, "pedal defer");
             return;
         }
         self.held_notes.remove(&note);
-        self.do_note_off(note);
+        self.deferred_note_off_velocities.remove(&note);
+        self.do_note_off(note, release_velocity);
+    }
+
+    /// Zone-mode note-on. Looks up matching zones by `(note, velocity)`,
+    /// RR-cycles within the matching set, and spawns a `Zoned` voice.
+    fn note_on_zoned(&mut self, note: u8, velocity: u8) {
+        let rr_idx = self.zone_rr_counter;
+        self.zone_rr_counter = self.zone_rr_counter.wrapping_add(1);
+
+        let resolved = match self.patch.resolve_zone(note, velocity, rr_idx) {
+            Some(r) => r,
+            None => {
+                tracing::debug!(note, velocity, "zone miss");
+                return;
+            }
+        };
+
+        // Audio-thread fast path: never decode synchronously here. If the
+        // sample isn't yet preloaded, drop the voice silently — the
+        // background preloader will populate the cache shortly and
+        // subsequent note-ons will produce sound.
+        let Some(data) = self.cache.get_loaded(&resolved.path) else {
+            tracing::trace!("zone sample not yet loaded: {}", resolved.path.display());
+            return;
+        };
+
+        // Combine integer semitone offset (note - root_key) with per-zone
+        // fine-tune in cents. rate = 2^(total_cents / 1200).
+        let semitones = note as f64 - resolved.root_key as f64;
+        let total_cents = semitones * 100.0 + resolved.tune_cents as f64;
+        let rate = 2.0f64.powf(total_cents / 1200.0);
+        let gain = 10.0f32.powf(resolved.gain_db / 20.0);
+
+        let voice = Voice::with_rate(
+            data,
+            note,
+            VoiceKind::Zoned,
+            rate,
+            gain,
+            self.release_frames,
+        );
+        self.voices.spawn(voice);
     }
 
     /// Process a MIDI CC event.
@@ -293,7 +433,10 @@ impl SampleEngine {
                 self.cc1 = value;
                 // Short-note articulations use CC1 to select sub-type (spiccato/
                 // staccato/pizzicato/etc.); sustain articulations use it for dynamics.
-                let is_short = self.patch.spec.articulation(&self.articulation)
+                let is_short = self
+                    .patch
+                    .spec
+                    .articulation(&self.articulation)
                     .map(|a| a.kind == ArticulationKind::Short)
                     .unwrap_or(false);
                 if is_short {
@@ -320,11 +463,23 @@ impl SampleEngine {
                 let was_held = self.cc64_held;
                 self.cc64_held = value >= 64;
                 if was_held && !self.cc64_held {
-                    // Pedal released — send deferred note-offs.
-                    let notes: Vec<u8> = self.held_notes.keys().cloned().collect();
-                    self.held_notes.clear();
-                    for n in notes {
-                        self.do_note_off(n);
+                    // Pedal released — release only notes that received note-off
+                    // while the pedal was down. Notes still physically held have
+                    // no deferred note-off entry and must keep sounding.
+                    let notes: Vec<(u8, u8)> = self
+                        .deferred_note_off_velocities
+                        .iter()
+                        .map(|(&note, &release_velocity)| (note, release_velocity))
+                        .collect();
+                    tracing::debug!(
+                        deferred = notes.len(),
+                        still_held = self.held_notes.len().saturating_sub(notes.len()),
+                        "pedal up release"
+                    );
+                    self.deferred_note_off_velocities.clear();
+                    for (note, velocity) in notes {
+                        self.held_notes.remove(&note);
+                        self.do_note_off(note, velocity);
                     }
                 }
             }
@@ -342,7 +497,9 @@ impl SampleEngine {
 
         // Advance legato countdown.
         let fire = match &mut self.legato_state {
-            LegatoState::Pending { frames_remaining, .. } => {
+            LegatoState::Pending {
+                frames_remaining, ..
+            } => {
                 if *frames_remaining <= block_frames {
                     true
                 } else {
@@ -396,13 +553,29 @@ impl SampleEngine {
         let nv_hi_gain = nv_scale * nv_cc1_blend;
 
         if let Some(v) = self.make_voice(
-            &artic, &section, &mic, &nv_lo, note, "", VoiceKind::SustainNVLo, nv_lo_gain, release_frames,
+            &artic,
+            &section,
+            &mic,
+            &nv_lo,
+            note,
+            "",
+            VoiceKind::SustainNVLo,
+            nv_lo_gain,
+            release_frames,
         ) {
             self.voices.spawn(v);
         }
         if nv_hi != nv_lo {
             if let Some(v) = self.make_voice(
-                &artic, &section, &mic, &nv_hi, note, "", VoiceKind::SustainNVHi, nv_hi_gain, release_frames,
+                &artic,
+                &section,
+                &mic,
+                &nv_hi,
+                note,
+                "",
+                VoiceKind::SustainNVHi,
+                nv_hi_gain,
+                release_frames,
             ) {
                 self.voices.spawn(v);
             }
@@ -415,13 +588,29 @@ impl SampleEngine {
             let vb_hi_gain = vb_scale * vb_cc1_blend;
 
             if let Some(v) = self.make_voice(
-                &vib_id, &section, &mic, &vb_lo, note, "", VoiceKind::SustainVibLo, vb_lo_gain, release_frames,
+                &vib_id,
+                &section,
+                &mic,
+                &vb_lo,
+                note,
+                "",
+                VoiceKind::SustainVibLo,
+                vb_lo_gain,
+                release_frames,
             ) {
                 self.voices.spawn(v);
             }
             if vb_hi != vb_lo {
                 if let Some(v) = self.make_voice(
-                    &vib_id, &section, &mic, &vb_hi, note, "", VoiceKind::SustainVibHi, vb_hi_gain, release_frames,
+                    &vib_id,
+                    &section,
+                    &mic,
+                    &vb_hi,
+                    note,
+                    "",
+                    VoiceKind::SustainVibHi,
+                    vb_hi_gain,
+                    release_frames,
                 ) {
                     self.voices.spawn(v);
                 }
@@ -435,26 +624,59 @@ impl SampleEngine {
         let artic = self.articulation.clone();
         let section = self.section.clone();
         let mic = self.mic.clone();
-        let release_frames = self.release_frames;
+        let has_release_artic = self
+            .patch
+            .spec
+            .articulation(&artic)
+            .and_then(|a| a.release_artic.as_ref())
+            .is_some();
+        let release_frames = if has_release_artic {
+            ms_to_frames(KEY_UP_DECLICK_MS, self.sample_rate)
+        } else {
+            self.release_frames
+        };
+        let voice_kind = if has_release_artic {
+            VoiceKind::SustainLo
+        } else {
+            VoiceKind::Short
+        };
 
-        if let Some(v) =
-            self.make_voice(&artic, &section, &mic, &dynamic, note, "", VoiceKind::Short, 1.0, release_frames)
-        {
+        if let Some(v) = self.make_voice(
+            &artic,
+            &section,
+            &mic,
+            &dynamic,
+            note,
+            "",
+            voice_kind,
+            1.0,
+            release_frames,
+        ) {
             self.voices.spawn(v);
         }
     }
 
     fn trigger_legzero(&mut self, note: u8, _velocity: u8) {
         // Find a Legato-kind articulation for same-note retrigger.
-        let Some(rz_id) = self.find_legato_artic_id(true) else { return };
+        let Some(rz_id) = self.find_legato_artic_id(true) else {
+            return;
+        };
         let section = self.section.clone();
         let mic = self.mic.clone();
         let (lo_dyn, _, _) = self.current_layers_owned();
         let release_frames = self.release_frames;
 
-        if let Some(v) =
-            self.make_voice(&rz_id, &section, &mic, &lo_dyn, note, "", VoiceKind::Legato, 1.0, release_frames)
-        {
+        if let Some(v) = self.make_voice(
+            &rz_id,
+            &section,
+            &mic,
+            &lo_dyn,
+            note,
+            "",
+            VoiceKind::Legato,
+            1.0,
+            release_frames,
+        ) {
             self.voices.spawn(v);
         }
     }
@@ -467,7 +689,11 @@ impl SampleEngine {
             .unwrap_or(&to_note);
 
         // Check portamento threshold (default 20, velocity ≤ threshold triggers glide).
-        let port_thresh = self.patch.spec.legato_engine.as_ref()
+        let port_thresh = self
+            .patch
+            .spec
+            .legato_engine
+            .as_ref()
             .and_then(|le| le.portamento.as_ref())
             .map(|p| p.trigger_vel_max)
             .unwrap_or(0); // 0 disables portamento
@@ -500,7 +726,8 @@ impl SampleEngine {
 
         // For portamento, look for Port-type articulation; otherwise Leg/NVLeg.
         let leg_id = if portamento {
-            self.find_port_artic_id().or_else(|| self.find_legato_artic_id(false))
+            self.find_port_artic_id()
+                .or_else(|| self.find_legato_artic_id(false))
         } else {
             self.find_legato_artic_id(false)
         };
@@ -517,9 +744,29 @@ impl SampleEngine {
 
         // Try directional first; fall back to directionless if not found.
         let v = self
-            .make_voice(&leg_id, &section, &mic, &lo_dyn, to_note, direction, VoiceKind::Legato, 1.0, release_frames)
+            .make_voice(
+                &leg_id,
+                &section,
+                &mic,
+                &lo_dyn,
+                to_note,
+                direction,
+                VoiceKind::Legato,
+                1.0,
+                release_frames,
+            )
             .or_else(|| {
-                self.make_voice(&leg_id, &section, &mic, &lo_dyn, to_note, "", VoiceKind::Legato, 1.0, release_frames)
+                self.make_voice(
+                    &leg_id,
+                    &section,
+                    &mic,
+                    &lo_dyn,
+                    to_note,
+                    "",
+                    VoiceKind::Legato,
+                    1.0,
+                    release_frames,
+                )
             });
 
         if let Some(v) = v {
@@ -534,14 +781,17 @@ impl SampleEngine {
     /// Find the Port articulation matching the current sordino state.
     fn find_port_artic_id(&self) -> Option<String> {
         let want_sord = self.articulation.starts_with("Sord");
-        self.patch.spec.articulations.iter()
+        self.patch
+            .spec
+            .articulations
+            .iter()
             .filter(|a| a.kind == ArticulationKind::Legato)
             .filter(|a| a.id.starts_with("Sord") == want_sord)
             .find(|a| a.id.to_lowercase().contains("port"))
             .map(|a| a.id.clone())
     }
 
-    fn do_note_off(&mut self, note: u8) {
+    fn do_note_off(&mut self, note: u8, velocity: u8) {
         // Trigger release trail if the current articulation specifies one.
         let release_artic = self
             .patch
@@ -549,17 +799,31 @@ impl SampleEngine {
             .articulation(&self.articulation.clone())
             .and_then(|a| a.release_artic.clone());
 
-        if let Some(rel_id) = release_artic {
+        if let Some(rel_id) = release_artic
+            .as_ref()
+            .filter(|_| velocity >= RELEASE_SAMPLE_VELOCITY_MIN)
+        {
             let section = self.section.clone();
             let mic = self.mic.clone();
-            let (lo_dyn, _, _) = self.current_layers_owned();
+            let rel_dyn = self.dynamic_for_artic(rel_id, velocity);
             let release_frames = self.release_frames;
+            tracing::debug!(note, velocity, dyn = %rel_dyn, "release sample");
 
             if let Some(v) = self.make_voice(
-                &rel_id, &section, &mic, &lo_dyn, note, "", VoiceKind::Release, 0.7, release_frames,
+                &rel_id,
+                &section,
+                &mic,
+                &rel_dyn,
+                note,
+                "",
+                VoiceKind::Release,
+                RELEASE_SAMPLE_GAIN,
+                release_frames,
             ) {
                 self.voices.spawn(v);
             }
+        } else if release_artic.is_some() {
+            tracing::trace!(note, velocity, "release sample skipped");
         }
 
         self.voices.note_off(note);
@@ -580,15 +844,16 @@ impl SampleEngine {
         let vib_artic = self.find_vibrato_pair_id(&artic);
 
         let (_, _, nv_blend) = self.layers_for_artic(&artic);
-        let (_, _, vb_blend) = vib_artic.as_deref()
+        let (_, _, vb_blend) = vib_artic
+            .as_deref()
             .map(|id| self.layers_for_artic(id))
             .unwrap_or((String::new(), String::new(), nv_blend));
 
         self.voices.update_sustain_blend(
             nv * (1.0 - nv_blend), // NVLo
-            nv * nv_blend,          // NVHi
+            nv * nv_blend,         // NVHi
             vb * (1.0 - vb_blend), // VibLo
-            vb * vb_blend,          // VibHi
+            vb * vb_blend,         // VibHi
             ramp,
         );
     }
@@ -598,7 +863,13 @@ impl SampleEngine {
     /// `"on_off"` mode (CSSS): snaps at 64. All other libraries: linear.
     fn cc2_blend(&self) -> f32 {
         match self.patch.spec.dynamics.vibrato_mode.as_deref() {
-            Some("on_off") => if self.cc2 >= 64 { 1.0 } else { 0.0 },
+            Some("on_off") => {
+                if self.cc2 >= 64 {
+                    1.0
+                } else {
+                    0.0
+                }
+            }
             _ => self.cc2 as f32 / 127.0,
         }
     }
@@ -616,7 +887,10 @@ impl SampleEngine {
         let is_sord = id_lower.contains("sord");
         let is_nv = id_lower.contains("nv") || id_lower.contains("nonvib");
 
-        self.patch.spec.articulations.iter()
+        self.patch
+            .spec
+            .articulations
+            .iter()
             .filter(|a| a.id != artic_id)
             .filter(|a| a.kind == ArticulationKind::Sustain)
             .filter(|a| {
@@ -642,8 +916,12 @@ impl SampleEngine {
     /// Sordino mode is active, the matched articulation is remapped to its sordino
     /// counterpart.
     fn apply_cc58(&mut self) {
-        let Some(ks) = self.patch.spec.keyswitch.as_ref() else { return };
-        let Some(label) = ks.cc58_function(self.cc58) else { return };
+        let Some(ks) = self.patch.spec.keyswitch.as_ref() else {
+            return;
+        };
+        let Some(label) = ks.cc58_function(self.cc58) else {
+            return;
+        };
         let label = label.to_string();
 
         // ── Mode switches ────────────────────────────────────────────────────
@@ -722,15 +1000,30 @@ impl SampleEngine {
 
         let rr_idx = self.rr.next(section, artic_id, dynamic, max_rr);
 
-        let (path, sampled_note) =
-            self.patch.resolve(section, artic_id, mic, dynamic, note, direction, rr_idx)?;
-
-        let data = match self.cache.get(&path) {
-            Ok(d) => d,
-            Err(e) => {
-                tracing::warn!("sample load failed {}: {e}", path.display());
+        let (path, sampled_note) = match self
+            .patch
+            .resolve(section, artic_id, mic, dynamic, note, direction, rr_idx)
+        {
+            Some(resolved) => resolved,
+            None => {
+                tracing::debug!(
+                    section,
+                    artic = artic_id,
+                    mic,
+                    dynamic,
+                    note,
+                    direction = ?direction,
+                    rr = rr_idx,
+                    "sample miss"
+                );
                 return None;
             }
+        };
+
+        // Audio-thread fast path: skip silently when not yet preloaded.
+        let Some(data) = self.cache.get_loaded(&path) else {
+            tracing::trace!("sample not yet loaded: {}", path.display());
+            return None;
         };
 
         let semitone_offset = note as i16 - sampled_note as i16;
@@ -747,7 +1040,10 @@ impl SampleEngine {
     /// Returns `(lo_label, hi_label, hi_blend)` for a specific articulation ID
     /// at the current CC1 value, using that articulation's own dynamics count.
     fn layers_for_artic(&self, artic_id: &str) -> (String, String, f32) {
-        let n = self.patch.spec.articulation(artic_id)
+        let n = self
+            .patch
+            .spec
+            .articulation(artic_id)
             .map(|a| a.dynamics.len())
             .unwrap_or(0);
         let d = &self.patch.spec.dynamics;
@@ -819,7 +1115,11 @@ impl SampleEngine {
     /// `dynamics` array. For example, Staccato with ["pp","mp","f","fff"]
     /// maps vel 0–31→pp, 32–63→mp, 64–95→f, 96–127→fff.
     fn short_note_dynamic(&self, velocity: u8) -> String {
-        let Some(artic) = self.patch.spec.articulation(&self.articulation) else {
+        self.dynamic_for_artic(&self.articulation, velocity)
+    }
+
+    fn dynamic_for_artic(&self, artic_id: &str, velocity: u8) -> String {
+        let Some(artic) = self.patch.spec.articulation(artic_id) else {
             return "p".into();
         };
         if artic.dynamics.is_empty() {
@@ -840,16 +1140,24 @@ impl SampleEngine {
         let d = &self.patch.spec.dynamics;
 
         // Determine which map to consult based on current articulation family.
-        let in_pizz_family = d.pizzicato_cc1_map.values()
+        let in_pizz_family = d
+            .pizzicato_cc1_map
+            .values()
             .any(|id| id == &self.articulation);
-        let in_short_family = d.short_note_cc1_map.values()
+        let in_short_family = d
+            .short_note_cc1_map
+            .values()
             .any(|id| id == &self.articulation);
 
         if !in_short_family && !in_pizz_family {
             return; // not in a switchable short-note family
         }
 
-        let map = if in_pizz_family { &d.pizzicato_cc1_map } else { &d.short_note_cc1_map };
+        let map = if in_pizz_family {
+            &d.pizzicato_cc1_map
+        } else {
+            &d.short_note_cc1_map
+        };
         let cc1 = self.cc1;
 
         for (range_str, artic_id) in map {
@@ -877,14 +1185,14 @@ impl SampleEngine {
         let artic_lower = self.articulation.to_lowercase();
         let prefer_nv = artic_lower.contains("nv") || artic_lower.contains("nonvib");
 
-        let candidates: Vec<&crate::spec::ArticulationSpec> = self.patch
+        let candidates: Vec<&crate::spec::ArticulationSpec> = self
+            .patch
             .spec
             .articulations
             .iter()
             .filter(|a| a.kind == ArticulationKind::Legato)
             .filter(|a| {
-                a.instrument_filter.is_empty()
-                    || a.instrument_filter.contains(&self.section)
+                a.instrument_filter.is_empty() || a.instrument_filter.contains(&self.section)
             })
             .filter(|a| a.id.starts_with("Sord") == want_sord)
             .filter(|a| {
@@ -899,9 +1207,13 @@ impl SampleEngine {
 
         // Prefer NVLeg when in non-vibrato mode, Leg otherwise.
         let preferred = if prefer_nv {
-            candidates.iter().find(|a| a.id.to_lowercase().contains("nv"))
+            candidates
+                .iter()
+                .find(|a| a.id.to_lowercase().contains("nv"))
         } else {
-            candidates.iter().find(|a| !a.id.to_lowercase().contains("nv"))
+            candidates
+                .iter()
+                .find(|a| !a.id.to_lowercase().contains("nv"))
         };
 
         preferred
@@ -948,8 +1260,8 @@ impl VoicePool {
     ) {
         for v in self.voices_mut() {
             match v.kind {
-                VoiceKind::SustainNVLo  => v.ramp_gain(nv_lo,  ramp_frames),
-                VoiceKind::SustainNVHi  => v.ramp_gain(nv_hi,  ramp_frames),
+                VoiceKind::SustainNVLo => v.ramp_gain(nv_lo, ramp_frames),
+                VoiceKind::SustainNVHi => v.ramp_gain(nv_hi, ramp_frames),
                 VoiceKind::SustainVibLo => v.ramp_gain(vib_lo, ramp_frames),
                 VoiceKind::SustainVibHi => v.ramp_gain(vib_hi, ramp_frames),
                 // Legacy kinds still accepted; treat as NV Lo/Hi.
@@ -991,9 +1303,18 @@ mod tests {
         // We test current_layers_owned() logic in isolation by constructing
         // a mock layers slice and exercising the algorithm directly.
         let layers: &[Cc1Layer] = &[
-            Cc1Layer { label: "p".into(),  cc_range: [0, 42] },
-            Cc1Layer { label: "mf".into(), cc_range: [33, 94] },
-            Cc1Layer { label: "ff".into(), cc_range: [85, 127] },
+            Cc1Layer {
+                label: "p".into(),
+                cc_range: [0, 42],
+            },
+            Cc1Layer {
+                label: "mf".into(),
+                cc_range: [33, 94],
+            },
+            Cc1Layer {
+                label: "ff".into(),
+                cc_range: [85, 127],
+            },
         ];
 
         // Inline the algorithm (same logic as current_layers_owned).
@@ -1044,12 +1365,16 @@ mod tests {
         let specs_dir = {
             let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap();
             std::path::Path::new(&manifest)
-                .parent().unwrap()
-                .parent().unwrap()
+                .parent()
+                .unwrap()
+                .parent()
+                .unwrap()
                 .join("specs")
         };
         let spec_path = specs_dir.join("cinematic-strings.toml");
-        if !spec_path.exists() { return; }
+        if !spec_path.exists() {
+            return;
+        }
 
         let spec = crate::LibrarySpec::from_file(&spec_path).expect("load CSS spec");
         let patch = crate::PlayerPatch::from_spec(spec);

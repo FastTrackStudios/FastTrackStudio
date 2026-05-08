@@ -1,7 +1,7 @@
 //! Pure grid geometry functions — cell positions, module bounds, collision detection.
 
-use signal::block::BlockColor;
 use signal::ModuleType;
+use signal::block::BlockColor;
 
 use super::types::GridSlot;
 

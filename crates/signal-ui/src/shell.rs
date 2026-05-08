@@ -12,13 +12,14 @@ use dioxus::prelude::*;
 use dock_dioxus::{DockProvider, DockRoot, PanelRenderer, PanelRendererRegistry};
 use signal::Signal;
 
-use audio_gui::theme::use_init_theme;
 use crate::register_panels;
-use crate::views::FxView;
+use crate::views::{FxView, SamplerView};
+use audio_gui::theme::use_init_theme;
 
 /// Signal view mode — determines which top-level browser/editor is shown.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
+    Sampler,
     Preset,
     Profile,
     Song,
@@ -48,7 +49,7 @@ pub fn SignalRoot(controller: Signal) -> Element {
 /// Main shell: mode selector + dock-based panel layout.
 #[component]
 fn SignalShell() -> Element {
-    let mut mode = use_signal(|| Mode::Preset);
+    let mut mode = use_signal(|| Mode::Sampler);
 
     let render_panel = use_hook(|| {
         let mut registry = PanelRendererRegistry::new();
@@ -62,12 +63,17 @@ fn SignalShell() -> Element {
             // Mode selector bar
             nav { class: "flex items-center gap-1 px-4 py-2 border-b border-zinc-800 bg-zinc-900",
                 span { class: "text-sm font-semibold text-zinc-400 mr-3", "Signal" }
+                ModeButton { label: "Sampler", active: mode() == Mode::Sampler, onclick: move |_| mode.set(Mode::Sampler) }
                 ModeButton { label: "Preset", active: mode() == Mode::Preset, onclick: move |_| mode.set(Mode::Preset) }
                 ModeButton { label: "Profile", active: mode() == Mode::Profile, onclick: move |_| mode.set(Mode::Profile) }
                 ModeButton { label: "Song", active: mode() == Mode::Song, onclick: move |_| mode.set(Mode::Song) }
                 ModeButton { label: "FX", active: mode() == Mode::Fx, onclick: move |_| mode.set(Mode::Fx) }
             }
-            if mode() == Mode::Fx {
+            if mode() == Mode::Sampler {
+                div { class: "flex-1 overflow-hidden",
+                    SamplerView {}
+                }
+            } else if mode() == Mode::Fx {
                 // FX mode — EQ + Compressor panels
                 div { class: "flex-1 overflow-hidden p-4",
                     FxView {}

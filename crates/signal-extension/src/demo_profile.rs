@@ -35,10 +35,7 @@ const SCENES: &[(&str, &[&str])] = &[
         &["input", "amp", "dynamics", "modulation", "master"],
     ),
     ("Ambient", &["input", "amp", "modulation", "time", "master"]),
-    (
-        "Q-Tron",
-        &["input", "drive", "amp", "modulation", "master"],
-    ),
+    ("Q-Tron", &["input", "drive", "amp", "modulation", "master"]),
     (
         "Solo",
         &["input", "drive", "amp", "time", "dynamics", "master"],
@@ -74,7 +71,10 @@ pub async fn load_demo_profile(daw: &Daw) -> Result<()> {
     // ── Build each scene ─────────────────────────────────────────────
     let scene_count = SCENES.len();
     for (i, &(scene_name, module_types)) in SCENES.iter().enumerate() {
-        info!("[demo-profile] Building scene {}/{scene_count}: {scene_name}", i + 1);
+        info!(
+            "[demo-profile] Building scene {}/{scene_count}: {scene_name}",
+            i + 1
+        );
 
         let is_last_scene = i == scene_count - 1;
 
@@ -93,9 +93,7 @@ pub async fn load_demo_profile(daw: &Daw) -> Result<()> {
         scene_input.set_parent_send(false).await?;
 
         // Layer track
-        let layer = tracks
-            .add(&format!("[L] {scene_name}"), None)
-            .await?;
+        let layer = tracks.add(&format!("[L] {scene_name}"), None).await?;
         layer.set_color(scene_color(scene_name)).await?;
 
         // Close scene folder (and profile folder on last scene)
@@ -126,11 +124,7 @@ pub async fn load_demo_profile(daw: &Daw) -> Result<()> {
         .set_ext_state("fts_signal", "profile_name", "All-Around")
         .await?;
     profile
-        .set_ext_state(
-            "fts_signal",
-            "scene_count",
-            &scene_count.to_string(),
-        )
+        .set_ext_state("fts_signal", "scene_count", &scene_count.to_string())
         .await?;
 
     info!("[demo-profile] All-Around profile created with {scene_count} scenes");
@@ -238,24 +232,24 @@ pub async fn add_layer_fx(layer: &TrackHandle, module_types: &[&str]) -> Result<
 pub fn scene_color(name: &str) -> u32 {
     match name {
         // Profile scenes
-        "Clean" => 0x22C55E,         // green
-        "Crunch" => 0xEAB308,        // yellow
-        "Drive" => 0xEF4444,         // red
-        "Lead" => 0xF97316,          // orange
-        "Funk" => 0x8B5CF6,          // violet
-        "Ambient" => 0x06B6D4,       // cyan
-        "Q-Tron" => 0xEC4899,        // pink
-        "Solo" => 0x3B82F6,          // blue
+        "Clean" => 0x22C55E,   // green
+        "Crunch" => 0xEAB308,  // yellow
+        "Drive" => 0xEF4444,   // red
+        "Lead" => 0xF97316,    // orange
+        "Funk" => 0x8B5CF6,    // violet
+        "Ambient" => 0x06B6D4, // cyan
+        "Q-Tron" => 0xEC4899,  // pink
+        "Solo" => 0x3B82F6,    // blue
         // Setlist sections
-        "Rhythm" => 0x84CC16,        // lime
-        "Edge" => 0xF43F5E,          // rose
-        "Djent" => 0xDC2626,         // red-dark
-        "Harmony Lead" => 0xFBBF24,  // amber
-        "Chug" => 0xB45309,          // amber-dark
-        "Filtered" => 0xA855F7,      // purple
-        "Dry Lead" => 0xFB923C,      // orange-light
-        "Dry Drive" => 0xF87171,     // red-light
-        "Default" => 0x9CA3AF,       // gray-light
-        _ => 0x6B7280,               // gray
+        "Rhythm" => 0x84CC16,       // lime
+        "Edge" => 0xF43F5E,         // rose
+        "Djent" => 0xDC2626,        // red-dark
+        "Harmony Lead" => 0xFBBF24, // amber
+        "Chug" => 0xB45309,         // amber-dark
+        "Filtered" => 0xA855F7,     // purple
+        "Dry Lead" => 0xFB923C,     // orange-light
+        "Dry Drive" => 0xF87171,    // red-light
+        "Default" => 0x9CA3AF,      // gray-light
+        _ => 0x6B7280,              // gray
     }
 }

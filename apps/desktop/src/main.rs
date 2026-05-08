@@ -2,20 +2,23 @@
 //!
 //! Two rendering modes, selected at compile time:
 //!
-//! **Production** (default): `nih_plug_dioxus::open_standalone_with_state`
+//! **Dev** (default): `dioxus::LaunchBuilder::desktop` (WebKit/WRY)
+//! — enables `dx serve` hot-reload for rapid RSX/Tailwind prototyping.
+//! `dev` is the default feature so plain `dx serve` works without flags.
+//!
+//! **Production** (`--no-default-features`): `nih_plug_dioxus::open_standalone_with_state`
 //! (Blitz/Vello/wgpu renderer) — same pipeline as `fts-signal-plugin`
 //! (VST3/CLAP). UI components are guaranteed to render identically in both
-//! standalone and plugin contexts.
-//!
-//! **Dev** (`--features dev`): `dioxus::LaunchBuilder::desktop` (WebKit/WRY)
-//! — enables `dx serve` hot-reload for rapid RSX/Tailwind prototyping.
-//! RSX components are renderer-agnostic so layout/styling changes made here
-//! transfer directly to production.
+//! standalone and plugin contexts. Nix release builds pass `--no-default-features`
+//! automatically.
 
 use dioxus::prelude::*;
 
 use signal::{Signal, connect_db_seeded};
+use signal_audio::MidiInput;
+#[cfg(not(feature = "dev"))]
 use signal_audio::ProcessingChain;
+#[cfg(not(feature = "dev"))]
 use signal_sampler::SamplerPlayer;
 use signal_ui::SignalRoot;
 
@@ -24,15 +27,32 @@ use signal_ui::SignalRoot;
 /// without an external file load (required for VST plugin compatibility).
 const SIGNAL_CSS: &str = include_str!("../assets/tailwind.css");
 
+/// Base document reset so the WebKit/WRY renderer fills the viewport.
+/// Tailwind's preflight does not set `html, body { height: 100% }`, which
+/// causes `h-full` on the root component div to have no effect (no parent
+/// height to inherit from). This CSS runs before Tailwind to establish the
+/// baseline. Blitz/wgpu doesn't use this — it manages layout directly.
+#[cfg(feature = "dev")]
+const BASE_CSS: &str = r#"
+html, body {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    background: oklch(14.5% 0 0);
+}
+#main {
+    height: 100%;
+}
+"#;
+
 /// Default log filter: info-level globally, but suppress the Blitz/Dioxus
 /// "Changing the props of Style {}" warning that fires on every re-render.
 /// The CSS IS applied correctly — this warning is a Blitz limitation (style
 /// elements can't be updated after mount), not a real error.
 fn default_log_filter() -> tracing_subscriber::EnvFilter {
     tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-        tracing_subscriber::EnvFilter::new(
-            "info,dioxus_document::elements=error",
-        )
+        tracing_subscriber::EnvFilter::new("info,dioxus_document::elements=error")
     })
 }
 
@@ -58,8 +78,8 @@ struct AppState {
 
 #[cfg(not(feature = "dev"))]
 fn main() {
-    use std::sync::Arc;
     use nih_plug_dioxus::SharedState;
+    use std::sync::Arc;
 
     tracing_subscriber::fmt()
         .with_env_filter(default_log_filter())
@@ -134,6 +154,17 @@ fn App() -> Element {
 
 #[cfg(feature = "dev")]
 fn main() {
+    // WebKitGTK accelerated compositing breaks on Linux with NVIDIA/llvmpipe —
+    // the GBM buffer allocation fails and the window stays white.
+    // Disabling compositing mode forces software rendering.
+    // See: https://github.com/NixOS/nixpkgs/issues/32580
+    if std::env::var("WEBKIT_DISABLE_COMPOSITING_MODE").is_err() {
+        // Safety: single-threaded at this point; no other threads have started.
+        unsafe {
+            std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
+        }
+    }
+
     tracing_subscriber::fmt()
         .with_env_filter(default_log_filter())
         .init();
@@ -142,12 +173,11 @@ fn main() {
 
     dioxus::LaunchBuilder::desktop()
         .with_cfg(
-            dioxus::desktop::Config::default()
-                .with_window(
-                    dioxus::desktop::WindowBuilder::default()
-                        .with_title("Signal (dev)")
-                        .with_inner_size(dioxus::desktop::LogicalSize::new(1400.0, 900.0)),
-                ),
+            dioxus::desktop::Config::default().with_window(
+                dioxus::desktop::WindowBuilder::default()
+                    .with_title("Signal (dev)")
+                    .with_inner_size(dioxus::desktop::LogicalSize::new(1400.0, 900.0)),
+            ),
         )
         .launch(DevApp);
 }
@@ -167,12 +197,31 @@ fn DevApp() -> Element {
         .map(|r| r.as_ref().map(Signal::clone).map_err(|e| e.to_string()));
 
     match state {
-        None => rsx! { div { "Loading…" } },
-        Some(Err(e)) => rsx! { div { "DB error: {e}" } },
-        Some(Ok(ctrl)) => rsx! {
-            AppStyles {}
-            SignalRoot { controller: ctrl }
+        None => rsx! {
+            document::Style { {BASE_CSS} }
+            div { style: "color: #e4e4e7; padding: 16px;", "Loading…" }
         },
+        Some(Err(e)) => rsx! {
+            document::Style { {BASE_CSS} }
+            div { style: "color: #ef4444; padding: 16px;", "DB error: {e}" }
+        },
+        Some(Ok(ctrl)) => {
+            // Open MIDI on first successful load (once per app lifetime).
+            use_context_provider(|| {
+                let midi = MidiInput::open_all();
+                if midi.is_some() {
+                    tracing::info!("MIDI: input active");
+                } else {
+                    tracing::info!("MIDI: no input ports found");
+                }
+                midi // provides Option<MidiInput>
+            });
+            rsx! {
+                document::Style { {BASE_CSS} }
+                AppStyles {}
+                SignalRoot { controller: ctrl }
+            }
+        }
     }
 }
 

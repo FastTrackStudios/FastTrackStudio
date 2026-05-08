@@ -44,11 +44,19 @@ impl ParamRange {
     }
     /// Unipolar `[0, 1]` with a default.
     pub const fn unipolar(default: f32) -> Self {
-        Self { min: 0.0, max: 1.0, default }
+        Self {
+            min: 0.0,
+            max: 1.0,
+            default,
+        }
     }
     /// Bipolar `[-1, 1]` with a default.
     pub const fn bipolar(default: f32) -> Self {
-        Self { min: -1.0, max: 1.0, default }
+        Self {
+            min: -1.0,
+            max: 1.0,
+            default,
+        }
     }
 }
 
@@ -269,7 +277,12 @@ pub struct FmOperatorParams {
 impl SynthBlockParams for FmOperatorParams {
     const BLOCK_TYPE: BlockType = BlockType::FmOperator;
     fn default_params() -> Self {
-        Self { ratio: 1.0, tune_cents: 0.0, level: 0.75, feedback: 0.0 }
+        Self {
+            ratio: 1.0,
+            tune_cents: 0.0,
+            level: 0.75,
+            feedback: 0.0,
+        }
     }
 }
 
@@ -372,7 +385,11 @@ pub struct FormantParams {
 impl SynthBlockParams for FormantParams {
     const BLOCK_TYPE: BlockType = BlockType::Formant;
     fn default_params() -> Self {
-        Self { vowel: 0.0, formant_shift: 0.0, mix: 0.5 }
+        Self {
+            vowel: 0.0,
+            formant_shift: 0.0,
+            mix: 0.5,
+        }
     }
 }
 
@@ -401,7 +418,11 @@ pub struct DfsParams {
 impl SynthBlockParams for DfsParams {
     const BLOCK_TYPE: BlockType = BlockType::Dfs;
     fn default_params() -> Self {
-        Self { depth: 0.5, position: 0.5, mix: 0.5 }
+        Self {
+            depth: 0.5,
+            position: 0.5,
+            mix: 0.5,
+        }
     }
 }
 
@@ -421,7 +442,10 @@ pub struct NoiseParams {
 impl SynthBlockParams for NoiseParams {
     const BLOCK_TYPE: BlockType = BlockType::Noise;
     fn default_params() -> Self {
-        Self { color: 0, level: 0.5 }
+        Self {
+            color: 0,
+            level: 0.5,
+        }
     }
 }
 
@@ -507,11 +531,31 @@ impl SynthBlockParams for MultisegEnvelopeParams {
     fn default_params() -> Self {
         Self {
             stages: vec![
-                MultisegStage { level: 0.0, time_ms: 0.0, curve: 0.0 },
-                MultisegStage { level: 1.0, time_ms: 5.0, curve: 0.0 },
-                MultisegStage { level: 0.7, time_ms: 100.0, curve: 0.0 },
-                MultisegStage { level: 0.7, time_ms: 0.0, curve: 0.0 },
-                MultisegStage { level: 0.0, time_ms: 200.0, curve: 0.0 },
+                MultisegStage {
+                    level: 0.0,
+                    time_ms: 0.0,
+                    curve: 0.0,
+                },
+                MultisegStage {
+                    level: 1.0,
+                    time_ms: 5.0,
+                    curve: 0.0,
+                },
+                MultisegStage {
+                    level: 0.7,
+                    time_ms: 100.0,
+                    curve: 0.0,
+                },
+                MultisegStage {
+                    level: 0.7,
+                    time_ms: 0.0,
+                    curve: 0.0,
+                },
+                MultisegStage {
+                    level: 0.0,
+                    time_ms: 200.0,
+                    curve: 0.0,
+                },
             ],
             loop_start: None,
             loop_end: None,
@@ -660,7 +704,13 @@ pub struct UnisonParams {
 impl SynthBlockParams for UnisonParams {
     const BLOCK_TYPE: BlockType = BlockType::Unison;
     fn default_params() -> Self {
-        Self { voices: 1, detune_cents: 0.0, width: 0.5, phase_random: 0.0, drift: 0.0 }
+        Self {
+            voices: 1,
+            detune_cents: 0.0,
+            width: 0.5,
+            phase_random: 0.0,
+            drift: 0.0,
+        }
     }
 }
 
@@ -709,8 +759,13 @@ impl SynthBlockParams for StepSeqParams {
         Self {
             steps: vec![
                 StepSeqStep {
-                    note: 60, velocity: 0.7, slice_index: -1,
-                    start: 0.0, end: 1.0, channel: -1, probability: 1.0,
+                    note: 60,
+                    velocity: 0.7,
+                    slice_index: -1,
+                    start: 0.0,
+                    end: 1.0,
+                    channel: -1,
+                    probability: 1.0,
                 };
                 16
             ],

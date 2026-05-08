@@ -1,7 +1,9 @@
 #[test]
 fn parse_omnisphere_wavetable_styx() {
     use signal_sampler::LibrarySpec;
-    let path = std::path::Path::new("/run/media/AudioHaven/Sampled/Synth/Omnisphere-Wavetables/4 - EDM Wavetables/Spectroid/Xenomorphic/library.styx");
+    let path = std::path::Path::new(
+        "/run/media/AudioHaven/Sampled/Synth/Omnisphere-Wavetables/4 - EDM Wavetables/Spectroid/Xenomorphic/library.styx",
+    );
     if !path.exists() {
         return;
     }

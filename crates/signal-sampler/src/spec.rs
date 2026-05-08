@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use facet::Facet;
+use signal_proto::tagging::{StructuredTag, TagSet};
 
 use crate::SamplerError;
 
@@ -88,6 +89,27 @@ pub struct LibrarySpec {
     /// consumes them.
     #[facet(default)]
     pub grooves: Vec<GrooveSpec>,
+
+    /// Free-form structured tags using the project-wide `StructuredTag`
+    /// schema. Stored as a flat `Vec` (instead of the Map-shaped
+    /// `signal_proto::tagging::TagSet`) so it round-trips cleanly through
+    /// facet-styx; call [`LibrarySpec::tag_set`] to materialize a `TagSet`
+    /// for the collection browser.
+    #[facet(default)]
+    pub tags: Vec<StructuredTag>,
+    /// Primary instrument family (`"violin"`, `"drums"`, `"rhodes"`,
+    /// `"synth-bass"`, …). Empty when not classified.
+    #[facet(default)]
+    pub instrument: String,
+    /// High-level content category (`"orchestral"`, `"drum-kit"`,
+    /// `"groove"`, `"electric-piano"`, `"synth"`, …). Empty when not
+    /// classified.
+    #[facet(default)]
+    pub category: String,
+    /// Stylistic descriptors / sub-genres (Stylus suite name,
+    /// articulation list, drum sub-style, etc.).
+    #[facet(default)]
+    pub style: Vec<String>,
 }
 
 impl LibrarySpec {
@@ -123,6 +145,18 @@ impl LibrarySpec {
     /// Look up a mic by its `id` field.
     pub fn mic(&self, id: &str) -> Option<&MicSpec> {
         self.mics.iter().find(|m| m.id == id)
+    }
+
+    /// Materialize a [`TagSet`] from the flat `tags` vector.
+    ///
+    /// The collection browser consumes `TagSet`; the spec stores tags as a
+    /// `Vec` purely for facet-styx round-trip ergonomics.
+    pub fn tag_set(&self) -> TagSet {
+        let mut set = TagSet::new();
+        for t in &self.tags {
+            set.insert(t.clone());
+        }
+        set
     }
 }
 

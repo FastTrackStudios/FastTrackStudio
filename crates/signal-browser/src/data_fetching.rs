@@ -3,19 +3,19 @@
 //! Each `fetch_col*` function queries the `Signal` for the
 //! appropriate domain entities and maps them into `ColumnItem` rows.
 
+use signal::Signal;
 use signal::layer::Layer;
 use signal::rig::RigType;
 use signal::tagging::{StructuredTag, TagCategory, TagSet};
 use signal::traits::HasMetadata;
-use signal::Signal;
 use signal::{
-    BlockType, ModuleBlock, ModuleBlockSource, ModulePreset, Preset, SignalChain, SignalNode,
-    ALL_BLOCK_TYPES,
+    ALL_BLOCK_TYPES, BlockType, ModuleBlock, ModuleBlockSource, ModulePreset, Preset, SignalChain,
+    SignalNode,
 };
 use std::collections::HashMap;
 
-use super::grid_conversion::ParamLookup;
-use super::types::{
+use crate::grid_conversion::ParamLookup;
+use crate::types::{
     ColumnItem, DetailData, EngineFlowData, LayerFlowData, ModuleChainData, NavCategory,
 };
 
@@ -24,11 +24,7 @@ const LAYER_PRESET_TAG: usize = usize::MAX;
 
 // region: --- Column fetching
 
-pub(super) async fn fetch_col2(
-    signal: &Signal,
-    nav: NavCategory,
-    rig_type: RigType,
-) -> Vec<ColumnItem> {
+pub async fn fetch_col2(signal: &Signal, nav: NavCategory, rig_type: RigType) -> Vec<ColumnItem> {
     match nav {
         NavCategory::Presets => {
             let mut items: Vec<ColumnItem> = Vec::new();
@@ -145,8 +141,6 @@ pub(super) async fn fetch_col2(
             items
         }
         NavCategory::Modules => {
-            // Show module types as col2 items (like Blocks shows block types).
-            // Count how many presets exist per module type for the badge.
             let all_presets = signal.module_presets().list().await.unwrap_or_default();
             signal::ALL_MODULE_TYPES
                 .iter()
@@ -196,9 +190,7 @@ pub(super) async fn fetch_col2(
 }
 
 /// Returns (column items, block presets cache).
-/// The cache is non-empty only for `NavCategory::Blocks` — it holds the raw
-/// `Preset` objects so col4 can extract snapshots without re-querying.
-pub(super) async fn fetch_col3(
+pub async fn fetch_col3(
     signal: &Signal,
     nav: NavCategory,
     col2_id: &str,
@@ -208,7 +200,6 @@ pub(super) async fn fetch_col3(
         NavCategory::Presets => {
             let is_layer = col2_tag == Some(LAYER_PRESET_TAG);
             let items = if is_layer {
-                // Layer preset — show variants with module chains
                 if let Some(layer) = signal.layers().load(col2_id).await.ok().flatten() {
                     let all_module_presets =
                         signal.module_presets().list().await.unwrap_or_default();
@@ -246,15 +237,12 @@ pub(super) async fn fetch_col3(
                     Vec::new()
                 }
             } else {
-                // Rig preset — show scenes with engines
                 if let Some(rig) = signal.rigs().load(col2_id).await.ok().flatten() {
                     let all_module_presets =
                         signal.module_presets().list().await.unwrap_or_default();
                     let block_preset_lookup = build_block_preset_lookup(signal).await;
                     let mut out = Vec::new();
                     for (idx, v) in rig.variants.iter().enumerate() {
-                        // Lazy scene resolution: only resolve the first scene eagerly.
-                        // Remaining scenes are resolved on click via resolve_scene_detail.
                         let engines = if idx == 0 {
                             resolve_rig_scene_engines(
                                 signal,
@@ -368,7 +356,6 @@ pub(super) async fn fetch_col3(
             (items, Vec::new())
         }
         NavCategory::Modules => {
-            // col2 is a module type index — show presets for that type.
             if let Some(idx) = col2_tag {
                 if let Some(&mt) = signal::ALL_MODULE_TYPES.get(idx) {
                     let all_presets = signal.module_presets().list().await.unwrap_or_default();
@@ -376,7 +363,6 @@ pub(super) async fn fetch_col3(
                         .iter()
                         .filter(|p| p.module_type() == mt)
                         .map(|p| {
-                            // Load default snapshot chain for detail preview
                             let chain = p.snapshots().first().map(|s| s.module().chain().clone());
                             ColumnItem {
                                 id: p.id().to_string(),
@@ -432,9 +418,6 @@ pub(super) async fn fetch_col3(
 
 // region: --- Detail resolution helpers
 
-/// Resolve a layer's default variant refs into `ModuleChainData` for grid rendering.
-///
-/// Delegates to [`resolve_variant_module_chains`] with the layer's default variant.
 async fn resolve_layer_module_chains(
     signal: &Signal,
     layer: &Layer,
@@ -448,13 +431,6 @@ async fn resolve_layer_module_chains(
     resolve_variant_module_chains(signal, variant, all_module_presets, block_preset_lookup).await
 }
 
-/// Resolve a specific layer snapshot's refs into `ModuleChainData` for grid rendering.
-///
-/// Handles all four ref types:
-/// - `layer_refs` → recursively resolved nested layers
-/// - `module_refs` → full module chains from module presets
-/// - `block_refs` → single-block synthetic chains (one per block)
-/// - `plugin_refs` → virtual module chains from plugin block defs
 async fn resolve_variant_module_chains(
     signal: &Signal,
     variant: &signal::layer::LayerSnapshot,
@@ -463,7 +439,6 @@ async fn resolve_variant_module_chains(
 ) -> Vec<ModuleChainData> {
     let mut out = Vec::new();
 
-    // 1) Resolve layer_refs (recursive — nested layers)
     for lr in &variant.layer_refs {
         let layer_id_str = lr.collection_id.to_string();
         if let Some(nested_layer) = signal
@@ -484,7 +459,6 @@ async fn resolve_variant_module_chains(
         }
     }
 
-    // 2) Resolve module_refs (module presets with full signal chains)
     for mr in &variant.module_refs {
         let collection_id_str = mr.collection_id.to_string();
         let module_preset = all_module_presets
@@ -519,7 +493,6 @@ async fn resolve_variant_module_chains(
         });
     }
 
-    // 3) Resolve block_refs (standalone blocks → single-node chains)
     for br in &variant.block_refs {
         let preset_id_str = br.collection_id.to_string();
         let (bt, preset_name) = block_preset_lookup
@@ -556,7 +529,6 @@ async fn resolve_variant_module_chains(
         });
     }
 
-    // 4) Resolve plugin_refs (plugin block defs → virtual module chains)
     for pr in &variant.plugin_refs {
         for (label, mt, chain) in pr.def.to_module_chains() {
             let mc = mt.color();
@@ -574,12 +546,7 @@ async fn resolve_variant_module_chains(
     out
 }
 
-/// Build a lookup table of block preset ID → (BlockType, name).
-///
-/// Loads all block collections across every block type. This is cached
-/// per-call since `resolve_layer_module_chains` may be called multiple
-/// times for nested layers.
-async fn build_block_preset_lookup(
+pub(crate) async fn build_block_preset_lookup(
     signal: &Signal,
 ) -> std::collections::HashMap<String, (BlockType, String)> {
     let mut lookup = std::collections::HashMap::new();
@@ -591,9 +558,6 @@ async fn build_block_preset_lookup(
     lookup
 }
 
-/// Resolve a rig scene's full hierarchy into `EngineFlowData` for grid rendering.
-///
-/// Walks: `RigScene.engine_selections → Engine → EngineScene.layer_selections → Layer → modules`
 async fn resolve_rig_scene_engines(
     signal: &Signal,
     scene: &signal::rig::RigScene,
@@ -607,7 +571,6 @@ async fn resolve_rig_scene_engines(
             Some(e) => e,
             None => continue,
         };
-        // Find the selected engine variant, fall back to default
         let engine_variant = engine
             .variant(&es.variant_id)
             .or_else(|| engine.default_variant());
@@ -642,12 +605,7 @@ async fn resolve_rig_scene_engines(
     engines
 }
 
-/// On-demand resolution for a lazily-loaded rig scene.
-///
-/// Called when the user clicks a scene that was not eagerly resolved
-/// (i.e. any scene other than the first). Loads the rig, finds the
-/// matching scene, resolves engines, and builds a parameter lookup.
-pub(super) async fn resolve_scene_detail(
+pub async fn resolve_scene_detail(
     signal: &Signal,
     rig_id: &str,
     scene_id: &str,
@@ -661,7 +619,6 @@ pub(super) async fn resolve_scene_detail(
     let engines =
         resolve_rig_scene_engines(signal, scene, &all_module_presets, &block_preset_lookup).await;
 
-    // Build param lookup from the resolved engines
     let detail = DetailData {
         engines: engines.clone(),
         ..Default::default()
@@ -682,12 +639,7 @@ pub(super) async fn resolve_scene_detail(
     Some((engines, params))
 }
 
-/// On-demand resolution for a layer variant.
-///
-/// Loads the layer, finds the matching variant (or default), resolves its
-/// module chains, wraps them in a synthetic `EngineFlowData`, and builds
-/// a parameter lookup — making the result compatible with `engines_to_grid_slots`.
-pub(super) async fn resolve_layer_detail(
+pub async fn resolve_layer_detail(
     signal: &Signal,
     layer_id: &str,
     variant_id: Option<&str>,
@@ -696,7 +648,6 @@ pub(super) async fn resolve_layer_detail(
     let all_module_presets = signal.module_presets().list().await.unwrap_or_default();
     let block_preset_lookup = build_block_preset_lookup(signal).await;
 
-    // Pick the requested variant, falling back to default
     let variant = variant_id
         .and_then(|vid| layer.variants.iter().find(|v| v.id.to_string() == vid))
         .or_else(|| layer.default_variant())?;
@@ -705,7 +656,6 @@ pub(super) async fn resolve_layer_detail(
         resolve_variant_module_chains(signal, variant, &all_module_presets, &block_preset_lookup)
             .await;
 
-    // Wrap in a synthetic EngineFlowData so it's grid-compatible
     let engine = EngineFlowData {
         name: layer.name.clone(),
         layers: vec![LayerFlowData {
@@ -715,7 +665,6 @@ pub(super) async fn resolve_layer_detail(
     };
     let engines = vec![engine];
 
-    // Build param lookup
     let detail = DetailData {
         engines: engines.clone(),
         ..Default::default()
@@ -740,9 +689,7 @@ pub(super) async fn resolve_layer_detail(
 
 // region: --- Parameter resolution
 
-/// Walk all column items' detail data, collect block source references,
-/// and resolve them into a parameter lookup table.
-pub(super) async fn build_param_lookup(signal: &Signal, items: &[ColumnItem]) -> ParamLookup {
+pub async fn build_param_lookup(signal: &Signal, items: &[ColumnItem]) -> ParamLookup {
     let mut lookup = ParamLookup::new();
     for item in items {
         collect_chain_sources(&item.detail, &mut lookup, signal).await;
@@ -750,9 +697,7 @@ pub(super) async fn build_param_lookup(signal: &Signal, items: &[ColumnItem]) ->
     lookup
 }
 
-/// Collect block parameters from all chains in a DetailData tree.
 async fn collect_chain_sources(data: &DetailData, lookup: &mut ParamLookup, signal: &Signal) {
-    // Walk engines → layers → module chains → chain nodes
     for engine in &data.engines {
         for layer in &engine.layers {
             for mc in &layer.module_chains {
@@ -760,17 +705,14 @@ async fn collect_chain_sources(data: &DetailData, lookup: &mut ParamLookup, sign
             }
         }
     }
-    // Walk module_chains directly
     for mc in &data.module_chains {
         resolve_chain_params(&mc.chain, lookup, signal).await;
     }
-    // Walk standalone chain
     if let Some(ref chain) = data.chain {
         resolve_chain_params(chain, lookup, signal).await;
     }
 }
 
-/// Walk a signal chain and resolve parameters for each block source.
 async fn resolve_chain_params(chain: &SignalChain, lookup: &mut ParamLookup, signal: &Signal) {
     for node in chain.nodes() {
         resolve_node_params(node, lookup, signal).await;
@@ -779,55 +721,51 @@ async fn resolve_chain_params(chain: &SignalChain, lookup: &mut ParamLookup, sig
 
 async fn resolve_node_params(node: &signal::SignalNode, lookup: &mut ParamLookup, signal: &Signal) {
     match node {
-        signal::SignalNode::Block(mb) => {
-            match mb.source() {
-                signal::ModuleBlockSource::PresetSnapshot {
-                    preset_id,
-                    snapshot_id,
-                    ..
-                } => {
-                    let key = (preset_id.to_string(), snapshot_id.to_string());
-                    if !lookup.contains_key(&key) {
-                        if let Some(block) = signal
-                            .block_presets()
-                            .load_variant(mb.block_type(), preset_id.clone(), snapshot_id.clone())
-                            .await
-                            .ok()
-                            .flatten()
-                        {
-                            let params: Vec<(String, f32)> = block
-                                .parameters()
-                                .iter()
-                                .map(|p| (p.name().to_string(), p.value().get()))
-                                .collect();
-                            lookup.insert(key, params);
-                        }
+        signal::SignalNode::Block(mb) => match mb.source() {
+            signal::ModuleBlockSource::PresetSnapshot {
+                preset_id,
+                snapshot_id,
+                ..
+            } => {
+                let key = (preset_id.to_string(), snapshot_id.to_string());
+                if !lookup.contains_key(&key) {
+                    if let Some(block) = signal
+                        .block_presets()
+                        .load_variant(mb.block_type(), preset_id.clone(), snapshot_id.clone())
+                        .await
+                        .ok()
+                        .flatten()
+                    {
+                        let params: Vec<(String, f32)> = block
+                            .parameters()
+                            .iter()
+                            .map(|p| (p.name().to_string(), p.value().get()))
+                            .collect();
+                        lookup.insert(key, params);
                     }
-                }
-                signal::ModuleBlockSource::PresetDefault { preset_id, .. } => {
-                    let key = (preset_id.to_string(), "default".to_string());
-                    if !lookup.contains_key(&key) {
-                        if let Some(block) = signal
-                            .block_presets()
-                            .load_default(mb.block_type(), preset_id.clone())
-                            .await
-                            .ok()
-                            .flatten()
-                        {
-                            let params: Vec<(String, f32)> = block
-                                .parameters()
-                                .iter()
-                                .map(|p| (p.name().to_string(), p.value().get()))
-                                .collect();
-                            lookup.insert(key, params);
-                        }
-                    }
-                }
-                signal::ModuleBlockSource::Inline { .. } => {
-                    // Inline blocks carry their params directly — handled in extract_block_params
                 }
             }
-        }
+            signal::ModuleBlockSource::PresetDefault { preset_id, .. } => {
+                let key = (preset_id.to_string(), "default".to_string());
+                if !lookup.contains_key(&key) {
+                    if let Some(block) = signal
+                        .block_presets()
+                        .load_default(mb.block_type(), preset_id.clone())
+                        .await
+                        .ok()
+                        .flatten()
+                    {
+                        let params: Vec<(String, f32)> = block
+                            .parameters()
+                            .iter()
+                            .map(|p| (p.name().to_string(), p.value().get()))
+                            .collect();
+                        lookup.insert(key, params);
+                    }
+                }
+            }
+            signal::ModuleBlockSource::Inline { .. } => {}
+        },
         signal::SignalNode::Split { lanes } => {
             for lane in lanes {
                 for n in lane.nodes() {
@@ -861,21 +799,12 @@ mod tests {
     use super::*;
     use signal::rig::RigType;
 
-    /// Reproduce the exact data pipeline the Manage tab uses:
-    ///   1. bootstrap signal
-    ///   2. list rigs, filter by Guitar
-    ///   3. pick first preset, pick first scene
-    ///   4. call resolve_scene_detail (same as manage's resolve_scene_engines)
-    ///   5. call engines_to_grid_slots
-    ///
-    /// This test will tell us whether the data pipeline produces grid slots.
     #[tokio::test]
     async fn manage_tab_guitar_pipeline_produces_grid_slots() {
         let signal = signal::bootstrap_in_memory_controller_async()
             .await
             .expect("bootstrap failed");
 
-        // Step 1: list rigs filtered by Guitar (same as manage tab effect)
         let rigs = signal.rigs().list().await.unwrap();
         let guitar_rigs: Vec<_> = rigs
             .into_iter()
@@ -883,13 +812,6 @@ mod tests {
             .collect();
 
         assert!(!guitar_rigs.is_empty(), "expected at least one Guitar rig");
-        eprintln!(
-            "Guitar rigs: {:?}",
-            guitar_rigs
-                .iter()
-                .map(|r| (&r.name, r.variants.len()))
-                .collect::<Vec<_>>()
-        );
 
         let first_rig = &guitar_rigs[0];
         assert_eq!(first_rig.name, "MegaRig");
@@ -902,44 +824,12 @@ mod tests {
         let rig_id = first_rig.id.to_string();
         let first_scene = &first_rig.variants[0];
         let scene_id = first_scene.id.to_string();
-        eprintln!(
-            "rig_id={} scene_id={} scene_name={}",
-            rig_id, scene_id, first_scene.name
-        );
 
-        // Step 2: resolve scene engines (same path as manage tab)
         let result = resolve_scene_detail(&signal, &rig_id, &scene_id).await;
         assert!(result.is_some(), "resolve_scene_detail returned None");
 
         let (engines, params) = result.unwrap();
-        eprintln!("engines count: {}", engines.len());
-        for (i, engine) in engines.iter().enumerate() {
-            eprintln!(
-                "  engine[{}] name={} layers={}",
-                i,
-                engine.name,
-                engine.layers.len()
-            );
-            for (j, layer) in engine.layers.iter().enumerate() {
-                eprintln!(
-                    "    layer[{}] name={} module_chains={}",
-                    j,
-                    layer.name,
-                    layer.module_chains.len()
-                );
-                for (k, mc) in layer.module_chains.iter().enumerate() {
-                    eprintln!(
-                        "      chain[{}] name={} nodes={}",
-                        k,
-                        mc.name,
-                        mc.chain.nodes().len()
-                    );
-                }
-            }
-        }
-        eprintln!("params count: {}", params.len());
 
-        // Assertions
         assert!(!engines.is_empty(), "expected at least one engine");
         assert!(
             engines.iter().all(|e| !e.layers.is_empty()),
@@ -953,12 +843,12 @@ mod tests {
             "at least one layer should have module chains"
         );
 
-        // Step 3: convert to grid slots (same as manage tab RSX)
-        let grid_slots = super::super::grid_conversion::engines_to_grid_slots(&engines, &params);
-        eprintln!("grid_slots count: {}", grid_slots.len());
+        let grid_slots = crate::grid_conversion::engines_to_grid_slots(&engines, &params);
         assert!(
             !grid_slots.is_empty(),
             "engines_to_grid_slots should produce non-empty grid slots"
         );
     }
 }
+
+// endregion: --- Tests

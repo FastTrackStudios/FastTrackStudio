@@ -324,4 +324,3 @@ pub trait ExtensionParamService {
     /// Report this extension's current FX chain state.
     async fn report_fx_state(&self) -> Result<ExtensionFxState, SignalServiceError>;
 }
-

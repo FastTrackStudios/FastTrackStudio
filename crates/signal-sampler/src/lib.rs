@@ -45,19 +45,69 @@
 //! ```
 
 pub mod bank;
+pub mod block;
 pub mod engine;
 pub mod midi;
+pub mod pack_rewrite;
 pub mod player;
+pub mod retag;
 pub mod sample_map;
 pub mod spec;
 
 pub use bank::SamplerBank;
+pub use block::{BlockParams, BlockSpec, SamplerBlock};
 pub use engine::SampleEngine;
+pub use engine::cache::SignalPcmPack;
 pub use player::SamplerPlayer;
-pub use spec::LibrarySpec;
 pub use sample_map::{SampleKey, SampleMap};
+pub use spec::LibrarySpec;
 
 use std::path::Path;
+
+pub mod pack {
+    //! `.signalpack` reader utilities.
+    //!
+    //! Cheap header-only inspection without decoding any audio.
+
+    use super::{LibrarySpec, SamplerError, SignalPcmPack};
+    use std::path::Path;
+
+    /// Result of [`read_pack_header`] — parsed library spec plus pack stats.
+    /// No audio data is loaded.
+    #[derive(Debug, Clone)]
+    pub struct PackHeader {
+        pub spec: LibrarySpec,
+        pub sample_count: usize,
+        pub size_bytes: u64,
+    }
+
+    /// Cheap header-only read from a `.signalpack`.
+    ///
+    /// Returns the embedded `LibrarySpec` plus pack statistics. No audio is
+    /// decoded — suitable for browse/list panels.
+    pub fn read_pack_header(pack_path: &Path) -> Result<PackHeader, SamplerError> {
+        let pack = SignalPcmPack::open(pack_path)?;
+        let spec = parse_embedded_spec(&pack)?;
+        let size_bytes = std::fs::metadata(pack_path).map(|m| m.len()).unwrap_or(0);
+        Ok(PackHeader {
+            spec,
+            sample_count: pack.entry_count(),
+            size_bytes,
+        })
+    }
+
+    pub(crate) fn parse_embedded_spec(pack: &SignalPcmPack) -> Result<LibrarySpec, SamplerError> {
+        let text = pack
+            .embedded_spec()
+            .ok_or_else(|| SamplerError::SpecParse("pack carries no embedded spec".into()))?;
+        match pack.embedded_spec_format() {
+            Some("toml") => LibrarySpec::from_toml(text),
+            _ => LibrarySpec::from_styx(text),
+        }
+    }
+}
+
+pub use pack::{PackHeader, read_pack_header};
 
 /// Identifier for a loaded instrument within the bank.
 pub type InstrumentId = String;
@@ -85,26 +135,250 @@ pub enum SamplerError {
 // ── PlayerPatch ───────────────────────────────────────────────────────────────
 
 /// A fully loaded library patch: spec + sample index.
+///
+/// Two playback modes are supported:
+/// - **Convention mode** — sample lookup goes through `map` and decodes
+///   `(section, articulation, mic, dynamic, note, direction, rr)`. Used by
+///   libraries with regular filename conventions (Cinematic Strings, Keyscape).
+/// - **Zone mode** — `spec.zones` is non-empty. Sample lookup goes through
+///   `zone_paths` and resolves `(note, velocity, rr_idx)` directly via
+///   [`resolve_zone`](Self::resolve_zone). Used by Spectrasonics-style
+///   libraries (Omnisphere, Trilian) where the keymap is metadata, not
+///   filenames.
 pub struct PlayerPatch {
     pub spec: LibrarySpec,
     pub map: SampleMap,
+    /// Absolute paths parallel to `spec.zones` (zone mode only; empty otherwise).
+    pub zone_paths: Vec<std::path::PathBuf>,
+    /// Absolute paths parallel to `spec.grooves`. Empty when the spec has none.
+    pub groove_paths: Vec<std::path::PathBuf>,
+    /// Absolute paths parallel to `spec.wavetables`. Empty when the spec has none.
+    pub wavetable_paths: Vec<std::path::PathBuf>,
+    pub prepared_cache_dir: Option<std::path::PathBuf>,
+    /// When loaded from a `.signalpack`, the pack itself supplies all audio.
+    /// `SampleEngine` builds its cache directly from this rather than from
+    /// disk, so no on-disk source files need exist.
+    pub pack: Option<SignalPcmPack>,
+}
+
+/// Resolved zone match: where to read the sample plus how to play it.
+#[derive(Debug, Clone)]
+pub struct ResolvedZone {
+    pub path: std::path::PathBuf,
+    /// Pitch at which the sample plays back unchanged.
+    pub root_key: u8,
+    /// Per-zone gain in dB.
+    pub gain_db: f32,
+    /// Per-zone fine-tune in cents (added on top of the root-key transposition).
+    pub tune_cents: f32,
 }
 
 impl PlayerPatch {
     /// Load a spec and scan WAV files under `samples_root`.
+    ///
+    /// If the spec carries explicit `zones`, the patch is built in zone mode and
+    /// the on-disk filename scan is skipped (zoned libraries have arbitrary
+    /// filenames that the convention parser cannot handle).
     pub fn load(spec_path: &Path, samples_root: &Path) -> Result<Self, SamplerError> {
         let spec = LibrarySpec::from_file(spec_path)?;
-        let map = SampleMap::scan(samples_root)?;
-        Ok(Self { spec, map })
+        let zoned = !spec.zones.is_empty();
+        let zone_paths = if zoned {
+            spec.zones
+                .iter()
+                .map(|z| samples_root.join(&z.file))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let groove_paths = spec
+            .grooves
+            .iter()
+            .map(|g| samples_root.join(&g.file))
+            .collect();
+        let wavetable_paths = spec
+            .wavetables
+            .iter()
+            .map(|w| samples_root.join(&w.file))
+            .collect();
+        // Filename-scan only when neither zones nor grooves carry the layout.
+        let convention_mode = !zoned && spec.grooves.is_empty();
+        let map = if convention_mode {
+            SampleMap::scan(samples_root)?
+        } else {
+            SampleMap::empty()
+        };
+        let prepared_cache_dir = engine::cache::default_prepared_cache_dir(samples_root);
+        let prepared_cache_dir = prepared_cache_dir
+            .join("index.tsv")
+            .exists()
+            .then_some(prepared_cache_dir);
+        Ok(Self {
+            spec,
+            map,
+            zone_paths,
+            groove_paths,
+            wavetable_paths,
+            prepared_cache_dir,
+            pack: None,
+        })
     }
 
     /// Build a patch from an already-parsed spec with an empty sample map.
     pub fn from_spec(spec: LibrarySpec) -> Self {
-        Self { spec, map: SampleMap::empty() }
+        Self {
+            spec,
+            map: SampleMap::empty(),
+            zone_paths: Vec::new(),
+            groove_paths: Vec::new(),
+            wavetable_paths: Vec::new(),
+            prepared_cache_dir: None,
+            pack: None,
+        }
+    }
+
+    /// Load a patch directly from a `.signalpack`.
+    ///
+    /// The pack's embedded styx supplies the [`LibrarySpec`]; sample data
+    /// decodes straight from the pack body — no on-disk audio required.
+    ///
+    /// Wavetables are ignored entirely (out of scope for the sampler engine).
+    /// Grooves with no explicit `zones` are surfaced as one synthesized zone
+    /// per groove rooted at `slice_base_note` so a single MIDI key triggers
+    /// the whole loop. Slicing and time-stretch are intentionally not
+    /// implemented — the loop plays sample-rate-locked at original tempo.
+    pub fn from_pack(pack_path: &Path) -> Result<Self, SamplerError> {
+        use crate::engine::cache::SignalPcmPack;
+        let pack = SignalPcmPack::open(pack_path)?;
+        let mut spec = pack::parse_embedded_spec(&pack)?;
+
+        // Stylus / groove libraries: synthesize one zone per groove so the
+        // existing zone-mode playback path triggers the whole loop on
+        // note-on. This is the documented simplification — no slicing, no
+        // time-stretch, no tempo sync. A single key (slice_base_note, or 36
+        // by default) plays the entire loop at its native sample rate.
+        if spec.zones.is_empty() && !spec.grooves.is_empty() {
+            for g in &spec.grooves {
+                let root = if g.slice_base_note == 0 {
+                    36
+                } else {
+                    g.slice_base_note
+                };
+                spec.zones.push(crate::spec::ZoneSpec {
+                    file: g.file.clone(),
+                    key_min: root,
+                    key_max: root,
+                    root_key: root,
+                    vel_min: 0,
+                    vel_max: 127,
+                    rr_index: 0,
+                    gain_db: 0.0,
+                    tune_cents: 0.0,
+                    mic: String::new(),
+                    articulation: String::new(),
+                    dynamic: String::new(),
+                    direction: String::new(),
+                    section: String::new(),
+                    variant: String::new(),
+                });
+            }
+        }
+
+        // Build zone_paths from the relative file fields. The pack's
+        // entry_for_path uses suffix-matching, so a relative or absolute
+        // path resolves the same entry — we use the relative path verbatim
+        // so the lookup is direct.
+        let zone_paths: Vec<std::path::PathBuf> = spec
+            .zones
+            .iter()
+            .map(|z| std::path::PathBuf::from(&z.file))
+            .collect();
+        let groove_paths: Vec<std::path::PathBuf> = spec
+            .grooves
+            .iter()
+            .map(|g| std::path::PathBuf::from(&g.file))
+            .collect();
+
+        // Convention-mode packs (older Keyscape, CSS pre-zone-rewrite) ship
+        // with no `zones` array — the engine resolves samples by parsing the
+        // filenames of every entry. Build the SampleMap directly from the
+        // pack's entry list so playback works even when no on-disk source
+        // is available.
+        let map = if spec.zones.is_empty() && spec.grooves.is_empty() {
+            SampleMap::from_paths(pack.entry_paths().map(|p| p.to_path_buf()))
+        } else {
+            SampleMap::empty()
+        };
+
+        Ok(Self {
+            spec,
+            map,
+            zone_paths,
+            groove_paths,
+            wavetable_paths: Vec::new(),
+            prepared_cache_dir: None,
+            pack: Some(pack),
+        })
+    }
+
+    /// Whether the patch is in zone mode (explicit `(key × vel × RR)` zones).
+    pub fn is_zoned(&self) -> bool {
+        !self.zone_paths.is_empty()
     }
 
     pub fn total_samples(&self) -> usize {
-        self.map.total()
+        let base = if self.is_zoned() {
+            self.zone_paths.len()
+        } else {
+            self.map.total()
+        };
+        base + self.groove_paths.len() + self.wavetable_paths.len()
+    }
+
+    pub fn sample_paths(&self) -> Box<dyn Iterator<Item = &std::path::PathBuf> + '_> {
+        let base: Box<dyn Iterator<Item = &std::path::PathBuf> + '_> = if self.is_zoned() {
+            Box::new(self.zone_paths.iter())
+        } else {
+            Box::new(self.map.paths())
+        };
+        Box::new(
+            base.chain(self.groove_paths.iter())
+                .chain(self.wavetable_paths.iter()),
+        )
+    }
+
+    /// Sample paths ordered by `|note - center|` so the middle of the
+    /// keyboard decodes first and the extremes last. Used by the
+    /// background preloader so the most-played range comes online first.
+    /// `center` defaults to 60 (middle C) at the call site.
+    ///
+    /// - Zone-mode patches: zones sorted by `|root_key - center|`.
+    /// - Convention-mode patches: sample-map entries sorted by `|note - center|`.
+    /// - Grooves + wavetables: appended last (no inherent pitch priority).
+    pub fn sample_paths_centered(&self, center: u8) -> Vec<std::path::PathBuf> {
+        let center = center as i32;
+        let mut out: Vec<std::path::PathBuf> = Vec::new();
+        if self.is_zoned() {
+            let mut indexed: Vec<(i32, &std::path::PathBuf)> = self
+                .spec
+                .zones
+                .iter()
+                .zip(self.zone_paths.iter())
+                .map(|(z, p)| ((z.root_key as i32 - center).abs(), p))
+                .collect();
+            indexed.sort_by_key(|(d, _)| *d);
+            out.extend(indexed.into_iter().map(|(_, p)| p.clone()));
+        } else {
+            let mut indexed: Vec<(i32, std::path::PathBuf)> = self
+                .map
+                .iter()
+                .map(|(k, p)| ((k.note as i32 - center).abs(), p.clone()))
+                .collect();
+            indexed.sort_by_key(|(d, _)| *d);
+            out.extend(indexed.into_iter().map(|(_, p)| p));
+        }
+        out.extend(self.groove_paths.iter().cloned());
+        out.extend(self.wavetable_paths.iter().cloned());
+        out
     }
 
     pub fn resolve(
@@ -117,18 +391,72 @@ impl PlayerPatch {
         direction: &str,
         rr: usize,
     ) -> Option<(std::path::PathBuf, u8)> {
-        self.map.resolve(&self.spec, section_id, articulation_id, mic_id, dynamic, target_note, direction, rr)
+        self.map.resolve(
+            &self.spec,
+            section_id,
+            articulation_id,
+            mic_id,
+            dynamic,
+            target_note,
+            direction,
+            rr,
+        )
+    }
+
+    /// Resolve a zone for `(note, velocity)`, RR-cycling within the matching set.
+    ///
+    /// Returns `None` if the patch is not in zone mode or no zone contains the
+    /// `(note, velocity)` point. Multiple matching zones form a round-robin
+    /// group; `rr_idx` is reduced modulo the group size.
+    pub fn resolve_zone(&self, note: u8, velocity: u8, rr_idx: usize) -> Option<ResolvedZone> {
+        if !self.is_zoned() {
+            return None;
+        }
+        // Indices of zones whose (key range, vel range) contains the point.
+        let candidates: Vec<usize> = self
+            .spec
+            .zones
+            .iter()
+            .enumerate()
+            .filter(|(_, z)| z.contains(note, velocity))
+            .map(|(i, _)| i)
+            .collect();
+        if candidates.is_empty() {
+            return None;
+        }
+        let pick = candidates[rr_idx % candidates.len()];
+        let z = &self.spec.zones[pick];
+        Some(ResolvedZone {
+            path: self.zone_paths[pick].clone(),
+            root_key: z.root_key,
+            gain_db: z.gain_db,
+            tune_cents: z.tune_cents,
+        })
     }
 
     pub fn legato_delay_expressive(&self, velocity: u8) -> Option<u32> {
-        self.spec.legato_engine.as_ref()?.expressive.as_ref()?.delay_for_velocity(velocity)
+        self.spec
+            .legato_engine
+            .as_ref()?
+            .expressive
+            .as_ref()?
+            .delay_for_velocity(velocity)
     }
 
     pub fn legato_delay_low_latency(&self, velocity: u8) -> Option<u32> {
-        self.spec.legato_engine.as_ref()?.low_latency.as_ref()?.delay_for_velocity(velocity)
+        self.spec
+            .legato_engine
+            .as_ref()?
+            .low_latency
+            .as_ref()?
+            .delay_for_velocity(velocity)
     }
 
     pub fn short_note_pre_delay_ms(&self) -> u32 {
-        self.spec.short_note_timing.as_ref().map(|t| t.pre_delay_ms).unwrap_or(0)
+        self.spec
+            .short_note_timing
+            .as_ref()
+            .map(|t| t.pre_delay_ms)
+            .unwrap_or(0)
     }
 }

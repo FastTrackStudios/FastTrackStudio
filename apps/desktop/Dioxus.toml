@@ -1,5 +1,6 @@
 [application]
 name = "Signal"
+default_platform = "desktop"
 # `dev` feature switches the entry point to WebKit/WRY so `dx serve` works.
 # Production builds (cargo run -p signal-desktop) use Blitz/wgpu instead.
 features = ["dev"]

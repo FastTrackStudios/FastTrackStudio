@@ -133,7 +133,9 @@ pub fn SceneTileCell(
     } else if disabled {
         format!("background-color: {color}; filter: brightness(0.08); animation: none;")
     } else if loading {
-        format!("background-color: {color}; filter: brightness(1.0); animation: tile-pulse 0.8s ease-in-out infinite;")
+        format!(
+            "background-color: {color}; filter: brightness(1.0); animation: tile-pulse 0.8s ease-in-out infinite;"
+        )
     } else if active {
         format!("background-color: {color}; filter: brightness(1.0); animation: none;")
     } else if preloaded {

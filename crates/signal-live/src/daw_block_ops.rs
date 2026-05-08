@@ -19,8 +19,8 @@ use signal_proto::{
     SignalChain, SignalNode, SnapshotId,
 };
 
-use crate::macro_setup::MacroSetupResult;
 use crate::SignalLive;
+use crate::macro_setup::MacroSetupResult;
 use signal_storage::{
     BlockRepo, EngineRepo, LayerRepo, ModuleRepo, ProfileRepo, RackRepo, RigRepo,
     SceneTemplateRepo, SetlistRepo, SongRepo,
@@ -261,7 +261,7 @@ fn map_js_volume_params(block: &Block) -> Block {
     let volume_norm = (level / 2.0).clamp(0.0, 1.0);
 
     Block::from_parameters(vec![
-        BP::new("level", "Level", volume_norm).with_daw_name("Volume")
+        BP::new("level", "Level", volume_norm).with_daw_name("Volume"),
     ])
 }
 
@@ -891,7 +891,7 @@ async fn inject_nam_model_state(fx: &daw::FxHandle, model_path: &str) -> Result<
 /// Replaces the base64 state segment in the FX's existing REAPER chunk
 /// with the provided binary data (base64-encoded).
 async fn inject_binary_state(fx: &daw::FxHandle, binary_state: &[u8]) -> Result<(), String> {
-    use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+    use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
 
     let existing = fx
         .state_chunk_encoded()

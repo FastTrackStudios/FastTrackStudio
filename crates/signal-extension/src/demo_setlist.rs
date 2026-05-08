@@ -201,7 +201,10 @@ pub async fn load_demo_setlist(daw: &Daw) -> Result<()> {
 
         // ── Song marker ───────────────────────────────────────────────
         if let Err(e) = markers.add(song_start_time, song.title).await {
-            tracing::warn!("[demo-setlist] Failed to add marker for '{}': {e:#}", song.title);
+            tracing::warn!(
+                "[demo-setlist] Failed to add marker for '{}': {e:#}",
+                song.title
+            );
         }
 
         // ── Song folder ───────────────────────────────────────────────
@@ -215,7 +218,10 @@ pub async fn load_demo_setlist(daw: &Daw) -> Result<()> {
             .add("CLAP: FTS Signal Controller (FastTrackStudio)")
             .await
         {
-            tracing::warn!("[demo-setlist] Failed to add controller to '{}': {e:#}", song.title);
+            tracing::warn!(
+                "[demo-setlist] Failed to add controller to '{}': {e:#}",
+                song.title
+            );
         }
 
         // Store section count for section switching
@@ -270,7 +276,9 @@ pub async fn load_demo_setlist(daw: &Daw) -> Result<()> {
             {
                 Ok(Some(item)) => {
                     if let Err(e) = item.set_color(Some(scene_color(sec_name))).await {
-                        tracing::warn!("[demo-setlist] Failed to set color for '{sec_name}': {e:#}");
+                        tracing::warn!(
+                            "[demo-setlist] Failed to set color for '{sec_name}': {e:#}"
+                        );
                     }
                     if let Err(e) = item.active_take().set_name(sec_name).await {
                         tracing::warn!("[demo-setlist] Failed to set name for '{sec_name}': {e:#}");
@@ -322,10 +330,16 @@ pub async fn load_demo_setlist(daw: &Daw) -> Result<()> {
                 let _ = item.active_take().set_name(song.title).await;
             }
             Ok(None) => {
-                tracing::warn!("[demo-setlist] No MIDI item returned for song '{}'", song.title);
+                tracing::warn!(
+                    "[demo-setlist] No MIDI item returned for song '{}'",
+                    song.title
+                );
             }
             Err(e) => {
-                tracing::warn!("[demo-setlist] Failed song MIDI item for '{}': {e:#}", song.title);
+                tracing::warn!(
+                    "[demo-setlist] Failed song MIDI item for '{}': {e:#}",
+                    song.title
+                );
             }
         }
 
@@ -357,7 +371,11 @@ pub async fn load_demo_setlist(daw: &Daw) -> Result<()> {
 
     // Store the Guitar Input track's GUID so the scene timer can find it
     rig_folder
-        .set_ext_state("fts_signal", "input_track_guid", &rig_input.guid().to_string())
+        .set_ext_state(
+            "fts_signal",
+            "input_track_guid",
+            &rig_input.guid().to_string(),
+        )
         .await?;
 
     let total_sections: usize = SETLIST.iter().map(|s| s.sections.len()).sum();

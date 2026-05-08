@@ -20,8 +20,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             eprintln!("usage: cargo xtask <command>");
             eprintln!();
             eprintln!("commands:");
-            eprintln!("  install       Build and install signal-extension + fts-signal-controller into REAPER");
-            eprintln!("  uninstall     Remove signal-extension and fts-signal-controller from REAPER");
+            eprintln!(
+                "  install       Build and install signal-extension + fts-signal-controller into REAPER"
+            );
+            eprintln!(
+                "  uninstall     Remove signal-extension and fts-signal-controller from REAPER"
+            );
             eprintln!("  bundle        Bundle CLAP plugins (delegates to nih_plug_xtask)");
             eprintln!("  status        Show installed extensions and plugins");
             eprintln!("  reaper-test   Run REAPER integration tests [filter] [--keep-open]");
@@ -63,8 +67,12 @@ fn install() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n── Bundling fts-signal-controller ──");
     let status = Command::new("cargo")
         .args([
-            "run", "--package", "xtask", "--",
-            "bundle", "fts-signal-controller",
+            "run",
+            "--package",
+            "xtask",
+            "--",
+            "bundle",
+            "fts-signal-controller",
         ])
         .current_dir(&root)
         .status()?;
@@ -116,10 +124,7 @@ fn uninstall() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn reaper_test(
-    filter: Option<String>,
-    keep_open: bool,
-) -> Result<(), Box<dyn std::error::Error>> {
+fn reaper_test(filter: Option<String>, keep_open: bool) -> Result<(), Box<dyn std::error::Error>> {
     let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
     let ci = std::env::var("CI").is_ok();
     let timeout_secs: u64 = std::env::var("REAPER_TEST_TIMEOUT_SECS")
@@ -168,11 +173,7 @@ fn reaper_test(
         std::fs::copy(&ext_src, &ext_dst)?;
         println!("  Installed signal-extension -> {}", ext_dst.display());
     } else {
-        return Err(format!(
-            "signal-extension binary not found at {}",
-            ext_src.display()
-        )
-        .into());
+        return Err(format!("signal-extension binary not found at {}", ext_src.display()).into());
     }
     runner::end_section(ci);
 

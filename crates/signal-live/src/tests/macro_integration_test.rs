@@ -4,10 +4,10 @@
 
 #[cfg(test)]
 mod macro_integration {
-    use signal_live::{
-        macro_registry, macro_recorder::MacroRecorder, macro_setup::*, macro_templates,
-    };
     use macromod::MacroBank;
+    use signal_live::{
+        macro_recorder::MacroRecorder, macro_registry, macro_setup::*, macro_templates,
+    };
 
     /// Scenario: Load block with 3-band EQ, drive all 3 parameters from one macro
     #[test]
@@ -17,8 +17,7 @@ mod macro_integration {
         assert_eq!(eq_bank.knobs.len(), 3);
 
         // 2. Validate: Check that macro bank is valid
-        signal_live::macro_error::validate_macro_bank(&eq_bank)
-            .expect("EQ bank should be valid");
+        signal_live::macro_error::validate_macro_bank(&eq_bank).expect("EQ bank should be valid");
 
         // 3. Register: Simulate what setup_macros_for_block does
         let setup_result = MacroSetupResult {
@@ -226,7 +225,7 @@ mod macro_integration {
     /// Scenario: Error handling for invalid configurations
     #[test]
     fn test_error_handling_invalid_inputs() {
-        use signal_live::macro_error::{validate_macro_bank, MacroError};
+        use signal_live::macro_error::{MacroError, validate_macro_bank};
 
         let empty_bank = MacroBank::default();
         let result = validate_macro_bank(&empty_bank);

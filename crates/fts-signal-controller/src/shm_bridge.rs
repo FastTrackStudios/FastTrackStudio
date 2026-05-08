@@ -9,8 +9,8 @@
 //! that value and mutes/unmutes sends on the profile input track to switch
 //! between scene variations.
 
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use daw::Daw;
@@ -131,7 +131,10 @@ async fn poll_macro_config(
             return Ok(());
         }
 
-        tracing::info!("[signal-ctrl] Found macro_config on track '{}'", track_info.name);
+        tracing::info!(
+            "[signal-ctrl] Found macro_config on track '{}'",
+            track_info.name
+        );
         *last_config = config_json.clone();
 
         // Parse and apply

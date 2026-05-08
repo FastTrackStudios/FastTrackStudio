@@ -57,9 +57,19 @@ impl BiquadFilter {
         let a2 = (1.0 - alpha) / a0;
 
         Self {
-            b0, b1, b2, a1, a2,
-            x1l: 0.0, x2l: 0.0, y1l: 0.0, y2l: 0.0,
-            x1r: 0.0, x2r: 0.0, y1r: 0.0, y2r: 0.0,
+            b0,
+            b1,
+            b2,
+            a1,
+            a2,
+            x1l: 0.0,
+            x2l: 0.0,
+            y1l: 0.0,
+            y2l: 0.0,
+            x1r: 0.0,
+            x2r: 0.0,
+            y1r: 0.0,
+            y2r: 0.0,
         }
     }
 
@@ -67,7 +77,7 @@ impl BiquadFilter {
     pub fn process(&mut self, buf: &mut [f32]) {
         let mut i = 0;
         while i + 1 < buf.len() {
-            buf[i]     = self.tick_l(buf[i]);
+            buf[i] = self.tick_l(buf[i]);
             buf[i + 1] = self.tick_r(buf[i + 1]);
             i += 2;
         }
@@ -75,25 +85,37 @@ impl BiquadFilter {
 
     /// Clear filter memory. Call when bypassing to avoid clicks on re-engage.
     pub fn reset(&mut self) {
-        self.x1l = 0.0; self.x2l = 0.0; self.y1l = 0.0; self.y2l = 0.0;
-        self.x1r = 0.0; self.x2r = 0.0; self.y1r = 0.0; self.y2r = 0.0;
+        self.x1l = 0.0;
+        self.x2l = 0.0;
+        self.y1l = 0.0;
+        self.y2l = 0.0;
+        self.x1r = 0.0;
+        self.x2r = 0.0;
+        self.y1r = 0.0;
+        self.y2r = 0.0;
     }
 
     #[inline]
     fn tick_l(&mut self, x: f32) -> f32 {
         let y = self.b0 * x + self.b1 * self.x1l + self.b2 * self.x2l
-                            - self.a1 * self.y1l  - self.a2 * self.y2l;
-        self.x2l = self.x1l; self.x1l = x;
-        self.y2l = self.y1l; self.y1l = y;
+            - self.a1 * self.y1l
+            - self.a2 * self.y2l;
+        self.x2l = self.x1l;
+        self.x1l = x;
+        self.y2l = self.y1l;
+        self.y1l = y;
         y
     }
 
     #[inline]
     fn tick_r(&mut self, x: f32) -> f32 {
         let y = self.b0 * x + self.b1 * self.x1r + self.b2 * self.x2r
-                            - self.a1 * self.y1r  - self.a2 * self.y2r;
-        self.x2r = self.x1r; self.x1r = x;
-        self.y2r = self.y1r; self.y1r = y;
+            - self.a1 * self.y1r
+            - self.a2 * self.y2r;
+        self.x2r = self.x1r;
+        self.x1r = x;
+        self.y2r = self.y1r;
+        self.y1r = y;
         y
     }
 }

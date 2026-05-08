@@ -19,13 +19,24 @@ pub struct RrCounters {
 
 impl RrCounters {
     pub fn new() -> Self {
-        Self { counters: HashMap::new(), rr_start: 0 }
+        Self {
+            counters: HashMap::new(),
+            rr_start: 0,
+        }
     }
 
     /// Advance and return the next RR index (0-based) for the given group.
     /// `max_rr` is the total number of RR slots (from the spec).
-    pub fn next(&mut self, section: &str, articulation: &str, dynamic: &str, max_rr: usize) -> usize {
-        if max_rr == 0 { return 0; }
+    pub fn next(
+        &mut self,
+        section: &str,
+        articulation: &str,
+        dynamic: &str,
+        max_rr: usize,
+    ) -> usize {
+        if max_rr == 0 {
+            return 0;
+        }
         let key = RrKey {
             section: section.to_string(),
             articulation: articulation.to_string(),

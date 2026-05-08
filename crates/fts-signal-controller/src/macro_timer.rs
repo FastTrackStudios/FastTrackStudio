@@ -31,10 +31,14 @@ struct Mapping {
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
-enum TrackRef { ByIndex(u32) }
+enum TrackRef {
+    ByIndex(u32),
+}
 
 #[derive(Debug, Clone, serde::Deserialize)]
-enum FxRef { ByIndex(u32) }
+enum FxRef {
+    ByIndex(u32),
+}
 
 #[derive(Debug, Clone, serde::Deserialize)]
 enum MapMode {
@@ -45,7 +49,10 @@ enum MapMode {
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
-struct CurvePoint { macro_value: f32, param_value: f32 }
+struct CurvePoint {
+    macro_value: f32,
+    param_value: f32,
+}
 
 impl MapMode {
     fn apply(&self, source: f32) -> f32 {
@@ -53,18 +60,34 @@ impl MapMode {
         match self {
             MapMode::ScaleRange { min, max } => min + v * (max - min),
             MapMode::PassThrough => v,
-            MapMode::Toggle => if v >= 0.5 { 1.0 } else { 0.0 },
+            MapMode::Toggle => {
+                if v >= 0.5 {
+                    1.0
+                } else {
+                    0.0
+                }
+            }
             MapMode::MultiPoint { points } => {
-                if points.is_empty() { return v; }
-                if points.len() == 1 { return points[0].param_value; }
-                if v <= points[0].macro_value { return points[0].param_value; }
+                if points.is_empty() {
+                    return v;
+                }
+                if points.len() == 1 {
+                    return points[0].param_value;
+                }
+                if v <= points[0].macro_value {
+                    return points[0].param_value;
+                }
                 let last = &points[points.len() - 1];
-                if v >= last.macro_value { return last.param_value; }
+                if v >= last.macro_value {
+                    return last.param_value;
+                }
                 for window in points.windows(2) {
                     let (a, b) = (&window[0], &window[1]);
                     if v >= a.macro_value && v <= b.macro_value {
                         let range = b.macro_value - a.macro_value;
-                        if range < 1e-6 { return a.param_value; }
+                        if range < 1e-6 {
+                            return a.param_value;
+                        }
                         let t = (v - a.macro_value) / range;
                         return a.param_value + (b.param_value - a.param_value) * t;
                     }
@@ -99,7 +122,9 @@ static STATE: Mutex<MacroState> = Mutex::new(MacroState {
 
 /// Called at ~30Hz on REAPER's main thread.
 pub fn poll() {
-    let Ok(mut state) = STATE.try_lock() else { return };
+    let Ok(mut state) = STATE.try_lock() else {
+        return;
+    };
 
     state.tick_count += 1;
 
@@ -131,27 +156,38 @@ pub fn invalidate() {
 fn scan_tracks(state: &mut MacroState) {
     state.tracks.clear();
 
-    let Some(daw) = daw::main_thread_daw() else { return };
+    let Some(daw) = daw::main_thread_daw() else {
+        return;
+    };
     let tracks = daw.track_list();
 
     for track_info in &tracks {
-        let config_json = match daw.track_get_ext_state(&track_info.guid, MAPPING_CONFIG_KEY, MAPPING_CONFIG_SUBKEY) {
+        let config_json = match daw.track_get_ext_state(
+            &track_info.guid,
+            MAPPING_CONFIG_KEY,
+            MAPPING_CONFIG_SUBKEY,
+        ) {
             Some(json) if !json.is_empty() => json,
             _ => continue,
         };
 
         let mappings = parse_mappings(&config_json);
-        if mappings.is_empty() { continue; }
+        if mappings.is_empty() {
+            continue;
+        }
 
         // Find the signal controller FX on this track
-        let controller_fx_index = daw.fx_list(&track_info.guid)
+        let controller_fx_index = daw
+            .fx_list(&track_info.guid)
             .iter()
             .find(|fx| fx.name.contains("Signal Controller"))
             .map(|fx| fx.index);
 
         info!(
             "[macro-timer] Track '{}': {} mappings, controller FX={:?}",
-            track_info.name, mappings.len(), controller_fx_index
+            track_info.name,
+            mappings.len(),
+            controller_fx_index
         );
 
         state.tracks.push(MacroTrackState {
@@ -163,19 +199,29 @@ fn scan_tracks(state: &mut MacroState) {
         });
     }
 
-    info!("[macro-timer] Scan complete: {} track(s) with mappings", state.tracks.len());
+    info!(
+        "[macro-timer] Scan complete: {} track(s) with mappings",
+        state.tracks.len()
+    );
 }
 
 fn refresh_configs(state: &mut MacroState) {
-    let Some(daw) = daw::main_thread_daw() else { return };
+    let Some(daw) = daw::main_thread_daw() else {
+        return;
+    };
 
     for ts in &mut state.tracks {
-        let new_json = daw.track_get_ext_state(&ts.track_guid, MAPPING_CONFIG_KEY, MAPPING_CONFIG_SUBKEY)
+        let new_json = daw
+            .track_get_ext_state(&ts.track_guid, MAPPING_CONFIG_KEY, MAPPING_CONFIG_SUBKEY)
             .unwrap_or_default();
 
         if new_json != ts.config_json {
             ts.mappings = parse_mappings(&new_json);
-            info!("[macro-timer] Refreshed '{}': {} mappings", ts.track_guid, ts.mappings.len());
+            info!(
+                "[macro-timer] Refreshed '{}': {} mappings",
+                ts.track_guid,
+                ts.mappings.len()
+            );
             ts.config_json = new_json;
         }
     }
@@ -183,16 +229,28 @@ fn refresh_configs(state: &mut MacroState) {
     // Pick up NEW tracks
     let all_tracks = daw.track_list();
     for track_info in &all_tracks {
-        if state.tracks.iter().any(|t| t.track_guid == track_info.guid) { continue; }
+        if state.tracks.iter().any(|t| t.track_guid == track_info.guid) {
+            continue;
+        }
 
-        let config_json = match daw.track_get_ext_state(&track_info.guid, MAPPING_CONFIG_KEY, MAPPING_CONFIG_SUBKEY) {
+        let config_json = match daw.track_get_ext_state(
+            &track_info.guid,
+            MAPPING_CONFIG_KEY,
+            MAPPING_CONFIG_SUBKEY,
+        ) {
             Some(json) if !json.is_empty() => json,
             _ => continue,
         };
         let mappings = parse_mappings(&config_json);
-        if mappings.is_empty() { continue; }
+        if mappings.is_empty() {
+            continue;
+        }
 
-        info!("[macro-timer] New track '{}': {} mappings", track_info.name, mappings.len());
+        info!(
+            "[macro-timer] New track '{}': {} mappings",
+            track_info.name,
+            mappings.len()
+        );
         state.tracks.push(MacroTrackState {
             track_guid: track_info.guid.clone(),
             controller_fx_index: None,
@@ -204,10 +262,14 @@ fn refresh_configs(state: &mut MacroState) {
 }
 
 fn apply_macros(state: &mut MacroState) {
-    let Some(daw) = daw::main_thread_daw() else { return };
+    let Some(daw) = daw::main_thread_daw() else {
+        return;
+    };
 
     for ts in &mut state.tracks {
-        if ts.mappings.is_empty() { continue; }
+        if ts.mappings.is_empty() {
+            continue;
+        }
 
         // Read macro values from the signal controller's FX params
         let macros = if let Some(fx_idx) = ts.controller_fx_index {
@@ -230,7 +292,9 @@ fn apply_macros(state: &mut MacroState) {
                 break;
             }
         }
-        if !changed { continue; }
+        if !changed {
+            continue;
+        }
 
         // Track which macro changed the most
         if ts.controller_fx_index.is_some() {
@@ -244,7 +308,12 @@ fn apply_macros(state: &mut MacroState) {
                 }
             }
             if best_delta > 1e-3 {
-                daw.ext_state_set("FTS_SIGNAL", "last_macro_index", &best_idx.to_string(), false);
+                daw.ext_state_set(
+                    "FTS_SIGNAL",
+                    "last_macro_index",
+                    &best_idx.to_string(),
+                    false,
+                );
             }
         }
 
@@ -256,9 +325,13 @@ fn apply_macros(state: &mut MacroState) {
         // Apply each mapping
         for mapping in &ts.mappings {
             let source_idx = mapping.source_param as usize;
-            if source_idx >= NUM_MACROS { continue; }
+            if source_idx >= NUM_MACROS {
+                continue;
+            }
 
-            let target_fx_idx = match &mapping.target_fx { FxRef::ByIndex(idx) => *idx };
+            let target_fx_idx = match &mapping.target_fx {
+                FxRef::ByIndex(idx) => *idx,
+            };
             let param_idx = mapping.target_param_index;
 
             if let Some(ref lt) = last_touched {
@@ -278,13 +351,21 @@ fn apply_macros(state: &mut MacroState) {
 static LAST_CONSOLE_MSG: Mutex<String> = Mutex::new(String::new());
 
 fn flush_console_log() {
-    let Some(daw) = daw::main_thread_daw() else { return };
+    let Some(daw) = daw::main_thread_daw() else {
+        return;
+    };
 
-    let Some(msg) = daw.ext_state_get("FTS_SIGNAL", "console_log") else { return };
-    if msg.is_empty() { return; }
+    let Some(msg) = daw.ext_state_get("FTS_SIGNAL", "console_log") else {
+        return;
+    };
+    if msg.is_empty() {
+        return;
+    }
 
     let mut last = LAST_CONSOLE_MSG.lock().unwrap();
-    if msg == last.as_str() { return; }
+    if msg == last.as_str() {
+        return;
+    }
     *last = msg.clone();
 
     daw.show_console_msg(&format!("[Signal] {msg}\n"));
@@ -316,10 +397,22 @@ mod tests {
     fn multi_point_four_stages() {
         let mode = MapMode::MultiPoint {
             points: vec![
-                CurvePoint { macro_value: 0.0, param_value: 0.9 },
-                CurvePoint { macro_value: 0.33, param_value: 0.6 },
-                CurvePoint { macro_value: 0.66, param_value: 0.3 },
-                CurvePoint { macro_value: 1.0, param_value: 0.1 },
+                CurvePoint {
+                    macro_value: 0.0,
+                    param_value: 0.9,
+                },
+                CurvePoint {
+                    macro_value: 0.33,
+                    param_value: 0.6,
+                },
+                CurvePoint {
+                    macro_value: 0.66,
+                    param_value: 0.3,
+                },
+                CurvePoint {
+                    macro_value: 1.0,
+                    param_value: 0.1,
+                },
             ],
         };
         assert!((mode.apply(0.0) - 0.9).abs() < 1e-4);

@@ -135,7 +135,9 @@ impl LiveAudioEngine {
                     .expect("Failed to build f32 output stream")
             }
             fmt => {
-                tracing::warn!("signal-audio: unsupported sample format {fmt:?} — only f32 is supported");
+                tracing::warn!(
+                    "signal-audio: unsupported sample format {fmt:?} — only f32 is supported"
+                );
                 panic!("Unsupported sample format: {fmt:?}");
             }
         };

@@ -103,7 +103,7 @@ impl GaplessSwapEngine {
         let new_fx = match chain.add(new_fx_name).await {
             Ok(fx) => fx,
             Err(e) => {
-                return SwapResult::Failed(format!("Failed to add FX '{}': {}", new_fx_name, e))
+                return SwapResult::Failed(format!("Failed to add FX '{}': {}", new_fx_name, e));
             }
         };
 
@@ -160,7 +160,7 @@ impl GaplessSwapEngine {
         let new_fx = match chain.add(new_fx_name).await {
             Ok(fx) => fx,
             Err(e) => {
-                return SwapResult::Failed(format!("Failed to add FX '{}': {}", new_fx_name, e))
+                return SwapResult::Failed(format!("Failed to add FX '{}': {}", new_fx_name, e));
             }
         };
 
@@ -228,7 +228,7 @@ impl GaplessSwapEngine {
         let new_container = match chain.by_index(count_before).await {
             Ok(Some(fx)) => fx,
             Ok(None) => {
-                return SwapResult::Failed("New container not found after insert".to_string())
+                return SwapResult::Failed("New container not found after insert".to_string());
             }
             Err(e) => return SwapResult::Failed(format!("Failed to find new container: {}", e)),
         };

@@ -103,16 +103,11 @@ async fn update_mapping(
     param_value: f64,
 ) -> Result<()> {
     // Read existing config
-    let existing = track
-        .get_ext_state(EXT_SECTION, "mapping_config")
-        .await?;
+    let existing = track.get_ext_state(EXT_SECTION, "mapping_config").await?;
 
     let mut config: serde_json::Value = match &existing {
-        Some(json) if !json.is_empty() => {
-            serde_json::from_str(json).unwrap_or_else(|_| {
-                serde_json::json!({"version": "0.1", "mappings": []})
-            })
-        }
+        Some(json) if !json.is_empty() => serde_json::from_str(json)
+            .unwrap_or_else(|_| serde_json::json!({"version": "0.1", "mappings": []})),
         _ => serde_json::json!({"version": "0.1", "mappings": []}),
     };
 
@@ -183,7 +178,8 @@ async fn update_mapping(
         } else if (macro_value - 1.0).abs() < 1e-6 {
             serde_json::json!({"ScaleRange": {"min": param_value, "max": param_value}})
         } else {
-            let pts = vec![serde_json::json!({"macro_value": macro_value, "param_value": param_value})];
+            let pts =
+                vec![serde_json::json!({"macro_value": macro_value, "param_value": param_value})];
             serde_json::json!({"MultiPoint": {"points": pts}})
         };
 
@@ -311,7 +307,11 @@ pub async fn handle_macro_clear(daw: &Daw) -> Result<()> {
         }
     }
 
-    console_log(daw, &format!("No mappings to clear for Macro {}", macro_idx)).await;
+    console_log(
+        daw,
+        &format!("No mappings to clear for Macro {}", macro_idx),
+    )
+    .await;
     Ok(())
 }
 
