@@ -89,14 +89,15 @@ keyflow = { git = "https://github.com/FastTrackStudios/keyflow.git", branch = "m
 engraver = { git = "https://github.com/FastTrackStudios/keyflow.git", branch = "main" }
 keyflow-ui = { git = "https://github.com/FastTrackStudios/keyflow.git", branch = "main", default-features = false }
 
-# DAW facade crate (sibling repo — single public API surface)
+# DAW domain
+# `daw` is the facade. `daw-cli` is a public sibling crate of CLI
+# helpers reused by `fts-cli`. `daw-extension-runtime` is a public
+# sibling crate for in-process REAPER extension hosting (folding it
+# into `daw` would cycle through daw-reaper → keyflow → daw, see daw
+# a823b67).
 daw = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
-daw-ui = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
 daw-cli = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
 daw-extension-runtime = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
-# NOTE: daw-proto, daw-control, daw-control-sync, daw-reaper, daw-standalone,
-# dawfile-reaper are INTERNAL. Access them through the `daw` facade crate.
-# Use features: sync, reaper, standalone, file
 
 # Dock UI (sibling repo)
 dock-proto = { git = "https://github.com/FastTrackStudios/dock-dioxus.git", branch = "main" }
@@ -118,7 +119,6 @@ dynamic-template = { git = "https://github.com/FastTrackStudios/dynamic-template
 
 # Shared infrastructure
 audio-controls = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
-daw-allocator = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
 vox-discover = { path = "crates/shared/vox-discover" }
 installer-core = { path = "crates/shared/installer-core" }
 

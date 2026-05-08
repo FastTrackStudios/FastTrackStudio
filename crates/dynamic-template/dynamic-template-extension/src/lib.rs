@@ -144,11 +144,12 @@ async fn run(daw: Daw) -> Result<()> {
     // (Track event subscription was dropped during the vox 0.46 migration:
     // TrackEvent doesn't impl Reborrow so SelfRef::get isn't available. Auto-color
     // re-application on track changes will be re-wired once that lands.)
-    while let Ok(Some(event)) = action_rx.recv().await {
-        match event.get() {
-            daw::service::ActionEvent::Triggered { command_name } => {
+    use daw::RxExt;
+    loop {
+        match action_rx.next_owned().await {
+            Ok(Some(daw::service::ActionEvent::Triggered { command_name })) => {
                 if let Err(e) = handle_action(
-                    command_name.as_str(),
+                    &command_name,
                     &daw,
                     &mut auto_color_enabled,
                     &mut group_cache,
@@ -157,6 +158,11 @@ async fn run(daw: Daw) -> Result<()> {
                 {
                     warn!("[dynamic-template] Action {command_name} failed: {e}");
                 }
+            }
+            Ok(None) => break,
+            Err(e) => {
+                warn!("[dynamic-template] action stream error: {e}");
+                break;
             }
         }
     }
