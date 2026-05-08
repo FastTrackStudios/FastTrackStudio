@@ -1236,20 +1236,36 @@ impl ReaperTake {
             None
         };
 
-        // Get source info
+        // Get source info. Source type comes from REAPER's
+        // `GetMediaSourceType` tag string ("midi" / "wave" / "flac" /
+        // "ogg" / "mp3" / "video" / "empty" / etc.). Length, sample
+        // rate, and channel count would need PCM_source_GetSampleRate /
+        // PCM_source_GetNumChannels wrappers — deferred to #25.
         let source_file_path = item_sw::get_take_source_file_path(medium, take);
         let source = item_sw::get_take_source(medium, take);
         let (source_type, source_length, source_sample_rate, source_channels, is_midi) =
-            if source.is_some() {
-                // For now, assume audio - proper implementation needs low-level API wrappers
-                (SourceType::Audio, None, None, None, false)
-            } else {
-                (SourceType::Empty, None, None, None, false)
+            match source {
+                Some(src) => {
+                    let tag = item_sw::get_pcm_source_type(low, src).unwrap_or_default();
+                    let kind = match tag.as_str() {
+                        "midi" | "midipool" => SourceType::Midi,
+                        "video" => SourceType::Video,
+                        "" | "empty" => SourceType::Empty,
+                        // Most audio formats: wave, flac, ogg, mp3, opus, wavpack, etc.
+                        _ => SourceType::Audio,
+                    };
+                    let is_midi = matches!(kind, SourceType::Midi);
+                    (kind, None, None, None, is_midi)
+                }
+                None => (SourceType::Empty, None, None, None, false),
             };
 
+        // For MIDI takes, count notes via the existing safe wrapper around
+        // `MIDI_CountEvts`. CC + text/sysex counts are intentionally not
+        // surfaced here yet — the proto only carries `midi_note_count`.
         let midi_note_count = if is_midi {
-            // TODO: Implement using MIDI_CountEvts low-level API
-            Some(0)
+            let counts = crate::safe_wrappers::midi::count_events(low, take);
+            Some(counts.notes.max(0) as u32)
         } else {
             None
         };

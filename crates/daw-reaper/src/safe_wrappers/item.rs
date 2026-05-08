@@ -267,6 +267,25 @@ pub fn get_take_source(
     unsafe { medium.get_media_item_take_source(take) }
 }
 
+/// Read the type tag of a PCM source via `GetMediaSourceType`. Returns
+/// the lowercase tag (e.g. `"midi"`, `"wave"`, `"flac"`, `"video"`,
+/// `"empty"`). `None` on read failure / non-UTF-8 / null source.
+pub fn get_pcm_source_type(
+    low: &reaper_low::Reaper,
+    source: reaper_medium::PcmSource,
+) -> Option<String> {
+    let mut buf = vec![0i8; 64];
+    unsafe {
+        low.GetMediaSourceType(
+            source.as_ptr(),
+            buf.as_mut_ptr() as *mut _,
+            buf.len() as i32,
+        );
+    }
+    let cstr = unsafe { std::ffi::CStr::from_ptr(buf.as_ptr() as *const _) };
+    cstr.to_str().ok().map(|s| s.to_ascii_lowercase())
+}
+
 /// Get the source file path for a take (returns None for MIDI/empty takes).
 pub fn get_take_source_file_path(
     medium: &reaper_medium::Reaper,
