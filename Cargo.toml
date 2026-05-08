@@ -30,7 +30,6 @@ members = [
     "crates/daw-reaper-dioxus",
     "crates/daw-reaper-dioxus-ext",
     "crates/daw-reaper-dioxus-ext-test",
-    "crates/daw-wpe-webkit",
     "apps/example-extension",
     "apps/example-plugin",
     "xtask",
@@ -236,14 +235,6 @@ moire-wasm = { git = "https://github.com/FastTrackStudios/moire.git", rev = "7a2
 moire-wire = { git = "https://github.com/FastTrackStudios/moire.git", rev = "7a2f1dc" }
 
 [patch.crates-io]
-# Wry: vendored fork at ../forks/wry pinned to v0.53.5 with a Linux fix
-# that uses `GtkPlug` (XEMBED) for `build_as_child` instead of faking a
-# `gtk::Window::Toplevel` over a foreign GdkWindow. The upstream path
-# corrupts the X session's `_NET_ACTIVE_WINDOW` and breaks focus/grab
-# routing whenever the host (REAPER, VST host, etc.) doesn't own a real
-# GTK toplevel. See the dock.rs WebKit panel embedding path.
-wry = { path = "../forks/wry" }
-
 dioxus = { path = "/home/cody/Development/Dioxus/dioxus/packages/dioxus" }
 dioxus-asset-resolver = { path = "/home/cody/Development/Dioxus/dioxus/packages/asset-resolver" }
 dioxus-cli-config = { path = "/home/cody/Development/Dioxus/dioxus/packages/cli-config" }

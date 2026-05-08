@@ -38,7 +38,6 @@ reaper-test-panels = [
     "dep:daw-module",
     "dep:daw-reaper-dioxus",
     "dep:fts-ui",
-    "daw-reaper-dioxus/desktop-renderer",
 ]
 
 [lints]
