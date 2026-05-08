@@ -1691,6 +1691,212 @@ pub struct EmailLinkResponse {
     pub email_count: u32,
 }
 
+/// Specialized workflow service for the `cooking` integration.
+///
+/// Mirrors Mealie's surface: recipes (with ordered ingredient + step
+/// children), cookbooks (named collections, m2m to recipe), meal plans
+/// (one slot per `(date, meal_type, organization)` — `set_meal_plan_entry`
+/// upserts on that triple), and shopping lists (with optional
+/// generate-from-meal-plan).
+///
+/// Recipe ingredients and steps are JSON-encoded on the wire (one
+/// `Vec<RecipeIngredientSpec>` / `Vec<RecipeStepSpec>` per call) to fit
+/// inside Vox's tuple-arity budget without exposing one-method-per-child
+/// CRUD endpoints.
+#[vox::service]
+pub trait CookingService {
+    // Recipes
+    async fn list_recipes(
+        &self,
+        organization: Option<String>,
+    ) -> Result<Vec<crate::recipe::RecipeApi>, VaultError>;
+    async fn get_recipe(&self, id: Uuid) -> Result<Option<RecipeWithDetails>, VaultError>;
+    async fn create_recipe(
+        &self,
+        request: CreateRecipeRequest,
+    ) -> Result<RecipeWithDetails, VaultError>;
+    async fn update_recipe(
+        &self,
+        id: Uuid,
+        patch: RecipePatch,
+    ) -> Result<crate::recipe::RecipeApi, VaultError>;
+    async fn delete_recipe(&self, id: Uuid) -> Result<(), VaultError>;
+    /// Validate `0.0..=5.0` and persist. `ParseError` outside that range.
+    async fn rate_recipe(
+        &self,
+        id: Uuid,
+        rating: f32,
+    ) -> Result<crate::recipe::RecipeApi, VaultError>;
+    /// Stamp `last_made` (defaults to today).
+    async fn mark_made(
+        &self,
+        id: Uuid,
+        on_date: Option<chrono::NaiveDate>,
+    ) -> Result<crate::recipe::RecipeApi, VaultError>;
+
+    // Cookbooks
+    async fn list_cookbooks(
+        &self,
+        organization: Option<String>,
+    ) -> Result<Vec<crate::cookbook::CookbookApi>, VaultError>;
+    async fn get_cookbook(&self, id: Uuid) -> Result<Option<CookbookWithRecipes>, VaultError>;
+    async fn create_cookbook(
+        &self,
+        name: String,
+        description: Option<String>,
+        organization: Option<String>,
+    ) -> Result<crate::cookbook::CookbookApi, VaultError>;
+    async fn add_recipe_to_cookbook(
+        &self,
+        cookbook_id: Uuid,
+        recipe_id: Uuid,
+    ) -> Result<(), VaultError>;
+    async fn remove_recipe_from_cookbook(
+        &self,
+        cookbook_id: Uuid,
+        recipe_id: Uuid,
+    ) -> Result<(), VaultError>;
+
+    // Meal plan
+    async fn list_meal_plan(
+        &self,
+        request: MealPlanRangeRequest,
+    ) -> Result<Vec<crate::meal_plan::MealPlanEntryApi>, VaultError>;
+    /// Upsert on `(date, meal_type, organization)` — see `MealPlanEntry`
+    /// docs.
+    async fn set_meal_plan_entry(
+        &self,
+        request: SetMealPlanEntryRequest,
+    ) -> Result<crate::meal_plan::MealPlanEntryApi, VaultError>;
+    async fn delete_meal_plan_entry(&self, id: Uuid) -> Result<(), VaultError>;
+
+    // Shopping lists
+    async fn list_shopping_lists(
+        &self,
+        organization: Option<String>,
+    ) -> Result<Vec<crate::shopping_list::ShoppingListApi>, VaultError>;
+    async fn get_shopping_list(
+        &self,
+        id: Uuid,
+    ) -> Result<Option<ShoppingListWithItems>, VaultError>;
+    async fn create_shopping_list(
+        &self,
+        name: String,
+        organization: Option<String>,
+    ) -> Result<crate::shopping_list::ShoppingListApi, VaultError>;
+    /// Append one shopping_list_item per RecipeIngredient across every
+    /// meal-plan entry in the requested range. Items inherit `food`,
+    /// `unit`, `quantity` and back-reference `recipe_id` + `meal_plan_id`.
+    /// Existing items in the list are kept (not deduped).
+    async fn generate_from_meal_plan(
+        &self,
+        request: GenerateShoppingListRequest,
+    ) -> Result<ShoppingListWithItems, VaultError>;
+    async fn check_item(&self, item_id: Uuid, checked: bool) -> Result<(), VaultError>;
+    async fn add_shopping_list_item(
+        &self,
+        request: AddShoppingItemRequest,
+    ) -> Result<(), VaultError>;
+}
+
+/// Wire-friendly Recipe-with-children view. `ingredients_json` and
+/// `steps_json` are JSON-encoded `Vec<RecipeIngredientApi>` /
+/// `Vec<RecipeStepApi>`, ordered.
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct RecipeWithDetails {
+    pub recipe: crate::recipe::RecipeApi,
+    pub ingredients_json: String,
+    pub steps_json: String,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct CookbookWithRecipes {
+    pub cookbook: crate::cookbook::CookbookApi,
+    /// JSON-encoded `Vec<RecipeApi>`, ordered by sequence.
+    pub recipes_json: String,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct ShoppingListWithItems {
+    pub list: crate::shopping_list::ShoppingListApi,
+    /// JSON-encoded `Vec<ShoppingListItemApi>`, ordered by sequence.
+    pub items_json: String,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct CreateRecipeRequest {
+    pub name: String,
+    pub description: Option<String>,
+    pub organization: Option<String>,
+    pub prep_time_minutes: Option<u32>,
+    pub cook_time_minutes: Option<u32>,
+    pub servings: Option<u32>,
+    pub source_url: Option<String>,
+    pub created_by: Option<String>,
+    /// JSON-encoded `Vec<RecipeIngredientSpec>`. Empty string means
+    /// "no ingredients".
+    pub ingredients_json: String,
+    /// JSON-encoded `Vec<RecipeStepSpec>`.
+    pub steps_json: String,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct RecipePatch {
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub prep_time_minutes: Option<u32>,
+    pub cook_time_minutes: Option<u32>,
+    pub servings: Option<u32>,
+    pub source_url: Option<String>,
+    pub yield_label: Option<String>,
+    pub notes: Option<String>,
+    /// Fully replaces ingredients when Some. JSON-encoded
+    /// `Vec<RecipeIngredientSpec>`.
+    pub ingredients_json: Option<String>,
+    /// Fully replaces steps when Some. JSON-encoded
+    /// `Vec<RecipeStepSpec>`.
+    pub steps_json: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct MealPlanRangeRequest {
+    pub organization: Option<String>,
+    pub from_date: chrono::NaiveDate,
+    pub to_date: chrono::NaiveDate,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct SetMealPlanEntryRequest {
+    pub date: chrono::NaiveDate,
+    /// Parsed via [`crate::meal_plan::MealType::parse`]. Unknown values
+    /// return `ParseError`.
+    pub meal_type: String,
+    pub organization: Option<String>,
+    pub recipe_id: Option<Uuid>,
+    pub title: Option<String>,
+    pub servings_planned: Option<u32>,
+    pub notes: Option<String>,
+    pub created_by: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct GenerateShoppingListRequest {
+    pub list_id: Uuid,
+    pub organization: Option<String>,
+    pub from_date: chrono::NaiveDate,
+    pub to_date: chrono::NaiveDate,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct AddShoppingItemRequest {
+    pub list_id: Uuid,
+    pub food: String,
+    pub quantity: Option<f64>,
+    pub unit: Option<String>,
+    pub note: Option<String>,
+    pub label: Option<String>,
+}
+
 /// Errors returned by vault operations.
 #[derive(Debug, facet::Facet, thiserror::Error)]
 #[repr(C)]
