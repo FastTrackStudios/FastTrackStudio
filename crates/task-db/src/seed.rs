@@ -12,13 +12,15 @@
 //! rest of the app continues to go through the generated CRUD surfaces.
 
 use chrono::{Duration, NaiveDate, Utc};
-use sea_orm::{ActiveValue::Set, DatabaseConnection, DbErr, EntityTrait};
+use sea_orm::{ActiveValue::Set, ColumnTrait, DatabaseConnection, DbErr, EntityTrait, QueryFilter};
 use uuid::Uuid;
 
 use task_core::activity;
 use task_core::attachment;
 use task_core::calendar_event::{self, CalendarEventStatus};
 use task_core::comment;
+use task_core::cookbook;
+use task_core::cookbook_recipe;
 use task_core::cycle::{self, CycleStatus, CycleTaskList};
 use task_core::email;
 use task_core::email::EmailStringList;
@@ -28,11 +30,16 @@ use task_core::integration::{
     TaskTemplate, TaskTemplateList,
 };
 use task_core::invoice::{self, InvoiceLine, InvoiceLineList, InvoiceStatus, Payment, PaymentList};
+use task_core::meal_plan::{self, MealType};
 use task_core::notification;
 use task_core::people::{self, ContactMethod, ContactMethodList, ProviderRef, ProviderRefList};
 use task_core::project::{self, ProjectStatus};
 use task_core::property::JsonObject;
 use task_core::reaction;
+use task_core::recipe;
+use task_core::recipe_ingredient;
+use task_core::recipe_step;
+use task_core::shopping_list;
 use task_core::task::{
     self, EmailRefList, Priority, RecurrenceAnchor, ReminderList, Status, StringList,
     TaskDependencyList, TaskRelationList, TimeEntry, TimeEntryList, WikiLink, WikiLinkList,
@@ -91,6 +98,16 @@ pub struct DemoSeedSummary {
     pub integrations_unchanged: usize,
     pub tracks_created: usize,
     pub tracks_unchanged: usize,
+    pub recipes_created: usize,
+    pub recipes_unchanged: usize,
+    pub cookbooks_created: usize,
+    pub cookbooks_unchanged: usize,
+    pub meal_plan_entries_created: usize,
+    pub meal_plan_entries_unchanged: usize,
+    pub shopping_lists_created: usize,
+    pub shopping_lists_unchanged: usize,
+    pub shopping_list_items_created: usize,
+    pub shopping_list_items_unchanged: usize,
 }
 
 impl DemoSeedSummary {
@@ -111,6 +128,11 @@ impl DemoSeedSummary {
             + self.attachments_created
             + self.integrations_created
             + self.tracks_created
+            + self.recipes_created
+            + self.cookbooks_created
+            + self.meal_plan_entries_created
+            + self.shopping_lists_created
+            + self.shopping_list_items_created
     }
 
     pub fn total_unchanged(&self) -> usize {
@@ -130,6 +152,11 @@ impl DemoSeedSummary {
             + self.attachments_unchanged
             + self.integrations_unchanged
             + self.tracks_unchanged
+            + self.recipes_unchanged
+            + self.cookbooks_unchanged
+            + self.meal_plan_entries_unchanged
+            + self.shopping_lists_unchanged
+            + self.shopping_list_items_unchanged
     }
 }
 
@@ -156,6 +183,7 @@ pub async fn seed_demo_data(db: &DatabaseConnection) -> Result<DemoSeedSummary, 
     seed_attachments(db, &mut summary).await?;
     seed_integrations(db, &mut summary).await?;
     seed_tracks(db, &mut summary).await?;
+    seed_cooking(db, &mut summary).await?;
     Ok(summary)
 }
 
@@ -323,6 +351,71 @@ pub async fn reset_demo_data(db: &DatabaseConnection) -> Result<DemoSeedSummary,
             summary.tracks_created += 1;
         }
     }
+
+    // Cooking — child rows first, then parents (no FK enforcement in
+    // SQLite default, but order is still the right discipline).
+    for key in MEAL_PLAN_KEYS {
+        let id = demo_id(key);
+        if meal_plan::Entity::delete_by_id(id)
+            .exec(db)
+            .await?
+            .rows_affected
+            > 0
+        {
+            summary.meal_plan_entries_created += 1;
+        }
+    }
+    for key in COOKBOOK_KEYS {
+        let cb_id = demo_id(key);
+        cookbook_recipe::Entity::delete_many()
+            .filter(cookbook_recipe::Column::CookbookId.eq(cb_id))
+            .exec(db)
+            .await?;
+        if cookbook::Entity::delete_by_id(cb_id)
+            .exec(db)
+            .await?
+            .rows_affected
+            > 0
+        {
+            summary.cookbooks_created += 1;
+        }
+    }
+    for key in RECIPE_KEYS {
+        let rid = demo_id(key);
+        recipe_ingredient::Entity::delete_many()
+            .filter(recipe_ingredient::Column::RecipeId.eq(rid))
+            .exec(db)
+            .await?;
+        recipe_step::Entity::delete_many()
+            .filter(recipe_step::Column::RecipeId.eq(rid))
+            .exec(db)
+            .await?;
+        if recipe::Entity::delete_by_id(rid)
+            .exec(db)
+            .await?
+            .rows_affected
+            > 0
+        {
+            summary.recipes_created += 1;
+        }
+    }
+    for key in SHOPPING_LIST_KEYS {
+        let lid = demo_id(key);
+        let items_removed = shopping_list::ItemEntity::delete_many()
+            .filter(shopping_list::ItemColumn::ListId.eq(lid))
+            .exec(db)
+            .await?
+            .rows_affected as usize;
+        summary.shopping_list_items_created += items_removed;
+        if shopping_list::Entity::delete_by_id(lid)
+            .exec(db)
+            .await?
+            .rows_affected
+            > 0
+        {
+            summary.shopping_lists_created += 1;
+        }
+    }
     for key in PROJECT_KEYS {
         let id = demo_id(key);
         if project::Entity::delete_by_id(id)
@@ -485,6 +578,31 @@ const INTEGRATION_KEYS: &[&str] = &[
     "integration:cooking",
     "integration:fitness",
 ];
+
+const RECIPE_KEYS: &[&str] = &[
+    "recipe:weeknight-carbonara",
+    "recipe:sheet-pan-chicken-veg",
+    "recipe:chickpea-curry",
+    "recipe:smashburger",
+    "recipe:greek-salad",
+    "recipe:banana-pancakes",
+];
+
+const COOKBOOK_KEYS: &[&str] = &["cookbook:codys-weeknight-rotation"];
+
+const MEAL_PLAN_KEYS: &[&str] = &[
+    "meal:day0-lunch",
+    "meal:day0-dinner",
+    "meal:day1-breakfast",
+    "meal:day1-dinner",
+    "meal:day2-dinner",
+    "meal:day3-dinner",
+    "meal:day4-dinner",
+    "meal:day5-lunch",
+    "meal:day6-dinner",
+];
+
+const SHOPPING_LIST_KEYS: &[&str] = &["shop:this-week"];
 
 // ── Project fixtures ────────────────────────────────────────────────────────
 
@@ -2921,6 +3039,444 @@ async fn seed_tracks(db: &DatabaseConnection, summary: &mut DemoSeedSummary) -> 
         track::Entity::insert(active).exec(db).await?;
         summary.tracks_created += 1;
     }
+    Ok(())
+}
+
+// ── Cooking fixtures ─────────────────────────────────────────────────────────
+
+struct RecipeFixture {
+    key: &'static str,
+    name: &'static str,
+    description: &'static str,
+    prep: u32,
+    cook: u32,
+    servings: u32,
+    cuisine: &'static str,
+    dietary: &'static [&'static str],
+    /// (quantity, unit, food)
+    ingredients: &'static [(Option<f64>, Option<&'static str>, &'static str)],
+    /// Plain step text in order.
+    steps: &'static [&'static str],
+}
+
+const RECIPE_FIXTURES: &[RecipeFixture] = &[
+    RecipeFixture {
+        key: "recipe:weeknight-carbonara",
+        name: "Weeknight Carbonara",
+        description: "Classic Roman pasta — guanciale, eggs, pecorino, lots of pepper.",
+        prep: 10,
+        cook: 20,
+        servings: 4,
+        cuisine: "italian",
+        dietary: &[],
+        ingredients: &[
+            (Some(1.0), Some("lb"), "spaghetti"),
+            (Some(4.0), None, "egg yolks"),
+            (Some(1.0), None, "whole egg"),
+            (Some(1.0), Some("cup"), "pecorino romano"),
+            (Some(6.0), Some("oz"), "guanciale"),
+            (Some(2.0), Some("tsp"), "black pepper"),
+        ],
+        steps: &[
+            "Bring a large pot of salted water to a boil and cook the spaghetti to al dente.",
+            "While pasta cooks, render diced guanciale in a wide skillet until crisp.",
+            "Whisk yolks, whole egg, pecorino and pepper. Temper with a ladle of pasta water.",
+            "Toss pasta with guanciale off heat, add egg mixture, toss to a glossy sauce.",
+        ],
+    },
+    RecipeFixture {
+        key: "recipe:sheet-pan-chicken-veg",
+        name: "Sheet-pan Chicken & Veg",
+        description: "Chicken thighs roasted with broccoli and sweet potato — minimal cleanup.",
+        prep: 10,
+        cook: 35,
+        servings: 4,
+        cuisine: "american",
+        dietary: &["gluten-free"],
+        ingredients: &[
+            (Some(2.0), Some("lb"), "chicken thighs"),
+            (Some(1.0), Some("head"), "broccoli, cut into florets"),
+            (Some(2.0), None, "sweet potatoes, cubed"),
+            (Some(3.0), Some("tbsp"), "olive oil"),
+            (Some(2.0), Some("tsp"), "smoked paprika"),
+            (Some(4.0), Some("clove"), "garlic, minced"),
+        ],
+        steps: &[
+            "Preheat oven to 425°F. Toss vegetables with oil, paprika, garlic, salt, pepper.",
+            "Spread on sheet pan, nestle chicken thighs between, brush thighs with oil.",
+            "Roast 30–35 minutes until thighs hit 165°F and vegetables are caramelized.",
+        ],
+    },
+    RecipeFixture {
+        key: "recipe:chickpea-curry",
+        name: "Chickpea Curry",
+        description: "Pantry-friendly chana masala with coconut milk and garam masala.",
+        prep: 10,
+        cook: 25,
+        servings: 4,
+        cuisine: "indian",
+        dietary: &["vegetarian", "gluten-free"],
+        ingredients: &[
+            (Some(2.0), None, "cans chickpeas, drained"),
+            (Some(1.0), None, "yellow onion, diced"),
+            (Some(4.0), Some("clove"), "garlic, minced"),
+            (Some(1.0), Some("tbsp"), "fresh ginger, grated"),
+            (Some(1.0), None, "can crushed tomatoes"),
+            (Some(1.0), None, "can coconut milk"),
+            (Some(2.0), Some("tsp"), "garam masala"),
+        ],
+        steps: &[
+            "Sauté onion in oil until translucent, add garlic and ginger, cook one minute.",
+            "Stir in tomatoes and garam masala, simmer 5 minutes to bloom spices.",
+            "Add chickpeas and coconut milk, simmer 15 minutes until thickened.",
+            "Season with salt; serve over rice.",
+        ],
+    },
+    RecipeFixture {
+        key: "recipe:smashburger",
+        name: "Smashburger",
+        description: "Smash-style griddle burger on toasted brioche with American cheese.",
+        prep: 5,
+        cook: 15,
+        servings: 2,
+        cuisine: "american",
+        dietary: &[],
+        ingredients: &[
+            (Some(8.0), Some("oz"), "ground beef (80/20)"),
+            (Some(2.0), None, "brioche buns"),
+            (Some(2.0), Some("slice"), "american cheese"),
+            (Some(2.0), Some("tbsp"), "butter"),
+            (Some(1.0), Some("tsp"), "kosher salt"),
+        ],
+        steps: &[
+            "Heat cast-iron skillet smoking hot. Butter and toast bun halves.",
+            "Form beef into two loose balls. Smash flat in pan, season heavily.",
+            "Flip after 2 minutes, top with cheese, melt. Stack on bun.",
+        ],
+    },
+    RecipeFixture {
+        key: "recipe:greek-salad",
+        name: "Greek Salad",
+        description: "Crisp Mediterranean salad — no lettuce, lots of feta and olives.",
+        prep: 10,
+        cook: 0,
+        servings: 2,
+        cuisine: "mediterranean",
+        dietary: &["vegetarian", "gluten-free"],
+        ingredients: &[
+            (Some(1.0), None, "english cucumber, diced"),
+            (Some(2.0), None, "tomatoes, diced"),
+            (Some(0.5), None, "red onion, sliced"),
+            (Some(0.5), Some("cup"), "kalamata olives"),
+            (Some(4.0), Some("oz"), "feta cheese, cubed"),
+            (Some(3.0), Some("tbsp"), "olive oil"),
+            (Some(1.0), Some("tsp"), "dried oregano"),
+        ],
+        steps: &[
+            "Combine cucumber, tomato, onion, olives in a wide bowl.",
+            "Drizzle olive oil, scatter feta and oregano, season with salt.",
+        ],
+    },
+    RecipeFixture {
+        key: "recipe:banana-pancakes",
+        name: "Banana Pancakes",
+        description: "Fluffy banana-flecked pancakes — weekend breakfast staple.",
+        prep: 5,
+        cook: 15,
+        servings: 4,
+        cuisine: "breakfast",
+        dietary: &["vegetarian"],
+        ingredients: &[
+            (Some(2.0), None, "ripe bananas, mashed"),
+            (Some(2.0), None, "eggs"),
+            (Some(1.5), Some("cup"), "all-purpose flour"),
+            (Some(2.0), Some("tsp"), "baking powder"),
+            (Some(1.25), Some("cup"), "milk"),
+            (Some(1.0), Some("tsp"), "cinnamon"),
+        ],
+        steps: &[
+            "Whisk dry ingredients. In a separate bowl, whisk bananas, eggs, milk.",
+            "Combine wet and dry until just incorporated.",
+            "Cook on medium-hot griddle, ~2 min per side until golden.",
+        ],
+    },
+];
+
+async fn seed_cooking(db: &DatabaseConnection, summary: &mut DemoSeedSummary) -> Result<(), DbErr> {
+    let now = Utc::now();
+
+    // ── Recipes (with ingredients + steps) ───────────────────────────
+    for fix in RECIPE_FIXTURES {
+        let id = demo_id(fix.key);
+        if recipe::Entity::find_by_id(id).one(db).await?.is_some() {
+            summary.recipes_unchanged += 1;
+            continue;
+        }
+        let mut props = serde_json::Map::new();
+        props.insert(
+            "cuisine".to_string(),
+            serde_json::Value::String(fix.cuisine.to_string()),
+        );
+        if !fix.dietary.is_empty() {
+            props.insert(
+                "dietary".to_string(),
+                serde_json::Value::Array(
+                    fix.dietary
+                        .iter()
+                        .map(|s| serde_json::Value::String((*s).to_string()))
+                        .collect(),
+                ),
+            );
+        }
+        let active = recipe::ActiveModel {
+            id: Set(id),
+            name: Set(fix.name.to_string()),
+            slug: Set(slugify(fix.name)),
+            description: Set(Some(fix.description.to_string())),
+            organization: Set(Some(ORG_PERSONAL.to_string())),
+            prep_time_minutes: Set(Some(fix.prep)),
+            cook_time_minutes: Set(Some(fix.cook)),
+            total_time_minutes: Set(Some(fix.prep + fix.cook)),
+            servings: Set(Some(fix.servings)),
+            yield_label: Set(None),
+            source_url: Set(None),
+            rating: Set(None),
+            last_made: Set(None),
+            notes: Set(None),
+            created_by: Set(Some("cody".to_string())),
+            properties: Set(JsonObject::from_value(serde_json::Value::Object(props))),
+            created_at: Set(now),
+            updated_at: Set(now),
+        };
+        recipe::Entity::insert(active).exec(db).await?;
+        summary.recipes_created += 1;
+
+        for (idx, (qty, unit, food)) in fix.ingredients.iter().enumerate() {
+            let ing_active = recipe_ingredient::ActiveModel {
+                id: Set(demo_id(&format!("{}:ing:{}", fix.key, idx))),
+                recipe_id: Set(id),
+                sequence: Set((idx + 1) as u32),
+                quantity: Set(*qty),
+                unit: Set(unit.map(|s| s.to_string())),
+                food: Set(food.to_string()),
+                note: Set(None),
+                is_section: Set(false),
+                created_at: Set(now),
+                updated_at: Set(now),
+            };
+            recipe_ingredient::Entity::insert(ing_active)
+                .exec(db)
+                .await?;
+        }
+        for (idx, text) in fix.steps.iter().enumerate() {
+            let step_active = recipe_step::ActiveModel {
+                id: Set(demo_id(&format!("{}:step:{}", fix.key, idx))),
+                recipe_id: Set(id),
+                sequence: Set((idx + 1) as u32),
+                text: Set((*text).to_string()),
+                duration_minutes: Set(None),
+                created_at: Set(now),
+                updated_at: Set(now),
+            };
+            recipe_step::Entity::insert(step_active).exec(db).await?;
+        }
+    }
+
+    // ── Cookbook (Cody's Weeknight Rotation) ─────────────────────────
+    let cookbook_key = "cookbook:codys-weeknight-rotation";
+    let cookbook_id = demo_id(cookbook_key);
+    if cookbook::Entity::find_by_id(cookbook_id)
+        .one(db)
+        .await?
+        .is_none()
+    {
+        let active = cookbook::ActiveModel {
+            id: Set(cookbook_id),
+            name: Set("Cody's Weeknight Rotation".to_string()),
+            description: Set(Some(
+                "Six recipes I rotate through on busy weeknights.".to_string(),
+            )),
+            organization: Set(Some(ORG_PERSONAL.to_string())),
+            created_by: Set(Some("cody".to_string())),
+            created_at: Set(now),
+            updated_at: Set(now),
+        };
+        cookbook::Entity::insert(active).exec(db).await?;
+        summary.cookbooks_created += 1;
+        for (idx, fix) in RECIPE_FIXTURES.iter().enumerate() {
+            let join_id = demo_id(&format!("{}:join:{}", cookbook_key, fix.key));
+            let active = cookbook_recipe::ActiveModel {
+                id: Set(join_id),
+                cookbook_id: Set(cookbook_id),
+                recipe_id: Set(demo_id(fix.key)),
+                sequence: Set((idx + 1) as u32),
+                added_at: Set(now),
+            };
+            cookbook_recipe::Entity::insert(active).exec(db).await?;
+        }
+    } else {
+        summary.cookbooks_unchanged += 1;
+    }
+
+    // ── Meal plan (today + next 6 days) ──────────────────────────────
+    let today = chrono::Local::now().date_naive();
+    let entries: &[(&str, i64, MealType, Option<&str>, Option<&str>)] = &[
+        (
+            "meal:day0-lunch",
+            0,
+            MealType::Lunch,
+            Some("recipe:greek-salad"),
+            None,
+        ),
+        (
+            "meal:day0-dinner",
+            0,
+            MealType::Dinner,
+            Some("recipe:weeknight-carbonara"),
+            None,
+        ),
+        (
+            "meal:day1-breakfast",
+            1,
+            MealType::Breakfast,
+            Some("recipe:banana-pancakes"),
+            None,
+        ),
+        (
+            "meal:day1-dinner",
+            1,
+            MealType::Dinner,
+            Some("recipe:sheet-pan-chicken-veg"),
+            None,
+        ),
+        (
+            "meal:day2-dinner",
+            2,
+            MealType::Dinner,
+            Some("recipe:chickpea-curry"),
+            None,
+        ),
+        (
+            "meal:day3-dinner",
+            3,
+            MealType::Dinner,
+            Some("recipe:smashburger"),
+            Some("movie night"),
+        ),
+        (
+            "meal:day4-dinner",
+            4,
+            MealType::Dinner,
+            Some("recipe:weeknight-carbonara"),
+            None,
+        ),
+        (
+            "meal:day5-lunch",
+            5,
+            MealType::Lunch,
+            Some("recipe:greek-salad"),
+            None,
+        ),
+        (
+            "meal:day6-dinner",
+            6,
+            MealType::Dinner,
+            None,
+            Some("leftovers"),
+        ),
+    ];
+    for (key, day_offset, meal, recipe_key, title) in entries {
+        let id = demo_id(key);
+        if meal_plan::Entity::find_by_id(id).one(db).await?.is_some() {
+            summary.meal_plan_entries_unchanged += 1;
+            continue;
+        }
+        let date = today + Duration::days(*day_offset);
+        let active = meal_plan::ActiveModel {
+            id: Set(id),
+            date: Set(date),
+            meal_type: Set(*meal),
+            organization: Set(Some(ORG_PERSONAL.to_string())),
+            recipe_id: Set(recipe_key.map(|k| demo_id(k))),
+            title: Set(title.map(|s| s.to_string())),
+            servings_planned: Set(None),
+            notes: Set(None),
+            created_by: Set(Some("cody".to_string())),
+            created_at: Set(now),
+            updated_at: Set(now),
+        };
+        meal_plan::Entity::insert(active).exec(db).await?;
+        summary.meal_plan_entries_created += 1;
+    }
+
+    // ── Shopping list ("This Week") ──────────────────────────────────
+    let list_key = "shop:this-week";
+    let list_id = demo_id(list_key);
+    if shopping_list::Entity::find_by_id(list_id)
+        .one(db)
+        .await?
+        .is_none()
+    {
+        let active = shopping_list::ActiveModel {
+            id: Set(list_id),
+            name: Set("This Week".to_string()),
+            organization: Set(Some(ORG_PERSONAL.to_string())),
+            completed_at: Set(None),
+            created_by: Set(Some("cody".to_string())),
+            properties: Set(JsonObject::default()),
+            created_at: Set(now),
+            updated_at: Set(now),
+        };
+        shopping_list::Entity::insert(active).exec(db).await?;
+        summary.shopping_lists_created += 1;
+
+        // Pre-populate items inline by mirroring `generate_from_meal_plan`
+        // so the seeder doesn't depend on the service layer.
+        let plan_rows = meal_plan::Entity::find().all(db).await?;
+        let mut next_seq: u32 = 1;
+        for entry in plan_rows {
+            let Some(rid) = entry.recipe_id else { continue };
+            let ingredients = recipe_ingredient::Entity::find()
+                .filter(recipe_ingredient::Column::RecipeId.eq(rid))
+                .all(db)
+                .await?;
+            for ing in ingredients {
+                if ing.is_section {
+                    continue;
+                }
+                let item_id = demo_id(&format!("{}:item:{}:{}", list_key, entry.id, ing.id));
+                let item_active = shopping_list::ItemActiveModel {
+                    id: Set(item_id),
+                    list_id: Set(list_id),
+                    sequence: Set(next_seq),
+                    quantity: Set(ing.quantity),
+                    unit: Set(ing.unit.clone()),
+                    food: Set(ing.food.clone()),
+                    note: Set(ing.note.clone()),
+                    recipe_id: Set(Some(rid)),
+                    meal_plan_id: Set(Some(entry.id)),
+                    checked: Set(false),
+                    label: Set(None),
+                    created_at: Set(now),
+                    updated_at: Set(now),
+                };
+                shopping_list::ItemEntity::insert(item_active)
+                    .exec(db)
+                    .await?;
+                summary.shopping_list_items_created += 1;
+                next_seq += 1;
+            }
+        }
+    } else {
+        summary.shopping_lists_unchanged += 1;
+        // Count existing items so re-runs report unchanged correctly.
+        let existing_items = shopping_list::ItemEntity::find()
+            .filter(shopping_list::ItemColumn::ListId.eq(list_id))
+            .all(db)
+            .await?;
+        summary.shopping_list_items_unchanged += existing_items.len();
+    }
+
     Ok(())
 }
 

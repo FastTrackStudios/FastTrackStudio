@@ -126,6 +126,26 @@ async fn seed_demo_data_covers_every_entity_flavor() {
         "want >= 12 tracks, got {}",
         s.tracks_created
     );
+    assert!(
+        s.recipes_created >= 6,
+        "want >= 6 recipes, got {}",
+        s.recipes_created
+    );
+    assert!(
+        s.cookbooks_created >= 1,
+        "want >= 1 cookbook, got {}",
+        s.cookbooks_created
+    );
+    assert!(
+        s.meal_plan_entries_created >= 7,
+        "want >= 7 meal plan entries, got {}",
+        s.meal_plan_entries_created
+    );
+    assert!(
+        s.shopping_list_items_created > 0,
+        "want > 0 shopping list items, got {}",
+        s.shopping_list_items_created
+    );
 }
 
 #[tokio::test]
