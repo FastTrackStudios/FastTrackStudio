@@ -2069,6 +2069,7 @@ version = "0.1.0"
 dependencies = [
  "daw-control",
  "daw-control-sync",
+ "daw-extension-runtime",
  "daw-module",
  "daw-proto",
  "daw-reaper",
@@ -2076,8 +2077,10 @@ dependencies = [
  "daw-standalone",
  "dawfile-ableton",
  "dawfile-reaper",
+ "facet",
  "tokio",
  "tracing",
+ "vox 0.3.1 (git+https://github.com/Codys-Wright/vox.git?rev=ccb46b54)",
 ]
 
 [[package]]
@@ -2190,7 +2193,9 @@ name = "daw-extension-runtime"
 version = "0.1.0"
 dependencies = [
  "crossbeam-channel",
- "daw 0.1.0",
+ "daw-control",
+ "daw-proto",
+ "daw-reaper",
  "eyre",
  "fragile",
  "moire",

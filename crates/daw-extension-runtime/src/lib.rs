@@ -10,7 +10,7 @@ use std::error::Error;
 use std::sync::OnceLock;
 
 use crossbeam_channel::{Receiver, Sender};
-use daw::Daw;
+use daw_control::Daw;
 use eyre::{Result, eyre};
 use reaper_high::{MainTaskMiddleware, MainThreadTask, Reaper as HighReaper, TaskSupport};
 use reaper_low::PluginContext;
@@ -81,7 +81,7 @@ impl ExtensionRuntime {
         }
 
         Global::init();
-        daw::reaper::set_task_support(Global::task_support());
+        daw_reaper::set_task_support(Global::task_support());
 
         let tokio_runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
@@ -100,7 +100,7 @@ impl ExtensionRuntime {
     /// Build an async DAW handle backed by the in-process REAPER dispatcher.
     pub fn build_daw(&self) -> Result<Daw> {
         self.tokio_runtime
-            .block_on(daw::reaper::build_extension_daw())
+            .block_on(daw_reaper::build_extension_daw())
             .map_err(|e| eyre!("{e}"))
     }
 
@@ -139,7 +139,7 @@ pub struct ActionDef {
 /// Result of registering actions with REAPER.
 pub struct ActionRegistration {
     /// Receiver for action trigger events.
-    pub rx: Rx<daw::service::ActionEvent>,
+    pub rx: Rx<daw_proto::ActionEvent>,
     /// Number of actions successfully registered and confirmed in the action list.
     pub registered: usize,
     /// Number of actions that failed to register or were not found in the action list.
