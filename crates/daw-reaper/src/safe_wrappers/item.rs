@@ -286,6 +286,131 @@ pub fn get_pcm_source_type(
     cstr.to_str().ok().map(|s| s.to_ascii_lowercase())
 }
 
+/// Read a take's GUID as a braced string (e.g. `{XXXXXXXX-...}`).
+/// Returns the take pointer formatted as a fallback if REAPER's
+/// `GetSetMediaItemTakeInfo("GUID")` returns null (empty take, etc).
+pub fn get_take_guid_string(low: &reaper_low::Reaper, take: MediaItemTake) -> String {
+    let guid_ptr = unsafe {
+        low.GetSetMediaItemTakeInfo(take.as_ptr(), c"GUID".as_ptr(), std::ptr::null_mut())
+            as *const reaper_low::raw::GUID
+    };
+    if guid_ptr.is_null() {
+        return format!("{:p}", take.as_ptr());
+    }
+    let g = unsafe { &*guid_ptr };
+    format!(
+        "{{{:08X}-{:04X}-{:04X}-{:02X}{:02X}-{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}}}",
+        g.Data1,
+        g.Data2,
+        g.Data3,
+        g.Data4[0],
+        g.Data4[1],
+        g.Data4[2],
+        g.Data4[3],
+        g.Data4[4],
+        g.Data4[5],
+        g.Data4[6],
+        g.Data4[7]
+    )
+}
+
+/// Set `B_PPITCH` (preserve-pitch-when-changing-rate flag) on a take.
+/// REAPER stores BOOL attributes as `f64` 0.0/1.0 via the `_Value` API.
+pub fn set_take_preserve_pitch(
+    medium: &reaper_medium::Reaper,
+    take: MediaItemTake,
+    preserve: bool,
+) {
+    set_take_info_value(
+        medium,
+        take,
+        TakeAttributeKey::PPitch,
+        if preserve { 1.0 } else { 0.0 },
+    );
+}
+
+/// Set a take's custom color. Pass `None` to clear the color (0).
+/// REAPER expects `(native_color | 0x1000000)` to actually display; we
+/// OR that flag in for callers.
+pub fn set_take_color(medium: &reaper_medium::Reaper, take: MediaItemTake, color: Option<u32>) {
+    let raw = match color {
+        Some(c) => (c | 0x0100_0000) as f64,
+        None => 0.0,
+    };
+    set_take_info_value(medium, take, TakeAttributeKey::CustomColor, raw);
+}
+
+/// Create a new PCM source from a file path. Returns `None` if REAPER
+/// can't load the file. The returned source is owned by REAPER once
+/// passed to `set_take_source`; otherwise the caller must free it via
+/// `PCM_Source_Destroy` (not currently exposed).
+pub fn pcm_source_create_from_file(
+    low: &reaper_low::Reaper,
+    path: &str,
+) -> Option<reaper_medium::PcmSource> {
+    let cpath = std::ffi::CString::new(path).ok()?;
+    let raw = unsafe { low.PCM_Source_CreateFromFile(cpath.as_ptr()) };
+    reaper_medium::PcmSource::new(raw)
+}
+
+/// Replace a take's PCM source. The previous source is leaked unless
+/// the caller frees it explicitly.
+pub fn set_take_source(
+    low: &reaper_low::Reaper,
+    take: MediaItemTake,
+    source: reaper_medium::PcmSource,
+) {
+    unsafe {
+        low.SetMediaItemTake_Source(take.as_ptr(), source.as_ptr());
+    }
+}
+
+/// Read or write a media item's full state chunk.
+///
+/// Pass `value = None` to read the current chunk (returns it as a
+/// String). Pass `Some(s)` to write — returns `Some(String::new())` on
+/// success or `None` on rejection. The buffer scales as needed.
+pub fn get_set_item_state(
+    low: &reaper_low::Reaper,
+    item: MediaItem,
+    value: Option<&str>,
+) -> Option<String> {
+    match value {
+        // Write path: allocate a writable null-terminated buffer.
+        Some(s) => {
+            let mut buf: Vec<u8> = s.as_bytes().to_vec();
+            buf.push(0);
+            let ok = unsafe {
+                low.GetSetItemState(item.as_ptr(), buf.as_mut_ptr() as *mut i8, buf.len() as i32)
+            };
+            if ok { Some(String::new()) } else { None }
+        }
+        // Read path: try increasing buffer sizes until the chunk fits.
+        None => {
+            for size in [16 * 1024, 64 * 1024, 256 * 1024, 1024 * 1024] {
+                let mut buf = vec![0u8; size];
+                let ok = unsafe {
+                    low.GetSetItemState(
+                        item.as_ptr(),
+                        buf.as_mut_ptr() as *mut i8,
+                        buf.len() as i32,
+                    )
+                };
+                if !ok {
+                    return None;
+                }
+                let s = super::buffer::string_from_buffer(&buf);
+                // If we filled within ~95% of the buffer assume truncation
+                // and grow.
+                if s.len() < (size * 95 / 100) {
+                    return Some(s);
+                }
+            }
+            None
+        }
+    }
+}
+
 /// Get the source file path for a take (returns None for MIDI/empty takes).
 pub fn get_take_source_file_path(
     medium: &reaper_medium::Reaper,

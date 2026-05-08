@@ -1471,6 +1471,175 @@ pub async fn cmd_remove_track(daw: &Daw, track_arg: &str) -> Result<()> {
     Ok(())
 }
 
+// ── Items / Takes ────────────────────────────────────────────────────────────
+
+pub async fn cmd_items(daw: &Daw, track_arg: &str, as_json: bool) -> Result<()> {
+    let handle = resolve_track_handle(daw, track_arg).await?;
+    let items = handle.items().all().await?;
+    if as_json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(
+                &items
+                    .iter()
+                    .map(|i| json!({
+                        "guid": i.guid,
+                        "position": i.position.as_seconds(),
+                        "length": i.length.as_seconds(),
+                        "muted": i.muted,
+                        "selected": i.selected,
+                        "take_count": i.take_count,
+                        "active_take": i.active_take_index,
+                    }))
+                    .collect::<Vec<_>>()
+            )?
+        );
+    } else if items.is_empty() {
+        println!("(no items on track)");
+    } else {
+        println!(
+            "{:<3} {:>10} {:>10}  {:<6} {:<3}  GUID",
+            "#", "pos", "len", "takes", "sel"
+        );
+        for (idx, it) in items.iter().enumerate() {
+            println!(
+                "{:<3} {:>10.3} {:>10.3}  {:<6} {:<3}  {}",
+                idx,
+                it.position.as_seconds(),
+                it.length.as_seconds(),
+                it.take_count,
+                if it.selected { "yes" } else { "no" },
+                it.guid,
+            );
+        }
+    }
+    Ok(())
+}
+
+pub async fn cmd_takes(daw: &Daw, track_arg: &str, item_idx: u32, as_json: bool) -> Result<()> {
+    let track = resolve_track_handle(daw, track_arg).await?;
+    let item = track
+        .items()
+        .by_index(item_idx)
+        .await?
+        .ok_or_else(|| eyre::eyre!("item #{} not found on track", item_idx))?;
+    let info = item.info().await?;
+    let takes = item.takes().all().await?;
+
+    let mut rows = Vec::new();
+    for (idx, take) in takes.iter().enumerate() {
+        let handle = item
+            .takes()
+            .by_index(idx as u32)
+            .await?
+            .ok_or_else(|| eyre::eyre!("take #{} disappeared mid-call", idx))?;
+        let source_type = handle.source_type().await?;
+        rows.push(json!({
+            "index": idx,
+            "guid": take.guid,
+            "name": take.name,
+            "is_active": idx as u32 == info.active_take_index,
+            "source_type": format!("{:?}", source_type),
+            "is_midi": take.is_midi,
+            "midi_note_count": take.midi_note_count,
+            "pitch": take.pitch,
+            "play_rate": take.play_rate,
+            "preserve_pitch": take.preserve_pitch,
+            "color": take.color,
+        }));
+    }
+
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&rows)?);
+    } else if rows.is_empty() {
+        println!("(no takes on item)");
+    } else {
+        println!(
+            "{:<3} {:<6} {:<6} {:<7} {:<5}  name",
+            "#", "act", "type", "midi#", "rate"
+        );
+        for row in &rows {
+            println!(
+                "{:<3} {:<6} {:<6} {:<7} {:<5.3}  {}",
+                row["index"],
+                if row["is_active"].as_bool().unwrap_or(false) {
+                    "*"
+                } else {
+                    ""
+                },
+                row["source_type"].as_str().unwrap_or("?"),
+                row["midi_note_count"]
+                    .as_u64()
+                    .map(|n| n.to_string())
+                    .unwrap_or_else(|| "-".into()),
+                row["play_rate"].as_f64().unwrap_or(1.0),
+                row["name"].as_str().unwrap_or(""),
+            );
+        }
+    }
+    Ok(())
+}
+
+pub async fn cmd_take_delete(
+    daw: &Daw,
+    track_arg: &str,
+    item_idx: u32,
+    take_idx: u32,
+) -> Result<()> {
+    let take = resolve_take(daw, track_arg, item_idx, take_idx).await?;
+    take.delete().await?;
+    println!("Deleted take #{} on item #{}", take_idx, item_idx);
+    Ok(())
+}
+
+pub async fn cmd_take_preserve_pitch(
+    daw: &Daw,
+    track_arg: &str,
+    item_idx: u32,
+    take_idx: u32,
+    preserve: bool,
+) -> Result<()> {
+    let take = resolve_take(daw, track_arg, item_idx, take_idx).await?;
+    take.set_preserve_pitch(preserve).await?;
+    println!(
+        "Take #{}: preserve_pitch = {}",
+        take_idx,
+        if preserve { "on" } else { "off" }
+    );
+    Ok(())
+}
+
+pub async fn cmd_take_set_source(
+    daw: &Daw,
+    track_arg: &str,
+    item_idx: u32,
+    take_idx: u32,
+    path: &str,
+) -> Result<()> {
+    let take = resolve_take(daw, track_arg, item_idx, take_idx).await?;
+    take.set_source_file(path).await?;
+    println!("Take #{}: source set to {}", take_idx, path);
+    Ok(())
+}
+
+async fn resolve_take(
+    daw: &Daw,
+    track_arg: &str,
+    item_idx: u32,
+    take_idx: u32,
+) -> Result<daw::TakeHandle> {
+    let track = resolve_track_handle(daw, track_arg).await?;
+    let item = track
+        .items()
+        .by_index(item_idx)
+        .await?
+        .ok_or_else(|| eyre::eyre!("item #{} not found on track", item_idx))?;
+    item.takes()
+        .by_index(take_idx)
+        .await?
+        .ok_or_else(|| eyre::eyre!("take #{} not found on item #{}", take_idx, item_idx))
+}
+
 // ── File Operations ──────────────────────────────────────────────────────────
 
 // r[impl cli.combine]

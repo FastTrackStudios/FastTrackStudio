@@ -837,6 +837,43 @@ impl TakeHandle {
         Ok(())
     }
 
+    /// Set the take's custom color. Pass `None` to clear it.
+    pub async fn set_color(&self, color: Option<u32>) -> Result<()> {
+        self.clients
+            .take
+            .set_color(
+                self.context(),
+                self.item_ref(),
+                self.take_ref.clone(),
+                color,
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// Toggle preserve-pitch-when-changing-rate (`B_PPITCH`).
+    pub async fn set_preserve_pitch(&self, preserve: bool) -> Result<()> {
+        self.clients
+            .take
+            .set_preserve_pitch(
+                self.context(),
+                self.item_ref(),
+                self.take_ref.clone(),
+                preserve,
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// Detect the take's source type (`Audio`, `Midi`, `Video`, `Empty`).
+    pub async fn source_type(&self) -> Result<daw_proto::SourceType> {
+        Ok(self
+            .clients
+            .take
+            .get_source_type(self.context(), self.item_ref(), self.take_ref.clone())
+            .await?)
+    }
+
     // =========================================================================
     // MIDI Editing
     // =========================================================================

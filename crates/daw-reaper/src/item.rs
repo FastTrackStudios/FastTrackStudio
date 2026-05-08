@@ -1152,15 +1152,6 @@ impl ReaperTake {
         Self
     }
 
-    /// Stub for getting take GUID (take chunks not supported yet).
-    fn _get_take_state_chunk(
-        _take: MediaItemTake,
-        _buffer_size: u32,
-    ) -> Result<String, &'static str> {
-        // TODO: REAPER doesn't have GetSetItemState2 for takes
-        Err("take chunk reading not implemented yet")
-    }
-
     /// Resolve a TakeRef within an item
     pub(crate) fn resolve_take(item: MediaItem, take_ref: &TakeRef) -> Option<MediaItemTake> {
         let reaper = Reaper::get();
@@ -1169,16 +1160,13 @@ impl ReaperTake {
 
         match take_ref {
             TakeRef::Guid(guid) => {
-                // Search takes by GUID using low-level API
                 let count = item_sw::count_takes(low, item);
-
                 for i in 0..count {
-                    if let Some(take) = item_sw::get_take(low, item, i)
-                        && let Ok(chunk) = Self::_get_take_state_chunk(take, 1024)
-                        && let Some(take_guid) = extract_guid_from_chunk(&chunk)
-                        && &take_guid == guid
-                    {
-                        return Some(take);
+                    if let Some(take) = item_sw::get_take(low, item, i) {
+                        let take_guid = item_sw::get_take_guid_string(low, take);
+                        if &take_guid == guid {
+                            return Some(take);
+                        }
                     }
                 }
                 None
@@ -1198,10 +1186,7 @@ impl ReaperTake {
         let medium = reaper.medium_reaper();
         let low = medium.low();
 
-        let guid = Self::_get_take_state_chunk(take, 1024)
-            .ok()
-            .and_then(|chunk| extract_guid_from_chunk(&chunk))
-            .unwrap_or_default();
+        let guid = item_sw::get_take_guid_string(low, take);
 
         let item_guid = item_sw::get_item_state_chunk(low, item, 1024)
             .and_then(|chunk| extract_guid_from_chunk(&chunk))
@@ -1219,7 +1204,7 @@ impl ReaperTake {
         let pitch = item_sw::get_take_pitch(medium, take);
 
         let preserve_pitch_raw =
-            item_sw::get_take_info_value(medium, take, TakeAttributeKey::PitchMode);
+            item_sw::get_take_info_value(medium, take, TakeAttributeKey::PPitch);
         let preserve_pitch = preserve_pitch_raw != 0.0;
 
         let start_offset = item_sw::get_take_info_value(medium, take, TakeAttributeKey::StartOffs);
@@ -1404,8 +1389,8 @@ impl TakeService for ReaperTake {
             let medium = Reaper::get().medium_reaper();
 
             let take = item_sw::add_take_to_media_item(medium, item_ptr)?;
-            let chunk = Self::_get_take_state_chunk(take, 1024).ok()?;
-            extract_guid_from_chunk(&chunk)
+            let low = medium.low();
+            Some(item_sw::get_take_guid_string(low, take))
         })
         .await
         .unwrap_or(None)
@@ -1419,11 +1404,48 @@ impl TakeService for ReaperTake {
             else {
                 return;
             };
-            let Some(_take_ptr) = Self::resolve_take(item_ptr, &take) else {
+            let Some(take_ptr) = Self::resolve_take(item_ptr, &take) else {
                 return;
             };
-            // TODO: Implement take deletion
-            // REAPER doesn't have DeleteTakeFromMediaItem in the API
+
+            // REAPER's API has no DeleteTakeFromMediaItem; the cleanest
+            // built-in path is action 40129 ("Item: Delete active take
+            // from items"), which acts on the current item selection +
+            // each item's active take. We therefore:
+            //   1. snapshot current selection,
+            //   2. select only this item, set the target take active,
+            //   3. fire 40129,
+            //   4. restore selection.
+            let medium = Reaper::get().medium_reaper();
+            let low = medium.low();
+            let proj_ctx = ReaperProjectContext::CurrentProject;
+
+            // Snapshot existing selected items.
+            let total = medium.count_media_items(proj_ctx);
+            let mut prior_selection: Vec<MediaItem> = Vec::with_capacity(total as usize);
+            for i in 0..total {
+                if let Some(it) = medium.get_media_item(proj_ctx, i)
+                    && item_sw::is_item_selected(low, it)
+                {
+                    prior_selection.push(it);
+                }
+            }
+
+            // Select only the target item, mark target take active.
+            for it in &prior_selection {
+                item_sw::set_media_item_selected(medium, *it, false);
+            }
+            item_sw::set_media_item_selected(medium, item_ptr, true);
+            item_sw::set_active_take(low, take_ptr);
+
+            // Fire the action.
+            item_sw::main_on_command_ex(medium, reaper_medium::CommandId::new(40129), 0, proj_ctx);
+
+            // Restore prior selection.
+            item_sw::set_media_item_selected(medium, item_ptr, false);
+            for it in prior_selection {
+                item_sw::set_media_item_selected(medium, it, true);
+            }
         });
     }
 
@@ -1468,12 +1490,23 @@ impl TakeService for ReaperTake {
     async fn set_color(
         &self,
         _project: ProjectContext,
-        _item: ItemRef,
-        _take: TakeRef,
+        item: ItemRef,
+        take: TakeRef,
         color: Option<u32>,
     ) {
         debug!("ReaperTake: set_color to {:?}", color);
-        // TODO: Implement using chunk manipulation or low-level API
+        main_thread::run(move || {
+            let Some(item_ptr) =
+                ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)
+            else {
+                return;
+            };
+            let Some(take_ptr) = Self::resolve_take(item_ptr, &take) else {
+                return;
+            };
+            let medium = Reaper::get().medium_reaper();
+            item_sw::set_take_color(medium, take_ptr, color);
+        });
     }
 
     // =========================================================================
@@ -1557,16 +1590,16 @@ impl TakeService for ReaperTake {
     ) {
         debug!("ReaperTake: set_preserve_pitch to {}", preserve);
         main_thread::run(move || {
-            let Some(_item_ptr) =
+            let Some(item_ptr) =
                 ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)
             else {
                 return;
             };
-            let Some(_take_ptr) = Self::resolve_take(_item_ptr, &take) else {
+            let Some(take_ptr) = Self::resolve_take(item_ptr, &take) else {
                 return;
             };
-            // TODO: Implement proper pitch mode setting
-            let _preserve = preserve;
+            let medium = Reaper::get().medium_reaper();
+            item_sw::set_take_preserve_pitch(medium, take_ptr, preserve);
         });
     }
 
@@ -1615,11 +1648,15 @@ impl TakeService for ReaperTake {
             else {
                 return;
             };
-            let Some(_take_ptr) = Self::resolve_take(item_ptr, &take) else {
+            let Some(take_ptr) = Self::resolve_take(item_ptr, &take) else {
                 return;
             };
-            // TODO: Create a new PCM source from file
-            let _path = path;
+            let low = Reaper::get().medium_reaper().low();
+            let Some(new_source) = item_sw::pcm_source_create_from_file(low, &path) else {
+                tracing::warn!(path = %path, "PCM_Source_CreateFromFile returned null");
+                return;
+            };
+            item_sw::set_take_source(low, take_ptr, new_source);
         });
     }
 
@@ -1633,11 +1670,15 @@ impl TakeService for ReaperTake {
             let item_ptr = ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)?;
             let take_ptr = Self::resolve_take(item_ptr, &take)?;
             let medium = Reaper::get().medium_reaper();
-
-            // TODO: Implement source type detection using low-level API
-            let _source = item_sw::get_take_source(medium, take_ptr)?;
-            // For now, return Audio as default
-            Some(SourceType::Audio)
+            let low = medium.low();
+            let source = item_sw::get_take_source(medium, take_ptr)?;
+            let tag = item_sw::get_pcm_source_type(low, source).unwrap_or_default();
+            Some(match tag.as_str() {
+                "midi" | "midipool" => SourceType::Midi,
+                "video" => SourceType::Video,
+                "" | "empty" => SourceType::Empty,
+                _ => SourceType::Audio,
+            })
         })
         .await
         .unwrap_or(None)

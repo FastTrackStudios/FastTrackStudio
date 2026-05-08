@@ -677,6 +677,49 @@ enum Command {
         /// Path to .RPP project file
         path: String,
     },
+    /// List items on a track
+    Items {
+        /// Track name or index
+        track: String,
+    },
+    /// Show takes on a specific item
+    Takes {
+        /// Track name or index
+        track: String,
+        /// Item zero-based index on the track
+        item: u32,
+    },
+    /// Delete a take from an item by index
+    TakeDelete {
+        /// Track name or index
+        track: String,
+        /// Item zero-based index on the track
+        item: u32,
+        /// Take zero-based index on the item
+        take: u32,
+    },
+    /// Toggle preserve-pitch (B_PPITCH) on a take
+    TakePreservePitch {
+        /// Track name or index
+        track: String,
+        /// Item zero-based index on the track
+        item: u32,
+        /// Take zero-based index on the item
+        take: u32,
+        /// Preserve pitch when changing rate
+        preserve: OnOff,
+    },
+    /// Replace a take's source media file
+    TakeSetSource {
+        /// Track name or index
+        track: String,
+        /// Item zero-based index on the track
+        item: u32,
+        /// Take zero-based index on the item
+        take: u32,
+        /// Path to the new source file
+        path: String,
+    },
     /// Combine multiple RPP files into a single project
     Combine {
         /// Path to .RPL file or list of .RPP files
@@ -1492,6 +1535,27 @@ async fn main() -> Result<()> {
         Command::RppSummary { ref path } => {
             print_value(daw_cli::ops::rpp_summary(&daw, path).await?, cli.json)?
         }
+        Command::Items { ref track } => daw_cli::cmd_items(&daw, track, cli.json).await?,
+        Command::Takes { ref track, item } => {
+            daw_cli::cmd_takes(&daw, track, item, cli.json).await?
+        }
+        Command::TakeDelete {
+            ref track,
+            item,
+            take,
+        } => daw_cli::cmd_take_delete(&daw, track, item, take).await?,
+        Command::TakePreservePitch {
+            ref track,
+            item,
+            take,
+            preserve,
+        } => daw_cli::cmd_take_preserve_pitch(&daw, track, item, take, preserve.0).await?,
+        Command::TakeSetSource {
+            ref track,
+            item,
+            take,
+            ref path,
+        } => daw_cli::cmd_take_set_source(&daw, track, item, take, path).await?,
         // Already handled above
         Command::Launch { .. }
         | Command::Profiles
