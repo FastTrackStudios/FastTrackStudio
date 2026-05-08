@@ -851,6 +851,12 @@ impl ServerContext {
         })
     }
 
+    fn template_service(&self) -> task_core::TemplateServiceImpl {
+        task_core::TemplateServiceImpl::new(task_core::service_impl::TemplateServiceDeps {
+            db: self.db.clone(),
+        })
+    }
+
     fn conversation_service(&self) -> task_core::ConversationServiceImpl {
         task_core::ConversationServiceImpl::new(task_core::service_impl::ConversationServiceDeps {
             provider: self.talk.clone(),
@@ -1127,6 +1133,12 @@ async fn handle_vox_connection(socket: WebSocket, state: AppState, auth: VoxAuth
                 "ProjectTypeService" => {
                     connection.handle_with(task_core::ProjectTypeServiceDispatcher::new(
                         ctx.project_type_service(),
+                    ));
+                    Ok(())
+                }
+                "TemplateService" => {
+                    connection.handle_with(task_core::TemplateServiceDispatcher::new(
+                        ctx.template_service(),
                     ));
                     Ok(())
                 }

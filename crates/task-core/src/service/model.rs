@@ -621,6 +621,72 @@ pub struct ProjectTypeView {
     pub context_conventions: Vec<String>,
 }
 
+/// Materializable project templates — the runtime API on top of
+/// `ProjectTemplate` entries declared inside `Integration` rows.
+///
+/// One template plus a target project name produces a fresh project and
+/// its scaffolded tasks. Re-running with the same project name is
+/// idempotent (deterministic ids derived from
+/// `(integration_name, template_name, project_name)`).
+#[vox::service]
+pub trait TemplateService {
+    /// Every project template registered across all integrations.
+    async fn list_templates(&self) -> Result<Vec<TemplateView>, VaultError>;
+
+    /// Look up a single template by the integration that owns it and the
+    /// template's name.
+    async fn get_template(
+        &self,
+        integration_name: String,
+        template_name: String,
+    ) -> Result<Option<TemplateView>, VaultError>;
+
+    /// Materialize a project + scaffolded tasks from a template.
+    /// `project_type` defaults to the integration's name.
+    async fn materialize(
+        &self,
+        request: MaterializeRequest,
+    ) -> Result<MaterializeResult, VaultError>;
+}
+
+/// Wire-friendly snapshot of a `ProjectTemplate` from an integration.
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct TemplateView {
+    pub integration_name: String,
+    pub name: String,
+    pub description: Option<String>,
+    /// JSON-encoded `Vec<TaskTemplate>` — what tasks materialize creates.
+    pub task_templates_json: String,
+}
+
+/// Argument bundle for [`TemplateService::materialize`].
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct MaterializeRequest {
+    pub integration_name: String,
+    pub template_name: String,
+    /// Title of the project to create. Reused as the deterministic-id
+    /// salt so re-running the same call is idempotent.
+    pub project_name: String,
+    /// Override `Project::area` if set; otherwise inherit from the
+    /// integration's `area_conventions[0]`.
+    pub area: Option<String>,
+    /// Override `Project::organization` if set.
+    pub organization: Option<String>,
+    /// Override `Project::lead` if set.
+    pub lead: Option<String>,
+}
+
+/// Result of materializing a project + its tasks.
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct MaterializeResult {
+    pub project_id: Uuid,
+    pub project_title: String,
+    pub task_ids: Vec<Uuid>,
+    pub created_project: bool,
+    pub created_task_count: u32,
+    pub unchanged_task_count: u32,
+}
+
 #[vox::service]
 pub trait SystemService {
     /// Fast live capability snapshot for this task-server instance.

@@ -10,6 +10,7 @@ pub mod operating;
 pub mod people;
 pub mod project_type;
 pub mod property;
+pub mod template;
 pub mod time;
 
 pub use activity::{ActivityServiceDeps, ActivityServiceImpl};
@@ -23,4 +24,5 @@ pub use operating::{OperatingServiceDeps, OperatingServiceImpl};
 pub use people::{PeopleServiceDeps, PeopleServiceImpl};
 pub use project_type::{ProjectTypeServiceDeps, ProjectTypeServiceImpl};
 pub use property::{PropertyServiceDeps, PropertyServiceImpl};
+pub use template::{TemplateServiceDeps, TemplateServiceImpl};
 pub use time::{TimeServiceDeps, TimeServiceImpl};

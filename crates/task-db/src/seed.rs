@@ -24,8 +24,8 @@ use task_core::email;
 use task_core::email::EmailStringList;
 use task_core::expense::{self, ExpenseStatus};
 use task_core::integration::{
-    self, IntegrationStringList, ProjectTemplateList, StatusDef, StatusDefList, TaskTemplate,
-    TaskTemplateList,
+    self, IntegrationStringList, ProjectTemplate, ProjectTemplateList, StatusDef, StatusDefList,
+    TaskTemplate, TaskTemplateList,
 };
 use task_core::invoice::{self, InvoiceLine, InvoiceLineList, InvoiceStatus, Payment, PaymentList};
 use task_core::notification;
@@ -2299,7 +2299,7 @@ async fn seed_integrations(
     summary: &mut DemoSeedSummary,
 ) -> Result<(), DbErr> {
     let integrations = [
-        integration_active(
+        integration_active_full(
             "integration:audio-production",
             "audio-production",
             &[
@@ -2323,6 +2323,68 @@ async fn seed_integrations(
                     "approved",
                     "normal",
                     "audio,client",
+                ),
+            ],
+            &[
+                (
+                    "Album Production",
+                    Some("Full album: pre-pro → tracking → mix → master → approval"),
+                    &[
+                        (
+                            "Pre-production: scope + reference",
+                            "tracking",
+                            "high",
+                            "audio,planning",
+                        ),
+                        (
+                            "Tracking: drums & bass",
+                            "tracking",
+                            "high",
+                            "audio,tracking",
+                        ),
+                        (
+                            "Tracking: guitars & keys",
+                            "tracking",
+                            "normal",
+                            "audio,tracking",
+                        ),
+                        (
+                            "Tracking: vocals",
+                            "tracking",
+                            "high",
+                            "audio,tracking,vocals",
+                        ),
+                        ("Mixing: rough mixes", "mixing", "high", "audio,mix"),
+                        (
+                            "Mixing: client revisions",
+                            "mixing",
+                            "normal",
+                            "audio,mix,client",
+                        ),
+                        ("Mastering pass", "mastering", "high", "audio,master"),
+                        (
+                            "Client approval + delivery",
+                            "approved",
+                            "high",
+                            "audio,client,delivery",
+                        ),
+                    ],
+                ),
+                (
+                    "Live Show Prep",
+                    Some("Live performance: input list, stage plot, runners, day-of"),
+                    &[
+                        (
+                            "Confirm venue + stage size",
+                            "tracking",
+                            "high",
+                            "live,venue",
+                        ),
+                        ("Build input list", "tracking", "high", "live,audio"),
+                        ("Draft stage plot", "mixing", "normal", "live,plot"),
+                        ("Soundcheck + line check", "mastering", "high", "live,audio"),
+                        ("Show", "approved", "high", "live,show"),
+                    ],
                 ),
             ],
             &["Music"],
@@ -2430,6 +2492,27 @@ fn integration_active(
     area_conventions: &[&str],
     context_conventions: &[&str],
 ) -> integration::ActiveModel {
+    integration_active_full(
+        key,
+        name,
+        statuses,
+        task_templates,
+        &[],
+        area_conventions,
+        context_conventions,
+    )
+}
+
+#[allow(clippy::type_complexity)]
+fn integration_active_full(
+    key: &str,
+    name: &str,
+    statuses: &[(&str, bool, Option<&str>)],
+    task_templates: &[(&str, &str, &str, &str)],
+    project_templates: &[(&str, Option<&str>, &[(&str, &str, &str, &str)])],
+    area_conventions: &[&str],
+    context_conventions: &[&str],
+) -> integration::ActiveModel {
     let status_list = StatusDefList(
         statuses
             .iter()
@@ -2459,11 +2542,38 @@ fn integration_active(
             .collect(),
     );
 
+    let project_template_list = ProjectTemplateList(
+        project_templates
+            .iter()
+            .map(|(tname, desc, tasks)| ProjectTemplate {
+                name: (*tname).to_string(),
+                description: desc.map(str::to_string),
+                tasks: TaskTemplateList(
+                    tasks
+                        .iter()
+                        .map(|(title, status, priority, tags)| TaskTemplate {
+                            title: (*title).to_string(),
+                            status: Some((*status).to_string()),
+                            priority: Some((*priority).to_string()),
+                            contexts: IntegrationStringList::default(),
+                            tags: IntegrationStringList(
+                                tags.split(',').map(|t| t.trim().to_string()).collect(),
+                            ),
+                            recurrence: None,
+                            time_estimate_minutes: None,
+                            body: None,
+                        })
+                        .collect(),
+                ),
+            })
+            .collect(),
+    );
+
     integration::ActiveModel {
         id: Set(demo_id(key)),
         name: Set(name.to_string()),
         statuses: Set(status_list),
-        project_templates: Set(ProjectTemplateList::default()),
+        project_templates: Set(project_template_list),
         task_templates: Set(task_template_list),
         area_conventions: Set(IntegrationStringList(
             area_conventions.iter().map(|s| s.to_string()).collect(),

@@ -116,14 +116,15 @@ pub use service::{
     InvoiceCreateRequest, InvoicePaymentRequest, InvoiceService, InvoiceServiceDispatcher,
     MailCreateMailboxRequest, MailCreateTagRequest, MailDeleteTagRequest, MailListMessagesRequest,
     MailMessageTagRequest, MailMoveMessageRequest, MailService, MailServiceDispatcher,
-    NextcloudCapability, OperatingAreaStatus, OperatingGoal, OperatingModelReport,
-    OperatingRoutine, OperatingService, OperatingServiceDispatcher, PeopleService,
-    PeopleServiceDispatcher, ProjectFileSummary, ProjectKnowledgeContext, ProjectPatch,
-    ProjectService, ProjectServiceDispatcher, ProjectTypeService, ProjectTypeServiceDispatcher,
-    ProjectTypeSpec, ProjectTypeView, PropertyDefinitionView, PropertyService,
-    PropertyServiceDispatcher, ProviderSyncState, RemoteDeckBoard, RemoteDeckStack, ReviewReport,
-    SyncPlan, SyncPlanItem, SyncStats, SystemCapabilities, SystemHealth, SystemService,
-    SystemServiceDispatcher, TaskService, TaskServiceDispatcher, TimeEntryContext, TimeEntryFilter,
+    MaterializeRequest, MaterializeResult, NextcloudCapability, OperatingAreaStatus, OperatingGoal,
+    OperatingModelReport, OperatingRoutine, OperatingService, OperatingServiceDispatcher,
+    PeopleService, PeopleServiceDispatcher, ProjectFileSummary, ProjectKnowledgeContext,
+    ProjectPatch, ProjectService, ProjectServiceDispatcher, ProjectTypeService,
+    ProjectTypeServiceDispatcher, ProjectTypeSpec, ProjectTypeView, PropertyDefinitionView,
+    PropertyService, PropertyServiceDispatcher, ProviderSyncState, RemoteDeckBoard,
+    RemoteDeckStack, ReviewReport, SyncPlan, SyncPlanItem, SyncStats, SystemCapabilities,
+    SystemHealth, SystemService, SystemServiceDispatcher, TaskService, TaskServiceDispatcher,
+    TemplateService, TemplateServiceDispatcher, TemplateView, TimeEntryContext, TimeEntryFilter,
     TimeEntryPatch, TimeLogRequest, TimeService, TimeServiceDispatcher, TimeStartRequest,
     TimedTaskEntry, VaultCapability, VaultError, activity_service_service_descriptor,
     attachment_service_service_descriptor, calendar_service_service_descriptor,
@@ -133,14 +134,14 @@ pub use service::{
     people_service_service_descriptor, project_service_service_descriptor,
     project_type_service_service_descriptor, property_service_service_descriptor,
     system_service_service_descriptor, task_service_service_descriptor,
-    time_service_service_descriptor,
+    template_service_service_descriptor, time_service_service_descriptor,
 };
 #[cfg(feature = "server")]
 pub use service_impl::{
     ActivityServiceImpl, AttachmentServiceImpl, CalendarServiceImpl, ConversationServiceImpl,
     ExpenseServiceImpl, InboxServiceImpl, InvoiceServiceImpl, MailServiceImpl,
     OperatingServiceImpl, PeopleServiceImpl, ProjectServiceImpl, ProjectTypeServiceImpl,
-    PropertyServiceImpl, TaskServiceImpl, TimeServiceImpl,
+    PropertyServiceImpl, TaskServiceImpl, TemplateServiceImpl, TimeServiceImpl,
 };
 
 #[cfg(feature = "caldav")]
