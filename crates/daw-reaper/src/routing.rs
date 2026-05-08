@@ -8,6 +8,7 @@ use crate::project_context::{
     MAX_PROJECT_TABS, find_project_by_guid, project_guid as project_guid_from,
 };
 use crate::safe_wrappers::routing as routing_sw;
+use daw_control::lock::LockExt;
 use daw_proto::{
     AutomationMode, ChannelMapping, MidiChannelMapping, MidiDestinationChannel, MidiSourceChannel,
     ProjectContext, RouteLocation, RouteRef, RouteType, RoutingEvent, RoutingService, SendMode,
@@ -93,7 +94,7 @@ pub fn poll_and_broadcast_routing() {
     let Some(cache) = ROUTING_CACHE.get() else {
         return;
     };
-    let mut cache_guard = cache.lock().unwrap();
+    let mut cache_guard = cache.lock_recoverable("routing");
 
     let reaper = Reaper::get();
     let medium = reaper.medium_reaper();

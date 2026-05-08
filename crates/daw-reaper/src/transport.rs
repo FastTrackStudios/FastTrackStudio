@@ -51,6 +51,7 @@ use tracing::{debug, info};
 use vox::Tx;
 
 use crate::main_thread;
+use daw_control::lock::LockExt;
 
 /// Per-project transport update - includes project GUID so subscribers know which project changed
 #[derive(Clone, Debug)]
@@ -154,7 +155,7 @@ pub fn poll_and_broadcast() {
     let Some(cache) = PROJECT_TRANSPORT_CACHE.get() else {
         return;
     };
-    let mut cache_guard = cache.lock().unwrap();
+    let mut cache_guard = cache.lock_recoverable("transport");
 
     // Track which projects we've seen this poll (for cleanup of closed projects)
     let mut seen_guids = Vec::new();

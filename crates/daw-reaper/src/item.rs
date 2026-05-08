@@ -9,6 +9,7 @@ use crate::project_context::{
 };
 use crate::safe_wrappers::item as item_sw;
 use crate::track::{resolve_project, resolve_track};
+use daw_control::lock::LockExt;
 use daw_proto::{
     BeatAttachMode, Duration, FadeShape, Item, ItemEvent, ItemRef, ItemService, PositionInSeconds,
     ProjectContext, SourceType, Take, TakeEvent, TakeRef, TakeService, TrackRef,
@@ -128,7 +129,7 @@ pub fn poll_and_broadcast_items() {
     let Some(cache) = ITEM_CACHE.get() else {
         return;
     };
-    let mut cache_guard = cache.lock().unwrap();
+    let mut cache_guard = cache.lock_recoverable("item");
 
     let reaper = Reaper::get();
     let medium = reaper.medium_reaper();

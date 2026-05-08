@@ -149,6 +149,8 @@ pub use vox::Caller;
 pub mod error;
 pub use error::{Error, Result};
 
+pub mod lock;
+
 mod action_registry;
 mod audio_engine;
 mod automation;

@@ -8,6 +8,7 @@
 //! before being sent to extensions.
 
 use crate::main_thread;
+use daw_control::lock::RwLockExt;
 use daw_proto::{
     InputContext, InputEvent, InputService, KeyCode, KeyEvent, KeyFilter, KeyModifiers, KeyMsgKind,
 };
@@ -100,7 +101,7 @@ impl TranslateAccel for InputAccelHandler {
 
         // Evaluate filter synchronously
         let should_eat = {
-            let filter = self.state.filter.read().unwrap();
+            let filter = self.state.filter.read_recoverable("input");
             match &*filter {
                 KeyFilter::PassAll => false,
                 KeyFilter::EatAll => true,
@@ -332,12 +333,12 @@ impl InputService for ReaperInput {
                 format!("EatMatching({} patterns)", patterns.len())
             }
         };
-        *self.state.filter.write().unwrap() = filter;
+        *self.state.filter.write_recoverable("input") = filter;
         info!("Key filter updated: {label}");
     }
 
     async fn get_key_filter(&self) -> KeyFilter {
-        self.state.filter.read().unwrap().clone()
+        self.state.filter.read_recoverable("input").clone()
     }
 
     async fn set_enabled(&self, enabled: bool) {

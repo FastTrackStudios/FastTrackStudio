@@ -35,6 +35,7 @@ use vox::Tx;
 use crate::main_thread;
 use crate::project_context::{find_project_by_guid, project_guid};
 use crate::safe_wrappers::fx as fx_sw;
+use daw_control::lock::LockExt;
 
 // =============================================================================
 // FX Event Broadcasting Infrastructure
@@ -125,7 +126,7 @@ fn fx_event_receiver() -> Option<broadcast::Receiver<FxEvent>> {
 /// Register an FX chain for monitoring.
 fn register_monitored_chain(project: ProjectContext, context: FxChainContext) {
     if let Some(chains) = FX_MONITORED_CHAINS.get() {
-        let mut chains = chains.lock().unwrap();
+        let mut chains = chains.lock_recoverable("fx");
         let already = chains.iter().any(|(p, c)| p == &project && c == &context);
         if !already {
             chains.push((project, context));
@@ -164,7 +165,7 @@ pub fn poll_and_broadcast_fx() {
     };
 
     let chains: Vec<(ProjectContext, FxChainContext)> = {
-        let guard = monitored.lock().unwrap();
+        let guard = monitored.lock_recoverable("fx");
         guard.clone()
     };
 
@@ -172,7 +173,7 @@ pub fn poll_and_broadcast_fx() {
         return;
     }
 
-    let mut cache_guard = cache.lock().unwrap();
+    let mut cache_guard = cache.lock_recoverable("fx");
 
     for (project_ctx, chain_ctx) in &chains {
         let Some(project) = resolve_project(project_ctx) else {

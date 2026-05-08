@@ -18,6 +18,7 @@ use crate::safe_wrappers::audio_accessor as aa_sw;
 use crate::track::resolve_track_pub;
 
 use aa_sw::SendableAccessorPtr;
+use daw_control::lock::LockExt;
 
 /// REAPER audio accessor service implementation.
 ///
@@ -40,7 +41,7 @@ impl ReaperAudioAccessor {
 
     /// Generate a unique accessor ID.
     fn next_id(&self) -> String {
-        let mut counter = self.next_id.lock().unwrap();
+        let mut counter = self.next_id.lock_recoverable("audio_accessor");
         let id = *counter;
         *counter += 1;
         format!("aa-{}", id)
@@ -52,18 +53,23 @@ impl ReaperAudioAccessor {
             return None;
         }
         let id = self.next_id();
-        self.accessors.lock().unwrap().insert(id.clone(), ptr);
+        self.accessors
+            .lock_recoverable("audio_accessor")
+            .insert(id.clone(), ptr);
         Some(id)
     }
 
     /// Look up a pointer by ID.
     pub(crate) fn get_ptr(&self, id: &str) -> Option<SendableAccessorPtr> {
-        self.accessors.lock().unwrap().get(id).copied()
+        self.accessors
+            .lock_recoverable("audio_accessor")
+            .get(id)
+            .copied()
     }
 
     /// Remove and return a pointer by ID.
     pub(crate) fn remove_ptr(&self, id: &str) -> Option<SendableAccessorPtr> {
-        self.accessors.lock().unwrap().remove(id)
+        self.accessors.lock_recoverable("audio_accessor").remove(id)
     }
 }
 

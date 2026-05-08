@@ -12,4 +12,7 @@ futures = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 facet-json = { workspace = true }
+# Used by the lock-poisoning recovery helpers in `lock.rs` so callers
+# get a structured warning when a Mutex/RwLock is recovered.
+tracing = { workspace = true }
 # Note: No tokio - this crate is WASM-compatible for use in web apps

@@ -14,6 +14,7 @@ use crate::fx::{
 use crate::project::project_to_info;
 use crate::safe_wrappers::fx as fx_sw;
 use crate::track::{assign_parent_guids, build_track_info, resolve_project, resolve_track};
+use daw_control::lock::LockExt;
 use daw_proto::batch::*;
 use daw_proto::*;
 use reaper_high::{GroupingBehavior, PlayRate, Reaper, Tempo as ReaperTempo};
@@ -1572,7 +1573,8 @@ fn dispatch_action_registry_sync(op: &ActionRegistryOp) -> Result<StepOutput, St
             Err("ExecuteAction requires async dispatch (action metadata lookup)".to_string())
         }
         ActionRegistryOp::SetToggleState(name, v) => {
-            let mut states = crate::action_registry::toggle_states().lock().unwrap();
+            let mut states =
+                crate::action_registry::toggle_states().lock_recoverable("dispatch_sync");
             if states.contains_key(name) {
                 states.insert(name.clone(), *v);
             }

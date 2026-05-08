@@ -23,6 +23,7 @@ use crate::main_thread;
 use crate::project_context::{MAX_PROJECT_TABS, project_guid as project_guid_from};
 use crate::safe_wrappers::tempo as sw;
 use crate::safe_wrappers::time_map as tw;
+use daw_control::lock::LockExt;
 use daw_proto::{
     Position, ProjectContext, TempoMapEvent, TempoMapService, TempoPoint, TimePosition,
     TimeSignature,
@@ -154,7 +155,7 @@ pub fn poll_and_broadcast_tempo_map() {
     let medium = reaper.medium_reaper();
     let low = medium.low();
 
-    let mut cache_guard = cache.lock().unwrap();
+    let mut cache_guard = cache.lock_recoverable("tempo_map");
     let mut seen_guids = Vec::new();
 
     // Iterate through all open projects

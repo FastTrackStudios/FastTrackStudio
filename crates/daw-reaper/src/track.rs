@@ -18,6 +18,7 @@ use vox::Tx;
 use crate::main_thread;
 use crate::project_context::{MAX_PROJECT_TABS, find_project_by_guid, project_guid};
 use crate::safe_wrappers::routing as routing_sw;
+use daw_control::lock::LockExt;
 
 // =============================================================================
 // Track Change Detection (Broadcaster + Cache + Poll)
@@ -157,7 +158,7 @@ pub fn poll_and_broadcast_tracks() {
     let Some(cache) = TRACK_CACHE.get() else {
         return;
     };
-    let mut cache_guard = cache.lock().unwrap();
+    let mut cache_guard = cache.lock_recoverable("track");
 
     let reaper = Reaper::get();
     let medium = reaper.medium_reaper();

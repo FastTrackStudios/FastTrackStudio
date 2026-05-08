@@ -12,6 +12,7 @@
 //! command name prefix (e.g., `FTS_SESSION_*` → Session submenu).
 
 use crate::main_thread;
+use daw_control::lock::LockExt;
 use daw_proto::{
     ActionEvent, ActionExecutionResult, ActionInfo, ActionListFilter, ActionListRequest,
     ActionListResponse, ActionOrigin, ActionRegistryService, ActionSection,
@@ -217,7 +218,7 @@ fn notify_action_triggered(command_name: String) {
 }
 
 fn flip_toggle_state(command_name: &str) -> bool {
-    let mut states = toggle_states().lock().unwrap();
+    let mut states = toggle_states().lock_recoverable("action_registry");
     let state = states.entry(command_name.to_string()).or_insert(false);
     *state = !*state;
     *state
@@ -493,8 +494,10 @@ fn action_matches_query(info: &ActionInfo, query: Option<&str>) -> bool {
 fn find_action_info(command_id: CommandId, section: ActionSection) -> Option<ActionInfo> {
     let reaper = Reaper::get();
     let medium = reaper.medium_reaper();
-    let registered = registered_actions().lock().unwrap().clone();
-    let toggles = toggle_states().lock().unwrap().clone();
+    let registered = registered_actions()
+        .lock_recoverable("action_registry")
+        .clone();
+    let toggles = toggle_states().lock_recoverable("action_registry").clone();
     let (section_id, section_name) = action_section_label(section);
     let section = reaper.section_by_id(SectionId::new(section_id));
 
@@ -593,7 +596,7 @@ impl HookCustomMenu for FtsMenuHook {
 
 /// Build the Extensions > FastTrackStudio menu from registered actions.
 fn build_extension_menu(hmenu: Hmenu) {
-    let actions = menu_actions().lock().unwrap().clone();
+    let actions = menu_actions().lock_recoverable("action_registry").clone();
     if actions.is_empty() {
         return;
     }
@@ -726,7 +729,7 @@ impl ActionRegistryService for ReaperActionRegistry {
     ) -> u32 {
         // Check if already registered by us
         {
-            let map = registered_actions().lock().unwrap();
+            let map = registered_actions().lock_recoverable("action_registry");
             if let Some(&cmd_id) = map.get(&command_name) {
                 debug!(
                     "Action '{}' already registered (cmd_id={})",
@@ -843,7 +846,7 @@ impl ActionRegistryService for ReaperActionRegistry {
 
             // Park the RegisteredAction + (optional) gaccel handle in
             // OWNED_ACTIONS keyed by command_name so unregister can drop them.
-            owned_actions().lock().unwrap().insert(
+            owned_actions().lock_recoverable("action_registry").insert(
                 name_for_query.clone(),
                 OwnedAction {
                     action,
@@ -865,11 +868,13 @@ impl ActionRegistryService for ReaperActionRegistry {
                 // Store menu metadata if this action should appear in the menu
                 if show_in_menu {
                     let group = derive_menu_group(&command_name);
-                    menu_actions().lock().unwrap().push(MenuActionDef {
-                        command_name: command_name.clone(),
-                        display_name: description.clone(),
-                        group,
-                    });
+                    menu_actions()
+                        .lock_recoverable("action_registry")
+                        .push(MenuActionDef {
+                            command_name: command_name.clone(),
+                            display_name: description.clone(),
+                            group,
+                        });
                 }
 
                 debug!("Action '{}' registered: cmd_id={}", command_name, cmd_id);
@@ -896,7 +901,9 @@ impl ActionRegistryService for ReaperActionRegistry {
             // NamedCommandLookup table).
             let name_for_query = command_name.clone();
             let _ = main_thread::query(move || {
-                let owned = owned_actions().lock().unwrap().remove(&name_for_query);
+                let owned = owned_actions()
+                    .lock_recoverable("action_registry")
+                    .remove(&name_for_query);
                 if let Some(owned) = owned {
                     let reaper = Reaper::get();
                     if let Some(handle) = owned.gaccel_handle {
@@ -917,7 +924,9 @@ impl ActionRegistryService for ReaperActionRegistry {
                     // when the name is already known).
                     owned.action.unregister();
                 }
-                toggle_states().lock().unwrap().remove(&name_for_query);
+                toggle_states()
+                    .lock_recoverable("action_registry")
+                    .remove(&name_for_query);
                 delete_shared_toggle_state(&name_for_query);
             })
             .await;
@@ -930,7 +939,9 @@ impl ActionRegistryService for ReaperActionRegistry {
 
             // Clear any toggle state recorded for this action so a later
             // re-register starts fresh (no stale on/off carrying over).
-            toggle_states().lock().unwrap().remove(&command_name);
+            toggle_states()
+                .lock_recoverable("action_registry")
+                .remove(&command_name);
 
             info!("Unregistered action '{}' (full teardown)", command_name);
         } else {
@@ -986,8 +997,10 @@ impl ActionRegistryService for ReaperActionRegistry {
         main_thread::query(move || {
             let reaper = Reaper::get();
             let medium = reaper.medium_reaper();
-            let registered = registered_actions().lock().unwrap().clone();
-            let toggles = toggle_states().lock().unwrap().clone();
+            let registered = registered_actions()
+                .lock_recoverable("action_registry")
+                .clone();
+            let toggles = toggle_states().lock_recoverable("action_registry").clone();
             let query = request.query.as_ref().map(|q| q.to_ascii_lowercase());
             let limit = request.limit.unwrap_or(u32::MAX) as usize;
             let (section_id, section_name) = action_section_label(request.section);
@@ -1191,7 +1204,7 @@ impl ActionRegistryService for ReaperActionRegistry {
 
     async fn set_toggle_state(&self, command_name: String, is_on: bool) {
         let was_known = {
-            let mut states = toggle_states().lock().unwrap();
+            let mut states = toggle_states().lock_recoverable("action_registry");
             if states.contains_key(&command_name) {
                 states.insert(command_name.clone(), is_on);
                 debug!("Toggle state for '{}' set to {}", command_name, is_on);
@@ -1252,7 +1265,7 @@ impl ActionRegistryService for ReaperActionRegistry {
     async fn get_toggle_state(&self, command_name: String) -> Option<bool> {
         main_thread::query(move || {
             let normalized = normalize_command_name(&command_name);
-            let toggles = toggle_states().lock().unwrap();
+            let toggles = toggle_states().lock_recoverable("action_registry");
             if let Some(state) = toggles.get(normalized).copied() {
                 return Some(state);
             }
