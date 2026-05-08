@@ -12,6 +12,7 @@ pub mod mail;
 #[cfg(feature = "server")]
 pub mod mail_watch;
 pub mod nextcloud_sync;
+pub mod openfoodfacts;
 pub mod talk;
 
 pub use channel::{
@@ -28,6 +29,9 @@ pub use mail::{
 #[cfg(feature = "server")]
 pub use mail_watch::{ImapWatchConfig, WatchEvent, watch_idle};
 pub use nextcloud_sync::NextcloudSync;
+pub use openfoodfacts::{
+    OpenFoodFactsClient, OpenFoodFactsConfig, OpenFoodFactsError, OpenFoodFactsProduct,
+};
 pub use talk::{Message as TalkMessage, Room as TalkRoom, TalkClient, TalkConfig};
 
 #[cfg(test)]
