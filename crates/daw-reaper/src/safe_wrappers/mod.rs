@@ -14,6 +14,7 @@ pub mod audio;
 pub mod audio_accessor;
 pub mod buffer;
 pub mod cstring;
+pub mod envelope;
 pub mod ext_state;
 pub mod fx;
 pub mod item;

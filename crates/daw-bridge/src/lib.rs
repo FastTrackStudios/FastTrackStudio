@@ -180,6 +180,7 @@ async fn register_daw_dispatcher() {
     let dawfile_ops = daw::reaper::DawFileOps::new();
     let window_geometry = daw::reaper::ReaperWindowGeometry::new();
     let plugin_loader = daw::reaper::ReaperPluginLoader::new();
+    let automation = daw::reaper::ReaperAutomation::new();
     let batch = daw::reaper::batch::BatchExecutor::new();
     let dock_host = daw_reaper_dioxus::ReaperDockHost::new();
 
@@ -292,6 +293,10 @@ async fn register_daw_dispatcher() {
         .with(
             plugin_loader_service_service_descriptor(),
             PluginLoaderServiceDispatcher::new(plugin_loader),
+        )
+        .with(
+            daw::service::automation::automation_service_service_descriptor(),
+            daw::service::automation::AutomationServiceDispatcher::new(automation),
         )
         .with(
             batch_service_service_descriptor(),

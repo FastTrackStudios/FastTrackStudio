@@ -3,6 +3,7 @@
 //! Creates a `RoutedHandler` with all REAPER service implementations.
 //! Used by `PluginHost` to create a local `Daw` instance without SHM.
 
+use daw_proto::automation::{AutomationServiceDispatcher, automation_service_service_descriptor};
 use daw_proto::{
     ActionRegistryServiceDispatcher, AudioEngineServiceDispatcher, DawFileServiceDispatcher,
     ExtStateServiceDispatcher, FxServiceDispatcher, HealthServiceDispatcher,
@@ -72,6 +73,7 @@ pub fn create_daw_handler() -> RoutedHandler {
     let dawfile_ops = crate::DawFileOps::new();
     let window_geometry = crate::ReaperWindowGeometry::new();
     let plugin_loader = crate::ReaperPluginLoader::new();
+    let automation = crate::ReaperAutomation::new();
     let batch = crate::batch::BatchExecutor::new();
 
     RoutedHandler::new()
@@ -166,6 +168,10 @@ pub fn create_daw_handler() -> RoutedHandler {
         .with(
             plugin_loader_service_service_descriptor(),
             PluginLoaderServiceDispatcher::new(plugin_loader),
+        )
+        .with(
+            automation_service_service_descriptor(),
+            AutomationServiceDispatcher::new(automation),
         )
         .with(
             batch_service_service_descriptor(),
