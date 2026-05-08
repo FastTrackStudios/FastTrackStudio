@@ -32,6 +32,7 @@ use task_core::expense::{self, ExpenseStatus};
 use task_core::food::{self, FoodAliasList};
 use task_core::food_log;
 use task_core::food_product;
+use task_core::glossary::{self, GlossaryAliasList, GlossaryRelatedList};
 use task_core::integration::{
     self, IntegrationStringList, ProjectTemplate, ProjectTemplateList, StatusDef, StatusDefList,
     TaskTemplate, TaskTemplateList,
@@ -130,6 +131,8 @@ pub struct DemoSeedSummary {
     pub food_logs_unchanged: usize,
     pub cooking_sessions_created: usize,
     pub cooking_sessions_unchanged: usize,
+    pub glossary_terms_created: usize,
+    pub glossary_terms_unchanged: usize,
 }
 
 impl DemoSeedSummary {
@@ -161,6 +164,7 @@ impl DemoSeedSummary {
             + self.pantry_items_created
             + self.food_logs_created
             + self.cooking_sessions_created
+            + self.glossary_terms_created
     }
 
     pub fn total_unchanged(&self) -> usize {
@@ -191,6 +195,7 @@ impl DemoSeedSummary {
             + self.pantry_items_unchanged
             + self.food_logs_unchanged
             + self.cooking_sessions_unchanged
+            + self.glossary_terms_unchanged
     }
 }
 
@@ -220,6 +225,9 @@ pub async fn seed_demo_data(db: &DatabaseConnection) -> Result<DemoSeedSummary, 
     // Foods must seed before recipes so RecipeIngredient.food_id
     // auto-link finds the catalog row on insert.
     seed_foods(db, &mut summary).await?;
+    // Glossary terms before recipes so any wikilinks in seeded
+    // step text resolve cleanly when rendered.
+    seed_glossary(db, &mut summary).await?;
     seed_cooking(db, &mut summary).await?;
     seed_food_products(db, &mut summary).await?;
     seed_locations(db, &mut summary).await?;
@@ -492,6 +500,17 @@ pub async fn reset_demo_data(db: &DatabaseConnection) -> Result<DemoSeedSummary,
         let id = demo_id(key);
         if food::Entity::delete_by_id(id).exec(db).await?.rows_affected > 0 {
             summary.foods_created += 1;
+        }
+    }
+    for key in GLOSSARY_KEYS {
+        let id = demo_id(key);
+        if glossary::GlossaryEntity::delete_by_id(id)
+            .exec(db)
+            .await?
+            .rows_affected
+            > 0
+        {
+            summary.glossary_terms_created += 1;
         }
     }
     for key in RECIPE_KEYS {
@@ -825,6 +844,28 @@ const FOOD_PRODUCT_KEYS: &[&str] = &[
     "food_product:generic-chickpeas-15oz",
     "food_product:bertolli-evoo-500ml",
     "food_product:demo-dozen-eggs",
+];
+
+/// Cross-cutting glossary catalog. Cooking concepts plus a sprinkle
+/// of audio-production terms so the workflow-agnostic design has
+/// proof of life. Slugs are derived deterministically from the key
+/// suffix; `category` keeps the resolver scoped per-domain.
+const GLOSSARY_KEYS: &[&str] = &[
+    // Cooking
+    "glossary:simmer",
+    "glossary:saute",
+    "glossary:deglaze",
+    "glossary:mise-en-place",
+    "glossary:julienne",
+    "glossary:brunoise",
+    "glossary:fold",
+    "glossary:temper",
+    "glossary:reduce",
+    "glossary:sear",
+    // Audio production
+    "glossary:mastering",
+    "glossary:gain-staging",
+    "glossary:comping",
 ];
 
 // ── Project fixtures ────────────────────────────────────────────────────────
@@ -4150,6 +4191,185 @@ async fn seed_foods(db: &DatabaseConnection, summary: &mut DemoSeedSummary) -> R
         };
         food::Entity::insert(active).exec(db).await?;
         summary.foods_created += 1;
+    }
+    Ok(())
+}
+
+/// Demo fixture for a [`task_core::glossary::GlossaryTerm`].
+struct GlossaryFixture {
+    key: &'static str,
+    name: &'static str,
+    slug: &'static str,
+    body: &'static str,
+    aliases: &'static [&'static str],
+    category: &'static str,
+    related_keys: &'static [&'static str],
+}
+
+const GLOSSARY_FIXTURES: &[GlossaryFixture] = &[
+    GlossaryFixture {
+        key: "glossary:simmer",
+        name: "Simmer",
+        slug: "simmer",
+        body: "Cook gently just below a boil. Bubbles rise slowly, water moves but doesn't roll. About 180–205°F (82–96°C).",
+        aliases: &["simmering"],
+        category: "cooking",
+        related_keys: &["glossary:reduce"],
+    },
+    GlossaryFixture {
+        key: "glossary:saute",
+        name: "Sauté",
+        slug: "saute",
+        body: "High-heat pan cooking with a small amount of fat. Constant motion to prevent sticking.",
+        aliases: &["saute", "sauteing", "sautéing"],
+        category: "cooking",
+        related_keys: &[],
+    },
+    GlossaryFixture {
+        key: "glossary:deglaze",
+        name: "Deglaze",
+        slug: "deglaze",
+        body: "Add liquid (wine, stock, water) to a hot pan to dissolve the browned residue (fond) stuck to the bottom. The dissolved fond becomes the base of a pan sauce.",
+        aliases: &["deglazing"],
+        category: "cooking",
+        related_keys: &[],
+    },
+    GlossaryFixture {
+        key: "glossary:mise-en-place",
+        name: "Mise en Place",
+        slug: "mise-en-place",
+        body: "Everything in its place. Prep + measure + arrange every ingredient before you start cooking.",
+        aliases: &["mise"],
+        category: "cooking",
+        related_keys: &[],
+    },
+    GlossaryFixture {
+        key: "glossary:julienne",
+        name: "Julienne",
+        slug: "julienne",
+        body: "Long thin matchsticks, typically 1/8 inch × 1/8 inch × 2–3 inches.",
+        aliases: &["julienning"],
+        category: "cooking",
+        related_keys: &["glossary:brunoise"],
+    },
+    GlossaryFixture {
+        key: "glossary:brunoise",
+        name: "Brunoise",
+        slug: "brunoise",
+        body: "Tiny dice, 1/8 inch cubes. Often produced by julienning first then cross-cutting.",
+        aliases: &[],
+        category: "cooking",
+        related_keys: &[],
+    },
+    GlossaryFixture {
+        key: "glossary:fold",
+        name: "Fold",
+        slug: "fold",
+        body: "Gentle combining technique using a spatula in a J-motion. Used to incorporate light/aerated ingredients (whipped cream, beaten egg whites) without deflating them.",
+        aliases: &["folding"],
+        category: "cooking",
+        related_keys: &[],
+    },
+    GlossaryFixture {
+        key: "glossary:temper",
+        name: "Temper",
+        slug: "temper",
+        body: "Gradually raise the temperature of a delicate ingredient (egg yolks, chocolate) by whisking in a small amount of hot liquid before combining fully — prevents scrambling/breaking.",
+        aliases: &["tempering"],
+        category: "cooking",
+        related_keys: &[],
+    },
+    GlossaryFixture {
+        key: "glossary:reduce",
+        name: "Reduce",
+        slug: "reduce",
+        body: "Boil or simmer a liquid uncovered to drive off water and concentrate flavor + thicken.",
+        aliases: &["reducing", "reduction"],
+        category: "cooking",
+        related_keys: &[],
+    },
+    GlossaryFixture {
+        key: "glossary:sear",
+        name: "Sear",
+        slug: "sear",
+        body: "High-heat browning of meat surfaces to develop crust + Maillard flavor. The interior cooks afterward.",
+        aliases: &["searing"],
+        category: "cooking",
+        related_keys: &[],
+    },
+    // Audio production
+    GlossaryFixture {
+        key: "glossary:mastering",
+        name: "Mastering",
+        slug: "mastering",
+        body: "Final post-production step that prepares mixed audio for distribution: loudness, EQ, dynamic range.",
+        aliases: &["master"],
+        category: "audio-production",
+        related_keys: &[],
+    },
+    GlossaryFixture {
+        key: "glossary:gain-staging",
+        name: "Gain Staging",
+        slug: "gain-staging",
+        body: "Setting input/output levels at every stage so each plugin/processor receives a healthy signal — neither too quiet nor clipping.",
+        aliases: &["gain-staging"],
+        category: "audio-production",
+        related_keys: &[],
+    },
+    GlossaryFixture {
+        key: "glossary:comping",
+        name: "Comping",
+        slug: "comping",
+        body: "Compositing the best parts of multiple takes into one final performance track.",
+        aliases: &["comp", "comp track"],
+        category: "audio-production",
+        related_keys: &[],
+    },
+];
+
+async fn seed_glossary(
+    db: &DatabaseConnection,
+    summary: &mut DemoSeedSummary,
+) -> Result<(), DbErr> {
+    let now = Utc::now();
+    for fix in GLOSSARY_FIXTURES {
+        let id = demo_id(fix.key);
+        if glossary::GlossaryEntity::find_by_id(id)
+            .one(db)
+            .await?
+            .is_some()
+        {
+            summary.glossary_terms_unchanged += 1;
+            continue;
+        }
+        let aliases = GlossaryAliasList::from(
+            fix.aliases
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect::<Vec<_>>(),
+        );
+        let related = GlossaryRelatedList::from(
+            fix.related_keys
+                .iter()
+                .map(|k| demo_id(k))
+                .collect::<Vec<_>>(),
+        );
+        let active = glossary::GlossaryActiveModel {
+            id: Set(id),
+            name: Set(fix.name.to_string()),
+            slug: Set(fix.slug.to_string()),
+            body_markdown: Set(fix.body.to_string()),
+            aliases: Set(aliases),
+            category: Set(fix.category.to_string()),
+            related_term_ids: Set(related),
+            organization: Set(None), // global
+            created_by: Set(Some("cody".to_string())),
+            properties: Set(JsonObject::default()),
+            created_at: Set(now),
+            updated_at: Set(now),
+        };
+        glossary::GlossaryEntity::insert(active).exec(db).await?;
+        summary.glossary_terms_created += 1;
     }
     Ok(())
 }

@@ -2293,6 +2293,111 @@ pub struct FoodProductPatch {
     pub image_url: Option<String>,
 }
 
+// ── Glossary ────────────────────────────────────────────────────────
+
+/// Workflow-agnostic catalog of terms (cooking concepts, audio terms,
+/// fitness terms, ...) plus an Obsidian-style `[[wikilink]]` resolver
+/// for markdown bodies. The cooking workflow uses this first for
+/// recipe-step references like `[[simmer]]`/`[[deglaze|deglazing]]`,
+/// but other workflows tag their terms with their own `category`
+/// ("audio-production", "fitness", ...) and the resolver can be
+/// scoped per-call.
+#[vox::service]
+pub trait GlossaryService {
+    async fn list_terms(
+        &self,
+        organization: Option<String>,
+        category: Option<String>,
+    ) -> Result<Vec<crate::glossary::GlossaryTermApi>, VaultError>;
+
+    async fn get_term(
+        &self,
+        id: Uuid,
+    ) -> Result<Option<crate::glossary::GlossaryTermApi>, VaultError>;
+
+    /// Look up by slug, name, or any alias (case-insensitive). When
+    /// `category` is `Some`, restrict to that category only.
+    async fn find_term_by_slug_or_alias(
+        &self,
+        organization: Option<String>,
+        category: Option<String>,
+        slug_or_alias: String,
+    ) -> Result<Option<crate::glossary::GlossaryTermApi>, VaultError>;
+
+    async fn create_term(
+        &self,
+        request: CreateGlossaryTermRequest,
+    ) -> Result<crate::glossary::GlossaryTermApi, VaultError>;
+
+    async fn update_term(
+        &self,
+        id: Uuid,
+        patch: GlossaryTermPatch,
+    ) -> Result<crate::glossary::GlossaryTermApi, VaultError>;
+
+    async fn delete_term(&self, id: Uuid) -> Result<(), VaultError>;
+
+    /// Add an alias to an existing term. Idempotent — duplicates
+    /// (case-insensitive) are silently dropped.
+    async fn add_alias(
+        &self,
+        id: Uuid,
+        alias: String,
+    ) -> Result<crate::glossary::GlossaryTermApi, VaultError>;
+
+    /// Resolve a markdown body to a list of wikilink spans + their
+    /// resolved term ids. Caller can use this to build a richer
+    /// rendering surface (terminal coloring, iPad tap-to-expand, ...).
+    /// Spans are returned JSON-encoded for Vox transport.
+    async fn resolve_in_text(
+        &self,
+        request: ResolveInTextRequest,
+    ) -> Result<ResolveInTextView, VaultError>;
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct CreateGlossaryTermRequest {
+    pub name: String,
+    /// Auto-derived from `name` when None.
+    pub slug: Option<String>,
+    pub body_markdown: String,
+    pub aliases: Vec<String>,
+    pub category: String,
+    pub related_term_ids: Vec<Uuid>,
+    pub organization: Option<String>,
+    pub created_by: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct GlossaryTermPatch {
+    pub name: Option<String>,
+    pub slug: Option<String>,
+    pub body_markdown: Option<String>,
+    pub aliases: Option<Vec<String>>,
+    pub category: Option<String>,
+    pub related_term_ids: Option<Vec<Uuid>>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct ResolveInTextRequest {
+    pub text: String,
+    pub organization: Option<String>,
+    /// When set, restrict resolution to terms with this category.
+    /// `None` means "any category". Recommended for recipe steps:
+    /// pass `"cooking"` so `[[mastering]]` doesn't resolve to the
+    /// audio-production term.
+    pub category: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct ResolveInTextView {
+    /// JSON-encoded
+    /// `Vec<{span: WikilinkSpan, target_id: Option<Uuid>, term_summary: Option<{name, slug, category}>}>`.
+    pub spans_json: String,
+    /// Distinct term ids found, in order of first appearance.
+    pub resolved_term_ids: Vec<Uuid>,
+}
+
 // ── Pantry ──────────────────────────────────────────────────────────
 
 /// Pantry stock management — branded products, generic foods, and the

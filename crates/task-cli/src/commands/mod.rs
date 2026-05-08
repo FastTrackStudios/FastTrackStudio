@@ -11,6 +11,7 @@ pub(crate) mod demo;
 pub(crate) mod email;
 pub(crate) mod expense;
 pub(crate) mod github;
+pub(crate) mod glossary;
 pub(crate) mod inbox;
 pub(crate) mod invoice;
 pub(crate) mod operating;

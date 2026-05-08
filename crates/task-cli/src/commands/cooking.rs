@@ -707,7 +707,7 @@ pub(crate) async fn run_remote_cook_command(
         CookCommands::Nutrition { command } => run_nutrition(remote, command).await,
         CookCommands::Session { command } => {
             let client = remote.cooking().await?;
-            run_session(&client, command).await
+            run_session(&client, remote, command).await
         }
     }
 }
@@ -1260,7 +1260,7 @@ async fn run_recipe(
                 .await
                 .map_err(|e| eyre::eyre!("get_recipe: {e}"))?
                 .ok_or_else(|| eyre::eyre!("recipe not found: {recipe}"))?;
-            print_recipe_detail(&detail, json)?;
+            print_recipe_detail_with_glossary(&detail, json, Some(remote)).await?;
         }
         RecipeCommands::Create(args) => {
             let ingredients: Vec<RecipeIngredientSpec> = args
@@ -1460,7 +1460,11 @@ async fn run_recipe(
 
 // ── Session handlers ────────────────────────────────────────────────
 
-async fn run_session(client: &CookingServiceClient, command: SessionCommands) -> eyre::Result<()> {
+async fn run_session(
+    client: &CookingServiceClient,
+    remote: &RemoteVoxConfig,
+    command: SessionCommands,
+) -> eyre::Result<()> {
     match command {
         SessionCommands::Start {
             recipe,
@@ -1488,7 +1492,7 @@ async fn run_session(client: &CookingServiceClient, command: SessionCommands) ->
                 .await
                 .map_err(|e| eyre::eyre!("get_cooking_session: {e}"))?
                 .ok_or_else(|| eyre::eyre!("cooking session not found: {session}"))?;
-            print_session(&view, json)?;
+            print_session_with_glossary(&view, json, Some(remote)).await?;
         }
         SessionCommands::ListActive { organization, json } => {
             let rows = client
@@ -2455,4 +2459,269 @@ fn print_pantry_row(r: &task_core::pantry::PantryItemApi) {
         "{}  {} {}  exp={}  {}  ({})",
         r.id, r.quantity, r.unit, exp, min, r.id
     );
+}
+
+// ── Glossary integration ────────────────────────────────────────────
+//
+// `task cook recipe show` and `task cook session show` resolve
+// `[[wikilink]]` references in step text against the cross-cutting
+// `Glossary` catalog (scoped to `category = "cooking"` so audio terms
+// don't bleed into recipe rendering). The wikilink resolution is a
+// presentation concern only — when --json is set we leave the
+// underlying step text as plain markdown but include a side-band
+// `wikilinks` payload so consumers can render their own UIs.
+
+const COOKING_GLOSSARY_CATEGORY: &str = "cooking";
+
+/// Resolve `[[wikilink]]`s in the supplied step texts against the
+/// glossary service. Returns one parsed JSON spans-payload + the
+/// per-text rendered output. Any service error is logged as a warning
+/// and the rendering falls back to the original text (rendering is
+/// not load-bearing).
+async fn resolve_step_wikilinks(
+    remote: &RemoteVoxConfig,
+    texts: &[String],
+) -> Vec<(String, Vec<(String, String, String)>)> {
+    let client = match remote.glossary().await {
+        Ok(c) => c,
+        Err(_) => return texts.iter().map(|t| (t.clone(), Vec::new())).collect(),
+    };
+    let mut out = Vec::with_capacity(texts.len());
+    for text in texts {
+        let view = match client
+            .resolve_in_text(task_core::service::ResolveInTextRequest {
+                text: text.clone(),
+                organization: None,
+                category: Some(COOKING_GLOSSARY_CATEGORY.to_string()),
+            })
+            .await
+        {
+            Ok(v) => v,
+            Err(_) => {
+                out.push((text.clone(), Vec::new()));
+                continue;
+            }
+        };
+        let parsed: serde_json::Value =
+            serde_json::from_str(&view.spans_json).unwrap_or(serde_json::Value::Null);
+        let mut concepts: Vec<(String, String, String)> = Vec::new();
+        let mut spans: Vec<task_core::ResolvedWikilink> = Vec::new();
+        if let Some(arr) = parsed.as_array() {
+            for entry in arr {
+                let span_obj = match entry.get("span") {
+                    Some(s) => s,
+                    None => continue,
+                };
+                let start = span_obj
+                    .get("start")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(0) as usize;
+                let end = span_obj
+                    .get("end")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(0) as usize;
+                let raw = span_obj
+                    .get("raw")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
+                let slug = span_obj
+                    .get("slug")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
+                let display = span_obj
+                    .get("display")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string);
+                let target_id = entry
+                    .get("target_id")
+                    .and_then(serde_json::Value::as_str)
+                    .and_then(|s| uuid::Uuid::parse_str(s).ok());
+                if let Some(summary) = entry.get("term_summary") {
+                    if let (Some(name), Some(slug_s)) = (
+                        summary.get("name").and_then(serde_json::Value::as_str),
+                        summary.get("slug").and_then(serde_json::Value::as_str),
+                    ) {
+                        let body = summary
+                            .get("body_excerpt")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("")
+                            .to_string();
+                        if !concepts.iter().any(|(_, s, _)| s == slug_s) {
+                            concepts.push((name.to_string(), slug_s.to_string(), body));
+                        }
+                    }
+                }
+                spans.push(task_core::ResolvedWikilink {
+                    span: task_core::WikilinkSpan {
+                        start,
+                        end,
+                        raw,
+                        slug,
+                        display,
+                    },
+                    target_id,
+                });
+            }
+        }
+        let (rendered, _) = task_core::render_wikilinks_for_terminal(text, &spans);
+        out.push((rendered, concepts));
+    }
+    out
+}
+
+async fn print_recipe_detail_with_glossary(
+    detail: &RecipeWithDetails,
+    json: bool,
+    remote: Option<&RemoteVoxConfig>,
+) -> eyre::Result<()> {
+    if json {
+        // JSON path is unchanged for backward compat.
+        return print_recipe_detail(detail, json);
+    }
+    let r = &detail.recipe;
+    println!("Recipe {}", r.id);
+    println!("  name:    {}", r.name);
+    println!("  slug:    {}", r.slug);
+    if let Some(d) = &r.description {
+        println!("  desc:    {d}");
+    }
+    if let Some(p) = r.prep_time_minutes {
+        println!("  prep:    {p} min");
+    }
+    if let Some(c) = r.cook_time_minutes {
+        println!("  cook:    {c} min");
+    }
+    if let Some(s) = r.servings {
+        println!("  serves:  {s}");
+    }
+    if let Some(rt) = r.rating {
+        println!("  rating:  {rt:.1}");
+    }
+    let ingredients: Vec<serde_json::Value> =
+        serde_json::from_str(&detail.ingredients_json).unwrap_or_default();
+    println!("  ingredients:");
+    for ing in ingredients {
+        let qty = ing
+            .get("quantity")
+            .and_then(|v| v.as_f64())
+            .map(|n| format!("{n} "))
+            .unwrap_or_default();
+        let unit = ing
+            .get("unit")
+            .and_then(|v| v.as_str())
+            .map(|s| format!("{s} "))
+            .unwrap_or_default();
+        let food = ing.get("food").and_then(|v| v.as_str()).unwrap_or("");
+        println!("    - {qty}{unit}{food}");
+    }
+    let steps: Vec<serde_json::Value> =
+        serde_json::from_str(&detail.steps_json).unwrap_or_default();
+    let texts: Vec<String> = steps
+        .iter()
+        .map(|s| {
+            s.get("text")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string()
+        })
+        .collect();
+    let resolved = match remote {
+        Some(r) => resolve_step_wikilinks(r, &texts).await,
+        None => texts.iter().map(|t| (t.clone(), Vec::new())).collect(),
+    };
+    println!("  steps:");
+    let mut all_concepts: Vec<(String, String, String)> = Vec::new();
+    for (i, (rendered, concepts)) in resolved.iter().enumerate() {
+        println!("    {}. {}", i + 1, rendered);
+        for c in concepts {
+            if !all_concepts.iter().any(|(_, s, _)| s == &c.1) {
+                all_concepts.push(c.clone());
+            }
+        }
+    }
+    if !all_concepts.is_empty() {
+        println!("\n  Concepts referenced:");
+        for (name, _slug, body) in &all_concepts {
+            let one_line = body.split(['.', '\n']).next().unwrap_or("").trim();
+            if one_line.is_empty() {
+                println!("    - {name}");
+            } else {
+                println!("    - {name}: {one_line}.");
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn print_session_with_glossary(
+    view: &CookingSessionView,
+    json: bool,
+    remote: Option<&RemoteVoxConfig>,
+) -> eyre::Result<()> {
+    if json {
+        return print_session(view, json);
+    }
+    let s = &view.session;
+    println!(
+        "Session {}  recipe: {}  status: {}",
+        s.id,
+        s.recipe_name_snapshot,
+        s.status.as_str()
+    );
+    if let Some(srv) = s.scaled_servings {
+        println!("  servings: {srv}");
+    }
+    let total_ings = view.mise_en_place_json.matches("true").count()
+        + view.mise_en_place_json.matches("false").count();
+    let gathered = total_ings - view.ungathered_count as usize;
+    println!("  mise en place: {} of {} gathered", gathered, total_ings);
+    let steps: serde_json::Value =
+        serde_json::from_str(&view.steps_json).unwrap_or(serde_json::Value::Array(vec![]));
+    let total_steps = steps.as_array().map(|a| a.len()).unwrap_or(0);
+    if s.current_step_index < 0 {
+        println!("  Phase: mise en place (before step 1 of {total_steps})");
+        return Ok(());
+    }
+    let idx = s.current_step_index as usize;
+    let step_text = steps
+        .get(idx)
+        .and_then(|s| s.get("text"))
+        .and_then(|t| t.as_str())
+        .unwrap_or("")
+        .to_string();
+    let duration = steps
+        .get(idx)
+        .and_then(|s| s.get("duration_minutes"))
+        .and_then(|d| d.as_u64());
+    let resolved = match remote {
+        Some(r) => resolve_step_wikilinks(r, std::slice::from_ref(&step_text)).await,
+        None => vec![(step_text.clone(), Vec::new())],
+    };
+    let (rendered, concepts) = resolved
+        .into_iter()
+        .next()
+        .unwrap_or((step_text.clone(), Vec::new()));
+    println!(
+        "  Step {} of {}: {}{}",
+        idx + 1,
+        total_steps,
+        rendered,
+        duration
+            .map(|d| format!(" ({d} min timer)"))
+            .unwrap_or_default()
+    );
+    if !concepts.is_empty() {
+        println!("\n  Concepts referenced:");
+        for (name, _slug, body) in &concepts {
+            let one_line = body.split(['.', '\n']).next().unwrap_or("").trim();
+            if one_line.is_empty() {
+                println!("    - {name}");
+            } else {
+                println!("    - {name}: {one_line}.");
+            }
+        }
+    }
+    Ok(())
 }
