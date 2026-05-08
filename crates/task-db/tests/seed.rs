@@ -152,8 +152,8 @@ async fn seed_demo_data_covers_every_entity_flavor() {
         s.foods_created
     );
     assert!(
-        s.food_products_created >= 3,
-        "want >= 3 food products, got {}",
+        s.food_products_created >= 5,
+        "want >= 5 food products, got {}",
         s.food_products_created
     );
 

@@ -703,6 +703,8 @@ const FOOD_PRODUCT_KEYS: &[&str] = &[
     "food_product:tj-evoo-500ml",
     "food_product:vital-farms-eggs-dozen",
     "food_product:generic-chickpeas-15oz",
+    "food_product:bertolli-evoo-500ml",
+    "food_product:demo-dozen-eggs",
 ];
 
 // ── Project fixtures ────────────────────────────────────────────────────────
@@ -4036,37 +4038,88 @@ async fn seed_food_products(
     summary: &mut DemoSeedSummary,
 ) -> Result<(), DbErr> {
     let now = Utc::now();
+    /// Demo product fixture. Two of these (`bertolli-evoo-500ml` and
+    /// the existing manual rows) are barcode-less for the pantry bead;
+    /// the others ship realistic Open Food Facts barcodes so the
+    /// barcode-lookup CLI surface has something to exercise.
+    struct ProductFixture {
+        key: &'static str,
+        food_key: &'static str,
+        barcode: Option<&'static str>,
+        brand: Option<&'static str>,
+        name: &'static str,
+        size_g: Option<f64>,
+        size_label: Option<&'static str>,
+        source: &'static str,
+        /// Pre-populated NutritionFacts in JSON form. Empty string =
+        /// no nutrition data on this row (matches the existing manual
+        /// fixtures' behavior).
+        nutrition_json: &'static str,
+    }
     let products = [
-        (
-            "food_product:tj-evoo-500ml",
-            "food:olive-oil",
-            None::<&str>,
-            Some("Trader Joe's"),
-            "Trader Joe's Extra Virgin Olive Oil 500ml",
-            Some(500.0),
-            Some("500ml"),
-        ),
-        (
-            "food_product:vital-farms-eggs-dozen",
-            "food:eggs",
-            None,
-            Some("Vital Farms"),
-            "Vital Farms Pasture-Raised Eggs Dozen",
-            None,
-            Some("dozen"),
-        ),
-        (
-            "food_product:generic-chickpeas-15oz",
-            "food:chickpeas-canned",
-            None,
-            Some("Generic"),
-            "Generic Canned Chickpeas 15oz",
-            Some(425.0),
-            Some("15oz"),
-        ),
+        ProductFixture {
+            key: "food_product:tj-evoo-500ml",
+            food_key: "food:olive-oil",
+            barcode: None,
+            brand: Some("Trader Joe's"),
+            name: "Trader Joe's Extra Virgin Olive Oil 500ml",
+            size_g: Some(500.0),
+            size_label: Some("500ml"),
+            source: "manual",
+            nutrition_json: "",
+        },
+        ProductFixture {
+            key: "food_product:vital-farms-eggs-dozen",
+            food_key: "food:eggs",
+            barcode: None,
+            brand: Some("Vital Farms"),
+            name: "Vital Farms Pasture-Raised Eggs Dozen",
+            size_g: None,
+            size_label: Some("dozen"),
+            source: "manual",
+            nutrition_json: "",
+        },
+        ProductFixture {
+            key: "food_product:generic-chickpeas-15oz",
+            food_key: "food:chickpeas-canned",
+            barcode: None,
+            brand: Some("Generic"),
+            name: "Generic Canned Chickpeas 15oz",
+            size_g: Some(425.0),
+            size_label: Some("15oz"),
+            source: "manual",
+            nutrition_json: "",
+        },
+        // Real-world Open Food Facts hit; nutrition copied from a
+        // captured response so we don't need a network call at seed
+        // time.
+        ProductFixture {
+            key: "food_product:bertolli-evoo-500ml",
+            food_key: "food:olive-oil",
+            barcode: Some("0048500201497"),
+            brand: Some("Bertolli"),
+            name: "Bertolli Extra Virgin Olive Oil",
+            size_g: Some(500.0),
+            size_label: Some("500 ml"),
+            source: "openfoodfacts",
+            nutrition_json: r#"{"kcal_per_100g":884.0,"protein_g":0.0,"carbs_g":0.0,"sugars_g":0.0,"fiber_g":0.0,"fat_g":100.0,"saturated_fat_g":14.0,"sodium_mg":0.0,"source":"openfoodfacts","notes":null}"#,
+        },
+        // Useful pantry stock fixture; intentionally barcode-less so
+        // the pantry bead has a "loose item" to play with.
+        ProductFixture {
+            key: "food_product:demo-dozen-eggs",
+            food_key: "food:eggs",
+            barcode: None,
+            brand: None,
+            name: "Demo Dozen Eggs",
+            size_g: None,
+            size_label: Some("dozen"),
+            source: "manual",
+            nutrition_json: "",
+        },
     ];
-    for (key, food_key, barcode, brand, name, size_g, size_label) in products {
-        let id = demo_id(key);
+    for p in products {
+        let id = demo_id(p.key);
         if food_product::Entity::find_by_id(id)
             .one(db)
             .await?
@@ -4075,19 +4128,32 @@ async fn seed_food_products(
             summary.food_products_unchanged += 1;
             continue;
         }
+        let nutrition = if p.nutrition_json.trim().is_empty() {
+            JsonObject::default()
+        } else {
+            match serde_json::from_str::<serde_json::Value>(p.nutrition_json) {
+                Ok(v) => JsonObject::from_value(v),
+                Err(_) => JsonObject::default(),
+            }
+        };
+        let last_synced = if p.source == "openfoodfacts" {
+            Some(now)
+        } else {
+            None
+        };
         let active = food_product::ActiveModel {
             id: Set(id),
-            food_id: Set(demo_id(food_key)),
-            barcode: Set(barcode.map(|s| s.to_string())),
-            brand: Set(brand.map(|s| s.to_string())),
-            name: Set(name.to_string()),
-            package_size_g: Set(size_g),
-            package_size_label: Set(size_label.map(|s| s.to_string())),
-            source: Set("manual".to_string()),
-            external_id: Set(None),
-            nutrition_per_100g: Set(JsonObject::default()),
+            food_id: Set(demo_id(p.food_key)),
+            barcode: Set(p.barcode.map(|s| s.to_string())),
+            brand: Set(p.brand.map(|s| s.to_string())),
+            name: Set(p.name.to_string()),
+            package_size_g: Set(p.size_g),
+            package_size_label: Set(p.size_label.map(|s| s.to_string())),
+            source: Set(p.source.to_string()),
+            external_id: Set(p.barcode.map(|s| s.to_string())),
+            nutrition_per_100g: Set(nutrition),
             image_url: Set(None),
-            last_synced_at: Set(None),
+            last_synced_at: Set(last_synced),
             organization: Set(Some(ORG_PERSONAL.to_string())),
             properties: Set(JsonObject::default()),
             created_at: Set(now),

@@ -6356,6 +6356,7 @@ dependencies = [
  "facet 0.46.0",
  "hyper",
  "loro",
+ "reqwest",
  "sea-orm",
  "sea-orm-migration",
  "serde",

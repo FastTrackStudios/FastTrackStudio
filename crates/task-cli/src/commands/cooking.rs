@@ -10,10 +10,10 @@ use task_core::food::FoodApi;
 use task_core::food_product::FoodProductApi;
 use task_core::recipe::{RecipeApi, RecipeIngredientSpec, RecipeStepSpec};
 use task_core::service::{
-    AddShoppingItemRequest, CookbookWithRecipes, CookingServiceClient, CreateFoodProductRequest,
-    CreateFoodRequest, CreateRecipeRequest, FoodServiceClient, GenerateShoppingListRequest,
-    ImportRecipeRequest, MealPlanRangeRequest, RecipeWithDetails, SetMealPlanEntryRequest,
-    ShoppingListWithItems,
+    AddShoppingItemRequest, BarcodeLookupRequest, CookbookWithRecipes, CookingServiceClient,
+    CreateFoodProductRequest, CreateFoodRequest, CreateRecipeRequest, FoodServiceClient,
+    GenerateShoppingListRequest, ImportRecipeRequest, MealPlanRangeRequest, RecipeWithDetails,
+    SetMealPlanEntryRequest, ShoppingListWithItems,
 };
 use uuid::Uuid;
 
@@ -128,6 +128,20 @@ pub(crate) enum ProductCommands {
         source: String,
         #[arg(long)]
         organization: Option<String>,
+    },
+    /// Look up a product on Open Food Facts (cache-first). Default
+    /// cache TTL is 7 days; pass `--max-age-hours 0` to force a fresh
+    /// fetch.
+    Lookup {
+        barcode: String,
+        #[arg(long)]
+        organization: Option<String>,
+        #[arg(long = "max-age-hours", default_value = "168")]
+        max_age_hours: u32,
+        #[arg(long = "auto-create-food")]
+        auto_create_food: bool,
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -491,6 +505,81 @@ async fn run_product(client: &FoodServiceClient, command: ProductCommands) -> ey
                 }
                 println!("  food_id:  {}", item.food_id);
                 println!("  source:   {}", item.source);
+            }
+        }
+        ProductCommands::Lookup {
+            barcode,
+            organization,
+            max_age_hours,
+            auto_create_food,
+            json,
+        } => {
+            // Track whether the product was already cached so we can
+            // tell the user "freshly fetched" vs "served from cache".
+            let cached_before = client
+                .get_food_product_by_barcode(organization.clone(), barcode.clone())
+                .await
+                .map_err(|e| eyre::eyre!("get_food_product_by_barcode: {e}"))?;
+            let request = BarcodeLookupRequest {
+                barcode: barcode.clone(),
+                organization,
+                max_age_hours,
+                auto_create_food,
+                user_agent_override: None,
+            };
+            let outcome = client
+                .lookup_food_product_by_barcode(request)
+                .await
+                .map_err(|e| eyre::eyre!("lookup_food_product_by_barcode: {e}"))?;
+            match outcome {
+                None => {
+                    if json {
+                        println!("null");
+                    } else {
+                        println!("(no product found for barcode {barcode})");
+                    }
+                }
+                Some(product) => {
+                    let was_cached = match (cached_before.as_ref(), product.last_synced_at) {
+                        (Some(prev), Some(now_synced)) => prev
+                            .last_synced_at
+                            .map(|prev_synced| prev_synced == now_synced)
+                            .unwrap_or(false),
+                        _ => false,
+                    };
+                    if json {
+                        println!("{}", serde_json::to_string_pretty(&product)?);
+                    } else {
+                        println!(
+                            "{}  {}  ({})",
+                            if was_cached { "[cached]" } else { "[fresh] " },
+                            product.name,
+                            product.barcode.clone().unwrap_or_else(|| "-".to_string()),
+                        );
+                        if let Some(brand) = &product.brand {
+                            println!("  brand:        {brand}");
+                        }
+                        if let Some(label) = &product.package_size_label {
+                            println!("  package:      {label}");
+                        }
+                        if let Some(grams) = product.package_size_g {
+                            println!("  package (g):  {grams}");
+                        }
+                        if let Some(url) = &product.image_url {
+                            println!("  image:        {url}");
+                        }
+                        // Pull kcal from the JSON nutrition payload.
+                        let nutrition_value = serde_json::to_value(&product.nutrition_per_100g)
+                            .unwrap_or(serde_json::Value::Null);
+                        if let Some(kcal) = nutrition_value
+                            .get("kcal_per_100g")
+                            .and_then(|v| v.as_f64())
+                        {
+                            println!("  kcal/100g:    {kcal:.0}");
+                        }
+                        println!("  food_id:      {}", product.food_id);
+                    }
+                }
             }
         }
         ProductCommands::Create {
