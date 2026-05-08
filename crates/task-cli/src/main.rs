@@ -343,6 +343,11 @@ pub(crate) enum Commands {
         #[command(subcommand)]
         command: CookCommands,
     },
+    /// Cross-cutting glossary — term catalog + `[[wikilink]]` resolver
+    Glossary {
+        #[command(subcommand)]
+        command: commands::glossary::GlossaryCommands,
+    },
     /// Reusable venues, locations, spaces, and default files
     Location {
         #[command(subcommand)]
@@ -1259,6 +1264,9 @@ pub(crate) async fn run_remote_command(
         }
         Commands::Cook { command } => {
             commands::cooking::run_remote_cook_command(remote, actor, command).await?
+        }
+        Commands::Glossary { command } => {
+            commands::glossary::run_remote_glossary_command(remote, command).await?
         }
         Commands::Audio { command } => {
             commands::audio::run_remote_audio_command(remote, actor, command).await?

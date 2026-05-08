@@ -327,6 +327,10 @@ impl RemoteVoxConfig {
         self.connect().await
     }
 
+    pub(crate) async fn glossary(&self) -> eyre::Result<task_core::service::GlossaryServiceClient> {
+        self.connect().await
+    }
+
     pub(crate) async fn pantry(&self) -> eyre::Result<task_core::service::PantryServiceClient> {
         self.connect().await
     }

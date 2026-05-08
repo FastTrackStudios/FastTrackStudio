@@ -22,6 +22,7 @@ mod m20260507_000015_add_recipe_nutrition_summary;
 mod m20260507_000016_create_food_logs;
 mod m20260507_000017_create_cooking_sessions;
 mod m20260507_000018_create_substitutions;
+mod m20260507_000019_create_glossary_terms;
 
 pub struct Migrator;
 
@@ -51,6 +52,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260507_000016_create_food_logs::Migration),
             Box::new(m20260507_000017_create_cooking_sessions::Migration),
             Box::new(m20260507_000018_create_substitutions::Migration),
+            Box::new(m20260507_000019_create_glossary_terms::Migration),
         ]
     }
 }
