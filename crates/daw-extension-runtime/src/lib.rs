@@ -56,7 +56,7 @@ impl Global {
 /// Runtime state owned by one integrated REAPER extension.
 pub struct ExtensionRuntime {
     session: RefCell<ReaperSession>,
-    tokio_runtime: tokio::runtime::Runtime,
+    tokio_runtime: std::sync::Arc<tokio::runtime::Runtime>,
     task_middleware: RefCell<MainTaskMiddleware>,
 }
 
@@ -83,10 +83,12 @@ impl ExtensionRuntime {
         Global::init();
         daw_reaper::set_task_support(Global::task_support());
 
-        let tokio_runtime = tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(2)
-            .enable_all()
-            .build()?;
+        let tokio_runtime = std::sync::Arc::new(
+            tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(2)
+                .enable_all()
+                .build()?,
+        );
         let task_middleware = Global::get().create_task_middleware();
         let session = ReaperSession::load(context);
 
@@ -95,6 +97,12 @@ impl ExtensionRuntime {
             tokio_runtime,
             task_middleware: RefCell::new(task_middleware),
         })
+    }
+
+    /// Build a [`daw_module::ModuleContext`] backed by this runtime, for
+    /// hosting [`daw_module::DawModule`] implementations.
+    pub fn module_context(&self) -> daw_module::ModuleContext {
+        daw_module::ModuleContext::new(self.tokio_runtime.clone())
     }
 
     /// Build an async DAW handle backed by the in-process REAPER dispatcher.

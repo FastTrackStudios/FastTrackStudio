@@ -10,6 +10,7 @@ description = "Integrated REAPER extension runtime helpers"
 # Depend on internal crates directly so `daw` can re-export this crate
 # under `daw::extension_runtime` without a dependency cycle.
 daw-control = { path = "../daw-control" }
+daw-module = { path = "../daw-module" }
 daw-proto = { path = "../daw-proto" }
 daw-reaper = { path = "../daw-reaper" }
 vox.workspace = true
