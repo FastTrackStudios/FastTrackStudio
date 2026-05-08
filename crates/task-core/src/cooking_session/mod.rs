@@ -6,7 +6,9 @@
 pub mod model;
 pub mod state;
 
-pub use model::{Column, CookingSession, CookingSessionApi, CookingSessionStatus, Entity, Model};
+pub use model::{
+    ActiveModel, Column, CookingSession, CookingSessionApi, CookingSessionStatus, Entity, Model,
+};
 pub use state::{
     StepState, mise_en_place_from_json, mise_en_place_to_json, step_states_from_json,
     step_states_to_json,

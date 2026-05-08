@@ -22,6 +22,7 @@ use uuid::Uuid;
 
 use crate::cookbook::{self, CookbookApi};
 use crate::cookbook_recipe;
+use crate::cooking_session::{self, CookingSessionApi, CookingSessionStatus, StepState};
 use crate::food_log;
 use crate::meal_plan::{self, MealPlanEntryApi, MealType};
 use crate::nutrition::{
@@ -32,10 +33,12 @@ use crate::recipe::{self, RecipeApi, RecipeIngredientSpec, RecipeStepSpec};
 use crate::recipe_ingredient::{self, RecipeIngredientApi};
 use crate::recipe_step::{self, RecipeStepApi};
 use crate::service::{
-    AddShoppingItemRequest, AggregatedNutritionView, CookbookWithRecipes, CookingService,
-    CreateRecipeRequest, GenerateShoppingListRequest, ImportRecipeRequest,
-    MarkMealPlanCookedRequest, MealPlanRangeRequest, RecipeImportPreview, RecipePatch,
-    RecipeWithDetails, SetMealPlanEntryRequest, ShoppingListWithItems, VaultError,
+    AddShoppingItemRequest, AggregatedNutritionView, CompleteCookingSessionRequest,
+    CookbookWithRecipes, CookingService, CookingSessionView, CreateRecipeRequest,
+    GenerateShoppingListRequest, ImportRecipeRequest, MarkIngredientGatheredRequest,
+    MarkMealPlanCookedRequest, MealPlanRangeRequest, NavigateStepRequest, RecipeImportPreview,
+    RecipePatch, RecipeWithDetails, ScaledRecipeView, SetMealPlanEntryRequest,
+    ShoppingListWithItems, StartCookingSessionRequest, StepTimerActionRequest, VaultError,
 };
 use crate::shopping_list::{self, ShoppingListApi, ShoppingListItemApi};
 
@@ -145,6 +148,100 @@ fn ingredient_to_api(model: recipe_ingredient::Model) -> Result<RecipeIngredient
 
 fn step_to_api(model: recipe_step::Model) -> Result<RecipeStepApi, VaultError> {
     convert_model::<recipe_step::Model, RecipeStepApi>(model)
+}
+
+fn session_to_api(model: cooking_session::Model) -> Result<CookingSessionApi, VaultError> {
+    convert_model::<cooking_session::Model, CookingSessionApi>(model)
+}
+
+/// Materialize a [`CookingSessionView`] from a session row, by reading
+/// the snapshotted JSON state plus the recipe's ingredients/steps and
+/// scaling ingredients to the session's `scaled_servings`.
+async fn build_session_view(
+    db: &DatabaseConnection,
+    session: cooking_session::Model,
+) -> Result<CookingSessionView, VaultError> {
+    let recipe = recipe::Entity::find_by_id(session.recipe_id)
+        .one(db)
+        .await
+        .map_err(|e| io(e, "load recipe for session view"))?;
+    let ingredients = recipe_ingredient::Entity::find()
+        .filter(recipe_ingredient::Column::RecipeId.eq(session.recipe_id))
+        .order_by_asc(recipe_ingredient::Column::Sequence)
+        .all(db)
+        .await
+        .map_err(|e| io(e, "load ingredients for session view"))?;
+    let steps = recipe_step::Entity::find()
+        .filter(recipe_step::Column::RecipeId.eq(session.recipe_id))
+        .order_by_asc(recipe_step::Column::Sequence)
+        .all(db)
+        .await
+        .map_err(|e| io(e, "load steps for session view"))?;
+
+    let ingredient_apis: Vec<RecipeIngredientApi> = ingredients
+        .into_iter()
+        .map(ingredient_to_api)
+        .collect::<Result<Vec<_>, _>>()?;
+    let step_apis: Vec<RecipeStepApi> = steps
+        .into_iter()
+        .map(step_to_api)
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let source_servings = recipe.as_ref().and_then(|r| r.servings);
+    let target_servings = session.scaled_servings.or(source_servings).unwrap_or(1);
+    let scaled =
+        crate::recipe::scale_ingredients(&ingredient_apis, source_servings, target_servings);
+
+    let mise_state = cooking_session::mise_en_place_from_json(&session.mise_en_place_state);
+    let step_states = cooking_session::step_states_from_json(&session.step_states);
+    let ungathered_count: u32 = mise_state.iter().filter(|b| !**b).count() as u32;
+
+    let scaled_ingredients_json = serde_json::to_string(&scaled.ingredients)
+        .map_err(|e| io(e, "serialize scaled ingredients"))?;
+    let steps_json = serde_json::to_string(&step_apis).map_err(|e| io(e, "serialize steps"))?;
+    let step_states_json =
+        serde_json::to_string(&step_states).map_err(|e| io(e, "serialize step_states"))?;
+    let mise_en_place_json =
+        serde_json::to_string(&mise_state).map_err(|e| io(e, "serialize mise"))?;
+
+    Ok(CookingSessionView {
+        session: session_to_api(session)?,
+        scaled_ingredients_json,
+        steps_json,
+        step_states_json,
+        mise_en_place_json,
+        ungathered_count,
+    })
+}
+
+/// Persist updated mise/step JSON columns + `current_step_index` and
+/// return the refreshed model.
+async fn save_session_state(
+    db: &DatabaseConnection,
+    mut session: cooking_session::Model,
+    mise: Option<&[bool]>,
+    steps: Option<&[StepState]>,
+    new_index: Option<i32>,
+) -> Result<cooking_session::Model, VaultError> {
+    if let Some(m) = mise {
+        session.mise_en_place_state = cooking_session::mise_en_place_to_json(m);
+    }
+    if let Some(s) = steps {
+        session.step_states = cooking_session::step_states_to_json(s);
+    }
+    if let Some(idx) = new_index {
+        session.current_step_index = idx;
+    }
+    let mut active: cooking_session::ActiveModel = session.clone().into();
+    active.mise_en_place_state = Set(session.mise_en_place_state.clone());
+    active.step_states = Set(session.step_states.clone());
+    active.current_step_index = Set(session.current_step_index);
+    active.updated_at = Set(Utc::now());
+    let updated = active
+        .update(db)
+        .await
+        .map_err(|e| io(e, "update cooking session state"))?;
+    Ok(updated)
 }
 
 fn ingredient_active_for(
@@ -1154,5 +1251,381 @@ impl CookingService for CookingServiceImpl {
             .await
             .map_err(|e| io(e, "insert shopping_list_item"))?;
         Ok(())
+    }
+
+    // ── Cooking sessions ────────────────────────────────────────────
+
+    async fn start_cooking_session(
+        &self,
+        request: StartCookingSessionRequest,
+    ) -> Result<CookingSessionView, VaultError> {
+        let recipe = recipe::Entity::find_by_id(request.recipe_id)
+            .one(&self.db)
+            .await
+            .map_err(|e| io(e, "load recipe for start_cooking_session"))?
+            .ok_or_else(|| VaultError::NotFound(format!("recipe:{}", request.recipe_id)))?;
+        let ingredients = recipe_ingredient::Entity::find()
+            .filter(recipe_ingredient::Column::RecipeId.eq(recipe.id))
+            .order_by_asc(recipe_ingredient::Column::Sequence)
+            .all(&self.db)
+            .await
+            .map_err(|e| io(e, "load ingredients for start_cooking_session"))?;
+        let steps = recipe_step::Entity::find()
+            .filter(recipe_step::Column::RecipeId.eq(recipe.id))
+            .order_by_asc(recipe_step::Column::Sequence)
+            .all(&self.db)
+            .await
+            .map_err(|e| io(e, "load steps for start_cooking_session"))?;
+
+        let mise = vec![false; ingredients.len()];
+        let step_states = vec![StepState::default(); steps.len()];
+        let now = Utc::now();
+        let session_id = Uuid::new_v4();
+        let active = cooking_session::ActiveModel {
+            id: Set(session_id),
+            recipe_id: Set(recipe.id),
+            recipe_name_snapshot: Set(recipe.name.clone()),
+            status: Set(CookingSessionStatus::Active),
+            current_step_index: Set(-1),
+            scaled_servings: Set(request.scaled_servings.or(recipe.servings)),
+            mise_en_place_state: Set(cooking_session::mise_en_place_to_json(&mise)),
+            step_states: Set(cooking_session::step_states_to_json(&step_states)),
+            notes: Set(None),
+            started_at: Set(now),
+            completed_at: Set(None),
+            organization: Set(request.organization.or(recipe.organization.clone())),
+            created_by: Set(request.created_by),
+            properties: Set(JsonObject::default()),
+            created_at: Set(now),
+            updated_at: Set(now),
+        };
+        let _ = ingredients; // (counts already used)
+        let model = active
+            .insert(&self.db)
+            .await
+            .map_err(|e| io(e, "insert cooking_session"))?;
+        build_session_view(&self.db, model).await
+    }
+
+    async fn get_cooking_session(
+        &self,
+        id: Uuid,
+    ) -> Result<Option<CookingSessionView>, VaultError> {
+        let Some(model) = cooking_session::Entity::find_by_id(id)
+            .one(&self.db)
+            .await
+            .map_err(|e| io(e, "get_cooking_session"))?
+        else {
+            return Ok(None);
+        };
+        Ok(Some(build_session_view(&self.db, model).await?))
+    }
+
+    async fn list_active_cooking_sessions(
+        &self,
+        organization: Option<String>,
+    ) -> Result<Vec<CookingSessionApi>, VaultError> {
+        let mut q = cooking_session::Entity::find()
+            .filter(cooking_session::Column::Status.eq(CookingSessionStatus::Active))
+            .order_by_desc(cooking_session::Column::StartedAt);
+        if let Some(org) = organization {
+            q = q.filter(cooking_session::Column::Organization.eq(org));
+        }
+        let rows = q
+            .all(&self.db)
+            .await
+            .map_err(|e| io(e, "list_active_cooking_sessions"))?;
+        rows.into_iter().map(session_to_api).collect()
+    }
+
+    async fn mark_ingredient_gathered(
+        &self,
+        request: MarkIngredientGatheredRequest,
+    ) -> Result<CookingSessionView, VaultError> {
+        let session = cooking_session::Entity::find_by_id(request.session_id)
+            .one(&self.db)
+            .await
+            .map_err(|e| io(e, "load cooking_session"))?
+            .ok_or_else(|| {
+                VaultError::NotFound(format!("cooking_session:{}", request.session_id))
+            })?;
+        let mut mise = cooking_session::mise_en_place_from_json(&session.mise_en_place_state);
+        let idx = request.ingredient_index as usize;
+        if idx >= mise.len() {
+            return Err(VaultError::ParseError(format!(
+                "ingredient_index {idx} out of range (len={})",
+                mise.len()
+            )));
+        }
+        mise[idx] = request.gathered;
+        let updated = save_session_state(&self.db, session, Some(&mise), None, None).await?;
+        build_session_view(&self.db, updated).await
+    }
+
+    async fn navigate_step(
+        &self,
+        request: NavigateStepRequest,
+    ) -> Result<CookingSessionView, VaultError> {
+        let session = cooking_session::Entity::find_by_id(request.session_id)
+            .one(&self.db)
+            .await
+            .map_err(|e| io(e, "load cooking_session"))?
+            .ok_or_else(|| {
+                VaultError::NotFound(format!("cooking_session:{}", request.session_id))
+            })?;
+        let step_states = cooking_session::step_states_from_json(&session.step_states);
+        let max_index = if step_states.is_empty() {
+            -1
+        } else {
+            (step_states.len() - 1) as i32
+        };
+        let current = session.current_step_index;
+        let new_index = match request.direction.as_str() {
+            "next" => (current + 1).min(max_index),
+            "previous" | "prev" => (current - 1).max(-1),
+            "jump" => {
+                let target = request.jump_to.ok_or_else(|| {
+                    VaultError::ParseError("jump direction requires jump_to".to_string())
+                })?;
+                if target < -1 || target > max_index {
+                    return Err(VaultError::ParseError(format!(
+                        "jump_to {target} out of range [-1, {max_index}]"
+                    )));
+                }
+                target
+            }
+            other => {
+                return Err(VaultError::ParseError(format!(
+                    "unknown navigate direction: {other}"
+                )));
+            }
+        };
+        // Don't auto-start timers — explicit user action only.
+        let updated = save_session_state(&self.db, session, None, None, Some(new_index)).await?;
+        build_session_view(&self.db, updated).await
+    }
+
+    async fn step_timer_action(
+        &self,
+        request: StepTimerActionRequest,
+    ) -> Result<CookingSessionView, VaultError> {
+        let session = cooking_session::Entity::find_by_id(request.session_id)
+            .one(&self.db)
+            .await
+            .map_err(|e| io(e, "load cooking_session"))?
+            .ok_or_else(|| {
+                VaultError::NotFound(format!("cooking_session:{}", request.session_id))
+            })?;
+        let mut step_states = cooking_session::step_states_from_json(&session.step_states);
+        let step_index = request.step_index.unwrap_or(session.current_step_index);
+        if step_index < 0 || (step_index as usize) >= step_states.len() {
+            return Err(VaultError::ParseError(format!(
+                "step_index {step_index} out of range (len={})",
+                step_states.len()
+            )));
+        }
+        let idx = step_index as usize;
+        let now = Utc::now();
+        let state = &mut step_states[idx];
+        match request.action.as_str() {
+            "start" => {
+                state.started_at = Some(now);
+                state.paused_at = None;
+                state.completed_at = None;
+            }
+            "pause" => {
+                if state.started_at.is_none() {
+                    return Err(VaultError::ParseError(
+                        "cannot pause a step that hasn't started".to_string(),
+                    ));
+                }
+                if state.completed_at.is_some() {
+                    return Err(VaultError::ParseError(
+                        "cannot pause a completed step".to_string(),
+                    ));
+                }
+                if state.paused_at.is_some() {
+                    return Err(VaultError::ParseError("step is already paused".to_string()));
+                }
+                state.paused_at = Some(now);
+            }
+            "resume" => {
+                let paused = state
+                    .paused_at
+                    .ok_or_else(|| VaultError::ParseError("step is not paused".to_string()))?;
+                let elapsed_paused = (now - paused).num_seconds().max(0) as u32;
+                state.pause_offset_seconds =
+                    state.pause_offset_seconds.saturating_add(elapsed_paused);
+                state.paused_at = None;
+            }
+            "complete" => {
+                if state.started_at.is_none() {
+                    state.started_at = Some(now);
+                }
+                // If currently paused, fold the paused interval into
+                // pause_offset before stamping completion.
+                if let Some(paused) = state.paused_at.take() {
+                    let elapsed_paused = (now - paused).num_seconds().max(0) as u32;
+                    state.pause_offset_seconds =
+                        state.pause_offset_seconds.saturating_add(elapsed_paused);
+                }
+                state.completed_at = Some(now);
+            }
+            "reset" => {
+                *state = StepState::default();
+            }
+            other => {
+                return Err(VaultError::ParseError(format!(
+                    "unknown timer action: {other}"
+                )));
+            }
+        }
+        let updated = save_session_state(&self.db, session, None, Some(&step_states), None).await?;
+        build_session_view(&self.db, updated).await
+    }
+
+    async fn complete_cooking_session(
+        &self,
+        request: CompleteCookingSessionRequest,
+    ) -> Result<CookingSessionView, VaultError> {
+        let session = cooking_session::Entity::find_by_id(request.session_id)
+            .one(&self.db)
+            .await
+            .map_err(|e| io(e, "load cooking_session"))?
+            .ok_or_else(|| {
+                VaultError::NotFound(format!("cooking_session:{}", request.session_id))
+            })?;
+        let now = Utc::now();
+        let log_date = request
+            .log_date
+            .unwrap_or_else(|| chrono::Local::now().date_naive());
+
+        // Update Recipe.last_made.
+        if let Some(recipe) = recipe::Entity::find_by_id(session.recipe_id)
+            .one(&self.db)
+            .await
+            .map_err(|e| io(e, "load recipe for complete_cooking_session"))?
+        {
+            let mut active: recipe::ActiveModel = recipe.into();
+            active.last_made = Set(Some(log_date));
+            active.updated_at = Set(now);
+            let _ = active
+                .update(&self.db)
+                .await
+                .map_err(|e| io(e, "update recipe.last_made"))?;
+        }
+
+        // Optional auto-log: insert a FoodLog row using the recipe's
+        // cached nutrition_summary × servings_eaten.
+        if request.log_meal {
+            let aggregated = compute_recipe_nutrition(&self.db, session.recipe_id).await?;
+            let per_serving = aggregated
+                .per_serving
+                .clone()
+                .unwrap_or_else(|| aggregated.total.clone());
+            let servings = request
+                .servings_eaten
+                .or(session.scaled_servings)
+                .unwrap_or(1)
+                .max(1);
+            let factor = f64::from(servings);
+            let meal_type = request
+                .meal_type
+                .as_deref()
+                .and_then(MealType::parse)
+                .unwrap_or(MealType::Other);
+            let mut active = <food_log::ActiveModel as sea_orm::ActiveModelTrait>::default();
+            active.id = Set(Uuid::new_v4());
+            active.date = Set(log_date);
+            active.meal_type = Set(meal_type);
+            active.organization = Set(session.organization.clone());
+            active.recipe_id = Set(Some(session.recipe_id));
+            active.food_name = Set(session.recipe_name_snapshot.clone());
+            active.quantity_grams = Set(0.0);
+            active.kcal = Set(per_serving.kcal_per_100g.map(|v| v * factor));
+            active.protein_g = Set(per_serving.protein_g.map(|v| v * factor));
+            active.carbs_g = Set(per_serving.carbs_g.map(|v| v * factor));
+            active.sugars_g = Set(per_serving.sugars_g.map(|v| v * factor));
+            active.fiber_g = Set(per_serving.fiber_g.map(|v| v * factor));
+            active.fat_g = Set(per_serving.fat_g.map(|v| v * factor));
+            active.saturated_fat_g = Set(per_serving.saturated_fat_g.map(|v| v * factor));
+            active.sodium_mg = Set(per_serving.sodium_mg.map(|v| v * factor));
+            active.notes = Set(Some(format!(
+                "cooking_session={}; servings_eaten={servings}",
+                session.id
+            )));
+            active.created_by = Set(request.actor.or(session.created_by.clone()));
+            active.properties = Set(JsonObject::default());
+            active.created_at = Set(now);
+            active.updated_at = Set(now);
+            active
+                .insert(&self.db)
+                .await
+                .map_err(|e| io(e, "insert food_log for cooking session"))?;
+        }
+
+        // Stamp the session as completed.
+        let mut active: cooking_session::ActiveModel = session.clone().into();
+        active.status = Set(CookingSessionStatus::Completed);
+        active.completed_at = Set(Some(now));
+        active.updated_at = Set(now);
+        let updated = active
+            .update(&self.db)
+            .await
+            .map_err(|e| io(e, "complete cooking_session"))?;
+        build_session_view(&self.db, updated).await
+    }
+
+    async fn abandon_cooking_session(&self, id: Uuid) -> Result<CookingSessionView, VaultError> {
+        let session = cooking_session::Entity::find_by_id(id)
+            .one(&self.db)
+            .await
+            .map_err(|e| io(e, "load cooking_session"))?
+            .ok_or_else(|| VaultError::NotFound(format!("cooking_session:{id}")))?;
+        let now = Utc::now();
+        let mut active: cooking_session::ActiveModel = session.into();
+        active.status = Set(CookingSessionStatus::Abandoned);
+        active.completed_at = Set(Some(now));
+        active.updated_at = Set(now);
+        let updated = active
+            .update(&self.db)
+            .await
+            .map_err(|e| io(e, "abandon cooking_session"))?;
+        build_session_view(&self.db, updated).await
+    }
+
+    async fn scale_recipe(
+        &self,
+        recipe_id: Uuid,
+        target_servings: u32,
+    ) -> Result<ScaledRecipeView, VaultError> {
+        let recipe = recipe::Entity::find_by_id(recipe_id)
+            .one(&self.db)
+            .await
+            .map_err(|e| io(e, "load recipe for scale"))?
+            .ok_or_else(|| VaultError::NotFound(format!("recipe:{recipe_id}")))?;
+        let ingredients = recipe_ingredient::Entity::find()
+            .filter(recipe_ingredient::Column::RecipeId.eq(recipe_id))
+            .order_by_asc(recipe_ingredient::Column::Sequence)
+            .all(&self.db)
+            .await
+            .map_err(|e| io(e, "load ingredients for scale"))?;
+        let ingredient_apis: Vec<RecipeIngredientApi> = ingredients
+            .into_iter()
+            .map(ingredient_to_api)
+            .collect::<Result<Vec<_>, _>>()?;
+        let result =
+            crate::recipe::scale_ingredients(&ingredient_apis, recipe.servings, target_servings);
+        let scaled_ingredients_json = serde_json::to_string(&result.ingredients)
+            .map_err(|e| io(e, "serialize scaled ingredients"))?;
+        Ok(ScaledRecipeView {
+            recipe_id,
+            recipe_name: recipe.name.clone(),
+            source_servings: result.source_servings,
+            target_servings: result.target_servings,
+            multiplier: result.multiplier,
+            scaled_ingredients_json,
+            warnings: result.warnings,
+        })
     }
 }

@@ -1833,6 +1833,148 @@ pub trait CookingService {
         &self,
         request: MarkMealPlanCookedRequest,
     ) -> Result<Vec<Uuid>, VaultError>;
+
+    // ── Cooking sessions (interactive walkthrough) ─────────────────
+    /// Begin an interactive cooking session for `recipe_id`. Snapshots
+    /// the recipe's ingredient + step counts, initializes the
+    /// per-ingredient mise-en-place state to all-false, and returns the
+    /// session view with scaled ingredients.
+    async fn start_cooking_session(
+        &self,
+        request: StartCookingSessionRequest,
+    ) -> Result<CookingSessionView, VaultError>;
+
+    async fn get_cooking_session(&self, id: Uuid)
+    -> Result<Option<CookingSessionView>, VaultError>;
+
+    async fn list_active_cooking_sessions(
+        &self,
+        organization: Option<String>,
+    ) -> Result<Vec<crate::cooking_session::CookingSessionApi>, VaultError>;
+
+    /// Toggle the `gathered` flag on one ingredient checkbox. Returns
+    /// `ParseError` when `ingredient_index` is out of range.
+    async fn mark_ingredient_gathered(
+        &self,
+        request: MarkIngredientGatheredRequest,
+    ) -> Result<CookingSessionView, VaultError>;
+
+    /// Move the session's `current_step_index` cursor. `direction` is
+    /// one of `"next"` / `"previous"` / `"jump"` (the latter requires
+    /// `jump_to`).
+    async fn navigate_step(
+        &self,
+        request: NavigateStepRequest,
+    ) -> Result<CookingSessionView, VaultError>;
+
+    /// Per-step timer action: `"start"`, `"pause"`, `"resume"`,
+    /// `"complete"`, or `"reset"`. Step durations are NOT auto-started
+    /// on navigation — the user must explicitly press start so they're
+    /// not surprised by a running timer.
+    async fn step_timer_action(
+        &self,
+        request: StepTimerActionRequest,
+    ) -> Result<CookingSessionView, VaultError>;
+
+    /// Mark the session `Completed`, stamp `Recipe.last_made = today`,
+    /// and (when `log_meal = true`) insert a FoodLog row using the
+    /// recipe's cached `nutrition_summary` × `servings_eaten`.
+    async fn complete_cooking_session(
+        &self,
+        request: CompleteCookingSessionRequest,
+    ) -> Result<CookingSessionView, VaultError>;
+
+    /// Mark the session `Abandoned`. Does NOT update `last_made` or
+    /// log a meal.
+    async fn abandon_cooking_session(&self, id: Uuid) -> Result<CookingSessionView, VaultError>;
+
+    /// Linearly scale a recipe's ingredients to `target_servings` and
+    /// return the scaled list. Step durations and step text are not
+    /// touched.
+    async fn scale_recipe(
+        &self,
+        recipe_id: Uuid,
+        target_servings: u32,
+    ) -> Result<ScaledRecipeView, VaultError>;
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct StartCookingSessionRequest {
+    pub recipe_id: Uuid,
+    pub scaled_servings: Option<u32>,
+    pub organization: Option<String>,
+    pub created_by: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct MarkIngredientGatheredRequest {
+    pub session_id: Uuid,
+    /// 0-based ingredient index (matches the snapshotted `Vec<bool>`).
+    pub ingredient_index: u32,
+    pub gathered: bool,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct NavigateStepRequest {
+    pub session_id: Uuid,
+    /// One of: `"next"` | `"previous"` | `"jump"`.
+    pub direction: String,
+    /// Required when `direction == "jump"`; 0-based step index. May be
+    /// `-1` to return to the mise-en-place phase.
+    pub jump_to: Option<i32>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct StepTimerActionRequest {
+    pub session_id: Uuid,
+    /// 0-based step index. `None` means "current step from
+    /// `session.current_step_index`".
+    pub step_index: Option<i32>,
+    /// One of: `"start"` | `"pause"` | `"resume"` | `"complete"` |
+    /// `"reset"`.
+    pub action: String,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct CompleteCookingSessionRequest {
+    pub session_id: Uuid,
+    /// When true, auto-log a FoodLog row for the cook (using the
+    /// recipe's `nutrition_summary` × `servings_eaten`).
+    pub log_meal: bool,
+    pub servings_eaten: Option<u32>,
+    /// Parsed via [`crate::meal_plan::MealType::parse`]; defaults to
+    /// `"other"`.
+    pub meal_type: Option<String>,
+    /// Defaults to today.
+    pub log_date: Option<chrono::NaiveDate>,
+    pub actor: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct CookingSessionView {
+    pub session: crate::cooking_session::CookingSessionApi,
+    /// JSON-encoded `Vec<RecipeIngredientApi>` already scaled to
+    /// `session.scaled_servings` (or `recipe.servings` when None).
+    pub scaled_ingredients_json: String,
+    /// JSON-encoded `Vec<RecipeStepApi>`, ordered by sequence.
+    pub steps_json: String,
+    /// JSON-encoded `Vec<StepState>` parallel to steps.
+    pub step_states_json: String,
+    /// JSON-encoded `Vec<bool>` parallel to ingredients.
+    pub mise_en_place_json: String,
+    /// Convenience: how many ingredients are still ungathered.
+    pub ungathered_count: u32,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct ScaledRecipeView {
+    pub recipe_id: Uuid,
+    pub recipe_name: String,
+    pub source_servings: Option<u32>,
+    pub target_servings: u32,
+    pub multiplier: f64,
+    pub scaled_ingredients_json: String,
+    pub warnings: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, facet::Facet, serde::Serialize, serde::Deserialize)]
