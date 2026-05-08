@@ -21,7 +21,6 @@
 use std::cell::OnceCell;
 use std::collections::HashMap;
 use std::error::Error;
-use std::ffi::CStr;
 use std::sync::{Arc, OnceLock};
 
 use crossbeam_channel::{Receiver, Sender};
@@ -234,7 +233,7 @@ fn install_60hz_misc_timer() {
     };
     unsafe {
         reaper.plugin_register(
-            CStr::from_bytes_with_nul_unchecked(b"timer\0").as_ptr(),
+            c"timer".as_ptr(),
             activate_60hz_misc_timer as *mut std::ffi::c_void,
         );
     }
@@ -251,7 +250,7 @@ extern "C" fn activate_60hz_misc_timer() {
     // One-shot — deregister so this only runs once.
     unsafe {
         reaper.plugin_register(
-            CStr::from_bytes_with_nul_unchecked(b"-timer\0").as_ptr(),
+            c"-timer".as_ptr(),
             activate_60hz_misc_timer as *mut std::ffi::c_void,
         );
     }

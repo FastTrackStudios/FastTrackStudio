@@ -13,7 +13,7 @@
 //! the lifetime of the project. Each function null-checks before
 //! dereffing, so passing dangling/null pointers is defined behavior
 //! (returns `None` / `false` / `0`).
-#![allow(clippy::not_unsafe_ptr_arg_deref)]
+#![allow(clippy::not_unsafe_ptr_arg_deref, clippy::too_many_arguments)]
 
 use reaper_low::Reaper;
 use reaper_low::raw::{MediaTrack, TrackEnvelope};
