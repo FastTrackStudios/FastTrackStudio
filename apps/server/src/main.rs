@@ -1328,6 +1328,14 @@ async fn handle_vox_connection(socket: WebSocket, state: AppState, auth: VoxAuth
                     );
                     Ok(())
                 }
+                "SubstitutionRepo" => {
+                    connection.handle_with(
+                        task_core::substitution::SubstitutionRepoDispatcher::new(
+                            task_core::substitution::SubstitutionRepoStorage::new(db.clone()),
+                        ),
+                    );
+                    Ok(())
+                }
                 "ShoppingListRepo" => {
                     connection.handle_with(
                         task_core::shopping_list::ShoppingListRepoDispatcher::new(

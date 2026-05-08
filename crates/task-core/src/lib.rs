@@ -33,6 +33,7 @@ pub mod recipe_step;
 pub mod revenue;
 pub mod rrule;
 pub mod shopping_list;
+pub mod substitution;
 pub mod task;
 pub mod task_relation;
 pub mod team;
@@ -116,6 +117,7 @@ pub use revenue::{
     Revenue, RevenueBucket, RevenueCreateRequest, RevenueFilter, RevenueReport, format_revenue_id,
 };
 pub use shopping_list::{ShoppingList, ShoppingListApi, ShoppingListItem, ShoppingListItemApi};
+pub use substitution::{Substitution, SubstitutionApi};
 pub use task::{
     DependencyRelType, Priority, Reaction, RecurrenceAnchor, RelationType, Reminder,
     ReminderAnchor, Status, Task, TaskDependency, TaskRelation, TimeEntry, WikiLink,

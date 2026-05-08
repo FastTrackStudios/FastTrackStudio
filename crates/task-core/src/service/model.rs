@@ -1896,6 +1896,93 @@ pub trait CookingService {
         recipe_id: Uuid,
         target_servings: u32,
     ) -> Result<ScaledRecipeView, VaultError>;
+
+    // ── Substitutions ───────────────────────────────────────────────
+    /// Rank substitution suggestions for a recipe given missing
+    /// ingredients or a dietary filter.
+    async fn suggest_substitutions(
+        &self,
+        request: SuggestSubstitutionsRequest,
+    ) -> Result<SubstitutionSuggestionsView, VaultError>;
+
+    /// Manage the substitution catalog directly (for the CLI).
+    async fn create_substitution(
+        &self,
+        request: CreateSubstitutionRequest,
+    ) -> Result<crate::substitution::SubstitutionApi, VaultError>;
+    async fn list_substitutions(
+        &self,
+        organization: Option<String>,
+    ) -> Result<Vec<crate::substitution::SubstitutionApi>, VaultError>;
+    async fn delete_substitution(&self, id: Uuid) -> Result<(), VaultError>;
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct SuggestSubstitutionsRequest {
+    pub recipe_id: Uuid,
+    /// Force-include suggestions for these ingredient food_ids even
+    /// when no dietary filter applies. When empty + no dietary filter,
+    /// returns empty (the suggester needs at least one signal).
+    pub missing_food_ids: Vec<Uuid>,
+    /// Dietary filter: ["vegan", "gluten_free", ...]. Recipe ingredients
+    /// whose linked Food.properties.dietary_tags don't include the
+    /// filter are flagged for substitution.
+    pub dietary_filter: Vec<String>,
+    pub organization: Option<String>,
+    /// Cap suggestions per ingredient (default 5).
+    pub limit_per_ingredient: Option<u32>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct CreateSubstitutionRequest {
+    pub from_food_id: Uuid,
+    pub to_food_id: Uuid,
+    pub ratio: f64,
+    pub conversion_note: Option<String>,
+    /// JSON-encoded `applies_when` object.
+    pub applies_when_json: Option<String>,
+    pub confidence: f32,
+    pub bidirectional: bool,
+    pub organization: Option<String>,
+    pub created_by: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct SubstitutionSuggestionsView {
+    pub recipe_id: Uuid,
+    pub recipe_name: String,
+    /// JSON-encoded `Vec<IngredientSuggestion>`.
+    pub suggestions_json: String,
+    pub warnings: Vec<String>,
+}
+
+/// Plain-rust shape that lives inside `suggestions_json`.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct IngredientSuggestion {
+    pub ingredient_food_id: Option<Uuid>,
+    pub ingredient_food_name: String,
+    pub original_quantity: Option<f64>,
+    pub original_unit: Option<String>,
+    /// Ranked descending by `score`.
+    pub suggestions: Vec<RankedSubstitution>,
+    /// Why this ingredient was flagged: "missing", "dietary:vegan", …
+    pub reasons: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct RankedSubstitution {
+    pub substitution_id: Uuid,
+    pub from_food_id: Uuid,
+    pub to_food_id: Uuid,
+    pub to_food_name: String,
+    pub suggested_quantity: Option<f64>,
+    pub suggested_unit: Option<String>,
+    pub ratio: f64,
+    pub conversion_note: Option<String>,
+    pub confidence: f32,
+    pub score: f64,
+    pub applies_when_summary: String,
+    pub is_inverse: bool,
 }
 
 #[derive(Debug, Clone, Default, facet::Facet)]
