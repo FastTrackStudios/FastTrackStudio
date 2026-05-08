@@ -14,7 +14,7 @@
 use chrono::{Duration, NaiveDate, Utc};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, DatabaseConnection, DbErr, EntityTrait,
-    QueryFilter,
+    QueryFilter, QueryOrder,
 };
 use uuid::Uuid;
 
@@ -29,6 +29,7 @@ use task_core::email;
 use task_core::email::EmailStringList;
 use task_core::expense::{self, ExpenseStatus};
 use task_core::food::{self, FoodAliasList};
+use task_core::food_log;
 use task_core::food_product;
 use task_core::integration::{
     self, IntegrationStringList, ProjectTemplate, ProjectTemplateList, StatusDef, StatusDefList,
@@ -124,6 +125,8 @@ pub struct DemoSeedSummary {
     pub locations_unchanged: usize,
     pub pantry_items_created: usize,
     pub pantry_items_unchanged: usize,
+    pub food_logs_created: usize,
+    pub food_logs_unchanged: usize,
 }
 
 impl DemoSeedSummary {
@@ -153,6 +156,7 @@ impl DemoSeedSummary {
             + self.shopping_list_items_created
             + self.locations_created
             + self.pantry_items_created
+            + self.food_logs_created
     }
 
     pub fn total_unchanged(&self) -> usize {
@@ -181,6 +185,7 @@ impl DemoSeedSummary {
             + self.shopping_list_items_unchanged
             + self.locations_unchanged
             + self.pantry_items_unchanged
+            + self.food_logs_unchanged
     }
 }
 
@@ -217,6 +222,8 @@ pub async fn seed_demo_data(db: &DatabaseConnection) -> Result<DemoSeedSummary, 
     // Backfill `food_id` on any pre-existing recipe_ingredient rows
     // (idempotent: only updates rows whose food_id is currently NULL).
     backfill_recipe_ingredient_food_ids(db).await?;
+    recompute_demo_recipe_nutrition(db).await?;
+    seed_food_logs(db, &mut summary).await?;
     Ok(summary)
 }
 
@@ -406,6 +413,19 @@ pub async fn reset_demo_data(db: &DatabaseConnection) -> Result<DemoSeedSummary,
             > 0
         {
             summary.tracks_created += 1;
+        }
+    }
+
+    // Food logs delete first — they reference foods/products/recipes.
+    for key in FOOD_LOG_KEYS {
+        let id = demo_id(key);
+        if task_core::food_log::Entity::delete_by_id(id)
+            .exec(db)
+            .await?
+            .rows_affected
+            > 0
+        {
+            summary.food_logs_created += 1;
         }
     }
 
@@ -678,6 +698,23 @@ const MEAL_PLAN_KEYS: &[&str] = &[
 ];
 
 const SHOPPING_LIST_KEYS: &[&str] = &["shop:this-week"];
+
+const FOOD_LOG_KEYS: &[&str] = &[
+    "food_log:day0-breakfast-eggs",
+    "food_log:day0-lunch-greek-salad",
+    "food_log:day0-dinner-carbonara",
+    "food_log:day1-breakfast-banana",
+    "food_log:day1-lunch-sheetpan",
+    "food_log:day2-dinner-chickpea",
+    "food_log:day3-breakfast-oatmeal",
+    "food_log:day4-dinner-smashburger",
+    "food_log:day5-lunch-leftovers",
+    "food_log:day6-dinner-takeout",
+    "food_log:day0-snack-yogurt",
+    "food_log:day1-snack-apple",
+    "food_log:day2-breakfast-eggs",
+    "food_log:day3-dinner-pasta",
+];
 
 const LOCATION_KEYS: &[&str] = &[
     "location:pantry-shelf",
@@ -4486,6 +4523,323 @@ async fn backfill_recipe_ingredient_food_ids(db: &DatabaseConnection) -> Result<
         let mut active: recipe_ingredient::ActiveModel = row.into();
         active.food_id = sea_orm::ActiveValue::Set(Some(food_row.id));
         active.update(db).await?;
+    }
+    Ok(())
+}
+
+/// Recompute `nutrition_summary` for every demo recipe so the cached
+/// blob is populated. Idempotent.
+async fn recompute_demo_recipe_nutrition(db: &DatabaseConnection) -> Result<(), DbErr> {
+    use task_core::nutrition::{
+        IngredientNutritionInput, NutritionFacts, aggregate_recipe_nutrition,
+    };
+    for key in RECIPE_KEYS {
+        let rid = demo_id(key);
+        let Some(rec) = recipe::Entity::find_by_id(rid).one(db).await? else {
+            continue;
+        };
+        let ings = recipe_ingredient::Entity::find()
+            .filter(recipe_ingredient::Column::RecipeId.eq(rid))
+            .order_by_asc(recipe_ingredient::Column::Sequence)
+            .all(db)
+            .await?;
+        let mut inputs: Vec<IngredientNutritionInput> = Vec::new();
+        for ing in ings {
+            if ing.is_section {
+                continue;
+            }
+            let nutrition = match ing.food_id {
+                Some(fid) => food::Entity::find_by_id(fid)
+                    .one(db)
+                    .await?
+                    .map(|f| NutritionFacts::from_json_object(&f.nutrition_per_100g)),
+                None => None,
+            };
+            inputs.push(IngredientNutritionInput {
+                food_id: ing.food_id,
+                food_name: ing.food.clone(),
+                quantity: ing.quantity,
+                unit: ing.unit.clone(),
+                nutrition_per_100g: nutrition,
+            });
+        }
+        let aggregated = aggregate_recipe_nutrition(rec.servings, &inputs);
+        let summary_value = serde_json::json!({
+            "total": aggregated.total,
+            "per_serving": aggregated.per_serving,
+            "warnings": aggregated.warnings,
+        });
+        let mut active: recipe::ActiveModel = rec.into();
+        active.nutrition_summary = sea_orm::ActiveValue::Set(JsonObject::from_value(summary_value));
+        active.updated_at = sea_orm::ActiveValue::Set(Utc::now());
+        active.update(db).await?;
+    }
+    Ok(())
+}
+
+/// Seed ~14 deterministic FoodLog rows spanning today and the previous
+/// 6 days so daily/weekly aggregates have data on first boot.
+async fn seed_food_logs(
+    db: &DatabaseConnection,
+    summary: &mut DemoSeedSummary,
+) -> Result<(), DbErr> {
+    use task_core::nutrition::NutritionFacts;
+    let today = chrono::Local::now().date_naive();
+    let now = Utc::now();
+    let org = ORG_PERSONAL;
+
+    /// (key, day_offset_back, meal, food_name, qty_g, recipe_key, snapshot_kcal)
+    struct Fixture {
+        key: &'static str,
+        day_back: i64,
+        meal: MealType,
+        food_name: &'static str,
+        quantity_grams: f64,
+        recipe_key: Option<&'static str>,
+        meal_plan_key: Option<&'static str>,
+        // When `Some`, used directly. When `None`, looked up from Food.
+        kcal: Option<f64>,
+        protein: Option<f64>,
+        carbs: Option<f64>,
+        fat: Option<f64>,
+    }
+    let fixtures: &[Fixture] = &[
+        // Today (day 0)
+        Fixture {
+            key: "food_log:day0-breakfast-eggs",
+            day_back: 0,
+            meal: MealType::Breakfast,
+            food_name: "eggs",
+            quantity_grams: 100.0,
+            recipe_key: None,
+            meal_plan_key: None,
+            kcal: Some(155.0),
+            protein: Some(13.0),
+            carbs: Some(1.1),
+            fat: Some(11.0),
+        },
+        Fixture {
+            key: "food_log:day0-lunch-greek-salad",
+            day_back: 0,
+            meal: MealType::Lunch,
+            food_name: "Greek Salad",
+            quantity_grams: 0.0,
+            recipe_key: Some("recipe:greek-salad"),
+            meal_plan_key: Some("meal:day0-lunch"),
+            kcal: Some(420.0),
+            protein: Some(10.0),
+            carbs: Some(20.0),
+            fat: Some(30.0),
+        },
+        Fixture {
+            key: "food_log:day0-dinner-carbonara",
+            day_back: 0,
+            meal: MealType::Dinner,
+            food_name: "Carbonara",
+            quantity_grams: 0.0,
+            recipe_key: Some("recipe:carbonara"),
+            meal_plan_key: Some("meal:day0-dinner"),
+            kcal: Some(720.0),
+            protein: Some(28.0),
+            carbs: Some(75.0),
+            fat: Some(32.0),
+        },
+        Fixture {
+            key: "food_log:day0-snack-yogurt",
+            day_back: 0,
+            meal: MealType::Snack,
+            food_name: "Greek yogurt",
+            quantity_grams: 170.0,
+            recipe_key: None,
+            meal_plan_key: None,
+            kcal: Some(100.0),
+            protein: Some(17.0),
+            carbs: Some(6.0),
+            fat: Some(0.5),
+        },
+        // Yesterday (day 1)
+        Fixture {
+            key: "food_log:day1-breakfast-banana",
+            day_back: 1,
+            meal: MealType::Breakfast,
+            food_name: "banana",
+            quantity_grams: 120.0,
+            recipe_key: None,
+            meal_plan_key: None,
+            kcal: Some(105.0),
+            protein: Some(1.3),
+            carbs: Some(27.0),
+            fat: Some(0.4),
+        },
+        Fixture {
+            key: "food_log:day1-lunch-sheetpan",
+            day_back: 1,
+            meal: MealType::Lunch,
+            food_name: "Sheet-pan Chicken",
+            quantity_grams: 0.0,
+            recipe_key: Some("recipe:sheet-pan-chicken"),
+            meal_plan_key: None,
+            kcal: Some(550.0),
+            protein: Some(40.0),
+            carbs: Some(30.0),
+            fat: Some(28.0),
+        },
+        Fixture {
+            key: "food_log:day1-snack-apple",
+            day_back: 1,
+            meal: MealType::Snack,
+            food_name: "apple",
+            quantity_grams: 180.0,
+            recipe_key: None,
+            meal_plan_key: None,
+            kcal: Some(95.0),
+            protein: Some(0.5),
+            carbs: Some(25.0),
+            fat: Some(0.3),
+        },
+        // Day 2
+        Fixture {
+            key: "food_log:day2-dinner-chickpea",
+            day_back: 2,
+            meal: MealType::Dinner,
+            food_name: "Chickpea Curry",
+            quantity_grams: 0.0,
+            recipe_key: Some("recipe:chickpea-curry"),
+            meal_plan_key: Some("meal:day2-dinner"),
+            kcal: Some(480.0),
+            protein: Some(18.0),
+            carbs: Some(60.0),
+            fat: Some(18.0),
+        },
+        Fixture {
+            key: "food_log:day2-breakfast-eggs",
+            day_back: 2,
+            meal: MealType::Breakfast,
+            food_name: "eggs",
+            quantity_grams: 150.0,
+            recipe_key: None,
+            meal_plan_key: None,
+            kcal: Some(232.5),
+            protein: Some(19.5),
+            carbs: Some(1.65),
+            fat: Some(16.5),
+        },
+        // Day 3
+        Fixture {
+            key: "food_log:day3-breakfast-oatmeal",
+            day_back: 3,
+            meal: MealType::Breakfast,
+            food_name: "oatmeal",
+            quantity_grams: 250.0,
+            recipe_key: None,
+            meal_plan_key: None,
+            kcal: Some(150.0),
+            protein: Some(5.0),
+            carbs: Some(27.0),
+            fat: Some(2.5),
+        },
+        Fixture {
+            key: "food_log:day3-dinner-pasta",
+            day_back: 3,
+            meal: MealType::Dinner,
+            food_name: "pasta with marinara",
+            quantity_grams: 350.0,
+            recipe_key: None,
+            meal_plan_key: None,
+            kcal: Some(520.0),
+            protein: Some(15.0),
+            carbs: Some(95.0),
+            fat: Some(8.0),
+        },
+        // Day 4
+        Fixture {
+            key: "food_log:day4-dinner-smashburger",
+            day_back: 4,
+            meal: MealType::Dinner,
+            food_name: "Smashburger",
+            quantity_grams: 0.0,
+            recipe_key: Some("recipe:smashburger"),
+            meal_plan_key: Some("meal:day4-dinner"),
+            kcal: Some(820.0),
+            protein: Some(38.0),
+            carbs: Some(45.0),
+            fat: Some(52.0),
+        },
+        // Day 5 — leftovers (free-form, no recipe link)
+        Fixture {
+            key: "food_log:day5-lunch-leftovers",
+            day_back: 5,
+            meal: MealType::Lunch,
+            food_name: "Leftover chickpea curry",
+            quantity_grams: 400.0,
+            recipe_key: None,
+            meal_plan_key: Some("meal:day5-lunch"),
+            kcal: Some(450.0),
+            protein: Some(17.0),
+            carbs: Some(58.0),
+            fat: Some(16.0),
+        },
+        // Day 6 — takeout, no nutrition data
+        Fixture {
+            key: "food_log:day6-dinner-takeout",
+            day_back: 6,
+            meal: MealType::Dinner,
+            food_name: "Takeout (unknown)",
+            quantity_grams: 0.0,
+            recipe_key: None,
+            meal_plan_key: Some("meal:day6-dinner"),
+            kcal: None,
+            protein: None,
+            carbs: None,
+            fat: None,
+        },
+    ];
+
+    for fix in fixtures {
+        let id = demo_id(fix.key);
+        if food_log::Entity::find_by_id(id).one(db).await?.is_some() {
+            summary.food_logs_unchanged += 1;
+            continue;
+        }
+        let date = today - Duration::days(fix.day_back);
+        let recipe_id = fix.recipe_key.map(demo_id);
+        let meal_plan_id = fix.meal_plan_key.map(demo_id);
+        let food_id = task_core::food::find_food_by_name(db, Some(org), fix.food_name)
+            .await?
+            .map(|f| f.id);
+        // Snapshot fields: prefer fixture overrides; otherwise scale
+        // from the linked Food's nutrition.
+        let (kcal, protein, carbs, fat, fiber, sodium) =
+            match (fix.kcal, food_id.and_then(|_| None::<NutritionFacts>)) {
+                (Some(_), _) => (fix.kcal, fix.protein, fix.carbs, fix.fat, None, None),
+                _ => (None, None, None, None, None, None),
+            };
+        let mut active = <food_log::ActiveModel as sea_orm::ActiveModelTrait>::default();
+        active.id = sea_orm::ActiveValue::Set(id);
+        active.date = sea_orm::ActiveValue::Set(date);
+        active.meal_type = sea_orm::ActiveValue::Set(fix.meal);
+        active.food_id = sea_orm::ActiveValue::Set(food_id);
+        active.product_id = sea_orm::ActiveValue::Set(None);
+        active.food_name = sea_orm::ActiveValue::Set(fix.food_name.to_string());
+        active.quantity_grams = sea_orm::ActiveValue::Set(fix.quantity_grams);
+        active.kcal = sea_orm::ActiveValue::Set(kcal);
+        active.protein_g = sea_orm::ActiveValue::Set(protein);
+        active.carbs_g = sea_orm::ActiveValue::Set(carbs);
+        active.sugars_g = sea_orm::ActiveValue::Set(None);
+        active.fiber_g = sea_orm::ActiveValue::Set(fiber);
+        active.fat_g = sea_orm::ActiveValue::Set(fat);
+        active.saturated_fat_g = sea_orm::ActiveValue::Set(None);
+        active.sodium_mg = sea_orm::ActiveValue::Set(sodium);
+        active.notes = sea_orm::ActiveValue::Set(None);
+        active.created_by = sea_orm::ActiveValue::Set(Some("cody".to_string()));
+        active.meal_plan_entry_id = sea_orm::ActiveValue::Set(meal_plan_id);
+        active.recipe_id = sea_orm::ActiveValue::Set(recipe_id);
+        active.organization = sea_orm::ActiveValue::Set(Some(org.to_string()));
+        active.properties = sea_orm::ActiveValue::Set(JsonObject::default());
+        active.created_at = sea_orm::ActiveValue::Set(now);
+        active.updated_at = sea_orm::ActiveValue::Set(now);
+        food_log::Entity::insert(active).exec(db).await?;
+        summary.food_logs_created += 1;
     }
     Ok(())
 }
