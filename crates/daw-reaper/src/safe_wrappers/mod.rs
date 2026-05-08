@@ -25,6 +25,7 @@ pub mod routing;
 pub mod ruler_lanes;
 pub mod tempo;
 pub mod time_map;
+pub mod ui;
 
 /// Convenience alias for the low-level REAPER FFI struct.
 pub type ReaperLow = reaper_low::Reaper;

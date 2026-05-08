@@ -80,35 +80,64 @@ impl UiService for ReaperUi {
 
     async fn browse_for_file(
         &self,
-        _title: String,
-        _initial_dir: Option<PathBuf>,
-        _filter: Option<String>,
+        title: String,
+        initial_dir: Option<PathBuf>,
+        filter: Option<String>,
     ) -> Option<PathBuf> {
-        // TODO: Implement using REAPER's file browser API
-        // The medium-level API doesn't expose these functions yet
-        None
+        main_thread::query(move || {
+            if !reaper_low::Swell::is_available_globally() {
+                return None;
+            }
+            let swell = reaper_low::Swell::get();
+            crate::safe_wrappers::ui::browse_for_open_file(
+                swell,
+                &title,
+                initial_dir.as_deref(),
+                filter.as_deref(),
+            )
+        })
+        .await
+        .flatten()
     }
 
     async fn browse_for_save_file(
         &self,
-        _title: String,
-        _initial_dir: Option<PathBuf>,
-        _default_name: String,
-        _filter: Option<String>,
+        title: String,
+        initial_dir: Option<PathBuf>,
+        default_name: String,
+        filter: Option<String>,
     ) -> Option<PathBuf> {
-        // TODO: Implement using REAPER's file browser API
-        // The medium-level API doesn't expose these functions yet
-        None
+        main_thread::query(move || {
+            if !reaper_low::Swell::is_available_globally() {
+                return None;
+            }
+            let swell = reaper_low::Swell::get();
+            crate::safe_wrappers::ui::browse_for_save_file(
+                swell,
+                &title,
+                initial_dir.as_deref(),
+                &default_name,
+                filter.as_deref(),
+            )
+        })
+        .await
+        .flatten()
     }
 
     async fn browse_for_directory(
         &self,
-        _title: String,
-        _initial_dir: Option<PathBuf>,
+        title: String,
+        initial_dir: Option<PathBuf>,
     ) -> Option<PathBuf> {
-        // TODO: Implement using REAPER's directory browser API
-        // The medium-level API doesn't expose these functions yet
-        None
+        main_thread::query(move || {
+            if !reaper_low::Swell::is_available_globally() {
+                return None;
+            }
+            let swell = reaper_low::Swell::get();
+            crate::safe_wrappers::ui::browse_for_directory(swell, &title, initial_dir.as_deref())
+        })
+        .await
+        .flatten()
     }
 
     async fn set_prevent_ui_refresh(&self, prevent: bool) {
