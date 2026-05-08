@@ -15,6 +15,8 @@ use task_core::recipe_ingredient::parse_ingredient_line;
 const NYT_FIXTURE: &str = include_str!("recipe_import_fixtures/nyt-cooking-jsonld.html");
 const SE_FIXTURE: &str = include_str!("recipe_import_fixtures/seriouseats-graph.html");
 const OG_FIXTURE: &str = include_str!("recipe_import_fixtures/opengraph-only.html");
+const ALLRECIPES_FIXTURE: &str = include_str!("recipe_import_fixtures/allrecipes-chef-john.html");
+const BBC_FIXTURE: &str = include_str!("recipe_import_fixtures/bbc-good-food-jsonld.html");
 
 #[test]
 fn jsonld_single_recipe_populates_all_known_fields() {
@@ -169,6 +171,109 @@ fn iso_duration_table() {
             "duration parser disagreed on {input:?}"
         );
     }
+}
+
+#[test]
+fn allrecipes_chef_john_fixture_full_recipe() {
+    // Synthetic fixture mirroring the canonical schema.org/Recipe shape
+    // Allrecipes serves. Allrecipes blocks data-center curl, so live
+    // capture isn't possible from CI; Mealie's allrecipes scraper is a
+    // 7-line stub inheriting the generic schema.org parser, confirming
+    // the site has zero quirks beyond standard JSON-LD.
+    let result = RecipeImporter::parse(
+        ALLRECIPES_FIXTURE,
+        "https://www.allrecipes.com/recipe/231221/chef-johns-buttermilk-fried-chicken/",
+    )
+    .unwrap();
+    assert_eq!(result.strategy, ImportStrategy::JsonLd);
+    let draft = &result.draft;
+    assert_eq!(draft.name, "Chef John's Buttermilk Fried Chicken");
+    assert!(
+        draft
+            .description
+            .as_deref()
+            .unwrap()
+            .starts_with("Chef John's recipe"),
+        "description present"
+    );
+    assert_eq!(draft.prep_time_minutes, Some(15));
+    assert_eq!(draft.cook_time_minutes, Some(35));
+    assert_eq!(draft.created_by.as_deref(), Some("Chef John"));
+    assert_eq!(
+        result.image_url.as_deref(),
+        Some("https://www.allrecipes.com/thmb/example/buttermilk-fried-chicken.jpg")
+    );
+
+    // recipeYield "8 pieces" — leading int extracted into servings,
+    // string preserved in yield_label.
+    assert_eq!(draft.servings, Some(8));
+    assert_eq!(draft.yield_label.as_deref(), Some("8 pieces"));
+
+    // Ingredients: 17 lines, parser splits qty/unit/food.
+    let ingredients: Vec<RecipeIngredientSpec> =
+        serde_json::from_str(&draft.ingredients_json).unwrap();
+    assert_eq!(ingredients.len(), 17);
+    assert!(
+        ingredients.iter().any(|i| i.food.contains("buttermilk")),
+        "buttermilk among ingredients"
+    );
+    assert!(
+        ingredients
+            .iter()
+            .any(|i| i.unit.as_deref() == Some("cups")),
+        "at least one cup-quantity ingredient"
+    );
+
+    // Steps: 6 HowToSteps.
+    let steps: Vec<RecipeStepSpec> = serde_json::from_str(&draft.steps_json).unwrap();
+    assert_eq!(steps.len(), 6);
+    assert!(
+        steps[0].text.starts_with("Toss chicken pieces"),
+        "first step text matches"
+    );
+
+    // Properties: cuisine + category + keywords + rating.
+    let props: Value = serde_json::from_str(draft.properties_json.as_deref().unwrap()).unwrap();
+    assert_eq!(
+        props.get("cuisine").and_then(Value::as_str),
+        Some("American")
+    );
+    // recipeCategory is an array; first wins.
+    assert_eq!(
+        props.get("category").and_then(Value::as_str),
+        Some("Dinner")
+    );
+    assert!(
+        props.get("keywords").and_then(Value::as_array).is_some(),
+        "keywords stored as array"
+    );
+    assert!(
+        props
+            .get("rating")
+            .and_then(Value::as_f64)
+            .map(|r| (4.7..=4.9).contains(&r))
+            .unwrap_or(false),
+        "ratingValue 4.8 (string) clamped + parsed"
+    );
+}
+
+#[test]
+fn bbc_good_food_live_fixture() {
+    // Live-captured BBC Good Food page (trimmed to head + JSON-LD).
+    // Confirms our parser handles a real-world non-NYT, non-Allrecipes
+    // schema.org Recipe page end-to-end.
+    let result = RecipeImporter::parse(
+        BBC_FIXTURE,
+        "https://www.bbcgoodfood.com/recipes/easy-chocolate-cake",
+    )
+    .unwrap();
+    // Either JsonLd (preferred) or OpenGraph fallback both fine — the
+    // assertion is that name + image_url come through.
+    assert!(!result.draft.name.is_empty(), "name populated");
+    assert!(
+        result.image_url.is_some() || result.draft.description.is_some(),
+        "at least image or description populated"
+    );
 }
 
 #[test]

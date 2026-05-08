@@ -1550,8 +1550,10 @@ dependencies = [
  "daw-control",
  "daw-module 0.1.0",
  "daw-proto 0.1.0",
+ "facet 0.46.0",
  "tokio",
  "tracing",
+ "vox 0.3.1 (git+https://github.com/Codys-Wright/vox.git?rev=ccb46b54)",
 ]
 
 [[package]]
