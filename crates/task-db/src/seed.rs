@@ -4583,7 +4583,6 @@ async fn seed_food_logs(
     db: &DatabaseConnection,
     summary: &mut DemoSeedSummary,
 ) -> Result<(), DbErr> {
-    use task_core::nutrition::NutritionFacts;
     let today = chrono::Local::now().date_naive();
     let now = Utc::now();
     let org = ORG_PERSONAL;
@@ -4807,13 +4806,11 @@ async fn seed_food_logs(
         let food_id = task_core::food::find_food_by_name(db, Some(org), fix.food_name)
             .await?
             .map(|f| f.id);
-        // Snapshot fields: prefer fixture overrides; otherwise scale
-        // from the linked Food's nutrition.
+        // Snapshot fields are fixture-supplied (manual nutrition for
+        // demo determinism). For free-form takeout rows fix.kcal is
+        // None and the macros stay None.
         let (kcal, protein, carbs, fat, fiber, sodium) =
-            match (fix.kcal, food_id.and_then(|_| None::<NutritionFacts>)) {
-                (Some(_), _) => (fix.kcal, fix.protein, fix.carbs, fix.fat, None, None),
-                _ => (None, None, None, None, None, None),
-            };
+            (fix.kcal, fix.protein, fix.carbs, fix.fat, None, None);
         let mut active = <food_log::ActiveModel as sea_orm::ActiveModelTrait>::default();
         active.id = sea_orm::ActiveValue::Set(id);
         active.date = sea_orm::ActiveValue::Set(date);

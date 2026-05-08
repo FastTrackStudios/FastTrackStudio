@@ -166,6 +166,11 @@ async fn seed_demo_data_covers_every_entity_flavor() {
         "want >= 12 pantry items, got {}",
         s.pantry_items_created
     );
+    assert!(
+        s.food_logs_created >= 12,
+        "want >= 12 food log rows, got {}",
+        s.food_logs_created
+    );
 
     // Pantry should have at least one expiring-soon item (within 7 days).
     use chrono::Duration as ChronoDuration;

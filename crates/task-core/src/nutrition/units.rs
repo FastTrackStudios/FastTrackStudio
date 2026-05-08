@@ -92,9 +92,7 @@ pub fn to_grams_best_effort(
     if let Some(g) = to_grams(quantity, unit) {
         return Some(g);
     }
-    if volume_to_ml_factor(unit).is_none() {
-        return None;
-    }
+    volume_to_ml_factor(unit)?;
     let density = density_g_per_ml.or(if assume_water { Some(1.0) } else { None })?;
     volume_to_grams(quantity, unit, density)
 }
