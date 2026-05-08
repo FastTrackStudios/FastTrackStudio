@@ -550,6 +550,77 @@ pub struct PropertyDefinitionView {
     pub updated_at: String,
 }
 
+/// A project-type / workflow binding.
+///
+/// Exposes the `Integration` entity through a workflow-oriented lens:
+/// when `Project::project_type` matches an Integration's `name`, that
+/// integration's `statuses` and `task_templates` define the workflow's
+/// status set and standard task scaffolding.
+///
+/// Status gating is *advisory* at this layer — `Task::status` is a fixed
+/// SeaORM enum (Open/InProgress/Done/Cancelled/...). Integrations
+/// declare their workflow's named statuses, which clients map onto the
+/// canonical enum at presentation time.
+#[vox::service]
+pub trait ProjectTypeService {
+    /// Every registered project type / workflow.
+    async fn list_types(&self) -> Result<Vec<ProjectTypeView>, VaultError>;
+
+    /// Look up a single type by `name`.
+    async fn get_type(&self, name: String) -> Result<Option<ProjectTypeView>, VaultError>;
+
+    /// Register a new type or upsert an existing one (matched by `name`).
+    /// All list payloads are JSON-encoded to keep the wire shape
+    /// Vox/Facet-friendly.
+    async fn register_type(&self, spec: ProjectTypeSpec) -> Result<ProjectTypeView, VaultError>;
+
+    /// Delete a type by name. Projects referencing it keep their
+    /// `project_type` string; the lookup just returns None afterwards.
+    async fn delete_type(&self, name: String) -> Result<(), VaultError>;
+
+    /// Resolve the integration matching a project's `project_type`. Returns
+    /// `None` when the project has no type or no matching integration is
+    /// registered.
+    async fn get_active_for_project(
+        &self,
+        project_id: Uuid,
+    ) -> Result<Option<ProjectTypeView>, VaultError>;
+}
+
+/// Argument bundle for [`ProjectTypeService::register_type`]. Collapses
+/// to a single Facet-friendly struct so the trait method stays under
+/// Vox's tuple-arity limit.
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct ProjectTypeSpec {
+    pub name: String,
+    /// JSON-encoded `Vec<StatusDef>`.
+    pub statuses_json: String,
+    /// JSON-encoded `Vec<TaskTemplate>`.
+    pub task_templates_json: String,
+    /// JSON-encoded `Vec<ProjectTemplate>` — leave empty if none.
+    pub project_templates_json: String,
+    pub area_conventions: Vec<String>,
+    pub context_conventions: Vec<String>,
+}
+
+/// Wire-friendly snapshot of a project-type integration. Lists are sent
+/// as JSON-encoded strings to dodge Vox/Facet limitations on nested
+/// custom types.
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct ProjectTypeView {
+    pub id: Uuid,
+    pub name: String,
+    /// JSON-encoded `Vec<StatusDef>`.
+    pub statuses_json: String,
+    /// JSON-encoded `Vec<TaskTemplate>` (project-template-free standalone
+    /// task scaffolding).
+    pub task_templates_json: String,
+    /// JSON-encoded `Vec<ProjectTemplate>`.
+    pub project_templates_json: String,
+    pub area_conventions: Vec<String>,
+    pub context_conventions: Vec<String>,
+}
+
 #[vox::service]
 pub trait SystemService {
     /// Fast live capability snapshot for this task-server instance.

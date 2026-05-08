@@ -1542,6 +1542,7 @@ dependencies = [
  "futures",
  "serde",
  "serde_json",
+ "tracing",
  "vox 0.3.1 (git+https://github.com/Codys-Wright/vox.git?rev=ccb46b54)",
 ]
 

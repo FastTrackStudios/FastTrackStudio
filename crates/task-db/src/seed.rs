@@ -23,6 +23,10 @@ use task_core::cycle::{self, CycleStatus, CycleTaskList};
 use task_core::email;
 use task_core::email::EmailStringList;
 use task_core::expense::{self, ExpenseStatus};
+use task_core::integration::{
+    self, IntegrationStringList, ProjectTemplateList, StatusDef, StatusDefList, TaskTemplate,
+    TaskTemplateList,
+};
 use task_core::invoice::{self, InvoiceLine, InvoiceLineList, InvoiceStatus, Payment, PaymentList};
 use task_core::notification;
 use task_core::people::{self, ContactMethod, ContactMethodList, ProviderRef, ProviderRefList};
@@ -81,6 +85,8 @@ pub struct DemoSeedSummary {
     pub email_refs_unchanged: usize,
     pub attachments_created: usize,
     pub attachments_unchanged: usize,
+    pub integrations_created: usize,
+    pub integrations_unchanged: usize,
 }
 
 impl DemoSeedSummary {
@@ -99,6 +105,7 @@ impl DemoSeedSummary {
             + self.invoices_created
             + self.email_refs_created
             + self.attachments_created
+            + self.integrations_created
     }
 
     pub fn total_unchanged(&self) -> usize {
@@ -116,6 +123,7 @@ impl DemoSeedSummary {
             + self.invoices_unchanged
             + self.email_refs_unchanged
             + self.attachments_unchanged
+            + self.integrations_unchanged
     }
 }
 
@@ -140,6 +148,7 @@ pub async fn seed_demo_data(db: &DatabaseConnection) -> Result<DemoSeedSummary, 
     seed_invoices(db, &mut summary).await?;
     seed_email_refs(db, &mut summary).await?;
     seed_attachments(db, &mut summary).await?;
+    seed_integrations(db, &mut summary).await?;
     Ok(summary)
 }
 
@@ -147,6 +156,17 @@ pub async fn seed_demo_data(db: &DatabaseConnection) -> Result<DemoSeedSummary, 
 pub async fn reset_demo_data(db: &DatabaseConnection) -> Result<DemoSeedSummary, DbErr> {
     let mut summary = DemoSeedSummary::default();
 
+    for key in INTEGRATION_KEYS {
+        let id = demo_id(key);
+        if integration::Entity::delete_by_id(id)
+            .exec(db)
+            .await?
+            .rows_affected
+            > 0
+        {
+            summary.integrations_created += 1;
+        }
+    }
     for key in ATTACHMENT_KEYS {
         let id = demo_id(key);
         if attachment::Entity::delete_by_id(id)
@@ -422,6 +442,13 @@ const EMAIL_REF_KEYS: &[&str] = &[
     "email:fix-auth-stack-trace",
     "email:montreal-client-revisions",
     "email:tour-venue-confirmation",
+];
+
+const INTEGRATION_KEYS: &[&str] = &[
+    "integration:audio-production",
+    "integration:video-production",
+    "integration:cooking",
+    "integration:fitness",
 ];
 
 // ── Project fixtures ────────────────────────────────────────────────────────
@@ -2263,4 +2290,186 @@ async fn seed_attachments(
         }
     }
     Ok(())
+}
+
+// ── Integration / project-type fixtures ────────────────────────────────────
+
+async fn seed_integrations(
+    db: &DatabaseConnection,
+    summary: &mut DemoSeedSummary,
+) -> Result<(), DbErr> {
+    let integrations = [
+        integration_active(
+            "integration:audio-production",
+            "audio-production",
+            &[
+                ("Tracking", false, Some("#3b82f6")),
+                ("Mixing", false, Some("#8b5cf6")),
+                ("Mastering", false, Some("#ec4899")),
+                ("Approved", true, Some("#10b981")),
+                ("On Hold", false, Some("#f59e0b")),
+            ],
+            &[
+                ("Set up session", "tracking", "high", "audio,session-prep"),
+                ("Reference compare", "mixing", "normal", "audio,review"),
+                (
+                    "Master & loudness check",
+                    "mastering",
+                    "high",
+                    "audio,master",
+                ),
+                (
+                    "Client approval round",
+                    "approved",
+                    "normal",
+                    "audio,client",
+                ),
+            ],
+            &["Music"],
+            &["studio", "remote"],
+        ),
+        integration_active(
+            "integration:video-production",
+            "video-production",
+            &[
+                ("Pre-production", false, Some("#3b82f6")),
+                ("Shoot", false, Some("#f97316")),
+                ("Editing", false, Some("#8b5cf6")),
+                ("Color", false, Some("#ec4899")),
+                ("Sound", false, Some("#06b6d4")),
+                ("Final", true, Some("#10b981")),
+            ],
+            &[
+                ("Shot list", "pre-production", "high", "video,planning"),
+                (
+                    "Location scout",
+                    "pre-production",
+                    "normal",
+                    "video,planning",
+                ),
+                ("Rough cut", "editing", "normal", "video,edit"),
+                ("Color pass", "color", "normal", "video,color"),
+                ("Audio mix", "sound", "normal", "video,audio"),
+            ],
+            &["Video"],
+            &["set", "studio", "post"],
+        ),
+        integration_active(
+            "integration:cooking",
+            "cooking",
+            &[
+                ("Planned", false, Some("#3b82f6")),
+                ("Shopping", false, Some("#f59e0b")),
+                ("Prepping", false, Some("#8b5cf6")),
+                ("Cooked", true, Some("#10b981")),
+            ],
+            &[
+                (
+                    "Plan meals for the week",
+                    "planned",
+                    "normal",
+                    "cooking,plan",
+                ),
+                (
+                    "Generate shopping list",
+                    "shopping",
+                    "normal",
+                    "cooking,shopping",
+                ),
+                ("Mise en place", "prepping", "normal", "cooking,prep"),
+                ("Cook & plate", "cooked", "normal", "cooking"),
+            ],
+            &["Personal"],
+            &["kitchen", "shop"],
+        ),
+        integration_active(
+            "integration:fitness",
+            "fitness",
+            &[
+                ("Scheduled", false, Some("#3b82f6")),
+                ("In Progress", false, Some("#8b5cf6")),
+                ("Completed", true, Some("#10b981")),
+                ("Skipped", false, Some("#6b7280")),
+            ],
+            &[
+                ("Warm-up", "scheduled", "low", "fitness,warmup"),
+                ("Main lift", "in-progress", "high", "fitness,strength"),
+                (
+                    "Accessory work",
+                    "in-progress",
+                    "normal",
+                    "fitness,accessory",
+                ),
+                ("Cooldown & log", "completed", "low", "fitness,log"),
+            ],
+            &["Personal"],
+            &["gym", "home"],
+        ),
+    ];
+
+    for i in integrations {
+        let id = match &i.id {
+            Set(v) => *v,
+            _ => unreachable!(),
+        };
+        if integration::Entity::find_by_id(id).one(db).await?.is_some() {
+            summary.integrations_unchanged += 1;
+        } else {
+            integration::Entity::insert(i).exec(db).await?;
+            summary.integrations_created += 1;
+        }
+    }
+    Ok(())
+}
+
+fn integration_active(
+    key: &str,
+    name: &str,
+    statuses: &[(&str, bool, Option<&str>)],
+    task_templates: &[(&str, &str, &str, &str)],
+    area_conventions: &[&str],
+    context_conventions: &[&str],
+) -> integration::ActiveModel {
+    let status_list = StatusDefList(
+        statuses
+            .iter()
+            .map(|(s, completion, color)| StatusDef {
+                name: (*s).to_string(),
+                is_completion: *completion,
+                color: color.map(str::to_string),
+            })
+            .collect(),
+    );
+
+    let task_template_list = TaskTemplateList(
+        task_templates
+            .iter()
+            .map(|(title, status, priority, tags)| TaskTemplate {
+                title: (*title).to_string(),
+                status: Some((*status).to_string()),
+                priority: Some((*priority).to_string()),
+                contexts: IntegrationStringList::default(),
+                tags: IntegrationStringList(
+                    tags.split(',').map(|t| t.trim().to_string()).collect(),
+                ),
+                recurrence: None,
+                time_estimate_minutes: None,
+                body: None,
+            })
+            .collect(),
+    );
+
+    integration::ActiveModel {
+        id: Set(demo_id(key)),
+        name: Set(name.to_string()),
+        statuses: Set(status_list),
+        project_templates: Set(ProjectTemplateList::default()),
+        task_templates: Set(task_template_list),
+        area_conventions: Set(IntegrationStringList(
+            area_conventions.iter().map(|s| s.to_string()).collect(),
+        )),
+        context_conventions: Set(IntegrationStringList(
+            context_conventions.iter().map(|s| s.to_string()).collect(),
+        )),
+    }
 }

@@ -119,7 +119,8 @@ pub use service::{
     NextcloudCapability, OperatingAreaStatus, OperatingGoal, OperatingModelReport,
     OperatingRoutine, OperatingService, OperatingServiceDispatcher, PeopleService,
     PeopleServiceDispatcher, ProjectFileSummary, ProjectKnowledgeContext, ProjectPatch,
-    ProjectService, ProjectServiceDispatcher, PropertyDefinitionView, PropertyService,
+    ProjectService, ProjectServiceDispatcher, ProjectTypeService, ProjectTypeServiceDispatcher,
+    ProjectTypeSpec, ProjectTypeView, PropertyDefinitionView, PropertyService,
     PropertyServiceDispatcher, ProviderSyncState, RemoteDeckBoard, RemoteDeckStack, ReviewReport,
     SyncPlan, SyncPlanItem, SyncStats, SystemCapabilities, SystemHealth, SystemService,
     SystemServiceDispatcher, TaskService, TaskServiceDispatcher, TimeEntryContext, TimeEntryFilter,
@@ -130,15 +131,16 @@ pub use service::{
     inbox_service_service_descriptor, invoice_service_service_descriptor,
     mail_service_service_descriptor, operating_service_service_descriptor,
     people_service_service_descriptor, project_service_service_descriptor,
-    property_service_service_descriptor, system_service_service_descriptor,
-    task_service_service_descriptor, time_service_service_descriptor,
+    project_type_service_service_descriptor, property_service_service_descriptor,
+    system_service_service_descriptor, task_service_service_descriptor,
+    time_service_service_descriptor,
 };
 #[cfg(feature = "server")]
 pub use service_impl::{
     ActivityServiceImpl, AttachmentServiceImpl, CalendarServiceImpl, ConversationServiceImpl,
     ExpenseServiceImpl, InboxServiceImpl, InvoiceServiceImpl, MailServiceImpl,
-    OperatingServiceImpl, PeopleServiceImpl, ProjectServiceImpl, PropertyServiceImpl,
-    TaskServiceImpl, TimeServiceImpl,
+    OperatingServiceImpl, PeopleServiceImpl, ProjectServiceImpl, ProjectTypeServiceImpl,
+    PropertyServiceImpl, TaskServiceImpl, TimeServiceImpl,
 };
 
 #[cfg(feature = "caldav")]

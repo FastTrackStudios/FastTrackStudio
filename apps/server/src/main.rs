@@ -845,6 +845,12 @@ impl ServerContext {
         })
     }
 
+    fn project_type_service(&self) -> task_core::ProjectTypeServiceImpl {
+        task_core::ProjectTypeServiceImpl::new(task_core::service_impl::ProjectTypeServiceDeps {
+            db: self.db.clone(),
+        })
+    }
+
     fn conversation_service(&self) -> task_core::ConversationServiceImpl {
         task_core::ConversationServiceImpl::new(task_core::service_impl::ConversationServiceDeps {
             provider: self.talk.clone(),
@@ -1115,6 +1121,12 @@ async fn handle_vox_connection(socket: WebSocket, state: AppState, auth: VoxAuth
                 "PropertyService" => {
                     connection.handle_with(task_core::PropertyServiceDispatcher::new(
                         ctx.property_service(),
+                    ));
+                    Ok(())
+                }
+                "ProjectTypeService" => {
+                    connection.handle_with(task_core::ProjectTypeServiceDispatcher::new(
+                        ctx.project_type_service(),
                     ));
                     Ok(())
                 }

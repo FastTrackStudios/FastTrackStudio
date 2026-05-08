@@ -8,6 +8,7 @@ pub mod invoice;
 pub mod mail;
 pub mod operating;
 pub mod people;
+pub mod project_type;
 pub mod property;
 pub mod time;
 
@@ -20,5 +21,6 @@ pub use invoice::{InvoiceServiceDeps, InvoiceServiceImpl};
 pub use mail::{MailServiceDeps, MailServiceImpl};
 pub use operating::{OperatingServiceDeps, OperatingServiceImpl};
 pub use people::{PeopleServiceDeps, PeopleServiceImpl};
+pub use project_type::{ProjectTypeServiceDeps, ProjectTypeServiceImpl};
 pub use property::{PropertyServiceDeps, PropertyServiceImpl};
 pub use time::{TimeServiceDeps, TimeServiceImpl};
