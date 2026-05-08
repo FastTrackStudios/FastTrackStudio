@@ -3320,7 +3320,14 @@ async fn seed_cooking(db: &DatabaseConnection, summary: &mut DemoSeedSummary) ->
 
     // ── Meal plan (today + next 6 days) ──────────────────────────────
     let today = chrono::Local::now().date_naive();
-    let entries: &[(&str, i64, MealType, Option<&str>, Option<&str>)] = &[
+    type MealPlanFixture = (
+        &'static str,
+        i64,
+        MealType,
+        Option<&'static str>,
+        Option<&'static str>,
+    );
+    let entries: &[MealPlanFixture] = &[
         (
             "meal:day0-lunch",
             0,
@@ -3397,7 +3404,7 @@ async fn seed_cooking(db: &DatabaseConnection, summary: &mut DemoSeedSummary) ->
             date: Set(date),
             meal_type: Set(*meal),
             organization: Set(Some(ORG_PERSONAL.to_string())),
-            recipe_id: Set(recipe_key.map(|k| demo_id(k))),
+            recipe_id: Set(recipe_key.map(demo_id)),
             title: Set(title.map(|s| s.to_string())),
             servings_planned: Set(None),
             notes: Set(None),

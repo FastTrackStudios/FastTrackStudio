@@ -596,9 +596,8 @@ impl CookingService for CookingServiceImpl {
             .filter(meal_plan::Column::Date.lte(request.to_date))
             .order_by_asc(meal_plan::Column::Date)
             .order_by_asc(meal_plan::Column::MealType);
-        match request.organization.as_deref() {
-            Some(org) => q = q.filter(meal_plan::Column::Organization.eq(org)),
-            None => {}
+        if let Some(org) = request.organization.as_deref() {
+            q = q.filter(meal_plan::Column::Organization.eq(org));
         }
         let rows = q.all(&self.db).await.map_err(|e| io(e, "list_meal_plan"))?;
         rows.into_iter().map(meal_plan_to_api).collect()
@@ -745,9 +744,8 @@ impl CookingService for CookingServiceImpl {
             .filter(meal_plan::Column::Date.gte(request.from_date))
             .filter(meal_plan::Column::Date.lte(request.to_date))
             .filter(meal_plan::Column::RecipeId.is_not_null());
-        match request.organization.as_deref() {
-            Some(org) => q = q.filter(meal_plan::Column::Organization.eq(org)),
-            None => {}
+        if let Some(org) = request.organization.as_deref() {
+            q = q.filter(meal_plan::Column::Organization.eq(org));
         }
         let entries = q
             .all(&self.db)
