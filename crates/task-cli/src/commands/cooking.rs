@@ -13,11 +13,12 @@ use task_core::service::{
     AddShoppingItemRequest, AddToPantryRequest, BarcodeLookupRequest,
     CompleteCookingSessionRequest, ConsumeFromPantryRequest, CookbookWithRecipes,
     CookingServiceClient, CookingSessionView, CreateFoodProductRequest, CreateFoodRequest,
-    CreateRecipeRequest, FoodServiceClient, GenerateShoppingListFromMissingRequest,
-    GenerateShoppingListRequest, ImportRecipeRequest, MarkIngredientGatheredRequest,
-    MealPlanRangeRequest, NavigateStepRequest, PantryItemPatch, PantryListRequest,
-    PantryServiceClient, RecipeWithDetails, SetMealPlanEntryRequest, ShoppingListWithItems,
-    StartCookingSessionRequest, StepTimerActionRequest,
+    CreateRecipeRequest, CreateSubstitutionRequest, FoodServiceClient,
+    GenerateShoppingListFromMissingRequest, GenerateShoppingListRequest, ImportRecipeRequest,
+    IngredientSuggestion, MarkIngredientGatheredRequest, MealPlanRangeRequest, NavigateStepRequest,
+    PantryItemPatch, PantryListRequest, PantryServiceClient, RecipeWithDetails,
+    SetMealPlanEntryRequest, ShoppingListWithItems, StartCookingSessionRequest,
+    StepTimerActionRequest, SuggestSubstitutionsRequest,
 };
 use uuid::Uuid;
 
@@ -75,6 +76,46 @@ pub(crate) enum CookCommands {
     Session {
         #[command(subcommand)]
         command: SessionCommands,
+    },
+    /// Substitution catalog management (CRUD over swap rules).
+    Substitution {
+        #[command(subcommand)]
+        command: SubstitutionCommands,
+    },
+}
+
+// ── Substitutions ───────────────────────────────────────────────────
+
+#[derive(Subcommand)]
+pub(crate) enum SubstitutionCommands {
+    List {
+        #[arg(long)]
+        organization: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    Create {
+        #[arg(long)]
+        from: String,
+        #[arg(long)]
+        to: String,
+        #[arg(long)]
+        ratio: f64,
+        #[arg(long)]
+        note: Option<String>,
+        #[arg(long, default_value_t = 0.8)]
+        confidence: f32,
+        #[arg(long)]
+        bidirectional: bool,
+        #[arg(long = "diet", value_name = "TAG")]
+        diet: Vec<String>,
+        #[arg(long = "context", value_name = "CTX")]
+        context: Vec<String>,
+        #[arg(long)]
+        organization: Option<String>,
+    },
+    Delete {
+        id: String,
     },
 }
 
@@ -506,6 +547,23 @@ pub(crate) enum RecipeCommands {
         #[arg(long)]
         json: bool,
     },
+    /// Suggest substitutions for missing ingredients or a dietary
+    /// restriction.
+    Substitutions {
+        recipe: String,
+        /// Repeatable: ingredient food name or UUID that's missing.
+        #[arg(long = "missing", value_name = "FOOD")]
+        missing: Vec<String>,
+        /// Repeatable: dietary tag (vegan, gluten_free, dairy_free, …).
+        #[arg(long = "diet", value_name = "TAG")]
+        diet: Vec<String>,
+        #[arg(long)]
+        limit: Option<u32>,
+        #[arg(long)]
+        organization: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Args)]
@@ -708,6 +766,11 @@ pub(crate) async fn run_remote_cook_command(
         CookCommands::Session { command } => {
             let client = remote.cooking().await?;
             run_session(&client, command).await
+        }
+        CookCommands::Substitution { command } => {
+            let client = remote.cooking().await?;
+            let food_client = remote.food().await?;
+            run_substitution(&client, &food_client, command).await
         }
     }
 }
@@ -1416,6 +1479,32 @@ async fn run_recipe(
                     }
                 }
             }
+        }
+        RecipeCommands::Substitutions {
+            recipe,
+            missing,
+            diet,
+            limit,
+            organization,
+            json,
+        } => {
+            let recipe_id = resolve_recipe_id(client, &recipe).await?;
+            let food_client = remote.food().await?;
+            let mut missing_ids: Vec<Uuid> = Vec::new();
+            for m in &missing {
+                missing_ids.push(resolve_food_id(&food_client, m).await?);
+            }
+            let view = client
+                .suggest_substitutions(SuggestSubstitutionsRequest {
+                    recipe_id,
+                    missing_food_ids: missing_ids,
+                    dietary_filter: diet,
+                    organization,
+                    limit_per_ingredient: limit,
+                })
+                .await
+                .map_err(|e| eyre::eyre!("suggest_substitutions: {e}"))?;
+            print_substitution_suggestions(&view, json)?;
         }
         RecipeCommands::Scale {
             recipe,
@@ -2455,4 +2544,182 @@ fn print_pantry_row(r: &task_core::pantry::PantryItemApi) {
         "{}  {} {}  exp={}  {}  ({})",
         r.id, r.quantity, r.unit, exp, min, r.id
     );
+}
+
+// ── Substitutions ───────────────────────────────────────────────────
+
+async fn run_substitution(
+    client: &CookingServiceClient,
+    food_client: &FoodServiceClient,
+    command: SubstitutionCommands,
+) -> eyre::Result<()> {
+    match command {
+        SubstitutionCommands::List { organization, json } => {
+            let rows = client
+                .list_substitutions(organization)
+                .await
+                .map_err(|e| eyre::eyre!("list_substitutions: {e}"))?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&rows)?);
+            } else if rows.is_empty() {
+                println!("(no substitutions)");
+            } else {
+                for s in &rows {
+                    let bidir = if s.bidirectional { "↔" } else { "→" };
+                    let note = s.conversion_note.as_deref().unwrap_or("");
+                    println!(
+                        "{}  {} {} {}  ratio={:.2}  conf={:.2}  {}",
+                        s.id, s.from_food_id, bidir, s.to_food_id, s.ratio, s.confidence, note
+                    );
+                }
+            }
+        }
+        SubstitutionCommands::Create {
+            from,
+            to,
+            ratio,
+            note,
+            confidence,
+            bidirectional,
+            diet,
+            context,
+            organization,
+        } => {
+            let from_id = resolve_food_id(food_client, &from).await?;
+            let to_id = resolve_food_id(food_client, &to).await?;
+            let applies_when = build_applies_when(&diet, &context);
+            let applies_when_json = if applies_when.as_object().is_some_and(|m| m.is_empty()) {
+                None
+            } else {
+                Some(serde_json::to_string(&applies_when)?)
+            };
+            let api = client
+                .create_substitution(CreateSubstitutionRequest {
+                    from_food_id: from_id,
+                    to_food_id: to_id,
+                    ratio,
+                    conversion_note: note,
+                    applies_when_json,
+                    confidence,
+                    bidirectional,
+                    organization,
+                    created_by: None,
+                })
+                .await
+                .map_err(|e| eyre::eyre!("create_substitution: {e}"))?;
+            println!(
+                "Created substitution {} ({} → {}, ratio {:.2}, conf {:.2})",
+                api.id, api.from_food_id, api.to_food_id, api.ratio, api.confidence
+            );
+        }
+        SubstitutionCommands::Delete { id } => {
+            let parsed = Uuid::parse_str(&id)
+                .map_err(|e| eyre::eyre!("invalid substitution id '{id}': {e}"))?;
+            client
+                .delete_substitution(parsed)
+                .await
+                .map_err(|e| eyre::eyre!("delete_substitution: {e}"))?;
+            println!("Deleted substitution {parsed}");
+        }
+    }
+    Ok(())
+}
+
+fn build_applies_when(diet: &[String], context: &[String]) -> serde_json::Value {
+    let mut obj = serde_json::Map::new();
+    if !diet.is_empty() {
+        obj.insert(
+            "dietary".to_string(),
+            serde_json::Value::Array(
+                diet.iter()
+                    .map(|s| serde_json::Value::String(s.clone()))
+                    .collect(),
+            ),
+        );
+    }
+    if !context.is_empty() {
+        obj.insert(
+            "context".to_string(),
+            serde_json::Value::Array(
+                context
+                    .iter()
+                    .map(|s| serde_json::Value::String(s.clone()))
+                    .collect(),
+            ),
+        );
+    }
+    serde_json::Value::Object(obj)
+}
+
+fn print_substitution_suggestions(
+    view: &task_core::service::SubstitutionSuggestionsView,
+    json: bool,
+) -> eyre::Result<()> {
+    if json {
+        let payload = serde_json::json!({
+            "recipe_id": view.recipe_id,
+            "recipe_name": view.recipe_name,
+            "suggestions": serde_json::from_str::<serde_json::Value>(&view.suggestions_json)
+                .unwrap_or(serde_json::Value::Array(Vec::new())),
+            "warnings": view.warnings,
+        });
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+    let suggestions: Vec<IngredientSuggestion> =
+        serde_json::from_str(&view.suggestions_json).unwrap_or_default();
+    println!("Substitutions for '{}':", view.recipe_name);
+    for w in &view.warnings {
+        println!("  warn: {w}");
+    }
+    if suggestions.is_empty() {
+        println!("  (no flagged ingredients)");
+        return Ok(());
+    }
+    for s in &suggestions {
+        let qty = s
+            .original_quantity
+            .map(|q| format!("{q}"))
+            .unwrap_or_else(|| "?".to_string());
+        let unit = s.original_unit.as_deref().unwrap_or("");
+        let reasons = if s.reasons.is_empty() {
+            String::new()
+        } else {
+            format!(" [{}]", s.reasons.join(", "))
+        };
+        println!(
+            "\nFor \"{}\" ({} {}){}:",
+            s.ingredient_food_name,
+            qty,
+            unit,
+            reasons.trim_end()
+        );
+        if s.suggestions.is_empty() {
+            println!("  (no available swaps)");
+            continue;
+        }
+        for r in &s.suggestions {
+            let qty_str = r
+                .suggested_quantity
+                .map(|q| format!("{q}"))
+                .unwrap_or_else(|| format!("{:.2}×", r.ratio));
+            let note = r
+                .conversion_note
+                .as_deref()
+                .map(|n| format!(" — {n}"))
+                .unwrap_or_default();
+            let inv = if r.is_inverse { " (inverse)" } else { "" };
+            println!(
+                "  → {} ({} {}){}{}  — confidence {:.2}, score {:.2}",
+                r.to_food_name,
+                qty_str,
+                r.suggested_unit.as_deref().unwrap_or(""),
+                note,
+                inv,
+                r.confidence,
+                r.score
+            );
+        }
+    }
+    Ok(())
 }

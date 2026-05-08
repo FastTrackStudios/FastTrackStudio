@@ -50,6 +50,7 @@ use task_core::recipe;
 use task_core::recipe_ingredient;
 use task_core::recipe_step;
 use task_core::shopping_list;
+use task_core::substitution;
 use task_core::task::{
     self, EmailRefList, Priority, RecurrenceAnchor, ReminderList, Status, StringList,
     TaskDependencyList, TaskRelationList, TimeEntry, TimeEntryList, WikiLink, WikiLinkList,
@@ -130,6 +131,8 @@ pub struct DemoSeedSummary {
     pub food_logs_unchanged: usize,
     pub cooking_sessions_created: usize,
     pub cooking_sessions_unchanged: usize,
+    pub substitutions_created: usize,
+    pub substitutions_unchanged: usize,
 }
 
 impl DemoSeedSummary {
@@ -161,6 +164,7 @@ impl DemoSeedSummary {
             + self.pantry_items_created
             + self.food_logs_created
             + self.cooking_sessions_created
+            + self.substitutions_created
     }
 
     pub fn total_unchanged(&self) -> usize {
@@ -191,6 +195,7 @@ impl DemoSeedSummary {
             + self.pantry_items_unchanged
             + self.food_logs_unchanged
             + self.cooking_sessions_unchanged
+            + self.substitutions_unchanged
     }
 }
 
@@ -230,6 +235,7 @@ pub async fn seed_demo_data(db: &DatabaseConnection) -> Result<DemoSeedSummary, 
     recompute_demo_recipe_nutrition(db).await?;
     seed_food_logs(db, &mut summary).await?;
     seed_cooking_sessions(db, &mut summary).await?;
+    seed_substitutions(db, &mut summary).await?;
     Ok(summary)
 }
 
@@ -474,6 +480,18 @@ pub async fn reset_demo_data(db: &DatabaseConnection) -> Result<DemoSeedSummary,
             > 0
         {
             summary.cookbooks_created += 1;
+        }
+    }
+    // Substitutions reference foods; reset before foods.
+    for key in SUBSTITUTION_KEYS {
+        let id = demo_id(key);
+        if substitution::Entity::delete_by_id(id)
+            .exec(db)
+            .await?
+            .rows_affected
+            > 0
+        {
+            summary.substitutions_created += 1;
         }
     }
     // Food products before foods (FK ordering even without enforcement).
@@ -721,6 +739,27 @@ const SHOPPING_LIST_KEYS: &[&str] = &["shop:this-week"];
 const COOKING_SESSION_KEYS: &[&str] = &[
     "cooking-session:active-carbonara",
     "cooking-session:completed-greek-salad",
+];
+
+const SUBSTITUTION_KEYS: &[&str] = &[
+    "substitution:butter-to-ghee",
+    "substitution:butter-to-olive-oil",
+    "substitution:buttermilk-to-whole-milk",
+    "substitution:buttermilk-to-greek-yogurt",
+    "substitution:cow-milk-to-almond-milk",
+    "substitution:cow-milk-to-oat-milk",
+    "substitution:cow-milk-to-soy-milk",
+    "substitution:heavy-cream-to-coconut-cream",
+    "substitution:eggs-to-flax-egg",
+    "substitution:eggs-to-aquafaba",
+    "substitution:flour-to-gf-blend",
+    "substitution:flour-to-almond-flour",
+    "substitution:white-sugar-to-honey",
+    "substitution:white-sugar-to-maple-syrup",
+    "substitution:soy-sauce-to-coconut-aminos",
+    "substitution:pecorino-to-parmesan",
+    "substitution:guanciale-to-bacon",
+    "substitution:chicken-thigh-to-tofu",
 ];
 
 const FOOD_LOG_KEYS: &[&str] = &[
@@ -5011,5 +5050,593 @@ async fn seed_cooking_sessions(
         summary.cooking_sessions_unchanged += 1;
     }
 
+    Ok(())
+}
+
+// ── Substitution catalog ────────────────────────────────────────────
+
+/// Foods auto-created by the substitution seeder when they aren't part
+/// of the main `FOOD_FIXTURES` table. Keyed identically so demo UUIDs
+/// stay stable.
+struct ExtraFoodFixture {
+    key: &'static str,
+    name: &'static str,
+    aliases: &'static [&'static str],
+    category: &'static str,
+    default_unit: Option<&'static str>,
+    dietary_tags: &'static [&'static str],
+}
+
+const SUBSTITUTION_EXTRA_FOODS: &[ExtraFoodFixture] = &[
+    ExtraFoodFixture {
+        key: "food:ghee",
+        name: "ghee",
+        aliases: &["clarified butter"],
+        category: "dairy",
+        default_unit: Some("tbsp"),
+        dietary_tags: &["vegetarian", "gluten_free"],
+    },
+    ExtraFoodFixture {
+        key: "food:buttermilk",
+        name: "buttermilk",
+        aliases: &[],
+        category: "dairy",
+        default_unit: Some("cup"),
+        dietary_tags: &["vegetarian", "gluten_free"],
+    },
+    ExtraFoodFixture {
+        key: "food:greek-yogurt",
+        name: "greek yogurt",
+        aliases: &["yogurt"],
+        category: "dairy",
+        default_unit: Some("cup"),
+        dietary_tags: &["vegetarian", "gluten_free"],
+    },
+    ExtraFoodFixture {
+        key: "food:almond-milk",
+        name: "almond milk",
+        aliases: &[],
+        category: "dairy-alternative",
+        default_unit: Some("cup"),
+        dietary_tags: &["vegan", "vegetarian", "dairy_free", "gluten_free"],
+    },
+    ExtraFoodFixture {
+        key: "food:oat-milk",
+        name: "oat milk",
+        aliases: &[],
+        category: "dairy-alternative",
+        default_unit: Some("cup"),
+        dietary_tags: &["vegan", "vegetarian", "dairy_free"],
+    },
+    ExtraFoodFixture {
+        key: "food:soy-milk",
+        name: "soy milk",
+        aliases: &[],
+        category: "dairy-alternative",
+        default_unit: Some("cup"),
+        dietary_tags: &["vegan", "vegetarian", "dairy_free", "gluten_free"],
+    },
+    ExtraFoodFixture {
+        key: "food:heavy-cream",
+        name: "heavy cream",
+        aliases: &["heavy whipping cream"],
+        category: "dairy",
+        default_unit: Some("cup"),
+        dietary_tags: &["vegetarian", "gluten_free"],
+    },
+    ExtraFoodFixture {
+        key: "food:coconut-cream",
+        name: "coconut cream",
+        aliases: &[],
+        category: "dairy-alternative",
+        default_unit: Some("cup"),
+        dietary_tags: &["vegan", "vegetarian", "dairy_free", "gluten_free"],
+    },
+    ExtraFoodFixture {
+        key: "food:flax-egg",
+        name: "flax egg",
+        aliases: &[],
+        category: "pantry-staple",
+        default_unit: Some("piece"),
+        dietary_tags: &["vegan", "vegetarian", "dairy_free", "gluten_free"],
+    },
+    ExtraFoodFixture {
+        key: "food:aquafaba",
+        name: "aquafaba",
+        aliases: &[],
+        category: "pantry-staple",
+        default_unit: Some("tbsp"),
+        dietary_tags: &["vegan", "vegetarian", "dairy_free", "gluten_free"],
+    },
+    ExtraFoodFixture {
+        key: "food:gf-flour-blend",
+        name: "gluten-free 1:1 blend",
+        aliases: &["gluten-free flour", "gf flour"],
+        category: "pantry-staple",
+        default_unit: Some("cup"),
+        dietary_tags: &["vegan", "vegetarian", "dairy_free", "gluten_free"],
+    },
+    ExtraFoodFixture {
+        key: "food:almond-flour",
+        name: "almond flour",
+        aliases: &[],
+        category: "pantry-staple",
+        default_unit: Some("cup"),
+        dietary_tags: &[
+            "vegan",
+            "vegetarian",
+            "dairy_free",
+            "gluten_free",
+            "low_carb",
+        ],
+    },
+    ExtraFoodFixture {
+        key: "food:honey",
+        name: "honey",
+        aliases: &[],
+        category: "pantry-staple",
+        default_unit: Some("cup"),
+        dietary_tags: &["vegetarian", "gluten_free", "dairy_free"],
+    },
+    ExtraFoodFixture {
+        key: "food:maple-syrup",
+        name: "maple syrup",
+        aliases: &[],
+        category: "pantry-staple",
+        default_unit: Some("cup"),
+        dietary_tags: &["vegan", "vegetarian", "gluten_free", "dairy_free"],
+    },
+    ExtraFoodFixture {
+        key: "food:coconut-aminos",
+        name: "coconut aminos",
+        aliases: &[],
+        category: "pantry-staple",
+        default_unit: Some("tbsp"),
+        dietary_tags: &[
+            "vegan",
+            "vegetarian",
+            "gluten_free",
+            "dairy_free",
+            "soy_free",
+        ],
+    },
+    ExtraFoodFixture {
+        key: "food:parmesan",
+        name: "parmesan",
+        aliases: &["parmigiano reggiano"],
+        category: "dairy",
+        default_unit: Some("cup"),
+        dietary_tags: &["vegetarian", "gluten_free"],
+    },
+    ExtraFoodFixture {
+        key: "food:bacon",
+        name: "bacon",
+        aliases: &[],
+        category: "meat",
+        default_unit: Some("oz"),
+        dietary_tags: &["gluten_free", "dairy_free"],
+    },
+    ExtraFoodFixture {
+        key: "food:tofu-firm",
+        name: "tofu (firm)",
+        aliases: &["tofu", "firm tofu"],
+        category: "protein-alternative",
+        default_unit: Some("oz"),
+        dietary_tags: &["vegan", "vegetarian", "dairy_free", "gluten_free"],
+    },
+];
+
+/// Stamp `properties.dietary_tags` on existing foods so the dietary
+/// filter on `suggest_substitutions` has something to read.
+const FOOD_DIETARY_TAGS: &[(&str, &[&str])] = &[
+    ("food:butter", &["vegetarian", "gluten_free"]),
+    ("food:eggs", &["vegetarian", "gluten_free"]),
+    ("food:whole-milk", &["vegetarian", "gluten_free"]),
+    ("food:feta-cheese", &["vegetarian", "gluten_free"]),
+    ("food:pecorino-romano", &["vegetarian", "gluten_free"]),
+    ("food:guanciale", &["gluten_free", "dairy_free"]),
+    ("food:chicken-thigh", &["gluten_free", "dairy_free"]),
+    ("food:ground-beef", &["gluten_free", "dairy_free"]),
+    (
+        "food:olive-oil",
+        &["vegan", "vegetarian", "dairy_free", "gluten_free"],
+    ),
+    (
+        "food:white-sugar",
+        &["vegan", "vegetarian", "dairy_free", "gluten_free"],
+    ),
+    (
+        "food:brown-sugar",
+        &["vegan", "vegetarian", "dairy_free", "gluten_free"],
+    ),
+    (
+        "food:all-purpose-flour",
+        &["vegan", "vegetarian", "dairy_free"],
+    ),
+    ("food:soy-sauce", &["vegan", "vegetarian", "dairy_free"]),
+    (
+        "food:white-rice",
+        &["vegan", "vegetarian", "dairy_free", "gluten_free"],
+    ),
+    ("food:dried-pasta", &["vegan", "vegetarian", "dairy_free"]),
+    ("food:spaghetti", &["vegan", "vegetarian", "dairy_free"]),
+    (
+        "food:chickpeas-canned",
+        &["vegan", "vegetarian", "dairy_free", "gluten_free"],
+    ),
+    (
+        "food:canned-tomatoes",
+        &["vegan", "vegetarian", "dairy_free", "gluten_free"],
+    ),
+    (
+        "food:canned-coconut-milk",
+        &["vegan", "vegetarian", "dairy_free", "gluten_free"],
+    ),
+    ("food:american-cheese", &["vegetarian", "gluten_free"]),
+    ("food:brioche-bun", &["vegetarian"]),
+    (
+        "food:yellow-onion",
+        &["vegan", "vegetarian", "dairy_free", "gluten_free"],
+    ),
+    (
+        "food:red-onion",
+        &["vegan", "vegetarian", "dairy_free", "gluten_free"],
+    ),
+    (
+        "food:garlic",
+        &["vegan", "vegetarian", "dairy_free", "gluten_free"],
+    ),
+    (
+        "food:tomato",
+        &["vegan", "vegetarian", "dairy_free", "gluten_free"],
+    ),
+    (
+        "food:cucumber",
+        &["vegan", "vegetarian", "dairy_free", "gluten_free"],
+    ),
+    (
+        "food:banana",
+        &["vegan", "vegetarian", "dairy_free", "gluten_free"],
+    ),
+];
+
+async fn ensure_extra_food(
+    db: &DatabaseConnection,
+    fix: &ExtraFoodFixture,
+    now: chrono::DateTime<Utc>,
+) -> Result<(), DbErr> {
+    let id = demo_id(fix.key);
+    if food::Entity::find_by_id(id).one(db).await?.is_some() {
+        return Ok(());
+    }
+    let aliases = FoodAliasList::from(
+        fix.aliases
+            .iter()
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>(),
+    );
+    let mut props = serde_json::Map::new();
+    props.insert(
+        "dietary_tags".to_string(),
+        serde_json::Value::Array(
+            fix.dietary_tags
+                .iter()
+                .map(|s| serde_json::Value::String((*s).to_string()))
+                .collect(),
+        ),
+    );
+    let active = food::ActiveModel {
+        id: Set(id),
+        name: Set(fix.name.to_string()),
+        aliases: Set(aliases),
+        category: Set(Some(fix.category.to_string())),
+        default_unit: Set(fix.default_unit.map(|s| s.to_string())),
+        organization: Set(Some(ORG_PERSONAL.to_string())),
+        nutrition_per_100g: Set(JsonObject::default()),
+        notes: Set(None),
+        properties: Set(JsonObject::from_value(serde_json::Value::Object(props))),
+        created_by: Set(Some("cody".to_string())),
+        created_at: Set(now),
+        updated_at: Set(now),
+    };
+    food::Entity::insert(active).exec(db).await?;
+    Ok(())
+}
+
+async fn stamp_dietary_tags(
+    db: &DatabaseConnection,
+    food_key: &str,
+    tags: &[&str],
+) -> Result<(), DbErr> {
+    let id = demo_id(food_key);
+    let Some(model) = food::Entity::find_by_id(id).one(db).await? else {
+        return Ok(());
+    };
+    // Skip work when the tags are already present (idempotency).
+    let existing = model
+        .properties
+        .as_value()
+        .get("dietary_tags")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(str::to_string))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let target: Vec<String> = tags.iter().map(|s| (*s).to_string()).collect();
+    if existing == target {
+        return Ok(());
+    }
+    let mut props = match model.properties.as_value().clone() {
+        serde_json::Value::Object(map) => map,
+        _ => serde_json::Map::new(),
+    };
+    props.insert(
+        "dietary_tags".to_string(),
+        serde_json::Value::Array(
+            tags.iter()
+                .map(|s| serde_json::Value::String((*s).to_string()))
+                .collect(),
+        ),
+    );
+    let mut active: food::ActiveModel = model.into();
+    active.properties = Set(JsonObject::from_value(serde_json::Value::Object(props)));
+    active.updated_at = Set(Utc::now());
+    active.update(db).await?;
+    Ok(())
+}
+
+#[derive(Clone, Copy)]
+struct SubstitutionFixture {
+    key: &'static str,
+    from_food_key: &'static str,
+    to_food_key: &'static str,
+    ratio: f64,
+    bidirectional: bool,
+    dietary: &'static [&'static str],
+    confidence: f32,
+    note: Option<&'static str>,
+}
+
+const SUBSTITUTION_FIXTURES: &[SubstitutionFixture] = &[
+    SubstitutionFixture {
+        key: "substitution:butter-to-ghee",
+        from_food_key: "food:butter",
+        to_food_key: "food:ghee",
+        ratio: 1.0,
+        bidirectional: true,
+        dietary: &[],
+        confidence: 0.95,
+        note: None,
+    },
+    SubstitutionFixture {
+        key: "substitution:butter-to-olive-oil",
+        from_food_key: "food:butter",
+        to_food_key: "food:olive-oil",
+        ratio: 0.75,
+        bidirectional: false,
+        dietary: &["vegan", "dairy_free"],
+        confidence: 0.85,
+        note: Some("best for sautéing"),
+    },
+    SubstitutionFixture {
+        key: "substitution:buttermilk-to-whole-milk",
+        from_food_key: "food:buttermilk",
+        to_food_key: "food:whole-milk",
+        ratio: 1.0,
+        bidirectional: false,
+        dietary: &[],
+        confidence: 0.9,
+        note: Some("plus 1 tbsp lemon juice or vinegar per cup"),
+    },
+    SubstitutionFixture {
+        key: "substitution:buttermilk-to-greek-yogurt",
+        from_food_key: "food:buttermilk",
+        to_food_key: "food:greek-yogurt",
+        ratio: 1.0,
+        bidirectional: false,
+        dietary: &[],
+        confidence: 0.85,
+        note: Some("thin with milk to buttermilk consistency"),
+    },
+    SubstitutionFixture {
+        key: "substitution:cow-milk-to-almond-milk",
+        from_food_key: "food:whole-milk",
+        to_food_key: "food:almond-milk",
+        ratio: 1.0,
+        bidirectional: true,
+        dietary: &["vegan", "dairy_free"],
+        confidence: 0.9,
+        note: Some("unsweetened"),
+    },
+    SubstitutionFixture {
+        key: "substitution:cow-milk-to-oat-milk",
+        from_food_key: "food:whole-milk",
+        to_food_key: "food:oat-milk",
+        ratio: 1.0,
+        bidirectional: true,
+        dietary: &["vegan", "dairy_free"],
+        confidence: 0.92,
+        note: None,
+    },
+    SubstitutionFixture {
+        key: "substitution:cow-milk-to-soy-milk",
+        from_food_key: "food:whole-milk",
+        to_food_key: "food:soy-milk",
+        ratio: 1.0,
+        bidirectional: true,
+        dietary: &["vegan", "dairy_free"],
+        confidence: 0.9,
+        note: None,
+    },
+    SubstitutionFixture {
+        key: "substitution:heavy-cream-to-coconut-cream",
+        from_food_key: "food:heavy-cream",
+        to_food_key: "food:coconut-cream",
+        ratio: 1.0,
+        bidirectional: false,
+        dietary: &["vegan", "dairy_free"],
+        confidence: 0.85,
+        note: Some("full-fat canned"),
+    },
+    SubstitutionFixture {
+        key: "substitution:eggs-to-flax-egg",
+        from_food_key: "food:eggs",
+        to_food_key: "food:flax-egg",
+        ratio: 1.0,
+        bidirectional: false,
+        dietary: &["vegan"],
+        confidence: 0.9,
+        note: Some("1 tbsp ground flax + 3 tbsp water per egg, rest 5min"),
+    },
+    SubstitutionFixture {
+        key: "substitution:eggs-to-aquafaba",
+        from_food_key: "food:eggs",
+        to_food_key: "food:aquafaba",
+        ratio: 3.0,
+        bidirectional: false,
+        dietary: &["vegan"],
+        confidence: 0.8,
+        note: Some("3 tbsp aquafaba per egg"),
+    },
+    SubstitutionFixture {
+        key: "substitution:flour-to-gf-blend",
+        from_food_key: "food:all-purpose-flour",
+        to_food_key: "food:gf-flour-blend",
+        ratio: 1.0,
+        bidirectional: false,
+        dietary: &["gluten_free"],
+        confidence: 0.88,
+        note: None,
+    },
+    SubstitutionFixture {
+        key: "substitution:flour-to-almond-flour",
+        from_food_key: "food:all-purpose-flour",
+        to_food_key: "food:almond-flour",
+        ratio: 0.75,
+        bidirectional: false,
+        dietary: &["gluten_free", "low_carb"],
+        confidence: 0.7,
+        note: Some("won't rise — use only in non-leavened recipes"),
+    },
+    SubstitutionFixture {
+        key: "substitution:white-sugar-to-honey",
+        from_food_key: "food:white-sugar",
+        to_food_key: "food:honey",
+        ratio: 0.75,
+        bidirectional: false,
+        dietary: &[],
+        confidence: 0.85,
+        note: Some("reduce other liquids by 25%, drop oven temp 25°F"),
+    },
+    SubstitutionFixture {
+        key: "substitution:white-sugar-to-maple-syrup",
+        from_food_key: "food:white-sugar",
+        to_food_key: "food:maple-syrup",
+        ratio: 0.75,
+        bidirectional: false,
+        dietary: &["vegan"],
+        confidence: 0.85,
+        note: Some("reduce other liquids by 25%"),
+    },
+    SubstitutionFixture {
+        key: "substitution:soy-sauce-to-coconut-aminos",
+        from_food_key: "food:soy-sauce",
+        to_food_key: "food:coconut-aminos",
+        ratio: 1.0,
+        bidirectional: true,
+        dietary: &["gluten_free", "soy_free"],
+        confidence: 0.9,
+        note: None,
+    },
+    SubstitutionFixture {
+        key: "substitution:pecorino-to-parmesan",
+        from_food_key: "food:pecorino-romano",
+        to_food_key: "food:parmesan",
+        ratio: 1.0,
+        bidirectional: true,
+        dietary: &[],
+        confidence: 0.9,
+        note: Some("parmesan is milder"),
+    },
+    SubstitutionFixture {
+        key: "substitution:guanciale-to-bacon",
+        from_food_key: "food:guanciale",
+        to_food_key: "food:bacon",
+        ratio: 1.0,
+        bidirectional: true,
+        dietary: &[],
+        confidence: 0.85,
+        note: Some("smokier flavor"),
+    },
+    SubstitutionFixture {
+        key: "substitution:chicken-thigh-to-tofu",
+        from_food_key: "food:chicken-thigh",
+        to_food_key: "food:tofu-firm",
+        ratio: 1.0,
+        bidirectional: false,
+        dietary: &["vegan", "vegetarian"],
+        confidence: 0.75,
+        note: Some("press 30min before cooking"),
+    },
+];
+
+async fn seed_substitutions(
+    db: &DatabaseConnection,
+    summary: &mut DemoSeedSummary,
+) -> Result<(), DbErr> {
+    let now = Utc::now();
+    // Stamp dietary tags on the canonical foods first.
+    for (key, tags) in FOOD_DIETARY_TAGS {
+        stamp_dietary_tags(db, key, tags).await?;
+    }
+    // Auto-create the secondary foods referenced only by substitutions.
+    for fix in SUBSTITUTION_EXTRA_FOODS {
+        ensure_extra_food(db, fix, now).await?;
+    }
+
+    for fix in SUBSTITUTION_FIXTURES {
+        let id = demo_id(fix.key);
+        if substitution::Entity::find_by_id(id)
+            .one(db)
+            .await?
+            .is_some()
+        {
+            summary.substitutions_unchanged += 1;
+            continue;
+        }
+        let mut applies_when = serde_json::Map::new();
+        if !fix.dietary.is_empty() {
+            applies_when.insert(
+                "dietary".to_string(),
+                serde_json::Value::Array(
+                    fix.dietary
+                        .iter()
+                        .map(|s| serde_json::Value::String((*s).to_string()))
+                        .collect(),
+                ),
+            );
+        }
+        let active = substitution::ActiveModel {
+            id: Set(id),
+            from_food_id: Set(demo_id(fix.from_food_key)),
+            to_food_id: Set(demo_id(fix.to_food_key)),
+            ratio: Set(fix.ratio),
+            conversion_note: Set(fix.note.map(|s| s.to_string())),
+            applies_when: Set(JsonObject::from_value(serde_json::Value::Object(
+                applies_when,
+            ))),
+            confidence: Set(fix.confidence),
+            bidirectional: Set(fix.bidirectional),
+            organization: Set(Some(ORG_PERSONAL.to_string())),
+            created_by: Set(Some("cody".to_string())),
+            properties: Set(JsonObject::default()),
+            created_at: Set(now),
+            updated_at: Set(now),
+        };
+        substitution::Entity::insert(active).exec(db).await?;
+        summary.substitutions_created += 1;
+    }
     Ok(())
 }

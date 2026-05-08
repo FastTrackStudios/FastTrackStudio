@@ -35,12 +35,15 @@ use crate::recipe_step::{self, RecipeStepApi};
 use crate::service::{
     AddShoppingItemRequest, AggregatedNutritionView, CompleteCookingSessionRequest,
     CookbookWithRecipes, CookingService, CookingSessionView, CreateRecipeRequest,
-    GenerateShoppingListRequest, ImportRecipeRequest, MarkIngredientGatheredRequest,
-    MarkMealPlanCookedRequest, MealPlanRangeRequest, NavigateStepRequest, RecipeImportPreview,
+    CreateSubstitutionRequest, GenerateShoppingListRequest, ImportRecipeRequest,
+    IngredientSuggestion, MarkIngredientGatheredRequest, MarkMealPlanCookedRequest,
+    MealPlanRangeRequest, NavigateStepRequest, RankedSubstitution, RecipeImportPreview,
     RecipePatch, RecipeWithDetails, ScaledRecipeView, SetMealPlanEntryRequest,
-    ShoppingListWithItems, StartCookingSessionRequest, StepTimerActionRequest, VaultError,
+    ShoppingListWithItems, StartCookingSessionRequest, StepTimerActionRequest,
+    SubstitutionSuggestionsView, SuggestSubstitutionsRequest, VaultError,
 };
 use crate::shopping_list::{self, ShoppingListApi, ShoppingListItemApi};
+use crate::substitution::{self, SubstitutionApi};
 
 use super::helpers::convert_model;
 
@@ -1628,4 +1631,365 @@ impl CookingService for CookingServiceImpl {
             warnings: result.warnings,
         })
     }
+
+    // ── Substitutions ───────────────────────────────────────────────
+
+    async fn suggest_substitutions(
+        &self,
+        request: SuggestSubstitutionsRequest,
+    ) -> Result<SubstitutionSuggestionsView, VaultError> {
+        let recipe = recipe::Entity::find_by_id(request.recipe_id)
+            .one(&self.db)
+            .await
+            .map_err(|e| io(e, "load recipe for suggest_substitutions"))?
+            .ok_or_else(|| VaultError::NotFound(format!("recipe:{}", request.recipe_id)))?;
+        let ingredients = recipe_ingredient::Entity::find()
+            .filter(recipe_ingredient::Column::RecipeId.eq(recipe.id))
+            .order_by_asc(recipe_ingredient::Column::Sequence)
+            .all(&self.db)
+            .await
+            .map_err(|e| io(e, "load ingredients for suggest_substitutions"))?;
+
+        let limit = request.limit_per_ingredient.unwrap_or(5).max(1) as usize;
+        let mut warnings: Vec<String> = Vec::new();
+        let mut suggestions: Vec<IngredientSuggestion> = Vec::new();
+        let dietary_filter: Vec<String> = request
+            .dietary_filter
+            .iter()
+            .map(|s| s.trim().to_ascii_lowercase())
+            .filter(|s| !s.is_empty())
+            .collect();
+        let has_dietary = !dietary_filter.is_empty();
+        let has_missing = !request.missing_food_ids.is_empty();
+        if !has_dietary && !has_missing {
+            return Ok(SubstitutionSuggestionsView {
+                recipe_id: recipe.id,
+                recipe_name: recipe.name,
+                suggestions_json: "[]".to_string(),
+                warnings,
+            });
+        }
+
+        for ing in &ingredients {
+            if ing.is_section {
+                continue;
+            }
+            let mut reasons: Vec<String> = Vec::new();
+            let food_row = match ing.food_id {
+                Some(fid) => crate::food::Entity::find_by_id(fid)
+                    .one(&self.db)
+                    .await
+                    .map_err(|e| io(e, "load food for ingredient"))?,
+                None => None,
+            };
+
+            if has_missing
+                && ing
+                    .food_id
+                    .is_some_and(|f| request.missing_food_ids.contains(&f))
+            {
+                reasons.push("missing".to_string());
+            }
+            if has_dietary {
+                if let Some(food) = &food_row {
+                    let tags = dietary_tags_from_food(food);
+                    for filter_tag in &dietary_filter {
+                        if !tags.iter().any(|t| t == filter_tag) {
+                            reasons.push(format!("dietary:{filter_tag}"));
+                        }
+                    }
+                } else if ing.food_id.is_none() {
+                    warnings.push(format!(
+                        "can't check dietary tags for unlinked ingredient '{}'",
+                        ing.food
+                    ));
+                    reasons.push("unlinked".to_string());
+                } else {
+                    // food_id set but row not found — treat similar to unlinked.
+                    warnings.push(format!(
+                        "linked food row missing for ingredient '{}'",
+                        ing.food
+                    ));
+                    reasons.push("unlinked".to_string());
+                }
+            }
+
+            if reasons.is_empty() {
+                continue;
+            }
+
+            let mut ranked: Vec<RankedSubstitution> = Vec::new();
+            if let Some(fid) = ing.food_id {
+                // Direct hits.
+                let direct =
+                    load_substitutions_by_from(&self.db, fid, request.organization.as_deref())
+                        .await?;
+                for sub in direct {
+                    if let Some(rs) = build_ranked(&self.db, &sub, false, &dietary_filter).await? {
+                        ranked.push(rs);
+                    }
+                }
+                // Inverse hits (only bidirectional rules apply).
+                let inverse =
+                    load_substitutions_by_to(&self.db, fid, request.organization.as_deref())
+                        .await?;
+                for sub in inverse {
+                    if !sub.bidirectional {
+                        continue;
+                    }
+                    if let Some(rs) = build_ranked(&self.db, &sub, true, &dietary_filter).await? {
+                        ranked.push(rs);
+                    }
+                }
+            }
+
+            // Re-score with original quantity scaling.
+            for rs in &mut ranked {
+                rs.suggested_quantity = ing.quantity.map(|q| q * rs.ratio);
+                rs.suggested_unit = ing.unit.clone();
+            }
+
+            // Boost if applies_when.dietary exactly matches the filter.
+            if has_dietary {
+                for rs in &mut ranked {
+                    let summary_tags = applies_when_dietary_tags(&rs.applies_when_summary);
+                    if !summary_tags.is_empty()
+                        && summary_tags.iter().all(|t| dietary_filter.contains(t))
+                        && summary_tags.len() == dietary_filter.len()
+                    {
+                        rs.score = (rs.score + 0.2).min(1.5);
+                    }
+                }
+            }
+
+            // Sort & truncate.
+            ranked.sort_by(|a, b| {
+                b.score
+                    .partial_cmp(&a.score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            ranked.truncate(limit);
+
+            suggestions.push(IngredientSuggestion {
+                ingredient_food_id: ing.food_id,
+                ingredient_food_name: ing.food.clone(),
+                original_quantity: ing.quantity,
+                original_unit: ing.unit.clone(),
+                suggestions: ranked,
+                reasons,
+            });
+        }
+
+        let suggestions_json =
+            serde_json::to_string(&suggestions).map_err(|e| io(e, "serialize suggestions"))?;
+        Ok(SubstitutionSuggestionsView {
+            recipe_id: recipe.id,
+            recipe_name: recipe.name,
+            suggestions_json,
+            warnings,
+        })
+    }
+
+    async fn create_substitution(
+        &self,
+        request: CreateSubstitutionRequest,
+    ) -> Result<SubstitutionApi, VaultError> {
+        if !request.ratio.is_finite() || request.ratio <= 0.0 {
+            return Err(VaultError::ParseError(format!(
+                "ratio must be a positive finite number (got {})",
+                request.ratio
+            )));
+        }
+        let confidence = request.confidence.clamp(0.0, 1.0);
+        let applies_when = match request.applies_when_json.as_deref() {
+            Some(s) if !s.trim().is_empty() => {
+                let value: serde_json::Value =
+                    serde_json::from_str(s).map_err(|e| parse(e, "applies_when_json"))?;
+                if !value.is_object() {
+                    return Err(parse(
+                        "expected JSON object",
+                        "applies_when_json must encode an object",
+                    ));
+                }
+                JsonObject::from_value(value)
+            }
+            _ => JsonObject::default(),
+        };
+        let now = Utc::now();
+        let active = substitution::ActiveModel {
+            id: Set(Uuid::new_v4()),
+            from_food_id: Set(request.from_food_id),
+            to_food_id: Set(request.to_food_id),
+            ratio: Set(request.ratio),
+            conversion_note: Set(request.conversion_note),
+            applies_when: Set(applies_when),
+            confidence: Set(confidence),
+            bidirectional: Set(request.bidirectional),
+            organization: Set(request.organization),
+            created_by: Set(request.created_by),
+            properties: Set(JsonObject::default()),
+            created_at: Set(now),
+            updated_at: Set(now),
+        };
+        let model = active
+            .insert(&self.db)
+            .await
+            .map_err(|e| io(e, "insert substitution"))?;
+        substitution_to_api(model)
+    }
+
+    async fn list_substitutions(
+        &self,
+        organization: Option<String>,
+    ) -> Result<Vec<SubstitutionApi>, VaultError> {
+        let mut q = substitution::Entity::find().order_by_asc(substitution::Column::CreatedAt);
+        if let Some(org) = organization {
+            q = q.filter(substitution::Column::Organization.eq(org));
+        }
+        let rows = q
+            .all(&self.db)
+            .await
+            .map_err(|e| io(e, "list_substitutions"))?;
+        rows.into_iter().map(substitution_to_api).collect()
+    }
+
+    async fn delete_substitution(&self, id: Uuid) -> Result<(), VaultError> {
+        substitution::Entity::delete_by_id(id)
+            .exec(&self.db)
+            .await
+            .map_err(|e| io(e, "delete_substitution"))?;
+        Ok(())
+    }
+}
+
+fn substitution_to_api(model: substitution::Model) -> Result<SubstitutionApi, VaultError> {
+    convert_model::<substitution::Model, SubstitutionApi>(model)
+}
+
+/// Pull `dietary_tags` from a Food's `properties.dietary_tags` JSON
+/// array, lower-cased. Missing/non-array → empty.
+fn dietary_tags_from_food(food: &crate::food::Model) -> Vec<String> {
+    food.properties
+        .as_value()
+        .get("dietary_tags")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.trim().to_ascii_lowercase()))
+                .filter(|s| !s.is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Pull `dietary` array from an `applies_when` JSON object.
+fn applies_when_dietary(value: &serde_json::Value) -> Vec<String> {
+    value
+        .get("dietary")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.trim().to_ascii_lowercase()))
+                .filter(|s| !s.is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Decode the `applies_when_summary` ("vegan, gluten_free") back to a
+/// tag list. Used internally for the dietary-perfect-fit boost.
+fn applies_when_dietary_tags(summary: &str) -> Vec<String> {
+    summary
+        .split(',')
+        .map(|s| s.trim().to_ascii_lowercase())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+async fn load_substitutions_by_from<C: sea_orm::ConnectionTrait>(
+    db: &C,
+    from_food_id: Uuid,
+    organization: Option<&str>,
+) -> Result<Vec<substitution::Model>, VaultError> {
+    let mut q =
+        substitution::Entity::find().filter(substitution::Column::FromFoodId.eq(from_food_id));
+    q = match organization {
+        Some(org) => q.filter(substitution::Column::Organization.eq(org)),
+        None => q.filter(substitution::Column::Organization.is_null()),
+    };
+    q.all(db)
+        .await
+        .map_err(|e| io(e, "load substitutions by from_food_id"))
+}
+
+async fn load_substitutions_by_to<C: sea_orm::ConnectionTrait>(
+    db: &C,
+    to_food_id: Uuid,
+    organization: Option<&str>,
+) -> Result<Vec<substitution::Model>, VaultError> {
+    let mut q = substitution::Entity::find().filter(substitution::Column::ToFoodId.eq(to_food_id));
+    q = match organization {
+        Some(org) => q.filter(substitution::Column::Organization.eq(org)),
+        None => q.filter(substitution::Column::Organization.is_null()),
+    };
+    q.all(db)
+        .await
+        .map_err(|e| io(e, "load substitutions by to_food_id"))
+}
+
+/// Apply the dietary-applies_when filter and compute the ranking score.
+/// Returns `None` when the substitution is filtered out.
+async fn build_ranked<C: sea_orm::ConnectionTrait>(
+    db: &C,
+    sub: &substitution::Model,
+    is_inverse: bool,
+    dietary_filter: &[String],
+) -> Result<Option<RankedSubstitution>, VaultError> {
+    let aw_dietary = applies_when_dietary(sub.applies_when.as_value());
+    if !dietary_filter.is_empty() && !aw_dietary.is_empty() {
+        // applies_when.dietary must be a subset of the filter.
+        let all_in = aw_dietary.iter().all(|t| dietary_filter.contains(t));
+        if !all_in {
+            return Ok(None);
+        }
+    }
+
+    let (from_id, to_id, ratio) = if is_inverse {
+        let inv = if sub.ratio.abs() < f64::EPSILON {
+            1.0
+        } else {
+            1.0 / sub.ratio
+        };
+        (sub.to_food_id, sub.from_food_id, inv)
+    } else {
+        (sub.from_food_id, sub.to_food_id, sub.ratio)
+    };
+
+    let to_food_name = crate::food::Entity::find_by_id(to_id)
+        .one(db)
+        .await
+        .map_err(|e| io(e, "load to_food for substitution"))?
+        .map(|f| f.name)
+        .unwrap_or_else(|| to_id.to_string());
+
+    let mut score = sub.confidence as f64;
+    if is_inverse {
+        score -= 0.1;
+    }
+    let score = score.clamp(0.0, 1.5);
+
+    Ok(Some(RankedSubstitution {
+        substitution_id: sub.id,
+        from_food_id: from_id,
+        to_food_id: to_id,
+        to_food_name,
+        suggested_quantity: None,
+        suggested_unit: None,
+        ratio,
+        conversion_note: sub.conversion_note.clone(),
+        confidence: sub.confidence,
+        score,
+        applies_when_summary: aw_dietary.join(", "),
+        is_inverse,
+    }))
 }
