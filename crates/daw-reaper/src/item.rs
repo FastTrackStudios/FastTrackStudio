@@ -498,6 +498,31 @@ impl ReaperItem {
             None
         };
 
+        // C_BEATATTACHMODE: -1 → project default, 0 → time, 1 → full beats, 2 → position only.
+        let beat_attach_mode =
+            match item_sw::get_item_info_value(medium, item, ItemAttributeKey::BeatAttachMode)
+                as i32
+            {
+                1 => BeatAttachMode::Beats,
+                2 => BeatAttachMode::BeatsPositionOnly,
+                // -1 (project default) and 0 (time) both map to Time; project
+                // default is approximated as Time at the proto level.
+                _ => BeatAttachMode::Time,
+            };
+
+        // C_AUTOSTRETCH: 1 = enabled (requires BeatAttachMode == 1).
+        let auto_stretch =
+            item_sw::get_item_info_value(medium, item, ItemAttributeKey::AutoStretch) != 0.0;
+
+        // I_GROUPID: 0 = no group, otherwise an item group identifier.
+        let group_id_raw =
+            item_sw::get_item_info_value(medium, item, ItemAttributeKey::GroupId) as i32;
+        let group_id = if group_id_raw > 0 {
+            Some(group_id_raw as u32)
+        } else {
+            None
+        };
+
         let take_count = item_sw::count_takes(low, item) as u32;
 
         let active_take = item_sw::get_active_take(medium, item);
@@ -532,11 +557,11 @@ impl ReaperItem {
             fade_out_length: Duration::from_seconds(fade_out_length),
             fade_in_shape: reaper_fade_to_proto(fade_in_shape_raw),
             fade_out_shape: reaper_fade_to_proto(fade_out_shape_raw),
-            beat_attach_mode: BeatAttachMode::Time, // TODO: Read from REAPER
+            beat_attach_mode,
             loop_source,
-            auto_stretch: false, // TODO: Read from REAPER
+            auto_stretch,
             color,
-            group_id: None, // TODO: Read from REAPER
+            group_id,
             take_count,
             active_take_index,
         })
@@ -1199,6 +1224,18 @@ impl ReaperTake {
 
         let start_offset = item_sw::get_take_info_value(medium, take, TakeAttributeKey::StartOffs);
 
+        // I_CUSTOMCOLOR — same encoding as items: positive value carries
+        // the color; 0 / negative means "no color set". REAPER OR-masks
+        // 0x1000000 in to mark the color as live, but we surface the
+        // raw u32 to the proto layer.
+        let take_color_raw =
+            item_sw::get_take_info_value(medium, take, TakeAttributeKey::CustomColor) as i32;
+        let take_color = if take_color_raw > 0 {
+            Some(take_color_raw as u32)
+        } else {
+            None
+        };
+
         // Get source info
         let source_file_path = item_sw::get_take_source_file_path(medium, take);
         let source = item_sw::get_take_source(medium, take);
@@ -1223,7 +1260,7 @@ impl ReaperTake {
             index,
             is_active,
             name,
-            color: None, // TODO: Read from chunk
+            color: take_color,
             volume,
             play_rate,
             pitch,
