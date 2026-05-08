@@ -139,6 +139,52 @@ fn project_guid_string(project: &reaper_high::Project) -> String {
     project_guid(project)
 }
 
+/// Run a closure that calls into a `reaper-high` Fx accessor, returning
+/// `Some(value)` on success and `None` if the closure panicked. On
+/// panic, log a structured warning carrying `label`, the optional FX
+/// GUID, and the recovered panic message.
+///
+/// Several `reaper-high` methods (notably `Fx::name`, `Fx::is_enabled`,
+/// `Fx::parameter_count`) call `.expect()` internally and panic when
+/// the FX reference is stale — common with container children whose
+/// indices have shifted. Wrapping each call in this helper keeps the
+/// service alive (filling in caller-supplied defaults) while preserving
+/// the panic context for debugging via `tracing` instead of swallowing
+/// it. See [issue #20](https://github.com/FastTrackStudios/daw/issues/20).
+fn safe_fx_call<T>(label: &'static str, fx_guid: Option<&str>, f: impl FnOnce() -> T) -> Option<T> {
+    // `AssertUnwindSafe` is appropriate here: the reaper-high types we
+    // pass through aren't `UnwindSafe` because they wrap raw REAPER
+    // pointers, but a panic during the FX accessor doesn't leave them
+    // in an inconsistent state we'd observe — the next service tick
+    // re-reads from REAPER directly.
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
+        Ok(value) => Some(value),
+        Err(payload) => {
+            let msg = panic_payload_message(&payload);
+            tracing::warn!(
+                label,
+                fx_guid = fx_guid.unwrap_or(""),
+                panic = %msg,
+                "reaper-high FX accessor panicked; using fallback"
+            );
+            None
+        }
+    }
+}
+
+/// Best-effort extraction of the panic message from a `catch_unwind`
+/// payload. Handles the common `&str` / `String` cases that `panic!()`
+/// and `.expect()` produce.
+fn panic_payload_message(payload: &Box<dyn std::any::Any + Send>) -> String {
+    if let Some(s) = payload.downcast_ref::<&'static str>() {
+        return (*s).to_string();
+    }
+    if let Some(s) = payload.downcast_ref::<String>() {
+        return s.clone();
+    }
+    "<non-string panic payload>".to_string()
+}
+
 /// Parameter value change threshold (avoid flooding with micro-changes from automation)
 const PARAM_CHANGE_THRESHOLD: f64 = 0.0001;
 
@@ -208,19 +254,16 @@ fn read_chain_state(chain: &FxChain) -> CachedChainState {
             .get_or_query_guid()
             .map(|g| g.to_string_without_braces())
             .unwrap_or_default();
-        let name = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            fx.name().to_str().to_string()
-        }))
-        .unwrap_or_else(|_| "(unknown)".to_string());
+        let name = safe_fx_call("fx.name", Some(&guid), || fx.name().to_str().to_string())
+            .unwrap_or_else(|| "(unknown)".to_string());
         let index = fx.index();
-        let enabled = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| fx.is_enabled()))
-            .unwrap_or(false);
+        let enabled =
+            safe_fx_call("fx.is_enabled", Some(&guid), || fx.is_enabled()).unwrap_or(false);
 
         // Read parameter values (up to MAX_MONITORED_PARAMS)
-        let param_count =
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| fx.parameter_count()))
-                .unwrap_or(0)
-                .min(MAX_MONITORED_PARAMS);
+        let param_count = safe_fx_call("fx.parameter_count", Some(&guid), || fx.parameter_count())
+            .unwrap_or(0)
+            .min(MAX_MONITORED_PARAMS);
         let mut param_values = Vec::with_capacity(param_count as usize);
         for i in 0..param_count {
             let param = fx.parameter_by_index(i);
@@ -270,10 +313,10 @@ fn snapshot_container(
     out: &mut Vec<CachedContainerState>,
 ) {
     let child_count = read_config_u32(container_fx, "container_count");
-    let name = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+    let name = safe_fx_call("container.name", None, || {
         container_fx.name().to_str().to_string()
-    }))
-    .unwrap_or_else(|_| "Container".to_string());
+    })
+    .unwrap_or_else(|| "Container".to_string());
     let routing_mode = read_config_u32(container_fx, "parallel");
 
     let mut child_ids = Vec::with_capacity(child_count as usize);
@@ -579,10 +622,8 @@ pub(crate) fn resolve_fx_index(chain: &FxChain, fx_ref: &FxRef) -> Option<u32> {
         FxRef::Name(name) => {
             // Search by name (first match)
             for fx in chain.index_based_fxs() {
-                let fx_name = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    fx.name().to_str().to_string()
-                }));
-                if let Ok(n) = fx_name
+                let fx_name = safe_fx_call("fx.name", None, || fx.name().to_str().to_string());
+                if let Some(n) = fx_name
                     && n == *name
                 {
                     return Some(fx.index());
@@ -679,10 +720,8 @@ fn capture_single_fx(
         .get_or_query_guid()
         .map(|g| g.to_string_without_braces())
         .unwrap_or_default();
-    let plugin_name = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        fx.name().to_str().to_string()
-    }))
-    .unwrap_or_else(|_| "(unknown)".to_string());
+    let plugin_name = safe_fx_call("fx.name", None, || fx.name().to_str().to_string())
+        .unwrap_or_else(|| "(unknown)".to_string());
 
     // Try tag_chunk first (works for VST/VST3), fallback to dawfile-reaper (for CLAP)
     let chunk_str = match fx.tag_chunk() {
@@ -787,9 +826,10 @@ fn parse_fx_type(sub_type: &str) -> FxType {
 
 /// Build an Fx proto struct from a reaper-high Fx.
 ///
-/// Uses `catch_unwind` around methods that call `.expect()` internally
-/// (like `name()`) to prevent panics from crashing REAPER when an FX
-/// reference is stale (e.g. container child with an invalid index).
+/// Uses [`safe_fx_call`] around methods that call `.expect()` internally
+/// (like `name()`) so a panic from a stale FX reference (e.g. container
+/// child with an invalid index) is logged and falls back to a default
+/// rather than crashing the service. See issue #20.
 ///
 /// The optional `chain` parameter enables a fallback GUID lookup for
 /// container children. `get_or_query_guid()` internally calls the
@@ -808,21 +848,15 @@ pub(crate) fn build_fx_info(fx: &reaper_high::Fx, chain: Option<&FxChain>) -> Fx
                 .map(|g| g.to_string_without_braces())
                 .unwrap_or_default()
         });
-    let name = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        fx.name().to_str().to_string()
-    }))
-    .unwrap_or_else(|_| "(unknown)".to_string());
+    let name = safe_fx_call("fx.name", None, || fx.name().to_str().to_string())
+        .unwrap_or_else(|| "(unknown)".to_string());
     let index = fx.index();
-    let enabled =
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| fx.is_enabled())).unwrap_or(false);
-    let offline =
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| !fx.is_online())).unwrap_or(false);
+    let enabled = safe_fx_call("fx.is_enabled", None, || fx.is_enabled()).unwrap_or(false);
+    let offline = safe_fx_call("fx.unknown", None, || !fx.is_online()).unwrap_or(false);
     let window_open =
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| fx.window_is_open()))
-            .unwrap_or(false);
+        safe_fx_call("fx.window_is_open", None, || fx.window_is_open()).unwrap_or(false);
     let parameter_count =
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| fx.parameter_count()))
-            .unwrap_or(0);
+        safe_fx_call("fx.parameter_count", None, || fx.parameter_count()).unwrap_or(0);
 
     // Get plugin type and name via info() (REAPER >= 6.37)
     let (plugin_name, plugin_type) = match fx.info() {
@@ -834,11 +868,11 @@ pub(crate) fn build_fx_info(fx: &reaper_high::Fx, chain: Option<&FxChain>) -> Fx
     };
 
     // Get preset name via dedicated TrackFX_GetPreset API
-    let preset_name = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+    let preset_name = safe_fx_call("fx.preset_name", None, || {
         fx.preset_name()
             .map(|rs| rs.to_str().to_string())
             .filter(|s| !s.is_empty())
-    }))
+    })
     .unwrap_or(None);
 
     Fx {
@@ -1162,15 +1196,14 @@ fn build_container_node(
     let name = read_config_str(container_fx, "renamed_name")
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| {
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            safe_fx_call("container.name", None, || {
                 container_fx.name().to_str().to_string()
-            }))
-            .unwrap_or_else(|_| "Container".to_string())
+            })
+            .unwrap_or_else(|| "Container".to_string())
         });
 
     let enabled =
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| container_fx.is_enabled()))
-            .unwrap_or(true);
+        safe_fx_call("container.is_enabled", None, || container_fx.is_enabled()).unwrap_or(true);
 
     // Build children using container_item.X API
     let mut children = Vec::new();
@@ -1912,17 +1945,16 @@ impl FxService for ReaperFx {
             let fx = chain.fx_by_index_untracked(index);
 
             // Get preset index and count via reaper-high
-            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let result = safe_fx_call("fx.preset_index_and_count", None, || {
                 fx.preset_index_and_count()
-            }))
-            .ok()?;
+            })?;
 
             // Get preset name via reaper-high
-            let name = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let name = safe_fx_call("fx.preset_name", None, || {
                 fx.preset_name()
                     .map(|rs| rs.to_str().to_string())
                     .filter(|s| !s.is_empty())
-            }))
+            })
             .unwrap_or(None);
 
             Some(FxPresetIndex {
@@ -2382,10 +2414,8 @@ impl FxService for ReaperFx {
                 if let Ok(guid) = fx.get_or_query_guid() {
                     guid_to_index.insert(guid.to_string_without_braces(), fx.index());
                 }
-                let fx_name = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    fx.name().to_str().to_string()
-                }))
-                .unwrap_or_default();
+                let fx_name = safe_fx_call("fx.name", None, || fx.name().to_str().to_string())
+                    .unwrap_or_default();
                 name_to_indices.entry(fx_name).or_default().push(fx.index());
             }
             // Track how many instances of each name have been consumed (for duplicate plugins)
