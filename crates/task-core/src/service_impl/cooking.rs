@@ -347,6 +347,7 @@ impl CookingService for CookingServiceImpl {
             notes: Set(None),
             created_by: Set(request.created_by),
             properties: Set(properties),
+            nutrition_summary: Set(JsonObject::default()),
             created_at: Set(now),
             updated_at: Set(now),
         };

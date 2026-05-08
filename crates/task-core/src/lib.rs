@@ -12,6 +12,7 @@ pub mod cycle;
 pub mod email;
 pub mod expense;
 pub mod food;
+pub mod food_log;
 pub mod food_product;
 pub mod invoice;
 pub mod location;
@@ -82,6 +83,7 @@ pub use expense::{
     format_expense_id,
 };
 pub use food::{Food, FoodAliasList, FoodApi};
+pub use food_log::{FoodLog, FoodLogApi};
 pub use food_product::{FoodProduct, FoodProductApi};
 pub use invoice::{Invoice, InvoiceLine, InvoiceStatus, Payment, format_invoice_id};
 pub use location::{Location, Space, VenueDefault, render_location_body};

@@ -3408,6 +3408,7 @@ async fn seed_cooking(db: &DatabaseConnection, summary: &mut DemoSeedSummary) ->
             notes: Set(None),
             created_by: Set(Some("cody".to_string())),
             properties: Set(JsonObject::from_value(serde_json::Value::Object(props))),
+            nutrition_summary: Set(JsonObject::default()),
             created_at: Set(now),
             updated_at: Set(now),
         };

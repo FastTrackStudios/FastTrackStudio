@@ -70,6 +70,17 @@ pub struct Model {
     #[sea_orm(column_type = "Json")]
     pub properties: crate::property::JsonObject,
 
+    /// Cached recipe-level nutrition aggregate. Populated by
+    /// `CookingService::recompute_recipe_nutrition` after each
+    /// `create_recipe` / `update_recipe`. Empty `{}` until first
+    /// recompute. JSON-encoded
+    /// [`crate::nutrition::AggregatedNutrition`]-shaped payload.
+    #[crudcrate(exclude(list))]
+    #[facet(skip)]
+    #[facet(default)]
+    #[sea_orm(column_type = "Json")]
+    pub nutrition_summary: crate::property::JsonObject,
+
     #[crudcrate(exclude(create), on_create = chrono::Utc::now())]
     pub created_at: chrono::DateTime<chrono::Utc>,
     #[crudcrate(exclude(create), exclude(update), on_create = chrono::Utc::now())]
@@ -83,6 +94,7 @@ impl ActiveModelBehavior for ActiveModel {
     fn new() -> Self {
         Self {
             properties: sea_orm::ActiveValue::Set(crate::property::JsonObject::default()),
+            nutrition_summary: sea_orm::ActiveValue::Set(crate::property::JsonObject::default()),
             ..<Self as sea_orm::ActiveModelTrait>::default()
         }
     }
