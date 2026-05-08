@@ -22,15 +22,20 @@ use uuid::Uuid;
 
 use crate::cookbook::{self, CookbookApi};
 use crate::cookbook_recipe;
+use crate::food_log;
 use crate::meal_plan::{self, MealPlanEntryApi, MealType};
+use crate::nutrition::{
+    AggregatedNutrition, IngredientNutritionInput, NutritionFacts, aggregate_recipe_nutrition,
+};
 use crate::property::JsonObject;
 use crate::recipe::{self, RecipeApi, RecipeIngredientSpec, RecipeStepSpec};
 use crate::recipe_ingredient::{self, RecipeIngredientApi};
 use crate::recipe_step::{self, RecipeStepApi};
 use crate::service::{
-    AddShoppingItemRequest, CookbookWithRecipes, CookingService, CreateRecipeRequest,
-    GenerateShoppingListRequest, ImportRecipeRequest, MealPlanRangeRequest, RecipeImportPreview,
-    RecipePatch, RecipeWithDetails, SetMealPlanEntryRequest, ShoppingListWithItems, VaultError,
+    AddShoppingItemRequest, AggregatedNutritionView, CookbookWithRecipes, CookingService,
+    CreateRecipeRequest, GenerateShoppingListRequest, ImportRecipeRequest,
+    MarkMealPlanCookedRequest, MealPlanRangeRequest, RecipeImportPreview, RecipePatch,
+    RecipeWithDetails, SetMealPlanEntryRequest, ShoppingListWithItems, VaultError,
 };
 use crate::shopping_list::{self, ShoppingListApi, ShoppingListItemApi};
 
@@ -162,6 +167,67 @@ fn ingredient_active_for(
         created_at: Set(now),
         updated_at: Set(now),
     }
+}
+
+/// Serialize-friendly mirror of [`AggregatedNutrition`] for the
+/// `nutrition_summary` JSON column. Mirrors the fields callers care
+/// about without leaking the entire facet/serde graph.
+#[derive(serde::Serialize)]
+struct SerializedAggregated<'a> {
+    total: &'a NutritionFacts,
+    per_serving: Option<&'a NutritionFacts>,
+    warnings: &'a [String],
+}
+
+impl<'a> From<&'a AggregatedNutrition> for SerializedAggregated<'a> {
+    fn from(value: &'a AggregatedNutrition) -> Self {
+        Self {
+            total: &value.total,
+            per_serving: value.per_serving.as_ref(),
+            warnings: &value.warnings,
+        }
+    }
+}
+
+/// Compute nutrition aggregate for a recipe by walking its ingredients
+/// and resolving each `food_id` → `Food.nutrition_per_100g`.
+pub(crate) async fn compute_recipe_nutrition<C: sea_orm::ConnectionTrait>(
+    db: &C,
+    recipe_id: Uuid,
+) -> Result<AggregatedNutrition, VaultError> {
+    let recipe = recipe::Entity::find_by_id(recipe_id)
+        .one(db)
+        .await
+        .map_err(|e| io(e, "load recipe for aggregation"))?
+        .ok_or_else(|| VaultError::NotFound(format!("recipe:{recipe_id}")))?;
+    let ingredients = recipe_ingredient::Entity::find()
+        .filter(recipe_ingredient::Column::RecipeId.eq(recipe_id))
+        .order_by_asc(recipe_ingredient::Column::Sequence)
+        .all(db)
+        .await
+        .map_err(|e| io(e, "load ingredients for aggregation"))?;
+    let mut inputs: Vec<IngredientNutritionInput> = Vec::with_capacity(ingredients.len());
+    for ing in ingredients {
+        if ing.is_section {
+            continue;
+        }
+        let nutrition = match ing.food_id {
+            Some(fid) => crate::food::Entity::find_by_id(fid)
+                .one(db)
+                .await
+                .map_err(|e| io(e, "load food for aggregation"))?
+                .map(|f| NutritionFacts::from_json_object(&f.nutrition_per_100g)),
+            None => None,
+        };
+        inputs.push(IngredientNutritionInput {
+            food_id: ing.food_id,
+            food_name: ing.food.clone(),
+            quantity: ing.quantity,
+            unit: ing.unit.clone(),
+            nutrition_per_100g: nutrition,
+        });
+    }
+    Ok(aggregate_recipe_nutrition(recipe.servings, &inputs))
 }
 
 /// Resolve `food_id` for an ingredient via name-match against the
@@ -941,6 +1007,115 @@ impl CookingService for CookingServiceImpl {
             .await
             .map_err(|e| io(e, "check item"))?;
         Ok(())
+    }
+
+    async fn recompute_recipe_nutrition(
+        &self,
+        recipe_id: Uuid,
+    ) -> Result<AggregatedNutritionView, VaultError> {
+        let aggregated = compute_recipe_nutrition(&self.db, recipe_id).await?;
+        let recipe = recipe::Entity::find_by_id(recipe_id)
+            .one(&self.db)
+            .await
+            .map_err(|e| io(e, "load recipe (recompute)"))?
+            .ok_or_else(|| VaultError::NotFound(format!("recipe:{recipe_id}")))?;
+        let recipe_name = recipe.name.clone();
+
+        let summary_value =
+            serde_json::to_value(SerializedAggregated::from(&aggregated)).unwrap_or_default();
+        let mut active: recipe::ActiveModel = recipe.into();
+        active.nutrition_summary = Set(JsonObject::from_value(summary_value));
+        active.updated_at = Set(Utc::now());
+        active
+            .update(&self.db)
+            .await
+            .map_err(|e| io(e, "persist nutrition_summary"))?;
+
+        let total_json = serde_json::to_string(&aggregated.total)
+            .map_err(|e| io(e, "serialize nutrition total"))?;
+        let per_serving_json = match aggregated.per_serving.as_ref() {
+            Some(p) => Some(serde_json::to_string(p).map_err(|e| io(e, "serialize per_serving"))?),
+            None => None,
+        };
+        Ok(AggregatedNutritionView {
+            recipe_id,
+            recipe_name,
+            total_json,
+            per_serving_json,
+            warnings: aggregated.warnings,
+        })
+    }
+
+    async fn mark_meal_plan_cooked(
+        &self,
+        request: MarkMealPlanCookedRequest,
+    ) -> Result<Vec<Uuid>, VaultError> {
+        let entry = meal_plan::Entity::find_by_id(request.meal_plan_entry_id)
+            .one(&self.db)
+            .await
+            .map_err(|e| io(e, "load meal_plan_entry"))?
+            .ok_or_else(|| {
+                VaultError::NotFound(format!("meal_plan_entry:{}", request.meal_plan_entry_id))
+            })?;
+        let servings_consumed = request
+            .servings_consumed
+            .or(entry.servings_planned)
+            .unwrap_or(1)
+            .max(1);
+        let now = Utc::now();
+        let log_id = Uuid::new_v4();
+        let mut active = <food_log::ActiveModel as sea_orm::ActiveModelTrait>::default();
+        active.properties = Set(JsonObject::default());
+        active.id = Set(log_id);
+        active.date = Set(entry.date);
+        active.meal_type = Set(entry.meal_type);
+        active.organization = Set(entry.organization.clone());
+        active.meal_plan_entry_id = Set(Some(entry.id));
+        active.created_by = Set(request.created_by.or(entry.created_by.clone()));
+        active.created_at = Set(now);
+        active.updated_at = Set(now);
+        if let Some(recipe_id) = entry.recipe_id {
+            // Always recompute first so the snapshot is fresh.
+            let aggregated = compute_recipe_nutrition(&self.db, recipe_id).await?;
+            let recipe = recipe::Entity::find_by_id(recipe_id)
+                .one(&self.db)
+                .await
+                .map_err(|e| io(e, "load recipe (mark cooked)"))?
+                .ok_or_else(|| VaultError::NotFound(format!("recipe:{recipe_id}")))?;
+            let per_serving_facts = aggregated
+                .per_serving
+                .clone()
+                .unwrap_or_else(|| aggregated.total.clone());
+            let factor = f64::from(servings_consumed);
+            active.recipe_id = Set(Some(recipe_id));
+            active.food_name = Set(recipe.name.clone());
+            active.kcal = Set(per_serving_facts.kcal_per_100g.map(|v| v * factor));
+            active.protein_g = Set(per_serving_facts.protein_g.map(|v| v * factor));
+            active.carbs_g = Set(per_serving_facts.carbs_g.map(|v| v * factor));
+            active.sugars_g = Set(per_serving_facts.sugars_g.map(|v| v * factor));
+            active.fiber_g = Set(per_serving_facts.fiber_g.map(|v| v * factor));
+            active.fat_g = Set(per_serving_facts.fat_g.map(|v| v * factor));
+            active.saturated_fat_g = Set(per_serving_facts.saturated_fat_g.map(|v| v * factor));
+            active.sodium_mg = Set(per_serving_facts.sodium_mg.map(|v| v * factor));
+            // quantity_grams = 100g sentinel × servings (the recipe
+            // doesn't carry a per-serving gram weight; we record
+            // servings_consumed in notes for traceability).
+            active.quantity_grams = Set(0.0);
+            active.notes = Set(Some(format!("servings_consumed={servings_consumed}")));
+        } else {
+            active.recipe_id = Set(None);
+            active.food_name = Set(entry
+                .title
+                .clone()
+                .unwrap_or_else(|| "untitled meal".to_string()));
+            active.quantity_grams = Set(0.0);
+            // All macros stay None.
+        }
+        active
+            .insert(&self.db)
+            .await
+            .map_err(|e| io(e, "insert food_log"))?;
+        Ok(vec![log_id])
     }
 
     async fn add_shopping_list_item(

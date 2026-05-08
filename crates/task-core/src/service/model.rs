@@ -1809,6 +1809,51 @@ pub trait CookingService {
         &self,
         request: AddShoppingItemRequest,
     ) -> Result<(), VaultError>;
+
+    // ── Nutrition / cooking-state ──────────────────────────────────
+    /// Recompute the recipe's `nutrition_summary` by aggregating every
+    /// ingredient's linked Food/FoodProduct nutrition. Persists the
+    /// result as a JSON-encoded
+    /// [`crate::nutrition::AggregatedNutrition`]-shaped blob on
+    /// `recipe.nutrition_summary`. Idempotent.
+    async fn recompute_recipe_nutrition(
+        &self,
+        recipe_id: Uuid,
+    ) -> Result<AggregatedNutritionView, VaultError>;
+
+    /// Mark a meal-plan entry as cooked. Generates one or more
+    /// [`crate::food_log::FoodLogApi`] rows snapshotting the recipe's
+    /// per-serving nutrition × `servings_consumed`. When the entry has
+    /// no `recipe_id` (free-form `title`) a single FoodLog row is
+    /// created with `food_name = entry.title`, all macros `None`, and
+    /// `quantity_grams = 0.0`.
+    ///
+    /// Returns the created FoodLog ids.
+    async fn mark_meal_plan_cooked(
+        &self,
+        request: MarkMealPlanCookedRequest,
+    ) -> Result<Vec<Uuid>, VaultError>;
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct AggregatedNutritionView {
+    pub recipe_id: Uuid,
+    pub recipe_name: String,
+    /// JSON-encoded [`crate::nutrition::NutritionFacts`] (whole-batch
+    /// total).
+    pub total_json: String,
+    /// JSON-encoded per-serving slice when `recipe.servings.is_some()`.
+    pub per_serving_json: Option<String>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct MarkMealPlanCookedRequest {
+    pub meal_plan_entry_id: Uuid,
+    /// Override servings consumed. Defaults to
+    /// `entry.servings_planned` when set, else `1`.
+    pub servings_consumed: Option<u32>,
+    pub created_by: Option<String>,
 }
 
 /// Wire-friendly Recipe-with-children view. `ingredients_json` and
@@ -2259,6 +2304,107 @@ pub struct RecipeMatchView {
     pub unmatched_food_lines: Vec<String>,
     /// Unit-mismatch notes, etc.
     pub warnings: Vec<String>,
+}
+
+// ── Nutrition / Food log ────────────────────────────────────────────
+
+/// Daily food consumption diary. Each [`crate::food_log::FoodLogApi`]
+/// row is an immutable snapshot of nutrition values at log time. Rows
+/// can be edited (`update_log`) but the snapshot fields drift
+/// independently of the source Food's `nutrition_per_100g`.
+#[vox::service]
+pub trait NutritionService {
+    /// Manual single-food log. Service resolves Food via name / id /
+    /// barcode; resolves nutrition by `Food.nutrition_per_100g × grams`.
+    async fn log_food(
+        &self,
+        request: LogFoodRequest,
+    ) -> Result<crate::food_log::FoodLogApi, VaultError>;
+
+    /// All log rows in a date range. Ordered ascending by
+    /// `(date, created_at)`.
+    async fn list_log(
+        &self,
+        request: LogListRequest,
+    ) -> Result<Vec<crate::food_log::FoodLogApi>, VaultError>;
+
+    /// Sum every log row on a single date — kcal/protein/carbs/fat
+    /// macros + log_count.
+    async fn daily_totals(
+        &self,
+        organization: Option<String>,
+        date: chrono::NaiveDate,
+    ) -> Result<DailyTotalsView, VaultError>;
+
+    /// Per-day breakdown across a 7-day window starting at `from_date`.
+    async fn weekly_summary(
+        &self,
+        organization: Option<String>,
+        from_date: chrono::NaiveDate,
+    ) -> Result<WeeklySummaryView, VaultError>;
+
+    /// Edit a log row (correct an estimate after the fact).
+    async fn update_log(
+        &self,
+        id: Uuid,
+        patch: FoodLogPatch,
+    ) -> Result<crate::food_log::FoodLogApi, VaultError>;
+
+    async fn delete_log(&self, id: Uuid) -> Result<(), VaultError>;
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct LogFoodRequest {
+    pub date: chrono::NaiveDate,
+    /// Parsed via [`crate::meal_plan::MealType::parse`].
+    pub meal_type: String,
+    pub organization: Option<String>,
+    /// One of `food_id` / `food_name` / `product_id` / `barcode` must
+    /// be set.
+    pub food_id: Option<Uuid>,
+    pub food_name: Option<String>,
+    pub product_id: Option<Uuid>,
+    pub barcode: Option<String>,
+    pub quantity: f64,
+    pub unit: String,
+    pub notes: Option<String>,
+    pub created_by: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct LogListRequest {
+    pub organization: Option<String>,
+    pub from_date: chrono::NaiveDate,
+    pub to_date: chrono::NaiveDate,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct FoodLogPatch {
+    pub quantity_grams: Option<f64>,
+    pub kcal: Option<f64>,
+    pub protein_g: Option<f64>,
+    pub carbs_g: Option<f64>,
+    pub fat_g: Option<f64>,
+    pub notes: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct DailyTotalsView {
+    pub date: chrono::NaiveDate,
+    pub kcal: f64,
+    pub protein_g: f64,
+    pub carbs_g: f64,
+    pub fat_g: f64,
+    pub fiber_g: f64,
+    pub sodium_mg: f64,
+    pub log_count: u32,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct WeeklySummaryView {
+    pub days: Vec<DailyTotalsView>,
+    /// `averages.date` is the `from_date` (sentinel — ignore).
+    pub averages: DailyTotalsView,
 }
 
 /// Errors returned by vault operations.
