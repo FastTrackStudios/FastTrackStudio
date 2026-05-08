@@ -15,6 +15,8 @@
 //!   layer (the entity itself only enforces a non-empty string).
 
 pub mod model;
+pub mod scale;
 
 pub use model::Model as Recipe;
 pub use model::*;
+pub use scale::{ScaleResult, scale_ingredients};

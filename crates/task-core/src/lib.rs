@@ -8,6 +8,7 @@ pub mod client;
 pub mod comment;
 pub mod cookbook;
 pub mod cookbook_recipe;
+pub mod cooking_session;
 pub mod cycle;
 pub mod email;
 pub mod expense;
@@ -76,6 +77,9 @@ pub use client::{Client, resolve_rate};
 pub use comment::Comment;
 pub use cookbook::{Cookbook, CookbookApi};
 pub use cookbook_recipe::{CookbookRecipe, CookbookRecipeApi};
+pub use cooking_session::{
+    CookingSession, CookingSessionApi, CookingSessionStatus, StepState as CookingStepState,
+};
 pub use cycle::{Cycle, CycleStatus};
 pub use email::EmailRef;
 pub use expense::{
@@ -103,7 +107,9 @@ pub use project::{
 pub use property::{PropertyDefinition, PropertyKind};
 pub use query::{Filter, Group, GroupedTasks, Query, Sort, TaskGroup};
 pub use reaction::Reaction as EntityReaction;
-pub use recipe::{Recipe, RecipeApi, RecipeIngredientSpec, RecipeStepSpec};
+pub use recipe::{
+    Recipe, RecipeApi, RecipeIngredientSpec, RecipeStepSpec, ScaleResult, scale_ingredients,
+};
 pub use recipe_ingredient::{RecipeIngredient, RecipeIngredientApi};
 pub use recipe_step::{RecipeStep, RecipeStepApi};
 pub use revenue::{
