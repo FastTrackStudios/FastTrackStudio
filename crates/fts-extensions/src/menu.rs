@@ -10,7 +10,7 @@
 use std::sync::OnceLock;
 
 use reaper_high::Reaper;
-use reaper_low::{raw, Swell};
+use reaper_low::{Swell, raw};
 use reaper_medium::{Hmenu, HookCustomMenu, MenuHookFlag, ReaperStr};
 use tracing::{debug, info};
 
@@ -122,7 +122,10 @@ impl HookCustomMenu for FtsMenuHook {
             added += 1;
         }
 
-        info!("FtsMenuHook: added {added}/{} items to submenu", entries.len());
+        info!(
+            "FtsMenuHook: added {added}/{} items to submenu",
+            entries.len()
+        );
 
         let parent = menu.as_ptr();
 

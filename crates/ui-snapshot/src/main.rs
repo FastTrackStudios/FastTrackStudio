@@ -72,7 +72,10 @@ fn output_path(name: &str) -> PathBuf {
 
 fn update() -> std::process::ExitCode {
     for scene in SCENES {
-        println!("render {} ({}×{})...", scene.name, scene.width, scene.height);
+        println!(
+            "render {} ({}×{})...",
+            scene.name, scene.width, scene.height
+        );
         let buf = render_scene(scene);
         let path = reference_path(scene.name);
         write_png(&path, &buf, scene.width, scene.height);
@@ -138,7 +141,10 @@ fn check(tolerance: f32) -> std::process::ExitCode {
 fn diff_png(actual: &Path, reference: &Path, tolerance: f32) -> Result<usize, String> {
     let diff_path = actual.with_file_name(format!(
         "{}-diff.png",
-        actual.file_stem().and_then(|s| s.to_str()).unwrap_or("scene")
+        actual
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("scene")
     ));
     let left = actual.to_string_lossy().into_owned();
     let right = reference.to_string_lossy().into_owned();

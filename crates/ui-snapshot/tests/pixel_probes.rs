@@ -91,7 +91,11 @@ fn oklch_background_paints_expected_srgb() {
     let w = scene.width;
 
     // Row 0, y = 40; column centers x = 40, 120, 200, 280, 360.
-    assert_in(sample_pixel(&buf, w, 40, 40), &DESTRUCTIVE, "bg destructive");
+    assert_in(
+        sample_pixel(&buf, w, 40, 40),
+        &DESTRUCTIVE,
+        "bg destructive",
+    );
     assert_in(sample_pixel(&buf, w, 120, 40), &PRIMARY, "bg primary");
     assert_in(sample_pixel(&buf, w, 200, 40), &CHART_2, "bg chart-2");
     assert_in(sample_pixel(&buf, w, 280, 40), &FOREGROUND, "bg foreground");

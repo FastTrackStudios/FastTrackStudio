@@ -1,7 +1,7 @@
 //! Minimal REAPER window and mouse utilities needed by the tempo module.
 
-use reaper_low::raw::HWND;
 use reaper_low::Swell;
+use reaper_low::raw::HWND;
 use reaper_medium::Reaper as MediumReaper;
 
 /// Control ID for the arrange view track-view child window (consistent across platforms).

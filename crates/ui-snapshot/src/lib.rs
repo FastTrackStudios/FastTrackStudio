@@ -54,7 +54,12 @@ pub fn render_scene(scene: &Scene) -> Vec<u8> {
     let height = scene.height;
 
     let page_component = scene.render;
-    let vdom = VirtualDom::new_with_props(Page, PageProps { inner: page_component });
+    let vdom = VirtualDom::new_with_props(
+        Page,
+        PageProps {
+            inner: page_component,
+        },
+    );
 
     let viewport = Viewport::new(width, height, 1.0, ColorScheme::Light);
     let mut doc = DioxusDocument::new(
@@ -88,7 +93,12 @@ pub fn render_scene(scene: &Scene) -> Vec<u8> {
 /// Sample one RGBA pixel out of a tightly-packed RGBA8 buffer.
 pub fn sample_pixel(buffer: &[u8], width: u32, x: u32, y: u32) -> [u8; 4] {
     let idx = ((y * width + x) * 4) as usize;
-    [buffer[idx], buffer[idx + 1], buffer[idx + 2], buffer[idx + 3]]
+    [
+        buffer[idx],
+        buffer[idx + 1],
+        buffer[idx + 2],
+        buffer[idx + 3],
+    ]
 }
 
 #[derive(Clone, Props)]

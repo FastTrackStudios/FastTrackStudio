@@ -8,10 +8,9 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use daw::Daw;
-use dynamic_template::{auto_color, default_config, OrganizeIntoTracks};
+use dynamic_template::{OrganizeIntoTracks, auto_color, default_config};
 use dynamic_template_proto::{
-    actions::dynamic_template_actions,
-    auto_color::actions::auto_color_actions,
+    actions::dynamic_template_actions, auto_color::actions::auto_color_actions,
     visibility_manager::actions::visibility_manager_actions,
 };
 use tracing::{info, warn};
@@ -90,8 +89,12 @@ pub fn build_action_defs() -> ActionDefs {
 pub fn subscribe_track_events(daw: &Daw, tokio_runtime: &tokio::runtime::Runtime) {
     let daw = daw.clone();
     tokio_runtime.spawn(async move {
-        let Ok(project) = daw.current_project().await else { return; };
-        let Ok(mut track_rx) = project.tracks().subscribe().await else { return; };
+        let Ok(project) = daw.current_project().await else {
+            return;
+        };
+        let Ok(mut track_rx) = project.tracks().subscribe().await else {
+            return;
+        };
         info!("[dynamic-template] Subscribed to track events");
 
         loop {
@@ -111,7 +114,9 @@ pub fn subscribe_track_events(daw: &Daw, tokio_runtime: &tokio::runtime::Runtime
 // ── Action Dispatch ─────────────────────────────────────────────
 
 fn dispatch_action(command_name: &str) {
-    let Some(daw) = crate::Global::try_daw() else { return; };
+    let Some(daw) = crate::Global::try_daw() else {
+        return;
+    };
     let state = state();
 
     // Run async action on the tokio runtime
@@ -255,19 +260,27 @@ async fn sort_tracks(daw: &Daw, selected_only: bool) -> eyre::Result<()> {
     let source = if selected_only {
         let handles = tracks.selected().await?;
         let mut infos = Vec::with_capacity(handles.len());
-        for h in &handles { infos.push(h.info().await?); }
+        for h in &handles {
+            infos.push(h.info().await?);
+        }
         infos
     } else {
         tracks.all().await?
     };
 
-    if source.is_empty() { return Ok(()); }
+    if source.is_empty() {
+        return Ok(());
+    }
 
     let names: Vec<String> = source.iter().map(|t| t.name.clone()).collect();
     let config = default_config();
     let hierarchy = names.organize_into_tracks(&config, None)?;
 
-    info!("[dynamic-template] Organized {} → {} tracks", source.len(), hierarchy.tracks.len());
+    info!(
+        "[dynamic-template] Organized {} → {} tracks",
+        source.len(),
+        hierarchy.tracks.len()
+    );
     tracks.apply_hierarchy(hierarchy).await?;
     Ok(())
 }
@@ -279,13 +292,17 @@ async fn color_tracks(daw: &Daw, selected_only: bool) -> eyre::Result<u32> {
     let infos = if selected_only {
         let handles = tracks.selected().await?;
         let mut v = Vec::with_capacity(handles.len());
-        for h in &handles { v.push(h.info().await?); }
+        for h in &handles {
+            v.push(h.info().await?);
+        }
         v
     } else {
         tracks.all().await?
     };
 
-    if infos.is_empty() { return Ok(0); }
+    if infos.is_empty() {
+        return Ok(0);
+    }
 
     let names: Vec<String> = infos.iter().map(|t| t.name.clone()).collect();
     let color_map = auto_color::classify_and_color(names);
@@ -309,7 +326,9 @@ async fn clear_track_colors(daw: &Daw, selected_only: bool) -> eyre::Result<u32>
     let infos = if selected_only {
         let handles = tracks.selected().await?;
         let mut v = Vec::with_capacity(handles.len());
-        for h in &handles { v.push(h.info().await?); }
+        for h in &handles {
+            v.push(h.info().await?);
+        }
         v
     } else {
         tracks.all().await?
@@ -376,7 +395,10 @@ async fn toggle_group_visibility(
     }
 
     let config = default_config();
-    let group = config.groups.iter().find(|g| g.name.to_lowercase() == group_name);
+    let group = config
+        .groups
+        .iter()
+        .find(|g| g.name.to_lowercase() == group_name);
     let Some(_group) = group else {
         info!("[dynamic-template] Unknown visibility group: {group_name}");
         return Ok(());

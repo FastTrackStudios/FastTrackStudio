@@ -7,7 +7,6 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use reaper_high::Reaper;
 use crate::Global;
 use crate::continuous_action::start_continuous_action;
 #[allow(unused_imports)]
@@ -17,6 +16,7 @@ use crate::tempo::{
     snap_grid_to_transient_constrained_handler, snap_grid_to_transient_fully_constrained_handler,
     snap_grid_to_transient_handler,
 };
+use reaper_high::Reaper;
 
 pub type ActionDefs = Vec<(String, String, Arc<dyn Fn() + Send + Sync>, bool, bool)>;
 
@@ -34,7 +34,10 @@ fn sync_toggle_state(command_id: &str, is_on: bool) {
     let daw = daw.clone();
     let command_id = command_id.to_string();
     Global::get().tokio_runtime.spawn(async move {
-        let _ = daw.action_registry().set_toggle_state(&command_id, is_on).await;
+        let _ = daw
+            .action_registry()
+            .set_toggle_state(&command_id, is_on)
+            .await;
     });
 }
 
@@ -133,23 +136,15 @@ pub fn build_action_defs() -> ActionDefs {
             "Split selected items at cursor with crossfade on left",
             || item_actions::split_items_with_crossfade_left(),
         ),
-        toggle_menu_action(
-            "FTS_TEST_TOGGLE",
-            "Test Toggle",
-            toggle_test_toggle_handler,
-        ),
+        toggle_menu_action("FTS_TEST_TOGGLE", "Test Toggle", toggle_test_toggle_handler),
         // ── Info ─────────────────────────────────────────────────────────────
-        menu_action(
-            "FTS_INFO",
-            "FastTrackStudio Info",
-            || {
-                let version = env!("CARGO_PKG_VERSION");
-                Reaper::get().show_console_msg(format!(
-                    "FastTrackStudio Extensions v{version}\n\
+        menu_action("FTS_INFO", "FastTrackStudio Info", || {
+            let version = env!("CARGO_PKG_VERSION");
+            Reaper::get().show_console_msg(format!(
+                "FastTrackStudio Extensions v{version}\n\
                      https://github.com/FastTrackStudios\n"
-                ));
-            },
-        ),
+            ));
+        }),
     ];
 
     // Module actions (launcher, dynamic-template, session, sync, input, keyflow)

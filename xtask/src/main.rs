@@ -7,7 +7,7 @@
 //!   cargo xtask <filter>           # run tests matching filter
 //!   FTS_KEEP_OPEN=1 cargo xtask   # keep REAPER open after tests
 
-use reaper_test::runner::{TestPackage, TestRunner};
+use reaper_test::runner::{ExtensionPackage, TestPackage, TestRunner};
 use std::env;
 use std::path::PathBuf;
 
@@ -23,8 +23,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let filter = args.iter().skip(1).find(|a| !a.starts_with("--")).cloned();
 
     let home = env::var("HOME").unwrap_or_else(|_| "/tmp".into());
-    let resources_dir = env::var("FTS_REAPER_RESOURCES")
-        .unwrap_or_else(|_| format!("{home}/.fts-dev"));
+    let resources_dir =
+        env::var("FTS_REAPER_RESOURCES").unwrap_or_else(|_| format!("{home}/.fts-dev"));
 
     let project_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
@@ -54,50 +54,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ))
         .with_headless(runner_headless);
 
-    // Build and install extensions
-    runner.install_daw_bridge(&daw_root)?;
-    reaper_test::runner::install_plugin(
-        &project_root.join("target/release/libreaper_fts_extensions.so"),
-        "reaper_fts_extensions.so",
-        &PathBuf::from(&resources_dir).join("UserPlugins"),
+    let packages = vec![TestPackage {
+        package: "fts-extensions".into(),
+        features: vec![],
+        test_threads: 1,
+        default_skips: vec![],
+        test_binary: Some("extension_loads".into()),
+    }];
+
+    runner.install_test_extensions(
+        &daw_root,
+        &project_root,
+        &[ExtensionPackage {
+            package: "fts-extensions".into(),
+            lib_stem: "reaper_fts_extensions".into(),
+            plugin_name: "reaper_fts_extensions.so".into(),
+            release: true,
+        }],
     )?;
 
     // Install config symlinks (modules contribute their own configs)
     install_configs(&project_root, &resources_dir)?;
 
-    // Build test binaries
-    println!("\n-- Building test binaries --");
-    let status = std::process::Command::new("cargo")
-        .args(["test", "-p", "fts-extensions", "--no-run"])
-        .current_dir(&project_root)
-        .status()?;
-    if !status.success() {
-        return Err("Failed to build test binaries".into());
-    }
-
-    // Clean, spawn, wait, test
-    runner.clean_stale_sockets();
-
-    println!("\n-- Spawning REAPER --");
-    let mut reaper = runner.spawn_reaper()?;
-    reaper.wait_for_socket(&runner)?;
-
-    let packages = vec![
-        TestPackage {
-            package: "fts-extensions".into(),
-            features: vec![],
-            test_threads: 1,
-            default_skips: vec![],
-            test_binary: Some("extension_loads".into()),
-        },
-    ];
-
-    let tests_passed = runner.run_tests(&mut reaper, &packages, filter.as_deref())?;
-
-    if !runner.keep_open {
-        reaper.stop(&runner);
-    }
-    runner.clean_stale_sockets();
+    runner.build_test_packages(&project_root, &packages)?;
+    let tests_passed = runner.run_reaper_tests(&packages, filter.as_deref())?;
 
     if tests_passed {
         println!("\n  All tests passed!");
@@ -121,11 +101,21 @@ fn install_configs(
     let input_src = project_root.join("../input/config").canonicalize()?;
     let input_keybinds = fts_dir.join("input/keybinds");
     std::fs::create_dir_all(&input_keybinds)?;
-    for name in &["fasttrackstudio", "logic", "reaper", "pro-tools", "ableton", "overlays"] {
+    for name in &[
+        "fasttrackstudio",
+        "logic",
+        "reaper",
+        "pro-tools",
+        "ableton",
+        "overlays",
+    ] {
         symlink_force(&input_src.join(name), &input_keybinds.join(name))?;
     }
     std::fs::create_dir_all(fts_dir.join("input"))?;
-    symlink_force(&input_src.join("workflows"), &fts_dir.join("input/workflows"))?;
+    symlink_force(
+        &input_src.join("workflows"),
+        &fts_dir.join("input/workflows"),
+    )?;
     println!("  input: keybinds + workflows");
 
     // ── launcher: action packs ──

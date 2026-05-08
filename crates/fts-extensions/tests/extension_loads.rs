@@ -23,10 +23,7 @@ async fn wait_for_ready(ctx: &ReaperTestContext) -> eyre::Result<()> {
 }
 
 /// Wait specifically for an input action to appear in the host registry.
-async fn wait_for_input_action(
-    ctx: &ReaperTestContext,
-    command_name: &str,
-) -> eyre::Result<u32> {
+async fn wait_for_input_action(ctx: &ReaperTestContext, command_name: &str) -> eyre::Result<u32> {
     let actions = ctx.daw.action_registry();
 
     for i in 0..30 {
@@ -84,8 +81,13 @@ async fn input_toggle_passthrough_is_registered(ctx: &ReaperTestContext) -> eyre
 
     let cmd_id = wait_for_input_action(ctx, "FTS_INPUT_TOGGLE_PASSTHROUGH").await?;
 
-    let registered = actions.is_registered("FTS_INPUT_TOGGLE_PASSTHROUGH").await?;
-    assert!(registered, "FTS_INPUT_TOGGLE_PASSTHROUGH should be registered");
+    let registered = actions
+        .is_registered("FTS_INPUT_TOGGLE_PASSTHROUGH")
+        .await?;
+    assert!(
+        registered,
+        "FTS_INPUT_TOGGLE_PASSTHROUGH should be registered"
+    );
 
     wait_for_input_action_list(ctx, "FTS_INPUT_TOGGLE_PASSTHROUGH").await?;
 
@@ -106,7 +108,10 @@ async fn legacy_test_toggle_is_in_action_list(ctx: &ReaperTestContext) -> eyre::
 
     let cmd_id = wait_for_input_action(ctx, "FTS_TEST_TOGGLE").await?;
     let in_list = actions.is_in_action_list("FTS_TEST_TOGGLE").await?;
-    assert!(in_list, "FTS_TEST_TOGGLE should appear in REAPER's action list");
+    assert!(
+        in_list,
+        "FTS_TEST_TOGGLE should appear in REAPER's action list"
+    );
 
     ctx.log(&format!("FTS_TEST_TOGGLE registered with cmd_id={cmd_id}"));
     Ok(())
@@ -121,7 +126,9 @@ async fn input_profile_selector_is_in_action_list(ctx: &ReaperTestContext) -> ey
     let actions = ctx.daw.action_registry();
 
     let cmd_id = wait_for_input_action(ctx, "FTS_INPUT_PROFILE_SELECTOR").await?;
-    let in_list = actions.is_in_action_list("FTS_INPUT_PROFILE_SELECTOR").await?;
+    let in_list = actions
+        .is_in_action_list("FTS_INPUT_PROFILE_SELECTOR")
+        .await?;
     assert!(
         in_list,
         "FTS_INPUT_PROFILE_SELECTOR should appear in REAPER's action list"
@@ -140,7 +147,9 @@ async fn input_actions_panel_is_in_action_list(ctx: &ReaperTestContext) -> eyre:
     let actions = ctx.daw.action_registry();
 
     let cmd_id = wait_for_input_action(ctx, "FTS_INPUT_TOGGLE_ACTIONS_PANEL").await?;
-    let in_list = actions.is_in_action_list("FTS_INPUT_TOGGLE_ACTIONS_PANEL").await?;
+    let in_list = actions
+        .is_in_action_list("FTS_INPUT_TOGGLE_ACTIONS_PANEL")
+        .await?;
     assert!(
         in_list,
         "FTS_INPUT_TOGGLE_ACTIONS_PANEL should appear in REAPER's action list"
@@ -177,9 +186,7 @@ async fn all_actions_registered(ctx: &ReaperTestContext) -> eyre::Result<()> {
     ];
 
     // ── Launcher module ──
-    let launcher = [
-        "FTS_LAUNCHER_TOGGLE",
-    ];
+    let launcher = ["FTS_LAUNCHER_TOGGLE"];
 
     // ── Session module (prefix: fts.session) ──
     let session = [

@@ -13,9 +13,9 @@ use std::error::Error;
 use std::sync::{Arc, OnceLock};
 
 use crossbeam_channel::{Receiver, Sender};
+use daw::Daw;
 use daw::module::{self, DawModule, ModuleContext};
 use daw::service::ActionEvent;
-use daw::Daw;
 use fragile::Fragile;
 use reaper_high::{MainTaskMiddleware, MainThreadTask, Reaper as HighReaper, TaskSupport};
 use reaper_low::PluginContext;
@@ -99,10 +99,19 @@ fn catch_panic(label: &str, f: impl FnOnce() + std::panic::UnwindSafe) {
 extern "C" fn timer_callback() {
     if let Some(app_fragile) = APP.get() {
         let app = app_fragile.get();
-        catch_panic("process_tasks", std::panic::AssertUnwindSafe(|| app.process_tasks()));
+        catch_panic(
+            "process_tasks",
+            std::panic::AssertUnwindSafe(|| app.process_tasks()),
+        );
         catch_panic("poll_and_broadcast", daw::reaper::poll_and_broadcast);
-        catch_panic("poll_and_broadcast_tracks", daw::reaper::poll_and_broadcast_tracks);
-        catch_panic("process_pending_actions", std::panic::AssertUnwindSafe(|| process_pending_actions(app)));
+        catch_panic(
+            "poll_and_broadcast_tracks",
+            daw::reaper::poll_and_broadcast_tracks,
+        );
+        catch_panic(
+            "process_pending_actions",
+            std::panic::AssertUnwindSafe(|| process_pending_actions(app)),
+        );
         catch_panic("update_panels", daw::ui::dock::update_panels);
     }
 }
@@ -146,7 +155,11 @@ fn register_actions_sync(defs: &actions::ActionDefs) {
         for (command_id, display_name, _handler, show_in_menu, toggleable) in defs {
             let description = display_name.as_str();
             let result = match (show_in_menu, toggleable) {
-                (true, true) => registry.register_toggle_in_menu(&command_id, description).await,
+                (true, true) => {
+                    registry
+                        .register_toggle_in_menu(&command_id, description)
+                        .await
+                }
                 (true, false) => registry.register_in_menu(&command_id, description).await,
                 (false, true) => registry.register_toggle(&command_id, description).await,
                 (false, false) => registry.register(&command_id, description).await,
@@ -208,9 +221,9 @@ fn register_actions_sync(defs: &actions::ActionDefs) {
                     });
                     let event = event.expect("SelfRef::map ran");
                     match event {
-                    ActionEvent::Triggered { ref command_name } => {
-                        let _ = tx.send(command_name.clone());
-                    }
+                        ActionEvent::Triggered { ref command_name } => {
+                            let _ = tx.send(command_name.clone());
+                        }
                     }
                 }
                 Ok(None) => {
@@ -343,14 +356,16 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
 
     // Combine all defs for REAPER registration
     let mut all_defs: actions::ActionDefs = legacy_defs;
+    all_defs.extend(module_actions.into_iter().map(
+        |(id, display_name, handler, show_in_menu, toggleable)| {
+            (id, display_name, handler, show_in_menu, toggleable)
+        },
+    ));
     all_defs.extend(
-        module_actions
+        ui_test_panel::action_defs()
             .into_iter()
-            .map(|(id, display_name, handler, show_in_menu, toggleable)| {
-                (id, display_name, handler, show_in_menu, toggleable)
-            }),
+            .map(|a| a.into_tuple()),
     );
-    all_defs.extend(ui_test_panel::action_defs().into_iter().map(|a| a.into_tuple()));
 
     let session = ReaperSession::load(context);
     let app = App {

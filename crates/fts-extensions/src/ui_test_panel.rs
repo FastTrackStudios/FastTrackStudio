@@ -50,21 +50,13 @@ pub fn panel_defs() -> [PanelDef; 2] {
 
 pub fn action_defs() -> [ActionDef; 2] {
     [
-        ActionDef::new(
-            "fts-ui-native",
-            "FTS: UI Native",
-            || {
-                daw::ui::dock::toggle_panel("FTS_UI_NATIVE");
-            },
-        )
+        ActionDef::new("fts-ui-native", "FTS: UI Native", || {
+            daw::ui::dock::toggle_panel("FTS_UI_NATIVE");
+        })
         .in_menu(),
-        ActionDef::new(
-            "fts-ui-desktop",
-            "FTS: UI Desktop",
-            || {
-                daw::ui::dock::toggle_panel("FTS_UI_DESKTOP");
-            },
-        )
+        ActionDef::new("fts-ui-desktop", "FTS: UI Desktop", || {
+            daw::ui::dock::toggle_panel("FTS_UI_DESKTOP");
+        })
         .in_menu(),
     ]
 }
