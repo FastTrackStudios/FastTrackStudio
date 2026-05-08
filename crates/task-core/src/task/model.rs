@@ -134,89 +134,10 @@ macro_rules! json_vec_type {
     };
 }
 
-/// Workflow-defined Obsidian-style frontmatter sidecar.
-///
-/// Wraps a `serde_json::Value` (always an object in practice) so that
-/// crudcrate's auto-derived Update/Create models — which derive `Facet` —
-/// can compile. The shape is opaque to facet reflection; serde and SeaORM
-/// see-through the wrapper transparently.
-#[derive(Debug, Clone, PartialEq, Facet, Serialize, Deserialize, ToSchema)]
-#[facet(opaque)]
-#[serde(transparent)]
-pub struct JsonProperties(pub serde_json::Value);
-
-impl Default for JsonProperties {
-    fn default() -> Self {
-        Self(serde_json::Value::Object(serde_json::Map::new()))
-    }
-}
-
-impl From<serde_json::Value> for JsonProperties {
-    fn from(value: serde_json::Value) -> Self {
-        Self(value)
-    }
-}
-
-impl From<JsonProperties> for serde_json::Value {
-    fn from(value: JsonProperties) -> Self {
-        value.0
-    }
-}
-
-impl Deref for JsonProperties {
-    type Target = serde_json::Value;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl DerefMut for JsonProperties {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-
-impl From<JsonProperties> for Value {
-    fn from(value: JsonProperties) -> Self {
-        Value::Json(Some(Box::new(value.0)))
-    }
-}
-
-impl Nullable for JsonProperties {
-    fn null() -> Value {
-        Value::Json(None)
-    }
-}
-
-impl TryGetable for JsonProperties {
-    fn try_get_by<I: ColIdx>(res: &QueryResult, idx: I) -> Result<Self, TryGetError> {
-        let value: serde_json::Value = res.try_get_by(idx)?;
-        Ok(Self(value))
-    }
-}
-
-impl ValueType for JsonProperties {
-    fn try_from(value: Value) -> Result<Self, ValueTypeErr> {
-        match value {
-            Value::Json(Some(value)) => Ok(Self(*value)),
-            Value::Json(None) => Ok(Self::default()),
-            _ => Err(ValueTypeErr),
-        }
-    }
-
-    fn type_name() -> String {
-        stringify!(JsonProperties).to_string()
-    }
-
-    fn array_type() -> ArrayType {
-        ArrayType::Json
-    }
-
-    fn column_type() -> ColumnType {
-        ColumnType::Json
-    }
-}
+/// Re-exported here so existing imports keep working. Canonical home is
+/// [`crate::property::JsonObject`] — the Facet/SeaORM bridge for any
+/// JSON column that participates in crudcrate's auto-derived models.
+pub use crate::property::JsonObject as JsonProperties;
 
 json_vec_type!(StringList, String);
 json_vec_type!(WikiLinkList, WikiLink);

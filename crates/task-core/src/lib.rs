@@ -119,24 +119,26 @@ pub use service::{
     NextcloudCapability, OperatingAreaStatus, OperatingGoal, OperatingModelReport,
     OperatingRoutine, OperatingService, OperatingServiceDispatcher, PeopleService,
     PeopleServiceDispatcher, ProjectFileSummary, ProjectKnowledgeContext, ProjectPatch,
-    ProjectService, ProjectServiceDispatcher, ProviderSyncState, RemoteDeckBoard, RemoteDeckStack,
-    ReviewReport, SyncPlan, SyncPlanItem, SyncStats, SystemCapabilities, SystemHealth,
-    SystemService, SystemServiceDispatcher, TaskService, TaskServiceDispatcher, TimeEntryContext,
-    TimeEntryFilter, TimeEntryPatch, TimeLogRequest, TimeService, TimeServiceDispatcher,
-    TimeStartRequest, TimedTaskEntry, VaultCapability, VaultError,
-    activity_service_service_descriptor, attachment_service_service_descriptor,
-    calendar_service_service_descriptor, conversation_service_service_descriptor,
-    expense_service_service_descriptor, inbox_service_service_descriptor,
-    invoice_service_service_descriptor, mail_service_service_descriptor,
-    operating_service_service_descriptor, people_service_service_descriptor,
-    project_service_service_descriptor, system_service_service_descriptor,
+    ProjectService, ProjectServiceDispatcher, PropertyDefinitionView, PropertyService,
+    PropertyServiceDispatcher, ProviderSyncState, RemoteDeckBoard, RemoteDeckStack, ReviewReport,
+    SyncPlan, SyncPlanItem, SyncStats, SystemCapabilities, SystemHealth, SystemService,
+    SystemServiceDispatcher, TaskService, TaskServiceDispatcher, TimeEntryContext, TimeEntryFilter,
+    TimeEntryPatch, TimeLogRequest, TimeService, TimeServiceDispatcher, TimeStartRequest,
+    TimedTaskEntry, VaultCapability, VaultError, activity_service_service_descriptor,
+    attachment_service_service_descriptor, calendar_service_service_descriptor,
+    conversation_service_service_descriptor, expense_service_service_descriptor,
+    inbox_service_service_descriptor, invoice_service_service_descriptor,
+    mail_service_service_descriptor, operating_service_service_descriptor,
+    people_service_service_descriptor, project_service_service_descriptor,
+    property_service_service_descriptor, system_service_service_descriptor,
     task_service_service_descriptor, time_service_service_descriptor,
 };
 #[cfg(feature = "server")]
 pub use service_impl::{
     ActivityServiceImpl, AttachmentServiceImpl, CalendarServiceImpl, ConversationServiceImpl,
     ExpenseServiceImpl, InboxServiceImpl, InvoiceServiceImpl, MailServiceImpl,
-    OperatingServiceImpl, PeopleServiceImpl, ProjectServiceImpl, TaskServiceImpl, TimeServiceImpl,
+    OperatingServiceImpl, PeopleServiceImpl, ProjectServiceImpl, PropertyServiceImpl,
+    TaskServiceImpl, TimeServiceImpl,
 };
 
 #[cfg(feature = "caldav")]

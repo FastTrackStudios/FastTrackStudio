@@ -480,6 +480,77 @@ pub trait CalendarService {
 }
 
 #[vox::service]
+pub trait PropertyService {
+    /// List every registered property definition.
+    async fn list_definitions(&self) -> Result<Vec<PropertyDefinitionView>, VaultError>;
+
+    /// Register or update a property definition. Idempotent on `name`.
+    async fn define_property(
+        &self,
+        name: String,
+        kind: String,
+        description: Option<String>,
+        options: String,
+    ) -> Result<PropertyDefinitionView, VaultError>;
+
+    /// Delete a property definition by name. Existing entity properties
+    /// are not touched — definitions are advisory metadata.
+    async fn delete_definition(&self, name: String) -> Result<(), VaultError>;
+
+    /// Read all properties off one entity. `owner_type` is the entity
+    /// kind: "task" | "project" | "calendar_event" | "person" | "comment"
+    /// | "asset" | "location". Returns the JSON object verbatim
+    /// (Obsidian frontmatter shape).
+    async fn get_properties(
+        &self,
+        owner_type: String,
+        owner_id: Uuid,
+    ) -> Result<String, VaultError>;
+
+    /// Set one property on one entity. JSON-encoded `value`. Auto-creates
+    /// a Text property definition if `name` isn't registered yet.
+    async fn set_property(
+        &self,
+        owner_type: String,
+        owner_id: Uuid,
+        name: String,
+        value: String,
+    ) -> Result<(), VaultError>;
+
+    /// Remove a property from one entity.
+    async fn unset_property(
+        &self,
+        owner_type: String,
+        owner_id: Uuid,
+        name: String,
+    ) -> Result<(), VaultError>;
+
+    /// Find every entity of `owner_type` whose property `name` JSON-equals
+    /// `value` (encoded as JSON). Backed by SQLite `json_extract`.
+    async fn find_by_property(
+        &self,
+        owner_type: String,
+        name: String,
+        value: String,
+    ) -> Result<Vec<Uuid>, VaultError>;
+}
+
+/// Wire-friendly snapshot of a property definition.
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct PropertyDefinitionView {
+    pub id: Uuid,
+    pub name: String,
+    /// One of: "text" | "number" | "checkbox" | "date" | "datetime"
+    /// | "list" | "tags".
+    pub kind: String,
+    pub description: Option<String>,
+    /// JSON-encoded options blob.
+    pub options: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[vox::service]
 pub trait SystemService {
     /// Fast live capability snapshot for this task-server instance.
     async fn capabilities(&self) -> SystemCapabilities;

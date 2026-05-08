@@ -1524,21 +1524,9 @@ checksum = "a4ae5f15dda3c708c0ade84bfee31ccab44a3da4f88015ed22f63732abe300c8"
 name = "daw"
 version = "0.1.0"
 dependencies = [
- "daw-control 0.1.0",
+ "daw-control",
  "daw-module 0.1.0",
  "daw-proto 0.1.0",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "daw"
-version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/daw.git?branch=main#cb1767489b11e6a7f76896a6f52ae71c8c9730c5"
-dependencies = [
- "daw-control 0.1.0 (git+https://github.com/FastTrackStudios/daw.git?branch=main)",
- "daw-module 0.1.0 (git+https://github.com/FastTrackStudios/daw.git?branch=main)",
- "daw-proto 0.1.0 (git+https://github.com/FastTrackStudios/daw.git?branch=main)",
  "tokio",
  "tracing",
 ]
@@ -1555,21 +1543,6 @@ dependencies = [
  "serde",
  "serde_json",
  "vox 0.3.1 (git+https://github.com/Codys-Wright/vox.git?rev=ccb46b54)",
-]
-
-[[package]]
-name = "daw-control"
-version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/daw.git?branch=main#cb1767489b11e6a7f76896a6f52ae71c8c9730c5"
-dependencies = [
- "daw-proto 0.1.0 (git+https://github.com/FastTrackStudios/daw.git?branch=main)",
- "eyre",
- "facet 0.46.0",
- "facet-json",
- "futures",
- "serde",
- "serde_json",
- "vox 0.3.1 (git+https://github.com/Codys-Wright/vox?rev=ccb46b5416100d38430cb082d71bf0377428c241)",
 ]
 
 [[package]]
@@ -2283,7 +2256,7 @@ checksum = "9f1f227452a390804cdb637b74a86990f2a7d7ba4b7d5693aac9b4dd6defd8d6"
 name = "fasttrackaudio"
 version = "0.1.0"
 dependencies = [
- "daw 0.1.0",
+ "daw",
  "facet 0.46.0",
  "keyflow",
  "thiserror 2.0.18",
@@ -3320,7 +3293,7 @@ version = "0.1.0"
 dependencies = [
  "color-eyre",
  "colored",
- "daw 0.1.0 (git+https://github.com/FastTrackStudios/daw.git?branch=main)",
+ "daw-module 0.1.0 (git+https://github.com/FastTrackStudios/daw.git?branch=main)",
  "daw-proto 0.1.0 (git+https://github.com/FastTrackStudios/daw.git?branch=main)",
  "derive_more 1.0.0",
  "facet 0.46.0",

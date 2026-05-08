@@ -14,4 +14,12 @@ pub mod json_object;
 pub mod model;
 
 pub use json_object::JsonObject;
-pub use model::*;
+pub use model::{
+    Entity as PropertyDefinitionEntity, Model as PropertyDefinition, PropertyDefinitionApi,
+    PropertyDefinitionApiList, PropertyKind,
+};
+
+/// Default value for a `properties` column — an empty JSON object `{}`.
+pub fn default_properties_json() -> JsonObject {
+    JsonObject::default()
+}

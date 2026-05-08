@@ -316,6 +316,11 @@ pub(crate) enum Commands {
         #[command(subcommand)]
         command: DemoCommands,
     },
+    /// Obsidian-style polymorphic property management.
+    Prop {
+        #[command(subcommand)]
+        command: commands::property::PropertyCommands,
+    },
     /// Asset inventory and maintenance tracking
     Asset {
         #[command(subcommand)]
@@ -1215,6 +1220,9 @@ pub(crate) async fn run_remote_command(
         }
         Commands::Demo { command } => {
             commands::demo::run(command);
+        }
+        Commands::Prop { command } => {
+            commands::property::run_remote_property_command(remote, command).await?
         }
         Commands::Project { command } => {
             commands::project::run_remote_project_command(remote, actor, command).await?

@@ -86,3 +86,30 @@ pub enum PropertyKind {
     #[sea_orm(string_value = "tags")]
     Tags,
 }
+
+impl PropertyKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            PropertyKind::Text => "text",
+            PropertyKind::Number => "number",
+            PropertyKind::Checkbox => "checkbox",
+            PropertyKind::Date => "date",
+            PropertyKind::Datetime => "datetime",
+            PropertyKind::List => "list",
+            PropertyKind::Tags => "tags",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.to_ascii_lowercase().as_str() {
+            "text" | "string" => Some(PropertyKind::Text),
+            "number" | "num" | "int" | "float" => Some(PropertyKind::Number),
+            "checkbox" | "bool" | "boolean" => Some(PropertyKind::Checkbox),
+            "date" => Some(PropertyKind::Date),
+            "datetime" => Some(PropertyKind::Datetime),
+            "list" => Some(PropertyKind::List),
+            "tags" | "tag" => Some(PropertyKind::Tags),
+            _ => None,
+        }
+    }
+}

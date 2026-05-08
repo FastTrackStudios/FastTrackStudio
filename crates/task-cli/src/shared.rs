@@ -309,6 +309,10 @@ impl RemoteVoxConfig {
         self.connect().await
     }
 
+    pub(crate) async fn property(&self) -> eyre::Result<task_core::service::PropertyServiceClient> {
+        self.connect().await
+    }
+
     pub(crate) async fn connect<C>(&self) -> eyre::Result<C>
     where
         C: vox::FromVoxSession,

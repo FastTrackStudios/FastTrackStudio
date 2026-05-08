@@ -14,6 +14,7 @@ pub(crate) mod invoice;
 pub(crate) mod operating;
 pub(crate) mod people;
 pub(crate) mod project;
+pub(crate) mod property;
 pub(crate) mod server;
 pub(crate) mod talk;
 pub(crate) mod task;
