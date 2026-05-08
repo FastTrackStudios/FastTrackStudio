@@ -1945,6 +1945,130 @@ pub struct AddShoppingItemRequest {
     pub label: Option<String>,
 }
 
+// ── Food + FoodProduct ──────────────────────────────────────────────
+
+/// Canonical ingredient catalog + branded products. The `food_id` link
+/// on `RecipeIngredient` is populated by name-match on insert (see
+/// `crate::food::find_food_by_name`), so most callers only touch this
+/// service directly when curating the catalog or attaching barcoded
+/// products.
+#[vox::service]
+pub trait FoodService {
+    // ── Foods (canonical ingredients) ──────────────────────────────
+    async fn list_foods(
+        &self,
+        organization: Option<String>,
+    ) -> Result<Vec<crate::food::FoodApi>, VaultError>;
+    async fn get_food(&self, id: Uuid) -> Result<Option<crate::food::FoodApi>, VaultError>;
+    /// Look up a Food by canonical name OR any alias
+    /// (case-insensitive). Returns the first match within the
+    /// organization (or global when `organization = None`).
+    async fn find_food_by_name(
+        &self,
+        organization: Option<String>,
+        name_or_alias: String,
+    ) -> Result<Option<crate::food::FoodApi>, VaultError>;
+    async fn create_food(
+        &self,
+        request: CreateFoodRequest,
+    ) -> Result<crate::food::FoodApi, VaultError>;
+    async fn update_food(
+        &self,
+        id: Uuid,
+        patch: FoodPatch,
+    ) -> Result<crate::food::FoodApi, VaultError>;
+    async fn delete_food(&self, id: Uuid) -> Result<(), VaultError>;
+    /// Add an alias to an existing Food. Idempotent — duplicates
+    /// (case-insensitive) are silently dropped.
+    async fn add_food_alias(
+        &self,
+        food_id: Uuid,
+        alias: String,
+    ) -> Result<crate::food::FoodApi, VaultError>;
+
+    // ── Food products (branded) ────────────────────────────────────
+    async fn list_food_products(
+        &self,
+        organization: Option<String>,
+    ) -> Result<Vec<crate::food_product::FoodProductApi>, VaultError>;
+    async fn get_food_product(
+        &self,
+        id: Uuid,
+    ) -> Result<Option<crate::food_product::FoodProductApi>, VaultError>;
+    async fn get_food_product_by_barcode(
+        &self,
+        organization: Option<String>,
+        barcode: String,
+    ) -> Result<Option<crate::food_product::FoodProductApi>, VaultError>;
+    async fn create_food_product(
+        &self,
+        request: CreateFoodProductRequest,
+    ) -> Result<crate::food_product::FoodProductApi, VaultError>;
+    async fn update_food_product(
+        &self,
+        id: Uuid,
+        patch: FoodProductPatch,
+    ) -> Result<crate::food_product::FoodProductApi, VaultError>;
+
+    /// Manually link a `RecipeIngredient` row to a `Food`. Used when
+    /// the auto name-match on recipe insert didn't find a hit and the
+    /// user wires the link by hand later.
+    async fn link_recipe_ingredient(
+        &self,
+        recipe_ingredient_id: Uuid,
+        food_id: Uuid,
+    ) -> Result<(), VaultError>;
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct CreateFoodRequest {
+    pub name: String,
+    pub aliases: Vec<String>,
+    pub category: Option<String>,
+    pub default_unit: Option<String>,
+    pub organization: Option<String>,
+    /// JSON-encoded [`crate::nutrition::NutritionFacts`].
+    pub nutrition_json: Option<String>,
+    pub notes: Option<String>,
+    pub created_by: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct FoodPatch {
+    pub name: Option<String>,
+    pub category: Option<String>,
+    pub default_unit: Option<String>,
+    /// `Some([])` clears; `None` leaves unchanged.
+    pub aliases: Option<Vec<String>>,
+    pub nutrition_json: Option<String>,
+    pub notes: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct CreateFoodProductRequest {
+    pub food_id: Uuid,
+    pub barcode: Option<String>,
+    pub brand: Option<String>,
+    pub name: String,
+    pub package_size_g: Option<f64>,
+    pub package_size_label: Option<String>,
+    pub source: String,
+    pub external_id: Option<String>,
+    pub nutrition_json: Option<String>,
+    pub image_url: Option<String>,
+    pub organization: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct FoodProductPatch {
+    pub brand: Option<String>,
+    pub name: Option<String>,
+    pub package_size_g: Option<f64>,
+    pub package_size_label: Option<String>,
+    pub nutrition_json: Option<String>,
+    pub image_url: Option<String>,
+}
+
 /// Errors returned by vault operations.
 #[derive(Debug, facet::Facet, thiserror::Error)]
 #[repr(C)]

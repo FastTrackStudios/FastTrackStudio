@@ -12,7 +12,10 @@
 //! rest of the app continues to go through the generated CRUD surfaces.
 
 use chrono::{Duration, NaiveDate, Utc};
-use sea_orm::{ActiveValue::Set, ColumnTrait, DatabaseConnection, DbErr, EntityTrait, QueryFilter};
+use sea_orm::{
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, DatabaseConnection, DbErr, EntityTrait,
+    QueryFilter,
+};
 use uuid::Uuid;
 
 use task_core::activity;
@@ -25,6 +28,8 @@ use task_core::cycle::{self, CycleStatus, CycleTaskList};
 use task_core::email;
 use task_core::email::EmailStringList;
 use task_core::expense::{self, ExpenseStatus};
+use task_core::food::{self, FoodAliasList};
+use task_core::food_product;
 use task_core::integration::{
     self, IntegrationStringList, ProjectTemplate, ProjectTemplateList, StatusDef, StatusDefList,
     TaskTemplate, TaskTemplateList,
@@ -98,6 +103,10 @@ pub struct DemoSeedSummary {
     pub integrations_unchanged: usize,
     pub tracks_created: usize,
     pub tracks_unchanged: usize,
+    pub foods_created: usize,
+    pub foods_unchanged: usize,
+    pub food_products_created: usize,
+    pub food_products_unchanged: usize,
     pub recipes_created: usize,
     pub recipes_unchanged: usize,
     pub cookbooks_created: usize,
@@ -128,6 +137,8 @@ impl DemoSeedSummary {
             + self.attachments_created
             + self.integrations_created
             + self.tracks_created
+            + self.foods_created
+            + self.food_products_created
             + self.recipes_created
             + self.cookbooks_created
             + self.meal_plan_entries_created
@@ -152,6 +163,8 @@ impl DemoSeedSummary {
             + self.attachments_unchanged
             + self.integrations_unchanged
             + self.tracks_unchanged
+            + self.foods_unchanged
+            + self.food_products_unchanged
             + self.recipes_unchanged
             + self.cookbooks_unchanged
             + self.meal_plan_entries_unchanged
@@ -183,7 +196,14 @@ pub async fn seed_demo_data(db: &DatabaseConnection) -> Result<DemoSeedSummary, 
     seed_attachments(db, &mut summary).await?;
     seed_integrations(db, &mut summary).await?;
     seed_tracks(db, &mut summary).await?;
+    // Foods must seed before recipes so RecipeIngredient.food_id
+    // auto-link finds the catalog row on insert.
+    seed_foods(db, &mut summary).await?;
     seed_cooking(db, &mut summary).await?;
+    seed_food_products(db, &mut summary).await?;
+    // Backfill `food_id` on any pre-existing recipe_ingredient rows
+    // (idempotent: only updates rows whose food_id is currently NULL).
+    backfill_recipe_ingredient_food_ids(db).await?;
     Ok(summary)
 }
 
@@ -378,6 +398,24 @@ pub async fn reset_demo_data(db: &DatabaseConnection) -> Result<DemoSeedSummary,
             > 0
         {
             summary.cookbooks_created += 1;
+        }
+    }
+    // Food products before foods (FK ordering even without enforcement).
+    for key in FOOD_PRODUCT_KEYS {
+        let id = demo_id(key);
+        if food_product::Entity::delete_by_id(id)
+            .exec(db)
+            .await?
+            .rows_affected
+            > 0
+        {
+            summary.food_products_created += 1;
+        }
+    }
+    for key in FOOD_KEYS {
+        let id = demo_id(key);
+        if food::Entity::delete_by_id(id).exec(db).await?.rows_affected > 0 {
+            summary.foods_created += 1;
         }
     }
     for key in RECIPE_KEYS {
@@ -603,6 +641,69 @@ const MEAL_PLAN_KEYS: &[&str] = &[
 ];
 
 const SHOPPING_LIST_KEYS: &[&str] = &["shop:this-week"];
+
+/// Cody's pantry-relevant catalog. Mix of pantry staples, produce,
+/// dairy, protein, and spices. Each Food carries category +
+/// default_unit + (when well-known) per-100g nutrition.
+const FOOD_KEYS: &[&str] = &[
+    // Pantry staples
+    "food:olive-oil",
+    "food:kosher-salt",
+    "food:black-pepper",
+    "food:all-purpose-flour",
+    "food:white-sugar",
+    "food:brown-sugar",
+    "food:baking-powder",
+    "food:baking-soda",
+    "food:garlic-powder",
+    "food:onion-powder",
+    "food:smoked-paprika",
+    "food:ground-cumin",
+    "food:dried-oregano",
+    "food:soy-sauce",
+    "food:white-rice",
+    "food:dried-pasta",
+    "food:canned-tomatoes",
+    "food:canned-coconut-milk",
+    "food:spaghetti",
+    "food:american-cheese",
+    // Produce
+    "food:yellow-onion",
+    "food:red-onion",
+    "food:garlic",
+    "food:fresh-ginger",
+    "food:lemon",
+    "food:lime",
+    "food:tomato",
+    "food:cucumber",
+    "food:kalamata-olives",
+    "food:broccoli",
+    "food:sweet-potato",
+    "food:banana",
+    // Dairy/Eggs
+    "food:butter",
+    "food:eggs",
+    "food:whole-milk",
+    "food:feta-cheese",
+    "food:pecorino-romano",
+    "food:brioche-bun",
+    // Protein
+    "food:chicken-thigh",
+    "food:ground-beef",
+    "food:guanciale",
+    "food:chickpeas-canned",
+    // Spices/Misc
+    "food:ground-cinnamon",
+    "food:garam-masala",
+    "food:dried-thyme",
+    "food:dried-rosemary",
+];
+
+const FOOD_PRODUCT_KEYS: &[&str] = &[
+    "food_product:tj-evoo-500ml",
+    "food_product:vital-farms-eggs-dozen",
+    "food_product:generic-chickpeas-15oz",
+];
 
 // ── Project fixtures ────────────────────────────────────────────────────────
 
@@ -3252,14 +3353,21 @@ async fn seed_cooking(db: &DatabaseConnection, summary: &mut DemoSeedSummary) ->
         recipe::Entity::insert(active).exec(db).await?;
         summary.recipes_created += 1;
 
-        for (idx, (qty, unit, food)) in fix.ingredients.iter().enumerate() {
+        for (idx, (qty, unit, food_text)) in fix.ingredients.iter().enumerate() {
+            // Auto-link to canonical Food by name when one already
+            // exists (foods are seeded earlier in this routine — see
+            // `seed_foods`). Idempotent across re-runs.
+            let food_id = task_core::food::find_food_by_name(db, Some(ORG_PERSONAL), food_text)
+                .await?
+                .map(|f| f.id);
             let ing_active = recipe_ingredient::ActiveModel {
                 id: Set(demo_id(&format!("{}:ing:{}", fix.key, idx))),
                 recipe_id: Set(id),
                 sequence: Set((idx + 1) as u32),
                 quantity: Set(*qty),
                 unit: Set(unit.map(|s| s.to_string())),
-                food: Set(food.to_string()),
+                food: Set(food_text.to_string()),
+                food_id: Set(food_id),
                 note: Set(None),
                 is_section: Set(false),
                 created_at: Set(now),
@@ -3485,6 +3593,538 @@ async fn seed_cooking(db: &DatabaseConnection, summary: &mut DemoSeedSummary) ->
         summary.shopping_list_items_unchanged += existing_items.len();
     }
 
+    Ok(())
+}
+
+/// One row of the Food catalog seed table.
+struct FoodFixture {
+    key: &'static str,
+    name: &'static str,
+    aliases: &'static [&'static str],
+    category: &'static str,
+    default_unit: Option<&'static str>,
+    /// (kcal, protein_g, carbs_g, fat_g) per 100g — None when we don't
+    /// have a confident value (e.g. "lemon" varies). Other macros stay
+    /// `None` for the demo seed; the OpenFoodFacts bead fills them.
+    nutrition: Option<(f64, f64, f64, f64)>,
+}
+
+const FOOD_FIXTURES: &[FoodFixture] = &[
+    // Pantry staples
+    FoodFixture {
+        key: "food:olive-oil",
+        name: "olive oil",
+        aliases: &["evoo", "extra virgin olive oil"],
+        category: "pantry-staple",
+        default_unit: Some("tbsp"),
+        nutrition: Some((884.0, 0.0, 0.0, 100.0)),
+    },
+    FoodFixture {
+        key: "food:kosher-salt",
+        name: "kosher salt",
+        aliases: &["salt"],
+        category: "pantry-staple",
+        default_unit: Some("tsp"),
+        nutrition: None,
+    },
+    FoodFixture {
+        key: "food:black-pepper",
+        name: "black pepper",
+        aliases: &["pepper", "ground black pepper"],
+        category: "pantry-staple",
+        default_unit: Some("tsp"),
+        nutrition: None,
+    },
+    FoodFixture {
+        key: "food:all-purpose-flour",
+        name: "all-purpose flour",
+        aliases: &["flour", "ap flour"],
+        category: "pantry-staple",
+        default_unit: Some("cup"),
+        nutrition: Some((364.0, 10.0, 76.0, 1.0)),
+    },
+    FoodFixture {
+        key: "food:white-sugar",
+        name: "white sugar",
+        aliases: &["sugar", "granulated sugar"],
+        category: "pantry-staple",
+        default_unit: Some("cup"),
+        nutrition: Some((387.0, 0.0, 100.0, 0.0)),
+    },
+    FoodFixture {
+        key: "food:brown-sugar",
+        name: "brown sugar",
+        aliases: &[],
+        category: "pantry-staple",
+        default_unit: Some("cup"),
+        nutrition: Some((380.0, 0.1, 98.0, 0.0)),
+    },
+    FoodFixture {
+        key: "food:baking-powder",
+        name: "baking powder",
+        aliases: &[],
+        category: "pantry-staple",
+        default_unit: Some("tsp"),
+        nutrition: None,
+    },
+    FoodFixture {
+        key: "food:baking-soda",
+        name: "baking soda",
+        aliases: &[],
+        category: "pantry-staple",
+        default_unit: Some("tsp"),
+        nutrition: None,
+    },
+    FoodFixture {
+        key: "food:garlic-powder",
+        name: "garlic powder",
+        aliases: &[],
+        category: "spices",
+        default_unit: Some("tsp"),
+        nutrition: None,
+    },
+    FoodFixture {
+        key: "food:onion-powder",
+        name: "onion powder",
+        aliases: &[],
+        category: "spices",
+        default_unit: Some("tsp"),
+        nutrition: None,
+    },
+    FoodFixture {
+        key: "food:smoked-paprika",
+        name: "smoked paprika",
+        aliases: &["paprika"],
+        category: "spices",
+        default_unit: Some("tsp"),
+        nutrition: None,
+    },
+    FoodFixture {
+        key: "food:ground-cumin",
+        name: "ground cumin",
+        aliases: &["cumin"],
+        category: "spices",
+        default_unit: Some("tsp"),
+        nutrition: None,
+    },
+    FoodFixture {
+        key: "food:dried-oregano",
+        name: "dried oregano",
+        aliases: &["oregano"],
+        category: "spices",
+        default_unit: Some("tsp"),
+        nutrition: None,
+    },
+    FoodFixture {
+        key: "food:soy-sauce",
+        name: "soy sauce",
+        aliases: &[],
+        category: "pantry-staple",
+        default_unit: Some("tbsp"),
+        nutrition: None,
+    },
+    FoodFixture {
+        key: "food:white-rice",
+        name: "white rice",
+        aliases: &["rice"],
+        category: "pantry-staple",
+        default_unit: Some("cup"),
+        nutrition: Some((130.0, 2.7, 28.0, 0.3)),
+    },
+    FoodFixture {
+        key: "food:dried-pasta",
+        name: "dried pasta",
+        aliases: &["pasta"],
+        category: "pantry-staple",
+        default_unit: Some("oz"),
+        nutrition: Some((371.0, 13.0, 75.0, 1.5)),
+    },
+    FoodFixture {
+        key: "food:canned-tomatoes",
+        name: "canned tomatoes",
+        aliases: &["crushed tomatoes", "canned crushed tomatoes"],
+        category: "pantry-staple",
+        default_unit: Some("can"),
+        nutrition: None,
+    },
+    FoodFixture {
+        key: "food:canned-coconut-milk",
+        name: "coconut milk",
+        aliases: &["canned coconut milk"],
+        category: "pantry-staple",
+        default_unit: Some("can"),
+        nutrition: Some((230.0, 2.3, 6.0, 24.0)),
+    },
+    FoodFixture {
+        key: "food:spaghetti",
+        name: "spaghetti",
+        aliases: &[],
+        category: "pantry-staple",
+        default_unit: Some("oz"),
+        nutrition: Some((371.0, 13.0, 75.0, 1.5)),
+    },
+    FoodFixture {
+        key: "food:american-cheese",
+        name: "american cheese",
+        aliases: &[],
+        category: "dairy",
+        default_unit: Some("slice"),
+        nutrition: Some((375.0, 18.0, 7.3, 31.0)),
+    },
+    // Produce
+    FoodFixture {
+        key: "food:yellow-onion",
+        name: "yellow onion",
+        aliases: &["onion"],
+        category: "produce",
+        default_unit: Some("piece"),
+        nutrition: Some((40.0, 1.1, 9.3, 0.1)),
+    },
+    FoodFixture {
+        key: "food:red-onion",
+        name: "red onion",
+        aliases: &[],
+        category: "produce",
+        default_unit: Some("piece"),
+        nutrition: Some((40.0, 1.1, 9.3, 0.1)),
+    },
+    FoodFixture {
+        key: "food:garlic",
+        name: "garlic",
+        aliases: &["garlic clove", "clove of garlic"],
+        category: "produce",
+        default_unit: Some("clove"),
+        nutrition: Some((149.0, 6.4, 33.0, 0.5)),
+    },
+    FoodFixture {
+        key: "food:fresh-ginger",
+        name: "fresh ginger",
+        aliases: &["ginger"],
+        category: "produce",
+        default_unit: Some("tbsp"),
+        nutrition: Some((80.0, 1.8, 18.0, 0.8)),
+    },
+    FoodFixture {
+        key: "food:lemon",
+        name: "lemon",
+        aliases: &[],
+        category: "produce",
+        default_unit: Some("piece"),
+        nutrition: Some((29.0, 1.1, 9.0, 0.3)),
+    },
+    FoodFixture {
+        key: "food:lime",
+        name: "lime",
+        aliases: &[],
+        category: "produce",
+        default_unit: Some("piece"),
+        nutrition: Some((30.0, 0.7, 11.0, 0.2)),
+    },
+    FoodFixture {
+        key: "food:tomato",
+        name: "tomato",
+        aliases: &["tomatoes"],
+        category: "produce",
+        default_unit: Some("piece"),
+        nutrition: Some((18.0, 0.9, 3.9, 0.2)),
+    },
+    FoodFixture {
+        key: "food:cucumber",
+        name: "cucumber",
+        aliases: &["english cucumber"],
+        category: "produce",
+        default_unit: Some("piece"),
+        nutrition: Some((15.0, 0.7, 3.6, 0.1)),
+    },
+    FoodFixture {
+        key: "food:kalamata-olives",
+        name: "kalamata olives",
+        aliases: &["olives"],
+        category: "produce",
+        default_unit: Some("cup"),
+        nutrition: Some((115.0, 0.8, 6.3, 11.0)),
+    },
+    FoodFixture {
+        key: "food:broccoli",
+        name: "broccoli",
+        aliases: &[],
+        category: "produce",
+        default_unit: Some("head"),
+        nutrition: Some((34.0, 2.8, 7.0, 0.4)),
+    },
+    FoodFixture {
+        key: "food:sweet-potato",
+        name: "sweet potato",
+        aliases: &["sweet potatoes"],
+        category: "produce",
+        default_unit: Some("piece"),
+        nutrition: Some((86.0, 1.6, 20.0, 0.1)),
+    },
+    FoodFixture {
+        key: "food:banana",
+        name: "banana",
+        aliases: &["bananas", "ripe bananas"],
+        category: "produce",
+        default_unit: Some("piece"),
+        nutrition: Some((89.0, 1.1, 23.0, 0.3)),
+    },
+    // Dairy/Eggs
+    FoodFixture {
+        key: "food:butter",
+        name: "butter",
+        aliases: &[],
+        category: "dairy",
+        default_unit: Some("tbsp"),
+        nutrition: Some((717.0, 0.9, 0.1, 81.0)),
+    },
+    FoodFixture {
+        key: "food:eggs",
+        name: "eggs",
+        aliases: &["egg", "whole egg", "egg yolks", "egg yolk"],
+        category: "dairy",
+        default_unit: Some("piece"),
+        nutrition: Some((155.0, 13.0, 1.0, 11.0)),
+    },
+    FoodFixture {
+        key: "food:whole-milk",
+        name: "whole milk",
+        aliases: &["milk"],
+        category: "dairy",
+        default_unit: Some("cup"),
+        nutrition: Some((61.0, 3.2, 4.8, 3.3)),
+    },
+    FoodFixture {
+        key: "food:feta-cheese",
+        name: "feta cheese",
+        aliases: &["feta"],
+        category: "dairy",
+        default_unit: Some("oz"),
+        nutrition: Some((264.0, 14.0, 4.1, 21.0)),
+    },
+    FoodFixture {
+        key: "food:pecorino-romano",
+        name: "pecorino romano",
+        aliases: &["pecorino"],
+        category: "dairy",
+        default_unit: Some("cup"),
+        nutrition: Some((387.0, 32.0, 0.0, 27.0)),
+    },
+    FoodFixture {
+        key: "food:brioche-bun",
+        name: "brioche bun",
+        aliases: &["brioche buns"],
+        category: "bakery",
+        default_unit: Some("piece"),
+        nutrition: Some((315.0, 9.0, 50.0, 8.0)),
+    },
+    // Protein
+    FoodFixture {
+        key: "food:chicken-thigh",
+        name: "chicken thigh",
+        aliases: &["chicken thighs"],
+        category: "meat",
+        default_unit: Some("lb"),
+        nutrition: Some((209.0, 26.0, 0.0, 11.0)),
+    },
+    FoodFixture {
+        key: "food:ground-beef",
+        name: "ground beef",
+        aliases: &["ground beef (80/20)"],
+        category: "meat",
+        default_unit: Some("oz"),
+        nutrition: Some((254.0, 17.0, 0.0, 20.0)),
+    },
+    FoodFixture {
+        key: "food:guanciale",
+        name: "guanciale",
+        aliases: &[],
+        category: "meat",
+        default_unit: Some("oz"),
+        nutrition: Some((650.0, 7.0, 0.0, 69.0)),
+    },
+    FoodFixture {
+        key: "food:chickpeas-canned",
+        name: "chickpeas (canned)",
+        aliases: &["chickpeas", "cans chickpeas", "garbanzo beans"],
+        category: "pantry-staple",
+        default_unit: Some("can"),
+        nutrition: Some((164.0, 8.9, 27.0, 2.6)),
+    },
+    // Spices/Misc
+    FoodFixture {
+        key: "food:ground-cinnamon",
+        name: "ground cinnamon",
+        aliases: &["cinnamon"],
+        category: "spices",
+        default_unit: Some("tsp"),
+        nutrition: None,
+    },
+    FoodFixture {
+        key: "food:garam-masala",
+        name: "garam masala",
+        aliases: &[],
+        category: "spices",
+        default_unit: Some("tsp"),
+        nutrition: None,
+    },
+    FoodFixture {
+        key: "food:dried-thyme",
+        name: "dried thyme",
+        aliases: &["thyme"],
+        category: "spices",
+        default_unit: Some("tsp"),
+        nutrition: None,
+    },
+    FoodFixture {
+        key: "food:dried-rosemary",
+        name: "dried rosemary",
+        aliases: &["rosemary"],
+        category: "spices",
+        default_unit: Some("tsp"),
+        nutrition: None,
+    },
+];
+
+async fn seed_foods(db: &DatabaseConnection, summary: &mut DemoSeedSummary) -> Result<(), DbErr> {
+    let now = Utc::now();
+    for fix in FOOD_FIXTURES {
+        let id = demo_id(fix.key);
+        if food::Entity::find_by_id(id).one(db).await?.is_some() {
+            summary.foods_unchanged += 1;
+            continue;
+        }
+        let nutrition = fix
+            .nutrition
+            .map(|(kcal, protein, carbs, fat)| {
+                serde_json::json!({
+                    "kcal_per_100g": kcal,
+                    "protein_g": protein,
+                    "carbs_g": carbs,
+                    "fat_g": fat,
+                    "source": "manual",
+                })
+            })
+            .map_or(JsonObject::default(), JsonObject::from_value);
+        let aliases = FoodAliasList::from(
+            fix.aliases
+                .iter()
+                .map(|s| s.to_string())
+                .collect::<Vec<_>>(),
+        );
+        let active = food::ActiveModel {
+            id: Set(id),
+            name: Set(fix.name.to_string()),
+            aliases: Set(aliases),
+            category: Set(Some(fix.category.to_string())),
+            default_unit: Set(fix.default_unit.map(|s| s.to_string())),
+            organization: Set(Some(ORG_PERSONAL.to_string())),
+            nutrition_per_100g: Set(nutrition),
+            notes: Set(None),
+            properties: Set(JsonObject::default()),
+            created_by: Set(Some("cody".to_string())),
+            created_at: Set(now),
+            updated_at: Set(now),
+        };
+        food::Entity::insert(active).exec(db).await?;
+        summary.foods_created += 1;
+    }
+    Ok(())
+}
+
+async fn seed_food_products(
+    db: &DatabaseConnection,
+    summary: &mut DemoSeedSummary,
+) -> Result<(), DbErr> {
+    let now = Utc::now();
+    let products = [
+        (
+            "food_product:tj-evoo-500ml",
+            "food:olive-oil",
+            None::<&str>,
+            Some("Trader Joe's"),
+            "Trader Joe's Extra Virgin Olive Oil 500ml",
+            Some(500.0),
+            Some("500ml"),
+        ),
+        (
+            "food_product:vital-farms-eggs-dozen",
+            "food:eggs",
+            None,
+            Some("Vital Farms"),
+            "Vital Farms Pasture-Raised Eggs Dozen",
+            None,
+            Some("dozen"),
+        ),
+        (
+            "food_product:generic-chickpeas-15oz",
+            "food:chickpeas-canned",
+            None,
+            Some("Generic"),
+            "Generic Canned Chickpeas 15oz",
+            Some(425.0),
+            Some("15oz"),
+        ),
+    ];
+    for (key, food_key, barcode, brand, name, size_g, size_label) in products {
+        let id = demo_id(key);
+        if food_product::Entity::find_by_id(id)
+            .one(db)
+            .await?
+            .is_some()
+        {
+            summary.food_products_unchanged += 1;
+            continue;
+        }
+        let active = food_product::ActiveModel {
+            id: Set(id),
+            food_id: Set(demo_id(food_key)),
+            barcode: Set(barcode.map(|s| s.to_string())),
+            brand: Set(brand.map(|s| s.to_string())),
+            name: Set(name.to_string()),
+            package_size_g: Set(size_g),
+            package_size_label: Set(size_label.map(|s| s.to_string())),
+            source: Set("manual".to_string()),
+            external_id: Set(None),
+            nutrition_per_100g: Set(JsonObject::default()),
+            image_url: Set(None),
+            last_synced_at: Set(None),
+            organization: Set(Some(ORG_PERSONAL.to_string())),
+            properties: Set(JsonObject::default()),
+            created_at: Set(now),
+            updated_at: Set(now),
+        };
+        food_product::Entity::insert(active).exec(db).await?;
+        summary.food_products_created += 1;
+    }
+    Ok(())
+}
+
+/// Backfill `food_id` on `recipe_ingredient` rows whose value is
+/// currently NULL. Idempotent — pre-populated rows are left alone.
+async fn backfill_recipe_ingredient_food_ids(db: &DatabaseConnection) -> Result<(), DbErr> {
+    use task_core::recipe;
+    let rows = recipe_ingredient::Entity::find()
+        .filter(recipe_ingredient::Column::FoodId.is_null())
+        .all(db)
+        .await?;
+    for row in rows {
+        if row.is_section || row.food.trim().is_empty() {
+            continue;
+        }
+        // Look up the recipe's organization scope.
+        let org = recipe::Entity::find_by_id(row.recipe_id)
+            .one(db)
+            .await?
+            .and_then(|r| r.organization);
+        let Some(food_row) =
+            task_core::food::find_food_by_name(db, org.as_deref(), &row.food).await?
+        else {
+            continue;
+        };
+        let mut active: recipe_ingredient::ActiveModel = row.into();
+        active.food_id = sea_orm::ActiveValue::Set(Some(food_row.id));
+        active.update(db).await?;
+    }
     Ok(())
 }
 

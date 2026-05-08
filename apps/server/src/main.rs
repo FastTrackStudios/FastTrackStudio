@@ -873,6 +873,12 @@ impl ServerContext {
         )
     }
 
+    fn food_service(&self) -> task_core::service_impl::FoodServiceImpl {
+        task_core::service_impl::FoodServiceImpl::new(task_core::service_impl::FoodServiceDeps {
+            db: self.db.clone(),
+        })
+    }
+
     fn conversation_service(&self) -> task_core::ConversationServiceImpl {
         task_core::ConversationServiceImpl::new(task_core::service_impl::ConversationServiceDeps {
             provider: self.talk.clone(),
@@ -1170,6 +1176,25 @@ async fn handle_vox_connection(socket: WebSocket, state: AppState, auth: VoxAuth
                     ));
                     Ok(())
                 }
+                "FoodService" => {
+                    connection
+                        .handle_with(task_core::FoodServiceDispatcher::new(ctx.food_service()));
+                    Ok(())
+                }
+                "FoodRepo" => {
+                    connection.handle_with(task_core::food::FoodRepoDispatcher::new(
+                        task_core::food::FoodRepoStorage::new(db.clone()),
+                    ));
+                    Ok(())
+                }
+                "FoodProductRepo" => {
+                    connection.handle_with(
+                        task_core::food_product::FoodProductRepoDispatcher::new(
+                            task_core::food_product::FoodProductRepoStorage::new(db.clone()),
+                        ),
+                    );
+                    Ok(())
+                }
                 "RecipeRepo" => {
                     connection.handle_with(task_core::recipe::RecipeRepoDispatcher::new(
                         task_core::recipe::RecipeRepoStorage::new(db.clone()),
@@ -1317,6 +1342,9 @@ impl task_core::service::SystemService for ServerSystemService {
                 "TimeService".into(),
                 "AudioProductionService".into(),
                 "CookingService".into(),
+                "FoodService".into(),
+                "FoodRepo".into(),
+                "FoodProductRepo".into(),
                 "RecipeRepo".into(),
                 "RecipeIngredientRepo".into(),
                 "RecipeStepRepo".into(),

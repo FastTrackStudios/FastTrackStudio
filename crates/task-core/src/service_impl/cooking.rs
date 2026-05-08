@@ -146,6 +146,7 @@ fn ingredient_active_for(
     recipe_id: Uuid,
     spec: &RecipeIngredientSpec,
     sequence: u32,
+    food_id: Option<Uuid>,
     now: chrono::DateTime<Utc>,
 ) -> recipe_ingredient::ActiveModel {
     recipe_ingredient::ActiveModel {
@@ -155,11 +156,33 @@ fn ingredient_active_for(
         quantity: Set(spec.quantity),
         unit: Set(spec.unit.clone()),
         food: Set(spec.food.clone()),
+        food_id: Set(food_id),
         note: Set(spec.note.clone()),
         is_section: Set(spec.is_section.unwrap_or(false)),
         created_at: Set(now),
         updated_at: Set(now),
     }
+}
+
+/// Resolve `food_id` for an ingredient via name-match against the
+/// canonical `Food` catalog. Returns `None` on miss — recipe data
+/// stays valid even when no matching Food row exists yet.
+async fn resolve_food_id<C: sea_orm::ConnectionTrait>(
+    db: &C,
+    organization: Option<&str>,
+    spec: &RecipeIngredientSpec,
+) -> Result<Option<Uuid>, VaultError> {
+    if spec.is_section.unwrap_or(false) {
+        return Ok(None);
+    }
+    let needle = spec.food.trim();
+    if needle.is_empty() {
+        return Ok(None);
+    }
+    let hit = crate::food::find_food_by_name(db, organization, needle)
+        .await
+        .map_err(|e| io(e, "find_food_by_name"))?;
+    Ok(hit.map(|f| f.id))
 }
 
 /// Serde-friendly mirror of [`CreateRecipeRequest`] used to expose the
@@ -280,7 +303,8 @@ impl CookingService for CookingServiceImpl {
         let steps = step_specs_from_json(&request.steps_json)?;
 
         let base_slug = to_slug(&request.name);
-        let slug = unique_slug(&self.db, &base_slug, request.organization.as_deref()).await?;
+        let organization = request.organization.clone();
+        let slug = unique_slug(&self.db, &base_slug, organization.as_deref()).await?;
 
         let now = Utc::now();
         let recipe_id = Uuid::new_v4();
@@ -337,7 +361,8 @@ impl CookingService for CookingServiceImpl {
             .await
             .map_err(|e| io(e, "insert recipe"))?;
         for (idx, spec) in ingredients.iter().enumerate() {
-            ingredient_active_for(recipe_id, spec, (idx + 1) as u32, now)
+            let food_id = resolve_food_id(&txn, organization.as_deref(), spec).await?;
+            ingredient_active_for(recipe_id, spec, (idx + 1) as u32, food_id, now)
                 .insert(&txn)
                 .await
                 .map_err(|e| io(e, "insert ingredient"))?;
@@ -364,6 +389,7 @@ impl CookingService for CookingServiceImpl {
             .await
             .map_err(|e| io(e, "load recipe"))?
             .ok_or_else(|| VaultError::NotFound(format!("recipe:{id}")))?;
+        let organization = model.organization.clone();
         let new_ingredients = match patch.ingredients_json.as_deref() {
             Some(payload) => Some(ingredient_specs_from_json(payload)?),
             None => None,
@@ -418,7 +444,8 @@ impl CookingService for CookingServiceImpl {
                 .await
                 .map_err(|e| io(e, "clear ingredients"))?;
             for (idx, spec) in specs.iter().enumerate() {
-                ingredient_active_for(id, spec, (idx + 1) as u32, now)
+                let food_id = resolve_food_id(&txn, organization.as_deref(), spec).await?;
+                ingredient_active_for(id, spec, (idx + 1) as u32, food_id, now)
                     .insert(&txn)
                     .await
                     .map_err(|e| io(e, "insert ingredient"))?;

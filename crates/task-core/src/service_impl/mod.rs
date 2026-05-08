@@ -4,6 +4,7 @@ pub mod audio_production;
 pub mod business;
 pub mod conversation;
 pub mod cooking;
+pub mod food;
 pub(crate) mod helpers;
 pub mod inbox;
 pub mod invoice;
@@ -21,6 +22,7 @@ pub use audio_production::{AudioProductionServiceDeps, AudioProductionServiceImp
 pub use business::*;
 pub use conversation::{ConversationServiceDeps, ConversationServiceImpl};
 pub use cooking::{CookingServiceDeps, CookingServiceImpl};
+pub use food::{FoodServiceDeps, FoodServiceImpl};
 pub use inbox::{InboxServiceDeps, InboxServiceImpl};
 pub use invoice::{InvoiceServiceDeps, InvoiceServiceImpl};
 pub use mail::{MailServiceDeps, MailServiceImpl};

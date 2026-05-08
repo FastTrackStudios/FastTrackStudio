@@ -36,6 +36,12 @@ pub struct Model {
     pub quantity: Option<f64>,
     pub unit: Option<String>,
     pub food: String,
+    /// Optional FK to [`crate::food::Food`]. Populated by name-match on
+    /// recipe insert (see `crate::food::find_food_by_name`); left None
+    /// when no canonical Food row exists yet. Manually re-linkable via
+    /// `FoodService::link_recipe_ingredient`.
+    #[crudcrate(filterable)]
+    pub food_id: Option<Uuid>,
     pub note: Option<String>,
     /// True when this row is a section header ("For the sauce:").
     pub is_section: bool,

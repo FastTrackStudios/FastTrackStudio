@@ -15,6 +15,8 @@ mod m20260507_000008_create_property_definitions;
 mod m20260507_000009_create_tracks;
 mod m20260507_000010_create_cooking_tables;
 mod m20260507_000011_add_recipe_image_url;
+mod m20260507_000012_create_food_tables;
+mod m20260507_000013_add_recipe_ingredient_food_id;
 
 pub struct Migrator;
 
@@ -37,6 +39,8 @@ impl MigratorTrait for Migrator {
             Box::new(m20260507_000009_create_tracks::Migration),
             Box::new(m20260507_000010_create_cooking_tables::Migration),
             Box::new(m20260507_000011_add_recipe_image_url::Migration),
+            Box::new(m20260507_000012_create_food_tables::Migration),
+            Box::new(m20260507_000013_add_recipe_ingredient_food_id::Migration),
         ]
     }
 }

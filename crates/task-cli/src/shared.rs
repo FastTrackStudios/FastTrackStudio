@@ -323,6 +323,10 @@ impl RemoteVoxConfig {
         self.connect().await
     }
 
+    pub(crate) async fn food(&self) -> eyre::Result<task_core::service::FoodServiceClient> {
+        self.connect().await
+    }
+
     pub(crate) async fn connect<C>(&self) -> eyre::Result<C>
     where
         C: vox::FromVoxSession,

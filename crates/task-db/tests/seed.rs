@@ -146,6 +146,34 @@ async fn seed_demo_data_covers_every_entity_flavor() {
         "want > 0 shopping list items, got {}",
         s.shopping_list_items_created
     );
+    assert!(
+        s.foods_created >= 30,
+        "want >= 30 foods, got {}",
+        s.foods_created
+    );
+    assert!(
+        s.food_products_created >= 3,
+        "want >= 3 food products, got {}",
+        s.food_products_created
+    );
+
+    // The auto-link on recipe insert should hit > half the seeded
+    // ingredients across the demo recipes.
+    let total = task_core::recipe_ingredient::Entity::find()
+        .all(&db)
+        .await
+        .expect("ingredients")
+        .len();
+    let linked = task_core::recipe_ingredient::Entity::find()
+        .filter(task_core::recipe_ingredient::Column::FoodId.is_not_null())
+        .all(&db)
+        .await
+        .expect("linked")
+        .len();
+    assert!(
+        linked * 2 > total,
+        "want >50% of {total} recipe ingredients auto-linked, got {linked}"
+    );
 }
 
 #[tokio::test]

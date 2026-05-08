@@ -6,11 +6,14 @@
 
 use chrono::NaiveDate;
 use clap::{Args, Subcommand};
+use task_core::food::FoodApi;
+use task_core::food_product::FoodProductApi;
 use task_core::recipe::{RecipeApi, RecipeIngredientSpec, RecipeStepSpec};
 use task_core::service::{
-    AddShoppingItemRequest, CookbookWithRecipes, CookingServiceClient, CreateRecipeRequest,
-    GenerateShoppingListRequest, ImportRecipeRequest, MealPlanRangeRequest, RecipeWithDetails,
-    SetMealPlanEntryRequest, ShoppingListWithItems,
+    AddShoppingItemRequest, CookbookWithRecipes, CookingServiceClient, CreateFoodProductRequest,
+    CreateFoodRequest, CreateRecipeRequest, FoodServiceClient, GenerateShoppingListRequest,
+    ImportRecipeRequest, MealPlanRangeRequest, RecipeWithDetails, SetMealPlanEntryRequest,
+    ShoppingListWithItems,
 };
 use uuid::Uuid;
 
@@ -37,6 +40,94 @@ pub(crate) enum CookCommands {
     Shop {
         #[command(subcommand)]
         command: ShopCommands,
+    },
+    /// Canonical ingredient catalog (Food).
+    Food {
+        #[command(subcommand)]
+        command: FoodCommands,
+    },
+    /// Branded products (FoodProduct) — barcode-keyed.
+    Product {
+        #[command(subcommand)]
+        command: ProductCommands,
+    },
+}
+
+// ── Food ────────────────────────────────────────────────────────────
+
+#[derive(Subcommand)]
+pub(crate) enum FoodCommands {
+    List {
+        #[arg(long)]
+        organization: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    Show {
+        food: String,
+        #[arg(long)]
+        json: bool,
+    },
+    Create {
+        #[arg(long)]
+        name: String,
+        #[arg(long = "alias", value_name = "ALIAS")]
+        aliases: Vec<String>,
+        #[arg(long)]
+        category: Option<String>,
+        #[arg(long = "default-unit")]
+        default_unit: Option<String>,
+        #[arg(long)]
+        organization: Option<String>,
+        /// JSON-encoded `NutritionFacts` payload.
+        #[arg(long)]
+        nutrition: Option<String>,
+        #[arg(long)]
+        notes: Option<String>,
+    },
+    Alias {
+        food: String,
+        alias: String,
+    },
+    /// Manually link a recipe-ingredient row to a Food.
+    Link {
+        recipe_ingredient_id: String,
+        food: String,
+    },
+}
+
+// ── Product ─────────────────────────────────────────────────────────
+
+#[derive(Subcommand)]
+pub(crate) enum ProductCommands {
+    List {
+        #[arg(long)]
+        organization: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    Show {
+        product: String,
+        #[arg(long)]
+        json: bool,
+    },
+    Create {
+        #[arg(long)]
+        food: String,
+        #[arg(long)]
+        barcode: Option<String>,
+        #[arg(long)]
+        brand: Option<String>,
+        #[arg(long)]
+        name: String,
+        #[arg(long = "package-size-g")]
+        package_size_g: Option<f64>,
+        #[arg(long = "package-size-label")]
+        package_size_label: Option<String>,
+        #[arg(long, default_value = "manual")]
+        source: String,
+        #[arg(long)]
+        organization: Option<String>,
     },
 }
 
@@ -222,13 +313,258 @@ pub(crate) async fn run_remote_cook_command(
     actor: Option<&str>,
     command: CookCommands,
 ) -> eyre::Result<()> {
-    let client = remote.cooking().await?;
     match command {
-        CookCommands::Recipe { command } => run_recipe(&client, actor, command).await,
-        CookCommands::Cookbook { command } => run_cookbook(&client, command).await,
-        CookCommands::Plan { command } => run_plan(&client, actor, command).await,
-        CookCommands::Shop { command } => run_shop(&client, command).await,
+        CookCommands::Recipe { command } => {
+            let client = remote.cooking().await?;
+            run_recipe(&client, actor, command).await
+        }
+        CookCommands::Cookbook { command } => {
+            let client = remote.cooking().await?;
+            run_cookbook(&client, command).await
+        }
+        CookCommands::Plan { command } => {
+            let client = remote.cooking().await?;
+            run_plan(&client, actor, command).await
+        }
+        CookCommands::Shop { command } => {
+            let client = remote.cooking().await?;
+            run_shop(&client, command).await
+        }
+        CookCommands::Food { command } => {
+            let client = remote.food().await?;
+            run_food(&client, actor, command).await
+        }
+        CookCommands::Product { command } => {
+            let client = remote.food().await?;
+            run_product(&client, command).await
+        }
     }
+}
+
+// ── Food handlers ───────────────────────────────────────────────────
+
+async fn resolve_food_id(client: &FoodServiceClient, reference: &str) -> eyre::Result<Uuid> {
+    if let Ok(id) = Uuid::parse_str(reference) {
+        return Ok(id);
+    }
+    // Try organization-less first, then it's up to the caller to use a
+    // UUID for org-scoped lookups (the lookup helpers walk the global
+    // catalog; for org-scoped the user can pass the UUID directly).
+    let hit = client
+        .find_food_by_name(None, reference.to_string())
+        .await
+        .map_err(|e| eyre::eyre!("find_food_by_name: {e}"))?;
+    if let Some(food) = hit {
+        return Ok(food.id);
+    }
+    // Fall back to a personal-org lookup (the seeded catalog lives there).
+    let hit = client
+        .find_food_by_name(Some("personal".to_string()), reference.to_string())
+        .await
+        .map_err(|e| eyre::eyre!("find_food_by_name: {e}"))?;
+    hit.map(|f| f.id)
+        .ok_or_else(|| eyre::eyre!("food not found: {reference}"))
+}
+
+async fn run_food(
+    client: &FoodServiceClient,
+    actor: Option<&str>,
+    command: FoodCommands,
+) -> eyre::Result<()> {
+    match command {
+        FoodCommands::List { organization, json } => {
+            let foods = client
+                .list_foods(organization)
+                .await
+                .map_err(|e| eyre::eyre!("list_foods: {e}"))?;
+            print_foods(&foods, json)?;
+        }
+        FoodCommands::Show { food, json } => {
+            let id = resolve_food_id(client, &food).await?;
+            let item = client
+                .get_food(id)
+                .await
+                .map_err(|e| eyre::eyre!("get_food: {e}"))?
+                .ok_or_else(|| eyre::eyre!("food not found: {food}"))?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&item)?);
+            } else {
+                println!("{}  {}", item.id, item.name);
+                if let Some(cat) = &item.category {
+                    println!("  category:     {cat}");
+                }
+                if let Some(unit) = &item.default_unit {
+                    println!("  default unit: {unit}");
+                }
+                if !item.aliases.is_empty() {
+                    let list: Vec<&String> = item.aliases.iter().collect();
+                    println!("  aliases:      {list:?}");
+                }
+                if let Some(org) = &item.organization {
+                    println!("  organization: {org}");
+                }
+            }
+        }
+        FoodCommands::Create {
+            name,
+            aliases,
+            category,
+            default_unit,
+            organization,
+            nutrition,
+            notes,
+        } => {
+            let saved = client
+                .create_food(CreateFoodRequest {
+                    name,
+                    aliases,
+                    category,
+                    default_unit,
+                    organization,
+                    nutrition_json: nutrition,
+                    notes,
+                    created_by: actor.map(str::to_string),
+                })
+                .await
+                .map_err(|e| eyre::eyre!("create_food: {e}"))?;
+            println!("Created food '{}' (id={})", saved.name, saved.id);
+        }
+        FoodCommands::Alias { food, alias } => {
+            let id = resolve_food_id(client, &food).await?;
+            let updated = client
+                .add_food_alias(id, alias)
+                .await
+                .map_err(|e| eyre::eyre!("add_food_alias: {e}"))?;
+            let list: Vec<&String> = updated.aliases.iter().collect();
+            println!("'{}' aliases: {list:?}", updated.name);
+        }
+        FoodCommands::Link {
+            recipe_ingredient_id,
+            food,
+        } => {
+            let ing_id = Uuid::parse_str(&recipe_ingredient_id)
+                .map_err(|e| eyre::eyre!("invalid recipe-ingredient UUID: {e}"))?;
+            let food_id = resolve_food_id(client, &food).await?;
+            client
+                .link_recipe_ingredient(ing_id, food_id)
+                .await
+                .map_err(|e| eyre::eyre!("link_recipe_ingredient: {e}"))?;
+            println!("Linked recipe-ingredient {ing_id} -> food {food_id}");
+        }
+    }
+    Ok(())
+}
+
+async fn run_product(client: &FoodServiceClient, command: ProductCommands) -> eyre::Result<()> {
+    match command {
+        ProductCommands::List { organization, json } => {
+            let rows = client
+                .list_food_products(organization)
+                .await
+                .map_err(|e| eyre::eyre!("list_food_products: {e}"))?;
+            print_products(&rows, json)?;
+        }
+        ProductCommands::Show { product, json } => {
+            // UUID short-circuit; otherwise treat as barcode.
+            let item = if let Ok(id) = Uuid::parse_str(&product) {
+                client
+                    .get_food_product(id)
+                    .await
+                    .map_err(|e| eyre::eyre!("get_food_product: {e}"))?
+            } else {
+                // Try personal org by default for barcode lookup.
+                client
+                    .get_food_product_by_barcode(Some("personal".to_string()), product.clone())
+                    .await
+                    .map_err(|e| eyre::eyre!("get_food_product_by_barcode: {e}"))?
+            }
+            .ok_or_else(|| eyre::eyre!("food product not found: {product}"))?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&item)?);
+            } else {
+                println!("{}  {}", item.id, item.name);
+                if let Some(brand) = &item.brand {
+                    println!("  brand:    {brand}");
+                }
+                if let Some(bar) = &item.barcode {
+                    println!("  barcode:  {bar}");
+                }
+                println!("  food_id:  {}", item.food_id);
+                println!("  source:   {}", item.source);
+            }
+        }
+        ProductCommands::Create {
+            food,
+            barcode,
+            brand,
+            name,
+            package_size_g,
+            package_size_label,
+            source,
+            organization,
+        } => {
+            let food_id = resolve_food_id(client, &food).await?;
+            let saved = client
+                .create_food_product(CreateFoodProductRequest {
+                    food_id,
+                    barcode,
+                    brand,
+                    name,
+                    package_size_g,
+                    package_size_label,
+                    source,
+                    external_id: None,
+                    nutrition_json: None,
+                    image_url: None,
+                    organization,
+                })
+                .await
+                .map_err(|e| eyre::eyre!("create_food_product: {e}"))?;
+            println!("Created product '{}' (id={})", saved.name, saved.id);
+        }
+    }
+    Ok(())
+}
+
+fn print_foods(foods: &[FoodApi], json: bool) -> eyre::Result<()> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(foods)?);
+        return Ok(());
+    }
+    if foods.is_empty() {
+        println!("(no foods)");
+        return Ok(());
+    }
+    for f in foods {
+        println!(
+            "{}  {}  ({})",
+            f.id,
+            f.name,
+            f.category.clone().unwrap_or_else(|| "-".to_string())
+        );
+    }
+    Ok(())
+}
+
+fn print_products(products: &[FoodProductApi], json: bool) -> eyre::Result<()> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(products)?);
+        return Ok(());
+    }
+    if products.is_empty() {
+        println!("(no products)");
+        return Ok(());
+    }
+    for p in products {
+        println!(
+            "{}  {}  [{}]  {}",
+            p.id,
+            p.name,
+            p.barcode.clone().unwrap_or_else(|| "-".to_string()),
+            p.brand.clone().unwrap_or_else(|| "-".to_string()),
+        );
+    }
+    Ok(())
 }
 
 // ── Recipe handlers ─────────────────────────────────────────────────
