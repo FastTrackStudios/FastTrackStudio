@@ -115,14 +115,17 @@ impl DawModule for DynamicTemplateModule {
 
             loop {
                 match track_rx.recv().await {
-                    Ok(Some(_event)) => {
+                    Ok(Some(event)) => {
+                        let event = event.get();
                         let enabled = {
                             let s = state();
                             let mut locked = s.lock().unwrap();
-                            locked.group_cache.clear();
+                            if track_event_invalidates_groups(event) {
+                                locked.group_cache.clear();
+                            }
                             locked.auto_color_enabled
                         };
-                        if enabled {
+                        if enabled && track_event_needs_auto_color(event) {
                             if let Err(err) = color_tracks(daw, false).await {
                                 tracing::warn!(
                                     "[dynamic-template] auto-color refresh failed: {err}"
@@ -135,6 +138,26 @@ impl DawModule for DynamicTemplateModule {
             }
         });
     }
+}
+
+fn track_event_invalidates_groups(event: &daw::service::TrackEvent) -> bool {
+    matches!(
+        event,
+        daw::service::TrackEvent::Added(_)
+            | daw::service::TrackEvent::Removed(_)
+            | daw::service::TrackEvent::Renamed { .. }
+            | daw::service::TrackEvent::Moved { .. }
+    )
+}
+
+fn track_event_needs_auto_color(event: &daw::service::TrackEvent) -> bool {
+    matches!(
+        event,
+        daw::service::TrackEvent::Added(_)
+            | daw::service::TrackEvent::Removed(_)
+            | daw::service::TrackEvent::Renamed { .. }
+            | daw::service::TrackEvent::Moved { .. }
+    )
 }
 
 fn dispatch(command_name: &str) {
