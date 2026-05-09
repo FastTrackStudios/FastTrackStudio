@@ -951,6 +951,60 @@ impl TakeHandle {
     }
 
     // =========================================================================
+    // Take Ratings (REAPER 7.17+)
+    // =========================================================================
+
+    /// Detect this take's current rating by reading its take markers.
+    /// Returns the *first* up-rank or down-rank marker found, or `None` if
+    /// the take is unranked. Multiple rank markers on one take aren't
+    /// expected — REAPER's actions clear before re-ranking — but we don't
+    /// validate.
+    pub async fn rating(&self) -> Result<Option<daw_proto::TakeRating>> {
+        let markers = self.markers().await?;
+        Ok(markers
+            .iter()
+            .find_map(|m| daw_proto::TakeRating::from_marker_name(&m.name)))
+    }
+
+    /// Up-rank the active take one level. Wraps REAPER action 42680
+    /// (`Item: Up-rank active take or last recording pass`). The
+    /// underlying service snapshots and restores the prior item selection
+    /// so this is safe to call mid-session.
+    pub async fn up_rank(&self) -> Result<()> {
+        self.run_rating_action(daw_proto::take_rating_actions::UP_RANK_ACTIVE_TAKE)
+            .await
+    }
+
+    /// Cycle through up-rank/down-rank levels (action 43197). The cycle
+    /// is up→max→down→neutral→up→… per REAPER's pref settings.
+    pub async fn cycle_rating(&self) -> Result<()> {
+        self.run_rating_action(daw_proto::take_rating_actions::CYCLE_RANK_ACTIVE_TAKE)
+            .await
+    }
+
+    /// Clear all up-rank/down-rank markers on this take's item (action
+    /// 43161). Affects every take on the same item, not just this one.
+    pub async fn clear_rating(&self) -> Result<()> {
+        self.run_rating_action(daw_proto::take_rating_actions::CLEAR_RANK_SELECTED_ITEMS)
+            .await
+    }
+
+    /// Run an arbitrary REAPER take-ranking action against this take. See
+    /// [`daw_proto::take_rating_actions`] for the documented command IDs.
+    pub async fn run_rating_action(&self, command_id: u32) -> Result<()> {
+        self.clients
+            .take
+            .run_take_rating_action(
+                self.context(),
+                self.item_ref(),
+                self.take_ref.clone(),
+                command_id,
+            )
+            .await?;
+        Ok(())
+    }
+
+    // =========================================================================
     // MIDI Editing
     // =========================================================================
 

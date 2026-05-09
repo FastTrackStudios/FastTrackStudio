@@ -307,6 +307,22 @@ pub trait TakeService {
     );
 
     // =========================================================================
+    // Take Ratings (REAPER 7.17+ ranking actions)
+    // =========================================================================
+
+    /// Run a REAPER take-ranking action against a specific item+take. The
+    /// implementation snapshots and restores the prior selection so this
+    /// is safe to call mid-session. `command_id` should come from
+    /// [`super::take_rating_actions`].
+    async fn run_take_rating_action(
+        &self,
+        project: ProjectContext,
+        item: ItemRef,
+        take: TakeRef,
+        command_id: u32,
+    );
+
+    // =========================================================================
     // Subscriptions
     // =========================================================================
 

@@ -230,6 +230,85 @@ async fn take_marker_add_list_update_delete(
 }
 
 #[reaper_test(isolated)]
+async fn take_rating_up_rank_progression_and_clear(
+    ctx: &reaper_test::ReaperTestContext,
+) -> eyre::Result<()> {
+    let project = ctx.project().clone();
+    let track = project.tracks().add("Take Rating Track", None).await?;
+    let item = track
+        .items()
+        .add(
+            daw_proto::PositionInSeconds::from_seconds(0.0),
+            daw_proto::Duration::from_seconds(2.0),
+        )
+        .await?;
+    let take = item.takes().active().await?;
+
+    // Fresh take is unranked.
+    assert_eq!(
+        take.rating().await?,
+        None,
+        "freshly created take should be unranked"
+    );
+
+    // First up-rank → level 1 (REAPER writes marker name `:)`).
+    take.up_rank().await?;
+    assert_eq!(
+        take.rating().await?,
+        Some(daw_proto::TakeRating::UpRank(1)),
+        "after first up_rank, rating should be UpRank(1)"
+    );
+
+    // Second up-rank → level 2.
+    take.up_rank().await?;
+    assert_eq!(
+        take.rating().await?,
+        Some(daw_proto::TakeRating::UpRank(2)),
+        "after second up_rank, rating should be UpRank(2)"
+    );
+
+    // Clear wipes ranking back to None.
+    take.clear_rating().await?;
+    assert_eq!(
+        take.rating().await?,
+        None,
+        "after clear_rating, take should be unranked"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn take_rating_marker_name_round_trip() {
+    use daw_proto::TakeRating;
+    // Up-rank levels 1..=5 round-trip cleanly.
+    for level in 1..=5u8 {
+        let r = TakeRating::UpRank(level);
+        let name = r.to_marker_name();
+        assert_eq!(name.as_bytes()[0], b':');
+        assert_eq!(name.len(), 1 + level as usize);
+        assert_eq!(TakeRating::from_marker_name(&name), Some(r));
+    }
+    // Down-rank is a single level.
+    assert_eq!(TakeRating::DownRank.to_marker_name(), ":(");
+    assert_eq!(
+        TakeRating::from_marker_name(":("),
+        Some(TakeRating::DownRank)
+    );
+    // Multiple frownies still parse as DownRank (REAPER never writes >1
+    // but we accept what we read).
+    assert_eq!(
+        TakeRating::from_marker_name(":((("),
+        Some(TakeRating::DownRank)
+    );
+    // Ordinary marker names don't match.
+    assert_eq!(TakeRating::from_marker_name("intro"), None);
+    assert_eq!(TakeRating::from_marker_name(""), None);
+    assert_eq!(TakeRating::from_marker_name(":"), None);
+    assert_eq!(TakeRating::from_marker_name(":)abc"), None);
+}
+
+#[reaper_test(isolated)]
 async fn take_source_type_detected_for_default(
     ctx: &reaper_test::ReaperTestContext,
 ) -> eyre::Result<()> {

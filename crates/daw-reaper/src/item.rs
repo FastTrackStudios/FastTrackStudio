@@ -1824,6 +1824,62 @@ impl TakeService for ReaperTake {
             item_sw::delete_take_marker(low, take_ptr, index);
         });
     }
+
+    async fn run_take_rating_action(
+        &self,
+        _project: ProjectContext,
+        item: ItemRef,
+        take: TakeRef,
+        command_id: u32,
+    ) {
+        debug!("ReaperTake: run_take_rating_action item={item:?} take={take:?} cmd={command_id}");
+        main_thread::run(move || {
+            let Some(item_ptr) =
+                ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)
+            else {
+                return;
+            };
+            let Some(take_ptr) = Self::resolve_take(item_ptr, &take) else {
+                return;
+            };
+
+            // Same selection-snapshot/restore dance we use for delete_take.
+            // REAPER's ranking actions all operate on the current item
+            // selection + each item's active take, so we isolate the
+            // target before firing.
+            let medium = Reaper::get().medium_reaper();
+            let low = medium.low();
+            let proj_ctx = ReaperProjectContext::CurrentProject;
+
+            let total = medium.count_media_items(proj_ctx);
+            let mut prior_selection: Vec<MediaItem> = Vec::with_capacity(total as usize);
+            for i in 0..total {
+                if let Some(it) = medium.get_media_item(proj_ctx, i)
+                    && item_sw::is_item_selected(low, it)
+                {
+                    prior_selection.push(it);
+                }
+            }
+
+            for it in &prior_selection {
+                item_sw::set_media_item_selected(medium, *it, false);
+            }
+            item_sw::set_media_item_selected(medium, item_ptr, true);
+            item_sw::set_active_take(low, take_ptr);
+
+            item_sw::main_on_command_ex(
+                medium,
+                reaper_medium::CommandId::new(command_id),
+                0,
+                proj_ctx,
+            );
+
+            item_sw::set_media_item_selected(medium, item_ptr, false);
+            for it in prior_selection {
+                item_sw::set_media_item_selected(medium, it, true);
+            }
+        });
+    }
 }
 
 // =============================================================================

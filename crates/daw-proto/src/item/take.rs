@@ -166,3 +166,115 @@ pub struct TakeMarkerUpdate {
     /// the existing color untouched.
     pub color: Option<Option<u32>>,
 }
+
+// ─── Take ratings (REAPER 7.17+) ───────────────────────────────────────────
+//
+// REAPER 7.17 added "take ranking" — a comp/review system built on top of
+// take markers. Ratings are encoded as specially-named take markers; the
+// daw service surfaces the *actions* that REAPER provides for manipulating
+// them, plus a detector that reads them back from `TakeMarker::name`.
+//
+// REAPER's encoding (verified empirically by firing action 42680 and
+// reading the resulting take marker):
+//   up-rank   level N  →  marker name `":" + ")" * N`   (`:)`, `:))`, `:)))`)
+//   down-rank          →  marker name `":("`
+// REAPER's prefs configure the maximum up-rank level (1–5, default 3) and
+// whether down-ranking is enabled (0 or 1 max, default 1). We clamp
+// `UpRank` to 1..=5 and treat down-rank as a flag (just `DownRank` —
+// REAPER never assigns higher levels). Neutral / unranked takes have no
+// rank marker at all.
+
+/// A take's ranking, derived from its take markers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Facet)]
+#[repr(u8)]
+pub enum TakeRating {
+    /// Up-ranked — level 1..=5. Encoded by REAPER as a `:` followed by
+    /// N `)` characters (`":)"` = 1, `":))"` = 2, `":)))"` = 3, …).
+    /// REAPER's default max is 3 (configurable up to 5).
+    UpRank(u8),
+    /// Down-ranked. REAPER only supports a single down-rank level
+    /// (`":("`); the variant is a flag, not a count.
+    DownRank,
+}
+
+impl TakeRating {
+    /// Parse a take marker name as a rating, if it matches REAPER's
+    /// smiley/frowny format. Returns `None` for ordinary markers.
+    pub fn from_marker_name(name: &str) -> Option<Self> {
+        let rest = name.trim().strip_prefix(':')?;
+        if rest.is_empty() {
+            return None;
+        }
+        let bytes = rest.as_bytes();
+        if bytes.iter().all(|b| *b == b')') {
+            Some(Self::UpRank(bytes.len().clamp(1, 5) as u8))
+        } else if bytes.iter().all(|b| *b == b'(') {
+            // REAPER only emits a single down-rank level; treat any run
+            // of frownies as a generic DownRank.
+            Some(Self::DownRank)
+        } else {
+            None
+        }
+    }
+
+    /// Serialize into REAPER's smiley/frowny marker-name format.
+    pub fn to_marker_name(self) -> String {
+        match self {
+            Self::UpRank(level) => {
+                let n = level.clamp(1, 5) as usize;
+                let mut s = String::with_capacity(1 + n);
+                s.push(':');
+                for _ in 0..n {
+                    s.push(')');
+                }
+                s
+            }
+            Self::DownRank => ":(".to_string(),
+        }
+    }
+}
+
+/// REAPER built-in action command IDs for the take-ranking system added in
+/// 7.17. We surface them as constants so service code can call
+/// `Main_OnCommand` with a meaningful name. Selection state must be set up
+/// by the caller — most of these operate on the current item selection or
+/// the take/item under mouse.
+pub mod take_rating_actions {
+    /// `Item: Up-rank active take or last recording pass` — bumps the
+    /// active take up one level (cycles back to neutral after the max).
+    pub const UP_RANK_ACTIVE_TAKE: u32 = 42680;
+
+    /// `Item: Cycle through up-rank/down-rank levels for active take or
+    /// last recording pass` — cycles up→max→down→neutral→up→...
+    pub const CYCLE_RANK_ACTIVE_TAKE: u32 = 43197;
+
+    /// `Item: Clear up-rank/down-rank markers` — wipes ranking on
+    /// selected items' active takes.
+    pub const CLEAR_RANK_SELECTED_ITEMS: u32 = 43161;
+
+    /// `Item: Clear up-rank/down-rank markers for take under mouse`.
+    pub const CLEAR_RANK_TAKE_UNDER_MOUSE: u32 = 43162;
+
+    /// `Item: Up-rank take or comp area under mouse`.
+    pub const UP_RANK_TAKE_UNDER_MOUSE: u32 = 43155;
+
+    /// `Item: Cycle through up-rank/down-rank levels for take or comp area
+    /// under mouse`.
+    pub const CYCLE_RANK_TAKE_UNDER_MOUSE: u32 = 43198;
+
+    /// `Item: Up-rank take marker at play position or edit cursor`.
+    pub const UP_RANK_AT_PLAY_POSITION: u32 = 43157;
+
+    /// `Item: Up-rank take marker at mouse position`.
+    pub const UP_RANK_AT_MOUSE_POSITION: u32 = 43159;
+
+    /// `Item: Delete takes that are not up-ranked (no confirm)`.
+    pub const DELETE_NON_UPRANKED_TAKES: u32 = 40229;
+
+    /// `Track: Clear up-rank/down-rank markers for all items on track`.
+    pub const CLEAR_RANK_ALL_ITEMS_ON_TRACK: u32 = 43165;
+
+    /// `Track: Delete takes for all items on track that are not up-ranked
+    /// (no confirm)`.
+    pub const DELETE_NON_UPRANKED_TAKES_ON_TRACK: u32 = 43166;
+}

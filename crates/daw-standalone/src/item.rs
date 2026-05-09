@@ -709,4 +709,13 @@ impl TakeService for StandaloneTake {
         _index: u32,
     ) {
     }
+
+    async fn run_take_rating_action(
+        &self,
+        _project: ProjectContext,
+        _item: daw_proto::ItemRef,
+        _take: TakeRef,
+        _command_id: u32,
+    ) {
+    }
 }
