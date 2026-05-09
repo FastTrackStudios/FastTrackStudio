@@ -163,13 +163,20 @@ fn initialize_daw(tokio_runtime: &tokio::runtime::Runtime) -> eyre::Result<Daw> 
 /// The registry service in `daw-reaper` owns the REAPER command IDs and
 /// toggle state. We register through that service here, then forward action
 /// trigger events into the existing dispatch channel.
-fn register_actions_sync(defs: &actions::ActionDefs, modules: Vec<Box<dyn DawModule>>) {
+fn register_actions_sync(
+    defs: &actions::ActionDefs,
+    modules: Vec<Box<dyn DawModule>>,
+    panels: Vec<module::PanelDef>,
+) {
     let g = Global::get();
     let daw = g.daw.clone();
     let runtime = g.tokio_runtime.clone();
     let defs = defs.clone();
+    let action_count = defs.len();
+    let panel_count = panels.len();
     let daw_for_subscription = daw.clone();
     let runtime_for_module_subscriptions = runtime.clone();
+    let task_support = &g.task_support;
 
     runtime.spawn(async move {
         let registry = daw.action_registry();
@@ -222,6 +229,20 @@ fn register_actions_sync(defs: &actions::ActionDefs, modules: Vec<Box<dyn DawMod
                 Err(e) => warn!("Error registering action {command_id}: {e}"),
             }
         }
+        info!(actions = action_count, "Action registration completed");
+
+        if let Err(err) = task_support.do_later_in_main_thread_asap(move || {
+            daw::ui::dock::init_service();
+            daw::ui::dock::init_dock(reaper_low::Reaper::get(), reaper_low::Swell::get());
+            info!(panels = panels.len(), "Panel definitions collected");
+            for panel in &panels {
+                daw::ui::dock::register_panel_from_service(panel);
+            }
+            daw::ui::dock::restore_dock_state();
+            info!(panels = panels.len(), "Panel registration completed");
+        }) {
+            warn!("Failed to schedule panel registration: {err}");
+        }
 
         let module_ctx = ModuleContext::new(runtime_for_module_subscriptions);
         for module in &modules {
@@ -233,6 +254,12 @@ fn register_actions_sync(defs: &actions::ActionDefs, modules: Vec<Box<dyn DawMod
             module.subscribe(&module_ctx);
         }
         info!(modules = modules.len(), "All modules subscribed");
+        info!(
+            modules = modules.len(),
+            actions = action_count,
+            panels = panel_count,
+            "FTS Extensions ready"
+        );
     });
 
     let (tx, _) = action_channel();
@@ -421,7 +448,7 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
 
     APP.set(Fragile::new(app)).map_err(|_| "App already set")?;
 
-    register_actions_sync(&all_defs, modules);
+    register_actions_sync(&all_defs, modules, panels);
 
     let app = APP.get().unwrap().get();
     let mut session = app.session.borrow_mut();
@@ -451,20 +478,6 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
         Err(e) => warn!("Extensions menu hook registration FAILED: {:?}", e),
     }
 
-    // ── Dioxus panel rendering ────────────────────────────────────────
-    daw::ui::dock::init_service();
-    daw::ui::dock::init_dock(reaper_low::Reaper::get(), reaper_low::Swell::get());
-    info!(panels = panels.len(), "Panel definitions collected");
-    for panel in &panels {
-        daw::ui::dock::register_panel_from_service(panel);
-    }
-    daw::ui::dock::restore_dock_state();
-
-    info!(
-        modules = module_count,
-        actions = all_defs.len(),
-        panels = panels.len(),
-        "FTS Extensions ready"
-    );
+    info!(modules = module_count, "FTS Extensions startup scheduled");
     Ok(())
 }
