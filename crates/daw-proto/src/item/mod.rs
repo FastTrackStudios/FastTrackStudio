@@ -17,4 +17,4 @@ pub use service::{
     ItemService, ItemServiceClient, ItemServiceDispatcher, TakeService, TakeServiceClient,
     TakeServiceDispatcher, item_service_service_descriptor, take_service_service_descriptor,
 };
-pub use take::{SourceType, Take, TakeRef};
+pub use take::{SourceType, Take, TakeMarker, TakeMarkerCreate, TakeMarkerUpdate, TakeRef};

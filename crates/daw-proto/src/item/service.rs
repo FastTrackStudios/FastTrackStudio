@@ -266,6 +266,47 @@ pub trait TakeService {
     ) -> SourceType;
 
     // =========================================================================
+    // Take Markers
+    // =========================================================================
+
+    /// List all take markers in source-PPQ order.
+    async fn get_take_markers(
+        &self,
+        project: ProjectContext,
+        item: ItemRef,
+        take: TakeRef,
+    ) -> Vec<super::TakeMarker>;
+
+    /// Append a new take marker. Returns the new marker's enumeration index,
+    /// or `None` if REAPER refused the call (e.g. closed take handle).
+    async fn add_take_marker(
+        &self,
+        project: ProjectContext,
+        item: ItemRef,
+        take: TakeRef,
+        marker: super::TakeMarkerCreate,
+    ) -> Option<u32>;
+
+    /// Modify an existing take marker. Fields left as `None` in the update
+    /// keep their current value.
+    async fn set_take_marker(
+        &self,
+        project: ProjectContext,
+        item: ItemRef,
+        take: TakeRef,
+        update: super::TakeMarkerUpdate,
+    );
+
+    /// Delete the take marker at the given enumeration index.
+    async fn delete_take_marker(
+        &self,
+        project: ProjectContext,
+        item: ItemRef,
+        take: TakeRef,
+        index: u32,
+    );
+
+    // =========================================================================
     // Subscriptions
     // =========================================================================
 

@@ -146,6 +146,90 @@ async fn take_set_source_file_flips_to_audio(
 }
 
 #[reaper_test(isolated)]
+async fn take_marker_add_list_update_delete(
+    ctx: &reaper_test::ReaperTestContext,
+) -> eyre::Result<()> {
+    let project = ctx.project().clone();
+    let track = project.tracks().add("Take Marker Track", None).await?;
+    let item = track
+        .items()
+        .add(
+            daw_proto::PositionInSeconds::from_seconds(0.0),
+            daw_proto::Duration::from_seconds(4.0),
+        )
+        .await?;
+    let take = item.takes().active().await?;
+
+    // Add three markers at different source-PPQ positions.
+    let m0 = take
+        .add_marker("intro", 0.0, None)
+        .await?
+        .ok_or_else(|| eyre::eyre!("add_marker(intro) returned None"))?;
+    let m1 = take
+        .add_marker("verse", 960.0, Some(0xFF0000))
+        .await?
+        .ok_or_else(|| eyre::eyre!("add_marker(verse) returned None"))?;
+    let m2 = take
+        .add_marker("chorus", 1920.0, None)
+        .await?
+        .ok_or_else(|| eyre::eyre!("add_marker(chorus) returned None"))?;
+
+    // List should return three markers.
+    let markers = take.markers().await?;
+    assert_eq!(
+        markers.len(),
+        3,
+        "expected 3 markers, got {}",
+        markers.len()
+    );
+
+    // Names + positions round-trip.
+    let names: Vec<&str> = markers.iter().map(|m| m.name.as_str()).collect();
+    assert!(names.contains(&"intro"));
+    assert!(names.contains(&"verse"));
+    assert!(names.contains(&"chorus"));
+    let verse = markers.iter().find(|m| m.name == "verse").unwrap();
+    assert!(
+        (verse.position_ppq - 960.0).abs() < 0.5,
+        "verse position should be ~960 PPQ, got {}",
+        verse.position_ppq
+    );
+    assert_eq!(
+        verse.color,
+        Some(0xFF0000),
+        "verse color should round-trip; got {:?}",
+        verse.color
+    );
+
+    // Update the first marker — rename + reposition.
+    take.update_marker(m0, Some("intro-renamed"), Some(120.0), None)
+        .await?;
+    let after_update = take.markers().await?;
+    let intro = after_update
+        .iter()
+        .find(|m| m.name == "intro-renamed")
+        .ok_or_else(|| eyre::eyre!("renamed intro not found: {after_update:?}"))?;
+    assert!(
+        (intro.position_ppq - 120.0).abs() < 0.5,
+        "intro should reposition to 120 PPQ"
+    );
+
+    // Delete the highest-index marker (chorus = m2).
+    take.delete_marker(m2).await?;
+    let after_delete = take.markers().await?;
+    assert_eq!(
+        after_delete.len(),
+        2,
+        "after delete should have 2 markers, got {}",
+        after_delete.len()
+    );
+    assert!(after_delete.iter().all(|m| m.name != "chorus"));
+
+    let _ = m1; // m1 is referenced — silence unused warnings
+    Ok(())
+}
+
+#[reaper_test(isolated)]
 async fn take_source_type_detected_for_default(
     ctx: &reaper_test::ReaperTestContext,
 ) -> eyre::Result<()> {

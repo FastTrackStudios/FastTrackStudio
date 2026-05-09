@@ -875,6 +875,82 @@ impl TakeHandle {
     }
 
     // =========================================================================
+    // Take Markers
+    // =========================================================================
+
+    /// List all take markers in source-PPQ order.
+    pub async fn markers(&self) -> Result<Vec<daw_proto::TakeMarker>> {
+        Ok(self
+            .clients
+            .take
+            .get_take_markers(self.context(), self.item_ref(), self.take_ref.clone())
+            .await?)
+    }
+
+    /// Append a new take marker. Returns the new enumeration index.
+    pub async fn add_marker(
+        &self,
+        name: &str,
+        position_ppq: f64,
+        color: Option<u32>,
+    ) -> Result<Option<u32>> {
+        Ok(self
+            .clients
+            .take
+            .add_take_marker(
+                self.context(),
+                self.item_ref(),
+                self.take_ref.clone(),
+                daw_proto::TakeMarkerCreate {
+                    name: name.to_string(),
+                    position_ppq,
+                    color,
+                },
+            )
+            .await?)
+    }
+
+    /// Update an existing take marker. Pass `None` for fields that should
+    /// keep their current value; for `color`, `Some(None)` clears the color.
+    pub async fn update_marker(
+        &self,
+        index: u32,
+        name: Option<&str>,
+        position_ppq: Option<f64>,
+        color: Option<Option<u32>>,
+    ) -> Result<()> {
+        self.clients
+            .take
+            .set_take_marker(
+                self.context(),
+                self.item_ref(),
+                self.take_ref.clone(),
+                daw_proto::TakeMarkerUpdate {
+                    index,
+                    name: name.map(|s| s.to_string()),
+                    position_ppq,
+                    color,
+                },
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// Delete the take marker at the given enumeration index.
+    pub async fn delete_marker(&self, index: u32) -> Result<()> {
+        self.clients
+            .take
+            .delete_take_marker(
+                self.context(),
+                self.item_ref(),
+                self.take_ref.clone(),
+                index,
+            )
+            .await?;
+        Ok(())
+    }
+
+    // =========================================================================
     // MIDI Editing
     // =========================================================================
 

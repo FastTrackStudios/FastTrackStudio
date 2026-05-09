@@ -123,3 +123,46 @@ impl Default for Take {
         }
     }
 }
+
+// ─── Take markers ───────────────────────────────────────────────────────────
+//
+// REAPER take markers (`GetTakeMarker`, `SetTakeMarker`, etc.) — markers
+// attached to a take's source media at a specific PPQ position. Used for
+// review/comp workflows; REAPER 7.17+ also exposes built-in actions that
+// stamp star-rating markers onto the active take.
+
+/// One marker on a take's source.
+#[derive(Clone, Debug, PartialEq, Facet)]
+pub struct TakeMarker {
+    /// Stable enumeration index. REAPER renumbers when markers are inserted
+    /// or deleted, so the index is only meaningful within a single read.
+    pub index: u32,
+    /// Display name. Convention for REAPER's built-in rating markers is
+    /// e.g. `"5"` / `"4"` / etc. — keyflow / fts treat any leading digit
+    /// 1..=5 as a star rating.
+    pub name: String,
+    /// Position in source PPQ (NOT take-time, NOT absolute project time).
+    pub position_ppq: f64,
+    /// Custom color (0xRRGGBB). `None` falls back to REAPER's default.
+    pub color: Option<u32>,
+}
+
+/// Create-only payload for adding a new take marker.
+#[derive(Clone, Debug, Facet)]
+pub struct TakeMarkerCreate {
+    pub name: String,
+    pub position_ppq: f64,
+    pub color: Option<u32>,
+}
+
+/// Update payload for modifying an existing take marker. `index` selects
+/// the marker; the rest are optional partial updates.
+#[derive(Clone, Debug, Facet)]
+pub struct TakeMarkerUpdate {
+    pub index: u32,
+    pub name: Option<String>,
+    pub position_ppq: Option<f64>,
+    /// `Some(Some(c))` sets a color, `Some(None)` clears it, `None` leaves
+    /// the existing color untouched.
+    pub color: Option<Option<u32>>,
+}

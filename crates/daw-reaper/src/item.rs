@@ -1718,6 +1718,112 @@ impl TakeService for ReaperTake {
             info!("ReaperTake: subscribe_takes stream ended");
         });
     }
+
+    // =========================================================================
+    // Take Markers
+    // =========================================================================
+
+    async fn get_take_markers(
+        &self,
+        _project: ProjectContext,
+        item: ItemRef,
+        take: TakeRef,
+    ) -> Vec<daw_proto::TakeMarker> {
+        main_thread::query(move || {
+            let Some(item_ptr) =
+                ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)
+            else {
+                return Vec::new();
+            };
+            let Some(take_ptr) = Self::resolve_take(item_ptr, &take) else {
+                return Vec::new();
+            };
+            let low = Reaper::get().medium_reaper().low();
+            item_sw::list_take_markers(low, take_ptr)
+                .into_iter()
+                .map(|m| daw_proto::TakeMarker {
+                    index: m.index,
+                    name: m.name,
+                    position_ppq: m.position_ppq,
+                    color: m.color,
+                })
+                .collect()
+        })
+        .await
+        .unwrap_or_default()
+    }
+
+    async fn add_take_marker(
+        &self,
+        _project: ProjectContext,
+        item: ItemRef,
+        take: TakeRef,
+        marker: daw_proto::TakeMarkerCreate,
+    ) -> Option<u32> {
+        main_thread::query(move || {
+            let item_ptr = ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)?;
+            let take_ptr = Self::resolve_take(item_ptr, &take)?;
+            let low = Reaper::get().medium_reaper().low();
+            item_sw::add_take_marker(
+                low,
+                take_ptr,
+                &marker.name,
+                marker.position_ppq,
+                marker.color,
+            )
+        })
+        .await
+        .flatten()
+    }
+
+    async fn set_take_marker(
+        &self,
+        _project: ProjectContext,
+        item: ItemRef,
+        take: TakeRef,
+        update: daw_proto::TakeMarkerUpdate,
+    ) {
+        main_thread::run(move || {
+            let Some(item_ptr) =
+                ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)
+            else {
+                return;
+            };
+            let Some(take_ptr) = Self::resolve_take(item_ptr, &take) else {
+                return;
+            };
+            let low = Reaper::get().medium_reaper().low();
+            item_sw::update_take_marker(
+                low,
+                take_ptr,
+                update.index,
+                update.name.as_deref(),
+                update.position_ppq,
+                update.color,
+            );
+        });
+    }
+
+    async fn delete_take_marker(
+        &self,
+        _project: ProjectContext,
+        item: ItemRef,
+        take: TakeRef,
+        index: u32,
+    ) {
+        main_thread::run(move || {
+            let Some(item_ptr) =
+                ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)
+            else {
+                return;
+            };
+            let Some(take_ptr) = Self::resolve_take(item_ptr, &take) else {
+                return;
+            };
+            let low = Reaper::get().medium_reaper().low();
+            item_sw::delete_take_marker(low, take_ptr, index);
+        });
+    }
 }
 
 // =============================================================================

@@ -411,6 +411,152 @@ pub fn get_set_item_state(
     }
 }
 
+// ─── Take markers ──────────────────────────────────────────────────────────
+
+/// One take marker as returned by `GetTakeMarker`.
+#[derive(Clone, Debug)]
+pub struct TakeMarker {
+    pub index: u32,
+    pub name: String,
+    pub position_ppq: f64,
+    pub color: Option<u32>,
+}
+
+/// Number of take markers on the take.
+pub fn count_take_markers(low: &reaper_low::Reaper, take: MediaItemTake) -> u32 {
+    let n = unsafe { low.GetNumTakeMarkers(take.as_ptr()) };
+    n.max(0) as u32
+}
+
+/// Read a single take marker by index. Returns `None` if `index` is out of
+/// range (REAPER signals that with a negative position).
+pub fn get_take_marker(
+    low: &reaper_low::Reaper,
+    take: MediaItemTake,
+    index: u32,
+) -> Option<TakeMarker> {
+    let mut name_buf = vec![0i8; 256];
+    let mut color: i32 = 0;
+    let pos = unsafe {
+        low.GetTakeMarker(
+            take.as_ptr(),
+            index as i32,
+            name_buf.as_mut_ptr(),
+            name_buf.len() as i32,
+            &mut color,
+        )
+    };
+    if pos < 0.0 {
+        return None;
+    }
+    let cstr = unsafe { std::ffi::CStr::from_ptr(name_buf.as_ptr()) };
+    let name = cstr.to_string_lossy().into_owned();
+    Some(TakeMarker {
+        index,
+        name,
+        position_ppq: pos,
+        // REAPER returns color OR'd with 0x1000000 to mark "set"; mask it
+        // out and surface None for "default".
+        color: if color != 0 {
+            Some((color as u32) & 0x00FF_FFFF)
+        } else {
+            None
+        },
+    })
+}
+
+/// All take markers on this take, in REAPER's enumeration order.
+pub fn list_take_markers(low: &reaper_low::Reaper, take: MediaItemTake) -> Vec<TakeMarker> {
+    let n = count_take_markers(low, take);
+    (0..n)
+        .filter_map(|i| get_take_marker(low, take, i))
+        .collect()
+}
+
+/// Append a new take marker. Returns the new marker's index, or `None` on
+/// failure.
+pub fn add_take_marker(
+    low: &reaper_low::Reaper,
+    take: MediaItemTake,
+    name: &str,
+    position_ppq: f64,
+    color: Option<u32>,
+) -> Option<u32> {
+    let cname = std::ffi::CString::new(name).ok()?;
+    let mut pos = position_ppq;
+    let mut color_val = color
+        .map(|c| ((c & 0x00FF_FFFF) | 0x0100_0000) as i32)
+        .unwrap_or(0);
+    let color_ptr = if color.is_some() {
+        &mut color_val as *mut i32
+    } else {
+        std::ptr::null_mut()
+    };
+    let idx = unsafe {
+        low.SetTakeMarker(
+            take.as_ptr(),
+            -1, // -1 = append
+            cname.as_ptr(),
+            &mut pos,
+            color_ptr,
+        )
+    };
+    if idx < 0 { None } else { Some(idx as u32) }
+}
+
+/// Modify an existing take marker in place. Pass `None` for fields that
+/// should keep their current value. Returns `true` if REAPER accepted the
+/// call.
+pub fn update_take_marker(
+    low: &reaper_low::Reaper,
+    take: MediaItemTake,
+    index: u32,
+    name: Option<&str>,
+    position_ppq: Option<f64>,
+    color: Option<Option<u32>>,
+) -> bool {
+    // Read-modify-write: REAPER's `SetTakeMarker` overwrites all fields, so
+    // we read the existing marker and only touch the requested ones.
+    let existing = match get_take_marker(low, take, index) {
+        Some(m) => m,
+        None => return false,
+    };
+    let new_name = name.unwrap_or(&existing.name);
+    let new_pos = position_ppq.unwrap_or(existing.position_ppq);
+    let new_color = match color {
+        Some(c) => c,
+        None => existing.color,
+    };
+    let cname = match std::ffi::CString::new(new_name) {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+    let mut pos = new_pos;
+    let mut color_val = new_color
+        .map(|c| ((c & 0x00FF_FFFF) | 0x0100_0000) as i32)
+        .unwrap_or(0);
+    let color_ptr = if new_color.is_some() {
+        &mut color_val as *mut i32
+    } else {
+        std::ptr::null_mut()
+    };
+    let result = unsafe {
+        low.SetTakeMarker(
+            take.as_ptr(),
+            index as i32,
+            cname.as_ptr(),
+            &mut pos,
+            color_ptr,
+        )
+    };
+    result >= 0
+}
+
+/// Delete the take marker at the given index. Returns `true` on success.
+pub fn delete_take_marker(low: &reaper_low::Reaper, take: MediaItemTake, index: u32) -> bool {
+    unsafe { low.DeleteTakeMarker(take.as_ptr(), index as i32) }
+}
+
 /// Get the source file path for a take (returns None for MIDI/empty takes).
 pub fn get_take_source_file_path(
     medium: &reaper_medium::Reaper,

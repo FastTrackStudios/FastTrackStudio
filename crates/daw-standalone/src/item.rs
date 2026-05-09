@@ -670,4 +670,43 @@ impl TakeService for StandaloneTake {
     }
 
     async fn subscribe_takes(&self, _project: ProjectContext, _tx: Tx<TakeEvent>) {}
+
+    // ─── Take markers (no-op stubs — standalone has no DAW chrome) ───────
+
+    async fn get_take_markers(
+        &self,
+        _project: ProjectContext,
+        _item: daw_proto::ItemRef,
+        _take: TakeRef,
+    ) -> Vec<daw_proto::TakeMarker> {
+        Vec::new()
+    }
+
+    async fn add_take_marker(
+        &self,
+        _project: ProjectContext,
+        _item: daw_proto::ItemRef,
+        _take: TakeRef,
+        _marker: daw_proto::TakeMarkerCreate,
+    ) -> Option<u32> {
+        None
+    }
+
+    async fn set_take_marker(
+        &self,
+        _project: ProjectContext,
+        _item: daw_proto::ItemRef,
+        _take: TakeRef,
+        _update: daw_proto::TakeMarkerUpdate,
+    ) {
+    }
+
+    async fn delete_take_marker(
+        &self,
+        _project: ProjectContext,
+        _item: daw_proto::ItemRef,
+        _take: TakeRef,
+        _index: u32,
+    ) {
+    }
 }
