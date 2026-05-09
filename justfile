@@ -145,8 +145,8 @@ restart: install-release kill
 
 # Tail the extension log (live)
 log:
-    tail -f {{home_dir}}/.local/state/fasttrackstudio/reaper-fts-extensions.log.$(date +%Y-%m-%d)
+    tail -f "$(ls -t {{home_dir}}/.local/state/fasttrackstudio/reaper-fts-extensions.log.* | head -n 1)"
 
 # Show last N lines of the extension log (default 30)
 log-last n="30":
-    tail -n {{n}} {{home_dir}}/.local/state/fasttrackstudio/reaper-fts-extensions.log.$(date +%Y-%m-%d)
+    tail -n {{n}} "$(ls -t {{home_dir}}/.local/state/fasttrackstudio/reaper-fts-extensions.log.* | head -n 1)"

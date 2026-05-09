@@ -82,7 +82,7 @@ version = "0.1.0"
 dependencies = [
  "convert_case 0.6.0",
  "facet 0.46.0",
- "vox 0.4.0",
+ "vox",
 ]
 
 [[package]]
@@ -433,6 +433,9 @@ name = "arbitrary"
 version = "1.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3d036a3c4ab069c7b410a2ce876bd74808d2d0888a82667669f8e783a898bf1"
+dependencies = [
+ "derive_arbitrary",
+]
 
 [[package]]
 name = "arboard"
@@ -1340,6 +1343,17 @@ name = "cfb"
 version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d38f2da7a0a2c4ccf0065be06397cc26a81f4e528be095826eee9d4adbb8c60f"
+dependencies = [
+ "byteorder",
+ "fnv",
+ "uuid",
+]
+
+[[package]]
+name = "cfb"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d8a4f8e55be323b378facfcf1f06aa97f6ec17cf4ac84fb17325093aaf62da41"
 dependencies = [
  "byteorder",
  "fnv",
@@ -2289,8 +2303,8 @@ version = "0.1.0"
 dependencies = [
  "daw-control",
  "daw-control-sync",
- "daw-module 0.1.0",
- "daw-proto 0.1.0",
+ "daw-module",
+ "daw-proto",
  "daw-reaper",
  "daw-reaper-dioxus",
  "dawfile-ableton",
@@ -2298,14 +2312,14 @@ dependencies = [
  "facet 0.46.0",
  "tokio",
  "tracing",
- "vox 0.3.1",
+ "vox",
 ]
 
 [[package]]
 name = "daw-control"
 version = "0.1.0"
 dependencies = [
- "daw-proto 0.1.0",
+ "daw-proto",
  "eyre",
  "facet 0.46.0",
  "facet-json 0.46.0",
@@ -2313,7 +2327,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tracing",
- "vox 0.3.1",
+ "vox",
 ]
 
 [[package]]
@@ -2325,8 +2339,8 @@ dependencies = [
  "moire",
  "tokio",
  "tracing",
- "vox 0.3.1",
- "vox-stream 0.3.1",
+ "vox",
+ "vox-stream",
 ]
 
 [[package]]
@@ -2335,8 +2349,8 @@ version = "0.1.0"
 dependencies = [
  "crossbeam-channel",
  "daw-control",
- "daw-module 0.1.0",
- "daw-proto 0.1.0",
+ "daw-module",
+ "daw-proto",
  "daw-reaper",
  "eyre",
  "fragile",
@@ -2346,7 +2360,7 @@ dependencies = [
  "reaper-medium",
  "tokio",
  "tracing",
- "vox 0.3.1",
+ "vox",
  "vox-ffi",
 ]
 
@@ -2359,35 +2373,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "daw-module"
-version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/daw.git?branch=main#4c729ca6409228c940a516bfa41858e18246392a"
-dependencies = [
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "daw-proto"
 version = "0.1.0"
 dependencies = [
  "actions-proto",
  "facet 0.46.0",
  "thiserror 2.0.18",
- "vox 0.3.1",
- "vox-types 0.3.1",
-]
-
-[[package]]
-name = "daw-proto"
-version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/daw.git?branch=main#4c729ca6409228c940a516bfa41858e18246392a"
-dependencies = [
- "actions-proto",
- "facet 0.46.0",
- "thiserror 2.0.18",
- "vox 0.3.1",
- "vox-types 0.3.1",
+ "vox",
+ "vox-types",
 ]
 
 [[package]]
@@ -2398,7 +2391,11 @@ dependencies = [
  "crossbeam-channel",
  "daw-control",
  "daw-control-sync",
- "daw-proto 0.1.0",
+ "daw-proto",
+ "dawfile-aaf",
+ "dawfile-ableton",
+ "dawfile-dawproject",
+ "dawfile-protools",
  "dawfile-reaper",
  "display-info",
  "enumflags2",
@@ -2412,7 +2409,7 @@ dependencies = [
  "swell-ui 0.1.0 (git+https://github.com/FastTrackStudios/reaper-lib.git?branch=main)",
  "tokio",
  "tracing",
- "vox 0.3.1",
+ "vox",
 ]
 
 [[package]]
@@ -2425,8 +2422,8 @@ dependencies = [
  "blitz-traits",
  "cocoa",
  "crossbeam",
- "daw-module 0.1.0",
- "daw-proto 0.1.0",
+ "daw-module",
+ "daw-proto",
  "daw-reaper-embed",
  "dioxus-devtools",
  "dioxus-native",
@@ -2443,7 +2440,7 @@ dependencies = [
  "tokio",
  "tracing",
  "vello 0.8.0",
- "vox 0.3.1",
+ "vox",
  "wgpu 28.0.0",
  "x11-dl",
 ]
@@ -2465,13 +2462,40 @@ dependencies = [
 ]
 
 [[package]]
+name = "dawfile-aaf"
+version = "0.1.0"
+dependencies = [
+ "cfb 0.10.0",
+ "daw-proto",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "dawfile-ableton"
 version = "0.1.0"
 dependencies = [
- "daw-proto 0.1.0",
+ "daw-proto",
  "flate2",
  "quick-xml 0.37.5",
  "roxmltree 0.20.0",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "dawfile-dawproject"
+version = "0.1.0"
+dependencies = [
+ "daw-proto",
+ "roxmltree 0.20.0",
+ "thiserror 2.0.18",
+ "zip",
+]
+
+[[package]]
+name = "dawfile-protools"
+version = "0.1.0"
+dependencies = [
+ "daw-proto",
  "thiserror 2.0.18",
 ]
 
@@ -2481,7 +2505,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
- "daw-proto 0.1.0",
+ "daw-proto",
  "libc",
  "nom 8.0.0",
  "rayon",
@@ -2550,6 +2574,17 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "derive_arbitrary"
+version = "1.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e567bd82dcff979e4b03460c307b3cdc9e96fde3d73bed1496d2bc75d9dd62a"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
 ]
 
 [[package]]
@@ -3143,7 +3178,7 @@ dependencies = [
  "anyhow",
  "color-palette",
  "daw",
- "daw-proto 0.1.0 (git+https://github.com/FastTrackStudios/daw.git?branch=main)",
+ "daw-proto",
  "dynamic-template-proto",
  "eyre",
  "facet 0.46.0",
@@ -3153,7 +3188,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.18",
  "tracing",
- "vox 0.4.0",
+ "vox",
 ]
 
 [[package]]
@@ -3161,10 +3196,10 @@ name = "dynamic-template-proto"
 version = "0.1.0"
 dependencies = [
  "actions-proto",
- "daw-proto 0.1.0 (git+https://github.com/FastTrackStudios/daw.git?branch=main)",
+ "daw-proto",
  "facet 0.46.0",
  "thiserror 2.0.18",
- "vox 0.4.0",
+ "vox",
 ]
 
 [[package]]
@@ -3420,16 +3455,6 @@ dependencies = [
 
 [[package]]
 name = "facet-cbor"
-version = "0.3.1"
-source = "git+https://github.com/Codys-Wright/vox.git?rev=ccb46b54#ccb46b5416100d38430cb082d71bf0377428c241"
-dependencies = [
- "facet 0.46.0",
- "facet-core 0.46.0",
- "facet-reflect 0.46.0",
-]
-
-[[package]]
-name = "facet-cbor"
 version = "0.3.3"
 source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110a605f72abe42a81f0069aeda0b3"
 dependencies = [
@@ -3460,7 +3485,6 @@ checksum = "b18251d9fd8e27c85ba879c75cb2f92fdd5f1e43c17fedc3a40faadcc3fa2a99"
 dependencies = [
  "autocfg",
  "camino",
- "chrono",
  "const-fnv1a-hash",
  "iddqd",
  "impls",
@@ -4166,6 +4190,7 @@ dependencies = [
  "dioxus-native",
  "facet 0.44.3",
  "facet-styx 3.0.0",
+ "fts-ui",
  "launcher-core",
  "launcher-ui",
  "providers",
@@ -5182,7 +5207,7 @@ version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a588916bfdfd92e71cacef98a63d9b1f0d74d6599980d11894290e7ddefffcf7"
 dependencies = [
- "cfb",
+ "cfb 0.7.3",
 ]
 
 [[package]]
@@ -5464,8 +5489,8 @@ version = "0.1.0"
 dependencies = [
  "color-eyre",
  "colored 3.1.1",
- "daw-module 0.1.0 (git+https://github.com/FastTrackStudios/daw.git?branch=main)",
- "daw-proto 0.1.0 (git+https://github.com/FastTrackStudios/daw.git?branch=main)",
+ "daw-module",
+ "daw-proto",
  "derive_more 1.0.0",
  "engraver",
  "facet 0.46.0",
@@ -5491,7 +5516,7 @@ dependencies = [
  "facet 0.46.0",
  "keyflow",
  "tracing",
- "vox 0.4.0",
+ "vox",
 ]
 
 [[package]]
@@ -5499,7 +5524,7 @@ name = "keyflow-proto"
 version = "0.1.0"
 dependencies = [
  "color-palette",
- "daw-proto 0.1.0 (git+https://github.com/FastTrackStudios/daw.git?branch=main)",
+ "daw-proto",
  "facet 0.46.0",
  "helgoboss-midi",
  "music-catalog",
@@ -5507,7 +5532,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tracing",
  "uuid",
- "vox 0.4.0",
+ "vox",
 ]
 
 [[package]]
@@ -5630,8 +5655,10 @@ dependencies = [
 name = "launcher-ui"
 version = "0.1.0"
 dependencies = [
- "dioxus-native",
+ "dioxus",
+ "fts-ui",
  "launcher-core",
+ "lucide-dioxus",
  "tracing",
 ]
 
@@ -8270,6 +8297,7 @@ dependencies = [
  "facet-json 0.44.5",
  "facet-styx 2.0.0",
  "figue",
+ "fts-ui",
  "helgoboss-midi",
  "input",
  "once_cell",
@@ -8364,8 +8392,8 @@ dependencies = [
  "reaper-test-macro",
  "tokio",
  "tracing",
- "vox 0.3.1",
- "vox-stream 0.3.1",
+ "vox",
+ "vox-stream",
 ]
 
 [[package]]
@@ -9057,6 +9085,7 @@ dependencies = [
  "daw",
  "eyre",
  "keyflow",
+ "keyflow-daw-analysis",
  "moire",
  "rayon",
  "rustc-hash 2.1.2",
@@ -9066,7 +9095,7 @@ dependencies = [
  "tracing",
  "utils",
  "uuid",
- "vox 0.4.0",
+ "vox",
 ]
 
 [[package]]
@@ -9086,7 +9115,7 @@ dependencies = [
  "tracing",
  "utils",
  "uuid",
- "vox 0.4.0",
+ "vox",
 ]
 
 [[package]]
@@ -9954,7 +9983,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
- "vox 0.4.0",
+ "vox",
  "vox-discover",
 ]
 
@@ -9965,7 +9994,7 @@ dependencies = [
  "actions-proto",
  "daw",
  "facet 0.46.0",
- "vox 0.4.0",
+ "vox",
 ]
 
 [[package]]
@@ -11071,24 +11100,6 @@ checksum = "6a02e4885ed3bc0f2de90ea6dd45ebcbb66dacffe03547fadbb0eeae2770887d"
 
 [[package]]
 name = "vox"
-version = "0.3.1"
-source = "git+https://github.com/Codys-Wright/vox.git?rev=ccb46b54#ccb46b5416100d38430cb082d71bf0377428c241"
-dependencies = [
- "facet 0.46.0",
- "facet-pretty 0.46.0",
- "facet-reflect 0.46.0",
- "moire",
- "tokio",
- "tracing",
- "vox-core 0.3.1",
- "vox-postcard 0.3.1",
- "vox-service-macros 0.3.1",
- "vox-stream 0.3.1",
- "vox-types 0.3.1",
-]
-
-[[package]]
-name = "vox"
 version = "0.4.0"
 source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110a605f72abe42a81f0069aeda0b3"
 dependencies = [
@@ -11098,33 +11109,12 @@ dependencies = [
  "moire",
  "tokio",
  "tracing",
- "vox-core 0.4.0",
+ "vox-core",
  "vox-jit",
- "vox-postcard 0.4.0",
- "vox-service-macros 0.4.0",
- "vox-stream 0.4.0",
- "vox-types 0.4.0",
-]
-
-[[package]]
-name = "vox-core"
-version = "0.3.1"
-source = "git+https://github.com/Codys-Wright/vox.git?rev=ccb46b54#ccb46b5416100d38430cb082d71bf0377428c241"
-dependencies = [
- "facet 0.46.0",
- "facet-cbor 0.3.1",
- "facet-core 0.46.0",
- "facet-error 0.46.0",
- "facet-reflect 0.46.0",
- "getrandom 0.3.4",
- "moire",
- "smallvec 1.15.1",
- "tokio",
- "tracing",
- "vox-postcard 0.3.1",
- "vox-types 0.3.1",
- "wasm-bindgen-futures",
- "zerocopy",
+ "vox-postcard",
+ "vox-service-macros",
+ "vox-stream",
+ "vox-types",
 ]
 
 [[package]]
@@ -11133,7 +11123,7 @@ version = "0.4.0"
 source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110a605f72abe42a81f0069aeda0b3"
 dependencies = [
  "facet 0.46.0",
- "facet-cbor 0.3.3",
+ "facet-cbor",
  "facet-core 0.46.0",
  "facet-error 0.46.0",
  "facet-reflect 0.46.0",
@@ -11144,8 +11134,8 @@ dependencies = [
  "tokio",
  "tracing",
  "vox-jit",
- "vox-postcard 0.4.0",
- "vox-types 0.4.0",
+ "vox-postcard",
+ "vox-types",
  "wasm-bindgen-futures",
  "zerocopy",
 ]
@@ -11163,11 +11153,11 @@ dependencies = [
 
 [[package]]
 name = "vox-ffi"
-version = "0.3.1"
-source = "git+https://github.com/Codys-Wright/vox.git?rev=ccb46b54#ccb46b5416100d38430cb082d71bf0377428c241"
+version = "0.4.0"
+source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110a605f72abe42a81f0069aeda0b3"
 dependencies = [
  "tracing",
- "vox-types 0.3.1",
+ "vox-types",
 ]
 
 [[package]]
@@ -11187,8 +11177,8 @@ dependencies = [
  "museair",
  "vox-jit-abi",
  "vox-jit-cal",
- "vox-postcard 0.4.0",
- "vox-schema 0.4.0",
+ "vox-postcard",
+ "vox-schema",
 ]
 
 [[package]]
@@ -11213,18 +11203,6 @@ dependencies = [
 
 [[package]]
 name = "vox-macros-core"
-version = "0.3.1"
-source = "git+https://github.com/Codys-Wright/vox.git?rev=ccb46b54#ccb46b5416100d38430cb082d71bf0377428c241"
-dependencies = [
- "facet-cargo-toml",
- "heck 0.5.0",
- "proc-macro2",
- "quote",
- "vox-macros-parse 0.3.1",
-]
-
-[[package]]
-name = "vox-macros-core"
 version = "0.4.0"
 source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110a605f72abe42a81f0069aeda0b3"
 dependencies = [
@@ -11232,16 +11210,7 @@ dependencies = [
  "heck 0.5.0",
  "proc-macro2",
  "quote",
- "vox-macros-parse 0.4.0",
-]
-
-[[package]]
-name = "vox-macros-parse"
-version = "0.3.1"
-source = "git+https://github.com/Codys-Wright/vox.git?rev=ccb46b54#ccb46b5416100d38430cb082d71bf0377428c241"
-dependencies = [
- "proc-macro2",
- "unsynn",
+ "vox-macros-parse",
 ]
 
 [[package]]
@@ -11251,18 +11220,6 @@ source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110
 dependencies = [
  "proc-macro2",
  "unsynn",
-]
-
-[[package]]
-name = "vox-postcard"
-version = "0.3.1"
-source = "git+https://github.com/Codys-Wright/vox.git?rev=ccb46b54#ccb46b5416100d38430cb082d71bf0377428c241"
-dependencies = [
- "chrono",
- "facet 0.46.0",
- "facet-core 0.46.0",
- "facet-reflect 0.46.0",
- "vox-schema 0.3.1",
 ]
 
 [[package]]
@@ -11275,19 +11232,7 @@ dependencies = [
  "facet-reflect 0.46.0",
  "vox-jit-abi",
  "vox-jit-cal",
- "vox-schema 0.4.0",
-]
-
-[[package]]
-name = "vox-schema"
-version = "0.3.1"
-source = "git+https://github.com/Codys-Wright/vox.git?rev=ccb46b54#ccb46b5416100d38430cb082d71bf0377428c241"
-dependencies = [
- "blake3",
- "facet 0.46.0",
- "facet-cbor 0.3.1",
- "facet-core 0.46.0",
- "indexmap",
+ "vox-schema",
 ]
 
 [[package]]
@@ -11297,18 +11242,9 @@ source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110
 dependencies = [
  "blake3",
  "facet 0.46.0",
- "facet-cbor 0.3.3",
+ "facet-cbor",
  "facet-core 0.46.0",
  "indexmap",
-]
-
-[[package]]
-name = "vox-service-macros"
-version = "0.3.1"
-source = "git+https://github.com/Codys-Wright/vox.git?rev=ccb46b54#ccb46b5416100d38430cb082d71bf0377428c241"
-dependencies = [
- "proc-macro2",
- "vox-macros-core 0.3.1",
 ]
 
 [[package]]
@@ -11317,19 +11253,7 @@ version = "0.4.0"
 source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110a605f72abe42a81f0069aeda0b3"
 dependencies = [
  "proc-macro2",
- "vox-macros-core 0.4.0",
-]
-
-[[package]]
-name = "vox-stream"
-version = "0.3.1"
-source = "git+https://github.com/Codys-Wright/vox.git?rev=ccb46b54#ccb46b5416100d38430cb082d71bf0377428c241"
-dependencies = [
- "libc",
- "moire",
- "tokio",
- "vox-core 0.3.1",
- "vox-types 0.3.1",
+ "vox-macros-core",
 ]
 
 [[package]]
@@ -11340,31 +11264,8 @@ dependencies = [
  "libc",
  "moire",
  "tokio",
- "vox-core 0.4.0",
- "vox-types 0.4.0",
-]
-
-[[package]]
-name = "vox-types"
-version = "0.3.1"
-source = "git+https://github.com/Codys-Wright/vox.git?rev=ccb46b54#ccb46b5416100d38430cb082d71bf0377428c241"
-dependencies = [
- "bitflags 2.11.0",
- "blake3",
- "facet 0.46.0",
- "facet-cbor 0.3.1",
- "facet-core 0.46.0",
- "facet-path 0.46.0",
- "facet-reflect 0.46.0",
- "futures-channel",
- "heck 0.5.0",
- "indexmap",
- "moire",
- "smallvec 1.15.1",
- "structstruck",
- "tokio",
- "vox-postcard 0.3.1",
- "vox-schema 0.3.1",
+ "vox-core",
+ "vox-types",
 ]
 
 [[package]]
@@ -11376,7 +11277,7 @@ dependencies = [
  "blake3",
  "bytes",
  "facet 0.46.0",
- "facet-cbor 0.3.3",
+ "facet-cbor",
  "facet-core 0.46.0",
  "facet-path 0.46.0",
  "facet-reflect 0.46.0",
@@ -11388,8 +11289,8 @@ dependencies = [
  "structstruck",
  "tokio",
  "vox-jit",
- "vox-postcard 0.4.0",
- "vox-schema 0.4.0",
+ "vox-postcard",
+ "vox-schema",
 ]
 
 [[package]]
@@ -13402,10 +13303,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "zip"
+version = "2.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fabe6324e908f85a1c52063ce7aa26b68dcb7eb6dbc83a2d148403c9bc3eba50"
+dependencies = [
+ "arbitrary",
+ "crc32fast",
+ "crossbeam-utils",
+ "displaydoc",
+ "flate2",
+ "indexmap",
+ "memchr",
+ "thiserror 2.0.18",
+ "zopfli",
+]
+
+[[package]]
 name = "zmij"
 version = "1.0.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b8848ee67ecc8aedbaf3e4122217aff892639231befc6a1b58d29fff4c2cabaa"
+
+[[package]]
+name = "zopfli"
+version = "0.8.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f05cd8797d63865425ff89b5c4a48804f35ba0ce8d125800027ad6017d2b5249"
+dependencies = [
+ "bumpalo",
+ "crc32fast",
+ "log",
+ "simd-adler32",
+]
 
 [[package]]
 name = "zune-core"
@@ -13430,6 +13360,14 @@ checksum = "29ce2c8a9384ad323cf564b67da86e21d3cfdff87908bc1223ed5c99bc792713"
 dependencies = [
  "zune-core",
 ]
+
+[[patch.unused]]
+name = "blitz"
+version = "0.3.0-alpha.2"
+
+[[patch.unused]]
+name = "blitz"
+version = "0.3.0-alpha.2"
 
 [[patch.unused]]
 name = "sync-ui"
@@ -13498,11 +13436,3 @@ source = "git+https://github.com/FastTrackStudios/anyrender.git?rev=422b5d0#422b
 [[patch.unused]]
 name = "session-ui"
 version = "0.1.0"
-
-[[patch.unused]]
-name = "blitz"
-version = "0.3.0-alpha.2"
-
-[[patch.unused]]
-name = "blitz"
-version = "0.3.0-alpha.2"

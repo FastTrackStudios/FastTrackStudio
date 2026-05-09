@@ -50,7 +50,16 @@ fts-launcher = { path = "../fts-launcher" }
 
 [patch."https://github.com/FastTrackStudios/daw.git"]
 daw = { path = "../daw/crates/daw" }
+daw-proto = { path = "../daw/crates/daw-proto" }
+daw-control = { path = "../daw/crates/daw-control" }
+daw-control-sync = { path = "../daw/crates/daw-control-sync" }
 daw-extension-runtime = { path = "../daw/crates/daw-extension-runtime" }
+daw-module = { path = "../daw/crates/daw-module" }
+daw-reaper = { path = "../daw/crates/daw-reaper" }
+daw-reaper-dioxus = { path = "../daw/crates/daw-reaper-dioxus" }
+daw-reaper-embed = { path = "../daw/crates/daw-reaper-embed" }
+dawfile-reaper = { path = "../daw/crates/dawfile-reaper" }
+dawfile-ableton = { path = "../daw/crates/dawfile-ableton" }
 reaper-test = { path = "../daw/crates/reaper-test" }
 reaper-launcher = { path = "../daw/crates/reaper-launcher" }
 

@@ -402,6 +402,7 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     let app = APP.get().unwrap().get();
     let mut session = app.session.borrow_mut();
     session.plugin_register_add_timer(timer_callback)?;
+    daw::reaper::register_project_importer(&mut session)?;
 
     drop(session);
 
