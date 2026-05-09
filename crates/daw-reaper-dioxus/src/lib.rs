@@ -33,8 +33,9 @@ pub mod service;
 pub mod snapshot;
 
 pub use dock::{
-    DockablePanelConfig, hide_panel, is_panel_visible, register_panel, restore_dock_state,
-    save_dock_state, show_panel, toggle_panel, unregister_all_panels, update_panels,
+    DockablePanelConfig, hide_panel, is_panel_visible, prewarm_panel, register_panel,
+    restore_dock_state, save_dock_state, show_panel, toggle_panel, unregister_all_panels,
+    update_panels,
 };
 pub use dock_host::ReaperDockHost;
 pub use embedded::EmbeddedView;
