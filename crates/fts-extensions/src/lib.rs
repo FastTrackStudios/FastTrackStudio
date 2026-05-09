@@ -232,8 +232,6 @@ fn register_actions_sync(
         info!(actions = action_count, "Action registration completed");
 
         if let Err(err) = task_support.do_later_in_main_thread_asap(move || {
-            daw::ui::dock::init_service();
-            daw::ui::dock::init_dock(reaper_low::Reaper::get(), reaper_low::Swell::get());
             info!(panels = panels.len(), "Panel definitions collected");
             for panel in &panels {
                 daw::ui::dock::register_panel_from_service(panel);
@@ -392,7 +390,11 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     // produce incomplete or stale action metadata.
     let module_ctx = ModuleContext::new(g.tokio_runtime.clone());
     for module in &modules {
-        info!(module = module.name(), "Initializing {}", module.display_name());
+        info!(
+            module = module.name(),
+            "Initializing {}",
+            module.display_name()
+        );
         module.init(&module_ctx);
     }
     info!(modules = module_count, "All modules initialized");
@@ -447,6 +449,9 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     };
 
     APP.set(Fragile::new(app)).map_err(|_| "App already set")?;
+
+    daw::ui::dock::init_service();
+    daw::ui::dock::init_dock(reaper_low::Reaper::get(), reaper_low::Swell::get());
 
     register_actions_sync(&all_defs, modules, panels);
 
