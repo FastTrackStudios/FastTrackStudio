@@ -279,7 +279,10 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
         .with_writer(non_blocking)
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive(tracing::Level::INFO.into()),
+                .add_directive(tracing::Level::INFO.into())
+                .add_directive("cranelift_jit=warn".parse()?)
+                .add_directive("cranelift_codegen=warn".parse()?)
+                .add_directive("wasmtime=warn".parse()?),
         )
         .init();
 
