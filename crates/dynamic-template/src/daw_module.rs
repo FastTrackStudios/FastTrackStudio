@@ -489,6 +489,16 @@ fn create_template_group(command_suffix: &str) -> eyre::Result<()> {
         let mut created = 0usize;
         let mut insert_index = plan.insert_index;
 
+        tracing::info!(
+            "[dynamic-template] create plan group={} root={} insert_index={} folders_to_create={} closing_depth={} existing_tracks={}",
+            folders.last().unwrap_or(&command_suffix),
+            plan.version_root,
+            plan.insert_index,
+            plan.folders_to_create.join("/"),
+            plan.closing_depth,
+            project_tracks.len()
+        );
+
         if let Some(adjustment) = plan.previous_folder_close_adjustment {
             if let Err(err) =
                 set_folder_depth_on_main_thread(&adjustment.guid, adjustment.new_depth)
@@ -614,15 +624,15 @@ fn insertion_point_inside_folder(
         guid: previous.guid.clone(),
         new_depth: previous.folder_depth + 1,
     });
-    (end as u32, adjustment)
+    (track_insert_index_at(tracks, end), adjustment)
 }
 
 fn insertion_index_for_top_level_group(tracks: &[daw::service::Track], group_name: &str) -> u32 {
     let Some(target_order) = default_group_order(group_name) else {
-        return tracks.len() as u32;
+        return track_insert_index_at(tracks, tracks.len());
     };
 
-    let mut fallback = tracks.len() as u32;
+    let mut fallback = track_insert_index_at(tracks, tracks.len());
     for (index, track) in tracks.iter().enumerate() {
         if track.parent_guid.is_some() {
             continue;
@@ -634,10 +644,17 @@ fn insertion_index_for_top_level_group(tracks: &[daw::service::Track], group_nam
             return track.index;
         }
         if order <= target_order {
-            fallback = folder_end_exclusive(tracks, index) as u32;
+            fallback = track_insert_index_at(tracks, folder_end_exclusive(tracks, index));
         }
     }
     fallback
+}
+
+fn track_insert_index_at(tracks: &[daw::service::Track], position: usize) -> u32 {
+    tracks
+        .get(position)
+        .map(|track| track.index)
+        .unwrap_or(tracks.len() as u32)
 }
 
 fn folder_end_exclusive(tracks: &[daw::service::Track], folder_index: usize) -> usize {
