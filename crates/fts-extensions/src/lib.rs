@@ -132,8 +132,29 @@ fn process_pending_actions(app: &App) {
 // ── Initialisation ───────────────────────────────────────────────────────────
 
 fn initialize_daw(tokio_runtime: &tokio::runtime::Runtime) -> eyre::Result<Daw> {
+    use daw::reaper::{RoutedHandler, build_extension_daw_with, create_daw_handler};
+    use keyflow_daw_analysis::{
+        KeyflowMidiAnalysis, MidiChartServiceDispatcher, midi_chart_service_service_descriptor,
+    };
+
     tokio_runtime
-        .block_on(daw::reaper::build_extension_daw())
+        .block_on(async {
+            // The keyflow chart service needs a `Daw` handle of its own to
+            // call back into the daw client API while serving requests.
+            // Build a temporary dual: first construct a "naked" daw on the
+            // stock handler so KeyflowMidiAnalysis has a Daw to read from,
+            // then re-build the real `Daw` on a handler that ALSO carries
+            // the keyflow dispatcher. The naked-daw's caller is leaked
+            // alongside the LocalCaller in build_extension_daw_with.
+            let inner_daw = daw::reaper::build_extension_daw().await?;
+            let keyflow = KeyflowMidiAnalysis::new(inner_daw);
+
+            let handler: RoutedHandler = create_daw_handler().with(
+                midi_chart_service_service_descriptor(),
+                MidiChartServiceDispatcher::new(keyflow),
+            );
+            build_extension_daw_with(handler).await
+        })
         .map_err(|e| eyre::eyre!("Failed to initialise in-process DAW: {e}"))
 }
 

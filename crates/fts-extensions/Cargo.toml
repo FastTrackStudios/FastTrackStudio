@@ -22,9 +22,16 @@ sync-proto = { workspace = true }
 reaper-input = { workspace = true }
 keyflow = { workspace = true }
 
-# DAW API — in-process via the `extension-runtime` feature. `reaper-ui`
-# pulls in the Dioxus panel rendering host.
-daw = { workspace = true, features = ["reaper", "sync", "reaper-ui", "extension-runtime"] }
+# DAW API. `reaper-ui` pulls in the Dioxus panel rendering host.
+# `daw-extension-runtime` is a public sibling of daw (not a daw feature)
+# because folding it in would cycle through daw-reaper.
+daw = { workspace = true, features = ["reaper", "sync", "reaper-ui"] }
+daw-extension-runtime = { workspace = true }
+
+# Keyflow chart/chord analysis service. fts-extensions composes this
+# with the daw bridge handler so chart data is available over the
+# same in-process RPC channel as the daw services.
+keyflow-daw-analysis = { workspace = true }
 
 # FTS design system (shadcn-ui clone for Dioxus)
 fts-ui = { workspace = true }

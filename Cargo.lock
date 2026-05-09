@@ -2289,7 +2289,6 @@ version = "0.1.0"
 dependencies = [
  "daw-control",
  "daw-control-sync",
- "daw-extension-runtime",
  "daw-module 0.1.0",
  "daw-proto 0.1.0",
  "daw-reaper",
@@ -2336,6 +2335,7 @@ version = "0.1.0"
 dependencies = [
  "crossbeam-channel",
  "daw-control",
+ "daw-module 0.1.0",
  "daw-proto 0.1.0",
  "daw-reaper",
  "eyre",
@@ -2361,7 +2361,7 @@ dependencies = [
 [[package]]
 name = "daw-module"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/daw.git?branch=main#a86871b6b4ac8634d0703de4604eac88a6283677"
+source = "git+https://github.com/FastTrackStudios/daw.git?branch=main#4c729ca6409228c940a516bfa41858e18246392a"
 dependencies = [
  "tokio",
  "tracing",
@@ -2381,7 +2381,7 @@ dependencies = [
 [[package]]
 name = "daw-proto"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/daw.git?branch=main#a86871b6b4ac8634d0703de4604eac88a6283677"
+source = "git+https://github.com/FastTrackStudios/daw.git?branch=main#4c729ca6409228c940a516bfa41858e18246392a"
 dependencies = [
  "actions-proto",
  "facet 0.46.0",
@@ -2404,7 +2404,6 @@ dependencies = [
  "enumflags2",
  "eyre",
  "facet-json 0.46.0",
- "keyflow 0.1.0 (git+https://github.com/FastTrackStudios/keyflow.git?branch=main)",
  "libloading 0.8.9",
  "moire",
  "reaper-high",
@@ -3195,7 +3194,6 @@ dependencies = [
 [[package]]
 name = "engraver"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/keyflow.git?branch=main#c57b122ec309a8aade59b07b84041bc98a195a85"
 dependencies = [
  "engraver-proto",
 ]
@@ -3203,7 +3201,6 @@ dependencies = [
 [[package]]
 name = "engraver-proto"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/keyflow.git?branch=main#c57b122ec309a8aade59b07b84041bc98a195a85"
 dependencies = [
  "anyrender 0.8.0 (git+https://github.com/DioxusLabs/anyrender.git?branch=main)",
  "bitflags 2.11.0",
@@ -3214,7 +3211,7 @@ dependencies = [
  "facet 0.46.0",
  "getrandom 0.2.17",
  "helgoboss-midi",
- "keyflow-proto 0.1.0 (git+https://github.com/FastTrackStudios/keyflow.git?branch=main)",
+ "keyflow-proto",
  "keyflow-text",
  "kurbo 0.13.0",
  "lopdf 0.36.0",
@@ -4137,13 +4134,15 @@ version = "0.1.0"
 dependencies = [
  "crossbeam-channel",
  "daw",
+ "daw-extension-runtime",
  "dynamic-template",
  "dynamic-template-proto",
  "eyre",
  "fragile",
  "fts-launcher",
  "fts-ui",
- "keyflow 0.1.0 (git+https://github.com/FastTrackStudios/keyflow.git?rev=c57b122ec309a8aade59b07b84041bc98a195a85)",
+ "keyflow",
+ "keyflow-daw-analysis",
  "reaper-high",
  "reaper-input",
  "reaper-low",
@@ -5462,7 +5461,6 @@ dependencies = [
 [[package]]
 name = "keyflow"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/keyflow.git?branch=main#c57b122ec309a8aade59b07b84041bc98a195a85"
 dependencies = [
  "color-eyre",
  "colored 3.1.1",
@@ -5473,27 +5471,8 @@ dependencies = [
  "facet 0.46.0",
  "getrandom 0.2.17",
  "helgoboss-midi",
- "keyflow-proto 0.1.0 (git+https://github.com/FastTrackStudios/keyflow.git?branch=main)",
+ "keyflow-proto",
  "keyflow-text",
- "regex",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "keyflow"
-version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/keyflow.git?rev=c57b122ec309a8aade59b07b84041bc98a195a85#c57b122ec309a8aade59b07b84041bc98a195a85"
-dependencies = [
- "color-eyre",
- "colored 3.1.1",
- "daw-module 0.1.0 (git+https://github.com/FastTrackStudios/daw.git?branch=main)",
- "daw-proto 0.1.0 (git+https://github.com/FastTrackStudios/daw.git?branch=main)",
- "derive_more 1.0.0",
- "facet 0.46.0",
- "getrandom 0.2.17",
- "helgoboss-midi",
- "keyflow-proto 0.1.0 (git+https://github.com/FastTrackStudios/keyflow.git?rev=c57b122ec309a8aade59b07b84041bc98a195a85)",
  "regex",
  "tracing",
  "uuid",
@@ -5502,29 +5481,22 @@ dependencies = [
 [[package]]
 name = "keyflow-chordpro"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/keyflow.git?branch=main#c57b122ec309a8aade59b07b84041bc98a195a85"
 
 [[package]]
-name = "keyflow-proto"
+name = "keyflow-daw-analysis"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/keyflow.git?branch=main#c57b122ec309a8aade59b07b84041bc98a195a85"
 dependencies = [
- "color-palette",
- "daw-proto 0.1.0 (git+https://github.com/FastTrackStudios/daw.git?branch=main)",
+ "daw",
+ "eyre",
  "facet 0.46.0",
- "helgoboss-midi",
- "music-catalog",
- "serde",
- "thiserror 2.0.18",
+ "keyflow",
  "tracing",
- "uuid",
  "vox 0.4.0",
 ]
 
 [[package]]
 name = "keyflow-proto"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/keyflow.git?rev=c57b122ec309a8aade59b07b84041bc98a195a85#c57b122ec309a8aade59b07b84041bc98a195a85"
 dependencies = [
  "color-palette",
  "daw-proto 0.1.0 (git+https://github.com/FastTrackStudios/daw.git?branch=main)",
@@ -5541,10 +5513,9 @@ dependencies = [
 [[package]]
 name = "keyflow-text"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/keyflow.git?branch=main#c57b122ec309a8aade59b07b84041bc98a195a85"
 dependencies = [
  "keyflow-chordpro",
- "keyflow-proto 0.1.0 (git+https://github.com/FastTrackStudios/keyflow.git?branch=main)",
+ "keyflow-proto",
  "tracing",
 ]
 
@@ -9085,7 +9056,7 @@ dependencies = [
  "chrono",
  "daw",
  "eyre",
- "keyflow 0.1.0 (git+https://github.com/FastTrackStudios/keyflow.git?branch=main)",
+ "keyflow",
  "moire",
  "rayon",
  "rustc-hash 2.1.2",
@@ -9108,7 +9079,7 @@ dependencies = [
  "facet 0.46.0",
  "futures",
  "gloo-timers",
- "keyflow 0.1.0 (git+https://github.com/FastTrackStudios/keyflow.git?branch=main)",
+ "keyflow",
  "serde",
  "thiserror 2.0.18",
  "tokio",
@@ -13461,35 +13432,7 @@ dependencies = [
 ]
 
 [[patch.unused]]
-name = "anyrender_svg"
-version = "0.6.3"
-source = "git+https://github.com/FastTrackStudios/anyrender.git?rev=422b5d0#422b5d0b820dccda702c882fe3eee7ba8e958e77"
-
-[[patch.unused]]
-name = "anyrender_vello"
-version = "0.6.2"
-source = "git+https://github.com/FastTrackStudios/anyrender.git?rev=422b5d0#422b5d0b820dccda702c882fe3eee7ba8e958e77"
-
-[[patch.unused]]
-name = "anyrender_vello_hybrid"
-version = "0.1.1"
-source = "git+https://github.com/FastTrackStudios/anyrender.git?rev=422b5d0#422b5d0b820dccda702c882fe3eee7ba8e958e77"
-
-[[patch.unused]]
-name = "wgpu_context"
-version = "0.1.2"
-source = "git+https://github.com/FastTrackStudios/anyrender.git?rev=422b5d0#422b5d0b820dccda702c882fe3eee7ba8e958e77"
-
-[[patch.unused]]
-name = "blitz"
-version = "0.3.0-alpha.2"
-
-[[patch.unused]]
 name = "sync-ui"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "session-ui"
 version = "0.1.0"
 
 [[patch.unused]]
@@ -13531,6 +13474,34 @@ source = "git+https://github.com/Codys-Wright/vox.git?rev=ccb46b5416100d38430cb0
 name = "vox-types"
 version = "0.3.1"
 source = "git+https://github.com/Codys-Wright/vox.git?rev=ccb46b5416100d38430cb082d71bf0377428c241#ccb46b5416100d38430cb082d71bf0377428c241"
+
+[[patch.unused]]
+name = "anyrender_svg"
+version = "0.6.3"
+source = "git+https://github.com/FastTrackStudios/anyrender.git?rev=422b5d0#422b5d0b820dccda702c882fe3eee7ba8e958e77"
+
+[[patch.unused]]
+name = "anyrender_vello"
+version = "0.6.2"
+source = "git+https://github.com/FastTrackStudios/anyrender.git?rev=422b5d0#422b5d0b820dccda702c882fe3eee7ba8e958e77"
+
+[[patch.unused]]
+name = "anyrender_vello_hybrid"
+version = "0.1.1"
+source = "git+https://github.com/FastTrackStudios/anyrender.git?rev=422b5d0#422b5d0b820dccda702c882fe3eee7ba8e958e77"
+
+[[patch.unused]]
+name = "wgpu_context"
+version = "0.1.2"
+source = "git+https://github.com/FastTrackStudios/anyrender.git?rev=422b5d0#422b5d0b820dccda702c882fe3eee7ba8e958e77"
+
+[[patch.unused]]
+name = "session-ui"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "blitz"
+version = "0.3.0-alpha.2"
 
 [[patch.unused]]
 name = "blitz"

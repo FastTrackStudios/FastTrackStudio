@@ -31,7 +31,9 @@ reaper-high = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branc
 reaper-low = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
 reaper-macros = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
 reaper-medium = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
-daw = { git = "https://github.com/FastTrackStudios/daw.git", rev = "273dbaa1ef5e4dfac9cd35988e13d2b4b954ab6e" }
+daw = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
+daw-extension-runtime = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
+keyflow-daw-analysis = { git = "https://github.com/FastTrackStudios/keyflow.git", branch = "main" }
 fts-ui = { git = "https://github.com/FastTrackStudios/fts-ui.git", rev = "d9f01261cb59708300cc5b31fa7fe6bd766a66aa" }
 tokio = { version = "1.48", features = ["rt-multi-thread", "net", "sync"] }
 tracing = "0.1"
@@ -48,8 +50,13 @@ fts-launcher = { path = "../fts-launcher" }
 
 [patch."https://github.com/FastTrackStudios/daw.git"]
 daw = { path = "../daw/crates/daw" }
+daw-extension-runtime = { path = "../daw/crates/daw-extension-runtime" }
 reaper-test = { path = "../daw/crates/reaper-test" }
 reaper-launcher = { path = "../daw/crates/reaper-launcher" }
+
+[patch."https://github.com/FastTrackStudios/keyflow.git"]
+keyflow = { path = "../keyflow/crates/keyflow" }
+keyflow-daw-analysis = { path = "../keyflow/crates/keyflow-daw-analysis" }
 
 [patch."https://github.com/FastTrackStudios/input.git"]
 reaper-input = { path = "../input/crates/reaper-input" }
