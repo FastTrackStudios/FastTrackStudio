@@ -49,6 +49,11 @@ actions_proto::define_actions! {
             description: "Toggle visibility of all Harmonica tracks",
             category: View,
         }
+        TOGGLE_STRINGS = "toggle_strings" {
+            name: "Toggle Strings",
+            description: "Toggle visibility of all Strings tracks",
+            category: View,
+        }
         TOGGLE_VOCALS = "toggle_vocals" {
             name: "Toggle Vocals",
             description: "Toggle visibility of all Vocals tracks",
@@ -77,6 +82,11 @@ actions_proto::define_actions! {
         TOGGLE_REFERENCE = "toggle_reference" {
             name: "Toggle Reference",
             description: "Toggle visibility of all Reference tracks",
+            category: View,
+        }
+        TOGGLE_STEM_SPLIT = "toggle_stem_split" {
+            name: "Toggle Stem Split",
+            description: "Toggle visibility of all Stem Split tracks",
             category: View,
         }
 
