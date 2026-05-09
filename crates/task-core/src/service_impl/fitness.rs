@@ -14,14 +14,17 @@ use uuid::Uuid;
 use crate::attachment;
 use crate::body_measurement::{self, BodyMeasurementApi};
 use crate::exercise::{self, ExerciseAliasList, ExerciseApi, ExerciseModality, ExerciseMuscleList};
+use crate::food_log;
 use crate::property::JsonObject;
 use crate::routine::{self, RoutineApi, RoutineTagList};
 use crate::routine_exercise::{self, RoutineExerciseApi};
 use crate::service::{
     AddRoutineExerciseRequest, BodyMeasurementTrendRequest, BodyMeasurementTrendView,
-    CompleteWorkoutSessionRequest, CreateExerciseRequest, CreateRoutineRequest, ExercisePatch,
+    CompleteWorkoutSessionRequest, CreateExerciseRequest, CreateRoutineRequest,
+    DailyCalorieBalanceRequest, DailyCalorieBalanceView, DayBalance, DaySessionBreakdown,
+    ExercisePatch, ExerciseProgressEntry, ExerciseProgressRequest, ExerciseProgressView,
     FitnessService, ListBodyMeasurementsRequest, LogSetRequest, MetricTrend,
-    RecordBodyMeasurementRequest, RoutineWithExercisesView, StartWorkoutSessionRequest,
+    RecordBodyMeasurementRequest, RoutineWithExercisesView, StartWorkoutSessionRequest, TopSet,
     UpdateBodyMeasurementRequest, UpdateSetRequest, VaultError, WorkoutSessionView,
 };
 use crate::set_log::{self, SetLogApi};
@@ -899,6 +902,20 @@ impl FitnessService for FitnessServiceImpl {
         workout_session_to_api(saved)
     }
 
+    async fn exercise_progress(
+        &self,
+        request: ExerciseProgressRequest,
+    ) -> Result<ExerciseProgressView, VaultError> {
+        exercise_progress_impl(&self.db, request).await
+    }
+
+    async fn daily_calorie_balance(
+        &self,
+        request: DailyCalorieBalanceRequest,
+    ) -> Result<DailyCalorieBalanceView, VaultError> {
+        daily_calorie_balance_impl(&self.db, request).await
+    }
+
     async fn abandon_workout_session(&self, id: Uuid) -> Result<WorkoutSessionApi, VaultError> {
         let model = workout_session::Entity::find_by_id(id)
             .one(&self.db)
@@ -1250,5 +1267,498 @@ async fn build_session_view(
         sets_total,
         total_volume_kg,
         total_cardio_seconds,
+    })
+}
+
+// ─── Progress queries ───────────────────────────────────────────────
+
+/// Resolve the input string to (Some(exercise_id), canonical_name,
+/// modality_label) when it links a known Exercise, or
+/// (None, snapshot_name, None) when it should fall back to a free-form
+/// match against `set_log.exercise_name_snapshot`.
+async fn resolve_exercise_for_progress(
+    db: &DatabaseConnection,
+    organization: Option<&str>,
+    needle: &str,
+) -> Result<(Option<Uuid>, String, Option<String>), VaultError> {
+    let hit = crate::exercise::find_exercise_by_slug_or_alias(db, organization, needle)
+        .await
+        .map_err(|e| io(e, "resolve exercise for progress"))?;
+    if let Some(ex) = hit {
+        return Ok((Some(ex.id), ex.name, Some(ex.modality.as_str().to_string())));
+    }
+    // No catalog hit — match the literal name against set_log snapshots
+    // (case-insensitive). Use the trimmed form as the "canonical" name
+    // we'll display.
+    Ok((None, needle.trim().to_string(), None))
+}
+
+async fn exercise_progress_impl(
+    db: &DatabaseConnection,
+    request: ExerciseProgressRequest,
+) -> Result<ExerciseProgressView, VaultError> {
+    let needle = request.exercise.trim();
+    if needle.is_empty() {
+        return Err(VaultError::ParseError(
+            "exercise_progress: exercise reference is empty".into(),
+        ));
+    }
+    let (exercise_id, exercise_name, modality) =
+        resolve_exercise_for_progress(db, request.organization.as_deref(), needle).await?;
+
+    // Pull all candidate set_logs in one shot; we'll group by session
+    // afterwards. Ordering is irrelevant here.
+    let mut set_query = set_log::Entity::find();
+    if let Some(eid) = exercise_id {
+        set_query = set_query.filter(set_log::Column::ExerciseId.eq(eid));
+    } else {
+        // Case-insensitive name match against the snapshot.
+        let lowered = exercise_name.to_lowercase();
+        // SQLite's LIKE is case-insensitive for ASCII by default, so an
+        // equality check on the lowered value via lower() works portably.
+        set_query = set_query.filter(sea_orm::sea_query::Expr::cust_with_values(
+            "LOWER(exercise_name_snapshot) = ?",
+            [lowered],
+        ));
+    }
+    let all_sets = set_query
+        .all(db)
+        .await
+        .map_err(|e| io(e, "load set_logs for progress"))?;
+
+    // Distinct workout_session_ids referenced by these sets.
+    let mut session_ids: std::collections::HashSet<Uuid> = std::collections::HashSet::new();
+    for s in &all_sets {
+        session_ids.insert(s.workout_session_id);
+    }
+
+    // Load matching workout sessions, applying organization scope and
+    // ordering by started_at DESC.
+    let limit = request.limit.unwrap_or(10).clamp(1, 50);
+    let mut session_query =
+        workout_session::Entity::find().order_by_desc(workout_session::Column::StartedAt);
+    if let Some(org) = &request.organization {
+        session_query = session_query.filter(workout_session::Column::Organization.eq(org.clone()));
+    }
+    let session_rows = session_query
+        .all(db)
+        .await
+        .map_err(|e| io(e, "load workout_sessions for progress"))?;
+
+    let mut entries: Vec<ExerciseProgressEntry> = Vec::new();
+    for session in session_rows {
+        if !session_ids.contains(&session.id) {
+            continue;
+        }
+        // Subset of sets belonging to this session.
+        let session_sets: Vec<&set_log::Model> = all_sets
+            .iter()
+            .filter(|s| s.workout_session_id == session.id)
+            .collect();
+        let entry = build_progress_entry(&session, &session_sets, modality.as_deref());
+        entries.push(entry);
+        if entries.len() as u32 >= limit {
+            break;
+        }
+    }
+
+    let session_count = entries.len() as u32;
+    let trend_summary = build_trend_summary(&entries, modality.as_deref());
+    let entries_json =
+        serde_json::to_string(&entries).map_err(|e| io(e, "serialize progress entries"))?;
+
+    Ok(ExerciseProgressView {
+        exercise_id,
+        exercise_name,
+        modality,
+        session_count,
+        entries_json,
+        trend_summary,
+    })
+}
+
+fn build_progress_entry(
+    session: &workout_session::Model,
+    sets: &[&set_log::Model],
+    modality: Option<&str>,
+) -> ExerciseProgressEntry {
+    let mut completed_set_count: u32 = 0;
+    let mut session_volume_kg: f64 = 0.0;
+    let mut completed: Vec<&set_log::Model> = Vec::new();
+    for s in sets {
+        if s.completed_at.is_some() {
+            completed_set_count += 1;
+            completed.push(*s);
+            if let (Some(reps), Some(w)) = (s.reps, s.weight_kg) {
+                session_volume_kg += f64::from(reps) * w;
+            }
+        }
+    }
+    let top_set = pick_top_set(&completed, modality);
+    ExerciseProgressEntry {
+        workout_session_id: session.id,
+        session_started_at: session.started_at,
+        session_status: session.status.as_str().to_string(),
+        completed_set_count,
+        session_volume_kg,
+        top_set,
+    }
+}
+
+/// Pick the "top" set across the supplied completed sets.
+///
+/// * Strength: highest `weight_kg`, tiebreak on `reps`.
+/// * Cardio: longest `distance_meters`, fallback to `duration_seconds`
+///   when no distance is recorded.
+/// * Mobility: longest `duration_seconds`.
+/// * When the modality is unknown (custom name with no exercise link),
+///   we infer per-set: prefer `(reps, weight_kg)` if either is set,
+///   otherwise fall back to distance / duration.
+fn pick_top_set(completed: &[&set_log::Model], modality: Option<&str>) -> Option<TopSet> {
+    if completed.is_empty() {
+        return None;
+    }
+
+    let resolved_modality = modality.unwrap_or_else(|| infer_modality(completed));
+
+    let chosen = match resolved_modality {
+        "cardio" => completed.iter().max_by(|a, b| {
+            let ad = a.distance_meters.unwrap_or(0.0);
+            let bd = b.distance_meters.unwrap_or(0.0);
+            ad.partial_cmp(&bd)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| {
+                    a.duration_seconds
+                        .unwrap_or(0)
+                        .cmp(&b.duration_seconds.unwrap_or(0))
+                })
+        }),
+        "mobility" => completed
+            .iter()
+            .max_by_key(|s| s.duration_seconds.unwrap_or(0)),
+        // Strength (default).
+        _ => completed.iter().max_by(|a, b| {
+            let aw = a.weight_kg.unwrap_or(0.0);
+            let bw = b.weight_kg.unwrap_or(0.0);
+            aw.partial_cmp(&bw)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.reps.unwrap_or(0).cmp(&b.reps.unwrap_or(0)))
+        }),
+    }?;
+
+    let estimated_one_rep_max_kg = match (chosen.reps, chosen.weight_kg) {
+        (Some(r), Some(w)) if r > 0 => Some(w * (1.0 + f64::from(r) / 30.0)),
+        _ => None,
+    };
+    Some(TopSet {
+        set_log_id: chosen.id,
+        reps: chosen.reps,
+        weight_kg: chosen.weight_kg,
+        duration_seconds: chosen.duration_seconds,
+        distance_meters: chosen.distance_meters,
+        avg_hr: chosen.avg_hr,
+        pace_seconds_per_km: chosen.pace_seconds_per_km,
+        rpe: chosen.rpe,
+        estimated_one_rep_max_kg,
+    })
+}
+
+fn infer_modality(sets: &[&set_log::Model]) -> &'static str {
+    // Reps + weight → strength. Distance → cardio. Otherwise mobility.
+    for s in sets {
+        if s.weight_kg.is_some() || s.reps.is_some() {
+            return "strength";
+        }
+    }
+    for s in sets {
+        if s.distance_meters.is_some() {
+            return "cardio";
+        }
+    }
+    "mobility"
+}
+
+fn build_trend_summary(entries: &[ExerciseProgressEntry], modality: Option<&str>) -> String {
+    // Need ≥ 2 entries that have a top_set.
+    let with_top: Vec<&ExerciseProgressEntry> =
+        entries.iter().filter(|e| e.top_set.is_some()).collect();
+    if with_top.len() < 2 {
+        return String::new();
+    }
+    // entries are DESC by started_at; "first" in trend = oldest = LAST in list.
+    let first = with_top.last().expect("len >= 2").top_set.as_ref().unwrap();
+    let last = with_top
+        .first()
+        .expect("len >= 2")
+        .top_set
+        .as_ref()
+        .unwrap();
+    let resolved = modality.unwrap_or("strength");
+    match resolved {
+        "cardio" => {
+            let f_dist = first.distance_meters.unwrap_or(0.0) / 1000.0;
+            let l_dist = last.distance_meters.unwrap_or(0.0) / 1000.0;
+            format!(
+                "{:.1}km in {} → {:.1}km in {}",
+                f_dist,
+                fmt_hms(first.duration_seconds.unwrap_or(0)),
+                l_dist,
+                fmt_hms(last.duration_seconds.unwrap_or(0)),
+            )
+        }
+        "mobility" => format!(
+            "{} → {}",
+            fmt_mmss(first.duration_seconds.unwrap_or(0)),
+            fmt_mmss(last.duration_seconds.unwrap_or(0)),
+        ),
+        _ => format!(
+            "top set {} × {} kg → {} × {} kg",
+            first.reps.unwrap_or(0),
+            first.weight_kg.unwrap_or(0.0),
+            last.reps.unwrap_or(0),
+            last.weight_kg.unwrap_or(0.0),
+        ),
+    }
+}
+
+fn fmt_mmss(seconds: u32) -> String {
+    let m = seconds / 60;
+    let s = seconds % 60;
+    format!("{m}:{s:02}")
+}
+
+fn fmt_hms(seconds: u32) -> String {
+    let h = seconds / 3600;
+    let m = (seconds % 3600) / 60;
+    let s = seconds % 60;
+    if h > 0 {
+        format!("{h}:{m:02}:{s:02}")
+    } else {
+        format!("{m}:{s:02}")
+    }
+}
+
+// ─── Calorie balance ─────────────────────────────────────────────────
+
+/// MET-based burn estimate.
+///
+/// **Assumption**: each completed WorkoutSession is approximated with a
+/// single MET value derived from its dominant modality (the modality
+/// with the most set_log rows). Then `kcal = MET × bodyweight_kg ×
+/// duration_hours`. This is intentionally rough — Compendium-of-Physical-
+/// Activities ballpark figures, not heart-rate-derived burn.
+///
+/// MET table (Compendium 2011, simplified):
+///   - strength: 5.0 ("weight lifting, vigorous")
+///   - cardio:   7.0 ("general moderate aerobic")
+///   - mobility: 2.5 ("stretching")
+///
+/// Bodyweight fallback chain: `WorkoutSession.bodyweight_kg` →
+/// `request.default_bodyweight_kg` → 75.0 kg. Sessions that are still
+/// `Active` are excluded from burn entirely (no `completed_at` to
+/// anchor the duration). Duration is clamped to `[0, 4h]` so a forgotten
+/// "complete" doesn't poison the day total.
+fn met_for_modality(modality: &str) -> f64 {
+    match modality {
+        "cardio" => 7.0,
+        "mobility" => 2.5,
+        // strength + mixed both fall back to the strength MET. The
+        // dominant-set rule already steers genuine cardio sessions
+        // away from this branch.
+        _ => 5.0,
+    }
+}
+
+fn dominant_modality(sets: &[set_log::Model]) -> String {
+    if sets.is_empty() {
+        return "empty".to_string();
+    }
+    let (mut strength, mut cardio, mut mobility) = (0u32, 0u32, 0u32);
+    for s in sets {
+        if s.weight_kg.is_some() || s.reps.is_some() {
+            strength += 1;
+        } else if s.distance_meters.is_some() {
+            cardio += 1;
+        } else if s.duration_seconds.is_some() {
+            mobility += 1;
+        }
+    }
+    let total_typed = strength + cardio + mobility;
+    if total_typed == 0 {
+        return "mobility".to_string();
+    }
+    // Return "mixed" only when more than one modality is represented
+    // AND the leader doesn't have a clear majority. We still pick the
+    // leader for MET, but the label flags the heterogeneity.
+    let leader = if strength >= cardio && strength >= mobility {
+        "strength"
+    } else if cardio >= mobility {
+        "cardio"
+    } else {
+        "mobility"
+    };
+    let mut nonzero = 0;
+    if strength > 0 {
+        nonzero += 1;
+    }
+    if cardio > 0 {
+        nonzero += 1;
+    }
+    if mobility > 0 {
+        nonzero += 1;
+    }
+    if nonzero > 1 {
+        "mixed".to_string()
+    } else {
+        leader.to_string()
+    }
+}
+
+fn met_for_dominant(label: &str, sets: &[set_log::Model]) -> f64 {
+    if label != "mixed" {
+        return met_for_modality(label);
+    }
+    // For mixed, use whichever individual modality had the most sets.
+    let (mut strength, mut cardio, mut mobility) = (0u32, 0u32, 0u32);
+    for s in sets {
+        if s.weight_kg.is_some() || s.reps.is_some() {
+            strength += 1;
+        } else if s.distance_meters.is_some() {
+            cardio += 1;
+        } else if s.duration_seconds.is_some() {
+            mobility += 1;
+        }
+    }
+    if strength >= cardio && strength >= mobility {
+        met_for_modality("strength")
+    } else if cardio >= mobility {
+        met_for_modality("cardio")
+    } else {
+        met_for_modality("mobility")
+    }
+}
+
+async fn daily_calorie_balance_impl(
+    db: &DatabaseConnection,
+    request: DailyCalorieBalanceRequest,
+) -> Result<DailyCalorieBalanceView, VaultError> {
+    let today = chrono::Utc::now().date_naive();
+    let since = request.since_date.unwrap_or(today);
+    let until = request.until_date.unwrap_or(since);
+    if until < since {
+        return Err(VaultError::ParseError(
+            "daily_calorie_balance: until_date must be >= since_date".into(),
+        ));
+    }
+    let bw_default = request.default_bodyweight_kg;
+
+    // Pre-load food logs and completed sessions in the window.
+    let mut food_query = food_log::Entity::find()
+        .filter(food_log::Column::Date.gte(since))
+        .filter(food_log::Column::Date.lte(until));
+    if let Some(org) = &request.organization {
+        food_query = food_query.filter(food_log::Column::Organization.eq(org.clone()));
+    }
+    let food_rows = food_query
+        .all(db)
+        .await
+        .map_err(|e| io(e, "load food_logs for balance"))?;
+
+    let mut session_query = workout_session::Entity::find()
+        .filter(workout_session::Column::Status.eq(WorkoutSessionStatus::Completed));
+    if let Some(org) = &request.organization {
+        session_query = session_query.filter(workout_session::Column::Organization.eq(org.clone()));
+    }
+    let session_rows = session_query
+        .all(db)
+        .await
+        .map_err(|e| io(e, "load workout_sessions for balance"))?;
+
+    // Group sessions by date (anchored on completed_at if set, else
+    // started_at).
+    let mut sessions_by_date: std::collections::HashMap<
+        chrono::NaiveDate,
+        Vec<workout_session::Model>,
+    > = std::collections::HashMap::new();
+    for sess in session_rows {
+        let anchor = sess.completed_at.unwrap_or(sess.started_at).date_naive();
+        if anchor < since || anchor > until {
+            continue;
+        }
+        sessions_by_date.entry(anchor).or_default().push(sess);
+    }
+
+    let mut days: Vec<DayBalance> = Vec::new();
+    let mut total_consumed: f64 = 0.0;
+    let mut total_burned: f64 = 0.0;
+    let mut day_count: u32 = 0;
+    let mut cursor = since;
+    while cursor <= until {
+        day_count += 1;
+        // Consumed.
+        let day_food: Vec<&food_log::Model> =
+            food_rows.iter().filter(|r| r.date == cursor).collect();
+        let consumed_kcal: f64 = day_food.iter().map(|r| r.kcal.unwrap_or(0.0)).sum();
+        let food_log_count = day_food.len() as u32;
+
+        // Burned.
+        let day_sessions = sessions_by_date.remove(&cursor).unwrap_or_default();
+        let mut burned_kcal: f64 = 0.0;
+        let mut breakdowns: Vec<DaySessionBreakdown> = Vec::new();
+        let session_count = day_sessions.len() as u32;
+        for sess in &day_sessions {
+            let sets = set_log::Entity::find()
+                .filter(set_log::Column::WorkoutSessionId.eq(sess.id))
+                .all(db)
+                .await
+                .map_err(|e| io(e, "load set_logs for burn estimate"))?;
+            let modality_label = dominant_modality(&sets);
+            let met = met_for_dominant(&modality_label, &sets);
+            let bodyweight = sess.bodyweight_kg.or(bw_default).unwrap_or(75.0);
+            // Duration anchored on completed_at; clamp to [0, 4h].
+            let duration_seconds = match sess.completed_at {
+                Some(end) => {
+                    let secs = (end - sess.started_at).num_seconds().max(0);
+                    secs.min(4 * 3600) as u32
+                }
+                None => 0,
+            };
+            let kcal = met * bodyweight * (f64::from(duration_seconds) / 3600.0);
+            burned_kcal += kcal;
+            breakdowns.push(DaySessionBreakdown {
+                session_id: sess.id,
+                label: sess.routine_name_snapshot.clone(),
+                status: sess.status.as_str().to_string(),
+                kcal_estimated: kcal,
+                modality_summary: modality_label,
+            });
+        }
+
+        let net = consumed_kcal - burned_kcal;
+        total_consumed += consumed_kcal;
+        total_burned += burned_kcal;
+        let breakdown_json = serde_json::to_string(&breakdowns)
+            .map_err(|e| io(e, "serialize day session breakdown"))?;
+        days.push(DayBalance {
+            date: cursor,
+            consumed_kcal,
+            food_log_count,
+            burned_kcal,
+            session_count,
+            net_kcal: net,
+            session_breakdown_json: breakdown_json,
+        });
+        cursor = cursor
+            .succ_opt()
+            .ok_or_else(|| VaultError::IoError("date overflow in balance window".into()))?;
+    }
+
+    let days_json = serde_json::to_string(&days).map_err(|e| io(e, "serialize day balances"))?;
+    Ok(DailyCalorieBalanceView {
+        days_json,
+        total_consumed_kcal: total_consumed,
+        total_burned_kcal: total_burned,
+        net_kcal: total_consumed - total_burned,
+        day_count,
     })
 }

@@ -2897,6 +2897,18 @@ pub trait FitnessService {
         &self,
         request: BodyMeasurementTrendRequest,
     ) -> Result<BodyMeasurementTrendView, VaultError>;
+
+    // ── Progress & balance queries ───────────────────────────
+
+    async fn exercise_progress(
+        &self,
+        request: ExerciseProgressRequest,
+    ) -> Result<ExerciseProgressView, VaultError>;
+
+    async fn daily_calorie_balance(
+        &self,
+        request: DailyCalorieBalanceRequest,
+    ) -> Result<DailyCalorieBalanceView, VaultError>;
 }
 
 #[derive(Debug, Clone, Default, facet::Facet)]
@@ -3140,6 +3152,118 @@ pub struct RoutineWithExercisesView {
     pub routine: crate::routine::RoutineApi,
     /// JSON-encoded `Vec<RoutineExerciseApi>` ordered by position.
     pub exercises_json: String,
+}
+
+// ── Fitness progress / balance ───────────────────────────────────────
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct ExerciseProgressRequest {
+    /// Exercise to look up. Resolves via slug → name → alias.
+    pub exercise: String,
+    pub organization: Option<String>,
+    /// How many recent sessions to include. Default 10, max 50.
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct ExerciseProgressView {
+    pub exercise_id: Option<Uuid>,
+    pub exercise_name: String,
+    /// Modality string ("strength" / "cardio" / "mobility") — picked
+    /// up from the linked Exercise. None for unlinked / custom names.
+    pub modality: Option<String>,
+    pub session_count: u32,
+    /// JSON-encoded `Vec<ExerciseProgressEntry>` ordered by session
+    /// `started_at` DESC.
+    pub entries_json: String,
+    /// One-line summary of trend over the included sessions:
+    /// for strength: "top set 8 × 80 kg → 6 × 95 kg" (first → last)
+    /// for cardio:   "5.0 km in 30:30 → 5.2 km in 28:15"
+    /// Empty string when fewer than 2 entries.
+    pub trend_summary: String,
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct ExerciseProgressEntry {
+    pub workout_session_id: Uuid,
+    pub session_started_at: chrono::DateTime<chrono::Utc>,
+    pub session_status: String,
+    /// Number of completed (completed_at = Some) sets of this
+    /// exercise in the session.
+    pub completed_set_count: u32,
+    /// Total volume across completed strength sets in this session
+    /// for this exercise (sum reps × weight_kg). 0.0 for cardio.
+    pub session_volume_kg: f64,
+    /// The single "top set" of this exercise within the session. The
+    /// metric used to rank depends on the modality.
+    pub top_set: Option<TopSet>,
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct TopSet {
+    pub set_log_id: Uuid,
+    pub reps: Option<u32>,
+    pub weight_kg: Option<f64>,
+    pub duration_seconds: Option<u32>,
+    pub distance_meters: Option<f64>,
+    pub avg_hr: Option<u32>,
+    pub pace_seconds_per_km: Option<u32>,
+    pub rpe: Option<f32>,
+    /// Estimated 1RM via Epley formula (`weight × (1 + reps/30)`)
+    /// when both reps and weight are present. None otherwise.
+    pub estimated_one_rep_max_kg: Option<f64>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct DailyCalorieBalanceRequest {
+    pub organization: Option<String>,
+    /// Inclusive (UTC date). Default = today.
+    pub since_date: Option<chrono::NaiveDate>,
+    /// Inclusive (UTC date). Default = `since_date`.
+    pub until_date: Option<chrono::NaiveDate>,
+    /// Bodyweight in kg used to estimate kcal burn for sessions that
+    /// don't have a session-level bodyweight_kg. When None and a
+    /// session has none either, the estimator falls back to 75 kg
+    /// (documented assumption).
+    pub default_bodyweight_kg: Option<f64>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct DailyCalorieBalanceView {
+    /// JSON-encoded `Vec<DayBalance>` ordered by date ASC.
+    pub days_json: String,
+    /// Summary across the whole window.
+    pub total_consumed_kcal: f64,
+    pub total_burned_kcal: f64,
+    /// `consumed - burned` (positive = surplus).
+    pub net_kcal: f64,
+    pub day_count: u32,
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct DayBalance {
+    pub date: chrono::NaiveDate,
+    /// Sum of FoodLog snapshot kcal for the day.
+    pub consumed_kcal: f64,
+    pub food_log_count: u32,
+    /// Sum estimated burn across WorkoutSessions whose `completed_at`
+    /// (preferred) or `started_at` falls on `date`.
+    pub burned_kcal: f64,
+    pub session_count: u32,
+    pub net_kcal: f64,
+    /// Per-session breakdown for the day, JSON-encoded
+    /// `Vec<DaySessionBreakdown>`.
+    pub session_breakdown_json: String,
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct DaySessionBreakdown {
+    pub session_id: Uuid,
+    pub label: String,
+    pub status: String,
+    pub kcal_estimated: f64,
+    /// "strength" / "cardio" / "mobility" / "mixed" / "empty".
+    pub modality_summary: String,
 }
 
 /// Errors returned by vault operations.
