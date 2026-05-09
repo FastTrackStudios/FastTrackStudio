@@ -63,11 +63,6 @@ pub async fn dispatch_op(
         BatchOp::AudioAccessor(op) => {
             dispatch_audio_accessor(op, outputs, audio_accessor_svc).await
         }
-        BatchOp::MidiAnalysis(_) => Err(
-            "MidiAnalysisService is no longer dispatched from daw-reaper batch — \
-             register the keyflow-daw-analysis impl externally and call it directly."
-                .to_string(),
-        ),
     }
 }
 

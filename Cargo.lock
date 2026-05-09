@@ -10651,10 +10651,6 @@ dependencies = [
 ]
 
 [[patch.unused]]
-name = "blitz"
-version = "0.3.0-alpha.2"
-
-[[patch.unused]]
 name = "vox-codegen"
 version = "0.3.1"
 source = "git+https://github.com/Codys-Wright/vox.git?rev=ccb46b54#ccb46b5416100d38430cb082d71bf0377428c241"
@@ -10668,3 +10664,7 @@ source = "git+https://github.com/Codys-Wright/vox.git?rev=ccb46b54#ccb46b5416100
 name = "vox-websocket"
 version = "0.3.1"
 source = "git+https://github.com/Codys-Wright/vox.git?rev=ccb46b54#ccb46b5416100d38430cb082d71bf0377428c241"
+
+[[patch.unused]]
+name = "blitz"
+version = "0.3.0-alpha.2"

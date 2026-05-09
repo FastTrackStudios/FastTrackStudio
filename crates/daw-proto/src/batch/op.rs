@@ -31,7 +31,6 @@ pub enum BatchOp {
     Peak(PeakOp),
     Resource(ResourceOp),
     AudioAccessor(AudioAccessorOp),
-    MidiAnalysis(MidiAnalysisOp),
 }
 
 // =============================================================================
@@ -588,17 +587,6 @@ pub enum AudioAccessorOp {
 }
 
 // =============================================================================
-// MIDI analysis operations
-// =============================================================================
-
-#[repr(u8)]
-#[derive(Clone, Debug, Facet)]
-pub enum MidiAnalysisOp {
-    SourceFingerprint(MidiChartRequest),
-    GenerateChartData(MidiChartRequest),
-}
-
-// =============================================================================
 // Helper: Extract step references from ops (for dependency tracking)
 // =============================================================================
 
@@ -754,8 +742,7 @@ impl BatchOp {
             | BatchOp::ActionRegistry(_)
             | BatchOp::Toolbar(_)
             | BatchOp::PluginLoader(_)
-            | BatchOp::Resource(_)
-            | BatchOp::MidiAnalysis(_) => {}
+            | BatchOp::Resource(_) => {}
         }
     }
 

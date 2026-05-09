@@ -246,16 +246,10 @@ pub enum StepOutput {
     ResultStr(Result<String, String>),
     /// Result<FxPinMappings, String> from silence_fx_output
     ResultFxPinMappings(Result<FxPinMappings, String>),
-    /// Result<MidiChartData, String>
-    ResultMidiChartData(Result<MidiChartData, String>),
-    /// Result<String, String> from source_fingerprint
+    /// Result<String, String> generic string result
     ResultString(Result<String, String>),
 
     // -- Input types --
     /// Key filter
     KeyFilter(KeyFilter),
-
-    // -- Midi analysis --
-    /// Midi chart data
-    MidiChartData(MidiChartData),
 }

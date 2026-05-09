@@ -51,7 +51,6 @@ fn daw_service_descriptors() -> Vec<&'static vox::ServiceDescriptor> {
         daw::service::item_service_service_descriptor(),
         daw::service::live_midi_service_service_descriptor(),
         daw::service::marker_service_service_descriptor(),
-        daw::service::midi_analysis_service_service_descriptor(),
         daw::service::midi_service_service_descriptor(),
         daw::service::peak_service_service_descriptor(),
         daw::service::plugin_loader_service_service_descriptor(),

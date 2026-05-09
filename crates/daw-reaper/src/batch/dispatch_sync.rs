@@ -59,11 +59,6 @@ pub fn dispatch_op_sync(
         BatchOp::AudioAccessor(op) => {
             dispatch_audio_accessor_sync(op, outputs, services.audio_accessor_svc)
         }
-        BatchOp::MidiAnalysis(_) => Err(
-            "MidiAnalysisService is no longer dispatched from daw-reaper batch — \
-             register the keyflow-daw-analysis impl externally and call it directly."
-                .to_string(),
-        ),
         // Services not yet sync-optimized — return error so caller falls back
         _ => Err(format!(
             "sync dispatch not implemented for {:?}",
@@ -96,7 +91,6 @@ pub fn is_sync_supported(op: &BatchOp) -> bool {
             | BatchOp::PositionConversion(_)
             | BatchOp::Health(_)
             | BatchOp::AudioAccessor(_)
-            | BatchOp::MidiAnalysis(_)
     )
 }
 

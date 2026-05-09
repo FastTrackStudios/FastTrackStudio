@@ -128,7 +128,6 @@ pub(crate) use daw_proto::InputServiceClient;
 pub(crate) use daw_proto::ItemServiceClient;
 pub(crate) use daw_proto::LiveMidiServiceClient;
 pub(crate) use daw_proto::MarkerServiceClient;
-pub(crate) use daw_proto::MidiAnalysisServiceClient;
 pub(crate) use daw_proto::MidiServiceClient;
 pub(crate) use daw_proto::PositionConversionServiceClient;
 pub(crate) use daw_proto::ProjectServiceClient;
@@ -162,7 +161,6 @@ mod fx;
 mod input;
 mod items;
 mod markers;
-mod midi_analysis;
 mod midi_editor;
 mod plugin_loader;
 mod project;
@@ -188,7 +186,6 @@ pub use self::fx::{FxChain, FxHandle, FxParamHandle};
 pub use self::input::Input;
 pub use self::items::{ItemHandle, Items, ProjectItems, TakeHandle, Takes};
 pub use self::markers::Markers;
-pub use self::midi_analysis::MidiAnalysis;
 pub use self::midi_editor::MidiEditor;
 pub use self::plugin_loader::PluginLoader;
 pub use self::project::Project;
@@ -223,7 +220,6 @@ pub struct DawClients {
     pub(crate) automation: AutomationServiceClient,
     pub(crate) live_midi: LiveMidiServiceClient,
     pub(crate) midi: MidiServiceClient,
-    pub(crate) midi_analysis: MidiAnalysisServiceClient,
     pub(crate) audio_engine: AudioEngineServiceClient,
     pub(crate) ext_state: ExtStateServiceClient,
     pub(crate) health: HealthServiceClient,
@@ -256,7 +252,6 @@ impl DawClients {
             automation: AutomationServiceClient::new(handle.clone()),
             live_midi: LiveMidiServiceClient::new(handle.clone()),
             midi: MidiServiceClient::new(handle.clone()),
-            midi_analysis: MidiAnalysisServiceClient::new(handle.clone()),
             audio_engine: AudioEngineServiceClient::new(handle.clone()),
             ext_state: ExtStateServiceClient::new(handle.clone()),
             health: HealthServiceClient::new(handle.clone()),

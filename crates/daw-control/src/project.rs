@@ -3,8 +3,8 @@
 use std::sync::Arc;
 
 use crate::{
-    DawClients, Error, ExtState, FxChain, Markers, MidiAnalysis, ProjectItems, Regions, TempoMap,
-    TrackHandle, Tracks, Transport,
+    DawClients, Error, ExtState, FxChain, Markers, ProjectItems, Regions, TempoMap, TrackHandle,
+    Tracks, Transport,
 };
 use daw_proto::FxChainContext;
 
@@ -477,11 +477,6 @@ impl Project {
     /// Same API as `Daw::ext_state()` — lightweight, cheap to clone.
     pub fn ext_state(&self) -> ExtState {
         ExtState::new(self.clients.clone())
-    }
-
-    /// Get project-level MIDI analysis accessor.
-    pub fn midi_analysis(&self) -> MidiAnalysis {
-        MidiAnalysis::new(self.guid.clone(), self.clients.clone())
     }
 
     /// Get monitoring FX chain (global, not per-track)
