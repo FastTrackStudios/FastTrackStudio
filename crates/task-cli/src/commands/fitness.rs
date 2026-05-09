@@ -9,9 +9,11 @@ use task_core::exercise::ExerciseApi;
 use task_core::routine::RoutineApi;
 use task_core::routine_exercise::RoutineExerciseApi;
 use task_core::service::{
-    AddRoutineExerciseRequest, CreateExerciseRequest, CreateRoutineRequest, ExercisePatch,
-    FitnessServiceClient, RoutineWithExercisesView,
+    AddRoutineExerciseRequest, CompleteWorkoutSessionRequest, CreateExerciseRequest,
+    CreateRoutineRequest, ExercisePatch, FitnessServiceClient, LogSetRequest,
+    RoutineWithExercisesView, StartWorkoutSessionRequest, UpdateSetRequest, WorkoutSessionView,
 };
+use task_core::set_log::SetLogApi;
 use uuid::Uuid;
 
 use crate::shared::RemoteVoxConfig;
@@ -27,6 +29,11 @@ pub(crate) enum FitnessCommands {
     Routine {
         #[command(subcommand)]
         command: RoutineCommands,
+    },
+    /// Logged workouts — start a session, check off sets as you finish them.
+    Session {
+        #[command(subcommand)]
+        command: SessionCommands,
     },
 }
 
@@ -180,6 +187,7 @@ pub(crate) async fn run_remote_fitness_command(
     match command {
         FitnessCommands::Exercise { command } => run_exercise(&client, actor, command).await,
         FitnessCommands::Routine { command } => run_routine(&client, actor, command).await,
+        FitnessCommands::Session { command } => run_session(&client, actor, command).await,
     }
 }
 
@@ -660,4 +668,494 @@ fn format_duration(seconds: u32) -> String {
     let m = seconds / 60;
     let s = seconds % 60;
     format!("{m}:{s:02}")
+}
+
+// ── Session ─────────────────────────────────────────────────────────
+
+#[derive(Subcommand)]
+pub(crate) enum SessionCommands {
+    /// Begin a workout session. With `--routine`, the session pre-populates
+    /// planned sets matching the routine's targets so they're ready to check
+    /// off. Without it, the session starts empty for ad-hoc lifting.
+    Start {
+        #[arg(long)]
+        routine: Option<String>,
+        #[arg(long)]
+        label: Option<String>,
+        #[arg(long = "bodyweight-kg")]
+        bodyweight_kg: Option<f64>,
+        #[arg(long)]
+        organization: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Render a session as a checkbox list. Pass "active" for the most-
+    /// recent active session in your org, a UUID, or a fragment of the
+    /// routine name to fuzzy-match.
+    Show {
+        session: String,
+        #[arg(long)]
+        organization: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// List recent workout sessions.
+    List {
+        #[arg(long)]
+        organization: Option<String>,
+        #[arg(long)]
+        status: Option<String>,
+        #[arg(long)]
+        limit: Option<u32>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Append a new set to a session. By default the set is marked done
+    /// immediately; pass `--defer` to add it as a planned (unchecked) row.
+    Log {
+        session: String,
+        #[arg(long, conflicts_with = "custom")]
+        exercise: Option<String>,
+        #[arg(long, conflicts_with = "exercise")]
+        custom: Option<String>,
+        #[arg(long)]
+        organization: Option<String>,
+        #[arg(long)]
+        reps: Option<u32>,
+        #[arg(long = "weight-kg")]
+        weight_kg: Option<f64>,
+        #[arg(long)]
+        duration: Option<u32>,
+        #[arg(long = "distance-m")]
+        distance_m: Option<f64>,
+        #[arg(long = "avg-hr")]
+        avg_hr: Option<u32>,
+        #[arg(long = "pace-s-per-km")]
+        pace_s_per_km: Option<u32>,
+        #[arg(long)]
+        rpe: Option<f32>,
+        #[arg(long)]
+        notes: Option<String>,
+        #[arg(long)]
+        defer: bool,
+    },
+    /// Tick a set as done.
+    Check { set_log_id: String },
+    /// Untick a previously-checked set.
+    Uncheck { set_log_id: String },
+    /// Update fields on an already-logged set.
+    SetUpdate {
+        set_log_id: String,
+        #[arg(long)]
+        reps: Option<u32>,
+        #[arg(long = "weight-kg")]
+        weight_kg: Option<f64>,
+        #[arg(long)]
+        duration: Option<u32>,
+        #[arg(long = "distance-m")]
+        distance_m: Option<f64>,
+        #[arg(long = "avg-hr")]
+        avg_hr: Option<u32>,
+        #[arg(long = "pace-s-per-km")]
+        pace_s_per_km: Option<u32>,
+        #[arg(long)]
+        rpe: Option<f32>,
+        #[arg(long)]
+        notes: Option<String>,
+    },
+    /// Delete a set row entirely.
+    SetDelete { set_log_id: String },
+    /// Mark a session complete.
+    Complete {
+        session: String,
+        #[arg(long)]
+        organization: Option<String>,
+        #[arg(long)]
+        rpe: Option<f32>,
+        #[arg(long)]
+        notes: Option<String>,
+        /// Skip the "all sets must be done" check.
+        #[arg(long = "allow-incomplete")]
+        allow_incomplete: bool,
+    },
+    /// Mark a session abandoned.
+    Abandon {
+        session: String,
+        #[arg(long)]
+        organization: Option<String>,
+    },
+}
+
+async fn resolve_session_id(
+    client: &FitnessServiceClient,
+    organization: Option<String>,
+    reference: &str,
+) -> eyre::Result<Uuid> {
+    if let Ok(id) = Uuid::parse_str(reference) {
+        return Ok(id);
+    }
+    let lower = reference.trim().to_lowercase();
+    if lower == "active" {
+        let candidates = client
+            .list_workout_sessions(organization.clone(), Some("active".to_string()), Some(1))
+            .await
+            .map_err(|e| eyre::eyre!("list_workout_sessions: {e}"))?;
+        return candidates
+            .into_iter()
+            .next()
+            .map(|s| s.id)
+            .ok_or_else(|| eyre::eyre!("no active workout session found"));
+    }
+    let candidates = client
+        .list_workout_sessions(organization.clone(), None, Some(50))
+        .await
+        .map_err(|e| eyre::eyre!("list_workout_sessions: {e}"))?;
+    candidates
+        .into_iter()
+        .find(|s| s.routine_name_snapshot.to_lowercase().contains(&lower))
+        .map(|s| s.id)
+        .ok_or_else(|| eyre::eyre!("workout session not found: {reference}"))
+}
+
+async fn run_session(
+    client: &FitnessServiceClient,
+    actor: Option<&str>,
+    command: SessionCommands,
+) -> eyre::Result<()> {
+    match command {
+        SessionCommands::Start {
+            routine,
+            label,
+            bodyweight_kg,
+            organization,
+            json,
+        } => {
+            let routine_id = match routine {
+                Some(r) => Some(resolve_routine_id(client, organization.clone(), &r).await?),
+                None => None,
+            };
+            let view = client
+                .start_workout_session(StartWorkoutSessionRequest {
+                    routine_id,
+                    label,
+                    bodyweight_kg,
+                    organization,
+                    created_by: actor.map(str::to_string),
+                })
+                .await
+                .map_err(|e| eyre::eyre!("start_workout_session: {e}"))?;
+            print_session(&view, json)?;
+        }
+        SessionCommands::Show {
+            session,
+            organization,
+            json,
+        } => {
+            let id = resolve_session_id(client, organization, &session).await?;
+            let view = client
+                .get_workout_session(id)
+                .await
+                .map_err(|e| eyre::eyre!("get_workout_session: {e}"))?
+                .ok_or_else(|| eyre::eyre!("workout session not found: {session}"))?;
+            print_session(&view, json)?;
+        }
+        SessionCommands::List {
+            organization,
+            status,
+            limit,
+            json,
+        } => {
+            let rows = client
+                .list_workout_sessions(organization, status, limit)
+                .await
+                .map_err(|e| eyre::eyre!("list_workout_sessions: {e}"))?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&rows)?);
+            } else if rows.is_empty() {
+                println!("(no sessions)");
+            } else {
+                for r in rows {
+                    let when = r.started_at.format("%Y-%m-%d %H:%M");
+                    println!(
+                        "{}  [{}]  {when}  {}",
+                        r.id,
+                        r.status.as_str(),
+                        r.routine_name_snapshot
+                    );
+                }
+            }
+        }
+        SessionCommands::Log {
+            session,
+            exercise,
+            custom,
+            organization,
+            reps,
+            weight_kg,
+            duration,
+            distance_m,
+            avg_hr,
+            pace_s_per_km,
+            rpe,
+            notes,
+            defer,
+        } => {
+            let session_id = resolve_session_id(client, organization.clone(), &session).await?;
+            let exercise_id = match exercise.as_deref() {
+                Some(reference) => {
+                    Some(resolve_exercise_id(client, organization.clone(), reference).await?)
+                }
+                None => None,
+            };
+            if exercise_id.is_none() && custom.is_none() {
+                return Err(eyre::eyre!(
+                    "either --exercise or --custom must be provided"
+                ));
+            }
+            let row = client
+                .log_set(LogSetRequest {
+                    workout_session_id: session_id,
+                    exercise_id,
+                    display_name: custom,
+                    routine_exercise_id: None,
+                    reps,
+                    weight_kg,
+                    duration_seconds: duration,
+                    distance_meters: distance_m,
+                    avg_hr,
+                    pace_seconds_per_km: pace_s_per_km,
+                    rpe,
+                    notes,
+                    defer,
+                })
+                .await
+                .map_err(|e| eyre::eyre!("log_set: {e}"))?;
+            println!(
+                "Logged '{}' set #{} (id={})",
+                row.exercise_name_snapshot,
+                row.set_index + 1,
+                row.id
+            );
+        }
+        SessionCommands::Check { set_log_id } => {
+            let id = Uuid::parse_str(&set_log_id).map_err(|e| eyre::eyre!("invalid UUID: {e}"))?;
+            let row = client
+                .mark_set_done(id, true)
+                .await
+                .map_err(|e| eyre::eyre!("mark_set_done: {e}"))?;
+            println!(
+                "[x] {} set #{}",
+                row.exercise_name_snapshot,
+                row.set_index + 1
+            );
+        }
+        SessionCommands::Uncheck { set_log_id } => {
+            let id = Uuid::parse_str(&set_log_id).map_err(|e| eyre::eyre!("invalid UUID: {e}"))?;
+            let row = client
+                .mark_set_done(id, false)
+                .await
+                .map_err(|e| eyre::eyre!("mark_set_done: {e}"))?;
+            println!(
+                "[ ] {} set #{}",
+                row.exercise_name_snapshot,
+                row.set_index + 1
+            );
+        }
+        SessionCommands::SetUpdate {
+            set_log_id,
+            reps,
+            weight_kg,
+            duration,
+            distance_m,
+            avg_hr,
+            pace_s_per_km,
+            rpe,
+            notes,
+        } => {
+            let id = Uuid::parse_str(&set_log_id).map_err(|e| eyre::eyre!("invalid UUID: {e}"))?;
+            let row = client
+                .update_set(UpdateSetRequest {
+                    set_log_id: id,
+                    reps,
+                    weight_kg,
+                    duration_seconds: duration,
+                    distance_meters: distance_m,
+                    avg_hr,
+                    pace_seconds_per_km: pace_s_per_km,
+                    rpe,
+                    notes,
+                })
+                .await
+                .map_err(|e| eyre::eyre!("update_set: {e}"))?;
+            println!("Updated set #{} ({})", row.set_index + 1, row.id);
+        }
+        SessionCommands::SetDelete { set_log_id } => {
+            let id = Uuid::parse_str(&set_log_id).map_err(|e| eyre::eyre!("invalid UUID: {e}"))?;
+            client
+                .delete_set(id)
+                .await
+                .map_err(|e| eyre::eyre!("delete_set: {e}"))?;
+            println!("Deleted set {id}");
+        }
+        SessionCommands::Complete {
+            session,
+            organization,
+            rpe,
+            notes,
+            allow_incomplete,
+        } => {
+            let id = resolve_session_id(client, organization, &session).await?;
+            let saved = client
+                .complete_workout_session(CompleteWorkoutSessionRequest {
+                    id,
+                    overall_rpe: rpe,
+                    notes,
+                    require_all_sets_done: !allow_incomplete,
+                })
+                .await
+                .map_err(|e| eyre::eyre!("complete_workout_session: {e}"))?;
+            println!(
+                "Completed '{}' (id={})",
+                saved.routine_name_snapshot, saved.id
+            );
+        }
+        SessionCommands::Abandon {
+            session,
+            organization,
+        } => {
+            let id = resolve_session_id(client, organization, &session).await?;
+            let saved = client
+                .abandon_workout_session(id)
+                .await
+                .map_err(|e| eyre::eyre!("abandon_workout_session: {e}"))?;
+            println!(
+                "Abandoned '{}' (id={})",
+                saved.routine_name_snapshot, saved.id
+            );
+        }
+    }
+    Ok(())
+}
+
+fn print_session(view: &WorkoutSessionView, json: bool) -> eyre::Result<()> {
+    if json {
+        // WorkoutSessionView is facet::Facet but not serde::Serialize;
+        // assemble JSON by hand so callers can pipe / consume it.
+        let sets: serde_json::Value =
+            serde_json::from_str(&view.sets_json).unwrap_or(serde_json::Value::Array(Vec::new()));
+        let payload = serde_json::json!({
+            "session": view.session,
+            "sets": sets,
+            "sets_done": view.sets_done,
+            "sets_total": view.sets_total,
+            "total_volume_kg": view.total_volume_kg,
+            "total_cardio_seconds": view.total_cardio_seconds,
+        });
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+    let s = &view.session;
+    let started = s.started_at.format("%H:%M");
+    println!(
+        "{}  ·  started {started}  ·  {}/{} sets done  ·  [{}]",
+        s.routine_name_snapshot,
+        view.sets_done,
+        view.sets_total,
+        s.status.as_str()
+    );
+    if view.total_volume_kg > 0.0 {
+        println!("  volume: {:.1} kg", view.total_volume_kg);
+    }
+    if view.total_cardio_seconds > 0 {
+        println!("  cardio: {}", format_duration(view.total_cardio_seconds));
+    }
+    if let Some(bw) = s.bodyweight_kg {
+        println!("  bodyweight: {bw} kg");
+    }
+
+    let sets: Vec<SetLogApi> =
+        serde_json::from_str(&view.sets_json).map_err(|e| eyre::eyre!("decode sets_json: {e}"))?;
+    if sets.is_empty() {
+        println!("\n  (no sets logged yet)");
+        return Ok(());
+    }
+
+    // Group by exercise_name_snapshot, preserving first-occurrence order.
+    let mut order: Vec<String> = Vec::new();
+    let mut groups: std::collections::HashMap<String, Vec<SetLogApi>> =
+        std::collections::HashMap::new();
+    for set in sets {
+        let key = set.exercise_name_snapshot.clone();
+        if !groups.contains_key(&key) {
+            order.push(key.clone());
+        }
+        groups.entry(key).or_default().push(set);
+    }
+
+    for name in &order {
+        let group = groups.get(name).expect("group present");
+        println!("\n  {name}");
+        for set in group {
+            let mark = if set.completed_at.is_some() {
+                "[x]"
+            } else {
+                "[ ]"
+            };
+            let detail = format_set_detail(set);
+            let id_suffix = if set.completed_at.is_none() {
+                format!("    {}", set.id)
+            } else {
+                String::new()
+            };
+            println!("    {mark} {}   {detail}{id_suffix}", set.set_index + 1);
+        }
+    }
+    if !s.notes.is_empty() {
+        println!("\n  notes: {}", s.notes);
+    }
+    Ok(())
+}
+
+fn format_set_detail(set: &SetLogApi) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if set.reps.is_some() || set.weight_kg.is_some() {
+        let reps = set
+            .reps
+            .map(|r| r.to_string())
+            .unwrap_or_else(|| "_".to_string());
+        let weight = set
+            .weight_kg
+            .map(|w| format!("{w} kg"))
+            .unwrap_or_else(|| "_ kg".to_string());
+        parts.push(format!("{reps} reps @ {weight}"));
+    }
+    if let Some(dur) = set.duration_seconds {
+        parts.push(format_duration(dur));
+    }
+    if let Some(dist) = set.distance_meters {
+        if dist >= 1000.0 {
+            parts.push(format!("{:.2} km", dist / 1000.0));
+        } else {
+            parts.push(format!("{dist} m"));
+        }
+    }
+    if let Some(hr) = set.avg_hr {
+        parts.push(format!("HR {hr}"));
+    }
+    if let Some(pace) = set.pace_seconds_per_km {
+        parts.push(format!("pace {}/km", format_duration(pace)));
+    }
+    if let Some(rpe) = set.rpe {
+        parts.push(format!("RPE {rpe}"));
+    }
+    if let Some(notes) = &set.notes {
+        if !notes.is_empty() {
+            parts.push(format!("({notes})"));
+        }
+    }
+    if parts.is_empty() {
+        "—".to_string()
+    } else {
+        parts.join("   ")
+    }
 }

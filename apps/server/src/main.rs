@@ -1279,6 +1279,20 @@ async fn handle_vox_connection(socket: WebSocket, state: AppState, auth: VoxAuth
                     );
                     Ok(())
                 }
+                "WorkoutSessionRepo" => {
+                    connection.handle_with(
+                        task_core::workout_session::WorkoutSessionRepoDispatcher::new(
+                            task_core::workout_session::WorkoutSessionRepoStorage::new(db.clone()),
+                        ),
+                    );
+                    Ok(())
+                }
+                "SetLogRepo" => {
+                    connection.handle_with(task_core::set_log::SetLogRepoDispatcher::new(
+                        task_core::set_log::SetLogRepoStorage::new(db.clone()),
+                    ));
+                    Ok(())
+                }
                 "FoodService" => {
                     connection
                         .handle_with(task_core::FoodServiceDispatcher::new(ctx.food_service()));
@@ -1501,6 +1515,8 @@ impl task_core::service::SystemService for ServerSystemService {
                 "ExerciseRepo".into(),
                 "RoutineRepo".into(),
                 "RoutineExerciseRepo".into(),
+                "WorkoutSessionRepo".into(),
+                "SetLogRepo".into(),
                 "FoodService".into(),
                 "FoodRepo".into(),
                 "GlossaryService".into(),

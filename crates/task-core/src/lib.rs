@@ -36,6 +36,7 @@ pub mod revenue;
 pub mod routine;
 pub mod routine_exercise;
 pub mod rrule;
+pub mod set_log;
 pub mod shopping_list;
 pub mod substitution;
 pub mod task;
@@ -44,6 +45,7 @@ pub mod team;
 pub mod track;
 pub mod views;
 pub mod workflows;
+pub mod workout_session;
 
 #[cfg(feature = "server")]
 pub mod index;
@@ -130,6 +132,7 @@ pub use revenue::{
 };
 pub use routine::{Routine, RoutineApi, RoutineTagList};
 pub use routine_exercise::{RoutineExercise, RoutineExerciseApi};
+pub use set_log::{SetLog, SetLogApi};
 pub use shopping_list::{ShoppingList, ShoppingListApi, ShoppingListItem, ShoppingListItemApi};
 pub use substitution::{Substitution, SubstitutionApi};
 pub use task::{
@@ -139,6 +142,7 @@ pub use task::{
 pub use task_relation::TaskRelation as TaskRelationEntity;
 pub use track::{Track, TrackApi, TrackStatus};
 pub use views::{SavedView, ViewDisplay, ViewFilters};
+pub use workout_session::{WorkoutSession, WorkoutSessionApi, WorkoutSessionStatus};
 
 #[cfg(feature = "server")]
 pub use integration::{
@@ -162,47 +166,48 @@ pub use service::{
     CalendarServiceDispatcher, CardDavAddressBookInfo, CardDavContact, CardDavDeleteObjectRequest,
     CardDavDiscovery, CardDavMultigetRequest, CardDavObject, CardDavPutObjectRequest,
     CardDavSyncCollectionRequest, CardDavSyncCollectionResponse, CompleteCookingSessionRequest,
-    ConsumeFromPantryRequest, ConversationService, ConversationServiceDispatcher,
-    CookbookWithRecipes, CookingService, CookingServiceClient, CookingServiceDispatcher,
-    CookingSessionView, CreateExerciseRequest, CreateFoodProductRequest, CreateFoodRequest,
-    CreateGlossaryTermRequest, CreateRecipeRequest, CreateRoutineRequest, EmailLinkRequest,
-    EmailLinkResponse, EmailListRequest, EmailUnlinkRequest, ExercisePatch, ExpenseService,
-    ExpenseServiceDispatcher, FitnessService, FitnessServiceClient, FitnessServiceDispatcher,
-    FoodPatch, FoodProductPatch, FoodService, FoodServiceClient, FoodServiceDispatcher,
-    GenerateShoppingListFromMissingRequest, GenerateShoppingListRequest, GlossaryService,
-    GlossaryServiceClient, GlossaryServiceDispatcher, GlossaryTermPatch, HealthCheck,
-    InboxCaptureRequest, InboxItem, InboxPromoteRequest, InboxService, InboxServiceDispatcher,
-    InvoiceAgingBucket, InvoiceCreateRequest, InvoicePaymentRequest, InvoiceService,
-    InvoiceServiceDispatcher, MailCreateMailboxRequest, MailCreateTagRequest, MailDeleteTagRequest,
-    MailListMessagesRequest, MailMessageTagRequest, MailMoveMessageRequest, MailService,
-    MailServiceDispatcher, MarkIngredientGatheredRequest, MarkMealPlanCookedRequest,
-    MaterializeRequest, MaterializeResult, MealPlanRangeRequest, NavigateStepRequest,
-    NextcloudCapability, OperatingAreaStatus, OperatingGoal, OperatingModelReport,
-    OperatingRoutine, OperatingService, OperatingServiceDispatcher, PantryItemPatch,
-    PantryListRequest, PantryService, PantryServiceClient, PantryServiceDispatcher, PeopleService,
-    PeopleServiceDispatcher, ProjectFileSummary, ProjectKnowledgeContext, ProjectPatch,
-    ProjectService, ProjectServiceDispatcher, ProjectTypeService, ProjectTypeServiceDispatcher,
-    ProjectTypeSpec, ProjectTypeView, PropertyDefinitionView, PropertyService,
-    PropertyServiceDispatcher, ProviderSyncState, RecipeMatchView, RecipePatch, RecipeWithDetails,
-    RemoteDeckBoard, RemoteDeckStack, ResolveInTextRequest, ResolveInTextView, ReviewReport,
-    RoutineWithExercisesView, ScaledRecipeView, SetMealPlanEntryRequest, ShoppingListWithItems,
-    StartCookingSessionRequest, StepTimerActionRequest, SubmitMixRequest, SyncPlan, SyncPlanItem,
+    CompleteWorkoutSessionRequest, ConsumeFromPantryRequest, ConversationService,
+    ConversationServiceDispatcher, CookbookWithRecipes, CookingService, CookingServiceClient,
+    CookingServiceDispatcher, CookingSessionView, CreateExerciseRequest, CreateFoodProductRequest,
+    CreateFoodRequest, CreateGlossaryTermRequest, CreateRecipeRequest, CreateRoutineRequest,
+    EmailLinkRequest, EmailLinkResponse, EmailListRequest, EmailUnlinkRequest, ExercisePatch,
+    ExpenseService, ExpenseServiceDispatcher, FitnessService, FitnessServiceClient,
+    FitnessServiceDispatcher, FoodPatch, FoodProductPatch, FoodService, FoodServiceClient,
+    FoodServiceDispatcher, GenerateShoppingListFromMissingRequest, GenerateShoppingListRequest,
+    GlossaryService, GlossaryServiceClient, GlossaryServiceDispatcher, GlossaryTermPatch,
+    HealthCheck, InboxCaptureRequest, InboxItem, InboxPromoteRequest, InboxService,
+    InboxServiceDispatcher, InvoiceAgingBucket, InvoiceCreateRequest, InvoicePaymentRequest,
+    InvoiceService, InvoiceServiceDispatcher, LogSetRequest, MailCreateMailboxRequest,
+    MailCreateTagRequest, MailDeleteTagRequest, MailListMessagesRequest, MailMessageTagRequest,
+    MailMoveMessageRequest, MailService, MailServiceDispatcher, MarkIngredientGatheredRequest,
+    MarkMealPlanCookedRequest, MaterializeRequest, MaterializeResult, MealPlanRangeRequest,
+    NavigateStepRequest, NextcloudCapability, OperatingAreaStatus, OperatingGoal,
+    OperatingModelReport, OperatingRoutine, OperatingService, OperatingServiceDispatcher,
+    PantryItemPatch, PantryListRequest, PantryService, PantryServiceClient,
+    PantryServiceDispatcher, PeopleService, PeopleServiceDispatcher, ProjectFileSummary,
+    ProjectKnowledgeContext, ProjectPatch, ProjectService, ProjectServiceDispatcher,
+    ProjectTypeService, ProjectTypeServiceDispatcher, ProjectTypeSpec, ProjectTypeView,
+    PropertyDefinitionView, PropertyService, PropertyServiceDispatcher, ProviderSyncState,
+    RecipeMatchView, RecipePatch, RecipeWithDetails, RemoteDeckBoard, RemoteDeckStack,
+    ResolveInTextRequest, ResolveInTextView, ReviewReport, RoutineWithExercisesView,
+    ScaledRecipeView, SetMealPlanEntryRequest, ShoppingListWithItems, StartCookingSessionRequest,
+    StartWorkoutSessionRequest, StepTimerActionRequest, SubmitMixRequest, SyncPlan, SyncPlanItem,
     SyncStats, SystemCapabilities, SystemHealth, SystemService, SystemServiceDispatcher,
     TaskService, TaskServiceDispatcher, TemplateService, TemplateServiceDispatcher, TemplateView,
     TimeEntryContext, TimeEntryFilter, TimeEntryPatch, TimeLogRequest, TimeService,
-    TimeServiceDispatcher, TimeStartRequest, TimedTaskEntry, TrackPatch, VaultCapability,
-    VaultError, activity_service_service_descriptor, attachment_service_service_descriptor,
-    audio_production_service_service_descriptor, calendar_service_service_descriptor,
-    conversation_service_service_descriptor, cooking_service_service_descriptor,
-    expense_service_service_descriptor, fitness_service_service_descriptor,
-    food_service_service_descriptor, glossary_service_service_descriptor,
-    inbox_service_service_descriptor, invoice_service_service_descriptor,
-    mail_service_service_descriptor, operating_service_service_descriptor,
-    pantry_service_service_descriptor, people_service_service_descriptor,
-    project_service_service_descriptor, project_type_service_service_descriptor,
-    property_service_service_descriptor, system_service_service_descriptor,
-    task_service_service_descriptor, template_service_service_descriptor,
-    time_service_service_descriptor,
+    TimeServiceDispatcher, TimeStartRequest, TimedTaskEntry, TrackPatch, UpdateSetRequest,
+    VaultCapability, VaultError, WorkoutSessionView, activity_service_service_descriptor,
+    attachment_service_service_descriptor, audio_production_service_service_descriptor,
+    calendar_service_service_descriptor, conversation_service_service_descriptor,
+    cooking_service_service_descriptor, expense_service_service_descriptor,
+    fitness_service_service_descriptor, food_service_service_descriptor,
+    glossary_service_service_descriptor, inbox_service_service_descriptor,
+    invoice_service_service_descriptor, mail_service_service_descriptor,
+    operating_service_service_descriptor, pantry_service_service_descriptor,
+    people_service_service_descriptor, project_service_service_descriptor,
+    project_type_service_service_descriptor, property_service_service_descriptor,
+    system_service_service_descriptor, task_service_service_descriptor,
+    template_service_service_descriptor, time_service_service_descriptor,
 };
 #[cfg(feature = "server")]
 pub use service_impl::{

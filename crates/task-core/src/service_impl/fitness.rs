@@ -6,8 +6,8 @@
 
 use chrono::Utc;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, Set,
-    TransactionTrait,
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter,
+    QueryOrder, QuerySelect, Set, TransactionTrait,
 };
 use uuid::Uuid;
 
@@ -16,9 +16,12 @@ use crate::property::JsonObject;
 use crate::routine::{self, RoutineApi, RoutineTagList};
 use crate::routine_exercise::{self, RoutineExerciseApi};
 use crate::service::{
-    AddRoutineExerciseRequest, CreateExerciseRequest, CreateRoutineRequest, ExercisePatch,
-    FitnessService, RoutineWithExercisesView, VaultError,
+    AddRoutineExerciseRequest, CompleteWorkoutSessionRequest, CreateExerciseRequest,
+    CreateRoutineRequest, ExercisePatch, FitnessService, LogSetRequest, RoutineWithExercisesView,
+    StartWorkoutSessionRequest, UpdateSetRequest, VaultError, WorkoutSessionView,
 };
+use crate::set_log::{self, SetLogApi};
+use crate::workout_session::{self, WorkoutSessionApi, WorkoutSessionStatus};
 
 use super::helpers::convert_model;
 
@@ -541,4 +544,431 @@ impl FitnessService for FitnessServiceImpl {
             .map_err(|e| io(e, "commit reorder txn"))?;
         Ok(())
     }
+
+    // ── Workout sessions ─────────────────────────────────────
+
+    async fn start_workout_session(
+        &self,
+        request: StartWorkoutSessionRequest,
+    ) -> Result<WorkoutSessionView, VaultError> {
+        let now = Utc::now();
+        let session_id = Uuid::new_v4();
+
+        let (routine_name_snapshot, planned_rows): (String, Vec<routine_exercise::Model>) =
+            if let Some(rid) = request.routine_id {
+                let routine = routine::Entity::find_by_id(rid)
+                    .one(&self.db)
+                    .await
+                    .map_err(|e| io(e, "load routine"))?
+                    .ok_or_else(|| VaultError::NotFound(format!("routine:{rid}")))?;
+                let exercises = routine_exercise::Entity::find()
+                    .filter(routine_exercise::Column::RoutineId.eq(rid))
+                    .order_by_asc(routine_exercise::Column::Position)
+                    .all(&self.db)
+                    .await
+                    .map_err(|e| io(e, "load routine exercises"))?;
+                (routine.name, exercises)
+            } else {
+                let label = request
+                    .label
+                    .filter(|s| !s.trim().is_empty())
+                    .unwrap_or_else(|| "Ad-hoc workout".to_string());
+                (label, Vec::new())
+            };
+
+        let txn = self
+            .db
+            .begin()
+            .await
+            .map_err(|e| io(e, "begin start_workout_session txn"))?;
+
+        let session_active = workout_session::ActiveModel {
+            id: Set(session_id),
+            routine_id: Set(request.routine_id),
+            routine_name_snapshot: Set(routine_name_snapshot),
+            status: Set(WorkoutSessionStatus::Active),
+            started_at: Set(now),
+            completed_at: Set(None),
+            notes: Set(String::new()),
+            overall_rpe: Set(None),
+            bodyweight_kg: Set(request.bodyweight_kg),
+            organization: Set(request.organization),
+            created_by: Set(request.created_by),
+            properties: Set(JsonObject::default()),
+            created_at: Set(now),
+            updated_at: Set(now),
+        };
+        session_active
+            .insert(&txn)
+            .await
+            .map_err(|e| io(e, "insert workout_session"))?;
+
+        // Pre-populate planned SetLog rows from routine targets.
+        let mut position: i32 = 0;
+        let mut per_exercise_index: std::collections::HashMap<String, i32> =
+            std::collections::HashMap::new();
+        for re_row in &planned_rows {
+            // target_sets = None → seed exactly one planned set so the
+            // user can still see the row in the checklist.
+            let n = re_row.target_sets.unwrap_or(1).max(1);
+            let display_name = re_row.display_name.clone();
+            for _ in 0..n {
+                let set_index = per_exercise_index.entry(display_name.clone()).or_insert(0);
+                let id = Uuid::new_v4();
+                let active = set_log::ActiveModel {
+                    id: Set(id),
+                    workout_session_id: Set(session_id),
+                    exercise_id: Set(re_row.exercise_id),
+                    exercise_name_snapshot: Set(display_name.clone()),
+                    routine_exercise_id: Set(Some(re_row.id)),
+                    position: Set(position),
+                    set_index: Set(*set_index),
+                    reps: Set(re_row.target_reps),
+                    weight_kg: Set(re_row.target_weight_kg),
+                    duration_seconds: Set(re_row.target_duration_seconds),
+                    distance_meters: Set(re_row.target_distance_meters),
+                    avg_hr: Set(re_row.target_avg_hr),
+                    pace_seconds_per_km: Set(re_row.target_pace_seconds_per_km),
+                    rpe: Set(None),
+                    notes: Set(None),
+                    completed_at: Set(None),
+                    properties: Set(JsonObject::default()),
+                    created_at: Set(now),
+                    updated_at: Set(now),
+                };
+                active
+                    .insert(&txn)
+                    .await
+                    .map_err(|e| io(e, "insert planned set_log"))?;
+                *set_index += 1;
+                position += 1;
+            }
+        }
+
+        txn.commit()
+            .await
+            .map_err(|e| io(e, "commit start_workout_session txn"))?;
+
+        build_session_view(&self.db, session_id).await
+    }
+
+    async fn get_workout_session(
+        &self,
+        id: Uuid,
+    ) -> Result<Option<WorkoutSessionView>, VaultError> {
+        let exists = workout_session::Entity::find_by_id(id)
+            .one(&self.db)
+            .await
+            .map_err(|e| io(e, "get_workout_session"))?
+            .is_some();
+        if !exists {
+            return Ok(None);
+        }
+        build_session_view(&self.db, id).await.map(Some)
+    }
+
+    async fn list_workout_sessions(
+        &self,
+        organization: Option<String>,
+        status: Option<String>,
+        limit: Option<u32>,
+    ) -> Result<Vec<WorkoutSessionApi>, VaultError> {
+        let mut q =
+            workout_session::Entity::find().order_by_desc(workout_session::Column::StartedAt);
+        if let Some(org) = organization {
+            q = q.filter(workout_session::Column::Organization.eq(org));
+        }
+        if let Some(status) = status {
+            let parsed = WorkoutSessionStatus::parse(&status).ok_or_else(|| {
+                parse(
+                    format!("unknown status '{status}'"),
+                    "list_workout_sessions",
+                )
+            })?;
+            q = q.filter(workout_session::Column::Status.eq(parsed));
+        }
+        let limit = limit.unwrap_or(20);
+        let rows = q
+            .limit(u64::from(limit))
+            .all(&self.db)
+            .await
+            .map_err(|e| io(e, "list_workout_sessions"))?;
+        rows.into_iter().map(workout_session_to_api).collect()
+    }
+
+    async fn log_set(&self, request: LogSetRequest) -> Result<SetLogApi, VaultError> {
+        // Resolve exercise_id / display_name.
+        let (exercise_id, display_name) = match (request.exercise_id, request.display_name.clone())
+        {
+            (Some(eid), _) => {
+                let ex = exercise::Entity::find_by_id(eid)
+                    .one(&self.db)
+                    .await
+                    .map_err(|e| io(e, "load exercise for log_set"))?
+                    .ok_or_else(|| VaultError::NotFound(format!("exercise:{eid}")))?;
+                (Some(eid), ex.name)
+            }
+            (None, Some(name)) if !name.trim().is_empty() => (None, name),
+            _ => {
+                return Err(parse(
+                    "neither exercise_id nor display_name supplied",
+                    "log_set",
+                ));
+            }
+        };
+
+        // Make sure the session exists (and we can write to it).
+        if workout_session::Entity::find_by_id(request.workout_session_id)
+            .one(&self.db)
+            .await
+            .map_err(|e| io(e, "load workout_session for log_set"))?
+            .is_none()
+        {
+            return Err(VaultError::NotFound(format!(
+                "workout_session:{}",
+                request.workout_session_id
+            )));
+        }
+
+        let next_position = set_log::Entity::find()
+            .filter(set_log::Column::WorkoutSessionId.eq(request.workout_session_id))
+            .order_by_desc(set_log::Column::Position)
+            .one(&self.db)
+            .await
+            .map_err(|e| io(e, "next position lookup"))?
+            .map(|r| r.position + 1)
+            .unwrap_or(0);
+
+        let set_index = set_log::Entity::find()
+            .filter(set_log::Column::WorkoutSessionId.eq(request.workout_session_id))
+            .filter(set_log::Column::ExerciseNameSnapshot.eq(display_name.clone()))
+            .count(&self.db)
+            .await
+            .map_err(|e| io(e, "set index lookup"))? as i32;
+
+        let now = Utc::now();
+        let completed_at = if request.defer { None } else { Some(now) };
+        let id = Uuid::new_v4();
+        let active = set_log::ActiveModel {
+            id: Set(id),
+            workout_session_id: Set(request.workout_session_id),
+            exercise_id: Set(exercise_id),
+            exercise_name_snapshot: Set(display_name),
+            routine_exercise_id: Set(request.routine_exercise_id),
+            position: Set(next_position),
+            set_index: Set(set_index),
+            reps: Set(request.reps),
+            weight_kg: Set(request.weight_kg),
+            duration_seconds: Set(request.duration_seconds),
+            distance_meters: Set(request.distance_meters),
+            avg_hr: Set(request.avg_hr),
+            pace_seconds_per_km: Set(request.pace_seconds_per_km),
+            rpe: Set(request.rpe),
+            notes: Set(request.notes),
+            completed_at: Set(completed_at),
+            properties: Set(JsonObject::default()),
+            created_at: Set(now),
+            updated_at: Set(now),
+        };
+        let saved = active
+            .insert(&self.db)
+            .await
+            .map_err(|e| io(e, "insert set_log"))?;
+        set_log_to_api(saved)
+    }
+
+    async fn mark_set_done(&self, set_log_id: Uuid, done: bool) -> Result<SetLogApi, VaultError> {
+        let model = set_log::Entity::find_by_id(set_log_id)
+            .one(&self.db)
+            .await
+            .map_err(|e| io(e, "load set_log"))?
+            .ok_or_else(|| VaultError::NotFound(format!("set_log:{set_log_id}")))?;
+        let now = Utc::now();
+        let new_completed_at = match (done, model.completed_at) {
+            (true, Some(prev)) => Some(prev),
+            (true, None) => Some(now),
+            (false, _) => None,
+        };
+        let mut active: set_log::ActiveModel = model.into();
+        active.completed_at = Set(new_completed_at);
+        active.updated_at = Set(now);
+        let saved = active
+            .update(&self.db)
+            .await
+            .map_err(|e| io(e, "update set_log mark_done"))?;
+        set_log_to_api(saved)
+    }
+
+    async fn update_set(&self, request: UpdateSetRequest) -> Result<SetLogApi, VaultError> {
+        let model = set_log::Entity::find_by_id(request.set_log_id)
+            .one(&self.db)
+            .await
+            .map_err(|e| io(e, "load set_log"))?
+            .ok_or_else(|| VaultError::NotFound(format!("set_log:{}", request.set_log_id)))?;
+        let mut active: set_log::ActiveModel = model.into();
+        if let Some(reps) = request.reps {
+            active.reps = Set(Some(reps));
+        }
+        if let Some(w) = request.weight_kg {
+            active.weight_kg = Set(Some(w));
+        }
+        if let Some(d) = request.duration_seconds {
+            active.duration_seconds = Set(Some(d));
+        }
+        if let Some(d) = request.distance_meters {
+            active.distance_meters = Set(Some(d));
+        }
+        if let Some(h) = request.avg_hr {
+            active.avg_hr = Set(Some(h));
+        }
+        if let Some(p) = request.pace_seconds_per_km {
+            active.pace_seconds_per_km = Set(Some(p));
+        }
+        if let Some(r) = request.rpe {
+            active.rpe = Set(Some(r));
+        }
+        if let Some(n) = request.notes {
+            active.notes = Set(Some(n));
+        }
+        active.updated_at = Set(Utc::now());
+        let saved = active
+            .update(&self.db)
+            .await
+            .map_err(|e| io(e, "update set_log"))?;
+        set_log_to_api(saved)
+    }
+
+    async fn delete_set(&self, set_log_id: Uuid) -> Result<(), VaultError> {
+        set_log::Entity::delete_by_id(set_log_id)
+            .exec(&self.db)
+            .await
+            .map_err(|e| io(e, "delete set_log"))?;
+        Ok(())
+    }
+
+    async fn complete_workout_session(
+        &self,
+        request: CompleteWorkoutSessionRequest,
+    ) -> Result<WorkoutSessionApi, VaultError> {
+        let model = workout_session::Entity::find_by_id(request.id)
+            .one(&self.db)
+            .await
+            .map_err(|e| io(e, "load workout_session"))?
+            .ok_or_else(|| VaultError::NotFound(format!("workout_session:{}", request.id)))?;
+
+        if request.require_all_sets_done {
+            let pending = set_log::Entity::find()
+                .filter(set_log::Column::WorkoutSessionId.eq(request.id))
+                .filter(set_log::Column::CompletedAt.is_null())
+                .count(&self.db)
+                .await
+                .map_err(|e| io(e, "count pending set_logs"))?;
+            if pending > 0 {
+                return Err(parse(
+                    format!("{pending} set(s) still pending"),
+                    "complete_workout_session",
+                ));
+            }
+        }
+
+        let now = Utc::now();
+        let merged_notes = match request.notes {
+            Some(extra) if !extra.trim().is_empty() => {
+                if model.notes.trim().is_empty() {
+                    extra
+                } else {
+                    format!("{}\n{}", model.notes, extra)
+                }
+            }
+            _ => model.notes.clone(),
+        };
+        let mut active: workout_session::ActiveModel = model.into();
+        active.status = Set(WorkoutSessionStatus::Completed);
+        active.completed_at = Set(Some(now));
+        active.overall_rpe = Set(request.overall_rpe);
+        active.notes = Set(merged_notes);
+        active.updated_at = Set(now);
+        let saved = active
+            .update(&self.db)
+            .await
+            .map_err(|e| io(e, "complete workout_session"))?;
+        workout_session_to_api(saved)
+    }
+
+    async fn abandon_workout_session(&self, id: Uuid) -> Result<WorkoutSessionApi, VaultError> {
+        let model = workout_session::Entity::find_by_id(id)
+            .one(&self.db)
+            .await
+            .map_err(|e| io(e, "load workout_session"))?
+            .ok_or_else(|| VaultError::NotFound(format!("workout_session:{id}")))?;
+        let now = Utc::now();
+        let mut active: workout_session::ActiveModel = model.into();
+        active.status = Set(WorkoutSessionStatus::Abandoned);
+        active.completed_at = Set(Some(now));
+        active.updated_at = Set(now);
+        let saved = active
+            .update(&self.db)
+            .await
+            .map_err(|e| io(e, "abandon workout_session"))?;
+        workout_session_to_api(saved)
+    }
+}
+
+fn workout_session_to_api(model: workout_session::Model) -> Result<WorkoutSessionApi, VaultError> {
+    convert_model::<workout_session::Model, WorkoutSessionApi>(model)
+}
+
+fn set_log_to_api(model: set_log::Model) -> Result<SetLogApi, VaultError> {
+    convert_model::<set_log::Model, SetLogApi>(model)
+}
+
+async fn build_session_view(
+    db: &DatabaseConnection,
+    session_id: Uuid,
+) -> Result<WorkoutSessionView, VaultError> {
+    let session = workout_session::Entity::find_by_id(session_id)
+        .one(db)
+        .await
+        .map_err(|e| io(e, "load workout_session for view"))?
+        .ok_or_else(|| VaultError::NotFound(format!("workout_session:{session_id}")))?;
+    let sets = set_log::Entity::find()
+        .filter(set_log::Column::WorkoutSessionId.eq(session_id))
+        .order_by_asc(set_log::Column::Position)
+        .all(db)
+        .await
+        .map_err(|e| io(e, "load set_logs for view"))?;
+
+    let sets_total = sets.len() as u32;
+    let mut sets_done: u32 = 0;
+    let mut total_volume_kg: f64 = 0.0;
+    let mut total_cardio_seconds: u32 = 0;
+    for s in &sets {
+        if s.completed_at.is_some() {
+            sets_done += 1;
+            if let (Some(reps), Some(w)) = (s.reps, s.weight_kg) {
+                total_volume_kg += f64::from(reps) * w;
+            }
+            if let Some(dur) = s.duration_seconds {
+                // Treat sets with a duration but no reps as cardio/mobility.
+                if s.reps.is_none() {
+                    total_cardio_seconds = total_cardio_seconds.saturating_add(dur);
+                }
+            }
+        }
+    }
+
+    let set_apis: Vec<SetLogApi> = sets
+        .into_iter()
+        .map(set_log_to_api)
+        .collect::<Result<Vec<_>, _>>()?;
+    let sets_json = serde_json::to_string(&set_apis).map_err(|e| io(e, "serialize set_logs"))?;
+
+    Ok(WorkoutSessionView {
+        session: workout_session_to_api(session)?,
+        sets_json,
+        sets_done,
+        sets_total,
+        total_volume_kg,
+        total_cardio_seconds,
+    })
 }

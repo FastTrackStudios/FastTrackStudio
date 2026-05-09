@@ -2815,6 +2815,138 @@ pub trait FitnessService {
         routine_id: Uuid,
         ordered_ids: Vec<Uuid>,
     ) -> Result<(), VaultError>;
+
+    // ── Workout sessions ─────────────────────────────────────
+    async fn start_workout_session(
+        &self,
+        request: StartWorkoutSessionRequest,
+    ) -> Result<WorkoutSessionView, VaultError>;
+
+    async fn get_workout_session(&self, id: Uuid)
+    -> Result<Option<WorkoutSessionView>, VaultError>;
+
+    async fn list_workout_sessions(
+        &self,
+        organization: Option<String>,
+        status: Option<String>,
+        limit: Option<u32>,
+    ) -> Result<Vec<crate::workout_session::WorkoutSessionApi>, VaultError>;
+
+    /// Append a SetLog row to a session. Returns the inserted row.
+    /// `completed_at` is set to "now" by default; pass `defer = true`
+    /// to leave it unset (a planned-but-not-yet-done checkbox).
+    async fn log_set(
+        &self,
+        request: LogSetRequest,
+    ) -> Result<crate::set_log::SetLogApi, VaultError>;
+
+    /// Flip a SetLog's completed_at on or off. `done = true` sets it to
+    /// now (or keeps the existing timestamp if already set); `done =
+    /// false` clears it.
+    async fn mark_set_done(
+        &self,
+        set_log_id: Uuid,
+        done: bool,
+    ) -> Result<crate::set_log::SetLogApi, VaultError>;
+
+    /// Update fields of an existing set (reps, weight, notes, rpe).
+    /// Only fields that are `Some(...)` in the request are written; a
+    /// `None` field means "leave alone". To clear a value, delete and
+    /// re-log the set.
+    async fn update_set(
+        &self,
+        request: UpdateSetRequest,
+    ) -> Result<crate::set_log::SetLogApi, VaultError>;
+
+    async fn delete_set(&self, set_log_id: Uuid) -> Result<(), VaultError>;
+
+    async fn complete_workout_session(
+        &self,
+        request: CompleteWorkoutSessionRequest,
+    ) -> Result<crate::workout_session::WorkoutSessionApi, VaultError>;
+
+    async fn abandon_workout_session(
+        &self,
+        id: Uuid,
+    ) -> Result<crate::workout_session::WorkoutSessionApi, VaultError>;
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct StartWorkoutSessionRequest {
+    /// When set, the session pre-populates one SetLog (with
+    /// `completed_at = None`) for every (target_sets × routine_exercise)
+    /// in the routine, in position order, snapshotting display_name.
+    /// `None` for ad-hoc — the session starts empty.
+    pub routine_id: Option<Uuid>,
+    /// When routine_id is None, `routine_name_snapshot` becomes this
+    /// (or "Ad-hoc workout" when empty).
+    pub label: Option<String>,
+    pub bodyweight_kg: Option<f64>,
+    pub organization: Option<String>,
+    pub created_by: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct LogSetRequest {
+    pub workout_session_id: Uuid,
+    /// One of exercise_id or display_name must be supplied. When both
+    /// are given, exercise_id wins and display_name is overridden by
+    /// the linked Exercise.name.
+    pub exercise_id: Option<Uuid>,
+    pub display_name: Option<String>,
+    pub routine_exercise_id: Option<Uuid>,
+
+    pub reps: Option<u32>,
+    pub weight_kg: Option<f64>,
+    pub duration_seconds: Option<u32>,
+    pub distance_meters: Option<f64>,
+    pub avg_hr: Option<u32>,
+    pub pace_seconds_per_km: Option<u32>,
+
+    pub rpe: Option<f32>,
+    pub notes: Option<String>,
+
+    /// When true, leaves `completed_at = None` (a planned set you'll
+    /// check off later). Default false → completed_at = now.
+    pub defer: bool,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct UpdateSetRequest {
+    pub set_log_id: Uuid,
+    pub reps: Option<u32>,
+    pub weight_kg: Option<f64>,
+    pub duration_seconds: Option<u32>,
+    pub distance_meters: Option<f64>,
+    pub avg_hr: Option<u32>,
+    pub pace_seconds_per_km: Option<u32>,
+    pub rpe: Option<f32>,
+    pub notes: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct CompleteWorkoutSessionRequest {
+    pub id: Uuid,
+    pub overall_rpe: Option<f32>,
+    pub notes: Option<String>,
+    /// When true (default), refuse to complete if any SetLog still has
+    /// `completed_at = None`. When false, complete anyway (those rows
+    /// stay pending in the session's "what I did" view).
+    pub require_all_sets_done: bool,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct WorkoutSessionView {
+    pub session: crate::workout_session::WorkoutSessionApi,
+    /// JSON-encoded `Vec<SetLogApi>` ordered by position.
+    pub sets_json: String,
+    /// Sets done / total. Counts toward `total` even when pending.
+    pub sets_done: u32,
+    pub sets_total: u32,
+    /// Total volume (sum of reps × weight_kg over completed strength sets).
+    pub total_volume_kg: f64,
+    /// Total cardio duration in seconds across completed cardio sets.
+    pub total_cardio_seconds: u32,
 }
 
 #[derive(Debug, Clone, Default, facet::Facet)]
