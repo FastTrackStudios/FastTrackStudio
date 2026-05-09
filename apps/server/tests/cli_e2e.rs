@@ -33,20 +33,13 @@ async fn cli_e2e_system_smoke() {
 
 /// Full golden-path sweep across the workflow CLIs.
 ///
-/// Currently `#[ignore]`d because vox-postcard 0.3.1 panics with
-/// `UnsupportedType("Uuid")` when serializing any service response that
-/// contains a `Uuid` field — which is every list/show endpoint in the
-/// repo layer. The CLI then hangs waiting for a reply that never lands.
-/// Verified against `task project list`, `task cook recipe list`,
-/// `task fit routine list`, `task glossary list`. Server log shows the
-/// panic at `vox-core/src/driver.rs:456` inside the
-/// `vox_postcard::to_vec(&response).expect(...)` call.
-///
-/// Once vox gains Uuid support (or task-core wraps Uuids in an
-/// already-supported newtype across DTOs), drop the `ignore` attribute
-/// and this test will start exercising the full chain.
+/// Exercises the CLI → Vox → service → SQLite chain across every
+/// workflow that publishes list/show endpoints with `Uuid` fields.
+/// Originally blocked on a `vox-postcard` `UnsupportedType("Uuid")`
+/// panic in `SendReplyContext::send_reply`; now unblocked since
+/// vox-postcard handles `Uuid` natively (16 raw bytes, like the chrono
+/// special case) and the driver no longer panics on serialize failure.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "blocked on vox-postcard UnsupportedType(\"Uuid\") panic in service responses"]
 async fn cli_e2e_golden_paths() {
     let server_bin = env!("CARGO_BIN_EXE_task-server");
     let fixture = TestFixture::new();

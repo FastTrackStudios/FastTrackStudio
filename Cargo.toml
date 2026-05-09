@@ -88,7 +88,7 @@ version = "1"
 
 [workspace.dependencies.shm-primitives]
 git = "https://github.com/Codys-Wright/vox"
-rev = "ccb46b5416100d38430cb082d71bf0377428c241"
+rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5"
 
 [workspace.dependencies.tokio]
 version = "1"
@@ -111,40 +111,40 @@ path = "crates/task-core"
 
 [workspace.dependencies.vox]
 git = "https://github.com/Codys-Wright/vox"
-rev = "ccb46b5416100d38430cb082d71bf0377428c241"
+rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5"
 features = ["transport-websocket"]
 
 [workspace.dependencies.vox-core]
 git = "https://github.com/Codys-Wright/vox"
-rev = "ccb46b5416100d38430cb082d71bf0377428c241"
+rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5"
 
 [workspace.dependencies.vox-codegen]
 git = "https://github.com/Codys-Wright/vox"
-rev = "ccb46b5416100d38430cb082d71bf0377428c241"
+rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5"
 
 [workspace.dependencies.vox-inprocess]
 git = "https://github.com/Codys-Wright/vox"
-rev = "ccb46b5416100d38430cb082d71bf0377428c241"
+rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5"
 
 [workspace.dependencies.vox-local]
 git = "https://github.com/Codys-Wright/vox"
-rev = "ccb46b5416100d38430cb082d71bf0377428c241"
+rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5"
 
 [workspace.dependencies.vox-schema]
 git = "https://github.com/Codys-Wright/vox"
-rev = "ccb46b5416100d38430cb082d71bf0377428c241"
+rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5"
 
 [workspace.dependencies.vox-stream]
 git = "https://github.com/Codys-Wright/vox"
-rev = "ccb46b5416100d38430cb082d71bf0377428c241"
+rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5"
 
 [workspace.dependencies.vox-types]
 git = "https://github.com/Codys-Wright/vox"
-rev = "ccb46b5416100d38430cb082d71bf0377428c241"
+rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5"
 
 [workspace.dependencies.vox-websocket]
 git = "https://github.com/Codys-Wright/vox"
-rev = "ccb46b5416100d38430cb082d71bf0377428c241"
+rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5"
 
 [workspace.dependencies.sea-orm]
 git = "https://github.com/FastTrackStudios/sea-orm"

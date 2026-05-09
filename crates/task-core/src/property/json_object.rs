@@ -9,7 +9,7 @@
 
 use std::ops::{Deref, DerefMut};
 
-use facet::{Facet, Shape, TypeOpsDirect, VarianceDesc};
+use facet::{Facet, ProxyDef, PtrConst, PtrMut, PtrUninit, Shape, TypeOpsDirect, VarianceDesc};
 use sea_orm::sea_query::{ArrayType, ColumnType, Nullable, Value, ValueType, ValueTypeErr};
 use sea_orm::{ColIdx, QueryResult, TryGetError, TryGetable};
 use serde::{Deserialize, Serialize};
@@ -133,11 +133,45 @@ static JSON_OBJECT_TYPE_OPS: TypeOpsDirect = TypeOpsDirect {
     is_truthy: None,
 };
 
+// Proxy contract: vox-postcard / facet-json / etc. round-trip `JsonObject`
+// through a `String` containing the JSON text. This avoids needing
+// reflection-format-specific support for `serde_json::Value`.
+unsafe fn json_object_convert_out(
+    target_ptr: PtrConst,
+    proxy_ptr: PtrUninit,
+) -> Result<PtrMut, String> {
+    // SAFETY: caller guarantees `target_ptr` points to an initialized `JsonObject`
+    // and `proxy_ptr` points to writable memory sized for `String`.
+    let target: &JsonObject = unsafe { target_ptr.get::<JsonObject>() };
+    let text =
+        serde_json::to_string(&target.0).map_err(|e| format!("JsonObject -> JSON text: {e}"))?;
+    Ok(unsafe { proxy_ptr.put::<String>(text) })
+}
+
+unsafe fn json_object_convert_in(
+    proxy_ptr: PtrConst,
+    target_ptr: PtrUninit,
+) -> Result<PtrMut, String> {
+    // SAFETY: caller guarantees `proxy_ptr` points to an initialized `String`
+    // and `target_ptr` points to writable memory sized for `JsonObject`.
+    let text: String = unsafe { proxy_ptr.read::<String>() };
+    let value: serde_json::Value =
+        serde_json::from_str(&text).map_err(|e| format!("JSON text -> JsonObject: {e}"))?;
+    Ok(unsafe { target_ptr.put::<JsonObject>(JsonObject(value)) })
+}
+
+static JSON_OBJECT_PROXY: ProxyDef = ProxyDef {
+    shape: <String as Facet>::SHAPE,
+    convert_in: json_object_convert_in,
+    convert_out: json_object_convert_out,
+};
+
 unsafe impl<'facet> Facet<'facet> for JsonObject {
     const SHAPE: &'static Shape = &const {
         Shape::builder_for_sized::<JsonObject>("JsonObject")
             .variance(VarianceDesc::INVARIANT)
             .type_ops_direct(&JSON_OBJECT_TYPE_OPS)
+            .proxy(&JSON_OBJECT_PROXY)
             .build()
     };
 }
