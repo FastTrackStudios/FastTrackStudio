@@ -61,10 +61,14 @@ impl LocalCaller {
                 our_settings: ConnectionSettings {
                     parity: Parity::Even,
                     max_concurrent_requests: 64,
+
+                    initial_channel_credit: 16,
                 },
                 peer_settings: ConnectionSettings {
                     parity: Parity::Odd,
                     max_concurrent_requests: 64,
+
+                    initial_channel_credit: 16,
                 },
                 peer_supports_retry: true,
                 session_resume_key: None,
@@ -94,10 +98,14 @@ impl LocalCaller {
             our_settings: ConnectionSettings {
                 parity: Parity::Odd,
                 max_concurrent_requests: 64,
+
+                initial_channel_credit: 16,
             },
             peer_settings: ConnectionSettings {
                 parity: Parity::Even,
                 max_concurrent_requests: 64,
+
+                initial_channel_credit: 16,
             },
             peer_supports_retry: true,
             session_resume_key: None,
@@ -121,6 +129,8 @@ impl LocalCaller {
                 ConnectionSettings {
                     parity: Parity::Odd,
                     max_concurrent_requests: 64,
+
+                    initial_channel_credit: 16,
                 },
                 vec![
                     MetadataEntry {
