@@ -48,6 +48,7 @@ facet = { version = "0.46" }
 
 # ── Keyflow (sibling repo — facade pattern) ─────────────────────────
 keyflow = { git = "https://github.com/FastTrackStudios/keyflow.git", branch = "main" }
+keyflow-daw-analysis = { git = "https://github.com/FastTrackStudios/keyflow.git", branch = "main" }
 
 # ── Actions / Input (sibling repo) ──────────────────────────────────
 actions-proto = { git = "https://github.com/FastTrackStudios/input_actions.git", branch = "main" }
@@ -99,6 +100,7 @@ reaper-test = { path = "../daw/crates/reaper-test" }
 keyflow = { path = "../keyflow/crates/keyflow" }
 keyflow-proto = { path = "../keyflow/crates/keyflow-proto" }
 keyflow-text = { path = "../keyflow/crates/keyflow-text" }
+keyflow-daw-analysis = { path = "../keyflow/crates/keyflow-daw-analysis" }
 engraver = { path = "../keyflow/crates/engraver" }
 engraver-proto = { path = "../keyflow/crates/engraver-proto" }
 #
