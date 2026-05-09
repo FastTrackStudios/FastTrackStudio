@@ -4194,6 +4194,8 @@ dependencies = [
  "launcher-core",
  "launcher-ui",
  "providers",
+ "reaper-high",
+ "reaper-medium",
  "serde",
  "serde_json",
  "tracing",
@@ -13362,16 +13364,40 @@ dependencies = [
 ]
 
 [[patch.unused]]
-name = "blitz"
-version = "0.3.0-alpha.2"
-
-[[patch.unused]]
-name = "blitz"
-version = "0.3.0-alpha.2"
+name = "session-ui"
+version = "0.1.0"
 
 [[patch.unused]]
 name = "sync-ui"
 version = "0.1.0"
+
+[[patch.unused]]
+name = "blitz"
+version = "0.3.0-alpha.2"
+
+[[patch.unused]]
+name = "blitz"
+version = "0.3.0-alpha.2"
+
+[[patch.unused]]
+name = "anyrender_svg"
+version = "0.6.3"
+source = "git+https://github.com/FastTrackStudios/anyrender.git?rev=422b5d0#422b5d0b820dccda702c882fe3eee7ba8e958e77"
+
+[[patch.unused]]
+name = "anyrender_vello"
+version = "0.6.2"
+source = "git+https://github.com/FastTrackStudios/anyrender.git?rev=422b5d0#422b5d0b820dccda702c882fe3eee7ba8e958e77"
+
+[[patch.unused]]
+name = "anyrender_vello_hybrid"
+version = "0.1.1"
+source = "git+https://github.com/FastTrackStudios/anyrender.git?rev=422b5d0#422b5d0b820dccda702c882fe3eee7ba8e958e77"
+
+[[patch.unused]]
+name = "wgpu_context"
+version = "0.1.2"
+source = "git+https://github.com/FastTrackStudios/anyrender.git?rev=422b5d0#422b5d0b820dccda702c882fe3eee7ba8e958e77"
 
 [[patch.unused]]
 name = "vox"
@@ -13412,27 +13438,3 @@ source = "git+https://github.com/Codys-Wright/vox.git?rev=ccb46b5416100d38430cb0
 name = "vox-types"
 version = "0.3.1"
 source = "git+https://github.com/Codys-Wright/vox.git?rev=ccb46b5416100d38430cb082d71bf0377428c241#ccb46b5416100d38430cb082d71bf0377428c241"
-
-[[patch.unused]]
-name = "anyrender_svg"
-version = "0.6.3"
-source = "git+https://github.com/FastTrackStudios/anyrender.git?rev=422b5d0#422b5d0b820dccda702c882fe3eee7ba8e958e77"
-
-[[patch.unused]]
-name = "anyrender_vello"
-version = "0.6.2"
-source = "git+https://github.com/FastTrackStudios/anyrender.git?rev=422b5d0#422b5d0b820dccda702c882fe3eee7ba8e958e77"
-
-[[patch.unused]]
-name = "anyrender_vello_hybrid"
-version = "0.1.1"
-source = "git+https://github.com/FastTrackStudios/anyrender.git?rev=422b5d0#422b5d0b820dccda702c882fe3eee7ba8e958e77"
-
-[[patch.unused]]
-name = "wgpu_context"
-version = "0.1.2"
-source = "git+https://github.com/FastTrackStudios/anyrender.git?rev=422b5d0#422b5d0b820dccda702c882fe3eee7ba8e958e77"
-
-[[patch.unused]]
-name = "session-ui"
-version = "0.1.0"

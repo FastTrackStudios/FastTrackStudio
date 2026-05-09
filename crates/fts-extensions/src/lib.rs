@@ -326,6 +326,7 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
         .map_err(|_| "Global already set")?;
 
     let g = Global::get();
+    let _ = daw::init_from_parts(g.daw.clone(), g.tokio_runtime.clone());
     daw::reaper::set_task_support(&g.task_support);
 
     let task_middleware = MainTaskMiddleware::new(g.task_sender.clone(), g.task_receiver.clone());
