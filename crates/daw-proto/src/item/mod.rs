@@ -18,6 +18,6 @@ pub use service::{
     TakeServiceDispatcher, item_service_service_descriptor, take_service_service_descriptor,
 };
 pub use take::{
-    SourceType, Take, TakeMarker, TakeMarkerCreate, TakeMarkerUpdate, TakeRating, TakeRef,
-    take_rating_actions,
+    AddTakeMarkerAtPositionRequest, SourceType, Take, TakeMarker, TakeMarkerCreate,
+    TakeMarkerUpdate, TakeRating, TakeRef, take_rating_actions,
 };

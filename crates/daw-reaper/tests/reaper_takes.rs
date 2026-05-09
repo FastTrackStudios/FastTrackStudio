@@ -190,9 +190,9 @@ async fn take_marker_add_list_update_delete(
     assert!(names.contains(&"chorus"));
     let verse = markers.iter().find(|m| m.name == "verse").unwrap();
     assert!(
-        (verse.position_ppq - 960.0).abs() < 0.5,
+        (verse.source_position_seconds - 960.0).abs() < 0.5,
         "verse position should be ~960 PPQ, got {}",
-        verse.position_ppq
+        verse.source_position_seconds
     );
     assert_eq!(
         verse.color,
@@ -210,7 +210,7 @@ async fn take_marker_add_list_update_delete(
         .find(|m| m.name == "intro-renamed")
         .ok_or_else(|| eyre::eyre!("renamed intro not found: {after_update:?}"))?;
     assert!(
-        (intro.position_ppq - 120.0).abs() < 0.5,
+        (intro.source_position_seconds - 120.0).abs() < 0.5,
         "intro should reposition to 120 PPQ"
     );
 
@@ -226,6 +226,71 @@ async fn take_marker_add_list_update_delete(
     assert!(after_delete.iter().all(|m| m.name != "chorus"));
 
     let _ = m1; // m1 is referenced — silence unused warnings
+    Ok(())
+}
+
+#[reaper_test(isolated)]
+async fn take_marker_at_project_position_inside_and_outside(
+    ctx: &reaper_test::ReaperTestContext,
+) -> eyre::Result<()> {
+    use daw_proto::{Position, PositionInSeconds};
+
+    let project = ctx.project().clone();
+    let track = project.tracks().add("Take Marker At Track", None).await?;
+    // Item starts at 4.0s, length 2.0s → playable region [4.0, 6.0].
+    let item = track
+        .items()
+        .add(
+            PositionInSeconds::from_seconds(4.0),
+            daw_proto::Duration::from_seconds(2.0),
+        )
+        .await?;
+    let take = item.takes().active().await?;
+
+    // Inside the item: project_time 5.0s → source_time = 0 + (5.0 - 4.0) * 1 = 1.0s.
+    let inside = Position::from_time(PositionInSeconds::from_seconds(5.0));
+    let idx = take
+        .add_marker_at(inside, "[alice] inside", Some(0xFF8800))
+        .await?
+        .ok_or_else(|| eyre::eyre!("inside marker should have been added"))?;
+    let markers = take.markers().await?;
+    let marker = markers
+        .iter()
+        .find(|m| m.index == idx)
+        .ok_or_else(|| eyre::eyre!("added marker missing from list"))?;
+    assert!(
+        (marker.source_position_seconds - 1.0).abs() < 0.005,
+        "expected source_position ~= 1.0s, got {}",
+        marker.source_position_seconds
+    );
+    assert_eq!(marker.name, "[alice] inside");
+    assert_eq!(marker.color, Some(0xFF8800));
+
+    // Before the item: project_time 1.0s — outside, should be a no-op.
+    let before = Position::from_time(PositionInSeconds::from_seconds(1.0));
+    let outside_before = take.add_marker_at(before, "[alice] before", None).await?;
+    assert!(
+        outside_before.is_none(),
+        "marker before item should be rejected, got idx={outside_before:?}"
+    );
+
+    // After the item: project_time 100.0s — also a no-op.
+    let after = Position::from_time(PositionInSeconds::from_seconds(100.0));
+    let outside_after = take.add_marker_at(after, "[alice] after", None).await?;
+    assert!(
+        outside_after.is_none(),
+        "marker after item should be rejected, got idx={outside_after:?}"
+    );
+
+    // Still only one marker (the inside one).
+    let final_markers = take.markers().await?;
+    assert_eq!(
+        final_markers.len(),
+        1,
+        "expected 1 marker after bounds-rejected calls, got {}",
+        final_markers.len()
+    );
+
     Ok(())
 }
 

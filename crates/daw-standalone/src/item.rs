@@ -718,4 +718,14 @@ impl TakeService for StandaloneTake {
         _command_id: u32,
     ) {
     }
+
+    async fn add_take_marker_at_position(
+        &self,
+        _project: ProjectContext,
+        _item: daw_proto::ItemRef,
+        _take: TakeRef,
+        _request: daw_proto::AddTakeMarkerAtPositionRequest,
+    ) -> Option<u32> {
+        None
+    }
 }

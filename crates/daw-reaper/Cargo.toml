@@ -18,6 +18,10 @@ moire.workspace = true
 
 # RPP chunk parsing/serialization for chunk-based FX manipulation
 dawfile-reaper = { path = "../dawfile-reaper" }
+dawfile-ableton = { path = "../dawfile-ableton" }
+dawfile-protools = { path = "../dawfile-protools" }
+dawfile-aaf = { path = "../dawfile-aaf" }
+dawfile-dawproject = { path = "../dawfile-dawproject" }
 
 # REAPER bindings for actual DAW control
 reaper-high.workspace = true

@@ -306,6 +306,23 @@ pub trait TakeService {
         index: u32,
     );
 
+    /// Place a take marker at an absolute project-timeline position. The
+    /// implementation does the project-time → source-time conversion
+    /// (accounting for the item's start, the take's start offset and play
+    /// rate) so callers can drop a marker at, say, "playhead" or "second
+    /// verse" without computing the source offset themselves.
+    ///
+    /// Returns the new marker's enumeration index, or `None` if the
+    /// position falls outside the item's playable region (no-op + warning
+    /// in the host log).
+    async fn add_take_marker_at_position(
+        &self,
+        project: ProjectContext,
+        item: ItemRef,
+        take: TakeRef,
+        request: super::AddTakeMarkerAtPositionRequest,
+    ) -> Option<u32>;
+
     // =========================================================================
     // Take Ratings (REAPER 7.17+ ranking actions)
     // =========================================================================

@@ -418,7 +418,7 @@ pub fn get_set_item_state(
 pub struct TakeMarker {
     pub index: u32,
     pub name: String,
-    pub position_ppq: f64,
+    pub source_position_seconds: f64,
     pub color: Option<u32>,
 }
 
@@ -454,7 +454,7 @@ pub fn get_take_marker(
     Some(TakeMarker {
         index,
         name,
-        position_ppq: pos,
+        source_position_seconds: pos,
         // REAPER returns color OR'd with 0x1000000 to mark "set"; mask it
         // out and surface None for "default".
         color: if color != 0 {
@@ -479,11 +479,11 @@ pub fn add_take_marker(
     low: &reaper_low::Reaper,
     take: MediaItemTake,
     name: &str,
-    position_ppq: f64,
+    source_position_seconds: f64,
     color: Option<u32>,
 ) -> Option<u32> {
     let cname = std::ffi::CString::new(name).ok()?;
-    let mut pos = position_ppq;
+    let mut pos = source_position_seconds;
     let mut color_val = color
         .map(|c| ((c & 0x00FF_FFFF) | 0x0100_0000) as i32)
         .unwrap_or(0);
@@ -512,7 +512,7 @@ pub fn update_take_marker(
     take: MediaItemTake,
     index: u32,
     name: Option<&str>,
-    position_ppq: Option<f64>,
+    source_position_seconds: Option<f64>,
     color: Option<Option<u32>>,
 ) -> bool {
     // Read-modify-write: REAPER's `SetTakeMarker` overwrites all fields, so
@@ -522,7 +522,7 @@ pub fn update_take_marker(
         None => return false,
     };
     let new_name = name.unwrap_or(&existing.name);
-    let new_pos = position_ppq.unwrap_or(existing.position_ppq);
+    let new_pos = source_position_seconds.unwrap_or(existing.source_position_seconds);
     let new_color = match color {
         Some(c) => c,
         None => existing.color,

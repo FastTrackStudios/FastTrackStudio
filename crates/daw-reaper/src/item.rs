@@ -1744,7 +1744,7 @@ impl TakeService for ReaperTake {
                 .map(|m| daw_proto::TakeMarker {
                     index: m.index,
                     name: m.name,
-                    position_ppq: m.position_ppq,
+                    source_position_seconds: m.source_position_seconds,
                     color: m.color,
                 })
                 .collect()
@@ -1768,7 +1768,7 @@ impl TakeService for ReaperTake {
                 low,
                 take_ptr,
                 &marker.name,
-                marker.position_ppq,
+                marker.source_position_seconds,
                 marker.color,
             )
         })
@@ -1798,7 +1798,7 @@ impl TakeService for ReaperTake {
                 take_ptr,
                 update.index,
                 update.name.as_deref(),
-                update.position_ppq,
+                update.source_position_seconds,
                 update.color,
             );
         });
@@ -1823,6 +1823,95 @@ impl TakeService for ReaperTake {
             let low = Reaper::get().medium_reaper().low();
             item_sw::delete_take_marker(low, take_ptr, index);
         });
+    }
+
+    async fn add_take_marker_at_position(
+        &self,
+        project: ProjectContext,
+        item: ItemRef,
+        take: TakeRef,
+        request: daw_proto::AddTakeMarkerAtPositionRequest,
+    ) -> Option<u32> {
+        let project_for_query = project.clone();
+        main_thread::query(move || {
+            let item_ptr = ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)?;
+            let take_ptr = Self::resolve_take(item_ptr, &take)?;
+            let medium = Reaper::get().medium_reaper();
+            let low = medium.low();
+
+            // Resolve `Position` → project-time seconds. Prefer the
+            // `time` form; fall back to `musical` via the tempo map.
+            let project_seconds = if let Some(t) = request.position.time {
+                t.as_seconds()
+            } else if let Some(m) = request.position.musical {
+                // Approximate (measure, beat, subdivision) → quarter notes
+                // assuming a 4/4 grid for measure boundaries. REAPER's tempo
+                // map will translate the QN value to project-time taking
+                // mid-project tempo/meter changes into account.
+                let measure = (m.measure - 1).max(0) as f64;
+                let beat = m.beat as f64;
+                let sub = (m.subdivision as f64) / 1000.0;
+                let total_qn = measure * 4.0 + beat + sub;
+                let reaper_ctx = resolve_project_context(&project_for_query);
+                medium
+                    .time_map_2_qn_to_time(
+                        reaper_ctx,
+                        reaper_medium::PositionInQuarterNotes::new_panic(total_qn),
+                    )
+                    .get()
+            } else {
+                tracing::warn!(
+                    "ReaperTake::add_take_marker_at_position: Position has no time/musical form; nothing to do"
+                );
+                return None;
+            };
+
+            // Read item bounds + take rate/offset.
+            let item_pos =
+                item_sw::get_item_info_value(medium, item_ptr, ItemAttributeKey::Position);
+            let item_len =
+                item_sw::get_item_info_value(medium, item_ptr, ItemAttributeKey::Length);
+            let item_end = item_pos + item_len;
+
+            // Tiny epsilon for floating-point edge cases (1ms).
+            const EPS: f64 = 0.001;
+            if project_seconds < item_pos - EPS || project_seconds > item_end + EPS {
+                tracing::warn!(
+                    project_seconds,
+                    item_pos,
+                    item_end,
+                    "ReaperTake::add_take_marker_at_position: position outside item bounds; no-op"
+                );
+                return None;
+            }
+
+            let play_rate =
+                item_sw::get_take_info_value(medium, take_ptr, TakeAttributeKey::PlayRate);
+            let start_offset =
+                item_sw::get_take_info_value(medium, take_ptr, TakeAttributeKey::StartOffs);
+            let play_rate = if play_rate <= 0.0 { 1.0 } else { play_rate };
+
+            // source_time = take.start_offset + (project_time - item.position) * take.play_rate
+            let source_seconds = start_offset + (project_seconds - item_pos) * play_rate;
+            if source_seconds < -EPS {
+                tracing::warn!(
+                    source_seconds,
+                    "ReaperTake::add_take_marker_at_position: computed source position negative; no-op"
+                );
+                return None;
+            }
+            let source_seconds = source_seconds.max(0.0);
+
+            item_sw::add_take_marker(
+                low,
+                take_ptr,
+                &request.name,
+                source_seconds,
+                request.color,
+            )
+        })
+        .await
+        .flatten()
     }
 
     async fn run_take_rating_action(

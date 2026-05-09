@@ -142,7 +142,7 @@ pub struct TakeMarker {
     /// 1..=5 as a star rating.
     pub name: String,
     /// Position in source PPQ (NOT take-time, NOT absolute project time).
-    pub position_ppq: f64,
+    pub source_position_seconds: f64,
     /// Custom color (0xRRGGBB). `None` falls back to REAPER's default.
     pub color: Option<u32>,
 }
@@ -151,7 +151,7 @@ pub struct TakeMarker {
 #[derive(Clone, Debug, Facet)]
 pub struct TakeMarkerCreate {
     pub name: String,
-    pub position_ppq: f64,
+    pub source_position_seconds: f64,
     pub color: Option<u32>,
 }
 
@@ -161,10 +161,26 @@ pub struct TakeMarkerCreate {
 pub struct TakeMarkerUpdate {
     pub index: u32,
     pub name: Option<String>,
-    pub position_ppq: Option<f64>,
+    pub source_position_seconds: Option<f64>,
     /// `Some(Some(c))` sets a color, `Some(None)` clears it, `None` leaves
     /// the existing color untouched.
     pub color: Option<Option<u32>>,
+}
+
+/// Place a take marker at a project-timeline position. The service
+/// converts the project position to source-time (accounting for the
+/// item's start position, the take's start offset and play rate). If
+/// the resulting source position is out of bounds — the project position
+/// falls before/after the item, or the source has a known length and the
+/// computed source-time exceeds it — the call is a no-op (`Ok(None)`).
+#[derive(Clone, Debug, Facet)]
+pub struct AddTakeMarkerAtPositionRequest {
+    pub name: String,
+    /// Project-timeline position. May carry musical / time / MIDI forms;
+    /// the implementation prefers `time` if present, otherwise resolves
+    /// `musical` via the project's tempo map.
+    pub position: crate::primitives::Position,
+    pub color: Option<u32>,
 }
 
 // ─── Take ratings (REAPER 7.17+) ───────────────────────────────────────────

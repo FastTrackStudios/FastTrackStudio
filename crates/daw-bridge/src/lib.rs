@@ -5,7 +5,6 @@
 //! the DAW through vox RPC. Integrated extensions use daw-extension-runtime
 //! in-process instead of routing through this bridge.
 
-mod project_import;
 mod routed_handler;
 
 // ============================================================================
@@ -559,14 +558,7 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     session.plugin_register_add_timer(timer_callback)?;
     daw::reaper::register_extension_menu(&mut session);
 
-    // Register project file importer (Ableton .als → REAPER)
-    let import_register = reaper_medium::OwnedProjectImportRegister::new(
-        project_import::want_project_file,
-        project_import::enum_file_extensions,
-        project_import::load_project,
-    );
-    session.plugin_register_add_project_import(import_register)?;
-    info!("Project import handler registered (.als)");
+    daw::reaper::register_project_importer(&mut session)?;
 
     drop(session);
 

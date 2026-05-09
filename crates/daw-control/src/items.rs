@@ -887,11 +887,18 @@ impl TakeHandle {
             .await?)
     }
 
-    /// Append a new take marker. Returns the new enumeration index.
+    /// Append a new take marker at an exact source-time position.
+    /// Returns the new enumeration index.
+    ///
+    /// `source_position_seconds` is in the take's own source time
+    /// (REAPER's `srcpos`) — `0.0` is the start of the source media,
+    /// independent of where the item sits on the timeline. For
+    /// project-time positioning (drop a marker at "second verse" or
+    /// "playhead position"), use [`Self::add_marker_at`].
     pub async fn add_marker(
         &self,
         name: &str,
-        position_ppq: f64,
+        source_position_seconds: f64,
         color: Option<u32>,
     ) -> Result<Option<u32>> {
         Ok(self
@@ -903,7 +910,7 @@ impl TakeHandle {
                 self.take_ref.clone(),
                 daw_proto::TakeMarkerCreate {
                     name: name.to_string(),
-                    position_ppq,
+                    source_position_seconds,
                     color,
                 },
             )
@@ -916,7 +923,7 @@ impl TakeHandle {
         &self,
         index: u32,
         name: Option<&str>,
-        position_ppq: Option<f64>,
+        source_position_seconds: Option<f64>,
         color: Option<Option<u32>>,
     ) -> Result<()> {
         self.clients
@@ -928,12 +935,49 @@ impl TakeHandle {
                 daw_proto::TakeMarkerUpdate {
                     index,
                     name: name.map(|s| s.to_string()),
-                    position_ppq,
+                    source_position_seconds,
                     color,
                 },
             )
             .await?;
         Ok(())
+    }
+
+    /// Place a take marker at an absolute project-timeline position. The
+    /// service does the project-time → take-source-time conversion (the
+    /// item's start position, the take's start offset, and its play rate
+    /// all factor in).
+    ///
+    /// Returns:
+    /// * `Ok(Some(index))` — marker added; the value is REAPER's
+    ///   enumeration index for the new marker.
+    /// * `Ok(None)` — the position fell outside the item's playable
+    ///   region (or the resulting source-time was negative). The service
+    ///   logs a warning and does nothing else.
+    ///
+    /// Use this for "drop a marker at the playhead", "annotate at second
+    /// verse", etc. — anywhere the caller is thinking in terms of project
+    /// time / musical time, not the take's source frame.
+    pub async fn add_marker_at(
+        &self,
+        position: daw_proto::Position,
+        name: &str,
+        color: Option<u32>,
+    ) -> Result<Option<u32>> {
+        Ok(self
+            .clients
+            .take
+            .add_take_marker_at_position(
+                self.context(),
+                self.item_ref(),
+                self.take_ref.clone(),
+                daw_proto::AddTakeMarkerAtPositionRequest {
+                    name: name.to_string(),
+                    position,
+                    color,
+                },
+            )
+            .await?)
     }
 
     /// Delete the take marker at the given enumeration index.
