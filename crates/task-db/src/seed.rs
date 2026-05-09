@@ -53,6 +53,7 @@ use task_core::recipe_ingredient;
 use task_core::recipe_step;
 use task_core::routine::{self, RoutineTagList};
 use task_core::routine_exercise;
+use task_core::set_log;
 use task_core::shopping_list;
 use task_core::substitution;
 use task_core::task::{
@@ -61,6 +62,7 @@ use task_core::task::{
 };
 use task_core::track::{self, TrackStatus};
 use task_core::views::{self, ViewDisplay, ViewFilters};
+use task_core::workout_session::{self, WorkoutSessionStatus};
 
 /// Namespace for demo-data UUID derivation. Stable; do not change without
 /// running `reset_demo_data` first.
@@ -145,6 +147,10 @@ pub struct DemoSeedSummary {
     pub routines_unchanged: usize,
     pub routine_exercises_created: usize,
     pub routine_exercises_unchanged: usize,
+    pub workout_sessions_created: usize,
+    pub workout_sessions_unchanged: usize,
+    pub set_logs_created: usize,
+    pub set_logs_unchanged: usize,
 }
 
 impl DemoSeedSummary {
@@ -181,6 +187,8 @@ impl DemoSeedSummary {
             + self.exercises_created
             + self.routines_created
             + self.routine_exercises_created
+            + self.workout_sessions_created
+            + self.set_logs_created
     }
 
     pub fn total_unchanged(&self) -> usize {
@@ -216,6 +224,8 @@ impl DemoSeedSummary {
             + self.exercises_unchanged
             + self.routines_unchanged
             + self.routine_exercises_unchanged
+            + self.workout_sessions_unchanged
+            + self.set_logs_unchanged
     }
 }
 
@@ -261,12 +271,33 @@ pub async fn seed_demo_data(db: &DatabaseConnection) -> Result<DemoSeedSummary, 
     seed_substitutions(db, &mut summary).await?;
     seed_exercises(db, &mut summary).await?;
     seed_routines(db, &mut summary).await?;
+    seed_workout_sessions(db, &mut summary).await?;
     Ok(summary)
 }
 
 /// Delete every row created by [`seed_demo_data`] (by deterministic id).
 pub async fn reset_demo_data(db: &DatabaseConnection) -> Result<DemoSeedSummary, DbErr> {
     let mut summary = DemoSeedSummary::default();
+
+    // Fitness actuals — set_logs before workout_sessions, both before
+    // routines (set_log soft-FK to both routine_exercise and exercise).
+    for key in WORKOUT_SESSION_KEYS {
+        let sid = demo_id(key);
+        let removed_sets = set_log::Entity::delete_many()
+            .filter(set_log::Column::WorkoutSessionId.eq(sid))
+            .exec(db)
+            .await?
+            .rows_affected as usize;
+        summary.set_logs_created += removed_sets;
+        if workout_session::Entity::delete_by_id(sid)
+            .exec(db)
+            .await?
+            .rows_affected
+            > 0
+        {
+            summary.workout_sessions_created += 1;
+        }
+    }
 
     // Fitness — routine_exercises before routines; exercises last
     // (routine_exercises soft-FK to both).
@@ -995,6 +1026,11 @@ const ROUTINE_KEYS: &[&str] = &[
     "routine:push-day",
     "routine:easy-5k",
     "routine:full-body-kettlebell",
+];
+
+const WORKOUT_SESSION_KEYS: &[&str] = &[
+    "workout_session:push-day-active",
+    "workout_session:easy-5k-completed",
 ];
 
 // ── Project fixtures ────────────────────────────────────────────────────────
@@ -6581,6 +6617,522 @@ async fn seed_routines(
             routine_exercise::Entity::insert(active).exec(db).await?;
             summary.routine_exercises_created += 1;
         }
+    }
+    Ok(())
+}
+
+// ── Workout sessions (actuals) ───────────────────────────────────────
+
+struct PlannedSetFixture {
+    /// Optional Exercise lookup key. When None, the set is custom-named
+    /// and exercise_id stays null.
+    exercise_key: Option<&'static str>,
+    /// Slug-ish suffix used to derive the deterministic SetLog id.
+    slug: &'static str,
+    /// Display name to use when exercise_key is None.
+    custom_display_name: &'static str,
+    /// 1-based set index (= set_index + 1) — produces deterministic ids
+    /// like "set_log:push-day-active:bench-press:1".
+    set_no: u32,
+    reps: Option<u32>,
+    weight_kg: Option<f64>,
+    duration_seconds: Option<u32>,
+    distance_meters: Option<f64>,
+    avg_hr: Option<u32>,
+    pace_seconds_per_km: Option<u32>,
+    rpe: Option<f32>,
+    /// Some(offset minutes ago) → completed; None → pending.
+    completed_minutes_ago: Option<i64>,
+}
+
+const PUSH_DAY_PLANNED_SETS: &[PlannedSetFixture] = &[
+    // Bench Press: 4 of 8 @ 80kg, first 3 done with reps 8/7/7 + rpe 7/7.5/8
+    PlannedSetFixture {
+        exercise_key: Some("exercise:bench-press"),
+        slug: "bench-press",
+        custom_display_name: "",
+        set_no: 1,
+        reps: Some(8),
+        weight_kg: Some(80.0),
+        duration_seconds: None,
+        distance_meters: None,
+        avg_hr: None,
+        pace_seconds_per_km: None,
+        rpe: Some(7.0),
+        completed_minutes_ago: Some(80),
+    },
+    PlannedSetFixture {
+        exercise_key: Some("exercise:bench-press"),
+        slug: "bench-press",
+        custom_display_name: "",
+        set_no: 2,
+        reps: Some(7),
+        weight_kg: Some(80.0),
+        duration_seconds: None,
+        distance_meters: None,
+        avg_hr: None,
+        pace_seconds_per_km: None,
+        rpe: Some(7.5),
+        completed_minutes_ago: Some(75),
+    },
+    PlannedSetFixture {
+        exercise_key: Some("exercise:bench-press"),
+        slug: "bench-press",
+        custom_display_name: "",
+        set_no: 3,
+        reps: Some(7),
+        weight_kg: Some(80.0),
+        duration_seconds: None,
+        distance_meters: None,
+        avg_hr: None,
+        pace_seconds_per_km: None,
+        rpe: Some(8.0),
+        completed_minutes_ago: Some(70),
+    },
+    PlannedSetFixture {
+        exercise_key: Some("exercise:bench-press"),
+        slug: "bench-press",
+        custom_display_name: "",
+        set_no: 4,
+        reps: Some(8),
+        weight_kg: Some(80.0),
+        duration_seconds: None,
+        distance_meters: None,
+        avg_hr: None,
+        pace_seconds_per_km: None,
+        rpe: None,
+        completed_minutes_ago: None,
+    },
+    // Overhead Press: 3 of 8 @ 50kg, first 2 done
+    PlannedSetFixture {
+        exercise_key: Some("exercise:overhead-press"),
+        slug: "overhead-press",
+        custom_display_name: "",
+        set_no: 1,
+        reps: Some(8),
+        weight_kg: Some(50.0),
+        duration_seconds: None,
+        distance_meters: None,
+        avg_hr: None,
+        pace_seconds_per_km: None,
+        rpe: Some(7.0),
+        completed_minutes_ago: Some(60),
+    },
+    PlannedSetFixture {
+        exercise_key: Some("exercise:overhead-press"),
+        slug: "overhead-press",
+        custom_display_name: "",
+        set_no: 2,
+        reps: Some(8),
+        weight_kg: Some(50.0),
+        duration_seconds: None,
+        distance_meters: None,
+        avg_hr: None,
+        pace_seconds_per_km: None,
+        rpe: Some(8.0),
+        completed_minutes_ago: Some(55),
+    },
+    PlannedSetFixture {
+        exercise_key: Some("exercise:overhead-press"),
+        slug: "overhead-press",
+        custom_display_name: "",
+        set_no: 3,
+        reps: Some(8),
+        weight_kg: Some(50.0),
+        duration_seconds: None,
+        distance_meters: None,
+        avg_hr: None,
+        pace_seconds_per_km: None,
+        rpe: None,
+        completed_minutes_ago: None,
+    },
+    // Incline Dumbbell Press: 3 of 10 @ 25kg, first 1 done
+    PlannedSetFixture {
+        exercise_key: Some("exercise:incline-dumbbell-press"),
+        slug: "incline-dumbbell-press",
+        custom_display_name: "",
+        set_no: 1,
+        reps: Some(10),
+        weight_kg: Some(25.0),
+        duration_seconds: None,
+        distance_meters: None,
+        avg_hr: None,
+        pace_seconds_per_km: None,
+        rpe: Some(7.0),
+        completed_minutes_ago: Some(40),
+    },
+    PlannedSetFixture {
+        exercise_key: Some("exercise:incline-dumbbell-press"),
+        slug: "incline-dumbbell-press",
+        custom_display_name: "",
+        set_no: 2,
+        reps: Some(10),
+        weight_kg: Some(25.0),
+        duration_seconds: None,
+        distance_meters: None,
+        avg_hr: None,
+        pace_seconds_per_km: None,
+        rpe: None,
+        completed_minutes_ago: None,
+    },
+    PlannedSetFixture {
+        exercise_key: Some("exercise:incline-dumbbell-press"),
+        slug: "incline-dumbbell-press",
+        custom_display_name: "",
+        set_no: 3,
+        reps: Some(10),
+        weight_kg: Some(25.0),
+        duration_seconds: None,
+        distance_meters: None,
+        avg_hr: None,
+        pace_seconds_per_km: None,
+        rpe: None,
+        completed_minutes_ago: None,
+    },
+    // Tricep Pushdown (custom, no exercise_id): 3 of 12, none done
+    PlannedSetFixture {
+        exercise_key: None,
+        slug: "tricep-pushdown",
+        custom_display_name: "Tricep Pushdown",
+        set_no: 1,
+        reps: Some(12),
+        weight_kg: None,
+        duration_seconds: None,
+        distance_meters: None,
+        avg_hr: None,
+        pace_seconds_per_km: None,
+        rpe: None,
+        completed_minutes_ago: None,
+    },
+    PlannedSetFixture {
+        exercise_key: None,
+        slug: "tricep-pushdown",
+        custom_display_name: "Tricep Pushdown",
+        set_no: 2,
+        reps: Some(12),
+        weight_kg: None,
+        duration_seconds: None,
+        distance_meters: None,
+        avg_hr: None,
+        pace_seconds_per_km: None,
+        rpe: None,
+        completed_minutes_ago: None,
+    },
+    PlannedSetFixture {
+        exercise_key: None,
+        slug: "tricep-pushdown",
+        custom_display_name: "Tricep Pushdown",
+        set_no: 3,
+        reps: Some(12),
+        weight_kg: None,
+        duration_seconds: None,
+        distance_meters: None,
+        avg_hr: None,
+        pace_seconds_per_km: None,
+        rpe: None,
+        completed_minutes_ago: None,
+    },
+    // Plank: 3 of 45s, first 1 done
+    PlannedSetFixture {
+        exercise_key: Some("exercise:plank"),
+        slug: "plank",
+        custom_display_name: "",
+        set_no: 1,
+        reps: None,
+        weight_kg: None,
+        duration_seconds: Some(45),
+        distance_meters: None,
+        avg_hr: None,
+        pace_seconds_per_km: None,
+        rpe: None,
+        completed_minutes_ago: Some(20),
+    },
+    PlannedSetFixture {
+        exercise_key: Some("exercise:plank"),
+        slug: "plank",
+        custom_display_name: "",
+        set_no: 2,
+        reps: None,
+        weight_kg: None,
+        duration_seconds: Some(45),
+        distance_meters: None,
+        avg_hr: None,
+        pace_seconds_per_km: None,
+        rpe: None,
+        completed_minutes_ago: None,
+    },
+    PlannedSetFixture {
+        exercise_key: Some("exercise:plank"),
+        slug: "plank",
+        custom_display_name: "",
+        set_no: 3,
+        reps: None,
+        weight_kg: None,
+        duration_seconds: Some(45),
+        distance_meters: None,
+        avg_hr: None,
+        pace_seconds_per_km: None,
+        rpe: None,
+        completed_minutes_ago: None,
+    },
+    // Hanging Leg Raise: 3 of 10, none done
+    PlannedSetFixture {
+        exercise_key: Some("exercise:hanging-leg-raise"),
+        slug: "hanging-leg-raise",
+        custom_display_name: "",
+        set_no: 1,
+        reps: Some(10),
+        weight_kg: None,
+        duration_seconds: None,
+        distance_meters: None,
+        avg_hr: None,
+        pace_seconds_per_km: None,
+        rpe: None,
+        completed_minutes_ago: None,
+    },
+    PlannedSetFixture {
+        exercise_key: Some("exercise:hanging-leg-raise"),
+        slug: "hanging-leg-raise",
+        custom_display_name: "",
+        set_no: 2,
+        reps: Some(10),
+        weight_kg: None,
+        duration_seconds: None,
+        distance_meters: None,
+        avg_hr: None,
+        pace_seconds_per_km: None,
+        rpe: None,
+        completed_minutes_ago: None,
+    },
+    PlannedSetFixture {
+        exercise_key: Some("exercise:hanging-leg-raise"),
+        slug: "hanging-leg-raise",
+        custom_display_name: "",
+        set_no: 3,
+        reps: Some(10),
+        weight_kg: None,
+        duration_seconds: None,
+        distance_meters: None,
+        avg_hr: None,
+        pace_seconds_per_km: None,
+        rpe: None,
+        completed_minutes_ago: None,
+    },
+];
+
+const EASY_5K_PLANNED_SETS: &[PlannedSetFixture] = &[PlannedSetFixture {
+    exercise_key: Some("exercise:easy-run"),
+    slug: "easy-run",
+    custom_display_name: "",
+    set_no: 1,
+    reps: None,
+    weight_kg: None,
+    duration_seconds: Some(1830),
+    distance_meters: Some(5050.0),
+    avg_hr: Some(142),
+    pace_seconds_per_km: Some(363),
+    rpe: Some(5.0),
+    // Sentinel value: "completed at session.completed_at"; the seed
+    // overrides this for the cardio set since the session itself
+    // completed 3 days ago.
+    completed_minutes_ago: Some(0),
+}];
+
+#[allow(clippy::too_many_lines)]
+async fn seed_workout_sessions(
+    db: &DatabaseConnection,
+    summary: &mut DemoSeedSummary,
+) -> Result<(), DbErr> {
+    let now = Utc::now();
+    let push_day_routine_id = demo_id("routine:push-day");
+    let easy_5k_routine_id = demo_id("routine:easy-5k");
+
+    // ── Active Push Day session ──────────────────────────────
+    let session_key_push = "workout_session:push-day-active";
+    let push_session_id = demo_id(session_key_push);
+    if workout_session::Entity::find_by_id(push_session_id)
+        .one(db)
+        .await?
+        .is_none()
+    {
+        let started_at = now - Duration::minutes(90);
+        let push_routine = routine::Entity::find_by_id(push_day_routine_id)
+            .one(db)
+            .await?;
+        let routine_name = push_routine
+            .as_ref()
+            .map(|r| r.name.clone())
+            .unwrap_or_else(|| "Push Day".to_string());
+        let session_active = workout_session::ActiveModel {
+            id: Set(push_session_id),
+            routine_id: Set(Some(push_day_routine_id)),
+            routine_name_snapshot: Set(routine_name),
+            status: Set(WorkoutSessionStatus::Active),
+            started_at: Set(started_at),
+            completed_at: Set(None),
+            notes: Set(String::new()),
+            overall_rpe: Set(None),
+            bodyweight_kg: Set(Some(78.0)),
+            organization: Set(Some(ORG_PERSONAL.to_string())),
+            created_by: Set(Some("cody".to_string())),
+            properties: Set(JsonObject::default()),
+            created_at: Set(started_at),
+            updated_at: Set(now),
+        };
+        workout_session::Entity::insert(session_active)
+            .exec(db)
+            .await?;
+        summary.workout_sessions_created += 1;
+
+        seed_planned_sets(
+            db,
+            summary,
+            push_session_id,
+            "push-day-active",
+            PUSH_DAY_PLANNED_SETS,
+            started_at,
+            now,
+        )
+        .await?;
+    } else {
+        summary.workout_sessions_unchanged += 1;
+        let existing = set_log::Entity::find()
+            .filter(set_log::Column::WorkoutSessionId.eq(push_session_id))
+            .count(db)
+            .await? as usize;
+        summary.set_logs_unchanged += existing;
+    }
+
+    // ── Completed Easy 5K session ───────────────────────────
+    let session_key_5k = "workout_session:easy-5k-completed";
+    let easy_5k_session_id = demo_id(session_key_5k);
+    if workout_session::Entity::find_by_id(easy_5k_session_id)
+        .one(db)
+        .await?
+        .is_none()
+    {
+        let completed_at = now - Duration::days(3);
+        let started_at = completed_at - Duration::minutes(31);
+        let easy_routine = routine::Entity::find_by_id(easy_5k_routine_id)
+            .one(db)
+            .await?;
+        let routine_name = easy_routine
+            .as_ref()
+            .map(|r| r.name.clone())
+            .unwrap_or_else(|| "Easy 5K".to_string());
+        let session_active = workout_session::ActiveModel {
+            id: Set(easy_5k_session_id),
+            routine_id: Set(Some(easy_5k_routine_id)),
+            routine_name_snapshot: Set(routine_name),
+            status: Set(WorkoutSessionStatus::Completed),
+            started_at: Set(started_at),
+            completed_at: Set(Some(completed_at)),
+            notes: Set("Felt easy, maintained zone 2 throughout. Trail by the river.".to_string()),
+            overall_rpe: Set(Some(5.5)),
+            bodyweight_kg: Set(Some(78.5)),
+            organization: Set(Some(ORG_PERSONAL.to_string())),
+            created_by: Set(Some("cody".to_string())),
+            properties: Set(JsonObject::default()),
+            created_at: Set(started_at),
+            updated_at: Set(completed_at),
+        };
+        workout_session::Entity::insert(session_active)
+            .exec(db)
+            .await?;
+        summary.workout_sessions_created += 1;
+
+        // Single completed cardio set, completed at session.completed_at.
+        seed_planned_sets(
+            db,
+            summary,
+            easy_5k_session_id,
+            "easy-5k-completed",
+            EASY_5K_PLANNED_SETS,
+            started_at,
+            completed_at,
+        )
+        .await?;
+    } else {
+        summary.workout_sessions_unchanged += 1;
+        let existing = set_log::Entity::find()
+            .filter(set_log::Column::WorkoutSessionId.eq(easy_5k_session_id))
+            .count(db)
+            .await? as usize;
+        summary.set_logs_unchanged += existing;
+    }
+
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn seed_planned_sets(
+    db: &DatabaseConnection,
+    summary: &mut DemoSeedSummary,
+    session_id: Uuid,
+    session_slug: &str,
+    fixtures: &[PlannedSetFixture],
+    session_started_at: chrono::DateTime<Utc>,
+    completion_anchor: chrono::DateTime<Utc>,
+) -> Result<(), DbErr> {
+    let mut position: i32 = 0;
+    let mut per_exercise_index: std::collections::HashMap<String, i32> =
+        std::collections::HashMap::new();
+    for fix in fixtures {
+        let row_id_key = format!("set_log:{}:{}:{}", session_slug, fix.slug, fix.set_no);
+        let row_id = demo_id(&row_id_key);
+        if set_log::Entity::find_by_id(row_id).one(db).await?.is_some() {
+            summary.set_logs_unchanged += 1;
+            position += 1;
+            continue;
+        }
+
+        let (exercise_id, display_name) = match fix.exercise_key {
+            Some(key) => {
+                let id = demo_id(key);
+                let display = exercise::Entity::find_by_id(id)
+                    .one(db)
+                    .await?
+                    .map(|e| e.name)
+                    .unwrap_or_else(|| key.to_string());
+                (Some(id), display)
+            }
+            None => (None, fix.custom_display_name.to_string()),
+        };
+        let set_index = per_exercise_index.entry(display_name.clone()).or_insert(0);
+
+        let completed_at = fix.completed_minutes_ago.map(|m| {
+            if m == 0 {
+                completion_anchor
+            } else {
+                completion_anchor - Duration::minutes(m)
+            }
+        });
+
+        let active = set_log::ActiveModel {
+            id: Set(row_id),
+            workout_session_id: Set(session_id),
+            exercise_id: Set(exercise_id),
+            exercise_name_snapshot: Set(display_name.clone()),
+            routine_exercise_id: Set(None),
+            position: Set(position),
+            set_index: Set(*set_index),
+            reps: Set(fix.reps),
+            weight_kg: Set(fix.weight_kg),
+            duration_seconds: Set(fix.duration_seconds),
+            distance_meters: Set(fix.distance_meters),
+            avg_hr: Set(fix.avg_hr),
+            pace_seconds_per_km: Set(fix.pace_seconds_per_km),
+            rpe: Set(fix.rpe),
+            notes: Set(None),
+            completed_at: Set(completed_at),
+            properties: Set(JsonObject::default()),
+            created_at: Set(session_started_at),
+            updated_at: Set(completion_anchor),
+        };
+        set_log::Entity::insert(active).exec(db).await?;
+        summary.set_logs_created += 1;
+        *set_index += 1;
+        position += 1;
     }
     Ok(())
 }
