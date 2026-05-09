@@ -227,6 +227,10 @@ pub struct DawClients {
     pub(crate) toolbar: ToolbarServiceClient,
     pub(crate) plugin_loader: PluginLoaderServiceClient,
     pub(crate) batch: BatchServiceClient,
+    /// Original `Caller` kept around so consumers can build additional
+    /// service clients on the same in-process channel (e.g.
+    /// `keyflow_daw_analysis::MidiChartServiceClient`).
+    pub(crate) caller: Caller,
 }
 
 impl DawClients {
@@ -258,7 +262,8 @@ impl DawClients {
             input: InputServiceClient::new(handle.clone()),
             toolbar: ToolbarServiceClient::new(handle.clone()),
             plugin_loader: PluginLoaderServiceClient::new(handle.clone()),
-            batch: BatchServiceClient::new(handle),
+            batch: BatchServiceClient::new(handle.clone()),
+            caller: handle,
         }
     }
 }
@@ -308,6 +313,13 @@ impl Daw {
         Self {
             clients: Arc::new(DawClients::new(handle)),
         }
+    }
+
+    /// Borrow the underlying `Caller` so consumers can build additional
+    /// service clients (e.g. `keyflow_daw_analysis::MidiChartServiceClient`)
+    /// that share the same in-process channel as the daw services.
+    pub fn caller(&self) -> &Caller {
+        &self.clients.caller
     }
 
     /// Get the current/active project
