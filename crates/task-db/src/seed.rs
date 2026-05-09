@@ -28,6 +28,7 @@ use task_core::cooking_session::{self, CookingSessionStatus, StepState};
 use task_core::cycle::{self, CycleStatus, CycleTaskList};
 use task_core::email;
 use task_core::email::EmailStringList;
+use task_core::exercise::{self, ExerciseAliasList, ExerciseModality, ExerciseMuscleList};
 use task_core::expense::{self, ExpenseStatus};
 use task_core::food::{self, FoodAliasList};
 use task_core::food_log;
@@ -50,6 +51,8 @@ use task_core::reaction;
 use task_core::recipe;
 use task_core::recipe_ingredient;
 use task_core::recipe_step;
+use task_core::routine::{self, RoutineTagList};
+use task_core::routine_exercise;
 use task_core::shopping_list;
 use task_core::substitution;
 use task_core::task::{
@@ -136,6 +139,12 @@ pub struct DemoSeedSummary {
     pub substitutions_unchanged: usize,
     pub glossary_terms_created: usize,
     pub glossary_terms_unchanged: usize,
+    pub exercises_created: usize,
+    pub exercises_unchanged: usize,
+    pub routines_created: usize,
+    pub routines_unchanged: usize,
+    pub routine_exercises_created: usize,
+    pub routine_exercises_unchanged: usize,
 }
 
 impl DemoSeedSummary {
@@ -169,6 +178,9 @@ impl DemoSeedSummary {
             + self.cooking_sessions_created
             + self.substitutions_created
             + self.glossary_terms_created
+            + self.exercises_created
+            + self.routines_created
+            + self.routine_exercises_created
     }
 
     pub fn total_unchanged(&self) -> usize {
@@ -201,6 +213,9 @@ impl DemoSeedSummary {
             + self.cooking_sessions_unchanged
             + self.substitutions_unchanged
             + self.glossary_terms_unchanged
+            + self.exercises_unchanged
+            + self.routines_unchanged
+            + self.routine_exercises_unchanged
     }
 }
 
@@ -244,12 +259,45 @@ pub async fn seed_demo_data(db: &DatabaseConnection) -> Result<DemoSeedSummary, 
     seed_food_logs(db, &mut summary).await?;
     seed_cooking_sessions(db, &mut summary).await?;
     seed_substitutions(db, &mut summary).await?;
+    seed_exercises(db, &mut summary).await?;
+    seed_routines(db, &mut summary).await?;
     Ok(summary)
 }
 
 /// Delete every row created by [`seed_demo_data`] (by deterministic id).
 pub async fn reset_demo_data(db: &DatabaseConnection) -> Result<DemoSeedSummary, DbErr> {
     let mut summary = DemoSeedSummary::default();
+
+    // Fitness — routine_exercises before routines; exercises last
+    // (routine_exercises soft-FK to both).
+    for key in ROUTINE_KEYS {
+        let rid = demo_id(key);
+        let removed = routine_exercise::Entity::delete_many()
+            .filter(routine_exercise::Column::RoutineId.eq(rid))
+            .exec(db)
+            .await?
+            .rows_affected as usize;
+        summary.routine_exercises_created += removed;
+        if routine::Entity::delete_by_id(rid)
+            .exec(db)
+            .await?
+            .rows_affected
+            > 0
+        {
+            summary.routines_created += 1;
+        }
+    }
+    for key in EXERCISE_KEYS {
+        let id = demo_id(key);
+        if exercise::Entity::delete_by_id(id)
+            .exec(db)
+            .await?
+            .rows_affected
+            > 0
+        {
+            summary.exercises_created += 1;
+        }
+    }
 
     // Pantry first — soft FKs to foods/products/locations.
     for key in PANTRY_KEYS {
@@ -905,6 +953,48 @@ const GLOSSARY_KEYS: &[&str] = &[
     "glossary:mastering",
     "glossary:gain-staging",
     "glossary:comping",
+];
+
+const EXERCISE_KEYS: &[&str] = &[
+    // Strength
+    "exercise:back-squat",
+    "exercise:front-squat",
+    "exercise:goblet-squat",
+    "exercise:deadlift",
+    "exercise:romanian-deadlift",
+    "exercise:bench-press",
+    "exercise:incline-dumbbell-press",
+    "exercise:overhead-press",
+    "exercise:pull-up",
+    "exercise:chin-up",
+    "exercise:bent-over-row",
+    "exercise:dumbbell-row",
+    "exercise:hip-thrust",
+    "exercise:lunge",
+    "exercise:bulgarian-split-squat",
+    "exercise:plank",
+    "exercise:hanging-leg-raise",
+    "exercise:kettlebell-swing",
+    // Cardio
+    "exercise:easy-run",
+    "exercise:tempo-run",
+    "exercise:interval-run",
+    "exercise:cycling",
+    "exercise:rowing",
+    "exercise:jump-rope",
+    "exercise:stationary-bike",
+    // Mobility
+    "exercise:couch-stretch",
+    "exercise:90-90-hip-stretch",
+    "exercise:thoracic-extension",
+    "exercise:pigeon-pose",
+    "exercise:worlds-greatest-stretch",
+];
+
+const ROUTINE_KEYS: &[&str] = &[
+    "routine:push-day",
+    "routine:easy-5k",
+    "routine:full-body-kettlebell",
 ];
 
 // ── Project fixtures ────────────────────────────────────────────────────────
@@ -5807,11 +5897,9 @@ async fn seed_substitutions(
     summary: &mut DemoSeedSummary,
 ) -> Result<(), DbErr> {
     let now = Utc::now();
-    // Stamp dietary tags on the canonical foods first.
     for (key, tags) in FOOD_DIETARY_TAGS {
         stamp_dietary_tags(db, key, tags).await?;
     }
-    // Auto-create the secondary foods referenced only by substitutions.
     for fix in SUBSTITUTION_EXTRA_FOODS {
         ensure_extra_food(db, fix, now).await?;
     }
@@ -5857,6 +5945,642 @@ async fn seed_substitutions(
         };
         substitution::Entity::insert(active).exec(db).await?;
         summary.substitutions_created += 1;
+    }
+    Ok(())
+}
+
+// ── Fitness fixtures ────────────────────────────────────────────────────────
+
+struct ExerciseFixture {
+    key: &'static str,
+    name: &'static str,
+    aliases: &'static [&'static str],
+    modality: ExerciseModality,
+    primary_muscle: Option<&'static str>,
+    equipment: Option<&'static str>,
+    body_markdown: &'static str,
+}
+
+const EXERCISE_FIXTURES: &[ExerciseFixture] = &[
+    // ── Strength (~18) ──
+    ExerciseFixture {
+        key: "exercise:back-squat",
+        name: "Back Squat",
+        aliases: &["bs", "back-squat", "squat"],
+        modality: ExerciseModality::Strength,
+        primary_muscle: Some("quads"),
+        equipment: Some("barbell"),
+        body_markdown: "Hip-and-knee dominant compound. Brace the core, drive knees out, hit depth where hip crease is below knee. Foot stance and bar position vary by build.",
+    },
+    ExerciseFixture {
+        key: "exercise:front-squat",
+        name: "Front Squat",
+        aliases: &[],
+        modality: ExerciseModality::Strength,
+        primary_muscle: Some("quads"),
+        equipment: Some("barbell"),
+        body_markdown: "Bar racked on the front delts; elbows held high. More upright torso than back squat — heavier quad emphasis.",
+    },
+    ExerciseFixture {
+        key: "exercise:goblet-squat",
+        name: "Goblet Squat",
+        aliases: &[],
+        modality: ExerciseModality::Strength,
+        primary_muscle: Some("quads"),
+        equipment: Some("kettlebell"),
+        body_markdown: "Hold a kettlebell against the chest. Excellent positional teaching tool; keep elbows tucked, drive through midfoot.",
+    },
+    ExerciseFixture {
+        key: "exercise:deadlift",
+        name: "Deadlift",
+        aliases: &["dl", "conventional-deadlift"],
+        modality: ExerciseModality::Strength,
+        primary_muscle: Some("posterior-chain"),
+        equipment: Some("barbell"),
+        body_markdown: "Hinge from the hips. Bar over midfoot, lats engaged, neutral spine. Drive the floor away — don't yank.",
+    },
+    ExerciseFixture {
+        key: "exercise:romanian-deadlift",
+        name: "Romanian Deadlift",
+        aliases: &["rdl"],
+        modality: ExerciseModality::Strength,
+        primary_muscle: Some("hamstrings"),
+        equipment: Some("barbell"),
+        body_markdown: "Soft knees, push hips back, bar slides down the legs. Stop when hamstrings reach end-range tension; feel the stretch.",
+    },
+    ExerciseFixture {
+        key: "exercise:bench-press",
+        name: "Bench Press",
+        aliases: &["bench", "bp"],
+        modality: ExerciseModality::Strength,
+        primary_muscle: Some("chest"),
+        equipment: Some("barbell"),
+        body_markdown: "Retract the scapulae, plant feet, slight arch. Bar touches mid-chest; press to lockout over the shoulders.",
+    },
+    ExerciseFixture {
+        key: "exercise:incline-dumbbell-press",
+        name: "Incline Dumbbell Press",
+        aliases: &["incline-db-press"],
+        modality: ExerciseModality::Strength,
+        primary_muscle: Some("chest"),
+        equipment: Some("dumbbell"),
+        body_markdown: "30–45° bench. Press dumbbells from a deep stretch; squeeze chest at the top. Upper-chest hypertrophy staple.",
+    },
+    ExerciseFixture {
+        key: "exercise:overhead-press",
+        name: "Overhead Press",
+        aliases: &["ohp", "press", "strict-press"],
+        modality: ExerciseModality::Strength,
+        primary_muscle: Some("shoulders"),
+        equipment: Some("barbell"),
+        body_markdown: "Standing press from the front delts to lockout overhead. Squeeze glutes, brace core, no leg drive.",
+    },
+    ExerciseFixture {
+        key: "exercise:pull-up",
+        name: "Pull-Up",
+        aliases: &["pullup"],
+        modality: ExerciseModality::Strength,
+        primary_muscle: Some("back"),
+        equipment: Some("bodyweight"),
+        body_markdown: "Overhand grip. Pull the bar to upper chest by driving elbows down and back. Full ROM: dead hang to chin-over-bar.",
+    },
+    ExerciseFixture {
+        key: "exercise:chin-up",
+        name: "Chin-Up",
+        aliases: &["chinup"],
+        modality: ExerciseModality::Strength,
+        primary_muscle: Some("back"),
+        equipment: Some("bodyweight"),
+        body_markdown: "Underhand grip. More biceps involvement than the pull-up; usually feels stronger.",
+    },
+    ExerciseFixture {
+        key: "exercise:bent-over-row",
+        name: "Bent-Over Row",
+        aliases: &["barbell-row"],
+        modality: ExerciseModality::Strength,
+        primary_muscle: Some("back"),
+        equipment: Some("barbell"),
+        body_markdown: "Hinge at the hip, flat back. Pull the bar to the lower sternum; squeeze the mid-back at the top.",
+    },
+    ExerciseFixture {
+        key: "exercise:dumbbell-row",
+        name: "Dumbbell Row",
+        aliases: &["db-row", "single-arm-row"],
+        modality: ExerciseModality::Strength,
+        primary_muscle: Some("back"),
+        equipment: Some("dumbbell"),
+        body_markdown: "One hand on a bench. Row the dumbbell to the hip; let the lat do the work. Don't twist.",
+    },
+    ExerciseFixture {
+        key: "exercise:hip-thrust",
+        name: "Hip Thrust",
+        aliases: &["barbell-hip-thrust"],
+        modality: ExerciseModality::Strength,
+        primary_muscle: Some("glutes"),
+        equipment: Some("barbell"),
+        body_markdown: "Upper back on a bench, bar over the hips. Drive through heels to lockout; squeeze glutes hard. Pad the bar.",
+    },
+    ExerciseFixture {
+        key: "exercise:lunge",
+        name: "Lunge",
+        aliases: &["walking-lunge"],
+        modality: ExerciseModality::Strength,
+        primary_muscle: Some("quads"),
+        equipment: Some("bodyweight"),
+        body_markdown: "Long step forward; back knee just off the floor; drive through the front heel. Add load when bodyweight is easy.",
+    },
+    ExerciseFixture {
+        key: "exercise:bulgarian-split-squat",
+        name: "Bulgarian Split Squat",
+        aliases: &["bss"],
+        modality: ExerciseModality::Strength,
+        primary_muscle: Some("quads"),
+        equipment: Some("dumbbell"),
+        body_markdown: "Rear foot on a bench. Vertical shin or slight forward lean depending on emphasis. Brutal at moderate loads.",
+    },
+    ExerciseFixture {
+        key: "exercise:plank",
+        name: "Plank",
+        aliases: &["front-plank"],
+        modality: ExerciseModality::Strength,
+        primary_muscle: Some("core"),
+        equipment: Some("bodyweight"),
+        body_markdown: "Hollow-body brace, glutes squeezed, neutral spine. If your low back is the limiting factor, you're sagging.",
+    },
+    ExerciseFixture {
+        key: "exercise:hanging-leg-raise",
+        name: "Hanging Leg Raise",
+        aliases: &["hlr"],
+        modality: ExerciseModality::Strength,
+        primary_muscle: Some("core"),
+        equipment: Some("bodyweight"),
+        body_markdown: "Hang from a bar. Lift legs to parallel (or higher); avoid swinging. Posterior tilt at the top.",
+    },
+    ExerciseFixture {
+        key: "exercise:kettlebell-swing",
+        name: "Kettlebell Swing",
+        aliases: &["kb-swing", "swing"],
+        modality: ExerciseModality::Strength,
+        primary_muscle: Some("posterior-chain"),
+        equipment: Some("kettlebell"),
+        body_markdown: "Russian style: bell to chest height. Hinge — not squat. Snap the hips at the top; let the bell float.",
+    },
+    // ── Cardio (~7) ──
+    ExerciseFixture {
+        key: "exercise:easy-run",
+        name: "Easy Run",
+        aliases: &["zone-2-run"],
+        modality: ExerciseModality::Cardio,
+        primary_muscle: Some("running"),
+        equipment: Some("none"),
+        body_markdown: "Conversational pace, low HR (zone 2). Build the aerobic base; if you're gasping you're going too hard.",
+    },
+    ExerciseFixture {
+        key: "exercise:tempo-run",
+        name: "Tempo Run",
+        aliases: &["threshold-run"],
+        modality: ExerciseModality::Cardio,
+        primary_muscle: Some("running"),
+        equipment: Some("none"),
+        body_markdown: "Comfortably hard. Held-back race pace; sustainable for 20–40 minutes. Trains lactate threshold.",
+    },
+    ExerciseFixture {
+        key: "exercise:interval-run",
+        name: "Interval Run",
+        aliases: &["intervals", "track-intervals"],
+        modality: ExerciseModality::Cardio,
+        primary_muscle: Some("running"),
+        equipment: Some("none"),
+        body_markdown: "Hard reps with rest (e.g. 6 × 800m). Builds VO2max. Warm up generously before the work intervals.",
+    },
+    ExerciseFixture {
+        key: "exercise:cycling",
+        name: "Cycling",
+        aliases: &["bike", "ride"],
+        modality: ExerciseModality::Cardio,
+        primary_muscle: Some("cycling"),
+        equipment: Some("bike"),
+        body_markdown: "Outdoor or trainer. Tracking power (watts) is more reliable than HR for pacing.",
+    },
+    ExerciseFixture {
+        key: "exercise:rowing",
+        name: "Rowing",
+        aliases: &["erg", "rower"],
+        modality: ExerciseModality::Cardio,
+        primary_muscle: Some("rowing"),
+        equipment: Some("rower"),
+        body_markdown: "Legs → hips → arms on the drive; reverse on the recovery. Pace by 500m splits.",
+    },
+    ExerciseFixture {
+        key: "exercise:jump-rope",
+        name: "Jump Rope",
+        aliases: &["skipping"],
+        modality: ExerciseModality::Cardio,
+        primary_muscle: Some("cardio"),
+        equipment: Some("jump-rope"),
+        body_markdown: "Light bounces, wrists do most of the work. Great warm-up or HIIT filler.",
+    },
+    ExerciseFixture {
+        key: "exercise:stationary-bike",
+        name: "Stationary Bike",
+        aliases: &["spin-bike"],
+        modality: ExerciseModality::Cardio,
+        primary_muscle: Some("cycling"),
+        equipment: Some("stationary-bike"),
+        body_markdown: "Indoor cycling. Set seat height so the leg is just shy of full extension at the bottom of the pedal stroke.",
+    },
+    // ── Mobility (~5) ──
+    ExerciseFixture {
+        key: "exercise:couch-stretch",
+        name: "Couch Stretch",
+        aliases: &[],
+        modality: ExerciseModality::Mobility,
+        primary_muscle: Some("hip-flexors"),
+        equipment: Some("none"),
+        body_markdown: "Rear foot up against a wall or couch, front leg in a deep lunge. Squeeze the rear glute to deepen the stretch.",
+    },
+    ExerciseFixture {
+        key: "exercise:90-90-hip-stretch",
+        name: "90/90 Hip Stretch",
+        aliases: &["90-90"],
+        modality: ExerciseModality::Mobility,
+        primary_muscle: Some("hips"),
+        equipment: Some("none"),
+        body_markdown: "Front and back legs at 90°. Rotate forward over the front shin; great for internal/external hip rotation.",
+    },
+    ExerciseFixture {
+        key: "exercise:thoracic-extension",
+        name: "Thoracic Extension",
+        aliases: &["t-spine-extension"],
+        modality: ExerciseModality::Mobility,
+        primary_muscle: Some("thoracic-spine"),
+        equipment: Some("foam-roller"),
+        body_markdown: "Foam roller across the upper back; arms overhead, gently extend. Don't let the lower back take over.",
+    },
+    ExerciseFixture {
+        key: "exercise:pigeon-pose",
+        name: "Pigeon Pose",
+        aliases: &[],
+        modality: ExerciseModality::Mobility,
+        primary_muscle: Some("glutes"),
+        equipment: Some("none"),
+        body_markdown: "Front shin perpendicular to the body; rear leg extended. Sink into the front hip; breathe.",
+    },
+    ExerciseFixture {
+        key: "exercise:worlds-greatest-stretch",
+        name: "World's Greatest Stretch",
+        aliases: &["wgs"],
+        modality: ExerciseModality::Mobility,
+        primary_muscle: Some("full-body"),
+        equipment: Some("none"),
+        body_markdown: "Lunge → hand inside the front foot → thoracic rotation. One of the highest-ROI warmup movements.",
+    },
+];
+
+async fn seed_exercises(
+    db: &DatabaseConnection,
+    summary: &mut DemoSeedSummary,
+) -> Result<(), DbErr> {
+    let now = Utc::now();
+    for fix in EXERCISE_FIXTURES {
+        let id = demo_id(fix.key);
+        if exercise::Entity::find_by_id(id).one(db).await?.is_some() {
+            summary.exercises_unchanged += 1;
+            continue;
+        }
+        let slug = fix
+            .key
+            .strip_prefix("exercise:")
+            .unwrap_or(fix.key)
+            .to_string();
+        let aliases = ExerciseAliasList::from(
+            fix.aliases
+                .iter()
+                .map(|s| s.to_string())
+                .collect::<Vec<_>>(),
+        );
+        let active = exercise::ActiveModel {
+            id: Set(id),
+            name: Set(fix.name.to_string()),
+            slug: Set(slug),
+            aliases: Set(aliases),
+            modality: Set(fix.modality),
+            primary_muscle: Set(fix.primary_muscle.map(|s| s.to_string())),
+            secondary_muscles: Set(ExerciseMuscleList::default()),
+            equipment: Set(fix.equipment.map(|s| s.to_string())),
+            body_markdown: Set(fix.body_markdown.to_string()),
+            media_url: Set(None),
+            organization: Set(Some(ORG_PERSONAL.to_string())),
+            created_by: Set(Some("cody".to_string())),
+            properties: Set(JsonObject::default()),
+            created_at: Set(now),
+            updated_at: Set(now),
+        };
+        exercise::Entity::insert(active).exec(db).await?;
+        summary.exercises_created += 1;
+    }
+    Ok(())
+}
+
+struct RoutineFixture {
+    key: &'static str,
+    name: &'static str,
+    slug: &'static str,
+    description: Option<&'static str>,
+    category: Option<&'static str>,
+    difficulty: Option<&'static str>,
+    estimated_minutes: Option<u32>,
+    tags: &'static [&'static str],
+    exercises: &'static [RoutineExerciseFixture],
+}
+
+struct RoutineExerciseFixture {
+    /// Empty when this is a free-form custom row.
+    exercise_key: &'static str,
+    /// Used when exercise_key is empty.
+    custom_display_name: &'static str,
+    group_label: Option<&'static str>,
+    target_sets: Option<u32>,
+    target_reps: Option<u32>,
+    target_weight_kg: Option<f64>,
+    target_rest_seconds: Option<u32>,
+    target_rpe: Option<f32>,
+    target_duration_seconds: Option<u32>,
+    target_distance_meters: Option<f64>,
+    target_avg_hr: Option<u32>,
+}
+
+const ROUTINE_FIXTURES: &[RoutineFixture] = &[
+    RoutineFixture {
+        key: "routine:push-day",
+        name: "Push Day",
+        slug: "push-day",
+        description: Some("PPL push session — chest, shoulders, triceps."),
+        category: Some("ppl"),
+        difficulty: Some("intermediate"),
+        estimated_minutes: Some(60),
+        tags: &["hypertrophy", "push"],
+        exercises: &[
+            RoutineExerciseFixture {
+                exercise_key: "exercise:bench-press",
+                custom_display_name: "",
+                group_label: None,
+                target_sets: Some(4),
+                target_reps: Some(6),
+                target_weight_kg: Some(80.0),
+                target_rest_seconds: Some(180),
+                target_rpe: Some(8.0),
+                target_duration_seconds: None,
+                target_distance_meters: None,
+                target_avg_hr: None,
+            },
+            RoutineExerciseFixture {
+                exercise_key: "exercise:overhead-press",
+                custom_display_name: "",
+                group_label: None,
+                target_sets: Some(3),
+                target_reps: Some(8),
+                target_weight_kg: Some(50.0),
+                target_rest_seconds: Some(120),
+                target_rpe: None,
+                target_duration_seconds: None,
+                target_distance_meters: None,
+                target_avg_hr: None,
+            },
+            RoutineExerciseFixture {
+                exercise_key: "exercise:incline-dumbbell-press",
+                custom_display_name: "",
+                group_label: None,
+                target_sets: Some(3),
+                target_reps: Some(10),
+                target_weight_kg: Some(25.0),
+                target_rest_seconds: Some(90),
+                target_rpe: None,
+                target_duration_seconds: None,
+                target_distance_meters: None,
+                target_avg_hr: None,
+            },
+            RoutineExerciseFixture {
+                exercise_key: "",
+                custom_display_name: "Tricep Pushdown",
+                group_label: None,
+                target_sets: Some(3),
+                target_reps: Some(12),
+                target_weight_kg: None,
+                target_rest_seconds: Some(60),
+                target_rpe: None,
+                target_duration_seconds: None,
+                target_distance_meters: None,
+                target_avg_hr: None,
+            },
+            RoutineExerciseFixture {
+                exercise_key: "exercise:plank",
+                custom_display_name: "",
+                group_label: None,
+                target_sets: Some(3),
+                target_reps: None,
+                target_weight_kg: None,
+                target_rest_seconds: Some(45),
+                target_rpe: None,
+                target_duration_seconds: Some(45),
+                target_distance_meters: None,
+                target_avg_hr: None,
+            },
+            RoutineExerciseFixture {
+                exercise_key: "exercise:hanging-leg-raise",
+                custom_display_name: "",
+                group_label: None,
+                target_sets: Some(3),
+                target_reps: Some(10),
+                target_weight_kg: None,
+                target_rest_seconds: Some(45),
+                target_rpe: None,
+                target_duration_seconds: None,
+                target_distance_meters: None,
+                target_avg_hr: None,
+            },
+        ],
+    },
+    RoutineFixture {
+        key: "routine:easy-5k",
+        name: "Easy 5K",
+        slug: "easy-5k",
+        description: Some("Aerobic base run."),
+        category: Some("running"),
+        difficulty: Some("beginner"),
+        estimated_minutes: Some(35),
+        tags: &["zone-2", "endurance"],
+        exercises: &[RoutineExerciseFixture {
+            exercise_key: "exercise:easy-run",
+            custom_display_name: "",
+            group_label: None,
+            target_sets: None,
+            target_reps: None,
+            target_weight_kg: None,
+            target_rest_seconds: None,
+            target_rpe: None,
+            target_duration_seconds: Some(1800),
+            target_distance_meters: Some(5000.0),
+            target_avg_hr: Some(140),
+        }],
+    },
+    RoutineFixture {
+        key: "routine:full-body-kettlebell",
+        name: "Full-Body Kettlebell",
+        slug: "full-body-kettlebell",
+        description: Some("KB circuit — push/pull/hinge/squat in supersets."),
+        category: Some("kettlebell"),
+        difficulty: Some("intermediate"),
+        estimated_minutes: Some(40),
+        tags: &["full-body", "circuit"],
+        exercises: &[
+            RoutineExerciseFixture {
+                exercise_key: "exercise:goblet-squat",
+                custom_display_name: "",
+                group_label: Some("A1"),
+                target_sets: Some(4),
+                target_reps: Some(10),
+                target_weight_kg: Some(24.0),
+                target_rest_seconds: Some(60),
+                target_rpe: None,
+                target_duration_seconds: None,
+                target_distance_meters: None,
+                target_avg_hr: None,
+            },
+            RoutineExerciseFixture {
+                exercise_key: "exercise:kettlebell-swing",
+                custom_display_name: "",
+                group_label: Some("A2"),
+                target_sets: Some(4),
+                target_reps: Some(15),
+                target_weight_kg: Some(24.0),
+                target_rest_seconds: Some(60),
+                target_rpe: None,
+                target_duration_seconds: None,
+                target_distance_meters: None,
+                target_avg_hr: None,
+            },
+            RoutineExerciseFixture {
+                exercise_key: "exercise:pull-up",
+                custom_display_name: "",
+                group_label: Some("B1"),
+                target_sets: Some(4),
+                target_reps: Some(6),
+                target_weight_kg: None,
+                target_rest_seconds: Some(90),
+                target_rpe: None,
+                target_duration_seconds: None,
+                target_distance_meters: None,
+                target_avg_hr: None,
+            },
+            RoutineExerciseFixture {
+                exercise_key: "exercise:hip-thrust",
+                custom_display_name: "",
+                group_label: Some("B2"),
+                target_sets: Some(4),
+                target_reps: Some(10),
+                target_weight_kg: None,
+                target_rest_seconds: Some(90),
+                target_rpe: None,
+                target_duration_seconds: None,
+                target_distance_meters: None,
+                target_avg_hr: None,
+            },
+            RoutineExerciseFixture {
+                exercise_key: "exercise:plank",
+                custom_display_name: "",
+                group_label: None,
+                target_sets: Some(3),
+                target_reps: None,
+                target_weight_kg: None,
+                target_rest_seconds: Some(45),
+                target_rpe: None,
+                target_duration_seconds: Some(60),
+                target_distance_meters: None,
+                target_avg_hr: None,
+            },
+        ],
+    },
+];
+
+async fn seed_routines(
+    db: &DatabaseConnection,
+    summary: &mut DemoSeedSummary,
+) -> Result<(), DbErr> {
+    let now = Utc::now();
+    for fix in ROUTINE_FIXTURES {
+        let routine_id = demo_id(fix.key);
+        let existing = routine::Entity::find_by_id(routine_id).one(db).await?;
+        if existing.is_some() {
+            summary.routines_unchanged += 1;
+            // Keep child counts accurate even on idempotent re-runs.
+            let existing_children = routine_exercise::Entity::find()
+                .filter(routine_exercise::Column::RoutineId.eq(routine_id))
+                .count(db)
+                .await? as usize;
+            summary.routine_exercises_unchanged += existing_children;
+            continue;
+        }
+        let active = routine::ActiveModel {
+            id: Set(routine_id),
+            name: Set(fix.name.to_string()),
+            slug: Set(fix.slug.to_string()),
+            description: Set(fix.description.map(|s| s.to_string())),
+            body_markdown: Set(String::new()),
+            category: Set(fix.category.map(|s| s.to_string())),
+            estimated_duration_minutes: Set(fix.estimated_minutes),
+            difficulty: Set(fix.difficulty.map(|s| s.to_string())),
+            tags: Set(RoutineTagList::from(
+                fix.tags.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
+            )),
+            organization: Set(Some(ORG_PERSONAL.to_string())),
+            created_by: Set(Some("cody".to_string())),
+            properties: Set(JsonObject::default()),
+            created_at: Set(now),
+            updated_at: Set(now),
+        };
+        routine::Entity::insert(active).exec(db).await?;
+        summary.routines_created += 1;
+
+        for (idx, ex_fix) in fix.exercises.iter().enumerate() {
+            let row_id = demo_id(&format!("{}:exercise:{idx}", fix.key));
+            // Resolve display_name from the linked Exercise when keyed.
+            let (exercise_id, display_name) = if ex_fix.exercise_key.is_empty() {
+                (None, ex_fix.custom_display_name.to_string())
+            } else {
+                let ex_id = demo_id(ex_fix.exercise_key);
+                let display = exercise::Entity::find_by_id(ex_id)
+                    .one(db)
+                    .await?
+                    .map(|e| e.name)
+                    .unwrap_or_else(|| ex_fix.exercise_key.to_string());
+                (Some(ex_id), display)
+            };
+            let active = routine_exercise::ActiveModel {
+                id: Set(row_id),
+                routine_id: Set(routine_id),
+                exercise_id: Set(exercise_id),
+                display_name: Set(display_name),
+                position: Set(idx as i32),
+                group_label: Set(ex_fix.group_label.map(|s| s.to_string())),
+                target_sets: Set(ex_fix.target_sets),
+                target_reps: Set(ex_fix.target_reps),
+                target_weight_kg: Set(ex_fix.target_weight_kg),
+                target_rest_seconds: Set(ex_fix.target_rest_seconds),
+                target_rpe: Set(ex_fix.target_rpe),
+                tempo: Set(None),
+                target_duration_seconds: Set(ex_fix.target_duration_seconds),
+                target_distance_meters: Set(ex_fix.target_distance_meters),
+                target_avg_hr: Set(ex_fix.target_avg_hr),
+                target_pace_seconds_per_km: Set(None),
+                notes: Set(None),
+                properties: Set(JsonObject::default()),
+                created_at: Set(now),
+                updated_at: Set(now),
+            };
+            routine_exercise::Entity::insert(active).exec(db).await?;
+            summary.routine_exercises_created += 1;
+        }
     }
     Ok(())
 }

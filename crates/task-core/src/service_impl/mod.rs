@@ -4,6 +4,7 @@ pub mod audio_production;
 pub mod business;
 pub mod conversation;
 pub mod cooking;
+pub mod fitness;
 pub mod food;
 pub mod glossary;
 pub(crate) mod helpers;
@@ -25,6 +26,7 @@ pub use audio_production::{AudioProductionServiceDeps, AudioProductionServiceImp
 pub use business::*;
 pub use conversation::{ConversationServiceDeps, ConversationServiceImpl};
 pub use cooking::{CookingServiceDeps, CookingServiceImpl};
+pub use fitness::{FitnessServiceDeps, FitnessServiceImpl};
 pub use food::{FoodServiceDeps, FoodServiceImpl};
 pub use glossary::{GlossaryServiceDeps, GlossaryServiceImpl};
 pub use inbox::{InboxServiceDeps, InboxServiceImpl};

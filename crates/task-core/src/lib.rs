@@ -11,6 +11,7 @@ pub mod cookbook_recipe;
 pub mod cooking_session;
 pub mod cycle;
 pub mod email;
+pub mod exercise;
 pub mod expense;
 pub mod food;
 pub mod food_log;
@@ -32,6 +33,8 @@ pub mod recipe;
 pub mod recipe_ingredient;
 pub mod recipe_step;
 pub mod revenue;
+pub mod routine;
+pub mod routine_exercise;
 pub mod rrule;
 pub mod shopping_list;
 pub mod substitution;
@@ -84,6 +87,9 @@ pub use cooking_session::{
 };
 pub use cycle::{Cycle, CycleStatus};
 pub use email::EmailRef;
+pub use exercise::{
+    Exercise, ExerciseAliasList, ExerciseApi, ExerciseModality, ExerciseMuscleList,
+};
 pub use expense::{
     Expense, ExpenseBucket, ExpenseCreateRequest, ExpensePatch, ExpenseReport, ExpenseStatus,
     format_expense_id,
@@ -122,6 +128,8 @@ pub use recipe_step::{RecipeStep, RecipeStepApi};
 pub use revenue::{
     Revenue, RevenueBucket, RevenueCreateRequest, RevenueFilter, RevenueReport, format_revenue_id,
 };
+pub use routine::{Routine, RoutineApi, RoutineTagList};
+pub use routine_exercise::{RoutineExercise, RoutineExerciseApi};
 pub use shopping_list::{ShoppingList, ShoppingListApi, ShoppingListItem, ShoppingListItemApi};
 pub use substitution::{Substitution, SubstitutionApi};
 pub use task::{
@@ -143,29 +151,31 @@ pub use provider::{
 };
 #[cfg(feature = "server")]
 pub use service::{
-    ActivityService, ActivityServiceDispatcher, AddShoppingItemRequest, AddToPantryRequest,
-    AddTrackRequest, AttachmentDownloadResponse, AttachmentService, AttachmentServiceDispatcher,
-    AttachmentUploadRequest, AudioProductionService, AudioProductionServiceDispatcher,
-    BarcodeLookupRequest, BusinessFinanceClientSummary, BusinessFinanceReport, CalDavCalendarInfo,
-    CalDavDeleteObjectRequest, CalDavDiscovery, CalDavFreeBusyInterval, CalDavFreeBusyRequest,
-    CalDavMultigetRequest, CalDavObject, CalDavPutObjectRequest, CalDavScheduleRequest,
-    CalDavScheduleResponse, CalDavSyncCollectionRequest, CalDavSyncCollectionResponse,
-    CalendarEventPatch, CalendarService, CalendarServiceDispatcher, CardDavAddressBookInfo,
-    CardDavContact, CardDavDeleteObjectRequest, CardDavDiscovery, CardDavMultigetRequest,
-    CardDavObject, CardDavPutObjectRequest, CardDavSyncCollectionRequest,
-    CardDavSyncCollectionResponse, CompleteCookingSessionRequest, ConsumeFromPantryRequest,
-    ConversationService, ConversationServiceDispatcher, CookbookWithRecipes, CookingService,
-    CookingServiceClient, CookingServiceDispatcher, CookingSessionView, CreateFoodProductRequest,
-    CreateFoodRequest, CreateGlossaryTermRequest, CreateRecipeRequest, EmailLinkRequest,
-    EmailLinkResponse, EmailListRequest, EmailUnlinkRequest, ExpenseService,
-    ExpenseServiceDispatcher, FoodPatch, FoodProductPatch, FoodService, FoodServiceClient,
-    FoodServiceDispatcher, GenerateShoppingListFromMissingRequest, GenerateShoppingListRequest,
-    GlossaryService, GlossaryServiceClient, GlossaryServiceDispatcher, GlossaryTermPatch,
-    HealthCheck, InboxCaptureRequest, InboxItem, InboxPromoteRequest, InboxService,
-    InboxServiceDispatcher, InvoiceAgingBucket, InvoiceCreateRequest, InvoicePaymentRequest,
-    InvoiceService, InvoiceServiceDispatcher, MailCreateMailboxRequest, MailCreateTagRequest,
-    MailDeleteTagRequest, MailListMessagesRequest, MailMessageTagRequest, MailMoveMessageRequest,
-    MailService, MailServiceDispatcher, MarkIngredientGatheredRequest, MarkMealPlanCookedRequest,
+    ActivityService, ActivityServiceDispatcher, AddRoutineExerciseRequest, AddShoppingItemRequest,
+    AddToPantryRequest, AddTrackRequest, AttachmentDownloadResponse, AttachmentService,
+    AttachmentServiceDispatcher, AttachmentUploadRequest, AudioProductionService,
+    AudioProductionServiceDispatcher, BarcodeLookupRequest, BusinessFinanceClientSummary,
+    BusinessFinanceReport, CalDavCalendarInfo, CalDavDeleteObjectRequest, CalDavDiscovery,
+    CalDavFreeBusyInterval, CalDavFreeBusyRequest, CalDavMultigetRequest, CalDavObject,
+    CalDavPutObjectRequest, CalDavScheduleRequest, CalDavScheduleResponse,
+    CalDavSyncCollectionRequest, CalDavSyncCollectionResponse, CalendarEventPatch, CalendarService,
+    CalendarServiceDispatcher, CardDavAddressBookInfo, CardDavContact, CardDavDeleteObjectRequest,
+    CardDavDiscovery, CardDavMultigetRequest, CardDavObject, CardDavPutObjectRequest,
+    CardDavSyncCollectionRequest, CardDavSyncCollectionResponse, CompleteCookingSessionRequest,
+    ConsumeFromPantryRequest, ConversationService, ConversationServiceDispatcher,
+    CookbookWithRecipes, CookingService, CookingServiceClient, CookingServiceDispatcher,
+    CookingSessionView, CreateExerciseRequest, CreateFoodProductRequest, CreateFoodRequest,
+    CreateGlossaryTermRequest, CreateRecipeRequest, CreateRoutineRequest, EmailLinkRequest,
+    EmailLinkResponse, EmailListRequest, EmailUnlinkRequest, ExercisePatch, ExpenseService,
+    ExpenseServiceDispatcher, FitnessService, FitnessServiceClient, FitnessServiceDispatcher,
+    FoodPatch, FoodProductPatch, FoodService, FoodServiceClient, FoodServiceDispatcher,
+    GenerateShoppingListFromMissingRequest, GenerateShoppingListRequest, GlossaryService,
+    GlossaryServiceClient, GlossaryServiceDispatcher, GlossaryTermPatch, HealthCheck,
+    InboxCaptureRequest, InboxItem, InboxPromoteRequest, InboxService, InboxServiceDispatcher,
+    InvoiceAgingBucket, InvoiceCreateRequest, InvoicePaymentRequest, InvoiceService,
+    InvoiceServiceDispatcher, MailCreateMailboxRequest, MailCreateTagRequest, MailDeleteTagRequest,
+    MailListMessagesRequest, MailMessageTagRequest, MailMoveMessageRequest, MailService,
+    MailServiceDispatcher, MarkIngredientGatheredRequest, MarkMealPlanCookedRequest,
     MaterializeRequest, MaterializeResult, MealPlanRangeRequest, NavigateStepRequest,
     NextcloudCapability, OperatingAreaStatus, OperatingGoal, OperatingModelReport,
     OperatingRoutine, OperatingService, OperatingServiceDispatcher, PantryItemPatch,
@@ -175,31 +185,33 @@ pub use service::{
     ProjectTypeSpec, ProjectTypeView, PropertyDefinitionView, PropertyService,
     PropertyServiceDispatcher, ProviderSyncState, RecipeMatchView, RecipePatch, RecipeWithDetails,
     RemoteDeckBoard, RemoteDeckStack, ResolveInTextRequest, ResolveInTextView, ReviewReport,
-    ScaledRecipeView, SetMealPlanEntryRequest, ShoppingListWithItems, StartCookingSessionRequest,
-    StepTimerActionRequest, SubmitMixRequest, SyncPlan, SyncPlanItem, SyncStats,
-    SystemCapabilities, SystemHealth, SystemService, SystemServiceDispatcher, TaskService,
-    TaskServiceDispatcher, TemplateService, TemplateServiceDispatcher, TemplateView,
+    RoutineWithExercisesView, ScaledRecipeView, SetMealPlanEntryRequest, ShoppingListWithItems,
+    StartCookingSessionRequest, StepTimerActionRequest, SubmitMixRequest, SyncPlan, SyncPlanItem,
+    SyncStats, SystemCapabilities, SystemHealth, SystemService, SystemServiceDispatcher,
+    TaskService, TaskServiceDispatcher, TemplateService, TemplateServiceDispatcher, TemplateView,
     TimeEntryContext, TimeEntryFilter, TimeEntryPatch, TimeLogRequest, TimeService,
     TimeServiceDispatcher, TimeStartRequest, TimedTaskEntry, TrackPatch, VaultCapability,
     VaultError, activity_service_service_descriptor, attachment_service_service_descriptor,
     audio_production_service_service_descriptor, calendar_service_service_descriptor,
     conversation_service_service_descriptor, cooking_service_service_descriptor,
-    expense_service_service_descriptor, food_service_service_descriptor,
-    glossary_service_service_descriptor, inbox_service_service_descriptor,
-    invoice_service_service_descriptor, mail_service_service_descriptor,
-    operating_service_service_descriptor, pantry_service_service_descriptor,
-    people_service_service_descriptor, project_service_service_descriptor,
-    project_type_service_service_descriptor, property_service_service_descriptor,
-    system_service_service_descriptor, task_service_service_descriptor,
-    template_service_service_descriptor, time_service_service_descriptor,
+    expense_service_service_descriptor, fitness_service_service_descriptor,
+    food_service_service_descriptor, glossary_service_service_descriptor,
+    inbox_service_service_descriptor, invoice_service_service_descriptor,
+    mail_service_service_descriptor, operating_service_service_descriptor,
+    pantry_service_service_descriptor, people_service_service_descriptor,
+    project_service_service_descriptor, project_type_service_service_descriptor,
+    property_service_service_descriptor, system_service_service_descriptor,
+    task_service_service_descriptor, template_service_service_descriptor,
+    time_service_service_descriptor,
 };
 #[cfg(feature = "server")]
 pub use service_impl::{
     ActivityServiceImpl, AttachmentServiceImpl, AudioProductionServiceImpl, CalendarServiceImpl,
-    ConversationServiceImpl, ExpenseServiceImpl, FoodServiceImpl, GlossaryServiceImpl,
-    InboxServiceImpl, InvoiceServiceImpl, MailServiceImpl, OperatingServiceImpl, PantryServiceImpl,
-    PeopleServiceImpl, ProjectServiceImpl, ProjectTypeServiceImpl, PropertyServiceImpl,
-    TaskServiceImpl, TemplateServiceImpl, TimeServiceImpl,
+    ConversationServiceImpl, ExpenseServiceImpl, FitnessServiceImpl, FoodServiceImpl,
+    GlossaryServiceImpl, InboxServiceImpl, InvoiceServiceImpl, MailServiceImpl,
+    OperatingServiceImpl, PantryServiceImpl, PeopleServiceImpl, ProjectServiceImpl,
+    ProjectTypeServiceImpl, PropertyServiceImpl, TaskServiceImpl, TemplateServiceImpl,
+    TimeServiceImpl,
 };
 
 #[cfg(feature = "caldav")]

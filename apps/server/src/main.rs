@@ -921,6 +921,14 @@ impl ServerContext {
         )
     }
 
+    fn fitness_service(&self) -> task_core::service_impl::FitnessServiceImpl {
+        task_core::service_impl::FitnessServiceImpl::new(
+            task_core::service_impl::FitnessServiceDeps {
+                db: self.db.clone(),
+            },
+        )
+    }
+
     fn food_service(&self) -> task_core::service_impl::FoodServiceImpl {
         task_core::service_impl::FoodServiceImpl::new(task_core::service_impl::FoodServiceDeps {
             db: self.db.clone(),
@@ -1243,6 +1251,34 @@ async fn handle_vox_connection(socket: WebSocket, state: AppState, auth: VoxAuth
                     ));
                     Ok(())
                 }
+                "FitnessService" => {
+                    connection.handle_with(task_core::FitnessServiceDispatcher::new(
+                        ctx.fitness_service(),
+                    ));
+                    Ok(())
+                }
+                "ExerciseRepo" => {
+                    connection.handle_with(task_core::exercise::ExerciseRepoDispatcher::new(
+                        task_core::exercise::ExerciseRepoStorage::new(db.clone()),
+                    ));
+                    Ok(())
+                }
+                "RoutineRepo" => {
+                    connection.handle_with(task_core::routine::RoutineRepoDispatcher::new(
+                        task_core::routine::RoutineRepoStorage::new(db.clone()),
+                    ));
+                    Ok(())
+                }
+                "RoutineExerciseRepo" => {
+                    connection.handle_with(
+                        task_core::routine_exercise::RoutineExerciseRepoDispatcher::new(
+                            task_core::routine_exercise::RoutineExerciseRepoStorage::new(
+                                db.clone(),
+                            ),
+                        ),
+                    );
+                    Ok(())
+                }
                 "FoodService" => {
                     connection
                         .handle_with(task_core::FoodServiceDispatcher::new(ctx.food_service()));
@@ -1461,6 +1497,10 @@ impl task_core::service::SystemService for ServerSystemService {
                 "TimeService".into(),
                 "AudioProductionService".into(),
                 "CookingService".into(),
+                "FitnessService".into(),
+                "ExerciseRepo".into(),
+                "RoutineRepo".into(),
+                "RoutineExerciseRepo".into(),
                 "FoodService".into(),
                 "FoodRepo".into(),
                 "GlossaryService".into(),

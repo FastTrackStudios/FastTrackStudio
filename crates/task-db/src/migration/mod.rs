@@ -23,6 +23,8 @@ mod m20260507_000016_create_food_logs;
 mod m20260507_000017_create_cooking_sessions;
 mod m20260507_000018_create_substitutions;
 mod m20260507_000019_create_glossary_terms;
+mod m20260507_000020_create_exercises;
+mod m20260507_000021_create_routines;
 
 pub struct Migrator;
 
@@ -53,6 +55,8 @@ impl MigratorTrait for Migrator {
             Box::new(m20260507_000017_create_cooking_sessions::Migration),
             Box::new(m20260507_000018_create_substitutions::Migration),
             Box::new(m20260507_000019_create_glossary_terms::Migration),
+            Box::new(m20260507_000020_create_exercises::Migration),
+            Box::new(m20260507_000021_create_routines::Migration),
         ]
     }
 }
