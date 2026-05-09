@@ -10,6 +10,7 @@ pub(crate) mod cooking;
 pub(crate) mod demo;
 pub(crate) mod email;
 pub(crate) mod expense;
+pub(crate) mod fitness;
 pub(crate) mod github;
 pub(crate) mod inbox;
 pub(crate) mod invoice;

@@ -147,6 +147,21 @@ async fn seed_demo_data_covers_every_entity_flavor() {
         s.shopping_list_items_created
     );
     assert!(
+        s.exercises_created >= 25,
+        "want >= 25 exercises, got {}",
+        s.exercises_created
+    );
+    assert!(
+        s.routines_created >= 3,
+        "want >= 3 routines, got {}",
+        s.routines_created
+    );
+    assert!(
+        s.routine_exercises_created >= 12,
+        "want >= 12 routine_exercises, got {}",
+        s.routine_exercises_created
+    );
+    assert!(
         s.foods_created >= 30,
         "want >= 30 foods, got {}",
         s.foods_created

@@ -13,6 +13,7 @@ use commands::cooking::CookCommands;
 use commands::demo::DemoCommands;
 use commands::email::EmailCommands;
 use commands::expense::ExpenseCommands;
+use commands::fitness::FitnessCommands;
 use commands::github::GithubCommands;
 use commands::inbox::InboxCommands;
 use commands::invoice::InvoiceCommands;
@@ -342,6 +343,12 @@ pub(crate) enum Commands {
     Cook {
         #[command(subcommand)]
         command: CookCommands,
+    },
+    /// Fitness workflow — exercise catalog + routine templates
+    #[command(alias = "fitness")]
+    Fit {
+        #[command(subcommand)]
+        command: FitnessCommands,
     },
     /// Reusable venues, locations, spaces, and default files
     Location {
@@ -1256,6 +1263,9 @@ pub(crate) async fn run_remote_command(
         }
         Commands::Attachment { command } => {
             commands::attachment::run_remote_attachment_command(remote, actor, command).await?
+        }
+        Commands::Fit { command } => {
+            commands::fitness::run_remote_fitness_command(remote, actor, command).await?
         }
         Commands::Cook { command } => {
             commands::cooking::run_remote_cook_command(remote, actor, command).await?

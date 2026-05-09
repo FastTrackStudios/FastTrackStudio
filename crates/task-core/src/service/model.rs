@@ -2549,6 +2549,155 @@ pub struct WeeklySummaryView {
     pub averages: DailyTotalsView,
 }
 
+// ── Fitness ─────────────────────────────────────────────────────────
+
+/// Fitness foundation — Exercise catalog + Routine/RoutineExercise
+/// templates. The actual logged workouts (`WorkoutSession`/`SetLog`)
+/// land in a follow-up bead.
+#[vox::service]
+pub trait FitnessService {
+    // ── Exercises ─────────────────────────────────────────────
+    async fn list_exercises(
+        &self,
+        organization: Option<String>,
+        modality: Option<String>,
+        primary_muscle: Option<String>,
+    ) -> Result<Vec<crate::exercise::ExerciseApi>, VaultError>;
+
+    async fn get_exercise(
+        &self,
+        id: Uuid,
+    ) -> Result<Option<crate::exercise::ExerciseApi>, VaultError>;
+
+    async fn find_exercise_by_slug_or_alias(
+        &self,
+        organization: Option<String>,
+        slug_or_alias: String,
+    ) -> Result<Option<crate::exercise::ExerciseApi>, VaultError>;
+
+    async fn create_exercise(
+        &self,
+        request: CreateExerciseRequest,
+    ) -> Result<crate::exercise::ExerciseApi, VaultError>;
+
+    async fn update_exercise(
+        &self,
+        id: Uuid,
+        patch: ExercisePatch,
+    ) -> Result<crate::exercise::ExerciseApi, VaultError>;
+
+    async fn delete_exercise(&self, id: Uuid) -> Result<(), VaultError>;
+
+    // ── Routines ─────────────────────────────────────────────
+    async fn list_routines(
+        &self,
+        organization: Option<String>,
+        category: Option<String>,
+    ) -> Result<Vec<crate::routine::RoutineApi>, VaultError>;
+
+    /// Returns the routine with its exercise list pre-loaded as JSON.
+    async fn get_routine_with_exercises(
+        &self,
+        id: Uuid,
+    ) -> Result<Option<RoutineWithExercisesView>, VaultError>;
+
+    async fn create_routine(
+        &self,
+        request: CreateRoutineRequest,
+    ) -> Result<crate::routine::RoutineApi, VaultError>;
+
+    async fn delete_routine(&self, id: Uuid) -> Result<(), VaultError>;
+
+    /// Append an exercise to a routine. Auto-positions to the end.
+    async fn add_routine_exercise(
+        &self,
+        request: AddRoutineExerciseRequest,
+    ) -> Result<crate::routine_exercise::RoutineExerciseApi, VaultError>;
+
+    async fn remove_routine_exercise(&self, id: Uuid) -> Result<(), VaultError>;
+
+    /// Reorder a routine's exercises. Pass the desired ordering as a
+    /// list of routine_exercise ids; positions are reassigned 0..N.
+    async fn reorder_routine_exercises(
+        &self,
+        routine_id: Uuid,
+        ordered_ids: Vec<Uuid>,
+    ) -> Result<(), VaultError>;
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct CreateExerciseRequest {
+    pub name: String,
+    pub slug: Option<String>,
+    pub aliases: Vec<String>,
+    /// "strength" / "cardio" / "mobility".
+    pub modality: String,
+    pub primary_muscle: Option<String>,
+    pub secondary_muscles: Vec<String>,
+    pub equipment: Option<String>,
+    pub body_markdown: Option<String>,
+    pub media_url: Option<String>,
+    pub organization: Option<String>,
+    pub created_by: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct ExercisePatch {
+    pub name: Option<String>,
+    pub slug: Option<String>,
+    pub aliases: Option<Vec<String>>,
+    pub modality: Option<String>,
+    pub primary_muscle: Option<String>,
+    pub secondary_muscles: Option<Vec<String>>,
+    pub equipment: Option<String>,
+    pub body_markdown: Option<String>,
+    pub media_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct CreateRoutineRequest {
+    pub name: String,
+    pub slug: Option<String>,
+    pub description: Option<String>,
+    pub body_markdown: Option<String>,
+    pub category: Option<String>,
+    pub estimated_duration_minutes: Option<u32>,
+    pub difficulty: Option<String>,
+    pub tags: Vec<String>,
+    pub organization: Option<String>,
+    pub created_by: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct AddRoutineExerciseRequest {
+    pub routine_id: Uuid,
+    /// Either `exercise_id` (canonical link) OR `display_name` (free-form).
+    pub exercise_id: Option<Uuid>,
+    pub display_name: Option<String>,
+    pub group_label: Option<String>,
+
+    pub target_sets: Option<u32>,
+    pub target_reps: Option<u32>,
+    pub target_weight_kg: Option<f64>,
+    pub target_rest_seconds: Option<u32>,
+    pub target_rpe: Option<f32>,
+    pub tempo: Option<String>,
+
+    pub target_duration_seconds: Option<u32>,
+    pub target_distance_meters: Option<f64>,
+    pub target_avg_hr: Option<u32>,
+    pub target_pace_seconds_per_km: Option<u32>,
+
+    pub notes: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct RoutineWithExercisesView {
+    pub routine: crate::routine::RoutineApi,
+    /// JSON-encoded `Vec<RoutineExerciseApi>` ordered by position.
+    pub exercises_json: String,
+}
+
 /// Errors returned by vault operations.
 #[derive(Debug, facet::Facet, thiserror::Error)]
 #[repr(C)]
