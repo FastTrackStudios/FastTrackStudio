@@ -1,21 +1,17 @@
-use std::net::SocketAddr;
-use std::path::PathBuf;
-use std::process::Stdio;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+mod common;
+
+use std::time::Duration;
 use std::{fmt::Debug, future::Future};
 
 use chrono::{TimeZone, Utc};
+use common::{RunningServer, TEST_TOKEN, TestFixture, free_loopback_addr, wait_for_tcp};
 use serde::{Serialize, de::DeserializeOwned};
 use task_core::{
     CalendarEvent, CalendarEventStatus, Client, Filter, InboxCaptureRequest, InboxPromoteRequest,
     InvoiceCreateRequest, InvoicePaymentRequest, Priority, Project, Query, Sort, Status, Task,
     TimeEntryFilter, TimeLogRequest, TimeStartRequest, WikiLink,
 };
-use tokio::net::{TcpListener, TcpStream};
-use tokio::process::{Child, Command};
 use tokio::time::timeout;
-
-const TEST_TOKEN: &str = "task-server-e2e-session-token";
 
 #[tokio::test]
 async fn authenticated_system_service_reports_capabilities_and_health() {
@@ -556,126 +552,4 @@ where
         .await
         .unwrap_or_else(|_| panic!("{name} should not time out"))
         .is_err()
-}
-
-async fn free_loopback_addr() -> SocketAddr {
-    let listener = TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("free loopback port should bind");
-    listener
-        .local_addr()
-        .expect("bound listener should have local addr")
-}
-
-async fn wait_for_tcp(addr: SocketAddr) {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
-    loop {
-        if TcpStream::connect(addr).await.is_ok() {
-            return;
-        }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "task-server did not start listening on {addr}"
-        );
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-}
-
-struct TestFixture {
-    root: PathBuf,
-}
-
-impl TestFixture {
-    fn new() -> Self {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system clock should be after unix epoch")
-            .as_nanos();
-        let root = std::env::temp_dir().join(format!("task-server-e2e-{nanos}"));
-        std::fs::create_dir_all(root.join("vault")).expect("fixture vault should be created");
-        Self { root }
-    }
-
-    fn db_path(&self) -> PathBuf {
-        self.root.join("server.sqlite")
-    }
-
-    fn vault_path(&self) -> PathBuf {
-        self.root.join("vault")
-    }
-
-    fn seed_task(&self, task: Task) {
-        // The markdown seed pathway has been removed alongside the Vault
-        // layer. The task-server's persistence boundary is now SQLite via
-        // SeaORM, so this fixture method is a no-op kept for the (currently
-        // ignored) full-services smoke test until it's rewritten to seed
-        // through the repo services directly.
-        let _ = task;
-        let _ = self.vault_path();
-    }
-
-    fn seed_project(&self, project: Project) {
-        let _ = project;
-        let _ = self.vault_path();
-    }
-}
-
-impl Drop for TestFixture {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.root);
-    }
-}
-
-struct RunningServer {
-    child: Child,
-}
-
-impl RunningServer {
-    fn spawn(server_bin: &str, bind_addr: SocketAddr, fixture: &TestFixture) -> Self {
-        let child = Command::new(server_bin)
-            .env("BIND_ADDR", bind_addr.to_string())
-            .env("PUBLIC_BASE_URL", format!("http://{bind_addr}"))
-            .env("TASK_DB_PATH", fixture.db_path())
-            .env("TASK_VAULT", fixture.vault_path())
-            .env("TASK_SEED_DEMO", "1")
-            .env("TASK_TEST_SESSION_TOKEN", TEST_TOKEN)
-            .env("HOME", fixture.root.as_os_str())
-            .env(
-                "TASK_NEXTCLOUD_CONFIG",
-                fixture.root.join("missing-nextcloud.toml"),
-            )
-            .env_remove("NEXTCLOUD_URL")
-            .env_remove("NEXTCLOUD_USERNAME")
-            .env_remove("NEXTCLOUD_PASSWORD")
-            .env_remove("NEXTCLOUD_APP_PASSWORD")
-            .env_remove("NEXTCLOUD_PROJECTS_PATH")
-            .env_remove("NEXTCLOUD_CALENDAR")
-            .env_remove("NEXTCLOUD_EVENT_CALENDAR")
-            .env_remove("NEXTCLOUD_DECK_ENABLED")
-            .env(
-                "AUTH_SECRET",
-                "task-server-e2e-secret-key-must-be-at-least-32-chars",
-            )
-            .env("RUST_LOG", "task_server=warn")
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("task-server should spawn");
-        Self { child }
-    }
-
-    async fn stop(&mut self) {
-        if let Ok(Some(_)) = self.child.try_wait() {
-            return;
-        }
-        let _ = self.child.kill().await;
-        let _ = self.child.wait().await;
-    }
-}
-
-impl Drop for RunningServer {
-    fn drop(&mut self) {
-        let _ = self.child.start_kill();
-    }
 }
