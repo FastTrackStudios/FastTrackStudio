@@ -37,7 +37,7 @@ fn state() -> Arc<Mutex<State>> {
     STATE
         .get_or_init(|| {
             Arc::new(Mutex::new(State {
-                auto_color_enabled: false,
+                auto_color_enabled: true,
                 group_cache: HashMap::new(),
                 spawner: None,
             }))
@@ -102,6 +102,16 @@ impl DawModule for DynamicTemplateModule {
                 return;
             };
             tracing::info!("[dynamic-template] subscribed to track events");
+            let enabled = {
+                let s = state();
+                let locked = s.lock().unwrap();
+                locked.auto_color_enabled
+            };
+            if enabled {
+                if let Err(err) = color_tracks(daw, false).await {
+                    tracing::warn!("[dynamic-template] initial auto-color failed: {err}");
+                }
+            }
 
             loop {
                 match track_rx.recv().await {
