@@ -236,7 +236,31 @@ static USER_TIMER_CALLBACKS: std::sync::Mutex<Vec<fn()>> = std::sync::Mutex::new
 /// let daw = tokio_runtime.block_on(daw::reaper::build_extension_daw())?;
 /// ```
 pub async fn build_extension_daw() -> eyre::Result<Daw> {
-    let handler = crate::plugin_services::create_daw_handler();
+    build_extension_daw_with(crate::plugin_services::create_daw_handler()).await
+}
+
+/// Like [`build_extension_daw`], but accepts an externally-built
+/// `RoutedHandler` so consumers can layer their own dispatchers on top
+/// of the standard daw services.
+///
+/// Typical use from an extension that wants to host non-daw services
+/// (e.g. `keyflow-daw-analysis::MidiChartService`) on the same in-process
+/// channel as the rest of the daw API:
+///
+/// ```rust,ignore
+/// use daw_reaper::routed_handler::RoutedHandler;
+/// use daw_reaper::plugin_services::create_daw_handler;
+///
+/// let handler = create_daw_handler()
+///     .with(midi_chart_service_descriptor(),
+///           MidiChartServiceDispatcher::new(KeyflowMidiAnalysis::new(daw)));
+/// let daw = tokio_runtime.block_on(
+///     daw::reaper::build_extension_daw_with(handler)
+/// )?;
+/// ```
+pub async fn build_extension_daw_with(
+    handler: crate::routed_handler::RoutedHandler,
+) -> eyre::Result<Daw> {
     let local = LocalCaller::new(handler).await?;
     let caller = local.caller();
     // Leak LocalCaller to keep the server-side moire task alive for the

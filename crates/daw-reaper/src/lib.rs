@@ -121,4 +121,6 @@ pub use routing::{init_routing_broadcaster, poll_and_broadcast_routing};
 pub use toolbar::process_deferred_ops as process_toolbar_ops;
 
 // Re-export extension bootstrap convenience
-pub use bootstrap::build_extension_daw;
+pub use bootstrap::{build_extension_daw, build_extension_daw_with};
+pub use plugin_services::create_daw_handler;
+pub use routed_handler::RoutedHandler;
