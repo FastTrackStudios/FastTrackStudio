@@ -197,6 +197,11 @@ async fn seed_demo_data_covers_every_entity_flavor() {
         s.food_logs_created
     );
     assert!(
+        s.body_measurements_created >= 10,
+        "want >= 10 body measurement rows, got {}",
+        s.body_measurements_created
+    );
+    assert!(
         s.substitutions_created >= 15,
         "want >= 15 substitutions, got {}",
         s.substitutions_created

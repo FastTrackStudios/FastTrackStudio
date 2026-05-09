@@ -20,6 +20,7 @@ use uuid::Uuid;
 
 use task_core::activity;
 use task_core::attachment;
+use task_core::body_measurement;
 use task_core::calendar_event::{self, CalendarEventStatus};
 use task_core::comment;
 use task_core::cookbook;
@@ -151,6 +152,8 @@ pub struct DemoSeedSummary {
     pub workout_sessions_unchanged: usize,
     pub set_logs_created: usize,
     pub set_logs_unchanged: usize,
+    pub body_measurements_created: usize,
+    pub body_measurements_unchanged: usize,
 }
 
 impl DemoSeedSummary {
@@ -189,6 +192,7 @@ impl DemoSeedSummary {
             + self.routine_exercises_created
             + self.workout_sessions_created
             + self.set_logs_created
+            + self.body_measurements_created
     }
 
     pub fn total_unchanged(&self) -> usize {
@@ -226,6 +230,7 @@ impl DemoSeedSummary {
             + self.routine_exercises_unchanged
             + self.workout_sessions_unchanged
             + self.set_logs_unchanged
+            + self.body_measurements_unchanged
     }
 }
 
@@ -271,6 +276,7 @@ pub async fn seed_demo_data(db: &DatabaseConnection) -> Result<DemoSeedSummary, 
     seed_substitutions(db, &mut summary).await?;
     seed_exercises(db, &mut summary).await?;
     seed_routines(db, &mut summary).await?;
+    seed_body_measurements(db, &mut summary).await?;
     seed_workout_sessions(db, &mut summary).await?;
     Ok(summary)
 }
@@ -278,6 +284,21 @@ pub async fn seed_demo_data(db: &DatabaseConnection) -> Result<DemoSeedSummary, 
 /// Delete every row created by [`seed_demo_data`] (by deterministic id).
 pub async fn reset_demo_data(db: &DatabaseConnection) -> Result<DemoSeedSummary, DbErr> {
     let mut summary = DemoSeedSummary::default();
+
+    // Body measurements — independent of workout sessions, reset first
+    // for a tidy ordering. Photos hang off via attachments which are
+    // cleaned in their own reset block.
+    for key in BODY_MEASUREMENT_KEYS {
+        let id = demo_id(key);
+        if body_measurement::Entity::delete_by_id(id)
+            .exec(db)
+            .await?
+            .rows_affected
+            > 0
+        {
+            summary.body_measurements_created += 1;
+        }
+    }
 
     // Fitness actuals — set_logs before workout_sessions, both before
     // routines (set_log soft-FK to both routine_exercise and exercise).
@@ -1031,6 +1052,25 @@ const ROUTINE_KEYS: &[&str] = &[
 const WORKOUT_SESSION_KEYS: &[&str] = &[
     "workout_session:push-day-active",
     "workout_session:easy-5k-completed",
+];
+
+/// 12 measurement rows spread across the last 30 days for the
+/// `personal` org. The trend curve is hand-tuned: weight 78.4 → 76.9,
+/// bf% 19.2 → 17.8, waist 82.0 → 79.5. Circumference + vitals snapshots
+/// land every ~7 days.
+const BODY_MEASUREMENT_KEYS: &[&str] = &[
+    "body_measurement:2026-04-08",
+    "body_measurement:2026-04-11",
+    "body_measurement:2026-04-14",
+    "body_measurement:2026-04-17",
+    "body_measurement:2026-04-20",
+    "body_measurement:2026-04-23",
+    "body_measurement:2026-04-26",
+    "body_measurement:2026-04-29",
+    "body_measurement:2026-05-01",
+    "body_measurement:2026-05-03",
+    "body_measurement:2026-05-05",
+    "body_measurement:2026-05-08",
 ];
 
 // ── Project fixtures ────────────────────────────────────────────────────────
@@ -6937,6 +6977,205 @@ const EASY_5K_PLANNED_SETS: &[PlannedSetFixture] = &[PlannedSetFixture {
     // completed 3 days ago.
     completed_minutes_ago: Some(0),
 }];
+
+async fn seed_body_measurements(
+    db: &DatabaseConnection,
+    summary: &mut DemoSeedSummary,
+) -> Result<(), DbErr> {
+    // 12 rows across ~30 days with a realistic cut: weight 78.4 -> 76.9,
+    // bf% 19.2 -> 17.8, waist 82.0 -> 79.5. Circumferences populate on
+    // every other row (the others log only weight / bf%).
+    struct Fixture {
+        key: &'static str,
+        days_ago: i64,
+        weight_kg: f64,
+        body_fat_percent: f32,
+        muscle_mass_kg: Option<f64>,
+        chest_cm: Option<f64>,
+        waist_cm: Option<f64>,
+        hip_cm: Option<f64>,
+        resting_hr: Option<u32>,
+    }
+    let fixtures: &[Fixture] = &[
+        Fixture {
+            key: "body_measurement:2026-04-08",
+            days_ago: 30,
+            weight_kg: 78.4,
+            body_fat_percent: 19.2,
+            muscle_mass_kg: Some(35.4),
+            chest_cm: Some(102.0),
+            waist_cm: Some(82.0),
+            hip_cm: Some(101.5),
+            resting_hr: Some(58),
+        },
+        Fixture {
+            key: "body_measurement:2026-04-11",
+            days_ago: 27,
+            weight_kg: 78.1,
+            body_fat_percent: 19.0,
+            muscle_mass_kg: None,
+            chest_cm: None,
+            waist_cm: None,
+            hip_cm: None,
+            resting_hr: None,
+        },
+        Fixture {
+            key: "body_measurement:2026-04-14",
+            days_ago: 24,
+            weight_kg: 77.9,
+            body_fat_percent: 18.8,
+            muscle_mass_kg: Some(35.5),
+            chest_cm: Some(101.8),
+            waist_cm: Some(81.5),
+            hip_cm: Some(101.3),
+            resting_hr: Some(57),
+        },
+        Fixture {
+            key: "body_measurement:2026-04-17",
+            days_ago: 21,
+            weight_kg: 77.7,
+            body_fat_percent: 18.6,
+            muscle_mass_kg: None,
+            chest_cm: None,
+            waist_cm: None,
+            hip_cm: None,
+            resting_hr: None,
+        },
+        Fixture {
+            key: "body_measurement:2026-04-20",
+            days_ago: 18,
+            weight_kg: 77.5,
+            body_fat_percent: 18.5,
+            muscle_mass_kg: Some(35.6),
+            chest_cm: Some(101.5),
+            waist_cm: Some(81.0),
+            hip_cm: Some(101.0),
+            resting_hr: Some(57),
+        },
+        Fixture {
+            key: "body_measurement:2026-04-23",
+            days_ago: 15,
+            weight_kg: 77.3,
+            body_fat_percent: 18.3,
+            muscle_mass_kg: None,
+            chest_cm: None,
+            waist_cm: None,
+            hip_cm: None,
+            resting_hr: None,
+        },
+        Fixture {
+            key: "body_measurement:2026-04-26",
+            days_ago: 12,
+            weight_kg: 77.2,
+            body_fat_percent: 18.2,
+            muscle_mass_kg: Some(35.7),
+            chest_cm: Some(101.2),
+            waist_cm: Some(80.5),
+            hip_cm: Some(100.7),
+            resting_hr: Some(56),
+        },
+        Fixture {
+            key: "body_measurement:2026-04-29",
+            days_ago: 9,
+            weight_kg: 77.1,
+            body_fat_percent: 18.1,
+            muscle_mass_kg: None,
+            chest_cm: None,
+            waist_cm: None,
+            hip_cm: None,
+            resting_hr: None,
+        },
+        Fixture {
+            key: "body_measurement:2026-05-01",
+            days_ago: 7,
+            weight_kg: 77.0,
+            body_fat_percent: 18.0,
+            muscle_mass_kg: Some(35.7),
+            chest_cm: Some(101.0),
+            waist_cm: Some(80.0),
+            hip_cm: Some(100.5),
+            resting_hr: Some(56),
+        },
+        Fixture {
+            key: "body_measurement:2026-05-03",
+            days_ago: 5,
+            weight_kg: 76.95,
+            body_fat_percent: 17.95,
+            muscle_mass_kg: None,
+            chest_cm: None,
+            waist_cm: None,
+            hip_cm: None,
+            resting_hr: None,
+        },
+        Fixture {
+            key: "body_measurement:2026-05-05",
+            days_ago: 3,
+            weight_kg: 76.92,
+            body_fat_percent: 17.85,
+            muscle_mass_kg: Some(35.8),
+            chest_cm: Some(100.8),
+            waist_cm: Some(79.7),
+            hip_cm: Some(100.3),
+            resting_hr: Some(55),
+        },
+        Fixture {
+            key: "body_measurement:2026-05-08",
+            days_ago: 0,
+            weight_kg: 76.9,
+            body_fat_percent: 17.8,
+            muscle_mass_kg: Some(35.8),
+            chest_cm: Some(100.6),
+            waist_cm: Some(79.5),
+            hip_cm: Some(100.2),
+            resting_hr: Some(55),
+        },
+    ];
+
+    let now = Utc::now();
+    let org = ORG_PERSONAL;
+    for fix in fixtures {
+        let id = demo_id(fix.key);
+        if body_measurement::Entity::find_by_id(id)
+            .one(db)
+            .await?
+            .is_some()
+        {
+            summary.body_measurements_unchanged += 1;
+            continue;
+        }
+        let measured_at = now - Duration::days(fix.days_ago);
+        let active = body_measurement::ActiveModel {
+            id: Set(id),
+            measured_at: Set(measured_at),
+            weight_kg: Set(Some(fix.weight_kg)),
+            body_fat_percent: Set(Some(fix.body_fat_percent)),
+            muscle_mass_kg: Set(fix.muscle_mass_kg),
+            water_percent: Set(None),
+            neck_cm: Set(None),
+            chest_cm: Set(fix.chest_cm),
+            waist_cm: Set(fix.waist_cm),
+            hip_cm: Set(fix.hip_cm),
+            left_thigh_cm: Set(None),
+            right_thigh_cm: Set(None),
+            left_arm_cm: Set(None),
+            right_arm_cm: Set(None),
+            left_calf_cm: Set(None),
+            right_calf_cm: Set(None),
+            resting_hr: Set(fix.resting_hr),
+            blood_pressure_systolic: Set(None),
+            blood_pressure_diastolic: Set(None),
+            notes: Set(String::new()),
+            organization: Set(Some(org.to_string())),
+            created_by: Set(Some("cody".to_string())),
+            properties: Set(JsonObject::default()),
+            created_at: Set(now),
+            updated_at: Set(now),
+        };
+        body_measurement::Entity::insert(active).exec(db).await?;
+        summary.body_measurements_created += 1;
+    }
+    Ok(())
+}
 
 #[allow(clippy::too_many_lines)]
 async fn seed_workout_sessions(

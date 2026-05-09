@@ -4,14 +4,19 @@
 //! templates with positioned exercises. Logged workouts come in a
 //! follow-up bead.
 
+use std::path::PathBuf;
+
 use clap::Subcommand;
+use task_core::body_measurement::BodyMeasurementApi;
 use task_core::exercise::ExerciseApi;
 use task_core::routine::RoutineApi;
 use task_core::routine_exercise::RoutineExerciseApi;
 use task_core::service::{
-    AddRoutineExerciseRequest, CompleteWorkoutSessionRequest, CreateExerciseRequest,
-    CreateRoutineRequest, ExercisePatch, FitnessServiceClient, LogSetRequest,
-    RoutineWithExercisesView, StartWorkoutSessionRequest, UpdateSetRequest, WorkoutSessionView,
+    AddRoutineExerciseRequest, BodyMeasurementTrendRequest, BodyMeasurementTrendView,
+    CompleteWorkoutSessionRequest, CreateExerciseRequest, CreateRoutineRequest, ExercisePatch,
+    FitnessServiceClient, ListBodyMeasurementsRequest, LogSetRequest, MetricTrend,
+    RecordBodyMeasurementRequest, RoutineWithExercisesView, StartWorkoutSessionRequest,
+    UpdateBodyMeasurementRequest, UpdateSetRequest, WorkoutSessionView,
 };
 use task_core::set_log::SetLogApi;
 use uuid::Uuid;
@@ -34,6 +39,27 @@ pub(crate) enum FitnessCommands {
     Session {
         #[command(subcommand)]
         command: SessionCommands,
+    },
+    /// Quick weight log — shorthand for `measure record --weight-kg <kg>`.
+    Weigh {
+        weight_kg: f64,
+        /// Override the timestamp (ISO 8601). Defaults to now.
+        #[arg(long = "at")]
+        at: Option<String>,
+        /// Body-fat percent at this measurement.
+        #[arg(long = "bf")]
+        body_fat_percent: Option<f32>,
+        #[arg(long = "note")]
+        note: Option<String>,
+        #[arg(long)]
+        organization: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Body measurements (weight, BF%, circumferences, photos).
+    Measure {
+        #[command(subcommand)]
+        command: MeasureCommands,
     },
 }
 
@@ -188,6 +214,30 @@ pub(crate) async fn run_remote_fitness_command(
         FitnessCommands::Exercise { command } => run_exercise(&client, actor, command).await,
         FitnessCommands::Routine { command } => run_routine(&client, actor, command).await,
         FitnessCommands::Session { command } => run_session(&client, actor, command).await,
+        FitnessCommands::Weigh {
+            weight_kg,
+            at,
+            body_fat_percent,
+            note,
+            organization,
+            json,
+        } => {
+            let measured_at = parse_iso_at(at.as_deref())?;
+            let saved = client
+                .record_body_measurement(RecordBodyMeasurementRequest {
+                    measured_at,
+                    weight_kg: Some(weight_kg),
+                    body_fat_percent,
+                    notes: note,
+                    organization,
+                    created_by: actor.map(str::to_string),
+                    ..Default::default()
+                })
+                .await
+                .map_err(|e| eyre::eyre!("record_body_measurement: {e}"))?;
+            print_measurement(&saved, json)
+        }
+        FitnessCommands::Measure { command } => run_measure(remote, &client, actor, command).await,
     }
 }
 
@@ -1157,5 +1207,501 @@ fn format_set_detail(set: &SetLogApi) -> String {
         "—".to_string()
     } else {
         parts.join("   ")
+    }
+}
+
+// ── Measure (body measurements) ─────────────────────────────────────
+
+#[derive(Subcommand)]
+pub(crate) enum MeasureCommands {
+    /// Record a new body-measurement row. All fields are optional except
+    /// the timestamp (defaults to now) — record only what you measured.
+    Record {
+        #[arg(long = "at")]
+        at: Option<String>,
+        #[arg(long = "weight-kg")]
+        weight_kg: Option<f64>,
+        #[arg(long = "bf")]
+        body_fat_percent: Option<f32>,
+        #[arg(long = "muscle-kg")]
+        muscle_mass_kg: Option<f64>,
+        #[arg(long = "water-pct")]
+        water_percent: Option<f32>,
+        #[arg(long)]
+        neck: Option<f64>,
+        #[arg(long)]
+        chest: Option<f64>,
+        #[arg(long)]
+        waist: Option<f64>,
+        #[arg(long)]
+        hip: Option<f64>,
+        #[arg(long = "left-thigh")]
+        left_thigh: Option<f64>,
+        #[arg(long = "right-thigh")]
+        right_thigh: Option<f64>,
+        #[arg(long = "left-arm")]
+        left_arm: Option<f64>,
+        #[arg(long = "right-arm")]
+        right_arm: Option<f64>,
+        #[arg(long = "left-calf")]
+        left_calf: Option<f64>,
+        #[arg(long = "right-calf")]
+        right_calf: Option<f64>,
+        #[arg(long = "resting-hr")]
+        resting_hr: Option<u32>,
+        /// Blood pressure as `<systolic>/<diastolic>` (e.g. `120/80`).
+        #[arg(long = "bp")]
+        bp: Option<String>,
+        #[arg(long = "note")]
+        note: Option<String>,
+        #[arg(long)]
+        organization: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// List recent measurements (newest first).
+    List {
+        #[arg(long)]
+        since: Option<String>,
+        #[arg(long)]
+        until: Option<String>,
+        #[arg(long)]
+        limit: Option<u32>,
+        #[arg(long)]
+        organization: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show one measurement by id.
+    Show {
+        id: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Patch fields on an existing measurement (None fields = leave alone).
+    Update {
+        id: String,
+        #[arg(long = "weight-kg")]
+        weight_kg: Option<f64>,
+        #[arg(long = "bf")]
+        body_fat_percent: Option<f32>,
+        #[arg(long)]
+        waist: Option<f64>,
+        #[arg(long)]
+        chest: Option<f64>,
+        #[arg(long)]
+        hip: Option<f64>,
+        #[arg(long = "note")]
+        note: Option<String>,
+    },
+    /// Delete a measurement (drops attached photos as well).
+    Delete { id: String },
+    /// Compute trend metrics across a date window.
+    Trend {
+        #[arg(long)]
+        since: Option<String>,
+        #[arg(long)]
+        until: Option<String>,
+        #[arg(long)]
+        organization: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Photo subcommands — delegate to the attachment service with
+    /// `owner_type = "body_measurement"`.
+    Photo {
+        #[command(subcommand)]
+        command: PhotoCommands,
+    },
+}
+
+#[derive(Subcommand)]
+pub(crate) enum PhotoCommands {
+    /// Upload a progress photo and attach it to a measurement row.
+    Attach {
+        id: String,
+        path: PathBuf,
+        #[arg(long)]
+        label: Option<String>,
+    },
+    /// List photos hung off a measurement.
+    List { id: String },
+}
+
+fn parse_iso_at(value: Option<&str>) -> eyre::Result<Option<chrono::DateTime<chrono::Utc>>> {
+    let Some(raw) = value else {
+        return Ok(None);
+    };
+    let parsed = chrono::DateTime::parse_from_rfc3339(raw)
+        .map_err(|err| eyre::eyre!("invalid --at timestamp '{raw}': {err}"))?;
+    Ok(Some(parsed.with_timezone(&chrono::Utc)))
+}
+
+fn parse_bp(raw: &str) -> eyre::Result<(u32, u32)> {
+    let trimmed = raw.trim();
+    let mut parts = trimmed.splitn(2, '/');
+    let sys = parts
+        .next()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| eyre::eyre!("--bp must be `<systolic>/<diastolic>` (got `{raw}`)"))?;
+    let dia = parts
+        .next()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| eyre::eyre!("--bp must be `<systolic>/<diastolic>` (got `{raw}`)"))?;
+    let sys: u32 = sys
+        .parse()
+        .map_err(|err| eyre::eyre!("--bp systolic must be a non-negative integer: {err}"))?;
+    let dia: u32 = dia
+        .parse()
+        .map_err(|err| eyre::eyre!("--bp diastolic must be a non-negative integer: {err}"))?;
+    Ok((sys, dia))
+}
+
+async fn run_measure(
+    remote: &RemoteVoxConfig,
+    client: &FitnessServiceClient,
+    actor: Option<&str>,
+    command: MeasureCommands,
+) -> eyre::Result<()> {
+    match command {
+        MeasureCommands::Record {
+            at,
+            weight_kg,
+            body_fat_percent,
+            muscle_mass_kg,
+            water_percent,
+            neck,
+            chest,
+            waist,
+            hip,
+            left_thigh,
+            right_thigh,
+            left_arm,
+            right_arm,
+            left_calf,
+            right_calf,
+            resting_hr,
+            bp,
+            note,
+            organization,
+            json,
+        } => {
+            let measured_at = parse_iso_at(at.as_deref())?;
+            let (sys, dia) = match bp.as_deref() {
+                Some(raw) => {
+                    let (s, d) = parse_bp(raw)?;
+                    (Some(s), Some(d))
+                }
+                None => (None, None),
+            };
+            let saved = client
+                .record_body_measurement(RecordBodyMeasurementRequest {
+                    measured_at,
+                    weight_kg,
+                    body_fat_percent,
+                    muscle_mass_kg,
+                    water_percent,
+                    neck_cm: neck,
+                    chest_cm: chest,
+                    waist_cm: waist,
+                    hip_cm: hip,
+                    left_thigh_cm: left_thigh,
+                    right_thigh_cm: right_thigh,
+                    left_arm_cm: left_arm,
+                    right_arm_cm: right_arm,
+                    left_calf_cm: left_calf,
+                    right_calf_cm: right_calf,
+                    resting_hr,
+                    blood_pressure_systolic: sys,
+                    blood_pressure_diastolic: dia,
+                    notes: note,
+                    organization,
+                    created_by: actor.map(str::to_string),
+                })
+                .await
+                .map_err(|e| eyre::eyre!("record_body_measurement: {e}"))?;
+            print_measurement(&saved, json)?;
+        }
+        MeasureCommands::List {
+            since,
+            until,
+            limit,
+            organization,
+            json,
+        } => {
+            let rows = client
+                .list_body_measurements(ListBodyMeasurementsRequest {
+                    organization,
+                    since: parse_iso_at(since.as_deref())?,
+                    until: parse_iso_at(until.as_deref())?,
+                    limit,
+                })
+                .await
+                .map_err(|e| eyre::eyre!("list_body_measurements: {e}"))?;
+            print_measurements(&rows, json)?;
+        }
+        MeasureCommands::Show { id, json } => {
+            let parsed = Uuid::parse_str(&id).map_err(|e| eyre::eyre!("invalid UUID: {e}"))?;
+            let item = client
+                .get_body_measurement(parsed)
+                .await
+                .map_err(|e| eyre::eyre!("get_body_measurement: {e}"))?
+                .ok_or_else(|| eyre::eyre!("body_measurement not found: {id}"))?;
+            print_measurement(&item, json)?;
+        }
+        MeasureCommands::Update {
+            id,
+            weight_kg,
+            body_fat_percent,
+            waist,
+            chest,
+            hip,
+            note,
+        } => {
+            let parsed = Uuid::parse_str(&id).map_err(|e| eyre::eyre!("invalid UUID: {e}"))?;
+            let saved = client
+                .update_body_measurement(UpdateBodyMeasurementRequest {
+                    id: parsed,
+                    weight_kg,
+                    body_fat_percent,
+                    waist_cm: waist,
+                    chest_cm: chest,
+                    hip_cm: hip,
+                    notes: note,
+                    ..Default::default()
+                })
+                .await
+                .map_err(|e| eyre::eyre!("update_body_measurement: {e}"))?;
+            println!(
+                "Updated measurement {} (measured_at {})",
+                saved.id, saved.measured_at
+            );
+        }
+        MeasureCommands::Delete { id } => {
+            let parsed = Uuid::parse_str(&id).map_err(|e| eyre::eyre!("invalid UUID: {e}"))?;
+            client
+                .delete_body_measurement(parsed)
+                .await
+                .map_err(|e| eyre::eyre!("delete_body_measurement: {e}"))?;
+            println!("Deleted measurement {parsed} (and its photo attachments).");
+        }
+        MeasureCommands::Trend {
+            since,
+            until,
+            organization,
+            json,
+        } => {
+            let view = client
+                .body_measurement_trend(BodyMeasurementTrendRequest {
+                    organization,
+                    since: parse_iso_at(since.as_deref())?,
+                    until: parse_iso_at(until.as_deref())?,
+                })
+                .await
+                .map_err(|e| eyre::eyre!("body_measurement_trend: {e}"))?;
+            print_trend(&view, json)?;
+        }
+        MeasureCommands::Photo { command } => match command {
+            PhotoCommands::Attach { id, path, label } => {
+                let parsed = Uuid::parse_str(&id).map_err(|e| eyre::eyre!("invalid UUID: {e}"))?;
+                let attachments = remote.attachment().await?;
+                let bytes = std::fs::read(&path)
+                    .map_err(|err| eyre::eyre!("read {}: {err}", path.display()))?;
+                let basename = path
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .map(str::to_string)
+                    .unwrap_or_else(|| "photo.bin".to_string());
+                let remote_path = task_core::attachment::default_remote_path(
+                    "body_measurement",
+                    parsed,
+                    &basename,
+                );
+                let attachment = attachments
+                    .upload(task_core::service::AttachmentUploadRequest {
+                        owner_type: "body_measurement".to_string(),
+                        owner_id: parsed,
+                        path: remote_path,
+                        label,
+                        mime: None,
+                        bytes,
+                        uploader: actor.map(str::to_string),
+                        source: "nextcloud".to_string(),
+                    })
+                    .await
+                    .map_err(|err| eyre::eyre!("upload failed: {err}"))?;
+                println!(
+                    "Attached {} -> {}",
+                    attachment.label.as_deref().unwrap_or("(no label)"),
+                    attachment.path
+                );
+            }
+            PhotoCommands::List { id } => {
+                let parsed = Uuid::parse_str(&id).map_err(|e| eyre::eyre!("invalid UUID: {e}"))?;
+                let attachments = remote.attachment().await?;
+                let rows = attachments
+                    .list_for_entity("body_measurement".to_string(), parsed)
+                    .await
+                    .map_err(|err| eyre::eyre!("list failed: {err}"))?;
+                if rows.is_empty() {
+                    println!("(no photos)");
+                } else {
+                    for a in rows {
+                        let mime = a.mime.as_deref().unwrap_or("?");
+                        let label = a.label.as_deref().unwrap_or("(no label)");
+                        println!("{}  {label}  [{mime}]  {}", a.id, a.path);
+                    }
+                }
+            }
+        },
+    }
+    Ok(())
+}
+
+fn print_measurement(item: &BodyMeasurementApi, json: bool) -> eyre::Result<()> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(item)?);
+        return Ok(());
+    }
+    let when = item.measured_at.format("%Y-%m-%d %H:%M");
+    println!("{}  {when}", item.id);
+    if let Some(v) = item.weight_kg {
+        println!("  weight:        {v} kg");
+    }
+    if let Some(v) = item.body_fat_percent {
+        println!("  body fat:      {v}%");
+    }
+    if let Some(v) = item.muscle_mass_kg {
+        println!("  muscle mass:   {v} kg");
+    }
+    if let Some(v) = item.water_percent {
+        println!("  water:         {v}%");
+    }
+    let circ = [
+        ("neck", item.neck_cm),
+        ("chest", item.chest_cm),
+        ("waist", item.waist_cm),
+        ("hip", item.hip_cm),
+        ("left thigh", item.left_thigh_cm),
+        ("right thigh", item.right_thigh_cm),
+        ("left arm", item.left_arm_cm),
+        ("right arm", item.right_arm_cm),
+        ("left calf", item.left_calf_cm),
+        ("right calf", item.right_calf_cm),
+    ];
+    for (label, v) in circ {
+        if let Some(v) = v {
+            println!("  {label:<13}{v} cm");
+        }
+    }
+    if let Some(v) = item.resting_hr {
+        println!("  resting HR:    {v} bpm");
+    }
+    if let (Some(s), Some(d)) = (item.blood_pressure_systolic, item.blood_pressure_diastolic) {
+        println!("  blood pressure {s}/{d}");
+    }
+    if !item.notes.is_empty() {
+        println!("  notes:         {}", item.notes);
+    }
+    if let Some(org) = &item.organization {
+        println!("  organization:  {org}");
+    }
+    Ok(())
+}
+
+fn print_measurements(rows: &[BodyMeasurementApi], json: bool) -> eyre::Result<()> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(rows)?);
+        return Ok(());
+    }
+    if rows.is_empty() {
+        println!("(no measurements)");
+        return Ok(());
+    }
+    for r in rows {
+        let when = r.measured_at.format("%Y-%m-%d %H:%M");
+        let weight = r
+            .weight_kg
+            .map(|v| format!("{v:.1} kg"))
+            .unwrap_or_else(|| "—".to_string());
+        let bf = r
+            .body_fat_percent
+            .map(|v| format!("{v:.1}%"))
+            .unwrap_or_else(|| "—".to_string());
+        let waist = r
+            .waist_cm
+            .map(|v| format!("{v:.1} cm"))
+            .unwrap_or_else(|| "—".to_string());
+        println!("{}  {when}  weight={weight}  bf={bf}  waist={waist}", r.id);
+    }
+    Ok(())
+}
+
+fn print_trend(view: &BodyMeasurementTrendView, json: bool) -> eyre::Result<()> {
+    if json {
+        let payload = serde_json::json!({
+            "measurement_count": view.measurement_count,
+            "since": view.since,
+            "until": view.until,
+            "weight_kg": metric_json(view.weight_kg.as_ref()),
+            "body_fat_percent": metric_json(view.body_fat_percent.as_ref()),
+            "muscle_mass_kg": metric_json(view.muscle_mass_kg.as_ref()),
+            "waist_cm": metric_json(view.waist_cm.as_ref()),
+            "chest_cm": metric_json(view.chest_cm.as_ref()),
+            "hip_cm": metric_json(view.hip_cm.as_ref()),
+        });
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+    if view.measurement_count == 0 {
+        println!("No measurements in range.");
+        return Ok(());
+    }
+    let since = view.since.format("%Y-%m-%d");
+    let until = view.until.format("%Y-%m-%d");
+    println!(
+        "Body trend  ·  {since} -> {until}  ·  {} measurements\n",
+        view.measurement_count
+    );
+    let metrics: [(&str, Option<&MetricTrend>); 6] = [
+        ("weight_kg", view.weight_kg.as_ref()),
+        ("body_fat_pct", view.body_fat_percent.as_ref()),
+        ("muscle_mass_kg", view.muscle_mass_kg.as_ref()),
+        ("waist_cm", view.waist_cm.as_ref()),
+        ("chest_cm", view.chest_cm.as_ref()),
+        ("hip_cm", view.hip_cm.as_ref()),
+    ];
+    for (label, m) in metrics {
+        if let Some(m) = m {
+            println!(
+                "  {label:<14}{first:.1} -> {last:.1}   Δ {delta:+.1}  ({pct:+.1}%)   range {min:.1}–{max:.1}   n={n}",
+                first = m.first_value,
+                last = m.last_value,
+                delta = m.delta,
+                pct = m.delta_percent,
+                min = m.min_value,
+                max = m.max_value,
+                n = m.sample_count,
+            );
+        }
+    }
+    Ok(())
+}
+
+fn metric_json(m: Option<&MetricTrend>) -> serde_json::Value {
+    match m {
+        None => serde_json::Value::Null,
+        Some(m) => serde_json::json!({
+            "sample_count": m.sample_count,
+            "first_value": m.first_value,
+            "last_value": m.last_value,
+            "min_value": m.min_value,
+            "max_value": m.max_value,
+            "mean_value": m.mean_value,
+            "delta": m.delta,
+            "delta_percent": m.delta_percent,
+        }),
     }
 }

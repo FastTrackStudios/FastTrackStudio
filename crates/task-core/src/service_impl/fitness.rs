@@ -11,14 +11,18 @@ use sea_orm::{
 };
 use uuid::Uuid;
 
+use crate::attachment;
+use crate::body_measurement::{self, BodyMeasurementApi};
 use crate::exercise::{self, ExerciseAliasList, ExerciseApi, ExerciseModality, ExerciseMuscleList};
 use crate::property::JsonObject;
 use crate::routine::{self, RoutineApi, RoutineTagList};
 use crate::routine_exercise::{self, RoutineExerciseApi};
 use crate::service::{
-    AddRoutineExerciseRequest, CompleteWorkoutSessionRequest, CreateExerciseRequest,
-    CreateRoutineRequest, ExercisePatch, FitnessService, LogSetRequest, RoutineWithExercisesView,
-    StartWorkoutSessionRequest, UpdateSetRequest, VaultError, WorkoutSessionView,
+    AddRoutineExerciseRequest, BodyMeasurementTrendRequest, BodyMeasurementTrendView,
+    CompleteWorkoutSessionRequest, CreateExerciseRequest, CreateRoutineRequest, ExercisePatch,
+    FitnessService, ListBodyMeasurementsRequest, LogSetRequest, MetricTrend,
+    RecordBodyMeasurementRequest, RoutineWithExercisesView, StartWorkoutSessionRequest,
+    UpdateBodyMeasurementRequest, UpdateSetRequest, VaultError, WorkoutSessionView,
 };
 use crate::set_log::{self, SetLogApi};
 use crate::workout_session::{self, WorkoutSessionApi, WorkoutSessionStatus};
@@ -912,6 +916,282 @@ impl FitnessService for FitnessServiceImpl {
             .map_err(|e| io(e, "abandon workout_session"))?;
         workout_session_to_api(saved)
     }
+
+    // ── Body measurements ────────────────────────────────────
+
+    async fn record_body_measurement(
+        &self,
+        request: RecordBodyMeasurementRequest,
+    ) -> Result<BodyMeasurementApi, VaultError> {
+        let now = Utc::now();
+        let id = Uuid::new_v4();
+        let active = body_measurement::ActiveModel {
+            id: Set(id),
+            measured_at: Set(request.measured_at.unwrap_or(now)),
+            weight_kg: Set(request.weight_kg),
+            body_fat_percent: Set(request.body_fat_percent),
+            muscle_mass_kg: Set(request.muscle_mass_kg),
+            water_percent: Set(request.water_percent),
+            neck_cm: Set(request.neck_cm),
+            chest_cm: Set(request.chest_cm),
+            waist_cm: Set(request.waist_cm),
+            hip_cm: Set(request.hip_cm),
+            left_thigh_cm: Set(request.left_thigh_cm),
+            right_thigh_cm: Set(request.right_thigh_cm),
+            left_arm_cm: Set(request.left_arm_cm),
+            right_arm_cm: Set(request.right_arm_cm),
+            left_calf_cm: Set(request.left_calf_cm),
+            right_calf_cm: Set(request.right_calf_cm),
+            resting_hr: Set(request.resting_hr),
+            blood_pressure_systolic: Set(request.blood_pressure_systolic),
+            blood_pressure_diastolic: Set(request.blood_pressure_diastolic),
+            notes: Set(request.notes.unwrap_or_default()),
+            organization: Set(request.organization),
+            created_by: Set(request.created_by),
+            properties: Set(JsonObject::default()),
+            created_at: Set(now),
+            updated_at: Set(now),
+        };
+        let saved = active
+            .insert(&self.db)
+            .await
+            .map_err(|e| io(e, "insert body_measurement"))?;
+        body_measurement_to_api(saved)
+    }
+
+    async fn get_body_measurement(
+        &self,
+        id: Uuid,
+    ) -> Result<Option<BodyMeasurementApi>, VaultError> {
+        let row = body_measurement::Entity::find_by_id(id)
+            .one(&self.db)
+            .await
+            .map_err(|e| io(e, "get_body_measurement"))?;
+        row.map(body_measurement_to_api).transpose()
+    }
+
+    async fn list_body_measurements(
+        &self,
+        request: ListBodyMeasurementsRequest,
+    ) -> Result<Vec<BodyMeasurementApi>, VaultError> {
+        let mut q =
+            body_measurement::Entity::find().order_by_desc(body_measurement::Column::MeasuredAt);
+        if let Some(org) = request.organization {
+            q = q.filter(body_measurement::Column::Organization.eq(org));
+        }
+        if let Some(since) = request.since {
+            q = q.filter(body_measurement::Column::MeasuredAt.gte(since));
+        }
+        if let Some(until) = request.until {
+            q = q.filter(body_measurement::Column::MeasuredAt.lte(until));
+        }
+        let limit = request.limit.unwrap_or(30).min(365);
+        let rows = q
+            .limit(u64::from(limit))
+            .all(&self.db)
+            .await
+            .map_err(|e| io(e, "list_body_measurements"))?;
+        rows.into_iter().map(body_measurement_to_api).collect()
+    }
+
+    async fn update_body_measurement(
+        &self,
+        request: UpdateBodyMeasurementRequest,
+    ) -> Result<BodyMeasurementApi, VaultError> {
+        let model = body_measurement::Entity::find_by_id(request.id)
+            .one(&self.db)
+            .await
+            .map_err(|e| io(e, "load body_measurement"))?
+            .ok_or_else(|| VaultError::NotFound(format!("body_measurement:{}", request.id)))?;
+        let mut active: body_measurement::ActiveModel = model.into();
+        if let Some(v) = request.measured_at {
+            active.measured_at = Set(v);
+        }
+        if let Some(v) = request.weight_kg {
+            active.weight_kg = Set(Some(v));
+        }
+        if let Some(v) = request.body_fat_percent {
+            active.body_fat_percent = Set(Some(v));
+        }
+        if let Some(v) = request.muscle_mass_kg {
+            active.muscle_mass_kg = Set(Some(v));
+        }
+        if let Some(v) = request.water_percent {
+            active.water_percent = Set(Some(v));
+        }
+        if let Some(v) = request.neck_cm {
+            active.neck_cm = Set(Some(v));
+        }
+        if let Some(v) = request.chest_cm {
+            active.chest_cm = Set(Some(v));
+        }
+        if let Some(v) = request.waist_cm {
+            active.waist_cm = Set(Some(v));
+        }
+        if let Some(v) = request.hip_cm {
+            active.hip_cm = Set(Some(v));
+        }
+        if let Some(v) = request.left_thigh_cm {
+            active.left_thigh_cm = Set(Some(v));
+        }
+        if let Some(v) = request.right_thigh_cm {
+            active.right_thigh_cm = Set(Some(v));
+        }
+        if let Some(v) = request.left_arm_cm {
+            active.left_arm_cm = Set(Some(v));
+        }
+        if let Some(v) = request.right_arm_cm {
+            active.right_arm_cm = Set(Some(v));
+        }
+        if let Some(v) = request.left_calf_cm {
+            active.left_calf_cm = Set(Some(v));
+        }
+        if let Some(v) = request.right_calf_cm {
+            active.right_calf_cm = Set(Some(v));
+        }
+        if let Some(v) = request.resting_hr {
+            active.resting_hr = Set(Some(v));
+        }
+        if let Some(v) = request.blood_pressure_systolic {
+            active.blood_pressure_systolic = Set(Some(v));
+        }
+        if let Some(v) = request.blood_pressure_diastolic {
+            active.blood_pressure_diastolic = Set(Some(v));
+        }
+        if let Some(v) = request.notes {
+            active.notes = Set(v);
+        }
+        active.updated_at = Set(Utc::now());
+        let saved = active
+            .update(&self.db)
+            .await
+            .map_err(|e| io(e, "update body_measurement"))?;
+        body_measurement_to_api(saved)
+    }
+
+    async fn delete_body_measurement(&self, id: Uuid) -> Result<(), VaultError> {
+        let txn = self
+            .db
+            .begin()
+            .await
+            .map_err(|e| io(e, "begin delete_body_measurement txn"))?;
+        attachment::Entity::delete_many()
+            .filter(attachment::Column::OwnerType.eq("body_measurement"))
+            .filter(attachment::Column::OwnerId.eq(id))
+            .exec(&txn)
+            .await
+            .map_err(|e| io(e, "delete body_measurement attachments"))?;
+        body_measurement::Entity::delete_by_id(id)
+            .exec(&txn)
+            .await
+            .map_err(|e| io(e, "delete body_measurement"))?;
+        txn.commit()
+            .await
+            .map_err(|e| io(e, "commit delete_body_measurement txn"))?;
+        Ok(())
+    }
+
+    async fn body_measurement_trend(
+        &self,
+        request: BodyMeasurementTrendRequest,
+    ) -> Result<BodyMeasurementTrendView, VaultError> {
+        let mut q =
+            body_measurement::Entity::find().order_by_asc(body_measurement::Column::MeasuredAt);
+        if let Some(org) = request.organization.clone() {
+            q = q.filter(body_measurement::Column::Organization.eq(org));
+        }
+        if let Some(since) = request.since {
+            q = q.filter(body_measurement::Column::MeasuredAt.gte(since));
+        }
+        if let Some(until) = request.until {
+            q = q.filter(body_measurement::Column::MeasuredAt.lte(until));
+        }
+        let rows = q
+            .all(&self.db)
+            .await
+            .map_err(|e| io(e, "load body_measurements for trend"))?;
+
+        // Resolve effective window. When the caller didn't pin a bound,
+        // anchor on the data we found; if there's no data at all, fall
+        // back to "now → now" so the response is well-formed.
+        let now = Utc::now();
+        let since = request
+            .since
+            .unwrap_or_else(|| rows.first().map(|r| r.measured_at).unwrap_or(now));
+        let until = request
+            .until
+            .unwrap_or_else(|| rows.last().map(|r| r.measured_at).unwrap_or(now));
+
+        let weight_kg = compute_metric(rows.iter().filter_map(|r| r.weight_kg));
+        let muscle_mass_kg = compute_metric(rows.iter().filter_map(|r| r.muscle_mass_kg));
+        let waist_cm = compute_metric(rows.iter().filter_map(|r| r.waist_cm));
+        let chest_cm = compute_metric(rows.iter().filter_map(|r| r.chest_cm));
+        let hip_cm = compute_metric(rows.iter().filter_map(|r| r.hip_cm));
+        let body_fat_percent = compute_metric(
+            rows.iter()
+                .filter_map(|r| r.body_fat_percent.map(f64::from)),
+        );
+
+        Ok(BodyMeasurementTrendView {
+            measurement_count: rows.len() as u32,
+            since,
+            until,
+            weight_kg,
+            body_fat_percent,
+            muscle_mass_kg,
+            waist_cm,
+            chest_cm,
+            hip_cm,
+        })
+    }
+}
+
+fn body_measurement_to_api(
+    model: body_measurement::Model,
+) -> Result<BodyMeasurementApi, VaultError> {
+    convert_model::<body_measurement::Model, BodyMeasurementApi>(model)
+}
+
+/// Reduce an iterator of f64 samples (already filtered to `Some` values)
+/// into a [`MetricTrend`]. The iterator must walk samples in
+/// chronological order — first sample is `first_value`, last is
+/// `last_value`. Returns `None` when the iterator is empty.
+fn compute_metric(values: impl IntoIterator<Item = f64>) -> Option<MetricTrend> {
+    let mut iter = values.into_iter();
+    let first = iter.next()?;
+    let mut last = first;
+    let mut min = first;
+    let mut max = first;
+    let mut sum = first;
+    let mut n: u32 = 1;
+    for v in iter {
+        last = v;
+        if v < min {
+            min = v;
+        }
+        if v > max {
+            max = v;
+        }
+        sum += v;
+        n += 1;
+    }
+    let mean = sum / f64::from(n);
+    let delta = last - first;
+    let delta_percent = if first.abs() < f64::EPSILON {
+        0.0
+    } else {
+        delta / first * 100.0
+    };
+    Some(MetricTrend {
+        sample_count: n,
+        first_value: first,
+        last_value: last,
+        min_value: min,
+        max_value: max,
+        mean_value: mean,
+        delta,
+        delta_percent,
+    })
 }
 
 fn workout_session_to_api(model: workout_session::Model) -> Result<WorkoutSessionApi, VaultError> {

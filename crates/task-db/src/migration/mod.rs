@@ -26,6 +26,7 @@ mod m20260507_000019_create_glossary_terms;
 mod m20260507_000020_create_exercises;
 mod m20260507_000021_create_routines;
 mod m20260507_000022_create_workout_sessions;
+mod m20260507_000023_create_body_measurements;
 
 pub struct Migrator;
 
@@ -59,6 +60,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260507_000020_create_exercises::Migration),
             Box::new(m20260507_000021_create_routines::Migration),
             Box::new(m20260507_000022_create_workout_sessions::Migration),
+            Box::new(m20260507_000023_create_body_measurements::Migration),
         ]
     }
 }
