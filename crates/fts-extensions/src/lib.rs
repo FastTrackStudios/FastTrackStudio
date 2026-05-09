@@ -163,12 +163,13 @@ fn initialize_daw(tokio_runtime: &tokio::runtime::Runtime) -> eyre::Result<Daw> 
 /// The registry service in `daw-reaper` owns the REAPER command IDs and
 /// toggle state. We register through that service here, then forward action
 /// trigger events into the existing dispatch channel.
-fn register_actions_sync(defs: &actions::ActionDefs) {
+fn register_actions_sync(defs: &actions::ActionDefs, modules: Vec<Box<dyn DawModule>>) {
     let g = Global::get();
     let daw = g.daw.clone();
     let runtime = g.tokio_runtime.clone();
     let defs = defs.clone();
     let daw_for_subscription = daw.clone();
+    let runtime_for_module_subscriptions = runtime.clone();
 
     runtime.spawn(async move {
         let registry = daw.action_registry();
@@ -221,6 +222,17 @@ fn register_actions_sync(defs: &actions::ActionDefs) {
                 Err(e) => warn!("Error registering action {command_id}: {e}"),
             }
         }
+
+        let module_ctx = ModuleContext::new(runtime_for_module_subscriptions);
+        for module in &modules {
+            tracing::info!(
+                module = module.name(),
+                "Subscribing {}",
+                module.display_name()
+            );
+            module.subscribe(&module_ctx);
+        }
+        info!(modules = modules.len(), "All modules subscribed");
     });
 
     let (tx, _) = action_channel();
@@ -344,6 +356,7 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
         reaper_input::daw_module::module(),
         keyflow::daw_module::module(),
     ];
+    let module_count = modules.len();
 
     // Initialize all modules before collecting actions.
     //
@@ -351,7 +364,11 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     // configuration loaded during init, so registering them before init can
     // produce incomplete or stale action metadata.
     let module_ctx = ModuleContext::new(g.tokio_runtime.clone());
-    module::init_all(&modules, &module_ctx);
+    for module in &modules {
+        info!(module = module.name(), "Initializing {}", module.display_name());
+        module.init(&module_ctx);
+    }
+    info!(modules = module_count, "All modules initialized");
 
     // Collect actions from all modules after init has populated runtime state.
     let module_actions = module::collect_actions(&modules);
@@ -392,6 +409,9 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
             .map(|a| a.into_tuple()),
     );
 
+    let mut panels = module::collect_panels(&modules);
+    panels.extend(ui_test_panel::panel_defs());
+
     let session = ReaperSession::load(context);
     let app = App {
         session: RefCell::new(session),
@@ -401,7 +421,7 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
 
     APP.set(Fragile::new(app)).map_err(|_| "App already set")?;
 
-    register_actions_sync(&all_defs);
+    register_actions_sync(&all_defs, modules);
 
     let app = APP.get().unwrap().get();
     let mut session = app.session.borrow_mut();
@@ -434,8 +454,6 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     // ── Dioxus panel rendering ────────────────────────────────────────
     daw::ui::dock::init_service();
     daw::ui::dock::init_dock(reaper_low::Reaper::get(), reaper_low::Swell::get());
-    let mut panels = module::collect_panels(&modules);
-    panels.extend(ui_test_panel::panel_defs());
     info!(panels = panels.len(), "Panel definitions collected");
     for panel in &panels {
         daw::ui::dock::register_panel_from_service(panel);
@@ -443,7 +461,7 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     daw::ui::dock::restore_dock_state();
 
     info!(
-        modules = modules.len(),
+        modules = module_count,
         actions = all_defs.len(),
         panels = panels.len(),
         "FTS Extensions ready"
