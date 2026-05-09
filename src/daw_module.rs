@@ -1,6 +1,17 @@
 //! DawModule implementation for fts-launcher.
 
-use daw::module::{ActionDef, DawModule, DockPosition, ModuleContext, PanelComponent, PanelDef};
+use daw::module::{
+    ActionDef, DawModule, DockPosition, ModuleContext, PanelComponent, PanelDef, PanelRenderer,
+};
+use daw::ui::prelude::*;
+use fts_ui::prelude::{ThemeMode, ThemeProvider, ThemeState, default_theme_preset};
+use launcher_ui::components::Launcher;
+
+use crate::LauncherEngine;
+
+const LAUNCHER_PANEL_ID: &str = "FTS_LAUNCHER";
+const LAUNCHER_CSS: &str =
+    include_str!("../../dioxus-launcher/apps/standalone/assets/tailwind.css");
 
 pub struct LauncherModule;
 
@@ -15,25 +26,22 @@ impl DawModule for LauncherModule {
     fn actions(&self) -> Vec<ActionDef> {
         vec![
             ActionDef::new("FTS_LAUNCHER_TOGGLE", "FTS: Toggle Launcher", || {
-                tracing::info!("FTS Launcher toggle");
+                daw::ui::dock::toggle_panel(LAUNCHER_PANEL_ID);
             })
             .in_menu(),
-            ActionDef::new(
-                "FTS_LAUNCHER_FOCUS",
-                "FTS: Focus Launcher Search",
-                || {
-                    tracing::info!("FTS Launcher focus");
-                },
-            ),
+            ActionDef::new("FTS_LAUNCHER_FOCUS", "FTS: Focus Launcher Search", || {
+                daw::ui::dock::show_panel(LAUNCHER_PANEL_ID);
+            }),
         ]
     }
 
     fn panels(&self) -> Vec<PanelDef> {
         vec![PanelDef {
-            id: "FTS_LAUNCHER",
+            id: LAUNCHER_PANEL_ID,
             title: "FTS Launcher",
-            component: PanelComponent::from_fn_ptr(launcher_panel as *const ()),
+            component: PanelComponent::from_fn_ptr(LauncherPanel as fn() -> _ as *const ()),
             default_dock: DockPosition::Floating,
+            renderer: PanelRenderer::Native,
             default_size: (800.0, 520.0),
             toggle_action: Some("FTS_LAUNCHER_TOGGLE"),
         }]
@@ -44,15 +52,32 @@ impl DawModule for LauncherModule {
     }
 }
 
-/// The launcher panel's root Dioxus component.
-/// This is cast to `fn() -> Element` by the host's panel renderer.
-fn launcher_panel() {
-    // Placeholder — the actual component is:
-    // use fts_launcher::ui::Launcher;
-    // rsx! { Launcher { state, theme, on_close } }
-    //
-    // The host (FTS-Extensions) casts this to the real component type
-    // via reaper-dioxus::register_panel().
+#[component]
+pub fn LauncherPanel() -> Element {
+    let state = use_signal(|| {
+        let start = std::time::Instant::now();
+        tracing::info!("Creating launcher engine");
+        let state = LauncherEngine::new().into_state();
+        tracing::info!(
+            elapsed_ms = start.elapsed().as_millis(),
+            "Launcher engine created"
+        );
+        state
+    });
+    let theme_state = use_signal(|| ThemeState::new(default_theme_preset(), ThemeMode::Dark));
+    let on_close = move |_: ()| {
+        daw::ui::dock::hide_panel(LAUNCHER_PANEL_ID);
+    };
+
+    rsx! {
+        document::Style { {LAUNCHER_CSS} }
+        ThemeProvider { state: theme_state,
+            Launcher {
+                state,
+                on_close,
+            }
+        }
+    }
 }
 
 pub fn module() -> Box<dyn DawModule> {

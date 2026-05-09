@@ -1,8 +1,6 @@
 //! DAW Tracks provider — live track data from the current project.
 
-use launcher_core::{
-    ActionModifier, ActivationResult, Item, ItemAction, Provider, ProviderConfig,
-};
+use launcher_core::{ActionModifier, ActivationResult, Item, ItemAction, Provider, ProviderConfig};
 
 pub struct DawTracksProvider {
     config: ProviderConfig,
@@ -24,7 +22,9 @@ impl DawTracksProvider {
     }
 
     fn refresh(&mut self) {
-        let Some(daw) = daw::get() else { return; };
+        let Some(daw) = daw::get() else {
+            return;
+        };
 
         let tracks = daw::block_on(async {
             let project = daw.current_project().await.ok()?;
@@ -32,7 +32,9 @@ impl DawTracksProvider {
         })
         .flatten();
 
-        let Some(tracks) = tracks else { return; };
+        let Some(tracks) = tracks else {
+            return;
+        };
 
         self.tracks = tracks
             .iter()
@@ -73,35 +75,69 @@ impl DawTracksProvider {
 }
 
 impl Provider for DawTracksProvider {
-    fn name(&self) -> &str { "tracks" }
-    fn config(&self) -> &ProviderConfig { &self.config }
-    fn config_mut(&mut self) -> &mut ProviderConfig { &mut self.config }
+    fn name(&self) -> &str {
+        "tracks"
+    }
+    fn config(&self) -> &ProviderConfig {
+        &self.config
+    }
+    fn config_mut(&mut self) -> &mut ProviderConfig {
+        &mut self.config
+    }
 
     fn setup(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        self.refresh();
+        tracing::debug!("Skipping blocking track refresh during launcher setup");
         Ok(())
     }
 
-    fn query(&self, _q: &str, _exact: bool) -> Result<Vec<Item>, Box<dyn std::error::Error + Send + Sync>> {
+    fn query(
+        &self,
+        _q: &str,
+        _exact: bool,
+    ) -> Result<Vec<Item>, Box<dyn std::error::Error + Send + Sync>> {
         Ok(self.tracks.clone())
     }
 
-    fn activate(&self, item: &Item, action: &str) -> Result<ActivationResult, Box<dyn std::error::Error + Send + Sync>> {
-        let Some(daw) = daw::get() else { return Ok(ActivationResult::Close); };
+    fn activate(
+        &self,
+        item: &Item,
+        action: &str,
+    ) -> Result<ActivationResult, Box<dyn std::error::Error + Send + Sync>> {
+        let Some(daw) = daw::get() else {
+            return Ok(ActivationResult::Close);
+        };
 
-        let exec = item.actions.iter().find(|a| a.name == action).map(|a| a.exec.as_str()).unwrap_or("");
+        let exec = item
+            .actions
+            .iter()
+            .find(|a| a.name == action)
+            .map(|a| a.exec.as_str())
+            .unwrap_or("");
         let parts: Vec<&str> = exec.splitn(3, ':').collect();
-        if parts.len() < 3 { return Ok(ActivationResult::Close); }
+        if parts.len() < 3 {
+            return Ok(ActivationResult::Close);
+        }
         let (cmd, guid) = (parts[1], parts[2]);
 
         let keep_open = daw::block_on(async {
             let project = daw.current_project().await?;
             let track = project.tracks().by_guid(guid).await?;
-            let Some(track) = track else { return Ok::<bool, daw::Error>(false); };
+            let Some(track) = track else {
+                return Ok::<bool, daw::Error>(false);
+            };
             match cmd {
-                "track-select" => { track.select().await?; Ok(false) }
-                "track-solo" => { track.toggle_solo().await?; Ok(true) }
-                "track-mute" => { track.toggle_mute().await?; Ok(true) }
+                "track-select" => {
+                    track.select().await?;
+                    Ok(false)
+                }
+                "track-solo" => {
+                    track.toggle_solo().await?;
+                    Ok(true)
+                }
+                "track-mute" => {
+                    track.toggle_mute().await?;
+                    Ok(true)
+                }
                 "track-fx" => {
                     // Select the track first, then show FX via action
                     track.select_exclusive().await?;

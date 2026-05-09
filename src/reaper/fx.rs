@@ -1,8 +1,6 @@
 //! DAW FX provider — installed plugins from the DAW's FX database.
 
-use launcher_core::{
-    ActionModifier, ActivationResult, Item, ItemAction, Provider, ProviderConfig,
-};
+use launcher_core::{ActionModifier, ActivationResult, Item, ItemAction, Provider, ProviderConfig};
 
 pub struct DawFxProvider {
     config: ProviderConfig,
@@ -23,10 +21,14 @@ impl DawFxProvider {
     }
 
     fn refresh(&mut self) {
-        let Some(daw) = daw::get() else { return; };
+        let Some(daw) = daw::get() else {
+            return;
+        };
 
         let installed = daw::block_on(async { daw.installed_plugins().await.ok() }).flatten();
-        let Some(installed) = installed else { return; };
+        let Some(installed) = installed else {
+            return;
+        };
 
         self.plugins = installed
             .iter()
@@ -37,7 +39,11 @@ impl DawFxProvider {
                     || fx.ident.to_lowercase().contains("synth")
                     || fx.ident.to_lowercase().contains("vsti");
 
-                let base_tag = if is_instrument { "audio/instruments" } else { "audio/effects" };
+                let base_tag = if is_instrument {
+                    "audio/instruments"
+                } else {
+                    "audio/effects"
+                };
                 let format_tag = match format.to_lowercase().as_str() {
                     "vst" | "vst2" => "audio/effects/plugin/vst",
                     "vst3" => "audio/effects/plugin/vst3",
@@ -47,7 +53,10 @@ impl DawFxProvider {
                     _ => "audio/effects/plugin",
                 };
 
-                let id = format!("fx-{}", fx.ident.replace(' ', "-").replace(':', "-").to_lowercase());
+                let id = format!(
+                    "fx-{}",
+                    fx.ident.replace(' ', "-").replace(':', "-").to_lowercase()
+                );
 
                 Item::new(&id, &fx.name, "fx")
                     .with_sub(&format!("{developer} ({format})"))
@@ -56,8 +65,11 @@ impl DawFxProvider {
                     .with_search_fields(vec![fx.name.clone(), developer.clone(), format.clone()])
                     .with_actions(vec![
                         ItemAction::new("Add to track", format!("daw:fx-add:{}", fx.ident)),
-                        ItemAction::new("Add to new track", format!("daw:fx-new-track:{}", fx.ident))
-                            .with_modifier(ActionModifier::Shift),
+                        ItemAction::new(
+                            "Add to new track",
+                            format!("daw:fx-new-track:{}", fx.ident),
+                        )
+                        .with_modifier(ActionModifier::Shift),
                         ItemAction::new("Replace chain", format!("daw:fx-replace:{}", fx.ident))
                             .with_modifier(ActionModifier::CtrlShift),
                     ])
@@ -69,25 +81,48 @@ impl DawFxProvider {
 }
 
 impl Provider for DawFxProvider {
-    fn name(&self) -> &str { "fx" }
-    fn config(&self) -> &ProviderConfig { &self.config }
-    fn config_mut(&mut self) -> &mut ProviderConfig { &mut self.config }
+    fn name(&self) -> &str {
+        "fx"
+    }
+    fn config(&self) -> &ProviderConfig {
+        &self.config
+    }
+    fn config_mut(&mut self) -> &mut ProviderConfig {
+        &mut self.config
+    }
 
     fn setup(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        self.refresh();
+        tracing::debug!("Skipping blocking FX refresh during launcher setup");
         Ok(())
     }
 
-    fn query(&self, _q: &str, _exact: bool) -> Result<Vec<Item>, Box<dyn std::error::Error + Send + Sync>> {
+    fn query(
+        &self,
+        _q: &str,
+        _exact: bool,
+    ) -> Result<Vec<Item>, Box<dyn std::error::Error + Send + Sync>> {
         Ok(self.plugins.clone())
     }
 
-    fn activate(&self, item: &Item, action: &str) -> Result<ActivationResult, Box<dyn std::error::Error + Send + Sync>> {
-        let Some(daw) = daw::get() else { return Ok(ActivationResult::Close); };
+    fn activate(
+        &self,
+        item: &Item,
+        action: &str,
+    ) -> Result<ActivationResult, Box<dyn std::error::Error + Send + Sync>> {
+        let Some(daw) = daw::get() else {
+            return Ok(ActivationResult::Close);
+        };
 
-        let exec = item.actions.iter().find(|a| a.name == action).map(|a| a.exec.as_str()).unwrap_or("");
+        let exec = item
+            .actions
+            .iter()
+            .find(|a| a.name == action)
+            .map(|a| a.exec.as_str())
+            .unwrap_or("");
         let parts: Vec<&str> = exec.splitn(3, ':').collect();
-        if parts.len() < 3 { return Ok(ActivationResult::Close); }
+        if parts.len() < 3 {
+            return Ok(ActivationResult::Close);
+        }
         let (cmd, fx_ident) = (parts[1], parts[2]);
 
         daw::block_on(async {
@@ -129,7 +164,13 @@ impl Provider for DawFxProvider {
 fn parse_fx_ident(ident: &str) -> (String, String, String) {
     let (format, rest) = ident.split_once(": ").unwrap_or(("Unknown", ident));
     let (name, developer) = if let Some(paren_start) = rest.rfind('(') {
-        (rest[..paren_start].trim().to_string(), rest[paren_start + 1..].trim_end_matches(')').trim().to_string())
+        (
+            rest[..paren_start].trim().to_string(),
+            rest[paren_start + 1..]
+                .trim_end_matches(')')
+                .trim()
+                .to_string(),
+        )
     } else {
         (rest.to_string(), String::new())
     };
