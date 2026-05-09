@@ -10,8 +10,10 @@ use task_core::routine::RoutineApi;
 use task_core::routine_exercise::RoutineExerciseApi;
 use task_core::service::{
     AddRoutineExerciseRequest, CompleteWorkoutSessionRequest, CreateExerciseRequest,
-    CreateRoutineRequest, ExercisePatch, FitnessServiceClient, LogSetRequest,
-    RoutineWithExercisesView, StartWorkoutSessionRequest, UpdateSetRequest, WorkoutSessionView,
+    CreateRoutineRequest, DailyCalorieBalanceRequest, DailyCalorieBalanceView, DayBalance,
+    DaySessionBreakdown, ExercisePatch, ExerciseProgressEntry, ExerciseProgressRequest,
+    ExerciseProgressView, FitnessServiceClient, LogSetRequest, RoutineWithExercisesView,
+    StartWorkoutSessionRequest, UpdateSetRequest, WorkoutSessionView,
 };
 use task_core::set_log::SetLogApi;
 use uuid::Uuid;
@@ -34,6 +36,32 @@ pub(crate) enum FitnessCommands {
     Session {
         #[command(subcommand)]
         command: SessionCommands,
+    },
+    /// Per-exercise top-set history across recent sessions.
+    Progress {
+        /// Exercise to look up. Slug, canonical name, alias, or a free-form
+        /// SetLog snapshot name (case-insensitive).
+        exercise: String,
+        #[arg(long)]
+        organization: Option<String>,
+        #[arg(long)]
+        limit: Option<u32>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Daily calorie balance — kcal consumed (FoodLog) minus estimated
+    /// burn from completed WorkoutSessions, in a date window.
+    Balance {
+        #[arg(long)]
+        since: Option<String>,
+        #[arg(long)]
+        until: Option<String>,
+        #[arg(long = "bodyweight-kg")]
+        bodyweight_kg: Option<f64>,
+        #[arg(long)]
+        organization: Option<String>,
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -188,7 +216,228 @@ pub(crate) async fn run_remote_fitness_command(
         FitnessCommands::Exercise { command } => run_exercise(&client, actor, command).await,
         FitnessCommands::Routine { command } => run_routine(&client, actor, command).await,
         FitnessCommands::Session { command } => run_session(&client, actor, command).await,
+        FitnessCommands::Progress {
+            exercise,
+            organization,
+            limit,
+            json,
+        } => run_progress(&client, exercise, organization, limit, json).await,
+        FitnessCommands::Balance {
+            since,
+            until,
+            bodyweight_kg,
+            organization,
+            json,
+        } => run_balance(&client, since, until, bodyweight_kg, organization, json).await,
     }
+}
+
+// ── Progress / balance ──────────────────────────────────────────────
+
+async fn run_progress(
+    client: &FitnessServiceClient,
+    exercise: String,
+    organization: Option<String>,
+    limit: Option<u32>,
+    json: bool,
+) -> eyre::Result<()> {
+    let view = client
+        .exercise_progress(ExerciseProgressRequest {
+            exercise,
+            organization,
+            limit,
+        })
+        .await
+        .map_err(|e| eyre::eyre!("exercise_progress: {e}"))?;
+    print_progress(&view, json)
+}
+
+fn print_progress(view: &ExerciseProgressView, json: bool) -> eyre::Result<()> {
+    let entries: Vec<ExerciseProgressEntry> =
+        serde_json::from_str(&view.entries_json).unwrap_or_default();
+    if json {
+        let payload = serde_json::json!({
+            "exercise_id": view.exercise_id,
+            "exercise_name": view.exercise_name,
+            "modality": view.modality,
+            "session_count": view.session_count,
+            "entries": entries,
+            "trend_summary": view.trend_summary,
+        });
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+    let modality = view.modality.clone().unwrap_or_else(|| "—".to_string());
+    println!(
+        "{}  ·  {modality}  ·  {} session{}",
+        view.exercise_name,
+        view.session_count,
+        if view.session_count == 1 { "" } else { "s" },
+    );
+    if entries.is_empty() {
+        println!("\n  (no logged sets)");
+        return Ok(());
+    }
+    println!();
+    for entry in &entries {
+        let when = entry.session_started_at.format("%Y-%m-%d %H:%M");
+        let top = entry
+            .top_set
+            .as_ref()
+            .map(format_top_set)
+            .unwrap_or_else(|| "—".to_string());
+        let vol = if entry.session_volume_kg > 0.0 {
+            format!("vol {:.0} kg   ", entry.session_volume_kg)
+        } else {
+            String::new()
+        };
+        println!(
+            "  {when}  {:<10} {} done   {vol}top: {top}",
+            entry.session_status, entry.completed_set_count
+        );
+    }
+    if !view.trend_summary.is_empty() {
+        println!("\n  Trend: {}", view.trend_summary);
+    }
+    Ok(())
+}
+
+fn format_top_set(top: &task_core::service::TopSet) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if top.reps.is_some() || top.weight_kg.is_some() {
+        let r = top
+            .reps
+            .map(|r| r.to_string())
+            .unwrap_or_else(|| "_".into());
+        let w = top
+            .weight_kg
+            .map(|w| format!("{w} kg"))
+            .unwrap_or_else(|| "_ kg".into());
+        parts.push(format!("{r} × {w}"));
+    }
+    if let Some(d) = top.distance_meters {
+        parts.push(format!("{:.2} km", d / 1000.0));
+    }
+    if let Some(secs) = top.duration_seconds {
+        parts.push(format_duration(secs));
+    }
+    if let Some(rpe) = top.rpe {
+        parts.push(format!("RPE {rpe}"));
+    }
+    if let Some(orm) = top.estimated_one_rep_max_kg {
+        parts.push(format!("(1RM ≈ {orm:.1} kg)"));
+    }
+    if parts.is_empty() {
+        "—".to_string()
+    } else {
+        parts.join("  ")
+    }
+}
+
+async fn run_balance(
+    client: &FitnessServiceClient,
+    since: Option<String>,
+    until: Option<String>,
+    bodyweight_kg: Option<f64>,
+    organization: Option<String>,
+    json: bool,
+) -> eyre::Result<()> {
+    let today = chrono::Utc::now().date_naive();
+    let since_date = match since {
+        Some(s) => Some(
+            s.parse::<chrono::NaiveDate>()
+                .map_err(|e| eyre::eyre!("invalid --since '{s}': {e}"))?,
+        ),
+        None => None,
+    };
+    let until_date = match until {
+        Some(s) => Some(
+            s.parse::<chrono::NaiveDate>()
+                .map_err(|e| eyre::eyre!("invalid --until '{s}': {e}"))?,
+        ),
+        None => None,
+    };
+    // Default window: last 7 days when neither bound is supplied.
+    let (since_resolved, until_resolved) = match (since_date, until_date) {
+        (None, None) => (Some(today - chrono::Duration::days(6)), Some(today)),
+        (s, u) => (s, u),
+    };
+    let view = client
+        .daily_calorie_balance(DailyCalorieBalanceRequest {
+            organization,
+            since_date: since_resolved,
+            until_date: until_resolved,
+            default_bodyweight_kg: bodyweight_kg,
+        })
+        .await
+        .map_err(|e| eyre::eyre!("daily_calorie_balance: {e}"))?;
+    print_balance(&view, since_resolved, until_resolved, bodyweight_kg, json)
+}
+
+fn print_balance(
+    view: &DailyCalorieBalanceView,
+    since: Option<chrono::NaiveDate>,
+    until: Option<chrono::NaiveDate>,
+    bodyweight_kg: Option<f64>,
+    json: bool,
+) -> eyre::Result<()> {
+    let days: Vec<DayBalance> = serde_json::from_str(&view.days_json).unwrap_or_default();
+    if json {
+        let payload = serde_json::json!({
+            "since": since,
+            "until": until,
+            "default_bodyweight_kg": bodyweight_kg,
+            "days": days,
+            "total_consumed_kcal": view.total_consumed_kcal,
+            "total_burned_kcal": view.total_burned_kcal,
+            "net_kcal": view.net_kcal,
+            "day_count": view.day_count,
+        });
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+    let header = match (since, until) {
+        (Some(s), Some(u)) => format!("{s} → {u}"),
+        (Some(s), None) => format!("{s}"),
+        _ => "—".to_string(),
+    };
+    let bw_label = bodyweight_kg
+        .map(|w| format!("default bodyweight {w} kg"))
+        .unwrap_or_else(|| "default bodyweight 75 kg".to_string());
+    println!("Calorie balance  ·  {header}  ·  {bw_label}\n");
+    println!(
+        "  {:<12} {:>8} {:>8} {:>8}    Sessions",
+        "Date", "Consumed", "Burned", "Net",
+    );
+    for day in &days {
+        let breakdowns: Vec<DaySessionBreakdown> =
+            serde_json::from_str(&day.session_breakdown_json).unwrap_or_default();
+        let session_label = if breakdowns.is_empty() {
+            "—".to_string()
+        } else {
+            let parts: Vec<String> = breakdowns
+                .iter()
+                .map(|b| format!("{} ({})", b.label, b.modality_summary))
+                .collect();
+            format!("{} {}", breakdowns.len(), parts.join(", "))
+        };
+        let net = day.net_kcal;
+        let sign = if net >= 0.0 { "+" } else { "" };
+        println!(
+            "  {:<12} {:>8.0} {:>8.0} {:>7}{:.0}    {session_label}",
+            day.date.to_string(),
+            day.consumed_kcal,
+            day.burned_kcal,
+            sign,
+            net,
+        );
+    }
+    println!("\n  Window totals");
+    println!("    Consumed: {:>8.0} kcal", view.total_consumed_kcal);
+    println!("    Burned:   {:>8.0} kcal", view.total_burned_kcal);
+    let sign = if view.net_kcal >= 0.0 { "+" } else { "" };
+    println!("    Net:      {sign}{:.0} kcal", view.net_kcal);
+    Ok(())
 }
 
 // ── Exercise ────────────────────────────────────────────────────────
