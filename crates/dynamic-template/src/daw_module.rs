@@ -9,7 +9,7 @@ use daw::module::{ActionDef, DawModule, ModuleContext};
 use daw::reaper::track::{add_track_on_main_thread, set_folder_depth_on_main_thread};
 
 use crate::{
-    ItemMetadata, OrganizeIntoTracks, Structure, auto_color, default_config, monarchy_sort,
+    auto_color, default_config, monarchy_sort, ItemMetadata, OrganizeIntoTracks, Structure,
 };
 use dynamic_template_proto::{
     actions::dynamic_template_actions, auto_color::actions::auto_color_actions,
@@ -479,17 +479,36 @@ fn create_template_group(command_suffix: &str) -> eyre::Result<()> {
     let folders = spec.folders;
     let tracks = spec.tracks;
     daw::reaper::main_thread::run(move || {
-        let existing = current_project_track_names();
-        let suffix = next_version_suffix(&existing, folders[0]);
+        let project_tracks = current_project_tracks();
+        let existing: HashSet<String> = project_tracks
+            .iter()
+            .map(|track| track.name.clone())
+            .collect();
+        let plan = plan_create_insertion(&project_tracks, folders);
+        let suffix = next_version_suffix(&existing, plan.version_root);
         let mut created = 0usize;
+        let mut insert_index = plan.insert_index;
 
-        for folder in folders {
-            if let Some(guid) = add_track_on_main_thread(&with_suffix(folder, &suffix), None) {
+        if let Some(adjustment) = plan.previous_folder_close_adjustment {
+            if let Err(err) =
+                set_folder_depth_on_main_thread(&adjustment.guid, adjustment.new_depth)
+            {
+                tracing::warn!(
+                    "[dynamic-template] failed to prepare parent folder insertion: {err}"
+                );
+            }
+        }
+
+        for folder in plan.folders_to_create {
+            if let Some(guid) =
+                add_track_on_main_thread(&with_suffix(folder, &suffix), Some(insert_index))
+            {
                 if let Err(err) = set_folder_depth_on_main_thread(&guid, 1) {
                     tracing::warn!(
                         "[dynamic-template] failed to set folder depth for {folder}: {err}"
                     );
                 }
+                insert_index += 1;
                 created += 1;
             }
         }
@@ -500,35 +519,177 @@ fn create_template_group(command_suffix: &str) -> eyre::Result<()> {
             tracks
         };
         for (index, track) in leaf_tracks.iter().enumerate() {
-            if let Some(guid) = add_track_on_main_thread(&with_suffix(track, &suffix), None) {
+            if let Some(guid) =
+                add_track_on_main_thread(&with_suffix(track, &suffix), Some(insert_index))
+            {
                 if index == leaf_tracks.len() - 1 {
-                    let depth = -(folders.len() as i32);
+                    let depth = -plan.closing_depth;
                     if let Err(err) = set_folder_depth_on_main_thread(&guid, depth) {
                         tracing::warn!(
                             "[dynamic-template] failed to close folder depth for {track}: {err}"
                         );
                     }
                 }
+                insert_index += 1;
                 created += 1;
             }
         }
         tracing::info!(
-            "[dynamic-template] created template group {} with {} tracks",
+            "[dynamic-template] created template group {} at index {} with {} tracks",
             folders.last().unwrap_or(&command_suffix),
+            plan.insert_index,
             created
         );
     });
     Ok(())
 }
 
-fn current_project_track_names() -> HashSet<String> {
+struct CreateInsertionPlan {
+    insert_index: u32,
+    folders_to_create: &'static [&'static str],
+    version_root: &'static str,
+    closing_depth: i32,
+    previous_folder_close_adjustment: Option<FolderCloseAdjustment>,
+}
+
+struct FolderCloseAdjustment {
+    guid: String,
+    new_depth: i32,
+}
+
+fn current_project_tracks() -> Vec<daw::service::Track> {
     let Some(daw) = daw::main_thread_daw() else {
-        return HashSet::new();
+        return Vec::new();
     };
     daw.track_list()
-        .into_iter()
-        .map(|track| track.name)
-        .collect()
+}
+
+fn plan_create_insertion(
+    tracks: &[daw::service::Track],
+    folders: &'static [&'static str],
+) -> CreateInsertionPlan {
+    let root = folders[0];
+    if folders.len() > 1 {
+        if let Some(parent) = find_top_level_folder(tracks, root) {
+            let (insert_index, previous_folder_close_adjustment) =
+                insertion_point_inside_folder(tracks, parent);
+            return CreateInsertionPlan {
+                insert_index,
+                folders_to_create: &folders[1..],
+                version_root: folders[1],
+                closing_depth: folders.len() as i32,
+                previous_folder_close_adjustment,
+            };
+        }
+    }
+
+    CreateInsertionPlan {
+        insert_index: insertion_index_for_top_level_group(tracks, root),
+        folders_to_create: folders,
+        version_root: root,
+        closing_depth: folders.len() as i32,
+        previous_folder_close_adjustment: None,
+    }
+}
+
+fn find_top_level_folder(tracks: &[daw::service::Track], group_name: &str) -> Option<usize> {
+    let key = normalize_key(group_name);
+    tracks.iter().position(|track| {
+        track.parent_guid.is_none()
+            && track.folder_depth > 0
+            && normalize_key(&base_track_name(&track.name)) == key
+    })
+}
+
+fn insertion_point_inside_folder(
+    tracks: &[daw::service::Track],
+    folder_index: usize,
+) -> (u32, Option<FolderCloseAdjustment>) {
+    let end = folder_end_exclusive(tracks, folder_index);
+    if end <= folder_index + 1 {
+        return (tracks[folder_index].index + 1, None);
+    }
+    let previous = &tracks[end - 1];
+    let adjustment = (previous.folder_depth < 0).then(|| FolderCloseAdjustment {
+        guid: previous.guid.clone(),
+        new_depth: previous.folder_depth + 1,
+    });
+    (end as u32, adjustment)
+}
+
+fn insertion_index_for_top_level_group(tracks: &[daw::service::Track], group_name: &str) -> u32 {
+    let Some(target_order) = default_group_order(group_name) else {
+        return tracks.len() as u32;
+    };
+
+    let mut fallback = tracks.len() as u32;
+    for (index, track) in tracks.iter().enumerate() {
+        if track.parent_guid.is_some() {
+            continue;
+        }
+        let Some(order) = default_group_order(&base_track_name(&track.name)) else {
+            continue;
+        };
+        if order > target_order {
+            return track.index;
+        }
+        if order <= target_order {
+            fallback = folder_end_exclusive(tracks, index) as u32;
+        }
+    }
+    fallback
+}
+
+fn folder_end_exclusive(tracks: &[daw::service::Track], folder_index: usize) -> usize {
+    if tracks
+        .get(folder_index)
+        .is_none_or(|track| track.folder_depth <= 0)
+    {
+        return folder_index + 1;
+    }
+
+    let mut depth = 0i32;
+    for (index, track) in tracks.iter().enumerate().skip(folder_index) {
+        depth += track.folder_depth;
+        if index > folder_index && depth <= 0 {
+            return index + 1;
+        }
+    }
+    tracks.len()
+}
+
+fn default_group_order(group_name: &str) -> Option<usize> {
+    const GROUPS: &[&str] = &[
+        "Drums",
+        "Percussion",
+        "Bass",
+        "Guitars",
+        "Keys",
+        "Synths",
+        "Horns",
+        "Harmonica",
+        "Strings",
+        "Vocals",
+        "Choir",
+        "Orchestra",
+        "SFX",
+        "Guide",
+        "Reference",
+        "Stem Split",
+    ];
+    let key = normalize_key(group_name);
+    GROUPS.iter().position(|group| normalize_key(group) == key)
+}
+
+fn base_track_name(name: &str) -> String {
+    let Some((prefix, suffix)) = name.rsplit_once(' ') else {
+        return name.to_string();
+    };
+    if suffix.chars().all(|ch| ch.is_ascii_digit()) {
+        prefix.to_string()
+    } else {
+        name.to_string()
+    }
 }
 
 fn next_version_suffix(existing: &HashSet<String>, root_name: &str) -> String {
