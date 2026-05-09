@@ -2869,6 +2869,126 @@ pub trait FitnessService {
         &self,
         id: Uuid,
     ) -> Result<crate::workout_session::WorkoutSessionApi, VaultError>;
+
+    // ── Body measurements ────────────────────────────────────
+    async fn record_body_measurement(
+        &self,
+        request: RecordBodyMeasurementRequest,
+    ) -> Result<crate::body_measurement::BodyMeasurementApi, VaultError>;
+
+    async fn get_body_measurement(
+        &self,
+        id: Uuid,
+    ) -> Result<Option<crate::body_measurement::BodyMeasurementApi>, VaultError>;
+
+    async fn list_body_measurements(
+        &self,
+        request: ListBodyMeasurementsRequest,
+    ) -> Result<Vec<crate::body_measurement::BodyMeasurementApi>, VaultError>;
+
+    async fn update_body_measurement(
+        &self,
+        request: UpdateBodyMeasurementRequest,
+    ) -> Result<crate::body_measurement::BodyMeasurementApi, VaultError>;
+
+    async fn delete_body_measurement(&self, id: Uuid) -> Result<(), VaultError>;
+
+    async fn body_measurement_trend(
+        &self,
+        request: BodyMeasurementTrendRequest,
+    ) -> Result<BodyMeasurementTrendView, VaultError>;
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct RecordBodyMeasurementRequest {
+    pub measured_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub weight_kg: Option<f64>,
+    pub body_fat_percent: Option<f32>,
+    pub muscle_mass_kg: Option<f64>,
+    pub water_percent: Option<f32>,
+    pub neck_cm: Option<f64>,
+    pub chest_cm: Option<f64>,
+    pub waist_cm: Option<f64>,
+    pub hip_cm: Option<f64>,
+    pub left_thigh_cm: Option<f64>,
+    pub right_thigh_cm: Option<f64>,
+    pub left_arm_cm: Option<f64>,
+    pub right_arm_cm: Option<f64>,
+    pub left_calf_cm: Option<f64>,
+    pub right_calf_cm: Option<f64>,
+    pub resting_hr: Option<u32>,
+    pub blood_pressure_systolic: Option<u32>,
+    pub blood_pressure_diastolic: Option<u32>,
+    pub notes: Option<String>,
+    pub organization: Option<String>,
+    pub created_by: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct UpdateBodyMeasurementRequest {
+    pub id: Uuid,
+    pub measured_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub weight_kg: Option<f64>,
+    pub body_fat_percent: Option<f32>,
+    pub muscle_mass_kg: Option<f64>,
+    pub water_percent: Option<f32>,
+    pub neck_cm: Option<f64>,
+    pub chest_cm: Option<f64>,
+    pub waist_cm: Option<f64>,
+    pub hip_cm: Option<f64>,
+    pub left_thigh_cm: Option<f64>,
+    pub right_thigh_cm: Option<f64>,
+    pub left_arm_cm: Option<f64>,
+    pub right_arm_cm: Option<f64>,
+    pub left_calf_cm: Option<f64>,
+    pub right_calf_cm: Option<f64>,
+    pub resting_hr: Option<u32>,
+    pub blood_pressure_systolic: Option<u32>,
+    pub blood_pressure_diastolic: Option<u32>,
+    pub notes: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct ListBodyMeasurementsRequest {
+    pub organization: Option<String>,
+    pub since: Option<chrono::DateTime<chrono::Utc>>,
+    pub until: Option<chrono::DateTime<chrono::Utc>>,
+    /// Default 30, capped at 365.
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct BodyMeasurementTrendRequest {
+    pub organization: Option<String>,
+    pub since: Option<chrono::DateTime<chrono::Utc>>,
+    pub until: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct BodyMeasurementTrendView {
+    pub measurement_count: u32,
+    pub since: chrono::DateTime<chrono::Utc>,
+    pub until: chrono::DateTime<chrono::Utc>,
+    pub weight_kg: Option<MetricTrend>,
+    pub body_fat_percent: Option<MetricTrend>,
+    pub muscle_mass_kg: Option<MetricTrend>,
+    pub waist_cm: Option<MetricTrend>,
+    pub chest_cm: Option<MetricTrend>,
+    pub hip_cm: Option<MetricTrend>,
+}
+
+#[derive(Debug, Clone, Default, facet::Facet)]
+pub struct MetricTrend {
+    pub sample_count: u32,
+    pub first_value: f64,
+    pub last_value: f64,
+    pub min_value: f64,
+    pub max_value: f64,
+    pub mean_value: f64,
+    /// `last_value - first_value`.
+    pub delta: f64,
+    /// `delta / first_value * 100`. NaN-safe (0.0 when `first_value == 0`).
+    pub delta_percent: f64,
 }
 
 #[derive(Debug, Clone, Default, facet::Facet)]
