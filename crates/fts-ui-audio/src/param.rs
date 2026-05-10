@@ -38,10 +38,19 @@ pub struct ParamHandle {
     pub(crate) display_value: Getter<String>,
     pub(crate) name: Getter<String>,
     pub(crate) string_to_normalized: Parser,
+    /// Default normalized value, used by widgets to reset on alt-click /
+    /// double-click. Defaults to `0.5` (centre) when not provided.
+    pub(crate) default_normalized: f32,
+    /// Whether this parameter is bipolar (centred at zero, e.g. gain in
+    /// dB). Affects visualization — knobs draw the value arc from the
+    /// centre detent instead of from the start of the track.
+    pub(crate) bipolar: bool,
 }
 
 impl ParamHandle {
     /// Build a handle from raw closures. Assigns a fresh equality id.
+    /// Default normalized is `0.5`, bipolar is `false` — call
+    /// [`Self::with_default`] / [`Self::with_bipolar`] to override.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         normalized: impl Fn() -> f32 + Send + Sync + 'static,
@@ -61,7 +70,23 @@ impl ParamHandle {
             display_value: Arc::new(display_value),
             name: Arc::new(name),
             string_to_normalized: Arc::new(string_to_normalized),
+            default_normalized: 0.5,
+            bipolar: false,
         }
+    }
+
+    /// Set the default normalized value (used for alt-click reset etc.).
+    pub fn with_default(mut self, default_normalized: f32) -> Self {
+        self.default_normalized = default_normalized.clamp(0.0, 1.0);
+        self
+    }
+
+    /// Mark this parameter as bipolar (zero-centred). Knobs render the
+    /// value arc from the centre detent toward the cursor instead of from
+    /// the leftmost track position.
+    pub fn with_bipolar(mut self, bipolar: bool) -> Self {
+        self.bipolar = bipolar;
+        self
     }
 
     pub fn id(&self) -> u64 {
@@ -88,6 +113,20 @@ impl ParamHandle {
     }
     pub fn string_to_normalized(&self, s: &str) -> Option<f32> {
         (self.string_to_normalized)(s)
+    }
+    pub fn default_normalized(&self) -> f32 {
+        self.default_normalized
+    }
+    pub fn is_bipolar(&self) -> bool {
+        self.bipolar
+    }
+
+    /// Reset to the default normalized value, wrapped in begin/end edit so
+    /// host automation captures it as a single gesture.
+    pub fn reset_to_default(&self) {
+        self.begin_edit();
+        self.set_normalized(self.default_normalized);
+        self.end_edit();
     }
 }
 

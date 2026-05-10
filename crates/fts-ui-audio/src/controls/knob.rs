@@ -8,6 +8,7 @@ use crate::drag::{DragState, begin_drag};
 use crate::param::ParamHandle;
 use crate::theme::*;
 use dioxus::prelude::*;
+use dioxus_elements::input_data::MouseButton;
 use std::f64::consts::PI;
 
 /// Display size.
@@ -33,6 +34,10 @@ const START_ANGLE: f64 = 135.0;
 const SWEEP: f64 = 270.0;
 /// Pixels of vertical drag per full 0→1 sweep.
 const SENSITIVITY: f64 = 150.0;
+/// Per-notch step the mouse wheel takes (normalized value units). Hold
+/// Shift on the wheel for finer steps.
+const WHEEL_STEP: f64 = 0.02;
+const WHEEL_STEP_FINE: f64 = 0.005;
 
 fn angle_for_value(v: f64) -> f64 {
     START_ANGLE + v.clamp(0.0, 1.0) * SWEEP
@@ -55,6 +60,22 @@ fn svg_arc(cx: f64, cy: f64, r: f64, start_deg: f64, end_deg: f64) -> String {
 }
 
 /// A rotary knob bound to a [`ParamHandle`].
+///
+/// ## Interaction
+///
+/// - **Vertical drag** (mouse-down + drag up/down): coarse adjustment.
+/// - **Shift + drag**: fine (4× sensitivity).
+/// - **Ctrl/Cmd + drag**: ultra-fine (16× sensitivity).
+/// - **Mouse wheel**: stepped adjustment. Shift = finer steps.
+/// - **Double-click**: type a value into a text input.
+/// - **Alt + click**: reset to default value (via [`ParamHandle::with_default`]).
+///
+/// ## Visualization
+///
+/// - Default: value arc sweeps from the start of the track toward the cursor.
+/// - Bipolar (mark via [`ParamHandle::with_bipolar`]): value arc sweeps from
+///   the centre detent (12 o'clock) outward in either direction. Better for
+///   gain / pan / cents-style params.
 #[component]
 pub fn Knob(
     /// The parameter this knob drives.
@@ -74,6 +95,7 @@ pub fn Knob(
 ) -> Element {
     let mut drag: Signal<DragState> = use_context();
     let mut editing = use_signal(|| false);
+    let mut hovered = use_signal(|| false);
 
     // Re-render while a drag is active so the value display tracks the cursor.
     let _ = drag.read().move_count;
@@ -82,6 +104,8 @@ pub fn Knob(
     let display_value = handle.display_value();
     let param_name = label.unwrap_or_else(|| handle.name());
     let is_editing = *editing.read();
+    let is_hovered = *hovered.read();
+    let bipolar = handle.is_bipolar();
 
     let d = size.diameter();
     let df = d as f64;
@@ -92,7 +116,18 @@ pub fn Knob(
 
     let track_path = svg_arc(cx, cy, r, START_ANGLE, START_ANGLE + SWEEP);
     let end_angle = angle_for_value(val);
-    let value_path = if val > 0.001 {
+    // For bipolar params draw the value arc from the centre detent outward;
+    // for unipolar from the start of the track.
+    let value_path = if bipolar {
+        let centre_angle = START_ANGLE + SWEEP / 2.0;
+        if (val - 0.5).abs() < 0.001 {
+            String::new()
+        } else if val > 0.5 {
+            svg_arc(cx, cy, r, centre_angle, end_angle)
+        } else {
+            svg_arc(cx, cy, r, end_angle, centre_angle)
+        }
+    } else if val > 0.001 {
         svg_arc(cx, cy, r, START_ANGLE, end_angle)
     } else {
         String::new()
@@ -113,13 +148,27 @@ pub fn Knob(
     let accent = color.as_deref().unwrap_or(ACCENT);
     let opacity = if disabled { "0.5" } else { "1.0" };
     let cursor = if disabled { "not-allowed" } else { "pointer" };
+    // Subtle hover scale to communicate "this is interactable".
+    let scale = if !disabled && (is_hovered || drag.read().active) {
+        "1.04"
+    } else {
+        "1.0"
+    };
+    // Centre-detent tick (only drawn for bipolar so users see the 0 mark).
+    let detent_centre_angle = START_ANGLE + SWEEP / 2.0;
+    let (det_x1, det_y1) = arc_point(cx, cy, r - 6.0, detent_centre_angle);
+    let (det_x2, det_y2) = arc_point(cx, cy, r + 1.0, detent_centre_angle);
 
     rsx! {
         div {
             style: format!(
                 "display:inline-flex; flex-direction:column; align-items:center; gap:4px; \
-                 opacity:{opacity}; cursor:{cursor}; position:relative;"
+                 opacity:{opacity}; cursor:{cursor}; position:relative; \
+                 transform:scale({scale}); transition:transform 80ms ease-out;"
             ),
+            title: format!("{param_name} — {display_value}\nDrag · Shift=fine · Ctrl=ultra-fine · Wheel · Dbl-click=type · Alt-click=reset"),
+            onmouseenter: move |_| { hovered.set(true); },
+            onmouseleave: move |_| { hovered.set(false); },
 
             svg {
                 width: "{d}",
@@ -155,6 +204,18 @@ pub fn Knob(
                     }
                 }
 
+                if bipolar {
+                    line {
+                        x1: "{det_x1:.1}",
+                        y1: "{det_y1:.1}",
+                        x2: "{det_x2:.1}",
+                        y2: "{det_y2:.1}",
+                        stroke: "{BORDER}",
+                        stroke_width: "1",
+                        opacity: "0.6",
+                    }
+                }
+
                 line {
                     x1: "{tx:.1}",
                     y1: "{ty:.1}",
@@ -172,6 +233,18 @@ pub fn Knob(
                     onmousedown: {
                         let handle = handle.clone();
                         move |evt: MouseEvent| {
+                            // Alt-click → reset to default value (DAW convention).
+                            if evt.modifiers().alt() {
+                                evt.prevent_default();
+                                handle.reset_to_default();
+                                return;
+                            }
+                            // Right-click → text-edit prompt for typing a value.
+                            if evt.trigger_button() == Some(MouseButton::Secondary) {
+                                evt.prevent_default();
+                                editing.set(true);
+                                return;
+                            }
                             begin_drag(
                                 &mut drag,
                                 handle.clone(),
@@ -181,6 +254,28 @@ pub fn Knob(
                         }
                     },
                     ondoubleclick: move |_| { editing.set(true); },
+                    onwheel: {
+                        let handle = handle.clone();
+                        move |evt: WheelEvent| {
+                            evt.prevent_default();
+                            let delta_y = evt.delta().strip_units().y;
+                            // Wheel-up (negative delta_y on most platforms) increases.
+                            let direction = if delta_y < 0.0 { 1.0 } else { -1.0 };
+                            let mods = evt.modifiers();
+                            let step = if mods.ctrl() || mods.meta() {
+                                WHEEL_STEP_FINE * 0.25
+                            } else if mods.shift() {
+                                WHEEL_STEP_FINE
+                            } else {
+                                WHEEL_STEP
+                            };
+                            let cur = handle.normalized() as f64;
+                            let next = (cur + direction * step).clamp(0.0, 1.0) as f32;
+                            handle.begin_edit();
+                            handle.set_normalized(next);
+                            handle.end_edit();
+                        }
+                    },
                 }
             }
 

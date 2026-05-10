@@ -82,9 +82,22 @@ pub fn DragProvider(children: Element) -> Element {
                 if state.active {
                     if let Some(handle) = &state.handle {
                         let pos = evt.client_coordinates();
+                        // Modifier-key sensitivity multiplier — increases the
+                        // pixels-per-unit so motion feels finer:
+                        //  * Shift: 4× (fine)
+                        //  * Ctrl/Meta: 16× (ultra-fine)
+                        let mods = evt.modifiers();
+                        let mult = if mods.ctrl() || mods.meta() {
+                            16.0
+                        } else if mods.shift() {
+                            4.0
+                        } else {
+                            1.0
+                        };
+                        let sens = state.sensitivity * mult;
                         let delta = match state.axis {
-                            DragAxis::Vertical => (state.start_y - pos.y) / state.sensitivity,
-                            DragAxis::Horizontal => (pos.x - state.start_x) / state.sensitivity,
+                            DragAxis::Vertical => (state.start_y - pos.y) / sens,
+                            DragAxis::Horizontal => (pos.x - state.start_x) / sens,
                         };
                         let new_val = (state.start_value as f64 + delta).clamp(0.0, 1.0) as f32;
                         handle.set_normalized(new_val);
