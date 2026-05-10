@@ -23,9 +23,9 @@ pub enum KnobSize {
 impl KnobSize {
     pub fn diameter(self) -> u32 {
         match self {
-            Self::Small => 32,
-            Self::Medium => 48,
-            Self::Large => 64,
+            Self::Small => 44,
+            Self::Medium => 56,
+            Self::Large => 72,
         }
     }
 }
@@ -145,25 +145,30 @@ pub fn Knob(
     let (tx, ty) = arc_point(cx, cy, r - 6.0, end_angle);
     let (tx2, ty2) = arc_point(cx, cy, r + 1.0, end_angle);
 
-    // Resolve colors from CSS variables (fts-ui theme tokens) so the
-    // knob inherits the active preset / dark mode rather than the
-    // legacy hardcoded palette. Caller-provided override still wins.
-    let accent = color
-        .clone()
-        .unwrap_or_else(|| "var(--primary)".to_string());
-    let track_color = "var(--border)".to_string();
-    let pointer_color = "var(--foreground)".to_string();
-    let detent_color = "var(--muted-foreground)".to_string();
-    let mod_color = "var(--signal-mod, var(--accent))".to_string();
+    // Resolve colors from CSS variables via the `style` property (blitz
+    // doesn't substitute `var()` inside SVG presentation attributes —
+    // only inside `style="…"` declarations). Each color string also
+    // carries a solid hex fallback so the knob still renders if the
+    // theme variables aren't loaded.
+    let accent_css = match color.as_deref() {
+        Some(c) => format!("stroke: {c};"),
+        None => "stroke: var(--primary, #c8a86e);".to_string(),
+    };
+    let track_css = "stroke: var(--border, #2a2a30);".to_string();
+    let pointer_css = "stroke: var(--foreground, #d4d4d8);".to_string();
+    let detent_css = "stroke: var(--muted-foreground, #737380);".to_string();
+    let mod_css = "stroke: var(--signal-mod, var(--accent, #8b5cf6));".to_string();
+    let bg_css = "fill: var(--card, #0c0c0f); stroke: var(--border, #2a2a30);".to_string();
     let opacity = if disabled { "0.5" } else { "1.0" };
     let cursor = if disabled { "not-allowed" } else { "pointer" };
     // Hover/drag visuals: gentle scale + a glow on the value arc.
     let active = !disabled && (is_hovered || drag.read().active);
     let scale = if active { "1.04" } else { "1.0" };
-    let value_filter = if active {
-        format!("drop-shadow(0 0 4px {accent})")
+    let glow_color = color.clone().unwrap_or_else(|| "#c8a86e".to_string());
+    let value_extra_css = if active {
+        format!(" filter: drop-shadow(0 0 4px {glow_color});")
     } else {
-        "none".to_string()
+        String::new()
     };
     // Centre-detent tick (only drawn for bipolar so users see the 0 mark).
     let detent_centre_angle = START_ANGLE + SWEEP / 2.0;
@@ -196,19 +201,14 @@ pub fn Knob(
                     cx: "{cx:.1}",
                     cy: "{cy:.1}",
                     r: "{cap_r:.1}",
-                    fill: "var(--card, var(--background))",
-                    stroke: "{track_color}",
-                    stroke_width: "0.75",
-                    opacity: "0.85",
+                    style: "{bg_css} stroke-width:0.75; opacity:0.95;",
                 }
 
                 // Track (full-arc background).
                 path {
                     d: "{track_path}",
                     fill: "none",
-                    stroke: "{track_color}",
-                    stroke_width: "3.5",
-                    stroke_linecap: "round",
+                    style: "{track_css} stroke-width:4; stroke-linecap:round;",
                 }
 
                 // Bipolar 0 detent tick (sits behind the value arc).
@@ -218,9 +218,7 @@ pub fn Knob(
                         y1: "{det_y1:.1}",
                         x2: "{det_x2:.1}",
                         y2: "{det_y2:.1}",
-                        stroke: "{detent_color}",
-                        stroke_width: "1.25",
-                        opacity: "0.7",
+                        style: "{detent_css} stroke-width:1.5; opacity:0.7;",
                     }
                 }
 
@@ -229,10 +227,7 @@ pub fn Knob(
                     path {
                         d: "{value_path}",
                         fill: "none",
-                        stroke: "{accent}",
-                        stroke_width: "4",
-                        stroke_linecap: "round",
-                        style: "filter:{value_filter};",
+                        style: "{accent_css} stroke-width:4.5; stroke-linecap:round;{value_extra_css}",
                     }
                 }
 
@@ -240,10 +235,7 @@ pub fn Knob(
                     path {
                         d: "{mod_path}",
                         fill: "none",
-                        stroke: "{mod_color}",
-                        stroke_width: "2",
-                        stroke_linecap: "round",
-                        opacity: "0.65",
+                        style: "{mod_css} stroke-width:2.25; stroke-linecap:round; opacity:0.65;",
                     }
                 }
 
@@ -253,9 +245,7 @@ pub fn Knob(
                     y1: "{ty:.1}",
                     x2: "{tx2:.1}",
                     y2: "{ty2:.1}",
-                    stroke: "{pointer_color}",
-                    stroke_width: "2",
-                    stroke_linecap: "round",
+                    style: "{pointer_css} stroke-width:2.25; stroke-linecap:round;",
                 }
             }
 
