@@ -5,6 +5,7 @@ use dioxus_primitives::collapsible::{
     Collapsible as PrimitiveCollapsible, CollapsibleContent as PrimitiveCollapsibleContent,
     CollapsibleTrigger as PrimitiveCollapsibleTrigger,
 };
+use fts_story_runtime::story;
 
 // ---------------------------------------------------------------------------
 // Collapsible (root)
@@ -90,6 +91,25 @@ pub fn CollapsibleContent(props: CollapsibleContentProps) -> Element {
             id: props.id,
             class: props.class,
             {props.children}
+        }
+    }
+}
+
+/// Default Collapsible story with a trigger button and hidden content.
+#[story(category = "Collapsible", name = "default")]
+pub fn collapsible_default() -> Element {
+    rsx! {
+        div { class: "p-6 bg-background text-foreground max-w-md",
+            Collapsible { default_open: true,
+                CollapsibleTrigger {
+                    class: "inline-flex h-9 items-center rounded-lg border border-input bg-background px-3 text-sm shadow-xs hover:bg-accent hover:text-accent-foreground".to_string(),
+                    "Toggle details"
+                }
+                CollapsibleContent {
+                    class: "mt-2 rounded-lg border border-border p-3 text-sm text-muted-foreground".to_string(),
+                    "Collapsible content body. Press the trigger to hide or reveal this panel."
+                }
+            }
         }
     }
 }

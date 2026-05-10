@@ -3,6 +3,7 @@
 //! Used when a list, panel, or section has no content to display.
 
 use dioxus::prelude::*;
+use fts_story_runtime::story;
 
 /// A dashed-border container with centered placeholder text.
 ///
@@ -37,6 +38,15 @@ pub fn EmptyState(props: EmptyStateProps) -> Element {
             }
 
             p { class: "text-sm text-muted-foreground", "{props.message}" }
+        }
+    }
+}
+
+#[story(category = "EmptyState", name = "default")]
+pub fn empty_state_default() -> Element {
+    rsx! {
+        div { class: "p-6 bg-background text-foreground",
+            EmptyState { message: "No items to show".to_string() }
         }
     }
 }

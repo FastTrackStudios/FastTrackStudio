@@ -1,6 +1,7 @@
 //! Heading — H1 through H6 with consistent typography styles.
 
 use dioxus::prelude::*;
+use fts_story_runtime::story;
 
 /// Heading level.
 #[derive(Clone, Copy, PartialEq, Default)]
@@ -51,5 +52,19 @@ pub fn Heading(props: HeadingProps) -> Element {
         HeadingLevel::H4 => rsx! { h4 { class, {props.children} } },
         HeadingLevel::H5 => rsx! { h5 { class, {props.children} } },
         HeadingLevel::H6 => rsx! { h6 { class, {props.children} } },
+    }
+}
+
+#[story(category = "Typography", name = "heading_levels")]
+pub fn heading_levels() -> Element {
+    rsx! {
+        div { class: "p-6 bg-background text-foreground flex flex-col gap-2",
+            Heading { level: HeadingLevel::H1, "H1 Heading" }
+            Heading { level: HeadingLevel::H2, "H2 Heading" }
+            Heading { level: HeadingLevel::H3, "H3 Heading" }
+            Heading { level: HeadingLevel::H4, "H4 Heading" }
+            Heading { level: HeadingLevel::H5, "H5 Heading" }
+            Heading { level: HeadingLevel::H6, "H6 Heading" }
+        }
     }
 }

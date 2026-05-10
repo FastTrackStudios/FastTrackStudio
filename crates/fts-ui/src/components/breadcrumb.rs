@@ -1,6 +1,7 @@
 //! Breadcrumb — shadcn v4 maia style breadcrumb navigation.
 
 use dioxus::prelude::*;
+use fts_story_runtime::story;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct BreadcrumbProps {
@@ -133,6 +134,48 @@ pub fn BreadcrumbSeparator(props: BreadcrumbSeparatorProps) -> Element {
                 }
             } else {
                 {props.children}
+            }
+        }
+    }
+}
+
+/// Long breadcrumb path collapsed with a `...` ellipsis between root and tail.
+#[story(category = "Breadcrumb", name = "with-ellipsis")]
+pub fn breadcrumb_with_ellipsis() -> Element {
+    rsx! {
+        div { class: "p-6 bg-background text-foreground",
+            Breadcrumb {
+                BreadcrumbList {
+                    BreadcrumbItem { BreadcrumbLink { "Home" } }
+                    BreadcrumbSeparator {}
+                    BreadcrumbItem {
+                        span { class: "text-muted-foreground", "..." }
+                    }
+                    BreadcrumbSeparator {}
+                    BreadcrumbItem { BreadcrumbLink { "Components" } }
+                    BreadcrumbSeparator {}
+                    BreadcrumbItem { BreadcrumbLink { "Navigation" } }
+                    BreadcrumbSeparator {}
+                    BreadcrumbItem { BreadcrumbPage { "Breadcrumb" } }
+                }
+            }
+        }
+    }
+}
+
+/// Default breadcrumb trail with separators and a current page.
+#[story(category = "Breadcrumb", name = "default")]
+pub fn breadcrumb_default() -> Element {
+    rsx! {
+        div { class: "p-6 bg-background text-foreground",
+            Breadcrumb {
+                BreadcrumbList {
+                    BreadcrumbItem { BreadcrumbLink { "Home" } }
+                    BreadcrumbSeparator {}
+                    BreadcrumbItem { BreadcrumbLink { "Components" } }
+                    BreadcrumbSeparator {}
+                    BreadcrumbItem { BreadcrumbPage { "Breadcrumb" } }
+                }
             }
         }
     }

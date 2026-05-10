@@ -1,6 +1,7 @@
 //! Table — shadcn v4 maia style.
 
 use dioxus::prelude::*;
+use fts_story_runtime::story;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct TableContainerProps {
@@ -169,6 +170,43 @@ pub fn TableCaption(props: TableCaptionProps) -> Element {
         caption {
             class: crate::cn::merge_slice(&["text-muted-foreground mt-4 text-sm", props.class.as_str()]),
             {props.children}
+        }
+    }
+}
+
+/// Default Table story showing a small task list.
+#[story(category = "Table", name = "default")]
+pub fn table_default() -> Element {
+    rsx! {
+        div { class: "p-6 bg-background text-foreground",
+            TableContainer {
+                Table {
+                    TableHeader {
+                        TableRow {
+                            TableHead { "Name" }
+                            TableHead { "Status" }
+                            TableHead { "Due" }
+                        }
+                    }
+                    TableBody {
+                        TableRow {
+                            TableCell { "Auth bug" }
+                            TableCell { "WIP" }
+                            TableCell { "Apr 11" }
+                        }
+                        TableRow {
+                            TableCell { "Dashboard" }
+                            TableCell { "Open" }
+                            TableCell { "Apr 15" }
+                        }
+                        TableRow {
+                            TableCell { "Onboarding" }
+                            TableCell { "Done" }
+                            TableCell { "Apr 04" }
+                        }
+                    }
+                }
+            }
         }
     }
 }

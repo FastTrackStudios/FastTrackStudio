@@ -2,12 +2,13 @@
 
 use dioxus::prelude::*;
 use dioxus_primitives::{
+    ContentAlign, ContentSide,
     hover_card::{
         HoverCard as PrimitiveHoverCard, HoverCardContent as PrimitiveHoverCardContent,
         HoverCardTrigger as PrimitiveHoverCardTrigger,
     },
-    ContentAlign, ContentSide,
 };
+use fts_story_runtime::story;
 
 /// Which side the hover card appears on.
 #[derive(Clone, Copy, PartialEq, Default)]
@@ -107,6 +108,29 @@ pub fn HoverCardContent(props: HoverCardContentProps) -> Element {
                 props.class
             )),
             {props.children}
+        }
+    }
+}
+
+/// HoverCard forced open with content rendered for snapshots.
+#[story(category = "HoverCard", name = "hover card default")]
+pub fn hover_card_default() -> Element {
+    let mut open = use_signal(|| true);
+    rsx! {
+        div { class: "p-6 bg-background text-foreground flex items-center justify-center min-h-[18rem]",
+            HoverCard {
+                open: open(),
+                on_open_change: move |o| open.set(o),
+                HoverCardTrigger {
+                    button { class: "h-9 px-3 rounded-lg border border-border text-sm", "Hover me" }
+                }
+                HoverCardContent {
+                    div { class: "flex flex-col gap-1",
+                        span { class: "text-sm font-medium", "@username" }
+                        span { class: "text-xs text-muted-foreground", "Bio shown on hover/focus." }
+                    }
+                }
+            }
         }
     }
 }

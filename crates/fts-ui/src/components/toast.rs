@@ -8,7 +8,9 @@ use dioxus_primitives::toast::{
 };
 use std::time::Duration;
 
-pub use dioxus_primitives::toast::{consume_toast, use_toast, ToastOptions, ToastType, Toasts};
+pub use dioxus_primitives::toast::{ToastOptions, ToastType, Toasts, consume_toast, use_toast};
+
+use fts_story_runtime::story;
 
 #[component]
 pub fn ToastProvider(
@@ -59,4 +61,46 @@ pub fn Toast(props: PrimitiveToastProps) -> Element {
 
 pub fn styled_toast_options() -> ToastOptions {
     ToastOptions::new()
+}
+
+/// Static rendering of every toast type — success / warning / error / info / default.
+#[story(category = "Toast", name = "types")]
+pub fn toast_types() -> Element {
+    let row = |border_class: &'static str, title: &'static str, body: &'static str| {
+        rsx! {
+            div {
+                class: "pointer-events-auto relative grid w-full min-w-80 max-w-sm gap-1 rounded-lg border border-border bg-popover p-4 pr-10 text-sm text-popover-foreground shadow-md {border_class}",
+                div { class: "font-medium", "{title}" }
+                div { class: "text-muted-foreground", "{body}" }
+            }
+        }
+    };
+    rsx! {
+        div { class: "p-6 bg-background text-foreground flex flex-col gap-3 w-96",
+            {row("border-l-4 border-l-green-500", "Success", "Operation completed successfully.")}
+            {row("border-l-4 border-l-yellow-500", "Warning", "Something needs your attention.")}
+            {row("border-l-4 border-l-destructive", "Error", "Something went wrong.")}
+            {row("border-l-4 border-l-blue-500", "Info", "FYI — here is something to know.")}
+            {row("", "Default", "A neutral toast notification.")}
+        }
+    }
+}
+
+#[story(category = "Toast", name = "toast_default")]
+pub fn toast_default() -> Element {
+    // Static rendering of a toast-like card without provider plumbing.
+    rsx! {
+        div { class: "p-6 bg-background text-foreground flex flex-col gap-3 w-96",
+            div {
+                class: "pointer-events-auto relative grid w-full min-w-80 max-w-sm gap-1 rounded-lg border border-border bg-popover p-4 pr-10 text-sm text-popover-foreground shadow-md border-l-4 border-l-green-500",
+                div { class: "font-medium", "Saved" }
+                div { class: "text-muted-foreground", "Your changes have been saved." }
+            }
+            div {
+                class: "pointer-events-auto relative grid w-full min-w-80 max-w-sm gap-1 rounded-lg border border-border bg-popover p-4 pr-10 text-sm text-popover-foreground shadow-md border-l-4 border-l-destructive",
+                div { class: "font-medium", "Error" }
+                div { class: "text-muted-foreground", "Something went wrong." }
+            }
+        }
+    }
 }

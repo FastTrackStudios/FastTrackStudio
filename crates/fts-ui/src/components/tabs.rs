@@ -5,6 +5,7 @@ use dioxus_primitives::tabs::{
     TabContent as PrimitiveTabContent, TabList as PrimitiveTabList,
     TabTrigger as PrimitiveTabTrigger, Tabs as PrimitiveTabs,
 };
+use fts_story_runtime::story;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct TabsProps {
@@ -133,6 +134,63 @@ pub fn TabContent(props: TabContentProps) -> Element {
             id: props.id,
             class: crate::cn::merge_slice(&["text-sm", props.class.as_str()]),
             {props.children}
+        }
+    }
+}
+
+/// Tabs in vertical orientation — `horizontal: false`. The TabList is
+/// flipped to a column and placed beside the content panels.
+#[story(category = "Tabs", name = "vertical")]
+pub fn tabs_vertical() -> Element {
+    rsx! {
+        div { class: "p-6 bg-background text-foreground",
+            Tabs {
+                default_value: "account".to_string(),
+                horizontal: false,
+                class: "flex flex-row gap-4".to_string(),
+                TabList {
+                    class: "flex-col h-auto items-stretch gap-1 rounded-xl p-1".to_string(),
+                    TabTrigger { value: "account".to_string(), index: 0, "Account" }
+                    TabTrigger { value: "password".to_string(), index: 1, "Password" }
+                    TabTrigger { value: "settings".to_string(), index: 2, "Settings" }
+                }
+                div { class: "flex-1",
+                    TabContent { value: "account".to_string(), index: 0,
+                        div { class: "p-3 text-muted-foreground", "Account details go here." }
+                    }
+                    TabContent { value: "password".to_string(), index: 1,
+                        div { class: "p-3 text-muted-foreground", "Password update form." }
+                    }
+                    TabContent { value: "settings".to_string(), index: 2,
+                        div { class: "p-3 text-muted-foreground", "Settings panel." }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Three-tab layout with content panels.
+#[story(category = "Tabs", name = "default")]
+pub fn tabs_default() -> Element {
+    rsx! {
+        div { class: "p-6 bg-background text-foreground",
+            Tabs { default_value: "account".to_string(),
+                TabList {
+                    TabTrigger { value: "account".to_string(), index: 0, "Account" }
+                    TabTrigger { value: "password".to_string(), index: 1, "Password" }
+                    TabTrigger { value: "settings".to_string(), index: 2, "Settings" }
+                }
+                TabContent { value: "account".to_string(), index: 0,
+                    div { class: "p-3 text-muted-foreground", "Account details go here." }
+                }
+                TabContent { value: "password".to_string(), index: 1,
+                    div { class: "p-3 text-muted-foreground", "Password update form." }
+                }
+                TabContent { value: "settings".to_string(), index: 2,
+                    div { class: "p-3 text-muted-foreground", "Settings panel." }
+                }
+            }
         }
     }
 }

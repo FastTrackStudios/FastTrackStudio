@@ -1,6 +1,7 @@
 //! Text — body text with semantic variants.
 
 use dioxus::prelude::*;
+use fts_story_runtime::story;
 
 /// Text style variant.
 #[derive(Clone, Copy, PartialEq, Default)]
@@ -49,5 +50,17 @@ pub fn Text(props: TextProps) -> Element {
     match props.variant {
         TextVariant::Code => rsx! { code { class, {props.children} } },
         _ => rsx! { p { class, {props.children} } },
+    }
+}
+
+#[story(category = "Typography", name = "text_variants")]
+pub fn text_variants() -> Element {
+    rsx! {
+        div { class: "p-6 bg-background text-foreground flex flex-col gap-2",
+            Text { "Body text — the standard paragraph style." }
+            Text { variant: TextVariant::Small, "Small text — secondary detail." }
+            Text { variant: TextVariant::Muted, "Muted text — de-emphasized." }
+            Text { variant: TextVariant::Code, "Code text" }
+        }
     }
 }

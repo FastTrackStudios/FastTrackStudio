@@ -2,6 +2,7 @@
 
 use dioxus::prelude::*;
 use dioxus_primitives::toggle::Toggle as PrimitiveToggle;
+use fts_story_runtime::story;
 
 /// Variant for the toggle button.
 #[derive(Clone, Copy, PartialEq, Default)]
@@ -81,6 +82,52 @@ pub fn Toggle(props: ToggleProps) -> Element {
                 props.on_toggle.call(next);
             },
             {props.children}
+        }
+    }
+}
+
+/// Default toggle button.
+#[story(category = "Toggle", name = "default")]
+pub fn toggle_default() -> Element {
+    let mut pressed = use_signal(|| false);
+    rsx! {
+        div { class: "p-6 bg-background text-foreground",
+            Toggle {
+                pressed: pressed(),
+                on_toggle: move |next| pressed.set(next),
+                "Bold"
+            }
+        }
+    }
+}
+
+/// Toggle variants and sizes side-by-side.
+#[story(category = "Toggle", name = "variants")]
+pub fn toggle_variants() -> Element {
+    let mut a = use_signal(|| false);
+    let mut b = use_signal(|| true);
+    let mut c = use_signal(|| false);
+    rsx! {
+        div { class: "p-6 bg-background text-foreground flex items-center gap-3",
+            Toggle {
+                pressed: a(),
+                on_toggle: move |n| a.set(n),
+                size: ToggleSize::Small,
+                "S"
+            }
+            Toggle {
+                pressed: b(),
+                on_toggle: move |n| b.set(n),
+                size: ToggleSize::Medium,
+                "M"
+            }
+            Toggle {
+                pressed: c(),
+                on_toggle: move |n| c.set(n),
+                variant: ToggleVariant::Outline,
+                size: ToggleSize::Large,
+                "L · Outline"
+            }
         }
     }
 }

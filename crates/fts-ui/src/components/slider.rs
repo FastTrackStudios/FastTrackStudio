@@ -2,6 +2,7 @@
 
 use dioxus::prelude::*;
 use dioxus_primitives::slider::{Slider as PrimitiveSlider, SliderRange, SliderThumb, SliderTrack};
+use fts_story_runtime::story;
 
 // ---------------------------------------------------------------------------
 // Slider
@@ -62,6 +63,56 @@ pub fn Slider(props: SliderProps) -> Element {
                     class: "absolute top-1/2 size-5 -translate-x-1/2 -translate-y-1/2 rounded-full border border-primary bg-background shadow transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50",
                 }
             }
+        }
+    }
+}
+
+/// Slider at multiple fill levels plus a disabled state.
+#[story(category = "Slider", name = "range")]
+pub fn slider_range() -> Element {
+    let v0 = use_signal(|| 0.0);
+    let v25 = use_signal(|| 25.0);
+    let v50 = use_signal(|| 50.0);
+    let v75 = use_signal(|| 75.0);
+    let v100 = use_signal(|| 100.0);
+    let vd = use_signal(|| 50.0);
+    rsx! {
+        div { class: "p-6 bg-background text-foreground flex flex-col gap-4 w-72",
+            div { class: "flex items-center gap-3",
+                span { class: "w-16 text-xs text-muted-foreground", "0%" }
+                Slider { value: v0 }
+            }
+            div { class: "flex items-center gap-3",
+                span { class: "w-16 text-xs text-muted-foreground", "25%" }
+                Slider { value: v25 }
+            }
+            div { class: "flex items-center gap-3",
+                span { class: "w-16 text-xs text-muted-foreground", "50%" }
+                Slider { value: v50 }
+            }
+            div { class: "flex items-center gap-3",
+                span { class: "w-16 text-xs text-muted-foreground", "75%" }
+                Slider { value: v75 }
+            }
+            div { class: "flex items-center gap-3",
+                span { class: "w-16 text-xs text-muted-foreground", "100%" }
+                Slider { value: v100 }
+            }
+            div { class: "flex items-center gap-3",
+                span { class: "w-16 text-xs text-muted-foreground", "Disabled" }
+                Slider { value: vd, disabled: true }
+            }
+        }
+    }
+}
+
+/// Default slider with a single value thumb.
+#[story(category = "Slider", name = "default")]
+pub fn slider_default() -> Element {
+    let value = use_signal(|| 50.0);
+    rsx! {
+        div { class: "p-6 bg-background text-foreground w-72",
+            Slider { value }
         }
     }
 }

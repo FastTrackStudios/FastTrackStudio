@@ -6,6 +6,7 @@ use dioxus_primitives::menubar::{
     MenubarItem as PrimitiveMenubarItem, MenubarMenu as PrimitiveMenubarMenu,
     MenubarTrigger as PrimitiveMenubarTrigger,
 };
+use fts_story_runtime::story;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct MenubarProps {
@@ -178,6 +179,41 @@ pub fn MenubarShortcut(props: MenubarShortcutProps) -> Element {
         span {
             class: crate::cn::merge_slice(&["ml-auto text-xs tracking-widest text-muted-foreground", props.class.as_str()]),
             {props.children}
+        }
+    }
+}
+
+/// Menubar with a single menu rendered. The menubar itself is always visible;
+/// individual menus open on click and are not forced open here.
+#[story(category = "Menubar", name = "menubar default")]
+pub fn menubar_default() -> Element {
+    rsx! {
+        div { class: "p-6 bg-background text-foreground",
+            Menubar {
+                MenubarMenu { index: 0,
+                    MenubarTrigger { "File" }
+                    MenubarContent {
+                        MenubarItem { value: "new".to_string(), index: 0, "New" }
+                        MenubarItem { value: "open".to_string(), index: 1, "Open" }
+                        MenubarSeparator {}
+                        MenubarItem { value: "quit".to_string(), index: 2, "Quit" }
+                    }
+                }
+                MenubarMenu { index: 1,
+                    MenubarTrigger { "Edit" }
+                    MenubarContent {
+                        MenubarItem { value: "undo".to_string(), index: 0, "Undo" }
+                        MenubarItem { value: "redo".to_string(), index: 1, "Redo" }
+                    }
+                }
+                MenubarMenu { index: 2,
+                    MenubarTrigger { "View" }
+                    MenubarContent {
+                        MenubarItem { value: "zoom_in".to_string(), index: 0, "Zoom in" }
+                        MenubarItem { value: "zoom_out".to_string(), index: 1, "Zoom out" }
+                    }
+                }
+            }
         }
     }
 }

@@ -4,6 +4,7 @@ use dioxus::prelude::*;
 use dioxus_primitives::progress::{
     Progress as PrimitiveProgress, ProgressIndicator as PrimitiveProgressIndicator,
 };
+use fts_story_runtime::story;
 
 /// Visual variant for the progress bar fill.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -59,6 +60,27 @@ pub fn Progress(props: ProgressProps) -> Element {
                 class: "{fill_base} {fill_color}",
                 style: "width: {value}%",
             }
+        }
+    }
+}
+
+#[story(category = "Progress", name = "default")]
+pub fn progress_default() -> Element {
+    rsx! {
+        div { class: "p-6 bg-background text-foreground flex flex-col gap-3 w-80",
+            Progress { value: 75.0 }
+        }
+    }
+}
+
+#[story(category = "Progress", name = "variants")]
+pub fn progress_variants() -> Element {
+    rsx! {
+        div { class: "p-6 bg-background text-foreground flex flex-col gap-3 w-80",
+            Progress { value: 60.0 }
+            Progress { value: 45.0, variant: ProgressVariant::Success }
+            Progress { value: 30.0, variant: ProgressVariant::Warning }
+            Progress { value: 90.0, variant: ProgressVariant::Destructive }
         }
     }
 }

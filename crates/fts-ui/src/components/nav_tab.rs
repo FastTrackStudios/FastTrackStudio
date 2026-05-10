@@ -5,6 +5,7 @@
 //! NavTab is a standalone button meant for top-level route navigation.
 
 use dioxus::prelude::*;
+use fts_story_runtime::story;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct NavTabProps {
@@ -44,6 +45,36 @@ pub fn NavTab(props: NavTabProps) -> Element {
                 }
             },
             "{props.label}"
+        }
+    }
+}
+
+/// Row of NavTab pills with one active.
+#[story(category = "NavTab", name = "default")]
+pub fn nav_tab_default() -> Element {
+    let mut active = use_signal(|| "overview".to_string());
+    let on_click = use_callback(move |id: String| active.set(id));
+
+    rsx! {
+        div { class: "p-6 bg-background text-foreground flex items-center gap-2",
+            NavTab {
+                label: "Overview".to_string(),
+                tab_id: "overview".to_string(),
+                is_active: active() == "overview",
+                on_click,
+            }
+            NavTab {
+                label: "Activity".to_string(),
+                tab_id: "activity".to_string(),
+                is_active: active() == "activity",
+                on_click,
+            }
+            NavTab {
+                label: "Reports".to_string(),
+                tab_id: "reports".to_string(),
+                is_active: active() == "reports",
+                on_click,
+            }
         }
     }
 }

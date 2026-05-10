@@ -5,6 +5,7 @@ use dioxus_primitives::accordion::{
     Accordion as PrimitiveAccordion, AccordionContent as PrimitiveAccordionContent,
     AccordionItem as PrimitiveAccordionItem, AccordionTrigger as PrimitiveAccordionTrigger,
 };
+use fts_story_runtime::story;
 
 // ---------------------------------------------------------------------------
 // Accordion (container)
@@ -164,6 +165,29 @@ pub fn AccordionContent(props: AccordionContentProps) -> Element {
             div {
                 class: "pt-0 pb-4",
                 {props.children}
+            }
+        }
+    }
+}
+
+/// Default Accordion story with three FAQ-style items.
+#[story(category = "Accordion", name = "default")]
+pub fn accordion_default() -> Element {
+    rsx! {
+        div { class: "p-6 bg-background text-foreground max-w-xl",
+            Accordion {
+                AccordionItem { index: 0,
+                    AccordionTrigger { "Is it accessible?" }
+                    AccordionContent { "Yes — it follows WAI-ARIA accordion patterns." }
+                }
+                AccordionItem { index: 1,
+                    AccordionTrigger { "Is it styled?" }
+                    AccordionContent { "Yes — shadcn v4 maia tokens drive the look." }
+                }
+                AccordionItem { index: 2,
+                    AccordionTrigger { "Is it animated?" }
+                    AccordionContent { "Yes — open/close uses CSS transitions." }
+                }
             }
         }
     }

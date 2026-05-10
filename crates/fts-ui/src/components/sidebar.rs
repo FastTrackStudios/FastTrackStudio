@@ -1,6 +1,7 @@
 //! Sidebar — app sidebar layout system, shadcn v4 maia style.
 
 use dioxus::prelude::*;
+use fts_story_runtime::story;
 
 // ---------------------------------------------------------------------------
 // Context
@@ -473,6 +474,66 @@ pub fn SidebarInset(props: SidebarInsetProps) -> Element {
         main {
             class: crate::cn::merge_slice(&["flex-1 bg-background", props.class.as_str()]),
             {props.children}
+        }
+    }
+}
+
+/// Collapsible sidebar with header, nav groups, footer, and an inset content area.
+#[story(category = "Sidebar", name = "default")]
+pub fn sidebar_default() -> Element {
+    rsx! {
+        div { class: "p-6 bg-background text-foreground",
+            SidebarProvider {
+                Sidebar { collapsible: SidebarCollapsible::Icon,
+                    SidebarHeader {
+                        div { class: "flex items-center gap-2 px-2",
+                            div { class: "size-8 rounded-md bg-primary text-primary-foreground flex items-center justify-center text-xs font-bold", "FT" }
+                            span { class: "text-sm font-semibold", "FastTrack" }
+                        }
+                    }
+                    SidebarSeparator {}
+                    SidebarContent {
+                        SidebarGroup {
+                            SidebarGroupLabel { "Workspace" }
+                            SidebarGroupContent {
+                                SidebarMenu {
+                                    SidebarMenuItem {
+                                        SidebarMenuButton { is_active: true, "Dashboard" }
+                                    }
+                                    SidebarMenuItem {
+                                        SidebarMenuButton { "Projects" }
+                                    }
+                                    SidebarMenuItem {
+                                        SidebarMenuButton {
+                                            "Inbox"
+                                            SidebarMenuBadge { "4" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        SidebarGroup {
+                            SidebarGroupLabel { "Settings" }
+                            SidebarGroupContent {
+                                SidebarMenu {
+                                    SidebarMenuItem {
+                                        SidebarMenuButton { "Account" }
+                                    }
+                                    SidebarMenuItem {
+                                        SidebarMenuButton { "Billing" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    SidebarFooter {
+                        SidebarTrigger {}
+                    }
+                }
+                SidebarInset {
+                    div { class: "p-6", "Main content area." }
+                }
+            }
         }
     }
 }

@@ -1,6 +1,7 @@
 //! Carousel — shadcn v4 maia style horizontal swipeable carousel.
 
 use dioxus::prelude::*;
+use fts_story_runtime::story;
 
 // ---------------------------------------------------------------------------
 // Context
@@ -185,6 +186,80 @@ pub fn CarouselNext(props: CarouselNextProps) -> Element {
                 stroke_linejoin: "round",
                 class: "size-4",
                 path { d: "m9 18 6-6-6-6" }
+            }
+        }
+    }
+}
+
+/// Carousel with explicitly visible Prev/Next controls and five slides.
+#[story(category = "Carousel", name = "with-controls")]
+pub fn carousel_with_controls() -> Element {
+    rsx! {
+        div { class: "p-6 bg-background text-foreground",
+            div { class: "max-w-md rounded-lg border border-border overflow-hidden",
+                Carousel {
+                    CarouselContent { count: 5,
+                        CarouselItem {
+                            div { class: "flex h-48 items-center justify-center bg-muted text-foreground text-2xl font-semibold",
+                                "Slide 1"
+                            }
+                        }
+                        CarouselItem {
+                            div { class: "flex h-48 items-center justify-center bg-primary/10 text-foreground text-2xl font-semibold",
+                                "Slide 2"
+                            }
+                        }
+                        CarouselItem {
+                            div { class: "flex h-48 items-center justify-center bg-secondary text-secondary-foreground text-2xl font-semibold",
+                                "Slide 3"
+                            }
+                        }
+                        CarouselItem {
+                            div { class: "flex h-48 items-center justify-center bg-accent text-accent-foreground text-2xl font-semibold",
+                                "Slide 4"
+                            }
+                        }
+                        CarouselItem {
+                            div { class: "flex h-48 items-center justify-center bg-muted text-foreground text-2xl font-semibold",
+                                "Slide 5"
+                            }
+                        }
+                    }
+                    CarouselPrevious {}
+                    CarouselNext {}
+                }
+            }
+        }
+    }
+}
+
+/// Default Carousel story with three slides and navigation buttons.
+#[story(category = "Carousel", name = "default")]
+pub fn carousel_default() -> Element {
+    rsx! {
+        div { class: "p-6 bg-background text-foreground",
+            div { class: "max-w-md rounded-lg border border-border overflow-hidden",
+                Carousel {
+                    CarouselContent { count: 3,
+                        CarouselItem {
+                            div { class: "flex h-48 items-center justify-center bg-muted text-foreground text-2xl font-semibold",
+                                "Slide 1"
+                            }
+                        }
+                        CarouselItem {
+                            div { class: "flex h-48 items-center justify-center bg-primary/10 text-foreground text-2xl font-semibold",
+                                "Slide 2"
+                            }
+                        }
+                        CarouselItem {
+                            div { class: "flex h-48 items-center justify-center bg-secondary text-secondary-foreground text-2xl font-semibold",
+                                "Slide 3"
+                            }
+                        }
+                    }
+                    CarouselPrevious {}
+                    CarouselNext {}
+                }
             }
         }
     }

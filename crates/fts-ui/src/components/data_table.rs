@@ -6,6 +6,7 @@ use std::{
 };
 
 use dioxus::prelude::*;
+use fts_story_runtime::story;
 
 use super::{
     Select, SelectContent, SelectItem, Table, TableBody, TableCell, TableContainer, TableHead,
@@ -1190,6 +1191,93 @@ fn sort_indicator(state: &DataTableState, column_id: &str) -> &'static str {
             DataTableSortDirection::Desc => "Desc",
         })
         .unwrap_or("Sort")
+}
+
+#[derive(Clone, PartialEq)]
+struct DataTableStoryTask {
+    id: u32,
+    title: &'static str,
+    status: &'static str,
+    owner: &'static str,
+    priority: u32,
+}
+
+fn data_table_story_tasks() -> Vec<DataTableStoryTask> {
+    vec![
+        DataTableStoryTask {
+            id: 101,
+            title: "Wire account settings",
+            status: "In Progress",
+            owner: "Ada",
+            priority: 3,
+        },
+        DataTableStoryTask {
+            id: 102,
+            title: "Review invoice export",
+            status: "Queued",
+            owner: "Grace",
+            priority: 2,
+        },
+        DataTableStoryTask {
+            id: 103,
+            title: "Ship mobile shell",
+            status: "Blocked",
+            owner: "Linus",
+            priority: 4,
+        },
+        DataTableStoryTask {
+            id: 104,
+            title: "Tighten data table API",
+            status: "Done",
+            owner: "Barbara",
+            priority: 1,
+        },
+    ]
+}
+
+fn data_table_story_columns() -> Vec<DataTableColumn<DataTableStoryTask>> {
+    vec![
+        DataTableColumn::new("title", "Task", |task: &DataTableStoryTask| {
+            task.title.to_string()
+        }),
+        DataTableColumn::new("status", "Status", |task: &DataTableStoryTask| {
+            task.status.to_string()
+        }),
+        DataTableColumn::new("owner", "Owner", |task: &DataTableStoryTask| {
+            task.owner.to_string()
+        }),
+        DataTableColumn::new("priority", "Priority", |task: &DataTableStoryTask| {
+            task.priority.to_string()
+        })
+        .sort_value(|task| task.priority.into())
+        .cell_class("text-right")
+        .head_class("text-right"),
+    ]
+}
+
+/// Default DataTable story with toolbar, view, and footer wiring.
+#[story(category = "DataTable", name = "default")]
+pub fn data_table_default() -> Element {
+    let rows = use_signal(data_table_story_tasks);
+    let columns = use_signal(data_table_story_columns);
+    let options = use_signal(|| {
+        DataTableOptions::default().get_row_id(|task: &DataTableStoryTask, _| task.id.to_string())
+    });
+    let table = use_data_table_with_options(rows, columns, options);
+
+    rsx! {
+        div { class: "p-6 bg-background text-foreground",
+            div { class: "flex flex-col gap-3",
+                DataTableToolbar { table: table.clone() }
+                DataTableView {
+                    table: table.clone(),
+                    selectable: true,
+                    empty: "No tasks match the current filters.".to_string(),
+                }
+                DataTableFooter { table }
+            }
+        }
+    }
 }
 
 #[cfg(test)]

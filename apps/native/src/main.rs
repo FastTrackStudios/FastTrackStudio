@@ -12,25 +12,11 @@ fn main() {
 
     let args: Vec<String> = std::env::args().collect();
     let showcase = args.iter().any(|a| a == "--showcase");
-    let diag_dropdown = args.iter().any(|a| a == "--diag-dropdown");
 
-    if diag_dropdown {
-        dioxus::launch(DiagDropdownApp);
-    } else if showcase {
+    if showcase {
         dioxus::launch(ShowcaseApp);
     } else {
         dioxus::launch(LookbookApp);
-    }
-}
-
-#[component]
-fn DiagDropdownApp() -> Element {
-    let theme_state = use_signal(|| ThemeState::new(default_theme_preset(), ThemeMode::Dark));
-    rsx! {
-        document::Stylesheet { href: TAILWIND_CSS }
-        ThemeProvider { state: theme_state,
-            { fts_ui::stories::diag_dropdown_close(false) }
-        }
     }
 }
 

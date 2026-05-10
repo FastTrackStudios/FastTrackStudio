@@ -2,6 +2,7 @@
 
 use dioxus::prelude::*;
 use dioxus_primitives::label::Label as PrimitiveLabel;
+use fts_story_runtime::story;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct LabelProps {
@@ -24,6 +25,16 @@ pub fn Label(props: LabelProps) -> Element {
             html_for,
             class: crate::cn::merge_slice(&[base, props.class.as_str()]),
             {props.children}
+        }
+    }
+}
+
+/// Default label.
+#[story(category = "Label", name = "default", knobs(text = "Email address"))]
+pub fn label_default(text: &str) -> Element {
+    rsx! {
+        div { class: "p-6 bg-background text-foreground",
+            Label { "{text}" }
         }
     }
 }

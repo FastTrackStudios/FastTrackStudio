@@ -5,6 +5,7 @@ use dioxus_primitives::context_menu::{
     ContextMenu as PrimitiveContextMenu, ContextMenuContent as PrimitiveContextMenuContent,
     ContextMenuItem as PrimitiveContextMenuItem, ContextMenuTrigger as PrimitiveContextMenuTrigger,
 };
+use fts_story_runtime::story;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct ContextMenuProps {
@@ -142,6 +143,39 @@ pub fn ContextMenuLabel(props: ContextMenuLabelProps) -> Element {
         div {
             class: crate::cn::merge_slice(&["text-muted-foreground px-3 py-2.5 text-xs", props.class.as_str()]),
             {props.children}
+        }
+    }
+}
+
+/// ContextMenu forced open showing items. (Note: positioned at fixed coords.)
+#[story(category = "ContextMenu", name = "context menu default")]
+pub fn context_menu_default() -> Element {
+    let mut open = use_signal(|| true);
+    rsx! {
+        div { class: "p-6 bg-background text-foreground relative min-h-[18rem]",
+            if !open() {
+                button {
+                    class: "h-9 px-3 rounded-lg border border-border text-sm mb-3",
+                    onclick: move |_| open.set(true),
+                    "Open context menu"
+                }
+            }
+            ContextMenu {
+                open: open(),
+                on_open_change: move |o| open.set(o),
+                ContextMenuTrigger {
+                    div { class: "h-24 rounded-lg border border-dashed border-border flex items-center justify-center text-sm text-muted-foreground",
+                        "Right-click area"
+                    }
+                }
+                ContextMenuContent {
+                    ContextMenuLabel { "Actions" }
+                    ContextMenuItem { value: "copy".to_string(), index: 0, "Copy" }
+                    ContextMenuItem { value: "paste".to_string(), index: 1, "Paste" }
+                    ContextMenuSeparator {}
+                    ContextMenuItem { value: "delete".to_string(), index: 2, destructive: true, "Delete" }
+                }
+            }
         }
     }
 }

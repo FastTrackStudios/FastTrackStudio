@@ -1,6 +1,7 @@
 //! InputGroup — input with prefix/suffix addon slots, shadcn v4 maia style.
 
 use dioxus::prelude::*;
+use fts_story_runtime::story;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct InputGroupProps {
@@ -100,6 +101,21 @@ pub fn InputGroupControl(props: InputGroupControlProps) -> Element {
                     cb.call(e);
                 }
             },
+        }
+    }
+}
+
+/// Input group with a prefix addon and a suffix addon.
+#[story(category = "InputGroup", name = "default")]
+pub fn input_group_default() -> Element {
+    let value = use_signal(String::new);
+    rsx! {
+        div { class: "p-6 bg-background text-foreground w-80",
+            InputGroup {
+                InputGroupAddon { align: InputGroupAlign::Start, "$" }
+                InputGroupControl { value, placeholder: "0.00".to_string() }
+                InputGroupAddon { align: InputGroupAlign::End, "USD" }
+            }
         }
     }
 }

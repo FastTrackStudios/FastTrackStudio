@@ -4,6 +4,7 @@
 //! blur, cancels on Escape. Used for renaming scenes, presets, songs, etc.
 
 use dioxus::prelude::*;
+use fts_story_runtime::story;
 
 /// A text element that switches to an input on double-click for inline renaming.
 ///
@@ -92,6 +93,9 @@ pub fn InlineEdit(props: InlineEditProps) -> Element {
                 value: "{draft}",
                 placeholder: "{props.placeholder}",
                 autofocus: true,
+                onmounted: move |elem| async move {
+                    let _ = elem.set_focus(true).await;
+                },
                 oninput: move |e| draft.set(e.value()),
                 onkeydown: move |e: KeyboardEvent| {
                     e.stop_propagation();
@@ -121,6 +125,20 @@ pub fn InlineEdit(props: InlineEditProps) -> Element {
                 ondoubleclick: move |_| enter_edit(),
                 "{props.value}"
             }
+        }
+    }
+}
+
+#[story(category = "InlineEdit", name = "inline_edit_default")]
+pub fn inline_edit_default() -> Element {
+    let mut name = use_signal(|| "Scene A".to_string());
+    rsx! {
+        div { class: "p-6 bg-background text-foreground flex items-center gap-3",
+            InlineEdit {
+                value: name(),
+                on_commit: move |new_val: String| name.set(new_val),
+            }
+            span { class: "text-xs text-muted-foreground", "(double-click to edit)" }
         }
     }
 }

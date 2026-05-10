@@ -1,6 +1,7 @@
 //! Badge — shadcn v4 maia style.
 
 use dioxus::prelude::*;
+use fts_story_runtime::story;
 
 /// Visual variant for the badge.
 #[derive(Clone, Copy, PartialEq, Default)]
@@ -46,6 +47,20 @@ pub fn Badge(props: BadgeProps) -> Element {
                 props.class
             )),
             {props.children}
+        }
+    }
+}
+
+/// All `BadgeVariant` values rendered with a configurable label.
+#[story(category = "Badge", name = "variants", knobs(label = "Badge"))]
+pub fn badge_variants(label: &str) -> Element {
+    rsx! {
+        div { class: "p-6 bg-background text-foreground flex flex-wrap gap-2",
+            Badge { variant: BadgeVariant::Default, "{label}" }
+            Badge { variant: BadgeVariant::Secondary, "{label}" }
+            Badge { variant: BadgeVariant::Destructive, "{label}" }
+            Badge { variant: BadgeVariant::Outline, "{label}" }
+            Badge { variant: BadgeVariant::Ghost, "{label}" }
         }
     }
 }

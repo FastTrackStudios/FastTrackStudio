@@ -3,6 +3,7 @@
 //! Styled to match shadcn v4 maia card/item patterns.
 
 use dioxus::prelude::*;
+use fts_story_runtime::story;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct ListRowProps {
@@ -85,6 +86,26 @@ pub fn ListRow(props: ListRowProps) -> Element {
                 div { class: "flex-shrink-0 ml-3",
                     {trailing}
                 }
+            }
+        }
+    }
+}
+
+#[story(category = "ListRow", name = "list_row_default")]
+pub fn list_row_default() -> Element {
+    rsx! {
+        div { class: "p-6 bg-background text-foreground flex flex-col gap-2 w-[28rem]",
+            ListRow {
+                label: "Signal REAPER".to_string(),
+                detail: "Running — PID 1234".to_string(),
+                leading: rsx! { crate::components::StatusDot { color: crate::components::StatusDotColor::Success } },
+                trailing: rsx! { crate::components::Button { size: crate::components::ButtonSize::Small, variant: crate::components::ButtonVariant::Secondary, "Launch" } },
+            }
+            ListRow {
+                label: "Audio Interface".to_string(),
+                detail: "Disconnected".to_string(),
+                tag: "USB".to_string(),
+                leading: rsx! { crate::components::StatusDot { color: crate::components::StatusDotColor::Danger } },
             }
         }
     }

@@ -1,6 +1,7 @@
 //! Pagination — shadcn v4 maia style.
 
 use dioxus::prelude::*;
+use fts_story_runtime::story;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct PaginationProps {
@@ -191,6 +192,105 @@ pub fn PaginationEllipsis() -> Element {
         span {
             class: "flex size-9 items-center justify-center text-muted-foreground",
             "..."
+        }
+    }
+}
+
+/// Many-page layout — `1 ... 5 6 7 ... 20` with the middle page active.
+#[story(category = "Pagination", name = "many-pages")]
+pub fn pagination_many_pages() -> Element {
+    let mut current = use_signal(|| 6u32);
+    let total: u32 = 20;
+    let on_select = use_callback(move |p: u32| current.set(p));
+    let on_prev = use_callback(move |_| {
+        let c = current();
+        if c > 1 {
+            current.set(c - 1);
+        }
+    });
+    let on_next = use_callback(move |_| {
+        let c = current();
+        if c < total {
+            current.set(c + 1);
+        }
+    });
+    rsx! {
+        div { class: "p-6 bg-background text-foreground",
+            Pagination {
+                PaginationContent {
+                    PaginationItem {
+                        PaginationPrevious { on_click: on_prev, disabled: current() == 1 }
+                    }
+                    PaginationItem {
+                        PaginationLink { page: 1u32, is_active: current() == 1, on_click: on_select }
+                    }
+                    PaginationItem { PaginationEllipsis {} }
+                    PaginationItem {
+                        PaginationLink { page: 5u32, is_active: current() == 5, on_click: on_select }
+                    }
+                    PaginationItem {
+                        PaginationLink { page: 6u32, is_active: current() == 6, on_click: on_select }
+                    }
+                    PaginationItem {
+                        PaginationLink { page: 7u32, is_active: current() == 7, on_click: on_select }
+                    }
+                    PaginationItem { PaginationEllipsis {} }
+                    PaginationItem {
+                        PaginationLink { page: 20u32, is_active: current() == 20, on_click: on_select }
+                    }
+                    PaginationItem {
+                        PaginationNext { on_click: on_next, disabled: current() == total }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Pagination with previous/next, numeric pages, ellipsis, and an active page.
+#[story(category = "Pagination", name = "default")]
+pub fn pagination_default() -> Element {
+    let mut current = use_signal(|| 2u32);
+    let total: u32 = 10;
+    let on_select = use_callback(move |p: u32| current.set(p));
+    let on_prev = use_callback(move |_| {
+        let c = current();
+        if c > 1 {
+            current.set(c - 1);
+        }
+    });
+    let on_next = use_callback(move |_| {
+        let c = current();
+        if c < total {
+            current.set(c + 1);
+        }
+    });
+
+    rsx! {
+        div { class: "p-6 bg-background text-foreground",
+            Pagination {
+                PaginationContent {
+                    PaginationItem {
+                        PaginationPrevious { on_click: on_prev, disabled: current() == 1 }
+                    }
+                    PaginationItem {
+                        PaginationLink { page: 1u32, is_active: current() == 1, on_click: on_select }
+                    }
+                    PaginationItem {
+                        PaginationLink { page: 2u32, is_active: current() == 2, on_click: on_select }
+                    }
+                    PaginationItem {
+                        PaginationLink { page: 3u32, is_active: current() == 3, on_click: on_select }
+                    }
+                    PaginationItem { PaginationEllipsis {} }
+                    PaginationItem {
+                        PaginationLink { page: 10u32, is_active: current() == 10, on_click: on_select }
+                    }
+                    PaginationItem {
+                        PaginationNext { on_click: on_next, disabled: current() == total }
+                    }
+                }
+            }
         }
     }
 }

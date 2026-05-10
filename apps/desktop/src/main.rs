@@ -1,4 +1,4 @@
-use dioxus::desktop::{tao::window::WindowBuilder, Config};
+use dioxus::desktop::{Config, tao::window::WindowBuilder};
 use dioxus::prelude::*;
 use fts_story_shell::Lookbook;
 use fts_ui::prelude::*;
@@ -37,7 +37,9 @@ fn main() {
             )
             .with_menu(None);
         SnapshotApp::set_story(story);
-        LaunchBuilder::desktop().with_cfg(cfg).launch(SnapshotApp::run);
+        LaunchBuilder::desktop()
+            .with_cfg(cfg)
+            .launch(SnapshotApp::run);
         return;
     }
 

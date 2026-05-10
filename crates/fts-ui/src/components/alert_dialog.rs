@@ -8,6 +8,7 @@ use dioxus_primitives::alert_dialog::{
     AlertDialogDescription as PrimitiveAlertDialogDescription,
     AlertDialogRoot as PrimitiveAlertDialog, AlertDialogTitle as PrimitiveAlertDialogTitle,
 };
+use fts_story_runtime::story;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct AlertDialogProps {
@@ -160,6 +161,80 @@ pub fn AlertDialogCancel(props: AlertDialogCancelProps) -> Element {
             on_click: props.on_click,
             class: props.class,
             {props.children}
+        }
+    }
+}
+
+/// AlertDialog with an emphasised destructive primary action.
+#[story(category = "AlertDialog", name = "destructive")]
+pub fn alert_dialog_destructive() -> Element {
+    let mut open = use_signal(|| true);
+    rsx! {
+        div { class: "p-6 bg-background text-foreground relative min-h-[24rem]",
+            if !open() {
+                button {
+                    class: "h-9 px-3 rounded-lg border border-border text-sm",
+                    onclick: move |_| open.set(true),
+                    "Open destructive dialog"
+                }
+            }
+            AlertDialog {
+                open: open(),
+                on_close: move |_| open.set(false),
+                AlertDialogHeader {
+                    AlertDialogTitle { "Delete project?" }
+                    AlertDialogDescription { "Deleting this project will permanently remove all of its data, including settings and history. This cannot be undone." }
+                }
+                AlertDialogFooter {
+                    AlertDialogCancel {
+                        class: "h-9 px-3 rounded-lg border border-border text-sm".to_string(),
+                        on_click: move |_| open.set(false),
+                        "Cancel"
+                    }
+                    AlertDialogAction {
+                        class: "h-9 px-3 rounded-lg bg-destructive text-destructive-foreground hover:bg-destructive/90 font-medium text-sm".to_string(),
+                        on_click: move |_| open.set(false),
+                        "Delete project"
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// AlertDialog forced open with destructive confirmation actions.
+#[story(category = "AlertDialog", name = "alert dialog default")]
+pub fn alert_dialog_default() -> Element {
+    let mut open = use_signal(|| true);
+    rsx! {
+        div { class: "p-6 bg-background text-foreground relative min-h-[24rem]",
+            if !open() {
+                button {
+                    class: "h-9 px-3 rounded-lg border border-border text-sm",
+                    onclick: move |_| open.set(true),
+                    "Open alert dialog"
+                }
+            }
+            AlertDialog {
+                open: open(),
+                on_close: move |_| open.set(false),
+                AlertDialogHeader {
+                    AlertDialogTitle { "Are you absolutely sure?" }
+                    AlertDialogDescription { "This action cannot be undone. It will permanently delete the resource." }
+                }
+                AlertDialogFooter {
+                    AlertDialogCancel {
+                        class: "h-9 px-3 rounded-lg border border-border text-sm".to_string(),
+                        on_click: move |_| open.set(false),
+                        "Cancel"
+                    }
+                    AlertDialogAction {
+                        class: "h-9 px-3 rounded-lg bg-destructive text-destructive-foreground text-sm".to_string(),
+                        on_click: move |_| open.set(false),
+                        "Delete"
+                    }
+                }
+            }
         }
     }
 }

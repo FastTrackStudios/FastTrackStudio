@@ -6,6 +6,7 @@
 use dioxus::prelude::*;
 use dioxus_primitives::scroll_area::ScrollArea as PrimitiveScrollArea;
 pub use dioxus_primitives::scroll_area::{ScrollDirection, ScrollType};
+use fts_story_runtime::story;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct ScrollAreaProps {
@@ -32,6 +33,26 @@ pub fn ScrollArea(props: ScrollAreaProps) -> Element {
             div {
                 class: "h-full w-full overflow-auto scrollbar-thin scrollbar-thumb-rounded-full scrollbar-thumb-border scrollbar-track-transparent",
                 {props.children}
+            }
+        }
+    }
+}
+
+/// Default ScrollArea story rendering a fixed-height scrolling list.
+#[story(category = "ScrollArea", name = "default")]
+pub fn scroll_area_default() -> Element {
+    rsx! {
+        div { class: "p-6 bg-background text-foreground",
+            ScrollArea {
+                always_show_scrollbars: true,
+                class: "h-48 w-72 rounded-lg border border-border".to_string(),
+                div { class: "p-4 flex flex-col gap-2 text-sm",
+                    for i in 0..30 {
+                        div { key: "{i}", class: "rounded-md border border-border px-3 py-2",
+                            "Item {i + 1}"
+                        }
+                    }
+                }
             }
         }
     }

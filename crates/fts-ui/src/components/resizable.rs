@@ -3,6 +3,7 @@
 //! Simplified flex-basis approach (no JS drag interop).
 
 use dioxus::prelude::*;
+use fts_story_runtime::story;
 
 // ---------------------------------------------------------------------------
 // Direction
@@ -181,6 +182,30 @@ pub fn ResizableHandle(props: ResizableHandleProps) -> Element {
                         circle { cx: "7", cy: "7", r: "1" }
                         circle { cx: "3", cy: "11", r: "1" }
                         circle { cx: "7", cy: "11", r: "1" }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Default Resizable story rendering two horizontal panels with a handle.
+#[story(category = "Resizable", name = "default")]
+pub fn resizable_default() -> Element {
+    rsx! {
+        div { class: "p-6 bg-background text-foreground",
+            div { class: "h-64 w-full max-w-2xl rounded-lg border border-border overflow-hidden",
+                ResizablePanelGroup { direction: ResizeDirection::Horizontal,
+                    ResizablePanel { default_size: 40.0, class: "bg-muted/30".to_string(),
+                        div { class: "flex h-full items-center justify-center text-sm text-muted-foreground",
+                            "Sidebar"
+                        }
+                    }
+                    ResizableHandle { with_handle: true }
+                    ResizablePanel { default_size: 60.0,
+                        div { class: "flex h-full items-center justify-center text-sm text-muted-foreground",
+                            "Main"
+                        }
                     }
                 }
             }

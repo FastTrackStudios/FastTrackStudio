@@ -1,6 +1,7 @@
 //! Date picker — primitive-backed date input and calendar popover.
 
 use dioxus::prelude::*;
+use dioxus_primitives::ContentAlign;
 use dioxus_primitives::date_picker::{
     DatePicker as PrimitiveDatePicker, DatePickerCalendar as PrimitiveDatePickerCalendar,
     DatePickerInput as PrimitiveDatePickerInput, DatePickerPopover as PrimitiveDatePickerPopover,
@@ -8,8 +9,8 @@ use dioxus_primitives::date_picker::{
 use dioxus_primitives::popover::{
     PopoverContent as PrimitivePopoverContent, PopoverTrigger as PrimitivePopoverTrigger,
 };
-use dioxus_primitives::ContentAlign;
-use time::{macros::date, Date};
+use fts_story_runtime::story;
+use time::{Date, macros::date};
 
 #[component]
 pub fn DatePicker(
@@ -118,6 +119,25 @@ pub fn DatePickerCalendar(#[props(default)] class: String) -> Element {
         PrimitiveDatePickerCalendar {
             class,
             crate::components::Calendar {}
+        }
+    }
+}
+
+/// Default DatePicker story rendering input + popover calendar.
+#[story(category = "DatePicker", name = "default")]
+pub fn date_picker_default() -> Element {
+    rsx! {
+        div { class: "p-6 bg-background text-foreground",
+            DatePicker {
+                DatePickerPopover {
+                    DatePickerTrigger {
+                        DatePickerInput {}
+                    }
+                    DatePickerContent {
+                        DatePickerCalendar {}
+                    }
+                }
+            }
         }
     }
 }

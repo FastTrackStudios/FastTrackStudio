@@ -1,6 +1,7 @@
 //! Kbd — keyboard shortcut badge, shadcn v4 maia style.
 
 use dioxus::prelude::*;
+use fts_story_runtime::story;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct KbdProps {
@@ -19,6 +20,20 @@ pub fn Kbd(props: KbdProps) -> Element {
         kbd {
             class: crate::cn::merge_slice(&[base, props.class.as_str()]),
             {props.children}
+        }
+    }
+}
+
+#[story(category = "Kbd", name = "default")]
+pub fn kbd_default() -> Element {
+    rsx! {
+        div { class: "p-6 bg-background text-foreground flex items-center gap-2",
+            Kbd { "Ctrl" }
+            span { class: "text-muted-foreground", "+" }
+            Kbd { "K" }
+            span { class: "text-muted-foreground ml-3", "or" }
+            Kbd { "Enter" }
+            Kbd { "Esc" }
         }
     }
 }

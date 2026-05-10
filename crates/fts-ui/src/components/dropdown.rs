@@ -5,6 +5,7 @@ use dioxus_primitives::dropdown_menu::{
     DropdownMenu as PrimitiveDropdown, DropdownMenuContent as PrimitiveDropdownContent,
     DropdownMenuItem as PrimitiveDropdownItem, DropdownMenuTrigger as PrimitiveDropdownTrigger,
 };
+use fts_story_runtime::story;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct DropdownProps {
@@ -182,6 +183,30 @@ pub fn DropdownSeparator(props: DropdownSeparatorProps) -> Element {
         div {
             class: crate::cn::merge_slice(&["bg-border/50 -mx-1 my-1 h-px", props.class.as_str()]),
             role: "separator",
+        }
+    }
+}
+
+/// Dropdown forced open with a few menu items.
+#[story(category = "Dropdown", name = "dropdown default")]
+pub fn dropdown_default() -> Element {
+    let mut open = use_signal(|| true);
+    rsx! {
+        div { class: "p-6 bg-background text-foreground flex items-start justify-center min-h-[18rem]",
+            Dropdown {
+                open: open(),
+                on_open_change: move |o| open.set(o),
+                DropdownTrigger {
+                    button { class: "h-9 px-3 rounded-lg border border-border text-sm", "Open menu" }
+                }
+                DropdownContent {
+                    DropdownLabel { "Account" }
+                    DropdownItem { value: "profile".to_string(), index: 0, "Profile" }
+                    DropdownItem { value: "settings".to_string(), index: 1, "Settings" }
+                    DropdownSeparator {}
+                    DropdownItem { value: "logout".to_string(), index: 2, destructive: true, "Sign out" }
+                }
+            }
         }
     }
 }

@@ -1,6 +1,7 @@
 //! Native select — platform select control with fts-ui styling.
 
 use dioxus::prelude::*;
+use fts_story_runtime::story;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct NativeSelectProps {
@@ -61,6 +62,21 @@ pub fn NativeSelectOption(props: NativeSelectOptionProps) -> Element {
             value: props.value,
             disabled: if props.disabled { Some(true) } else { None },
             {props.children}
+        }
+    }
+}
+
+/// Default native select with three options.
+#[story(category = "NativeSelect", name = "default")]
+pub fn native_select_default() -> Element {
+    let value = use_signal(|| "apple".to_string());
+    rsx! {
+        div { class: "p-6 bg-background text-foreground w-64",
+            NativeSelect { value,
+                NativeSelectOption { value: "apple".to_string(), "Apple" }
+                NativeSelectOption { value: "banana".to_string(), "Banana" }
+                NativeSelectOption { value: "cherry".to_string(), "Cherry" }
+            }
         }
     }
 }

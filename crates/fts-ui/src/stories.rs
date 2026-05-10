@@ -21,10 +21,7 @@ use fts_story_runtime::story;
 #[story(
     category = "Buttons",
     name = "primary",
-    knobs(
-        label = "Click me",
-        disabled = false,
-    ),
+    knobs(label = "Click me", disabled = false,)
 )]
 pub fn button_primary(label: &str, disabled: bool) -> Element {
     rsx! {
@@ -35,12 +32,8 @@ pub fn button_primary(label: &str, disabled: bool) -> Element {
 }
 
 /// All `ButtonVariant` values laid out side by side.
-#[story(
-    category = "Buttons",
-    name = "variants",
-    knobs(_marker = false),
-)]
-pub fn button_variants(_marker: bool) -> Element {
+#[story(category = "Buttons", name = "variants")]
+pub fn button_variants() -> Element {
     rsx! {
         div { class: "p-6 bg-background text-foreground flex flex-wrap gap-2",
             Button { variant: ButtonVariant::Primary, "Primary" }
@@ -58,12 +51,8 @@ pub fn button_variants(_marker: bool) -> Element {
 /// snapshot: rows are variants, columns are states. Each cell is
 /// labelled so you can map a divergence in the composite back to the
 /// exact (variant, state) pair without counting.
-#[story(
-    category = "Buttons",
-    name = "matrix",
-    knobs(_marker = false),
-)]
-pub fn button_matrix(_marker: bool) -> Element {
+#[story(category = "Buttons", name = "matrix")]
+pub fn button_matrix() -> Element {
     rsx! {
         div { class: "p-6 bg-background text-foreground",
             table { class: "border-collapse",
@@ -108,12 +97,8 @@ fn ButtonRow(label: String, variant: ButtonVariant) -> Element {
 
 /// All button sizes for the Primary variant. Catches per-renderer
 /// drift in font scaling, padding, and intrinsic sizing.
-#[story(
-    category = "Buttons",
-    name = "sizes",
-    knobs(_marker = false),
-)]
-pub fn button_sizes(_marker: bool) -> Element {
+#[story(category = "Buttons", name = "sizes")]
+pub fn button_sizes() -> Element {
     rsx! {
         div { class: "p-6 bg-background text-foreground flex flex-wrap items-center gap-3",
             Button { size: ButtonSize::Small, "Small" }
@@ -123,35 +108,13 @@ pub fn button_sizes(_marker: bool) -> Element {
     }
 }
 
-// ── Badges ───────────────────────────────────────────────────────────────────
-
-/// All `BadgeVariant` values rendered with a configurable label.
-#[story(
-    category = "Badges",
-    name = "variants",
-    knobs(label = "Badge"),
-)]
-pub fn badge_variants(label: &str) -> Element {
-    rsx! {
-        div { class: "p-6 bg-background text-foreground flex flex-wrap gap-2",
-            Badge { variant: BadgeVariant::Default, "{label}" }
-            Badge { variant: BadgeVariant::Secondary, "{label}" }
-            Badge { variant: BadgeVariant::Destructive, "{label}" }
-            Badge { variant: BadgeVariant::Outline, "{label}" }
-        }
-    }
-}
-
 // ── Cards ────────────────────────────────────────────────────────────────────
 
 /// Card with header, content, and footer regions.
 #[story(
-    category = "Cards",
+    category = "Card",
     name = "basic",
-    knobs(
-        title = "Project Alpha",
-        description = "A sample project card.",
-    ),
+    knobs(title = "Project Alpha", description = "A sample project card.",)
 )]
 pub fn card_basic(title: &str, description: &str) -> Element {
     rsx! {
@@ -173,347 +136,144 @@ pub fn card_basic(title: &str, description: &str) -> Element {
     }
 }
 
-// ── Diagnostics ─────────────────────────────────────────────────────────────
-
-/// Minimal SVG smoke test — used to isolate which Blitz SVG behaviour
-/// is responsible for the missing spinner in the Button matrix.
-/// Renders four progressively-simpler variants of the same arc the
-/// Button uses so we can see exactly where Blitz diverges.
-#[story(
-    category = "Diagnostics",
-    name = "svg-smoke",
-    knobs(_marker = false),
-)]
-pub fn diag_svg_smoke(_marker: bool) -> Element {
-    rsx! {
-        div { class: "p-6 bg-background text-foreground flex flex-col gap-6",
-            // 1. Bare SVG with explicit width/height + viewBox.
-            //    No Tailwind, no currentColor. If this renders an arc,
-            //    Blitz can paint paths.
-            div { class: "flex items-center gap-3",
-                span { class: "w-48 text-sm text-muted-foreground", "explicit w/h, white stroke" }
-                svg {
-                    width: "32",
-                    height: "32",
-                    view_box: "0 0 24 24",
-                    fill: "none",
-                    stroke: "white",
-                    stroke_width: "2",
-                    path { d: "M21 12a9 9 0 1 1-6.219-8.56" }
-                }
-            }
-            // 2. currentColor stroke — relies on Blitz inheriting the
-            //    parent's `color` for the SVG painter.
-            div { class: "flex items-center gap-3 text-foreground",
-                span { class: "w-48 text-sm text-muted-foreground", "currentColor stroke" }
-                svg {
-                    width: "32",
-                    height: "32",
-                    view_box: "0 0 24 24",
-                    fill: "none",
-                    stroke: "currentColor",
-                    stroke_width: "2",
-                    path { d: "M21 12a9 9 0 1 1-6.219-8.56" }
-                }
-            }
-            // 3. Tailwind `size-8` instead of explicit width/height.
-            //    If this renders nothing, the issue is `size-*` on SVG.
-            div { class: "flex items-center gap-3",
-                span { class: "w-48 text-sm text-muted-foreground", "size-8 utility" }
-                svg {
-                    class: "size-8",
-                    view_box: "0 0 24 24",
-                    fill: "none",
-                    stroke: "white",
-                    stroke_width: "2",
-                    path { d: "M21 12a9 9 0 1 1-6.219-8.56" }
-                }
-            }
-            // 4. Exact spinner from Button: size-4 + currentColor.
-            div { class: "flex items-center gap-3 text-foreground",
-                span { class: "w-48 text-sm text-muted-foreground", "size-4 + currentColor (Button spinner)" }
-                svg {
-                    class: "size-4 animate-spin",
-                    view_box: "0 0 24 24",
-                    fill: "none",
-                    stroke: "currentColor",
-                    stroke_width: "2",
-                    path { d: "M21 12a9 9 0 1 1-6.219-8.56" }
-                }
-            }
-            // 5. Explicit width/height at 16px (no Tailwind). If this
-            //    renders an arc but row 4 doesn't, the issue is with
-            //    Blitz applying the `size-4` utility to SVG elements
-            //    rather than path painting at 16px.
-            div { class: "flex items-center gap-3",
-                span { class: "w-48 text-sm text-muted-foreground", "explicit 16x16, white stroke" }
-                svg {
-                    width: "16",
-                    height: "16",
-                    view_box: "0 0 24 24",
-                    fill: "none",
-                    stroke: "white",
-                    stroke_width: "2",
-                    path { d: "M21 12a9 9 0 1 1-6.219-8.56" }
-                }
-            }
-            // 6. Tailwind w-4 + h-4 split into two utilities (instead
-            //    of `size-4`). If this renders, the bug is the
-            //    `size-*` shorthand.
-            div { class: "flex items-center gap-3",
-                span { class: "w-48 text-sm text-muted-foreground", "w-4 h-4 split utility" }
-                svg {
-                    class: "w-4 h-4",
-                    view_box: "0 0 24 24",
-                    fill: "none",
-                    stroke: "white",
-                    stroke_width: "2",
-                    path { d: "M21 12a9 9 0 1 1-6.219-8.56" }
-                }
-            }
-            // 7. size-4 WITHOUT animate-spin. Isolates whether the
-            //    issue is the rotation or the size class itself.
-            div { class: "flex items-center gap-3",
-                span { class: "w-48 text-sm text-muted-foreground", "size-4 (no animate-spin)" }
-                svg {
-                    class: "size-4",
-                    view_box: "0 0 24 24",
-                    fill: "none",
-                    stroke: "white",
-                    stroke_width: "2",
-                    path { d: "M21 12a9 9 0 1 1-6.219-8.56" }
-                }
-            }
-            // 8. size-8 + animate-spin. Confirms the spin animation
-            //    works at larger sizes.
-            div { class: "flex items-center gap-3",
-                span { class: "w-48 text-sm text-muted-foreground", "size-8 + animate-spin" }
-                svg {
-                    class: "size-8 animate-spin",
-                    view_box: "0 0 24 24",
-                    fill: "none",
-                    stroke: "white",
-                    stroke_width: "2",
-                    path { d: "M21 12a9 9 0 1 1-6.219-8.56" }
-                }
-            }
-            // 9. 16x16 SVG with a STATIC `transform: rotate(45deg)`.
-            //    No animation. If this renders, the bug is the
-            //    keyframes / animation system, not transforms in
-            //    general at small sizes.
-            div { class: "flex items-center gap-3",
-                span { class: "w-48 text-sm text-muted-foreground", "16x16 + static rotate(45deg)" }
-                svg {
-                    width: "16",
-                    height: "16",
-                    style: "transform: rotate(45deg);",
-                    view_box: "0 0 24 24",
-                    fill: "none",
-                    stroke: "white",
-                    stroke_width: "2",
-                    path { d: "M21 12a9 9 0 1 1-6.219-8.56" }
-                }
-            }
-            // 10. 16x16 SVG wrapped in a div with the spin animation.
-            //     Isolates whether the bug is "animation on SVG" vs
-            //     "animation on small element regardless of type".
-            div { class: "flex items-center gap-3",
-                span { class: "w-48 text-sm text-muted-foreground", "div size-4 + animate-spin (no SVG)" }
-                div {
-                    class: "size-4 animate-spin",
-                    style: "background: white;",
-                }
-            }
-            // 11. size-4 + animate-spin + stroke="white" (no
-            //     currentColor). If this renders, the bug is
-            //     specifically `currentColor` at small sizes — usvg
-            //     resolves currentColor to black when the SVG markup
-            //     has no `color` attribute, and Blitz doesn't inject
-            //     the computed color before parsing. If this still
-            //     vanishes, the bug is animate-spin on small SVGs
-            //     regardless of stroke source.
-            div { class: "flex items-center gap-3",
-                span { class: "w-48 text-sm text-muted-foreground", "size-4 + animate-spin + white stroke" }
-                svg {
-                    class: "size-4 animate-spin",
-                    view_box: "0 0 24 24",
-                    fill: "none",
-                    stroke: "white",
-                    stroke_width: "2",
-                    path { d: "M21 12a9 9 0 1 1-6.219-8.56" }
-                }
-            }
-            // 12. size-4 + stroke="currentColor" WITHOUT animate-spin.
-            //     If this vanishes (or renders black-on-dark and is
-            //     functionally invisible), the bug is `currentColor`
-            //     at small sizes independent of animation. Pairs with
-            //     test 2 (currentColor at 32px ✓) — if 12 fails and 2
-            //     passes, the threshold is size, not currentColor in
-            //     general.
-            div { class: "flex items-center gap-3 text-foreground",
-                span { class: "w-48 text-sm text-muted-foreground", "size-4 + currentColor (no animate-spin)" }
-                svg {
-                    class: "size-4",
-                    view_box: "0 0 24 24",
-                    fill: "none",
-                    stroke: "currentColor",
-                    stroke_width: "2",
-                    path { d: "M21 12a9 9 0 1 1-6.219-8.56" }
-                }
-            }
-        }
-    }
-}
-
-/// Regression test for cross-renderer layout parity. Renders 8 rows
-/// of `flex items-center gap-3` (text label + 32×32 box) inside
-/// `flex-col gap-6`. Originally a bisection probe that pinned a 1 px
-/// per-row vertical drift between Blitz and wry to a single root
-/// cause: Xvfb's default DPI (75) made webkit scale every CSS-pixel
-/// value by ~96/75, while Blitz's CPU rasteriser uses CSS-px ==
-/// device-px at scale 1.0. Pinning Xvfb to `-dpi 96` brought parity
-/// from `dssim ≈ 0.085` to `≈ 0.003`. Keep this story so any future
-/// regression in flex / gap / line-height / DPI handling shows up
-/// here before the heavier Button-matrix tests fail.
-#[story(
-    category = "Diagnostics",
-    name = "layout-stack",
-    knobs(_marker = false),
-)]
-pub fn diag_layout_stack(_marker: bool) -> Element {
-    rsx! {
-        div { class: "p-6 bg-background text-foreground flex flex-col gap-6",
-            for i in 0..8 {
-                div { class: "flex items-center gap-3",
-                    span { class: "w-48 text-sm text-muted-foreground", "row {i} text-sm label" }
-                    div {
-                        style: "width: 32px; height: 32px; background: white;",
-                    }
-                }
-            }
-        }
-    }
-}
-
-/// Regression test for the dropdown-crash-on-first-click bug on the
-/// Blitz native renderer (fixed in
-/// `FastTrackStudios/blitz#fix/dom-handle-focus-defer-queue`). The
-/// original symptom was that `dioxus_primitives::dropdown_menu`'s
-/// trigger called `mounted.set_focus(true).await` from a `spawn`ed
-/// task, which the Dioxus runtime polled inside the same call stack
-/// as the event-dispatch loop while Blitz still held a `borrow_mut`
-/// on its document RefCell — `RefCell already borrowed`, panic on
-/// the first click. Visually it looked like "the dropdown isn't
-/// closing on outside click" because the renderer was dead.
-///
-/// `NodeHandle::set_focus` now queues into a
-/// `Rc<RefCell<Vec<(NodeId, bool)>>>` that `DioxusDocument` drains
-/// after every UI event, so the focus mutation lands on a clean
-/// borrow. With that, the existing Stylo focus state machine flips
-/// the trigger blur → primitive's `use_effect(focus.any_focused())`
-/// → `set_open(false)` chain correctly.
-///
-/// Steps to verify:
-///   1. Click "Open menu" — dropdown opens, badge shows `open`.
-///   2. Click the large grey "click-away target".
-///   3. Dropdown closes, badge flips to `closed`, click counter
-///      increments. Renderer does not panic on either click.
-///   4. Press Escape — closes via the keyboard path (independent
-///      of the focus path). Belt-and-suspenders.
-#[story(
-    category = "Diagnostics",
-    name = "dropdown-close",
-    knobs(_marker = false),
-)]
-pub fn diag_dropdown_close(_marker: bool) -> Element {
-    let mut click_count = use_signal(|| 0u32);
-    let mut last_open = use_signal(|| false);
-    let mut last_selected = use_signal(|| String::from("(none)"));
-    let mut select_count = use_signal(|| 0u32);
-
-    rsx! {
-        div { class: "p-6 bg-background text-foreground flex flex-col gap-6 min-h-screen",
-            div { class: "flex items-center gap-4",
-                Dropdown {
-                    on_open_change: move |open: bool| { last_open.set(open); },
-                    DropdownTrigger {
-                        class: "px-3 py-2 rounded-md bg-primary text-primary-foreground",
-                        "Open menu"
-                    }
-                    DropdownContent { align: "start".to_string(),
-                        DropdownItem {
-                            value: "edit".to_string(),
-                            index: 0,
-                            on_select: move |v: String| {
-                                last_selected.set(v);
-                                *select_count.write() += 1;
-                            },
-                            "Edit"
-                        }
-                        DropdownItem {
-                            value: "duplicate".to_string(),
-                            index: 1,
-                            on_select: move |v: String| {
-                                last_selected.set(v);
-                                *select_count.write() += 1;
-                            },
-                            "Duplicate"
-                        }
-                        DropdownSeparator {}
-                        DropdownItem {
-                            value: "delete".to_string(),
-                            index: 2,
-                            destructive: true,
-                            on_select: move |v: String| {
-                                last_selected.set(v);
-                                *select_count.write() += 1;
-                            },
-                            "Delete"
-                        }
-                    }
-                }
-                span { class: "text-sm text-muted-foreground",
-                    "open: "
-                    span { class: "font-mono", if last_open() { "open" } else { "closed" } }
-                    " · selected: "
-                    span { class: "font-mono", "{last_selected}" }
-                    " (#{select_count})"
-                }
-            }
-
-            // Click-away target. Counts clicks so we can verify the
-            // event is reaching Dioxus at all even when the dropdown
-            // refuses to close.
-            div {
-                class: "h-64 rounded-md border border-border bg-muted/40 flex items-center justify-center cursor-pointer select-none",
-                onclick: move |_| { *click_count.write() += 1; },
-                span { class: "text-sm text-muted-foreground",
-                    "click-away target — clicks received: "
-                    span { class: "font-mono", "{click_count}" }
-                }
-            }
-
-            div { class: "text-xs text-muted-foreground",
-                "Bug repro: open the menu, then click the grey area. On wry / web the menu closes; on Blitz native it stays open because the trigger never receives a blur event when an unfocusable sibling is clicked."
-            }
-        }
-    }
-}
-
 /// Force-link helper — referenced from the binary's `main` so LTO
 /// can't drop the static registrations. Each `#[story]` macro emits
 /// a registration as a `static` item; without a code path that
 /// touches it, the linker may strip it from the final binary.
 pub fn force_link() {
+    use crate::components::*;
+
+    // Tuples can be wide; nested tuples avoid the rustc tuple-arity limit
+    // and group symbols by category for readability.
     let _ = (
-        &BUTTON_PRIMARY_STORY,
-        &BUTTON_VARIANTS_STORY,
-        &BUTTON_MATRIX_STORY,
-        &BUTTON_SIZES_STORY,
-        &BADGE_VARIANTS_STORY,
-        &CARD_BASIC_STORY,
-        &DIAG_SVG_SMOKE_STORY,
-        &DIAG_LAYOUT_STACK_STORY,
-        &DIAG_DROPDOWN_CLOSE_STORY,
+        // Buttons + Cards (live in this file)
+        (
+            &BUTTON_PRIMARY_STORY,
+            &BUTTON_VARIANTS_STORY,
+            &BUTTON_MATRIX_STORY,
+            &BUTTON_SIZES_STORY,
+            &CARD_BASIC_STORY,
+        ),
+        // Badges + Avatar
+        (&BADGE_VARIANTS_STORY, &AVATAR_SIZES_STORY),
+        // Form controls
+        (
+            &CHECKBOX_DEFAULT_STORY,
+            &SWITCH_DEFAULT_STORY,
+            &RADIO_GROUP_DEFAULT_STORY,
+            &SLIDER_DEFAULT_STORY,
+            &TOGGLE_DEFAULT_STORY,
+            &TOGGLE_VARIANTS_STORY,
+            &TOGGLE_GROUP_DEFAULT_STORY,
+            &INPUT_DEFAULT_STORY,
+            &INPUT_VARIANTS_STORY,
+            &TEXTAREA_DEFAULT_STORY,
+            &LABEL_DEFAULT_STORY,
+            &INPUT_GROUP_DEFAULT_STORY,
+        ),
+        (
+            &INPUT_OTP_DEFAULT_STORY,
+            &NATIVE_SELECT_DEFAULT_STORY,
+            &SELECT_DEFAULT_STORY,
+            &SEGMENTED_CONTROL_DEFAULT_STORY,
+            &SEGMENTED_CONTROL_SIZES_STORY,
+        ),
+        // Overlays
+        (
+            &DIALOG_DEFAULT_STORY,
+            &ALERT_DIALOG_DEFAULT_STORY,
+            &DRAWER_DEFAULT_STORY,
+            &SIDE_SHEET_DEFAULT_STORY,
+            &POPOVER_DEFAULT_STORY,
+            &HOVER_CARD_DEFAULT_STORY,
+            &TOOLTIP_DEFAULT_STORY,
+            &DROPDOWN_DEFAULT_STORY,
+            &CONTEXT_MENU_DEFAULT_STORY,
+            &MENUBAR_DEFAULT_STORY,
+            &COMMAND_DEFAULT_STORY,
+            &COMBOBOX_DEFAULT_STORY,
+        ),
+        // Navigation
+        (
+            &BREADCRUMB_DEFAULT_STORY,
+            &PAGINATION_DEFAULT_STORY,
+            &TABS_DEFAULT_STORY,
+            &NAVIGATION_MENU_DEFAULT_STORY,
+            &SIDEBAR_DEFAULT_STORY,
+            &NAV_TAB_DEFAULT_STORY,
+        ),
+        // Data display
+        (
+            &ASPECT_RATIO_DEFAULT_STORY,
+            &SCROLL_AREA_DEFAULT_STORY,
+            &RESIZABLE_DEFAULT_STORY,
+            &TABLE_DEFAULT_STORY,
+            &ACCORDION_DEFAULT_STORY,
+            &COLLAPSIBLE_DEFAULT_STORY,
+            &DATA_TABLE_DEFAULT_STORY,
+            &CALENDAR_DEFAULT_STORY,
+            &CAROUSEL_DEFAULT_STORY,
+            &DATE_PICKER_DEFAULT_STORY,
+        ),
+        // Feedback + misc
+        (
+            &ALERT_DEFAULT_STORY,
+            &ALERT_VARIANTS_STORY,
+            &PROGRESS_DEFAULT_STORY,
+            &PROGRESS_VARIANTS_STORY,
+            &PROGRESS_BAR_DEFAULT_STORY,
+            &SPINNER_SIZES_STORY,
+            &SKELETON_DEFAULT_STORY,
+            &STATUS_DEFAULT_STORY,
+            &KBD_DEFAULT_STORY,
+            &TOAST_DEFAULT_STORY,
+            &EMPTY_STATE_DEFAULT_STORY,
+            &BUTTON_GROUP_DEFAULT_STORY,
+        ),
+        (
+            &ITEM_DEFAULT_STORY,
+            &KEY_VALUE_ROW_DEFAULT_STORY,
+            &LIST_ROW_DEFAULT_STORY,
+            &SECTION_HEADER_DEFAULT_STORY,
+            &SEARCHABLE_DROPDOWN_DEFAULT_STORY,
+            &SEARCHABLE_LIST_DEFAULT_STORY,
+            &INLINE_EDIT_DEFAULT_STORY,
+            &FIELD_DEFAULT_STORY,
+            &FORM_DEFAULT_STORY,
+            &TOOLBAR_DEFAULT_STORY,
+        ),
+        // Typography + layout (different module paths)
+        (
+            &crate::typography::HEADING_LEVELS_STORY,
+            &crate::typography::TEXT_VARIANTS_STORY,
+            &crate::layout::DIVIDER_DEFAULT_STORY,
+        ),
+        // Matrices — variants × states / sizes / sides etc.
+        (
+            &INPUT_SIZES_STORY,
+            &TEXTAREA_STATES_STORY,
+            &SLIDER_RANGE_STORY,
+            &SWITCH_STATES_STORY,
+            &CHECKBOX_STATES_STORY,
+            &RADIO_GROUP_STATES_STORY,
+            &SELECT_STATES_STORY,
+            &TOGGLE_GROUP_VARIANTS_STORY,
+            &SEGMENTED_CONTROL_STATES_STORY,
+            &AVATAR_FALLBACKS_STORY,
+        ),
+        (
+            &ALERT_DIALOG_DESTRUCTIVE_STORY,
+            &DRAWER_SIDES_STORY,
+            &SIDE_SHEET_SIDES_STORY,
+            &TABS_VERTICAL_STORY,
+            &BREADCRUMB_WITH_ELLIPSIS_STORY,
+            &PAGINATION_MANY_PAGES_STORY,
+            &TOAST_TYPES_STORY,
+            &STATUS_DOTS_AND_BADGES_STORY,
+            &CAROUSEL_WITH_CONTROLS_STORY,
+        ),
     );
+
+    #[cfg(feature = "router")]
+    let _ = &NAVBAR_DEFAULT_STORY;
 }

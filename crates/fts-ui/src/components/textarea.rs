@@ -1,6 +1,7 @@
 //! Textarea — shadcn v4 maia style.
 
 use dioxus::prelude::*;
+use fts_story_runtime::story;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct TextareaProps {
@@ -48,6 +49,50 @@ pub fn Textarea(props: TextareaProps) -> Element {
                     cb.call(e);
                 }
             },
+        }
+    }
+}
+
+/// Textarea states: default, disabled, error (via aria-invalid).
+#[story(category = "Textarea", name = "states")]
+pub fn textarea_states() -> Element {
+    let a = use_signal(|| "Default content".to_string());
+    let b = use_signal(|| "Disabled content".to_string());
+    let c = use_signal(|| "Error content".to_string());
+    rsx! {
+        div { class: "p-6 bg-background text-foreground flex flex-col gap-4 w-96",
+            div {
+                div { class: "text-xs uppercase tracking-wider text-muted-foreground mb-1", "Default" }
+                Textarea { value: a, placeholder: "Type a message...".to_string(), rows: 3 }
+            }
+            div {
+                div { class: "text-xs uppercase tracking-wider text-muted-foreground mb-1", "Disabled" }
+                Textarea { value: b, placeholder: "Type a message...".to_string(), rows: 3, disabled: true }
+            }
+            div {
+                div { class: "text-xs uppercase tracking-wider text-muted-foreground mb-1", "Error" }
+                Textarea {
+                    value: c,
+                    placeholder: "Type a message...".to_string(),
+                    rows: 3,
+                    class: "border-destructive aria-invalid:ring-destructive/20 aria-invalid:border-destructive".to_string(),
+                }
+            }
+        }
+    }
+}
+
+/// Default textarea with multi-line content.
+#[story(
+    category = "Textarea",
+    name = "default",
+    knobs(placeholder = "Type a longer message...")
+)]
+pub fn textarea_default(placeholder: &str) -> Element {
+    let value = use_signal(|| "Multi-line\nsecond line".to_string());
+    rsx! {
+        div { class: "p-6 bg-background text-foreground w-96",
+            Textarea { value, placeholder: placeholder.to_string(), rows: 4 }
         }
     }
 }

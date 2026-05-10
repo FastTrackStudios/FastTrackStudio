@@ -4,6 +4,7 @@
 //! `StatusBadge` — pill with tinted background, icon, and label text.
 
 use dioxus::prelude::*;
+use fts_story_runtime::story;
 
 // ---------------------------------------------------------------------------
 // StatusDot
@@ -178,6 +179,77 @@ pub fn StatusBadge(props: StatusBadgeProps) -> Element {
             }
 
             span { "{props.label}" }
+        }
+    }
+}
+
+/// Every `StatusDotColor` paired with every `StatusBadgeVariant` in a labelled grid.
+#[story(category = "Status", name = "dots-and-badges")]
+pub fn status_dots_and_badges() -> Element {
+    rsx! {
+        div { class: "p-6 bg-background text-foreground flex flex-col gap-6",
+            div {
+                div { class: "text-xs uppercase tracking-wider text-muted-foreground mb-2", "StatusDot — colors" }
+                div { class: "flex items-center gap-6",
+                    div { class: "flex items-center gap-2",
+                        StatusDot { color: StatusDotColor::Success }
+                        span { class: "text-sm", "Success" }
+                    }
+                    div { class: "flex items-center gap-2",
+                        StatusDot { color: StatusDotColor::Warning }
+                        span { class: "text-sm", "Warning" }
+                    }
+                    div { class: "flex items-center gap-2",
+                        StatusDot { color: StatusDotColor::Danger }
+                        span { class: "text-sm", "Danger" }
+                    }
+                    div { class: "flex items-center gap-2",
+                        StatusDot { color: StatusDotColor::Neutral }
+                        span { class: "text-sm", "Neutral" }
+                    }
+                    div { class: "flex items-center gap-2",
+                        StatusDot { color: StatusDotColor::Custom("#a855f7".to_string()) }
+                        span { class: "text-sm", "Custom" }
+                    }
+                }
+            }
+            div {
+                div { class: "text-xs uppercase tracking-wider text-muted-foreground mb-2", "StatusDot — sizes" }
+                div { class: "flex items-center gap-4",
+                    StatusDot { color: StatusDotColor::Success, size: StatusDotSize::Small }
+                    StatusDot { color: StatusDotColor::Success, size: StatusDotSize::Medium }
+                    StatusDot { color: StatusDotColor::Success, round: false }
+                }
+            }
+            div {
+                div { class: "text-xs uppercase tracking-wider text-muted-foreground mb-2", "StatusBadge — variants" }
+                div { class: "flex items-center gap-2 flex-wrap",
+                    StatusBadge { variant: StatusBadgeVariant::Success, label: "Connected".to_string() }
+                    StatusBadge { variant: StatusBadgeVariant::Warning, label: "Degraded".to_string() }
+                    StatusBadge { variant: StatusBadgeVariant::Danger, label: "Error".to_string() }
+                    StatusBadge { variant: StatusBadgeVariant::Neutral, label: "Offline".to_string() }
+                }
+            }
+        }
+    }
+}
+
+#[story(category = "Status", name = "default")]
+pub fn status_default() -> Element {
+    rsx! {
+        div { class: "p-6 bg-background text-foreground flex flex-col gap-3",
+            div { class: "flex items-center gap-3",
+                StatusDot { color: StatusDotColor::Success }
+                StatusDot { color: StatusDotColor::Warning }
+                StatusDot { color: StatusDotColor::Danger }
+                StatusDot { color: StatusDotColor::Neutral }
+            }
+            div { class: "flex items-center gap-2",
+                StatusBadge { variant: StatusBadgeVariant::Success, label: "Connected".to_string() }
+                StatusBadge { variant: StatusBadgeVariant::Warning, label: "Degraded".to_string() }
+                StatusBadge { variant: StatusBadgeVariant::Danger, label: "Error".to_string() }
+                StatusBadge { variant: StatusBadgeVariant::Neutral, label: "Offline".to_string() }
+            }
         }
     }
 }

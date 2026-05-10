@@ -18,7 +18,6 @@ pub mod typography;
 pub mod prelude;
 pub mod showcase;
 
-#[cfg(feature = "stories")]
 pub mod stories;
 
 // Re-export lucide icons for consumers.

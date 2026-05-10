@@ -1,6 +1,7 @@
 //! NavigationMenu — shadcn v4 maia style top-level navigation with mega-menu dropdowns.
 
 use dioxus::prelude::*;
+use fts_story_runtime::story;
 
 // ── Context ──────────────────────────────────────────────────────────────────
 
@@ -226,6 +227,38 @@ pub fn NavigationMenuLink(props: NavigationMenuLinkProps) -> Element {
                 ctx.active.set(None);
             },
             {props.children}
+        }
+    }
+}
+
+/// NavigationMenu with two items, one with a dropdown content panel.
+#[story(category = "NavigationMenu", name = "default")]
+pub fn navigation_menu_default() -> Element {
+    rsx! {
+        div { class: "p-6 bg-background text-foreground min-h-64",
+            NavigationMenu {
+                NavigationMenuList {
+                    NavigationMenuItem { value: "products".to_string(),
+                        NavigationMenuTrigger { "Products" }
+                        NavigationMenuContent {
+                            div { class: "grid gap-2 w-64",
+                                NavigationMenuLink { href: "#analytics".to_string(), "Analytics" }
+                                NavigationMenuLink { href: "#engagement".to_string(), active: true, "Engagement" }
+                                NavigationMenuLink { href: "#security".to_string(), "Security" }
+                            }
+                        }
+                    }
+                    NavigationMenuItem { value: "company".to_string(),
+                        NavigationMenuTrigger { "Company" }
+                        NavigationMenuContent {
+                            div { class: "grid gap-2 w-64",
+                                NavigationMenuLink { href: "#about".to_string(), "About" }
+                                NavigationMenuLink { href: "#careers".to_string(), "Careers" }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }

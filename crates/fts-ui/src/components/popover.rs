@@ -2,12 +2,13 @@
 
 use dioxus::prelude::*;
 use dioxus_primitives::{
+    ContentAlign, ContentSide,
     popover::{
         PopoverContent as PrimitivePopoverContent, PopoverRoot as PrimitivePopover,
         PopoverTrigger as PrimitivePopoverTrigger,
     },
-    ContentAlign, ContentSide,
 };
+use fts_story_runtime::story;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct PopoverProps {
@@ -94,6 +95,30 @@ pub fn PopoverContent(props: PopoverContentProps) -> Element {
                 props.class
             )),
             {props.children}
+        }
+    }
+}
+
+/// Popover forced open with simple content.
+#[story(category = "Popover", name = "popover default")]
+pub fn popover_default() -> Element {
+    let mut open = use_signal(|| true);
+    rsx! {
+        div { class: "p-6 bg-background text-foreground flex items-center justify-center min-h-[18rem]",
+            Popover {
+                open: open(),
+                is_modal: false,
+                on_open_change: move |o| open.set(o),
+                PopoverTrigger {
+                    button { class: "h-9 px-3 rounded-lg border border-border text-sm", "Open popover" }
+                }
+                PopoverContent {
+                    div { class: "flex flex-col gap-1",
+                        span { class: "text-sm font-medium", "Popover" }
+                        span { class: "text-xs text-muted-foreground", "Anchored content next to the trigger." }
+                    }
+                }
+            }
         }
     }
 }

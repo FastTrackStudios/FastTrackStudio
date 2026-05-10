@@ -5,6 +5,7 @@ use dioxus_primitives::dialog::{
     DialogContent as PrimitiveDialogContent, DialogDescription as PrimitiveDialogDescription,
     DialogRoot as PrimitiveDialog, DialogTitle as PrimitiveDialogTitle,
 };
+use fts_story_runtime::story;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct DialogProps {
@@ -152,6 +153,44 @@ pub fn DialogClose(props: DialogCloseProps) -> Element {
             onclick: move |_| props.on_click.call(()),
             span { class: "size-4 text-lg leading-none", aria_hidden: "true", "\u{2715}" }
             span { class: "sr-only", "Close" }
+        }
+    }
+}
+
+/// Dialog forced open with header, description, and footer actions.
+#[story(category = "Dialog", name = "dialog default")]
+pub fn dialog_default() -> Element {
+    let mut open = use_signal(|| true);
+    rsx! {
+        div { class: "p-6 bg-background text-foreground relative min-h-[24rem]",
+            if !open() {
+                button {
+                    class: "h-9 px-3 rounded-lg border border-border text-sm",
+                    onclick: move |_| open.set(true),
+                    "Open dialog"
+                }
+            }
+            Dialog {
+                open: open(),
+                on_close: move |_| open.set(false),
+                DialogHeader {
+                    DialogTitle { "Confirm action" }
+                    DialogDescription { "This is a forced-open dialog used for snapshot testing." }
+                }
+                p { class: "text-sm text-muted-foreground", "Body content goes here." }
+                DialogFooter {
+                    button {
+                        class: "h-9 px-3 rounded-lg border border-border text-sm",
+                        onclick: move |_| open.set(false),
+                        "Cancel"
+                    }
+                    button {
+                        class: "h-9 px-3 rounded-lg bg-primary text-primary-foreground text-sm",
+                        onclick: move |_| open.set(false),
+                        "Confirm"
+                    }
+                }
+            }
         }
     }
 }

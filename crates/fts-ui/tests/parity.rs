@@ -4,7 +4,7 @@
 //!
 //! ```sh
 //! cargo build --release -p fts-ui-showcase-desktop
-//! cargo test  --release -p fts-ui --features stories --test parity
+//! cargo test  --release -p fts-ui --test parity
 //! ```
 //!
 //! Outputs land in `crates/fts-ui/parity_output/` — one PNG per
@@ -14,8 +14,6 @@
 //! default). Required system tools: `Xvfb`, `xdotool`, ImageMagick
 //! (`import`). The test will fail-fast with a useful error message if
 //! any are missing.
-
-#![cfg(feature = "stories")]
 
 use dioxus::prelude::*;
 use fts_story_parity::{ParityConfig, ParityRunner, WryCaptureConfig};
@@ -94,16 +92,4 @@ fn button_matrix_parity() {
 #[ignore = "requires Xvfb/xdotool/imagemagick + a built target/release/fts-ui-showcase-desktop"]
 fn button_sizes_parity() {
     run(&stories::BUTTON_SIZES_STORY);
-}
-
-#[test]
-#[ignore = "requires Xvfb/xdotool/imagemagick + a built target/release/fts-ui-showcase-desktop"]
-fn diag_svg_smoke_parity() {
-    run(&stories::DIAG_SVG_SMOKE_STORY);
-}
-
-#[test]
-#[ignore = "requires Xvfb/xdotool/imagemagick + a built target/release/fts-ui-showcase-desktop"]
-fn diag_layout_stack_parity() {
-    run(&stories::DIAG_LAYOUT_STACK_STORY);
 }

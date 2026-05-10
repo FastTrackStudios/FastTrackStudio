@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 
 use dioxus::prelude::*;
+use fts_story_runtime::story;
 
 #[derive(Clone, PartialEq, Eq, Debug, Default)]
 pub struct FormFieldState {
@@ -362,5 +363,64 @@ mod tests {
 
         assert!(state.dirty());
         assert_eq!(state.values().get("name"), Some(&"Grace".to_string()));
+    }
+}
+
+#[story(category = "Form", name = "form_default")]
+pub fn form_default() -> Element {
+    let mut form = use_form();
+    let mut initialized = use_signal(|| false);
+    if !initialized() {
+        form.register("name", "Ada Lovelace");
+        form.register("email", "ada@example.com");
+        initialized.set(true);
+    }
+    let name = form.field("name");
+    let email = form.field("email");
+    let state = form.state();
+    let submitted = state.submit_count > 0;
+    let name_error = if submitted && name.value().trim().is_empty() {
+        Some("Name is required.".to_string())
+    } else {
+        None
+    };
+    let email_error = if submitted && !email.value().contains('@') {
+        Some("Enter a valid email address.".to_string())
+    } else {
+        None
+    };
+
+    rsx! {
+        div { class: "p-6 bg-background text-foreground",
+            Form {
+                class: "max-w-xl".to_string(),
+                on_submit: move |_| {
+                    form.submit();
+                    form.validate_field("name", &[FormRule::required("Name is required.")]);
+                    form.validate_field("email", &[FormRule::email("Enter a valid email address.")]);
+                },
+                crate::components::Field {
+                    crate::components::FieldLabel { required: true, "Name" }
+                    input {
+                        class: "h-9 w-full rounded-lg border border-input bg-transparent px-3 py-1 text-sm",
+                        value: "{name.value()}",
+                        oninput: name.oninput(),
+                        onblur: name.onblur(),
+                    }
+                    FormMessage { error: name_error }
+                }
+                crate::components::Field {
+                    crate::components::FieldLabel { required: true, "Email" }
+                    input {
+                        class: "h-9 w-full rounded-lg border border-input bg-transparent px-3 py-1 text-sm",
+                        value: "{email.value()}",
+                        oninput: email.oninput(),
+                        onblur: email.onblur(),
+                    }
+                    FormMessage { error: email_error }
+                }
+                crate::components::Button { variant: crate::components::ButtonVariant::Primary, "Validate" }
+            }
+        }
     }
 }

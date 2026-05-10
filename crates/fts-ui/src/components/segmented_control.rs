@@ -4,6 +4,7 @@
 //! with toggle buttons inside. Supports multiple sizes for different density needs.
 
 use dioxus::prelude::*;
+use fts_story_runtime::story;
 
 // ---------------------------------------------------------------------------
 // Size
@@ -33,8 +34,12 @@ impl SegmentedControlSize {
 
     fn inactive_classes(self) -> &'static str {
         match self {
-            Self::Small => "px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground hover:bg-accent/50 rounded transition-colors",
-            Self::Medium => "px-2.5 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-accent/50 rounded transition-colors",
+            Self::Small => {
+                "px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground hover:bg-accent/50 rounded transition-colors"
+            }
+            Self::Medium => {
+                "px-2.5 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-accent/50 rounded transition-colors"
+            }
         }
     }
 }
@@ -103,6 +108,91 @@ pub fn SegmentedControl(props: SegmentedControlProps) -> Element {
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+/// Segmented control states: default vs visually-disabled (wrapped in opacity-50 + pointer-events-none).
+#[story(category = "SegmentedControl", name = "states")]
+pub fn segmented_control_states() -> Element {
+    let mut a = use_signal(|| "song".to_string());
+    let opts = || {
+        vec![
+            ("song".to_string(), "Song".to_string()),
+            ("profile".to_string(), "Profile".to_string()),
+            ("preset".to_string(), "Preset".to_string()),
+        ]
+    };
+    rsx! {
+        div { class: "p-6 bg-background text-foreground flex flex-col gap-4 items-start",
+            div {
+                div { class: "text-xs uppercase tracking-wider text-muted-foreground mb-2", "Default" }
+                SegmentedControl {
+                    value: a(),
+                    on_change: move |v: String| a.set(v),
+                    options: opts(),
+                }
+            }
+            div {
+                div { class: "text-xs uppercase tracking-wider text-muted-foreground mb-2", "Disabled" }
+                div { class: "opacity-50 pointer-events-none",
+                    SegmentedControl {
+                        value: "song".to_string(),
+                        on_change: Callback::new(|_: String| {}),
+                        options: opts(),
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Default segmented control with three options.
+#[story(category = "SegmentedControl", name = "default")]
+pub fn segmented_control_default() -> Element {
+    let mut value = use_signal(|| "song".to_string());
+    let options = vec![
+        ("song".to_string(), "Song".to_string()),
+        ("profile".to_string(), "Profile".to_string()),
+        ("preset".to_string(), "Preset".to_string()),
+    ];
+    rsx! {
+        div { class: "p-6 bg-background text-foreground",
+            SegmentedControl {
+                value: value(),
+                on_change: move |v: String| value.set(v),
+                options,
+            }
+        }
+    }
+}
+
+/// Segmented control sizes (small and medium).
+#[story(category = "SegmentedControl", name = "sizes")]
+pub fn segmented_control_sizes() -> Element {
+    let mut a = use_signal(|| "one".to_string());
+    let mut b = use_signal(|| "two".to_string());
+    let opts = || {
+        vec![
+            ("one".to_string(), "One".to_string()),
+            ("two".to_string(), "Two".to_string()),
+            ("three".to_string(), "Three".to_string()),
+        ]
+    };
+    rsx! {
+        div { class: "p-6 bg-background text-foreground flex flex-col gap-3 items-start",
+            SegmentedControl {
+                value: a(),
+                on_change: move |v: String| a.set(v),
+                options: opts(),
+                size: SegmentedControlSize::Small,
+            }
+            SegmentedControl {
+                value: b(),
+                on_change: move |v: String| b.set(v),
+                options: opts(),
+                size: SegmentedControlSize::Medium,
             }
         }
     }

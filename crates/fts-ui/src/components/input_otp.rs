@@ -1,6 +1,7 @@
 //! InputOtp — shadcn v4 maia style one-time password input.
 
 use dioxus::prelude::*;
+use fts_story_runtime::story;
 
 // ---------------------------------------------------------------------------
 // Context
@@ -62,6 +63,10 @@ pub fn InputOtp(props: InputOtpProps) -> Element {
                 maxlength: "{length}",
                 value: "{value}",
                 class: "absolute inset-0 w-full h-full opacity-0 cursor-pointer",
+                autofocus: true,
+                onmounted: move |elem| async move {
+                    let _ = elem.set_focus(true).await;
+                },
                 onfocus: move |_| { focused.set(true); },
                 onblur: move |_| { focused.set(false); },
                 oninput: move |evt| {
@@ -166,6 +171,29 @@ pub fn InputOtpSeparator(props: InputOtpSeparatorProps) -> Element {
         span {
             class: crate::cn::merge_slice(&["flex items-center text-muted-foreground px-1", props.class.as_str()]),
             "\u{2014}"
+        }
+    }
+}
+
+/// Default 6-digit OTP input split into two groups of 3.
+#[story(category = "InputOtp", name = "default")]
+pub fn input_otp_default() -> Element {
+    let value = use_signal(String::new);
+    rsx! {
+        div { class: "p-6 bg-background text-foreground",
+            InputOtp { value, length: 6,
+                InputOtpGroup {
+                    InputOtpSlot { index: 0 }
+                    InputOtpSlot { index: 1 }
+                    InputOtpSlot { index: 2 }
+                }
+                InputOtpSeparator {}
+                InputOtpGroup {
+                    InputOtpSlot { index: 3 }
+                    InputOtpSlot { index: 4 }
+                    InputOtpSlot { index: 5 }
+                }
+            }
         }
     }
 }

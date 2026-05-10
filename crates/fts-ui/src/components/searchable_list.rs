@@ -5,6 +5,7 @@
 //! provides the search input, scrollable container, and empty-state fallback.
 
 use dioxus::prelude::*;
+use fts_story_runtime::story;
 
 // ---------------------------------------------------------------------------
 // SearchableList
@@ -57,6 +58,10 @@ pub fn SearchableList(props: SearchableListProps) -> Element {
                     placeholder: "{props.placeholder}",
                     value: "{value}",
                     oninput: move |evt| value.set(evt.value().clone()),
+                    autofocus: true,
+                    onmounted: move |elem| async move {
+                        let _ = elem.set_focus(true).await;
+                    },
                 }
             }
 
@@ -134,6 +139,34 @@ pub fn SearchableListItem(props: SearchableListItemProps) -> Element {
                 if !props.description.is_empty() {
                     span { class: "text-[9px] text-muted-foreground",
                         "{props.description}"
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[story(category = "SearchableList", name = "searchable_list_default")]
+pub fn searchable_list_default() -> Element {
+    let value = use_signal(String::new);
+    let items = vec!["Apple", "Banana", "Cherry", "Durian"];
+    let filter = value().to_lowercase();
+    let filtered: Vec<&&str> = items
+        .iter()
+        .filter(|s| s.to_lowercase().contains(&filter))
+        .collect();
+    let has_results = !filtered.is_empty();
+
+    rsx! {
+        div { class: "p-6 bg-background text-foreground w-80 h-72",
+            SearchableList {
+                value,
+                placeholder: "Filter fruit...".to_string(),
+                has_results,
+                for item in filtered {
+                    SearchableListItem {
+                        on_click: move |_| {},
+                        label: item.to_string(),
                     }
                 }
             }

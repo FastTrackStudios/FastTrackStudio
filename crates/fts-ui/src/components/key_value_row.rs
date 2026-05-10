@@ -3,6 +3,7 @@
 //! Used in info popovers, latency panels, and settings displays.
 
 use dioxus::prelude::*;
+use fts_story_runtime::story;
 
 /// A horizontal row with a label on the left and a value on the right.
 ///
@@ -45,6 +46,18 @@ pub fn KeyValueRow(props: KeyValueRowProps) -> Element {
 
             span { class: "text-muted-foreground", "{props.label}" }
             span { class: "{font}", "{props.value}" }
+        }
+    }
+}
+
+#[story(category = "KeyValueRow", name = "key_value_row_default")]
+pub fn key_value_row_default() -> Element {
+    rsx! {
+        div { class: "p-6 bg-background text-foreground flex flex-col gap-1.5 w-80",
+            KeyValueRow { label: "Tasks".to_string(), value: "42".to_string() }
+            KeyValueRow { label: "Done".to_string(), value: "38".to_string(), bold: true }
+            KeyValueRow { label: "Overdue".to_string(), value: "2".to_string() }
+            KeyValueRow { label: "Owner".to_string(), value: "Ada".to_string(), mono: false }
         }
     }
 }

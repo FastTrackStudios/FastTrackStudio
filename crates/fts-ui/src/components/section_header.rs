@@ -3,6 +3,7 @@
 //! Used to label groups of content in sidebars, panels, and lists.
 
 use dioxus::prelude::*;
+use fts_story_runtime::story;
 
 /// Size variants for the section header.
 #[derive(Clone, Copy, PartialEq, Default)]
@@ -63,6 +64,20 @@ pub fn SectionHeader(props: SectionHeaderProps) -> Element {
             if let Some(trailing) = &props.trailing {
                 {trailing}
             }
+        }
+    }
+}
+
+#[story(category = "SectionHeader", name = "section_header_default")]
+pub fn section_header_default() -> Element {
+    rsx! {
+        div { class: "p-6 bg-background text-foreground flex flex-col gap-3 w-80",
+            SectionHeader { label: "Instances".to_string() }
+            SectionHeader {
+                label: "Recent".to_string(),
+                trailing: rsx! { crate::components::Badge { variant: crate::components::BadgeVariant::Secondary, "3" } },
+            }
+            SectionHeader { label: "Tiny header".to_string(), size: SectionHeaderSize::Small }
         }
     }
 }

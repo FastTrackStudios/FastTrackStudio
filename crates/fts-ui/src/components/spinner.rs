@@ -1,6 +1,7 @@
 //! Spinner — loading indicator, shadcn v4 maia style.
 
 use dioxus::prelude::*;
+use fts_story_runtime::story;
 
 /// Spinner size variants.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -54,6 +55,17 @@ pub fn Spinner(props: SpinnerProps) -> Element {
                 fill: "currentColor",
                 d: "M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z",
             }
+        }
+    }
+}
+
+#[story(category = "Spinner", name = "spinner_sizes")]
+pub fn spinner_sizes() -> Element {
+    rsx! {
+        div { class: "p-6 bg-background text-foreground flex items-center gap-4",
+            Spinner { size: SpinnerSize::Small }
+            Spinner { size: SpinnerSize::Medium }
+            Spinner { size: SpinnerSize::Large }
         }
     }
 }

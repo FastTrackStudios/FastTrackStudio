@@ -4,6 +4,7 @@ use dioxus::prelude::*;
 use dioxus_primitives::radio_group::{
     RadioGroup as PrimitiveRadioGroup, RadioItem as PrimitiveRadioItem,
 };
+use fts_story_runtime::story;
 
 // ---------------------------------------------------------------------------
 // Context shared between RadioGroup and RadioGroupItem
@@ -107,6 +108,81 @@ pub fn RadioGroupItem(props: RadioGroupItemProps) -> Element {
             if is_checked {
                 span {
                     class: "absolute bg-primary-foreground size-2 rounded-full",
+                }
+            }
+        }
+    }
+}
+
+/// Two radio groups side by side: a standard group and one with a disabled item.
+#[story(category = "RadioGroup", name = "states")]
+pub fn radio_group_states() -> Element {
+    let standard = use_signal(|| "a".to_string());
+    let with_disabled = use_signal(|| "a".to_string());
+    rsx! {
+        div { class: "p-6 bg-background text-foreground flex flex-col gap-6",
+            div {
+                div { class: "text-xs uppercase tracking-wider text-muted-foreground mb-2", "Standard" }
+                RadioGroup { value: standard,
+                    div { class: "flex flex-col gap-2",
+                        div { class: "flex items-center gap-2",
+                            RadioGroupItem { value: "a".to_string() }
+                            span { class: "text-sm", "Option A" }
+                        }
+                        div { class: "flex items-center gap-2",
+                            RadioGroupItem { value: "b".to_string() }
+                            span { class: "text-sm", "Option B" }
+                        }
+                        div { class: "flex items-center gap-2",
+                            RadioGroupItem { value: "c".to_string() }
+                            span { class: "text-sm", "Option C" }
+                        }
+                    }
+                }
+            }
+            div {
+                div { class: "text-xs uppercase tracking-wider text-muted-foreground mb-2", "With disabled item" }
+                RadioGroup { value: with_disabled,
+                    div { class: "flex flex-col gap-2",
+                        div { class: "flex items-center gap-2",
+                            RadioGroupItem { value: "a".to_string() }
+                            span { class: "text-sm", "Available" }
+                        }
+                        div { class: "flex items-center gap-2",
+                            RadioGroupItem { value: "b".to_string(), disabled: true }
+                            span { class: "text-sm text-muted-foreground", "Disabled option" }
+                        }
+                        div { class: "flex items-center gap-2",
+                            RadioGroupItem { value: "c".to_string() }
+                            span { class: "text-sm", "Also available" }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Default radio group with three options.
+#[story(category = "RadioGroup", name = "default")]
+pub fn radio_group_default() -> Element {
+    let value = use_signal(|| "a".to_string());
+    rsx! {
+        div { class: "p-6 bg-background text-foreground",
+            RadioGroup { value,
+                div { class: "flex items-center gap-4",
+                    div { class: "flex items-center gap-2",
+                        RadioGroupItem { value: "a".to_string() }
+                        span { class: "text-sm", "Option A" }
+                    }
+                    div { class: "flex items-center gap-2",
+                        RadioGroupItem { value: "b".to_string() }
+                        span { class: "text-sm", "Option B" }
+                    }
+                    div { class: "flex items-center gap-2",
+                        RadioGroupItem { value: "c".to_string() }
+                        span { class: "text-sm", "Option C" }
+                    }
                 }
             }
         }

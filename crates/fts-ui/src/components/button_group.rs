@@ -1,6 +1,7 @@
 //! Button group — shadcn-style grouped actions.
 
 use dioxus::prelude::*;
+use fts_story_runtime::story;
 
 /// Button group axis.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -24,8 +25,12 @@ pub struct ButtonGroupProps {
 #[component]
 pub fn ButtonGroup(props: ButtonGroupProps) -> Element {
     let orientation = match props.orientation {
-        ButtonGroupOrientation::Horizontal => "flex-row [&>*:not(:first-child)]:-ml-px [&>*:not(:first-child)]:rounded-l-none [&>*:not(:last-child)]:rounded-r-none",
-        ButtonGroupOrientation::Vertical => "flex-col [&>*:not(:first-child)]:-mt-px [&>*:not(:first-child)]:rounded-t-none [&>*:not(:last-child)]:rounded-b-none",
+        ButtonGroupOrientation::Horizontal => {
+            "flex-row [&>*:not(:first-child)]:-ml-px [&>*:not(:first-child)]:rounded-l-none [&>*:not(:last-child)]:rounded-r-none"
+        }
+        ButtonGroupOrientation::Vertical => {
+            "flex-col [&>*:not(:first-child)]:-mt-px [&>*:not(:first-child)]:rounded-t-none [&>*:not(:last-child)]:rounded-b-none"
+        }
     };
 
     rsx! {
@@ -58,6 +63,24 @@ pub fn ButtonGroupText(props: ButtonGroupTextProps) -> Element {
                 props.class.as_str(),
             ]),
             {props.children}
+        }
+    }
+}
+
+#[story(category = "ButtonGroup", name = "button_group_default")]
+pub fn button_group_default() -> Element {
+    rsx! {
+        div { class: "p-6 bg-background text-foreground flex flex-col gap-4",
+            ButtonGroup {
+                crate::components::Button { variant: crate::components::ButtonVariant::Outline, "Left" }
+                crate::components::Button { variant: crate::components::ButtonVariant::Outline, "Middle" }
+                crate::components::Button { variant: crate::components::ButtonVariant::Outline, "Right" }
+            }
+            ButtonGroup { orientation: ButtonGroupOrientation::Vertical,
+                crate::components::Button { variant: crate::components::ButtonVariant::Outline, "Top" }
+                crate::components::Button { variant: crate::components::ButtonVariant::Outline, "Mid" }
+                crate::components::Button { variant: crate::components::ButtonVariant::Outline, "Bot" }
+            }
         }
     }
 }

@@ -1,6 +1,7 @@
 //! Item — flexible content row/card primitive.
 
 use dioxus::prelude::*;
+use fts_story_runtime::story;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum ItemVariant {
@@ -165,6 +166,32 @@ pub fn ItemActions(props: ItemActionsProps) -> Element {
         div {
             class: crate::cn::merge_slice(&["ml-auto flex shrink-0 items-center gap-2", props.class.as_str()]),
             {props.children}
+        }
+    }
+}
+
+#[story(category = "Item", name = "item_default")]
+pub fn item_default() -> Element {
+    rsx! {
+        div { class: "p-6 bg-background text-foreground",
+            ItemGroup {
+                Item { variant: ItemVariant::Outline,
+                    ItemMedia { lucide_dioxus::House { size: 18 } }
+                    ItemContent {
+                        ItemTitle { "Project Alpha" }
+                        ItemDescription { "Outline item with media, title, description." }
+                    }
+                    ItemActions {
+                        crate::components::Button { size: crate::components::ButtonSize::Small, "Open" }
+                    }
+                }
+                Item { variant: ItemVariant::Muted, interactive: true,
+                    ItemContent {
+                        ItemTitle { "Interactive muted item" }
+                        ItemDescription { "Hover to see accent." }
+                    }
+                }
+            }
         }
     }
 }

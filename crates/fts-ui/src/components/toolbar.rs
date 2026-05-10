@@ -5,6 +5,7 @@ use dioxus_primitives::toolbar::{
     Toolbar as PrimitiveToolbar, ToolbarButton as PrimitiveToolbarButton,
     ToolbarSeparator as PrimitiveToolbarSeparator,
 };
+use fts_story_runtime::story;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct ToolbarProps {
@@ -80,6 +81,23 @@ pub fn ToolbarSeparator(props: ToolbarSeparatorProps) -> Element {
             horizontal: props.horizontal,
             decorative: props.decorative,
             class: crate::cn::merge_slice(&["shrink-0 bg-border data-[orientation=horizontal]:h-px data-[orientation=horizontal]:w-full data-[orientation=vertical]:h-6 data-[orientation=vertical]:w-px", props.class.as_str()]),
+        }
+    }
+}
+
+#[story(category = "Toolbar", name = "default")]
+pub fn toolbar_default() -> Element {
+    rsx! {
+        div { class: "p-6 bg-background text-foreground",
+            Toolbar { aria_label: "Formatting".to_string(),
+                ToolbarButton { index: 0, lucide_dioxus::Bold { size: 14 } }
+                ToolbarButton { index: 1, lucide_dioxus::Italic { size: 14 } }
+                ToolbarButton { index: 2, lucide_dioxus::Underline { size: 14 } }
+                ToolbarSeparator {}
+                ToolbarButton { index: 3, lucide_dioxus::AlignLeft { size: 14 } }
+                ToolbarButton { index: 4, lucide_dioxus::AlignCenter { size: 14 } }
+                ToolbarButton { index: 5, lucide_dioxus::AlignRight { size: 14 } }
+            }
         }
     }
 }

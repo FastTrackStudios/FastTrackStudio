@@ -6,6 +6,7 @@ use dioxus_primitives::select::{
     SelectList as PrimitiveSelectList, SelectOption as PrimitiveSelectOption,
     SelectTrigger as PrimitiveSelectTrigger, SelectValue as PrimitiveSelectValue,
 };
+use fts_story_runtime::story;
 use lucide_dioxus::{Check, ChevronsUpDown};
 
 #[derive(Props, Clone, PartialEq)]
@@ -30,11 +31,7 @@ pub fn Select(props: SelectProps) -> Element {
     let mut value = props.value;
     let selected: ReadSignal<Option<String>> = use_memo(move || {
         let value = value();
-        if value.is_empty() {
-            None
-        } else {
-            Some(value)
-        }
+        if value.is_empty() { None } else { Some(value) }
     })
     .into();
 
@@ -215,6 +212,86 @@ pub fn SelectLabel(props: SelectLabelProps) -> Element {
             id: props.id,
             class: crate::cn::merge_slice(&["px-2 py-1.5 text-xs font-medium text-muted-foreground", props.class.as_str()]),
             {props.children}
+        }
+    }
+}
+
+/// Select states: empty (placeholder showing) / selected / disabled.
+#[story(category = "Select", name = "states")]
+pub fn select_states() -> Element {
+    let empty = use_signal(String::new);
+    let selected = use_signal(|| "banana".to_string());
+    let disabled = use_signal(|| "apple".to_string());
+    rsx! {
+        div { class: "p-6 bg-background text-foreground flex flex-col gap-4 w-64",
+            div {
+                div { class: "text-xs uppercase tracking-wider text-muted-foreground mb-1", "Empty" }
+                Select {
+                    value: empty,
+                    placeholder: "Choose a fruit...".to_string(),
+                    SelectContent {
+                        SelectItem { value: "apple".to_string(), index: 0, "Apple" }
+                        SelectItem { value: "banana".to_string(), index: 1, "Banana" }
+                        SelectItem { value: "cherry".to_string(), index: 2, "Cherry" }
+                    }
+                }
+            }
+            div {
+                div { class: "text-xs uppercase tracking-wider text-muted-foreground mb-1", "Selected" }
+                Select {
+                    value: selected,
+                    placeholder: "Choose a fruit...".to_string(),
+                    SelectContent {
+                        SelectItem { value: "apple".to_string(), index: 0, "Apple" }
+                        SelectItem { value: "banana".to_string(), index: 1, "Banana" }
+                        SelectItem { value: "cherry".to_string(), index: 2, "Cherry" }
+                    }
+                }
+            }
+            div {
+                div { class: "text-xs uppercase tracking-wider text-muted-foreground mb-1", "Disabled" }
+                Select {
+                    value: disabled,
+                    placeholder: "Choose a fruit...".to_string(),
+                    disabled: true,
+                    SelectContent {
+                        SelectItem { value: "apple".to_string(), index: 0, "Apple" }
+                        SelectItem { value: "banana".to_string(), index: 1, "Banana" }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Default select with a list of fruit options.
+#[story(
+    category = "Select",
+    name = "default",
+    knobs(placeholder = "Choose a fruit...")
+)]
+pub fn select_default(placeholder: &str) -> Element {
+    let value = use_signal(String::new);
+    rsx! {
+        div { class: "p-6 bg-background text-foreground w-64",
+            Select {
+                value,
+                placeholder: placeholder.to_string(),
+                SelectContent {
+                    SelectGroup {
+                        SelectLabel { "Fruits" }
+                        SelectItem { value: "apple".to_string(), index: 0, "Apple" }
+                        SelectItem { value: "banana".to_string(), index: 1, "Banana" }
+                        SelectItem { value: "cherry".to_string(), index: 2, "Cherry" }
+                    }
+                    SelectSeparator {}
+                    SelectGroup {
+                        SelectLabel { "Vegetables" }
+                        SelectItem { value: "carrot".to_string(), index: 3, "Carrot" }
+                        SelectItem { value: "potato".to_string(), index: 4, "Potato" }
+                    }
+                }
+            }
         }
     }
 }

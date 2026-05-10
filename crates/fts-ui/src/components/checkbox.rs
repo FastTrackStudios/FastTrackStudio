@@ -4,6 +4,7 @@ use dioxus::prelude::*;
 use dioxus_primitives::checkbox::{
     Checkbox as PrimitiveCheckbox, CheckboxIndicator, CheckboxState,
 };
+use fts_story_runtime::story;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct CheckboxProps {
@@ -65,6 +66,56 @@ pub fn Checkbox(props: CheckboxProps) -> Element {
                     path { d: "M20 6 9 17l-5-5" }
                 }
             }
+        }
+    }
+}
+
+/// Matrix of Checkbox states: unchecked / checked × enabled / disabled.
+/// (Indeterminate is not exposed by this wrapper.)
+#[story(category = "Checkbox", name = "states")]
+pub fn checkbox_states() -> Element {
+    let off = use_signal(|| false);
+    let on = use_signal(|| true);
+    let off_d = use_signal(|| false);
+    let on_d = use_signal(|| true);
+    rsx! {
+        div { class: "p-6 bg-background text-foreground",
+            table { class: "border-collapse",
+                thead {
+                    tr { class: "text-xs uppercase tracking-wider text-muted-foreground",
+                        th { class: "px-3 py-2 text-left", "State" }
+                        th { class: "px-3 py-2 text-left", "Enabled" }
+                        th { class: "px-3 py-2 text-left", "Disabled" }
+                    }
+                }
+                tbody {
+                    tr {
+                        td { class: "px-3 py-2 text-sm text-muted-foreground", "Unchecked" }
+                        td { class: "px-3 py-2", Checkbox { checked: off } }
+                        td { class: "px-3 py-2", Checkbox { checked: off_d, disabled: true } }
+                    }
+                    tr {
+                        td { class: "px-3 py-2 text-sm text-muted-foreground", "Checked" }
+                        td { class: "px-3 py-2", Checkbox { checked: on } }
+                        td { class: "px-3 py-2", Checkbox { checked: on_d, disabled: true } }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Default checkbox in checked, unchecked, and disabled states.
+#[story(category = "Checkbox", name = "default")]
+pub fn checkbox_default() -> Element {
+    let off = use_signal(|| false);
+    let on = use_signal(|| true);
+    let dis = use_signal(|| false);
+    rsx! {
+        div { class: "p-6 bg-background text-foreground flex items-center gap-4",
+            Checkbox { checked: off }
+            Checkbox { checked: on }
+            Checkbox { checked: dis, disabled: true }
         }
     }
 }

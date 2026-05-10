@@ -2,12 +2,13 @@
 
 use dioxus::prelude::*;
 use dioxus_primitives::{
+    ContentAlign, ContentSide,
     tooltip::{
         Tooltip as PrimitiveTooltip, TooltipContent as PrimitiveTooltipContent,
         TooltipTrigger as PrimitiveTooltipTrigger,
     },
-    ContentAlign, ContentSide,
 };
+use fts_story_runtime::story;
 
 // ---------------------------------------------------------------------------
 // TooltipSide
@@ -150,6 +151,24 @@ pub fn TooltipContent(props: TooltipContentProps) -> Element {
                 props.class.as_str(),
             ]),
             {props.children}
+        }
+    }
+}
+
+/// Tooltip forced open showing content above the trigger.
+#[story(category = "Tooltip", name = "tooltip default")]
+pub fn tooltip_default() -> Element {
+    let mut open = use_signal(|| true);
+    rsx! {
+        div { class: "p-6 bg-background text-foreground flex items-center justify-center min-h-[12rem]",
+            Tooltip {
+                open: open(),
+                on_open_change: move |o| open.set(o),
+                TooltipTrigger {
+                    button { class: "h-9 px-3 rounded-lg border border-border text-sm", "Hover" }
+                }
+                TooltipContent { side: TooltipSide::Top, "Tooltip text" }
+            }
         }
     }
 }

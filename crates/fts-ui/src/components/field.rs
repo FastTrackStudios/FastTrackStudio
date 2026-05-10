@@ -4,6 +4,7 @@
 //! for consistent form layout and validation styling.
 
 use dioxus::prelude::*;
+use fts_story_runtime::story;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct FieldProps {
@@ -78,6 +79,23 @@ pub fn FieldMessage(props: FieldMessageProps) -> Element {
         p {
             class: crate::cn::merge_slice(&["text-destructive text-sm", props.class.as_str()]),
             {props.children}
+        }
+    }
+}
+
+#[story(category = "Field", name = "field_default")]
+pub fn field_default() -> Element {
+    rsx! {
+        div { class: "p-6 bg-background text-foreground w-80",
+            Field {
+                FieldLabel { required: true, "Email" }
+                input {
+                    class: "h-9 w-full rounded-lg border border-input bg-transparent px-3 py-1 text-sm shadow-xs",
+                    placeholder: "you@example.com",
+                }
+                FieldDescription { "We'll never share your email." }
+                FieldMessage { "Required." }
+            }
         }
     }
 }

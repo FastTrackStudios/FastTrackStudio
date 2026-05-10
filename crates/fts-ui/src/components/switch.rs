@@ -2,6 +2,7 @@
 
 use dioxus::prelude::*;
 use dioxus_primitives::switch::{Switch as PrimitiveSwitch, SwitchThumb};
+use fts_story_runtime::story;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct SwitchProps {
@@ -57,6 +58,55 @@ pub fn Switch(props: SwitchProps) -> Element {
             SwitchThumb {
                 class: "{thumb_base} {thumb_translate}",
             }
+        }
+    }
+}
+
+/// Matrix of Switch states: off / on × enabled / disabled.
+#[story(category = "Switch", name = "states")]
+pub fn switch_states() -> Element {
+    let off = use_signal(|| false);
+    let on = use_signal(|| true);
+    let off_d = use_signal(|| false);
+    let on_d = use_signal(|| true);
+    rsx! {
+        div { class: "p-6 bg-background text-foreground",
+            table { class: "border-collapse",
+                thead {
+                    tr { class: "text-xs uppercase tracking-wider text-muted-foreground",
+                        th { class: "px-3 py-2 text-left", "State" }
+                        th { class: "px-3 py-2 text-left", "Enabled" }
+                        th { class: "px-3 py-2 text-left", "Disabled" }
+                    }
+                }
+                tbody {
+                    tr {
+                        td { class: "px-3 py-2 text-sm text-muted-foreground", "Off" }
+                        td { class: "px-3 py-2", Switch { checked: off } }
+                        td { class: "px-3 py-2", Switch { checked: off_d, disabled: true } }
+                    }
+                    tr {
+                        td { class: "px-3 py-2 text-sm text-muted-foreground", "On" }
+                        td { class: "px-3 py-2", Switch { checked: on } }
+                        td { class: "px-3 py-2", Switch { checked: on_d, disabled: true } }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Default switch in off, on, and disabled states.
+#[story(category = "Switch", name = "default")]
+pub fn switch_default() -> Element {
+    let off = use_signal(|| false);
+    let on = use_signal(|| true);
+    let dis = use_signal(|| false);
+    rsx! {
+        div { class: "p-6 bg-background text-foreground flex items-center gap-4",
+            Switch { checked: off }
+            Switch { checked: on }
+            Switch { checked: dis, disabled: true }
         }
     }
 }

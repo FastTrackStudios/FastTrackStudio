@@ -6,6 +6,7 @@ use dioxus_primitives::navbar::{
     NavbarItem as PrimitiveNavbarItem, NavbarNav as PrimitiveNavbarNav,
     NavbarTrigger as PrimitiveNavbarTrigger,
 };
+use fts_story_runtime::story;
 
 #[component]
 pub fn Navbar(
@@ -108,6 +109,36 @@ pub fn NavbarItem(
                 }
             },
             {children}
+        }
+    }
+}
+
+/// Navbar with a single nav containing a trigger and dropdown content.
+#[story(category = "Navbar", name = "default")]
+pub fn navbar_default() -> Element {
+    rsx! {
+        div { class: "p-6 bg-background text-foreground min-h-48",
+            Navbar {
+                NavbarNav { index: 0,
+                    NavbarTrigger { "Products" }
+                    NavbarContent {
+                        div { class: "flex flex-col gap-1",
+                            div { class: "px-3 py-2 text-sm rounded-md hover:bg-accent hover:text-accent-foreground", "Analytics" }
+                            div { class: "px-3 py-2 text-sm rounded-md hover:bg-accent hover:text-accent-foreground", "Engagement" }
+                            div { class: "px-3 py-2 text-sm rounded-md hover:bg-accent hover:text-accent-foreground", "Security" }
+                        }
+                    }
+                }
+                NavbarNav { index: 1,
+                    NavbarTrigger { "Company" }
+                    NavbarContent {
+                        div { class: "flex flex-col gap-1",
+                            div { class: "px-3 py-2 text-sm rounded-md hover:bg-accent hover:text-accent-foreground", "About" }
+                            div { class: "px-3 py-2 text-sm rounded-md hover:bg-accent hover:text-accent-foreground", "Careers" }
+                        }
+                    }
+                }
+            }
         }
     }
 }

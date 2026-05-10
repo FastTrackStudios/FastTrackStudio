@@ -1,6 +1,7 @@
 //! Alert — shadcn v4 maia style.
 
 use dioxus::prelude::*;
+use fts_story_runtime::story;
 
 /// Alert visual variant.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -80,6 +81,34 @@ pub fn AlertDescription(props: AlertDescriptionProps) -> Element {
         div {
             class: crate::cn::merge_slice(&["text-muted-foreground text-sm", props.class.as_str()]),
             {props.children}
+        }
+    }
+}
+
+#[story(category = "Alert", name = "default")]
+pub fn alert_default() -> Element {
+    rsx! {
+        div { class: "p-6 bg-background text-foreground flex flex-col gap-3",
+            Alert {
+                AlertTitle { "Heads up" }
+                AlertDescription { "Default alert with description." }
+            }
+        }
+    }
+}
+
+#[story(category = "Alert", name = "variants")]
+pub fn alert_variants() -> Element {
+    rsx! {
+        div { class: "p-6 bg-background text-foreground flex flex-col gap-3",
+            Alert {
+                AlertTitle { "Default" }
+                AlertDescription { "Standard alert." }
+            }
+            Alert { variant: AlertVariant::Destructive,
+                AlertTitle { "Error" }
+                AlertDescription { "Something went wrong." }
+            }
         }
     }
 }

@@ -6,6 +6,7 @@ use dioxus_primitives::calendar::{
     Calendar as PrimitiveCalendar, CalendarGrid, CalendarHeader, CalendarMonthTitle,
     CalendarNavigation, CalendarNextMonthButton, CalendarPreviousMonthButton,
 };
+use fts_story_runtime::story;
 use time::{Date, Month, UtcDateTime, Weekday};
 
 #[derive(Props, Clone, PartialEq)]
@@ -138,5 +139,17 @@ fn month_name(month: Month) -> &'static str {
         Month::October => "October",
         Month::November => "November",
         Month::December => "December",
+    }
+}
+
+/// Default Calendar story rendering today's month grid.
+#[story(category = "Calendar", name = "default")]
+pub fn calendar_default() -> Element {
+    rsx! {
+        div { class: "p-6 bg-background text-foreground",
+            div { class: "rounded-lg border border-border bg-card text-card-foreground shadow-sm w-fit",
+                Calendar {}
+            }
+        }
     }
 }

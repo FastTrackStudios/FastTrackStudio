@@ -67,9 +67,13 @@ pub fn Button(props: ButtonProps) -> Element {
     let variant = match props.variant {
         ButtonVariant::Primary => "bg-primary text-primary-foreground hover:bg-primary/80",
         ButtonVariant::Secondary => "bg-secondary text-secondary-foreground hover:bg-secondary/80",
-        ButtonVariant::Outline => "border-border bg-input/30 hover:bg-input/50 hover:text-foreground",
+        ButtonVariant::Outline => {
+            "border-border bg-input/30 hover:bg-input/50 hover:text-foreground"
+        }
         ButtonVariant::Ghost => "hover:bg-muted hover:text-foreground dark:hover:bg-muted/50",
-        ButtonVariant::Destructive => "bg-destructive/10 hover:bg-destructive/20 text-destructive dark:bg-destructive/20 dark:hover:bg-destructive/30 focus-visible:ring-destructive/20 focus-visible:border-destructive/40",
+        ButtonVariant::Destructive => {
+            "bg-destructive/10 hover:bg-destructive/20 text-destructive dark:bg-destructive/20 dark:hover:bg-destructive/30 focus-visible:ring-destructive/20 focus-visible:border-destructive/40"
+        }
         ButtonVariant::Link => "text-primary underline-offset-4 hover:underline border-none",
     };
 

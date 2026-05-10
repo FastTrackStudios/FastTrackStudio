@@ -8,6 +8,7 @@
 //! semantic `<progress>` element.
 
 use dioxus::prelude::*;
+use fts_story_runtime::story;
 
 /// Orientation for the progress bar.
 #[derive(Clone, Copy, PartialEq, Default)]
@@ -160,6 +161,27 @@ fn render_vertical(props: ProgressBarProps) -> Element {
                     props.progress.clamp(0.0, 100.0),
                     props.bright_color
                 ),
+            }
+        }
+    }
+}
+
+#[story(category = "ProgressBar", name = "progress_bar_default")]
+pub fn progress_bar_default() -> Element {
+    rsx! {
+        div { class: "p-6 bg-background text-foreground flex flex-col gap-3 w-96",
+            ProgressBar {
+                progress: 65.0,
+                bright_color: "#3b82f6".to_string(),
+                muted_color: "#1e3a8a".to_string(),
+                label: "Loading".to_string(),
+            }
+            ProgressBar {
+                progress: 35.0,
+                bright_color: "#10b981".to_string(),
+                muted_color: "#064e3b".to_string(),
+                label: "Render".to_string(),
+                comment: "step 2/5".to_string(),
             }
         }
     }
