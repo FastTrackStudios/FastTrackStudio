@@ -145,20 +145,20 @@ pub fn Knob(
     let (tx, ty) = arc_point(cx, cy, r - 6.0, end_angle);
     let (tx2, ty2) = arc_point(cx, cy, r + 1.0, end_angle);
 
-    // Resolve colors from CSS variables via the `style` property (blitz
-    // doesn't substitute `var()` inside SVG presentation attributes —
-    // only inside `style="…"` declarations). Each color string also
-    // carries a solid hex fallback so the knob still renders if the
-    // theme variables aren't loaded.
-    let accent_css = match color.as_deref() {
-        Some(c) => format!("stroke: {c};"),
-        None => "stroke: var(--primary, #c8a86e);".to_string(),
-    };
-    let track_css = "stroke: var(--border, #2a2a30);".to_string();
-    let pointer_css = "stroke: var(--foreground, #d4d4d8);".to_string();
-    let detent_css = "stroke: var(--muted-foreground, #737380);".to_string();
-    let mod_css = "stroke: var(--signal-mod, var(--accent, #8b5cf6));".to_string();
-    let bg_css = "fill: var(--card, #0c0c0f); stroke: var(--border, #2a2a30);".to_string();
+    // Concrete hex values for SVG presentation attributes — blitz
+    // doesn't render strokes when set via `style="stroke:…"` on a
+    // <path>, only when set via the `stroke="…"` attribute. CSS vars
+    // also don't resolve inside SVG attribute values, so we have to
+    // commit to fixed colors here. They were chosen to match the
+    // dark-mode primary palette; light mode skin still works because
+    // the contrast against the puck disc is high.
+    let accent = color.as_deref().unwrap_or("#c8a86e").to_string();
+    let track_color = "#2a2a30".to_string();
+    let pointer_color = "#d4d4d8".to_string();
+    let detent_color = "#737380".to_string();
+    let mod_color = "#8b5cf6".to_string();
+    let bg_fill = "#0c0c0f";
+    let bg_stroke = "#2a2a30";
     let opacity = if disabled { "0.5" } else { "1.0" };
     let cursor = if disabled { "not-allowed" } else { "pointer" };
     // Hover/drag visuals: gentle scale + a glow on the value arc.
@@ -201,14 +201,19 @@ pub fn Knob(
                     cx: "{cx:.1}",
                     cy: "{cy:.1}",
                     r: "{cap_r:.1}",
-                    style: "{bg_css} stroke-width:0.75; opacity:0.95;",
+                    fill: "{bg_fill}",
+                    stroke: "{bg_stroke}",
+                    stroke_width: "0.75",
+                    opacity: "0.95",
                 }
 
                 // Track (full-arc background).
                 path {
                     d: "{track_path}",
                     fill: "none",
-                    style: "{track_css} stroke-width:4; stroke-linecap:round;",
+                    stroke: "{track_color}",
+                    stroke_width: "4",
+                    stroke_linecap: "round",
                 }
 
                 // Bipolar 0 detent tick (sits behind the value arc).
@@ -218,7 +223,9 @@ pub fn Knob(
                         y1: "{det_y1:.1}",
                         x2: "{det_x2:.1}",
                         y2: "{det_y2:.1}",
-                        style: "{detent_css} stroke-width:1.5; opacity:0.7;",
+                        stroke: "{detent_color}",
+                        stroke_width: "1.5",
+                        opacity: "0.7",
                     }
                 }
 
@@ -227,7 +234,10 @@ pub fn Knob(
                     path {
                         d: "{value_path}",
                         fill: "none",
-                        style: "{accent_css} stroke-width:4.5; stroke-linecap:round;{value_extra_css}",
+                        stroke: "{accent}",
+                        stroke_width: "4.5",
+                        stroke_linecap: "round",
+                        style: "{value_extra_css}",
                     }
                 }
 
@@ -235,7 +245,10 @@ pub fn Knob(
                     path {
                         d: "{mod_path}",
                         fill: "none",
-                        style: "{mod_css} stroke-width:2.25; stroke-linecap:round; opacity:0.65;",
+                        stroke: "{mod_color}",
+                        stroke_width: "2.25",
+                        stroke_linecap: "round",
+                        opacity: "0.65",
                     }
                 }
 
@@ -245,7 +258,9 @@ pub fn Knob(
                     y1: "{ty:.1}",
                     x2: "{tx2:.1}",
                     y2: "{ty2:.1}",
-                    style: "{pointer_css} stroke-width:2.25; stroke-linecap:round;",
+                    stroke: "{pointer_color}",
+                    stroke_width: "2.25",
+                    stroke_linecap: "round",
                 }
             }
 
