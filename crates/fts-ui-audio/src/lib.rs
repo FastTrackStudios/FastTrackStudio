@@ -15,6 +15,7 @@
 //! ```
 
 pub mod axis;
+pub mod color;
 pub mod controls;
 pub mod drag;
 pub mod marks;

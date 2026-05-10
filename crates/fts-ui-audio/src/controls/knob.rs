@@ -4,6 +4,7 @@
 //! [`ParamHandle`] instead of a `nih_plug::ParamPtr`. Requires a
 //! [`crate::drag::DragProvider`] ancestor for drag capture.
 
+use crate::color::css_color_to_hex;
 use crate::drag::{DragState, begin_drag};
 use crate::param::ParamHandle;
 use crate::theme::*;
@@ -145,20 +146,34 @@ pub fn Knob(
     let (tx, ty) = arc_point(cx, cy, r - 6.0, end_angle);
     let (tx2, ty2) = arc_point(cx, cy, r + 1.0, end_angle);
 
-    // Concrete hex values for SVG presentation attributes — blitz
-    // doesn't render strokes when set via `style="stroke:…"` on a
-    // <path>, only when set via the `stroke="…"` attribute. CSS vars
-    // also don't resolve inside SVG attribute values, so we have to
-    // commit to fixed colors here. They were chosen to match the
-    // dark-mode primary palette; light mode skin still works because
-    // the contrast against the puck disc is high.
-    let accent = color.as_deref().unwrap_or("#c8a86e").to_string();
-    let track_color = "#2a2a30".to_string();
-    let pointer_color = "#d4d4d8".to_string();
-    let detent_color = "#737380".to_string();
-    let mod_color = "#8b5cf6".to_string();
-    let bg_fill = "#0c0c0f";
-    let bg_stroke = "#2a2a30";
+    // Resolve the active fts-ui theme tokens into concrete `#rrggbb`
+    // strings — blitz doesn't substitute `var(--…)` inside SVG
+    // presentation attributes, and `style="stroke:…"` is dropped on
+    // path elements, so we have to do the lookup in Rust. Falls back
+    // to a sensible dark-mode hex when the theme isn't in scope (e.g.
+    // unit tests that don't mount a ThemeProvider).
+    let theme = try_consume_context::<fts_ui::prelude::ThemeContext>();
+    let resolve = |key: &str, fallback: &str| -> String {
+        theme
+            .as_ref()
+            .and_then(|ctx| {
+                let state = ctx.state.read();
+                let style = state.styles.active(state.mode);
+                style.get(key).map(str::to_string)
+            })
+            .and_then(|raw| css_color_to_hex(&raw))
+            .unwrap_or_else(|| fallback.to_string())
+    };
+    let accent = color
+        .as_deref()
+        .map(str::to_string)
+        .unwrap_or_else(|| resolve("primary", "#c8a86e"));
+    let track_color = resolve("border", "#2a2a30");
+    let pointer_color = resolve("foreground", "#d4d4d8");
+    let detent_color = resolve("muted-foreground", "#737380");
+    let mod_color = resolve("accent", "#8b5cf6");
+    let bg_fill = resolve("card", "#0c0c0f");
+    let bg_stroke = resolve("border", "#2a2a30");
     let opacity = if disabled { "0.5" } else { "1.0" };
     let cursor = if disabled { "not-allowed" } else { "pointer" };
     // Hover/drag visuals: gentle scale + a glow on the value arc.
