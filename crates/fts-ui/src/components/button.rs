@@ -68,9 +68,14 @@ pub fn Button(props: ButtonProps) -> Element {
         ButtonVariant::Primary => "bg-primary text-primary-foreground hover:bg-primary/80",
         ButtonVariant::Secondary => "bg-secondary text-secondary-foreground hover:bg-secondary/80",
         ButtonVariant::Outline => {
-            "border-border bg-input/30 hover:bg-input/50 hover:text-foreground"
+            // Canonical shadcn outline: 1px solid `--border`, surface from
+            // `--background`, text from `--foreground`. Avoid alpha
+            // multipliers (`bg-input/30`) — blitz's compositor does not
+            // alpha-blend backgrounds reliably, so they read as either
+            // fully on or fully off depending on render order.
+            "border-border bg-background text-foreground hover:bg-accent hover:text-accent-foreground"
         }
-        ButtonVariant::Ghost => "hover:bg-muted hover:text-foreground dark:hover:bg-muted/50",
+        ButtonVariant::Ghost => "text-foreground hover:bg-accent hover:text-accent-foreground",
         ButtonVariant::Destructive => {
             "bg-destructive/10 hover:bg-destructive/20 text-destructive dark:bg-destructive/20 dark:hover:bg-destructive/30 focus-visible:ring-destructive/20 focus-visible:border-destructive/40"
         }
