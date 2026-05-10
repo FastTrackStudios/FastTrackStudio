@@ -32,10 +32,16 @@
 
 pub mod batch;
 pub mod bootstrap;
+pub mod local_caller;
 pub mod plugin_services;
+pub mod remote;
 pub mod routed_handler;
 pub mod safe_wrappers;
+pub mod sync;
 pub mod sync_api;
+pub use local_caller::LocalCaller;
+pub use remote::ReaperRemote;
+pub use sync::ReaperMainThread;
 pub use sync_api::DawMainThread;
 
 pub mod action_registry;

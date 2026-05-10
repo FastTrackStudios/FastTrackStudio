@@ -34,6 +34,7 @@ pub mod region;
 pub mod resource;
 pub mod routing;
 pub mod screenset;
+pub mod sync;
 pub mod tempo_map;
 pub mod toolbar;
 pub mod track;

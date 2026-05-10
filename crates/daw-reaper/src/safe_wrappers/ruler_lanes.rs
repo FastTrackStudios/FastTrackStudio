@@ -5,7 +5,86 @@
 
 use super::ReaperLow;
 use reaper_medium::ProjectContext;
+use std::collections::HashMap;
+use std::ffi::CString;
 use std::ptr;
+use std::sync::{Mutex, OnceLock};
+
+type LaneKey = (bool, u32);
+const EXT_STATE_SECTION: &str = "fasttrackstudio.ruler_lanes";
+
+fn assigned_lanes() -> &'static Mutex<HashMap<LaneKey, u32>> {
+    static LANES: OnceLock<Mutex<HashMap<LaneKey, u32>>> = OnceLock::new();
+    LANES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Remember the lane DAW assigned through REAPER's setter.
+///
+/// REAPER's `I_LANENUMBER` can be set, but its getter returns a display-derived
+/// value, so DAW keeps the assigned value for service reads in the same session.
+pub fn remember_assigned_lane(
+    low: &ReaperLow,
+    project: ProjectContext,
+    is_region: bool,
+    id: u32,
+    lane: u32,
+) {
+    if let Ok(mut lanes) = assigned_lanes().lock() {
+        lanes.insert((is_region, id), lane);
+    }
+
+    let Ok(section) = CString::new(EXT_STATE_SECTION) else {
+        return;
+    };
+    let Ok(key) = CString::new(lane_key(is_region, id)) else {
+        return;
+    };
+    let Ok(value) = CString::new(lane.to_string()) else {
+        return;
+    };
+
+    unsafe {
+        low.SetProjExtState(
+            project.to_raw(),
+            section.as_ptr(),
+            key.as_ptr(),
+            value.as_ptr(),
+        );
+    }
+}
+
+pub fn assigned_lane(
+    low: &ReaperLow,
+    project: ProjectContext,
+    is_region: bool,
+    id: u32,
+) -> Option<u32> {
+    if let Some(lane) = assigned_lanes()
+        .lock()
+        .ok()
+        .and_then(|lanes| lanes.get(&(is_region, id)).copied())
+    {
+        return Some(lane);
+    }
+
+    let section = CString::new(EXT_STATE_SECTION).ok()?;
+    let key = CString::new(lane_key(is_region, id)).ok()?;
+    let value = super::buffer::with_string_buffer_i32(64, |buf, len| unsafe {
+        low.GetProjExtState(project.to_raw(), section.as_ptr(), key.as_ptr(), buf, len)
+    })?;
+    let lane = value.parse::<u32>().ok()?;
+
+    if let Ok(mut lanes) = assigned_lanes().lock() {
+        lanes.insert((is_region, id), lane);
+    }
+
+    Some(lane)
+}
+
+fn lane_key(is_region: bool, id: u32) -> String {
+    let kind = if is_region { "region" } else { "marker" };
+    format!("{kind}:{id}")
+}
 
 /// Returns `true` if the running REAPER version supports ruler lane APIs
 /// (i.e., `GetRegionOrMarkerInfo_Value` is present).

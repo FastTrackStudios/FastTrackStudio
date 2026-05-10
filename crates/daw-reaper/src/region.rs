@@ -38,10 +38,18 @@ pub fn get_regions_on_main_thread() -> Vec<Region> {
             if let Some(info) = result
                 && let Some(end_pos) = info.region_end_position
             {
+                let id = info.id.get();
                 let lane =
-                    ruler_lanes::get_marker_lane(low, ReaperProjectContext::CurrentProject, idx);
+                    ruler_lanes::assigned_lane(low, ReaperProjectContext::CurrentProject, true, id)
+                        .or_else(|| {
+                            ruler_lanes::get_marker_lane(
+                                low,
+                                ReaperProjectContext::CurrentProject,
+                                idx,
+                            )
+                        });
                 regions.push(Region {
-                    id: Some(info.id.get()),
+                    id: Some(id),
                     time_range: TimeRange::from_seconds(info.position.get(), end_pos.get()),
                     name: info.name.to_string(),
                     color: {
@@ -108,9 +116,11 @@ impl RegionService for ReaperRegion {
                     if let Some(info) = result
                         && let Some(end_pos) = info.region_end_position
                     {
-                        let lane = ruler_lanes::get_marker_lane(low, reaper_ctx, idx);
+                        let id = info.id.get();
+                        let lane = ruler_lanes::assigned_lane(low, reaper_ctx, true, id)
+                            .or_else(|| ruler_lanes::get_marker_lane(low, reaper_ctx, idx));
                         regions.push(Region {
-                            id: Some(info.id.get()),
+                            id: Some(id),
                             time_range: TimeRange::from_seconds(info.position.get(), end_pos.get()),
                             name: info.name.to_string(),
                             color: {
@@ -231,9 +241,29 @@ impl RegionService for ReaperRegion {
     async fn rename_region(&self, _project: ProjectContext, id: u32, name: String) {
         debug!("ReaperRegion: rename_region {} to '{}'", id, name);
         main_thread::run(move || {
-            let low = reaper_high::Reaper::get().medium_reaper().low();
-            if let Ok(cname) = CString::new(name) {
-                sw::set_project_marker(low, id as i32, true, -1.0, -1.0, Some(&cname));
+            let reaper = reaper_high::Reaper::get();
+            let medium = reaper.medium_reaper();
+            let low = medium.low();
+            let reaper_ctx = ReaperProjectContext::CurrentProject;
+            let total_count = medium.count_project_markers(reaper_ctx).total_count;
+
+            for idx in 0..total_count {
+                medium.enum_project_markers_3(reaper_ctx, idx, |result| {
+                    if let Some(info) = result
+                        && let Some(end_pos) = info.region_end_position
+                        && info.id.get() == id
+                        && let Ok(cname) = CString::new(name.as_str())
+                    {
+                        sw::set_project_marker(
+                            low,
+                            id as i32,
+                            true,
+                            info.position.get(),
+                            end_pos.get(),
+                            Some(&cname),
+                        );
+                    }
+                });
             }
         });
     }
@@ -241,19 +271,35 @@ impl RegionService for ReaperRegion {
     async fn set_region_color(&self, _project: ProjectContext, id: u32, color: u32) {
         debug!("ReaperRegion: set_region_color {} to {}", id, color);
         main_thread::run(move || {
-            let low = reaper_high::Reaper::get().medium_reaper().low();
-            sw::set_project_marker_by_index2(
-                low,
-                ReaperProjectContext::CurrentProject,
-                id as i32,
-                true, // is a region
-                -1.0,
-                -1.0,
-                -1,
-                None,
-                color as i32,
-                0,
-            );
+            let reaper = reaper_high::Reaper::get();
+            let medium = reaper.medium_reaper();
+            let low = medium.low();
+            let reaper_ctx = ReaperProjectContext::CurrentProject;
+            let total_count = medium.count_project_markers(reaper_ctx).total_count;
+            let reaper_color = (color | 0x01000000) as i32;
+
+            for idx in 0..total_count {
+                medium.enum_project_markers_3(reaper_ctx, idx, |result| {
+                    if let Some(info) = result
+                        && let Some(end_pos) = info.region_end_position
+                        && info.id.get() == id
+                        && let Ok(name) = CString::new(info.name.to_string())
+                    {
+                        sw::set_project_marker_by_index2(
+                            low,
+                            reaper_ctx,
+                            idx as i32,
+                            true,
+                            info.position.get(),
+                            end_pos.get(),
+                            id as i32,
+                            Some(&name),
+                            reaper_color,
+                            0,
+                        );
+                    }
+                });
+            }
         });
     }
 
@@ -289,7 +335,11 @@ impl RegionService for ReaperRegion {
                             && info.region_end_position.is_some()
                             && info.id.get() == id
                         {
-                            ruler_lanes::set_marker_lane(low, reaper_ctx, idx, lane);
+                            if ruler_lanes::set_marker_lane(low, reaper_ctx, idx, lane) {
+                                ruler_lanes::remember_assigned_lane(
+                                    low, reaper_ctx, true, id, lane,
+                                );
+                            }
                         }
                     });
                 }
@@ -313,7 +363,11 @@ impl RegionService for ReaperRegion {
                         && info.region_end_position.is_some()
                         && info.id.get() == id
                     {
-                        ruler_lanes::set_marker_lane(low, reaper_ctx, idx, lane_value);
+                        if ruler_lanes::set_marker_lane(low, reaper_ctx, idx, lane_value) {
+                            ruler_lanes::remember_assigned_lane(
+                                low, reaper_ctx, true, id, lane_value,
+                            );
+                        }
                     }
                 });
             }

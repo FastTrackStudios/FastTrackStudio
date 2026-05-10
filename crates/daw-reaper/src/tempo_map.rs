@@ -20,7 +20,9 @@
 //! ```
 
 use crate::main_thread;
-use crate::project_context::{MAX_PROJECT_TABS, project_guid as project_guid_from};
+use crate::project_context::{
+    MAX_PROJECT_TABS, project_guid as project_guid_from, resolve_project_context,
+};
 use crate::safe_wrappers::tempo as sw;
 use crate::safe_wrappers::time_map as tw;
 use daw_control::lock::LockExt;
@@ -368,14 +370,14 @@ impl TempoMapService for ReaperTempoMap {
             .unwrap_or(0.0)
     }
 
-    async fn time_to_musical(&self, _project: ProjectContext, seconds: f64) -> (i32, i32, f64) {
+    async fn time_to_musical(&self, project: ProjectContext, seconds: f64) -> (i32, i32, f64) {
         main_thread::query(move || {
             let reaper = Reaper::get();
             let medium = reaper.medium_reaper();
+            let ctx = resolve_project_context(&project);
 
             if let Ok(pos) = reaper_medium::PositionInSeconds::new(seconds) {
-                let result =
-                    medium.time_map_2_time_to_beats(ReaperProjectContext::CurrentProject, pos);
+                let result = medium.time_map_2_time_to_beats(ctx, pos);
                 let measure = result.measure_index + 1;
                 let beats_since = result.beats_since_measure.get();
                 let beat_in_measure = beats_since.floor() as i32 + 1;
@@ -391,7 +393,7 @@ impl TempoMapService for ReaperTempoMap {
 
     async fn musical_to_time(
         &self,
-        _project: ProjectContext,
+        project: ProjectContext,
         measure: i32,
         beat: i32,
         fraction: f64,
@@ -399,16 +401,22 @@ impl TempoMapService for ReaperTempoMap {
         main_thread::query(move || {
             let reaper = Reaper::get();
             let medium = reaper.medium_reaper();
+            let ctx = resolve_project_context(&project);
 
             let measure_0based = (measure - 1).max(0);
             let beat_0based = (beat - 1).max(0) as f64 + fraction;
 
-            if let Ok(beats) = reaper_medium::PositionInBeats::new(beat_0based) {
-                let result = medium.time_map_2_beats_to_time(
-                    ReaperProjectContext::CurrentProject,
-                    MeasureMode::FromMeasureAtIndex(measure_0based),
-                    beats,
-                );
+            let measure_start = tw::get_measure_info(medium.low(), ctx, measure_0based);
+            if let Ok(measure_start_pos) = reaper_medium::PositionInSeconds::new(measure_start) {
+                let measure_start_beats = medium
+                    .time_map_2_time_to_beats(ctx, measure_start_pos)
+                    .full_beats;
+                let absolute_beats = measure_start_beats.get() + beat_0based;
+                let Ok(beats) = reaper_medium::PositionInBeats::new(absolute_beats) else {
+                    return 0.0;
+                };
+                let result =
+                    medium.time_map_2_beats_to_time(ctx, MeasureMode::IgnoreMeasure, beats);
                 result.get()
             } else {
                 0.0

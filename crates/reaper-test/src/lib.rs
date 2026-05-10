@@ -10,7 +10,7 @@
 #[cfg(feature = "runner")]
 pub mod runner;
 
-use daw::{Daw, Project, TrackHandle};
+use daw::rpc::{Daw, Project, TrackHandle};
 use eyre::Result;
 use std::{
     borrow::Cow,

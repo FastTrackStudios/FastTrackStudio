@@ -32,7 +32,6 @@ camino = "1"
 libloading = "0.8"
 crossbeam-channel.workspace = true
 daw-control = { path = "../daw-control" }
-daw-control-sync = { path = "../daw-control-sync" }
 eyre.workspace = true
 facet-json.workspace = true
 

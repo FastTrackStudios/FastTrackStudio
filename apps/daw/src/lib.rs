@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::{env, fs};
 
-use daw::Daw;
+use daw::rpc::Daw;
 use daw::service::FxType;
 use eyre::{Result, bail};
 use serde_json::json;
@@ -743,7 +743,7 @@ pub async fn resolve_track(daw: &Daw, track_arg: &str) -> Result<(String, String
 }
 
 /// Resolve a track argument and return the TrackHandle directly.
-pub async fn resolve_track_handle(daw: &Daw, track_arg: &str) -> Result<daw::TrackHandle> {
+pub async fn resolve_track_handle(daw: &Daw, track_arg: &str) -> Result<daw::rpc::TrackHandle> {
     let (guid, _) = resolve_track(daw, track_arg).await?;
     let project = daw.current_project().await?;
     project
@@ -755,10 +755,10 @@ pub async fn resolve_track_handle(daw: &Daw, track_arg: &str) -> Result<daw::Tra
 
 /// Resolve an FX argument (index or name) on a track's FX chain.
 pub async fn resolve_fx_handle(
-    fx_chain: &daw::FxChain,
+    fx_chain: &daw::rpc::FxChain,
     fx_arg: &str,
     track_name: &str,
-) -> Result<daw::FxHandle> {
+) -> Result<daw::rpc::FxHandle> {
     let fx_handle = if let Ok(idx) = fx_arg.parse::<u32>() {
         fx_chain.by_index(idx).await?
     } else {
@@ -1633,7 +1633,7 @@ async fn resolve_take(
     track_arg: &str,
     item_idx: u32,
     take_idx: u32,
-) -> Result<daw::TakeHandle> {
+) -> Result<daw::rpc::TakeHandle> {
     let track = resolve_track_handle(daw, track_arg).await?;
     let item = track
         .items()

@@ -4,7 +4,9 @@ use std::sync::Arc;
 
 use crate::DawClients;
 use crate::Result;
-use daw_proto::{PlayState, ProjectContext, TimeSignature, Transport as TransportState};
+use daw_proto::{
+    LoopRegion, PlayState, ProjectContext, TimeSignature, Transport as TransportState,
+};
 use vox::Rx;
 
 /// Transport handle for a specific project
@@ -227,6 +229,34 @@ impl Transport {
         self.clients
             .transport
             .set_loop(self.context(), enabled)
+            .await?;
+        Ok(())
+    }
+
+    /// Get the current time selection, if one is set.
+    pub async fn get_time_selection(&self) -> Result<Option<LoopRegion>> {
+        let selection = self
+            .clients
+            .transport
+            .get_time_selection(self.context())
+            .await?;
+        Ok(selection)
+    }
+
+    /// Set the current time selection in seconds.
+    pub async fn set_time_selection(&self, start_seconds: f64, end_seconds: f64) -> Result<()> {
+        self.clients
+            .transport
+            .set_time_selection(self.context(), start_seconds, end_seconds)
+            .await?;
+        Ok(())
+    }
+
+    /// Clear the current time selection.
+    pub async fn clear_time_selection(&self) -> Result<()> {
+        self.clients
+            .transport
+            .clear_time_selection(self.context())
             .await?;
         Ok(())
     }

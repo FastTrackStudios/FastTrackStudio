@@ -57,9 +57,11 @@ impl MarkerService for ReaperMarker {
                     if let Some(info) = result {
                         // region_end_position is None for markers, Some for regions
                         if info.region_end_position.is_none() {
-                            let lane = ruler_lanes::get_marker_lane(low, reaper_ctx, idx);
+                            let id = info.id.get();
+                            let lane = ruler_lanes::assigned_lane(low, reaper_ctx, false, id)
+                                .or_else(|| ruler_lanes::get_marker_lane(low, reaper_ctx, idx));
                             markers.push(Marker {
-                                id: Some(info.id.get()),
+                                id: Some(id),
                                 position: Position::from_time(TimePosition::from_seconds(
                                     info.position.get(),
                                 )),
@@ -191,19 +193,35 @@ impl MarkerService for ReaperMarker {
     async fn set_marker_color(&self, _project: ProjectContext, id: u32, color: u32) {
         debug!("ReaperMarker: set_marker_color {} to {}", id, color);
         main_thread::run(move || {
-            let low = reaper_high::Reaper::get().medium_reaper().low();
-            sw::set_project_marker_by_index2(
-                low,
-                ReaperProjectContext::CurrentProject,
-                id as i32,
-                false,
-                -1.0,
-                0.0,
-                -1,
-                None,
-                color as i32,
-                0,
-            );
+            let reaper = reaper_high::Reaper::get();
+            let medium = reaper.medium_reaper();
+            let low = medium.low();
+            let reaper_ctx = ReaperProjectContext::CurrentProject;
+            let total_count = medium.count_project_markers(reaper_ctx).total_count;
+            let reaper_color = (color | 0x01000000) as i32;
+
+            for idx in 0..total_count {
+                medium.enum_project_markers_3(reaper_ctx, idx, |result| {
+                    if let Some(info) = result
+                        && info.region_end_position.is_none()
+                        && info.id.get() == id
+                        && let Ok(name) = CString::new(info.name.to_string())
+                    {
+                        sw::set_project_marker_by_index2(
+                            low,
+                            reaper_ctx,
+                            idx as i32,
+                            false,
+                            info.position.get(),
+                            0.0,
+                            id as i32,
+                            Some(&name),
+                            reaper_color,
+                            0,
+                        );
+                    }
+                });
+            }
         });
     }
 
@@ -267,7 +285,11 @@ impl MarkerService for ReaperMarker {
                             && info.region_end_position.is_none()
                             && info.id.get() == id
                         {
-                            ruler_lanes::set_marker_lane(low, reaper_ctx, idx, lane);
+                            if ruler_lanes::set_marker_lane(low, reaper_ctx, idx, lane) {
+                                ruler_lanes::remember_assigned_lane(
+                                    low, reaper_ctx, false, id, lane,
+                                );
+                            }
                         }
                     });
                 }
@@ -292,7 +314,11 @@ impl MarkerService for ReaperMarker {
                         && info.region_end_position.is_none()
                         && info.id.get() == id
                     {
-                        ruler_lanes::set_marker_lane(low, reaper_ctx, idx, lane_value);
+                        if ruler_lanes::set_marker_lane(low, reaper_ctx, idx, lane_value) {
+                            ruler_lanes::remember_assigned_lane(
+                                low, reaper_ctx, false, id, lane_value,
+                            );
+                        }
                     }
                 });
             }

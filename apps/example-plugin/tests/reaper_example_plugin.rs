@@ -16,7 +16,9 @@ const EXAMPLE_PLUGIN_NAMES: &[&str] = &[
     "DAW Example Plugin",
 ];
 
-async fn add_example_plugin(track: &daw::TrackHandle) -> eyre::Result<Option<daw::FxHandle>> {
+async fn add_example_plugin(
+    track: &daw::rpc::TrackHandle,
+) -> eyre::Result<Option<daw::rpc::FxHandle>> {
     for name in EXAMPLE_PLUGIN_NAMES {
         if let Ok(fx) = track.fx_chain().add(name).await {
             return Ok(Some(fx));

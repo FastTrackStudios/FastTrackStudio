@@ -246,6 +246,7 @@ impl DawMainThread {
             record_mode: daw_proto::RecordMode::Normal,
             looping,
             loop_region: None,
+            time_selection: None,
             tempo: daw_proto::primitives::Tempo::from_bpm(tempo_bpm),
             playrate,
             time_signature: daw_proto::TimeSignature::new(ts_num, ts_denom),

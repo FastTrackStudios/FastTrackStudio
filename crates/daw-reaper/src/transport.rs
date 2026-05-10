@@ -41,13 +41,13 @@ use crate::project_context::{
 use daw_proto::{PlayState, ProjectContext, TimeSignature, Transport, TransportService};
 use reaper_high::{PlayRate, Project, Reaper, TaskSupport, Tempo as ReaperTempo};
 use reaper_medium::{
-    CommandId, PositionInSeconds, ProjectContext as ReaperProjectContext, ProjectRef,
-    SetEditCurPosOptions, TimeRangeType, UndoBehavior,
+    AutoSeekBehavior, CommandId, PositionInSeconds, ProjectContext as ReaperProjectContext,
+    ProjectRef, SetEditCurPosOptions, TimeRangeType, UndoBehavior,
 };
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use tokio::sync::broadcast;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 use vox::Tx;
 
 use crate::main_thread;
@@ -72,6 +72,7 @@ static LEGACY_TRANSPORT_BROADCASTER: OnceLock<broadcast::Sender<Transport>> = On
 /// Key is project GUID, value is last known transport state
 /// Only broadcasts when state actually changes (reactive pattern)
 static PROJECT_TRANSPORT_CACHE: OnceLock<Mutex<HashMap<String, Transport>>> = OnceLock::new();
+const MAX_REASONABLE_TIME_SELECTION_SECONDS: f64 = 60.0 * 60.0;
 
 /// Get the global TaskSupport reference.
 ///
@@ -80,6 +81,24 @@ static PROJECT_TRANSPORT_CACHE: OnceLock<Mutex<HashMap<String, Transport>>> = On
 #[allow(dead_code)]
 pub(crate) fn task_support() -> Option<&'static TaskSupport> {
     main_thread::task_support()
+}
+
+fn normalize_time_selection(
+    selection: Option<daw_proto::LoopRegion>,
+) -> Option<daw_proto::LoopRegion> {
+    let selection = selection.filter(daw_proto::LoopRegion::is_valid)?;
+    let duration = selection.duration();
+    if duration.is_finite() && duration <= MAX_REASONABLE_TIME_SELECTION_SECONDS {
+        return Some(selection);
+    }
+
+    warn!(
+        start = selection.start_seconds,
+        end = selection.end_seconds,
+        duration,
+        "ReaperTransport: ignoring unreasonable time selection",
+    );
+    None
 }
 
 /// Initialize the transport broadcaster.
@@ -307,6 +326,12 @@ pub(crate) fn read_transport_state_for_project(
         .get_set_loop_time_range_2_get(reaper_ctx, TimeRangeType::LoopPoints)
         .map(|range| daw_proto::LoopRegion::new(range.start.get(), range.end.get()));
 
+    let time_selection = normalize_time_selection(
+        medium
+            .get_set_loop_time_range_2_get(reaper_ctx, TimeRangeType::TimeSelection)
+            .map(|range| daw_proto::LoopRegion::new(range.start.get(), range.end.get())),
+    );
+
     // Convert time positions to musical positions using REAPER's tempo map
     // This properly handles tempo changes throughout the project
     // Also applies project measure offset for correct display
@@ -318,6 +343,7 @@ pub(crate) fn read_transport_state_for_project(
         record_mode: daw_proto::RecordMode::Normal,
         looping,
         loop_region,
+        time_selection,
         tempo: daw_proto::primitives::Tempo::from_bpm(tempo_bpm),
         playrate,
         time_signature: TimeSignature::new(ts_num as u32, ts_denom as u32),
@@ -371,6 +397,15 @@ fn time_to_musical_position(
     let subdivision = ((beats_since.fract()) * 1000.0).round() as i32;
 
     daw_proto::primitives::MusicalPosition::new(measure, beat, subdivision.clamp(0, 999))
+}
+
+fn resolve_reaper_project_context(project: &ProjectContext) -> ReaperProjectContext {
+    match project {
+        ProjectContext::Current => ReaperProjectContext::CurrentProject,
+        ProjectContext::Project(guid) => find_project_by_guid(guid)
+            .map(|proj| ReaperProjectContext::Proj(proj.raw()))
+            .unwrap_or(ReaperProjectContext::CurrentProject),
+    }
 }
 
 /// REAPER transport implementation.
@@ -714,6 +749,74 @@ impl TransportService for ReaperTransport {
             reaper
                 .medium_reaper()
                 .get_set_repeat_ex_set(ReaperProjectContext::CurrentProject, enabled);
+        });
+    }
+
+    async fn get_time_selection(&self, project: ProjectContext) -> Option<daw_proto::LoopRegion> {
+        main_thread::query(move || {
+            let reaper = Reaper::get();
+            let ctx = resolve_reaper_project_context(&project);
+            let selection = reaper
+                .medium_reaper()
+                .get_set_loop_time_range_2_get(ctx, TimeRangeType::TimeSelection)
+                .map(|range| daw_proto::LoopRegion::new(range.start.get(), range.end.get()));
+            let normalized = normalize_time_selection(selection.clone());
+            info!(
+                raw_start = ?selection.as_ref().map(|selection| selection.start_seconds),
+                raw_end = ?selection.as_ref().map(|selection| selection.end_seconds),
+                normalized_start = ?normalized.as_ref().map(|selection| selection.start_seconds),
+                normalized_end = ?normalized.as_ref().map(|selection| selection.end_seconds),
+                "ReaperTransport: get_time_selection",
+            );
+            normalized
+        })
+        .await
+        .unwrap_or(None)
+    }
+
+    async fn set_time_selection(
+        &self,
+        project: ProjectContext,
+        start_seconds: f64,
+        end_seconds: f64,
+    ) {
+        debug!(
+            "ReaperTransport: set_time_selection to {:.3}-{:.3}s",
+            start_seconds, end_seconds
+        );
+        main_thread::run(move || {
+            let reaper = Reaper::get();
+            let ctx = resolve_reaper_project_context(&project);
+            let start = start_seconds.min(end_seconds).max(0.0);
+            let end = start_seconds.max(end_seconds).max(0.0);
+            let Ok(start) = PositionInSeconds::new(start) else {
+                return;
+            };
+            let Ok(end) = PositionInSeconds::new(end) else {
+                return;
+            };
+            reaper.medium_reaper().get_set_loop_time_range_2_set(
+                ctx,
+                TimeRangeType::TimeSelection,
+                start,
+                end,
+                AutoSeekBehavior::DenyAutoSeek,
+            );
+        });
+    }
+
+    async fn clear_time_selection(&self, project: ProjectContext) {
+        debug!("ReaperTransport: clear_time_selection");
+        main_thread::run(move || {
+            let reaper = Reaper::get();
+            let ctx = resolve_reaper_project_context(&project);
+            reaper.medium_reaper().get_set_loop_time_range_2_set(
+                ctx,
+                TimeRangeType::TimeSelection,
+                PositionInSeconds::new_panic(0.0),
+                PositionInSeconds::new_panic(0.0),
+                AutoSeekBehavior::DenyAutoSeek,
+            );
         });
     }
 

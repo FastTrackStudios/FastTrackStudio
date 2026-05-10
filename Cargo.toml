@@ -4,7 +4,6 @@ members = [
     "crates/audio-controls",
     "crates/daw",
     "crates/daw-control",
-    "crates/daw-control-sync",
     "crates/daw-proto",
     "crates/daw-reaper",
     "crates/daw-standalone",

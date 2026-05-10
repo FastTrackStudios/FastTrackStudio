@@ -137,8 +137,8 @@ pub struct ReaperBootstrap {
 
 // ── Plugin DAW initialization ────────────────────────────────────────
 
+use crate::local_caller::LocalCaller;
 use daw_control::Daw;
-use daw_control_sync::LocalCaller;
 
 /// Create a `Daw` instance from a raw CLAP host pointer.
 ///

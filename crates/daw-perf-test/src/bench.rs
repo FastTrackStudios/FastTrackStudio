@@ -3,8 +3,8 @@
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+use daw::rpc::{BatchBuilder, Daw};
 use daw::service::batch::*;
-use daw::{BatchBuilder, Daw};
 use daw_proto::batch::BatchService;
 use daw_reaper::batch::BatchExecutor;
 use tracing::info;

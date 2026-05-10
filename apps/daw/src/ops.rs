@@ -1,6 +1,6 @@
 //! Structured operations shared by DAW CLI commands.
 
-use daw::Daw;
+use daw::rpc::Daw;
 use eyre::Result;
 use serde_json::{Value, json};
 
@@ -462,7 +462,7 @@ pub async fn transport_control(daw: &Daw, action: &str) -> Result<Value> {
     transport_state_for_project(&project).await
 }
 
-async fn transport_state_for_project(project: &daw::Project) -> Result<Value> {
+async fn transport_state_for_project(project: &daw::rpc::Project) -> Result<Value> {
     let state = project.transport().get_state().await?;
     Ok(json!({
         "play_state": format!("{:?}", state.play_state),

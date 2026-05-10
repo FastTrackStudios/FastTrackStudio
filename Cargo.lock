@@ -1964,7 +1964,6 @@ name = "daw"
 version = "0.1.0"
 dependencies = [
  "daw-control",
- "daw-control-sync",
  "daw-module",
  "daw-proto",
  "daw-reaper",
@@ -2059,19 +2058,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "daw-control-sync"
-version = "0.1.0"
-dependencies = [
- "daw-control",
- "eyre",
- "moire",
- "tokio",
- "tracing",
- "vox",
- "vox-stream",
-]
-
-[[package]]
 name = "daw-extension-runtime"
 version = "0.1.0"
 dependencies = [
@@ -2140,7 +2126,6 @@ dependencies = [
  "camino",
  "crossbeam-channel",
  "daw-control",
- "daw-control-sync",
  "daw-proto",
  "dawfile-aaf",
  "dawfile-ableton",

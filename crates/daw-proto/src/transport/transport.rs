@@ -68,6 +68,8 @@ pub struct Transport {
     pub looping: bool,
     /// Loop region (start/end positions). Only meaningful when looping is true.
     pub loop_region: Option<LoopRegion>,
+    /// REAPER-style time selection range, independent from loop points.
+    pub time_selection: Option<LoopRegion>,
     pub tempo: Tempo,
     pub playrate: f64,
     pub time_signature: TimeSignature,
@@ -83,6 +85,7 @@ impl Transport {
             record_mode: RecordMode::default(),
             looping: false,
             loop_region: None,
+            time_selection: None,
             tempo: Tempo::default(),
             playrate: 1.0,
             time_signature: TimeSignature::default(),
@@ -240,6 +243,20 @@ pub trait TransportService {
 
     /// Set loop enabled state
     async fn set_loop(&self, project: ProjectContext, enabled: bool);
+
+    /// Get the current project time selection, if one is set.
+    async fn get_time_selection(&self, project: ProjectContext) -> Option<LoopRegion>;
+
+    /// Set the current project time selection.
+    async fn set_time_selection(
+        &self,
+        project: ProjectContext,
+        start_seconds: f64,
+        end_seconds: f64,
+    );
+
+    /// Clear the current project time selection.
+    async fn clear_time_selection(&self, project: ProjectContext);
 
     // =========================================================================
     // Playrate Control (Priority 3)

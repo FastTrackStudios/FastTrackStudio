@@ -6,7 +6,7 @@
 
 use crate::platform::RwLock;
 use daw_proto::{
-    PlayState, ProjectContext, Transport, TransportService,
+    LoopRegion, PlayState, ProjectContext, Transport, TransportService,
     primitives::{Position, PositionInSeconds, Tempo, TimeSignature},
 };
 use std::collections::HashMap;
@@ -485,6 +485,55 @@ impl TransportService for StandaloneTransport {
         );
         self.with_state_mut(&guid, |state| {
             state.transport.looping = enabled;
+        })
+        .await;
+    }
+
+    async fn get_time_selection(&self, project: ProjectContext) -> Option<LoopRegion> {
+        let Some(guid) = self.resolve_project(&project).await else {
+            warn!("StandaloneTransport::get_time_selection - could not resolve project");
+            return None;
+        };
+        self.get_or_create_state(&guid)
+            .await
+            .transport
+            .time_selection
+    }
+
+    async fn set_time_selection(
+        &self,
+        project: ProjectContext,
+        start_seconds: f64,
+        end_seconds: f64,
+    ) {
+        let Some(guid) = self.resolve_project(&project).await else {
+            warn!("StandaloneTransport::set_time_selection - could not resolve project");
+            return;
+        };
+        debug!(
+            "StandaloneTransport: set_time_selection to {:.3}-{:.3}s for project {}",
+            start_seconds, end_seconds, guid
+        );
+        self.with_state_mut(&guid, |state| {
+            state.transport.time_selection = Some(LoopRegion::new(
+                start_seconds.min(end_seconds),
+                start_seconds.max(end_seconds),
+            ));
+        })
+        .await;
+    }
+
+    async fn clear_time_selection(&self, project: ProjectContext) {
+        let Some(guid) = self.resolve_project(&project).await else {
+            warn!("StandaloneTransport::clear_time_selection - could not resolve project");
+            return;
+        };
+        debug!(
+            "StandaloneTransport: clear_time_selection for project {}",
+            guid
+        );
+        self.with_state_mut(&guid, |state| {
+            state.transport.time_selection = None;
         })
         .await;
     }
