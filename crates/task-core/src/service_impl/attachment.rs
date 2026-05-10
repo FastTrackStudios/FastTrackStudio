@@ -115,7 +115,7 @@ where
                 out.push(attachment);
             }
         }
-        out.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+        out.sort_by_key(|attachment| attachment.created_at);
         Ok(out)
     }
 

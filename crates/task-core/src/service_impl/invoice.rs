@@ -184,7 +184,7 @@ pub(crate) fn build_finance_report(
         .filter(|entry| entry.entry.invoiced_at.is_none())
         .cloned()
         .collect();
-    unbilled_entries.sort_by(|a, b| a.entry.start_time.cmp(&b.entry.start_time));
+    unbilled_entries.sort_by_key(|entry| entry.entry.start_time);
 
     let billable_minutes: u32 = billable_entries
         .iter()
