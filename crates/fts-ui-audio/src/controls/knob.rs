@@ -145,26 +145,41 @@ pub fn Knob(
     let (tx, ty) = arc_point(cx, cy, r - 6.0, end_angle);
     let (tx2, ty2) = arc_point(cx, cy, r + 1.0, end_angle);
 
-    let accent = color.as_deref().unwrap_or(ACCENT);
+    // Resolve colors from CSS variables (fts-ui theme tokens) so the
+    // knob inherits the active preset / dark mode rather than the
+    // legacy hardcoded palette. Caller-provided override still wins.
+    let accent = color
+        .clone()
+        .unwrap_or_else(|| "var(--primary)".to_string());
+    let track_color = "var(--border)".to_string();
+    let pointer_color = "var(--foreground)".to_string();
+    let detent_color = "var(--muted-foreground)".to_string();
+    let mod_color = "var(--signal-mod, var(--accent))".to_string();
     let opacity = if disabled { "0.5" } else { "1.0" };
     let cursor = if disabled { "not-allowed" } else { "pointer" };
-    // Subtle hover scale to communicate "this is interactable".
-    let scale = if !disabled && (is_hovered || drag.read().active) {
-        "1.04"
+    // Hover/drag visuals: gentle scale + a glow on the value arc.
+    let active = !disabled && (is_hovered || drag.read().active);
+    let scale = if active { "1.04" } else { "1.0" };
+    let value_filter = if active {
+        format!("drop-shadow(0 0 4px {accent})")
     } else {
-        "1.0"
+        "none".to_string()
     };
     // Centre-detent tick (only drawn for bipolar so users see the 0 mark).
     let detent_centre_angle = START_ANGLE + SWEEP / 2.0;
     let (det_x1, det_y1) = arc_point(cx, cy, r - 6.0, detent_centre_angle);
     let (det_x2, det_y2) = arc_point(cx, cy, r + 1.0, detent_centre_angle);
+    // Inner cap radius — gives the knob a tactile "puck" inside the arc.
+    let cap_r = (r - 7.0).max(2.0);
 
     rsx! {
         div {
             style: format!(
-                "display:inline-flex; flex-direction:column; align-items:center; gap:4px; \
+                "display:inline-flex; flex-direction:column; align-items:center; gap:6px; \
                  opacity:{opacity}; cursor:{cursor}; position:relative; \
-                 transform:scale({scale}); transition:transform 80ms ease-out;"
+                 transform:scale({scale}); transition:transform 90ms ease-out; \
+                 padding:2px 0; \
+                 color:var(--foreground);"
             ),
             title: format!("{param_name} — {display_value}\nDrag · Shift=fine · Ctrl=ultra-fine · Wheel · Dbl-click=type · Alt-click=reset"),
             onmouseenter: move |_| { hovered.set(true); },
@@ -175,14 +190,41 @@ pub fn Knob(
                 height: "{d}",
                 view_box: "0 0 {df} {df}",
 
+                // Background disc — anchors the knob visually and
+                // gives the value arc something to sit on.
+                circle {
+                    cx: "{cx:.1}",
+                    cy: "{cy:.1}",
+                    r: "{cap_r:.1}",
+                    fill: "var(--card, var(--background))",
+                    stroke: "{track_color}",
+                    stroke_width: "0.75",
+                    opacity: "0.85",
+                }
+
+                // Track (full-arc background).
                 path {
                     d: "{track_path}",
                     fill: "none",
-                    stroke: "{BORDER}",
+                    stroke: "{track_color}",
                     stroke_width: "3.5",
                     stroke_linecap: "round",
                 }
 
+                // Bipolar 0 detent tick (sits behind the value arc).
+                if bipolar {
+                    line {
+                        x1: "{det_x1:.1}",
+                        y1: "{det_y1:.1}",
+                        x2: "{det_x2:.1}",
+                        y2: "{det_y2:.1}",
+                        stroke: "{detent_color}",
+                        stroke_width: "1.25",
+                        opacity: "0.7",
+                    }
+                }
+
+                // Value arc — the only colourful element by default.
                 if !value_path.is_empty() {
                     path {
                         d: "{value_path}",
@@ -190,6 +232,7 @@ pub fn Knob(
                         stroke: "{accent}",
                         stroke_width: "4",
                         stroke_linecap: "round",
+                        style: "filter:{value_filter};",
                     }
                 }
 
@@ -197,31 +240,20 @@ pub fn Knob(
                     path {
                         d: "{mod_path}",
                         fill: "none",
-                        stroke: "{SIGNAL_MOD}",
+                        stroke: "{mod_color}",
                         stroke_width: "2",
                         stroke_linecap: "round",
-                        opacity: "0.6",
+                        opacity: "0.65",
                     }
                 }
 
-                if bipolar {
-                    line {
-                        x1: "{det_x1:.1}",
-                        y1: "{det_y1:.1}",
-                        x2: "{det_x2:.1}",
-                        y2: "{det_y2:.1}",
-                        stroke: "{BORDER}",
-                        stroke_width: "1",
-                        opacity: "0.6",
-                    }
-                }
-
+                // Pointer line from cap edge through the arc.
                 line {
                     x1: "{tx:.1}",
                     y1: "{ty:.1}",
                     x2: "{tx2:.1}",
                     y2: "{ty2:.1}",
-                    stroke: "{TEXT}",
+                    stroke: "{pointer_color}",
                     stroke_width: "2",
                     stroke_linecap: "round",
                 }
@@ -283,10 +315,13 @@ pub fn Knob(
                 input {
                     r#type: "text",
                     style: format!(
-                        "font-size:10px; color:{TEXT}; background:{SURFACE}; \
-                         border:1px solid {ACCENT}; border-radius:3px; \
-                         min-width:48px; width:56px; text-align:center; \
-                         padding:1px 2px; outline:none;"
+                        "font-size:11px; color:var(--foreground); \
+                         background:var(--card, var(--background)); \
+                         border:1px solid var(--ring, var(--primary)); \
+                         border-radius:4px; min-width:52px; width:60px; \
+                         text-align:center; padding:2px 4px; outline:none; \
+                         font-variant-numeric:tabular-nums; \
+                         font-family:var(--font-sans, ui-monospace);"
                     ),
                     value: "{display_value}",
                     onkeydown: move |evt: KeyboardEvent| {
@@ -311,8 +346,11 @@ pub fn Knob(
             } else {
                 span {
                     style: format!(
-                        "font-size:10px; color:{TEXT_DIM}; font-variant-numeric:tabular-nums; \
-                         min-width:48px; text-align:center; cursor:text;"
+                        "font-size:11px; color:var(--foreground); \
+                         font-variant-numeric:tabular-nums; \
+                         font-weight:600; \
+                         min-width:52px; text-align:center; cursor:text; \
+                         letter-spacing:-0.01em;"
                     ),
                     ondoubleclick: move |_| {
                         if !disabled { editing.set(true); }
@@ -323,8 +361,10 @@ pub fn Knob(
 
             span {
                 style: format!(
-                    "font-size:10px; color:{TEXT_DIM}; font-weight:500; \
-                     min-width:48px; text-align:center;"
+                    "font-size:10px; color:var(--muted-foreground); \
+                     font-weight:500; letter-spacing:0.05em; \
+                     text-transform:uppercase; \
+                     min-width:52px; text-align:center;"
                 ),
                 "{param_name}"
             }
