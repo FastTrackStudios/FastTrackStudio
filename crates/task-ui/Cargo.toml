@@ -9,5 +9,4 @@ license = "MIT OR Apache-2.0"
 # `exclude` block in ../../Cargo.toml for the rationale.
 
 [dependencies]
-dioxus = { version = "0.7.6", default-features = false, features = ["lib"] }
-fts-ui = { path = "../../../FastTrackStudio/fts-ui/crates/fts-ui" }
+dioxus = { version = "0.7.9", default-features = false, features = ["lib"] }

@@ -9,11 +9,8 @@ members = [
     "xtask",
 ]
 # UI crates (task-ui + apps/{web,desktop,mobile}) live outside this workspace
-# because fts-ui's own Cargo.toml has path-deps to a sibling fts-story repo.
-# Including them here would force every cargo invocation in this workspace to
-# resolve fts-story, which breaks server/cli builds (especially under Nix).
-# Each UI crate carries its own Cargo.toml with inline deps and gets its own
-# Cargo.lock; they all share the live ../FastTrackStudio/fts-ui sibling.
+# so server/CLI builds do not pick up WASM/Dioxus-only dependency and target
+# constraints. Each UI crate carries its own Cargo.toml and Cargo.lock.
 exclude = [
     "apps/web",
     "apps/desktop",
