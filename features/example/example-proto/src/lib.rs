@@ -15,11 +15,14 @@
 //! No `cfg_attr` in the struct, no parallel definitions, no manual
 //! `From` impls — architect emits the storage<->wire bridge for you.
 
-use architect::Entity;
+// Re-exported so downstream test/client crates can reach Page/Sort/Filter
+// without taking a direct architect dep.
+pub use architect;
+
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-#[derive(Entity)]
+#[derive(architect::Entity, ::facet::Facet, Clone, Debug, PartialEq)]
 #[architect(
     // SeaORM table this entity persists to. Architect emits the
     // `#[sea_orm(table_name = "examples")]` decoration internally.
@@ -52,4 +55,40 @@ pub struct Example {
 
     #[architect(exclude(create, update), on_create = Utc::now(), on_update = Utc::now())]
     pub updated_at: DateTime<Utc>,
+}
+
+// ── Service trait ──────────────────────────────────────────────────────
+//
+// Plain `#[vox::service]` trait. Architect does not touch this. Standard
+// CRUD (`list_examples`, `get_example`, `create_example`, etc.) lives on
+// the auto-generated `ExampleRepo` — the server mounts both Repo + Service
+// dispatchers, so clients call whichever surface fits the call site.
+//
+// The Service is reserved for domain operations that don't map cleanly
+// onto CRUD: full-text search, multi-row mutations, workflow steps, etc.
+
+#[derive(Debug, Clone, PartialEq, Eq, facet::Facet, thiserror::Error)]
+#[repr(u8)]
+pub enum ExampleServiceError {
+    #[error("example not found")]
+    NotFound,
+    #[error("invalid input: {0}")]
+    InvalidInput(String),
+    #[error("internal error: {0}")]
+    Internal(String),
+}
+
+#[vox::service]
+pub trait ExampleService {
+    /// Full-text search across `name` + `description`. Returns at most
+    /// `limit` matches (server clamps to a sane max).
+    async fn search(&self, query: String, limit: u32) -> Result<Vec<Example>, ExampleServiceError>;
+
+    /// Duplicate an existing example, optionally overriding the name on
+    /// the new row. Returns the freshly inserted record.
+    async fn duplicate(
+        &self,
+        id: Uuid,
+        new_name: Option<String>,
+    ) -> Result<Example, ExampleServiceError>;
 }

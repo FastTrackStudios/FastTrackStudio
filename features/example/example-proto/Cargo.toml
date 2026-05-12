@@ -15,9 +15,18 @@ architect.workspace = true
 chrono.workspace = true
 uuid = { workspace = true, features = ["js"] }
 facet.workspace = true
+thiserror.workspace = true
+# The architect derive emits `::vox::service` paths; consumers carry the
+# direct vox dep so the macro output resolves without going through the
+# architect re-export (which fails for attribute-macro resolution).
+vox.workspace = true
+# Server-only: sea-orm is referenced by paths emitted from the architect
+# derive when --features server is set. Gated as optional so wasm builds
+# never see it.
+sea-orm = { workspace = true, optional = true }
 
 [features]
 default = []
 # Forwarded to architect so the macro's server-side emissions
 # (SeaORM Model, RepoStorage, From impls) compile in.
-server = ["architect/server"]
+server = ["architect/server", "dep:sea-orm"]

@@ -1,25 +1,72 @@
 //! Reference axum + vox server.
 //!
-//! Architecture in one paragraph: `apps/server` owns the I/O surface
-//! (HTTP listener + vox WebSocket endpoint) and the concrete
-//! [`ExampleService`] implementation. The service composes the
-//! crudcrate-generated [`ExampleRepo`] (CRUD over SeaORM) — anything
-//! that *is* business logic lives here; anything that's pure CRUD
-//! sits in the repo. Clients (wasm web, native desktop, future iOS)
-//! call `ExampleService` over the same `/vox` connection.
+//! Backend is chosen at compile time via cargo features on the `example`
+//! facade (`backend-db` or `backend-memory`). The dispatcher wiring is
+//! identical either way — the contract from `example_proto` is what
+//! holds it all together.
 
 mod service_impl;
 
-use axum::{Router, routing::get};
-use sea_orm::{Database, DatabaseConnection};
+use architect::axum_ws;
+use axum::{
+    extract::{State, WebSocketUpgrade},
+    response::{IntoResponse, Response},
+    routing::get,
+    Router,
+};
+use example::{ExampleRepoDispatcher, ExampleServiceDispatcher};
+use service_impl::ExampleServiceImpl;
 use std::sync::Arc;
 use tower_http::cors::CorsLayer;
-use tracing::info;
+use tracing::{info, warn};
 
-#[derive(Clone)]
-struct AppState {
-    db: DatabaseConnection,
+// ── Backend-specific state ────────────────────────────────────────────
+
+#[cfg(feature = "backend-db")]
+mod state {
+    use example::backend::{ExampleRepoStorage, Migrator};
+    use sea_orm::{Database, DatabaseConnection};
+    use sea_orm_migration::MigratorTrait;
+
+    #[derive(Clone)]
+    pub struct AppState {
+        pub repo: ExampleRepoStorage<DatabaseConnection>,
+    }
+
+    pub async fn init() -> eyre::Result<(AppState, String)> {
+        let database_url = std::env::var("DATABASE_URL")
+            .unwrap_or_else(|_| "sqlite://./example.db?mode=rwc".into());
+        let db = Database::connect(&database_url).await?;
+        Migrator::up(&db, None).await?;
+        Ok((
+            AppState {
+                repo: ExampleRepoStorage::new(db),
+            },
+            format!("sqlite ({database_url})"),
+        ))
+    }
 }
+
+#[cfg(feature = "backend-memory")]
+mod state {
+    use example::backend::ExampleRepoMemory;
+
+    #[derive(Clone)]
+    pub struct AppState {
+        pub repo: ExampleRepoMemory,
+    }
+
+    pub async fn init() -> eyre::Result<(AppState, String)> {
+        Ok((
+            AppState {
+                repo: ExampleRepoMemory::new(),
+            },
+            "in-memory".into(),
+        ))
+    }
+}
+
+use state::AppState;
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
@@ -30,35 +77,51 @@ async fn main() -> eyre::Result<()> {
         )
         .init();
 
-    let database_url = std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "sqlite://./example.db?mode=rwc".into());
     let bind_addr = std::env::var("BIND_ADDR").unwrap_or_else(|_| "0.0.0.0:4040".into());
-
-    info!(%database_url, %bind_addr, "starting example server");
-
-    let db = Database::connect(&database_url).await?;
-    // Run pending migrations on boot so a fresh `cargo run` doesn't
-    // require a separate migrate step.
-    use sea_orm_migration::MigratorTrait;
-    example_db::Migrator::up(&db, None).await?;
-
-    let state = Arc::new(AppState { db });
+    let (state, backend_label) = state::init().await?;
+    info!(backend = %backend_label, %bind_addr, "starting example server");
 
     let app = Router::new()
         .route("/api/health", get(health))
-        // Vox WebSocket endpoint is mounted below once the service
-        // dispatcher wiring lands. Left as a stub today.
+        .route("/vox", get(vox_ws_handler))
         .layer(CorsLayer::permissive())
-        .with_state(state);
+        .with_state(Arc::new(state));
 
     let listener = tokio::net::TcpListener::bind(&bind_addr).await?;
     info!("HTTP listening on http://{bind_addr}");
     info!("  Health:  http://{bind_addr}/api/health");
-    info!("  Vox WS:  ws://{bind_addr}/vox  (TODO: mount)");
+    info!("  Vox WS:  ws://{bind_addr}/vox");
     axum::serve(listener, app).await?;
     Ok(())
 }
 
 async fn health() -> &'static str {
     "ok"
+}
+
+async fn vox_ws_handler(
+    ws: WebSocketUpgrade,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    ws.on_upgrade(move |socket| async move {
+        let repo = state.repo.clone();
+        let factory = axum_ws::acceptor_fn(move |req, connection| match req.service() {
+            "ExampleRepo" => {
+                connection.handle_with(ExampleRepoDispatcher::new(repo.clone()));
+                Ok(())
+            }
+            "ExampleService" => {
+                connection.handle_with(ExampleServiceDispatcher::new(
+                    ExampleServiceImpl::new(repo.clone()),
+                ));
+                Ok(())
+            }
+            other => {
+                warn!(service = other, "unknown vox service requested");
+                Err(vec![])
+            }
+        });
+        axum_ws::serve(socket, factory).await;
+    })
+    .into_response()
 }

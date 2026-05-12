@@ -7,18 +7,21 @@ edition.workspace = true
 name = "example-server"
 path = "src/main.rs"
 
-# Axum HTTP + vox WebSocket. Mounts:
-#   GET /api/health            — liveness
-#   GET /vox?service=…         — vox transport
+# Axum HTTP + vox WebSocket. The actual repository implementation comes
+# from the `example` facade, which selects backend by cargo feature.
+# Pick exactly one at build time:
 #
-# Two vox services on /vox:
-#   - "ExampleService"  — hand-written domain trait from example-proto
-#   - "ExampleRepo"     — crudcrate auto-generated CRUD repo
-# Both share the same DB connection.
+#   cargo run -p example-app-server --features backend-db      # default
+#   cargo run -p example-app-server --no-default-features --features backend-memory
+
+[features]
+default = ["backend-db"]
+backend-db = ["example/backend-db", "dep:sea-orm", "dep:sea-orm-migration"]
+backend-memory = ["example/backend-memory"]
 
 [dependencies]
-example-proto = { workspace = true, features = ["server"] }
-example-db.workspace = true
+architect = { workspace = true, features = ["server-axum"] }
+example = { workspace = true }
 
 axum.workspace = true
 tokio.workspace = true
@@ -27,15 +30,9 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 eyre.workspace = true
 
-sea-orm.workspace = true
-sea-orm-migration.workspace = true
+# Pulled in only when backend-db is on. We hold a `DatabaseConnection` in
+# AppState and run migrations on boot — both are sea-orm specific.
+sea-orm = { workspace = true, optional = true }
+sea-orm-migration = { workspace = true, optional = true }
 
-vox.workspace = true
-vox-core.workspace = true
-vox-websocket.workspace = true
-
-facet.workspace = true
-serde.workspace = true
-serde_json.workspace = true
 uuid.workspace = true
-chrono.workspace = true

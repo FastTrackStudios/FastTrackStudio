@@ -1,81 +1,46 @@
 //! Concrete [`ExampleService`] implementation.
 //!
-//! Composes the crudcrate-generated [`ExampleRepo`] for storage, adds
-//! validation + domain rules on top. The vox `#[service]` macro on
-//! the trait gave us the dispatcher type used by `apps/server`'s
-//! WebSocket router.
-//!
-//! TODO: wire into the vox factory in `main.rs` once
-//! `connection.handle_with(ExampleServiceDispatcher::new(...))` is in
-//! place. Stubbed today so the trait + impl compile and demonstrate
-//! the pattern.
+//! `ExampleService` is hand-written domain logic on top of whichever
+//! `ExampleRepo` backend the build pulled in (db, memory, …). It owns
+//! only operations that aren't pure CRUD: search, duplicate, etc.
+//! Plain CRUD comes from `ExampleRepo` directly.
 
-use example_db::ExampleRepoStorage;
-use example_proto::{Example, ExampleService, ExampleServiceError};
-use sea_orm::DatabaseConnection;
-use std::sync::Arc;
+use example::{Example, ExampleRepo, ExampleService, ExampleServiceError};
 use uuid::Uuid;
 
 #[derive(Clone)]
-pub struct ExampleServiceImpl {
-    repo: Arc<ExampleRepoStorage<DatabaseConnection>>,
+pub struct ExampleServiceImpl<R: ExampleRepo + Clone + Send + Sync + 'static> {
+    repo: R,
 }
 
-impl ExampleServiceImpl {
-    pub fn new(db: DatabaseConnection) -> Self {
-        Self {
-            repo: Arc::new(ExampleRepoStorage::new(db)),
-        }
+impl<R: ExampleRepo + Clone + Send + Sync + 'static> ExampleServiceImpl<R> {
+    pub fn new(repo: R) -> Self {
+        Self { repo }
     }
 }
 
-#[vox::service]
-impl ExampleService for ExampleServiceImpl {
-    async fn list_examples(&self) -> Result<Vec<Example>, ExampleServiceError> {
-        // Repo returns its own ExampleList struct; the service trait
-        // promises Vec<Example>. Translate here.
-        let _ = &self.repo;
-        // TODO: call self.repo.list_example(None, None, None, None).await
-        Err(ExampleServiceError::Internal(
-            "list_examples: not wired to repo yet".into(),
-        ))
-    }
-
-    async fn get_example(&self, _id: Uuid) -> Result<Example, ExampleServiceError> {
-        Err(ExampleServiceError::Internal(
-            "get_example: not wired".into(),
-        ))
-    }
-
-    async fn create_example(
+impl<R: ExampleRepo + Clone + Send + Sync + 'static> ExampleService for ExampleServiceImpl<R> {
+    async fn search(
         &self,
-        name: String,
-        _description: String,
-    ) -> Result<Example, ExampleServiceError> {
-        if name.trim().is_empty() {
-            return Err(ExampleServiceError::InvalidInput("name is empty".into()));
+        query: String,
+        _limit: u32,
+    ) -> Result<Vec<Example>, ExampleServiceError> {
+        if query.trim().is_empty() {
+            return Err(ExampleServiceError::InvalidInput("query is empty".into()));
         }
+        let _ = &self.repo;
         Err(ExampleServiceError::Internal(
-            "create_example: not wired".into(),
+            "search: FTS5 wiring lands with the derive's fulltext emission".into(),
         ))
     }
 
-    async fn rename_example(
+    async fn duplicate(
         &self,
         _id: Uuid,
-        new_name: String,
+        _new_name: Option<String>,
     ) -> Result<Example, ExampleServiceError> {
-        if new_name.trim().is_empty() {
-            return Err(ExampleServiceError::InvalidInput("name is empty".into()));
-        }
         Err(ExampleServiceError::Internal(
-            "rename_example: not wired".into(),
-        ))
-    }
-
-    async fn delete_example(&self, _id: Uuid) -> Result<(), ExampleServiceError> {
-        Err(ExampleServiceError::Internal(
-            "delete_example: not wired".into(),
+            "duplicate: not implemented yet".into(),
         ))
     }
 }

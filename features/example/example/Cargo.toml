@@ -1,0 +1,26 @@
+[package]
+name = "example"
+version.workspace = true
+edition.workspace = true
+
+# Facade crate for the `example` feature.
+#
+# Re-exports the wire contract from `example-proto` and selects which
+# backend implementation to expose via cargo features:
+#
+#   --features backend-db      → SeaORM-backed (sqlite by default)
+#   --features backend-memory  → in-memory HashMap-backed
+#
+# Pick one in your binary. Both backends implement the same
+# `example_proto::ExampleRepo` trait, so dispatcher wiring in
+# `apps/server` is identical regardless.
+
+[dependencies]
+example-proto.workspace = true
+example-db = { workspace = true, optional = true }
+example-memory = { workspace = true, optional = true }
+
+[features]
+default = []
+backend-db = ["dep:example-db", "example-proto/server"]
+backend-memory = ["dep:example-memory"]

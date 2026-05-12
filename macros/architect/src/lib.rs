@@ -93,6 +93,9 @@ pub struct Filter {
 // glue is mechanical; this trait lets architect's emitted impl call
 // into SeaORM through a stable API.
 
+#[cfg(feature = "server-axum")]
+pub mod axum_ws;
+
 #[cfg(feature = "server")]
 pub mod storage {
     //! Generic storage helpers used by macro-emitted code.
