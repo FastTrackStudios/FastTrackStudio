@@ -24,7 +24,7 @@ use tracing::{info, warn};
 
 #[cfg(feature = "backend-db")]
 mod state {
-    use example::backend::{ExampleRepoStorage, Migrator};
+    use example::backend_db::{ExampleRepoStorage, Migrator};
     use sea_orm::{Database, DatabaseConnection};
     use sea_orm_migration::MigratorTrait;
 
@@ -49,7 +49,7 @@ mod state {
 
 #[cfg(feature = "backend-memory")]
 mod state {
-    use example::backend::ExampleRepoMemory;
+    use example::backend_memory::ExampleRepoMemory;
 
     #[derive(Clone)]
     pub struct AppState {

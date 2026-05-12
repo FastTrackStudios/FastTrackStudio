@@ -1267,6 +1267,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-app-tests-e2e"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "axum",
+ "example",
+ "example-proto",
+ "tokio",
+ "tower-http",
+ "tracing",
+ "uuid",
+ "vox-core",
+ "vox-websocket",
+]
+
+[[package]]
 name = "example-db"
 version = "0.1.0"
 dependencies = [
@@ -1299,6 +1315,17 @@ dependencies = [
  "thiserror 2.0.18",
  "uuid",
  "vox",
+]
+
+[[package]]
+name = "example-tests-native"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "example-memory",
+ "example-proto",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]

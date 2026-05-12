@@ -1,0 +1,24 @@
+[package]
+name = "example-tests-native"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+publish = false
+
+# Native integration tests for the `example` feature.
+#
+# Drives the wire contract from `example-proto` against the in-memory
+# backend (`example-memory`) — fast, no WebSocket, no browser. Sister
+# crate to `tests/web/`, which runs the same surface from wasm32
+# through vox over an actual server.
+#
+# Run from the repo root:
+#   cargo test -p example-tests-native
+
+[dependencies]
+example-proto.workspace = true
+example-memory.workspace = true
+architect.workspace = true
+uuid.workspace = true
+tokio = { workspace = true, features = ["macros", "rt"] }
