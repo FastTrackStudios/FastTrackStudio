@@ -9,4 +9,16 @@ license = "MIT OR Apache-2.0"
 # `exclude` block in ../../Cargo.toml for the rationale.
 
 [dependencies]
-dioxus = { version = "0.7.9", default-features = false, features = ["lib"] }
+dioxus = { version = "0.7.9", default-features = false, features = ["lib", "router"] }
+# Pulled in directly so apps that want bundle splitting can enable the
+# `wasm-split` feature through this crate's re-export. See the
+# `wasm-split` feature in apps/web/Cargo.toml.
+dioxus-router = { version = "0.7.9", default-features = false }
+
+[features]
+default = []
+# Opt-in WASM bundle splitting along route variants. Apps consuming this
+# crate that want splitting must enable both this feature *and* pass
+# `--wasm-split` to `dx serve` / `dx build`. Without --wasm-split the
+# call graph stays connected and `dx serve` works normally.
+wasm-split = ["dioxus-router/wasm-split"]
