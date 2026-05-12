@@ -19,6 +19,10 @@ publish = false
 [dependencies]
 example-proto.workspace = true
 example-memory.workspace = true
+# Pulled in to demonstrate that an external (third-party-shaped)
+# backend is interchangeable with the in-tree ones at the trait level.
+# See examples/external-stub/.
+example-stub-backend.workspace = true
 architect.workspace = true
 uuid.workspace = true
 tokio = { workspace = true, features = ["macros", "rt"] }

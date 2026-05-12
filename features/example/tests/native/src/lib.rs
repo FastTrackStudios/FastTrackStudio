@@ -117,3 +117,51 @@ async fn unsortable_field_errors() {
         .unwrap_err();
     assert!(matches!(err, RepoError::InvalidInput(_)));
 }
+
+// ── External backend conformance ──────────────────────────────────────
+//
+// Same contract, different impl. Proves the third-party extension
+// pattern: a backend that depends only on `example-proto` (no
+// `architect/server`, no SeaORM, no other in-tree backend) satisfies
+// the same `ExampleRepo` trait the in-tree memory backend does.
+//
+// Both tests use the trait surface only — there's no way for the test
+// body to tell it's running against `StubBackend` vs `ExampleRepoMemory`.
+
+// r[verify repo.create.id]
+#[tokio::test]
+async fn external_backend_round_trip() {
+    let r = example_stub_backend::StubBackend::new();
+    let created = r
+        .create(ExampleCreate {
+            name: "external".into(),
+            description: "from a third-party-shaped crate".into(),
+        })
+        .await
+        .unwrap();
+    let got = r.get(created.id).await.unwrap();
+    assert_eq!(got.id, created.id);
+    assert_eq!(got.name, "external");
+}
+
+// r[verify repo.list.sort.name]
+#[tokio::test]
+async fn external_backend_seed_data_sorts() {
+    let r = example_stub_backend::StubBackend::with_seed_data();
+    let page = r
+        .list(
+            Page { index: 0, size: 100 },
+            Some(Sort {
+                field: "name".into(),
+                order: SortOrder::Asc,
+            }),
+            None,
+        )
+        .await
+        .unwrap();
+    let names: Vec<_> = page.items.iter().map(|e| e.name.as_str()).collect();
+    assert_eq!(
+        names,
+        vec!["stub.alpha", "stub.bravo", "stub.charlie"]
+    );
+}
