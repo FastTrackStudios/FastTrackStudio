@@ -66,36 +66,16 @@ find . -mindepth 1 -maxdepth 1 \
     -name '_Footer.md' -prune -o \
     -exec rm -rf {} +
 
-# Render: for each markdown file in SRC_DIR, strip frontmatter, place
-# at the wiki's mirrored path.
-src="$OLDPWD/$SRC_DIR"
-while IFS= read -r -d '' file; do
-    rel="${file#$src/}"
-    # Convert path segments to title-case for prettier wiki URLs.
-    # docs/content/_index.md       → Home.md
-    # docs/content/getting-started/_index.md → Getting-Started/Home.md
-    # docs/content/architecture/pattern.md   → Architecture/Pattern.md
-    out=""
-    IFS='/' read -ra segs <<< "$rel"
-    n=${#segs[@]}
-    for (( i=0; i<n; i++ )); do
-        seg="${segs[i]}"
-        # The leaf (last segment) gets capitalized; _index.md becomes Home.md
-        if (( i == n - 1 )); then
-            case "$seg" in
-                _index.md) seg="Home.md" ;;
-                *) seg="$(echo "${seg%.md}" | sed -E 's/(^|-)([a-z])/\1\u\2/g; s/-/-/g').md" ;;
-            esac
-        else
-            # Section dirs: kebab-to-Title-Case
-            seg="$(echo "$seg" | sed -E 's/(^|-)([a-z])/\1\u\2/g')"
-        fi
-        out+="${seg}"
-        (( i < n - 1 )) && out+="/"
-    done
+# Title-case a kebab-to-Title path segment ("getting-started" → "Getting-Started").
+title_case() {
+    echo "$1" | sed -E 's/(^|-)([a-z])/\1\u\2/g'
+}
 
-    mkdir -p "$(dirname "$out")"
-    # Strip leading `+++ ... +++` frontmatter (TOML block, dodeca format).
+# Render one markdown file at $1 (absolute path) under $2 (wiki-relative path).
+render_md() {
+    local src_file="$1"
+    local out_path="$2"
+    mkdir -p "$(dirname "$out_path")"
     awk '
         BEGIN { in_fm = 0; done = 0 }
         !done && NR == 1 && /^\+\+\+[[:space:]]*$/ { in_fm = 1; next }
@@ -103,8 +83,63 @@ while IFS= read -r -d '' file; do
         in_fm { next }
         # Rewrite dodeca @/section/page.md links to wiki-friendly paths.
         { gsub(/\(@\/([^)]+)\.md\)/, "(\\1)"); print }
-    ' "$file" > "$out"
+    ' "$src_file" > "$out_path"
+}
+
+repo_root="$OLDPWD"
+
+# Render: for each markdown file under docs/content/, strip frontmatter
+# and place at the wiki's mirrored path.
+src="$repo_root/$SRC_DIR"
+while IFS= read -r -d '' file; do
+    rel="${file#$src/}"
+    # docs/content/_index.md                  → Home.md
+    # docs/content/getting-started/_index.md  → Getting-Started/Home.md
+    # docs/content/architecture/pattern.md    → Architecture/Pattern.md
+    out=""
+    IFS='/' read -ra segs <<< "$rel"
+    n=${#segs[@]}
+    for (( i=0; i<n; i++ )); do
+        seg="${segs[i]}"
+        if (( i == n - 1 )); then
+            case "$seg" in
+                _index.md) seg="Home.md" ;;
+                *) seg="$(title_case "${seg%.md}").md" ;;
+            esac
+        else
+            seg="$(title_case "$seg")"
+        fi
+        out+="${seg}"
+        (( i < n - 1 )) && out+="/"
+    done
+    render_md "$file" "$out"
 done < <(find "$src" -type f -name '*.md' -print0)
+
+# Feature specs live alongside the feature at features/<feature>/spec/*.md.
+# Mirror them into Specs/<Feature>/<Page>.md so they're browsable from the
+# wiki without leaving the feature crate as the source of truth.
+if [[ -d "$repo_root/features" ]]; then
+    while IFS= read -r -d '' file; do
+        # file = $repo_root/features/<feature>/spec/<page>.md
+        rel="${file#$repo_root/features/}"      # <feature>/spec/<page>.md
+        feature="${rel%%/*}"                      # <feature>
+        rest="${rel#*/spec/}"                     # <page>.md (possibly with subdir)
+        feature_title="$(title_case "$feature")"
+        # Title-case the leaf (e.g. repo.md → Repo.md).
+        leaf="$(basename "$rest")"
+        case "$leaf" in
+            _index.md) leaf="Home.md" ;;
+            *) leaf="$(title_case "${leaf%.md}").md" ;;
+        esac
+        sub="$(dirname "$rest")"
+        if [[ "$sub" == "." ]]; then
+            out="Specs/${feature_title}/${leaf}"
+        else
+            out="Specs/${feature_title}/${sub}/${leaf}"
+        fi
+        render_md "$file" "$out"
+    done < <(find "$repo_root/features" -path '*/spec/*' -type f -name '*.md' -print0)
+fi
 
 # Show what changed.
 git add -A
