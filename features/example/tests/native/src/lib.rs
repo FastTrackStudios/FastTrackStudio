@@ -30,7 +30,7 @@ async fn create_then_get_round_trip() {
     assert_eq!(got.name, "alpha");
 }
 
-// r[verify repo.list.sort.name_ascending]
+// r[verify repo.list.sort.name]
 #[tokio::test]
 async fn list_sorted_by_name_ascending() {
     let r = repo();
@@ -44,7 +44,10 @@ async fn list_sorted_by_name_ascending() {
     }
     let page = r
         .list(
-            Page { index: 0, size: 100 },
+            Page {
+                index: 0,
+                size: 100,
+            },
             Some(Sort {
                 field: "name".into(),
                 order: SortOrder::Asc,
@@ -82,7 +85,7 @@ async fn update_changes_fields() {
     assert_eq!(updated.description, "old");
 }
 
-// r[verify repo.delete.not_found]
+// r[verify repo.delete.missing]
 #[tokio::test]
 async fn delete_removes_row() {
     let r = repo();
@@ -94,13 +97,10 @@ async fn delete_removes_row() {
         .await
         .unwrap();
     r.delete(created.id).await.unwrap();
-    assert!(matches!(
-        r.get(created.id).await,
-        Err(RepoError::NotFound)
-    ));
+    assert!(matches!(r.get(created.id).await, Err(RepoError::NotFound)));
 }
 
-// r[verify repo.list.sort.unknown_field]
+// r[verify repo.list.sort.unknown]
 #[tokio::test]
 async fn unsortable_field_errors() {
     let r = repo();

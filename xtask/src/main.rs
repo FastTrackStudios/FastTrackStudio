@@ -51,8 +51,8 @@ fn print_usage() {
   cargo xtask docs serve             ddc serve
   cargo xtask docs build             ddc build
   cargo xtask wiki sync [--dry-run]  push docs/content/ to Forgejo wiki
-  cargo xtask ci                     check + fmt --check + clippy + test
-  cargo xtask install-tools          install ddc + tracey
+  cargo xtask ci                     fmt + clippy + check + test + tracey
+  cargo xtask tracey-validate        spec ↔ impl ↔ verify coverage check
 ",
         "USAGE".bold()
     );
@@ -99,7 +99,7 @@ fn main() -> ExitCode {
             }
         },
         Some((&"ci", _)) => run_ci(),
-        Some((&"install-tools", _)) => run_install_tools(),
+        Some((&"tracey-validate", _)) => run_tracey_validate(),
         Some((&"--help" | &"-h" | &"help", _)) => {
             print_usage();
             return ExitCode::SUCCESS;
@@ -151,7 +151,11 @@ fn run_test(args: TestArgs) -> eyre::Result<()> {
 
 fn run_e2e(args: E2eArgs) -> eyre::Result<()> {
     section("e2e (browser)");
-    let recipe = if args.memory { "test-e2e-memory" } else { "test-e2e" };
+    let recipe = if args.memory {
+        "test-e2e-memory"
+    } else {
+        "test-e2e"
+    };
     run_at_root(&["just", recipe])
 }
 
@@ -167,23 +171,25 @@ fn run_wiki_sync(args: WikiSyncArgs) -> eyre::Result<()> {
 fn run_ci() -> eyre::Result<()> {
     section("ci");
     cargo(&["fmt", "--all", "--check"])?;
-    cargo(&["clippy", "--workspace", "--all-targets", "--", "-D", "warnings"])?;
+    cargo(&[
+        "clippy",
+        "--workspace",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings",
+    ])?;
     cargo(&["check", "--workspace", "--all-targets"])?;
     cargo(&["nextest", "run", "--workspace", "--profile", "ci"])?;
+    run_tracey_validate()?;
     Ok(())
 }
 
-fn run_install_tools() -> eyre::Result<()> {
-    section("install-tools");
-    eprintln!("Installing dodeca (ddc) ...");
-    sh("curl --proto '=https' --tlsv1.2 -LsSf \
-        https://github.com/bearcove/dodeca/releases/latest/download/dodeca-installer.sh \
-        | sh")?;
-    eprintln!("Installing tracey ...");
-    sh("curl --proto '=https' --tlsv1.2 -LsSf \
-        https://github.com/bearcove/tracey/releases/latest/download/tracey-installer.sh \
-        | sh")?;
-    Ok(())
+fn run_tracey_validate() -> eyre::Result<()> {
+    section("tracey validate");
+    // Exits non-zero on broken refs / unknown prefixes / stale rules /
+    // naming violations. Warnings are non-fatal in tracey 1.3.0.
+    run_at_root(&["tracey", "query", "validate"])
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────
@@ -217,18 +223,6 @@ fn run_in(subdir: &str, argv: &[&str]) -> eyre::Result<()> {
         .status()?;
     if !status.success() {
         eyre::bail!("`{}` exited with {}", argv.join(" "), status);
-    }
-    Ok(())
-}
-
-fn sh(cmd: &str) -> eyre::Result<()> {
-    let status = Command::new("sh")
-        .arg("-c")
-        .arg(cmd)
-        .current_dir(repo_root())
-        .status()?;
-    if !status.success() {
-        eyre::bail!("`{cmd}` exited with {status}");
     }
     Ok(())
 }

@@ -14,10 +14,8 @@
 use std::sync::Arc;
 
 use architect::axum_ws;
-use axum::{routing::get, Router};
-use example::{
-    backend_memory::ExampleRepoMemory, ExampleRepoDispatcher,
-};
+use axum::{Router, routing::get};
+use example::{ExampleRepoDispatcher, backend_memory::ExampleRepoMemory};
 use tokio::sync::oneshot;
 
 /// Build the same Router that `apps/example/server` mounts. Exposed as
@@ -72,7 +70,9 @@ pub async fn spawn() -> (String, oneshot::Sender<()>) {
 async fn router_builds_and_serves_health() {
     let (ws_url, shutdown) = spawn().await;
     // Strip /vox + ws:// to hit /api/health over http.
-    let http = ws_url.replace("ws://", "http://").replace("/vox", "/api/health");
+    let http = ws_url
+        .replace("ws://", "http://")
+        .replace("/vox", "/api/health");
     let body = reqwest_health(&http).await;
     assert_eq!(body, "ok");
     let _ = shutdown.send(());

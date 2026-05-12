@@ -9,10 +9,10 @@ mod service_impl;
 
 use architect::axum_ws;
 use axum::{
+    Router,
     extract::{State, WebSocketUpgrade},
     response::{IntoResponse, Response},
     routing::get,
-    Router,
 };
 use example::{ExampleRepoDispatcher, ExampleServiceDispatcher};
 use service_impl::ExampleServiceImpl;
@@ -99,10 +99,7 @@ async fn health() -> &'static str {
     "ok"
 }
 
-async fn vox_ws_handler(
-    ws: WebSocketUpgrade,
-    State(state): State<Arc<AppState>>,
-) -> Response {
+async fn vox_ws_handler(ws: WebSocketUpgrade, State(state): State<Arc<AppState>>) -> Response {
     ws.on_upgrade(move |socket| async move {
         let repo = state.repo.clone();
         let factory = axum_ws::acceptor_fn(move |req, connection| match req.service() {
@@ -111,9 +108,9 @@ async fn vox_ws_handler(
                 Ok(())
             }
             "ExampleService" => {
-                connection.handle_with(ExampleServiceDispatcher::new(
-                    ExampleServiceImpl::new(repo.clone()),
-                ));
+                connection.handle_with(ExampleServiceDispatcher::new(ExampleServiceImpl::new(
+                    repo.clone(),
+                )));
                 Ok(())
             }
             other => {

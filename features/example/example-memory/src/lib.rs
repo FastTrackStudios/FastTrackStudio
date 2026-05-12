@@ -25,7 +25,7 @@ impl ExampleRepoMemory {
 }
 
 impl ExampleRepo for ExampleRepoMemory {
-    // r[impl repo.get.not_found]
+    // r[impl repo.get.missing]
     async fn get(&self, id: Uuid) -> Result<Example, RepoError> {
         let guard = self.inner.read().await;
         guard
@@ -35,8 +35,8 @@ impl ExampleRepo for ExampleRepoMemory {
             .ok_or(RepoError::NotFound)
     }
 
-    // r[impl repo.list.sort.name_ascending]
-    // r[impl repo.list.sort.unknown_field]
+    // r[impl repo.list.sort.name]
+    // r[impl repo.list.sort.unknown]
     async fn list(
         &self,
         page: Page,
@@ -100,7 +100,7 @@ impl ExampleRepo for ExampleRepoMemory {
         Ok(row.clone())
     }
 
-    // r[impl repo.delete.not_found]
+    // r[impl repo.delete.missing]
     async fn delete(&self, id: Uuid) -> Result<(), RepoError> {
         let mut guard = self.inner.write().await;
         let before = guard.len();

@@ -87,7 +87,10 @@ impl vox_types::Link for AxumWsLink {
         let (tx_in, rx_in) = mpsc::channel::<Result<AxumWsMessage, AxumWsError>>(1);
         let io_task = tokio::spawn(io_loop(self.socket, rx_out, tx_in, self.closed));
         (
-            AxumWsTx { tx: tx_out, io_task },
+            AxumWsTx {
+                tx: tx_out,
+                io_task,
+            },
             AxumWsRx { rx: rx_in },
         )
     }

@@ -47,9 +47,8 @@ pub struct Example {
     #[architect(filterable, fulltext)]
     pub description: String,
 
-    /// Audit timestamps managed by architect. Excluded from create
-    /// + update payloads (clients can't set them); populated by the
-    /// macro's storage layer on insert / update.
+    /// Audit timestamp. Excluded from create/update payloads (clients
+    /// can't set it); populated by the macro's storage layer on insert.
     #[architect(exclude(create, update), on_create = Utc::now())]
     pub created_at: DateTime<Utc>,
 

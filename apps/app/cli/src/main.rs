@@ -21,7 +21,7 @@ use facet_pretty::FacetPretty;
 use figue as args;
 use owo_colors::OwoColorize;
 use uuid::Uuid;
-use vox_core::{initiator_on, TransportMode};
+use vox_core::{TransportMode, initiator_on};
 use vox_websocket::WsLink;
 
 #[derive(Facet, Debug)]
@@ -142,7 +142,10 @@ async fn run_list(args: ListArgs) -> eyre::Result<()> {
     use architect::Page;
     let page = client
         .list(
-            Page { index: 0, size: args.page_size.unwrap_or(50) },
+            Page {
+                index: 0,
+                size: args.page_size.unwrap_or(50),
+            },
             None,
             None,
         )
@@ -158,7 +161,10 @@ async fn run_list(args: ListArgs) -> eyre::Result<()> {
 async fn run_get(args: GetArgs) -> eyre::Result<()> {
     let client = connect(args.url).await?;
     let id: Uuid = args.id.parse().map_err(|e| eyre::eyre!("bad UUID: {e}"))?;
-    let ex = client.get(id).await.map_err(|e| eyre::eyre!("get: {e:?}"))?;
+    let ex = client
+        .get(id)
+        .await
+        .map_err(|e| eyre::eyre!("get: {e:?}"))?;
     println!("{}", ex.pretty());
     Ok(())
 }
@@ -179,7 +185,10 @@ async fn run_create(args: CreateArgs) -> eyre::Result<()> {
 async fn run_delete(args: DeleteArgs) -> eyre::Result<()> {
     let client = connect(args.url).await?;
     let id: Uuid = args.id.parse().map_err(|e| eyre::eyre!("bad UUID: {e}"))?;
-    client.delete(id).await.map_err(|e| eyre::eyre!("delete: {e:?}"))?;
+    client
+        .delete(id)
+        .await
+        .map_err(|e| eyre::eyre!("delete: {e:?}"))?;
     println!("{} {id}", "deleted".green());
     Ok(())
 }

@@ -10,8 +10,7 @@ use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
 use syn::{
-    parse_macro_input, Data, DeriveInput, Expr, Field, Fields, Ident, LitBool, LitStr, Result,
-    Type,
+    Data, DeriveInput, Expr, Field, Fields, Ident, LitBool, LitStr, Result, Type, parse_macro_input,
 };
 
 // ── Attribute parsing ─────────────────────────────────────────────────
@@ -130,14 +129,14 @@ fn expand(input: DeriveInput) -> Result<TokenStream2> {
                 return Err(syn::Error::new_spanned(
                     &ident,
                     "architect::Entity requires named fields",
-                ))
+                ));
             }
         },
         _ => {
             return Err(syn::Error::new_spanned(
                 &ident,
                 "architect::Entity requires a struct",
-            ))
+            ));
         }
     };
 
@@ -151,10 +150,12 @@ fn expand(input: DeriveInput) -> Result<TokenStream2> {
         });
     }
 
-    let pk = parsed
-        .iter()
-        .find(|f| f.attrs.primary_key)
-        .ok_or_else(|| syn::Error::new_spanned(&ident, "architect::Entity needs a #[architect(primary_key)] field"))?;
+    let pk = parsed.iter().find(|f| f.attrs.primary_key).ok_or_else(|| {
+        syn::Error::new_spanned(
+            &ident,
+            "architect::Entity needs a #[architect(primary_key)] field",
+        )
+    })?;
     let pk_ident = pk.ident;
     let pk_ty = pk.ty;
 
