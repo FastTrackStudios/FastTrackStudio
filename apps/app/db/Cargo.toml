@@ -3,6 +3,11 @@ name = "app-db"
 version.workspace = true
 edition.workspace = true
 
+[package.metadata]
+
+[package.metadata."docs.rs"]
+rustdoc-args = ["--html-in-header", "arborium-header.html"]
+
 # Migration runner. `cargo run -p app-db -- up` brings the
 # SQLite DB to the latest migration; `down`, `status`, `refresh`,
 # `reset`, and `fresh` are inherited from sea-orm-migration's CLI.

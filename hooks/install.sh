@@ -1,24 +1,46 @@
 #!/usr/bin/env bash
-# Install architect's git hooks: pre-commit (fmt + tracey) and pre-push
-# (clippy + nextest). Idempotent — re-run any time.
-
 set -euo pipefail
 
-repo_root="$(git rev-parse --show-toplevel)"
-hooks_dir="$repo_root/.git/hooks"
-src_dir="$repo_root/hooks"
+HOOK_SOURCE_DIR="$(git rev-parse --show-toplevel)/hooks"
+GIT_DIR="$(git rev-parse --git-dir)"
 
-mkdir -p "$hooks_dir"
+copy_hook() {
+  local src="$1"
+  local dst="$2"
 
-for hook in pre-commit pre-push; do
-    src="$src_dir/$hook"
-    dst="$hooks_dir/$hook"
-    if [[ ! -f "$src" ]]; then
-        continue
+  mkdir -p "$(dirname "$dst")"
+  cp "$src" "$dst"
+  chmod +x "$dst"
+
+  echo "✔ installed $(basename "$src") → $dst"
+}
+
+install_for_dir() {
+  local hook_dir="$1"
+
+  for hook in "$HOOK_SOURCE_DIR"/*; do
+    local name
+    name="$(basename "$hook")"
+    # Skip install.sh itself
+    if [ "$name" = "install.sh" ]; then
+      continue
     fi
-    install -m755 "$src" "$dst"
-    echo "installed $hook → $dst"
+    local target="$hook_dir/$name"
+
+    copy_hook "$hook" "$target"
+  done
+}
+
+echo "Installing hooks from $HOOK_SOURCE_DIR …"
+
+# main repo
+install_for_dir "$GIT_DIR/hooks"
+
+# worktrees
+for wt in "$GIT_DIR"/worktrees/*; do
+  if [ -d "$wt" ]; then
+    install_for_dir "$wt/hooks"
+  fi
 done
 
-echo
-echo "hooks installed. Bypass with --no-verify if needed."
+echo "All hooks installed successfully."

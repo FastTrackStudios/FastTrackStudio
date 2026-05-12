@@ -7,6 +7,11 @@ license.workspace = true
 description = "Facet-native, vox-friendly entity framework. One #[derive(Entity)] → wire types + SeaORM Model + auto-generated repo trait, all in one source struct."
 repository.workspace = true
 
+[package.metadata]
+
+[package.metadata."docs.rs"]
+rustdoc-args = ["--html-in-header", "arborium-header.html"]
+
 # `architect` is the user-facing crate. It re-exports the derive macro
 # from `architect-derive`, and provides the runtime traits / helper
 # types the macro's output references (`RepoError`, `CrudStorage`, etc).

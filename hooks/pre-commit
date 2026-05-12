@@ -1,16 +1,10 @@
 #!/usr/bin/env bash
-# Fast checks — must pass before every commit. Heavier checks
-# (clippy, nextest) run at pre-push.
+# Bearcove capn: rustfmt on staged files, Cargo.lock staging, arborium,
+# edition-2024 + external-path-deps enforcement. See .config/capn/config.styx.
+set -e
+capn
 
-set -euo pipefail
-
-echo "[pre-commit] cargo fmt --all --check"
-cargo fmt --all --check
-
+# Spec ↔ impl ↔ verify coverage. Architect-specific addition.
 if command -v tracey >/dev/null 2>&1; then
-    echo "[pre-commit] tracey query validate"
     tracey query validate
-else
-    echo "[pre-commit] tracey not on PATH — skipping spec validation"
-    echo "[pre-commit]   enter the nix shell to get it"
 fi

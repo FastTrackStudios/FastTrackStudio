@@ -47,7 +47,10 @@ mod state {
     }
 }
 
-#[cfg(feature = "backend-memory")]
+// Picks backend-memory only when backend-db isn't also enabled — keeps
+// `cargo build --all-features` resolvable. In practice each binary
+// enables exactly one backend feature.
+#[cfg(all(not(feature = "backend-db"), feature = "backend-memory"))]
 mod state {
     use example::backend_memory::ExampleRepoMemory;
 

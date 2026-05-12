@@ -5,6 +5,11 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 
+[package.metadata]
+
+[package.metadata."docs.rs"]
+rustdoc-args = ["--html-in-header", "arborium-header.html"]
+
 # Native CLI that talks to a running `app-server` over the vox
 # WebSocket. Same wire types as the web + desktop clients (everything
 # from `example_proto`); same `ExampleRepoClient` the wasm test uses.
