@@ -81,8 +81,8 @@ fn main() -> ExitCode {
             run_e2e(a)
         }
         Some((&"docs", rest)) => match rest.split_first() {
-            Some((&"serve", _)) => run_in("docs", &["ddc", "serve"]),
-            Some((&"build", _)) => run_in("docs", &["ddc", "build"]),
+            Some((&"serve", _)) => run_at_root(&["ddc", "serve"]),
+            Some((&"build", _)) => run_at_root(&["ddc", "build"]),
             _ => {
                 eprintln!("{}: cargo xtask docs <serve|build>", "ERROR".red().bold());
                 return ExitCode::from(2);
