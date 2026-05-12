@@ -1,0 +1,24 @@
+[package]
+name = "bar"
+version.workspace = true
+edition.workspace = true
+
+# Facade — single import root for the `bar` feature.
+
+[dependencies]
+bar-proto.workspace = true
+bar-memory = { workspace = true, optional = true }
+architect = { workspace = true, optional = true }
+
+[features]
+default = []
+vox = ["bar-proto/vox"]
+server-seaorm = ["bar-proto/server"]
+server-axum = ["dep:architect", "architect/server-axum"]
+backend-memory = ["dep:bar-memory"]
+full = [
+    "vox",
+    "server-seaorm",
+    "server-axum",
+    "backend-memory",
+]

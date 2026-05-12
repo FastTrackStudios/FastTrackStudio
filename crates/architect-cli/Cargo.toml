@@ -1,0 +1,20 @@
+[package]
+name = "architect-cli"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Scaffolding CLI for architect projects — `architect feature new`, `architect backend new`, …"
+repository.workspace = true
+
+[[bin]]
+name = "architect"
+path = "src/main.rs"
+
+[dependencies]
+figue.workspace = true
+facet.workspace = true
+heck.workspace = true
+owo-colors.workspace = true
+eyre.workspace = true
+toml_edit = "0.23"

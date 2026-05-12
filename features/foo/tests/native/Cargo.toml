@@ -1,0 +1,14 @@
+[package]
+name = "foo-tests-native"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+foo-proto.workspace = true
+foo-memory.workspace = true
+architect.workspace = true
+uuid.workspace = true
+tokio = { workspace = true, features = ["macros", "rt"] }

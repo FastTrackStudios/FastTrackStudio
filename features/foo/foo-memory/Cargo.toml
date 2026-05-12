@@ -1,0 +1,17 @@
+[package]
+name = "foo-memory"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+# In-memory implementation of `foo-proto`'s repository trait. Useful
+# for tests and ephemeral single-process deployments. Depends only on
+# the contract crate — no sea-orm, no architect/server.
+
+[dependencies]
+foo-proto.workspace = true
+architect.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+tokio = { workspace = true, features = ["sync"] }

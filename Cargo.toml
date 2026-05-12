@@ -14,7 +14,7 @@ members = [
     "macros/architect-derive",
     "examples/external-stub",
     "examples/custom-server",
-    "xtask",
+    "crates/architect-cli", "features/foo/foo", "features/foo/foo-proto", "features/foo/foo-memory", "features/foo/tests/native", "features/bar/bar", "features/bar/bar-proto", "features/bar/bar-memory", "features/bar/tests/native",
 ]
 # Build the production graph by default; xtask is opt-in via `cargo xtask`.
 default-members = [
@@ -31,7 +31,7 @@ default-members = [
     "macros/architect",
     "macros/architect-derive",
     "examples/external-stub",
-    "examples/custom-server",
+    "examples/custom-server", "features/foo/foo", "features/foo/foo-proto", "features/foo/foo-memory", "features/foo/tests/native", "features/bar/bar", "features/bar/bar-proto", "features/bar/bar-memory", "features/bar/tests/native",
 ]
 # Crates with wasm32 / Dioxus target deps that don't survive a workspace
 # host build sit outside; each invokes cargo directly.
@@ -75,6 +75,7 @@ facet-pretty = "0.46"
 figue = "4"
 owo-colors = "4"
 camino = "1"
+heck = "0.5"
 facet-core = "0.46"
 
 # vox — Rust-native RPC. Service traits define the schema; the macro
@@ -123,3 +124,9 @@ example-proto = { path = "features/example/example-proto" }
 example-db = { path = "features/example/example-db" }
 example-memory = { path = "features/example/example-memory" }
 example-stub-backend = { path = "examples/external-stub" }
+foo = { path = "features/foo/foo" }
+foo-proto = { path = "features/foo/foo-proto" }
+foo-memory = { path = "features/foo/foo-memory" }
+bar = { path = "features/bar/bar" }
+bar-proto = { path = "features/bar/bar-proto" }
+bar-memory = { path = "features/bar/bar-memory" }
