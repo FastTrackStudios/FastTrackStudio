@@ -14,7 +14,7 @@ members = [
 exclude = [
     "apps/web",
     "apps/desktop",
-    "crates/example-ui",
+    "apps/ui",
     "features/example/example-test-wasm",
 ]
 resolver = "2"

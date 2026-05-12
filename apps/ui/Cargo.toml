@@ -11,9 +11,11 @@ license = "MIT OR Apache-2.0"
 # `vox-websocket`, which compiles for both wasm32 and native.
 
 [dependencies]
-example-proto = { path = "../example-proto" }
+example-proto = { path = "../../features/example/example-proto" }
 dioxus = { version = "0.7.9", default-features = false, features = ["lib", "router"] }
-vox = { git = "https://github.com/bearcove/vox", rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5" }
+# vox with `runtime` only — matches the workspace's wasm-clean baseline so
+# this crate compiles for wasm32 (where `apps/web` consumes it).
+vox = { git = "https://github.com/bearcove/vox", rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5", default-features = false, features = ["runtime"] }
 vox-core = { git = "https://github.com/bearcove/vox", rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5" }
 vox-websocket = { git = "https://github.com/bearcove/vox", rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5" }
 uuid = { version = "1", features = ["v4", "js"] }
