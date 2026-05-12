@@ -5,29 +5,19 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 
-# The schema crate. Defines:
-#  - The `Example` data type
-#  - The auto-generated `ExampleRepo` vox trait (crudcrate macro)
-#  - The hand-written `ExampleService` vox trait (domain surface)
-#
-# Compiles **with no features** to wasm32-unknown-unknown — the
-# `server` feature flips on SeaORM derives + storage glue that the
-# server / db crates need.
+# Demonstration of the architect derive: one struct, one source of
+# truth. Compiles to wasm32 without features; the `server` feature
+# pulls in the SeaORM Model + repo storage that architect emits
+# alongside the wire struct.
 
 [dependencies]
+architect.workspace = true
 chrono.workspace = true
 uuid = { workspace = true, features = ["js"] }
 facet.workspace = true
-vox.workspace = true
-thiserror.workspace = true
-
-# SeaORM + crudcrate are gated server-side. Wasm builds simply don't
-# resolve these crates.
-sea-orm = { workspace = true, optional = true }
-crudcrate = { workspace = true, optional = true }
 
 [features]
 default = []
-# Pulls in SeaORM derives + crudcrate's storage glue. Required by
-# `apps/server` and `crates/example-db`; *not* enabled by wasm clients.
-server = ["dep:sea-orm", "dep:crudcrate"]
+# Forwarded to architect so the macro's server-side emissions
+# (SeaORM Model, RepoStorage, From impls) compile in.
+server = ["architect/server"]

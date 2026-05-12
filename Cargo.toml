@@ -4,6 +4,8 @@ members = [
     "apps/db",
     "crates/example-proto",
     "crates/example-db",
+    "macros/architect",
+    "macros/architect-derive",
 ]
 # UI crates live outside the workspace to keep their wasm32 / Dioxus
 # target constraints from leaking into the server build.
@@ -19,7 +21,7 @@ version = "0.1.0"
 edition = "2024"
 authors = ["Cody Wright"]
 license = "MIT OR Apache-2.0"
-repository = "https://git.starcommand.live/codywright/Architecture-Reference"
+repository = "https://git.starcommand.live/codywright/architect"
 
 [workspace.dependencies]
 # Shared async runtime
@@ -65,6 +67,11 @@ serde_json = "1"
 # Wasm
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
+
+# The architect derive crate — owns the macro that emits the wire
+# struct + the SeaORM Model + the auto-generated vox repo trait,
+# all from one source struct. Every entity crate depends on this.
+architect = { path = "macros/architect" }
 
 # Proto crate — referenced by everything else as a path dep so
 # entity changes flow uniformly to every surface.

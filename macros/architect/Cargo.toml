@@ -1,0 +1,35 @@
+[package]
+name = "architect"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Facet-native, vox-friendly entity framework. One #[derive(Entity)] → wire types + SeaORM Model + auto-generated repo trait, all in one source struct."
+repository.workspace = true
+
+# `architect` is the user-facing crate. It re-exports the derive macro
+# from `architect-derive`, and provides the runtime traits / helper
+# types the macro's output references (`RepoError`, `CrudStorage`, etc).
+#
+# Wasm-clean by default. The `server` feature pulls in sea-orm + the
+# server-side storage glue so the same `#[derive(Entity)]` user struct
+# also gets a full ORM-backed repository implementation.
+
+[features]
+default = []
+# Pulls in sea-orm + sea-orm-migration + the storage runtime.
+# Wasm consumers do NOT enable this.
+server = ["dep:sea-orm", "dep:async-trait"]
+
+[dependencies]
+architect-derive = { path = "../architect-derive" }
+facet.workspace = true
+facet-core.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+thiserror.workspace = true
+vox.workspace = true
+
+# Server-side only — sea-orm + async-trait are gated.
+sea-orm = { workspace = true, optional = true }
+async-trait = { version = "0.1", optional = true }

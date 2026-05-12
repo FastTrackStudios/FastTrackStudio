@@ -15,7 +15,7 @@ use dioxus::prelude::*;
 pub fn App() -> Element {
     rsx! {
         div { class: "container",
-            h1 { "Architecture Reference" }
+            h1 { "architect" }
             p {
                 "Wire example: this component would call "
                 code { "ExampleServiceClient::list_examples()" }
