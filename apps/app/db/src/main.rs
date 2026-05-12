@@ -3,7 +3,7 @@
 //! `fresh`) work as in any other SeaORM project.
 //!
 //! Connection string comes from `DATABASE_URL`; defaults to a SQLite
-//! file in the project root so `cargo run -p example-app-db -- up`
+//! file in the project root so `cargo run -p app-db -- up`
 //! Just Works in a fresh checkout.
 
 use sea_orm_migration::prelude::*;

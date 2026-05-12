@@ -1,5 +1,5 @@
 [package]
-name = "example-app-tests-e2e"
+name = "app-tests-e2e"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -15,7 +15,7 @@ publish = false
 # added.
 #
 # Run with:
-#   cargo test -p example-app-tests-e2e
+#   cargo test -p app-tests-e2e
 
 [dependencies]
 example = { workspace = true, features = ["backend-memory"] }

@@ -1,18 +1,18 @@
 [package]
-name = "example-app-server"
+name = "app-server"
 version.workspace = true
 edition.workspace = true
 
 [[bin]]
-name = "example-server"
+name = "app-server"
 path = "src/main.rs"
 
 # Axum HTTP + vox WebSocket. The actual repository implementation comes
 # from the `example` facade, which selects backend by cargo feature.
 # Pick exactly one at build time:
 #
-#   cargo run -p example-app-server --features backend-db      # default
-#   cargo run -p example-app-server --no-default-features --features backend-memory
+#   cargo run -p app-server --features backend-db      # default
+#   cargo run -p app-server --no-default-features --features backend-memory
 
 [features]
 default = ["backend-db"]

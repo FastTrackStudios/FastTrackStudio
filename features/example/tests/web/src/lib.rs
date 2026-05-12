@@ -4,7 +4,7 @@
 //! over a WebSocket: create a row, fetch it back, list, delete, verify
 //! it's gone. Every byte goes through facet encoding on the wire.
 //!
-//! Prerequisite: `cargo run -p example-app-server` in another terminal.
+//! Prerequisite: `cargo run -p app-server` in another terminal.
 //! Then run from the architect repo root:
 //!
 //! ```sh

@@ -1,8 +1,8 @@
 [workspace]
 members = [
-    "apps/example/server",
-    "apps/example/db",
-    "apps/example/tests/e2e",
+    "apps/app/server",
+    "apps/app/db",
+    "apps/app/tests/e2e",
     "features/example/example",
     "features/example/example-proto",
     "features/example/example-db",
@@ -15,9 +15,9 @@ members = [
 # Crates with wasm32 / Dioxus target deps that don't survive a workspace
 # host build sit outside; each invokes cargo directly.
 exclude = [
-    "apps/example/web",
-    "apps/example/desktop",
-    "apps/example/ui",
+    "apps/app/web",
+    "apps/app/desktop",
+    "apps/app/ui",
     "features/example/tests/web",
 ]
 resolver = "2"

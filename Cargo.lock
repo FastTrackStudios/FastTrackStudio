@@ -100,6 +100,52 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
+name = "app-db"
+version = "0.1.0"
+dependencies = [
+ "example-db",
+ "eyre",
+ "sea-orm",
+ "sea-orm-migration",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "app-server"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "axum",
+ "example",
+ "eyre",
+ "sea-orm",
+ "sea-orm-migration",
+ "tokio",
+ "tower-http",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
+name = "app-tests-e2e"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "axum",
+ "example",
+ "example-proto",
+ "tokio",
+ "tower-http",
+ "tracing",
+ "uuid",
+ "vox-core",
+ "vox-websocket",
+]
+
+[[package]]
 name = "architect"
 version = "0.1.0"
 dependencies = [
@@ -1234,52 +1280,6 @@ dependencies = [
  "example-db",
  "example-memory",
  "example-proto",
-]
-
-[[package]]
-name = "example-app-db"
-version = "0.1.0"
-dependencies = [
- "example-db",
- "eyre",
- "sea-orm",
- "sea-orm-migration",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "example-app-server"
-version = "0.1.0"
-dependencies = [
- "architect",
- "axum",
- "example",
- "eyre",
- "sea-orm",
- "sea-orm-migration",
- "tokio",
- "tower-http",
- "tracing",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
-name = "example-app-tests-e2e"
-version = "0.1.0"
-dependencies = [
- "architect",
- "axum",
- "example",
- "example-proto",
- "tokio",
- "tower-http",
- "tracing",
- "uuid",
- "vox-core",
- "vox-websocket",
 ]
 
 [[package]]
