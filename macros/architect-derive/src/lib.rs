@@ -214,9 +214,16 @@ fn expand(input: DeriveInput) -> Result<TokenStream2> {
     };
 
     // ── Repo trait ──
+    //
+    // `cfg_attr` gates the `#[vox::service]` decoration on the user
+    // crate's `vox` feature. With the feature on, vox generates the
+    // dispatcher + client types as usual. With it off, the trait is
+    // just a plain Rust 2024 async trait and no RPC machinery
+    // compiles. This is the seam that lets a consumer use the trait
+    // in-process without pulling vox.
     let repo_trait = if container.emit_repo {
         quote! {
-            #[::vox::service]
+            #[cfg_attr(feature = "vox", ::vox::service)]
             #vis trait #repo_ident {
                 async fn get(&self, id: #pk_ty)
                     -> ::core::result::Result<#ident, ::architect::RepoError>;

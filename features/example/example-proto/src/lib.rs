@@ -77,7 +77,10 @@ pub enum ExampleServiceError {
     Internal(String),
 }
 
-#[vox::service]
+// Gated on the `vox` feature exactly like the architect-emitted
+// `ExampleRepo` trait — drop the vox feature and the trait is plain
+// async-in-trait without an RPC surface.
+#[cfg_attr(feature = "vox", vox::service)]
 pub trait ExampleService {
     /// Full-text search across `name` + `description`. Returns at most
     /// `limit` matches (server clamps to a sane max).

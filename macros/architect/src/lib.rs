@@ -30,10 +30,15 @@
 
 pub use architect_derive::Entity;
 
-// Re-export facet + vox so user crates can `use architect::Facet` /
-// `use architect::vox::service` without taking those crates as
-// separate direct dependencies. Keeps the consumer Cargo.toml short.
+// Re-export facet unconditionally — every architect-emitted struct
+// uses it for wire encoding regardless of whether RPC is in play.
 pub use facet;
+
+// Vox re-export only when the `vox` feature is on. Consumers that
+// want in-process trait use (no dispatcher, no client, no RPC at all)
+// can disable the vox feature on their proto crate to drop the
+// dependency entirely.
+#[cfg(feature = "vox")]
 pub use vox;
 
 // ── Repository error envelope ──────────────────────────────────────────

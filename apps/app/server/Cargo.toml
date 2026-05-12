@@ -23,6 +23,7 @@ path = "src/main.rs"
 default = ["backend-db"]
 backend-db = ["example/backend-db", "dep:sea-orm", "dep:sea-orm-migration"]
 backend-memory = ["example/backend-memory"]
+full = ["backend-db", "backend-memory"]
 
 [dependencies]
 architect = { workspace = true, features = ["server-axum"] }

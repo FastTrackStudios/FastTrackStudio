@@ -21,7 +21,16 @@ rustdoc-args = ["--html-in-header", "arborium-header.html"]
 # also gets a full ORM-backed repository implementation.
 
 [features]
+# architect itself stays minimal. Feature crates (e.g. example-proto)
+# pull `architect/vox` when they want the RPC stack so the choice
+# happens at the contract crate's level, not by accident.
 default = []
+vox = ["dep:vox"]
+
+# `full` enables every architect optional — vox, SeaORM bridge, axum
+# adapter. Matches tokio's `full` convention: when you just want
+# everything turned on for development or a single-binary build.
+full = ["vox", "server-seaorm", "server-axum"]
 
 # Two server-side features, deliberately independent so a binary can
 # pick storage and transport à la carte:
@@ -57,7 +66,11 @@ facet-core.workspace = true
 uuid.workspace = true
 chrono.workspace = true
 thiserror.workspace = true
-vox.workspace = true
+
+# Vox RPC stack — optional. When the `vox` feature is off, the macro
+# emits a plain async trait instead of a `#[vox::service]`-decorated one,
+# and the dispatcher/client types simply don't exist.
+vox = { workspace = true, optional = true }
 
 # Server-side only — sea-orm + async-trait are gated.
 sea-orm = { workspace = true, optional = true }

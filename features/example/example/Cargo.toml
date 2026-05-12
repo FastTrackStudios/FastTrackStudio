@@ -24,3 +24,7 @@ example-memory = { workspace = true, optional = true }
 default = []
 backend-db = ["dep:example-db", "example-proto/server"]
 backend-memory = ["dep:example-memory"]
+
+# All in-tree backends + the vox stack. Convenience for binaries that
+# want every first-party piece available at once.
+full = ["backend-db", "backend-memory", "example-proto/full"]
