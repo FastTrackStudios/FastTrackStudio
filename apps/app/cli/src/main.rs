@@ -15,7 +15,7 @@
 use std::env;
 use std::process::ExitCode;
 
-use example_proto::{ExampleCreate, ExampleRepoClient};
+use example::{ExampleCreate, ExampleRepoClient};
 use facet::Facet;
 use facet_pretty::FacetPretty;
 use figue as args;
@@ -193,8 +193,8 @@ async fn run_delete(args: DeleteArgs) -> eyre::Result<()> {
     Ok(())
 }
 
-// `architect::Page` re-exported through `example_proto::architect::Page` —
+// `architect::Page` re-exported through `example::architect::Page` —
 // pull from there to avoid a direct architect dep.
 mod architect {
-    pub use example_proto::architect::Page;
+    pub use example::architect::Page;
 }

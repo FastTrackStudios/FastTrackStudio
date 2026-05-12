@@ -21,12 +21,24 @@ path = "src/main.rs"
 
 [features]
 default = ["backend-db"]
-backend-db = ["example/backend-db", "dep:sea-orm", "dep:sea-orm-migration"]
-backend-memory = ["example/backend-memory"]
+# Note both backend features enable `example/server-axum` so the
+# axum WebSocket adapter is available regardless of which storage
+# backend the binary picks.
+backend-db = [
+    "example/backend-db",
+    "example/server-axum",
+    "example/vox",
+    "dep:sea-orm",
+    "dep:sea-orm-migration",
+]
+backend-memory = [
+    "example/backend-memory",
+    "example/server-axum",
+    "example/vox",
+]
 full = ["backend-db", "backend-memory"]
 
 [dependencies]
-architect = { workspace = true, features = ["server-axum"] }
 example = { workspace = true }
 
 axum.workspace = true

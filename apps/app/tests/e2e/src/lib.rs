@@ -13,7 +13,7 @@
 
 use std::sync::Arc;
 
-use architect::axum_ws;
+use example::axum_ws;
 use axum::{Router, routing::get};
 use example::{ExampleRepoDispatcher, backend_memory::ExampleRepoMemory};
 use tokio::sync::oneshot;

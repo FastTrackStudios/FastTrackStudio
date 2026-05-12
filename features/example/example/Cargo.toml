@@ -5,26 +5,47 @@ edition.workspace = true
 
 # Facade crate for the `example` feature.
 #
-# Re-exports the wire contract from `example-proto` and selects which
-# backend implementation to expose via cargo features:
+# Single import root + single feature surface. A consumer picks the
+# slice they want via cargo features on this one dep, and gets the
+# corresponding pieces re-exported from `example::*`:
 #
-#   --features backend-db      → SeaORM-backed (sqlite by default)
-#   --features backend-memory  → in-memory HashMap-backed
+#   vox            → #[vox::service] surface, dispatcher + client
+#   server-seaorm  → architect-emitted ExampleRepoStorage<C> + DbConn
+#   server-axum    → architect::axum_ws helpers, re-exported here
+#   backend-db     → in-tree SeaORM/SQLite backend (example-db)
+#   backend-memory → in-tree HashMap backend (example-memory)
+#   full           → all of the above
 #
-# Pick one in your binary. Both backends implement the same
-# `example_proto::ExampleRepo` trait, so dispatcher wiring in
-# `apps/server` is identical regardless.
+# Both backends implement `example_proto::ExampleRepo`, so dispatcher
+# wiring is identical regardless. Third parties skip the facade and
+# depend on example-proto + architect directly.
 
 [dependencies]
 example-proto.workspace = true
 example-db = { workspace = true, optional = true }
 example-memory = { workspace = true, optional = true }
+# Optional so consumers who don't need `server-axum` don't pull
+# architect's axum + tokio + futures + tracing + vox-core + vox-types.
+architect = { workspace = true, optional = true }
 
 [features]
 default = []
+
+# ── Axis features (forward to the underlying crates) ──
+vox = ["example-proto/vox"]
+server-seaorm = ["example-proto/server"]
+server-axum = ["dep:architect", "architect/server-axum"]
+
+# ── Backend selection ──
 backend-db = ["dep:example-db", "example-proto/server"]
 backend-memory = ["dep:example-memory"]
 
-# All in-tree backends + the vox stack. Convenience for binaries that
-# want every first-party piece available at once.
-full = ["backend-db", "backend-memory", "example-proto/full"]
+# Everything — every axis + every in-tree backend. Matches tokio's
+# `full` convention.
+full = [
+    "vox",
+    "server-seaorm",
+    "server-axum",
+    "backend-db",
+    "backend-memory",
+]

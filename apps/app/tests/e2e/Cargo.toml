@@ -18,9 +18,9 @@ publish = false
 #   cargo test -p app-tests-e2e
 
 [dependencies]
-example = { workspace = true, features = ["backend-memory"] }
-example-proto.workspace = true
-architect = { workspace = true, features = ["server-axum"] }
+# Single dep root — facade exposes the contract types, the memory
+# backend, the axum adapter, and the vox client/dispatcher.
+example = { workspace = true, features = ["backend-memory", "server-axum", "vox"] }
 axum.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 tower-http.workspace = true

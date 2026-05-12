@@ -8,7 +8,7 @@
 //! `apps/web` and `apps/desktop` mount.
 
 use dioxus::prelude::*;
-use example_proto::Example;
+use example::Example;
 
 /// Renders a list of examples. Caller fetches the data and hands it in;
 /// keeps this component testable in isolation without an open socket.

@@ -314,6 +314,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "example"
+version = "0.1.0"
+dependencies = [
+ "example-proto",
+]
+
+[[package]]
 name = "example-proto"
 version = "0.1.0"
 dependencies = [
@@ -329,7 +336,7 @@ dependencies = [
 name = "example-test-wasm"
 version = "0.1.0"
 dependencies = [
- "example-proto",
+ "example",
  "uuid",
  "vox-core",
  "vox-websocket",

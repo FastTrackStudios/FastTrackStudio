@@ -22,7 +22,7 @@ name = "app"
 path = "src/main.rs"
 
 [dependencies]
-example-proto.workspace = true
+example = { workspace = true, features = ["vox"] }
 figue.workspace = true
 facet.workspace = true
 facet-pretty.workspace = true

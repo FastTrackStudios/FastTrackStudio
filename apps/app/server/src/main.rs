@@ -7,7 +7,7 @@
 
 mod service_impl;
 
-use architect::axum_ws;
+use example::axum_ws;
 use axum::{
     Router,
     extract::{State, WebSocketUpgrade},

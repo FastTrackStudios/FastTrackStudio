@@ -13,7 +13,7 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use example_proto::{
+use example::{
     architect::{Page, SortOrder, Sort},
     ExampleCreate, ExampleRepoClient,
 };

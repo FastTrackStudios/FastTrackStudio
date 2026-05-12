@@ -20,9 +20,9 @@ publish = false
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-# Wire types + the auto-generated ExampleRepoClient — wasm-clean by
-# construction (only depends on vox with `runtime` feature).
-example-proto = { path = "../../example-proto" }
+# Single dep root — facade carries the wire types + auto-generated
+# ExampleRepoClient. Wasm-clean by construction.
+example = { path = "../../example", features = ["vox"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 vox-core = { git = "https://github.com/bearcove/vox", rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5" }

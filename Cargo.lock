@@ -103,7 +103,7 @@ checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 name = "app-cli"
 version = "0.1.0"
 dependencies = [
- "example-proto",
+ "example",
  "eyre",
  "facet",
  "facet-pretty",
@@ -134,7 +134,6 @@ dependencies = [
 name = "app-server"
 version = "0.1.0"
 dependencies = [
- "architect",
  "axum",
  "example",
  "eyre",
@@ -151,10 +150,8 @@ dependencies = [
 name = "app-tests-e2e"
 version = "0.1.0"
 dependencies = [
- "architect",
  "axum",
  "example",
- "example-proto",
  "tokio",
  "tower-http",
  "tracing",
@@ -1305,6 +1302,7 @@ dependencies = [
 name = "example"
 version = "0.1.0"
 dependencies = [
+ "architect",
  "example-db",
  "example-memory",
  "example-proto",
@@ -1389,7 +1387,7 @@ name = "example-ui"
 version = "0.1.0"
 dependencies = [
  "dioxus",
- "example-proto",
+ "example",
  "uuid",
  "vox",
  "vox-core",
