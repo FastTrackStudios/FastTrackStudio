@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Heavier checks — must pass before pushing. Skipped on `git push
+# --no-verify` if you really need to.
+
+set -euo pipefail
+
+echo "[pre-push] cargo clippy --workspace --all-targets -- -D warnings"
+cargo clippy --workspace --all-targets -- -D warnings
+
+if command -v cargo-nextest >/dev/null 2>&1; then
+    echo "[pre-push] cargo nextest run --workspace"
+    cargo nextest run --workspace
+else
+    echo "[pre-push] cargo-nextest not on PATH — falling back to cargo test"
+    cargo test --workspace
+fi

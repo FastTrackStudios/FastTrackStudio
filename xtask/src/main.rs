@@ -181,6 +181,8 @@ fn run_ci() -> eyre::Result<()> {
     ])?;
     cargo(&["check", "--workspace", "--all-targets"])?;
     cargo(&["nextest", "run", "--workspace", "--profile", "ci"])?;
+    // Doctests run separately — nextest doesn't pick them up.
+    cargo(&["test", "--doc", "--workspace"])?;
     run_tracey_validate()?;
     Ok(())
 }
