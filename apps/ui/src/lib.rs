@@ -1,26 +1,38 @@
-//! Shared Dioxus UI — used by both `apps/web` and `apps/desktop`.
+//! Runtime UI shell — composes feature-ui crates into the pages that
+//! `apps/web` and `apps/desktop` mount.
 //!
-//! The pattern this crate is showcasing:
-//!
-//! 1. Import the wasm-clean `example_proto::*` types + the
-//!    auto-generated `ExampleServiceClient`.
-//! 2. On mount, open a vox WebSocket connection to the server and
-//!    establish the `ExampleServiceClient`.
-//! 3. Render data using the same `Example` struct that the server
-//!    persists — no parallel DTOs, no manual JSON.
+//! For the example, there's one feature (`example`). A real project
+//! pulls in `timeline_ui::*`, `mixing_ui::*`, etc. here; the shell
+//! handles routing, layout, and the WebSocket client lifecycle, then
+//! delegates rendering to the feature components.
 
 use dioxus::prelude::*;
+use example_ui::{ExampleCreateForm, ExampleList};
 
 #[component]
 pub fn App() -> Element {
+    // Placeholder data — wire to `ExampleRepoClient` on mount in the
+    // next pass. The components are intentionally agnostic to where
+    // the data came from, so we can render them with literals here
+    // and stream live data in later without changing the JSX.
+    let items = use_signal(Vec::new);
+
     rsx! {
-        div { class: "container",
-            h1 { "architect" }
-            p {
-                "Wire example: this component would call "
-                code { "ExampleServiceClient::list_examples()" }
-                " over vox-websocket and render the result. "
-                "Service wiring lands next — this scaffold establishes the crate graph."
+        div { class: "app-shell",
+            header { h1 { "architect" } }
+            main {
+                section { class: "panel",
+                    h2 { "Examples" }
+                    ExampleList { items: items() }
+                }
+                section { class: "panel",
+                    h2 { "Add example" }
+                    ExampleCreateForm {
+                        on_submit: move |(_name, _description): (String, String)| {
+                            // TODO: call ExampleRepoClient::create here.
+                        }
+                    }
+                }
             }
         }
     }

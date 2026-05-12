@@ -15,6 +15,7 @@ exclude = [
     "apps/web",
     "apps/desktop",
     "apps/ui",
+    "features/example/example-ui",
     "features/example/example-test-wasm",
 ]
 resolver = "2"

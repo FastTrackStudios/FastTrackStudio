@@ -6,15 +6,15 @@ authors = ["Cody Wright"]
 license = "MIT OR Apache-2.0"
 
 # Native Dioxus desktop target. Same UI as the web app — the platform
-# differences are confined to this binary; `example-ui` stays
+# differences are confined to this binary; `example-app-ui` stays
 # platform-agnostic.
 
 [dependencies]
 example-proto = { path = "../../features/example/example-proto" }
-example-ui = { path = "../ui" }
+example-app-ui = { path = "../ui" }
 
 dioxus = { version = "0.7.9", default-features = false, features = ["lib", "desktop", "launch", "router"] }
-vox = { git = "https://github.com/bearcove/vox", rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5" }
+vox = { git = "https://github.com/bearcove/vox", rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5", default-features = false, features = ["runtime"] }
 vox-core = { git = "https://github.com/bearcove/vox", rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5" }
 vox-websocket = { git = "https://github.com/bearcove/vox", rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5", features = ["transport-websocket"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

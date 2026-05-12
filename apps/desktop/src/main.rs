@@ -1,7 +1,7 @@
 //! Dioxus desktop entry point.
 
 use dioxus::prelude::*;
-use example_ui::App;
+use example_app_ui::App;
 
 fn main() {
     dioxus::launch(Root);
