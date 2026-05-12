@@ -13,6 +13,7 @@ members = [
     "macros/architect",
     "macros/architect-derive",
     "examples/external-stub",
+    "examples/custom-server",
     "xtask",
 ]
 # Build the production graph by default; xtask is opt-in via `cargo xtask`.
@@ -30,6 +31,7 @@ default-members = [
     "macros/architect",
     "macros/architect-derive",
     "examples/external-stub",
+    "examples/custom-server",
 ]
 # Crates with wasm32 / Dioxus target deps that don't survive a workspace
 # host build sit outside; each invokes cargo directly.

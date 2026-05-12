@@ -96,7 +96,7 @@ pub struct Filter {
 #[cfg(feature = "server-axum")]
 pub mod axum_ws;
 
-#[cfg(feature = "server")]
+#[cfg(feature = "server-seaorm")]
 pub mod storage {
     //! Generic storage helpers used by macro-emitted code.
 

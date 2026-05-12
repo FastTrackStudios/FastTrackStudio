@@ -22,15 +22,23 @@ rustdoc-args = ["--html-in-header", "arborium-header.html"]
 
 [features]
 default = []
-# Pulls in sea-orm + sea-orm-migration + the storage runtime.
-# Wasm consumers do NOT enable this.
-server = ["dep:sea-orm", "dep:async-trait"]
-# Adds the axum WebSocket adapter (`architect::axum_ws::*`) — the
-# AxumWsLink/Tx/Rx + `serve` helper that every architect server reuses.
-# Implies `server` since this only makes sense alongside a SeaORM-backed
-# repo, but the adapter itself is independent of sea-orm.
+
+# Two server-side features, deliberately independent so a binary can
+# pick storage and transport à la carte:
+#
+#   server-seaorm   the SeaORM bridge — pulls sea-orm + async-trait,
+#                   exposes `architect::storage::DbConn`, and lets the
+#                   derive emit `<T>RepoStorage<C>`.
+#
+#   server-axum     the axum WebSocket adapter — pulls axum + tokio +
+#                   futures + tracing + vox-core + vox-types, exposes
+#                   `architect::axum_ws::{AxumWsLink, serve, ...}`.
+#
+# A consumer that brings its own repo impl (or fronts a remote API)
+# enables `server-axum` only and never compiles sea-orm.
+
+server-seaorm = ["dep:sea-orm", "dep:async-trait"]
 server-axum = [
-    "server",
     "dep:axum",
     "dep:tokio",
     "dep:futures",
@@ -38,6 +46,9 @@ server-axum = [
     "dep:vox-core",
     "dep:vox-types",
 ]
+# Back-compat alias — older consumers that wrote `features = ["server"]`
+# get the SeaORM bridge for free. Drop after one release cycle.
+server = ["server-seaorm"]
 
 [dependencies]
 architect-derive = { path = "../architect-derive" }

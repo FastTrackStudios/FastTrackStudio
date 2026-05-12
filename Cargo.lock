@@ -1311,6 +1311,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-custom-server"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "axum",
+ "example-proto",
+ "example-stub-backend",
+ "eyre",
+ "tokio",
+ "tower-http",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
 name = "example-db"
 version = "0.1.0"
 dependencies = [
