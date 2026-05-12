@@ -1,0 +1,41 @@
+[package]
+name = "example-app-server"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "example-server"
+path = "src/main.rs"
+
+# Axum HTTP + vox WebSocket. Mounts:
+#   GET /api/health            — liveness
+#   GET /vox?service=…         — vox transport
+#
+# Two vox services on /vox:
+#   - "ExampleService"  — hand-written domain trait from example-proto
+#   - "ExampleRepo"     — crudcrate auto-generated CRUD repo
+# Both share the same DB connection.
+
+[dependencies]
+example-proto = { workspace = true, features = ["server"] }
+example-db.workspace = true
+
+axum.workspace = true
+tokio.workspace = true
+tower-http.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+eyre.workspace = true
+
+sea-orm.workspace = true
+sea-orm-migration.workspace = true
+
+vox.workspace = true
+vox-core.workspace = true
+vox-websocket.workspace = true
+
+facet.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+chrono.workspace = true

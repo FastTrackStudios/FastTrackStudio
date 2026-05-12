@@ -1,0 +1,21 @@
+[package]
+name = "example-app-db"
+version.workspace = true
+edition.workspace = true
+
+# Migration runner. `cargo run -p example-app-db -- up` brings the
+# SQLite DB to the latest migration; `down`, `status`, `refresh`,
+# `reset`, and `fresh` are inherited from sea-orm-migration's CLI.
+
+[[bin]]
+name = "example-db"
+path = "src/main.rs"
+
+[dependencies]
+example-db.workspace = true
+sea-orm.workspace = true
+sea-orm-migration.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+eyre.workspace = true

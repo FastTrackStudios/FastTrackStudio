@@ -1,0 +1,33 @@
+[package]
+name = "example-proto"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+# The schema crate. Defines:
+#  - The `Example` data type
+#  - The auto-generated `ExampleRepo` vox trait (crudcrate macro)
+#  - The hand-written `ExampleService` vox trait (domain surface)
+#
+# Compiles **with no features** to wasm32-unknown-unknown — the
+# `server` feature flips on SeaORM derives + storage glue that the
+# server / db crates need.
+
+[dependencies]
+chrono.workspace = true
+uuid = { workspace = true, features = ["js"] }
+facet.workspace = true
+vox.workspace = true
+thiserror.workspace = true
+
+# SeaORM + crudcrate are gated server-side. Wasm builds simply don't
+# resolve these crates.
+sea-orm = { workspace = true, optional = true }
+crudcrate = { workspace = true, optional = true }
+
+[features]
+default = []
+# Pulls in SeaORM derives + crudcrate's storage glue. Required by
+# `apps/server` and `crates/example-db`; *not* enabled by wasm clients.
+server = ["dep:sea-orm", "dep:crudcrate"]

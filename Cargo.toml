@@ -1,0 +1,72 @@
+[workspace]
+members = [
+    "apps/server",
+    "apps/db",
+    "crates/example-proto",
+    "crates/example-db",
+]
+# UI crates live outside the workspace to keep their wasm32 / Dioxus
+# target constraints from leaking into the server build.
+exclude = [
+    "apps/web",
+    "apps/desktop",
+    "crates/example-ui",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+authors = ["Cody Wright"]
+license = "MIT OR Apache-2.0"
+repository = "https://git.starcommand.live/codywright/Architecture-Reference"
+
+[workspace.dependencies]
+# Shared async runtime
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Errors
+eyre = "0.6"
+thiserror = "2"
+
+# Time + IDs
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+uuid = { version = "1", features = ["v4"] }
+
+# Serialization: vox uses facet for wire encoding.
+facet = { version = "0.46", features = ["reflect", "chrono", "uuid"] }
+facet-core = "0.46"
+
+# vox — Rust-native RPC. Service traits define the schema; the macro
+# emits typed client + dispatcher for every transport.
+vox = { git = "https://github.com/bearcove/vox", rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5", features = ["transport-websocket"] }
+vox-core = { git = "https://github.com/bearcove/vox", rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5" }
+vox-websocket = { git = "https://github.com/bearcove/vox", rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5" }
+
+# Database — SeaORM with SQLite for the reference. Real projects pick
+# their own backend without changing the crudcrate-generated traits.
+sea-orm = { version = "1", features = ["sqlx-sqlite", "runtime-tokio-rustls", "macros", "with-uuid", "with-chrono"] }
+sea-orm-migration = { version = "1", features = ["sqlx-sqlite", "runtime-tokio-rustls"] }
+
+# crudcrate — derives the wasm-clean DTO struct + auto-generated
+# ExampleRepo vox trait from a single Model definition. Server picks
+# up the SeaORM bits via the `server` feature; wasm clients see only
+# the DTO + trait.
+crudcrate = { git = "https://github.com/FastTrackStudios/crudcrate", rev = "f666e52018cfa3b2c58518a01645735cddf774f9", features = ["derive"] }
+
+# HTTP
+axum = { version = "0.8", features = ["ws"] }
+tower-http = { version = "0.6", features = ["cors"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Wasm
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+
+# Proto crate — referenced by everything else as a path dep so
+# entity changes flow uniformly to every surface.
+example-proto = { path = "crates/example-proto" }
+example-db = { path = "crates/example-db" }
