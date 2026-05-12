@@ -12,6 +12,7 @@ fn repo() -> ExampleRepoMemory {
     ExampleRepoMemory::new()
 }
 
+// r[verify repo.create.id]
 #[tokio::test]
 async fn create_then_get_round_trip() {
     let r = repo();
@@ -29,6 +30,7 @@ async fn create_then_get_round_trip() {
     assert_eq!(got.name, "alpha");
 }
 
+// r[verify repo.list.sort.name_ascending]
 #[tokio::test]
 async fn list_sorted_by_name_ascending() {
     let r = repo();
@@ -55,6 +57,7 @@ async fn list_sorted_by_name_ascending() {
     assert_eq!(names, vec!["alpha", "bravo", "charlie"]);
 }
 
+// r[verify repo.update.partial]
 #[tokio::test]
 async fn update_changes_fields() {
     let r = repo();
@@ -79,6 +82,7 @@ async fn update_changes_fields() {
     assert_eq!(updated.description, "old");
 }
 
+// r[verify repo.delete.not_found]
 #[tokio::test]
 async fn delete_removes_row() {
     let r = repo();
@@ -96,6 +100,7 @@ async fn delete_removes_row() {
     ));
 }
 
+// r[verify repo.list.sort.unknown_field]
 #[tokio::test]
 async fn unsortable_field_errors() {
     let r = repo();

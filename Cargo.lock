@@ -100,6 +100,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
+name = "app-cli"
+version = "0.1.0"
+dependencies = [
+ "example-proto",
+ "eyre",
+ "facet",
+ "facet-pretty",
+ "figue",
+ "owo-colors",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+ "vox-core",
+ "vox-websocket",
+]
+
+[[package]]
 name = "app-db"
 version = "0.1.0"
 dependencies = [
@@ -174,6 +192,16 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "ariadne"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8454c8a44ce2cb9cc7e7fae67fc6128465b343b92c6631e94beca3c8d1524ea5"
+dependencies = [
+ "unicode-width",
+ "yansi",
 ]
 
 [[package]]
@@ -1398,6 +1426,7 @@ dependencies = [
  "const-fnv1a-hash",
  "iddqd",
  "impls",
+ "indexmap",
  "uuid",
 ]
 
@@ -1556,6 +1585,41 @@ dependencies = [
  "facet-format",
  "facet-reflect",
  "indexmap",
+]
+
+[[package]]
+name = "figue"
+version = "4.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "582fee8897439bd768acffac4fcf3cf648491ffec8bd7ee6fbdfac2b92f212f6"
+dependencies = [
+ "ariadne",
+ "camino",
+ "facet",
+ "facet-core",
+ "facet-error",
+ "facet-format",
+ "facet-json",
+ "facet-pretty",
+ "facet-reflect",
+ "figue-attrs",
+ "heck 0.5.0",
+ "indexmap",
+ "owo-colors",
+ "strip-ansi-escapes",
+ "strsim",
+ "supports-color 3.0.2",
+ "tracing",
+ "unicode-width",
+]
+
+[[package]]
+name = "figue-attrs"
+version = "4.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "10df8f240db0ff7a1f1e3a291a507f4a5ee33f91fe547c47ec3d99d0567282cd"
+dependencies = [
+ "facet",
 ]
 
 [[package]]
@@ -3995,6 +4059,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "strip-ansi-escapes"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2a8f8038e7e7969abb3f1b7c2a811225e9296da208539e0f79c5251d6cac0025"
+dependencies = [
+ "vte",
+]
+
+[[package]]
 name = "strsim"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4507,6 +4580,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9629274872b2bfaf8d66f5f15725007f635594914870f65218920345aa11aa8c"
 
 [[package]]
+name = "unicode-width"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b4ac048d71ede7ee76d585517add45da530660ef4390e49b098733c6e897f254"
+
+[[package]]
 name = "unicode-xid"
 version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4730,6 +4809,15 @@ dependencies = [
  "vox-types",
  "wasm-bindgen",
  "web-sys",
+]
+
+[[package]]
+name = "vte"
+version = "0.14.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "231fdcd7ef3037e8330d8e17e61011a2c244126acc0a982f4040ac3f9f0bc077"
+dependencies = [
+ "memchr",
 ]
 
 [[package]]
@@ -5364,6 +5452,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "05f360fc0b24296329c78fda852a1e9ae82de9cf7b27dae4b7f62f118f77b9ed"
 dependencies = [
  "tap",
+]
+
+[[package]]
+name = "xtask"
+version = "0.1.0"
+dependencies = [
+ "camino",
+ "eyre",
+ "facet",
+ "facet-pretty",
+ "figue",
+ "owo-colors",
 ]
 
 [[package]]

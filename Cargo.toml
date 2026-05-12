@@ -1,5 +1,22 @@
 [workspace]
 members = [
+    "apps/app/cli",
+    "apps/app/server",
+    "apps/app/db",
+    "apps/app/tests/e2e",
+    "features/example/example",
+    "features/example/example-proto",
+    "features/example/example-db",
+    "features/example/example-memory",
+    "features/example/example-ui",
+    "features/example/tests/native",
+    "macros/architect",
+    "macros/architect-derive",
+    "xtask",
+]
+# Build the production graph by default; xtask is opt-in via `cargo xtask`.
+default-members = [
+    "apps/app/cli",
     "apps/app/server",
     "apps/app/db",
     "apps/app/tests/e2e",
@@ -45,6 +62,14 @@ uuid = { version = "1", features = ["v4"] }
 
 # Serialization: vox uses facet for wire encoding.
 facet = { version = "0.46", features = ["reflect", "chrono", "uuid"] }
+facet-pretty = "0.46"
+
+# CLI argument + config parser. Same shape across xtask, apps/app/cli,
+# and any future user-facing binary so flags / env / config files all
+# work consistently.
+figue = "4"
+owo-colors = "4"
+camino = "1"
 facet-core = "0.46"
 
 # vox — Rust-native RPC. Service traits define the schema; the macro
