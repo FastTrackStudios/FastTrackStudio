@@ -6,6 +6,7 @@ members = [
     "features/example/example-proto",
     "features/example/example-db",
     "features/example/example-memory",
+    "features/example/example-ui",
     "macros/architect",
     "macros/architect-derive",
 ]
@@ -15,7 +16,6 @@ exclude = [
     "apps/web",
     "apps/desktop",
     "apps/ui",
-    "features/example/example-ui",
     "features/example/example-test-wasm",
 ]
 resolver = "2"
