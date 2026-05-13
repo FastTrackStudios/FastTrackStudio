@@ -57,11 +57,14 @@ impl EntityCrdt for TimeEntryEntity {
         TimeEntry {
             id: Uuid::new_v4(),
             task_id: input.task_id,
+            project_id: input.project_id,
+            client_id: input.client_id,
             user: input.user,
             start_time: input.start_time,
             end_time: input.end_time,
             description: input.description,
             billable: input.billable,
+            manual: input.manual,
             billable_rate_cents: input.billable_rate_cents,
             tags: input.tags,
             invoiced_at: input.invoiced_at,
@@ -73,11 +76,14 @@ impl EntityCrdt for TimeEntryEntity {
     fn encode_into(m: &LoroMap, e: &TimeEntry) -> Result<(), RepoError> {
         write_uuid(m, "id", e.id)?;
         write_opt_uuid(m, "task_id", e.task_id)?;
+        write_opt_uuid(m, "project_id", e.project_id)?;
+        write_opt_uuid(m, "client_id", e.client_id)?;
         write_opt_str(m, "user", e.user.as_deref())?;
         write_dt(m, "start_time", e.start_time)?;
         write_opt_dt(m, "end_time", e.end_time)?;
         write_opt_str(m, "description", e.description.as_deref())?;
         write_bool(m, "billable", e.billable)?;
+        write_bool(m, "manual", e.manual)?;
         write_opt_u32(m, "billable_rate_cents", e.billable_rate_cents)?;
         write_string_list(m, "tags", &e.tags)?;
         write_opt_dt(m, "invoiced_at", e.invoiced_at)?;
@@ -90,11 +96,14 @@ impl EntityCrdt for TimeEntryEntity {
         Ok(TimeEntry {
             id: read_uuid(m, "id")?,
             task_id: read_opt_uuid(m, "task_id")?,
+            project_id: read_opt_uuid(m, "project_id")?,
+            client_id: read_opt_uuid(m, "client_id")?,
             user: read_opt_str(m, "user")?,
             start_time: read_dt(m, "start_time")?,
             end_time: read_opt_dt(m, "end_time")?,
             description: read_opt_str(m, "description")?,
             billable: read_bool(m, "billable")?,
+            manual: read_bool(m, "manual")?,
             billable_rate_cents: read_opt_u32(m, "billable_rate_cents")?,
             tags: read_string_list(m, "tags")?,
             invoiced_at: read_opt_dt(m, "invoiced_at")?,
@@ -106,6 +115,12 @@ impl EntityCrdt for TimeEntryEntity {
     fn apply_update(m: &LoroMap, u: TimeEntryUpdate) -> Result<(), RepoError> {
         if let Some(v) = u.task_id {
             write_opt_uuid(m, "task_id", v)?;
+        }
+        if let Some(v) = u.project_id {
+            write_opt_uuid(m, "project_id", v)?;
+        }
+        if let Some(v) = u.client_id {
+            write_opt_uuid(m, "client_id", v)?;
         }
         if let Some(v) = u.user {
             write_opt_str(m, "user", v.as_deref())?;
@@ -121,6 +136,9 @@ impl EntityCrdt for TimeEntryEntity {
         }
         if let Some(v) = u.billable {
             write_bool(m, "billable", v)?;
+        }
+        if let Some(v) = u.manual {
+            write_bool(m, "manual", v)?;
         }
         if let Some(v) = u.billable_rate_cents {
             write_opt_u32(m, "billable_rate_cents", v)?;

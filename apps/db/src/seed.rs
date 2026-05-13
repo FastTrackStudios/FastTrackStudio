@@ -92,11 +92,15 @@ async fn seed_all(cdoc: &CrdtDoc) -> eyre::Result<()> {
     timer_proto::seed_fake_time_entry(&time_repo, 100usize).await?;
     info!("  timer: 100 entries");
 
+    let client_repo = invoice_crdt::ClientRepoLoro::new(cdoc);
     let invoice_repo = invoice_crdt::InvoiceRepoLoro::new(cdoc);
     let line_repo = invoice_crdt::InvoiceLineRepoLoro::new(cdoc);
+    let payment_repo = invoice_crdt::PaymentRepoLoro::new(cdoc);
+    invoice_proto::seed_fake_client(&client_repo, 5usize).await?;
     invoice_proto::seed_fake_invoice(&invoice_repo, 12usize).await?;
     invoice_proto::seed_fake_invoice_line(&line_repo, 40usize).await?;
-    info!("  invoice: 12 invoices, 40 lines");
+    invoice_proto::seed_fake_payment(&payment_repo, 20usize).await?;
+    info!("  invoice: 5 clients, 12 invoices, 40 lines, 20 payments");
 
     let revenue_repo = finance_crdt::RevenueRepoLoro::new(cdoc);
     let expense_repo = finance_crdt::ExpenseRepoLoro::new(cdoc);

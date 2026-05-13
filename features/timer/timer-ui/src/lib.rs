@@ -11,6 +11,9 @@ use fts_ui::prelude::*;
 use timer_proto::{TimeEntry, TimeEntryCreate};
 use uuid::Uuid;
 
+pub mod solidtime;
+pub use solidtime::*;
+
 #[component]
 pub fn TimeEntryList(
     items: Vec<TimeEntry>,
@@ -117,11 +120,14 @@ pub fn TimeEntryCreateForm(on_submit: EventHandler<TimeEntryCreate>) -> Element 
                         on_click: move |_| {
                             let payload = TimeEntryCreate {
                                 task_id: None,
+                                project_id: None,
+                                client_id: None,
                                 user: trim_to_option(user.read().clone()),
                                 start_time: Utc::now(),
                                 end_time: None,
                                 description: trim_to_option(description.read().clone()),
                                 billable: *billable.read(),
+                                manual: false,
                                 billable_rate_cents: None,
                                 tags: Vec::new(),
                                 invoiced_at: None,

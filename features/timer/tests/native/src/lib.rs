@@ -18,11 +18,14 @@ fn repo() -> TimeEntryRepoLoro {
 fn baseline(start_offset_min: i64) -> TimeEntryCreate {
     TimeEntryCreate {
         task_id: Some(Uuid::new_v4()),
+        project_id: None,
+        client_id: None,
         user: Some("alice".into()),
         start_time: Utc::now() + Duration::minutes(start_offset_min),
         end_time: None,
         description: Some("design review".into()),
         billable: true,
+        manual: false,
         billable_rate_cents: Some(15000),
         tags: vec!["design".into(), "review".into()],
         invoiced_at: None,
@@ -144,4 +147,50 @@ async fn two_replicas_converge_after_sync() {
         .unwrap();
     assert_eq!(a_list.total, 2);
     assert_eq!(b_list.total, 2);
+}
+
+#[tokio::test]
+async fn project_client_manual_round_trip() {
+    let r = repo();
+    let project_id = Uuid::new_v4();
+    let client_id = Uuid::new_v4();
+
+    let created = r
+        .create(TimeEntryCreate {
+            task_id: None,
+            project_id: Some(project_id),
+            client_id: Some(client_id),
+            user: Some("bob".into()),
+            start_time: Utc::now(),
+            end_time: Some(Utc::now() + Duration::minutes(45)),
+            description: Some("manually-logged session".into()),
+            billable: true,
+            manual: true,
+            billable_rate_cents: Some(20_000),
+            tags: vec!["logged".into()],
+            invoiced_at: None,
+        })
+        .await
+        .unwrap();
+
+    let got = r.get(created.id).await.unwrap();
+    assert_eq!(got.project_id, Some(project_id));
+    assert_eq!(got.client_id, Some(client_id));
+    assert!(got.manual);
+
+    // Flip `manual` via Update.
+    let updated = r
+        .update(
+            created.id,
+            TimeEntryUpdate {
+                manual: Some(false),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert!(!updated.manual);
+    // Project / client survive an unrelated update.
+    assert_eq!(updated.project_id, Some(project_id));
+    assert_eq!(updated.client_id, Some(client_id));
 }

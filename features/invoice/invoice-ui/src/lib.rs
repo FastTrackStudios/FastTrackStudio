@@ -1,10 +1,14 @@
 //! Invoice feature UI. Dumb components — data + callbacks in, RSX out.
 //!
-//! v1 covers the `Invoice` header only; `InvoiceLine` UI lands later.
+//! v1 covers the `Invoice` header only; the Invoice-Ninja-style
+//! invoicing surface lives in [`ninja`].
 //!
 //! - [`InvoiceList`]        — full collection view, dispatches `on_delete`
 //! - [`InvoiceRow`]         — single-row presentation
 //! - [`InvoiceCreateForm`]  — minimal new-invoice form, emits create payload
+
+pub mod ninja;
+pub use ninja::*;
 
 use chrono::Utc;
 use dioxus::prelude::*;
@@ -108,8 +112,12 @@ pub fn InvoiceCreateForm(on_submit: EventHandler<InvoiceCreate>) -> Element {
                                 paid_at: None,
                                 currency: c,
                                 subtotal_cents: 0,
+                                discount_cents: 0,
+                                tax_rate_bps: 0,
+                                tax_inclusive: false,
                                 tax_cents: 0,
                                 total_cents: 0,
+                                balance_cents: 0,
                                 notes: None,
                                 tags: Vec::new(),
                             };

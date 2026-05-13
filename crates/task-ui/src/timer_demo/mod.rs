@@ -192,11 +192,14 @@ pub fn TimerDemo() -> Element {
                                     let _ = repo
                                         .create(TimeEntryCreate {
                                             task_id: None,
+                                            project_id: None,
+                                            client_id: None,
                                             user: peer_label(),
                                             start_time: now,
                                             end_time: None,
                                             description: if desc.is_empty() { None } else { Some(desc) },
                                             billable: false,
+                                            manual: false,
                                             billable_rate_cents: None,
                                             tags: Vec::new(),
                                             invoiced_at: None,

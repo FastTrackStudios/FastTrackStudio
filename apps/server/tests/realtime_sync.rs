@@ -141,6 +141,9 @@ async fn two_peers_converge_through_sync_server() {
             billable_rate_cents: None,
             tags: vec![],
             invoiced_at: None,
+            project_id: None,
+            client_id: None,
+            manual: false,
         })
         .await
         .unwrap();
@@ -170,6 +173,9 @@ async fn two_peers_converge_through_sync_server() {
             billable_rate_cents: None,
             tags: vec![],
             invoiced_at: None,
+            project_id: None,
+            client_id: None,
+            manual: false,
         })
         .await
         .unwrap();
@@ -207,6 +213,9 @@ async fn late_joiner_gets_snapshot_with_history() {
                     billable_rate_cents: None,
                     tags: vec![],
                     invoiced_at: None,
+                    project_id: None,
+                    client_id: None,
+                    manual: false,
                 })
                 .await
                 .unwrap();
@@ -265,6 +274,9 @@ async fn updates_survive_in_persistence() {
             billable_rate_cents: None,
             tags: vec![],
             invoiced_at: None,
+            project_id: None,
+            client_id: None,
+            manual: false,
         })
         .await
         .unwrap();

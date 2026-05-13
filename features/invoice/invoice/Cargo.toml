@@ -19,11 +19,21 @@ invoice-crdt = { workspace = true, optional = true }
 invoice-db = { workspace = true, optional = true }
 crdt = { workspace = true, optional = true }
 architect = { workspace = true, optional = true }
+# Used by `InvoiceServiceImpl` (server-only, behind `server`).
+chrono = { workspace = true, optional = true }
+uuid = { workspace = true, optional = true }
 
 [features]
 default = []
 vox = ["invoice-proto/vox"]
-server = ["dep:invoice-crdt", "dep:invoice-db", "dep:crdt"]
+server = [
+    "dep:invoice-crdt",
+    "dep:invoice-db",
+    "dep:crdt",
+    "dep:chrono",
+    "dep:uuid",
+    "dep:architect",
+]
 server-axum = ["dep:architect", "architect/server-axum"]
 fake = ["invoice-proto/fake"]
 full = [

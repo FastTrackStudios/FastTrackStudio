@@ -5642,10 +5642,12 @@ name = "invoice"
 version = "0.1.0"
 dependencies = [
  "architect",
+ "chrono",
  "crdt",
  "invoice-crdt",
  "invoice-db",
  "invoice-proto",
+ "uuid",
 ]
 
 [[package]]
@@ -5693,6 +5695,8 @@ dependencies = [
  "dioxus",
  "fts-ui",
  "invoice-proto",
+ "project-proto",
+ "timer-proto",
  "uuid",
 ]
 
@@ -10756,6 +10760,9 @@ dependencies = [
  "chrono",
  "dioxus",
  "fts-ui",
+ "gloo-timers",
+ "invoice-proto",
+ "project-proto",
  "timer-proto",
  "uuid",
 ]

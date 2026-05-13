@@ -19,7 +19,10 @@ license.workspace = true
 [dependencies]
 dioxus = { workspace = true }
 timer-proto.workspace = true
+project-proto.workspace = true
+invoice-proto.workspace = true
 chrono = { workspace = true, features = ["clock", "std", "wasmbind"] }
 uuid = { workspace = true, features = ["v4", "js"] }
+gloo-timers.workspace = true
 
 fts-ui.workspace = true

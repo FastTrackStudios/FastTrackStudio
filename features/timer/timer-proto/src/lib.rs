@@ -24,6 +24,17 @@ pub struct TimeEntry {
     #[architect(filterable)]
     pub task_id: Option<Uuid>,
 
+    /// Optional FK to a `project_proto::Project`. Set when the work
+    /// rolls up to a project (and on through to its client).
+    #[architect(filterable)]
+    pub project_id: Option<Uuid>,
+
+    /// Denormalised client id for fast client-scoped filtering.
+    /// Written from `Project.client_id` at create time when a
+    /// `project_id` is supplied, or set directly for project-less work.
+    #[architect(filterable)]
+    pub client_id: Option<Uuid>,
+
     /// Who tracked the time. Free-form for now — promote to FK once
     /// the `person` feature settles.
     #[architect(filterable)]
@@ -48,6 +59,12 @@ pub struct TimeEntry {
     /// Whether this entry should be invoiced.
     #[architect(filterable)]
     pub billable: bool,
+
+    /// `false` = the timer was started/stopped live; `true` = the
+    /// entry was typed into a manual-entry dialog after the fact.
+    /// Used for reporting on logged vs. tracked time.
+    #[architect(filterable)]
+    pub manual: bool,
 
     /// Per-entry hourly rate override, in cents. Falls back to
     /// project / member / org default when None.
