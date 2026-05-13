@@ -11,7 +11,9 @@ use uuid::Uuid;
 use super::decoration::{SpanDecoration, decorate};
 use super::inline_parser::{InlineSpan, SpanKind, parse_inline};
 use super::inline_spans::{BlockRefSpan, EntityLinkSpan, TagSpan, WikilinkSpan};
-use super::input::StructuralOp;
+use super::input::{
+    BeforeInputEvent, StructuralOp, TextOp, apply_ops_to_string, handle_beforeinput,
+};
 
 /// Click target for a reference span (wikilink / blockref / entity).
 #[derive(Clone, Debug, PartialEq)]

@@ -4,19 +4,22 @@
 //! Roots are `knowledge_*` prefixed to keep them out of the way of
 //! any other feature's root names.
 //!
-//! `Block.content` is stored as a plain Loro string (LWW per write).
-//! FUTURE: upgrade `Block.content` to `LoroText` for character-level
-//! CRDT merges. Currently full-string LWW per write, which is fine
-//! for the single-block-at-a-time edit pattern the live-preview
-//! editor uses; concurrent in-block edits will need the upgrade.
+//! `Block.content` is stored as a `LoroText` child container so
+//! concurrent keystrokes from different peers merge character by
+//! character. The plain-string snapshot path (`BlockUpdate.content`)
+//! still works — it diffs old↔new and applies an insert/delete pair.
+//! The fast path is `BlockRepoLoro::apply_text_ops`, called from the
+//! editor's `beforeinput` handler.
 
 use architect::{Page as PageWindow, RepoError, SortOrder};
 use chrono::Utc;
 use crdt::EntityCrdt;
+pub use crdt::codec::TextOp;
 use crdt::codec::{
-    read_bool, read_dt, read_i64, read_opt_str, read_opt_uuid, read_str, read_string_list,
-    read_uuid, write_bool, write_dt, write_i64, write_opt_str, write_opt_string_list, write_str,
-    write_string_list, write_uuid,
+    apply_text_diff, read_bool, read_dt, read_i64, read_opt_str, read_opt_uuid, read_str,
+    read_string_list, read_text, read_text_with_migration, read_uuid, text_child, write_bool,
+    write_dt, write_i64, write_opt_str, write_opt_string_list, write_str, write_string_list,
+    write_uuid,
 };
 use knowledge_proto::{
     Base, BaseCreate, BaseList, BaseRepo, BaseUpdate, Block, BlockCreate, BlockList, BlockRepo,
@@ -532,6 +535,13 @@ impl BlockRepoLoro {
     pub fn doc(&self) -> &loro::LoroDoc {
         self.inner.doc()
     }
+
+    /// Editor fast path. Apply character-level edits to the block's
+    /// `content` LoroText. Skips `updated_at` bumping (the editor
+    /// flushes a real `update` on blur / structural change).
+    pub async fn apply_text_ops(&self, id: Uuid, ops: Vec<TextOp>) -> Result<(), RepoError> {
+        self.inner.apply_text_ops(id, "content", &ops).await
+    }
 }
 
 impl EntityCrdt for BlockEntity {
@@ -579,8 +589,13 @@ impl EntityCrdt for BlockEntity {
         write_opt_uuid(m, "parent_block_id", e.parent_block_id)?;
         write_str(m, "sort_key", &e.sort_key)?;
         write_str(m, "kind", &e.kind)?;
-        // FUTURE: upgrade this to LoroText for character-level merge.
-        write_str(m, "content", &e.content)?;
+        // Seed the content `LoroText` container with the initial body.
+        // Creates the child container even when content is empty so
+        // subsequent concurrent edits attach to the same container ID.
+        let _ = text_child(m, "content")?;
+        if !e.content.is_empty() {
+            apply_text_diff(m, "content", "", &e.content)?;
+        }
         write_opt_i32(m, "heading_level", e.heading_level)?;
         write_bool(m, "list_ordered", e.list_ordered)?;
         write_opt_str(m, "list_task", e.list_task.as_deref())?;
@@ -605,7 +620,7 @@ impl EntityCrdt for BlockEntity {
             parent_block_id: read_opt_uuid(m, "parent_block_id")?,
             sort_key: read_str(m, "sort_key")?,
             kind: read_str(m, "kind")?,
-            content: read_str(m, "content")?,
+            content: read_text_with_migration(m, "content")?,
             heading_level: read_opt_i32(m, "heading_level")?,
             list_ordered: read_bool(m, "list_ordered")?,
             list_task: read_opt_str(m, "list_task")?,
@@ -640,7 +655,13 @@ impl EntityCrdt for BlockEntity {
             write_str(m, "kind", &v)?;
         }
         if let Some(v) = u.content {
-            write_str(m, "content", &v)?;
+            // Compat path: callers that only have the full new string
+            // (programmatic create, paste fallback) come through here.
+            // We diff against the current text and apply minimal ops so
+            // concurrent peer edits still merge. Editor keystrokes use
+            // BlockRepoLoro::apply_text_ops instead — it bypasses this.
+            let old = read_text(m, "content")?;
+            apply_text_diff(m, "content", &old, &v)?;
         }
         if let Some(v) = u.heading_level {
             write_opt_i32(m, "heading_level", v)?;

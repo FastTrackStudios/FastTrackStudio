@@ -1,28 +1,39 @@
-//! Pure input handlers — old content + caret + event → new content +
-//! caret + optional `StructuralOp`. No DOM mutation; the BlockEditor
-//! re-renders from the new content and `caret.set_caret`s afterwards.
+//! Pure input handlers — current content + caret + event → text-edit
+//! ops + new caret + optional structural op. Ops are unicode-scalar
+//! coords (matches the crdt layer). The component layer translates
+//! between DOM (UTF-16) and these.
+
+/// Char-level text edit. Mirrors `crdt::codec::TextOp` shape; defined
+/// here so `knowledge-ui` stays free of a `crdt` dep. The route layer
+/// maps `editor::TextOp` → `crdt::codec::TextOp` when calling the
+/// `BlockRepoLoro::apply_text_ops` fast path.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TextOp {
+    Insert { pos: u32, text: String },
+    Delete { pos: u32, len: u32 },
+}
 
 /// Result of one input event.
 #[derive(Clone, Debug, PartialEq)]
 pub struct InputCommand {
-    pub new_content: String,
-    pub new_caret: usize,
+    pub edits: Vec<TextOp>,
+    pub new_caret: u32,
     pub structural: Option<StructuralOp>,
 }
 
 /// Block-level structural edits that bubble up to the outliner.
 #[derive(Clone, Debug, PartialEq)]
 pub enum StructuralOp {
-    SplitBlock { at: usize },
+    SplitBlock { at: u32 },
     MergeWithPrev,
     IndentBlock,
     OutdentBlock,
     MoveBlockUp,
     MoveBlockDown,
-    OpenSlashMenu { at: usize },
-    OpenWikilinkPicker { at: usize },
-    OpenBlockRefPicker { at: usize },
-    OpenTagPicker { at: usize },
+    OpenSlashMenu { at: u32 },
+    OpenWikilinkPicker { at: u32 },
+    OpenBlockRefPicker { at: u32 },
+    OpenTagPicker { at: u32 },
 }
 
 /// Subset of `InputEvent` data the handler needs. Constructed by the
@@ -45,131 +56,202 @@ pub struct KeyEvent {
     pub is_composing: bool,
 }
 
-pub fn handle_beforeinput(content: &str, caret: usize, ev: &BeforeInputEvent) -> InputCommand {
+/// Map a `beforeinput` event to text ops + optional structural op.
+/// Unknown `input_type` returns no ops + no structural — the caller
+/// must fall back to its `oninput` full-content path so the user
+/// doesn't see lost keystrokes.
+pub fn handle_beforeinput(content: &str, caret: u32, ev: &BeforeInputEvent) -> InputCommand {
     if ev.is_composing {
-        // Let IME finalize; downstream `oninput` will pick up the
-        // committed text once compositionend fires.
         return InputCommand {
-            new_content: content.to_string(),
+            edits: Vec::new(),
             new_caret: caret,
             structural: None,
         };
     }
+    let caret_u = caret as usize;
     match ev.input_type.as_str() {
-        "insertText" => {
+        "insertText" | "insertCompositionText" | "insertFromComposition" => {
             let data = ev.data.clone().unwrap_or_default();
-            // Picker / slash triggers
-            if data == "[" && content.get(caret.saturating_sub(1)..caret) == Some("[") {
-                // Just typed the second `[`
+            let data_chars = data.chars().count() as u32;
+            // Slash / picker triggers (single-char data only).
+            if data == "[" && char_at(content, caret_u.saturating_sub(1)) == Some('[') {
                 return InputCommand {
-                    new_content: insert_at(content, caret, &data),
-                    new_caret: caret + data.len(),
+                    edits: vec![TextOp::Insert {
+                        pos: caret,
+                        text: data,
+                    }],
+                    new_caret: caret + data_chars,
                     structural: Some(StructuralOp::OpenWikilinkPicker {
-                        at: caret + data.len(),
+                        at: caret + data_chars,
                     }),
                 };
             }
-            if data == "(" && content.get(caret.saturating_sub(1)..caret) == Some("(") {
+            if data == "(" && char_at(content, caret_u.saturating_sub(1)) == Some('(') {
                 return InputCommand {
-                    new_content: insert_at(content, caret, &data),
-                    new_caret: caret + data.len(),
+                    edits: vec![TextOp::Insert {
+                        pos: caret,
+                        text: data,
+                    }],
+                    new_caret: caret + data_chars,
                     structural: Some(StructuralOp::OpenBlockRefPicker {
-                        at: caret + data.len(),
+                        at: caret + data_chars,
                     }),
                 };
             }
-            if data == "/"
-                && (caret == 0
-                    || content.as_bytes()[caret - 1] == b' '
-                    || content.as_bytes()[caret - 1] == b'\n')
-            {
+            let prev = if caret_u == 0 {
+                None
+            } else {
+                char_at(content, caret_u - 1)
+            };
+            if data == "/" && matches!(prev, None | Some(' ') | Some('\n')) {
                 return InputCommand {
-                    new_content: insert_at(content, caret, &data),
-                    new_caret: caret + 1,
-                    structural: Some(StructuralOp::OpenSlashMenu { at: caret + 1 }),
+                    edits: vec![TextOp::Insert {
+                        pos: caret,
+                        text: data,
+                    }],
+                    new_caret: caret + data_chars,
+                    structural: Some(StructuralOp::OpenSlashMenu {
+                        at: caret + data_chars,
+                    }),
                 };
             }
-            if data == "#"
-                && (caret == 0
-                    || content.as_bytes()[caret - 1] == b' '
-                    || content.as_bytes()[caret - 1] == b'\n')
-            {
+            if data == "#" && matches!(prev, None | Some(' ') | Some('\n')) {
                 return InputCommand {
-                    new_content: insert_at(content, caret, &data),
-                    new_caret: caret + 1,
-                    structural: Some(StructuralOp::OpenTagPicker { at: caret + 1 }),
+                    edits: vec![TextOp::Insert {
+                        pos: caret,
+                        text: data,
+                    }],
+                    new_caret: caret + data_chars,
+                    structural: Some(StructuralOp::OpenTagPicker {
+                        at: caret + data_chars,
+                    }),
                 };
             }
             InputCommand {
-                new_content: insert_at(content, caret, &data),
-                new_caret: caret + data.len(),
+                edits: vec![TextOp::Insert {
+                    pos: caret,
+                    text: data,
+                }],
+                new_caret: caret + data_chars,
                 structural: None,
             }
         }
         "insertParagraph" | "insertLineBreak" => InputCommand {
-            new_content: content.to_string(),
+            edits: Vec::new(),
             new_caret: caret,
             structural: Some(StructuralOp::SplitBlock { at: caret }),
         },
         "deleteContentBackward" => {
             if caret == 0 {
                 return InputCommand {
-                    new_content: content.to_string(),
+                    edits: Vec::new(),
                     new_caret: caret,
                     structural: Some(StructuralOp::MergeWithPrev),
                 };
             }
-            // Remove the byte (or char) before caret.
-            let new_caret = prev_char_boundary(content, caret);
-            let mut new_content = String::with_capacity(content.len());
-            new_content.push_str(&content[..new_caret]);
-            new_content.push_str(&content[caret..]);
             InputCommand {
-                new_content,
-                new_caret,
+                edits: vec![TextOp::Delete {
+                    pos: caret - 1,
+                    len: 1,
+                }],
+                new_caret: caret - 1,
                 structural: None,
             }
         }
+        "deleteContentForward" => {
+            let total = content.chars().count() as u32;
+            if caret >= total {
+                return InputCommand {
+                    edits: Vec::new(),
+                    new_caret: caret,
+                    structural: None,
+                };
+            }
+            InputCommand {
+                edits: vec![TextOp::Delete { pos: caret, len: 1 }],
+                new_caret: caret,
+                structural: None,
+            }
+        }
+        "deleteWordBackward" => {
+            let start = word_start_before(content, caret);
+            if start >= caret {
+                return InputCommand {
+                    edits: Vec::new(),
+                    new_caret: caret,
+                    structural: None,
+                };
+            }
+            InputCommand {
+                edits: vec![TextOp::Delete {
+                    pos: start,
+                    len: caret - start,
+                }],
+                new_caret: start,
+                structural: None,
+            }
+        }
+        "insertFromPaste" => {
+            let data = ev.data.clone().unwrap_or_default();
+            let data_chars = data.chars().count() as u32;
+            if data.is_empty() {
+                return InputCommand {
+                    edits: Vec::new(),
+                    new_caret: caret,
+                    structural: None,
+                };
+            }
+            InputCommand {
+                edits: vec![TextOp::Insert {
+                    pos: caret,
+                    text: data,
+                }],
+                new_caret: caret + data_chars,
+                structural: None,
+            }
+        }
+        // Unknown — caller falls back to oninput full-content path.
         _ => InputCommand {
-            new_content: content.to_string(),
+            edits: Vec::new(),
             new_caret: caret,
             structural: None,
         },
     }
 }
 
-pub fn handle_keydown(content: &str, caret: usize, ev: &KeyEvent) -> Option<InputCommand> {
+pub fn handle_keydown(content: &str, caret: u32, ev: &KeyEvent) -> Option<InputCommand> {
     if ev.is_composing {
         return None;
     }
+    let _ = content;
     match ev.key.as_str() {
         "Tab" if !ev.shift => Some(InputCommand {
-            new_content: content.to_string(),
+            edits: Vec::new(),
             new_caret: caret,
             structural: Some(StructuralOp::IndentBlock),
         }),
         "Tab" if ev.shift => Some(InputCommand {
-            new_content: content.to_string(),
+            edits: Vec::new(),
             new_caret: caret,
             structural: Some(StructuralOp::OutdentBlock),
         }),
         "ArrowUp" if ev.meta || ev.ctrl => Some(InputCommand {
-            new_content: content.to_string(),
+            edits: Vec::new(),
             new_caret: caret,
             structural: Some(StructuralOp::MoveBlockUp),
         }),
         "ArrowDown" if ev.meta || ev.ctrl => Some(InputCommand {
-            new_content: content.to_string(),
+            edits: Vec::new(),
             new_caret: caret,
             structural: Some(StructuralOp::MoveBlockDown),
         }),
         "Enter" if !ev.shift => Some(InputCommand {
-            new_content: content.to_string(),
+            edits: Vec::new(),
             new_caret: caret,
             structural: Some(StructuralOp::SplitBlock { at: caret }),
         }),
         "Backspace" if caret == 0 => Some(InputCommand {
-            new_content: content.to_string(),
+            edits: Vec::new(),
             new_caret: caret,
             structural: Some(StructuralOp::MergeWithPrev),
         }),
@@ -177,23 +259,43 @@ pub fn handle_keydown(content: &str, caret: usize, ev: &KeyEvent) -> Option<Inpu
     }
 }
 
-fn insert_at(content: &str, at: usize, data: &str) -> String {
-    let mut out = String::with_capacity(content.len() + data.len());
-    out.push_str(&content[..at]);
-    out.push_str(data);
-    out.push_str(&content[at..]);
-    out
+/// Apply a sequence of ops to a plain string. The component layer
+/// uses this to reconstruct the new content when it needs to fire a
+/// full-string callback alongside the ops fast path.
+pub fn apply_ops_to_string(content: &str, ops: &[TextOp]) -> String {
+    let mut chars: Vec<char> = content.chars().collect();
+    for op in ops {
+        match op {
+            TextOp::Insert { pos, text } => {
+                let p = (*pos as usize).min(chars.len());
+                for (i, ch) in text.chars().enumerate() {
+                    chars.insert(p + i, ch);
+                }
+            }
+            TextOp::Delete { pos, len } => {
+                let p = (*pos as usize).min(chars.len());
+                let l = (*len as usize).min(chars.len() - p);
+                chars.drain(p..p + l);
+            }
+        }
+    }
+    chars.into_iter().collect()
 }
 
-fn prev_char_boundary(s: &str, i: usize) -> usize {
-    if i == 0 {
-        return 0;
+fn char_at(s: &str, idx_chars: usize) -> Option<char> {
+    s.chars().nth(idx_chars)
+}
+
+fn word_start_before(s: &str, caret: u32) -> u32 {
+    let chars: Vec<char> = s.chars().collect();
+    let mut i = (caret as usize).min(chars.len());
+    while i > 0 && chars[i - 1].is_whitespace() {
+        i -= 1;
     }
-    let mut j = i - 1;
-    while !s.is_char_boundary(j) {
-        j -= 1;
+    while i > 0 && !chars[i - 1].is_whitespace() {
+        i -= 1;
     }
-    j
+    i as u32
 }
 
 #[cfg(test)]
@@ -201,7 +303,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn insert_text_appends() {
+    fn insert_text_emits_insert_op() {
         let cmd = handle_beforeinput(
             "abc",
             3,
@@ -211,7 +313,13 @@ mod tests {
                 is_composing: false,
             },
         );
-        assert_eq!(cmd.new_content, "abcd");
+        assert_eq!(
+            cmd.edits,
+            vec![TextOp::Insert {
+                pos: 3,
+                text: "d".into()
+            }]
+        );
         assert_eq!(cmd.new_caret, 4);
     }
 
@@ -230,7 +338,13 @@ mod tests {
             cmd.structural,
             Some(StructuralOp::OpenWikilinkPicker { .. })
         ));
-        assert_eq!(cmd.new_content, "see [[");
+        assert_eq!(
+            cmd.edits,
+            vec![TextOp::Insert {
+                pos: 5,
+                text: "[".into()
+            }]
+        );
     }
 
     #[test]
@@ -252,6 +366,7 @@ mod tests {
             cmd.structural,
             Some(StructuralOp::SplitBlock { at: 3 })
         ));
+        assert!(cmd.edits.is_empty());
     }
 
     #[test]
@@ -266,5 +381,91 @@ mod tests {
             },
         );
         assert!(matches!(cmd.structural, Some(StructuralOp::MergeWithPrev)));
+        assert!(cmd.edits.is_empty());
+    }
+
+    #[test]
+    fn backspace_mid_emits_delete() {
+        let cmd = handle_beforeinput(
+            "abcd",
+            3,
+            &BeforeInputEvent {
+                input_type: "deleteContentBackward".into(),
+                data: None,
+                is_composing: false,
+            },
+        );
+        assert_eq!(cmd.edits, vec![TextOp::Delete { pos: 2, len: 1 }]);
+        assert_eq!(cmd.new_caret, 2);
+    }
+
+    #[test]
+    fn paste_emits_one_insert() {
+        let cmd = handle_beforeinput(
+            "hello ",
+            6,
+            &BeforeInputEvent {
+                input_type: "insertFromPaste".into(),
+                data: Some("world".into()),
+                is_composing: false,
+            },
+        );
+        assert_eq!(
+            cmd.edits,
+            vec![TextOp::Insert {
+                pos: 6,
+                text: "world".into()
+            }]
+        );
+        assert_eq!(cmd.new_caret, 11);
+    }
+
+    #[test]
+    fn unknown_input_type_falls_back_to_noop() {
+        let cmd = handle_beforeinput(
+            "abc",
+            3,
+            &BeforeInputEvent {
+                input_type: "formatBold".into(),
+                data: None,
+                is_composing: false,
+            },
+        );
+        assert!(cmd.edits.is_empty());
+        assert!(cmd.structural.is_none());
+    }
+
+    #[test]
+    fn delete_word_backward() {
+        let cmd = handle_beforeinput(
+            "hello world",
+            11,
+            &BeforeInputEvent {
+                input_type: "deleteWordBackward".into(),
+                data: None,
+                is_composing: false,
+            },
+        );
+        assert_eq!(cmd.edits, vec![TextOp::Delete { pos: 6, len: 5 }]);
+        assert_eq!(cmd.new_caret, 6);
+    }
+
+    #[test]
+    fn apply_ops_reconstructs_content() {
+        let s = apply_ops_to_string(
+            "hello",
+            &[
+                TextOp::Insert {
+                    pos: 5,
+                    text: " world".into(),
+                },
+                TextOp::Delete { pos: 0, len: 1 },
+                TextOp::Insert {
+                    pos: 0,
+                    text: "H".into(),
+                },
+            ],
+        );
+        assert_eq!(s, "Hello world");
     }
 }
