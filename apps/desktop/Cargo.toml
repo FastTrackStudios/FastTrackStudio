@@ -1,10 +1,14 @@
 [package]
 name = "task-app-desktop"
-version = "0.1.0"
-edition = "2021"
-authors = ["Cody Wright"]
-license = "MIT OR Apache-2.0"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
 
 [dependencies]
-dioxus = { version = "0.7.6", default-features = false, features = ["lib", "desktop"] }
-task-ui = { path = "../../crates/task-ui" }
+dioxus = { workspace = true, features = ["router"] }
+task-ui.workspace = true
+
+[features]
+default = ["desktop"]
+desktop = ["dioxus/desktop", "dioxus/launch"]

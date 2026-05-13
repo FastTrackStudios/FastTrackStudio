@@ -6,6 +6,10 @@
 
 pub mod app;
 pub mod data;
+pub mod feature_routes;
+pub mod sync;
+pub mod theming;
+pub mod timer_demo;
 pub mod views;
 
 pub use app::App;

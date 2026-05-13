@@ -1,5 +1,4 @@
 pub(crate) mod agent;
-pub(crate) mod asset;
 pub(crate) mod attachment;
 pub(crate) mod audio;
 pub(crate) mod calendar;

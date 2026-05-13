@@ -1,24 +1,36 @@
 [workspace]
+# Glob-driven membership. Scaffolder writes the dirs, cargo picks
+# them up; this file doesn't need touching when a new feature lands.
 members = [
-    "apps/server",
-    "crates/fasttrackaudio",
-    "crates/task-core",
-    "crates/task-cli",
-    "crates/task-db",
-    "integrations/obsidian/plugin",
+    "apps/*",
+    "crates/*",
+    "features/*/*",
+    "features/*/tests/native",
     "xtask",
 ]
-# UI crates (task-ui + apps/{web,desktop,mobile}) live outside this workspace
-# because fts-ui's own Cargo.toml has path-deps to a sibling fts-story repo.
-# Including them here would force every cargo invocation in this workspace to
-# resolve fts-story, which breaks server/cli builds (especially under Nix).
-# Each UI crate carries its own Cargo.toml with inline deps and gets its own
-# Cargo.lock; they all share the live ../FastTrackStudio/fts-ui sibling.
+# Only non-crate directories that `features/*/*` accidentally catches:
+# `features/<name>/spec` (tracey markdown) and `features/<name>/tests`
+# (parent of the `tests/native` crate, which IS picked up by the
+# explicit member pattern above). Two lines per feature until cargo
+# grows glob-exclude support.
 exclude = [
-    "apps/web",
-    "apps/desktop",
-    "apps/mobile",
-    "crates/task-ui",
+    "features/agent/spec",      "features/agent/tests",
+    "features/caldav/spec",     "features/caldav/tests",
+    "features/calendar/spec",   "features/calendar/tests",
+    "features/chat/spec",       "features/chat/tests",
+    "features/conference/spec", "features/conference/tests",
+    "features/cookbook/spec",   "features/cookbook/tests",
+    "features/email/spec",      "features/email/tests",
+    "features/finance/spec",    "features/finance/tests",
+    "features/fitness/spec",    "features/fitness/tests",
+    "features/inventory/spec",  "features/inventory/tests",
+    "features/invoice/spec",    "features/invoice/tests",
+    "features/location/spec",   "features/location/tests",
+    "features/person/spec",     "features/person/tests",
+    "features/project/spec",    "features/project/tests",
+    "features/threads/spec",    "features/threads/tests",
+    "features/timer/spec",      "features/timer/tests",
+    "features/knowledge/spec",  "features/knowledge/tests",
 ]
 resolver = "2"
 
@@ -27,8 +39,9 @@ name = "task"
 
 [workspace.package]
 version = "0.1.0"
-authors = ["Cody Wright"]
 edition = "2021"
+rust-version = "1.90"
+authors = ["Cody Wright"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/Codys-Wright/Task"
 
@@ -40,6 +53,115 @@ futures = "0.3"
 rrule = "0.11"
 thiserror = "2.0"
 tracing = "0.1"
+threads = { path = "features/threads/threads" }
+threads-proto = { path = "features/threads/threads-proto" }
+threads-crdt = { path = "features/threads/threads-crdt" }
+threads-db = { path = "features/threads/threads-db" }
+chat = { path = "features/chat/chat" }
+chat-proto = { path = "features/chat/chat-proto" }
+chat-crdt = { path = "features/chat/chat-crdt" }
+chat-db = { path = "features/chat/chat-db" }
+conference = { path = "features/conference/conference" }
+conference-proto = { path = "features/conference/conference-proto" }
+conference-crdt = { path = "features/conference/conference-crdt" }
+conference-db = { path = "features/conference/conference-db" }
+person = { path = "features/person/person" }
+person-proto = { path = "features/person/person-proto" }
+person-crdt = { path = "features/person/person-crdt" }
+person-db = { path = "features/person/person-db" }
+location = { path = "features/location/location" }
+location-proto = { path = "features/location/location-proto" }
+location-crdt = { path = "features/location/location-crdt" }
+location-db = { path = "features/location/location-db" }
+project = { path = "features/project/project" }
+project-proto = { path = "features/project/project-proto" }
+project-crdt = { path = "features/project/project-crdt" }
+project-db = { path = "features/project/project-db" }
+timer = { path = "features/timer/timer" }
+timer-proto = { path = "features/timer/timer-proto" }
+timer-crdt = { path = "features/timer/timer-crdt" }
+timer-db = { path = "features/timer/timer-db" }
+invoice = { path = "features/invoice/invoice" }
+invoice-proto = { path = "features/invoice/invoice-proto" }
+invoice-crdt = { path = "features/invoice/invoice-crdt" }
+invoice-db = { path = "features/invoice/invoice-db" }
+finance = { path = "features/finance/finance" }
+finance-proto = { path = "features/finance/finance-proto" }
+finance-crdt = { path = "features/finance/finance-crdt" }
+finance-db = { path = "features/finance/finance-db" }
+inventory = { path = "features/inventory/inventory" }
+inventory-proto = { path = "features/inventory/inventory-proto" }
+inventory-crdt = { path = "features/inventory/inventory-crdt" }
+inventory-db = { path = "features/inventory/inventory-db" }
+cookbook = { path = "features/cookbook/cookbook" }
+cookbook-proto = { path = "features/cookbook/cookbook-proto" }
+cookbook-crdt = { path = "features/cookbook/cookbook-crdt" }
+cookbook-db = { path = "features/cookbook/cookbook-db" }
+fitness = { path = "features/fitness/fitness" }
+fitness-proto = { path = "features/fitness/fitness-proto" }
+fitness-crdt = { path = "features/fitness/fitness-crdt" }
+fitness-db = { path = "features/fitness/fitness-db" }
+calendar = { path = "features/calendar/calendar" }
+calendar-proto = { path = "features/calendar/calendar-proto" }
+calendar-crdt = { path = "features/calendar/calendar-crdt" }
+calendar-db = { path = "features/calendar/calendar-db" }
+email = { path = "features/email/email" }
+email-proto = { path = "features/email/email-proto" }
+email-crdt = { path = "features/email/email-crdt" }
+email-db = { path = "features/email/email-db" }
+agent = { path = "features/agent/agent" }
+agent-proto = { path = "features/agent/agent-proto" }
+agent-crdt = { path = "features/agent/agent-crdt" }
+agent-db = { path = "features/agent/agent-db" }
+agent-hermes = { path = "features/agent/agent-hermes" }
+caldav = { path = "features/caldav/caldav" }
+caldav-proto = { path = "features/caldav/caldav-proto" }
+caldav-crdt = { path = "features/caldav/caldav-crdt" }
+caldav-db = { path = "features/caldav/caldav-db" }
+caldav-sync = { path = "features/caldav/caldav-sync" }
+caldav-ui = { path = "features/caldav/caldav-ui" }
+agent-ui = { path = "features/agent/agent-ui" }
+calendar-ui = { path = "features/calendar/calendar-ui" }
+chat-ui = { path = "features/chat/chat-ui" }
+conference-ui = { path = "features/conference/conference-ui" }
+cookbook-ui = { path = "features/cookbook/cookbook-ui" }
+email-ui = { path = "features/email/email-ui" }
+finance-ui = { path = "features/finance/finance-ui" }
+fitness-ui = { path = "features/fitness/fitness-ui" }
+inventory-ui = { path = "features/inventory/inventory-ui" }
+invoice-ui = { path = "features/invoice/invoice-ui" }
+location-ui = { path = "features/location/location-ui" }
+person-ui = { path = "features/person/person-ui" }
+project-ui = { path = "features/project/project-ui" }
+threads-ui = { path = "features/threads/threads-ui" }
+timer-ui = { path = "features/timer/timer-ui" }
+knowledge = { path = "features/knowledge/knowledge" }
+knowledge-proto = { path = "features/knowledge/knowledge-proto" }
+knowledge-crdt = { path = "features/knowledge/knowledge-crdt" }
+knowledge-db = { path = "features/knowledge/knowledge-db" }
+knowledge-ui = { path = "features/knowledge/knowledge-ui" }
+knowledge-sync = { path = "features/knowledge/knowledge-sync" }
+
+# Filesystem walker — used by knowledge-sync to crawl Obsidian vault
+# directories. Server-only dep; never reaches wasm.
+walkdir = "2"
+
+# Fuzzy matcher used by the knowledge live-preview editor pickers
+# (wikilink/blockref/tag/slash-command). Same crate used internally by
+# helix and other rust TUIs — fast prefix-friendly bonuses + Unicode
+# normalization. Wasm-clean.
+nucleo-matcher = "0.3"
+fts-ui = { path = "../FastTrackStudio/fts-ui/crates/fts-ui", default-features = false }
+
+# Ordered-map for round-trippable frontmatter key preservation
+# (needed by knowledge-proto's obsidian helpers).
+indexmap = "2"
+
+# Regex engine — knowledge-proto uses it for link/embed/tag scanning.
+regex = "1"
+
+# YAML parsing/serialization for Obsidian frontmatter round-trip.
+serde_yaml = "0.9"
 
 [workspace.dependencies.facet]
 version = "0.46"
@@ -75,9 +197,91 @@ git = "https://github.com/Leaf-Computer/lumen-blocks.git"
 tag = "v0.2.0"
 
 [workspace.dependencies.moire]
-version = "1.0.0"
-git = "https://github.com/bearcove/moire"
-rev = "13eac79"
+git = "https://git.starcommand.live/codywright/moire"
+rev = "aea86f91f84cdf6052e4310e8a0541d87f37c624"
+
+# Loro — CRDT engine, source of truth for every feature's data.
+# SeaORM stores the doc's snapshot + update log as opaque bytes.
+[workspace.dependencies.loro]
+version = "1.12"
+default-features = false
+
+# CalDAV/CardDAV/WebDAV-Sync client (RFC 4791 + RFC 6352 + RFC 6578).
+# Picked over `kitchen-fridge` because it actually implements VEVENT
+# (kitchen-fridge's upstream is VTODO-first with VEVENT support
+# documented as "fairly trivial but not yet"), supports sync-token
+# incremental fetches, and ships HTTP/2 + connection pooling. We
+# wrap it in a Loro-backed bridge — the architect `calendar` CRDT
+# is our local source of truth, so kitchen-fridge's bundled Cache /
+# Provider abstractions would be redundant.
+[workspace.dependencies.fast-dav-rs]
+version = "0.4"
+
+# iCalendar parser / builder. Used by `caldav-sync` to map between
+# raw `BEGIN:VEVENT…` text and `calendar_proto::CalendarEvent`
+# (and the inverse for push). Active maintenance, dual-licensed,
+# uses the same `rrule` crate we have at the workspace level.
+[workspace.dependencies.icalendar]
+version = "0.17"
+
+# Markdown parser used by `chat-ui/src/ai/markdown.rs` to render
+# assistant message bodies. `default-features = false` drops the
+# `simd` + `gen-tests` optional deps so the crate stays wasm-clean.
+[workspace.dependencies.pulldown-cmark]
+version = "0.10"
+default-features = false
+
+# Dioxus — UI lib. Single workspace dep; per-crate `[features]`
+# enable the platform target. Pattern lifted from dioxus-flake's
+# packages/web/desktop/mobile setup so `cargo check --workspace`
+# works inside the nix dev shell.
+[workspace.dependencies.dioxus]
+version = "0.7.9"
+default-features = false
+features = ["lib"]
+
+[workspace.dependencies.dioxus-router]
+version = "0.7.9"
+default-features = false
+
+# Web-sys / wasm-bindgen — wired only in crates that use them and
+# always behind `#[cfg(target_arch = "wasm32")]` source gates. They
+# do compile on native (stub wrappers in wasm-bindgen-shared) so
+# leaving them on a native-buildable crate's Cargo.toml is fine.
+[workspace.dependencies.web-sys]
+version = "0.3.98"
+
+[workspace.dependencies.wasm-bindgen]
+version = "0.2"
+
+[workspace.dependencies.wasm-bindgen-futures]
+version = "0.4"
+
+[workspace.dependencies.js-sys]
+version = "0.3"
+
+[workspace.dependencies.gloo-timers]
+version = "0.3"
+features = ["futures"]
+
+[workspace.dependencies.futures-channel]
+version = "0.3"
+
+[workspace.dependencies.futures-util]
+version = "0.3"
+default-features = false
+features = ["std"]
+
+[workspace.dependencies.task-ui]
+path = "crates/task-ui"
+
+# CRDT lib + SeaORM persistence — path deps pointing at architect's
+# in-repo libs. Same rev as the architect/macros/architect dep below.
+[workspace.dependencies.crdt]
+path = "../architect/libs/crdt"
+
+[workspace.dependencies.crdt-seaorm]
+path = "../architect/libs/crdt-seaorm"
 
 [workspace.dependencies.serde]
 version = "1"
@@ -110,9 +314,15 @@ features = [
 path = "crates/task-core"
 
 [workspace.dependencies.vox]
+# Wasm-clean baseline: just `runtime` (vox-core, gives #[vox::service]
+# + generated <Trait>Client). Server crates that own a vox server
+# add `features = ["transport-websocket"]` explicitly on their dep
+# line. Pattern lifted from architect's workspace + vox's own
+# rust/wasm-browser-tests crate.
 git = "https://github.com/Codys-Wright/vox"
 rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5"
-features = ["transport-websocket"]
+default-features = false
+features = ["runtime"]
 
 [workspace.dependencies.vox-core]
 git = "https://github.com/Codys-Wright/vox"
@@ -295,40 +505,54 @@ features = ["gen_secret", "otpauth"]
 [profile.wasm-dev]
 opt-level = 1
 inherits = "dev"
+# Drop debuginfo so the wasm bundle stays small (~26MB instead of
+# ~500MB). The dev `inherits = "dev"` default is debug=2 which
+# dominates wasm size and freezes browsers loading the page.
+debug = false
+strip = "debuginfo"
 
 # Use the local FastTrackStudio input_actions checkout during development so
 # dependent crates share the same updated vox/facet stack.
 [patch."https://github.com/FastTrackStudios/input_actions.git"]
 actions-proto = { path = "../FastTrackStudio/input_actions/crates/actions-proto" }
 
-[patch.crates-io.moire]
-git = "https://github.com/bearcove/moire"
-rev = "13eac79"
+# Redirect every transitive bearcove/moire reference (vox's
+# moire-runtime / moire-tokio / moire-types, etc.) to the codywright
+# fork at the same rev as the workspace dep above. Without this,
+# vox + architect end up with two parallel moire compilations.
+[patch."https://github.com/bearcove/moire"]
+moire             = { git = "https://git.starcommand.live/codywright/moire", rev = "aea86f91f84cdf6052e4310e8a0541d87f37c624" }
+moire-macros      = { git = "https://git.starcommand.live/codywright/moire", rev = "aea86f91f84cdf6052e4310e8a0541d87f37c624" }
+moire-macros-noop = { git = "https://git.starcommand.live/codywright/moire", rev = "aea86f91f84cdf6052e4310e8a0541d87f37c624" }
+moire-runtime     = { git = "https://git.starcommand.live/codywright/moire", rev = "aea86f91f84cdf6052e4310e8a0541d87f37c624" }
+moire-tokio       = { git = "https://git.starcommand.live/codywright/moire", rev = "aea86f91f84cdf6052e4310e8a0541d87f37c624" }
+moire-trace-capture = { git = "https://git.starcommand.live/codywright/moire", rev = "aea86f91f84cdf6052e4310e8a0541d87f37c624" }
+moire-trace-types = { git = "https://git.starcommand.live/codywright/moire", rev = "aea86f91f84cdf6052e4310e8a0541d87f37c624" }
+moire-types       = { git = "https://git.starcommand.live/codywright/moire", rev = "aea86f91f84cdf6052e4310e8a0541d87f37c624" }
+moire-wasm        = { git = "https://git.starcommand.live/codywright/moire", rev = "aea86f91f84cdf6052e4310e8a0541d87f37c624" }
+moire-wire        = { git = "https://git.starcommand.live/codywright/moire", rev = "aea86f91f84cdf6052e4310e8a0541d87f37c624" }
 
-[patch.crates-io.moire-macros-noop]
-git = "https://github.com/bearcove/moire"
-rev = "13eac79"
+[workspace.dependencies.architect]
+path = "../architect/macros/architect"
 
-[patch.crates-io.moire-runtime]
-git = "https://github.com/bearcove/moire"
-rev = "13eac79"
+[workspace.dependencies.printpdf]
+version = "0.7"
+default-features = false
 
-[patch.crates-io.moire-tokio]
-git = "https://github.com/bearcove/moire"
-rev = "13eac79"
+[workspace.dependencies.fake]
+version = "4"
+features = ["derive", "uuid", "chrono"]
 
-[patch.crates-io.moire-trace-types]
-git = "https://github.com/bearcove/moire"
-rev = "13eac79"
+# architect's `architect` crate (path dep above) depends on
+# `sea-orm = { workspace = true }` resolved against architect's own
+# workspace, which uses crates.io sea-orm 1.x. Task uses the
+# FastTrackStudios sea-orm fork — without these patches we'd get two
+# parallel sea-orm crates in the graph and every architect-emitted
+# RepoStorage type would be incompatible with our DatabaseConnection.
+[patch.crates-io.sea-orm]
+git = "https://github.com/FastTrackStudios/sea-orm"
+rev = "d01afa40d79227a4a2de85b50e76849300890766"
 
-[patch.crates-io.moire-types]
-git = "https://github.com/bearcove/moire"
-rev = "13eac79"
-
-[patch.crates-io.moire-wasm]
-git = "https://github.com/bearcove/moire"
-rev = "13eac79"
-
-[patch.crates-io.moire-wire]
-git = "https://github.com/bearcove/moire"
-rev = "13eac79"
+[patch.crates-io.sea-orm-migration]
+git = "https://github.com/FastTrackStudios/sea-orm"
+rev = "d01afa40d79227a4a2de85b50e76849300890766"

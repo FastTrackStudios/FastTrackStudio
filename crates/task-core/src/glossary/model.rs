@@ -20,7 +20,7 @@ use utoipa::ToSchema;
 
 /// Local mirror of the `json_vec_type!` macro. Kept private to this
 /// module per repo convention (the macro lives inline in
-/// `crate::asset::model` / `crate::location::model` etc. and isn't
+/// `crate::location::model` etc. and isn't
 /// exposed publicly).
 macro_rules! json_vec_type {
     ($name:ident, $item:ty) => {

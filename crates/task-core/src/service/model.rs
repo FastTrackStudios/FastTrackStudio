@@ -500,7 +500,7 @@ pub trait PropertyService {
 
     /// Read all properties off one entity. `owner_type` is the entity
     /// kind: "task" | "project" | "calendar_event" | "person" | "comment"
-    /// | "asset" | "location". Returns the JSON object verbatim
+    /// | "location". Returns the JSON object verbatim
     /// (Obsidian frontmatter shape).
     async fn get_properties(
         &self,

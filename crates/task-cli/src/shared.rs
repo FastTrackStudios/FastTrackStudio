@@ -247,10 +247,6 @@ impl RemoteVoxConfig {
         self.connect().await
     }
 
-    pub(crate) async fn asset_repo(&self) -> eyre::Result<task_core::asset::AssetRepoClient> {
-        self.connect().await
-    }
-
     pub(crate) async fn task(&self) -> eyre::Result<task_core::service::TaskServiceClient> {
         self.connect().await
     }

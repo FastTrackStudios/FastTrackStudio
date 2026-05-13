@@ -1,13 +1,109 @@
 [package]
 name = "task-ui"
-version = "0.1.0"
-edition = "2021"
-authors = ["Cody Wright"]
-license = "MIT OR Apache-2.0"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
 
-# This crate is intentionally outside the root Task workspace — see the
-# `exclude` block in ../../Cargo.toml for the rationale.
+# Workspace member. Sharing the lockfile + dep graph with the
+# server/CLI crates avoids the dioxus / dioxus-router version drift
+# that bit us before. wasm-only call sites (web-sys::WebSocket, etc.)
+# are gated with `#[cfg(target_arch = "wasm32")]` so this crate
+# compiles cleanly on the native target too — `cargo check
+# --workspace` works inside the nix dev shell.
 
 [dependencies]
-dioxus = { version = "0.7.6", default-features = false, features = ["lib"] }
-fts-ui = { path = "../../../FastTrackStudio/fts-ui/crates/fts-ui" }
+dioxus = { workspace = true, features = ["router"] }
+dioxus-router.workspace = true
+fts-ui = { workspace = true, features = ["router"] }
+
+# Local-first source-of-truth in the browser.
+loro.workspace = true
+architect = { path = "../../../architect/macros/architect" }
+crdt = { path = "../../../architect/libs/crdt" }
+
+# Per-feature trios.
+agent-proto = { workspace = true, features = ["fake"] }
+agent-crdt.workspace = true
+agent-ui.workspace = true
+caldav-proto = { workspace = true, features = ["fake"] }
+caldav-crdt.workspace = true
+caldav-ui.workspace = true
+calendar-proto = { workspace = true, features = ["fake"] }
+calendar-crdt.workspace = true
+calendar-ui.workspace = true
+chat-proto = { workspace = true, features = ["fake"] }
+chat-crdt.workspace = true
+chat-ui.workspace = true
+conference-proto = { workspace = true, features = ["fake"] }
+conference-crdt.workspace = true
+conference-ui.workspace = true
+cookbook-proto = { workspace = true, features = ["fake"] }
+cookbook-crdt.workspace = true
+cookbook-ui.workspace = true
+email-proto = { workspace = true, features = ["fake"] }
+email-crdt.workspace = true
+email-ui.workspace = true
+finance-proto = { workspace = true, features = ["fake"] }
+finance-crdt.workspace = true
+finance-ui.workspace = true
+fitness-proto = { workspace = true, features = ["fake"] }
+fitness-crdt.workspace = true
+fitness-ui.workspace = true
+inventory-proto = { workspace = true, features = ["fake"] }
+inventory-crdt.workspace = true
+inventory-ui.workspace = true
+invoice-proto = { workspace = true, features = ["fake"] }
+invoice-crdt.workspace = true
+invoice-ui.workspace = true
+knowledge-proto.workspace = true
+knowledge-crdt.workspace = true
+knowledge-ui.workspace = true
+location-proto = { workspace = true, features = ["fake"] }
+location-crdt.workspace = true
+location-ui.workspace = true
+person-proto = { workspace = true, features = ["fake"] }
+person-crdt.workspace = true
+person-ui.workspace = true
+project-proto = { workspace = true, features = ["fake"] }
+project-crdt.workspace = true
+project-ui.workspace = true
+threads-proto = { workspace = true, features = ["fake"] }
+threads-crdt.workspace = true
+threads-ui.workspace = true
+timer-proto = { workspace = true, features = ["fake"] }
+timer-crdt.workspace = true
+timer-ui.workspace = true
+
+uuid = { workspace = true, features = ["v4", "js"] }
+chrono = { workspace = true, features = ["clock", "std", "wasmbind"] }
+fake.workspace = true
+tracing.workspace = true
+serde_json.workspace = true
+
+# Browser glue. Compiles cleanly on native too; the source uses
+# them only inside `cfg(target_arch = "wasm32")` blocks.
+wasm-bindgen.workspace = true
+wasm-bindgen-futures.workspace = true
+js-sys.workspace = true
+web-sys = { workspace = true, features = [
+    "Window",
+    "Location",
+    "History",
+    "Navigator",
+    "WebSocket",
+    "MessageEvent",
+    "BinaryType",
+    "Blob",
+    "Event",
+    "CloseEvent",
+    "ErrorEvent",
+    "console",
+] }
+futures-channel.workspace = true
+futures-util.workspace = true
+
+[features]
+default = []
+# Opt-in WASM bundle splitting along route variants.
+wasm-split = ["dioxus-router/wasm-split"]

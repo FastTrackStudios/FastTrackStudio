@@ -1,10 +1,21 @@
 [package]
 name = "task-app-web"
-version = "0.1.0"
-edition = "2021"
-authors = ["Cody Wright"]
-license = "MIT OR Apache-2.0"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
 
 [dependencies]
-dioxus = { version = "0.7.6", default-features = false, features = ["lib", "web"] }
-task-ui = { path = "../../crates/task-ui" }
+# Workspace dioxus dep with no platform features; this crate's
+# `default = ["web"]` toggles `dioxus/web` + `dioxus/launch` on so
+# `dx serve` builds it correctly. Lifted from dioxus-flake's
+# packages/web pattern.
+dioxus = { workspace = true, features = ["router"] }
+task-ui.workspace = true
+
+[features]
+default = ["web"]
+web = ["dioxus/web", "dioxus/launch"]
+# Bundle-split the wasm binary along route variants. Requires
+# running `dx serve --wasm-split`.
+wasm-split = ["task-ui/wasm-split"]

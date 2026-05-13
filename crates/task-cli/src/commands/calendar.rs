@@ -48,10 +48,6 @@ pub(crate) enum CalendarCommands {
         #[arg(long)]
         attendee: Vec<String>,
         #[arg(long)]
-        asset: Vec<String>,
-        #[arg(long = "force-assets")]
-        force_assets: bool,
-        #[arg(long)]
         json: bool,
     },
     /// Update mutable calendar event fields
@@ -152,8 +148,6 @@ pub(crate) async fn run_remote_calendar_command(
             status,
             recurrence,
             attendee,
-            asset,
-            force_assets,
             json,
         } => {
             let start = parse_datetime(&start)?;
@@ -174,46 +168,11 @@ pub(crate) async fn run_remote_calendar_command(
             };
             let create: task_core::calendar_event::CalendarEventApiCreate = model_to_api(&event)?;
             let created: CalendarEvent = api_to_model(repo.create_calendar_event(create).await?)?;
-            let asset_reservations = if asset.is_empty() {
-                Vec::new()
-            } else {
-                let asset_repo = remote.asset_repo().await?;
-                let reference = created.id.clone().unwrap_or_else(|| created.title.clone());
-                let mut reservations = Vec::new();
-                for asset_ref in asset {
-                    reservations.push(
-                        crate::commands::asset::remote_reserve_asset_with_client(
-                            &asset_repo,
-                            &asset_ref,
-                            AssetReserveRequest {
-                                reference: reference.clone(),
-                                starts_at: Some(created.start),
-                                ends_at: created.end,
-                                force: force_assets,
-                                ..AssetReserveRequest::default()
-                            },
-                        )
-                        .await?,
-                    );
-                }
-                reservations
-            };
             if json {
-                println!(
-                    "{{\"event\":{},\"asset_reservations\":{}}}",
-                    facet_json::to_string(&created).unwrap_or_default(),
-                    facet_json::to_string(&asset_reservations).unwrap_or_default()
-                );
+                println!("{}", facet_json::to_string(&created).unwrap_or_default());
             } else {
                 println!("Created calendar event: {}", created.title);
                 println!("  id: {}", created.id.as_deref().unwrap_or("—"));
-                for reservation in &asset_reservations {
-                    println!(
-                        "  reserved asset: {} ({})",
-                        reservation.asset.name, reservation.asset.id
-                    );
-                    print_asset_conflicts(&reservation.conflicts, false);
-                }
             }
         }
         CalendarCommands::Update {
