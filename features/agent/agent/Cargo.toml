@@ -1,0 +1,34 @@
+[package]
+name = "agent"
+version.workspace = true
+edition.workspace = true
+
+# Facade — single import root for the `agent` feature.
+#
+#   default        wire types only (wasm-clean client baseline)
+#   vox            #[vox::service] surface + dispatcher/client
+#   server         CRDT source of truth + SeaORM persistence (pulls
+#                  agent-crdt + agent-db together — they're paired)
+#   server-axum    architect::axum_ws helpers, re-exported here
+#   fake           #[derive(Dummy)] on every emitted wire struct
+#   full           everything above
+
+[dependencies]
+agent-proto.workspace = true
+agent-crdt = { workspace = true, optional = true }
+agent-db = { workspace = true, optional = true }
+crdt = { workspace = true, optional = true }
+architect = { workspace = true, optional = true }
+
+[features]
+default = []
+vox = ["agent-proto/vox"]
+server = ["dep:agent-crdt", "dep:agent-db", "dep:crdt"]
+server-axum = ["dep:architect", "architect/server-axum"]
+fake = ["agent-proto/fake"]
+full = [
+    "vox",
+    "server",
+    "server-axum",
+    "fake",
+]

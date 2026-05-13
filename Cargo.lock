@@ -62,6 +62,68 @@ dependencies = [
 ]
 
 [[package]]
+name = "agent"
+version = "0.1.0"
+dependencies = [
+ "agent-crdt",
+ "agent-db",
+ "agent-proto",
+ "architect",
+ "crdt",
+]
+
+[[package]]
+name = "agent-crdt"
+version = "0.1.0"
+dependencies = [
+ "agent-proto",
+ "architect",
+ "chrono",
+ "crdt",
+ "loro",
+ "uuid",
+]
+
+[[package]]
+name = "agent-db"
+version = "0.1.0"
+dependencies = [
+ "agent-proto",
+ "async-trait",
+ "crdt-seaorm",
+ "sea-orm",
+ "sea-orm-migration",
+]
+
+[[package]]
+name = "agent-proto"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "chrono",
+ "facet 0.46.0",
+ "fake",
+ "sea-orm",
+ "thiserror 2.0.18",
+ "uuid",
+ "vox 0.3.1 (git+https://github.com/Codys-Wright/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
+]
+
+[[package]]
+name = "agent-tests-native"
+version = "0.1.0"
+dependencies = [
+ "agent-crdt",
+ "agent-proto",
+ "architect",
+ "crdt",
+ "fake",
+ "loro",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "ahash"
 version = "0.7.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -196,6 +258,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "architect"
+version = "0.1.0"
+dependencies = [
+ "architect-derive",
+ "async-trait",
+ "axum",
+ "chrono",
+ "facet 0.46.0",
+ "facet-core 0.46.0",
+ "fake",
+ "futures",
+ "moire 1.0.1",
+ "sea-orm",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+ "vox 0.3.1 (git+https://github.com/bearcove/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
+ "vox-core 0.3.1 (git+https://github.com/bearcove/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
+ "vox-types 0.3.1 (git+https://github.com/bearcove/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
+]
+
+[[package]]
+name = "architect-derive"
+version = "0.1.0"
+dependencies = [
+ "heck 0.5.0",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
 name = "argon2"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -230,6 +325,68 @@ name = "arref"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2ccd462b64c3c72f1be8305905a85d85403d768e8690c9b8bd3b9009a5761679"
+
+[[package]]
+name = "asset"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "asset-crdt",
+ "asset-db",
+ "asset-proto",
+ "crdt",
+]
+
+[[package]]
+name = "asset-crdt"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "asset-proto",
+ "chrono",
+ "crdt",
+ "loro",
+ "uuid",
+]
+
+[[package]]
+name = "asset-db"
+version = "0.1.0"
+dependencies = [
+ "asset-proto",
+ "async-trait",
+ "crdt-seaorm",
+ "sea-orm",
+ "sea-orm-migration",
+]
+
+[[package]]
+name = "asset-proto"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "chrono",
+ "facet 0.46.0",
+ "fake",
+ "sea-orm",
+ "thiserror 2.0.18",
+ "uuid",
+ "vox 0.3.1 (git+https://github.com/Codys-Wright/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
+]
+
+[[package]]
+name = "asset-tests-native"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "asset-crdt",
+ "asset-proto",
+ "crdt",
+ "fake",
+ "loro",
+ "tokio",
+ "uuid",
+]
 
 [[package]]
 name = "async-channel"
@@ -422,6 +579,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f28d99ec8bfea296261ca1af174f24225171fea9664ba9003cbebee704810528"
 dependencies = [
  "num-traits",
+]
+
+[[package]]
+name = "atomic"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a89cbf775b137e9b968e67227ef7f775587cde3fd31b0d8599dbd0f598a48340"
+dependencies = [
+ "bytemuck",
 ]
 
 [[package]]
@@ -836,6 +1002,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "bytemuck"
+version = "1.25.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c8efb64bd706a16a1bdde310ae86b351e4d21550d98d056f22f8a7f7a2183fec"
+
+[[package]]
 name = "byteorder"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -846,6 +1018,68 @@ name = "bytes"
 version = "1.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1e748733b7cbc798e1434b6ac524f0c1ff2ab456fe201501e6497c8417a4fc33"
+
+[[package]]
+name = "calendar"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "calendar-crdt",
+ "calendar-db",
+ "calendar-proto",
+ "crdt",
+]
+
+[[package]]
+name = "calendar-crdt"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "calendar-proto",
+ "chrono",
+ "crdt",
+ "loro",
+ "uuid",
+]
+
+[[package]]
+name = "calendar-db"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "calendar-proto",
+ "crdt-seaorm",
+ "sea-orm",
+ "sea-orm-migration",
+]
+
+[[package]]
+name = "calendar-proto"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "chrono",
+ "facet 0.46.0",
+ "fake",
+ "sea-orm",
+ "thiserror 2.0.18",
+ "uuid",
+ "vox 0.3.1 (git+https://github.com/Codys-Wright/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
+]
+
+[[package]]
+name = "calendar-tests-native"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "calendar-crdt",
+ "calendar-proto",
+ "crdt",
+ "fake",
+ "loro",
+ "tokio",
+ "uuid",
+]
 
 [[package]]
 name = "camino"
@@ -876,6 +1110,68 @@ name = "cfg_aliases"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
+
+[[package]]
+name = "chat"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "chat-crdt",
+ "chat-db",
+ "chat-proto",
+ "crdt",
+]
+
+[[package]]
+name = "chat-crdt"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "chat-proto",
+ "chrono",
+ "crdt",
+ "loro",
+ "uuid",
+]
+
+[[package]]
+name = "chat-db"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chat-proto",
+ "crdt-seaorm",
+ "sea-orm",
+ "sea-orm-migration",
+]
+
+[[package]]
+name = "chat-proto"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "chrono",
+ "facet 0.46.0",
+ "fake",
+ "sea-orm",
+ "thiserror 2.0.18",
+ "uuid",
+ "vox 0.3.1 (git+https://github.com/Codys-Wright/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
+]
+
+[[package]]
+name = "chat-tests-native"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "chat-crdt",
+ "chat-proto",
+ "crdt",
+ "fake",
+ "loro",
+ "tokio",
+ "uuid",
+]
 
 [[package]]
 name = "chrono"
@@ -1058,6 +1354,68 @@ dependencies = [
 ]
 
 [[package]]
+name = "conference"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "conference-crdt",
+ "conference-db",
+ "conference-proto",
+ "crdt",
+]
+
+[[package]]
+name = "conference-crdt"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "chrono",
+ "conference-proto",
+ "crdt",
+ "loro",
+ "uuid",
+]
+
+[[package]]
+name = "conference-db"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "conference-proto",
+ "crdt-seaorm",
+ "sea-orm",
+ "sea-orm-migration",
+]
+
+[[package]]
+name = "conference-proto"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "chrono",
+ "facet 0.46.0",
+ "fake",
+ "sea-orm",
+ "thiserror 2.0.18",
+ "uuid",
+ "vox 0.3.1 (git+https://github.com/Codys-Wright/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
+]
+
+[[package]]
+name = "conference-tests-native"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "conference-crdt",
+ "conference-proto",
+ "crdt",
+ "fake",
+ "loro",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "const-fnv1a-hash"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1103,6 +1461,68 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "baaaa0ecca5b51987b9423ccdc971514dd8b0bb7b4060b983d3664dad3f1f89f"
 dependencies = [
  "unicode-segmentation",
+]
+
+[[package]]
+name = "cookbook"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "cookbook-crdt",
+ "cookbook-db",
+ "cookbook-proto",
+ "crdt",
+]
+
+[[package]]
+name = "cookbook-crdt"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "chrono",
+ "cookbook-proto",
+ "crdt",
+ "loro",
+ "uuid",
+]
+
+[[package]]
+name = "cookbook-db"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "cookbook-proto",
+ "crdt-seaorm",
+ "sea-orm",
+ "sea-orm-migration",
+]
+
+[[package]]
+name = "cookbook-proto"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "chrono",
+ "facet 0.46.0",
+ "fake",
+ "sea-orm",
+ "thiserror 2.0.18",
+ "uuid",
+ "vox 0.3.1 (git+https://github.com/Codys-Wright/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
+]
+
+[[package]]
+name = "cookbook-tests-native"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "cookbook-crdt",
+ "cookbook-proto",
+ "crdt",
+ "fake",
+ "loro",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]
@@ -1328,6 +1748,33 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9481c1c90cbf2ac953f07c8d4a58aa3945c425b7185c9154d67a65e4230da511"
 dependencies = [
  "cfg-if",
+]
+
+[[package]]
+name = "crdt"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "async-trait",
+ "chrono",
+ "loro",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "crdt-seaorm"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "crdt",
+ "sea-orm",
+ "sea-orm-migration",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -1794,6 +2241,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "dummy"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3bbcf21279103a67372982cb1156a2154a452451dff2b884cf897ccecce389e0"
+dependencies = [
+ "darling 0.20.11",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
 name = "dunce"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1818,6 +2277,68 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "email"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "crdt",
+ "email-crdt",
+ "email-db",
+ "email-proto",
+]
+
+[[package]]
+name = "email-crdt"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "chrono",
+ "crdt",
+ "email-proto",
+ "loro",
+ "uuid",
+]
+
+[[package]]
+name = "email-db"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "crdt-seaorm",
+ "email-proto",
+ "sea-orm",
+ "sea-orm-migration",
+]
+
+[[package]]
+name = "email-proto"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "chrono",
+ "facet 0.46.0",
+ "fake",
+ "sea-orm",
+ "thiserror 2.0.18",
+ "uuid",
+ "vox 0.3.1 (git+https://github.com/Codys-Wright/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
+]
+
+[[package]]
+name = "email-tests-native"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "crdt",
+ "email-crdt",
+ "email-proto",
+ "fake",
+ "loro",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]
@@ -1974,6 +2495,16 @@ dependencies = [
  "facet-reflect 0.46.0",
  "facet-toml",
  "facet-value",
+]
+
+[[package]]
+name = "facet-cbor"
+version = "0.3.1"
+source = "git+https://github.com/bearcove/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5#fd3167b6d6b89b60edd9c78f7b8890f5a87571d5"
+dependencies = [
+ "facet 0.46.0",
+ "facet-core 0.46.0",
+ "facet-reflect 0.46.0",
 ]
 
 [[package]]
@@ -2273,6 +2804,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "fake"
+version = "4.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f2b0902eb36fbab51c14eda1c186bda119fcff91e5e4e7fc2dd2077298197ce8"
+dependencies = [
+ "chrono",
+ "deunicode",
+ "dummy",
+ "either",
+ "rand 0.9.4",
+ "uuid",
+]
+
+[[package]]
 name = "fallible-iterator"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2302,10 +2847,134 @@ dependencies = [
 ]
 
 [[package]]
+name = "finance"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "crdt",
+ "finance-crdt",
+ "finance-db",
+ "finance-proto",
+]
+
+[[package]]
+name = "finance-crdt"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "chrono",
+ "crdt",
+ "finance-proto",
+ "loro",
+ "uuid",
+]
+
+[[package]]
+name = "finance-db"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "crdt-seaorm",
+ "finance-proto",
+ "sea-orm",
+ "sea-orm-migration",
+]
+
+[[package]]
+name = "finance-proto"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "chrono",
+ "facet 0.46.0",
+ "fake",
+ "sea-orm",
+ "thiserror 2.0.18",
+ "uuid",
+ "vox 0.3.1 (git+https://github.com/Codys-Wright/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
+]
+
+[[package]]
+name = "finance-tests-native"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "crdt",
+ "fake",
+ "finance-crdt",
+ "finance-proto",
+ "loro",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "find-msvc-tools"
 version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
+
+[[package]]
+name = "fitness"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "crdt",
+ "fitness-crdt",
+ "fitness-db",
+ "fitness-proto",
+]
+
+[[package]]
+name = "fitness-crdt"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "chrono",
+ "crdt",
+ "fitness-proto",
+ "loro",
+ "uuid",
+]
+
+[[package]]
+name = "fitness-db"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "crdt-seaorm",
+ "fitness-proto",
+ "sea-orm",
+ "sea-orm-migration",
+]
+
+[[package]]
+name = "fitness-proto"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "chrono",
+ "facet 0.46.0",
+ "fake",
+ "sea-orm",
+ "thiserror 2.0.18",
+ "uuid",
+ "vox 0.3.1 (git+https://github.com/Codys-Wright/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
+]
+
+[[package]]
+name = "fitness-tests-native"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "crdt",
+ "fake",
+ "fitness-crdt",
+ "fitness-proto",
+ "loro",
+ "tokio",
+ "uuid",
+]
 
 [[package]]
 name = "flate2"
@@ -3259,6 +3928,130 @@ dependencies = [
 ]
 
 [[package]]
+name = "inventory"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "crdt",
+ "inventory-crdt",
+ "inventory-db",
+ "inventory-proto",
+]
+
+[[package]]
+name = "inventory-crdt"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "chrono",
+ "crdt",
+ "inventory-proto",
+ "loro",
+ "uuid",
+]
+
+[[package]]
+name = "inventory-db"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "crdt-seaorm",
+ "inventory-proto",
+ "sea-orm",
+ "sea-orm-migration",
+]
+
+[[package]]
+name = "inventory-proto"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "chrono",
+ "facet 0.46.0",
+ "fake",
+ "sea-orm",
+ "thiserror 2.0.18",
+ "uuid",
+ "vox 0.3.1 (git+https://github.com/Codys-Wright/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
+]
+
+[[package]]
+name = "inventory-tests-native"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "crdt",
+ "fake",
+ "inventory-crdt",
+ "inventory-proto",
+ "loro",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "invoice"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "crdt",
+ "invoice-crdt",
+ "invoice-db",
+ "invoice-proto",
+]
+
+[[package]]
+name = "invoice-crdt"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "chrono",
+ "crdt",
+ "invoice-proto",
+ "loro",
+ "uuid",
+]
+
+[[package]]
+name = "invoice-db"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "crdt-seaorm",
+ "invoice-proto",
+ "sea-orm",
+ "sea-orm-migration",
+]
+
+[[package]]
+name = "invoice-proto"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "chrono",
+ "facet 0.46.0",
+ "fake",
+ "sea-orm",
+ "thiserror 2.0.18",
+ "uuid",
+ "vox 0.3.1 (git+https://github.com/Codys-Wright/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
+]
+
+[[package]]
+name = "invoice-tests-native"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "crdt",
+ "fake",
+ "invoice-crdt",
+ "invoice-proto",
+ "loro",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "ipnet"
 version = "2.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3499,6 +4292,68 @@ name = "litemap"
 version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92daf443525c4cce67b150400bc2316076100ce0b3686209eb8cf3c31612e6f0"
+
+[[package]]
+name = "location"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "crdt",
+ "location-crdt",
+ "location-db",
+ "location-proto",
+]
+
+[[package]]
+name = "location-crdt"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "chrono",
+ "crdt",
+ "location-proto",
+ "loro",
+ "uuid",
+]
+
+[[package]]
+name = "location-db"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "crdt-seaorm",
+ "location-proto",
+ "sea-orm",
+ "sea-orm-migration",
+]
+
+[[package]]
+name = "location-proto"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "chrono",
+ "facet 0.46.0",
+ "fake",
+ "sea-orm",
+ "thiserror 2.0.18",
+ "uuid",
+ "vox 0.3.1 (git+https://github.com/Codys-Wright/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
+]
+
+[[package]]
+name = "location-tests-native"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "crdt",
+ "fake",
+ "location-crdt",
+ "location-proto",
+ "loro",
+ "tokio",
+ "uuid",
+]
 
 [[package]]
 name = "lock_api"
@@ -3815,7 +4670,7 @@ dependencies = [
 [[package]]
 name = "moire"
 version = "1.0.1"
-source = "git+https://github.com/bearcove/moire?rev=cf162e7#cf162e7be775dd6a22317fa4fef1309e6c0a9d69"
+source = "git+https://git.starcommand.live/codywright/moire?rev=aea86f91f84cdf6052e4310e8a0541d87f37c624#aea86f91f84cdf6052e4310e8a0541d87f37c624"
 dependencies = [
  "moire-macros-noop 1.0.1",
  "moire-tokio 1.0.1",
@@ -3830,7 +4685,7 @@ source = "git+https://github.com/bearcove/moire?rev=13eac79#13eac79c1b128282dd79
 [[package]]
 name = "moire-macros-noop"
 version = "1.0.1"
-source = "git+https://github.com/bearcove/moire?rev=cf162e7#cf162e7be775dd6a22317fa4fef1309e6c0a9d69"
+source = "git+https://git.starcommand.live/codywright/moire?rev=aea86f91f84cdf6052e4310e8a0541d87f37c624#aea86f91f84cdf6052e4310e8a0541d87f37c624"
 
 [[package]]
 name = "moire-runtime"
@@ -3851,7 +4706,7 @@ dependencies = [
 [[package]]
 name = "moire-runtime"
 version = "1.0.1"
-source = "git+https://github.com/bearcove/moire?rev=cf162e7#cf162e7be775dd6a22317fa4fef1309e6c0a9d69"
+source = "git+https://git.starcommand.live/codywright/moire?rev=aea86f91f84cdf6052e4310e8a0541d87f37c624#aea86f91f84cdf6052e4310e8a0541d87f37c624"
 dependencies = [
  "ctor",
  "facet 0.46.0",
@@ -3878,7 +4733,7 @@ dependencies = [
 [[package]]
 name = "moire-tokio"
 version = "1.0.1"
-source = "git+https://github.com/bearcove/moire?rev=cf162e7#cf162e7be775dd6a22317fa4fef1309e6c0a9d69"
+source = "git+https://git.starcommand.live/codywright/moire?rev=aea86f91f84cdf6052e4310e8a0541d87f37c624#aea86f91f84cdf6052e4310e8a0541d87f37c624"
 dependencies = [
  "moire-runtime 1.0.1",
  "moire-types 1.0.1",
@@ -3898,7 +4753,7 @@ dependencies = [
 [[package]]
 name = "moire-trace-capture"
 version = "1.0.1"
-source = "git+https://github.com/bearcove/moire?rev=cf162e7#cf162e7be775dd6a22317fa4fef1309e6c0a9d69"
+source = "git+https://git.starcommand.live/codywright/moire?rev=aea86f91f84cdf6052e4310e8a0541d87f37c624#aea86f91f84cdf6052e4310e8a0541d87f37c624"
 dependencies = [
  "libc",
  "moire-trace-types 1.0.1",
@@ -3915,7 +4770,7 @@ dependencies = [
 [[package]]
 name = "moire-trace-types"
 version = "1.0.1"
-source = "git+https://github.com/bearcove/moire?rev=cf162e7#cf162e7be775dd6a22317fa4fef1309e6c0a9d69"
+source = "git+https://git.starcommand.live/codywright/moire?rev=aea86f91f84cdf6052e4310e8a0541d87f37c624#aea86f91f84cdf6052e4310e8a0541d87f37c624"
 dependencies = [
  "facet 0.46.0",
 ]
@@ -3933,7 +4788,7 @@ dependencies = [
 [[package]]
 name = "moire-types"
 version = "1.0.1"
-source = "git+https://github.com/bearcove/moire?rev=cf162e7#cf162e7be775dd6a22317fa4fef1309e6c0a9d69"
+source = "git+https://git.starcommand.live/codywright/moire?rev=aea86f91f84cdf6052e4310e8a0541d87f37c624#aea86f91f84cdf6052e4310e8a0541d87f37c624"
 dependencies = [
  "facet 0.46.0",
  "facet-value",
@@ -3958,7 +4813,7 @@ dependencies = [
 [[package]]
 name = "moire-wasm"
 version = "1.0.1"
-source = "git+https://github.com/bearcove/moire?rev=cf162e7#cf162e7be775dd6a22317fa4fef1309e6c0a9d69"
+source = "git+https://git.starcommand.live/codywright/moire?rev=aea86f91f84cdf6052e4310e8a0541d87f37c624#aea86f91f84cdf6052e4310e8a0541d87f37c624"
 dependencies = [
  "async-channel 2.5.0",
  "async-lock",
@@ -3984,7 +4839,7 @@ dependencies = [
 [[package]]
 name = "moire-wire"
 version = "1.0.1"
-source = "git+https://github.com/bearcove/moire?rev=cf162e7#cf162e7be775dd6a22317fa4fef1309e6c0a9d69"
+source = "git+https://git.starcommand.live/codywright/moire?rev=aea86f91f84cdf6052e4310e8a0541d87f37c624#aea86f91f84cdf6052e4310e8a0541d87f37c624"
 dependencies = [
  "facet 0.46.0",
  "facet-json",
@@ -4388,6 +5243,68 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
+name = "person"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "crdt",
+ "person-crdt",
+ "person-db",
+ "person-proto",
+]
+
+[[package]]
+name = "person-crdt"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "chrono",
+ "crdt",
+ "loro",
+ "person-proto",
+ "uuid",
+]
+
+[[package]]
+name = "person-db"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "crdt-seaorm",
+ "person-proto",
+ "sea-orm",
+ "sea-orm-migration",
+]
+
+[[package]]
+name = "person-proto"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "chrono",
+ "facet 0.46.0",
+ "fake",
+ "sea-orm",
+ "thiserror 2.0.18",
+ "uuid",
+ "vox 0.3.1 (git+https://github.com/Codys-Wright/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
+]
+
+[[package]]
+name = "person-tests-native"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "crdt",
+ "fake",
+ "loro",
+ "person-crdt",
+ "person-proto",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "pest"
 version = "2.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4751,6 +5668,68 @@ dependencies = [
  "syn 2.0.117",
  "version_check",
  "yansi",
+]
+
+[[package]]
+name = "project"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "crdt",
+ "project-crdt",
+ "project-db",
+ "project-proto",
+]
+
+[[package]]
+name = "project-crdt"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "chrono",
+ "crdt",
+ "loro",
+ "project-proto",
+ "uuid",
+]
+
+[[package]]
+name = "project-db"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "crdt-seaorm",
+ "project-proto",
+ "sea-orm",
+ "sea-orm-migration",
+]
+
+[[package]]
+name = "project-proto"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "chrono",
+ "facet 0.46.0",
+ "fake",
+ "sea-orm",
+ "thiserror 2.0.18",
+ "uuid",
+ "vox 0.3.1 (git+https://github.com/Codys-Wright/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
+]
+
+[[package]]
+name = "project-tests-native"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "crdt",
+ "fake",
+ "loro",
+ "project-crdt",
+ "project-proto",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]
@@ -5426,6 +6405,9 @@ dependencies = [
  "dotenvy",
  "glob",
  "regex",
+ "sea-schema",
+ "sqlx",
+ "tokio",
  "tracing",
  "tracing-subscriber",
  "url",
@@ -5514,7 +6496,9 @@ checksum = "2239ff574c04858ca77485f112afea1a15e53135d3097d0c86509cef1def1338"
 dependencies = [
  "futures",
  "sea-query",
+ "sea-query-binder",
  "sea-schema-derive",
+ "sqlx",
 ]
 
 [[package]]
@@ -6287,7 +7271,7 @@ dependencies = [
  "task-core",
  "tokio",
  "uuid",
- "vox 0.3.1",
+ "vox 0.3.1 (git+https://github.com/Codys-Wright/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
 ]
 
 [[package]]
@@ -6330,9 +7314,9 @@ dependencies = [
  "tracing",
  "utoipa",
  "uuid",
- "vox 0.3.1",
- "vox-core 0.3.1",
- "vox-types 0.3.1",
+ "vox 0.3.1 (git+https://github.com/Codys-Wright/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
+ "vox-core 0.3.1 (git+https://github.com/Codys-Wright/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
+ "vox-types 0.3.1 (git+https://github.com/Codys-Wright/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
 ]
 
 [[package]]
@@ -6360,7 +7344,7 @@ dependencies = [
  "utoipa",
  "utoipa-axum",
  "uuid",
- "vox 0.3.1",
+ "vox 0.3.1 (git+https://github.com/Codys-Wright/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
 ]
 
 [[package]]
@@ -6386,7 +7370,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
- "vox 0.3.1",
+ "vox 0.3.1 (git+https://github.com/Codys-Wright/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
 ]
 
 [[package]]
@@ -6450,6 +7434,68 @@ dependencies = [
 ]
 
 [[package]]
+name = "threads"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "crdt",
+ "threads-crdt",
+ "threads-db",
+ "threads-proto",
+]
+
+[[package]]
+name = "threads-crdt"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "chrono",
+ "crdt",
+ "loro",
+ "threads-proto",
+ "uuid",
+]
+
+[[package]]
+name = "threads-db"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "crdt-seaorm",
+ "sea-orm",
+ "sea-orm-migration",
+ "threads-proto",
+]
+
+[[package]]
+name = "threads-proto"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "chrono",
+ "facet 0.46.0",
+ "fake",
+ "sea-orm",
+ "thiserror 2.0.18",
+ "uuid",
+ "vox 0.3.1 (git+https://github.com/Codys-Wright/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
+]
+
+[[package]]
+name = "threads-tests-native"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "crdt",
+ "fake",
+ "loro",
+ "threads-crdt",
+ "threads-proto",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "time"
 version = "0.3.47"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6478,6 +7524,68 @@ checksum = "2e70e4c5a0e0a8a4823ad65dfe1a6930e4f4d756dcd9dd7939022b5e8c501215"
 dependencies = [
  "num-conv",
  "time-core",
+]
+
+[[package]]
+name = "timer"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "crdt",
+ "timer-crdt",
+ "timer-db",
+ "timer-proto",
+]
+
+[[package]]
+name = "timer-crdt"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "chrono",
+ "crdt",
+ "loro",
+ "timer-proto",
+ "uuid",
+]
+
+[[package]]
+name = "timer-db"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "crdt-seaorm",
+ "sea-orm",
+ "sea-orm-migration",
+ "timer-proto",
+]
+
+[[package]]
+name = "timer-proto"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "chrono",
+ "facet 0.46.0",
+ "fake",
+ "sea-orm",
+ "thiserror 2.0.18",
+ "uuid",
+ "vox 0.3.1 (git+https://github.com/Codys-Wright/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
+]
+
+[[package]]
+name = "timer-tests-native"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "crdt",
+ "fake",
+ "loro",
+ "timer-crdt",
+ "timer-proto",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]
@@ -7011,8 +8119,10 @@ version = "1.23.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ddd74a9687298c6858e9b88ec8935ec45d22e8fd5e6394fa1bd4e99a87789c76"
 dependencies = [
+ "atomic",
  "getrandom 0.4.2",
  "js-sys",
+ "md-5",
  "serde_core",
  "sha1_smol",
  "wasm-bindgen",
@@ -7079,6 +8189,23 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 [[package]]
 name = "vox"
 version = "0.3.1"
+source = "git+https://github.com/bearcove/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5#fd3167b6d6b89b60edd9c78f7b8890f5a87571d5"
+dependencies = [
+ "facet 0.46.0",
+ "facet-pretty",
+ "facet-reflect 0.46.0",
+ "moire 1.0.0",
+ "tokio",
+ "tracing",
+ "vox-core 0.3.1 (git+https://github.com/bearcove/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
+ "vox-postcard 0.3.1 (git+https://github.com/bearcove/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
+ "vox-service-macros 0.3.1 (git+https://github.com/bearcove/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
+ "vox-types 0.3.1 (git+https://github.com/bearcove/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
+]
+
+[[package]]
+name = "vox"
+version = "0.3.1"
 source = "git+https://github.com/Codys-Wright/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5#fd3167b6d6b89b60edd9c78f7b8890f5a87571d5"
 dependencies = [
  "facet 0.46.0",
@@ -7090,11 +8217,11 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tracing",
- "vox-core 0.3.1",
- "vox-postcard 0.3.1",
- "vox-service-macros 0.3.1",
+ "vox-core 0.3.1 (git+https://github.com/Codys-Wright/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
+ "vox-postcard 0.3.1 (git+https://github.com/Codys-Wright/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
+ "vox-service-macros 0.3.1 (git+https://github.com/Codys-Wright/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
  "vox-stream 0.3.1",
- "vox-types 0.3.1",
+ "vox-types 0.3.1 (git+https://github.com/Codys-Wright/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
  "vox-websocket",
 ]
 
@@ -7122,19 +8249,19 @@ name = "vox-codegen"
 version = "0.3.1"
 source = "git+https://github.com/Codys-Wright/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5#fd3167b6d6b89b60edd9c78f7b8890f5a87571d5"
 dependencies = [
- "facet-cbor 0.3.1",
+ "facet-cbor 0.3.1 (git+https://github.com/Codys-Wright/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
  "facet-core 0.46.0",
  "heck 0.5.0",
- "vox-types 0.3.1",
+ "vox-types 0.3.1 (git+https://github.com/Codys-Wright/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
 ]
 
 [[package]]
 name = "vox-core"
 version = "0.3.1"
-source = "git+https://github.com/Codys-Wright/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5#fd3167b6d6b89b60edd9c78f7b8890f5a87571d5"
+source = "git+https://github.com/bearcove/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5#fd3167b6d6b89b60edd9c78f7b8890f5a87571d5"
 dependencies = [
  "facet 0.46.0",
- "facet-cbor 0.3.1",
+ "facet-cbor 0.3.1 (git+https://github.com/bearcove/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
  "facet-core 0.46.0",
  "facet-error",
  "facet-reflect 0.46.0",
@@ -7143,8 +8270,29 @@ dependencies = [
  "smallvec 1.15.1",
  "tokio",
  "tracing",
- "vox-postcard 0.3.1",
- "vox-types 0.3.1",
+ "vox-postcard 0.3.1 (git+https://github.com/bearcove/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
+ "vox-types 0.3.1 (git+https://github.com/bearcove/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
+ "wasm-bindgen-futures",
+ "zerocopy",
+]
+
+[[package]]
+name = "vox-core"
+version = "0.3.1"
+source = "git+https://github.com/Codys-Wright/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5#fd3167b6d6b89b60edd9c78f7b8890f5a87571d5"
+dependencies = [
+ "facet 0.46.0",
+ "facet-cbor 0.3.1 (git+https://github.com/Codys-Wright/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
+ "facet-core 0.46.0",
+ "facet-error",
+ "facet-reflect 0.46.0",
+ "getrandom 0.3.4",
+ "moire 1.0.0",
+ "smallvec 1.15.1",
+ "tokio",
+ "tracing",
+ "vox-postcard 0.3.1 (git+https://github.com/Codys-Wright/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
+ "vox-types 0.3.1 (git+https://github.com/Codys-Wright/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
  "wasm-bindgen-futures",
  "zerocopy",
 ]
@@ -7216,13 +8364,25 @@ dependencies = [
 [[package]]
 name = "vox-macros-core"
 version = "0.3.1"
+source = "git+https://github.com/bearcove/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5#fd3167b6d6b89b60edd9c78f7b8890f5a87571d5"
+dependencies = [
+ "facet-cargo-toml",
+ "heck 0.5.0",
+ "proc-macro2",
+ "quote",
+ "vox-macros-parse 0.3.1 (git+https://github.com/bearcove/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
+]
+
+[[package]]
+name = "vox-macros-core"
+version = "0.3.1"
 source = "git+https://github.com/Codys-Wright/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5#fd3167b6d6b89b60edd9c78f7b8890f5a87571d5"
 dependencies = [
  "facet-cargo-toml",
  "heck 0.5.0",
  "proc-macro2",
  "quote",
- "vox-macros-parse 0.3.1",
+ "vox-macros-parse 0.3.1 (git+https://github.com/Codys-Wright/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
 ]
 
 [[package]]
@@ -7235,6 +8395,15 @@ dependencies = [
  "proc-macro2",
  "quote",
  "vox-macros-parse 0.4.0",
+]
+
+[[package]]
+name = "vox-macros-parse"
+version = "0.3.1"
+source = "git+https://github.com/bearcove/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5#fd3167b6d6b89b60edd9c78f7b8890f5a87571d5"
+dependencies = [
+ "proc-macro2",
+ "unsynn",
 ]
 
 [[package]]
@@ -7258,6 +8427,19 @@ dependencies = [
 [[package]]
 name = "vox-postcard"
 version = "0.3.1"
+source = "git+https://github.com/bearcove/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5#fd3167b6d6b89b60edd9c78f7b8890f5a87571d5"
+dependencies = [
+ "chrono",
+ "facet 0.46.0",
+ "facet-core 0.46.0",
+ "facet-reflect 0.46.0",
+ "uuid",
+ "vox-schema 0.3.1 (git+https://github.com/bearcove/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
+]
+
+[[package]]
+name = "vox-postcard"
+version = "0.3.1"
 source = "git+https://github.com/Codys-Wright/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5#fd3167b6d6b89b60edd9c78f7b8890f5a87571d5"
 dependencies = [
  "chrono",
@@ -7265,7 +8447,7 @@ dependencies = [
  "facet-core 0.46.0",
  "facet-reflect 0.46.0",
  "uuid",
- "vox-schema 0.3.1",
+ "vox-schema 0.3.1 (git+https://github.com/Codys-Wright/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
 ]
 
 [[package]]
@@ -7284,11 +8466,23 @@ dependencies = [
 [[package]]
 name = "vox-schema"
 version = "0.3.1"
+source = "git+https://github.com/bearcove/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5#fd3167b6d6b89b60edd9c78f7b8890f5a87571d5"
+dependencies = [
+ "blake3",
+ "facet 0.46.0",
+ "facet-cbor 0.3.1 (git+https://github.com/bearcove/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
+ "facet-core 0.46.0",
+ "indexmap 2.14.0",
+]
+
+[[package]]
+name = "vox-schema"
+version = "0.3.1"
 source = "git+https://github.com/Codys-Wright/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5#fd3167b6d6b89b60edd9c78f7b8890f5a87571d5"
 dependencies = [
  "blake3",
  "facet 0.46.0",
- "facet-cbor 0.3.1",
+ "facet-cbor 0.3.1 (git+https://github.com/Codys-Wright/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
  "facet-core 0.46.0",
  "indexmap 2.14.0",
 ]
@@ -7308,10 +8502,19 @@ dependencies = [
 [[package]]
 name = "vox-service-macros"
 version = "0.3.1"
+source = "git+https://github.com/bearcove/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5#fd3167b6d6b89b60edd9c78f7b8890f5a87571d5"
+dependencies = [
+ "proc-macro2",
+ "vox-macros-core 0.3.1 (git+https://github.com/bearcove/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
+]
+
+[[package]]
+name = "vox-service-macros"
+version = "0.3.1"
 source = "git+https://github.com/Codys-Wright/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5#fd3167b6d6b89b60edd9c78f7b8890f5a87571d5"
 dependencies = [
  "proc-macro2",
- "vox-macros-core 0.3.1",
+ "vox-macros-core 0.3.1 (git+https://github.com/Codys-Wright/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
 ]
 
 [[package]]
@@ -7331,8 +8534,8 @@ dependencies = [
  "libc",
  "moire 1.0.0",
  "tokio",
- "vox-core 0.3.1",
- "vox-types 0.3.1",
+ "vox-core 0.3.1 (git+https://github.com/Codys-Wright/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
+ "vox-types 0.3.1 (git+https://github.com/Codys-Wright/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
 ]
 
 [[package]]
@@ -7350,12 +8553,12 @@ dependencies = [
 [[package]]
 name = "vox-types"
 version = "0.3.1"
-source = "git+https://github.com/Codys-Wright/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5#fd3167b6d6b89b60edd9c78f7b8890f5a87571d5"
+source = "git+https://github.com/bearcove/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5#fd3167b6d6b89b60edd9c78f7b8890f5a87571d5"
 dependencies = [
  "bitflags 2.11.1",
  "blake3",
  "facet 0.46.0",
- "facet-cbor 0.3.1",
+ "facet-cbor 0.3.1 (git+https://github.com/bearcove/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
  "facet-core 0.46.0",
  "facet-path 0.46.0",
  "facet-reflect 0.46.0",
@@ -7366,8 +8569,31 @@ dependencies = [
  "smallvec 1.15.1",
  "structstruck",
  "tokio",
- "vox-postcard 0.3.1",
- "vox-schema 0.3.1",
+ "vox-postcard 0.3.1 (git+https://github.com/bearcove/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
+ "vox-schema 0.3.1 (git+https://github.com/bearcove/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
+]
+
+[[package]]
+name = "vox-types"
+version = "0.3.1"
+source = "git+https://github.com/Codys-Wright/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5#fd3167b6d6b89b60edd9c78f7b8890f5a87571d5"
+dependencies = [
+ "bitflags 2.11.1",
+ "blake3",
+ "facet 0.46.0",
+ "facet-cbor 0.3.1 (git+https://github.com/Codys-Wright/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
+ "facet-core 0.46.0",
+ "facet-path 0.46.0",
+ "facet-reflect 0.46.0",
+ "futures-channel",
+ "heck 0.5.0",
+ "indexmap 2.14.0",
+ "moire 1.0.0",
+ "smallvec 1.15.1",
+ "structstruck",
+ "tokio",
+ "vox-postcard 0.3.1 (git+https://github.com/Codys-Wright/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
+ "vox-schema 0.3.1 (git+https://github.com/Codys-Wright/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
 ]
 
 [[package]]
@@ -7406,8 +8632,8 @@ dependencies = [
  "js-sys",
  "tokio",
  "tokio-tungstenite 0.26.2",
- "vox-core 0.3.1",
- "vox-types 0.3.1",
+ "vox-core 0.3.1 (git+https://github.com/Codys-Wright/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
+ "vox-types 0.3.1 (git+https://github.com/Codys-Wright/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
  "wasm-bindgen",
  "web-sys",
 ]
@@ -8062,7 +9288,7 @@ version = "0.1.0"
 dependencies = [
  "task-core",
  "vox-codegen",
- "vox-types 0.3.1",
+ "vox-types 0.3.1 (git+https://github.com/Codys-Wright/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
  "xshell",
 ]
 
@@ -8186,3 +9412,8 @@ name = "zmij"
 version = "1.0.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b8848ee67ecc8aedbaf3e4122217aff892639231befc6a1b58d29fff4c2cabaa"
+
+[[patch.unused]]
+name = "moire-macros"
+version = "1.0.1"
+source = "git+https://git.starcommand.live/codywright/moire?rev=aea86f91f84cdf6052e4310e8a0541d87f37c624#aea86f91f84cdf6052e4310e8a0541d87f37c624"
