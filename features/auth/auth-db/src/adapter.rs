@@ -14,7 +14,7 @@ use better_auth_core::adapters::*;
 use better_auth_core::error::{AuthError, AuthResult};
 use better_auth_core::types::*;
 
-use crate::entities::auth::*;
+use crate::entities::*;
 
 /// SeaORM adapter for better-auth, backed by SQLite.
 #[derive(Clone)]

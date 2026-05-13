@@ -19,7 +19,8 @@ hostname = "0.4"
 futures.workspace = true
 tower-http = { version = "0.6", features = ["cors"] }
 slug = "0.1"
-task-db = { path = "../../crates/task-db" }
+auth-db = { path = "../../features/auth/auth-db" }
+sea-orm.workspace = true
 task-core = { workspace = true, features = ["realtime"] }
 vox = { workspace = true, features = ["transport-websocket"] }
 better-auth = { workspace = true, features = ["axum"] }

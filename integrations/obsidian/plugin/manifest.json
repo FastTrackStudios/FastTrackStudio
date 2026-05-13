@@ -1,9 +1,0 @@
-{
-  "id": "task",
-  "name": "Task",
-  "version": "0.1.0",
-  "minAppVersion": "1.4.0",
-  "description": "Spec-driven task management backed by vault-core.",
-  "author": "Cody Wright",
-  "isDesktopOnly": false
-}

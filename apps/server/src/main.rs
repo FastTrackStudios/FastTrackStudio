@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use auth_db::SeaOrmAuthAdapter;
+use auth_db::entities::{auth_member, auth_organization, auth_session};
 use axum::extract::ws::{Message as AxumWsMessage, WebSocket};
 use axum::extract::{Query, State, WebSocketUpgrade};
 use axum::http::{HeaderMap, StatusCode};
@@ -11,14 +13,10 @@ use better_auth_core::adapters::{MemberOps, OrganizationOps, UserOps};
 use better_auth_core::config::AuthConfig;
 use better_auth_core::{CreateMember, CreateOrganization, CreateUser};
 use chrono::Utc;
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
 use serde::Serialize;
 use task_core::service::{
     HealthCheck, NextcloudCapability, SystemCapabilities, SystemHealth, VaultCapability,
-};
-use task_db::SeaOrmAuthAdapter;
-use task_db::entities::auth::{auth_member, auth_organization, auth_session};
-use task_db::sea_orm::{
-    self, ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set,
 };
 use tokio::sync::{mpsc, oneshot};
 use tower_http::cors::CorsLayer;
@@ -132,26 +130,11 @@ async fn main() -> eyre::Result<()> {
         if let Ok(token) = std::env::var("TASK_TEST_SESSION_TOKEN") {
             seed_test_session(&db, &token).await;
         }
-        match task_db::seed::seed_demo_data(&db).await {
-            Ok(summary) => info!(
-                projects = summary.projects_created,
-                tasks = summary.tasks_created,
-                events = summary.calendar_events_created,
-                people = summary.people_created,
-                comments = summary.comments_created,
-                reactions = summary.reactions_created,
-                notifications = summary.notifications_created,
-                saved_views = summary.saved_views_created,
-                cycles = summary.cycles_created,
-                activities = summary.activities_created,
-                expenses = summary.expenses_created,
-                invoices = summary.invoices_created,
-                email_refs = summary.email_refs_created,
-                unchanged = summary.total_unchanged(),
-                "Demo data seeded"
-            ),
-            Err(e) => warn!(error = %e, "Demo data seed failed"),
-        }
+        // Old `task-db::seed::seed_demo_data` was removed as part of
+        // the migration to the feature-based architecture. The
+        // per-feature `<name>-crdt` crates ship `fake-rs` seed
+        // helpers (`seed_fake_<entity>`) for the same purpose.
+        info!("Demo data seeding disabled — port to per-feature seed helpers when needed");
         info!("Auth mock data seeded");
     } else {
         info!("Demo seed disabled by TASK_SEED_DEMO=0");
@@ -195,7 +178,7 @@ async fn main() -> eyre::Result<()> {
 
 async fn init_server_db() -> eyre::Result<(sea_orm::DatabaseConnection, String)> {
     if let Ok(url) = std::env::var("TASK_DATABASE_URL").or_else(|_| std::env::var("DATABASE_URL")) {
-        let db = task_db::init(&url).await?;
+        let db = auth_db::init(&url).await?;
         return Ok((db, redact_db_url(&url)));
     }
 
@@ -205,11 +188,11 @@ async fn init_server_db() -> eyre::Result<(sea_orm::DatabaseConnection, String)>
                 std::fs::create_dir_all(parent)?;
             }
         }
-        let db = task_db::init_file(&path).await?;
+        let db = auth_db::init_file(&path).await?;
         return Ok((db, format!("sqlite://{path}")));
     }
 
-    let db = task_db::init_memory().await?;
+    let db = auth_db::init_memory().await?;
     Ok((db, "sqlite::memory:".to_string()))
 }
 

@@ -608,6 +608,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 
 [[package]]
+name = "auth"
+version = "0.1.0"
+dependencies = [
+ "auth-db",
+]
+
+[[package]]
+name = "auth-db"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "better-auth-core",
+ "chrono",
+ "sea-orm",
+ "sea-orm-migration",
+ "serde",
+ "serde_json",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "autocfg"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5092,17 +5114,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "obsidian-plugin"
-version = "0.1.0"
-dependencies = [
- "facet 0.46.0",
- "facet-json",
- "facet-yaml",
- "task-core",
- "wasm-bindgen",
-]
-
-[[package]]
 name = "octseq"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5221,12 +5232,6 @@ dependencies = [
  "rand_core 0.6.4",
  "subtle",
 ]
-
-[[package]]
-name = "paste"
-version = "1.0.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
 
 [[package]]
 name = "pem"
@@ -7357,37 +7362,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "task-db"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "axum",
- "better-auth-core",
- "chrono",
- "crudcrate",
- "facet 0.46.0",
- "hyper",
- "loro",
- "reqwest",
- "sea-orm",
- "sea-orm-migration",
- "serde",
- "serde_json",
- "serde_with",
- "slug",
- "task-core",
- "tokio",
- "tracing",
- "utoipa",
- "utoipa-axum",
- "uuid",
- "vox 0.3.1 (git+https://github.com/Codys-Wright/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
-]
-
-[[package]]
 name = "task-server"
 version = "0.1.0"
 dependencies = [
+ "auth-db",
  "axum",
  "base64",
  "better-auth",
@@ -7397,11 +7375,11 @@ dependencies = [
  "eyre",
  "futures",
  "hostname",
+ "sea-orm",
  "serde",
  "serde_json",
  "slug",
  "task-core",
- "task-db",
  "tokio",
  "tower-http",
  "tracing",
@@ -8154,19 +8132,6 @@ dependencies = [
  "serde",
  "serde_json",
  "utoipa-gen",
-]
-
-[[package]]
-name = "utoipa-axum"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7c25bae5bccc842449ec0c5ddc5cbb6a3a1eaeac4503895dc105a1138f8234a0"
-dependencies = [
- "axum",
- "paste",
- "tower-layer",
- "tower-service",
- "utoipa",
 ]
 
 [[package]]
