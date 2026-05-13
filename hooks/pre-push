@@ -1,28 +1,41 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if command -v bd >/dev/null 2>&1; then
-  export BD_GIT_HOOK=1
-  _bd_timeout=${BEADS_HOOK_TIMEOUT:-30}
-  if command -v timeout >/dev/null 2>&1; then
-    timeout "$_bd_timeout" bd hooks run pre-push "$@"
-    _bd_exit=$?
-    if [ "$_bd_exit" -eq 124 ]; then
-      echo >&2 "beads: hook 'pre-push' timed out after ${_bd_timeout}s - continuing without beads"
-      _bd_exit=0
-    fi
-  else
-    bd hooks run pre-push "$@"
-    _bd_exit=$?
-  fi
-  if [ "$_bd_exit" -eq 3 ]; then
-    echo >&2 "beads: database not initialized - skipping hook 'pre-push'"
-    _bd_exit=0
-  fi
-  if [ "$_bd_exit" -ne 0 ]; then
-    exit "$_bd_exit"
-  fi
+# Pre-push wrapper around `capn pre-push`. Capn builds the workspace
+# before letting the push through, which requires every system lib
+# the workspace touches — notably `pango`, `webkitgtk_4_1`, and the
+# rest of the Dioxus desktop stack pulled in by `apps/desktop`.
+#
+# Outside a nix shell the host's `PKG_CONFIG_PATH` probably doesn't
+# carry those libs, so capn fails with `No package 'pango' found`.
+# The fix is to enter this repo's `nix develop` shell (the default
+# one already bundles every Linux GTK + WebView dep dioxus-desktop
+# needs) before running capn. When already inside a nix shell we
+# skip re-entry — capn just runs in the current env.
+#
+# Skip switch: `NO_CAPN=1 git push …` bypasses capn entirely. Reach
+# for that only when the failure is unrelated to your diff (e.g. an
+# infra-only issue you're going to fix in a follow-up). Otherwise
+# fix the root cause and let capn keep doing its job.
+
+if [ "${NO_CAPN:-0}" = "1" ]; then
+  exit 0
 fi
 
-CAPN_BIN="${CAPN_BIN:-$(command -v capn || printf '%s' /home/cody/Development/capn/target/debug/capn)}"
+CAPN_BIN="${CAPN_BIN:-$(command -v capn 2>/dev/null || printf '%s' /home/cody/Development/capn/target/debug/capn)}"
+
+# Already inside any nix shell? Trust the env and run directly.
+if [ -n "${IN_NIX_SHELL:-}" ]; then
+  exec "$CAPN_BIN" pre-push
+fi
+
+# Outside a nix shell: enter the repo's default shell so capn sees
+# pango + webkitgtk + the rest. Fall back to running capn raw if
+# nix isn't available at all (degraded mode — let capn fail loudly
+# with the actual missing-dep error rather than silently skipping).
+if command -v nix >/dev/null 2>&1; then
+  REPO_ROOT="$(git rev-parse --show-toplevel)"
+  exec nix develop "${REPO_ROOT}" -c "$CAPN_BIN" pre-push
+fi
+
 exec "$CAPN_BIN" pre-push
