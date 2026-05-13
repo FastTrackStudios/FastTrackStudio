@@ -10,6 +10,7 @@ license.workspace = true
 
 [dependencies]
 architect.workspace = true
+async-trait.workspace = true
 chrono.workspace = true
 uuid = { workspace = true, features = ["js"] }
 facet.workspace = true

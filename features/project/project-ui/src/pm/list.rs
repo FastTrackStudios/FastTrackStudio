@@ -102,8 +102,15 @@ pub fn TaskListView(
     on_select_change: EventHandler<HashSet<Uuid>>,
     on_open: EventHandler<Uuid>,
     on_inline_edit: EventHandler<(Uuid, TaskUpdate)>,
+    // FUTURE: wire a per-row context menu including "Run with agent"
+    // once the list rows get a ContextMenu wrap. Prop is here so the
+    // route layer can pass through today and the wiring lands when
+    // the list renderer grows the menu.
+    #[props(default)] on_dispatch_agent: EventHandler<Uuid>,
     on_bulk_action: EventHandler<BulkAction>,
 ) -> Element {
+    // Silence unused-prop warning until the row context menu lands.
+    let _ = on_dispatch_agent;
     let mut collapsed: Signal<HashSet<String>> = use_signal(HashSet::new);
 
     if tasks.is_empty() {

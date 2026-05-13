@@ -18,3 +18,12 @@ chrono = { workspace = true, features = ["clock", "std", "wasmbind"] }
 uuid = { workspace = true, features = ["v4", "js"] }
 
 fts-ui.workspace = true
+
+# Web-only — used for clipboard writes from the IntegrationSettings
+# card. Gated with `#[cfg(target_arch = "wasm32")]` at the call
+# sites so native builds skip them.
+web-sys = { workspace = true, features = [
+    "Window",
+    "Navigator",
+    "Clipboard",
+] }

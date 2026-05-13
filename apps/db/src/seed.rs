@@ -4,6 +4,7 @@
 
 use std::time::Duration;
 
+use agent_proto::GitRepoConnectionRepo;
 use crdt::{CrdtDoc, Persistence};
 use crdt_seaorm::SeaOrmPersistence;
 use tracing::info;
@@ -167,7 +168,40 @@ async fn seed_all(cdoc: &CrdtDoc) -> eyre::Result<()> {
 
     let agent_repo = agent_crdt::AgentRunRepoLoro::new(cdoc);
     agent_proto::seed_fake_agent_run(&agent_repo, 25usize).await?;
-    info!("  agent: 25 runs");
+    let agent_log_repo = agent_crdt::AgentLogLineRepoLoro::new(cdoc);
+    // 6 log lines, tied loosely (run_id is faker-random) to existing
+    // AgentRun rows. The UI joins by `run_id` so seeded lines won't
+    // line up against real runs — fine for design-time mock data.
+    agent_proto::seed_fake_agent_log_line(&agent_log_repo, 6usize).await?;
+    let git_conn_repo = agent_crdt::GitRepoConnectionRepoLoro::new(cdoc);
+    git_conn_repo
+        .create(agent_proto::GitRepoConnectionCreate {
+            provider: "github".into(),
+            owner: "Codys-Wright".into(),
+            repo: "Task".into(),
+            default_branch: "main".into(),
+            project_id: None,
+            // v1 stub: sealing happens in the next phase; this is a
+            // placeholder hash that the server will replace once the
+            // sealed-box layer lands.
+            webhook_secret_hash: "0".repeat(64),
+            webhook_path: "gh-7f3a".into(),
+            last_event_at: None,
+        })
+        .await?;
+    git_conn_repo
+        .create(agent_proto::GitRepoConnectionCreate {
+            provider: "forgejo".into(),
+            owner: "cody".into(),
+            repo: "starcommand".into(),
+            default_branch: "main".into(),
+            project_id: None,
+            webhook_secret_hash: "1".repeat(64),
+            webhook_path: "fj-2b8d".into(),
+            last_event_at: None,
+        })
+        .await?;
+    info!("  agent: 25 runs, 6 log lines, 2 git repo connections");
 
     // ── CalDAV reference data ─────────────────────────────────
     let caldav_acct = caldav_crdt::CalDavAccountRepoLoro::new(cdoc);

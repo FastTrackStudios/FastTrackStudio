@@ -4,11 +4,14 @@
 pub use agent_proto::*;
 
 /// CRDT source of truth + SeaORM persistence. Construct one
-/// `CrdtDoc` per collaboration boundary and hand a `AgentRepoLoro`
-/// to the vox dispatcher.
+/// `CrdtDoc` per collaboration boundary and hand the per-entity
+/// RepoLoro newtype to the vox dispatcher.
 #[cfg(feature = "server")]
 pub mod server {
-    pub use agent_crdt::{AgentEntity, AgentRepoLoro};
+    pub use agent_crdt::{
+        AgentLogLineEntity, AgentLogLineRepoLoro, AgentRunEntity, AgentRunRepoLoro,
+        GitRepoConnectionEntity, GitRepoConnectionRepoLoro,
+    };
     pub use agent_db::{AgentMigrator, SeaOrmPersistence};
     pub use crdt::{CrdtDoc, Persistence};
 }

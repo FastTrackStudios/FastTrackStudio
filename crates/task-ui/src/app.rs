@@ -75,6 +75,12 @@ pub enum Route {
         ThreadsRoute {},
         #[route("/timer")]
         TimerRoute {},
+        #[route("/agents/runs")]
+        AgentRunsRoute {},
+        #[route("/settings/integrations")]
+        IntegrationsSettingsRoute {},
+        #[route("/settings/webhooks")]
+        WebhooksRoute {},
 }
 
 #[component]
@@ -180,6 +186,18 @@ fn ThreadsRoute() -> Element {
 #[component]
 fn TimerRoute() -> Element {
     rsx! { crate::feature_routes::timer::TimeEntryView {} }
+}
+#[component]
+fn AgentRunsRoute() -> Element {
+    rsx! { crate::feature_routes::agent::AgentRunBoardView {} }
+}
+#[component]
+fn IntegrationsSettingsRoute() -> Element {
+    rsx! { crate::feature_routes::agent::IntegrationSettingsView {} }
+}
+#[component]
+fn WebhooksRoute() -> Element {
+    rsx! { crate::feature_routes::agent::WebhookEventLogView {} }
 }
 
 #[component]
@@ -632,6 +650,21 @@ fn feature_nav_tabs() -> Vec<NavTab> {
 fn system_nav_tabs() -> Vec<NavTab> {
     vec![
         NavTab {
+            label: "Agent runs",
+            icon: icon_bot_message,
+            route: Route::AgentRunsRoute {},
+        },
+        NavTab {
+            label: "Integrations",
+            icon: icon_settings,
+            route: Route::IntegrationsSettingsRoute {},
+        },
+        NavTab {
+            label: "Webhooks",
+            icon: icon_flask,
+            route: Route::WebhooksRoute {},
+        },
+        NavTab {
             label: "Timer demo",
             icon: icon_timer,
             route: Route::TimerDemoRoute {},
@@ -710,6 +743,9 @@ fn route_title(route: &Route) -> &'static str {
         Route::ProjectsLiveRoute {} => "Projects (live)",
         Route::ThreadsRoute {} => "Threads",
         Route::TimerRoute {} => "Timer",
+        Route::AgentRunsRoute {} => "Agent runs",
+        Route::IntegrationsSettingsRoute {} => "Integrations",
+        Route::WebhooksRoute {} => "Webhooks",
     }
 }
 

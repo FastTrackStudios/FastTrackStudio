@@ -3,8 +3,33 @@
 //! Pure functions; no state, no IO. Keep this thin — anything that
 //! needs RSX or a signal belongs in a component module.
 
+use chrono::{DateTime, Utc};
 use fts_ui::prelude::StatusBadgeVariant;
 use uuid::Uuid;
+
+/// Short relative-time formatter used by the Git panel and likely
+/// other future surfaces. Mirrors the bucketing used in
+/// `agent-ui::hermes_kit::common::format_relative_time` so the two
+/// look identical side-by-side.
+pub fn relative_time(t: DateTime<Utc>, now: DateTime<Utc>) -> String {
+    let delta = now.signed_duration_since(t);
+    let secs = delta.num_seconds();
+    if secs < 60 {
+        return "just now".to_string();
+    }
+    let mins = delta.num_minutes();
+    if mins < 60 {
+        return format!("{mins}m ago");
+    }
+    let hours = delta.num_hours();
+    if hours < 24 {
+        return format!("{hours}h ago");
+    }
+    if hours < 48 {
+        return "yesterday".to_string();
+    }
+    t.format("%b %-d").to_string()
+}
 
 /// Short, stable, human-recognisable ID chip — first 4 hex of the UUID
 /// uppercased, prefixed `PRJ-`. Designed for table rows and tooltips.

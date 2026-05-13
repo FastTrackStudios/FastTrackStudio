@@ -4,6 +4,8 @@
 //! the fts-ui `Sheet`; when `None`, nothing. All field edits emit a
 //! `TaskUpdate` patch that only sets the field the user touched.
 
+use agent_proto::{AgentLogLine, AgentRun};
+use agent_ui::hermes_kit::AgentRunPanel;
 use dioxus::prelude::*;
 use fts_ui::lucide_dioxus::{Copy as CopyIcon, Plus, Trash2, X};
 use fts_ui::prelude::*;
@@ -11,6 +13,7 @@ use project_proto::{Cycle, Milestone, Task, TaskUpdate};
 use uuid::Uuid;
 
 use super::common::{status_to_badge_variant, task_id_chip};
+use super::git::TaskGitPanel;
 use super::priority::PriorityBadge;
 
 const STATUSES: &[&str] = &[
@@ -34,6 +37,14 @@ pub fn TaskDetailSheet(
     on_subtask_add: EventHandler<String>,
     on_delete: EventHandler<Uuid>,
     on_duplicate: EventHandler<Uuid>,
+    // ── Git + Agent extensions ────────────────────────────────────
+    #[props(default)] run: Option<AgentRun>,
+    #[props(default)] log_lines: Vec<AgentLogLine>,
+    #[props(default)] on_set_branch_name: EventHandler<String>,
+    #[props(default)] on_clear_branch_name: EventHandler<()>,
+    #[props(default)] on_cancel_run: EventHandler<Uuid>,
+    #[props(default)] on_open_run_external: EventHandler<String>,
+    #[props(default)] on_dispatch_agent: EventHandler<Uuid>,
 ) -> Element {
     let open = task.is_some();
     let mut confirm_open = use_signal(|| false);
@@ -127,12 +138,30 @@ pub fn TaskDetailSheet(
                                             TabTrigger { value: "comments".to_string(), index: 0usize, "Comments" }
                                             TabTrigger { value: "activity".to_string(), index: 1usize, "Activity" }
                                             TabTrigger { value: "subtasks".to_string(), index: 2usize, "Subtasks" }
+                                            TabTrigger { value: "git".to_string(), index: 3usize, "Git" }
+                                            TabTrigger { value: "agent".to_string(), index: 4usize, "Agent" }
                                         }
                                         TabContent { value: "comments".to_string(), index: 0usize,
                                             div { class: "py-4 text-xs text-muted-foreground", "Comments coming soon." }
                                         }
                                         TabContent { value: "activity".to_string(), index: 1usize,
                                             div { class: "py-4 text-xs text-muted-foreground", "Activity log coming soon." }
+                                        }
+                                        TabContent { value: "git".to_string(), index: 3usize,
+                                            TaskGitPanel {
+                                                task: t.clone(),
+                                                on_set_branch_name: move |s| on_set_branch_name.call(s),
+                                                on_clear_branch_name: move |_| on_clear_branch_name.call(()),
+                                            }
+                                        }
+                                        TabContent { value: "agent".to_string(), index: 4usize,
+                                            AgentRunPanel {
+                                                run: run.clone(),
+                                                log_lines: log_lines.clone(),
+                                                on_cancel: move |id| on_cancel_run.call(id),
+                                                on_open_external: move |url| on_open_run_external.call(url),
+                                                on_dispatch_new: move |_| on_dispatch_agent.call(task_id),
+                                            }
                                         }
                                         TabContent { value: "subtasks".to_string(), index: 2usize,
                                             div { class: "flex flex-col gap-2 py-3",

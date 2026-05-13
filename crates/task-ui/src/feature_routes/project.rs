@@ -16,6 +16,9 @@
 use std::collections::HashSet;
 use std::rc::Rc;
 
+use agent_crdt::{AgentLogLineRepoLoro, AgentRunRepoLoro};
+use agent_proto::{AgentLogLine, AgentLogLineRepo, AgentRun, AgentRunCreate, AgentRunRepo};
+use agent_ui::hermes_kit::{AgentDispatchDialog, DispatchIntent, IntegrationInfo, TaskBrief};
 use architect::Page;
 use chrono::{Duration, Utc};
 use dioxus::prelude::*;
@@ -23,7 +26,7 @@ use fts_ui::prelude::*;
 use futures_channel::mpsc;
 use futures_util::StreamExt;
 use project_crdt::{CrdtDoc, ProjectRepoLoro};
-use project_proto::{Project, ProjectCreate, ProjectRepo, Task, TaskUpdate};
+use project_proto::{Project, ProjectCreate, ProjectRepo, Task, TaskUpdate, branch_slug};
 use project_ui::{
     BulkAction, PaletteIntent, ProjectDashboard, ProjectHeaderCard, ProjectOverviewGrid,
     ProjectTab, TaskCommandPalette, TaskDetailSheet, TaskGroupBy, TaskKanbanBoard, TaskListView,
@@ -102,6 +105,10 @@ fn fake_tasks_for(project: &Project) -> Vec<Task> {
                 .collect(),
             sort_index: i as i64,
             completed_at: None,
+            agent_run_id: None,
+            branch_name: None,
+            pr_urls: Vec::new(),
+            commit_refs: Vec::new(),
             created_at: now - Duration::hours((24 - i) as i64),
             updated_at: now - Duration::minutes((i as i64) * 7),
         })
@@ -167,16 +174,27 @@ pub fn ProjectView() -> Element {
         Rc::new(ProjectRepoLoro::new(&doc))
     });
     let doc: Rc<CrdtDoc> = use_hook(|| Rc::new(CrdtDoc::from_loro(repo.doc().clone())));
+    let agent_run_repo: Rc<AgentRunRepoLoro> = use_hook(|| Rc::new(AgentRunRepoLoro::new(&doc)));
+    let log_line_repo: Rc<AgentLogLineRepoLoro> =
+        use_hook(|| Rc::new(AgentLogLineRepoLoro::new(&doc)));
 
     let mut items = use_signal::<Vec<Project>>(Vec::new);
     let mut status_msg = use_signal(|| "starting…".to_string());
 
     // In-memory tasks. Seeded lazily on first project load (see effect below).
     let mut tasks = use_signal::<Vec<Task>>(Vec::new);
+    // Agent runs + log lines mirror the CRDT repos. The route layer
+    // owns the reactive view; the repos are the source of truth.
+    let mut agent_runs = use_signal::<Vec<AgentRun>>(Vec::new);
+    let mut agent_logs = use_signal::<Vec<AgentLogLine>>(Vec::new);
+    let mut dispatch_dialog_open = use_signal(|| false);
+    let mut dispatch_target = use_signal::<Option<Uuid>>(|| None);
 
     let refresh_tx: mpsc::UnboundedSender<()> = use_hook(|| {
         let (tx, mut rx) = mpsc::unbounded::<()>();
         let repo_for_loop = repo.clone();
+        let run_repo_for_loop = agent_run_repo.clone();
+        let log_repo_for_loop = log_line_repo.clone();
         spawn_local(async move {
             while rx.next().await.is_some() {
                 if let Ok(list) = repo_for_loop
@@ -191,6 +209,32 @@ pub fn ProjectView() -> Element {
                     .await
                 {
                     items.set(list.items);
+                }
+                if let Ok(list) = run_repo_for_loop
+                    .list(
+                        Page {
+                            index: 0,
+                            size: 500,
+                        },
+                        None,
+                        None,
+                    )
+                    .await
+                {
+                    agent_runs.set(list.items);
+                }
+                if let Ok(list) = log_repo_for_loop
+                    .list(
+                        Page {
+                            index: 0,
+                            size: 2000,
+                        },
+                        None,
+                        None,
+                    )
+                    .await
+                {
+                    agent_logs.set(list.items);
                 }
             }
         });
@@ -321,6 +365,10 @@ pub fn ProjectView() -> Element {
             tags: vec![],
             sort_index,
             completed_at: None,
+            agent_run_id: None,
+            branch_name: None,
+            pr_urls: Vec::new(),
+            commit_refs: Vec::new(),
             created_at: now,
             updated_at: now,
         });
@@ -379,6 +427,105 @@ pub fn ProjectView() -> Element {
         }
     };
 
+    // ── Agent dispatch (v1: local write only) ─────────────────────────
+    //
+    // FUTURE: real dispatch goes through a vox endpoint that calls
+    // `IntegrationRegistry::dispatch` on the server. For v1 the
+    // server's MockIntegration event loop is decoupled and won't pick
+    // up runs we create from the wasm side — the UI flow demos
+    // dispatch & log tailing end-to-end against the local CRDT doc,
+    // and live runs require running the server with the registry +
+    // a Hermes URL.
+    let mut perform_dispatch = {
+        let agent_run_repo = agent_run_repo.clone();
+        let tx = refresh_tx.clone();
+        move |intent: DispatchIntent| {
+            // Patch the task with branch_name (if absent) + new agent_run_id.
+            let task_id = intent.task_id;
+            let current_tasks = tasks.read().clone();
+            let task = current_tasks.iter().find(|t| t.id == task_id).cloned();
+            let title = task.as_ref().map(|t| t.title.clone()).unwrap_or_default();
+            let existing_branch = task.as_ref().and_then(|t| t.branch_name.clone());
+            let branch =
+                existing_branch.unwrap_or_else(|| branch_slug("cwright", "PRJ", task_id, &title));
+            let run_id = Uuid::new_v4();
+            let payload = AgentRunCreate {
+                name: format!("{} · {}", intent.agent_kind, title),
+                kind: intent.agent_kind.clone(),
+                prompt: intent.prompt.clone(),
+                status: "queued".into(),
+                task_id: Some(task_id),
+                started_at: None,
+                completed_at: None,
+                result: None,
+                error_message: None,
+                tokens_used: None,
+                cost_cents: None,
+                tags: Vec::new(),
+                integration: Some(intent.integration.clone()),
+                external_id: None,
+                external_url: None,
+                log_cursor: None,
+            };
+            // Patch the task locally — agent_run_id + branch_name.
+            let mut next = current_tasks;
+            if let Some(t) = next.iter_mut().find(|t| t.id == task_id) {
+                t.agent_run_id = Some(run_id);
+                t.branch_name = Some(branch);
+                t.updated_at = Utc::now();
+            }
+            tasks.set(next);
+
+            let repo = agent_run_repo.clone();
+            let tx = tx.clone();
+            spawn_local(async move {
+                // We can't pick the id today (AgentRunCreate doesn't
+                // expose `id`), so the repo assigns one. The local
+                // `agent_run_id` we set above is overwritten the
+                // moment the repo emits the real id back via list().
+                // FUTURE: pin to `run_id` when the repo grows an
+                // `id` field on Create.
+                let _ = repo.create(payload).await;
+                let _ = tx.unbounded_send(());
+                let _ = run_id;
+            });
+        }
+    };
+
+    // Branch-name handlers fired from TaskGitPanel.
+    let mut set_branch_name = move |task_id: Uuid, raw: String| {
+        let mut next = tasks.read().clone();
+        if let Some(t) = next.iter_mut().find(|t| t.id == task_id) {
+            let target = if raw.is_empty() {
+                branch_slug("cwright", "PRJ", task_id, &t.title)
+            } else {
+                raw
+            };
+            t.branch_name = Some(target);
+            t.updated_at = Utc::now();
+        }
+        tasks.set(next);
+    };
+    let mut clear_branch_name = move |task_id: Uuid| {
+        let mut next = tasks.read().clone();
+        if let Some(t) = next.iter_mut().find(|t| t.id == task_id) {
+            t.branch_name = None;
+            t.updated_at = Utc::now();
+        }
+        tasks.set(next);
+    };
+
+    // Cancel run — local write only in v1.
+    let mut cancel_run = move |run_id: Uuid| {
+        let mut next = agent_runs.read().clone();
+        if let Some(r) = next.iter_mut().find(|r| r.id == run_id) {
+            r.status = "cancelled".into();
+            r.completed_at = Some(Utc::now());
+            r.updated_at = Utc::now();
+        }
+        agent_runs.set(next);
+    };
+
     let cur_items = items();
     let first_project = cur_items.first().cloned();
 
@@ -410,6 +557,22 @@ pub fn ProjectView() -> Element {
     };
 
     let stats = task_stats(&tasks.read());
+
+    // Resolve the agent run + log lines bound to the sheet's task.
+    let task_run: Option<AgentRun> = task_for_sheet
+        .as_ref()
+        .and_then(|t| t.agent_run_id)
+        .and_then(|rid| agent_runs.read().iter().find(|r| r.id == rid).cloned());
+    let task_logs: Vec<AgentLogLine> = if let Some(r) = &task_run {
+        agent_logs
+            .read()
+            .iter()
+            .filter(|l| l.run_id == r.id)
+            .cloned()
+            .collect()
+    } else {
+        Vec::new()
+    };
 
     let available_assignees: Vec<String> = {
         let mut v: Vec<String> = tasks
@@ -540,6 +703,10 @@ pub fn ProjectView() -> Element {
                                             on_card_patch: move |(id, u)| patch_task((id, u)),
                                             on_quick_create: move |t| quick_create(t),
                                             on_card_delete: move |id| delete_task(id),
+                                            on_dispatch_agent: move |id| {
+                                                dispatch_target.set(Some(id));
+                                                dispatch_dialog_open.set(true);
+                                            },
                                         }
                                     },
                                 }
@@ -566,19 +733,87 @@ pub fn ProjectView() -> Element {
             }
 
             // Slide-over inspector.
-            TaskDetailSheet {
-                task: task_for_sheet,
-                subtasks,
-                available_cycles: Vec::new(),
-                available_milestones: Vec::new(),
-                available_assignees,
-                on_close: move |_| selected_task.set(None),
-                on_patch: move |(id, u)| patch_task((id, u)),
-                on_subtask_add: move |_title| {
-                    // FUTURE: real subtask creation against TaskRepoLoro.
-                },
-                on_delete: move |id| delete_task(id),
-                on_duplicate: move |id| duplicate_task(id),
+            {
+                let sheet_task_id = task_for_sheet.as_ref().map(|t| t.id);
+                rsx! {
+                    TaskDetailSheet {
+                        task: task_for_sheet,
+                        subtasks,
+                        available_cycles: Vec::new(),
+                        available_milestones: Vec::new(),
+                        available_assignees,
+                        on_close: move |_| selected_task.set(None),
+                        on_patch: move |(id, u)| patch_task((id, u)),
+                        on_subtask_add: move |_title| {
+                            // FUTURE: real subtask creation against TaskRepoLoro.
+                        },
+                        on_delete: move |id| delete_task(id),
+                        on_duplicate: move |id| duplicate_task(id),
+                        run: task_run,
+                        log_lines: task_logs,
+                        on_set_branch_name: move |raw: String| {
+                            if let Some(id) = sheet_task_id {
+                                set_branch_name(id, raw);
+                            }
+                        },
+                        on_clear_branch_name: move |_| {
+                            if let Some(id) = sheet_task_id {
+                                clear_branch_name(id);
+                            }
+                        },
+                        on_cancel_run: move |rid| cancel_run(rid),
+                        on_open_run_external: move |_url: String| {
+                            // FUTURE: window.open(_url, "_blank"). v1 surfaces
+                            // the link via the anchor on the badge row already.
+                        },
+                        on_dispatch_agent: move |id| {
+                            dispatch_target.set(Some(id));
+                            dispatch_dialog_open.set(true);
+                        },
+                    }
+                }
+            }
+
+            // Agent dispatch dialog.
+            {
+                let target_id = *dispatch_target.read();
+                let brief = target_id.and_then(|id| {
+                    tasks.read().iter().find(|t| t.id == id).map(|t| TaskBrief {
+                        id: t.id,
+                        title: t.title.clone(),
+                        description: t.description.clone(),
+                        tags: t.tags.clone(),
+                        branch_name: t.branch_name.clone(),
+                    })
+                });
+                let integrations = vec![
+                    IntegrationInfo {
+                        name: "mock".into(),
+                        label: "Mock (local demo)".into(),
+                        agent_kinds: vec!["sim".into()],
+                    },
+                    IntegrationInfo {
+                        name: "hermes".into(),
+                        label: "Hermes".into(),
+                        agent_kinds: vec!["engineer".into(), "reviewer".into(), "planner".into()],
+                    },
+                ];
+                rsx! {
+                    AgentDispatchDialog {
+                        open: *dispatch_dialog_open.read(),
+                        task: brief,
+                        available_integrations: integrations,
+                        on_dispatch: move |intent: DispatchIntent| {
+                            dispatch_dialog_open.set(false);
+                            dispatch_target.set(None);
+                            perform_dispatch(intent);
+                        },
+                        on_close: move |_| {
+                            dispatch_dialog_open.set(false);
+                            dispatch_target.set(None);
+                        },
+                    }
+                }
             }
 
             // Cmd-K palette.

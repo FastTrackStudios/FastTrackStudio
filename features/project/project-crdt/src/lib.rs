@@ -14,11 +14,35 @@ use crdt::codec::{
 };
 use loro::LoroMap;
 use project_proto::{
-    Cycle, CycleCreate, CycleList, CycleRepo, CycleUpdate, Milestone, MilestoneCreate,
+    CommitRef, Cycle, CycleCreate, CycleList, CycleRepo, CycleUpdate, Milestone, MilestoneCreate,
     MilestoneList, MilestoneRepo, MilestoneUpdate, Project, ProjectCreate, ProjectList,
     ProjectRepo, ProjectUpdate, Task, TaskCreate, TaskList, TaskRepo, TaskUpdate,
 };
 use uuid::Uuid;
+
+// ── CommitRef codec ───────────────────────────────────────────────────
+//
+// A Vec<CommitRef> is encoded as a JSON-string at the field key (one
+// row per Task, replaced wholesale on update). This matches the
+// codec strategy used by `write_string_list` (tab-joined → naive LWW
+// on the whole vec): fine for append-mostly leaf data like commit
+// pointers. Upgrade to a LoroList<LoroMap> sub-container if
+// concurrent commit appends from multiple replicas start clobbering.
+
+fn write_commit_refs(m: &LoroMap, k: &str, v: &[CommitRef]) -> Result<(), RepoError> {
+    let encoded = serde_json::to_string(v)
+        .map_err(|e| RepoError::Internal(format!("encode commit_refs: {e}")))?;
+    crdt::codec::write_str(m, k, &encoded)
+}
+
+fn read_commit_refs(m: &LoroMap, k: &str) -> Result<Vec<CommitRef>, RepoError> {
+    let raw = crdt::codec::read_str(m, k)?;
+    if raw.is_empty() {
+        return Ok(Vec::new());
+    }
+    serde_json::from_str(&raw)
+        .map_err(|e| RepoError::Internal(format!("decode commit_refs at `{k}`: {e}")))
+}
 
 pub use crdt::{CrdtDoc, LoroRepo};
 
@@ -215,6 +239,10 @@ impl EntityCrdt for TaskEntity {
             tags: input.tags,
             sort_index: input.sort_index,
             completed_at: input.completed_at,
+            agent_run_id: input.agent_run_id,
+            branch_name: input.branch_name,
+            pr_urls: input.pr_urls,
+            commit_refs: input.commit_refs,
             created_at: now,
             updated_at: now,
         }
@@ -235,6 +263,10 @@ impl EntityCrdt for TaskEntity {
         write_string_list(m, "tags", &e.tags)?;
         write_i64(m, "sort_index", e.sort_index)?;
         write_opt_dt(m, "completed_at", e.completed_at)?;
+        write_opt_uuid(m, "agent_run_id", e.agent_run_id)?;
+        write_opt_str(m, "branch_name", e.branch_name.as_deref())?;
+        write_string_list(m, "pr_urls", &e.pr_urls)?;
+        write_commit_refs(m, "commit_refs", &e.commit_refs)?;
         write_dt(m, "created_at", e.created_at)?;
         write_dt(m, "updated_at", e.updated_at)?;
         Ok(())
@@ -256,6 +288,10 @@ impl EntityCrdt for TaskEntity {
             tags: read_string_list(m, "tags")?,
             sort_index: read_i64(m, "sort_index")?,
             completed_at: read_opt_dt(m, "completed_at")?,
+            agent_run_id: read_opt_uuid(m, "agent_run_id").unwrap_or(None),
+            branch_name: read_opt_str(m, "branch_name").unwrap_or(None),
+            pr_urls: read_string_list(m, "pr_urls").unwrap_or_default(),
+            commit_refs: read_commit_refs(m, "commit_refs").unwrap_or_default(),
             created_at: read_dt(m, "created_at")?,
             updated_at: read_dt(m, "updated_at")?,
         })
@@ -300,6 +336,18 @@ impl EntityCrdt for TaskEntity {
         }
         if let Some(v) = u.completed_at {
             write_opt_dt(m, "completed_at", v)?;
+        }
+        if let Some(v) = u.agent_run_id {
+            write_opt_uuid(m, "agent_run_id", v)?;
+        }
+        if let Some(v) = u.branch_name {
+            write_opt_str(m, "branch_name", v.as_deref())?;
+        }
+        if let Some(v) = u.pr_urls {
+            write_opt_string_list(m, "pr_urls", Some(&v))?;
+        }
+        if let Some(v) = u.commit_refs {
+            write_commit_refs(m, "commit_refs", &v)?;
         }
         write_dt(m, "updated_at", Utc::now())?;
         Ok(())

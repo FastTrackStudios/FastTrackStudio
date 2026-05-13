@@ -45,6 +45,29 @@ sea-orm-migration.workspace = true
 # with fake data — UI design loops without manual setup.
 task-db = { path = "../db" }
 
+# Webhook receivers (GitHub + Hermes), inbound HMAC verification,
+# sealing of webhook secrets, and integration plugin registry boot.
+agent-proto = { workspace = true }
+agent-crdt = { workspace = true }
+agent-hermes = { path = "../../features/agent/agent-hermes" }
+project-proto = { workspace = true }
+project-crdt = { workspace = true }
+architect = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+async-trait = { workspace = true }
+chrono = { workspace = true }
+regex = "1"
+hmac = { workspace = true }
+sha2 = { workspace = true }
+aes-gcm = { workspace = true }
+rand = "0.8"
+hex = "0.4"
+base64 = { workspace = true }
+subtle = "2"
+thiserror = { workspace = true }
+url = { workspace = true }
+
 [dev-dependencies]
 # Integration tests spawn the server in-process and drive it with
 # raw WebSocket clients to verify the realtime byte-relay end-to-end.

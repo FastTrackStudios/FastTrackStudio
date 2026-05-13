@@ -20,6 +20,121 @@ use architect::Entity;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
+// ── CommitRef ─────────────────────────────────────────────────────────
+//
+// Leaf data owned by `Task` — a tiny pointer at a git commit produced
+// from an `AgentRun` dispatched from the task. NOT a separate Entity;
+// it lives inline inside Task and is encoded as a LoroMap-per-element
+// list in the CRDT layer.
+
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(::facet::Facet, Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct CommitRef {
+    /// Full 40-char hex SHA. Validated by the producer; we treat it
+    /// as opaque here.
+    pub sha: String,
+
+    /// First line of the commit message only — keep the leaf small.
+    pub message: String,
+
+    /// Optional permalink to the commit on the upstream forge.
+    pub url: Option<String>,
+
+    #[cfg_attr(feature = "fake", dummy(faker = "fakers::RecentDateTime"))]
+    pub authored_at: DateTime<Utc>,
+}
+
+/// Build a stable branch slug for an agent run dispatched from a task.
+///
+/// Format: `{handle}/{project_key}-{short_id}-{title_slug}` where
+/// - `short_id` is the first 4 uppercase hex chars of `task_id.simple()`
+/// - `title_slug` is lowercase ASCII alnum, non-alnum collapsed to `-`,
+///   trimmed at both ends, capped at 40 chars.
+///
+/// Idempotent: re-running on the same inputs produces the same slug.
+/// The Task stores the result in `branch_name` and never re-derives it
+/// after the first dispatch, so a title change doesn't rename the
+/// branch.
+pub fn branch_slug(handle: &str, project_key: &str, task_id: Uuid, title: &str) -> String {
+    let short_id_full = task_id.simple().to_string();
+    let short_id = short_id_full
+        .get(..4)
+        .unwrap_or(short_id_full.as_str())
+        .to_ascii_uppercase();
+
+    // Title → ASCII alnum + `-` separators
+    let mut slug = String::with_capacity(title.len());
+    let mut prev_dash = false;
+    for c in title.chars() {
+        if c.is_ascii_alphanumeric() {
+            slug.push(c.to_ascii_lowercase());
+            prev_dash = false;
+        } else if !slug.is_empty() && !prev_dash {
+            slug.push('-');
+            prev_dash = true;
+        }
+    }
+    while slug.ends_with('-') {
+        slug.pop();
+    }
+    if slug.len() > 40 {
+        slug.truncate(40);
+        while slug.ends_with('-') {
+            slug.pop();
+        }
+    }
+    if slug.is_empty() {
+        slug.push_str("task");
+    }
+
+    format!("{handle}/{project_key}-{short_id}-{slug}")
+}
+
+#[cfg(test)]
+mod branch_slug_tests {
+    use super::*;
+    use uuid::Uuid;
+
+    fn fixed_id() -> Uuid {
+        Uuid::parse_str("3f9a1234-5678-90ab-cdef-1234567890ab").unwrap()
+    }
+
+    #[test]
+    fn empty_title_falls_back_to_task() {
+        let s = branch_slug("cwright", "PRJ", fixed_id(), "");
+        assert_eq!(s, "cwright/PRJ-3F9A-task");
+    }
+
+    #[test]
+    fn long_title_is_capped_at_40_chars() {
+        let title = "this is an extremely long task title that should be truncated cleanly";
+        let s = branch_slug("cwright", "PRJ", fixed_id(), title);
+        let suffix = s.rsplit('-').next().unwrap();
+        // The slug body (everything after the short_id-) is ≤ 40
+        let body = &s["cwright/PRJ-3F9A-".len()..];
+        assert!(body.len() <= 40, "body len {}: {}", body.len(), body);
+        // No trailing dash
+        assert!(!body.ends_with('-'));
+        assert!(!suffix.is_empty());
+    }
+
+    #[test]
+    fn unicode_title_falls_back_to_ascii_alnum_only() {
+        // Non-ASCII chars dropped; runs of separators collapse.
+        let s = branch_slug("cwright", "PRJ", fixed_id(), "Café — résumé! 你好");
+        assert_eq!(s, "cwright/PRJ-3F9A-caf-r-sum");
+    }
+
+    #[test]
+    fn idempotent_on_reslug() {
+        let title = "Add CSV export";
+        let a = branch_slug("cwright", "PRJ", fixed_id(), title);
+        let b = branch_slug("cwright", "PRJ", fixed_id(), title);
+        assert_eq!(a, b);
+        assert_eq!(a, "cwright/PRJ-3F9A-add-csv-export");
+    }
+}
+
 // ── Project ───────────────────────────────────────────────────────────
 
 #[cfg_attr(feature = "fake", derive(::fake::Dummy))]
@@ -120,6 +235,36 @@ pub struct Task {
     #[architect(filterable)]
     #[cfg_attr(feature = "fake", dummy(faker = "crate::fakers::RecentDateTime"))]
     pub completed_at: Option<DateTime<Utc>>,
+
+    // ── Agent + git integration extensions ───────────────────────────
+    //
+    // Added in the Hermes-agent / git integration arc. All optional /
+    // vec-with-default so older docs (pre-extension) and call sites
+    // that don't care can ignore them.
+    /// The agent run currently dispatched from this task, if any.
+    /// `None` once the run completes (or never set). Single-active —
+    /// only one in-flight run per task.
+    #[architect(filterable)]
+    pub agent_run_id: Option<Uuid>,
+
+    /// Stable branch slug derived once via `branch_slug(...)` on first
+    /// dispatch and never regenerated — title edits don't rename
+    /// branches. `None` until the first dispatch happens.
+    #[architect(filterable)]
+    #[cfg_attr(feature = "fake", dummy(faker = "crate::fakers::MaybeBranchName"))]
+    pub branch_name: Option<String>,
+
+    /// Canonical PR URLs (GitHub, GitLab, Forgejo). Multi-element when
+    /// the agent's work spans repos or pushes to backports. Append-
+    /// only in normal flow; the UI may dedupe on display.
+    #[cfg_attr(feature = "fake", dummy(faker = "crate::fakers::PrUrls"))]
+    pub pr_urls: Vec<String>,
+
+    /// Leaf commit pointers produced by the agent. The Task owns this
+    /// list directly (no separate Entity) since commits are
+    /// per-task and never queried independently.
+    #[cfg_attr(feature = "fake", dummy(faker = "crate::fakers::CommitRefList"))]
+    pub commit_refs: Vec<CommitRef>,
 
     #[architect(exclude(create, update), on_create = Utc::now())]
     pub created_at: DateTime<Utc>,
@@ -430,6 +575,87 @@ pub mod fakers {
     impl Dummy<FutureDateTime> for DateTime<Utc> {
         fn dummy_with_rng<R: Rng + ?Sized>(_: &FutureDateTime, rng: &mut R) -> Self {
             Utc::now() + Duration::days(rng.random_range(0..90))
+        }
+    }
+
+    pub struct MaybeBranchName;
+    impl Dummy<MaybeBranchName> for Option<String> {
+        fn dummy_with_rng<R: Rng + ?Sized>(_: &MaybeBranchName, rng: &mut R) -> Self {
+            if rng.random_bool(0.4) {
+                const SUFFIXES: &[&str] = &[
+                    "add-csv-export",
+                    "fix-flaky-test",
+                    "refactor-auth",
+                    "wire-payments",
+                    "doc-sweep",
+                ];
+                let s: &str = SUFFIXES.choose(rng).unwrap();
+                Some(format!(
+                    "cwright/PRJ-{:04X}-{s}",
+                    rng.random_range(0..=0xFFFFu32)
+                ))
+            } else {
+                None
+            }
+        }
+    }
+
+    pub struct PrUrls;
+    impl Dummy<PrUrls> for Vec<String> {
+        fn dummy_with_rng<R: Rng + ?Sized>(_: &PrUrls, rng: &mut R) -> Self {
+            if rng.random_bool(0.3) {
+                vec![format!(
+                    "https://github.com/Codys-Wright/Task/pull/{}",
+                    rng.random_range(100..9999u32)
+                )]
+            } else {
+                Vec::new()
+            }
+        }
+    }
+
+    pub struct CommitRefList;
+    impl Dummy<CommitRefList> for Vec<super::CommitRef> {
+        fn dummy_with_rng<R: Rng + ?Sized>(_: &CommitRefList, rng: &mut R) -> Self {
+            let n = rng.random_range(0..=2usize);
+            (0..n)
+                .map(|_| {
+                    <super::CommitRef as Dummy<CommitRefFaker>>::dummy_with_rng(
+                        &CommitRefFaker,
+                        rng,
+                    )
+                })
+                .collect()
+        }
+    }
+
+    /// Generates a single CommitRef. Public so other fakers can reuse it.
+    pub struct CommitRefFaker;
+    impl Dummy<CommitRefFaker> for super::CommitRef {
+        fn dummy_with_rng<R: Rng + ?Sized>(_: &CommitRefFaker, rng: &mut R) -> Self {
+            let sha: String = (0..40)
+                .map(|_| {
+                    let n = rng.random_range(0..16u8);
+                    char::from_digit(n as u32, 16).unwrap()
+                })
+                .collect();
+            const MSGS: &[&str] = &[
+                "fix: handle empty inbox",
+                "feat: wire CSV export to UI",
+                "refactor: extract dispatcher",
+                "chore: bump deps",
+                "docs: explain branch slug",
+            ];
+            let m: &str = MSGS.choose(rng).unwrap();
+            super::CommitRef {
+                sha: sha.clone(),
+                message: m.to_string(),
+                url: Some(format!(
+                    "https://github.com/Codys-Wright/Task/commit/{}",
+                    &sha[..8]
+                )),
+                authored_at: Utc::now() - Duration::hours(rng.random_range(0..240)),
+            }
         }
     }
 

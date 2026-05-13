@@ -85,6 +85,10 @@ async fn task_round_trip_with_full_payload() {
             tags: vec!["mix".into(), "eq".into()],
             sort_index: 0,
             completed_at: None,
+            agent_run_id: None,
+            branch_name: None,
+            pr_urls: Vec::new(),
+            commit_refs: Vec::new(),
         })
         .await
         .unwrap();
@@ -180,6 +184,10 @@ async fn all_four_entities_coexist_in_one_doc() {
             tags: vec![],
             sort_index: 0,
             completed_at: None,
+            agent_run_id: None,
+            branch_name: None,
+            pr_urls: Vec::new(),
+            commit_refs: Vec::new(),
         })
         .await
         .unwrap();
@@ -303,6 +311,10 @@ async fn replicas_converge_across_all_entities() {
         tags: vec![],
         sort_index: 0,
         completed_at: None,
+        agent_run_id: None,
+        branch_name: None,
+        pr_urls: Vec::new(),
+        commit_refs: Vec::new(),
     })
     .await
     .unwrap();
@@ -320,6 +332,10 @@ async fn replicas_converge_across_all_entities() {
         tags: vec![],
         sort_index: 0,
         completed_at: None,
+        agent_run_id: None,
+        branch_name: None,
+        pr_urls: Vec::new(),
+        commit_refs: Vec::new(),
     })
     .await
     .unwrap();
@@ -386,4 +402,99 @@ async fn replicas_converge_across_all_entities() {
         .total,
         2
     );
+}
+
+// ── Phase A: agent + git Task field round-trips ──────────────────────
+
+#[tokio::test]
+async fn task_agent_and_git_fields_round_trip() {
+    use project_proto::{CommitRef, TaskUpdate};
+
+    let doc = CrdtDoc::ephemeral();
+    let projects = ProjectRepoLoro::new(&doc);
+    let tasks = TaskRepoLoro::new(&doc);
+
+    let p = projects
+        .create(ProjectCreate {
+            name: "Hermes-test".into(),
+            description: None,
+            status: "active".into(),
+            project_type: None,
+            color: None,
+            owner: None,
+        })
+        .await
+        .unwrap();
+
+    let now = Utc::now();
+    let run_id = Uuid::new_v4();
+    let commit_a = CommitRef {
+        sha: "a".repeat(40),
+        message: "feat: add CSV export".into(),
+        url: Some("https://github.com/Codys-Wright/Task/commit/aaaaaaaa".into()),
+        authored_at: now,
+    };
+    let commit_b = CommitRef {
+        sha: "b".repeat(40),
+        message: "fix: handle empty rows".into(),
+        url: None,
+        authored_at: now,
+    };
+
+    let t = tasks
+        .create(TaskCreate {
+            project_id: p.id,
+            parent_id: None,
+            cycle_id: None,
+            title: "Hermes wiring".into(),
+            description: None,
+            status: "in-progress".into(),
+            priority: "high".into(),
+            assignee: None,
+            estimate_minutes: None,
+            due_date: None,
+            tags: vec![],
+            sort_index: 0,
+            completed_at: None,
+            agent_run_id: Some(run_id),
+            branch_name: Some("cwright/PRJ-3F9A-add-csv-export".into()),
+            pr_urls: vec![
+                "https://github.com/Codys-Wright/Task/pull/42".into(),
+                "https://github.com/Codys-Wright/Task/pull/43".into(),
+            ],
+            commit_refs: vec![commit_a.clone(), commit_b.clone()],
+        })
+        .await
+        .unwrap();
+
+    let got = tasks.get(t.id).await.unwrap();
+    assert_eq!(got.agent_run_id, Some(run_id));
+    assert_eq!(
+        got.branch_name.as_deref(),
+        Some("cwright/PRJ-3F9A-add-csv-export")
+    );
+    assert_eq!(got.pr_urls.len(), 2);
+    assert_eq!(got.commit_refs.len(), 2);
+    assert_eq!(got.commit_refs[0], commit_a);
+    assert_eq!(got.commit_refs[1], commit_b);
+
+    // Patching commit_refs replaces the whole list.
+    let updated = tasks
+        .update(
+            t.id,
+            TaskUpdate {
+                commit_refs: Some(vec![commit_b.clone()]),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(updated.commit_refs, vec![commit_b]);
+}
+
+#[test]
+fn branch_slug_matches_doc_example() {
+    let id = Uuid::parse_str("3f9a1234-5678-90ab-cdef-1234567890ab").unwrap();
+    let s = project_proto::branch_slug("cwright", "PRJ", id, "Add CSV export");
+    assert_eq!(s, "cwright/PRJ-3F9A-add-csv-export");
 }

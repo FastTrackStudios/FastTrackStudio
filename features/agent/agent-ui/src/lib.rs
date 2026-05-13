@@ -3,6 +3,12 @@
 //! - [`AgentRunList`]  — full collection view, dispatches `on_delete`
 //! - [`AgentRunRow`]   — single-row presentation
 //! - [`AgentRunCreateForm`] — minimal new-run form, emits the create payload
+//! - [`hermes_kit`]    — integration-focused components (dispatch
+//!   dialog, run panel, board, settings, webhook log) for the
+//!   Hermes-agent + git integration arc.
+
+pub mod hermes_kit;
+pub use hermes_kit::*;
 
 use agent_proto::{AgentRun, AgentRunCreate};
 use dioxus::prelude::*;
@@ -241,6 +247,10 @@ pub fn AgentRunCreateForm(on_submit: EventHandler<AgentRunCreate>) -> Element {
                                 tokens_used: None,
                                 cost_cents: None,
                                 tags: Vec::new(),
+                                integration: None,
+                                external_id: None,
+                                external_url: None,
+                                log_cursor: None,
                             };
                             on_submit.call(payload);
                             name.set(String::new());

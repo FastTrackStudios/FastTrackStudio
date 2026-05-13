@@ -11,7 +11,7 @@ use std::collections::HashMap;
 
 use chrono::Utc;
 use dioxus::prelude::*;
-use fts_ui::lucide_dioxus::{Calendar as CalendarIcon, Plus, Trash2};
+use fts_ui::lucide_dioxus::{Bot, Calendar as CalendarIcon, Plus, Trash2};
 use fts_ui::prelude::*;
 use project_proto::{Task, TaskUpdate};
 use uuid::Uuid;
@@ -44,6 +44,7 @@ fn TaskCard(
     on_open: EventHandler<Uuid>,
     on_patch: EventHandler<(Uuid, TaskUpdate)>,
     on_delete: EventHandler<Uuid>,
+    on_dispatch_agent: EventHandler<Uuid>,
 ) -> Element {
     let id = task.id;
     let id_chip = task_id_chip(id);
@@ -165,6 +166,14 @@ fn TaskCard(
                 }
                 ContextMenuSeparator {}
                 ContextMenuItem {
+                    value: "run-agent".to_string(),
+                    index: 11usize,
+                    on_select: move |_: String| on_dispatch_agent.call(id),
+                    Bot { size: 14 }
+                    "Run with agent"
+                }
+                ContextMenuSeparator {}
+                ContextMenuItem {
                     value: "delete".to_string(),
                     index: 12usize,
                     destructive: true,
@@ -251,6 +260,7 @@ pub fn TaskKanbanBoard(
     on_card_patch: EventHandler<(Uuid, TaskUpdate)>,
     on_quick_create: EventHandler<(String, String)>,
     on_card_delete: EventHandler<Uuid>,
+    #[props(default)] on_dispatch_agent: EventHandler<Uuid>,
 ) -> Element {
     // Bucket tasks by group key. Keys not present in `column_order`
     // get appended to the end so we don't lose data.
@@ -317,6 +327,7 @@ pub fn TaskKanbanBoard(
                                             on_open: move |id| on_card_open.call(id),
                                             on_patch: move |p| on_card_patch.call(p),
                                             on_delete: move |id| on_card_delete.call(id),
+                                            on_dispatch_agent: move |id| on_dispatch_agent.call(id),
                                         }
                                     }
                                 }

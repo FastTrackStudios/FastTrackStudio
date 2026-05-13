@@ -10,9 +10,10 @@ license.workspace = true
 
 [dependencies]
 architect.workspace = true
-chrono.workspace = true
-uuid = { workspace = true, features = ["js"] }
+chrono = { workspace = true, features = ["serde"] }
+uuid = { workspace = true, features = ["js", "serde"] }
 facet.workspace = true
+serde.workspace = true
 thiserror.workspace = true
 
 vox = { workspace = true, optional = true }

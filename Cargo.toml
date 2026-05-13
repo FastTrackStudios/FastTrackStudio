@@ -112,6 +112,7 @@ agent = { path = "features/agent/agent" }
 agent-proto = { path = "features/agent/agent-proto" }
 agent-crdt = { path = "features/agent/agent-crdt" }
 agent-db = { path = "features/agent/agent-db" }
+agent-hermes = { path = "features/agent/agent-hermes" }
 caldav = { path = "features/caldav/caldav" }
 caldav-proto = { path = "features/caldav/caldav-proto" }
 caldav-crdt = { path = "features/caldav/caldav-crdt" }

@@ -4,6 +4,7 @@
 
 pub mod board;
 pub mod common;
+pub mod git;
 pub mod header;
 pub mod list;
 pub mod overview;
@@ -13,7 +14,10 @@ pub mod sheet;
 pub mod theme;
 
 pub use board::TaskKanbanBoard;
-pub use common::{color_swatch_class, fuzzy_match, status_to_badge_variant, task_id_chip};
+pub use common::{
+    color_swatch_class, fuzzy_match, relative_time, status_to_badge_variant, task_id_chip,
+};
+pub use git::TaskGitPanel;
 pub use header::{ProjectHeaderCard, ProjectTab, TaskStats, TaskView};
 pub use list::{BulkAction, TaskGroupBy, TaskListView};
 pub use overview::{ProjectOverviewCard, ProjectOverviewGrid};
