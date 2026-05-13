@@ -886,7 +886,12 @@ fn OrgSwitcher(
                     {render_trigger(active.clone(), compact)}
                 }
                 DropdownContent {
-                    align: if compact { "end" } else { "start" },
+                    // Footer-pinned in the sidebar — open upward so the
+                    // menu stays inside the viewport. End alignment
+                    // keeps it pinned to the right edge of the trigger
+                    // so the wider menu doesn't overflow the sidebar.
+                    side: if compact { "bottom" } else { "top" },
+                    align: if compact { "end" } else { "end" },
                     width: if compact { "w-64" } else { "w-[16rem]" },
                     DropdownLabel { "Switch organization" }
                     for (idx, org) in orgs.iter().enumerate() {
