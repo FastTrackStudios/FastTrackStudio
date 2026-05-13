@@ -26,6 +26,7 @@ async fn comment_round_trip() {
             resolved_by: None,
             mentions: vec!["alice".into()],
             tags: vec!["mix".into()],
+            anchor_json: None,
         })
         .await
         .unwrap();
@@ -107,6 +108,7 @@ async fn all_three_coexist_in_one_doc() {
             resolved_by: None,
             mentions: vec![],
             tags: vec![],
+            anchor_json: None,
         })
         .await
         .unwrap();
@@ -169,6 +171,7 @@ async fn replicas_converge_across_all_entities() {
         resolved_by: None,
         mentions: vec![],
         tags: vec![],
+        anchor_json: None,
     })
     .await
     .unwrap();

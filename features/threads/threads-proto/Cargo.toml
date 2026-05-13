@@ -11,13 +11,17 @@ license.workspace = true
 [dependencies]
 architect.workspace = true
 chrono.workspace = true
-uuid = { workspace = true, features = ["js"] }
+uuid = { workspace = true, features = ["js", "serde"] }
 facet.workspace = true
 thiserror.workspace = true
+serde.workspace = true
 
 vox = { workspace = true, optional = true }
 sea-orm = { workspace = true, optional = true }
 fake = { workspace = true, optional = true }
+
+[dev-dependencies]
+serde_json.workspace = true
 
 [features]
 default = ["vox"]

@@ -114,6 +114,7 @@ pub fn CommentCreateForm(on_submit: EventHandler<CommentCreate>) -> Element {
                                 resolved_by: None,
                                 mentions: Vec::new(),
                                 tags: Vec::new(),
+                                anchor_json: None,
                             };
                             on_submit.call(payload);
                             author.set(String::new());
