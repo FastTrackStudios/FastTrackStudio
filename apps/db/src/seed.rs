@@ -468,6 +468,16 @@ async fn seed_all(cdoc: &CrdtDoc) -> eyre::Result<()> {
 
     info!("  knowledge: 1 vault, 2 folders, 50 pages, {block_total} blocks, 8 tags, 2 bases");
 
+    // ── Threads Phase-A deterministic samples ─────────────────
+    // Layered on top of the fake-generated comments above so the seed
+    // gallery always includes a stable set of action threads + threads
+    // anchored to real knowledge blocks (for the upcoming embed work).
+    let phase_a = seed_threads_phase_a_samples(&comment_repo, &kblocks).await?;
+    info!(
+        "  threads phase-A: {} action threads, {} anchored threads",
+        phase_a.actions, phase_a.anchored,
+    );
+
     // ── CalDAV reference data ─────────────────────────────────
     let caldav_acct = caldav_crdt::CalDavAccountRepoLoro::new(cdoc);
     let caldav_cal = caldav_crdt::CalDavCalendarRepoLoro::new(cdoc);
@@ -477,4 +487,152 @@ async fn seed_all(cdoc: &CrdtDoc) -> eyre::Result<()> {
 
     info!("seed complete");
     Ok(())
+}
+
+struct PhaseACounts {
+    actions: usize,
+    anchored: usize,
+}
+
+/// Deterministic Phase-A thread samples — overlaid on the fake-generated
+/// comments to guarantee the seed gallery always contains a stable set of
+/// (a) action threads spanning kinds and (b) threads anchored to real
+/// knowledge blocks via [`threads_proto::Anchor::TextQuoteSelector`].
+///
+/// Anchored threads pin a short snippet of the target block's content as
+/// the `exact` quote — exercise material for the [`resolve_text_quote`]
+/// fuzzy-resolution path in `threads-proto::anchor`.
+async fn seed_threads_phase_a_samples(
+    comments: &threads_crdt::CommentRepoLoro,
+    kblocks: &knowledge_crdt::BlockRepoLoro,
+) -> eyre::Result<PhaseACounts> {
+    use threads_proto::{Anchor, CommentCreate, CommentRepo as _, CommentUpdate};
+
+    // Action / question / decision / praise thread fixtures.
+    let action_specs: &[(&str, Option<&str>, &str)] = &[
+        ("action", Some("open"), "Ship Phase B-embed UI by Friday"),
+        (
+            "action",
+            Some("open"),
+            "Wire `BlockThreadMarker` into the outliner",
+        ),
+        (
+            "action",
+            Some("in-progress"),
+            "Pick a Bitap crate or keep the hand-roll",
+        ),
+        (
+            "action",
+            Some("open"),
+            "Decide PDF highlight schema migration story",
+        ),
+        (
+            "action",
+            Some("in-progress"),
+            "Spec the Logseq export contract",
+        ),
+        (
+            "action",
+            Some("done"),
+            "Adopt W3C selector names in the Anchor enum",
+        ),
+        (
+            "action",
+            Some("wont-do"),
+            "Embed audio bytes inline in Loro doc",
+        ),
+        (
+            "question",
+            None,
+            "Should reactions be threaded onto replies?",
+        ),
+        (
+            "question",
+            None,
+            "Do we need per-comment permissions in v1?",
+        ),
+        ("decision", None, "Status maps 1:1 to Logseq TODO markers."),
+        (
+            "praise",
+            None,
+            "Tolerant decode test caught a real regression.",
+        ),
+    ];
+
+    let entity_id = Uuid::new_v4();
+    let mut actions = 0usize;
+    for (kind, status, body) in action_specs {
+        let c = comments
+            .create(CommentCreate {
+                entity_id,
+                entity_type: "task".into(),
+                author: "seed".into(),
+                body: (*body).into(),
+                time_start_ms: None,
+                time_end_ms: None,
+                reply_to: None,
+                resolved: false,
+                resolved_by: None,
+                mentions: vec![],
+                tags: vec!["phase-a-sample".into()],
+                anchor_json: None,
+            })
+            .await?;
+        let mut upd = CommentUpdate::default();
+        upd.kind = Some((*kind).to_string());
+        if let Some(s) = status {
+            upd.action_status = Some(Some((*s).to_string()));
+        }
+        comments.update(c.id, upd).await?;
+        actions += 1;
+    }
+
+    // Anchored threads pointing at real knowledge blocks.
+    let blocks = kblocks
+        .list(
+            threads_proto::architect::Page { index: 0, size: 16 },
+            None,
+            None,
+        )
+        .await?;
+    let mut anchored = 0usize;
+    for block in blocks.items.iter().take(5) {
+        // Use the first ~24 chars of trimmed content as the pinned quote.
+        let trimmed = block.content.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let snippet_len = trimmed
+            .char_indices()
+            .nth(24)
+            .map(|(i, _)| i)
+            .unwrap_or(trimmed.len());
+        let snippet = trimmed[..snippet_len].to_string();
+        let anchor = Anchor::TextQuoteSelector {
+            block_id: block.id,
+            exact: snippet.clone(),
+            prefix: None,
+            suffix: None,
+        };
+        let anchor_json = serde_json::to_string(&anchor)?;
+        comments
+            .create(CommentCreate {
+                entity_id: block.id,
+                entity_type: "knowledge_block".into(),
+                author: "seed".into(),
+                body: format!("Re: \"{snippet}\" — needs follow-up."),
+                time_start_ms: None,
+                time_end_ms: None,
+                reply_to: None,
+                resolved: false,
+                resolved_by: None,
+                mentions: vec![],
+                tags: vec!["phase-a-sample".into(), "anchored".into()],
+                anchor_json: Some(anchor_json),
+            })
+            .await?;
+        anchored += 1;
+    }
+
+    Ok(PhaseACounts { actions, anchored })
 }

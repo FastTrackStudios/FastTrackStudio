@@ -2,9 +2,9 @@ use architect::{Page, RepoError, SortOrder};
 use chrono::Utc;
 use crdt::EntityCrdt;
 use crdt::codec::{
-    read_bool, read_dt, read_opt_i64, read_opt_str, read_opt_uuid, read_str, read_string_list,
-    read_uuid, write_bool, write_dt, write_opt_i64, write_opt_str, write_opt_string_list,
-    write_opt_uuid, write_str, write_string_list, write_uuid,
+    read_bool, read_dt, read_opt_bool, read_opt_dt, read_opt_i64, read_opt_str, read_opt_uuid,
+    read_str, read_string_list, read_uuid, write_bool, write_dt, write_opt_dt, write_opt_i64,
+    write_opt_str, write_opt_string_list, write_opt_uuid, write_str, write_string_list, write_uuid,
 };
 use loro::LoroMap;
 use threads_proto::{
@@ -62,6 +62,16 @@ impl EntityCrdt for CommentEntity {
             resolved_by: input.resolved_by,
             mentions: input.mentions,
             tags: input.tags,
+            kind: "discussion".into(),
+            action_status: None,
+            action_assignee: None,
+            action_priority: None,
+            action_due_date: None,
+            spawned_task_id: None,
+            edited_at: None,
+            deleted: false,
+            deleted_by: None,
+            anchor_json: input.anchor_json,
             created_at: now,
             updated_at: now,
         }
@@ -80,12 +90,25 @@ impl EntityCrdt for CommentEntity {
         write_opt_str(m, "resolved_by", e.resolved_by.as_deref())?;
         write_string_list(m, "mentions", &e.mentions)?;
         write_string_list(m, "tags", &e.tags)?;
+        write_str(m, "kind", &e.kind)?;
+        write_opt_str(m, "action_status", e.action_status.as_deref())?;
+        write_opt_str(m, "action_assignee", e.action_assignee.as_deref())?;
+        write_opt_str(m, "action_priority", e.action_priority.as_deref())?;
+        write_opt_dt(m, "action_due_date", e.action_due_date)?;
+        write_opt_uuid(m, "spawned_task_id", e.spawned_task_id)?;
+        write_opt_dt(m, "edited_at", e.edited_at)?;
+        write_bool(m, "deleted", e.deleted)?;
+        write_opt_str(m, "deleted_by", e.deleted_by.as_deref())?;
+        write_opt_str(m, "anchor_json", e.anchor_json.as_deref())?;
         write_dt(m, "created_at", e.created_at)?;
         write_dt(m, "updated_at", e.updated_at)?;
         Ok(())
     }
 
     fn decode_from(m: &LoroMap) -> Result<Comment, RepoError> {
+        // Tolerant decode: pre-extension snapshots lack the post-Phase-A
+        // fields. Missing values fall back to the documented defaults so
+        // existing on-disk docs load without migration.
         Ok(Comment {
             id: read_uuid(m, "id")?,
             entity_id: read_uuid(m, "entity_id")?,
@@ -99,6 +122,16 @@ impl EntityCrdt for CommentEntity {
             resolved_by: read_opt_str(m, "resolved_by")?,
             mentions: read_string_list(m, "mentions")?,
             tags: read_string_list(m, "tags")?,
+            kind: read_opt_str(m, "kind")?.unwrap_or_else(|| "discussion".into()),
+            action_status: read_opt_str(m, "action_status")?,
+            action_assignee: read_opt_str(m, "action_assignee")?,
+            action_priority: read_opt_str(m, "action_priority")?,
+            action_due_date: read_opt_dt(m, "action_due_date")?,
+            spawned_task_id: read_opt_uuid(m, "spawned_task_id")?,
+            edited_at: read_opt_dt(m, "edited_at")?,
+            deleted: read_opt_bool(m, "deleted")?.unwrap_or(false),
+            deleted_by: read_opt_str(m, "deleted_by")?,
+            anchor_json: read_opt_str(m, "anchor_json")?,
             created_at: read_dt(m, "created_at")?,
             updated_at: read_dt(m, "updated_at")?,
         })
@@ -137,6 +170,36 @@ impl EntityCrdt for CommentEntity {
         }
         if let Some(v) = u.tags {
             write_opt_string_list(m, "tags", Some(&v))?;
+        }
+        if let Some(v) = u.kind {
+            write_str(m, "kind", &v)?;
+        }
+        if let Some(v) = u.action_status {
+            write_opt_str(m, "action_status", v.as_deref())?;
+        }
+        if let Some(v) = u.action_assignee {
+            write_opt_str(m, "action_assignee", v.as_deref())?;
+        }
+        if let Some(v) = u.action_priority {
+            write_opt_str(m, "action_priority", v.as_deref())?;
+        }
+        if let Some(v) = u.action_due_date {
+            write_opt_dt(m, "action_due_date", v)?;
+        }
+        if let Some(v) = u.spawned_task_id {
+            write_opt_uuid(m, "spawned_task_id", v)?;
+        }
+        if let Some(v) = u.edited_at {
+            write_opt_dt(m, "edited_at", v)?;
+        }
+        if let Some(v) = u.deleted {
+            write_bool(m, "deleted", v)?;
+        }
+        if let Some(v) = u.deleted_by {
+            write_opt_str(m, "deleted_by", v.as_deref())?;
+        }
+        if let Some(v) = u.anchor_json {
+            write_opt_str(m, "anchor_json", v.as_deref())?;
         }
         write_dt(m, "updated_at", Utc::now())?;
         Ok(())
@@ -359,6 +422,15 @@ impl EntityCrdt for AttachmentEntity {
             checksum: input.checksum,
             uploader: input.uploader,
             tags: input.tags,
+            kind: "file".into(),
+            duration_ms: None,
+            width: None,
+            height: None,
+            blob_url: None,
+            blob_loro_key: None,
+            waveform_json: None,
+            transcript: None,
+            title: None,
             created_at: now,
             updated_at: now,
         }
@@ -376,12 +448,23 @@ impl EntityCrdt for AttachmentEntity {
         write_opt_str(m, "checksum", e.checksum.as_deref())?;
         write_opt_str(m, "uploader", e.uploader.as_deref())?;
         write_string_list(m, "tags", &e.tags)?;
+        write_str(m, "kind", &e.kind)?;
+        write_opt_i64(m, "duration_ms", e.duration_ms)?;
+        write_opt_i64(m, "width", e.width.map(i64::from))?;
+        write_opt_i64(m, "height", e.height.map(i64::from))?;
+        write_opt_str(m, "blob_url", e.blob_url.as_deref())?;
+        write_opt_str(m, "blob_loro_key", e.blob_loro_key.as_deref())?;
+        write_opt_str(m, "waveform_json", e.waveform_json.as_deref())?;
+        write_opt_str(m, "transcript", e.transcript.as_deref())?;
+        write_opt_str(m, "title", e.title.as_deref())?;
         write_dt(m, "created_at", e.created_at)?;
         write_dt(m, "updated_at", e.updated_at)?;
         Ok(())
     }
 
     fn decode_from(m: &LoroMap) -> Result<Attachment, RepoError> {
+        // Tolerant decode: pre-extension snapshots lack the post-Phase-A
+        // fields. Missing values fall back to defaults.
         Ok(Attachment {
             id: read_uuid(m, "id")?,
             owner_id: read_uuid(m, "owner_id")?,
@@ -394,6 +477,15 @@ impl EntityCrdt for AttachmentEntity {
             checksum: read_opt_str(m, "checksum")?,
             uploader: read_opt_str(m, "uploader")?,
             tags: read_string_list(m, "tags")?,
+            kind: read_opt_str(m, "kind")?.unwrap_or_else(|| "file".into()),
+            duration_ms: read_opt_i64(m, "duration_ms")?,
+            width: read_opt_i64(m, "width")?.map(|v| v as i32),
+            height: read_opt_i64(m, "height")?.map(|v| v as i32),
+            blob_url: read_opt_str(m, "blob_url")?,
+            blob_loro_key: read_opt_str(m, "blob_loro_key")?,
+            waveform_json: read_opt_str(m, "waveform_json")?,
+            transcript: read_opt_str(m, "transcript")?,
+            title: read_opt_str(m, "title")?,
             created_at: read_dt(m, "created_at")?,
             updated_at: read_dt(m, "updated_at")?,
         })
@@ -429,6 +521,33 @@ impl EntityCrdt for AttachmentEntity {
         }
         if let Some(v) = u.tags {
             write_opt_string_list(m, "tags", Some(&v))?;
+        }
+        if let Some(v) = u.kind {
+            write_str(m, "kind", &v)?;
+        }
+        if let Some(v) = u.duration_ms {
+            write_opt_i64(m, "duration_ms", v)?;
+        }
+        if let Some(v) = u.width {
+            write_opt_i64(m, "width", v.map(i64::from))?;
+        }
+        if let Some(v) = u.height {
+            write_opt_i64(m, "height", v.map(i64::from))?;
+        }
+        if let Some(v) = u.blob_url {
+            write_opt_str(m, "blob_url", v.as_deref())?;
+        }
+        if let Some(v) = u.blob_loro_key {
+            write_opt_str(m, "blob_loro_key", v.as_deref())?;
+        }
+        if let Some(v) = u.waveform_json {
+            write_opt_str(m, "waveform_json", v.as_deref())?;
+        }
+        if let Some(v) = u.transcript {
+            write_opt_str(m, "transcript", v.as_deref())?;
+        }
+        if let Some(v) = u.title {
+            write_opt_str(m, "title", v.as_deref())?;
         }
         write_dt(m, "updated_at", Utc::now())?;
         Ok(())
@@ -479,5 +598,91 @@ impl AttachmentRepo for AttachmentRepoLoro {
     }
     async fn delete(&self, id: Uuid) -> Result<(), RepoError> {
         self.inner.delete(id).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crdt::EntityCrdt;
+    use loro::LoroDoc;
+
+    /// Build a Comment map containing only the pre-Phase-A field shape, then
+    /// verify `decode_from` reconstructs a Comment with documented defaults
+    /// for the new post-Phase-A fields.
+    #[test]
+    fn tolerant_decode_pre_extension_comment() {
+        let doc = LoroDoc::new();
+        let root = doc.get_map("test_root");
+        let id = Uuid::new_v4();
+        let entity_id = Uuid::new_v4();
+        let now = Utc::now();
+
+        write_uuid(&root, "id", id).unwrap();
+        write_uuid(&root, "entity_id", entity_id).unwrap();
+        write_str(&root, "entity_type", "task").unwrap();
+        write_str(&root, "author", "alice").unwrap();
+        write_str(&root, "body", "looks good").unwrap();
+        write_opt_i64(&root, "time_start_ms", None).unwrap();
+        write_opt_i64(&root, "time_end_ms", None).unwrap();
+        write_opt_uuid(&root, "reply_to", None).unwrap();
+        write_bool(&root, "resolved", false).unwrap();
+        write_opt_str(&root, "resolved_by", None).unwrap();
+        write_string_list(&root, "mentions", &[]).unwrap();
+        write_string_list(&root, "tags", &[]).unwrap();
+        write_dt(&root, "created_at", now).unwrap();
+        write_dt(&root, "updated_at", now).unwrap();
+
+        let c = CommentEntity::decode_from(&root).expect("tolerant decode");
+
+        assert_eq!(c.id, id);
+        assert_eq!(c.body, "looks good");
+        assert_eq!(c.kind, "discussion");
+        assert!(c.action_status.is_none());
+        assert!(c.action_assignee.is_none());
+        assert!(c.action_priority.is_none());
+        assert!(c.action_due_date.is_none());
+        assert!(c.spawned_task_id.is_none());
+        assert!(c.edited_at.is_none());
+        assert!(!c.deleted);
+        assert!(c.deleted_by.is_none());
+        assert!(c.anchor_json.is_none());
+    }
+
+    #[test]
+    fn tolerant_decode_pre_extension_attachment() {
+        let doc = LoroDoc::new();
+        let root = doc.get_map("test_root");
+        let id = Uuid::new_v4();
+        let owner_id = Uuid::new_v4();
+        let now = Utc::now();
+
+        write_uuid(&root, "id", id).unwrap();
+        write_uuid(&root, "owner_id", owner_id).unwrap();
+        write_str(&root, "owner_type", "comment").unwrap();
+        write_str(&root, "source", "upload").unwrap();
+        write_str(&root, "path", "attachments/1/report.pdf").unwrap();
+        write_opt_str(&root, "label", None).unwrap();
+        write_opt_str(&root, "mime", Some("application/pdf")).unwrap();
+        write_opt_i64(&root, "size_bytes", Some(12345)).unwrap();
+        write_opt_str(&root, "checksum", None).unwrap();
+        write_opt_str(&root, "uploader", None).unwrap();
+        write_string_list(&root, "tags", &[]).unwrap();
+        write_dt(&root, "created_at", now).unwrap();
+        write_dt(&root, "updated_at", now).unwrap();
+
+        let a = AttachmentEntity::decode_from(&root).expect("tolerant decode");
+
+        assert_eq!(a.id, id);
+        assert_eq!(a.path, "attachments/1/report.pdf");
+        assert_eq!(a.kind, "file");
+        assert!(a.duration_ms.is_none());
+        assert!(a.width.is_none());
+        assert!(a.height.is_none());
+        assert!(a.blob_url.is_none());
+        assert!(a.blob_loro_key.is_none());
+        assert!(a.waveform_json.is_none());
+        assert!(a.transcript.is_none());
+        assert!(a.title.is_none());
     }
 }
