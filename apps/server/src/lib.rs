@@ -1,4 +1,4 @@
-//! Loro sync-relay library.
+//! Task server — Loro sync-relay library.
 //!
 //! Exposed so tests can spin up the server in-process on a random
 //! port, with any `Persistence` impl (e.g. `InMemoryPersistence` for

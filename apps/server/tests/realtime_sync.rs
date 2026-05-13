@@ -1,6 +1,6 @@
 //! End-to-end realtime sync test.
 //!
-//! Spawns the sync-demo server on a random local port backed by
+//! Spawns task-server on a random local port backed by
 //! `InMemoryPersistence`, then drives two raw WebSocket clients
 //! against it. Each client owns its own `CrdtDoc` +
 //! `TimeEntryRepoLoro`. We verify the canonical Loro sync protocol
@@ -17,7 +17,7 @@ use chrono::Utc;
 use crdt::{CrdtDoc, Persistence, in_memory::InMemoryPersistence};
 use futures::{SinkExt, StreamExt};
 use loro::ExportMode;
-use sync_demo::{AppState, router};
+use task_server::{AppState, router};
 use timer_crdt::TimeEntryRepoLoro;
 use timer_proto::{TimeEntryCreate, TimeEntryRepo};
 use tokio::net::TcpListener;
