@@ -593,6 +593,10 @@ fn update_tracey_config(repo_root: &Path, n: &Names) -> eyre::Result<()> {
     //
     // Append before the LAST closing `)` on its own line, indented or
     // not. Cheap heuristic: replace the final `\n)\n` with our block + `\n)\n`.
+    // Default new features to a single `live` impl, scoped to the
+    // memory backend that the scaffold just created. Adding more
+    // backends later means adding more impl blocks (e.g. `mock`,
+    // `reaper`, `protools`) under the same spec.
     let block = format!(
         r#"
     {{
@@ -600,9 +604,9 @@ fn update_tracey_config(repo_root: &Path, n: &Names) -> eyre::Result<()> {
         include (features/{kebab}/spec/**/*.md)
         impls (
             {{
-                name rust
+                name live
                 include (
-                    features/{kebab}/**/*.rs
+                    features/{kebab}/{kebab}-memory/**/*.rs
                 )
                 exclude (
                     features/{kebab}/**/target/**

@@ -71,6 +71,7 @@ impl StubBackend {
 }
 
 impl ExampleRepo for StubBackend {
+    // r[impl repo.get.missing]
     async fn get(&self, id: Uuid) -> Result<Example, RepoError> {
         let guard = self.inner.read().await;
         guard
@@ -80,6 +81,8 @@ impl ExampleRepo for StubBackend {
             .ok_or(RepoError::NotFound)
     }
 
+    // r[impl repo.list.sort.name]
+    // r[impl repo.list.sort.unknown]
     async fn list(
         &self,
         page: Page,
@@ -112,6 +115,7 @@ impl ExampleRepo for StubBackend {
         Ok(ExampleList { items, total, page })
     }
 
+    // r[impl repo.create.id]
     async fn create(&self, input: ExampleCreate) -> Result<Example, RepoError> {
         let now = Utc::now();
         let row = Example {
@@ -125,6 +129,7 @@ impl ExampleRepo for StubBackend {
         Ok(row)
     }
 
+    // r[impl repo.update.partial]
     async fn update(&self, id: Uuid, input: ExampleUpdate) -> Result<Example, RepoError> {
         let mut guard = self.inner.write().await;
         let row = guard
@@ -141,6 +146,7 @@ impl ExampleRepo for StubBackend {
         Ok(row.clone())
     }
 
+    // r[impl repo.delete.missing]
     async fn delete(&self, id: Uuid) -> Result<(), RepoError> {
         let mut guard = self.inner.write().await;
         let before = guard.len();
