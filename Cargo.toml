@@ -197,6 +197,13 @@ version = "0.4"
 [workspace.dependencies.icalendar]
 version = "0.17"
 
+# Markdown parser used by `chat-ui/src/ai/markdown.rs` to render
+# assistant message bodies. `default-features = false` drops the
+# `simd` + `gen-tests` optional deps so the crate stays wasm-clean.
+[workspace.dependencies.pulldown-cmark]
+version = "0.10"
+default-features = false
+
 # Dioxus — UI lib. Single workspace dep; per-crate `[features]`
 # enable the platform target. Pattern lifted from dioxus-flake's
 # packages/web/desktop/mobile setup so `cargo check --workspace`

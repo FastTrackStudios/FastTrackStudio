@@ -1,15 +1,32 @@
 use agent_proto::{
-    AgentLogLine, AgentLogLineCreate, AgentLogLineList, AgentLogLineRepo, AgentLogLineUpdate,
-    AgentRun, AgentRunCreate, AgentRunList, AgentRunRepo, AgentRunUpdate,
+    AgentConversation, AgentConversationCreate, AgentConversationList, AgentConversationRepo,
+    AgentConversationUpdate, AgentLogLine, AgentLogLineCreate, AgentLogLineList, AgentLogLineRepo,
+    AgentLogLineUpdate, AgentRun, AgentRunCreate, AgentRunList, AgentRunRepo, AgentRunUpdate,
 };
 use architect::{Page, RepoError, SortOrder};
 use chrono::Utc;
 use crdt::EntityCrdt;
 use crdt::codec::{
-    read_dt, read_opt_dt, read_opt_i64, read_opt_str, read_opt_u32, read_opt_uuid, read_str,
-    read_string_list, read_uuid, write_dt, write_opt_dt, write_opt_i64, write_opt_str,
-    write_opt_string_list, write_opt_u32, write_opt_uuid, write_str, write_string_list, write_uuid,
+    read_bool, read_dt, read_i64, read_opt_dt, read_opt_i64, read_opt_str, read_opt_u32,
+    read_opt_uuid, read_str, read_string_list, read_uuid, write_bool, write_dt, write_i64,
+    write_opt_dt, write_opt_i64, write_opt_str, write_opt_string_list, write_opt_u32,
+    write_opt_uuid, write_str, write_string_list, write_uuid,
 };
+
+// `crdt::codec` has no i32 helpers — widen to i64 for storage and
+// narrow on read, matching the pattern in `invoice-crdt`.
+fn write_i32(m: &loro::LoroMap, k: &str, v: i32) -> Result<(), RepoError> {
+    write_i64(m, k, v as i64)
+}
+fn read_i32(m: &loro::LoroMap, k: &str) -> Result<i32, RepoError> {
+    Ok(read_i64(m, k)? as i32)
+}
+fn write_opt_i32(m: &loro::LoroMap, k: &str, v: Option<i32>) -> Result<(), RepoError> {
+    write_opt_i64(m, k, v.map(|x| x as i64))
+}
+fn read_opt_i32(m: &loro::LoroMap, k: &str) -> Result<Option<i32>, RepoError> {
+    Ok(read_opt_i64(m, k)?.map(|x| x as i32))
+}
 use loro::LoroMap;
 use uuid::Uuid;
 
@@ -360,6 +377,187 @@ impl AgentLogLineRepo for AgentLogLineRepoLoro {
         self.inner.create(input).await
     }
     async fn update(&self, id: Uuid, input: AgentLogLineUpdate) -> Result<AgentLogLine, RepoError> {
+        self.inner.update(id, input).await
+    }
+    async fn delete(&self, id: Uuid) -> Result<(), RepoError> {
+        self.inner.delete(id).await
+    }
+}
+
+// ── AgentConversation ─────────────────────────────────────────────────
+
+pub struct AgentConversationEntity;
+
+#[derive(Clone)]
+pub struct AgentConversationRepoLoro {
+    inner: LoroRepo<AgentConversationEntity>,
+}
+
+impl AgentConversationRepoLoro {
+    pub fn new(doc: &CrdtDoc) -> Self {
+        Self { inner: doc.repo() }
+    }
+    pub fn inner(&self) -> &LoroRepo<AgentConversationEntity> {
+        &self.inner
+    }
+    pub fn doc(&self) -> &loro::LoroDoc {
+        self.inner.doc()
+    }
+}
+
+impl EntityCrdt for AgentConversationEntity {
+    type Wire = AgentConversation;
+    type Create = AgentConversationCreate;
+    type Update = AgentConversationUpdate;
+    type List = AgentConversationList;
+
+    const ROOT: &'static str = "agent_conversations";
+
+    fn id(w: &AgentConversation) -> Uuid {
+        w.id
+    }
+
+    fn from_create(input: AgentConversationCreate) -> AgentConversation {
+        let now = Utc::now();
+        AgentConversation {
+            id: Uuid::new_v4(),
+            title: input.title,
+            system_prompt: input.system_prompt,
+            default_model: input.default_model,
+            temperature_milli: input.temperature_milli,
+            max_tokens: input.max_tokens,
+            tool_set: input.tool_set,
+            agent_run_id: input.agent_run_id,
+            project_id: input.project_id,
+            parent_conversation_id: input.parent_conversation_id,
+            branch_from_message_id: input.branch_from_message_id,
+            archived: input.archived,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    fn encode_into(m: &loro::LoroMap, e: &AgentConversation) -> Result<(), RepoError> {
+        write_uuid(m, "id", e.id)?;
+        write_str(m, "title", &e.title)?;
+        write_opt_str(m, "system_prompt", e.system_prompt.as_deref())?;
+        write_str(m, "default_model", &e.default_model)?;
+        write_i32(m, "temperature_milli", e.temperature_milli)?;
+        write_opt_i32(m, "max_tokens", e.max_tokens)?;
+        write_string_list(m, "tool_set", &e.tool_set)?;
+        write_opt_uuid(m, "agent_run_id", e.agent_run_id)?;
+        write_opt_uuid(m, "project_id", e.project_id)?;
+        write_opt_uuid(m, "parent_conversation_id", e.parent_conversation_id)?;
+        write_opt_uuid(m, "branch_from_message_id", e.branch_from_message_id)?;
+        write_bool(m, "archived", e.archived)?;
+        write_dt(m, "created_at", e.created_at)?;
+        write_dt(m, "updated_at", e.updated_at)?;
+        Ok(())
+    }
+
+    fn decode_from(m: &loro::LoroMap) -> Result<AgentConversation, RepoError> {
+        Ok(AgentConversation {
+            id: read_uuid(m, "id")?,
+            title: read_str(m, "title")?,
+            system_prompt: read_opt_str(m, "system_prompt")?,
+            default_model: read_str(m, "default_model")?,
+            temperature_milli: read_i32(m, "temperature_milli")?,
+            max_tokens: read_opt_i32(m, "max_tokens")?,
+            tool_set: read_string_list(m, "tool_set")?,
+            agent_run_id: read_opt_uuid(m, "agent_run_id")?,
+            project_id: read_opt_uuid(m, "project_id")?,
+            parent_conversation_id: read_opt_uuid(m, "parent_conversation_id")?,
+            branch_from_message_id: read_opt_uuid(m, "branch_from_message_id")?,
+            archived: read_bool(m, "archived")?,
+            created_at: read_dt(m, "created_at")?,
+            updated_at: read_dt(m, "updated_at")?,
+        })
+    }
+
+    fn apply_update(m: &loro::LoroMap, u: AgentConversationUpdate) -> Result<(), RepoError> {
+        if let Some(v) = u.title {
+            write_str(m, "title", &v)?;
+        }
+        if let Some(v) = u.system_prompt {
+            write_opt_str(m, "system_prompt", v.as_deref())?;
+        }
+        if let Some(v) = u.default_model {
+            write_str(m, "default_model", &v)?;
+        }
+        if let Some(v) = u.temperature_milli {
+            write_i32(m, "temperature_milli", v)?;
+        }
+        if let Some(v) = u.max_tokens {
+            write_opt_i32(m, "max_tokens", v)?;
+        }
+        if let Some(v) = u.tool_set {
+            write_opt_string_list(m, "tool_set", Some(&v))?;
+        }
+        if let Some(v) = u.agent_run_id {
+            write_opt_uuid(m, "agent_run_id", v)?;
+        }
+        if let Some(v) = u.project_id {
+            write_opt_uuid(m, "project_id", v)?;
+        }
+        if let Some(v) = u.parent_conversation_id {
+            write_opt_uuid(m, "parent_conversation_id", v)?;
+        }
+        if let Some(v) = u.branch_from_message_id {
+            write_opt_uuid(m, "branch_from_message_id", v)?;
+        }
+        if let Some(v) = u.archived {
+            write_bool(m, "archived", v)?;
+        }
+        write_dt(m, "updated_at", Utc::now())?;
+        Ok(())
+    }
+
+    fn sort_items(
+        items: &mut [AgentConversation],
+        field: &str,
+        order: SortOrder,
+    ) -> Result<(), RepoError> {
+        match field {
+            "title" => items.sort_by(|a, b| a.title.cmp(&b.title)),
+            "created_at" => items.sort_by(|a, b| a.created_at.cmp(&b.created_at)),
+            "updated_at" => items.sort_by(|a, b| a.updated_at.cmp(&b.updated_at)),
+            other => {
+                return Err(RepoError::InvalidInput(format!(
+                    "unsortable field: {other}"
+                )));
+            }
+        }
+        if matches!(order, SortOrder::Desc) {
+            items.reverse();
+        }
+        Ok(())
+    }
+
+    fn build_list(items: Vec<AgentConversation>, total: u32, page: Page) -> AgentConversationList {
+        AgentConversationList { items, total, page }
+    }
+}
+
+impl AgentConversationRepo for AgentConversationRepoLoro {
+    async fn get(&self, id: Uuid) -> Result<AgentConversation, RepoError> {
+        self.inner.get(id).await
+    }
+    async fn list(
+        &self,
+        page: architect::Page,
+        sort: Option<architect::Sort>,
+        filter: Option<architect::Filter>,
+    ) -> Result<AgentConversationList, RepoError> {
+        self.inner.list(page, sort, filter).await
+    }
+    async fn create(&self, input: AgentConversationCreate) -> Result<AgentConversation, RepoError> {
+        self.inner.create(input).await
+    }
+    async fn update(
+        &self,
+        id: Uuid,
+        input: AgentConversationUpdate,
+    ) -> Result<AgentConversation, RepoError> {
         self.inner.update(id, input).await
     }
     async fn delete(&self, id: Uuid) -> Result<(), RepoError> {

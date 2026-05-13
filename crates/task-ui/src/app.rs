@@ -51,6 +51,8 @@ pub enum Route {
         CalendarRoute {},
         #[route("/chat")]
         ChatRoute {},
+        #[route("/chat-ai")]
+        AgentChatRoute {},
         #[route("/conference")]
         ConferenceRoute {},
         #[route("/cookbook")]
@@ -138,6 +140,10 @@ fn CalendarRoute() -> Element {
 #[component]
 fn ChatRoute() -> Element {
     rsx! { crate::feature_routes::chat::MessageView {} }
+}
+#[component]
+fn AgentChatRoute() -> Element {
+    rsx! { crate::feature_routes::agent_chat::AgentChatRoute {} }
 }
 #[component]
 fn ConferenceRoute() -> Element {
@@ -585,6 +591,11 @@ fn feature_nav_tabs() -> Vec<NavTab> {
             route: Route::ChatRoute {},
         },
         NavTab {
+            label: "AI Chat",
+            icon: icon_message_circle,
+            route: Route::AgentChatRoute {},
+        },
+        NavTab {
             label: "Conference",
             icon: icon_video,
             route: Route::ConferenceRoute {},
@@ -731,6 +742,7 @@ fn route_title(route: &Route) -> &'static str {
         Route::AgentRoute {} => "Agent",
         Route::CalendarRoute {} => "Calendar",
         Route::ChatRoute {} => "Chat",
+        Route::AgentChatRoute {} => "AI Chat",
         Route::ConferenceRoute {} => "Conference",
         Route::CookbookRoute {} => "Cookbook",
         Route::EmailRoute {} => "Email",

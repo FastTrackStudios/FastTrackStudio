@@ -9,8 +9,9 @@ pub use agent_proto::*;
 #[cfg(feature = "server")]
 pub mod server {
     pub use agent_crdt::{
-        AgentLogLineEntity, AgentLogLineRepoLoro, AgentRunEntity, AgentRunRepoLoro,
-        GitRepoConnectionEntity, GitRepoConnectionRepoLoro,
+        AgentConversationEntity, AgentConversationRepoLoro, AgentLogLineEntity,
+        AgentLogLineRepoLoro, AgentRunEntity, AgentRunRepoLoro, GitRepoConnectionEntity,
+        GitRepoConnectionRepoLoro,
     };
     pub use agent_db::{AgentMigrator, SeaOrmPersistence};
     pub use crdt::{CrdtDoc, Persistence};

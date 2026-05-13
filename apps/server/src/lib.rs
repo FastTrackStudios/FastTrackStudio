@@ -51,11 +51,16 @@ use tokio::sync::{Mutex, broadcast};
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
-use agent_crdt::{AgentLogLineRepoLoro, AgentRunRepoLoro, GitRepoConnectionRepoLoro};
+use agent_crdt::{
+    AgentConversationRepoLoro, AgentLogLineRepoLoro, AgentRunRepoLoro, GitRepoConnectionRepoLoro,
+};
+use agent_proto::ChatModelRegistry;
 use agent_proto::integration::{EventSink, EventSinkImpl, IntegrationRegistry, ShutdownSignal};
+use chat_crdt::MessageRepoLoro;
 use crdt::CrdtDoc;
 use project_crdt::TaskRepoLoro;
 
+pub mod chat;
 pub mod integration_sink;
 pub mod sealing;
 pub mod webhook_inbox;
@@ -91,6 +96,12 @@ pub struct AppState {
     pub agent_log_repo: Arc<AgentLogLineRepoLoro>,
     pub git_repo_repo: Arc<GitRepoConnectionRepoLoro>,
 
+    // ── AI chat ──────────────────────────────────────────────────────
+    pub message_repo: Arc<MessageRepoLoro>,
+    pub agent_conversation_repo: Arc<AgentConversationRepoLoro>,
+    pub chat_model_registry: Arc<ChatModelRegistry>,
+    pub chat_sessions: Arc<chat::ChatStreamSessions>,
+
     pub workspace_doc: Arc<CrdtDoc>,
     pub shutdown: ShutdownSignal,
 }
@@ -125,6 +136,8 @@ impl AppState {
         let agent_run_repo = Arc::new(AgentRunRepoLoro::new(&crdt_doc));
         let agent_log_repo = Arc::new(AgentLogLineRepoLoro::new(&crdt_doc));
         let git_repo_repo = Arc::new(GitRepoConnectionRepoLoro::new(&crdt_doc));
+        let message_repo = Arc::new(MessageRepoLoro::new(&crdt_doc));
+        let agent_conversation_repo = Arc::new(AgentConversationRepoLoro::new(&crdt_doc));
 
         Ok(Self {
             rooms: Arc::new(Mutex::new(HashMap::new())),
@@ -138,6 +151,10 @@ impl AppState {
             agent_run_repo,
             agent_log_repo,
             git_repo_repo,
+            message_repo,
+            agent_conversation_repo,
+            chat_model_registry: Arc::new(ChatModelRegistry::new()),
+            chat_sessions: Arc::new(chat::ChatStreamSessions::new()),
             workspace_doc: crdt_doc,
             shutdown: ShutdownSignal::new(),
         })
@@ -167,6 +184,8 @@ impl AppState {
         let agent_run_repo = Arc::new(AgentRunRepoLoro::new(&crdt_doc));
         let agent_log_repo = Arc::new(AgentLogLineRepoLoro::new(&crdt_doc));
         let git_repo_repo = Arc::new(GitRepoConnectionRepoLoro::new(&crdt_doc));
+        let message_repo = Arc::new(MessageRepoLoro::new(&crdt_doc));
+        let agent_conversation_repo = Arc::new(AgentConversationRepoLoro::new(&crdt_doc));
         Self {
             rooms: Arc::new(Mutex::new(HashMap::new())),
             persistence,
@@ -179,6 +198,10 @@ impl AppState {
             agent_run_repo,
             agent_log_repo,
             git_repo_repo,
+            message_repo,
+            agent_conversation_repo,
+            chat_model_registry: Arc::new(ChatModelRegistry::new()),
+            chat_sessions: Arc::new(chat::ChatStreamSessions::new()),
             workspace_doc: crdt_doc,
             shutdown: ShutdownSignal::new(),
         }
@@ -227,6 +250,7 @@ pub fn router(state: AppState) -> Router {
         .route("/sync/{doc_id}", get(ws_handler))
         .nest("/webhooks/github", webhooks::github::router())
         .nest("/webhooks/hermes", webhooks::hermes::router())
+        .nest("/api/agent-chat", chat::router())
         .layer(tower_http::cors::CorsLayer::permissive())
         .with_state(state)
 }

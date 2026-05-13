@@ -9,9 +9,9 @@ use chat_proto::{
 use chrono::Utc;
 use crdt::EntityCrdt;
 use crdt::codec::{
-    read_bool, read_dt, read_opt_dt, read_opt_str, read_opt_uuid, read_str, read_string_list,
-    read_uuid, write_bool, write_dt, write_opt_dt, write_opt_str, write_opt_string_list,
-    write_opt_uuid, write_str, write_string_list, write_uuid,
+    read_bool, read_dt, read_opt_dt, read_opt_str, read_opt_u32, read_opt_uuid, read_str,
+    read_string_list, read_uuid, write_bool, write_dt, write_opt_dt, write_opt_str,
+    write_opt_string_list, write_opt_u32, write_opt_uuid, write_str, write_string_list, write_uuid,
 };
 use loro::LoroMap;
 use uuid::Uuid;
@@ -205,6 +205,16 @@ impl EntityCrdt for MessageEntity {
             deleted: input.deleted,
             mentions: input.mentions,
             attachment_ids: input.attachment_ids,
+            role: input.role,
+            model: input.model,
+            reasoning: input.reasoning,
+            tool_calls_json: input.tool_calls_json,
+            finish_reason: input.finish_reason,
+            tokens_input: input.tokens_input,
+            tokens_output: input.tokens_output,
+            cost_cents: input.cost_cents,
+            streaming: input.streaming,
+            agent_conversation_id: input.agent_conversation_id,
             created_at: now,
             updated_at: now,
         }
@@ -212,7 +222,9 @@ impl EntityCrdt for MessageEntity {
 
     fn encode_into(m: &LoroMap, e: &Message) -> Result<(), RepoError> {
         write_uuid(m, "id", e.id)?;
-        write_uuid(m, "channel_id", e.channel_id)?;
+        // `channel_id` is now Option (XOR with `agent_conversation_id`),
+        // so use the opt_uuid codec.
+        write_opt_uuid(m, "channel_id", e.channel_id)?;
         write_str(m, "author", &e.author)?;
         write_str(m, "body", &e.body)?;
         write_opt_uuid(m, "reply_to", e.reply_to)?;
@@ -220,6 +232,18 @@ impl EntityCrdt for MessageEntity {
         write_bool(m, "deleted", e.deleted)?;
         write_string_list(m, "mentions", &e.mentions)?;
         write_string_list(m, "attachment_ids", &e.attachment_ids)?;
+        // AI-chat extension fields. Codec write order matches the
+        // struct field order for easy diffing.
+        write_opt_str(m, "role", e.role.as_deref())?;
+        write_opt_str(m, "model", e.model.as_deref())?;
+        write_opt_str(m, "reasoning", e.reasoning.as_deref())?;
+        write_opt_str(m, "tool_calls_json", e.tool_calls_json.as_deref())?;
+        write_opt_str(m, "finish_reason", e.finish_reason.as_deref())?;
+        write_opt_u32(m, "tokens_input", e.tokens_input)?;
+        write_opt_u32(m, "tokens_output", e.tokens_output)?;
+        write_opt_u32(m, "cost_cents", e.cost_cents)?;
+        write_bool(m, "streaming", e.streaming)?;
+        write_opt_uuid(m, "agent_conversation_id", e.agent_conversation_id)?;
         write_dt(m, "created_at", e.created_at)?;
         write_dt(m, "updated_at", e.updated_at)?;
         Ok(())
@@ -228,7 +252,7 @@ impl EntityCrdt for MessageEntity {
     fn decode_from(m: &LoroMap) -> Result<Message, RepoError> {
         Ok(Message {
             id: read_uuid(m, "id")?,
-            channel_id: read_uuid(m, "channel_id")?,
+            channel_id: read_opt_uuid(m, "channel_id")?,
             author: read_str(m, "author")?,
             body: read_str(m, "body")?,
             reply_to: read_opt_uuid(m, "reply_to")?,
@@ -236,6 +260,18 @@ impl EntityCrdt for MessageEntity {
             deleted: read_bool(m, "deleted")?,
             mentions: read_string_list(m, "mentions")?,
             attachment_ids: read_string_list(m, "attachment_ids")?,
+            // Tolerant of missing keys for forward-compat with seeds
+            // written before Phase A landed.
+            role: read_opt_str(m, "role").unwrap_or(None),
+            model: read_opt_str(m, "model").unwrap_or(None),
+            reasoning: read_opt_str(m, "reasoning").unwrap_or(None),
+            tool_calls_json: read_opt_str(m, "tool_calls_json").unwrap_or(None),
+            finish_reason: read_opt_str(m, "finish_reason").unwrap_or(None),
+            tokens_input: read_opt_u32(m, "tokens_input").unwrap_or(None),
+            tokens_output: read_opt_u32(m, "tokens_output").unwrap_or(None),
+            cost_cents: read_opt_u32(m, "cost_cents").unwrap_or(None),
+            streaming: read_bool(m, "streaming").unwrap_or(false),
+            agent_conversation_id: read_opt_uuid(m, "agent_conversation_id").unwrap_or(None),
             created_at: read_dt(m, "created_at")?,
             updated_at: read_dt(m, "updated_at")?,
         })
@@ -243,7 +279,7 @@ impl EntityCrdt for MessageEntity {
 
     fn apply_update(m: &LoroMap, u: MessageUpdate) -> Result<(), RepoError> {
         if let Some(v) = u.channel_id {
-            write_uuid(m, "channel_id", v)?;
+            write_opt_uuid(m, "channel_id", v)?;
         }
         if let Some(v) = u.author {
             write_str(m, "author", &v)?;
@@ -266,12 +302,43 @@ impl EntityCrdt for MessageEntity {
         if let Some(v) = u.attachment_ids {
             write_opt_string_list(m, "attachment_ids", Some(&v))?;
         }
+        if let Some(v) = u.role {
+            write_opt_str(m, "role", v.as_deref())?;
+        }
+        if let Some(v) = u.model {
+            write_opt_str(m, "model", v.as_deref())?;
+        }
+        if let Some(v) = u.reasoning {
+            write_opt_str(m, "reasoning", v.as_deref())?;
+        }
+        if let Some(v) = u.tool_calls_json {
+            write_opt_str(m, "tool_calls_json", v.as_deref())?;
+        }
+        if let Some(v) = u.finish_reason {
+            write_opt_str(m, "finish_reason", v.as_deref())?;
+        }
+        if let Some(v) = u.tokens_input {
+            write_opt_u32(m, "tokens_input", v)?;
+        }
+        if let Some(v) = u.tokens_output {
+            write_opt_u32(m, "tokens_output", v)?;
+        }
+        if let Some(v) = u.cost_cents {
+            write_opt_u32(m, "cost_cents", v)?;
+        }
+        if let Some(v) = u.streaming {
+            write_bool(m, "streaming", v)?;
+        }
+        if let Some(v) = u.agent_conversation_id {
+            write_opt_uuid(m, "agent_conversation_id", v)?;
+        }
         write_dt(m, "updated_at", Utc::now())?;
         Ok(())
     }
 
     fn sort_items(items: &mut [Message], field: &str, order: SortOrder) -> Result<(), RepoError> {
         match field {
+            // Sort works on Option<Uuid> by std lexical order (None < Some).
             "channel_id" => items.sort_by(|a, b| a.channel_id.cmp(&b.channel_id)),
             "created_at" => items.sort_by(|a, b| a.created_at.cmp(&b.created_at)),
             other => {

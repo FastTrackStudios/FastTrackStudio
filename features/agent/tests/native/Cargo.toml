@@ -21,3 +21,5 @@ architect = { workspace = true, features = ["fake"] }
 fake.workspace = true
 uuid.workspace = true
 tokio = { workspace = true, features = ["macros", "rt"] }
+async-trait.workspace = true
+futures-core = "0.3"

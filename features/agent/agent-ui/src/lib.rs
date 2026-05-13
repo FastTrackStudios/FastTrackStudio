@@ -7,7 +7,9 @@
 //!   dialog, run panel, board, settings, webhook log) for the
 //!   Hermes-agent + git integration arc.
 
+pub mod agent_chat_page;
 pub mod hermes_kit;
+pub use agent_chat_page::{AgentChatPage, AgentChatPageProps};
 pub use hermes_kit::*;
 
 use agent_proto::{AgentRun, AgentRunCreate};

@@ -4,7 +4,8 @@
 
 use std::time::Duration;
 
-use agent_proto::GitRepoConnectionRepo;
+use agent_proto::{AgentConversationRepo, GitRepoConnectionRepo};
+use chat_proto::MessageRepo;
 use crdt::{CrdtDoc, Persistence};
 use crdt_seaorm::SeaOrmPersistence;
 use tracing::info;
@@ -168,6 +169,88 @@ async fn seed_all(cdoc: &CrdtDoc) -> eyre::Result<()> {
 
     let agent_repo = agent_crdt::AgentRunRepoLoro::new(cdoc);
     agent_proto::seed_fake_agent_run(&agent_repo, 25usize).await?;
+
+    // AI chat conversations — Phase A. ~3 mixed-model conversations
+    // with ~15 messages (alternating user/assistant) tied to them.
+    // One assistant message gets explicit reasoning text so the UI
+    // can exercise the extended-thinking render path.
+    let conv_repo = agent_crdt::AgentConversationRepoLoro::new(cdoc);
+    let conv_models = ["mock", "claude-opus-4-7", "gpt-4o-mini"];
+    let conv_titles = [
+        "Refactor the agent feature",
+        "Plan the Phase A migration",
+        "Debug the CRDT codec",
+    ];
+    let mut convs: Vec<agent_proto::AgentConversation> = Vec::new();
+    for (title, model) in conv_titles.iter().zip(conv_models.iter()) {
+        let c = conv_repo
+            .create(agent_proto::AgentConversationCreate {
+                title: (*title).into(),
+                system_prompt: Some("You are a helpful AI pair programmer.".into()),
+                default_model: (*model).into(),
+                temperature_milli: 700,
+                max_tokens: Some(4096),
+                tool_set: vec!["shell".into(), "edit".into(), "grep".into()],
+                agent_run_id: None,
+                project_id: None,
+                parent_conversation_id: None,
+                branch_from_message_id: None,
+                archived: false,
+            })
+            .await?;
+        convs.push(c);
+    }
+
+    let chat_message_repo = chat_crdt::MessageRepoLoro::new(cdoc);
+    // 15 messages alternating user/assistant across the 3 convos.
+    // Reasoning text goes on one specific assistant turn so a UI
+    // snapshot test can pin it.
+    for i in 0..15usize {
+        let conv = &convs[i % convs.len()];
+        let is_user = i % 2 == 0;
+        let role: &str = if is_user { "user" } else { "assistant" };
+        let body = if is_user {
+            "Can you take a look at this?".to_string()
+        } else {
+            "Sure — here's a quick rundown of the trade-offs.".to_string()
+        };
+        let reasoning = if !is_user && i == 3 {
+            Some(
+                "The user is asking about CRDT convergence. Focus on the merge semantics first."
+                    .into(),
+            )
+        } else {
+            None
+        };
+        chat_message_repo
+            .create(chat_proto::MessageCreate {
+                channel_id: None,
+                author: if is_user {
+                    "cody".into()
+                } else {
+                    "assistant".into()
+                },
+                body,
+                reply_to: None,
+                edited_at: None,
+                deleted: false,
+                mentions: Vec::new(),
+                attachment_ids: Vec::new(),
+                role: Some(role.into()),
+                model: Some(conv.default_model.clone()),
+                reasoning,
+                tool_calls_json: None,
+                finish_reason: if is_user { None } else { Some("stop".into()) },
+                tokens_input: if is_user { None } else { Some(420) },
+                tokens_output: if is_user { None } else { Some(180) },
+                cost_cents: if is_user { None } else { Some(3) },
+                streaming: false,
+                agent_conversation_id: Some(conv.id),
+            })
+            .await?;
+    }
+    info!("  agent: 3 conversations, 15 AI messages");
+
     let agent_log_repo = agent_crdt::AgentLogLineRepoLoro::new(cdoc);
     // 6 log lines, tied loosely (run_id is faker-random) to existing
     // AgentRun rows. The UI joins by `run_id` so seeded lines won't

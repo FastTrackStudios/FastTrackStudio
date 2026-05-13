@@ -100,8 +100,10 @@ name = "agent-hermes"
 version = "0.1.0"
 dependencies = [
  "agent-proto",
+ "async-stream",
  "async-trait",
  "chrono",
+ "futures-core",
  "futures-util",
  "reqwest",
  "serde",
@@ -123,7 +125,9 @@ dependencies = [
  "chrono",
  "facet 0.46.0",
  "fake",
+ "futures-core",
  "sea-orm",
+ "serde",
  "thiserror 2.0.18",
  "uuid",
  "vox 0.3.1 (git+https://github.com/Codys-Wright/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
@@ -134,6 +138,8 @@ name = "agent-ui"
 version = "0.1.0"
 dependencies = [
  "agent-proto",
+ "chat-proto",
+ "chat-ui",
  "chrono",
  "dioxus",
  "fts-ui",
@@ -1400,11 +1406,16 @@ dependencies = [
 name = "chat-ui"
 version = "0.1.0"
 dependencies = [
+ "agent-proto",
  "chat-proto",
  "chrono",
  "dioxus",
  "fts-ui",
+ "pulldown-cmark",
+ "serde_json",
+ "tracing",
  "uuid",
+ "web-sys",
 ]
 
 [[package]]
@@ -8491,6 +8502,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "pulldown-cmark"
+version = "0.10.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "76979bea66e7875e7509c4ec5300112b316af87fa7a252ca91c448b32dfe3993"
+dependencies = [
+ "bitflags 2.11.1",
+ "memchr",
+ "unicase",
+]
+
+[[package]]
 name = "pxfm"
 version = "0.1.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10625,11 +10647,14 @@ dependencies = [
  "async-trait",
  "axum",
  "base64",
+ "chat-crdt",
+ "chat-proto",
  "chrono",
  "crdt",
  "crdt-seaorm",
  "eyre",
  "futures",
+ "futures-util",
  "hex",
  "hmac",
  "loro",
@@ -10648,6 +10673,7 @@ dependencies = [
  "timer-crdt",
  "timer-proto",
  "tokio",
+ "tokio-stream",
  "tokio-tungstenite 0.27.0",
  "tower-http",
  "tracing",
@@ -11041,6 +11067,7 @@ dependencies = [
  "futures-core",
  "pin-project-lite",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]

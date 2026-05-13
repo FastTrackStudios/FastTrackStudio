@@ -53,7 +53,7 @@ async fn message_round_trip() {
 
     let m = messages
         .create(MessageCreate {
-            channel_id: ch.id,
+            channel_id: Some(ch.id),
             author: "cody".into(),
             body: "hello world".into(),
             reply_to: None,
@@ -61,6 +61,16 @@ async fn message_round_trip() {
             deleted: false,
             mentions: vec!["alice".into()],
             attachment_ids: vec!["att-1".into()],
+            role: None,
+            model: None,
+            reasoning: None,
+            tool_calls_json: None,
+            finish_reason: None,
+            tokens_input: None,
+            tokens_output: None,
+            cost_cents: None,
+            streaming: false,
+            agent_conversation_id: None,
         })
         .await
         .unwrap();
@@ -68,7 +78,7 @@ async fn message_round_trip() {
     let got = messages.get(m.id).await.unwrap();
     assert_eq!(got.body, "hello world");
     assert_eq!(got.author, "cody");
-    assert_eq!(got.channel_id, ch.id);
+    assert_eq!(got.channel_id, Some(ch.id));
     assert_eq!(got.mentions, vec!["alice".to_string()]);
     assert_eq!(got.attachment_ids, vec!["att-1".to_string()]);
     assert!(!got.deleted);
@@ -132,7 +142,7 @@ async fn all_three_coexist_in_one_doc() {
 
     messages
         .create(MessageCreate {
-            channel_id: ch.id,
+            channel_id: Some(ch.id),
             author: "a".into(),
             body: "m1".into(),
             reply_to: None,
@@ -140,6 +150,16 @@ async fn all_three_coexist_in_one_doc() {
             deleted: false,
             mentions: vec![],
             attachment_ids: vec![],
+            role: None,
+            model: None,
+            reasoning: None,
+            tool_calls_json: None,
+            finish_reason: None,
+            tokens_input: None,
+            tokens_output: None,
+            cost_cents: None,
+            streaming: false,
+            agent_conversation_id: None,
         })
         .await
         .unwrap();
@@ -200,7 +220,7 @@ async fn replicas_converge_across_all_entities() {
         .unwrap();
 
     ma.create(MessageCreate {
-        channel_id: cha.id,
+        channel_id: Some(cha.id),
         author: "alice".into(),
         body: "from-a".into(),
         reply_to: None,
@@ -208,11 +228,21 @@ async fn replicas_converge_across_all_entities() {
         deleted: false,
         mentions: vec![],
         attachment_ids: vec![],
+        role: None,
+        model: None,
+        reasoning: None,
+        tool_calls_json: None,
+        finish_reason: None,
+        tokens_input: None,
+        tokens_output: None,
+        cost_cents: None,
+        streaming: false,
+        agent_conversation_id: None,
     })
     .await
     .unwrap();
     mb.create(MessageCreate {
-        channel_id: chb.id,
+        channel_id: Some(chb.id),
         author: "bob".into(),
         body: "from-b".into(),
         reply_to: None,
@@ -220,6 +250,16 @@ async fn replicas_converge_across_all_entities() {
         deleted: false,
         mentions: vec![],
         attachment_ids: vec![],
+        role: None,
+        model: None,
+        reasoning: None,
+        tool_calls_json: None,
+        finish_reason: None,
+        tokens_input: None,
+        tokens_output: None,
+        cost_cents: None,
+        streaming: false,
+        agent_conversation_id: None,
     })
     .await
     .unwrap();
@@ -260,4 +300,83 @@ async fn replicas_converge_across_all_entities() {
     assert_eq!(mb.list(page(), None, None).await.unwrap().total, 2);
     assert_eq!(mema.list(page(), None, None).await.unwrap().total, 2);
     assert_eq!(memb.list(page(), None, None).await.unwrap().total, 2);
+}
+
+// ── Phase A: AI-extended Message fields round trip ───────────────────
+
+#[tokio::test]
+async fn ai_message_fields_round_trip() {
+    let doc = CrdtDoc::ephemeral();
+    let messages = MessageRepoLoro::new(&doc);
+
+    let conv_id = uuid::Uuid::new_v4();
+
+    // All AI fields set.
+    let full = messages
+        .create(MessageCreate {
+            channel_id: None,
+            author: "assistant".into(),
+            body: "Here's the plan.".into(),
+            reply_to: None,
+            edited_at: None,
+            deleted: false,
+            mentions: vec![],
+            attachment_ids: vec![],
+            role: Some("assistant".into()),
+            model: Some("claude-opus-4-7".into()),
+            reasoning: Some("Thinking step by step...".into()),
+            tool_calls_json: Some("[{\"name\":\"shell\"}]".into()),
+            finish_reason: Some("stop".into()),
+            tokens_input: Some(420),
+            tokens_output: Some(180),
+            cost_cents: Some(3),
+            streaming: false,
+            agent_conversation_id: Some(conv_id),
+        })
+        .await
+        .unwrap();
+
+    let got = messages.get(full.id).await.unwrap();
+    assert_eq!(got.channel_id, None);
+    assert_eq!(got.agent_conversation_id, Some(conv_id));
+    assert_eq!(got.role.as_deref(), Some("assistant"));
+    assert_eq!(got.model.as_deref(), Some("claude-opus-4-7"));
+    assert!(got.reasoning.is_some());
+    assert_eq!(got.tool_calls_json.as_deref(), Some("[{\"name\":\"shell\"}]"));
+    assert_eq!(got.finish_reason.as_deref(), Some("stop"));
+    assert_eq!(got.tokens_input, Some(420));
+    assert_eq!(got.tokens_output, Some(180));
+    assert_eq!(got.cost_cents, Some(3));
+    assert!(!got.streaming);
+
+    // All AI fields None (human chat shape, channel_id Some).
+    let ch_id = uuid::Uuid::new_v4();
+    let bare = messages
+        .create(MessageCreate {
+            channel_id: Some(ch_id),
+            author: "cody".into(),
+            body: "hi".into(),
+            reply_to: None,
+            edited_at: None,
+            deleted: false,
+            mentions: vec![],
+            attachment_ids: vec![],
+            role: None,
+            model: None,
+            reasoning: None,
+            tool_calls_json: None,
+            finish_reason: None,
+            tokens_input: None,
+            tokens_output: None,
+            cost_cents: None,
+            streaming: false,
+            agent_conversation_id: None,
+        })
+        .await
+        .unwrap();
+    let got2 = messages.get(bare.id).await.unwrap();
+    assert_eq!(got2.channel_id, Some(ch_id));
+    assert_eq!(got2.agent_conversation_id, None);
+    assert!(got2.role.is_none());
+    assert!(got2.tokens_input.is_none());
 }

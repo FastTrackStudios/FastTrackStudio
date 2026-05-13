@@ -12,8 +12,10 @@ license.workspace = true
 
 [dependencies]
 agent-proto = { workspace = true }
+async-stream = "0.3"
 async-trait = { workspace = true }
 chrono = { workspace = true }
+futures-core = "0.3"
 futures-util = { workspace = true }
 reqwest = { workspace = true, features = ["json"] }
 serde = { workspace = true, features = ["derive"] }

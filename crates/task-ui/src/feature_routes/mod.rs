@@ -3,6 +3,7 @@
 //! drives the dumb components from the matching `<name>-ui` crate.
 
 pub mod agent;
+pub mod agent_chat;
 pub mod calendar;
 pub mod chat;
 pub mod conference;

@@ -3,7 +3,8 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use agent_hermes::MockIntegration;
+use agent_hermes::{MockChatModel, MockIntegration};
+use agent_proto::ChatModelRegistry;
 use agent_proto::integration::IntegrationRegistry;
 use eyre::WrapErr;
 use task_db::{WORKSPACE_DOC_ID, default_database_url, open_and_migrate, seed};
@@ -66,6 +67,12 @@ async fn main() -> eyre::Result<()> {
         }
     }
     state.registry = Arc::new(registry);
+
+    // ChatModelRegistry — at least the MockChatModel so the agent-chat
+    // route works out of the box. Real providers register here too.
+    let mut chat_registry = ChatModelRegistry::new();
+    chat_registry.register(Arc::new(MockChatModel));
+    state.chat_model_registry = Arc::new(chat_registry);
 
     // Spawn the per-plugin event loops. They keep running until
     // `state.shutdown` flips.

@@ -4,7 +4,12 @@ use architect::Entity;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
+pub mod chat_model;
 pub mod integration;
+
+pub use chat_model::{
+    ChatModel, ChatModelRegistry, ChatStreamChunk, ChatStreamRequest, ChatTurn, ToolSchema,
+};
 
 /// Canonical log levels emitted on `AgentLogLine`. Plugins SHOULD
 /// pick from this set; unknown values are stored verbatim and may
@@ -221,6 +226,186 @@ pub struct GitRepoConnection {
     pub updated_at: DateTime<Utc>,
 }
 
+// ── AgentConversation ─────────────────────────────────────────────────
+//
+// Phase A: schema-only. The conversation hangs `Message` rows off
+// itself via `Message.agent_conversation_id` (XOR with `channel_id`,
+// enforced at the service layer). Branching is supported via
+// `parent_conversation_id` + `branch_from_message_id` — when a user
+// rewinds and resubmits, we fork a child conversation and replay up
+// to the branch point.
+
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(Entity, ::facet::Facet, Clone, Debug, PartialEq)]
+#[architect(table_name = "agent_conversations", repo)]
+pub struct AgentConversation {
+    #[architect(primary_key, auto_increment = false, on_create = Uuid::new_v4())]
+    pub id: Uuid,
+
+    #[architect(filterable, sortable, fulltext)]
+    #[cfg_attr(
+        feature = "fake",
+        dummy(faker = "crate::fakers::AgentConversationTitle")
+    )]
+    pub title: String,
+
+    #[cfg_attr(
+        feature = "fake",
+        dummy(faker = "fake::faker::lorem::en::Sentence(5..15)")
+    )]
+    pub system_prompt: Option<String>,
+
+    /// Model id from `default_model_catalog()`. Filterable so the
+    /// UI can scope by model.
+    #[architect(filterable)]
+    #[cfg_attr(feature = "fake", dummy(faker = "crate::fakers::ConversationModel"))]
+    pub default_model: String,
+
+    /// 700 = 0.7. See `ChatStreamRequest::temperature_milli`.
+    #[cfg_attr(feature = "fake", dummy(faker = "0i32..1500"))]
+    pub temperature_milli: i32,
+
+    #[cfg_attr(feature = "fake", dummy(faker = "crate::fakers::MaybeMaxTokens"))]
+    pub max_tokens: Option<i32>,
+
+    /// Names of tools available to this conversation. Resolved
+    /// against the server-side tool registry when dispatching.
+    #[cfg_attr(feature = "fake", dummy(faker = "crate::fakers::AgentToolSet"))]
+    pub tool_set: Vec<String>,
+
+    /// Optional pointer to the `AgentRun` that's currently driving
+    /// this conversation. `None` for chat-only sessions that never
+    /// dispatched to an external integration.
+    #[architect(filterable)]
+    pub agent_run_id: Option<Uuid>,
+
+    #[architect(filterable)]
+    pub project_id: Option<Uuid>,
+
+    /// For branching. `None` for the root; `Some` when this is a
+    /// child fork. The fork point is `branch_from_message_id`.
+    #[architect(filterable)]
+    pub parent_conversation_id: Option<Uuid>,
+
+    pub branch_from_message_id: Option<Uuid>,
+
+    #[architect(filterable)]
+    pub archived: bool,
+
+    #[architect(exclude(create, update), on_create = Utc::now())]
+    pub created_at: DateTime<Utc>,
+
+    #[architect(exclude(create, update), on_create = Utc::now(), on_update = Utc::now())]
+    pub updated_at: DateTime<Utc>,
+}
+
+// ── ModelInfo + catalog ───────────────────────────────────────────────
+//
+// Embedded value type (NOT an Entity) — describes a single LLM the
+// server can route to. Returned by `ChatModel::models()` and exposed
+// to the UI via the registry.
+
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(::facet::Facet, Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ModelInfo {
+    /// Stable identifier (e.g. "claude-opus-4-7", "gemma3:4b").
+    pub id: String,
+    /// Provider key (e.g. "anthropic", "ollama", "mock"). Matches a
+    /// `ChatModel::provider()`.
+    pub provider: String,
+    /// Human-readable label.
+    pub display: String,
+    /// `true` if the model supports extended thinking / reasoning
+    /// blocks. Drives whether `stream_reasoning` is honoured.
+    pub reasoning: bool,
+    /// Context window in tokens.
+    pub context_tokens: u32,
+    /// Cost per million input tokens, in millicents
+    /// (i.e. 15_000 = $15.00 / Mtok). `0` for free/local models.
+    pub input_cost_milli: u32,
+    pub output_cost_milli: u32,
+}
+
+/// Hand-authored v1 model catalog. Numbers are plausible-but-static —
+/// real per-provider pricing lives in the plugin crates and supersedes
+/// this list once the registry boots.
+pub fn default_model_catalog() -> Vec<ModelInfo> {
+    vec![
+        ModelInfo {
+            id: "mock".into(),
+            provider: "mock".into(),
+            display: "Mock (deterministic)".into(),
+            reasoning: false,
+            context_tokens: 32_000,
+            input_cost_milli: 0,
+            output_cost_milli: 0,
+        },
+        ModelInfo {
+            id: "gemma3:4b".into(),
+            provider: "ollama".into(),
+            display: "Gemma 3 (4B, local)".into(),
+            reasoning: false,
+            context_tokens: 128_000,
+            input_cost_milli: 0,
+            output_cost_milli: 0,
+        },
+        ModelInfo {
+            id: "qwen2.5-coder:32b".into(),
+            provider: "ollama".into(),
+            display: "Qwen2.5 Coder (32B, local)".into(),
+            reasoning: false,
+            context_tokens: 128_000,
+            input_cost_milli: 0,
+            output_cost_milli: 0,
+        },
+        ModelInfo {
+            id: "claude-opus-4-7".into(),
+            provider: "anthropic".into(),
+            display: "Claude Opus 4.7".into(),
+            reasoning: true,
+            context_tokens: 200_000,
+            input_cost_milli: 15_000,
+            output_cost_milli: 75_000,
+        },
+        ModelInfo {
+            id: "claude-sonnet-4-6".into(),
+            provider: "anthropic".into(),
+            display: "Claude Sonnet 4.6".into(),
+            reasoning: true,
+            context_tokens: 200_000,
+            input_cost_milli: 3_000,
+            output_cost_milli: 15_000,
+        },
+        ModelInfo {
+            id: "claude-haiku-4-5".into(),
+            provider: "anthropic".into(),
+            display: "Claude Haiku 4.5".into(),
+            reasoning: false,
+            context_tokens: 200_000,
+            input_cost_milli: 800,
+            output_cost_milli: 4_000,
+        },
+        ModelInfo {
+            id: "gpt-4o".into(),
+            provider: "openai".into(),
+            display: "GPT-4o".into(),
+            reasoning: false,
+            context_tokens: 128_000,
+            input_cost_milli: 2_500,
+            output_cost_milli: 10_000,
+        },
+        ModelInfo {
+            id: "gpt-4o-mini".into(),
+            provider: "openai".into(),
+            display: "GPT-4o mini".into(),
+            reasoning: false,
+            context_tokens: 128_000,
+            input_cost_milli: 150,
+            output_cost_milli: 600,
+        },
+    ]
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, ::facet::Facet, thiserror::Error)]
 #[repr(u8)]
 pub enum AgentServiceError {
@@ -407,6 +592,71 @@ pub mod fakers {
                 })
                 .collect();
             format!("{kind}-{suffix}")
+        }
+    }
+
+    pub struct AgentConversationTitle;
+    impl Dummy<AgentConversationTitle> for String {
+        fn dummy_with_rng<R: Rng + ?Sized>(_: &AgentConversationTitle, rng: &mut R) -> Self {
+            pick(
+                rng,
+                &[
+                    "Refactor the agent feature",
+                    "Plan the Phase A migration",
+                    "Help me write release notes",
+                    "Debug the CRDT codec",
+                    "Architect dry-run",
+                    "Brainstorm a new feature",
+                    "Code review of the chat PR",
+                    "Triage today's bugs",
+                ],
+            )
+        }
+    }
+
+    pub struct ConversationModel;
+    impl Dummy<ConversationModel> for String {
+        fn dummy_with_rng<R: Rng + ?Sized>(_: &ConversationModel, rng: &mut R) -> Self {
+            pick(
+                rng,
+                &[
+                    "mock",
+                    "claude-opus-4-7",
+                    "claude-sonnet-4-6",
+                    "gpt-4o-mini",
+                    "gemma3:4b",
+                ],
+            )
+        }
+    }
+
+    pub struct MaybeMaxTokens;
+    impl Dummy<MaybeMaxTokens> for Option<i32> {
+        fn dummy_with_rng<R: Rng + ?Sized>(_: &MaybeMaxTokens, rng: &mut R) -> Self {
+            if rng.random_bool(0.5) {
+                Some(rng.random_range(512..16_384i32))
+            } else {
+                None
+            }
+        }
+    }
+
+    pub struct AgentToolSet;
+    impl Dummy<AgentToolSet> for Vec<String> {
+        fn dummy_with_rng<R: Rng + ?Sized>(_: &AgentToolSet, rng: &mut R) -> Self {
+            const POOL: &[&str] = &[
+                "shell",
+                "edit",
+                "grep",
+                "read",
+                "write",
+                "web_fetch",
+                "task_search",
+            ];
+            let n = rng.random_range(0..=3usize);
+            POOL.choose_multiple(rng, n)
+                .map(|s| s.to_string())
+                .collect()
         }
     }
 

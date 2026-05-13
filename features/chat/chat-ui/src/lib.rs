@@ -7,6 +7,9 @@
 //! - [`MessageRow`]        — single-row presentation (composable)
 //! - [`MessageCreateForm`] — minimal new-message form, emits the create payload
 
+pub mod ai;
+pub use ai::*;
+
 use chat_proto::{Message, MessageCreate};
 use dioxus::prelude::*;
 use fts_ui::lucide_dioxus::{
@@ -218,7 +221,7 @@ pub fn MessageCreateForm(on_submit: EventHandler<MessageCreate>) -> Element {
                                 return;
                             }
                             let payload = MessageCreate {
-                                channel_id: Uuid::new_v4(),
+                                channel_id: Some(Uuid::new_v4()),
                                 author: a,
                                 body: b,
                                 reply_to: None,
@@ -226,6 +229,16 @@ pub fn MessageCreateForm(on_submit: EventHandler<MessageCreate>) -> Element {
                                 deleted: false,
                                 mentions: Vec::new(),
                                 attachment_ids: Vec::new(),
+                                role: None,
+                                model: None,
+                                reasoning: None,
+                                tool_calls_json: None,
+                                finish_reason: None,
+                                tokens_input: None,
+                                tokens_output: None,
+                                cost_cents: None,
+                                streaming: false,
+                                agent_conversation_id: None,
                             };
                             on_submit.call(payload);
                             author.set(String::new());

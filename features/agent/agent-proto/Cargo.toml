@@ -15,6 +15,11 @@ chrono.workspace = true
 uuid = { workspace = true, features = ["js"] }
 facet.workspace = true
 thiserror.workspace = true
+# `futures-core` is wasm-friendly (no executor) — pulled in for
+# `BoxStream` on `ChatModel::complete_stream` without dragging the
+# full `futures` crate (which includes `futures-executor`) into wasm.
+futures-core = "0.3"
+serde = { workspace = true, features = ["derive"] }
 
 vox = { workspace = true, optional = true }
 sea-orm = { workspace = true, optional = true }
