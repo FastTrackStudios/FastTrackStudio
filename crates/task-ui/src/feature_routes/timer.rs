@@ -4,12 +4,12 @@
 use std::rc::Rc;
 
 use architect::Page;
-use timer_crdt::{CrdtDoc, TimeEntryRepoLoro};
-use timer_proto::{TimeEntry, TimeEntryCreate, TimeEntryRepo};
-use timer_ui::{TimeEntryCreateForm, TimeEntryList};
 use dioxus::prelude::*;
 use futures_channel::mpsc;
 use futures_util::StreamExt;
+use timer_crdt::{CrdtDoc, TimeEntryRepoLoro};
+use timer_proto::{TimeEntry, TimeEntryCreate, TimeEntryRepo};
+use timer_ui::{TimeEntryCreateForm, TimeEntryList};
 use uuid::Uuid;
 use wasm_bindgen_futures::spawn_local;
 
@@ -21,8 +21,7 @@ pub fn TimeEntryView() -> Element {
         let doc = CrdtDoc::ephemeral();
         Rc::new(TimeEntryRepoLoro::new(&doc))
     });
-    let doc: Rc<CrdtDoc> =
-        use_hook(|| Rc::new(CrdtDoc::from_loro(repo.doc().clone())));
+    let doc: Rc<CrdtDoc> = use_hook(|| Rc::new(CrdtDoc::from_loro(repo.doc().clone())));
 
     let mut items = use_signal::<Vec<TimeEntry>>(Vec::new);
     let mut status_msg = use_signal(|| "starting…".to_string());
@@ -33,7 +32,14 @@ pub fn TimeEntryView() -> Element {
         spawn_local(async move {
             while rx.next().await.is_some() {
                 if let Ok(list) = repo_for_loop
-                    .list(Page { index: 0, size: 200 }, None, None)
+                    .list(
+                        Page {
+                            index: 0,
+                            size: 200,
+                        },
+                        None,
+                        None,
+                    )
                     .await
                 {
                     items.set(list.items);
@@ -99,10 +105,15 @@ pub fn TimeEntryView() -> Element {
             let tx = tx.clone();
             spawn_local(async move {
                 use timer_proto::TimeEntryUpdate;
-                let _ = repo.update(id, TimeEntryUpdate {
-                    end_time: Some(Some(chrono::Utc::now())),
-                    ..Default::default()
-                }).await;
+                let _ = repo
+                    .update(
+                        id,
+                        TimeEntryUpdate {
+                            end_time: Some(Some(chrono::Utc::now())),
+                            ..Default::default()
+                        },
+                    )
+                    .await;
                 let _ = tx.unbounded_send(());
             });
         }

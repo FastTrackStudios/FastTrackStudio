@@ -4,12 +4,12 @@
 use std::rc::Rc;
 
 use architect::Page;
-use person_crdt::{PersonRepoLoro, CrdtDoc};
-use person_proto::{Person, PersonCreate, PersonRepo};
-use person_ui::{PersonCreateForm, PersonList};
 use dioxus::prelude::*;
 use futures_channel::mpsc;
 use futures_util::StreamExt;
+use person_crdt::{CrdtDoc, PersonRepoLoro};
+use person_proto::{Person, PersonCreate, PersonRepo};
+use person_ui::{PersonCreateForm, PersonList};
 use uuid::Uuid;
 use wasm_bindgen_futures::spawn_local;
 
@@ -21,8 +21,7 @@ pub fn PersonView() -> Element {
         let doc = CrdtDoc::ephemeral();
         Rc::new(PersonRepoLoro::new(&doc))
     });
-    let doc: Rc<CrdtDoc> =
-        use_hook(|| Rc::new(CrdtDoc::from_loro(repo.doc().clone())));
+    let doc: Rc<CrdtDoc> = use_hook(|| Rc::new(CrdtDoc::from_loro(repo.doc().clone())));
 
     let mut items = use_signal::<Vec<Person>>(Vec::new);
     let mut status_msg = use_signal(|| "starting…".to_string());
@@ -33,7 +32,14 @@ pub fn PersonView() -> Element {
         spawn_local(async move {
             while rx.next().await.is_some() {
                 if let Ok(list) = repo_for_loop
-                    .list(Page { index: 0, size: 200 }, None, None)
+                    .list(
+                        Page {
+                            index: 0,
+                            size: 200,
+                        },
+                        None,
+                        None,
+                    )
                     .await
                 {
                     items.set(list.items);

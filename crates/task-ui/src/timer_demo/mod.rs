@@ -18,7 +18,7 @@ use futures_channel::mpsc;
 use futures_util::StreamExt;
 use timer_crdt::TimeEntryRepoLoro;
 use timer_proto::{TimeEntry, TimeEntryCreate, TimeEntryRepo, TimeEntryUpdate};
-use uuid::{uuid, Uuid};
+use uuid::{Uuid, uuid};
 use wasm_bindgen_futures::spawn_local;
 
 /// Hardcoded "workspace" UUID so every browser pointed at the demo
@@ -76,7 +76,10 @@ pub fn TimerDemo() -> Element {
             while rx.next().await.is_some() {
                 if let Ok(list) = repo_clone
                     .list(
-                        architect::Page { index: 0, size: 200 },
+                        architect::Page {
+                            index: 0,
+                            size: 200,
+                        },
                         Some(architect::Sort {
                             field: "start_time".into(),
                             order: architect::SortOrder::Desc,
@@ -275,11 +278,7 @@ fn peer_label() -> Option<String> {
     let nav = win.navigator();
     let ua = nav.user_agent().ok()?;
     // Just take the first browser-ish token.
-    let short = ua
-        .split_whitespace()
-        .next()
-        .unwrap_or("anon")
-        .to_string();
+    let short = ua.split_whitespace().next().unwrap_or("anon").to_string();
     Some(short)
 }
 

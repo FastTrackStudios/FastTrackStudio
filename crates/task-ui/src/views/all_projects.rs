@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 
-use crate::data::{active_projects, Project, Task, TaskStatus};
+use crate::data::{Project, Task, TaskStatus, active_projects};
 
 #[component]
 pub fn AllProjects() -> Element {

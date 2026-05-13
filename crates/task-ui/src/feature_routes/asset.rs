@@ -24,8 +24,7 @@ pub fn AssetView() -> Element {
         Rc::new(AssetRepoLoro::new(&doc))
     });
     crate::ui_log!("AssetView: repo hook done");
-    let doc: Rc<CrdtDoc> =
-        use_hook(|| Rc::new(CrdtDoc::from_loro(repo.doc().clone())));
+    let doc: Rc<CrdtDoc> = use_hook(|| Rc::new(CrdtDoc::from_loro(repo.doc().clone())));
     crate::ui_log!("AssetView: doc hook done");
 
     let mut items = use_signal::<Vec<Asset>>(Vec::new);
@@ -38,7 +37,14 @@ pub fn AssetView() -> Element {
         spawn_local(async move {
             while rx.next().await.is_some() {
                 if let Ok(list) = repo_for_loop
-                    .list(Page { index: 0, size: 200 }, None, None)
+                    .list(
+                        Page {
+                            index: 0,
+                            size: 200,
+                        },
+                        None,
+                        None,
+                    )
                     .await
                 {
                     items.set(list.items);

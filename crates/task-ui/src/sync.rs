@@ -133,10 +133,7 @@ pub fn connect(
         let mut bytes = vec![0u8; array.length() as usize];
         array.copy_to(&mut bytes);
         if let Err(e) = doc_for_msg.apply_remote(&bytes) {
-            web_sys::console::error_2(
-                &"sync: apply_remote failed".into(),
-                &format!("{e}").into(),
-            );
+            web_sys::console::error_2(&"sync: apply_remote failed".into(), &format!("{e}").into());
             return;
         }
         // Importing a remote update doesn't trigger

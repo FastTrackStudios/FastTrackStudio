@@ -1,9 +1,9 @@
 [package]
 name = "email-ui"
-version = "0.1.0"
-edition = "2021"
-authors = ["Cody Wright"]
-license = "MIT OR Apache-2.0"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
 
 # Dumb Dioxus components for the `email` feature.
 #
@@ -17,7 +17,7 @@ license = "MIT OR Apache-2.0"
 # unified with the native server build.
 
 [dependencies]
-dioxus = { version = "0.7.9", default-features = false, features = ["lib"] }
-email-proto = { path = "../email-proto", default-features = false }
-chrono = { version = "0.4", default-features = false, features = ["clock", "std", "wasmbind"] }
-uuid = { version = "1", features = ["v4", "js"] }
+dioxus = { workspace = true }
+email-proto.workspace = true
+chrono = { workspace = true, features = ["clock", "std", "wasmbind"] }
+uuid = { workspace = true, features = ["v4", "js"] }

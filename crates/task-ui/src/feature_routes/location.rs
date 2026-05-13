@@ -4,12 +4,12 @@
 use std::rc::Rc;
 
 use architect::Page;
-use location_crdt::{LocationRepoLoro, CrdtDoc};
-use location_proto::{Location, LocationCreate, LocationRepo};
-use location_ui::{LocationCreateForm, LocationList};
 use dioxus::prelude::*;
 use futures_channel::mpsc;
 use futures_util::StreamExt;
+use location_crdt::{CrdtDoc, LocationRepoLoro};
+use location_proto::{Location, LocationCreate, LocationRepo};
+use location_ui::{LocationCreateForm, LocationList};
 use uuid::Uuid;
 use wasm_bindgen_futures::spawn_local;
 
@@ -21,8 +21,7 @@ pub fn LocationView() -> Element {
         let doc = CrdtDoc::ephemeral();
         Rc::new(LocationRepoLoro::new(&doc))
     });
-    let doc: Rc<CrdtDoc> =
-        use_hook(|| Rc::new(CrdtDoc::from_loro(repo.doc().clone())));
+    let doc: Rc<CrdtDoc> = use_hook(|| Rc::new(CrdtDoc::from_loro(repo.doc().clone())));
 
     let mut items = use_signal::<Vec<Location>>(Vec::new);
     let mut status_msg = use_signal(|| "starting…".to_string());
@@ -33,7 +32,14 @@ pub fn LocationView() -> Element {
         spawn_local(async move {
             while rx.next().await.is_some() {
                 if let Ok(list) = repo_for_loop
-                    .list(Page { index: 0, size: 200 }, None, None)
+                    .list(
+                        Page {
+                            index: 0,
+                            size: 200,
+                        },
+                        None,
+                        None,
+                    )
                     .await
                 {
                     items.set(list.items);

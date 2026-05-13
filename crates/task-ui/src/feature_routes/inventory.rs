@@ -4,12 +4,12 @@
 use std::rc::Rc;
 
 use architect::Page;
-use inventory_crdt::{CrdtDoc, PantryItemRepoLoro};
-use inventory_proto::{PantryItem, PantryItemCreate, PantryItemRepo};
-use inventory_ui::{PantryItemCreateForm, PantryItemList};
 use dioxus::prelude::*;
 use futures_channel::mpsc;
 use futures_util::StreamExt;
+use inventory_crdt::{CrdtDoc, PantryItemRepoLoro};
+use inventory_proto::{PantryItem, PantryItemCreate, PantryItemRepo};
+use inventory_ui::{PantryItemCreateForm, PantryItemList};
 use uuid::Uuid;
 use wasm_bindgen_futures::spawn_local;
 
@@ -21,8 +21,7 @@ pub fn PantryItemView() -> Element {
         let doc = CrdtDoc::ephemeral();
         Rc::new(PantryItemRepoLoro::new(&doc))
     });
-    let doc: Rc<CrdtDoc> =
-        use_hook(|| Rc::new(CrdtDoc::from_loro(repo.doc().clone())));
+    let doc: Rc<CrdtDoc> = use_hook(|| Rc::new(CrdtDoc::from_loro(repo.doc().clone())));
 
     let mut items = use_signal::<Vec<PantryItem>>(Vec::new);
     let mut status_msg = use_signal(|| "starting…".to_string());
@@ -33,7 +32,14 @@ pub fn PantryItemView() -> Element {
         spawn_local(async move {
             while rx.next().await.is_some() {
                 if let Ok(list) = repo_for_loop
-                    .list(Page { index: 0, size: 200 }, None, None)
+                    .list(
+                        Page {
+                            index: 0,
+                            size: 200,
+                        },
+                        None,
+                        None,
+                    )
                     .await
                 {
                     items.set(list.items);

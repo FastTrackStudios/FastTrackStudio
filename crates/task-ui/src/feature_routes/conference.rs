@@ -4,7 +4,7 @@
 use std::rc::Rc;
 
 use architect::Page;
-use conference_crdt::{MeetingRepoLoro, CrdtDoc};
+use conference_crdt::{CrdtDoc, MeetingRepoLoro};
 use conference_proto::{Meeting, MeetingCreate, MeetingRepo};
 use conference_ui::{MeetingCreateForm, MeetingList};
 use dioxus::prelude::*;
@@ -21,8 +21,7 @@ pub fn MeetingView() -> Element {
         let doc = CrdtDoc::ephemeral();
         Rc::new(MeetingRepoLoro::new(&doc))
     });
-    let doc: Rc<CrdtDoc> =
-        use_hook(|| Rc::new(CrdtDoc::from_loro(repo.doc().clone())));
+    let doc: Rc<CrdtDoc> = use_hook(|| Rc::new(CrdtDoc::from_loro(repo.doc().clone())));
 
     let mut items = use_signal::<Vec<Meeting>>(Vec::new);
     let mut status_msg = use_signal(|| "starting…".to_string());
@@ -33,7 +32,14 @@ pub fn MeetingView() -> Element {
         spawn_local(async move {
             while rx.next().await.is_some() {
                 if let Ok(list) = repo_for_loop
-                    .list(Page { index: 0, size: 200 }, None, None)
+                    .list(
+                        Page {
+                            index: 0,
+                            size: 200,
+                        },
+                        None,
+                        None,
+                    )
                     .await
                 {
                     items.set(list.items);

@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 
-use crate::data::{organizations, Organization};
+use crate::data::{Organization, organizations};
 use crate::views::{AllProjects, Inbox, ProjectOverview};
 
 /// Source of truth for the app's top-level routes. The router will pick
@@ -119,35 +119,65 @@ fn AssetsRoute() -> Element {
 }
 
 #[component]
-fn AgentRoute() -> Element { rsx! { crate::feature_routes::agent::AgentRunView {} } }
+fn AgentRoute() -> Element {
+    rsx! { crate::feature_routes::agent::AgentRunView {} }
+}
 #[component]
-fn CalendarRoute() -> Element { rsx! { crate::feature_routes::calendar::CalendarEventView {} } }
+fn CalendarRoute() -> Element {
+    rsx! { crate::feature_routes::calendar::CalendarEventView {} }
+}
 #[component]
-fn ChatRoute() -> Element { rsx! { crate::feature_routes::chat::MessageView {} } }
+fn ChatRoute() -> Element {
+    rsx! { crate::feature_routes::chat::MessageView {} }
+}
 #[component]
-fn ConferenceRoute() -> Element { rsx! { crate::feature_routes::conference::MeetingView {} } }
+fn ConferenceRoute() -> Element {
+    rsx! { crate::feature_routes::conference::MeetingView {} }
+}
 #[component]
-fn CookbookRoute() -> Element { rsx! { crate::feature_routes::cookbook::RecipeView {} } }
+fn CookbookRoute() -> Element {
+    rsx! { crate::feature_routes::cookbook::RecipeView {} }
+}
 #[component]
-fn EmailRoute() -> Element { rsx! { crate::feature_routes::email::EmailView {} } }
+fn EmailRoute() -> Element {
+    rsx! { crate::feature_routes::email::EmailView {} }
+}
 #[component]
-fn FinanceRoute() -> Element { rsx! { crate::feature_routes::finance::RevenueView {} } }
+fn FinanceRoute() -> Element {
+    rsx! { crate::feature_routes::finance::RevenueView {} }
+}
 #[component]
-fn FitnessRoute() -> Element { rsx! { crate::feature_routes::fitness::WorkoutSessionView {} } }
+fn FitnessRoute() -> Element {
+    rsx! { crate::feature_routes::fitness::WorkoutSessionView {} }
+}
 #[component]
-fn InventoryRoute() -> Element { rsx! { crate::feature_routes::inventory::PantryItemView {} } }
+fn InventoryRoute() -> Element {
+    rsx! { crate::feature_routes::inventory::PantryItemView {} }
+}
 #[component]
-fn InvoiceRoute() -> Element { rsx! { crate::feature_routes::invoice::InvoiceView {} } }
+fn InvoiceRoute() -> Element {
+    rsx! { crate::feature_routes::invoice::InvoiceView {} }
+}
 #[component]
-fn LocationsRoute() -> Element { rsx! { crate::feature_routes::location::LocationView {} } }
+fn LocationsRoute() -> Element {
+    rsx! { crate::feature_routes::location::LocationView {} }
+}
 #[component]
-fn PeopleRoute() -> Element { rsx! { crate::feature_routes::person::PersonView {} } }
+fn PeopleRoute() -> Element {
+    rsx! { crate::feature_routes::person::PersonView {} }
+}
 #[component]
-fn ProjectsLiveRoute() -> Element { rsx! { crate::feature_routes::project::ProjectView {} } }
+fn ProjectsLiveRoute() -> Element {
+    rsx! { crate::feature_routes::project::ProjectView {} }
+}
 #[component]
-fn ThreadsRoute() -> Element { rsx! { crate::feature_routes::threads::CommentView {} } }
+fn ThreadsRoute() -> Element {
+    rsx! { crate::feature_routes::threads::CommentView {} }
+}
 #[component]
-fn TimerRoute() -> Element { rsx! { crate::feature_routes::timer::TimeEntryView {} } }
+fn TimerRoute() -> Element {
+    rsx! { crate::feature_routes::timer::TimeEntryView {} }
+}
 
 #[component]
 fn SettingsRoute() -> Element {
@@ -317,29 +347,113 @@ struct NavTab {
 
 fn nav_tabs() -> Vec<NavTab> {
     vec![
-        NavTab { label: "Home",      icon: "▦", route: Route::DashboardRoute {} },
-        NavTab { label: "Inbox",     icon: "✉", route: Route::InboxRoute {} },
-        NavTab { label: "Test",      icon: "✓", route: Route::TestRoute {} },
+        NavTab {
+            label: "Home",
+            icon: "▦",
+            route: Route::DashboardRoute {},
+        },
+        NavTab {
+            label: "Inbox",
+            icon: "✉",
+            route: Route::InboxRoute {},
+        },
+        NavTab {
+            label: "Test",
+            icon: "✓",
+            route: Route::TestRoute {},
+        },
         // Per-feature multiplayer routes — alphabetized for easy
         // scanning across the demo surface.
-        NavTab { label: "Agent",     icon: "✸", route: Route::AgentRoute {} },
-        NavTab { label: "Assets",    icon: "▢", route: Route::AssetsRoute {} },
-        NavTab { label: "Calendar",  icon: "▦", route: Route::CalendarRoute {} },
-        NavTab { label: "Chat",      icon: "✎", route: Route::ChatRoute {} },
-        NavTab { label: "Conference",icon: "◉", route: Route::ConferenceRoute {} },
-        NavTab { label: "Cookbook",  icon: "✦", route: Route::CookbookRoute {} },
-        NavTab { label: "Email",     icon: "✉", route: Route::EmailRoute {} },
-        NavTab { label: "Finance",   icon: "$", route: Route::FinanceRoute {} },
-        NavTab { label: "Fitness",   icon: "♥", route: Route::FitnessRoute {} },
-        NavTab { label: "Inventory", icon: "▣", route: Route::InventoryRoute {} },
-        NavTab { label: "Invoice",   icon: "▤", route: Route::InvoiceRoute {} },
-        NavTab { label: "Locations", icon: "◇", route: Route::LocationsRoute {} },
-        NavTab { label: "People",    icon: "☺", route: Route::PeopleRoute {} },
-        NavTab { label: "Projects",  icon: "▤", route: Route::ProjectsLiveRoute {} },
-        NavTab { label: "Threads",   icon: "❝", route: Route::ThreadsRoute {} },
-        NavTab { label: "Timer",     icon: "⏱", route: Route::TimerRoute {} },
-        NavTab { label: "Timer demo",icon: "⏲", route: Route::TimerDemoRoute {} },
-        NavTab { label: "Settings",  icon: "⚙", route: Route::SettingsRoute {} },
+        NavTab {
+            label: "Agent",
+            icon: "✸",
+            route: Route::AgentRoute {},
+        },
+        NavTab {
+            label: "Assets",
+            icon: "▢",
+            route: Route::AssetsRoute {},
+        },
+        NavTab {
+            label: "Calendar",
+            icon: "▦",
+            route: Route::CalendarRoute {},
+        },
+        NavTab {
+            label: "Chat",
+            icon: "✎",
+            route: Route::ChatRoute {},
+        },
+        NavTab {
+            label: "Conference",
+            icon: "◉",
+            route: Route::ConferenceRoute {},
+        },
+        NavTab {
+            label: "Cookbook",
+            icon: "✦",
+            route: Route::CookbookRoute {},
+        },
+        NavTab {
+            label: "Email",
+            icon: "✉",
+            route: Route::EmailRoute {},
+        },
+        NavTab {
+            label: "Finance",
+            icon: "$",
+            route: Route::FinanceRoute {},
+        },
+        NavTab {
+            label: "Fitness",
+            icon: "♥",
+            route: Route::FitnessRoute {},
+        },
+        NavTab {
+            label: "Inventory",
+            icon: "▣",
+            route: Route::InventoryRoute {},
+        },
+        NavTab {
+            label: "Invoice",
+            icon: "▤",
+            route: Route::InvoiceRoute {},
+        },
+        NavTab {
+            label: "Locations",
+            icon: "◇",
+            route: Route::LocationsRoute {},
+        },
+        NavTab {
+            label: "People",
+            icon: "☺",
+            route: Route::PeopleRoute {},
+        },
+        NavTab {
+            label: "Projects",
+            icon: "▤",
+            route: Route::ProjectsLiveRoute {},
+        },
+        NavTab {
+            label: "Threads",
+            icon: "❝",
+            route: Route::ThreadsRoute {},
+        },
+        NavTab {
+            label: "Timer",
+            icon: "⏱",
+            route: Route::TimerRoute {},
+        },
+        NavTab {
+            label: "Timer demo",
+            icon: "⏲",
+            route: Route::TimerDemoRoute {},
+        },
+        NavTab {
+            label: "Settings",
+            icon: "⚙",
+            route: Route::SettingsRoute {},
+        },
     ]
 }
 
@@ -397,7 +511,11 @@ fn OrgSwitcher(
     #[props(default = false)] compact: bool,
 ) -> Element {
     let mut open = use_signal(|| false);
-    let orgs = if orgs.is_empty() { organizations() } else { orgs };
+    let orgs = if orgs.is_empty() {
+        organizations()
+    } else {
+        orgs
+    };
     let active = active_org();
 
     let trigger_class = if compact {

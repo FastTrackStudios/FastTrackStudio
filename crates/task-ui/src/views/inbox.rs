@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 
-use crate::data::{inbox_items, project_name, InboxItem};
+use crate::data::{InboxItem, inbox_items, project_name};
 
 #[component]
 pub fn Inbox() -> Element {

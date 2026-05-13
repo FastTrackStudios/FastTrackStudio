@@ -35,10 +35,7 @@ pub fn AssetList(items: Vec<Asset>, on_delete: EventHandler<Uuid>) -> Element {
 #[component]
 pub fn AssetRow(asset: Asset, on_delete: EventHandler<Uuid>) -> Element {
     let id = asset.id;
-    let manufacturer = asset
-        .manufacturer
-        .clone()
-        .unwrap_or_else(|| "—".into());
+    let manufacturer = asset.manufacturer.clone().unwrap_or_else(|| "—".into());
     let model = asset.model.clone().unwrap_or_else(|| "—".into());
     rsx! {
         div { class: "flex items-center justify-between rounded-md border border-slate-800 bg-slate-900 px-4 py-3",

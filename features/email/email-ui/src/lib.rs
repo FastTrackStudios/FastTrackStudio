@@ -35,10 +35,7 @@ pub fn EmailList(items: Vec<Email>, on_delete: EventHandler<Uuid>) -> Element {
 #[component]
 pub fn EmailRow(email: Email, on_delete: EventHandler<Uuid>) -> Element {
     let id = email.id;
-    let folder = email
-        .folder
-        .clone()
-        .unwrap_or_else(|| "inbox".into());
+    let folder = email.folder.clone().unwrap_or_else(|| "inbox".into());
     let subject_class = if email.read {
         "text-sm font-bold text-slate-300"
     } else {

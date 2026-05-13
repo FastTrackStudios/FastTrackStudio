@@ -1,92 +1,88 @@
 [package]
 name = "task-ui"
-version = "0.1.0"
-edition = "2021"
-authors = ["Cody Wright"]
-license = "MIT OR Apache-2.0"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
 
-# This crate is intentionally outside the root Task workspace — see the
-# `exclude` block in ../../Cargo.toml for the rationale.
+# Workspace member. Sharing the lockfile + dep graph with the
+# server/CLI crates avoids the dioxus / dioxus-router version drift
+# that bit us before. wasm-only call sites (web-sys::WebSocket, etc.)
+# are gated with `#[cfg(target_arch = "wasm32")]` so this crate
+# compiles cleanly on the native target too — `cargo check
+# --workspace` works inside the nix dev shell.
 
 [dependencies]
-dioxus = { version = "0.7.9", default-features = false, features = ["lib", "router"] }
-# Pulled in directly so apps that want bundle splitting can enable the
-# `wasm-split` feature through this crate's re-export. See the
-# `wasm-split` feature in apps/web/Cargo.toml.
-dioxus-router = { version = "0.7.9", default-features = false }
+dioxus = { workspace = true, features = ["router"] }
+dioxus-router.workspace = true
 
-# Local-first source-of-truth in the browser. The Timer demo route
-# holds a `CrdtDoc` + `TimeEntryRepoLoro` and syncs Loro bytes over a
-# raw WebSocket against the standalone `sync-demo` server. No vox in
-# the UI — RPC is reserved for the few mutations that must round-trip
-# (the demo doesn't need any).
-loro = { version = "1.12", default-features = false }
+# Local-first source-of-truth in the browser.
+loro.workspace = true
 architect = { path = "../../../architect/macros/architect" }
 crdt = { path = "../../../architect/libs/crdt" }
-timer-proto = { path = "../../features/timer/timer-proto" }
-timer-crdt = { path = "../../features/timer/timer-crdt" }
 
-# All feature trios (proto + crdt + ui). The CRDT crates live in the
-# main workspace; the UI crates are excluded (Dioxus-only). Each
-# `feature_routes/<name>.rs` wires its three deps against a shared
-# CrdtDoc and renders the dumb components from `<name>-ui`.
-asset-proto = { path = "../../features/asset/asset-proto" }
-asset-crdt = { path = "../../features/asset/asset-crdt" }
-asset-ui = { path = "../../features/asset/asset-ui" }
-agent-proto = { path = "../../features/agent/agent-proto" }
-agent-crdt = { path = "../../features/agent/agent-crdt" }
-agent-ui = { path = "../../features/agent/agent-ui" }
-calendar-proto = { path = "../../features/calendar/calendar-proto" }
-calendar-crdt = { path = "../../features/calendar/calendar-crdt" }
-calendar-ui = { path = "../../features/calendar/calendar-ui" }
-chat-proto = { path = "../../features/chat/chat-proto" }
-chat-crdt = { path = "../../features/chat/chat-crdt" }
-chat-ui = { path = "../../features/chat/chat-ui" }
-conference-proto = { path = "../../features/conference/conference-proto" }
-conference-crdt = { path = "../../features/conference/conference-crdt" }
-conference-ui = { path = "../../features/conference/conference-ui" }
-cookbook-proto = { path = "../../features/cookbook/cookbook-proto" }
-cookbook-crdt = { path = "../../features/cookbook/cookbook-crdt" }
-cookbook-ui = { path = "../../features/cookbook/cookbook-ui" }
-email-proto = { path = "../../features/email/email-proto" }
-email-crdt = { path = "../../features/email/email-crdt" }
-email-ui = { path = "../../features/email/email-ui" }
-finance-proto = { path = "../../features/finance/finance-proto" }
-finance-crdt = { path = "../../features/finance/finance-crdt" }
-finance-ui = { path = "../../features/finance/finance-ui" }
-fitness-proto = { path = "../../features/fitness/fitness-proto" }
-fitness-crdt = { path = "../../features/fitness/fitness-crdt" }
-fitness-ui = { path = "../../features/fitness/fitness-ui" }
-inventory-proto = { path = "../../features/inventory/inventory-proto" }
-inventory-crdt = { path = "../../features/inventory/inventory-crdt" }
-inventory-ui = { path = "../../features/inventory/inventory-ui" }
-invoice-proto = { path = "../../features/invoice/invoice-proto" }
-invoice-crdt = { path = "../../features/invoice/invoice-crdt" }
-invoice-ui = { path = "../../features/invoice/invoice-ui" }
-location-proto = { path = "../../features/location/location-proto" }
-location-crdt = { path = "../../features/location/location-crdt" }
-location-ui = { path = "../../features/location/location-ui" }
-person-proto = { path = "../../features/person/person-proto" }
-person-crdt = { path = "../../features/person/person-crdt" }
-person-ui = { path = "../../features/person/person-ui" }
-project-proto = { path = "../../features/project/project-proto" }
-project-crdt = { path = "../../features/project/project-crdt" }
-project-ui = { path = "../../features/project/project-ui" }
-threads-proto = { path = "../../features/threads/threads-proto" }
-threads-crdt = { path = "../../features/threads/threads-crdt" }
-threads-ui = { path = "../../features/threads/threads-ui" }
-timer-ui = { path = "../../features/timer/timer-ui" }
+# Per-feature trios.
+asset-proto.workspace = true
+asset-crdt.workspace = true
+asset-ui.workspace = true
+agent-proto.workspace = true
+agent-crdt.workspace = true
+agent-ui.workspace = true
+caldav-proto.workspace = true
+caldav-crdt.workspace = true
+caldav-ui.workspace = true
+calendar-proto.workspace = true
+calendar-crdt.workspace = true
+calendar-ui.workspace = true
+chat-proto.workspace = true
+chat-crdt.workspace = true
+chat-ui.workspace = true
+conference-proto.workspace = true
+conference-crdt.workspace = true
+conference-ui.workspace = true
+cookbook-proto.workspace = true
+cookbook-crdt.workspace = true
+cookbook-ui.workspace = true
+email-proto.workspace = true
+email-crdt.workspace = true
+email-ui.workspace = true
+finance-proto.workspace = true
+finance-crdt.workspace = true
+finance-ui.workspace = true
+fitness-proto.workspace = true
+fitness-crdt.workspace = true
+fitness-ui.workspace = true
+inventory-proto.workspace = true
+inventory-crdt.workspace = true
+inventory-ui.workspace = true
+invoice-proto.workspace = true
+invoice-crdt.workspace = true
+invoice-ui.workspace = true
+location-proto.workspace = true
+location-crdt.workspace = true
+location-ui.workspace = true
+person-proto.workspace = true
+person-crdt.workspace = true
+person-ui.workspace = true
+project-proto.workspace = true
+project-crdt.workspace = true
+project-ui.workspace = true
+threads-proto.workspace = true
+threads-crdt.workspace = true
+threads-ui.workspace = true
+timer-proto.workspace = true
+timer-crdt.workspace = true
+timer-ui.workspace = true
 
-# Wire types touched by the UI.
-uuid = { version = "1", features = ["v4", "js"] }
-chrono = { version = "0.4", default-features = false, features = ["clock", "std", "wasmbind"] }
+uuid = { workspace = true, features = ["v4", "js"] }
+chrono = { workspace = true, features = ["clock", "std", "wasmbind"] }
 
-# Browser glue. We bind to web-sys directly for WebSocket so the demo
-# stays free of opinionated wasm-bindgen wrappers.
-wasm-bindgen = "0.2"
-wasm-bindgen-futures = "0.4"
-js-sys = "0.3"
-web-sys = { version = "0.3.98", features = [
+# Browser glue. Compiles cleanly on native too; the source uses
+# them only inside `cfg(target_arch = "wasm32")` blocks.
+wasm-bindgen.workspace = true
+wasm-bindgen-futures.workspace = true
+js-sys.workspace = true
+web-sys = { workspace = true, features = [
     "Window",
     "Location",
     "History",
@@ -100,13 +96,10 @@ web-sys = { version = "0.3.98", features = [
     "ErrorEvent",
     "console",
 ] }
-futures-channel = "0.3"
-futures-util = { version = "0.3", default-features = false, features = ["std"] }
+futures-channel.workspace = true
+futures-util.workspace = true
 
 [features]
 default = []
-# Opt-in WASM bundle splitting along route variants. Apps consuming this
-# crate that want splitting must enable both this feature *and* pass
-# `--wasm-split` to `dx serve` / `dx build`. Without --wasm-split the
-# call graph stays connected and `dx serve` works normally.
+# Opt-in WASM bundle splitting along route variants.
 wasm-split = ["dioxus-router/wasm-split"]

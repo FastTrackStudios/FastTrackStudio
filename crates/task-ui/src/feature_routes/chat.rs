@@ -4,7 +4,7 @@
 use std::rc::Rc;
 
 use architect::Page;
-use chat_crdt::{MessageRepoLoro, CrdtDoc};
+use chat_crdt::{CrdtDoc, MessageRepoLoro};
 use chat_proto::{Message, MessageCreate, MessageRepo};
 use chat_ui::{MessageCreateForm, MessageList};
 use dioxus::prelude::*;
@@ -21,8 +21,7 @@ pub fn MessageView() -> Element {
         let doc = CrdtDoc::ephemeral();
         Rc::new(MessageRepoLoro::new(&doc))
     });
-    let doc: Rc<CrdtDoc> =
-        use_hook(|| Rc::new(CrdtDoc::from_loro(repo.doc().clone())));
+    let doc: Rc<CrdtDoc> = use_hook(|| Rc::new(CrdtDoc::from_loro(repo.doc().clone())));
 
     let mut items = use_signal::<Vec<Message>>(Vec::new);
     let mut status_msg = use_signal(|| "starting…".to_string());
@@ -33,7 +32,14 @@ pub fn MessageView() -> Element {
         spawn_local(async move {
             while rx.next().await.is_some() {
                 if let Ok(list) = repo_for_loop
-                    .list(Page { index: 0, size: 200 }, None, None)
+                    .list(
+                        Page {
+                            index: 0,
+                            size: 200,
+                        },
+                        None,
+                        None,
+                    )
                     .await
                 {
                     items.set(list.items);

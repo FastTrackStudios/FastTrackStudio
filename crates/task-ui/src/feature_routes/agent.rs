@@ -3,10 +3,10 @@
 
 use std::rc::Rc;
 
-use architect::Page;
 use agent_crdt::{AgentRunRepoLoro, CrdtDoc};
 use agent_proto::{AgentRun, AgentRunCreate, AgentRunRepo};
 use agent_ui::{AgentRunCreateForm, AgentRunList};
+use architect::Page;
 use dioxus::prelude::*;
 use futures_channel::mpsc;
 use futures_util::StreamExt;
@@ -21,8 +21,7 @@ pub fn AgentRunView() -> Element {
         let doc = CrdtDoc::ephemeral();
         Rc::new(AgentRunRepoLoro::new(&doc))
     });
-    let doc: Rc<CrdtDoc> =
-        use_hook(|| Rc::new(CrdtDoc::from_loro(repo.doc().clone())));
+    let doc: Rc<CrdtDoc> = use_hook(|| Rc::new(CrdtDoc::from_loro(repo.doc().clone())));
 
     let mut items = use_signal::<Vec<AgentRun>>(Vec::new);
     let mut status_msg = use_signal(|| "starting…".to_string());
@@ -33,7 +32,14 @@ pub fn AgentRunView() -> Element {
         spawn_local(async move {
             while rx.next().await.is_some() {
                 if let Ok(list) = repo_for_loop
-                    .list(Page { index: 0, size: 200 }, None, None)
+                    .list(
+                        Page {
+                            index: 0,
+                            size: 200,
+                        },
+                        None,
+                        None,
+                    )
                     .await
                 {
                     items.set(list.items);

@@ -1,38 +1,36 @@
 [workspace]
+# Glob-driven membership. Scaffolder writes the dirs, cargo picks
+# them up; this file doesn't need touching when a new feature lands.
 members = [
-    "apps/server",
-    "apps/sync-demo",
-    "crates/fasttrackaudio",
-    "crates/task-core",
-    "crates/task-cli",
-    "features/auth/auth",
-    "features/auth/auth-db",
-    "xtask", "features/threads/threads", "features/threads/threads-proto", "features/threads/threads-crdt", "features/threads/threads-db", "features/threads/tests/native", "features/chat/chat", "features/chat/chat-proto", "features/chat/chat-crdt", "features/chat/chat-db", "features/chat/tests/native", "features/conference/conference", "features/conference/conference-proto", "features/conference/conference-crdt", "features/conference/conference-db", "features/conference/tests/native", "features/asset/asset", "features/asset/asset-proto", "features/asset/asset-crdt", "features/asset/asset-db", "features/asset/tests/native", "features/person/person", "features/person/person-proto", "features/person/person-crdt", "features/person/person-db", "features/person/tests/native", "features/location/location", "features/location/location-proto", "features/location/location-crdt", "features/location/location-db", "features/location/tests/native", "features/project/project", "features/project/project-proto", "features/project/project-crdt", "features/project/project-db", "features/project/tests/native", "features/timer/timer", "features/timer/timer-proto", "features/timer/timer-crdt", "features/timer/timer-db", "features/timer/tests/native", "features/invoice/invoice", "features/invoice/invoice-proto", "features/invoice/invoice-crdt", "features/invoice/invoice-db", "features/invoice/tests/native", "features/finance/finance", "features/finance/finance-proto", "features/finance/finance-crdt", "features/finance/finance-db", "features/finance/tests/native", "features/inventory/inventory", "features/inventory/inventory-proto", "features/inventory/inventory-crdt", "features/inventory/inventory-db", "features/inventory/tests/native", "features/cookbook/cookbook", "features/cookbook/cookbook-proto", "features/cookbook/cookbook-crdt", "features/cookbook/cookbook-db", "features/cookbook/tests/native", "features/fitness/fitness", "features/fitness/fitness-proto", "features/fitness/fitness-crdt", "features/fitness/fitness-db", "features/fitness/tests/native", "features/calendar/calendar", "features/calendar/calendar-proto", "features/calendar/calendar-crdt", "features/calendar/calendar-db", "features/calendar/tests/native", "features/email/email", "features/email/email-proto", "features/email/email-crdt", "features/email/email-db", "features/email/tests/native", "features/agent/agent", "features/agent/agent-proto", "features/agent/agent-crdt", "features/agent/agent-db", "features/agent/tests/native",
+    "apps/*",
+    "crates/*",
+    "features/*/*",
+    "features/*/tests/native",
+    "xtask",
 ]
-# UI crates (task-ui + apps/{web,desktop,mobile}) live outside this workspace
-# so server/CLI builds do not pick up WASM/Dioxus-only dependency and target
-# constraints. Each UI crate carries its own Cargo.toml and Cargo.lock.
+# Only non-crate directories that `features/*/*` accidentally catches:
+# `features/<name>/spec` (tracey markdown) and `features/<name>/tests`
+# (parent of the `tests/native` crate, which IS picked up by the
+# explicit member pattern above). Two lines per feature until cargo
+# grows glob-exclude support.
 exclude = [
-    "apps/web",
-    "apps/desktop",
-    "apps/mobile",
-    "crates/task-ui",
-    "features/agent/agent-ui",
-    "features/asset/asset-ui",
-    "features/calendar/calendar-ui",
-    "features/chat/chat-ui",
-    "features/conference/conference-ui",
-    "features/cookbook/cookbook-ui",
-    "features/email/email-ui",
-    "features/finance/finance-ui",
-    "features/fitness/fitness-ui",
-    "features/inventory/inventory-ui",
-    "features/invoice/invoice-ui",
-    "features/location/location-ui",
-    "features/person/person-ui",
-    "features/project/project-ui",
-    "features/threads/threads-ui",
-    "features/timer/timer-ui",
+    "features/agent/spec",      "features/agent/tests",
+    "features/asset/spec",      "features/asset/tests",
+    "features/caldav/spec",     "features/caldav/tests",
+    "features/calendar/spec",   "features/calendar/tests",
+    "features/chat/spec",       "features/chat/tests",
+    "features/conference/spec", "features/conference/tests",
+    "features/cookbook/spec",   "features/cookbook/tests",
+    "features/email/spec",      "features/email/tests",
+    "features/finance/spec",    "features/finance/tests",
+    "features/fitness/spec",    "features/fitness/tests",
+    "features/inventory/spec",  "features/inventory/tests",
+    "features/invoice/spec",    "features/invoice/tests",
+    "features/location/spec",   "features/location/tests",
+    "features/person/spec",     "features/person/tests",
+    "features/project/spec",    "features/project/tests",
+    "features/threads/spec",    "features/threads/tests",
+    "features/timer/spec",      "features/timer/tests",
 ]
 resolver = "2"
 
@@ -119,6 +117,28 @@ agent = { path = "features/agent/agent" }
 agent-proto = { path = "features/agent/agent-proto" }
 agent-crdt = { path = "features/agent/agent-crdt" }
 agent-db = { path = "features/agent/agent-db" }
+caldav = { path = "features/caldav/caldav" }
+caldav-proto = { path = "features/caldav/caldav-proto" }
+caldav-crdt = { path = "features/caldav/caldav-crdt" }
+caldav-db = { path = "features/caldav/caldav-db" }
+caldav-sync = { path = "features/caldav/caldav-sync" }
+caldav-ui = { path = "features/caldav/caldav-ui" }
+agent-ui = { path = "features/agent/agent-ui" }
+asset-ui = { path = "features/asset/asset-ui" }
+calendar-ui = { path = "features/calendar/calendar-ui" }
+chat-ui = { path = "features/chat/chat-ui" }
+conference-ui = { path = "features/conference/conference-ui" }
+cookbook-ui = { path = "features/cookbook/cookbook-ui" }
+email-ui = { path = "features/email/email-ui" }
+finance-ui = { path = "features/finance/finance-ui" }
+fitness-ui = { path = "features/fitness/fitness-ui" }
+inventory-ui = { path = "features/inventory/inventory-ui" }
+invoice-ui = { path = "features/invoice/invoice-ui" }
+location-ui = { path = "features/location/location-ui" }
+person-ui = { path = "features/person/person-ui" }
+project-ui = { path = "features/project/project-ui" }
+threads-ui = { path = "features/threads/threads-ui" }
+timer-ui = { path = "features/timer/timer-ui" }
 
 [workspace.dependencies.facet]
 version = "0.46"
@@ -162,6 +182,53 @@ rev = "aea86f91f84cdf6052e4310e8a0541d87f37c624"
 [workspace.dependencies.loro]
 version = "1.12"
 default-features = false
+
+# CalDAV client. The `caldav` feature wraps it in a Loro-backed
+# bridge: server-side sync engine pulls remote events into the
+# `calendar` feature's CRDT, pushes local edits back. See
+# https://docs.rs/kitchen_fridge/ for the upstream surface.
+[workspace.dependencies.kitchen-fridge]
+version = "0.4"
+
+# Dioxus — UI lib. Single workspace dep; per-crate `[features]`
+# enable the platform target. Pattern lifted from dioxus-flake's
+# packages/web/desktop/mobile setup so `cargo check --workspace`
+# works inside the nix dev shell.
+[workspace.dependencies.dioxus]
+version = "0.7.9"
+default-features = false
+features = ["lib"]
+
+[workspace.dependencies.dioxus-router]
+version = "0.7.9"
+default-features = false
+
+# Web-sys / wasm-bindgen — wired only in crates that use them and
+# always behind `#[cfg(target_arch = "wasm32")]` source gates. They
+# do compile on native (stub wrappers in wasm-bindgen-shared) so
+# leaving them on a native-buildable crate's Cargo.toml is fine.
+[workspace.dependencies.web-sys]
+version = "0.3.98"
+
+[workspace.dependencies.wasm-bindgen]
+version = "0.2"
+
+[workspace.dependencies.wasm-bindgen-futures]
+version = "0.4"
+
+[workspace.dependencies.js-sys]
+version = "0.3"
+
+[workspace.dependencies.futures-channel]
+version = "0.3"
+
+[workspace.dependencies.futures-util]
+version = "0.3"
+default-features = false
+features = ["std"]
+
+[workspace.dependencies.task-ui]
+path = "crates/task-ui"
 
 # CRDT lib + SeaORM persistence — path deps pointing at architect's
 # in-repo libs. Same rev as the architect/macros/architect dep below.

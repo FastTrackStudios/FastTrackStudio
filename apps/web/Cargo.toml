@@ -1,29 +1,21 @@
 [package]
 name = "task-app-web"
-version = "0.1.0"
-edition = "2021"
-authors = ["Cody Wright"]
-license = "MIT OR Apache-2.0"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
 
 [dependencies]
-dioxus = { version = "0.7.9", default-features = false, features = ["lib", "web", "launch", "router"] }
-web-sys = { version = "0.3.98", features = ["Window", "Location", "History"] }
-task-ui = { path = "../../crates/task-ui" }
-
-# Loro CRDT — local-first source of truth in the browser.
-loro = { version = "1.12", default-features = false }
-# Demo feature's wire types + Repo trait. No vox (no RPC) — the UI
-# drives the local LoroRepo directly, syncing bytes via WebSocket.
-timer-proto = { path = "../../features/timer/timer-proto" }
-timer-crdt = { path = "../../features/timer/timer-crdt" }
-crdt = { path = "../../../architect/libs/crdt" }
-uuid = { version = "1", features = ["v4", "js"] }
-chrono = { version = "0.4", default-features = false, features = ["clock", "std", "wasmbind"] }
+# Workspace dioxus dep with no platform features; this crate's
+# `default = ["web"]` toggles `dioxus/web` + `dioxus/launch` on so
+# `dx serve` builds it correctly. Lifted from dioxus-flake's
+# packages/web pattern.
+dioxus = { workspace = true, features = ["router"] }
+task-ui.workspace = true
 
 [features]
-default = []
-# Bundle-split the wasm binary along route variants. Requires running
-# `dx serve --wasm-split` or `dx bundle --wasm-split`. Without the CLI
-# flag the call graph is disconnected and a plain `dx serve` won't work,
-# so this stays off for normal hot-reload dev.
+default = ["web"]
+web = ["dioxus/web", "dioxus/launch"]
+# Bundle-split the wasm binary along route variants. Requires
+# running `dx serve --wasm-split`.
 wasm-split = ["task-ui/wasm-split"]
