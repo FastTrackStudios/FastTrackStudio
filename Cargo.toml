@@ -97,12 +97,13 @@ vox-core = { git = "https://github.com/bearcove/vox", rev = "fd3167b6d6b89b60edd
 vox-types = { git = "https://github.com/bearcove/vox", rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5" }
 vox-websocket = { git = "https://github.com/bearcove/vox", rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5" }
 
-# Moiré — runtime graph instrumentation. Already pulled in transitively
-# by vox; declared explicitly here so architect's axum_ws adapter can
-# use named mpsc/oneshot/spawn primitives. Compiles to passthroughs
-# when the `diagnostics` cargo feature is off (zero runtime cost).
-# Pinned to the same rev vox uses for graph consistency.
-moire = { git = "https://github.com/bearcove/moire", rev = "13eac79c1b128282dd792a611319d0a1016ad15d" }
+# Moiré — runtime graph instrumentation. Pinned to our fork at
+# codywright/moire which layers (a) forge's NixOS frame-pointer
+# termination fix and (b) a flake.nix that builds moire-web with
+# its frontend bundled. The `[patch."..."]` block at the bottom
+# redirects every transitive bearcove/moire reference (incl. vox's)
+# to this same fork so the runtime graph stays coherent.
+moire = { git = "https://git.starcommand.live/codywright/moire", rev = "aea86f91f84cdf6052e4310e8a0541d87f37c624" }
 
 # Database — SeaORM with SQLite for the reference. Real projects pick
 # their own backend without changing the crudcrate-generated traits.
@@ -143,3 +144,20 @@ foo-memory = { path = "features/foo/foo-memory" }
 bar = { path = "features/bar/bar" }
 bar-proto = { path = "features/bar/bar-proto" }
 bar-memory = { path = "features/bar/bar-memory" }
+
+# Redirect every transitive bearcove/moire reference (e.g. vox's
+# moire-runtime / moire-tokio / moire-types) to our fork at the same
+# rev as the workspace dep above. Without this, vox + architect would
+# end up with two parallel moire compilations, two parallel entity
+# graphs, and the dashboard would see only half the picture.
+[patch."https://github.com/bearcove/moire"]
+moire             = { git = "https://git.starcommand.live/codywright/moire", rev = "aea86f91f84cdf6052e4310e8a0541d87f37c624" }
+moire-macros      = { git = "https://git.starcommand.live/codywright/moire", rev = "aea86f91f84cdf6052e4310e8a0541d87f37c624" }
+moire-macros-noop = { git = "https://git.starcommand.live/codywright/moire", rev = "aea86f91f84cdf6052e4310e8a0541d87f37c624" }
+moire-runtime     = { git = "https://git.starcommand.live/codywright/moire", rev = "aea86f91f84cdf6052e4310e8a0541d87f37c624" }
+moire-tokio       = { git = "https://git.starcommand.live/codywright/moire", rev = "aea86f91f84cdf6052e4310e8a0541d87f37c624" }
+moire-trace-capture = { git = "https://git.starcommand.live/codywright/moire", rev = "aea86f91f84cdf6052e4310e8a0541d87f37c624" }
+moire-trace-types = { git = "https://git.starcommand.live/codywright/moire", rev = "aea86f91f84cdf6052e4310e8a0541d87f37c624" }
+moire-types       = { git = "https://git.starcommand.live/codywright/moire", rev = "aea86f91f84cdf6052e4310e8a0541d87f37c624" }
+moire-wasm        = { git = "https://git.starcommand.live/codywright/moire", rev = "aea86f91f84cdf6052e4310e8a0541d87f37c624" }
+moire-wire        = { git = "https://git.starcommand.live/codywright/moire", rev = "aea86f91f84cdf6052e4310e8a0541d87f37c624" }
