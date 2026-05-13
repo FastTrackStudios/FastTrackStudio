@@ -5723,6 +5723,7 @@ name = "project-tests-native"
 version = "0.1.0"
 dependencies = [
  "architect",
+ "chrono",
  "crdt",
  "fake",
  "loro",
@@ -7579,6 +7580,7 @@ name = "timer-tests-native"
 version = "0.1.0"
 dependencies = [
  "architect",
+ "chrono",
  "crdt",
  "fake",
  "loro",

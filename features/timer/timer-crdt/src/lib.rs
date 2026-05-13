@@ -1,33 +1,37 @@
-//! Loro-backed `TimerRepo`. Source of truth lives in a LoroDoc;
+//! Loro-backed `TimeEntryRepo`. Source of truth lives in a LoroDoc;
 //! persistence is the concern of `timer-db`.
+//!
+//! Container layout: top-level `"time_entries"` LoroMap, keyed by
+//! uuid; each entry is a sub-LoroMap with one key per field. All
+//! field codecs come from `crdt::codec`.
 
 use architect::{Page, RepoError, SortOrder};
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use crdt::EntityCrdt;
-use loro::{LoroMap, LoroValue};
-use timer_proto::{Timer, TimerCreate, TimerList, TimerRepo, TimerUpdate};
+use crdt::codec::{
+    read_bool, read_dt, read_opt_dt, read_opt_str, read_opt_u32, read_opt_uuid, read_string_list,
+    read_uuid, write_bool, write_dt, write_opt_dt, write_opt_str, write_opt_string_list,
+    write_opt_u32, write_opt_uuid, write_string_list, write_uuid,
+};
+use loro::LoroMap;
+use timer_proto::{TimeEntry, TimeEntryCreate, TimeEntryList, TimeEntryRepo, TimeEntryUpdate};
 use uuid::Uuid;
 
 pub use crdt::{CrdtDoc, LoroRepo};
 
-/// Zero-sized marker for the `EntityCrdt` impl. Lets us implement
-/// the foreign `EntityCrdt` trait without owning the wire struct.
-pub struct TimerEntity;
+pub struct TimeEntryEntity;
 
-/// Newtype-wrapped repo, implements `TimerRepo`. Construct from a
-/// `CrdtDoc` — multiple repos over different entity types can share
-/// one doc, mutations commit together, exports cover the whole doc.
 #[derive(Clone)]
-pub struct TimerRepoLoro {
-    inner: LoroRepo<TimerEntity>,
+pub struct TimeEntryRepoLoro {
+    inner: LoroRepo<TimeEntryEntity>,
 }
 
-impl TimerRepoLoro {
+impl TimeEntryRepoLoro {
     pub fn new(doc: &CrdtDoc) -> Self {
         Self { inner: doc.repo() }
     }
 
-    pub fn inner(&self) -> &LoroRepo<TimerEntity> {
+    pub fn inner(&self) -> &LoroRepo<TimeEntryEntity> {
         &self.inner
     }
 
@@ -36,66 +40,105 @@ impl TimerRepoLoro {
     }
 }
 
-// ── EntityCrdt impl ───────────────────────────────────────────────────
-//
-// Container layout: a top-level "timer_items" LoroMap keyed by
-// uuid string; each entry is a sub-LoroMap with the wire fields.
-// For features with hierarchy or ordering, swap this for a LoroTree
-// or LoroMovableList — the trait surface stays the same.
+impl EntityCrdt for TimeEntryEntity {
+    type Wire = TimeEntry;
+    type Create = TimeEntryCreate;
+    type Update = TimeEntryUpdate;
+    type List = TimeEntryList;
 
-impl EntityCrdt for TimerEntity {
-    type Wire = Timer;
-    type Create = TimerCreate;
-    type Update = TimerUpdate;
-    type List = TimerList;
+    const ROOT: &'static str = "time_entries";
 
-    const ROOT: &'static str = "timer_items";
-
-    fn id(wire: &Timer) -> Uuid {
+    fn id(wire: &TimeEntry) -> Uuid {
         wire.id
     }
 
-    fn from_create(input: TimerCreate) -> Timer {
+    fn from_create(input: TimeEntryCreate) -> TimeEntry {
         let now = Utc::now();
-        Timer {
+        TimeEntry {
             id: Uuid::new_v4(),
-            name: input.name,
+            task_id: input.task_id,
+            user: input.user,
+            start_time: input.start_time,
+            end_time: input.end_time,
+            description: input.description,
+            billable: input.billable,
+            billable_rate_cents: input.billable_rate_cents,
+            tags: input.tags,
+            invoiced_at: input.invoiced_at,
             created_at: now,
             updated_at: now,
         }
     }
 
-    fn encode_into(map: &LoroMap, e: &Timer) -> Result<(), RepoError> {
-        map.insert("id", e.id.to_string()).map_err(loro_err)?;
-        map.insert("name", e.name.as_str()).map_err(loro_err)?;
-        map.insert("created_at", e.created_at.to_rfc3339())
-            .map_err(loro_err)?;
-        map.insert("updated_at", e.updated_at.to_rfc3339())
-            .map_err(loro_err)?;
+    fn encode_into(m: &LoroMap, e: &TimeEntry) -> Result<(), RepoError> {
+        write_uuid(m, "id", e.id)?;
+        write_opt_uuid(m, "task_id", e.task_id)?;
+        write_opt_str(m, "user", e.user.as_deref())?;
+        write_dt(m, "start_time", e.start_time)?;
+        write_opt_dt(m, "end_time", e.end_time)?;
+        write_opt_str(m, "description", e.description.as_deref())?;
+        write_bool(m, "billable", e.billable)?;
+        write_opt_u32(m, "billable_rate_cents", e.billable_rate_cents)?;
+        write_string_list(m, "tags", &e.tags)?;
+        write_opt_dt(m, "invoiced_at", e.invoiced_at)?;
+        write_dt(m, "created_at", e.created_at)?;
+        write_dt(m, "updated_at", e.updated_at)?;
         Ok(())
     }
 
-    fn decode_from(m: &LoroMap) -> Result<Timer, RepoError> {
-        Ok(Timer {
-            id: parse_uuid(read_str(m, "id")?)?,
-            name: read_str(m, "name")?,
-            created_at: parse_dt(read_str(m, "created_at")?)?,
-            updated_at: parse_dt(read_str(m, "updated_at")?)?,
+    fn decode_from(m: &LoroMap) -> Result<TimeEntry, RepoError> {
+        Ok(TimeEntry {
+            id: read_uuid(m, "id")?,
+            task_id: read_opt_uuid(m, "task_id")?,
+            user: read_opt_str(m, "user")?,
+            start_time: read_dt(m, "start_time")?,
+            end_time: read_opt_dt(m, "end_time")?,
+            description: read_opt_str(m, "description")?,
+            billable: read_bool(m, "billable")?,
+            billable_rate_cents: read_opt_u32(m, "billable_rate_cents")?,
+            tags: read_string_list(m, "tags")?,
+            invoiced_at: read_opt_dt(m, "invoiced_at")?,
+            created_at: read_dt(m, "created_at")?,
+            updated_at: read_dt(m, "updated_at")?,
         })
     }
 
-    fn apply_update(m: &LoroMap, input: TimerUpdate) -> Result<(), RepoError> {
-        if let Some(name) = input.name {
-            m.insert("name", name.as_str()).map_err(loro_err)?;
+    fn apply_update(m: &LoroMap, u: TimeEntryUpdate) -> Result<(), RepoError> {
+        if let Some(v) = u.task_id {
+            write_opt_uuid(m, "task_id", v)?;
         }
-        m.insert("updated_at", Utc::now().to_rfc3339())
-            .map_err(loro_err)?;
+        if let Some(v) = u.user {
+            write_opt_str(m, "user", v.as_deref())?;
+        }
+        if let Some(v) = u.start_time {
+            write_dt(m, "start_time", v)?;
+        }
+        if let Some(v) = u.end_time {
+            write_opt_dt(m, "end_time", v)?;
+        }
+        if let Some(v) = u.description {
+            write_opt_str(m, "description", v.as_deref())?;
+        }
+        if let Some(v) = u.billable {
+            write_bool(m, "billable", v)?;
+        }
+        if let Some(v) = u.billable_rate_cents {
+            write_opt_u32(m, "billable_rate_cents", v)?;
+        }
+        if let Some(v) = u.tags {
+            write_opt_string_list(m, "tags", Some(&v))?;
+        }
+        if let Some(v) = u.invoiced_at {
+            write_opt_dt(m, "invoiced_at", v)?;
+        }
+        write_dt(m, "updated_at", Utc::now())?;
         Ok(())
     }
 
-    fn sort_items(items: &mut [Timer], field: &str, order: SortOrder) -> Result<(), RepoError> {
+    fn sort_items(items: &mut [TimeEntry], field: &str, order: SortOrder) -> Result<(), RepoError> {
         match field {
-            "name" => items.sort_by(|a, b| a.name.cmp(&b.name)),
+            "start_time" => items.sort_by(|a, b| a.start_time.cmp(&b.start_time)),
+            "end_time" => items.sort_by(|a, b| a.end_time.cmp(&b.end_time)),
             "created_at" => items.sort_by(|a, b| a.created_at.cmp(&b.created_at)),
             other => {
                 return Err(RepoError::InvalidInput(format!(
@@ -109,62 +152,30 @@ impl EntityCrdt for TimerEntity {
         Ok(())
     }
 
-    fn build_list(items: Vec<Timer>, total: u32, page: Page) -> TimerList {
-        TimerList { items, total, page }
+    fn build_list(items: Vec<TimeEntry>, total: u32, page: Page) -> TimeEntryList {
+        TimeEntryList { items, total, page }
     }
 }
 
-// ── TimerRepo forwarders ────────────────────────────────────────────
-
-impl TimerRepo for TimerRepoLoro {
-    async fn get(&self, id: Uuid) -> Result<Timer, RepoError> {
+impl TimeEntryRepo for TimeEntryRepoLoro {
+    async fn get(&self, id: Uuid) -> Result<TimeEntry, RepoError> {
         self.inner.get(id).await
     }
-
     async fn list(
         &self,
         page: architect::Page,
         sort: Option<architect::Sort>,
         filter: Option<architect::Filter>,
-    ) -> Result<TimerList, RepoError> {
+    ) -> Result<TimeEntryList, RepoError> {
         self.inner.list(page, sort, filter).await
     }
-
-    async fn create(&self, input: TimerCreate) -> Result<Timer, RepoError> {
+    async fn create(&self, input: TimeEntryCreate) -> Result<TimeEntry, RepoError> {
         self.inner.create(input).await
     }
-
-    async fn update(&self, id: Uuid, input: TimerUpdate) -> Result<Timer, RepoError> {
+    async fn update(&self, id: Uuid, input: TimeEntryUpdate) -> Result<TimeEntry, RepoError> {
         self.inner.update(id, input).await
     }
-
     async fn delete(&self, id: Uuid) -> Result<(), RepoError> {
         self.inner.delete(id).await
     }
-}
-
-// ── codec helpers ─────────────────────────────────────────────────────
-
-fn read_str(m: &LoroMap, k: &str) -> Result<String, RepoError> {
-    match m.get(k) {
-        Some(loro::ValueOrContainer::Value(LoroValue::String(s))) => Ok((*s).to_string()),
-        Some(other) => Err(RepoError::Internal(format!(
-            "expected string at key `{k}`, got {other:?}"
-        ))),
-        None => Err(RepoError::Internal(format!("missing key `{k}`"))),
-    }
-}
-
-fn parse_uuid(s: String) -> Result<Uuid, RepoError> {
-    Uuid::parse_str(&s).map_err(|e| RepoError::Internal(format!("bad uuid: {e}")))
-}
-
-fn parse_dt(s: String) -> Result<DateTime<Utc>, RepoError> {
-    DateTime::parse_from_rfc3339(&s)
-        .map(|dt| dt.with_timezone(&Utc))
-        .map_err(|e| RepoError::Internal(format!("bad timestamp: {e}")))
-}
-
-fn loro_err<E: std::fmt::Display>(e: E) -> RepoError {
-    RepoError::Internal(format!("loro: {e}"))
 }
