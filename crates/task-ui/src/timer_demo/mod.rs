@@ -6,7 +6,7 @@
 //! shape as the native tests use, just over a local LoroDoc instead
 //! of a server-side SeaORM connection.
 
-mod sync;
+use crate::sync;
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -103,7 +103,7 @@ pub fn TimerDemo() -> Element {
         // before our subscription fires.
         let _ = tx_for_sync.unbounded_send(());
         move || {
-            let ws_url = sync_url(&format!("/sync/{DEMO_DOC_ID}"));
+            let ws_url = sync::sync_url(&format!("/sync/{DEMO_DOC_ID}"));
             let tx = tx_for_sync.clone();
             match sync::connect(&ws_url, &doc, move || {
                 let _ = tx.unbounded_send(());
@@ -264,16 +264,6 @@ fn repo_doc_clone(repo: &TimeEntryRepoLoro) -> loro::LoroDoc {
     // `LoroDoc::Clone` returns a cheap clone of the Arc-shared
     // internal state.
     repo.doc().clone()
-}
-
-/// Compute the WebSocket URL relative to the current page. Lets the
-/// demo work whether you serve it via `dx serve` (different port) or
-/// through a proxy — set the host explicitly in the env var to
-/// override.
-fn sync_url(path: &str) -> String {
-    // Hardcoded to localhost:9090 for the demo. Production would
-    // derive this from window.location + a route on the same origin.
-    format!("ws://127.0.0.1:9090{path}")
 }
 
 /// Cheap "who's this browser" tag. Reads navigator.userAgent and

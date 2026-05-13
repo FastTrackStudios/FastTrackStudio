@@ -17,6 +17,22 @@ exclude = [
     "apps/desktop",
     "apps/mobile",
     "crates/task-ui",
+    "features/agent/agent-ui",
+    "features/asset/asset-ui",
+    "features/calendar/calendar-ui",
+    "features/chat/chat-ui",
+    "features/conference/conference-ui",
+    "features/cookbook/cookbook-ui",
+    "features/email/email-ui",
+    "features/finance/finance-ui",
+    "features/fitness/fitness-ui",
+    "features/inventory/inventory-ui",
+    "features/invoice/invoice-ui",
+    "features/location/location-ui",
+    "features/person/person-ui",
+    "features/project/project-ui",
+    "features/threads/threads-ui",
+    "features/timer/timer-ui",
 ]
 resolver = "2"
 

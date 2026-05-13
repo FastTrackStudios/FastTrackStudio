@@ -26,6 +26,57 @@ crdt = { path = "../../../architect/libs/crdt" }
 timer-proto = { path = "../../features/timer/timer-proto" }
 timer-crdt = { path = "../../features/timer/timer-crdt" }
 
+# All feature trios (proto + crdt + ui). The CRDT crates live in the
+# main workspace; the UI crates are excluded (Dioxus-only). Each
+# `feature_routes/<name>.rs` wires its three deps against a shared
+# CrdtDoc and renders the dumb components from `<name>-ui`.
+asset-proto = { path = "../../features/asset/asset-proto" }
+asset-crdt = { path = "../../features/asset/asset-crdt" }
+asset-ui = { path = "../../features/asset/asset-ui" }
+agent-proto = { path = "../../features/agent/agent-proto" }
+agent-crdt = { path = "../../features/agent/agent-crdt" }
+agent-ui = { path = "../../features/agent/agent-ui" }
+calendar-proto = { path = "../../features/calendar/calendar-proto" }
+calendar-crdt = { path = "../../features/calendar/calendar-crdt" }
+calendar-ui = { path = "../../features/calendar/calendar-ui" }
+chat-proto = { path = "../../features/chat/chat-proto" }
+chat-crdt = { path = "../../features/chat/chat-crdt" }
+chat-ui = { path = "../../features/chat/chat-ui" }
+conference-proto = { path = "../../features/conference/conference-proto" }
+conference-crdt = { path = "../../features/conference/conference-crdt" }
+conference-ui = { path = "../../features/conference/conference-ui" }
+cookbook-proto = { path = "../../features/cookbook/cookbook-proto" }
+cookbook-crdt = { path = "../../features/cookbook/cookbook-crdt" }
+cookbook-ui = { path = "../../features/cookbook/cookbook-ui" }
+email-proto = { path = "../../features/email/email-proto" }
+email-crdt = { path = "../../features/email/email-crdt" }
+email-ui = { path = "../../features/email/email-ui" }
+finance-proto = { path = "../../features/finance/finance-proto" }
+finance-crdt = { path = "../../features/finance/finance-crdt" }
+finance-ui = { path = "../../features/finance/finance-ui" }
+fitness-proto = { path = "../../features/fitness/fitness-proto" }
+fitness-crdt = { path = "../../features/fitness/fitness-crdt" }
+fitness-ui = { path = "../../features/fitness/fitness-ui" }
+inventory-proto = { path = "../../features/inventory/inventory-proto" }
+inventory-crdt = { path = "../../features/inventory/inventory-crdt" }
+inventory-ui = { path = "../../features/inventory/inventory-ui" }
+invoice-proto = { path = "../../features/invoice/invoice-proto" }
+invoice-crdt = { path = "../../features/invoice/invoice-crdt" }
+invoice-ui = { path = "../../features/invoice/invoice-ui" }
+location-proto = { path = "../../features/location/location-proto" }
+location-crdt = { path = "../../features/location/location-crdt" }
+location-ui = { path = "../../features/location/location-ui" }
+person-proto = { path = "../../features/person/person-proto" }
+person-crdt = { path = "../../features/person/person-crdt" }
+person-ui = { path = "../../features/person/person-ui" }
+project-proto = { path = "../../features/project/project-proto" }
+project-crdt = { path = "../../features/project/project-crdt" }
+project-ui = { path = "../../features/project/project-ui" }
+threads-proto = { path = "../../features/threads/threads-proto" }
+threads-crdt = { path = "../../features/threads/threads-crdt" }
+threads-ui = { path = "../../features/threads/threads-ui" }
+timer-ui = { path = "../../features/timer/timer-ui" }
+
 # Wire types touched by the UI.
 uuid = { version = "1", features = ["v4", "js"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std", "wasmbind"] }

@@ -1,0 +1,18 @@
+[package]
+name = "fitness-ui"
+version = "0.1.0"
+edition = "2021"
+authors = ["Cody Wright"]
+license = "MIT OR Apache-2.0"
+
+# Dumb Dioxus components for the `fitness` feature.
+#
+# Caller hands in data + receives events. No state ownership, no Loro
+# client, no WebSocket — keeps the components portable and easy to
+# storybook in isolation. `task-ui` does the wiring.
+
+[dependencies]
+dioxus = { version = "0.7.9", default-features = false, features = ["lib"] }
+fitness-proto = { path = "../fitness-proto", default-features = false }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std", "wasmbind"] }
+uuid = { version = "1", features = ["v4", "js"] }

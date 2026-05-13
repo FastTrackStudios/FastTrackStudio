@@ -26,6 +26,43 @@ pub enum Route {
 
         #[route("/timer-demo")]
         TimerDemoRoute {},
+
+        // Per-feature multiplayer routes. Each one shares the same
+        // workspace doc id via `sync::WORKSPACE_DOC_ID`, so edits in
+        // any tab on any feature land on the same authoritative
+        // server doc.
+        #[route("/agent")]
+        AgentRoute {},
+        #[route("/assets")]
+        AssetsRoute {},
+        #[route("/calendar")]
+        CalendarRoute {},
+        #[route("/chat")]
+        ChatRoute {},
+        #[route("/conference")]
+        ConferenceRoute {},
+        #[route("/cookbook")]
+        CookbookRoute {},
+        #[route("/email")]
+        EmailRoute {},
+        #[route("/finance")]
+        FinanceRoute {},
+        #[route("/fitness")]
+        FitnessRoute {},
+        #[route("/inventory")]
+        InventoryRoute {},
+        #[route("/invoice")]
+        InvoiceRoute {},
+        #[route("/locations")]
+        LocationsRoute {},
+        #[route("/people")]
+        PeopleRoute {},
+        #[route("/projects-live")]
+        ProjectsLiveRoute {},
+        #[route("/threads")]
+        ThreadsRoute {},
+        #[route("/timer")]
+        TimerRoute {},
 }
 
 #[component]
@@ -47,6 +84,42 @@ fn InboxRoute() -> Element {
 fn TimerDemoRoute() -> Element {
     rsx! { crate::timer_demo::TimerDemo {} }
 }
+
+#[component]
+fn AssetsRoute() -> Element {
+    rsx! { crate::feature_routes::asset::AssetView {} }
+}
+
+#[component]
+fn AgentRoute() -> Element { rsx! { crate::feature_routes::agent::AgentRunView {} } }
+#[component]
+fn CalendarRoute() -> Element { rsx! { crate::feature_routes::calendar::CalendarEventView {} } }
+#[component]
+fn ChatRoute() -> Element { rsx! { crate::feature_routes::chat::MessageView {} } }
+#[component]
+fn ConferenceRoute() -> Element { rsx! { crate::feature_routes::conference::MeetingView {} } }
+#[component]
+fn CookbookRoute() -> Element { rsx! { crate::feature_routes::cookbook::RecipeView {} } }
+#[component]
+fn EmailRoute() -> Element { rsx! { crate::feature_routes::email::EmailView {} } }
+#[component]
+fn FinanceRoute() -> Element { rsx! { crate::feature_routes::finance::RevenueView {} } }
+#[component]
+fn FitnessRoute() -> Element { rsx! { crate::feature_routes::fitness::WorkoutSessionView {} } }
+#[component]
+fn InventoryRoute() -> Element { rsx! { crate::feature_routes::inventory::PantryItemView {} } }
+#[component]
+fn InvoiceRoute() -> Element { rsx! { crate::feature_routes::invoice::InvoiceView {} } }
+#[component]
+fn LocationsRoute() -> Element { rsx! { crate::feature_routes::location::LocationView {} } }
+#[component]
+fn PeopleRoute() -> Element { rsx! { crate::feature_routes::person::PersonView {} } }
+#[component]
+fn ProjectsLiveRoute() -> Element { rsx! { crate::feature_routes::project::ProjectView {} } }
+#[component]
+fn ThreadsRoute() -> Element { rsx! { crate::feature_routes::threads::CommentView {} } }
+#[component]
+fn TimerRoute() -> Element { rsx! { crate::feature_routes::timer::TimeEntryView {} } }
 
 #[component]
 fn SettingsRoute() -> Element {
@@ -249,6 +322,22 @@ fn route_title(route: &Route) -> &'static str {
         Route::InboxRoute {} => "Inbox",
         Route::SettingsRoute {} => "Settings",
         Route::TimerDemoRoute {} => "Timer demo",
+        Route::AgentRoute {} => "Agent",
+        Route::AssetsRoute {} => "Assets",
+        Route::CalendarRoute {} => "Calendar",
+        Route::ChatRoute {} => "Chat",
+        Route::ConferenceRoute {} => "Conference",
+        Route::CookbookRoute {} => "Cookbook",
+        Route::EmailRoute {} => "Email",
+        Route::FinanceRoute {} => "Finance",
+        Route::FitnessRoute {} => "Fitness",
+        Route::InventoryRoute {} => "Inventory",
+        Route::InvoiceRoute {} => "Invoices",
+        Route::LocationsRoute {} => "Locations",
+        Route::PeopleRoute {} => "People",
+        Route::ProjectsLiveRoute {} => "Projects (live)",
+        Route::ThreadsRoute {} => "Threads",
+        Route::TimerRoute {} => "Timer",
     }
 }
 

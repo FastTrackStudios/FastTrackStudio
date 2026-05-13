@@ -1,4 +1,4 @@
-//! Loro ↔ WebSocket sync glue for the Timer demo.
+//! Loro ↔ WebSocket sync glue. Shared by every per-feature route.
 //!
 //! Owns one `LoroDoc` and one `WebSocket`. Wires the four pieces the
 //! Loro authors call out as the canonical pattern:
@@ -140,3 +140,15 @@ pub fn connect(
         _on_error: on_error,
     })
 }
+
+/// Compute the WebSocket URL for the demo sync server. Hardcoded to
+/// localhost:9090 — production would derive from window.location.
+pub fn sync_url(path: &str) -> String {
+    format!("ws://127.0.0.1:9090{path}")
+}
+
+/// Shared workspace doc id — every feature route hits the same room
+/// on the sync server, so all peers' edits across all features land
+/// on the same authoritative server doc. Change to scope a route to
+/// a different room.
+pub const WORKSPACE_DOC_ID: uuid::Uuid = uuid::uuid!("00000000-0000-0000-0000-000000000001");
