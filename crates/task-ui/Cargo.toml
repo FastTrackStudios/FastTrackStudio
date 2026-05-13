@@ -56,6 +56,9 @@ inventory-ui.workspace = true
 invoice-proto = { workspace = true, features = ["fake"] }
 invoice-crdt.workspace = true
 invoice-ui.workspace = true
+knowledge-proto.workspace = true
+knowledge-crdt.workspace = true
+knowledge-ui.workspace = true
 location-proto = { workspace = true, features = ["fake"] }
 location-crdt.workspace = true
 location-ui.workspace = true
@@ -76,6 +79,7 @@ uuid = { workspace = true, features = ["v4", "js"] }
 chrono = { workspace = true, features = ["clock", "std", "wasmbind"] }
 fake.workspace = true
 tracing.workspace = true
+serde_json.workspace = true
 
 # Browser glue. Compiles cleanly on native too; the source uses
 # them only inside `cfg(target_arch = "wasm32")` blocks.

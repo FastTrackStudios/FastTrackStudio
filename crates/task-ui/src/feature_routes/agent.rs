@@ -18,6 +18,12 @@ use dioxus::prelude::*;
 use fts_ui::prelude::*;
 use futures_channel::mpsc;
 use futures_util::StreamExt;
+use knowledge_crdt::{BlockRepoLoro, PageRepoLoro, VaultRepoLoro};
+use knowledge_proto::{
+    BlockCreate as KBlockCreate, BlockRepo, PageCreate as KPageCreate, PageRepo, VaultCreate,
+    VaultRepo,
+};
+use knowledge_ui::canvas::agent_diagram::layout_agent_runs;
 use uuid::Uuid;
 use wasm_bindgen_futures::spawn_local;
 
@@ -131,6 +137,9 @@ pub fn AgentRunBoardView() -> Element {
         Rc::new(AgentRunRepoLoro::new(&doc))
     });
     let doc: Rc<CrdtDoc> = use_hook(|| Rc::new(CrdtDoc::from_loro(repo.doc().clone())));
+    let k_vault_repo: Rc<VaultRepoLoro> = use_hook(|| Rc::new(VaultRepoLoro::new(&doc)));
+    let k_page_repo: Rc<PageRepoLoro> = use_hook(|| Rc::new(PageRepoLoro::new(&doc)));
+    let k_block_repo: Rc<BlockRepoLoro> = use_hook(|| Rc::new(BlockRepoLoro::new(&doc)));
     let mut runs = use_signal::<Vec<AgentRun>>(Vec::new);
     let mut status_msg = use_signal(|| "starting…".to_string());
 
@@ -183,9 +192,104 @@ pub fn AgentRunBoardView() -> Element {
     // accepts an empty map gracefully so this stays usable today.
     let task_titles: HashMap<Uuid, String> = HashMap::new();
 
+    let open_as_whiteboard = {
+        let k_vault_repo = k_vault_repo.clone();
+        let k_page_repo = k_page_repo.clone();
+        let k_block_repo = k_block_repo.clone();
+        move |_| {
+            let runs_now = runs.read().clone();
+            let k_vault_repo = k_vault_repo.clone();
+            let k_page_repo = k_page_repo.clone();
+            let k_block_repo = k_block_repo.clone();
+            spawn_local(async move {
+                // Find or create a vault.
+                let vault_id = match k_vault_repo
+                    .list(Page { index: 0, size: 50 }, None, None)
+                    .await
+                {
+                    Ok(list) if !list.items.is_empty() => list.items[0].id,
+                    _ => match k_vault_repo
+                        .create(VaultCreate {
+                            name: "Workspace".into(),
+                            root_path: None,
+                            use_markdown_links: false,
+                            new_link_format: "shortest".into(),
+                            attachment_folder_path: String::new(),
+                            default_view_mode: "live-preview".into(),
+                            config_json: "{}".into(),
+                        })
+                        .await
+                    {
+                        Ok(v) => v.id,
+                        Err(_) => return,
+                    },
+                };
+                let now = Utc::now();
+                let basename = format!("Agent runs {}", now.format("%Y-%m-%d %H:%M"));
+                let page = match k_page_repo
+                    .create(KPageCreate {
+                        vault_id,
+                        folder_id: None,
+                        path: format!("Daily/{basename}.canvas"),
+                        basename: basename.clone(),
+                        ext: "canvas".into(),
+                        aliases: Vec::new(),
+                        frontmatter_json: "{}".into(),
+                        stat_ctime: now,
+                        stat_mtime: now,
+                        stat_size: 0,
+                        is_journal: false,
+                        journal_day: None,
+                        shadow_for_kind: None,
+                        shadow_for_id: None,
+                    })
+                    .await
+                {
+                    Ok(p) => p,
+                    Err(_) => return,
+                };
+                let tasks_by_id: HashMap<Uuid, project_proto::Task> = HashMap::new();
+                let blocks = layout_agent_runs(&runs_now, &tasks_by_id, vault_id, page.id);
+                for b in blocks {
+                    let _ = k_block_repo
+                        .create(KBlockCreate {
+                            vault_id: b.vault_id,
+                            page_id: b.page_id,
+                            parent_block_id: b.parent_block_id,
+                            sort_key: b.sort_key,
+                            kind: b.kind,
+                            content: b.content,
+                            heading_level: b.heading_level,
+                            list_ordered: b.list_ordered,
+                            list_task: b.list_task,
+                            code_lang: b.code_lang,
+                            callout_kind: b.callout_kind,
+                            callout_foldable: b.callout_foldable,
+                            properties_json: b.properties_json,
+                            obsidian_block_id: b.obsidian_block_id,
+                            collapsed: b.collapsed,
+                            refs_json: b.refs_json,
+                            canvas_node_json: b.canvas_node_json,
+                        })
+                        .await;
+                }
+                // FUTURE: deep-link nav to the new page (currently the
+                // user navigates to /knowledge → Daily folder manually).
+            });
+        }
+    };
+
     rsx! {
         div { class: "mx-auto flex max-w-7xl flex-col gap-4 p-6 lg:p-10",
-            SectionHeader { label: "Agent runs" }
+            div { class: "flex items-center justify-between",
+                SectionHeader { label: "Agent runs" }
+                Button {
+                    variant: ButtonVariant::Outline,
+                    size: ButtonSize::Small,
+                    on_click: open_as_whiteboard,
+                    "Open as whiteboard"
+                }
+            }
             Text { variant: TextVariant::Muted, "{status_msg}" }
             AgentRunBoard {
                 runs: runs(),

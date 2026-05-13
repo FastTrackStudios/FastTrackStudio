@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use dioxus::prelude::*;
 use dioxus_router::Navigator;
 use fts_ui::lucide_dioxus::{
-    BotMessageSquare, CalendarDays, ChefHat, ChevronDown, DollarSign, Dumbbell, FileText,
+    BookOpen, BotMessageSquare, CalendarDays, ChefHat, ChevronDown, DollarSign, Dumbbell, FileText,
     FlaskConical, FolderKanban, House, Inbox as InboxIcon, Mail, MapPin, Menu, MessageCircle,
     MessagesSquare, Package, Palette, Settings as SettingsIcon, Timer as TimerIcon, Users, Video,
 };
@@ -68,6 +68,8 @@ pub enum Route {
         InventoryRoute {},
         #[route("/invoice")]
         InvoiceRoute {},
+        #[route("/knowledge")]
+        KnowledgeRoute {},
         #[route("/locations")]
         LocationsRoute {},
         #[route("/people")]
@@ -173,6 +175,10 @@ fn InventoryRoute() -> Element {
 #[component]
 fn InvoiceRoute() -> Element {
     rsx! { crate::feature_routes::invoice::InvoiceView {} }
+}
+#[component]
+fn KnowledgeRoute() -> Element {
+    rsx! { crate::feature_routes::knowledge::KnowledgeView {} }
 }
 #[component]
 fn LocationsRoute() -> Element {
@@ -568,6 +574,9 @@ fn icon_package() -> Element {
 fn icon_file_text() -> Element {
     rsx! { FileText { size: 16 } }
 }
+fn icon_book_open() -> Element {
+    rsx! { BookOpen { size: 16 } }
+}
 fn icon_map_pin() -> Element {
     rsx! { MapPin { size: 16 } }
 }
@@ -663,6 +672,11 @@ fn feature_nav_tabs() -> Vec<NavTab> {
             label: "Invoice",
             icon: icon_file_text,
             route: Route::InvoiceRoute {},
+        },
+        NavTab {
+            label: "Knowledge",
+            icon: icon_book_open,
+            route: Route::KnowledgeRoute {},
         },
         NavTab {
             label: "Locations",
@@ -784,6 +798,7 @@ fn route_title(route: &Route) -> &'static str {
         Route::FitnessRoute {} => "Fitness",
         Route::InventoryRoute {} => "Inventory",
         Route::InvoiceRoute {} => "Invoices",
+        Route::KnowledgeRoute {} => "Knowledge",
         Route::LocationsRoute {} => "Locations",
         Route::PeopleRoute {} => "People",
         Route::ProjectsLiveRoute {} => "Projects (live)",

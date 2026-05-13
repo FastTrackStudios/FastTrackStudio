@@ -23,6 +23,8 @@ dioxus = { workspace = true }
 project-proto.workspace = true
 agent-proto.workspace = true
 agent-ui.workspace = true
+knowledge-proto.workspace = true
+knowledge-ui.workspace = true
 chrono = { workspace = true, features = ["clock", "std", "wasmbind"] }
 uuid = { workspace = true, features = ["v4", "js"] }
 

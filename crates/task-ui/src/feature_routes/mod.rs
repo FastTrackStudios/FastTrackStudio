@@ -13,6 +13,7 @@ pub mod finance;
 pub mod fitness;
 pub mod inventory;
 pub mod invoice;
+pub mod knowledge;
 pub mod location;
 pub mod person;
 pub mod project;

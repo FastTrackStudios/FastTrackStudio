@@ -30,6 +30,7 @@ exclude = [
     "features/project/spec",    "features/project/tests",
     "features/threads/spec",    "features/threads/tests",
     "features/timer/spec",      "features/timer/tests",
+    "features/knowledge/spec",  "features/knowledge/tests",
 ]
 resolver = "2"
 
@@ -134,7 +135,33 @@ person-ui = { path = "features/person/person-ui" }
 project-ui = { path = "features/project/project-ui" }
 threads-ui = { path = "features/threads/threads-ui" }
 timer-ui = { path = "features/timer/timer-ui" }
+knowledge = { path = "features/knowledge/knowledge" }
+knowledge-proto = { path = "features/knowledge/knowledge-proto" }
+knowledge-crdt = { path = "features/knowledge/knowledge-crdt" }
+knowledge-db = { path = "features/knowledge/knowledge-db" }
+knowledge-ui = { path = "features/knowledge/knowledge-ui" }
+knowledge-sync = { path = "features/knowledge/knowledge-sync" }
+
+# Filesystem walker — used by knowledge-sync to crawl Obsidian vault
+# directories. Server-only dep; never reaches wasm.
+walkdir = "2"
+
+# Fuzzy matcher used by the knowledge live-preview editor pickers
+# (wikilink/blockref/tag/slash-command). Same crate used internally by
+# helix and other rust TUIs — fast prefix-friendly bonuses + Unicode
+# normalization. Wasm-clean.
+nucleo-matcher = "0.3"
 fts-ui = { path = "../FastTrackStudio/fts-ui/crates/fts-ui", default-features = false }
+
+# Ordered-map for round-trippable frontmatter key preservation
+# (needed by knowledge-proto's obsidian helpers).
+indexmap = "2"
+
+# Regex engine — knowledge-proto uses it for link/embed/tag scanning.
+regex = "1"
+
+# YAML parsing/serialization for Obsidian frontmatter round-trip.
+serde_yaml = "0.9"
 
 [workspace.dependencies.facet]
 version = "0.46"

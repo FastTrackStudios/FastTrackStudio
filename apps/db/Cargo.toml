@@ -21,6 +21,7 @@ publish = false
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
+chrono.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 eyre.workspace = true
@@ -65,3 +66,5 @@ threads-proto = { workspace = true, features = ["fake"] }
 threads-crdt.workspace = true
 timer-proto = { workspace = true, features = ["fake"] }
 timer-crdt.workspace = true
+knowledge-proto.workspace = true
+knowledge-crdt.workspace = true

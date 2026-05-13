@@ -8,6 +8,10 @@ use agent_proto::{AgentConversationRepo, GitRepoConnectionRepo};
 use chat_proto::MessageRepo;
 use crdt::{CrdtDoc, Persistence};
 use crdt_seaorm::SeaOrmPersistence;
+use knowledge_proto::{
+    BaseRepo as _, BlockRepo as _, FolderRepo as _, KnowledgeTagRepo as _, PageRepo as _,
+    VaultRepo as _,
+};
 use tracing::info;
 use uuid::Uuid;
 
@@ -285,6 +289,184 @@ async fn seed_all(cdoc: &CrdtDoc) -> eyre::Result<()> {
         })
         .await?;
     info!("  agent: 25 runs, 6 log lines, 2 git repo connections");
+
+    // ── Knowledge (Obsidian-compatible PKM/outliner) ───────────
+    // Phase A seed: 1 demo vault, 50 pages, ~300 blocks, 8 tags,
+    // 2 bases. Mix of paragraphs / headings / lists / code, with
+    // ~5 pages tagged `#projects/alpha` or `#books`. Bases are
+    // YAML-only; the UI dispatches them in a later phase.
+    let kvaults = knowledge_crdt::VaultRepoLoro::new(cdoc);
+    let kfolders = knowledge_crdt::FolderRepoLoro::new(cdoc);
+    let kpages = knowledge_crdt::PageRepoLoro::new(cdoc);
+    let kblocks = knowledge_crdt::BlockRepoLoro::new(cdoc);
+    let ktags = knowledge_crdt::KnowledgeTagRepoLoro::new(cdoc);
+    let kbases = knowledge_crdt::BaseRepoLoro::new(cdoc);
+
+    let vault = kvaults
+        .create(knowledge_proto::VaultCreate {
+            name: "Demo Vault".into(),
+            root_path: None,
+            use_markdown_links: false,
+            new_link_format: "shortest".into(),
+            attachment_folder_path: "attachments".into(),
+            default_view_mode: "live-preview".into(),
+            config_json: "{}".into(),
+        })
+        .await?;
+
+    let inbox_folder = kfolders
+        .create(knowledge_proto::FolderCreate {
+            vault_id: vault.id,
+            path: "inbox".into(),
+            parent_id: None,
+        })
+        .await?;
+    let projects_folder = kfolders
+        .create(knowledge_proto::FolderCreate {
+            vault_id: vault.id,
+            path: "projects".into(),
+            parent_id: None,
+        })
+        .await?;
+
+    for tag in [
+        "projects/alpha",
+        "projects/beta",
+        "books",
+        "research",
+        "todo",
+        "ideas",
+        "people",
+        "meetings",
+    ] {
+        ktags
+            .create(knowledge_proto::KnowledgeTagCreate {
+                vault_id: vault.id,
+                tag: tag.into(),
+                color: None,
+                description: None,
+            })
+            .await?;
+    }
+
+    let now_ts = chrono::Utc::now();
+    let mut block_total = 0usize;
+    for i in 0..50usize {
+        let folder_id = if i % 5 == 0 {
+            Some(projects_folder.id)
+        } else if i % 7 == 0 {
+            Some(inbox_folder.id)
+        } else {
+            None
+        };
+        let basename = format!("Page-{:02}", i);
+        let path = match folder_id {
+            Some(fid) if fid == projects_folder.id => format!("projects/{basename}.md"),
+            Some(fid) if fid == inbox_folder.id => format!("inbox/{basename}.md"),
+            _ => format!("{basename}.md"),
+        };
+        let page = kpages
+            .create(knowledge_proto::PageCreate {
+                vault_id: vault.id,
+                folder_id,
+                path,
+                basename: basename.clone(),
+                ext: "md".into(),
+                aliases: Vec::new(),
+                frontmatter_json: "[]".into(),
+                stat_ctime: now_ts,
+                stat_mtime: now_ts,
+                stat_size: 0,
+                is_journal: false,
+                journal_day: None,
+                shadow_for_kind: None,
+                shadow_for_id: None,
+            })
+            .await?;
+
+        // 4–8 blocks per page = ~300 total across 50 pages.
+        let block_count = 4 + (i % 5);
+        for b in 0..block_count {
+            let (kind, content) = if b == 0 {
+                ("heading".to_string(), basename.clone())
+            } else if b == 1 && i % 5 == 0 {
+                (
+                    "paragraph".into(),
+                    format!("Mentions [[Page-{:02}]] and #projects/alpha.", (i + 3) % 50),
+                )
+            } else if b == 2 && i % 11 == 0 {
+                ("code".into(), "let x = 42;".into())
+            } else if b == 3 {
+                (
+                    "list_item".into(),
+                    format!("an item about #books topic {i}"),
+                )
+            } else {
+                (
+                    "paragraph".into(),
+                    format!(
+                        "Paragraph {b} on page {i} — see [[Page-{:02}]].",
+                        (i + 1) % 50
+                    ),
+                )
+            };
+            let heading_level = if kind == "heading" { Some(1i32) } else { None };
+            let code_lang = if kind == "code" {
+                Some("rust".into())
+            } else {
+                None
+            };
+            kblocks
+                .create(knowledge_proto::BlockCreate {
+                    vault_id: vault.id,
+                    page_id: page.id,
+                    parent_block_id: None,
+                    sort_key: format!("{:04}", b),
+                    kind,
+                    content,
+                    heading_level,
+                    list_ordered: false,
+                    list_task: None,
+                    code_lang,
+                    callout_kind: None,
+                    callout_foldable: false,
+                    properties_json: "[]".into(),
+                    obsidian_block_id: None,
+                    collapsed: false,
+                    refs_json: "[]".into(),
+                    canvas_node_json: None,
+                })
+                .await?;
+            block_total += 1;
+        }
+    }
+
+    kbases
+        .create(knowledge_proto::BaseCreate {
+            vault_id: vault.id,
+            page_id: None,
+            name: "All Projects".into(),
+            definition_yaml:
+                "filters:\n  and:\n    - tag: projects\nviews:\n  - type: table\n    name: All\n"
+                    .into(),
+            parsed_filter_json: "{}".into(),
+            parsed_views_json: "[]".into(),
+        })
+        .await?;
+    kbases
+        .create(knowledge_proto::BaseCreate {
+            vault_id: vault.id,
+            page_id: None,
+            name: "Books".into(),
+            definition_yaml:
+                "filters:\n  and:\n    - tag: books\nviews:\n  - type: gallery\n    name: Library\n"
+                    .into(),
+            parsed_filter_json: "{}".into(),
+            parsed_views_json: "[]".into(),
+        })
+        .await?;
+
+    info!("  knowledge: 1 vault, 2 folders, 50 pages, {block_total} blocks, 8 tags, 2 bases");
 
     // ── CalDAV reference data ─────────────────────────────────
     let caldav_acct = caldav_crdt::CalDavAccountRepoLoro::new(cdoc);

@@ -9,6 +9,9 @@ use agent_ui::hermes_kit::AgentRunPanel;
 use dioxus::prelude::*;
 use fts_ui::lucide_dioxus::{Copy as CopyIcon, Plus, Trash2, X};
 use fts_ui::prelude::*;
+use knowledge_ui::common::{BlockBrief, PageBrief};
+use knowledge_ui::editor::{BlockUpdate as KnowledgeBlockUpdate, StructuralOp};
+use knowledge_ui::{EmbedDensity, OutlinerEmbed};
 use project_proto::{Cycle, Milestone, Task, TaskUpdate};
 use uuid::Uuid;
 
@@ -45,10 +48,21 @@ pub fn TaskDetailSheet(
     #[props(default)] on_cancel_run: EventHandler<Uuid>,
     #[props(default)] on_open_run_external: EventHandler<String>,
     #[props(default)] on_dispatch_agent: EventHandler<Uuid>,
+    // ── Knowledge / Notes extensions ──────────────────────────────
+    /// `None` disables the Notes tab embed (shows an EmptyState).
+    #[props(default)]
+    vault_id_for_shadow: Option<Uuid>,
+    #[props(default)] shadow_blocks: Vec<knowledge_proto::Block>,
+    #[props(default)] available_pages: Vec<PageBrief>,
+    #[props(default)] available_blocks: Vec<BlockBrief>,
+    #[props(default)] on_shadow_block_patch: EventHandler<(Uuid, KnowledgeBlockUpdate)>,
+    #[props(default)] on_shadow_structural: EventHandler<StructuralOp>,
+    #[props(default)] on_open_knowledge_page: EventHandler<Uuid>,
+    #[props(default)] on_open_knowledge_block: EventHandler<Uuid>,
 ) -> Element {
     let open = task.is_some();
     let mut confirm_open = use_signal(|| false);
-    let mut active_tab = use_signal(|| "subtasks".to_string());
+    let mut active_tab = use_signal(|| "notes".to_string());
     let new_subtask = use_signal(String::new);
 
     // Field-local signals are reconstructed each render based on `task` —
@@ -136,25 +150,52 @@ pub fn TaskDetailSheet(
                                         on_change: move |v: String| active_tab.set(v),
                                         TabList {
                                             TabTrigger { value: "comments", index: 0usize, "Comments" }
-                                            TabTrigger { value: "activity", index: 1usize, "Activity" }
-                                            TabTrigger { value: "subtasks", index: 2usize, "Subtasks" }
-                                            TabTrigger { value: "git", index: 3usize, "Git" }
-                                            TabTrigger { value: "agent", index: 4usize, "Agent" }
+                                            TabTrigger { value: "notes", index: 1usize, "Notes" }
+                                            TabTrigger { value: "activity", index: 2usize, "Activity" }
+                                            TabTrigger { value: "subtasks", index: 3usize, "Subtasks" }
+                                            TabTrigger { value: "git", index: 4usize, "Git" }
+                                            TabTrigger { value: "agent", index: 5usize, "Agent" }
                                         }
                                         TabContent { value: "comments", index: 0usize,
                                             div { class: "py-4 text-xs text-muted-foreground", "Comments coming soon." }
                                         }
-                                        TabContent { value: "activity", index: 1usize,
+                                        TabContent { value: "notes", index: 1usize,
+                                            {
+                                                match vault_id_for_shadow {
+                                                    Some(_vault_id) => {
+                                                        let shadow_id = knowledge_proto::shadow_page_id("task", task_id);
+                                                        rsx! {
+                                                            OutlinerEmbed {
+                                                                page_id: shadow_id,
+                                                                blocks: shadow_blocks.clone(),
+                                                                density: EmbedDensity::Comfortable,
+                                                                max_height: None,
+                                                                available_pages: available_pages.clone(),
+                                                                available_blocks: available_blocks.clone(),
+                                                                on_block_patch: move |evt| on_shadow_block_patch.call(evt),
+                                                                on_structural: move |op| on_shadow_structural.call(op),
+                                                                on_open_page: move |id| on_open_knowledge_page.call(id),
+                                                                on_open_block: move |id| on_open_knowledge_block.call(id),
+                                                            }
+                                                        }
+                                                    }
+                                                    None => rsx! {
+                                                        EmptyState { message: "Mount a vault to enable rich notes." }
+                                                    },
+                                                }
+                                            }
+                                        }
+                                        TabContent { value: "activity", index: 2usize,
                                             div { class: "py-4 text-xs text-muted-foreground", "Activity log coming soon." }
                                         }
-                                        TabContent { value: "git", index: 3usize,
+                                        TabContent { value: "git", index: 4usize,
                                             TaskGitPanel {
                                                 task: t.clone(),
                                                 on_set_branch_name: move |s| on_set_branch_name.call(s),
                                                 on_clear_branch_name: move |_| on_clear_branch_name.call(()),
                                             }
                                         }
-                                        TabContent { value: "agent", index: 4usize,
+                                        TabContent { value: "agent", index: 5usize,
                                             AgentRunPanel {
                                                 run: run.clone(),
                                                 log_lines: log_lines.clone(),
@@ -163,7 +204,7 @@ pub fn TaskDetailSheet(
                                                 on_dispatch_new: move |_| on_dispatch_agent.call(task_id),
                                             }
                                         }
-                                        TabContent { value: "subtasks", index: 2usize,
+                                        TabContent { value: "subtasks", index: 3usize,
                                             div { class: "flex flex-col gap-2 py-3",
                                                 for sub in subtasks.iter().cloned() {
                                                     {

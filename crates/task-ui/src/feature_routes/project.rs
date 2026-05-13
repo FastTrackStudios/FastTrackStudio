@@ -25,6 +25,13 @@ use dioxus::prelude::*;
 use fts_ui::prelude::*;
 use futures_channel::mpsc;
 use futures_util::StreamExt;
+use knowledge_crdt::{BlockRepoLoro, PageRepoLoro, VaultRepoLoro};
+use knowledge_proto::{
+    Block as KBlock, BlockCreate as KBlockCreate, BlockRepo, BlockUpdate as KBlockUpdate,
+    Page as KPage, PageCreate as KPageCreate, PageRepo, VaultCreate, VaultRepo, shadow_page_id,
+};
+use knowledge_ui::common::{BlockBrief, PageBrief, block_brief_from, page_brief_from};
+use knowledge_ui::editor::{BlockUpdate as EditorBlockUpdate, StructuralOp};
 use project_crdt::{CrdtDoc, ProjectRepoLoro};
 use project_proto::{Project, ProjectCreate, ProjectRepo, Task, TaskUpdate, branch_slug};
 use project_ui::{
@@ -177,6 +184,9 @@ pub fn ProjectView() -> Element {
     let agent_run_repo: Rc<AgentRunRepoLoro> = use_hook(|| Rc::new(AgentRunRepoLoro::new(&doc)));
     let log_line_repo: Rc<AgentLogLineRepoLoro> =
         use_hook(|| Rc::new(AgentLogLineRepoLoro::new(&doc)));
+    let k_vault_repo: Rc<VaultRepoLoro> = use_hook(|| Rc::new(VaultRepoLoro::new(&doc)));
+    let k_page_repo: Rc<PageRepoLoro> = use_hook(|| Rc::new(PageRepoLoro::new(&doc)));
+    let k_block_repo: Rc<BlockRepoLoro> = use_hook(|| Rc::new(BlockRepoLoro::new(&doc)));
 
     let mut items = use_signal::<Vec<Project>>(Vec::new);
     let mut status_msg = use_signal(|| "starting…".to_string());
@@ -189,14 +199,46 @@ pub fn ProjectView() -> Element {
     let mut agent_logs = use_signal::<Vec<AgentLogLine>>(Vec::new);
     let mut dispatch_dialog_open = use_signal(|| false);
     let mut dispatch_target = use_signal::<Option<Uuid>>(|| None);
+    let mut k_vault_id = use_signal::<Option<Uuid>>(|| None);
+    let mut k_pages = use_signal::<Vec<KPage>>(Vec::new);
+    let mut k_blocks = use_signal::<Vec<KBlock>>(Vec::new);
+    let mut k_seeded = use_signal(|| false);
 
     let refresh_tx: mpsc::UnboundedSender<()> = use_hook(|| {
         let (tx, mut rx) = mpsc::unbounded::<()>();
         let repo_for_loop = repo.clone();
         let run_repo_for_loop = agent_run_repo.clone();
         let log_repo_for_loop = log_line_repo.clone();
+        let k_page_repo_loop = k_page_repo.clone();
+        let k_block_repo_loop = k_block_repo.clone();
         spawn_local(async move {
             while rx.next().await.is_some() {
+                if let Ok(list) = k_page_repo_loop
+                    .list(
+                        Page {
+                            index: 0,
+                            size: 1000,
+                        },
+                        None,
+                        None,
+                    )
+                    .await
+                {
+                    k_pages.set(list.items);
+                }
+                if let Ok(list) = k_block_repo_loop
+                    .list(
+                        Page {
+                            index: 0,
+                            size: 10_000,
+                        },
+                        None,
+                        None,
+                    )
+                    .await
+                {
+                    k_blocks.set(list.items);
+                }
                 if let Ok(list) = repo_for_loop
                     .list(
                         Page {
@@ -263,6 +305,44 @@ pub fn ProjectView() -> Element {
         }
     });
 
+    // Ensure a default knowledge vault exists so the Notes tab works.
+    {
+        let k_vault_repo = k_vault_repo.clone();
+        let tx = refresh_tx.clone();
+        use_effect(move || {
+            if *k_seeded.read() {
+                return;
+            }
+            k_seeded.set(true);
+            let k_vault_repo = k_vault_repo.clone();
+            let tx = tx.clone();
+            spawn_local(async move {
+                let pg = Page { index: 0, size: 50 };
+                let existing = k_vault_repo.list(pg, None, None).await;
+                let id = match existing {
+                    Ok(list) if !list.items.is_empty() => list.items[0].id,
+                    _ => match k_vault_repo
+                        .create(VaultCreate {
+                            name: "Workspace".into(),
+                            root_path: None,
+                            use_markdown_links: false,
+                            new_link_format: "shortest".into(),
+                            attachment_folder_path: String::new(),
+                            default_view_mode: "live-preview".into(),
+                            config_json: "{}".into(),
+                        })
+                        .await
+                    {
+                        Ok(v) => v.id,
+                        Err(_) => return,
+                    },
+                };
+                k_vault_id.set(Some(id));
+                let _ = tx.unbounded_send(());
+            });
+        });
+    }
+
     // Seed sample tasks once the first project lands.
     use_effect(move || {
         let cur_items = items.read().clone();
@@ -280,6 +360,88 @@ pub fn ProjectView() -> Element {
     let mut selected_set = use_signal::<HashSet<Uuid>>(HashSet::new);
     let mut palette_open = use_signal(|| false);
     let mut shell_tab = use_signal(|| "pm".to_string());
+
+    // When the active task changes, ensure a shadow page + seed block.
+    {
+        let k_page_repo = k_page_repo.clone();
+        let k_block_repo = k_block_repo.clone();
+        let tx = refresh_tx.clone();
+        use_effect(move || {
+            let Some(task_id) = *selected_task.read() else {
+                return;
+            };
+            let Some(vault_id) = *k_vault_id.read() else {
+                return;
+            };
+            let shadow_id = shadow_page_id("task", task_id);
+            if k_pages.read().iter().any(|p| p.id == shadow_id) {
+                return;
+            }
+            let k_page_repo = k_page_repo.clone();
+            let k_block_repo = k_block_repo.clone();
+            let tx = tx.clone();
+            spawn_local(async move {
+                let now = Utc::now();
+                let _ = k_page_repo
+                    .create(KPageCreate {
+                        vault_id,
+                        folder_id: None,
+                        path: format!("shadow/task/{task_id}.md"),
+                        basename: format!("task-{task_id}"),
+                        ext: "md".into(),
+                        aliases: Vec::new(),
+                        frontmatter_json: "{}".into(),
+                        stat_ctime: now,
+                        stat_mtime: now,
+                        stat_size: 0,
+                        is_journal: false,
+                        journal_day: None,
+                        shadow_for_kind: Some("task".into()),
+                        shadow_for_id: Some(task_id),
+                    })
+                    .await;
+                if let Ok(list) = k_page_repo
+                    .list(
+                        Page {
+                            index: 0,
+                            size: 1000,
+                        },
+                        None,
+                        None,
+                    )
+                    .await
+                {
+                    if let Some(p) = list.items.iter().find(|p| {
+                        p.shadow_for_kind.as_deref() == Some("task")
+                            && p.shadow_for_id == Some(task_id)
+                    }) {
+                        let _ = k_block_repo
+                            .create(KBlockCreate {
+                                vault_id,
+                                page_id: p.id,
+                                parent_block_id: None,
+                                sort_key: "a000".into(),
+                                kind: "paragraph".into(),
+                                content: String::new(),
+                                heading_level: None,
+                                list_ordered: false,
+                                list_task: None,
+                                code_lang: None,
+                                callout_kind: None,
+                                callout_foldable: false,
+                                properties_json: "{}".into(),
+                                obsidian_block_id: None,
+                                collapsed: false,
+                                refs_json: "[]".into(),
+                                canvas_node_json: None,
+                            })
+                            .await;
+                    }
+                }
+                let _ = tx.unbounded_send(());
+            });
+        });
+    }
 
     // ── Callbacks: project ────────────────────────────────────────────
     let on_create_project = {
@@ -735,6 +897,68 @@ pub fn ProjectView() -> Element {
             // Slide-over inspector.
             {
                 let sheet_task_id = task_for_sheet.as_ref().map(|t| t.id);
+                let av = *k_vault_id.read();
+                let shadow_id = sheet_task_id.map(|tid| shadow_page_id("task", tid));
+                let shadow_blocks: Vec<KBlock> = match shadow_id {
+                    Some(sid) => {
+                        let mut bs: Vec<KBlock> = k_blocks
+                            .read()
+                            .iter()
+                            .filter(|b| b.page_id == sid)
+                            .cloned()
+                            .collect();
+                        bs.sort_by(|a, b| a.sort_key.cmp(&b.sort_key));
+                        bs
+                    }
+                    None => Vec::new(),
+                };
+                let k_page_titles: std::collections::HashMap<Uuid, String> = k_pages
+                    .read()
+                    .iter()
+                    .map(|p| (p.id, p.basename.clone()))
+                    .collect();
+                let available_pages: Vec<PageBrief> =
+                    k_pages.read().iter().map(page_brief_from).collect();
+                let available_blocks: Vec<BlockBrief> = k_blocks
+                    .read()
+                    .iter()
+                    .map(|b| {
+                        let title = k_page_titles.get(&b.page_id).cloned().unwrap_or_default();
+                        block_brief_from(b, &title)
+                    })
+                    .collect();
+
+                let k_block_repo_for_patch = k_block_repo.clone();
+                let tx_for_patch = refresh_tx.clone();
+                let on_shadow_block_patch =
+                    move |(id, patch): (Uuid, EditorBlockUpdate)| {
+                        let repo = k_block_repo_for_patch.clone();
+                        let tx = tx_for_patch.clone();
+                        spawn_local(async move {
+                            let mut update = KBlockUpdate::default();
+                            match patch {
+                                EditorBlockUpdate::SetContent(c) => update.content = Some(c),
+                                EditorBlockUpdate::SetHeadingLevel(l) => {
+                                    update.heading_level = Some(l);
+                                }
+                                EditorBlockUpdate::SetTaskMark(m) => update.list_task = Some(m),
+                                EditorBlockUpdate::SetCollapsed(b) => update.collapsed = Some(b),
+                                EditorBlockUpdate::SetKind(k) => update.kind = Some(k),
+                                EditorBlockUpdate::SetProperties(p) => {
+                                    update.properties_json = Some(p);
+                                }
+                            }
+                            let _ = repo.update(id, update).await;
+                            let _ = tx.unbounded_send(());
+                        });
+                    };
+
+                let on_shadow_structural = move |_op: StructuralOp| {
+                    // FUTURE: route through KnowledgeService (split / merge /
+                    // indent / outdent / move). v1 leaves these as no-ops so
+                    // the embed renders without errors.
+                };
+
                 rsx! {
                     TaskDetailSheet {
                         task: task_for_sheet,
@@ -742,6 +966,18 @@ pub fn ProjectView() -> Element {
                         available_cycles: Vec::new(),
                         available_milestones: Vec::new(),
                         available_assignees,
+                        vault_id_for_shadow: av,
+                        shadow_blocks: shadow_blocks,
+                        available_pages: available_pages,
+                        available_blocks: available_blocks,
+                        on_shadow_block_patch: on_shadow_block_patch,
+                        on_shadow_structural: on_shadow_structural,
+                        on_open_knowledge_page: move |_id: Uuid| {
+                            // FUTURE: deep-link nav to /knowledge?page=<id>.
+                        },
+                        on_open_knowledge_block: move |_id: Uuid| {
+                            // FUTURE: deep-link nav to /knowledge?block=<id>.
+                        },
                         on_close: move |_| selected_task.set(None),
                         on_patch: move |(id, u)| patch_task((id, u)),
                         on_subtask_add: move |_title| {
