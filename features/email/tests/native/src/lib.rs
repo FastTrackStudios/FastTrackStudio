@@ -1,45 +1,79 @@
-//! Native integration tests for the `email` feature. Drives
-//! the wire contract against the Loro-backed implementation through
-//! an ephemeral `CrdtDoc`.
-
 #![cfg(test)]
 
+use architect::Page;
+use chrono::Utc;
 use email_crdt::{CrdtDoc, EmailRepoLoro};
-use email_proto::{EmailCreate, EmailRepo};
+use email_proto::{EmailCreate, EmailRepo, EmailUpdate};
+use loro::ExportMode;
 
 fn repo() -> EmailRepoLoro {
     EmailRepoLoro::new(&CrdtDoc::ephemeral())
 }
 
-#[tokio::test]
-async fn create_then_get_round_trip() {
-    let r = repo();
-    let created = r
-        .create(EmailCreate {
-            name: "alpha".into(),
-        })
-        .await
-        .unwrap();
-    let got = r.get(created.id).await.unwrap();
-    assert_eq!(got.id, created.id);
-    assert_eq!(got.name, "alpha");
+fn fixture() -> EmailCreate {
+    EmailCreate {
+        message_id: "<abc123@example.com>".into(),
+        subject: "Hello world".into(),
+        from_addr: "alice@example.com".into(),
+        to_addrs: vec!["bob@example.com".into()],
+        cc_addrs: vec!["carol@example.com".into()],
+        bcc_addrs: vec![],
+        body: Some("greetings".into()),
+        received_at: Utc::now(),
+        read: false,
+        starred: false,
+        folder: Some("inbox".into()),
+        thread_id: Some("thread-1".into()),
+        tags: vec!["work".into(), "important".into()],
+    }
 }
 
-// Concurrent-replica merge — two repos backed by independent docs
-// exchange their bytes and converge. This is the test that says
-// "yes, this is actually a CRDT."
 #[tokio::test]
-async fn two_replicas_converge_after_sync() {
-    use loro::ExportMode;
+async fn round_trip_all_fields() {
+    let r = repo();
+    let e = r.create(fixture()).await.unwrap();
+    let got = r.get(e.id).await.unwrap();
+    assert_eq!(got.message_id, "<abc123@example.com>");
+    assert_eq!(got.subject, "Hello world");
+    assert_eq!(got.from_addr, "alice@example.com");
+    assert_eq!(got.to_addrs, vec!["bob@example.com".to_string()]);
+    assert_eq!(got.cc_addrs, vec!["carol@example.com".to_string()]);
+    assert!(got.bcc_addrs.is_empty());
+    assert_eq!(got.body.as_deref(), Some("greetings"));
+    assert!(!got.read);
+    assert!(!got.starred);
+    assert_eq!(got.folder.as_deref(), Some("inbox"));
+    assert_eq!(got.thread_id.as_deref(), Some("thread-1"));
+    assert_eq!(got.tags, vec!["work".to_string(), "important".into()]);
+}
+
+#[tokio::test]
+async fn update_marks_read_and_starred() {
+    let r = repo();
+    let e = r.create(fixture()).await.unwrap();
+    let updated = r
+        .update(
+            e.id,
+            EmailUpdate {
+                read: Some(true),
+                starred: Some(true),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert!(updated.read);
+    assert!(updated.starred);
+}
+
+#[tokio::test]
+async fn two_replicas_converge() {
     let a = repo();
     let b = repo();
-    a.create(EmailCreate {
-        name: "from-a".into(),
-    })
-    .await
-    .unwrap();
+    a.create(fixture()).await.unwrap();
     b.create(EmailCreate {
-        name: "from-b".into(),
+        message_id: "<def456@example.com>".into(),
+        ..fixture()
     })
     .await
     .unwrap();
@@ -47,28 +81,32 @@ async fn two_replicas_converge_after_sync() {
     let bb = b.doc().export(ExportMode::all_updates()).unwrap();
     b.doc().import(&ab).unwrap();
     a.doc().import(&bb).unwrap();
-    let a_list = a
-        .list(
-            architect::Page {
+    assert_eq!(
+        a.list(
+            Page {
                 index: 0,
-                size: 100,
+                size: 100
             },
             None,
-            None,
+            None
         )
         .await
-        .unwrap();
-    let b_list = b
-        .list(
-            architect::Page {
+        .unwrap()
+        .total,
+        2
+    );
+    assert_eq!(
+        b.list(
+            Page {
                 index: 0,
-                size: 100,
+                size: 100
             },
             None,
-            None,
+            None
         )
         .await
-        .unwrap();
-    assert_eq!(a_list.total, 2);
-    assert_eq!(b_list.total, 2);
+        .unwrap()
+        .total,
+        2
+    );
 }

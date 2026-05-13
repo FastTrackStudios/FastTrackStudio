@@ -116,6 +116,7 @@ dependencies = [
  "agent-crdt",
  "agent-proto",
  "architect",
+ "chrono",
  "crdt",
  "fake",
  "loro",
@@ -381,6 +382,7 @@ dependencies = [
  "architect",
  "asset-crdt",
  "asset-proto",
+ "chrono",
  "crdt",
  "fake",
  "loro",
@@ -1406,6 +1408,7 @@ name = "conference-tests-native"
 version = "0.1.0"
 dependencies = [
  "architect",
+ "chrono",
  "conference-crdt",
  "conference-proto",
  "crdt",
@@ -2332,6 +2335,7 @@ name = "email-tests-native"
 version = "0.1.0"
 dependencies = [
  "architect",
+ "chrono",
  "crdt",
  "email-crdt",
  "email-proto",

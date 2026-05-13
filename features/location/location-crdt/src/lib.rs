@@ -1,22 +1,20 @@
-//! Loro-backed `LocationRepo`. Source of truth lives in a LoroDoc;
-//! persistence is the concern of `location-db`.
+//! Loro-backed `LocationRepo`.
 
 use architect::{Page, RepoError, SortOrder};
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use crdt::EntityCrdt;
+use crdt::codec::{
+    read_dt, read_opt_str, read_opt_uuid, read_str, read_string_list, read_uuid, write_dt,
+    write_opt_str, write_opt_string_list, write_opt_uuid, write_str, write_string_list, write_uuid,
+};
 use location_proto::{Location, LocationCreate, LocationList, LocationRepo, LocationUpdate};
-use loro::{LoroMap, LoroValue};
+use loro::LoroMap;
 use uuid::Uuid;
 
 pub use crdt::{CrdtDoc, LoroRepo};
 
-/// Zero-sized marker for the `EntityCrdt` impl. Lets us implement
-/// the foreign `EntityCrdt` trait without owning the wire struct.
 pub struct LocationEntity;
 
-/// Newtype-wrapped repo, implements `LocationRepo`. Construct from a
-/// `CrdtDoc` — multiple repos over different entity types can share
-/// one doc, mutations commit together, exports cover the whole doc.
 #[derive(Clone)]
 pub struct LocationRepoLoro {
     inner: LoroRepo<LocationEntity>,
@@ -26,22 +24,13 @@ impl LocationRepoLoro {
     pub fn new(doc: &CrdtDoc) -> Self {
         Self { inner: doc.repo() }
     }
-
     pub fn inner(&self) -> &LoroRepo<LocationEntity> {
         &self.inner
     }
-
     pub fn doc(&self) -> &loro::LoroDoc {
         self.inner.doc()
     }
 }
-
-// ── EntityCrdt impl ───────────────────────────────────────────────────
-//
-// Container layout: a top-level "location_items" LoroMap keyed by
-// uuid string; each entry is a sub-LoroMap with the wire fields.
-// For features with hierarchy or ordering, swap this for a LoroTree
-// or LoroMovableList — the trait surface stays the same.
 
 impl EntityCrdt for LocationEntity {
     type Wire = Location;
@@ -49,10 +38,10 @@ impl EntityCrdt for LocationEntity {
     type Update = LocationUpdate;
     type List = LocationList;
 
-    const ROOT: &'static str = "location_items";
+    const ROOT: &'static str = "locations";
 
-    fn id(wire: &Location) -> Uuid {
-        wire.id
+    fn id(w: &Location) -> Uuid {
+        w.id
     }
 
     fn from_create(input: LocationCreate) -> Location {
@@ -60,36 +49,105 @@ impl EntityCrdt for LocationEntity {
         Location {
             id: Uuid::new_v4(),
             name: input.name,
+            kind: input.kind,
+            address1: input.address1,
+            address2: input.address2,
+            city: input.city,
+            state: input.state,
+            postal_code: input.postal_code,
+            country_code: input.country_code,
+            contact_name: input.contact_name,
+            contact_email: input.contact_email,
+            parent_id: input.parent_id,
+            notes: input.notes,
+            tags: input.tags,
             created_at: now,
             updated_at: now,
         }
     }
 
-    fn encode_into(map: &LoroMap, e: &Location) -> Result<(), RepoError> {
-        map.insert("id", e.id.to_string()).map_err(loro_err)?;
-        map.insert("name", e.name.as_str()).map_err(loro_err)?;
-        map.insert("created_at", e.created_at.to_rfc3339())
-            .map_err(loro_err)?;
-        map.insert("updated_at", e.updated_at.to_rfc3339())
-            .map_err(loro_err)?;
+    fn encode_into(m: &LoroMap, e: &Location) -> Result<(), RepoError> {
+        write_uuid(m, "id", e.id)?;
+        write_str(m, "name", &e.name)?;
+        write_opt_str(m, "kind", e.kind.as_deref())?;
+        write_opt_str(m, "address1", e.address1.as_deref())?;
+        write_opt_str(m, "address2", e.address2.as_deref())?;
+        write_opt_str(m, "city", e.city.as_deref())?;
+        write_opt_str(m, "state", e.state.as_deref())?;
+        write_opt_str(m, "postal_code", e.postal_code.as_deref())?;
+        write_opt_str(m, "country_code", e.country_code.as_deref())?;
+        write_opt_str(m, "contact_name", e.contact_name.as_deref())?;
+        write_opt_str(m, "contact_email", e.contact_email.as_deref())?;
+        write_opt_uuid(m, "parent_id", e.parent_id)?;
+        write_opt_str(m, "notes", e.notes.as_deref())?;
+        write_string_list(m, "tags", &e.tags)?;
+        write_dt(m, "created_at", e.created_at)?;
+        write_dt(m, "updated_at", e.updated_at)?;
         Ok(())
     }
 
     fn decode_from(m: &LoroMap) -> Result<Location, RepoError> {
         Ok(Location {
-            id: parse_uuid(read_str(m, "id")?)?,
+            id: read_uuid(m, "id")?,
             name: read_str(m, "name")?,
-            created_at: parse_dt(read_str(m, "created_at")?)?,
-            updated_at: parse_dt(read_str(m, "updated_at")?)?,
+            kind: read_opt_str(m, "kind")?,
+            address1: read_opt_str(m, "address1")?,
+            address2: read_opt_str(m, "address2")?,
+            city: read_opt_str(m, "city")?,
+            state: read_opt_str(m, "state")?,
+            postal_code: read_opt_str(m, "postal_code")?,
+            country_code: read_opt_str(m, "country_code")?,
+            contact_name: read_opt_str(m, "contact_name")?,
+            contact_email: read_opt_str(m, "contact_email")?,
+            parent_id: read_opt_uuid(m, "parent_id")?,
+            notes: read_opt_str(m, "notes")?,
+            tags: read_string_list(m, "tags")?,
+            created_at: read_dt(m, "created_at")?,
+            updated_at: read_dt(m, "updated_at")?,
         })
     }
 
-    fn apply_update(m: &LoroMap, input: LocationUpdate) -> Result<(), RepoError> {
-        if let Some(name) = input.name {
-            m.insert("name", name.as_str()).map_err(loro_err)?;
+    fn apply_update(m: &LoroMap, u: LocationUpdate) -> Result<(), RepoError> {
+        if let Some(v) = u.name {
+            write_str(m, "name", &v)?;
         }
-        m.insert("updated_at", Utc::now().to_rfc3339())
-            .map_err(loro_err)?;
+        if let Some(v) = u.kind {
+            write_opt_str(m, "kind", v.as_deref())?;
+        }
+        if let Some(v) = u.address1 {
+            write_opt_str(m, "address1", v.as_deref())?;
+        }
+        if let Some(v) = u.address2 {
+            write_opt_str(m, "address2", v.as_deref())?;
+        }
+        if let Some(v) = u.city {
+            write_opt_str(m, "city", v.as_deref())?;
+        }
+        if let Some(v) = u.state {
+            write_opt_str(m, "state", v.as_deref())?;
+        }
+        if let Some(v) = u.postal_code {
+            write_opt_str(m, "postal_code", v.as_deref())?;
+        }
+        if let Some(v) = u.country_code {
+            write_opt_str(m, "country_code", v.as_deref())?;
+        }
+        if let Some(v) = u.contact_name {
+            write_opt_str(m, "contact_name", v.as_deref())?;
+        }
+        if let Some(v) = u.contact_email {
+            write_opt_str(m, "contact_email", v.as_deref())?;
+        }
+        if let Some(v) = u.parent_id {
+            write_opt_uuid(m, "parent_id", v)?;
+        }
+        if let Some(v) = u.notes {
+            write_opt_str(m, "notes", v.as_deref())?;
+        }
+        if let Some(v) = u.tags {
+            write_opt_string_list(m, "tags", Some(&v))?;
+        }
+        write_dt(m, "updated_at", Utc::now())?;
         Ok(())
     }
 
@@ -114,13 +172,10 @@ impl EntityCrdt for LocationEntity {
     }
 }
 
-// ── LocationRepo forwarders ────────────────────────────────────────────
-
 impl LocationRepo for LocationRepoLoro {
     async fn get(&self, id: Uuid) -> Result<Location, RepoError> {
         self.inner.get(id).await
     }
-
     async fn list(
         &self,
         page: architect::Page,
@@ -129,42 +184,13 @@ impl LocationRepo for LocationRepoLoro {
     ) -> Result<LocationList, RepoError> {
         self.inner.list(page, sort, filter).await
     }
-
     async fn create(&self, input: LocationCreate) -> Result<Location, RepoError> {
         self.inner.create(input).await
     }
-
     async fn update(&self, id: Uuid, input: LocationUpdate) -> Result<Location, RepoError> {
         self.inner.update(id, input).await
     }
-
     async fn delete(&self, id: Uuid) -> Result<(), RepoError> {
         self.inner.delete(id).await
     }
-}
-
-// ── codec helpers ─────────────────────────────────────────────────────
-
-fn read_str(m: &LoroMap, k: &str) -> Result<String, RepoError> {
-    match m.get(k) {
-        Some(loro::ValueOrContainer::Value(LoroValue::String(s))) => Ok((*s).to_string()),
-        Some(other) => Err(RepoError::Internal(format!(
-            "expected string at key `{k}`, got {other:?}"
-        ))),
-        None => Err(RepoError::Internal(format!("missing key `{k}`"))),
-    }
-}
-
-fn parse_uuid(s: String) -> Result<Uuid, RepoError> {
-    Uuid::parse_str(&s).map_err(|e| RepoError::Internal(format!("bad uuid: {e}")))
-}
-
-fn parse_dt(s: String) -> Result<DateTime<Utc>, RepoError> {
-    DateTime::parse_from_rfc3339(&s)
-        .map(|dt| dt.with_timezone(&Utc))
-        .map_err(|e| RepoError::Internal(format!("bad timestamp: {e}")))
-}
-
-fn loro_err<E: std::fmt::Display>(e: E) -> RepoError {
-    RepoError::Internal(format!("loro: {e}"))
 }

@@ -16,6 +16,7 @@ conference-proto = { workspace = true, features = ["fake"] }
 conference-crdt.workspace = true
 crdt.workspace = true
 loro.workspace = true
+chrono.workspace = true
 architect = { workspace = true, features = ["fake"] }
 fake.workspace = true
 uuid.workspace = true
