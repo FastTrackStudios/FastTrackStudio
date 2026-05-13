@@ -8,6 +8,7 @@ use fts_ui::lucide_dioxus::{
     MessagesSquare, Package, Palette, Settings as SettingsIcon, Timer as TimerIcon, Users, Video,
 };
 use fts_ui::prelude::*;
+use fts_ui::primitives::{ContentAlign, ContentSide};
 use uuid::Uuid;
 
 use crate::data::{Organization, organizations};
@@ -118,7 +119,7 @@ fn TestRoute() -> Element {
             Text { variant: TextVariant::Muted,
                 "If you can see this and the counter increments, Dioxus + the router + wasm are all healthy."
             }
-            HStack { gap: "3".to_string(),
+            HStack { gap: "3",
                 Button {
                     on_click: move |_| counter += 1,
                     "Click me"
@@ -227,9 +228,12 @@ pub fn App() -> Element {
     let active_org: Signal<Organization> = use_context_provider(move || Signal::new(initial_org));
 
     // Per-org runtime preset override (user picks a different preset
-    // for an org via the picker; persists for the session only).
+    // for an org via the picker; persists for the session only). The
+    // `mode` signal is shared across orgs so flipping dark mode in one
+    // org carries to the others.
     let org_overrides: OrgThemeOverrides = use_context_provider(|| OrgThemeOverrides {
         map: Signal::new(HashMap::<String, String>::new()),
+        mode: Signal::new(ThemeMode::Dark),
     });
 
     // Per-project preset override (in-memory for v1).
@@ -238,15 +242,15 @@ pub fn App() -> Element {
             map: Signal::new(HashMap::<Uuid, String>::new()),
         });
 
-    // Derive the initial theme state from the active org's static default.
+    // Derive the initial theme state from the active org's static
+    // default. Default mode is Dark — flip to Light via the popover.
     let mut theme_state = use_signal(|| {
         let org = active_org.read().clone();
-        state_from_preset_name(org.theme_preset, ThemeMode::Light)
+        state_from_preset_name(org.theme_preset, ThemeMode::Dark)
     });
 
-    // Re-apply preset whenever the active org or the per-org override map
-    // changes. Preserves the user's current mode (light/dark) across the
-    // swap so flipping orgs doesn't accidentally toggle dark mode.
+    // Re-apply preset whenever the active org or the per-org override
+    // map changes. We don't touch mode here — that's the next effect.
     use_effect(move || {
         let org = active_org.read().clone();
         let resolved_name: String = org_overrides
@@ -257,6 +261,19 @@ pub fn App() -> Element {
             .unwrap_or_else(|| org.theme_preset.to_string());
         let preset = theme_preset(&resolved_name).unwrap_or_else(default_theme_preset);
         theme_state.write().set_preset(preset);
+    });
+
+    // Bridge global light/dark mode into the theme state. Without this,
+    // the user's Light/Dark click in the ThemeSwitcher popover writes
+    // to switcher_state.mode but never reaches theme_state, so the
+    // ThemeProvider keeps emitting the light palette and the page looks
+    // unchanged. Both reads subscribe, so flipping mode triggers a
+    // re-render of every consumer of CSS vars (bg-background, etc.).
+    use_effect(move || {
+        let mode = *org_overrides.mode.read();
+        if theme_state.peek().mode != mode {
+            theme_state.write().set_mode(mode);
+        }
     });
 
     rsx! {
@@ -279,16 +296,21 @@ fn AppShell() -> Element {
     let current = use_route::<Route>();
 
     rsx! {
-        div { class: "min-h-screen bg-background text-foreground lg:grid lg:grid-cols-[18rem_1fr]",
-            // Desktop sidebar (lg+)
-            div { class: "hidden lg:block",
+        // lg+: viewport-locked two-column layout. Sidebar (left) stays
+        // pinned at full height; main (right) scrolls independently.
+        // Below lg: normal vertical document flow with mobile chrome.
+        div { class: "min-h-screen bg-background text-foreground lg:grid lg:h-screen lg:grid-cols-[18rem_1fr] lg:overflow-hidden",
+            // Desktop sidebar (lg+) — full viewport height, never scrolls
+            // with the main area. Inner DesktopSidebar handles its own
+            // top-pinned / scrollable / bottom-pinned regions.
+            div { class: "hidden lg:flex lg:h-screen lg:flex-col lg:overflow-hidden",
                 SidebarProvider {
                     DesktopSidebar { orgs: orgs.clone(), current: current.clone() }
                 }
             }
 
-            // Main column
-            div { class: "flex min-h-screen flex-col",
+            // Main column — scrolls independently of the sidebar at lg+.
+            div { class: "flex min-h-screen flex-col lg:h-screen lg:min-h-0 lg:overflow-y-auto",
                 MobileHeader {}
 
                 main { class: "flex-1 pb-24 lg:pb-0",
@@ -412,9 +434,11 @@ fn TabBarItem(tab: NavTab, active: bool) -> Element {
 fn DesktopSidebar(orgs: Vec<Organization>, current: Route) -> Element {
     let nav = use_navigator();
     rsx! {
-        Sidebar { class: "min-h-screen w-72".to_string(),
+        // h-screen + flex-col so the inner regions can pin top + bottom
+        // and only the middle Features/System block scrolls.
+        Sidebar { class: "flex h-screen w-72 flex-col overflow-hidden",
             SidebarHeader {
-                HStack { gap: "3".to_string(), class: "px-2 py-1".to_string(),
+                HStack { gap: "3", class: "px-2 py-1",
                     div { class: "flex h-10 w-10 items-center justify-center rounded-xl bg-primary font-black text-primary-foreground", "T" }
                     div { class: "flex flex-col",
                         span { class: "text-base font-semibold text-foreground leading-tight", "Task" }
@@ -424,41 +448,51 @@ fn DesktopSidebar(orgs: Vec<Organization>, current: Route) -> Element {
                 }
             }
             SidebarSeparator {}
-            SidebarContent {
-                SidebarGroup {
-                    SidebarGroupLabel { "Workspace" }
-                    SidebarGroupContent {
-                        SidebarMenu {
-                            for tab in core_nav_tabs() {
-                                {render_sidebar_item(tab, &current, nav)}
-                            }
+
+            // Workspace section pinned right under the header.
+            SidebarGroup {
+                SidebarGroupLabel { "Workspace" }
+                SidebarGroupContent {
+                    SidebarMenu {
+                        for tab in core_nav_tabs() {
+                            {render_sidebar_item(tab, &current, nav)}
                         }
                     }
                 }
-                SidebarGroup {
-                    SidebarGroupLabel { "Features" }
-                    SidebarGroupContent {
-                        SidebarMenu {
-                            for tab in feature_nav_tabs() {
-                                {render_sidebar_item(tab, &current, nav)}
+            }
+            SidebarSeparator {}
+
+            // Everything else scrolls; flex-1 + min-h-0 lets the middle
+            // region take the leftover height between the pinned
+            // top/bottom regions and overflow-y-auto activates scroll.
+            div { class: "flex-1 min-h-0 overflow-y-auto",
+                SidebarContent {
+                    SidebarGroup {
+                        SidebarGroupLabel { "Features" }
+                        SidebarGroupContent {
+                            SidebarMenu {
+                                for tab in feature_nav_tabs() {
+                                    {render_sidebar_item(tab, &current, nav)}
+                                }
                             }
                         }
                     }
-                }
-                SidebarGroup {
-                    SidebarGroupLabel { "System" }
-                    SidebarGroupContent {
-                        SidebarMenu {
-                            for tab in system_nav_tabs() {
-                                {render_sidebar_item(tab, &current, nav)}
+                    SidebarGroup {
+                        SidebarGroupLabel { "System" }
+                        SidebarGroupContent {
+                            SidebarMenu {
+                                for tab in system_nav_tabs() {
+                                    {render_sidebar_item(tab, &current, nav)}
+                                }
                             }
                         }
                     }
                 }
             }
+
             SidebarFooter {
                 div { class: "px-1 pb-1 pt-2",
-                    SectionHeader { label: "Organization".to_string(), size: SectionHeaderSize::Small }
+                    SectionHeader { label: "Organization", size: SectionHeaderSize::Small }
                 }
                 OrgSwitcher { orgs, compact: false }
             }
@@ -790,11 +824,17 @@ fn OrgSwitcher(
             .get(active.id)
             .cloned()
             .unwrap_or_else(|| active.theme_preset.to_string());
-        state_from_preset_name(&name, ThemeMode::Light)
+        let mode = *org_overrides.mode.read();
+        state_from_preset_name(&name, mode)
     });
 
-    // When the active org changes, refresh the switcher state so the
-    // popover always reflects the org currently being themed.
+    // Refresh the switcher state when the active org changes (or when
+    // the user picks a preset elsewhere and we want the popover to
+    // mirror it). Critical: read `switcher_state` via `.peek()` so this
+    // effect does NOT subscribe to it — otherwise the user's own write
+    // to switcher_state (via the ThemeSwitcher dropdown) re-fires this
+    // effect, which then reverts the write back to the stale value in
+    // `org_overrides.map` *before* the downstream effect commits it.
     use_effect(move || {
         let org = active_org.read().clone();
         let name = org_overrides
@@ -803,7 +843,10 @@ fn OrgSwitcher(
             .get(org.id)
             .cloned()
             .unwrap_or_else(|| org.theme_preset.to_string());
-        let prev_mode = switcher_state.read().mode;
+        let prev_mode = switcher_state.peek().mode;
+        if switcher_state.peek().preset == name {
+            return;
+        }
         switcher_state.set(state_from_preset_name(&name, prev_mode));
     });
 
@@ -820,18 +863,31 @@ fn OrgSwitcher(
         }
     });
 
+    // Propagate switcher-driven mode (light/dark) changes to the global
+    // `OrgThemeOverrides.mode` signal so the top-level App effect can
+    // apply it to the real `theme_state`. Without this bridge, clicking
+    // Dark in the popover updates only the local switcher_state and
+    // the page palette never changes.
+    let mut org_mode = org_overrides.mode;
+    use_effect(move || {
+        let mode = switcher_state.read().mode;
+        if *org_mode.peek() != mode {
+            org_mode.set(mode);
+        }
+    });
+
     rsx! {
-        HStack { class: if compact { "items-center gap-1".to_string() } else { "items-center gap-1 w-full".to_string() },
+        HStack { class: if compact { "items-center gap-1" } else { "items-center gap-1 w-full" },
             Dropdown {
                 open: open(),
                 on_open_change: move |o| open.set(o),
-                class: if compact { "".to_string() } else { "w-full flex-1".to_string() },
-                DropdownTrigger { class: if compact { "".to_string() } else { "w-full".to_string() },
+                class: if compact { "" } else { "w-full flex-1" },
+                DropdownTrigger { class: if compact { "" } else { "w-full" },
                     {render_trigger(active.clone(), compact)}
                 }
                 DropdownContent {
-                    align: if compact { "end".to_string() } else { "start".to_string() },
-                    width: if compact { "w-64".to_string() } else { "w-[16rem]".to_string() },
+                    align: if compact { "end" } else { "start" },
+                    width: if compact { "w-64" } else { "w-[16rem]" },
                     DropdownLabel { "Switch organization" }
                     for (idx, org) in orgs.iter().enumerate() {
                         {
@@ -846,10 +902,10 @@ fn OrgSwitcher(
                                         active_org.set(org_for_select.clone());
                                         open.set(false);
                                     },
-                                    HStack { gap: "3".to_string(), class: "w-full".to_string(),
+                                    HStack { gap: "3", class: "w-full",
                                         Avatar { size: AvatarSize::Medium,
                                             AvatarFallback {
-                                                class: "bg-primary text-primary-foreground font-bold".to_string(),
+                                                class: "bg-primary text-primary-foreground font-bold",
                                                 "{org.monogram}"
                                             }
                                         }
@@ -872,7 +928,7 @@ fn OrgSwitcher(
                 open: theme_open(),
                 is_modal: false,
                 on_open_change: move |o| theme_open.set(o),
-                PopoverTrigger { class: "inline-flex".to_string(),
+                PopoverTrigger { class: "inline-flex",
                     button {
                         r#type: "button",
                         class: "inline-flex h-8 w-8 items-center justify-center rounded-md border border-border bg-card text-muted-foreground hover:bg-accent hover:text-accent-foreground",
@@ -884,7 +940,13 @@ fn OrgSwitcher(
                         Palette { size: 14 }
                     }
                 }
-                PopoverContent { class: "w-[22rem] p-3".to_string(),
+                // fts-ui's PopoverContent now anchors via (side, align)
+                // — open above the trigger and right-align so the panel
+                // stays inside the sidebar.
+                PopoverContent {
+                    side: ContentSide::Top,
+                    align: ContentAlign::End,
+                    class: "w-[17rem] p-3 max-h-[70vh] overflow-y-auto",
                     div { class: "flex flex-col gap-2",
                         span { class: "text-xs font-semibold uppercase tracking-widest text-muted-foreground",
                             "Theme · {active.name}"
@@ -904,7 +966,7 @@ fn render_trigger(active: Organization, compact: bool) -> Element {
                 class: "flex items-center gap-2 rounded-full border border-border bg-card px-2.5 py-1.5 text-xs font-semibold text-foreground hover:bg-accent",
                 r#type: "button",
                 Avatar { size: AvatarSize::Small,
-                    AvatarFallback { class: "bg-primary text-primary-foreground text-[10px] font-bold".to_string(), "{active.monogram}" }
+                    AvatarFallback { class: "bg-primary text-primary-foreground text-[10px] font-bold", "{active.monogram}" }
                 }
                 span { class: "max-w-[6.5rem] truncate", "{active.name}" }
                 ChevronDown { size: 14 }
@@ -916,7 +978,7 @@ fn render_trigger(active: Organization, compact: bool) -> Element {
                 class: "flex w-full items-center gap-3 rounded-xl border border-border bg-card px-3 py-2.5 text-left text-sm font-semibold text-foreground hover:bg-accent",
                 r#type: "button",
                 Avatar { size: AvatarSize::Medium,
-                    AvatarFallback { class: "bg-primary text-primary-foreground font-bold".to_string(), "{active.monogram}" }
+                    AvatarFallback { class: "bg-primary text-primary-foreground font-bold", "{active.monogram}" }
                 }
                 div { class: "flex min-w-0 flex-1 flex-col leading-tight",
                     span { class: "truncate", "{active.name}" }

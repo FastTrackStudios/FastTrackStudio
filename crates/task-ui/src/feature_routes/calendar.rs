@@ -117,12 +117,12 @@ pub fn CalendarEventView() -> Element {
     rsx! {
         div { class: "mx-auto flex max-w-6xl flex-col gap-4 p-6 lg:p-10",
             Tabs {
-                default_value: "calendar".to_string(),
+                default_value: "calendar",
                 TabList {
-                    TabTrigger { value: "calendar".to_string(), index: 0usize, "Calendar" }
-                    TabTrigger { value: "dashboard".to_string(), index: 1usize, "Dashboard" }
+                    TabTrigger { value: "calendar", index: 0usize, "Calendar" }
+                    TabTrigger { value: "dashboard", index: 1usize, "Dashboard" }
                 }
-                TabContent { value: "calendar".to_string(), index: 0usize,
+                TabContent { value: "calendar", index: 0usize,
                     InteractiveCalendar {
                         events: items(),
                         initial_view: None,
@@ -133,7 +133,7 @@ pub fn CalendarEventView() -> Element {
                         on_delete,
                     }
                 }
-                TabContent { value: "dashboard".to_string(), index: 1usize,
+                TabContent { value: "dashboard", index: 1usize,
                     CalendarEventDashboard {
                         items: items(),
                         status: status_msg(),

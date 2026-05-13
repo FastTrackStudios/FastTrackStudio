@@ -13,41 +13,41 @@ pub fn ProjectOverview() -> Element {
         div { class: "mx-auto flex max-w-6xl flex-col gap-8 p-6 lg:p-10",
             Card {
                 CardHeader {
-                    Text { variant: TextVariant::Small, class: "uppercase tracking-[0.3em] text-primary font-semibold".to_string(), "Task web baseline" }
-                    CardTitle { class: "max-w-3xl text-3xl font-bold lg:text-4xl".to_string(),
+                    Text { variant: TextVariant::Small, class: "uppercase tracking-[0.3em] text-primary font-semibold", "Task web baseline" }
+                    CardTitle { class: "max-w-3xl text-3xl font-bold lg:text-4xl",
                         "Projects, agent work, and operational status in one shell"
                     }
-                    CardDescription { class: "max-w-2xl".to_string(),
+                    CardDescription { class: "max-w-2xl",
                         "This first Dioxus web slice proves the app shell, navigation, theme pipeline, and deployable static bundle without touching production Task data."
                     }
                 }
                 CardContent {
-                    HStack { gap: "3".to_string(), class: "flex-wrap".to_string(),
+                    HStack { gap: "3", class: "flex-wrap",
                         StatCard { label: "Projects", value: format!("{}", project_count) }
                         StatCard { label: "Tasks", value: format!("{}", task_count) }
                     }
                 }
             }
 
-            SectionHeader { label: "Active projects".to_string() }
+            SectionHeader { label: "Active projects" }
 
             section { class: "grid gap-4 md:grid-cols-2 xl:grid-cols-3",
                 for project in projects {
                     Card { key: "{project.id}",
-                        CardHeader { class: "flex flex-row items-start justify-between gap-3".to_string(),
+                        CardHeader { class: "flex flex-row items-start justify-between gap-3",
                             div { class: "flex flex-col gap-1",
                                 CardTitle { "{project.name}" }
                                 CardDescription { "Next up" }
                             }
                             StatusBadge {
                                 variant: StatusBadgeVariant::Success,
-                                label: "Active".to_string(),
+                                label: "Active",
                             }
                         }
                         CardContent {
                             if let Some(task) = project.first_task() {
                                 Item { variant: ItemVariant::Muted,
-                                    ItemMedia { class: "size-7 rounded-full bg-green-500/20 text-green-500".to_string(),
+                                    ItemMedia { class: "size-7 rounded-full bg-green-500/20 text-green-500",
                                         span { class: "block size-2 rounded-full bg-current" }
                                     }
                                     ItemContent {
@@ -55,7 +55,7 @@ pub fn ProjectOverview() -> Element {
                                     }
                                 }
                             } else {
-                                EmptyState { message: "No tasks yet.".to_string() }
+                                EmptyState { message: "No tasks yet." }
                             }
                         }
                     }
@@ -68,10 +68,10 @@ pub fn ProjectOverview() -> Element {
 #[component]
 fn StatCard(label: &'static str, value: String) -> Element {
     rsx! {
-        Card { class: "min-w-32".to_string(),
-            CardContent { class: "p-4 pt-4".to_string(),
+        Card { class: "min-w-32",
+            CardContent { class: "p-4 pt-4",
                 div { class: "text-3xl font-extrabold text-foreground", "{value}" }
-                Text { variant: TextVariant::Small, class: "uppercase tracking-[0.2em] text-muted-foreground font-semibold".to_string(), "{label}" }
+                Text { variant: TextVariant::Small, class: "uppercase tracking-[0.2em] text-muted-foreground font-semibold", "{label}" }
             }
         }
     }

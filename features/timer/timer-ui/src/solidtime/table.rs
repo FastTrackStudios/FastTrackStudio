@@ -150,7 +150,7 @@ fn EntryRow(
                                     ..Default::default()
                                 }));
                             },
-                            class: "text-sm".to_string(),
+                            class: "text-sm",
                         }
                     }
 
@@ -220,13 +220,13 @@ fn EntryRow(
             }
             ContextMenuContent {
                 ContextMenuItem {
-                    value: "duplicate".to_string(),
+                    value: "duplicate",
                     index: 0,
                     on_select: move |_| on_duplicate.call(id),
                     "Duplicate"
                 }
                 ContextMenuItem {
-                    value: "billable".to_string(),
+                    value: "billable",
                     index: 1,
                     on_select: move |_| on_edit.call((id, TimeEntryUpdate {
                         billable: Some(true),
@@ -235,7 +235,7 @@ fn EntryRow(
                     "Mark billable"
                 }
                 ContextMenuItem {
-                    value: "non-billable".to_string(),
+                    value: "non-billable",
                     index: 2,
                     on_select: move |_| on_edit.call((id, TimeEntryUpdate {
                         billable: Some(false),
@@ -245,7 +245,7 @@ fn EntryRow(
                 }
                 ContextMenuSeparator {}
                 ContextMenuItem {
-                    value: "delete".to_string(),
+                    value: "delete",
                     index: 3,
                     destructive: true,
                     on_select: move |_| on_delete.call(id),

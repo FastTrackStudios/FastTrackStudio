@@ -157,33 +157,33 @@ fn InventoryTableRow(
                 ContextMenuLabel { "{item.name}" }
                 ContextMenuSeparator {}
                 ContextMenuItem {
-                    value: "checkout".to_string(),
+                    value: "checkout",
                     index: 0usize,
                     on_select: move |_: String| on_checkout.call(id),
                     "Checkout…"
                 }
                 ContextMenuItem {
-                    value: "checkin".to_string(),
+                    value: "checkin",
                     index: 1usize,
                     on_select: move |_: String| on_checkin.call(id),
                     "Check in"
                 }
                 ContextMenuSeparator {}
                 ContextMenuItem {
-                    value: "open".to_string(),
+                    value: "open",
                     index: 2usize,
                     on_select: move |_: String| on_open.call(id),
                     "Open details"
                 }
                 ContextMenuItem {
-                    value: "retire".to_string(),
+                    value: "retire",
                     index: 3usize,
                     on_select: move |_: String| on_retire.call(id),
                     "Retire"
                 }
                 ContextMenuSeparator {}
                 ContextMenuItem {
-                    value: "copy-serial".to_string(),
+                    value: "copy-serial",
                     index: 4usize,
                     on_select: {
                         let serial = item.serial_number.clone();

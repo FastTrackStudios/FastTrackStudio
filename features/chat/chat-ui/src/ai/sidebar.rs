@@ -60,8 +60,8 @@ pub fn ConversationSidebar(props: ConversationSidebarProps) -> Element {
                     Search { size: 14 }
                     Input {
                         value: query,
-                        placeholder: "Search…".to_string(),
-                        class: "border-0 bg-transparent shadow-none focus-visible:ring-0".to_string(),
+                        placeholder: "Search…",
+                        class: "border-0 bg-transparent shadow-none focus-visible:ring-0",
                     }
                 }
             }
@@ -137,7 +137,7 @@ fn ConversationRow(props: ConversationRowProps) -> Element {
             }
             ContextMenuContent {
                 ContextMenuItem {
-                    value: "rename".to_string(),
+                    value: "rename",
                     index: 0usize,
                     on_select: {
                         let title = title.clone();
@@ -146,14 +146,14 @@ fn ConversationRow(props: ConversationRowProps) -> Element {
                     "Rename"
                 }
                 ContextMenuItem {
-                    value: "archive".to_string(),
+                    value: "archive",
                     index: 1usize,
                     on_select: move |_v: String| props.on_archive.call(id),
                     "Archive"
                 }
                 ContextMenuSeparator {}
                 ContextMenuItem {
-                    value: "delete".to_string(),
+                    value: "delete",
                     index: 2usize,
                     destructive: true,
                     on_select: move |_v: String| props.on_delete.call(id),

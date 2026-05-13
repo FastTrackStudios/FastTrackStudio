@@ -254,7 +254,7 @@ pub fn RecurringInvoiceEditor(props: RecurringInvoiceEditorProps) -> Element {
                             Label { "Currency" }
                             Combobox {
                                 value: currency_signal,
-                                ComboboxTrigger { placeholder: "USD".to_string() }
+                                ComboboxTrigger { placeholder: "USD" }
                                 ComboboxContent { items: currency_items }
                             }
                         }
@@ -265,7 +265,7 @@ pub fn RecurringInvoiceEditor(props: RecurringInvoiceEditorProps) -> Element {
                             Label { "Frequency" }
                             Combobox {
                                 value: freq_signal,
-                                ComboboxTrigger { placeholder: "monthly".to_string() }
+                                ComboboxTrigger { placeholder: "monthly" }
                                 ComboboxContent { items: freq_items }
                             }
                         }
@@ -522,7 +522,7 @@ fn NotesField(
     rsx! {
         div { class: "flex flex-col gap-1",
             Label { "Notes (copied onto each generated invoice)" }
-            Textarea { value, placeholder: "Payment terms, …".to_string() }
+            Textarea { value, placeholder: "Payment terms, …" }
         }
     }
 }

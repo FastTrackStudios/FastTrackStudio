@@ -61,7 +61,7 @@ pub fn TaskDetailSheet(
             open,
             on_close: move |_| on_close.call(()),
             // Width override — spec asks ~560px.
-            class: "sm:max-w-[36rem] w-[36rem] flex flex-col h-full".to_string(),
+            class: "sm:max-w-[36rem] w-[36rem] flex flex-col h-full",
             if let Some(t) = task_ref {
                 {
                     let task_id = t.id;
@@ -94,8 +94,8 @@ pub fn TaskDetailSheet(
                                                 TaskUpdate { title: Some(new), ..Default::default() },
                                             ));
                                     },
-                                    placeholder: "Task title".to_string(),
-                                    class: "text-base font-semibold".to_string(),
+                                    placeholder: "Task title",
+                                    class: "text-base font-semibold",
                                 }
                             }
                         }
@@ -113,7 +113,7 @@ pub fn TaskDetailSheet(
                                             rsx! {
                                                 Textarea {
                                                     value: desc_signal,
-                                                    placeholder: "Add a description…".to_string(),
+                                                    placeholder: "Add a description…",
                                                     rows: 5u32,
                                                     on_change: move |_| {
                                                         let v = desc_signal.read().clone();
@@ -135,26 +135,26 @@ pub fn TaskDetailSheet(
                                         value: Some(active_tab.read().clone()),
                                         on_change: move |v: String| active_tab.set(v),
                                         TabList {
-                                            TabTrigger { value: "comments".to_string(), index: 0usize, "Comments" }
-                                            TabTrigger { value: "activity".to_string(), index: 1usize, "Activity" }
-                                            TabTrigger { value: "subtasks".to_string(), index: 2usize, "Subtasks" }
-                                            TabTrigger { value: "git".to_string(), index: 3usize, "Git" }
-                                            TabTrigger { value: "agent".to_string(), index: 4usize, "Agent" }
+                                            TabTrigger { value: "comments", index: 0usize, "Comments" }
+                                            TabTrigger { value: "activity", index: 1usize, "Activity" }
+                                            TabTrigger { value: "subtasks", index: 2usize, "Subtasks" }
+                                            TabTrigger { value: "git", index: 3usize, "Git" }
+                                            TabTrigger { value: "agent", index: 4usize, "Agent" }
                                         }
-                                        TabContent { value: "comments".to_string(), index: 0usize,
+                                        TabContent { value: "comments", index: 0usize,
                                             div { class: "py-4 text-xs text-muted-foreground", "Comments coming soon." }
                                         }
-                                        TabContent { value: "activity".to_string(), index: 1usize,
+                                        TabContent { value: "activity", index: 1usize,
                                             div { class: "py-4 text-xs text-muted-foreground", "Activity log coming soon." }
                                         }
-                                        TabContent { value: "git".to_string(), index: 3usize,
+                                        TabContent { value: "git", index: 3usize,
                                             TaskGitPanel {
                                                 task: t.clone(),
                                                 on_set_branch_name: move |s| on_set_branch_name.call(s),
                                                 on_clear_branch_name: move |_| on_clear_branch_name.call(()),
                                             }
                                         }
-                                        TabContent { value: "agent".to_string(), index: 4usize,
+                                        TabContent { value: "agent", index: 4usize,
                                             AgentRunPanel {
                                                 run: run.clone(),
                                                 log_lines: log_lines.clone(),
@@ -163,7 +163,7 @@ pub fn TaskDetailSheet(
                                                 on_dispatch_new: move |_| on_dispatch_agent.call(task_id),
                                             }
                                         }
-                                        TabContent { value: "subtasks".to_string(), index: 2usize,
+                                        TabContent { value: "subtasks", index: 2usize,
                                             div { class: "flex flex-col gap-2 py-3",
                                                 for sub in subtasks.iter().cloned() {
                                                     {
@@ -191,7 +191,7 @@ pub fn TaskDetailSheet(
                                                         HStack { class: "items-center gap-2",
                                                             Input {
                                                                 value: new_sub_inner,
-                                                                placeholder: "Add a subtask and press +".to_string(),
+                                                                placeholder: "Add a subtask and press +",
                                                                 size: InputSize::Small,
                                                             }
                                                             Button {
@@ -216,7 +216,7 @@ pub fn TaskDetailSheet(
 
                                 // Right column — properties
                                 div { class: "flex flex-col gap-3",
-                                    SectionHeader { label: "Properties".to_string(), size: SectionHeaderSize::Small }
+                                    SectionHeader { label: "Properties", size: SectionHeaderSize::Small }
                                     div { class: "flex flex-col gap-1",
                                         Label { "Status" }
                                         {
@@ -273,7 +273,7 @@ pub fn TaskDetailSheet(
                                                                 },
                                                             ));
                                                     },
-                                                    NativeSelectOption { value: "".to_string(), "Unassigned" }
+                                                    NativeSelectOption { value: "", "Unassigned" }
                                                     for a in assignees.into_iter() {
                                                         NativeSelectOption { key: "{a}", value: a.clone(), "{a}" }
                                                     }
@@ -302,7 +302,7 @@ pub fn TaskDetailSheet(
                                                                 TaskUpdate { cycle_id: Some(parsed), ..Default::default() },
                                                             ));
                                                     },
-                                                    NativeSelectOption { value: "".to_string(), "No cycle" }
+                                                    NativeSelectOption { value: "", "No cycle" }
                                                     for c in cycles.into_iter() {
                                                         NativeSelectOption {
                                                             key: "{c.id}",
@@ -339,7 +339,7 @@ pub fn TaskDetailSheet(
                                             rsx! {
                                                 Input {
                                                     value: estimate_signal,
-                                                    placeholder: "0".to_string(),
+                                                    placeholder: "0",
                                                     size: InputSize::Small,
                                                     on_change: move |_| {
                                                         let v = estimate_signal.read().clone();
@@ -364,7 +364,7 @@ pub fn TaskDetailSheet(
                                             rsx! {
                                                 Input {
                                                     value: tags_signal,
-                                                    placeholder: "comma,separated".to_string(),
+                                                    placeholder: "comma,separated",
                                                     size: InputSize::Small,
                                                     on_change: move |_| {
                                                         let v = tags_signal.read().clone();

@@ -81,15 +81,15 @@ pub fn ProjectOverviewCard(
                     div { class: format!("mt-1 h-3 w-3 shrink-0 rounded-full {swatch}") }
                     div { class: "flex min-w-0 flex-1 flex-col gap-1",
                         div { class: "flex items-center gap-2",
-                            CardTitle { class: "truncate text-base".to_string(), "{project.name}" }
+                            CardTitle { class: "truncate text-base", "{project.name}" }
                             StatusBadge { variant: status_variant, label: project.status.clone() }
                         }
-                        CardDescription { class: "line-clamp-2".to_string(), "{desc}" }
+                        CardDescription { class: "line-clamp-2", "{desc}" }
                     }
                 }
             }
 
-            CardContent { class: "flex flex-1 flex-col gap-4".to_string(),
+            CardContent { class: "flex flex-1 flex-col gap-4",
                 // Progress bar + counts
                 div { class: "flex flex-col gap-2",
                     div { class: "flex items-center justify-between text-xs text-muted-foreground",
@@ -100,7 +100,7 @@ pub fn ProjectOverviewCard(
                     div { class: "flex flex-wrap gap-2",
                         Badge { variant: BadgeVariant::Outline, "{open} open" }
                         if blocked > 0 {
-                            Badge { variant: BadgeVariant::Outline, class: "border-amber-500/40 text-amber-400".to_string(), "{blocked} blocked" }
+                            Badge { variant: BadgeVariant::Outline, class: "border-amber-500/40 text-amber-400", "{blocked} blocked" }
                         }
                         if let Some(owner) = project.owner.as_deref() {
                             Badge { variant: BadgeVariant::Secondary, "{owner}" }
@@ -112,7 +112,7 @@ pub fn ProjectOverviewCard(
                 div { class: "mt-auto flex flex-col gap-2",
                     Text {
                         variant: TextVariant::Small,
-                        class: "uppercase tracking-wider text-muted-foreground".to_string(),
+                        class: "uppercase tracking-wider text-muted-foreground",
                         "Next up"
                     }
                     match next {
@@ -150,7 +150,7 @@ fn NextUpRow(task: Task, on_open: EventHandler<Uuid>) -> Element {
                     }
                 }
             }
-            ArrowRight { size: 14, class: "shrink-0 opacity-0 transition-opacity group-hover:opacity-70".to_string() }
+            ArrowRight { size: 14, class: "shrink-0 opacity-0 transition-opacity group-hover:opacity-70" }
         }
     }
 }

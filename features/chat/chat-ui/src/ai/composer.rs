@@ -149,7 +149,7 @@ pub fn MessageComposer(props: MessageComposerProps) -> Element {
                                 }
                             }
                         }
-                        PopoverContent { class: "w-56 p-2".to_string(),
+                        PopoverContent { class: "w-56 p-2",
                             VStack { class: "gap-1",
                                 if available_tools_for_render.is_empty() {
                                     Text { variant: TextVariant::Muted, class: "text-xs p-2",
@@ -201,7 +201,7 @@ pub fn MessageComposer(props: MessageComposerProps) -> Element {
                     div { class: "flex-1",
                         Textarea {
                             value: draft,
-                            placeholder: "Send a message…  (⌘/Ctrl-Enter to send)".to_string(),
+                            placeholder: "Send a message…  (⌘/Ctrl-Enter to send)",
                             rows: *row_count.read(),
                             disabled,
                             on_change: use_callback(move |_e: FormEvent| {}),

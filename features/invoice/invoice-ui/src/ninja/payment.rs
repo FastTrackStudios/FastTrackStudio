@@ -141,7 +141,7 @@ pub fn PaymentRecordDialog(props: PaymentRecordDialogProps) -> Element {
                 Label { "Method" }
                 Combobox {
                     value: method,
-                    ComboboxTrigger { placeholder: "stripe".to_string() }
+                    ComboboxTrigger { placeholder: "stripe" }
                     ComboboxContent { items: method_items }
                 }
 
@@ -149,7 +149,7 @@ pub fn PaymentRecordDialog(props: PaymentRecordDialogProps) -> Element {
                 Input { value: reference, placeholder: "ch_abc123 / check #1042 / …" }
 
                 Label { "Notes" }
-                Textarea { value: notes, placeholder: "Optional notes".to_string() }
+                Textarea { value: notes, placeholder: "Optional notes" }
             }
 
             DialogFooter {

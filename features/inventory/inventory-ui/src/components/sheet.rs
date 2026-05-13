@@ -107,28 +107,28 @@ pub fn InventoryItemDetailSheet(
                     value: Some(tab.read().clone()),
                     on_change: move |v: String| tab.set(v),
                     TabList {
-                        TabTrigger { value: "overview".to_string(), index: 0usize, "Overview" }
-                        TabTrigger { value: "history".to_string(), index: 1usize, "History" }
-                        TabTrigger { value: "tags".to_string(), index: 2usize, "Tags" }
-                        TabTrigger { value: "notes".to_string(), index: 3usize, "Notes" }
+                        TabTrigger { value: "overview", index: 0usize, "Overview" }
+                        TabTrigger { value: "history", index: 1usize, "History" }
+                        TabTrigger { value: "tags", index: 2usize, "Tags" }
+                        TabTrigger { value: "notes", index: 3usize, "Notes" }
                     }
-                    TabContent { value: "overview".to_string(), index: 0usize,
+                    TabContent { value: "overview", index: 0usize,
                         div { class: "flex flex-col gap-2 pt-3",
-                            KeyValueRow { label: "Category".to_string(), value: category_label(item.category.as_deref()) }
-                            KeyValueRow { label: "Manufacturer".to_string(), value: item.manufacturer.clone().unwrap_or_else(|| "—".into()) }
-                            KeyValueRow { label: "Model".to_string(), value: item.model.clone().unwrap_or_else(|| "—".into()) }
-                            KeyValueRow { label: "Serial".to_string(), value: item.serial_number.clone().unwrap_or_else(|| "—".into()) }
-                            KeyValueRow { label: "QR".to_string(), value: item.qr_code.clone().unwrap_or_else(|| "—".into()) }
-                            KeyValueRow { label: "Owner".to_string(), value: owner_name, mono: false }
-                            KeyValueRow { label: "Location".to_string(), value: location_full, mono: false }
-                            KeyValueRow { label: "Value".to_string(), value: format_value_cents(item.value_cents) }
-                            KeyValueRow { label: "Vendor".to_string(), value: item.vendor.clone().unwrap_or_else(|| "—".into()), mono: false }
-                            KeyValueRow { label: "PO".to_string(), value: item.purchase_order.clone().unwrap_or_else(|| "—".into()) }
-                            KeyValueRow { label: "Acquired".to_string(), value: acquired }
-                            KeyValueRow { label: "Warranty".to_string(), value: warranty }
+                            KeyValueRow { label: "Category", value: category_label(item.category.as_deref()) }
+                            KeyValueRow { label: "Manufacturer", value: item.manufacturer.clone().unwrap_or_else(|| "—".into()) }
+                            KeyValueRow { label: "Model", value: item.model.clone().unwrap_or_else(|| "—".into()) }
+                            KeyValueRow { label: "Serial", value: item.serial_number.clone().unwrap_or_else(|| "—".into()) }
+                            KeyValueRow { label: "QR", value: item.qr_code.clone().unwrap_or_else(|| "—".into()) }
+                            KeyValueRow { label: "Owner", value: owner_name, mono: false }
+                            KeyValueRow { label: "Location", value: location_full, mono: false }
+                            KeyValueRow { label: "Value", value: format_value_cents(item.value_cents) }
+                            KeyValueRow { label: "Vendor", value: item.vendor.clone().unwrap_or_else(|| "—".into()), mono: false }
+                            KeyValueRow { label: "PO", value: item.purchase_order.clone().unwrap_or_else(|| "—".into()) }
+                            KeyValueRow { label: "Acquired", value: acquired }
+                            KeyValueRow { label: "Warranty", value: warranty }
                         }
                     }
-                    TabContent { value: "history".to_string(), index: 1usize,
+                    TabContent { value: "history", index: 1usize,
                         div { class: "flex flex-col gap-2 pt-3",
                             if history.is_empty() {
                                 Text { variant: TextVariant::Muted, "No checkout history yet." }
@@ -143,7 +143,7 @@ pub fn InventoryItemDetailSheet(
                             }
                         }
                     }
-                    TabContent { value: "tags".to_string(), index: 2usize,
+                    TabContent { value: "tags", index: 2usize,
                         div { class: "flex flex-wrap gap-2 pt-3",
                             if item.tags.is_empty() {
                                 Text { variant: TextVariant::Muted, "No tags." }
@@ -154,7 +154,7 @@ pub fn InventoryItemDetailSheet(
                             }
                         }
                     }
-                    TabContent { value: "notes".to_string(), index: 3usize,
+                    TabContent { value: "notes", index: 3usize,
                         div { class: "pt-3",
                             Text { "{item.notes.clone().unwrap_or_else(|| String::from(\"(no notes)\"))}" }
                         }

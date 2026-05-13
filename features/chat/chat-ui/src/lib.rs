@@ -107,7 +107,7 @@ pub fn MessageDashboard(
     rsx! {
         div { class: "mx-auto flex max-w-5xl flex-col gap-6 p-6 lg:p-10",
             SectionHeader {
-                label: "Chat".to_string(),
+                label: "Chat",
                 trailing: rsx! {
                     StatusBadge { variant: StatusBadgeVariant::Neutral, label: status.clone() }
                 },

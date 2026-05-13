@@ -170,7 +170,7 @@ pub fn AgentDispatchDialog(
                     Textarea {
                         value: prompt,
                         rows: 8u32,
-                        placeholder: "Tell the agent what to do…".to_string(),
+                        placeholder: "Tell the agent what to do…",
                     }
                 }
             }

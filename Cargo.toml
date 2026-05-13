@@ -478,6 +478,11 @@ features = ["gen_secret", "otpauth"]
 [profile.wasm-dev]
 opt-level = 1
 inherits = "dev"
+# Drop debuginfo so the wasm bundle stays small (~26MB instead of
+# ~500MB). The dev `inherits = "dev"` default is debug=2 which
+# dominates wasm size and freezes browsers loading the page.
+debug = false
+strip = "debuginfo"
 
 # Use the local FastTrackStudio input_actions checkout during development so
 # dependent crates share the same updated vox/facet stack.

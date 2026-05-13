@@ -66,7 +66,7 @@ pub fn AgentRunDashboard(
     rsx! {
         VStack { class: "gap-6",
             SectionHeader {
-                label: "Agent runs".to_string(),
+                label: "Agent runs",
                 trailing: rsx! {
                     StatusBadge {
                         variant: StatusBadgeVariant::Neutral,

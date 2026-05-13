@@ -918,11 +918,11 @@ pub fn InvoiceView() -> Element {
                 value: Some(current_tab.read().clone()),
                 on_change: move |v: String| current_tab.set(v),
                 TabList {
-                    TabTrigger { value: "invoices".to_string(), index: 0usize, "Invoices" }
-                    TabTrigger { value: "recurring".to_string(), index: 1usize, "Recurring" }
-                    TabTrigger { value: "clients".to_string(), index: 2usize, "Clients" }
+                    TabTrigger { value: "invoices", index: 0usize, "Invoices" }
+                    TabTrigger { value: "recurring", index: 1usize, "Recurring" }
+                    TabTrigger { value: "clients", index: 2usize, "Clients" }
                 }
-                TabContent { value: "invoices".to_string(), index: 0usize,
+                TabContent { value: "invoices", index: 0usize,
                     InvoiceNinjaDashboard {
                         invoices: invoices_vec.clone(),
                         lines_by_invoice: lines_by_invoice.clone(),
@@ -940,7 +940,7 @@ pub fn InvoiceView() -> Element {
                         on_record_payment: on_record_payment_request,
                     }
                 }
-                TabContent { value: "recurring".to_string(), index: 1usize,
+                TabContent { value: "recurring", index: 1usize,
                     RecurringInvoiceList {
                         items: recurring_vec.clone(),
                         clients: clients_vec.clone(),
@@ -951,7 +951,7 @@ pub fn InvoiceView() -> Element {
                         on_new: on_recurring_new,
                     }
                 }
-                TabContent { value: "clients".to_string(), index: 2usize,
+                TabContent { value: "clients", index: 2usize,
                     VStack { class: "gap-2",
                         Heading { level: HeadingLevel::H2, "Clients" }
                         if clients_vec.is_empty() {
@@ -976,7 +976,7 @@ pub fn InvoiceView() -> Element {
                 open: recurring_editor_open,
                 side: SheetSide::Right,
                 on_close: on_recurring_close,
-                class: "sm:max-w-[60rem] w-[60rem] flex flex-col h-full overflow-auto".to_string(),
+                class: "sm:max-w-[60rem] w-[60rem] flex flex-col h-full overflow-auto",
                 if let Some(rdraft) = recurring_draft.clone() {
                     SheetHeader {
                         SheetTitle { "Recurring template" }
@@ -996,7 +996,7 @@ pub fn InvoiceView() -> Element {
                 open: editor_open,
                 side: SheetSide::Right,
                 on_close: on_close_editor,
-                class: "sm:max-w-[60rem] w-[60rem] flex flex-col h-full overflow-auto".to_string(),
+                class: "sm:max-w-[60rem] w-[60rem] flex flex-col h-full overflow-auto",
                 if let Some(draft) = draft_for_editor.clone() {
                     SheetHeader {
                         SheetTitle { "Invoice {draft.invoice.number}" }

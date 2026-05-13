@@ -179,7 +179,7 @@ pub fn TimeEntriesToInvoiceDialog(props: TimeEntriesToInvoiceDialogProps) -> Ele
                         Label { "Client" }
                         Combobox {
                             value: client_value,
-                            ComboboxTrigger { placeholder: "Select client".to_string() }
+                            ComboboxTrigger { placeholder: "Select client" }
                             ComboboxContent { items: client_items }
                         }
                     }

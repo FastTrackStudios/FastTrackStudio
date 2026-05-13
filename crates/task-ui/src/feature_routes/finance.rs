@@ -165,10 +165,10 @@ pub fn RevenueView() -> Element {
                 value: Some(tab.read().clone()),
                 on_change: move |v: String| tab.set(v),
                 TabList {
-                    TabTrigger { value: "revenue".to_string(), index: 0usize, "Revenue" }
-                    TabTrigger { value: "assets".to_string(), index: 1usize, "Assets" }
+                    TabTrigger { value: "revenue", index: 0usize, "Revenue" }
+                    TabTrigger { value: "assets", index: 1usize, "Assets" }
                 }
-                TabContent { value: "revenue".to_string(), index: 0usize,
+                TabContent { value: "revenue", index: 0usize,
                     RevenueDashboard {
                         items: items(),
                         status: status_msg(),
@@ -176,7 +176,7 @@ pub fn RevenueView() -> Element {
                         on_delete: on_revenue_delete,
                     }
                 }
-                TabContent { value: "assets".to_string(), index: 1usize,
+                TabContent { value: "assets", index: 1usize,
                     FinancialAssetDashboard {
                         items: assets(),
                         status: status_msg(),

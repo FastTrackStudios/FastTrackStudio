@@ -145,7 +145,7 @@ pub fn PriorityBadge(
             is_modal: false,
             on_open_change: move |o| open.set(o),
             PopoverTrigger {
-                class: "inline-flex".to_string(),
+                class: "inline-flex",
                 button {
                     r#type: "button",
                     class: "inline-flex items-center gap-1.5 rounded-md px-1.5 py-0.5 hover:bg-accent",
@@ -157,7 +157,7 @@ pub fn PriorityBadge(
                 }
             }
             PopoverContent {
-                class: "w-44 p-1".to_string(),
+                class: "w-44 p-1",
                 div { class: "flex flex-col",
                     for p in Priority::all() {
                         {

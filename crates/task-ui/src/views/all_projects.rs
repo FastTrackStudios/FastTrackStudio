@@ -14,13 +14,13 @@ pub fn AllProjects() -> Element {
         div { class: "mx-auto flex max-w-6xl flex-col gap-8 p-6 lg:p-10",
             section { class: "flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between",
                 div { class: "space-y-2",
-                    Text { variant: TextVariant::Small, class: "uppercase tracking-[0.3em] text-primary font-semibold".to_string(), "All projects" }
+                    Text { variant: TextVariant::Small, class: "uppercase tracking-[0.3em] text-primary font-semibold", "All projects" }
                     Heading { level: HeadingLevel::H1, "Every project, every task" }
-                    Text { variant: TextVariant::Muted, class: "max-w-2xl".to_string(),
+                    Text { variant: TextVariant::Muted, class: "max-w-2xl",
                         "One screen for the full state of work. Each project shows its full task list grouped by status."
                     }
                 }
-                HStack { gap: "3".to_string(), class: "flex-wrap".to_string(),
+                HStack { gap: "3", class: "flex-wrap",
                     Stat { label: "Projects", value: format!("{}", project_count) }
                     Stat { label: "Open", value: format!("{}", open_tasks) }
                     Stat { label: "Done", value: format!("{}", done_tasks) }
@@ -43,19 +43,19 @@ fn ProjectSection(project: Project) -> Element {
 
     rsx! {
         Card {
-            CardHeader { class: "flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between".to_string(),
+            CardHeader { class: "flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between",
                 div { class: "flex flex-col gap-1",
-                    CardTitle { class: "text-2xl".to_string(), "{project.name}" }
+                    CardTitle { class: "text-2xl", "{project.name}" }
                     CardDescription { "{project.summary}" }
                 }
-                HStack { gap: "2".to_string(),
+                HStack { gap: "2",
                     Badge { variant: BadgeVariant::Outline, "{open} open" }
                     Badge { variant: BadgeVariant::Outline, "{done} done" }
                 }
             }
             CardContent {
                 if project.tasks.is_empty() {
-                    EmptyState { message: "No tasks yet.".to_string() }
+                    EmptyState { message: "No tasks yet." }
                 } else {
                     ItemGroup {
                         for task in &project.tasks {
@@ -88,11 +88,11 @@ fn TaskRow(task: Task) -> Element {
     rsx! {
         Item { variant: ItemVariant::Muted,
             ItemContent {
-                HStack { gap: "3".to_string(), class: "items-center".to_string(),
+                HStack { gap: "3", class: "items-center",
                     StatusBadge {
                         variant,
                         label: task.status.label().to_string(),
-                        class: "text-[10px] uppercase tracking-widest px-2 py-0.5".to_string(),
+                        class: "text-[10px] uppercase tracking-widest px-2 py-0.5",
                     }
                     ItemTitle { class: "{title_class}", "{task.title}" }
                 }
@@ -107,10 +107,10 @@ fn TaskRow(task: Task) -> Element {
 #[component]
 fn Stat(label: &'static str, value: String) -> Element {
     rsx! {
-        Card { class: "min-w-28".to_string(),
-            CardContent { class: "p-4 pt-4".to_string(),
+        Card { class: "min-w-28",
+            CardContent { class: "p-4 pt-4",
                 div { class: "text-2xl font-extrabold text-foreground", "{value}" }
-                Text { variant: TextVariant::Small, class: "uppercase tracking-[0.2em] text-muted-foreground font-semibold".to_string(), "{label}" }
+                Text { variant: TextVariant::Small, class: "uppercase tracking-[0.2em] text-muted-foreground font-semibold", "{label}" }
             }
         }
     }

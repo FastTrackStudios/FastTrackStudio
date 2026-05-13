@@ -67,22 +67,22 @@ pub fn TimerSummaryStats(props: TimerSummaryStatsProps) -> Element {
     rsx! {
         div { class: "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3",
             StatCard {
-                label: "Today".to_string(),
+                label: "Today",
                 value: format_duration_hms(today_b.total),
                 sublabel: format!("{} entries · {}", today_b.count, format_money(today_b.cents, "USD")),
             }
             StatCard {
-                label: "This week".to_string(),
+                label: "This week",
                 value: format_duration_hms(week_b.total),
                 sublabel: format!("{} entries · {}", week_b.count, format_money(week_b.cents, "USD")),
             }
             StatCard {
-                label: "This month".to_string(),
+                label: "This month",
                 value: format_duration_hms(month_b.total),
                 sublabel: format!("{} entries · {}", month_b.count, format_money(month_b.cents, "USD")),
             }
             StatCard {
-                label: "Billable".to_string(),
+                label: "Billable",
                 value: format!("{}%", billable_pct),
                 sublabel: format!("{} of {}", format_duration_hms(month_b.billable_secs), format_duration_hms(month_b.total)),
             }

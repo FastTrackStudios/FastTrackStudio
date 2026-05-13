@@ -67,7 +67,7 @@ pub fn WebhookEventLog(
 
     rsx! {
         VStack { class: "gap-4",
-            SectionHeader { label: "Webhook deliveries".to_string() }
+            SectionHeader { label: "Webhook deliveries" }
             Text { variant: TextVariant::Muted,
                 "Inbound webhook payloads from configured integrations. Server-only debug view."
             }
@@ -91,9 +91,9 @@ pub fn WebhookEventLog(
                                     };
                                     on_filter.call(next);
                                 },
-                                NativeSelectOption { value: "".to_string(), "All" }
-                                NativeSelectOption { value: "github".to_string(), "github" }
-                                NativeSelectOption { value: "hermes".to_string(), "hermes" }
+                                NativeSelectOption { value: "", "All" }
+                                NativeSelectOption { value: "github", "github" }
+                                NativeSelectOption { value: "hermes", "hermes" }
                             }
                         }
                     }
@@ -177,7 +177,7 @@ pub fn WebhookEventLog(
                                         Badge { variant: BadgeVariant::Secondary, "{integration}" }
                                         StatusBadge {
                                             variant: sig_variant,
-                                            label: if row.signature_ok { "sig ok".to_string() } else { "sig fail".to_string() },
+                                            label: if row.signature_ok { "sig ok" } else { "sig fail" },
                                         }
                                         StatusBadge { variant: proc_variant, label: proc_label }
                                     }

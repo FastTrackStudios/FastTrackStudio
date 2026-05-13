@@ -250,7 +250,7 @@ pub fn InteractiveCalendar(
                     }
                     SegmentedControl {
                         size: SegmentedControlSize::Small,
-                        value: if *compact.read() { "compact".to_string() } else { "comfortable".to_string() },
+                        value: if *compact.read() { "compact" } else { "comfortable" },
                         on_change: move |v: String| compact.set(v == "compact"),
                         options: vec![
                             ("comfortable".into(), "Comfortable".into()),
@@ -280,7 +280,7 @@ pub fn InteractiveCalendar(
                         on_select: move |dt: DateTime<Utc>| cursor.set(dt),
                     }
                     div { class: "rounded-lg border border-border bg-card p-3 text-xs text-muted-foreground flex flex-col gap-1",
-                        SectionHeader { label: "Shortcuts".to_string(), size: SectionHeaderSize::Small }
+                        SectionHeader { label: "Shortcuts", size: SectionHeaderSize::Small }
                         div { class: "flex justify-between", span { "Prev / Next" } span { class: "font-mono", "j / k" } }
                         div { class: "flex justify-between", span { "Today" } span { class: "font-mono", "t" } }
                         div { class: "flex justify-between", span { "Views" } span { class: "font-mono", "m w d a" } }

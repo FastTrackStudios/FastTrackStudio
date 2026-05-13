@@ -549,8 +549,8 @@ pub fn FinancialAssetCreateForm(on_submit: EventHandler<FinancialAssetCreate>) -
                     div { class: "w-40",
                         Combobox {
                             value: kind,
-                            placeholder: "Kind".to_string(),
-                            ComboboxTrigger { placeholder: "Kind".to_string() }
+                            placeholder: "Kind",
+                            ComboboxTrigger { placeholder: "Kind" }
                             ComboboxContent {
                                 for k in FINANCIAL_ASSET_KINDS.iter() {
                                     ComboboxItem { key: "{k}", value: k.to_string(),

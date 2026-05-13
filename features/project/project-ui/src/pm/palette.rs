@@ -50,17 +50,17 @@ pub fn TaskCommandPalette(
                 SearchIcon { size: 14 }
                 CommandInput {
                     value: search,
-                    placeholder: "Search tasks, run an action…".to_string(),
-                    class: "h-9 flex-1 border-0 bg-transparent text-sm outline-none focus:ring-0".to_string(),
+                    placeholder: "Search tasks, run an action…",
+                    class: "h-9 flex-1 border-0 bg-transparent text-sm outline-none focus:ring-0",
                 }
             }
 
             CommandList {
                 CommandEmpty { "No results." }
 
-                CommandGroup { heading: "Actions".to_string(),
+                CommandGroup { heading: "Actions",
                     CommandItem {
-                        value: "create task".to_string(),
+                        value: "create task",
                         keywords: vec!["new".into(), "add".into()],
                         on_select: move |_| on_run.call(PaletteIntent::CreateTask),
                         Plus { size: 14 }
@@ -68,42 +68,42 @@ pub fn TaskCommandPalette(
                         CommandShortcut { "C" }
                     }
                     CommandItem {
-                        value: "switch view list".to_string(),
+                        value: "switch view list",
                         keywords: vec!["view".into(), "table".into()],
                         on_select: move |_| on_run.call(PaletteIntent::SwitchView(TaskView::List)),
                         LayoutList { size: 14 }
                         "Switch to list view"
                     }
                     CommandItem {
-                        value: "switch view board".to_string(),
+                        value: "switch view board",
                         keywords: vec!["view".into(), "kanban".into()],
                         on_select: move |_| on_run.call(PaletteIntent::SwitchView(TaskView::Board)),
                         LayoutTemplate { size: 14 }
                         "Switch to board view"
                     }
                     CommandItem {
-                        value: "tab overview".to_string(),
+                        value: "tab overview",
                         keywords: vec!["jump".into()],
                         on_select: move |_| on_run.call(PaletteIntent::SetActiveTab(ProjectTab::Overview)),
                         FolderKanban { size: 14 }
                         "Open Overview"
                     }
                     CommandItem {
-                        value: "tab tasks".to_string(),
+                        value: "tab tasks",
                         keywords: vec!["jump".into()],
                         on_select: move |_| on_run.call(PaletteIntent::SetActiveTab(ProjectTab::Tasks)),
                         LayoutList { size: 14 }
                         "Open Tasks"
                     }
                     CommandItem {
-                        value: "tab cycles".to_string(),
+                        value: "tab cycles",
                         keywords: vec!["jump".into(), "sprint".into()],
                         on_select: move |_| on_run.call(PaletteIntent::SetActiveTab(ProjectTab::Cycles)),
                         Target { size: 14 }
                         "Open Cycles"
                     }
                     CommandItem {
-                        value: "tab milestones".to_string(),
+                        value: "tab milestones",
                         keywords: vec!["jump".into()],
                         on_select: move |_| on_run.call(PaletteIntent::SetActiveTab(ProjectTab::Milestones)),
                         Flag { size: 14 }
@@ -113,7 +113,7 @@ pub fn TaskCommandPalette(
 
                 CommandSeparator {}
 
-                CommandGroup { heading: "Filter by priority".to_string(),
+                CommandGroup { heading: "Filter by priority",
                     for p in ["urgent", "high", "medium", "low", "none"].iter() {
                         CommandItem {
                             key: "p-{p}",
@@ -129,7 +129,7 @@ pub fn TaskCommandPalette(
                 }
 
                 if !assignees.is_empty() {
-                    CommandGroup { heading: "Filter by assignee".to_string(),
+                    CommandGroup { heading: "Filter by assignee",
                         for a in assignees.into_iter() {
                             {
                                 let a_for_select = a.clone();
@@ -151,7 +151,7 @@ pub fn TaskCommandPalette(
 
                 CommandSeparator {}
 
-                CommandGroup { heading: "Tasks".to_string(),
+                CommandGroup { heading: "Tasks",
                     for task in tasks.iter().take(50).cloned() {
                         {
                             let task_id = task.id;

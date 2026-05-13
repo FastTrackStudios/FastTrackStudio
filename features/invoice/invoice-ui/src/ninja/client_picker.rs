@@ -50,7 +50,7 @@ pub fn ClientPicker(props: ClientPickerProps) -> Element {
             div { class: "flex-1 min-w-0",
                 Combobox {
                     value: combo_value,
-                    ComboboxTrigger { placeholder: "Select client".to_string() }
+                    ComboboxTrigger { placeholder: "Select client" }
                     ComboboxContent {
                         items,
                         empty: rsx! {
@@ -164,7 +164,7 @@ pub fn ClientCreateDialog(props: ClientCreateDialogProps) -> Element {
                         Label { "Currency" }
                         Combobox {
                             value: currency,
-                            ComboboxTrigger { placeholder: "USD".to_string() }
+                            ComboboxTrigger { placeholder: "USD" }
                             ComboboxContent { items: currency_items }
                         }
                     }
@@ -175,7 +175,7 @@ pub fn ClientCreateDialog(props: ClientCreateDialogProps) -> Element {
                 }
 
                 Label { "Notes" }
-                Textarea { value: notes, placeholder: "Anything to remember about this client?".to_string() }
+                Textarea { value: notes, placeholder: "Anything to remember about this client?" }
             }
             DialogFooter {
                 Button {

@@ -60,7 +60,7 @@ fn TaskCard(
             open: Some(menu_open()),
             on_open_change: move |o: bool| menu_open.set(o),
             ContextMenuTrigger {
-                class: "block".to_string(),
+                class: "block",
                 div {
                     class: "group rounded-lg border border-border bg-card p-3 text-sm shadow-sm hover:border-primary/40 hover:shadow-md transition-all cursor-pointer flex flex-col gap-2",
                     onclick: move |_| on_open.call(id),
@@ -102,7 +102,7 @@ fn TaskCard(
                         if let Some(name) = assignee.as_deref() {
                             Avatar { size: AvatarSize::Small,
                                 AvatarFallback {
-                                    class: "bg-muted text-foreground text-[10px]".to_string(),
+                                    class: "bg-muted text-foreground text-[10px]",
                                     "{name.chars().next().unwrap_or('?').to_uppercase().to_string()}"
                                 }
                             }
@@ -113,7 +113,7 @@ fn TaskCard(
             ContextMenuContent {
                 ContextMenuLabel { "Task" }
                 ContextMenuItem {
-                    value: "open".to_string(),
+                    value: "open",
                     index: 0usize,
                     on_select: move |_: String| on_open.call(id),
                     "Open"
@@ -166,7 +166,7 @@ fn TaskCard(
                 }
                 ContextMenuSeparator {}
                 ContextMenuItem {
-                    value: "run-agent".to_string(),
+                    value: "run-agent",
                     index: 11usize,
                     on_select: move |_: String| on_dispatch_agent.call(id),
                     Bot { size: 14 }
@@ -174,7 +174,7 @@ fn TaskCard(
                 }
                 ContextMenuSeparator {}
                 ContextMenuItem {
-                    value: "delete".to_string(),
+                    value: "delete",
                     index: 12usize,
                     destructive: true,
                     on_select: move |_: String| on_delete.call(id),
@@ -207,7 +207,7 @@ fn QuickCreate(column_key: String, on_quick_create: EventHandler<(String, String
             div { class: "flex flex-col gap-2 rounded-lg border border-primary/40 bg-card p-2",
                 Input {
                     value: draft,
-                    placeholder: "Task title".to_string(),
+                    placeholder: "Task title",
                     size: InputSize::Small,
                     on_change: move |e: FormEvent| {
                         // Submit on Enter via key check on the next blur/Enter wiring is
@@ -286,7 +286,7 @@ pub fn TaskKanbanBoard(
     }
 
     rsx! {
-        ScrollArea { class: "w-full".to_string(),
+        ScrollArea { class: "w-full",
             div { class: "flex items-start gap-3 px-1 py-2 min-h-[24rem]",
                 for col_key in ordered.iter().cloned() {
                     {

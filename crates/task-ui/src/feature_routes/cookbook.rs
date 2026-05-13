@@ -209,12 +209,12 @@ pub fn RecipeView() -> Element {
                 value: Some(tab.read().clone()),
                 on_change: move |v: String| tab.set(v),
                 TabList {
-                    TabTrigger { value: "recipes".to_string(), index: 0usize, "Recipes" }
-                    TabTrigger { value: "pantry".to_string(), index: 1usize, "Pantry" }
-                    TabTrigger { value: "shopping".to_string(), index: 2usize, "Shopping List" }
-                    TabTrigger { value: "products".to_string(), index: 3usize, "Products" }
+                    TabTrigger { value: "recipes", index: 0usize, "Recipes" }
+                    TabTrigger { value: "pantry", index: 1usize, "Pantry" }
+                    TabTrigger { value: "shopping", index: 2usize, "Shopping List" }
+                    TabTrigger { value: "products", index: 3usize, "Products" }
                 }
-                TabContent { value: "recipes".to_string(), index: 0usize,
+                TabContent { value: "recipes", index: 0usize,
                     RecipeDashboard {
                         items: recipes(),
                         status: status_msg(),
@@ -222,7 +222,7 @@ pub fn RecipeView() -> Element {
                         on_delete: on_recipe_delete,
                     }
                 }
-                TabContent { value: "pantry".to_string(), index: 1usize,
+                TabContent { value: "pantry", index: 1usize,
                     PantryItemDashboard {
                         items: pantry_items(),
                         status: status_msg(),
@@ -230,7 +230,7 @@ pub fn RecipeView() -> Element {
                         on_delete: on_pantry_delete,
                     }
                 }
-                TabContent { value: "shopping".to_string(), index: 2usize,
+                TabContent { value: "shopping", index: 2usize,
                     ShoppingListItemDashboard {
                         items: shopping_items(),
                         status: status_msg(),
@@ -238,7 +238,7 @@ pub fn RecipeView() -> Element {
                         on_delete: on_shopping_delete,
                     }
                 }
-                TabContent { value: "products".to_string(), index: 3usize,
+                TabContent { value: "products", index: 3usize,
                     FoodProductDashboard {
                         items: products(),
                         status: status_msg(),

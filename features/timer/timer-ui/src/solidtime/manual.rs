@@ -195,7 +195,7 @@ pub fn ManualTimeEntryDialog(props: ManualTimeEntryDialogProps) -> Element {
                 Label { "Project" }
                 Combobox {
                     value: project_value,
-                    ComboboxTrigger { placeholder: "Select project".to_string() }
+                    ComboboxTrigger { placeholder: "Select project" }
                     ComboboxContent {
                         items: project_items,
                         empty: rsx! {

@@ -59,7 +59,7 @@ fn render_user(props: &MessageBubbleProps) -> Element {
                     div { class: "opacity-0 group-hover/message:opacity-100 transition-opacity",
                         MessageActions {
                             message_id: props.message.id,
-                            role: "user".to_string(),
+                            role: "user",
                             body: props.message.body.clone(),
                             on_action: props.on_action,
                         }
@@ -88,7 +88,7 @@ fn render_assistant(props: &MessageBubbleProps) -> Element {
         div { class: "group/message flex gap-3 my-3",
             Avatar { size: AvatarSize::Small,
                 if let Some(url) = avatar_url {
-                    AvatarImage { src: url, alt: "Assistant".to_string() }
+                    AvatarImage { src: url, alt: "Assistant" }
                 }
                 AvatarFallback { "A" }
             }
@@ -133,7 +133,7 @@ fn render_assistant(props: &MessageBubbleProps) -> Element {
                         div { class: "opacity-0 group-hover/message:opacity-100 transition-opacity",
                             MessageActions {
                                 message_id: m_id(props),
-                                role: "assistant".to_string(),
+                                role: "assistant",
                                 body: props.message.body.clone(),
                                 on_action: props.on_action,
                             }

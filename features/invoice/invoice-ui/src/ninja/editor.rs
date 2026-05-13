@@ -143,7 +143,7 @@ pub fn InvoiceEditor(props: InvoiceEditorProps) -> Element {
                                 Label { "Currency" }
                                 Combobox {
                                     value: currency_signal,
-                                    ComboboxTrigger { placeholder: "USD".to_string() }
+                                    ComboboxTrigger { placeholder: "USD" }
                                     ComboboxContent { items: currency_items }
                                 }
                             }
@@ -160,7 +160,7 @@ pub fn InvoiceEditor(props: InvoiceEditorProps) -> Element {
                                 on_change,
                             }
                             DateField {
-                                label: "Issue date".to_string(),
+                                label: "Issue date",
                                 value: issue_str.clone(),
                                 on_set: {
                                     let d = draft.clone();
@@ -178,7 +178,7 @@ pub fn InvoiceEditor(props: InvoiceEditorProps) -> Element {
                                 },
                             }
                             DateField {
-                                label: "Due date".to_string(),
+                                label: "Due date",
                                 value: due_str.clone(),
                                 on_set: {
                                     let d = draft.clone();
@@ -436,7 +436,7 @@ fn NotesField(draft: InvoiceDraft, on_change: EventHandler<InvoiceDraft>) -> Ele
         }
     });
     rsx! {
-        Textarea { value, placeholder: "Payment terms, thank-you note, …".to_string() }
+        Textarea { value, placeholder: "Payment terms, thank-you note, …" }
     }
 }
 

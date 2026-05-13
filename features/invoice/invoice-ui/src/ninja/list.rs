@@ -227,32 +227,32 @@ fn InvoiceListRow(
             }
             ContextMenuContent {
                 ContextMenuItem {
-                    value: "open".to_string(),
+                    value: "open",
                     index: 0,
                     on_select: move |_| on_open.call(id),
                     "Open"
                 }
                 ContextMenuItem {
-                    value: "duplicate".to_string(),
+                    value: "duplicate",
                     index: 1,
                     on_select: move |_| on_duplicate.call(id),
                     "Duplicate"
                 }
                 ContextMenuItem {
-                    value: "mark-sent".to_string(),
+                    value: "mark-sent",
                     index: 2,
                     on_select: move |_| on_mark_sent.call(id),
                     "Mark sent"
                 }
                 ContextMenuItem {
-                    value: "record-payment".to_string(),
+                    value: "record-payment",
                     index: 3,
                     on_select: move |_| on_record_payment.call(id),
                     "Record payment"
                 }
                 ContextMenuSeparator {}
                 ContextMenuItem {
-                    value: "delete".to_string(),
+                    value: "delete",
                     index: 4,
                     destructive: true,
                     on_select: move |_| on_delete.call(id),

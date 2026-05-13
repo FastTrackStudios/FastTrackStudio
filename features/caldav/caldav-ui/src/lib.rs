@@ -36,7 +36,7 @@ pub fn CalDavAccountDashboard(
     rsx! {
         VStack { class: "gap-6",
             SectionHeader {
-                label: "CalDAV sync".to_string(),
+                label: "CalDAV sync",
                 trailing: rsx! {
                     StatusBadge {
                         variant: StatusBadgeVariant::Neutral,

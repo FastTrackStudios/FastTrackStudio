@@ -61,13 +61,13 @@ pub fn ReasoningPanel(props: ReasoningPanelProps) -> Element {
                 open: Some(open_state),
                 on_open_change: move |o: bool| open.set(o),
                 CollapsibleTrigger {
-                    class: "inline-flex items-center gap-2 text-amber-300/80 text-sm hover:text-amber-200".to_string(),
+                    class: "inline-flex items-center gap-2 text-amber-300/80 text-sm hover:text-amber-200",
                     if props.streaming {
                         Spinner { size: SpinnerSize::Small }
                     }
                     "{label}"
                 }
-                CollapsibleContent { class: "mt-2".to_string(),
+                CollapsibleContent { class: "mt-2",
                     div { class: "italic text-muted-foreground text-sm whitespace-pre-wrap",
                         "{body}"
                     }

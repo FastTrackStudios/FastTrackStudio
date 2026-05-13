@@ -59,7 +59,7 @@ pub fn CalendarEventDashboard(
     rsx! {
         VStack { class: "gap-6",
             SectionHeader {
-                label: "Calendar".to_string(),
+                label: "Calendar",
                 trailing: rsx! {
                     StatusBadge {
                         variant: StatusBadgeVariant::Neutral,

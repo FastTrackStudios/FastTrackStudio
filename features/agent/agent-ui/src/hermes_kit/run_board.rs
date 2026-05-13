@@ -56,7 +56,7 @@ pub fn AgentRunBoard(
     let now = Utc::now();
 
     rsx! {
-        ScrollArea { class: "w-full".to_string(),
+        ScrollArea { class: "w-full",
             div { class: "flex items-start gap-3 px-1 py-2 min-h-[24rem]",
                 for (key, label) in COLUMNS.iter() {
                     {

@@ -116,7 +116,7 @@ pub fn ProjectHeaderCard(
 
     rsx! {
         Card {
-            CardContent { class: "flex flex-col gap-4 py-5".to_string(),
+            CardContent { class: "flex flex-col gap-4 py-5",
                 HStack { class: "items-start gap-4 flex-wrap",
                     div { class: "h-12 w-12 rounded-xl shrink-0 {swatch}" }
 
@@ -135,7 +135,7 @@ pub fn ProjectHeaderCard(
                             } else {
                                 "text-2xl font-bold".to_string()
                             },
-                            placeholder: "Project name".to_string(),
+                            placeholder: "Project name",
                         }
                         if !description.is_empty() {
                             div { class: "mt-1 text-sm text-muted-foreground",
@@ -189,7 +189,7 @@ pub fn ProjectHeaderCard(
                             HStack { class: "items-center gap-2",
                                 Avatar { size: AvatarSize::Small,
                                     AvatarFallback {
-                                        class: "bg-muted text-foreground text-[10px]".to_string(),
+                                        class: "bg-muted text-foreground text-[10px]",
                                         "{name.chars().next().unwrap_or('?').to_uppercase().to_string()}"
                                     }
                                 }
@@ -246,7 +246,7 @@ pub fn ProjectHeaderCard(
                                 open: theme_open(),
                                 is_modal: false,
                                 on_open_change: move |o| theme_open.set(o),
-                                PopoverTrigger { class: "inline-flex".to_string(),
+                                PopoverTrigger { class: "inline-flex",
                                     button {
                                         r#type: "button",
                                         class: "inline-flex h-8 w-8 items-center justify-center rounded-md border border-border bg-card text-muted-foreground hover:bg-accent hover:text-accent-foreground",
@@ -258,7 +258,7 @@ pub fn ProjectHeaderCard(
                                         Palette { size: 14 }
                                     }
                                 }
-                                PopoverContent { class: "w-[26rem] p-3".to_string(),
+                                PopoverContent { class: "w-[26rem] p-3",
                                     ProjectThemeSettings {
                                         current: project_theme.clone(),
                                         on_change: move |v| handler.call(v),

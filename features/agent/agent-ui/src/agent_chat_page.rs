@@ -285,7 +285,7 @@ fn render_settings_sheet(
             open: *settings_open.read(),
             side: SheetSide::Right,
             on_close: move |_| settings_open.set(false),
-            class: "w-full sm:max-w-md".to_string(),
+            class: "w-full sm:max-w-md",
             div { class: "flex flex-col gap-4 overflow-y-auto",
                 Heading { level: HeadingLevel::H3, "Conversation settings" }
                 div { class: "flex flex-col gap-1",
@@ -319,7 +319,7 @@ fn render_settings_sheet(
                     Label { class: "text-xs uppercase tracking-widest text-muted-foreground", "Max tokens" }
                     Input {
                         value: max_tokens,
-                        placeholder: "(unbounded)".to_string(),
+                        placeholder: "(unbounded)",
                     }
                 }
                 div { class: "flex flex-col gap-1",

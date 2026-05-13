@@ -29,9 +29,17 @@ use uuid::Uuid;
 /// User-picked preset for an organization. Keyed by `Organization::id`
 /// (which is currently `&'static str` in `crate::data`). Missing entry
 /// means "use the org's static default".
+///
+/// `mode` carries the current light/dark choice. It's intentionally
+/// global (not per-org) — users want one consistent mode across the app
+/// even when they switch organizations. The popover's `ThemeSwitcher`
+/// writes to this through `OrgSwitcher`'s bridge effect; the App-level
+/// effect reads it and sets `theme_state.mode` so `ThemeProvider`
+/// re-renders the CSS variables for the right palette.
 #[derive(Clone, Copy)]
 pub struct OrgThemeOverrides {
     pub map: Signal<HashMap<String, String>>,
+    pub mode: Signal<ThemeMode>,
 }
 
 /// Per-project preset name override. `None` (i.e. missing entry) means

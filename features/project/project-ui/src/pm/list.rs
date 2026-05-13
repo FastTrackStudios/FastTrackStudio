@@ -285,7 +285,7 @@ pub fn TaskListView(
                                                                 ));
                                                         }
                                                     },
-                                                    class: "text-sm truncate".to_string(),
+                                                    class: "text-sm truncate",
                                                 }
                                             }
                                             div { class: "flex items-center gap-1 flex-wrap max-w-[10rem]",
@@ -310,7 +310,7 @@ pub fn TaskListView(
                                                     Avatar {
                                                         size: AvatarSize::Small,
                                                         AvatarFallback {
-                                                            class: "bg-muted text-foreground text-[10px]".to_string(),
+                                                            class: "bg-muted text-foreground text-[10px]",
                                                             "{name.chars().next().unwrap_or('?').to_uppercase().to_string()}"
                                                         }
                                                     }
@@ -329,8 +329,8 @@ pub fn TaskListView(
             // Bulk action bar
             if sel_count > 0 {
                 div { class: "sticky bottom-3 z-10 mt-3 flex justify-center",
-                    Card { class: "shadow-lg border-primary/30".to_string(),
-                        CardContent { class: "flex items-center gap-3 py-2 px-3".to_string(),
+                    Card { class: "shadow-lg border-primary/30",
+                        CardContent { class: "flex items-center gap-3 py-2 px-3",
                             SquareDashed { size: 14 }
                             span { class: "text-sm font-medium", "{sel_count} selected" }
                             Divider { orientation: DividerOrientation::Vertical }

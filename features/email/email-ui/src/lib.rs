@@ -98,7 +98,7 @@ pub fn EmailDashboard(
     rsx! {
         div { class: "mx-auto flex max-w-5xl flex-col gap-6 p-6 lg:p-10",
             SectionHeader {
-                label: "Email".to_string(),
+                label: "Email",
                 trailing: rsx! {
                     StatusBadge { variant: StatusBadgeVariant::Neutral, label: status.clone() }
                 },

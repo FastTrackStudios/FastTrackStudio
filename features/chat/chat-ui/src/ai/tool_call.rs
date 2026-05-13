@@ -134,10 +134,10 @@ pub fn ToolCallCard(call: ToolCallView) -> Element {
             CardContent { class: "flex flex-col gap-2 pt-0 pb-3",
                 Collapsible {
                     CollapsibleTrigger {
-                        class: "text-xs text-muted-foreground hover:text-foreground".to_string(),
+                        class: "text-xs text-muted-foreground hover:text-foreground",
                         "Arguments"
                     }
-                    CollapsibleContent { class: "mt-1".to_string(),
+                    CollapsibleContent { class: "mt-1",
                         pre { class: "rounded-md bg-muted p-2 text-xs font-mono whitespace-pre-wrap break-all",
                             "{call.arguments_json}"
                         }
@@ -146,10 +146,10 @@ pub fn ToolCallCard(call: ToolCallView) -> Element {
                 if result_present {
                     Collapsible { default_open: result_default_open,
                         CollapsibleTrigger {
-                            class: "text-xs text-muted-foreground hover:text-foreground".to_string(),
+                            class: "text-xs text-muted-foreground hover:text-foreground",
                             "Result"
                         }
-                        CollapsibleContent { class: "mt-1 flex flex-col gap-1".to_string(),
+                        CollapsibleContent { class: "mt-1 flex flex-col gap-1",
                             pre { class: "rounded-md bg-muted p-2 text-xs font-mono whitespace-pre-wrap break-all",
                                 "{displayed_result}"
                             }

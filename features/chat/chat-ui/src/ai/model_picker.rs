@@ -62,7 +62,7 @@ pub fn ModelPicker(props: ModelPickerProps) -> Element {
                 value,
                 on_change: combo_on_change,
                 ComboboxTrigger { placeholder: trigger_label.clone() }
-                ComboboxContent { search_placeholder: "Search models…".to_string(),
+                ComboboxContent { search_placeholder: "Search models…",
                     for model in models.into_iter() {
                         ComboboxItem {
                             key: "{model.id}",

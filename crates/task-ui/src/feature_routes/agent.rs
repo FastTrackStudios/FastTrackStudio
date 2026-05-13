@@ -185,7 +185,7 @@ pub fn AgentRunBoardView() -> Element {
 
     rsx! {
         div { class: "mx-auto flex max-w-7xl flex-col gap-4 p-6 lg:p-10",
-            SectionHeader { label: "Agent runs".to_string() }
+            SectionHeader { label: "Agent runs" }
             Text { variant: TextVariant::Muted, "{status_msg}" }
             AgentRunBoard {
                 runs: runs(),

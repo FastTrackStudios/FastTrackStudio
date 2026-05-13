@@ -132,7 +132,7 @@ pub fn TaskGitPanel(
                                         ItemActions { class: "gap-1",
                                             StatusBadge {
                                                 variant: StatusBadgeVariant::Neutral,
-                                                label: "open".to_string(),
+                                                label: "open",
                                             }
                                             button {
                                                 r#type: "button",

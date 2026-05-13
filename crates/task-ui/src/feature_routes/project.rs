@@ -642,12 +642,12 @@ pub fn ProjectView() -> Element {
                 value: Some(shell_tab.read().clone()),
                 on_change: move |v: String| shell_tab.set(v),
                 TabList {
-                    TabTrigger { value: "overview".to_string(), index: 0usize, "Overview" }
-                    TabTrigger { value: "pm".to_string(), index: 1usize, "Project" }
-                    TabTrigger { value: "dashboard".to_string(), index: 2usize, "Dashboard" }
+                    TabTrigger { value: "overview", index: 0usize, "Overview" }
+                    TabTrigger { value: "pm", index: 1usize, "Project" }
+                    TabTrigger { value: "dashboard", index: 2usize, "Dashboard" }
                 }
 
-                TabContent { value: "overview".to_string(), index: 0usize,
+                TabContent { value: "overview", index: 0usize,
                     ProjectOverviewGrid {
                         projects: cur_items.clone(),
                         tasks: overview_tasks.clone(),
@@ -660,7 +660,7 @@ pub fn ProjectView() -> Element {
                     }
                 }
 
-                TabContent { value: "pm".to_string(), index: 1usize,
+                TabContent { value: "pm", index: 1usize,
                     if let Some(project) = first_project.clone() {
                         ProjectThemeScope { project_id: project.id,
                             ProjectHeaderCard {
@@ -722,7 +722,7 @@ pub fn ProjectView() -> Element {
                     }
                 }
 
-                TabContent { value: "dashboard".to_string(), index: 2usize,
+                TabContent { value: "dashboard", index: 2usize,
                     ProjectDashboard {
                         items: cur_items.clone(),
                         status: status_msg(),

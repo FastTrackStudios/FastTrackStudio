@@ -127,7 +127,7 @@ pub fn AgentRunPanel(
             Divider {}
 
             // Log feed
-            ScrollArea { class: "max-h-[28rem] w-full".to_string(),
+            ScrollArea { class: "max-h-[28rem] w-full",
                 div { class: "flex flex-col gap-0.5 font-mono text-[11px] leading-relaxed",
                     if lines.is_empty() {
                         div { class: "text-xs text-muted-foreground", "Waiting for log output…" }

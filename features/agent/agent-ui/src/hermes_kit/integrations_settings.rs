@@ -86,7 +86,7 @@ pub fn IntegrationSettings(
 
     rsx! {
         VStack { class: "gap-6",
-            SectionHeader { label: "Integrations".to_string() }
+            SectionHeader { label: "Integrations" }
             Text {
                 variant: TextVariant::Muted,
                 "Configure agent integrations and connected git repositories. Secrets are server-only."
@@ -108,7 +108,7 @@ pub fn IntegrationSettings(
                         Label { "Base URL" }
                         Input {
                             value: base_url,
-                            placeholder: "http://localhost:9119".to_string(),
+                            placeholder: "http://localhost:9119",
                             size: InputSize::Small,
                         }
                     }
@@ -116,7 +116,7 @@ pub fn IntegrationSettings(
                         Label { "Session token" }
                         Input {
                             value: session_token,
-                            placeholder: "paste the hermes session cookie / token".to_string(),
+                            placeholder: "paste the hermes session cookie / token",
                             size: InputSize::Small,
                         }
                     }
@@ -124,7 +124,7 @@ pub fn IntegrationSettings(
                         Label { "Default agent profile" }
                         Input {
                             value: default_profile,
-                            placeholder: "engineer".to_string(),
+                            placeholder: "engineer",
                             size: InputSize::Small,
                         }
                     }
@@ -132,7 +132,7 @@ pub fn IntegrationSettings(
                         Label { "Webhook secret (optional)" }
                         Input {
                             value: webhook_secret,
-                            placeholder: "verifies inbound /webhooks/hermes/event payloads".to_string(),
+                            placeholder: "verifies inbound /webhooks/hermes/event payloads",
                             size: InputSize::Small,
                         }
                     }
@@ -273,26 +273,26 @@ pub fn IntegrationSettings(
                     div { class: "flex flex-col gap-1",
                         Label { "Provider" }
                         NativeSelect { value: repo_provider,
-                            NativeSelectOption { value: "github".to_string(), "github" }
-                            NativeSelectOption { value: "gitlab".to_string(), "gitlab" }
-                            NativeSelectOption { value: "forgejo".to_string(), "forgejo" }
+                            NativeSelectOption { value: "github", "github" }
+                            NativeSelectOption { value: "gitlab", "gitlab" }
+                            NativeSelectOption { value: "forgejo", "forgejo" }
                         }
                     }
                     div { class: "flex flex-col gap-1",
                         Label { "Owner" }
-                        Input { value: repo_owner, placeholder: "Codys-Wright".to_string(), size: InputSize::Small }
+                        Input { value: repo_owner, placeholder: "Codys-Wright", size: InputSize::Small }
                     }
                     div { class: "flex flex-col gap-1",
                         Label { "Repo name" }
-                        Input { value: repo_name, placeholder: "Task".to_string(), size: InputSize::Small }
+                        Input { value: repo_name, placeholder: "Task", size: InputSize::Small }
                     }
                     div { class: "flex flex-col gap-1",
                         Label { "Default branch" }
-                        Input { value: repo_default_branch, placeholder: "main".to_string(), size: InputSize::Small }
+                        Input { value: repo_default_branch, placeholder: "main", size: InputSize::Small }
                     }
                     div { class: "flex flex-col gap-1",
                         Label { "Webhook secret" }
-                        Input { value: repo_webhook_secret, placeholder: "shared secret".to_string(), size: InputSize::Small }
+                        Input { value: repo_webhook_secret, placeholder: "shared secret", size: InputSize::Small }
                     }
                 }
                 DialogFooter {
