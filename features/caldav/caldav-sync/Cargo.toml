@@ -37,5 +37,5 @@ thiserror.workspace = true
 tracing.workspace = true
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
 
-kitchen-fridge.workspace = true
+fast-dav-rs.workspace = true
 url = "2"

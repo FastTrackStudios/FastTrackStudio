@@ -183,11 +183,15 @@ rev = "aea86f91f84cdf6052e4310e8a0541d87f37c624"
 version = "1.12"
 default-features = false
 
-# CalDAV client. The `caldav` feature wraps it in a Loro-backed
-# bridge: server-side sync engine pulls remote events into the
-# `calendar` feature's CRDT, pushes local edits back. See
-# https://docs.rs/kitchen_fridge/ for the upstream surface.
-[workspace.dependencies.kitchen-fridge]
+# CalDAV/CardDAV/WebDAV-Sync client (RFC 4791 + RFC 6352 + RFC 6578).
+# Picked over `kitchen-fridge` because it actually implements VEVENT
+# (kitchen-fridge's upstream is VTODO-first with VEVENT support
+# documented as "fairly trivial but not yet"), supports sync-token
+# incremental fetches, and ships HTTP/2 + connection pooling. We
+# wrap it in a Loro-backed bridge — the architect `calendar` CRDT
+# is our local source of truth, so kitchen-fridge's bundled Cache /
+# Provider abstractions would be redundant.
+[workspace.dependencies.fast-dav-rs]
 version = "0.4"
 
 # Dioxus — UI lib. Single workspace dep; per-crate `[features]`

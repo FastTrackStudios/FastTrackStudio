@@ -1,40 +1,51 @@
-//! Server-side CalDAV sync engine.
+//! Server-side CalDAV sync engine, backed by `fast-dav-rs`.
 //!
-//! ## Responsibilities
+//! ## Why fast-dav-rs (over kitchen-fridge)
 //!
-//! 1. Hold a [`kitchen_fridge::Client`] per active account — that's
-//!    the actual CalDAV transport.
-//! 2. Resolve credentials at engine construction time so the
-//!    per-operation methods don't have to take them again.
-//! 3. Map kitchen_fridge's `Item` / `Event` / `Task` ↔ our
-//!    `calendar_proto::CalendarEvent` so consumers stay on the
-//!    architect-emitted Repo trait without learning iCal internals.
-//! 4. Update [`caldav_proto::CalDavCalendar`] bookkeeping (CTag,
-//!    `last_sync_at`, `event_count`) after each successful op.
+//! - Implements VEVENT properly (kitchen-fridge's upstream is
+//!   VTODO-first with "VEVENT … fairly trivial but not yet").
+//! - Sync-token incremental fetches (RFC 6578) — server returns
+//!   only the changed objects, perfect for the `CalDavCalendar::server_ctag`
+//!   field's intent.
+//! - Low-level (no built-in Cache/Provider). Our `calendar` feature
+//!   IS the cache — kitchen-fridge's local cache would have been
+//!   redundant + a second source of truth to keep in sync.
 //!
-//! ## Out of scope (for now)
+//! ## What's implemented
 //!
-//! - The full VEVENT mapping (kitchen-fridge's upstream is VTODO-
-//!   first; we ship a best-effort VEVENT pass and flag what's
-//!   missing in field comments below).
-//! - Conflict resolution beyond LWW on the CalendarEvent CRDT.
-//!   The Loro side merges concurrent local edits; the CalDAV side
-//!   is single-writer per ETag.
-//! - Push of unique events to a brand-new calendar (we pull first;
-//!   creating new collections is a separate operation that should
-//!   land alongside the UI for it).
+//! - [`CalDavSyncEngine::test_connection`] — confirms the credentials
+//!   resolve to a principal.
+//! - [`CalDavSyncEngine::discover_calendars`] — full
+//!   principal → home-set → list-calendars discovery, returns the
+//!   collection URLs + display metadata.
+//! - [`CalDavSyncEngine::sync_calendar`] — pulls changes via
+//!   `sync_collection` using `last_sync_token` (server-side ctag /
+//!   sync-token in our [`caldav_proto::CalDavCalendar`]) for
+//!   incremental updates.
+//!
+//! ## What's stubbed
+//!
+//! - **iCal → `CalendarEvent` mapping**. fast-dav-rs hands us
+//!   `calendar_data: Option<String>` per object — the raw iCal
+//!   text. We need an iCal parser (`ical` or `vobject`) to map
+//!   VEVENT → `CalendarEventCreate`. Returned as the raw string in
+//!   the [`SyncedObject`] for now so the caller can wire its own
+//!   parser without us forcing one.
+//! - **Push** (`PUT` of locally-changed events). fast-dav-rs's
+//!   `put_if_match` / `put_if_none_match` are ready; we just need
+//!   the same iCal *writer* on top.
 
 use std::sync::Arc;
 
 use caldav_proto::{CalDavServiceError, SyncSummary};
-use chrono::{DateTime, Utc};
+use fast_dav_rs::CalDavClient;
 use thiserror::Error;
-use tracing::warn;
+use tracing::info;
 use url::Url;
 use uuid::Uuid;
 
-/// Internal error type. Public so callers can match on it; the
-/// architect `CalDavServiceError` is the wire form.
+/// Internal error type. Public so callers can match on variants; the
+/// architect `CalDavServiceError` is the wire form on the service trait.
 #[derive(Debug, Error)]
 pub enum SyncError {
     #[error("account not found: {0}")]
@@ -55,7 +66,7 @@ pub enum SyncError {
     #[error("auth failed for account {0}")]
     AuthFailed(Uuid),
 
-    #[error("kitchen_fridge: {0}")]
+    #[error("caldav: {0}")]
     Upstream(String),
 
     #[error("internal: {0}")]
@@ -68,8 +79,9 @@ impl From<SyncError> for CalDavServiceError {
             SyncError::AccountNotFound(_) | SyncError::CalendarNotFound(_) => {
                 CalDavServiceError::NotFound
             }
-            SyncError::MissingCredentials(_) => CalDavServiceError::InvalidInput(e.to_string()),
-            SyncError::InvalidUrl { .. } => CalDavServiceError::InvalidInput(e.to_string()),
+            SyncError::MissingCredentials(_) | SyncError::InvalidUrl { .. } => {
+                CalDavServiceError::InvalidInput(e.to_string())
+            }
             SyncError::AuthFailed(_) => CalDavServiceError::AuthFailed(e.to_string()),
             SyncError::Upstream(_) => CalDavServiceError::Network(e.to_string()),
             SyncError::Internal(_) => CalDavServiceError::Internal(e.to_string()),
@@ -79,22 +91,56 @@ impl From<SyncError> for CalDavServiceError {
 
 /// Credential bundle for one CalDAV account. The sync engine asks
 /// for this on demand — we don't store passwords on disk through
-/// this crate, that's `auth-db`'s job.
+/// this crate; that's `auth-db`'s job.
 pub struct AccountCreds {
     pub base_url: Url,
     pub username: String,
     pub password: String,
 }
 
-/// Trait that the server impls to bridge between the sync engine and
-/// wherever credentials live (typically the auth-db `Vault` table or
-/// an env-driven test stub).
+/// Bridge to wherever credentials live. Typically the server impls
+/// this against the auth-db `Vault` table; tests use an env-driven
+/// stub.
 #[async_trait::async_trait]
 pub trait CredentialStore: Send + Sync + 'static {
     async fn load(&self, account_id: Uuid) -> Result<AccountCreds, SyncError>;
 }
 
-/// The actual engine. One per running server.
+/// One CalDAV collection (calendar) as the remote server describes it.
+/// Built from fast-dav-rs's [`CalendarInfo`] but stripped to just the
+/// fields the architect `CalDavCalendar` cares about.
+#[derive(Debug, Clone)]
+pub struct RemoteCalendar {
+    pub url: String,
+    pub display_name: String,
+    pub description: Option<String>,
+    pub color: Option<String>,
+    pub timezone: Option<String>,
+}
+
+/// One synced object — an event/todo/journal from the remote. We
+/// hand the raw iCal data back so the caller (or a separate
+/// `caldav-ical` crate later) does the VEVENT/VTODO parsing.
+#[derive(Debug, Clone)]
+pub struct SyncedObject {
+    pub href: String,
+    pub etag: Option<String>,
+    pub calendar_data: Option<String>,
+    pub is_deleted: bool,
+}
+
+/// Result of a single `sync_calendar` call. The returned `next_sync_token`
+/// should be stored on `caldav_proto::CalDavCalendar::server_ctag` so
+/// the next sync only fetches deltas.
+#[derive(Debug, Clone)]
+pub struct SyncedCalendar {
+    pub objects: Vec<SyncedObject>,
+    pub next_sync_token: Option<String>,
+}
+
+/// Sync engine — one per running server. Cheap to clone (the
+/// `Arc<dyn CredentialStore>` is the only stateful piece).
+#[derive(Clone)]
 pub struct CalDavSyncEngine {
     creds: Arc<dyn CredentialStore>,
 }
@@ -106,118 +152,122 @@ impl CalDavSyncEngine {
         }
     }
 
-    /// Lightweight ping — fetch the principal URL, confirm the
-    /// server returns 200/207. Returns Ok(()) on success.
+    pub fn with_arc(creds: Arc<dyn CredentialStore>) -> Self {
+        Self { creds }
+    }
+
+    /// Confirm the account's credentials resolve to a CalDAV
+    /// principal. Returns `Ok(())` on success.
     pub async fn test_connection(&self, account_id: Uuid) -> Result<(), SyncError> {
-        let creds = self.creds.load(account_id).await?;
-        let _client = build_client(&creds)?;
-        // `kitchen_fridge::Client::new` doesn't actually hit the
-        // network until you call something on it. Issue a cheap
-        // call here once kitchen-fridge exposes a `home_set()`
-        // -style helper; for now reaching this point means URL +
-        // creds parsed and the future request would use them.
-        // TODO: replace with an actual round-trip once kitchen-
-        // fridge stabilizes the "principal probe" API.
+        let client = self.build_client(account_id).await?;
+        let principal = client
+            .discover_current_user_principal()
+            .await
+            .map_err(map_err)?;
+        if principal.is_none() {
+            return Err(SyncError::AuthFailed(account_id));
+        }
         Ok(())
     }
 
-    /// Pull-then-push a single calendar by id. Returns the
-    /// summary numbers; callers should also update the matching
-    /// `CalDavCalendar` row's `last_sync_at` + `server_ctag` +
-    /// `event_count` from the values surfaced here.
-    pub async fn sync_calendar(
-        &self,
-        account_id: Uuid,
-        _calendar_url: &str,
-    ) -> Result<SyncSummary, SyncError> {
-        let creds = self.creds.load(account_id).await?;
-        let _client = build_client(&creds)?;
-
-        // Full bi-di sync hooks into `kitchen_fridge::CalDavProvider`
-        // which merges a local `Cache` with a remote `Client`. The
-        // wire-up varies per kitchen-fridge release; rather than
-        // pin one shape that'll bit-rot, ship the engine scaffold
-        // and leave the actual provider construction to the
-        // server-side glue that has the on-disk cache path.
-        //
-        // Concrete next step: open a `kitchen_fridge::Cache` at
-        // `$DATA_DIR/caldav/<account_id>/<calendar_uuid>/`, build
-        // a `CalDavProvider` from (cache, client), call
-        // `.sync().await`, and walk the resulting `local()` /
-        // `remote()` to map onto `calendar_crdt::CalendarEventRepoLoro`
-        // mutations.
-        warn!(
-            %account_id,
-            "caldav-sync: sync_calendar is a stub — wire kitchen_fridge::CalDavProvider in the server crate"
-        );
-        Ok(SyncSummary {
-            events_pulled: 0,
-            events_pushed: 0,
-            events_deleted: 0,
-        })
-    }
-
-    /// Hit the principal URL, list the user's calendar collections,
-    /// return them as a vector of (display_name, url) pairs. The
-    /// architect-emitted `CalDavCalendarRepo` is the caller's
-    /// responsibility for the reconciliation step.
+    /// Run principal → home-set → list-calendars discovery and
+    /// return every remote calendar as a [`RemoteCalendar`]. The
+    /// caller is responsible for reconciling these against the
+    /// architect-emitted `CalDavCalendarRepo`.
     pub async fn discover_calendars(
         &self,
         account_id: Uuid,
     ) -> Result<Vec<RemoteCalendar>, SyncError> {
+        let client = self.build_client(account_id).await?;
+        let principal = client
+            .discover_current_user_principal()
+            .await
+            .map_err(map_err)?
+            .ok_or(SyncError::AuthFailed(account_id))?;
+        let homes = client
+            .discover_calendar_home_set(&principal)
+            .await
+            .map_err(map_err)?;
+        let mut out = Vec::new();
+        for home in homes {
+            let calendars = client.list_calendars(&home).await.map_err(map_err)?;
+            for c in calendars {
+                out.push(RemoteCalendar {
+                    url: c.href,
+                    display_name: c.displayname.unwrap_or_default(),
+                    description: c.description,
+                    color: c.color,
+                    timezone: c.timezone,
+                });
+            }
+        }
+        info!(%account_id, calendars = out.len(), "discovered remote calendars");
+        Ok(out)
+    }
+
+    /// Pull changes from one remote calendar via the
+    /// [`sync_collection`](fast_dav_rs::CalDavClient::sync_collection)
+    /// REPORT. Pass `last_sync_token = None` for the initial sync
+    /// (returns all current objects); subsequent runs pass the
+    /// previously-returned `next_sync_token` for incremental deltas.
+    pub async fn sync_calendar(
+        &self,
+        account_id: Uuid,
+        calendar_url: &str,
+        last_sync_token: Option<&str>,
+    ) -> Result<SyncedCalendar, SyncError> {
+        let client = self.build_client(account_id).await?;
+        let resp = client
+            .sync_collection(calendar_url, last_sync_token, None, true)
+            .await
+            .map_err(map_err)?;
+        let objects = resp
+            .items
+            .into_iter()
+            .map(|i| SyncedObject {
+                href: i.href,
+                etag: i.etag,
+                calendar_data: i.calendar_data,
+                is_deleted: i.is_deleted,
+            })
+            .collect();
+        Ok(SyncedCalendar {
+            objects,
+            next_sync_token: resp.sync_token,
+        })
+    }
+
+    /// Wire into the architect `CalDavService` trait — convenience
+    /// for callers that want the summary shape. Tracks pulled-only;
+    /// push lands when the ical writer is in.
+    pub async fn sync_calendar_summary(
+        &self,
+        account_id: Uuid,
+        calendar_url: &str,
+        last_sync_token: Option<&str>,
+    ) -> Result<SyncSummary, SyncError> {
+        let synced = self
+            .sync_calendar(account_id, calendar_url, last_sync_token)
+            .await?;
+        let deleted = synced.objects.iter().filter(|o| o.is_deleted).count() as u32;
+        Ok(SyncSummary {
+            events_pulled: synced.objects.len() as u32 - deleted,
+            events_pushed: 0,
+            events_deleted: deleted,
+        })
+    }
+
+    async fn build_client(&self, account_id: Uuid) -> Result<CalDavClient, SyncError> {
         let creds = self.creds.load(account_id).await?;
-        let _client = build_client(&creds)?;
-        // TODO: call kitchen_fridge::Client::get_calendars() — the
-        // exact method name shifts across releases; stub for now.
-        warn!(
-            %account_id,
-            "caldav-sync: discover_calendars is a stub — wire kitchen_fridge::Client::get_calendars"
-        );
-        Ok(Vec::new())
+        CalDavClient::new(
+            creds.base_url.as_str(),
+            Some(creds.username.as_str()),
+            Some(creds.password.as_str()),
+        )
+        .map_err(map_err)
     }
 }
 
-/// One CalDAV calendar collection as the remote sees it.
-#[derive(Debug, Clone)]
-pub struct RemoteCalendar {
-    pub url: String,
-    pub display_name: String,
-    pub color: Option<String>,
-    pub ctag: Option<String>,
-}
-
-/// Wrap a `kitchen_fridge::Client::new` with our error type.
-fn build_client(creds: &AccountCreds) -> Result<kitchen_fridge::Client, SyncError> {
-    kitchen_fridge::Client::new(creds.base_url.clone(), &creds.username, &creds.password)
-        .map_err(|e| SyncError::Upstream(format!("{e:?}")))
-}
-
-// ── iCal ↔ CalendarEvent mapping ──────────────────────────────────────
-//
-// These helpers will get fleshed out as the engine starts emitting
-// real bytes; keeping them stubbed here so the type seam is visible.
-
-/// Convert a kitchen_fridge `Item` (which may be a `Task` or
-/// `Event`) into our `calendar_proto::CalendarEvent` Create payload.
-/// Returns `None` for items that don't have a sensible
-/// representation in our event model (e.g. VJOURNAL).
-pub fn item_to_event_create(
-    _item: &kitchen_fridge::Item,
-) -> Option<calendar_proto::CalendarEventCreate> {
-    // TODO: real mapping. Pull `summary`, `description`, `dtstart`,
-    // `dtend`, `rrule`, attendees from the ical wrapper kitchen_fridge
-    // exposes once we hook up the actual Provider.
-    None
-}
-
-/// Inverse of [`item_to_event_create`]: render a `CalendarEvent`
-/// back into the kitchen_fridge `Item` shape so we can push it
-/// upstream. Returns `None` if the event isn't representable (no
-/// start time, malformed rrule, …).
-pub fn event_to_item(
-    _event: &calendar_proto::CalendarEvent,
-    _last_modified: DateTime<Utc>,
-) -> Option<kitchen_fridge::Item> {
-    // TODO: real mapping.
-    None
+fn map_err<E: std::fmt::Display>(e: E) -> SyncError {
+    SyncError::Upstream(e.to_string())
 }
