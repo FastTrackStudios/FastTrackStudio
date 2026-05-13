@@ -102,24 +102,27 @@ async fn delete_removes_row() {
 
 // ── Fake-rs seeding ───────────────────────────────────────────────────
 //
-// `example/full` (or `example-proto/fake`) adds `#[derive(Dummy)]` to
-// every emitted struct. Two patterns the same machinery enables:
-// random data each run via `Faker.fake()`, deterministic data via a
-// seeded `StdRng`.
+// `example/fake` adds `#[derive(Dummy)]` to every wire + emitted
+// struct, and (because `repo` is on too) emits a `seed_fake_example`
+// helper that loops + creates in one call. Pass it a count or a range.
 
 #[tokio::test]
-async fn seed_with_faker_random() {
-    use fake::{Fake, Faker};
+async fn seed_fake_with_fixed_count() {
     let r = repo();
-    for _ in 0..5 {
-        let create: ExampleCreate = Faker.fake();
-        r.create(create).await.unwrap();
-    }
+    let rows = example_proto::seed_fake_example(&r, 5usize).await.unwrap();
+    assert_eq!(rows.len(), 5);
     let page = r
         .list(Page { index: 0, size: 100 }, None, None)
         .await
         .unwrap();
-    assert_eq!(page.items.len(), 5);
+    assert_eq!(page.total, 5);
+}
+
+#[tokio::test]
+async fn seed_fake_with_range_picks_within_bounds() {
+    let r = repo();
+    let rows = example_proto::seed_fake_example(&r, 3..8usize).await.unwrap();
+    assert!(rows.len() >= 3 && rows.len() < 8);
 }
 
 #[tokio::test]

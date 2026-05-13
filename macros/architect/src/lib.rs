@@ -110,6 +110,73 @@ pub struct Filter {
 #[cfg(feature = "server-axum")]
 pub mod axum_ws;
 
+#[cfg(feature = "fake")]
+pub mod seed {
+    //! Helpers for the architect-emitted `seed_fake_<entity>` functions.
+    //!
+    //! Each entity that opts into `fake` gets a `pub async fn
+    //! seed_fake_<snake>(repo, count)` in its proto crate. The `count`
+    //! argument takes anything that implements [`SeedCount`] — a
+    //! single number (`500`), a `Range<usize>` (`10..30` — picks a
+    //! random count in that range each call), or any other shape you
+    //! impl the trait for.
+
+    use std::ops::{Range, RangeInclusive};
+
+    /// "How many faked rows do you want?" — implemented for the obvious
+    /// integer types and ranges.
+    pub trait SeedCount {
+        fn pick(&self) -> usize;
+    }
+
+    impl SeedCount for usize {
+        fn pick(&self) -> usize {
+            *self
+        }
+    }
+    impl SeedCount for u32 {
+        fn pick(&self) -> usize {
+            *self as usize
+        }
+    }
+    impl SeedCount for u64 {
+        fn pick(&self) -> usize {
+            *self as usize
+        }
+    }
+    impl SeedCount for i32 {
+        fn pick(&self) -> usize {
+            (*self).max(0) as usize
+        }
+    }
+
+    impl SeedCount for Range<usize> {
+        fn pick(&self) -> usize {
+            use fake::rand::Rng;
+            if self.is_empty() {
+                return self.start;
+            }
+            fake::rand::rng().random_range(self.start..self.end)
+        }
+    }
+    impl SeedCount for Range<u32> {
+        fn pick(&self) -> usize {
+            (self.start as usize..self.end as usize).pick()
+        }
+    }
+    impl SeedCount for RangeInclusive<usize> {
+        fn pick(&self) -> usize {
+            use fake::rand::Rng;
+            fake::rand::rng().random_range(*self.start()..=*self.end())
+        }
+    }
+    impl SeedCount for RangeInclusive<u32> {
+        fn pick(&self) -> usize {
+            (*self.start() as usize..=*self.end() as usize).pick()
+        }
+    }
+}
+
 #[cfg(feature = "server-seaorm")]
 pub mod storage {
     //! Generic storage helpers used by macro-emitted code.

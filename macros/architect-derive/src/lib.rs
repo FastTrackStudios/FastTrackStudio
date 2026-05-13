@@ -248,6 +248,47 @@ fn expand(input: DeriveInput) -> Result<TokenStream2> {
         quote! {}
     };
 
+    // ── Fake-data seeding helper ──
+    //
+    // Emit a free `seed_fake_<entity>` function that loops, generates
+    // a `<Entity>Create` via fake-rs, and feeds each one into the
+    // repo. Gated on the user crate's `fake` feature, plus only
+    // emitted when a repo trait exists to call into.
+    let seed_fn_ident = format_ident!(
+        "seed_fake_{}",
+        ident.to_string().to_snake_case()
+    );
+    let seed_fn = if container.emit_repo {
+        quote! {
+            /// Generate `count` faked `#ident` instances and persist
+            /// them via `repo.create`. `count` accepts a single number
+            /// (`500`) or a range (`10..30` / `10..=30`) for a random
+            /// quantity per call. See `architect::seed::SeedCount`.
+            #[cfg(feature = "fake")]
+            #vis async fn #seed_fn_ident<R>(
+                repo: &R,
+                count: impl ::architect::seed::SeedCount,
+            ) -> ::core::result::Result<
+                ::std::vec::Vec<#ident>,
+                ::architect::RepoError,
+            >
+            where
+                R: #repo_ident + ?::core::marker::Sized,
+            {
+                use ::fake::Fake as _;
+                let n = ::architect::seed::SeedCount::pick(&count);
+                let mut out = ::std::vec::Vec::with_capacity(n);
+                for _ in 0..n {
+                    let payload: #create_ident = ::fake::Faker.fake();
+                    out.push(repo.create(payload).await?);
+                }
+                ::core::result::Result::Ok(out)
+            }
+        }
+    } else {
+        quote! {}
+    };
+
     // ── Server-only emission ──
     let server_block = build_server_block(
         &ident,
@@ -271,6 +312,7 @@ fn expand(input: DeriveInput) -> Result<TokenStream2> {
         #update_struct
         #list_struct
         #repo_trait
+        #seed_fn
         #server_block
     })
 }
